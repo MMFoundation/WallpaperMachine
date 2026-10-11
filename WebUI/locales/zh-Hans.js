@@ -761,6 +761,7 @@ export default {
   'Plugged in. Your usual quality settings are in use.': '已接通电源，使用平时的画质设置。',
   'Energy use': '能耗',
   'This app, last few seconds': '本应用，最近几秒',
+  'Right after you apply a wallpaper, these figures include loading it, which can take several watts for a few seconds.': '刚应用壁纸后，这些读数会包含加载壁纸的耗电，几秒内可能达到数瓦。',
   'How it’s measured': '如何测量',
   'macOS shares GPU energy between apps by GPU time.': 'macOS 按各应用占用 GPU 的时间分摊 GPU 能耗。',
   'Includes the control panel, the lock screen and the CPU side of video decoding. Screen compositing, the hardware video decoder, videos played with Native video, memory and the display itself are not included.': '包含控制面板、锁屏以及视频解码的 CPU 部分，不包含屏幕合成、硬件视频解码器、以原生视频播放的视频、内存和显示屏本身的耗电。',

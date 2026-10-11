@@ -197,6 +197,60 @@ Rechecked 2026-10-10 on an M5 Pro, macOS 27.0.1, without root:
   (about 15 % of all CPU energy) but nets to about 1 % for this app.
 - Hardware video decoding is charged to no one: see
   [features/performance.md](../features/performance.md#energy-use).
+- What a switch costs, per second per process, on the primary display while
+  windows covered it (so no frames were drawn): Yae Miko's first load
+  (3013702957), whose shader cache folder did not exist yet, compiled 42
+  programs in 1.1 s at 6.8 W, then `MTLCompilerService` drew 4.5–6 W for
+  2.5 s, 20 J in all. Lucy (3521337568) hit all 111 cached programs and the
+  Vulkan pipeline cache, yet `MTLCompilerService` still drew 5.3 and 4.8 W for
+  2 s. That launch ran the build in `build/Build/Products/Release`, and Lucy
+  had last been loaded by the copy in `/Applications`: macOS keeps compiled
+  Metal source per app location, so the second copy compiled it again, once.
+  A relaunch of the same copy does not (see
+  [renderer.md](renderer.md#metal-compile-across-processes)). Yae Miko again
+  in the same process cost 1.4 J, a video 3 J and The Winter Nothingness
+  (3796026374), every cache warm, 5.8 J. `WallpaperAgent` drew about 0.5 J
+  after each desktop picture update. Separately, bursts of screen-parameter
+  changes (`display refresh: N screen changes … merged` in the log) cost the
+  app and the panel's WebContent about 12 J over 3 s each.
+- Those bursts were EDR headroom ramps (2026-10-10, M5 Pro, macOS 27.0.1,
+  built-in XDR). Whenever something requests EDR (a menu-bar system banner,
+  HDR content) `corebrightnessd` ramps headroom between 1.0 and 1.2 over 2 s,
+  and AppKit posts `didChangeScreenParametersNotification` for every frame:
+  241 per ramp, one to three ramps a minute that session, with nothing but
+  `maximumExtendedDynamicRangeColorComponentValue` changed. Each ran a full
+  display refresh, so with Settings open one ramp measured 0.6 + 6.5 + 5.2 J
+  (app 3.3 W and 712 ms CPU per second, WebContent 3.2 W and 831 ms), and
+  WebKit logged 252 snapshot pushes. A 2 s `sample` of the app's main thread
+  during a ramp had 580 samples on CPU: 379 in the lock-screen service's
+  re-sync after each snapshot (it rereads the system wallpaper store and
+  rewrites its journal with `fsync`), 90 building the page snapshot, 33 in
+  the display refresh itself and 15 rebuilding the status menu. Another 233
+  waited on the window server in `sessionIsLocked()`
+  (`CGSessionCopyCurrentDictionary`, which the presentation policy calls once
+  for the notification and once after each refresh). With the panel closed
+  the lock-screen re-sync was 644 of 745 on-CPU samples, and a ramp cost
+  0.9–3.8 J and 0.9–1.9 s of app CPU. WebContent spent 398 of 459 busy
+  samples in the pushed render. Screen changes that leave the displays and
+  working areas as they were now do none of this; see
+  [renderer.md](renderer.md#regression-areas-that-must-stay-covered). Three
+  ramps after the change, with the panel open, the app drew 56–74 ms CPU per
+  second against a 71 ms quiet median, the panel's WebContent did not rise,
+  and the only display refresh was the first one after launch.
+- Dragging a scene property slider (2026-10-10, same Mac, Release build, panel
+  open, 40 s windows): every step applies an engine snapshot, which runs the
+  presentation policy, and pushes a page snapshot. Before, 30 drags over 17 s
+  put 141 main-thread samples into building page snapshots, 50 of them in
+  `ClientPaths.assetsURL` (up to four folder probes, 124 µs median per call
+  in a standalone loop), and 1 in `sessionIsLocked()` (52 µs median, 84 µs
+  p95). The lock read only adds up in bursts. After, over 18 drags, neither
+  ran under the snapshot or the policy. The folder is resolved when the panel
+  becomes key instead, which the desktop automation driving the drags
+  triggered on every drag (15 samples); a drag in the focused panel does not.
+  Coalition energy during the drags stayed within noise (app 119 vs 112 ms
+  CPU and 170 vs 156 mJ per second; coalition 552 vs 523 ms and 934 vs
+  923 mJ), and the after build also carried the lock-screen re-sync fix,
+  which removed another 123 samples from the same window.
 
 ## WindowServer's share
 
@@ -370,6 +424,10 @@ saving                    = (old incremental - new incremental) / old incrementa
   or below the noise floor, do not report a percentage.
 - Warm shaders, caches and temperature first; report cold start, first decoded
   frame and first shader compile separately from the steady-state window.
+- Compare wallpaper switches only between runs of the same copy of the app (the
+  manifest's `executable`). macOS keeps compiled Metal source per app location,
+  so the first load of a wallpaper in another copy with the same bundle ID is a
+  cold load, even when the scene's shader and pipeline caches are warm.
 - Activity Monitor's Energy Impact is not watts, and GPU utilization is not
   energy.
 

@@ -172,12 +172,18 @@ final class WallpaperEnergyRatings {
 final class WallpaperEnergyRecorder {
   /// One sample costs about 3 ms of kernel calls; every 30 s that is 0.01 % of a core.
   nonisolated static let defaultInterval: Duration = .seconds(30)
+  /// How long after a presentation change no interval starts. On an M5 Pro a scene's
+  /// first load drew 6–7 W for 2–4 s while its shaders compiled (10–22 J); a load with
+  /// every cache warm cost about 1.5 J.
+  nonisolated static let loadingNanoseconds: UInt64 = 8_000_000_000
 
   private let source: EnergyUsageSource?
   private let ratings: WallpaperEnergyRatings
   private let interval: Duration
   private let context: @MainActor () -> WallpaperEnergyContext?
   private var previous: (sample: EnergyUsageSample, context: WallpaperEnergyContext)?
+  /// Uptime of the last presentation change, on the samples' clock.
+  private var changedAt: UInt64?
   private var task: Task<Void, Never>?
 
   var isRunning: Bool { task != nil }
@@ -218,15 +224,22 @@ final class WallpaperEnergyRecorder {
     ratings.flush()
   }
 
-  /// Presentation changed; the interval in progress must not be credited to anyone.
-  func invalidate() {
+  /// Presentation changed; the interval in progress must not be credited to anyone, and
+  /// the next one starts only once a wallpaper that may be loading has had time to.
+  func invalidate(at uptime: UInt64 = DispatchTime.now().uptimeNanoseconds) {
     previous = nil
+    changedAt = uptime
   }
 
   /// Credits the interval since the previous sample when both ends agree. Nil means the
   /// counters could not be read.
   func record(_ sample: EnergyUsageSample?, context: WallpaperEnergyContext) {
     guard let sample else {
+      previous = nil
+      return
+    }
+    // Compiling shaders and decoding textures is what loading costs, not playing.
+    if let changedAt, sample.uptimeNanoseconds < changedAt + Self.loadingNanoseconds {
       previous = nil
       return
     }

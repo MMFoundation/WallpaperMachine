@@ -761,6 +761,7 @@ export default {
   'Plugged in. Your usual quality settings are in use.': '電源に接続中です。通常の画質設定を使用しています。',
   'Energy use': 'エネルギー使用量',
   'This app, last few seconds': 'このApp、直近数秒間',
+  'Right after you apply a wallpaper, these figures include loading it, which can take several watts for a few seconds.': '壁紙を適用した直後は、その読み込み分も値に含まれ、数秒間は数ワットに達することがあります。',
   'How it’s measured': '測定方法',
   'macOS shares GPU energy between apps by GPU time.': 'macOSはGPUの使用時間に応じて、各AppにGPUのエネルギーを割り当てます。',
   'Includes the control panel, the lock screen and the CPU side of video decoding. Screen compositing, the hardware video decoder, videos played with Native video, memory and the display itself are not included.': 'コントロールパネル、ロック画面、ビデオデコードのCPU処理を含みます。画面の合成処理、ハードウェアビデオデコーダ、ネイティブビデオで再生中のビデオ、メモリ、ディスプレイ本体は含まれません。',

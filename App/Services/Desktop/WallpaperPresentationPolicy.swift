@@ -60,6 +60,7 @@ final class WallpaperPresentationPolicy {
     private let otherAudioAction: @MainActor () -> OtherAudioAction
     private let desktopCoveredAction: @MainActor () -> DesktopCoveredAction
     private let coveredDisplays: @MainActor () -> Set<UInt32>
+    private let screenLayout: @MainActor () -> [NSRect]
     /// Owned only when neither surfaces nor coverage were injected.
     private let probes: WallpaperCoverageProbes?
     private let occlusionSettleDelay: Duration
@@ -70,6 +71,16 @@ final class WallpaperPresentationPolicy {
 
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var displaysAsleep = false
+    /// The session's lock state as the window server last reported it. Asking is a
+    /// synchronous round trip, and evaluate() runs after every snapshot the engine
+    /// applies, so it is asked again only where the answer can have changed: a lock
+    /// or unlock, waking displays, a user switch, and every evaluation while the
+    /// session counts as locked, so a stale lock can never hold the wallpaper.
+    private var sessionLocked = false
+    /// Set until the first evaluation, which covers a session locked before start().
+    private var sessionLockStale = true
+    /// The screens and working areas the last screen change found.
+    private var evaluatedScreenLayout: [NSRect]?
     private var settle: Task<Void, Never>?
     private var appliedGlobal: GlobalPresentation? = .running
     private var appliedAudio: Bool? = false
@@ -109,6 +120,7 @@ final class WallpaperPresentationPolicy {
         otherAudioAction: (@MainActor () -> OtherAudioAction)? = nil,
         desktopCoveredAction: (@MainActor () -> DesktopCoveredAction)? = nil,
         coveredDisplays: (@MainActor () -> Set<UInt32>)? = nil,
+        screenLayout: (@MainActor () -> [NSRect])? = nil,
         occlusionSettleDelay: Duration = .seconds(1),
         counters: RuntimeCounters? = nil,
         applyGlobal: @escaping @MainActor (GlobalPresentation, @escaping ApplyCompletion) -> Void,
@@ -136,6 +148,7 @@ final class WallpaperPresentationPolicy {
             self.coveredDisplays = { [] }
             probes = nil
         }
+        self.screenLayout = screenLayout ?? { Self.systemScreenLayout() }
         self.occlusionSettleDelay = occlusionSettleDelay
         self.counters = counters ?? .shared
         self.applyGlobal = applyGlobal
@@ -153,16 +166,30 @@ final class WallpaperPresentationPolicy {
                 forName: name, object: nil, queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.displaysAsleep = asleep
-                    self?.evaluate()
+                    guard let self else { return }
+                    self.displaysAsleep = asleep
+                    // A lock taken while the displays slept may have posted nothing.
+                    if !asleep { self.sessionLockStale = true }
+                    self.evaluate()
                 }
+            }))
+        }
+        // Switching users away and back changes the session without a lock notification.
+        for name in [
+            NSWorkspace.sessionDidResignActiveNotification,
+            NSWorkspace.sessionDidBecomeActiveNotification,
+        ] {
+            observers.append((workspaceCenter, workspaceCenter.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.sessionLockChanged() }
             }))
         }
         for name in ["com.apple.screenIsLocked", "com.apple.screenIsUnlocked"] {
             observers.append((lockCenter, lockCenter.addObserver(
                 forName: .init(name), object: nil, queue: .main
             ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.evaluate() }
+                MainActor.assumeIsolated { self?.sessionLockChanged() }
             }))
         }
         // object: nil — the control panel appearing over the desktop is exactly
@@ -178,8 +205,23 @@ final class WallpaperPresentationPolicy {
         observers.append((windowCenter, windowCenter.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.evaluate() }
+            MainActor.assumeIsolated { self?.screenParametersChanged() }
         }))
+        evaluatedScreenLayout = screenLayout()
+        evaluate()
+    }
+
+    /// An XDR display posts a screen change for every frame of an EDR headroom ramp.
+    /// Only a screen or working area that moved changes what the policy decides from here.
+    private func screenParametersChanged() {
+        let layout = screenLayout()
+        guard layout != evaluatedScreenLayout else { return }
+        evaluatedScreenLayout = layout
+        evaluate()
+    }
+
+    private func sessionLockChanged() {
+        sessionLockStale = true
         evaluate()
     }
 
@@ -190,6 +232,9 @@ final class WallpaperPresentationPolicy {
         observers.removeAll()
         probes?.removeAll()
         displaysAsleep = false
+        sessionLocked = false
+        sessionLockStale = true
+        evaluatedScreenLayout = nil
         // Teardown must never leave a surface suspended or muted.
         pendingDisplays.formUnion(suspendedDisplayIDs)
         suspendedDisplayIDs.removeAll()
@@ -232,6 +277,11 @@ final class WallpaperPresentationPolicy {
             .sorted { $0.displayID < $1.displayID }
     }
 
+    /// Each screen's frame and working area: what the coverage probes cover.
+    static func systemScreenLayout() -> [NSRect] {
+        NSScreen.screens.flatMap { [$0.frame, $0.visibleFrame] }
+    }
+
     static func sessionIsLocked() -> Bool {
         (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool
             ?? false
@@ -265,6 +315,10 @@ final class WallpaperPresentationPolicy {
     /// Retry unacknowledged delivery even when visibility is unchanged.
     func evaluate() {
         syncProbes()
+        if sessionLockStale || sessionLocked {
+            sessionLocked = isSessionLocked()
+            sessionLockStale = false
+        }
         let presentation = resolvedPresentation()
         let audio = resolvedAudioSuppressed()
         let current = currentSurfaces()
@@ -334,7 +388,7 @@ final class WallpaperPresentationPolicy {
         if displaysAsleep {
             strongest = max(strongest, displaySleepAction() == .stop ? .unloaded : .suspended)
         }
-        if isSessionLocked() {
+        if sessionLocked {
             strongest = max(strongest, .suspended)
         }
         let rules = appRuleActions()

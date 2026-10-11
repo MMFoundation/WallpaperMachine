@@ -43,6 +43,71 @@ Playlists accept any whole number of minutes from 1 to 10,080 next to the preset
 - Native gate (`python3 scripts/test.py`, incl. new WebPanelPlaylistTests/PlaylistStoreTests cases) — not run: needs macOS/Xcode
 - WKWebView appearance in the real panel — unchecked; no Release build
 
+## 2026-10-10 — Lock state and scene-assets folder no longer probed per update
+
+Cached the session lock state in WallpaperPresentationPolicy (asked at start, lock/unlock, display wake, user switch and while locked) and resolved the scene-assets folder with its readiness in WorkshopStore instead of in every page snapshot.
+
+- `python3 scripts/test.py --only WallpaperPresentationPolicyTests --only WorkshopDownloadIntentTests --only ControlPanelSnapshotDeliveryTests --only ControlPanelShellTests` — 71 passed, including 6 new tests
+- `python3 scripts/test.py` on the shared tree with the lock-screen re-sync change (artifacts/tests/Tests-20261010-134554-494250) — 1334 passed, 0 failed, 14 skipped
+- `python3 scripts/build.py --swift-only --configuration Release` at 51e1d39 — OK; relaunched by the user
+- Standalone loop: `CGSessionCopyCurrentDictionary` 52 µs median (84 µs p95), `ClientPaths.assetsURL` 124 µs, cached URL 0.3 µs
+- Live, 30 vs 18 user-approved Bar Count drags in 40 s windows: page-snapshot samples in `assetsURL` 50 of 141 → 0 of 71; policy lock read 1 → 0; coalition energy within noise
+- Driving the drags in the background activated the app per drag, so the on-key assets refresh took 15 samples; not representative of drags in the focused panel
+- Not exercised live: a real screen lock, display wake with a lock, or fast user switching (unit tests only)
+- `scripts/check_renderer.py` — not run: no renderer or bridge change
+
+## 2026-10-10 — Lock-screen check skips unchanged store re-syncs
+
+Release 1.3.2 (31) at HEAD bd55717, M5 Pro, macOS 27.0.1, AC power; animated lock screen and screen saver on one display with 45 Spaces (93 journal entries). Every two-second check and every snapshot apply re-synced the native selection.
+
+- Before, live: `stat` of `native-selection.plist` 2 s apart showed a new inode each check; per-second coalition sampler (`ri_energy_nj`) idle ticks 12–16 ms app CPU and 4–6 mJ every 2 s; `sample <pid> 2` ×3: 8–12 of 10–14 on-CPU main-thread samples in `LockScreenWallpaperSelection.synchronize`, 2–3 in `persistEntries`
+- Cause: re-encoding journaled baselines (global override, inherited and linked originals) reorders dictionary keys, so equal entries compared unequal and the journal was rewritten; the store was reread and every entry decoded each time
+- `Index.plist` unchanged for over 15 min while idle (`stat` every 5 s), so an unchanged check now costs one `stat`
+- Scratch `swiftc -O` benchmark, HEAD vs change, on copies of the real store and journal, 200 syncs ×2: unchanged store 2.9–3.6 ms → 1.6–2.6 µs per sync, journal writes 139–200 → 0; store rewritten with only an unrelated key 2.6–3.1 ms → 2.3–2.5 ms, writes 101–200 → 0
+- New journal test's fixture replayed in scratch: HEAD rewrote the journal in 30/30 runs, change in 0/30
+- `python3 scripts/test.py --only LockScreenWallpaperTests --only LockScreenWallpaperServiceTests` — 91 passed
+- `python3 scripts/test.py` — 1334 passed, 0 failed, 14 skipped (shared tree with the concurrent session-lock and asset-path change)
+- Not run: live after-measurement, which needs the rebuilt app relaunched; no desktop, wallpaper or lock-screen change was made
+
+## 2026-10-10 — Screen changes that move nothing no longer refresh displays
+
+Cause of the ~12 J bursts: on the built-in XDR display (M5 Pro, macOS 27.0.1) every EDR headroom ramp (1.0↔1.2 over 2 s, raised by a menu-bar banner or HDR content) posts 241 didChangeScreenParameters notifications with only maximumExtendedDynamicRangeColorComponentValue changed. A passive watcher saw 5,995 such notifications in 30 min and no frame, visibleFrame, scale or Space-driven change. Fix b3d3921 compares DisplayConfiguration (AppKit's copy of what DisplayDesc::all() reads, 11 µs per read) before refreshing; the Space monitor and presentation policy filter the same notification.
+
+- `python3 scripts/test.py` — exit 0; 1340 tests: 1326 passed, 14 skipped (targeted: DisplayRefreshCoalescerTests, WallpaperSpaceMonitorTests, WallpaperPresentationPolicyTests, ControlPanelSpaceWallpaperTests — 38 passed)
+- `python3 scripts/build.py --swift-only --configuration Release` — built; relaunched with the user's permission
+- Before, per-second coalition energy (ri_energy_nj): one ramp with Settings open 0.6 + 6.5 + 5.2 J (app 3.3 W, WebContent 3.2 W); ten ramps with the panel closed 0.2–2.6 W and 300–650 ms CPU/s for 2–4 s
+- Before, `sample` during a ramp: main thread 580 on-CPU samples (lock-screen re-sync 379, page snapshot 90, refresh 33) plus 233 blocked in CGSessionCopyCurrentDictionary; WebKit logged 252 snapshot pushes per ramp
+- After, three ramps with the panel open: app 56–74 ms CPU/s against a 71 ms/s quiet median, panel WebContent no rise; one display refresh, the first after launch
+- Not measured: WindowServer energy (proc_pid_rusage is denied without root); no external display, display wake or resolution change exercised live (covered by unit tests only)
+
+## 2026-10-10 — Metal shader compile across launches (investigation, docs only)
+
+Why MTLCompilerService recompiled Lucy (3521337568) after a launch despite warm shader and Vulkan pipeline caches. No app, renderer or upstream change; app not rebuilt; no desktop control or wallpaper change.
+
+- Built `offscreen_scene_probe` and `metal_scene_draw_smoke` with `scripts/build.py`'s environment; per-process CPU energy from `proc_pid_rusage` (`ri_energy_nj`) of the probe and each `MTLCompilerService` it started.
+- Same location, separate processes: first load 35.4–41.5 J, every later process 2.0–2.2 J with no compiler activity. New `LC_UUID`, new `CFBundleVersion`, bundle replaced in place: 2.0–2.1 J.
+- Same bundle id at another path: 21.7 J (19.5 J compiler). Cold compiled source only: 21.8–22.1 J; cold pipelines only: 4.1 J. Two rounds each.
+- No eviction or loss: 16 other wallpapers, a concurrent holder, a SIGKILLed holder, 3,400 entries (~45 MB) in one process.
+- App logs: every warm-cache compile gap (Winter 10:57, Lucy 11:17, Lofi Girl 12:14) was the Release build's first load of a wallpaper last loaded by `/Applications/WallpaperMachine.app`; same-copy repeats hit.
+- Native Metal admits Lucy and Lofi Girl, not Yae Miko (lighting) or Winter Nothingness (translation failure); MoltenVK 1.4.2 has no binary-archive option. Findings in features/performance.md, renderer.md and power-benchmark.md; links checked.
+
+## 2026-10-10 — Energy readout: static loading notice replaces switch detection
+
+- Change: the loading flag (switch detection, hidden grade and comparison) is removed; the Energy use row now always notes that right after a wallpaper is applied the figures include loading it. Per-wallpaper ratings still start no interval within 8 s of a presentation change.
+- Why: the user saw the flag miss a second apply. The readout samples only while Settings is open, so a switch made from another page, or a re-apply of the same wallpaper, was never seen.
+- Tests: targeted EnergyUsageMonitorTests, WallpaperEnergyRatingsTests, WebPanelEnergyUsageTests (24 passed); test_panel_localization OK; node --check WebUI/settings.js.
+- Full gate: python3 scripts/test.py — 1320 passed, 0 failed, 14 skipped (opt-in media and network layers).
+- Not verified: the note in the running panel (no screenshot taken).
+
+## 2026-10-10 — Energy readout: wallpaper loading flagged, measured switch cost
+
+- Change: readings whose window holds a sample within 8 s of a display's wallpaper changing (or of a rendering setting change) carry loading: shown with a note, no grade, battery share or comparison; a switch drops a comparison in progress. The rating recorder starts no interval within 8 s of a presentation change.
+- Measured with the user's permission: 5 switches via wallpapermachine://apply on the covered primary display, per-second per-process coalition energy. First loads 10–22 J at 6–7 W for 2–4 s (app shader compile + MTLCompilerService); warm repeat 1.4 J; video 3 J; restore 5.8 J; WallpaperAgent ~0.5 J per desktop picture update. Wallpaper restored to 3796026374.
+- Separate finding (flagged as a follow-up task): display-refresh bursts cost the app + panel WebContent ~12 J over 3 s each; MTLCompilerService recompiles despite a warm Vulkan pipeline cache (follow-up task).
+- Tests: python3 scripts/test.py --only EnergyUsageMonitorTests --only WallpaperEnergyRatingsTests --only WebPanelEnergyUsageTests (26 passed); python3 -m unittest scripts.tests.test_panel_localization (OK); node --check and a Node render of loading, loading+contended, native+loading and normal readings.
+- Full gate: python3 scripts/test.py — 1322 passed, 0 failed, 14 skipped (opt-in media and network layers).
+- Not verified: the new note in the running panel (no screenshot taken).
+
 ## 2026-10-10 — Energy readout: native video left out, macOS 27 ABI rechecked
 
 - Change: readings while a video is on the native player carry nativeVideo (no grade, battery share or comparison); the per-wallpaper recorder skips intervals with a presenting native-video display; ratings carry version 2 and a video's unversioned rating is hidden and replaced, not averaged.
@@ -64,66 +129,3 @@ Playlists accept any whole number of minutes from 1 to 10,080 next to the preset
 - python3 scripts/test.py: 267 Python tests passed; native 1315 passed, 0 failed, 14 skipped of 1329. Full gate run once.
 - Gap: smoothness after the fix on the real desktop is not yet measured; the same capture script must be re-run against a build that contains it.
 - Separate, unfixed: a web page assigned while its display is suspended loads detached, so its first reveal is a cold start (327 ms hidden content plus shader compiles on 2026-10-09 18:03:57).
-
-## 2026-10-09 — v1.3.2 published release and import-helper recovery
-
-- Published [v1.3.2](https://github.com/WallpaperMachine/WallpaperMachine/releases/tag/v1.3.2), build 31, from `e278ae8f205e324835facd6f84c70e27f3d31cc7`; [Version run 37825423704](https://github.com/WallpaperMachine/WallpaperMachine/actions/runs/37825423704) passed every required job. Failed, unpublished v1.3.0/v1.3.1 tags were preserved; notes cover v1.2.6 through v1.3.2.
-- Import-helper repair `8fb411a`: six targeted child-process tests passed normally and with `TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT=1`. Local `python3 scripts/test.py` passed 268 Python and 1,313 native tests, with 14 skips; no desktop picker was opened.
-- CI `python3 scripts/test.py --serial` passed 268 Python and 1,312 native tests, with 15 skips and no failures. Rust core, bridge, core-integration and shader checks passed; six explicit desktop/corpus exclusions and three missing-asset shader skips remain unverified.
-- CI renderer checks passed 12 generated pixel comparisons and eight projects through two reloads. Seven asset-dependent cases were skipped. The compiled timer probe exited 77 (35.20 ms median for a 10 ms wait), so ten named wall-clock cadence cases were skipped under `--allow-imprecise-timers`; these skips are not passing runtime coverage.
-- CI verified the Release bundle and mounted disk image. Independently downloaded the public DMG: 36,496,549 bytes, SHA-256 `abaa683f21d1c24e97f8eb6f8c08839e9ba1bc0a4b573b893ea1d4258af47e32`; it matches the CI artifact, public sidecar, release asset metadata and public latest update manifest.
-- Release body matches the tagged English notes and `Built from` commit; bundled changelog contains English and Simplified Chinese. Latest resolves to v1.3.2 and equals the highest public stable version. Public DMG and manifest requests succeeded.
-- `gh attestation verify` passed for the public DMG, restricted to this repository and `.github/workflows/build.yml`, rejecting self-hosted runners and enforcing source digest `8fb411a34d05dc1a3f4218afaa1d647bc9d94089`. As documented, this event digest precedes the version-bump commit; `Built from` records the built revision.
-- No install, launch/restart, desktop/Spaces/Mission Control/VoiceOver, real Siri/Focus, or manual disk-image smoke was performed. CI packaging and headless checks do not verify those surfaces. The release remains self-signed, not Developer ID signed or notarized.
-
-## 2026-10-09 — Release recovery after hosted test timing failures
-
-- v1.3.0 was tagged but not published: attempt 1 failed an onboarding test that counted incoming snapshots as requests; attempt 2 failed ThreadTimerTest.RequestsAfterALongWaitStillRespectTheCeiling on a host whose timer probe returned 77.
-- Test-only welcome replay fix `5ff25f1` now checks outgoing actions and injects an unrelated snapshot. Application code remains unchanged.
-- Added the omitted 50 ms cadence test to the existing exact-name CI fallback, only after the compiled timer probe reports imprecise timers. Default local runs still execute it; other failures remain failures.
-- Version workflow accepts optional notes_from, passed as release_notes.py --previous, so a new patch after an unpublished failed tag can include all changes since the last public release. Tags and live releases are not rewritten.
-- Python renderer/version/release-notes suites: 106 passed. Workflow shell arguments verified for default and explicit previous tag; developer preview includes the unpublished feature commits from v1.2.6.
-- Full local gate: 268 Python and 1,312 native passed, 0 failed, 14 skipped; artifacts/tests/Tests-20261009-012014-576231.xcresult (disposable).
-- First local renderer pass hit the time-sensitive UnchangedPresent frame-order assertion. Separate rerun python3 scripts/check_renderer.py --skip-build passed, with realtime_checks_executed=true, 12 equal pixel comparisons and 8 x 2 reloads; four asset checks skipped. Evidence artifacts/renderer/adaptive-20261009-012147 (disposable).
-- No runtime implementation, desktop interaction, installation, first-launch or manual-smoke changes. Recovery publication is tracked separately and must still pass the CI gate.
-
-## 2026-10-09 — Integrate Mission Control refreshes with Space-scoped posters
-
-- Integrated upstream `dc6b764` (Mission Control refresh/settling, injected-clock downloader tests and Supporter list) with feature commit `81eb112`; preserved both histories without rebase or force.
-- Kept JPEG encoding, changed-frame deduplication, immediate/3 s/15 s/optional 5-minute captures and lock-screen settling while retaining per-Space request contexts and scoped poster ownership.
-- Added regressions proving settling/periodic requests use the current Space context and respect hold, and identical pixels are reused on another Space only after a fresh context is confirmed.
-- Targeted desktop/native-video/Space/scheduler/lock-screen-authority/downloader tests — 129 passed, 0 failed, 0 skipped.
-- `python3 scripts/test.py` — exit 0; 268 Python tests passed; native 1,312 passed, 0 failed, 14 skipped of 1,326. Full gate ran once for this integration.
-- Native evidence: `artifacts/tests/Tests-20261009-001715-304824.xcresult` and same-name `.log` (disposable local evidence).
-- Renderer/bridge source is unchanged from the feature commit; the prior renderer-only build and 12 pixel comparisons plus 8 x 2 reloads remain applicable. Four asset checks were skipped, not passing asset coverage.
-- All 64 pre-existing verification entries from both merge parents were retained using the verification-log script; the active log remains bounded to ten entries. Diff and agent-path checks passed.
-- No real desktop/Mission Control/Space transitions, visible UI, VoiceOver, Release app rebuild or install/restart was performed. User authorized commit and push; remote delivery is checked separately after this commit.
-
-## 2026-10-08 — Lock-screen desktop settles before holding a frame
-
-- Report: AbyssGaming【琉璃】 left Mission Control Space thumbnails black with Animate lock screen on; DesktopPosters was empty (poster sync suspended, extension owns Desktop).
-- Root cause: offscreen_scene_probe, 21 frames at 1 s steps: frame 0 mean brightness 0.0, 67.8 at 1 s, ~122-135 from 2 s on. The extension held its readiness frame.
-- Fix: WallpaperPresentationAuthority.desktopSettleBudget (15 s) keeps an unlocked lock-screen surface animating after its first frame; on pausing it reads the held frame back for snapshots/backing.
-- python3 scripts/test.py --only WallpaperPresentationAuthorityTests: 16 passed. python3 scripts/test.py: 1215 passed, 0 failed, 14 skipped.
-- Not checked: real Mission Control thumbnails with the extension; whether WallpaperAgent re-reads the extension snapshot after it pauses.
-
-## 2026-10-08 — Mission Control poster refresh
-
-- Change: desktop poster retaken 3 s and 15 s after a new/changed/resumed wallpaper, fresh capture on Space change and wake, unchanged frames skipped by pixel digest, JPEG (q0.9) instead of PNG, optional 5-minute refresh in Settings › General.
-- Encode cost measured on M5 Pro at 3456x2234: PNG ~215 ms / 8.9 MB, JPEG ~32 ms / 2.8 MB, HEIC ~40 ms / 2.3 MB (synthetic graded frame).
-- python3 scripts/test.py --only DesktopWallpaperTests --only PlaybackPreferencesTests: 49 passed.
-- python3 scripts/test.py: 1214 passed, 0 failed, 14 skipped (opt-in layers).
-- Not checked: real Mission Control thumbnails, WallpaperAgent caching of replaced pictures, the lock-screen-provider mode (unchanged; still a frozen frame). Needs the manual-smoke Mission Control steps.
-
-## 2026-10-08 — Desktop Space choices and scoped poster ownership
-
-- Added experimental Follow desktop Space automation: per-display UUID choices for wallpapers/playlists, persistent visit identities, manual overrides until the next regular desktop visit, fullscreen exclusion, Focus priority and animated-lock-screen conflict checks.
-- `python3 scripts/build.py --renderer-only` — exit 0; rebuilt the renderer static library and regenerated bindings for the Objective-C++ poster context change. No Release app bundle was rebuilt or delivered.
-- `python3 scripts/test.py` — exit 0; 268 Python passed; native 1,305 passed, 0 failed, 14 skipped of 1,319. Full gate ran once in this batch. Native evidence: `artifacts/tests/Tests-20261008-235505-811159.xcresult` and same-name `.log` (disposable).
-- Targeted monitor/scheduler/store/poster/native-video/panel/backup run — 129 passed; poster scheduling/integration follow-up — 51 passed; final orphan-focus panel run — 2 passed.
-- `python3 scripts/check_renderer.py` — exit 0; 12 generated pooled/isolated pixel comparisons matched, diagnostics 0; 8 projects x 2 reloads passed. Four local-asset checks skipped. Evidence: `artifacts/renderer/adaptive-20261008-234144` (disposable).
-- Regression coverage includes independent/shared display groups, malformed/ambiguous topology, desktop reorder, fullscreen entries without UUIDs, visit persistence, paused catch-up, rapid queued switches, Focus exit with unknown topology, old-schema migration and backup transient-state exclusion/rollback.
-- Scoped poster tests cover current-Space-only writes, public-fallback exclusion, late request/encode rejection, mode changes, replacement gaps, current-only eject and all-Space restore. Native-video poster context is exercised through the real coordinator with a fake surface; Scene bindings carry context beside captured request generations.
-- Offscreen WKWebView tests cover choice save, UUID-preserving reorder, current-desktop accessible name, unavailable mode/native validation, orphan removal and final-orphan focus. One Impeccable detector invocation returned `[]`; source-only reviewer disposition `ship` for its single corrected focus finding.
-- Localization and JS syntax checks passed; 192 local documentation links resolved; diff check passed excluding generator-owned bindings. Upstream provenance updated, notices retained, CLAUDE.md remains a relative AGENTS.md symlink; no agent state staged.
-- No desktop/window/screenshot, actual Mission Control/Space/Focus transitions, visible layout, VoiceOver, installed-app test, install/restart, commit or push. Inactive Spaces retain posters, not resident renderer instances; brief reload transitions and animated-lock-screen incompatibility are documented.

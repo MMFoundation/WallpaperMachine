@@ -12,9 +12,13 @@ private final class PolicyProbe {
         WallpaperSurfaceVisibility(displayID: 1, isVisible: true)
     ]
     var sessionLocked = false
+    /// Window-server round trips spent asking for `sessionLocked`.
+    var lockReads = 0
     /// Displays whose working area other windows cover.
     var covered: Set<UInt32> = []
     var coveredAction: DesktopCoveredAction = .pause
+    /// Each screen's frame and working area.
+    var screenLayout = [NSRect(x: 0, y: 0, width: 1728, height: 1117), NSRect(x: 0, y: 0, width: 1728, height: 1084)]
 
     func setVisible(_ visible: Bool, display: UInt32 = 1) {
         if let index = surfaces.firstIndex(where: { $0.displayID == display }) {
@@ -45,9 +49,13 @@ final class WallpaperPresentationPolicyTests: XCTestCase {
             lockCenter: lockCenter,
             windowCenter: windowCenter,
             surfaces: { probe.surfaces },
-            isSessionLocked: { probe.sessionLocked },
+            isSessionLocked: {
+                probe.lockReads += 1
+                return probe.sessionLocked
+            },
             desktopCoveredAction: { probe.coveredAction },
             coveredDisplays: { probe.covered },
+            screenLayout: { probe.screenLayout },
             occlusionSettleDelay: settle,
             counters: counters,
             applyGlobal: { presentation, completion in
@@ -87,6 +95,90 @@ final class WallpaperPresentationPolicyTests: XCTestCase {
         probe.sessionLocked = true
         lockCenter.post(name: Notification.Name("com.apple.screenIsLocked"), object: nil)
         XCTAssertEqual(probe.applied, [true], "The lock screen hides the desktop even when its windows report visible")
+    }
+
+    /// Asking is a window-server round trip, and the app evaluates after every snapshot
+    /// the engine applies: dragging a property slider must not ask each time.
+    func testTheLockStateIsAskedOnlyWhenItCanHaveChanged() {
+        let probe = PolicyProbe()
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+        let readsAtStart = probe.lockReads
+
+        for _ in 0..<100 { policy.evaluate() }
+        windowCenter.post(name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        XCTAssertEqual(probe.lockReads, readsAtStart, "snapshots and occlusion changes do not lock the session")
+
+        probe.sessionLocked = true
+        lockCenter.post(name: Notification.Name("com.apple.screenIsLocked"), object: nil)
+        probe.sessionLocked = false
+        lockCenter.post(name: Notification.Name("com.apple.screenIsUnlocked"), object: nil)
+        XCTAssertEqual(probe.applied, [true, false])
+        let readsAfterUnlock = probe.lockReads
+        for _ in 0..<100 { policy.evaluate() }
+        XCTAssertEqual(probe.lockReads, readsAfterUnlock, "an unlocked session is not asked again")
+    }
+
+    func testASessionLockedBeforeStartIsSuspendedFromTheStart() {
+        let probe = PolicyProbe()
+        probe.sessionLocked = true
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertEqual(probe.applied, [true], "a lock that posted before start() is still a lock")
+
+        probe.sessionLocked = false
+        lockCenter.post(name: Notification.Name("com.apple.screenIsUnlocked"), object: nil)
+        XCTAssertEqual(probe.applied, [true, false])
+    }
+
+    /// A lock taken as the displays went to sleep may have posted nothing this process saw.
+    func testWakingDisplaysAskForTheLockStateAgain() {
+        let probe = PolicyProbe()
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+
+        workspaceCenter.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
+        probe.sessionLocked = true
+        workspaceCenter.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+        XCTAssertEqual(probe.applied, [true], "the lock screen after wake keeps the wallpaper suspended")
+        XCTAssertTrue(policy.isSuspended)
+
+        probe.sessionLocked = false
+        lockCenter.post(name: Notification.Name("com.apple.screenIsUnlocked"), object: nil)
+        XCTAssertEqual(probe.applied, [true, false])
+    }
+
+    func testSwitchingUsersAsksForTheLockStateAgain() {
+        let probe = PolicyProbe()
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+
+        probe.sessionLocked = true
+        workspaceCenter.post(name: NSWorkspace.sessionDidResignActiveNotification, object: nil)
+        XCTAssertEqual(probe.applied, [true], "a session switched away from is locked behind the login window")
+
+        probe.sessionLocked = false
+        workspaceCenter.post(name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
+        XCTAssertEqual(probe.applied, [true, false], "switching back resumes")
+    }
+
+    /// While the session counts as locked every evaluation asks again, so an unlock this
+    /// process never heard about cannot leave the wallpaper suspended.
+    func testAMissedUnlockClearsAtTheNextEvaluation() {
+        let probe = PolicyProbe()
+        let policy = makePolicy(probe)
+        policy.start()
+        defer { policy.stop() }
+
+        probe.sessionLocked = true
+        lockCenter.post(name: Notification.Name("com.apple.screenIsLocked"), object: nil)
+        probe.sessionLocked = false
+        policy.evaluate()
+        XCTAssertEqual(probe.applied, [true, false])
     }
 
     func testFullOcclusionSuspendsOnlyAfterTheSettleDelay() async throws {
@@ -142,6 +234,25 @@ final class WallpaperPresentationPolicyTests: XCTestCase {
         XCTAssertEqual(probe.displayDecisions(for: 1), [true])
         XCTAssertEqual(probe.displayDecisions(for: 2), [], "An uncovered display keeps running")
         XCTAssertEqual(probe.applied, [], "Covering is a per-display condition")
+    }
+
+    /// An XDR display posts a screen change for every frame of an EDR headroom ramp,
+    /// about 240 in two seconds, with every screen where it was.
+    func testOnlyAScreenChangeThatMovesAWorkingAreaIsEvaluated() {
+        let probe = PolicyProbe()
+        let policy = makePolicy(probe, settle: .zero)
+        policy.start()
+        defer { policy.stop() }
+
+        probe.covered = [1]
+        for _ in 0..<240 {
+            windowCenter.post(name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        }
+        XCTAssertTrue(probe.appliedDisplays.isEmpty, "a screen change that moved nothing decides nothing")
+
+        probe.screenLayout[1].size.height = 1020
+        windowCenter.post(name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        XCTAssertEqual(probe.displayDecisions(for: 1), [true], "the Dock appearing moves the working area")
     }
 
     func testKeepRunningIgnoresACoveredWorkingArea() {

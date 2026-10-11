@@ -49,6 +49,13 @@ the kernel's resource-coalition accounting (`CoalitionEnergySource`,
   dropped, since switching a video to the native player would otherwise read
   as a near-total saving. A window that held a native-video sample stays
   flagged until it has aged out.
+- **Loading.** The row's note says that right after a wallpaper is applied the
+  figures include loading it. On an M5 Pro a scene's first load drew 6–7 W for
+  2–4 s while its shaders compiled (10–22 J, most of it in `MTLCompilerService`)
+  and a load with every cache warm about 1.5 J, so for a few seconds the
+  figures and grade describe the load, not the wallpaper. The readout does not
+  detect switches: it samples only while Settings is open, so a switch made
+  from another page has already started when it begins.
 - **How GPU energy is shared out.** The kernel splits the whole GPU's energy
   between coalitions by GPU time. When other apps keep the GPU busy, this app's
   frames run at their clock and share the GPU for longer, so the figure charged
@@ -122,7 +129,9 @@ app delegate and reachable from the panel as `BridgeStore.wallpaperEnergyRatings
   app, so two different wallpapers cannot be told apart. An interval is
   credited only when both ends saw the same context and the GPU was not
   contended; any engine snapshot or presentation change in between invalidates
-  it, so a pause and resume inside one interval is not counted.
+  it, so a pause and resume inside one interval is not counted. A sample
+  taken within 8 s of such a change does not start an interval either, so a
+  switch's shader compiling and texture decoding are not rated as playback.
 - **Conditions.** The context records the displays showing it, the frame-rate
   ceiling in force (the battery one included) and the effective render scale.
   A measurement under other conditions replaces the rating rather than being
@@ -765,6 +774,23 @@ that cannot be read, is from another machine, or is simply missing is not a
 failure — the pipeline is compiled exactly as it was before, and the wallpaper
 loads. All of it is regenerable and all of it is removed by **Clear shader
 cache** in Storage; nothing you imported is stored there.
+
+Compatibility keeps no compiled Metal code of its own. MoltenVK's pipeline cache
+(`vk-pipeline-cache.bin`, beside the same scene's shaders) stores the Metal
+source MoltenVK generated, which saves translating it again but not compiling
+it; the compiled forms come from macOS's own Metal shader cache. That cache
+survives relaunching the app, rebuilding it, a new version number and a bundle
+replaced at the same path, but it keeps compiled Metal source per app location:
+a second copy of the app at another path — an installed copy beside a
+development build, say — compiles each wallpaper's shaders again the first time
+that copy loads it, once. Compiled pipelines are shared between copies. On Lucy
+(3521337568), with the offscreen probe on an M5 Pro under macOS 27.0.1, a load
+with every cache warm cost 2.0–2.2 J of CPU energy; with only the compiled
+source missing, 21.7–22.1 J, 19.5–19.8 J of it in `MTLCompilerService`; with
+only the pipelines missing, 4.1 J. The native backend's binary archive stores
+pipelines, so it covers the smaller part: both backends compile Metal source
+through the same per-location cache. Method and the full table are in
+[renderer testing](../testing/renderer.md#metal-compile-across-processes).
 
 Measured so far on one scene only — Workshop 3620484312, a 3840×2160 canvas on
 the built-in 3456×2234 display, with other applications running (numbers in the
