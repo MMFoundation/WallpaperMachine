@@ -1096,7 +1096,7 @@ export default {
   'Every {count} days': '每 {count} 天',
   'Minutes between changes': '更换间隔（分钟）',
   'min': '分钟',
-  'Any whole number of minutes, up to one week.': '可输入任意整数分钟，最长一周。',
+  'Any whole number of minutes, up to {count}.': '可输入任意整数分钟，最多 {count} 分钟。',
   'The list is empty. In Installed, select wallpapers and choose Add to playlist, or use the list button in a wallpaper’s details.': '列表为空。在“已安装”中选择壁纸后点按“加入播放列表”，或使用壁纸详情中的列表按钮。',
   'Next change': '下次更换',
   'Change now': '立即更换',

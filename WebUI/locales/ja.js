@@ -1096,7 +1096,7 @@ export default {
   'Every {count} days': '{count}日ごと',
   'Minutes between changes': '切り替え間隔（分）',
   'min': '分',
-  'Any whole number of minutes, up to one week.': '1週間までの任意の分数を整数で入力できます。',
+  'Any whole number of minutes, up to {count}.': '{count}分までの任意の分数を整数で入力できます。',
   'The list is empty. In Installed, select wallpapers and choose Add to playlist, or use the list button in a wallpaper’s details.': 'リストは空です。「インストール済み」で壁紙を選択して「プレイリストに追加」を選ぶか、壁紙の詳細にあるリストボタンを使用してください。',
   'Next change': '次回の切り替え',
   'Change now': '今すぐ切り替え',

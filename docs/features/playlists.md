@@ -113,6 +113,11 @@ next change in `WallpaperMachine.playlistNextChange`, so a relaunch neither
 restarts a long interval nor skips a change that fell due while the app was
 closed. Shuffle's round is kept for the running app only.
 
+Builds before custom intervals accept only the menu presets. Such a build
+reading a custom interval falls back to 30 minutes and saves that over it on its
+next playlist change, and its backup restore refuses a backup that contains one
+(playlists or saved plans) as an invalid preference value.
+
 ## Code
 
 | Part | Where |
