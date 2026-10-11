@@ -87,6 +87,11 @@ private struct NativeWallpaperConfiguration: AppExtensionConfiguration {
     connection.exportedInterface = interface
     connection.exportedObject = WallpaperHandler()
     // Surface lifetime is owned by WallpaperID, not transient settings/thumbnail connections.
+    // Both hops share the main queue, so a close is always counted after its open.
+    DispatchQueue.main.async { WallpaperController.shared.connectionOpened() }
+    connection.invalidationHandler = {
+      DispatchQueue.main.async { WallpaperController.shared.connectionClosed() }
+    }
     connection.resume()
     WallpaperRuntime.log("Accepted native host pid=\(connection.processIdentifier)")
     return true
