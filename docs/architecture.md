@@ -235,6 +235,9 @@ Swift keeps the *system* wallpaper consistent with that window:
   native store read-only, retains still-referenced posters and their journal entries across
   WallpaperAgent reloads, and retries asynchronous restoration for about five seconds. Failure cancels quit before
   other services are torn down; provider callbacks cannot discard the restorer during quit.
+  A poster the store still names after that wait, once every writable desktop is restored, is
+  logged and does not cancel quit: macOS 27 can copy a Space write into display-wide and
+  system-default selections that no per-Space write reaches, which otherwise blocked quit forever.
   A cancelled quit immediately restarts poster synchronization if the native provider has
   released the desktop, without waiting for another wallpaper or settings change.
 - `WallpaperPresentationPolicy` suspends or unloads presentation when no wallpaper pixel can reach a

@@ -388,6 +388,25 @@ final class DesktopWallpaperTests: XCTestCase {
     }
 
     @MainActor
+    func testUnreachablePosterReferenceDoesNotBlockQuitForever() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("before")]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try ledger.apply(image: Data([1]), target: one)
+        let poster = try XCTUnwrap(workspace.pictures[one])
+        // The display-wide selection keeps the poster; no Space write reaches it.
+        workspace.persistedPictures = [poster.url]
+        let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
+                                            surfaces: { [] }, frameCenter: NotificationCenter())
+        var waits = 0
+        try await sync.restoreForTermination { waits += 1 }
+        XCTAssertGreaterThan(waits, 0, "A lagging reload is still waited for first")
+        XCTAssertEqual(workspace.pictures[one], original("before"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: poster.url.path),
+                      "A poster macOS still names must not be deleted")
+    }
+
+    @MainActor
     func testUserChoiceDuringNativeReloadSurvivesQuit() async throws {
         let workspace = MemoryDesktopWorkspace()
         workspace.pictures = [one: original("before")]

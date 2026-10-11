@@ -39,7 +39,7 @@ protocol DesktopPictureWorkspace {
 
 @MainActor
 final class DesktopWallpaperLedger {
-    private enum Failure: LocalizedError {
+    enum Failure: LocalizedError {
         case originalUnavailable
         case restorationPending
 

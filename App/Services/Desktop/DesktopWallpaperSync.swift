@@ -359,6 +359,11 @@ final class DesktopWallpaperSync {
     /// Native Desktop/Idle restoration signals WallpaperAgent to reload. Wait
     /// for its poster selection to become readable and for our restoration to
     /// persist before allowing the app to exit.
+    ///
+    /// A poster can stay named where no per-Space write reaches it: macOS 27 can
+    /// copy a Space write into the display-wide and system-default
+    /// selections. Once every desktop that can be written is restored, that
+    /// leftover reference no longer blocks quitting, or the app could never quit.
     func restoreForTermination(
         wait: () async throws -> Void = { try await Task.sleep(for: .milliseconds(200)) }
     ) async throws {
@@ -369,7 +374,11 @@ final class DesktopWallpaperSync {
                 try ledger.restoreAll()
                 return
             } catch {
-                guard attempt < 24 else { throw error }
+                guard attempt < 24 else {
+                    guard error as? DesktopWallpaperLedger.Failure == .restorationPending else { throw error }
+                    AppLog.warn("Quitting while macOS still names a desktop poster in its wallpaper store; every writable desktop was restored")
+                    return
+                }
                 try await wait()
             }
         }
