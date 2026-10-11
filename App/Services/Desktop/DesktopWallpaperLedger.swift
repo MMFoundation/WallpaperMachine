@@ -26,6 +26,10 @@ struct DesktopPicture: Equatable, Codable {
     }
 }
 
+/// A write was sent but does not read back yet. WallpaperAgent applies
+/// per-Space selections asynchronously (about 0.3 s on macOS 27).
+struct DesktopPictureUnconfirmed: Error {}
+
 /// Tests use an in-memory workspace; no test changes the user's wallpaper.
 @MainActor
 protocol DesktopPictureWorkspace {
@@ -72,6 +76,14 @@ final class DesktopWallpaperLedger {
     static let refusalsBeforePause = 4
     private var refusals: [DesktopPictureTarget: Int] = [:]
 
+    /// How long a poster write may stay unconfirmed before it counts as refused.
+    static let confirmationWindow: Duration = .seconds(1)
+    private let confirmationWindow: Duration
+    private var unconfirmed: [DesktopPictureTarget: (url: URL, since: ContinuousClock.Instant)] = [:]
+    /// Whether a poster write still waits to read back; the coordinator then
+    /// synchronizes again after `confirmationWindow`.
+    var awaitsConfirmation: Bool { !unconfirmed.isEmpty }
+
     private struct Entry: Codable {
         var original: DesktopPicture
         // nil for the previous alternating-file journal, which remains readable.
@@ -82,10 +94,12 @@ final class DesktopWallpaperLedger {
     private let journal: URL
     private let workspace: any DesktopPictureWorkspace
 
-    init(folder: URL, workspace: any DesktopPictureWorkspace) throws {
+    init(folder: URL, workspace: any DesktopPictureWorkspace,
+         confirmationWindow: Duration = DesktopWallpaperLedger.confirmationWindow) throws {
         self.folder = folder
         self.journal = folder.appendingPathComponent("originals.json")
         self.workspace = workspace
+        self.confirmationWindow = confirmationWindow
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         if FileManager.default.fileExists(atPath: journal.path) {
             entries = try JSONDecoder().decode([String: Entry].self, from: Data(contentsOf: journal))
@@ -104,19 +118,25 @@ final class DesktopWallpaperLedger {
         var comparisons: [URL: Bool] = [:]
         let fallbacks = userWallpapers(targets: targets)
         let digests = posters.mapValues { Data(SHA256.hash(data: $0)) }
+        var applied = Set<DesktopPictureTarget>()
         for target in targets {
             // A key with an empty set holds every Space on that display. The public
             // fallback has no identity and cannot safely accept a Space-specific poster.
             if let allowed = targetSpaces[target.display], target.space.map(allowed.contains) != true { continue }
             do {
                 if let image = posters[target.display], liveDisplays.contains(target.display) {
+                    applied.insert(target)
                     try apply(image: image, digest: digests[target.display]!, target: target,
                               comparisons: &comparisons, fallbacks: fallbacks)
                 } else if !liveDisplays.contains(target.display) {
                     try restore(target: target, fallbacks: fallbacks)
                 }
+            } catch is DesktopPictureUnconfirmed {
+                // A restoration is confirmed by quit's wait on the native store.
             } catch { if firstError == nil { firstError = error } }
         }
+        // A desktop no longer receiving posters has nothing left to confirm.
+        unconfirmed = unconfirmed.filter { applied.contains($0.key) }
         // Pruned even when a desktop failed, or a failure that repeats on every
         // refresh would let posters pile up without bound. A desktop that
         // failed keeps what it shows: a readable picture is never deleted, and
@@ -156,6 +176,18 @@ final class DesktopWallpaperLedger {
                 NSLocalizedDescriptionKey: "Cannot read the original wallpaper for display \(target.display), desktop \(target.space ?? "current"); poster synchronization was not applied."
             ])
         }
+        if let pending = unconfirmed[target] {
+            if current.url.standardizedFileURL == pending.url.standardizedFileURL {
+                unconfirmed[target] = nil
+                refusals[target] = nil
+            } else if ContinuousClock.now - pending.since >= confirmationWindow {
+                unconfirmed[target] = nil
+                countRefusal(target)
+                throw NSError(domain: "DesktopWallpaperSync", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "macOS has not accepted the wallpaper for desktop \(target.space ?? "current")."
+                ])
+            }
+        }
         let owned = entry(for: current.url)
         var original = owned?.original ?? current
         if !Self.isUserWallpaper(original, folder: folder),
@@ -194,6 +226,8 @@ final class DesktopWallpaperLedger {
         let name = "poster-" + hash.finalize().map { String(format: "%02x", $0) }.joined()
             + "." + DesktopPosterEncoder.fileExtension
         let url = folder.appendingPathComponent(name)
+        // The same poster is still on its way; rewriting it would not land sooner.
+        if unconfirmed[target]?.url == url { return }
         if !FileManager.default.fileExists(atPath: url.path) {
             try image.write(to: url, options: .atomic)
         }
@@ -211,13 +245,19 @@ final class DesktopWallpaperLedger {
         do {
             try workspace.setPicture(.poster(url), target: target)
             refusals[target] = nil
+        } catch is DesktopPictureUnconfirmed {
+            unconfirmed[target] = (url, ContinuousClock.now)
         } catch {
-            let count = refusals[target, default: 0] + 1
-            refusals[target] = count
-            if count == Self.refusalsBeforePause {
-                AppLog.warn("macOS refused the wallpaper for display \(target.display), desktop \(target.space ?? "current") \(count) times in a row; its poster waits for the next Space change or wake")
-            }
+            countRefusal(target)
             throw error
+        }
+    }
+
+    private func countRefusal(_ target: DesktopPictureTarget) {
+        let count = refusals[target, default: 0] + 1
+        refusals[target] = count
+        if count == Self.refusalsBeforePause {
+            AppLog.warn("macOS refused the wallpaper for display \(target.display), desktop \(target.space ?? "current") \(count) times in a row; its poster waits for the next Space change or wake")
         }
     }
 
@@ -305,6 +345,11 @@ final class DesktopWallpaperLedger {
         // an empty selection or an already-updated cache. Keep its original.
         for url in try workspace.referencedPictureURLs(targets: targets) where entry(for: url) != nil {
             referenced.insert(url.lastPathComponent)
+        }
+        // WallpaperAgent copies a poster some time after the write; deleting it
+        // first makes the write fail as "no such file".
+        for pending in unconfirmed.values where entry(for: pending.url) != nil {
+            referenced.insert(pending.url.lastPathComponent)
         }
         for target in targets {
             targeted.insert(target.display)

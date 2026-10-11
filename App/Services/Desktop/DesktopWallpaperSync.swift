@@ -140,6 +140,9 @@ final class DesktopWallpaperSync {
     private let retainedDisplays: @MainActor () -> Set<String>
     private var knownDisplays = Set<String>()
     private var retry: Task<Void, Never>?
+    /// Synchronizes again once unconfirmed poster writes should read back.
+    private var confirming: Task<Void, Never>?
+    private let confirmationDelay: Duration
     private var lastRefresh: ContinuousClock.Instant?
     private var coalesced: Task<Void, Never>?
     private static let refreshInterval: Duration = .milliseconds(500)
@@ -186,8 +189,11 @@ final class DesktopWallpaperSync {
              }.value
          },
          settleDelays: [Duration] = DesktopWallpaperSync.settleCaptureDelays,
-         periodicInterval: Duration = DesktopWallpaperSync.periodicRefreshInterval) throws {
-        ledger = try DesktopWallpaperLedger(folder: folder, workspace: workspace)
+         periodicInterval: Duration = DesktopWallpaperSync.periodicRefreshInterval,
+         confirmationDelay: Duration = DesktopWallpaperLedger.confirmationWindow) throws {
+        ledger = try DesktopWallpaperLedger(folder: folder, workspace: workspace,
+                                            confirmationWindow: confirmationDelay)
+        self.confirmationDelay = confirmationDelay
         self.surfaces = surfaces
         self.frameCenter = frameCenter
         self.workspaceCenter = workspaceCenter
@@ -332,6 +338,8 @@ final class DesktopWallpaperSync {
     func suspendForNativeProvider() {
         stopped = true
         retry?.cancel()
+        confirming?.cancel()
+        confirming = nil
         coalesced?.cancel()
         coalesced = nil
         settling?.cancel()
@@ -464,6 +472,7 @@ final class DesktopWallpaperSync {
             newest[surface.display] = arrival
         }
         retry?.cancel()
+        defer { scheduleConfirmation() }
         do {
             try ledger.synchronize(posters: byDisplay, liveDisplays: Set(surfaces.map(\.display)).union(retained), targetSpaces: targetSpaces)
         } catch {
@@ -476,6 +485,21 @@ final class DesktopWallpaperSync {
                 guard let self, !self.stopped else { return }
                 self.synchronizeAllSpaces(attempt: attempt + 1)
             }
+        }
+    }
+
+    /// A poster write WallpaperAgent has not applied yet is checked again,
+    /// rather than rewritten or counted as refused at once.
+    private func scheduleConfirmation() {
+        confirming?.cancel()
+        confirming = nil
+        guard ledger.awaitsConfirmation, !stopped else { return }
+        let delay = confirmationDelay
+        confirming = Task { [weak self] in
+            do { try await Task.sleep(for: delay) } catch { return }
+            guard let self, !self.stopped else { return }
+            self.confirming = nil
+            self.synchronizeAllSpaces()
         }
     }
 
