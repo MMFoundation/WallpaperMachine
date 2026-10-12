@@ -14,6 +14,12 @@ final class LockScreenIdleExitTests: XCTestCase {
 
   private func settle() async throws { try await Task.sleep(for: .milliseconds(250)) }
 
+  /// Holds the main queue past the grace period, so a due exit waits behind it.
+  private func blockMainQueue(for seconds: TimeInterval, thenWaitFor signal: DispatchSemaphore) {
+    Thread.sleep(forTimeInterval: seconds)
+    signal.wait()
+  }
+
   func testExitsOnlyAfterTheLastHostConnectionCloses() async throws {
     let idle = makeExit()
     idle.connectionOpened()
@@ -32,6 +38,24 @@ final class LockScreenIdleExitTests: XCTestCase {
     idle.connectionOpened()
     idle.connectionClosed()
     idle.connectionOpened()
+    try await settle()
+    XCTAssertEqual(exits, 0)
+  }
+
+  /// The listener accepts connections off the main queue. One accepted after the exit
+  /// fell due, while the main queue was busy, must still keep the process.
+  func testAConnectionAcceptedWhileTheExitIsQueuedKeepsTheProcess() async throws {
+    let idle = makeExit()
+    idle.connectionOpened()
+    idle.connectionClosed()
+    // Let the first open's main-queue hop pass, so only the count can stop the exit.
+    try await Task.sleep(for: .milliseconds(10))
+    let accepted = DispatchSemaphore(value: 0)
+    DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(100)) {
+      idle.connectionOpened()
+      accepted.signal()
+    }
+    blockMainQueue(for: 0.15, thenWaitFor: accepted)
     try await settle()
     XCTAssertEqual(exits, 0)
   }

@@ -8,8 +8,10 @@ final class WallpaperController {
   private var observers: [NSObjectProtocol] = []
   private(set) var displaysAsleep = false
   private var started = false
-  private lazy var idleExit = LockScreenIdleExit(
-    grace: .seconds(30), isBusy: { [unowned self] in !surfaces.values.isEmpty },
+  /// Static so the extension's listener can count a connection off the main queue.
+  nonisolated static let idleExit = LockScreenIdleExit(
+    grace: .seconds(30),
+    isBusy: { !WallpaperController.shared.surfaces.values.isEmpty },
     exit: {
       WallpaperRuntime.log("Exiting: no wallpaper host or surface remains.")
       Darwin.exit(0)
@@ -233,11 +235,8 @@ final class WallpaperController {
     surface.snapshot(reply: reply)
   }
 
-  func connectionOpened() { idleExit.connectionOpened() }
-  func connectionClosed() { idleExit.connectionClosed() }
-
   private func remove(_ id: UUID) {
     surfaces.remove(id)
-    idleExit.surfacesChanged()
+    Self.idleExit.surfacesChanged()
   }
 }
