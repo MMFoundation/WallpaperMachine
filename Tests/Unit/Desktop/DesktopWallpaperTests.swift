@@ -419,6 +419,69 @@ final class DesktopWallpaperTests: XCTestCase {
                       "A poster macOS still names must not be deleted")
     }
 
+    /// A store that no longer names the poster does not prove the desktop stopped
+    /// showing it: quit waits for the restoration itself to read back.
+    @MainActor
+    func testQuitWaitsForEveryRestorationToReadBack() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("before")]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try ledger.apply(image: Data([1]), target: one)
+        workspace.lagging = [one]
+        let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
+                                            surfaces: { [] }, frameCenter: NotificationCenter())
+        var waits = 0
+        try await sync.restoreForTermination {
+            waits += 1
+            if waits == 3 { workspace.land() }
+        }
+        XCTAssertEqual(waits, 3)
+        XCTAssertEqual(workspace.pictures[one], original("before"))
+
+        // One that never reads back cancels quit even with nothing left in the store.
+        workspace.lagging = []
+        try DesktopWallpaperLedger(folder: root, workspace: workspace).apply(image: Data([2]), target: one)
+        workspace.lagging = [one]
+        let next = try DesktopWallpaperSync(folder: root, workspace: workspace,
+                                            surfaces: { [] }, frameCenter: NotificationCenter())
+        do {
+            try await next.restoreForTermination(wait: {})
+            XCTFail("An unconfirmed restoration must not let the app quit")
+        } catch {
+            XCTAssertEqual(error as? DesktopWallpaperLedger.Failure, .restorationUnconfirmed)
+        }
+    }
+
+    /// WallpaperAgent copies a poster after the write. A newer frame or a desktop
+    /// that stops receiving posters must not delete a file it may still copy, and a
+    /// poster that lands afterwards on a stopped desktop is restored.
+    @MainActor
+    func testPosterFilesStayUntilTheirWritesSettle() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("one")]
+        workspace.lagging = [one]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace,
+                                                confirmationWindow: .milliseconds(200))
+        try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        try ledger.synchronize(posters: ["1": Data([2])], liveDisplays: ["1"])
+        try ledger.synchronize(posters: [:], liveDisplays: [])
+        let posters = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("poster-") }
+        XCTAssertEqual(posters.count, 2, "Both in-flight frames stay on disk")
+        XCTAssertTrue(ledger.awaitsConfirmation)
+
+        workspace.land()
+        workspace.lagging = []
+        try ledger.synchronize(posters: [:], liveDisplays: [])
+        XCTAssertEqual(workspace.pictures[one], original("one"))
+
+        try await Task.sleep(for: .milliseconds(250))
+        try ledger.synchronize(posters: [:], liveDisplays: [])
+        XCTAssertFalse(ledger.awaitsConfirmation)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("poster-") }.isEmpty)
+    }
+
     @MainActor
     func testUserChoiceDuringNativeReloadSurvivesQuit() async throws {
         let workspace = MemoryDesktopWorkspace()

@@ -45,13 +45,16 @@ protocol DesktopPictureWorkspace {
 final class DesktopWallpaperLedger {
     enum Failure: LocalizedError {
         case originalUnavailable
+        /// macOS still names a poster in its wallpaper store.
         case restorationPending
+        /// A desktop's restored wallpaper does not read back yet.
+        case restorationUnconfirmed
 
         var errorDescription: String? {
             switch self {
             case .originalUnavailable:
                 String(localized: "The original macOS wallpaper could not be recovered. Select your wallpaper again in System Settings.")
-            case .restorationPending:
+            case .restorationPending, .restorationUnconfirmed:
                 String(localized: "macOS is still restoring the desktop wallpaper. Please try quitting again.")
             }
         }
@@ -80,9 +83,17 @@ final class DesktopWallpaperLedger {
     static let confirmationWindow: Duration = .seconds(1)
     private let confirmationWindow: Duration
     private var unconfirmed: [DesktopPictureTarget: (url: URL, since: ContinuousClock.Instant)] = [:]
+    /// Every poster file written without reading back, by when it was last
+    /// written. WallpaperAgent copies a file some time after the write, so it
+    /// stays for `confirmationWindow` even once a newer frame replaces it or
+    /// its desktop stops receiving posters.
+    private var inFlight: [URL: ContinuousClock.Instant] = [:]
+    /// Desktops whose restoration did not read back in the last pass.
+    private var unconfirmedRestorations = Set<DesktopPictureTarget>()
     /// Whether a poster write still waits to read back; the coordinator then
-    /// synchronizes again after `confirmationWindow`.
-    var awaitsConfirmation: Bool { !unconfirmed.isEmpty }
+    /// synchronizes again after `confirmationWindow`, which also restores a
+    /// late poster on a desktop that no longer receives them.
+    var awaitsConfirmation: Bool { !unconfirmed.isEmpty || !inFlight.isEmpty }
 
     private struct Entry: Codable {
         var original: DesktopPicture
@@ -118,7 +129,7 @@ final class DesktopWallpaperLedger {
         var comparisons: [URL: Bool] = [:]
         let fallbacks = userWallpapers(targets: targets)
         let digests = posters.mapValues { Data(SHA256.hash(data: $0)) }
-        var applied = Set<DesktopPictureTarget>()
+        var applied = Set<DesktopPictureTarget>(), restoring = Set<DesktopPictureTarget>()
         for target in targets {
             // A key with an empty set holds every Space on that display. The public
             // fallback has no identity and cannot safely accept a Space-specific poster.
@@ -132,11 +143,16 @@ final class DesktopWallpaperLedger {
                     try restore(target: target, fallbacks: fallbacks)
                 }
             } catch is DesktopPictureUnconfirmed {
-                // A restoration is confirmed by quit's wait on the native store.
+                // Only a restoration throws this; the next pass reads it back.
+                restoring.insert(target)
             } catch { if firstError == nil { firstError = error } }
         }
-        // A desktop no longer receiving posters has nothing left to confirm.
+        unconfirmedRestorations = restoring
+        // A desktop no longer receiving posters has nothing left to confirm;
+        // its in-flight file stays until the window passes.
         unconfirmed = unconfirmed.filter { applied.contains($0.key) }
+        let now = ContinuousClock.now
+        inFlight = inFlight.filter { now - $0.value < confirmationWindow }
         // Pruned even when a desktop failed, or a failure that repeats on every
         // refresh would let posters pile up without bound. A desktop that
         // failed keeps what it shows: a readable picture is never deleted, and
@@ -155,6 +171,9 @@ final class DesktopWallpaperLedger {
 
     func restoreAll() throws {
         try synchronize(posters: [:], liveDisplays: [])
+        // Until a restoration reads back, its desktop may still show a poster,
+        // and a store without one does not prove otherwise.
+        guard unconfirmedRestorations.isEmpty else { throw Failure.restorationUnconfirmed }
         let targets = try workspace.targets()
         guard try !workspace.referencedPictureURLs(targets: targets)
             .contains(where: { Self.isPoster($0, folder: folder) }) else {
@@ -246,7 +265,9 @@ final class DesktopWallpaperLedger {
             try workspace.setPicture(.poster(url), target: target)
             refusals[target] = nil
         } catch is DesktopPictureUnconfirmed {
-            unconfirmed[target] = (url, ContinuousClock.now)
+            let now = ContinuousClock.now
+            unconfirmed[target] = (url, now)
+            inFlight[url] = now
         } catch {
             countRefusal(target)
             throw error
@@ -348,8 +369,8 @@ final class DesktopWallpaperLedger {
         }
         // WallpaperAgent copies a poster some time after the write; deleting it
         // first makes the write fail as "no such file".
-        for pending in unconfirmed.values where entry(for: pending.url) != nil {
-            referenced.insert(pending.url.lastPathComponent)
+        for url in Set(inFlight.keys).union(unconfirmed.values.map(\.url)) where entry(for: url) != nil {
+            referenced.insert(url.lastPathComponent)
         }
         for target in targets {
             targeted.insert(target.display)

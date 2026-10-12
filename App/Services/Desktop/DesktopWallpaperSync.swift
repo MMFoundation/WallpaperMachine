@@ -370,8 +370,9 @@ final class DesktopWallpaperSync {
     ///
     /// A poster can stay named where no per-Space write reaches it: macOS 27 can
     /// copy a Space write into the display-wide and system-default
-    /// selections. Once every desktop that can be written is restored, that
-    /// leftover reference no longer blocks quitting, or the app could never quit.
+    /// selections. Once every desktop that can be written is restored and
+    /// reads back, that leftover reference no longer blocks quitting, or the
+    /// app could never quit. A restoration that never reads back still does.
     func restoreForTermination(
         wait: () async throws -> Void = { try await Task.sleep(for: .milliseconds(200)) }
     ) async throws {
