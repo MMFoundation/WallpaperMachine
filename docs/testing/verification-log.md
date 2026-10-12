@@ -25,6 +25,13 @@ move the oldest entries verbatim into
 (or a new dated archive file) first, and promote anything durable before it
 goes. Trimming is allowed; editing an entry's recorded result is not.
 
+## 2026-10-12 — Control panel stays closed at login (issue #41)
+
+- Change: ControlPanelLaunch reads the open-application Apple event's keyAELaunchedAsLogInItem; a login launch skips the startup panel unless the welcome guide is unfinished or BridgeStore failed to start.
+- python3 scripts/test.py --only ControlPanelLaunchTests: 3 passed.
+- python3 scripts/test.py on origin/main 1607a15 + this change: 1339 passed, 0 failed, 14 skipped of 1353.
+- Gap: not verified with a real logout/login; whether SMAppService.mainApp launches still carry keyAELaunchedAsLogInItem on macOS 27 is unconfirmed. Look for 'startup: launched at login; control panel stays closed' in the app log after the next login.
+
 ## 2026-10-11 — Aligned layers turn about their anchor
 
 SceneRuntimeContext rotated a non-centre layer about its centre and slid its anchor offset along the scene's axes. Every gate below ran in a detached worktree at HEAD plus this change only, because another session's uncommitted audio edits in the shared tree stop audio_tests from compiling (SmoothAudioResponseBinsForTesting undeclared).
@@ -118,14 +125,3 @@ Why MTLCompilerService recompiled Lucy (3521337568) after a launch despite warm 
 - Tests: python3 scripts/test.py --only EnergyUsageMonitorTests --only WallpaperEnergyRatingsTests --only WebPanelEnergyUsageTests (26 passed); python3 -m unittest scripts.tests.test_panel_localization (OK); node --check and a Node render of loading, loading+contended, native+loading and normal readings.
 - Full gate: python3 scripts/test.py — 1322 passed, 0 failed, 14 skipped (opt-in media and network layers).
 - Not verified: the new note in the running panel (no screenshot taken).
-
-## 2026-10-10 — Energy readout: native video left out, macOS 27 ABI rechecked
-
-- Change: readings while a video is on the native player carry nativeVideo (no grade, battery share or comparison); the per-wallpaper recorder skips intervals with a presenting native-video display; ratings carry version 2 and a video's unversioned rating is hidden and replaced, not averaged.
-- Evidence for the fix: a stored rating of 0.18 mW over 4.4 h for a video wallpaper; GPU billed_to_me fields are 0 in all 818 coalitions; decoding 720p H.264 at ~1,700 fps charged ~2 W CPU and 0 GPU.
-- ABI on M5 Pro, macOS 27.0.1: struct coalition_resource_usage is 50 fields (5 appended); indices 8/11/41 unchanged. Saturating Metal load: coalition 16.85 W, all coalitions 17.56 W, IOReport GPU Energy 17.94 W.
-- Unchanged: the 0.25 contention threshold. A 60 fps probe read 91 mW alone and 162 mW at 21 % other GPU time (below the flag); documented, not retuned.
-- Tests: python3 scripts/test.py --only EnergyUsageMonitorTests --only WallpaperEnergyRatingsTests --only WebPanelEnergyUsageTests (23 passed); new GPU-counter guard failed once on a cold test host (0 mW after 0.8 s) and now waits up to 5 s for a post, then passed 4 runs.
-- Full gate: python3 scripts/test.py — 1319 passed, 0 failed, 14 skipped (opt-in media and network layers).
-- Page: node --check WebUI/settings.js; energyControl rendered in Node for native, native+contended, contended and normal readings. The panel itself was not opened (no desktop authorization).
-- Not verified: a native-video wallpaper end to end in the running app, and the hardware decoder's own energy (needs powermetrics/root).
