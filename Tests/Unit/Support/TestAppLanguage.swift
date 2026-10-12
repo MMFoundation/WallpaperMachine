@@ -12,6 +12,6 @@ extension AppLanguageStore {
   /// specific language build their own with `systemLanguages`.
   @MainActor
   static func english() -> AppLanguageStore {
-    AppLanguageStore(defaults: TemporaryDefaults.makeForCurrentTest(), systemLanguages: ["en"])
+    AppLanguageStore(defaults: TemporaryDefaults.makeForCurrentTest().defaults, systemLanguages: ["en"])
   }
 }

@@ -18,10 +18,10 @@ enum TemporaryDefaults {
 
   /// A path-backed suite removed when the running test case finishes, for fixtures
   /// that are built outside an `XCTestCase` and cannot register a teardown block.
-  static func makeForCurrentTest() -> UserDefaults {
+  static func makeForCurrentTest() -> (defaults: UserDefaults, suite: String) {
     let suite = try! makeSuite()
     Cleanup.shared.track(suite)
-    return UserDefaults(suiteName: suite)!
+    return (UserDefaults(suiteName: suite)!, suite)
   }
 
   private static func makeSuite() throws -> String {
