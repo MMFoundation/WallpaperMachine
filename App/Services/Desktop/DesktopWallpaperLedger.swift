@@ -143,7 +143,8 @@ final class DesktopWallpaperLedger {
                     try restore(target: target, fallbacks: fallbacks)
                 }
             } catch is DesktopPictureUnconfirmed {
-                // Only a restoration throws this; the next pass reads it back.
+                // `apply` handles its own unconfirmed writes, so this is a
+                // restoration; the next pass reads it back.
                 restoring.insert(target)
             } catch { if firstError == nil { firstError = error } }
         }
@@ -172,8 +173,10 @@ final class DesktopWallpaperLedger {
     func restoreAll() throws {
         try synchronize(posters: [:], liveDisplays: [])
         // Until a restoration reads back, its desktop may still show a poster,
-        // and a store without one does not prove otherwise.
-        guard unconfirmedRestorations.isEmpty else { throw Failure.restorationUnconfirmed }
+        // and a store without one does not prove otherwise. A poster write still
+        // in flight can also land after its desktop was restored; the next pass
+        // restores it, and the window ends well within quit's wait.
+        guard unconfirmedRestorations.isEmpty, inFlight.isEmpty else { throw Failure.restorationUnconfirmed }
         let targets = try workspace.targets()
         guard try !workspace.referencedPictureURLs(targets: targets)
             .contains(where: { Self.isPoster($0, folder: folder) }) else {
@@ -198,6 +201,8 @@ final class DesktopWallpaperLedger {
         if let pending = unconfirmed[target] {
             if current.url.standardizedFileURL == pending.url.standardizedFileURL {
                 unconfirmed[target] = nil
+                // Another Space's write of the same file keeps it by its own entry.
+                inFlight[pending.url] = nil
                 refusals[target] = nil
             } else if ContinuousClock.now - pending.since >= confirmationWindow {
                 unconfirmed[target] = nil

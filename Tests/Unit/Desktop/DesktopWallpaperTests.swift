@@ -452,6 +452,28 @@ final class DesktopWallpaperTests: XCTestCase {
         }
     }
 
+    /// A poster write still in flight can land after quit restored its desktop, so
+    /// quit waits out the confirmation window and restores it again.
+    @MainActor
+    func testQuitWaitsForAPosterWriteStillInFlight() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("one")]
+        workspace.lagging = [one]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace,
+                                                confirmationWindow: .milliseconds(200))
+        try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        XCTAssertThrowsError(try ledger.restoreAll()) {
+            XCTAssertEqual($0 as? DesktopWallpaperLedger.Failure, .restorationUnconfirmed)
+        }
+        workspace.lagging = []
+        workspace.land()
+        XCTAssertThrowsError(try ledger.restoreAll(), "Restored, but the write is still in its window")
+        XCTAssertEqual(workspace.pictures[one], original("one"))
+        try await Task.sleep(for: .milliseconds(250))
+        try ledger.restoreAll()
+        XCTAssertEqual(workspace.pictures[one], original("one"))
+    }
+
     /// WallpaperAgent copies a poster after the write. A newer frame or a desktop
     /// that stops receiving posters must not delete a file it may still copy, and a
     /// poster that lands afterwards on a stopped desktop is restored.
