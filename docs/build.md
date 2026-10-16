@@ -214,6 +214,9 @@ bundle is absent.
    Homebrew prefix or the repository are deleted, and
    `@executable_path/../Frameworks` (or `@executable_path/../../../../Frameworks`
    for the embedded `.appex`) is added instead.
+   `python3 scripts/check_licenses.py` walks the same `otool -L` closure
+   (read-only, on an unpackaged or a packaged app) and adds the compiled-in
+   and Rust-crate inventories; see [testing](testing/README.md).
 2. **MoltenVK ICD.** A `MoltenVK_icd.json` is written into the app's `Resources`
    and into each extension's `Resources`, each pointing at the bundled
    `libMoltenVK.dylib` with the correct relative depth, so Vulkan resolves the

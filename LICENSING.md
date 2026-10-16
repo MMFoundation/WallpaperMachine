@@ -213,8 +213,10 @@ see [Rust crates](#rust-crates) for how.
 | Phosphene ABI reference | notice in `Extension/Phosphene-LICENSE.txt` | MIT | Compatible |
 | ungive/mediaremote-adapter | `upstream/mediaremote-adapter` | BSD-3-Clause | Compatible; embedded as an unlinked framework |
 | miniaudio | `upstream/renderer/external/open-wallpaper-engine/third_party/miniaudio` | Public domain or MIT-0 (choice) | Compatible |
+| stb_image | `upstream/renderer/external/open-wallpaper-engine/third_party/stb_image.h`, v2.26 | Public domain or MIT, licensee's choice (end of the header) | Compatible |
+| Vulkan Memory Allocator | `upstream/renderer/external/open-wallpaper-engine/third_party/vk_mem_alloc.h` | MIT (stated in the header) | Compatible |
 | **spirv_reflect** | `upstream/renderer/external/open-wallpaper-engine/third_party/spirv_reflect`, linked statically (`spirv-reflect-static`) | Apache-2.0 | **Incompatible with GPLv2** (see below) |
-| Eigen | Homebrew `eigen` 5.0.1, header-only | MPL-2.0 AND Apache-2.0 AND BSD-3-Clause AND Minpack (Homebrew metadata) | Not audited file by file; the Apache-2.0 portion must be checked for whether any of it is compiled in |
+| Eigen | Homebrew `eigen` 5.0.1, header-only | MPL-2.0 AND Apache-2.0 AND BSD-3-Clause AND Minpack (Homebrew metadata) | Not audited file by file; `Eigen/Core` includes `src/Core/arch/Default/BFloat16.h`, whose header is Apache-2.0, so every Eigen user has an Apache-2.0 file in its include closure; `scripts/check_licenses.py` lists Eigen as Apache-2.0 and, for Minpack, unknown until the Minpack terms are reviewed |
 | nlohmann-json, argparse, glm | Homebrew, header-only | MIT | Compatible |
 | quickjs-ng | Homebrew `quickjs-ng` 0.16.2, `libqjs` in the verified Debug dependency closure | MIT | Compatible |
 | lz4 | Homebrew `lz4` 1.10.0 | BSD-2-Clause | Compatible |
@@ -411,10 +413,23 @@ As implemented by `scripts/package.py` and `.github/workflows/build.yml`
   publishes release disk images while the blockers below are still open.
 - Local disk images produced by `scripts/package.py` are labelled as not cleared
   for distribution.
+- `python3 scripts/check_licenses.py` lists the license of every Mach-O
+  dependency of the built app (`otool -L`, walked recursively from the main
+  executable, the extension and `Contents/Frameworks`, with the MoltenVK ICD
+  seeded), of the third-party code compiled or statically linked into the
+  renderer (a source inventory: `crates/core/build.rs`, the scene engine's CMake
+  `find_package` targets and `third_party/`, against a hand-kept license table
+  in the script) and of every linked Rust crate (`cargo tree`, the same set as
+  [Rust crates](#rust-crates)). It classifies SPDX expressions against one
+  policy table (today GPL-2.0-only: Apache-2.0, the GPL-3.0 family and unknown
+  licenses fail), prints the Apache-2.0 components and any failing component
+  this file does not name. It is report-only by default; `--enforce` exits 1.
+  It needs a built app, Homebrew and Cargo, so the routine gate does not run it.
 
-These checks catch the GPLv3 FFmpeg mistake and a missing notice. They do not
-and cannot detect the Apache-2.0 problem, which is a matter of what is linked,
-not of a string in a library.
+The packaging checks catch the GPLv3 FFmpeg mistake and a missing notice. The
+Apache-2.0 problem is a matter of what is linked, not of a string in one
+library; `scripts/check_licenses.py` reports it from the link closure, in
+report-only mode until the blockers below are cleared.
 
 ### Notice payload
 
