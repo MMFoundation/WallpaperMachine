@@ -12,7 +12,7 @@
 #include "Scene/SceneResolution.hpp"
 #include "Scene/SceneWallpaper.hpp"
 #include "Scene/SceneWallpaperSurface.hpp"
-#include "VulkanRender/StaticSubgraphCache.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
 #include "synthetic_video.hpp"
 
 #import <Metal/Metal.h>

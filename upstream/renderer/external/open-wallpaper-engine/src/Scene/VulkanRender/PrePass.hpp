@@ -1,9 +1,11 @@
 #pragma once
 #include "VulkanPass.hpp"
+#include <optional>
 #include <string>
 
 #include "Vulkan/Device.hpp"
 
+#include "RenderCommon/ScenePassInfo.hpp"
 #include "SpecTexs.hpp"
 
 namespace wallpaper
@@ -11,7 +13,7 @@ namespace wallpaper
 namespace vulkan
 {
 
-class PrePass : public VulkanPass {
+class PrePass : public VulkanPass, public ScenePassInfo {
 public:
     struct Desc {
         // in
@@ -29,6 +31,10 @@ public:
     virtual ~PrePass();
 
     // void setClearValue(vk::ClearValue);
+
+    std::optional<ClearPassInfo> clearInfo() const override {
+        return ClearPassInfo { m_desc.result, m_desc.transparent };
+    }
 
     void prepare(Scene&, const Device&, RenderingResources&) override;
     bool updateFrame(const Device&, RenderingResources&) override;

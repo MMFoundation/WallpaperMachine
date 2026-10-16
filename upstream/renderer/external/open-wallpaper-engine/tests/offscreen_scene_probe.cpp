@@ -25,7 +25,7 @@
 #include "VulkanRender/CustomShaderPass.hpp"
 #include "VulkanRender/PrePass.hpp"
 #include "VulkanRender/CopyPass.hpp"
-#include "VulkanRender/StaticSubgraphCache.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
 #include "VulkanRender/PassCommon.hpp"
 #include "Presentation/WallpaperScaling.hpp"
 #include "TexturePrefetch.hpp"
@@ -367,7 +367,7 @@ int main() {
                 // the app sends PROPERTY_FILLMODE, so a running wallpaper never
                 // reaches UpdateCameraFillMode either, and cropping comes only
                 // from the scaling layout below.
-                const auto source = ResolveSceneSourceExtent(*scene, VkExtent2D { px_w, px_h });
+                const auto source = ResolveSceneSourceExtent(*scene, Extent2D { px_w, px_h });
                 const auto layout = ComputeWallpaperScalingLayout(
                     mode, source.width, source.height,
                     static_cast<uint32_t>(std::lround(px_w / display_scale)),
@@ -485,7 +485,7 @@ int main() {
             scene->imageParser->SetTextureSurfaceSize(scene->display_sized ? 0 : width,
                                                      scene->display_sized ? 0 : height);
         }
-        VkExtent2D surface_extent { 1920, 1080 };
+        Extent2D surface_extent { 1920, 1080 };
         if (const char* size = std::getenv("WE_TEST_SURFACE")) {
             Check(std::sscanf(size, "%ux%u", &surface_extent.width, &surface_extent.height) == 2 &&
                       surface_extent.width > 0 && surface_extent.height > 0,
@@ -511,7 +511,7 @@ int main() {
         // not be compared with the same blur rendered by a real backend.
         scene->shaderValueUpdater->SetTexelSize(1.0f / static_cast<float>(std::max(1u, extent.width)),
                                                 1.0f / static_cast<float>(std::max(1u, extent.height)));
-        Check(Device::Create(instance, extensions, extent, device), "create device");
+        Check(Device::Create(instance, extensions, ToVkExtent2D(extent), device), "create device");
         if (const char* output = std::getenv("WE_TEST_OUTPUT")) {
             device.UsePipelineCacheFile(output);
         }

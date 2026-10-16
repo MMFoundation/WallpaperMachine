@@ -8,7 +8,7 @@
 #include "Utils/Logging.h"
 #include "MetalRender/MetalBackendRouter.hpp"
 #include "MetalRender/MetalVideoSupport.hpp"
-#include "VulkanRender/StaticSubgraphCache.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
 #include "Video/SharedVideoSession.hpp"
 #include "Video/VideoFramePacing.hpp"
 

@@ -1,17 +1,19 @@
 #pragma once
 #include "VulkanPass.hpp"
+#include <optional>
 #include <string>
 
 #include "Vulkan/Device.hpp"
 #include "Scene/Scene.h"
-#include "VulkanRender/CopyElision.hpp"
+#include "RenderCommon/CopyElision.hpp"
+#include "RenderCommon/ScenePassInfo.hpp"
 
 namespace wallpaper
 {
 namespace vulkan
 {
 
-class CopyPass : public VulkanPass {
+class CopyPass : public VulkanPass, public ScenePassInfo {
 public:
     struct Desc {
         std::string src;
@@ -32,6 +34,10 @@ public:
 
     Desc&       desc() { return m_desc; }
     const Desc& desc() const { return m_desc; }
+
+    std::optional<CopyPassInfo> copyInfo() const override {
+        return CopyPassInfo { m_desc.src, m_desc.dst };
+    }
 
     /// Compile-time shape of this copy for the elision analysis.
     ElisionPassDesc elisionDesc(const Scene&) const;

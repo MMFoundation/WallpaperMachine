@@ -18,7 +18,7 @@
 // For `ResolveEffectiveVideoPlaybackState`: the global/per-layer combination is
 // part of what playback means, and a second copy of it here would be a second
 // definition that can drift from the compatibility backend's.
-#include "Vulkan/TextureCache.hpp"
+#include "Video/VideoTextureSource.hpp"
 
 #include <algorithm>
 #include <array>
@@ -270,7 +270,7 @@ struct MetalVideoTextures::State {
         video::VideoPlaybackState global_state {};
         global_state.paused = paused;
         global_state.rate   = rate;
-        return vulkan::ResolveEffectiveVideoPlaybackState(global_state, layer_state);
+        return video::ResolveEffectiveVideoPlaybackState(global_state, layer_state);
     }
 
     void reportSourceWork(VideoSourceEntry& entry, std::uint64_t generation)

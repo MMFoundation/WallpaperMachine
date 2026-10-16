@@ -3,23 +3,18 @@ set(LIB_NAME wpVulkanRender)
 add_library(${LIB_NAME}
 STATIC
 CopyPass.cpp
-CopyElision.cpp
-StaticSubgraphCache.cpp
 CustomShaderPass.cpp
 FinPass.cpp
 PrePass.cpp
-SceneDemandMapping.cpp
 SceneToRenderGraph.cpp
 TexturePrefetch.cpp
 VulkanRender.cpp
-# Presentation layout is shared by both render backends and is written in
-# Vulkan's viewport types, so it lives with the Vulkan-typed render code rather
-# than in the top-level renderer target. Putting it there would make the native
-# Metal backend depend on the target that already depends on it.
-../../Presentation/WallpaperScaling.cpp
+WallpaperViewport.cpp
 )
 
 target_link_libraries(${LIB_NAME}
+PUBLIC
+    wpRenderCommon
 PRIVATE
 	wpVulkan
     wpScene

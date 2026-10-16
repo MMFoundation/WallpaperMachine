@@ -42,7 +42,7 @@
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Runtime/RuntimeImageSource.hpp"
 #include "VulkanRender/SceneToRenderGraph.hpp"
-#include "VulkanRender/StaticSubgraphCache.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
 #include "VulkanRender/VulkanRender.hpp"
 #include "Runtime/VirtualAssetRegistry.hpp"
 #include <algorithm>

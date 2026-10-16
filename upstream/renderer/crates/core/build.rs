@@ -93,10 +93,12 @@ fn emit_static_link_flags(build_dir: &Path) {
         "wescene-renderer",
         "wpAudio",
         "wpLooper",
-        // Before wpVulkanRender: the Metal backend reuses that library's pass
-        // analysis and camera helpers, so it has to be resolved first.
+        // Both renderers come before wpRenderCommon: the scene logic they
+        // share (static reuse, copy elision, presentation layout, the step
+        // description) lives there, so it has to be resolved after them.
         "wpMetalRender",
         "wpVulkanRender",
+        "wpRenderCommon",
         "wpScene",
         "wpVulkan",
         "wpRGraph",
@@ -149,6 +151,7 @@ fn static_link_search_paths(build_dir: &Path) -> Vec<PathBuf> {
         build_dir.join("src/Looper"),
         build_dir.join("src/Scene"),
         build_dir.join("src/Scene/Particle"),
+        build_dir.join("src/Scene/RenderCommon"),
         build_dir.join("src/Scene/RenderGraph"),
         build_dir.join("src/Scene/Timer"),
         build_dir.join("src/Scene/MetalRender"),

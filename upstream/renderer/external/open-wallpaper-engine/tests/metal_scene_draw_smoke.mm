@@ -45,7 +45,7 @@
 #include "VulkanRender/CopyPass.hpp"
 #include "VulkanRender/CustomShaderPass.hpp"
 #include "VulkanRender/SceneToRenderGraph.hpp"
-#include "VulkanRender/StaticSubgraphCache.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
 #include "Shader/SceneMetalVariants.hpp"
 #include "Scene/Parse/WPShaderParser.hpp"
 #include "Scene/Parse/WPMdlParser.hpp"

@@ -9,8 +9,10 @@
 #include "Vulkan/StagingBuffer.hpp"
 #include "Vulkan/GraphicsPipeline.hpp"
 #include "Vulkan/Shader.hpp"
+#include "RenderCommon/CustomShaderSlots.hpp"
+#include "RenderCommon/ScenePassInfo.hpp"
 #include "VulkanRender/PassBatch.hpp"
-#include "VulkanRender/StaticSubgraphCache.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
 #include "SpecTexs.hpp"
 #include "SpriteAnimation.hpp"
 #include "Interface/IShaderValueUpdater.h"
@@ -27,7 +29,7 @@ namespace wallpaper
 namespace vulkan
 {
 
-class CustomShaderPass : public VulkanPass {
+class CustomShaderPass : public VulkanPass, public ScenePassInfo {
 public:
     struct Desc {
         struct TextureBinding {
@@ -106,6 +108,21 @@ public:
     Desc&       desc() { return m_desc; }
     const Desc& desc() const { return m_desc; }
 
+    std::optional<DrawPassInfo> drawInfo() const override {
+        return DrawPassInfo {
+            .node                     = m_desc.node,
+            .visibility_node          = m_desc.visibility_node,
+            .textures                 = m_desc.textures,
+            .output                   = m_desc.output,
+            .camera_override          = m_desc.camera_override,
+            .submesh_index            = m_desc.submesh_index,
+            .material_slot            = m_desc.material_slot,
+            .clear_on_first_use       = m_desc.clear_on_first_use,
+            .preserve_target_contents = m_desc.preserve_target_contents,
+            .write_alpha              = m_desc.write_alpha,
+        };
+    }
+
     void prepare(Scene&, const Device&, RenderingResources&) override;
     bool updateFrame(const Device&, RenderingResources&) override;
     VkResult execute(const Device&, RenderingResources&) override;
@@ -183,28 +200,6 @@ inline CustomShaderPass::Desc::TextureBinding ReflectedTextureBinding(
         texture_binding.sampler_binding = (i32)sampler_iter->second.binding;
     }
     return texture_binding;
-}
-
-inline std::optional<usize> CustomShaderTextureSlot(std::string_view name) {
-    constexpr std::string_view prefix { "g_Texture" };
-    if (! wallpaper::sstart_with(name, prefix)) return std::nullopt;
-    name.remove_prefix(prefix.size());
-    if (name.empty()) return std::nullopt;
-    usize slot = 0;
-    const auto result = std::from_chars(name.data(), name.data() + name.size(), slot);
-    if (result.ec != std::errc {} || result.ptr != name.data() + name.size()) {
-        return std::nullopt;
-    }
-    if (slot >= WE_GLTEX_NAMES.size() || (name.size() > 1u && name.front() == '0')) {
-        return std::nullopt;
-    }
-    return slot;
-}
-
-inline std::optional<usize> CustomShaderSamplerSlot(std::string_view name) {
-    constexpr std::string_view prefix { "_we_Sampler_" };
-    if (! wallpaper::sstart_with(name, prefix)) return std::nullopt;
-    return CustomShaderTextureSlot(name.substr(prefix.size()));
 }
 
 inline const VkDescriptorSetLayoutBinding*

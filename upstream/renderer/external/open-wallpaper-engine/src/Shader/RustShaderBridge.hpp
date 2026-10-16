@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Scene/Parse/WPShaderParser.hpp"
+#include "Shader/RustShaderIdentity.hpp"
 #include "Vulkan/Shader.hpp"
 
 #include <array>
@@ -141,7 +142,6 @@ bool CompileRustShaderProgram(
     const RustShaderIncludeReader& include_reader = {});
 
 std::string LastRustShaderError();
-std::string RustShaderCacheIdentity();
 
 #ifdef WESCENE_BUILD_TESTS
 bool CompileRustShaderProgramWithBridgeJson(

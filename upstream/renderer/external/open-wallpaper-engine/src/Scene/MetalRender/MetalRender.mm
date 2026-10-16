@@ -14,17 +14,15 @@
 #include "MetalRender/MetalProjection.hpp"
 #include "MetalRender/MetalShaderReflection.hpp"
 #include "MetalRender/SceneMetalProgram.hpp"
-#include "Shader/RustShaderBridge.hpp"
+#include "Shader/RustShaderIdentity.hpp"
 #include "MetalRender/ScenePassDescription.hpp"
 
-#include "CopyPass.hpp"
-#include "CustomShaderPass.hpp"
-#include "PassCommon.hpp"
-#include "PrePass.hpp"
 #include "RenderGraph/RenderGraph.hpp"
-#include "VulkanRender/CopyElision.hpp"
-#include "VulkanRender/StaticSubgraphCache.hpp"
-#include "VulkanRender/UnchangedPresent.hpp"
+#include "RenderCommon/CopyElision.hpp"
+#include "RenderCommon/CustomShaderSlots.hpp"
+#include "RenderCommon/SceneRaster.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
+#include "RenderCommon/UnchangedPresent.hpp"
 
 #include "Image.hpp"
 #include "Interface/IImageParser.h"
@@ -2346,8 +2344,8 @@ void MetalRender::SetPipelineArchivePath(std::string_view path)
 /// of one overwriting the other.
 void MetalRender::Impl::resolveTargetSizes(Scene& scene)
 {
-    const VkExtent2D fallback { std::max<uint32_t>(1, output_width),
-                                std::max<uint32_t>(1, output_height) };
+    const Extent2D fallback { std::max<uint32_t>(1, output_width),
+                              std::max<uint32_t>(1, output_height) };
     const auto extents      = vulkan::ResolveScreenBoundRenderTargetSizes(
         scene, fallback,
         vulkan::SceneRasterSurface { .display_scale_factor = NormalizeScaleFactor(display_scale_factor),

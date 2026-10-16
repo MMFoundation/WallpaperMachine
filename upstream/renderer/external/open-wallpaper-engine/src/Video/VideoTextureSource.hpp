@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -42,6 +43,19 @@ struct VideoPlaybackState {
     float  rate { 1.0f };
     double scene_elapsed_seconds { 0.0 };
 };
+
+/// What a source is asked to play: the layer's own clock and controls under
+/// the renderer's pause and rate. Both render backends call this one
+/// definition, so they cannot disagree about what a global pause means.
+inline VideoPlaybackState ResolveEffectiveVideoPlaybackState(const VideoPlaybackState& global_state,
+                                                             const VideoPlaybackState& layer_state) {
+    VideoPlaybackState effective_state = layer_state;
+    effective_state.paused = global_state.paused || layer_state.paused;
+    effective_state.rate =
+        std::max(0.0f, global_state.rate) * std::max(0.0f, layer_state.rate);
+    effective_state.scene_elapsed_seconds = layer_state.scene_elapsed_seconds;
+    return effective_state;
+}
 
 /// What a source has actually done, as running totals.
 ///

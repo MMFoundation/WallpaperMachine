@@ -41,6 +41,7 @@
 #include "VulkanRender/PrePass.hpp"
 #include "VulkanRender/PassCommon.hpp"
 #include "VulkanRender/Resource.hpp"
+#include "VulkanRender/WallpaperViewport.hpp"
 
 namespace wallpaper::vulkan {
 struct TextureCacheVideoInteropTestAccess {

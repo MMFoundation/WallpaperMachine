@@ -876,8 +876,7 @@ need an authorized runtime check
   with the same layout (Fit leaves black bars, Original size is not scaled to the
   display, a factor zooms). To regenerate or extend the expected rectangles, compile
   `upstream/renderer/external/open-wallpaper-engine/src/Presentation/WallpaperScaling.cpp`
-  with a stub `vulkan/vulkan.h` that defines `VkViewport`, `VkRect2D` and their
-  member structs, hand `ComputeWallpaperScalingLayout` the display as
+  directly (it needs no Vulkan header), hand `ComputeWallpaperScalingLayout` the display as
   `lround(devicePixels / scale)` logical points (as `MetalRender::Impl::scalingLayout`
   does), and print `viewport_px`.
 - `NativeVideoPosterOrientationTests` — which clips cannot take a poster from

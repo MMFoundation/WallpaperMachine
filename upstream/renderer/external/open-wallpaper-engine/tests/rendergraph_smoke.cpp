@@ -2110,7 +2110,7 @@ void main() {
     runtime_scene.renderTargets["fullscreen_runtime_target"] = runtime_target;
     wallpaper::vulkan::ResolveScreenBoundRenderTargetSizes(
         runtime_scene,
-        VkExtent2D {
+        wallpaper::Extent2D {
             .width  = 999,
             .height = 999,
         });
@@ -2141,7 +2141,7 @@ TEST(RenderGraph, screenBoundSizingHonorsTinyAuthoredDefaultExtent) {
 
     const auto source_extent = wallpaper::vulkan::ResolveScreenBoundRenderTargetSizes(
         scene,
-        VkExtent2D {
+        wallpaper::Extent2D {
             .width  = 999,
             .height = 999,
         });
@@ -2154,7 +2154,7 @@ TEST(RenderGraph, screenBoundSizingHonorsTinyAuthoredDefaultExtent) {
 
     const auto second_source_extent = wallpaper::vulkan::ResolveScreenBoundRenderTargetSizes(
         scene,
-        VkExtent2D {
+        wallpaper::Extent2D {
             .width  = 999,
             .height = 999,
         });

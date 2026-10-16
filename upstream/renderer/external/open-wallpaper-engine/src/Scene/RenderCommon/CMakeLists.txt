@@ -1,0 +1,28 @@
+set(LIB_NAME wpRenderCommon)
+
+# The scene-side logic both render backends share: the dynamic-reason
+# vocabulary and static-subgraph reuse, copy elision, the unchanged-present
+# gate, the scene-to-demand mapping, the presentation layout and the read-only
+# description of a render-graph step. Plain C++ with
+# no GPU API in it, so it builds into one archive that each backend links, and
+# its process-wide counters are defined exactly once.
+add_library(${LIB_NAME}
+STATIC
+CopyElision.cpp
+SceneDemandMapping.cpp
+ScenePassInfo.cpp
+StaticSubgraphCache.cpp
+# Presentation layout and cursor mapping: plain arithmetic both backends call.
+# Its Vulkan viewport conversions live with the Vulkan renderer.
+../../Presentation/WallpaperScaling.cpp
+)
+
+target_link_libraries(${LIB_NAME}
+PUBLIC
+    wpScene
+    wpUtils
+)
+target_include_directories(${LIB_NAME} PUBLIC include PRIVATE include/RenderCommon .)
+target_compile_options(${LIB_NAME} PRIVATE ${warn_opts} -Wno-missing-field-initializers)
+target_compile_features(${LIB_NAME} PUBLIC cxx_std_20)
+set_property(TARGET ${LIB_NAME} PROPERTY POSITION_INDEPENDENT_CODE ON)

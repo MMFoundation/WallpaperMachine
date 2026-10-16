@@ -23,17 +23,18 @@ endif()
 add_library(${LIB_NAME} STATIC ${METAL_RENDER_SOURCES})
 
 # Depends on wpScene and on the shared render graph, never the other way
-# round: wpScene must stay free of any renderer. wpVulkanRender is a dependency
-# because both backends consume one render graph, and the pass objects in that
-# graph plus the `DynamicReason` vocabulary live there -- a second copy of
-# either would be a second definition that can drift.
+# round: wpScene must stay free of any renderer. The logic both backends share
+# -- the `DynamicReason` vocabulary, static reuse, copy elision, the presentation
+# layout, and the read-only description of a graph step -- lives in
+# wpRenderCommon, so this library links no Vulkan code and includes no Vulkan
+# header; a second copy of that logic would be a second definition that can
+# drift.
 target_link_libraries(${LIB_NAME}
 PUBLIC
     wpUtils
     wpScene
+    wpRenderCommon
 PRIVATE
-    wpVulkanRender
-    wpVulkan
     wpParticle
     wpRGraph
     nlohmann_json::nlohmann_json)
@@ -43,9 +44,7 @@ PUBLIC
     include
 PRIVATE
     include/MetalRender
-    .
-    ${CMAKE_CURRENT_SOURCE_DIR}/../VulkanRender
-    ${CMAKE_CURRENT_SOURCE_DIR}/../VulkanRender/include)
+    .)
 
 target_compile_features(${LIB_NAME} PUBLIC cxx_std_20)
 

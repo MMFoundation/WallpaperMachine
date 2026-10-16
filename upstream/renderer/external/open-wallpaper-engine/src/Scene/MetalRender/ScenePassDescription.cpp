@@ -1,9 +1,7 @@
 #include "MetalRender/ScenePassDescription.hpp"
 
-#include "CopyPass.hpp"
-#include "CustomShaderPass.hpp"
-#include "PassCommon.hpp"
-#include "PrePass.hpp"
+#include "RenderCommon/ScenePassInfo.hpp"
+#include "RenderGraph/Pass.hpp"
 #include "RenderGraph/RenderGraph.hpp"
 #include "Scene/Scene.h"
 #include "SpecTexs.hpp"
@@ -181,14 +179,15 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             return set_error("the render graph contains a step the native renderer does not "
                              "recognise");
         case MetalPassKind::Clear: {
-            auto* pre = dynamic_cast<vulkan::PrePass*>(pass);
-            if (pre == nullptr) return set_error("a clear step has an unexpected shape");
+            const auto* info = dynamic_cast<const ScenePassInfo*>(pass);
+            const auto  pre  = info != nullptr ? info->clearInfo() : std::nullopt;
+            if (! pre) return set_error("a clear step has an unexpected shape");
             ScenePassDescription desc;
             desc.kind        = MetalPassKind::Clear;
             desc.name        = std::string(pass_node->name());
-            desc.target_key  = scene.ResolveRenderTargetName(pre->desc().result);
+            desc.target_key  = scene.ResolveRenderTargetName(pre->result);
             desc.load_action = MetalLoadAction::Clear;
-            if (pre->desc().transparent) {
+            if (pre->transparent) {
                 desc.clear_color = { 0.0f, 0.0f, 0.0f, 0.0f };
             } else {
                 desc.uses_scene_clear_color = true;
@@ -202,13 +201,14 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             continue;
         }
         case MetalPassKind::Copy: {
-            auto* copy = dynamic_cast<vulkan::CopyPass*>(pass);
-            if (copy == nullptr) return set_error("a copy step has an unexpected shape");
+            const auto* info = dynamic_cast<const ScenePassInfo*>(pass);
+            const auto  copy = info != nullptr ? info->copyInfo() : std::nullopt;
+            if (! copy) return set_error("a copy step has an unexpected shape");
             ScenePassDescription desc;
             desc.kind        = MetalPassKind::Copy;
             desc.name        = std::string(pass_node->name());
-            desc.source_key  = scene.ResolveRenderTargetName(copy->desc().src);
-            desc.target_key  = scene.ResolveRenderTargetName(copy->desc().dst);
+            desc.source_key  = scene.ResolveRenderTargetName(copy->src);
+            desc.target_key  = scene.ResolveRenderTargetName(copy->dst);
             desc.load_action = MetalLoadAction::DontCare;
             if (! TargetExtent(scene, desc.source_key, desc.source_width, desc.source_height)) {
                 return set_error("a copy step reads an image with no size");
@@ -221,9 +221,10 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             continue;
         }
         case MetalPassKind::CustomShader: {
-            auto* custom = dynamic_cast<vulkan::CustomShaderPass*>(pass);
-            if (custom == nullptr) return set_error("a draw step has an unexpected shape");
-            const auto& src = custom->desc();
+            const auto* info   = dynamic_cast<const ScenePassInfo*>(pass);
+            const auto  custom = info != nullptr ? info->drawInfo() : std::nullopt;
+            if (! custom) return set_error("a draw step has an unexpected shape");
+            const auto& src = *custom;
             if (src.node == nullptr || src.node->Mesh() == nullptr) {
                 return set_error("a draw step has no mesh");
             }

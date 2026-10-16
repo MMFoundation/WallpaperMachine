@@ -1,6 +1,6 @@
 #include "Scene/include/Scene/SceneUpdateDemand.hpp"
 
-#include "VulkanRender/StaticSubgraphCache.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
 
 namespace wallpaper
 {

@@ -3,7 +3,6 @@
 #include "Presentation/WallpaperFraming.hpp"
 
 #include <cstdint>
-#include <vulkan/vulkan.h>
 
 namespace wallpaper
 {
@@ -69,8 +68,5 @@ struct WallpaperCursorMapping {
 WallpaperCursorMapping ComputeWallpaperCursorMapping(const WallpaperScalingLayout& layout,
                                                      double camera_center_x, double camera_center_y,
                                                      double camera_width, double camera_height);
-
-VkViewport MakeWallpaperViewport(const WallpaperScalingLayout& layout);
-VkRect2D   MakeWallpaperScissor(const WallpaperScalingLayout& layout);
 
 } // namespace wallpaper

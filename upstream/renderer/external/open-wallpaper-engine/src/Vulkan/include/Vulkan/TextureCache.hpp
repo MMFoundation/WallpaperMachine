@@ -115,17 +115,6 @@ enum class TextureUploadSynchronization
     Deferred,
 };
 
-inline video::VideoPlaybackState
-ResolveEffectiveVideoPlaybackState(const video::VideoPlaybackState& global_state,
-                                   const video::VideoPlaybackState& layer_state) {
-    video::VideoPlaybackState effective_state = layer_state;
-    effective_state.paused = global_state.paused || layer_state.paused;
-    effective_state.rate =
-        std::max(0.0f, global_state.rate) * std::max(0.0f, layer_state.rate);
-    effective_state.scene_elapsed_seconds = layer_state.scene_elapsed_seconds;
-    return effective_state;
-}
-
 struct TextureKey {
     i32           width;
     i32           height;

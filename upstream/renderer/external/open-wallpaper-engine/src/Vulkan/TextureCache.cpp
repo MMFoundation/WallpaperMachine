@@ -1661,7 +1661,7 @@ bool TextureCache::UpdateVideoFrame(std::string_view                 key,
     observeVideoConsumer(video_tex);
 
     const video::VideoPlaybackState effective_state =
-        ResolveEffectiveVideoPlaybackState(m_video_playback_state, playback_state);
+        video::ResolveEffectiveVideoPlaybackState(m_video_playback_state, playback_state);
 
     if (! video_tex.source->syncPlayback(effective_state, error)) {
         return false;

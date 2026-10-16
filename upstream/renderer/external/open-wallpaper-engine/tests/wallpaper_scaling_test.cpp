@@ -1,4 +1,5 @@
 #include "Presentation/WallpaperScaling.hpp"
+#include "VulkanRender/WallpaperViewport.hpp"
 
 #include <gtest/gtest.h>
 

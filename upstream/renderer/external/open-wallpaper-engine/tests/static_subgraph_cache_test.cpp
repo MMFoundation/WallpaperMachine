@@ -1,6 +1,6 @@
 #include "Scene/include/Scene/SceneUpdateDemand.hpp"
-#include "VulkanRender/CopyElision.hpp"
-#include "VulkanRender/StaticSubgraphCache.hpp"
+#include "RenderCommon/CopyElision.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
 
 #include <gtest/gtest.h>
 

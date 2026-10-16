@@ -305,7 +305,7 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 add_executable(wallpaper_scaling_test wallpaper_scaling_test.cpp)
-target_link_libraries(wallpaper_scaling_test PRIVATE ${PROJECT_NAME} wpScene wpVulkan GTest::gtest_main)
+target_link_libraries(wallpaper_scaling_test PRIVATE ${PROJECT_NAME} wpScene wpVulkan wpVulkanRender GTest::gtest_main)
 target_include_directories(wallpaper_scaling_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(wallpaper_scaling_test PRIVATE cxx_std_20)
 gtest_discover_tests(
@@ -508,11 +508,11 @@ gtest_discover_tests(
 if(APPLE)
     add_executable(unchanged_present_test unchanged_present_test.mm)
     target_link_libraries(unchanged_present_test PRIVATE ${PROJECT_NAME}
-        wpScene wpVulkan wpVulkanRender wpRGraph
+        wpScene wpRenderCommon wpVulkan wpVulkanRender wpRGraph
         PkgConfig::TEST_AVFORMAT PkgConfig::TEST_AVCODEC PkgConfig::TEST_AVUTIL GTest::gtest_main)
     target_include_directories(unchanged_present_test PRIVATE
         . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/include
-        ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender/include)
+        ${CMAKE_SOURCE_DIR}/src/Scene/RenderCommon/include)
     wescene_prefer_ffmpeg_headers(unchanged_present_test "TEST_")
     target_compile_features(unchanged_present_test PRIVATE cxx_std_20)
     set_target_properties(unchanged_present_test PROPERTIES
@@ -537,9 +537,9 @@ gtest_discover_tests(
 
 # Pure analysis: no device, no surface, no GPU.
 add_executable(static_subgraph_cache_test static_subgraph_cache_test.cpp)
-target_link_libraries(static_subgraph_cache_test PRIVATE wpVulkanRender wpVulkan wpScene wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)
+target_link_libraries(static_subgraph_cache_test PRIVATE wpRenderCommon wpScene wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(static_subgraph_cache_test PRIVATE
-    . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender/include)
+    . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/RenderCommon/include)
 target_compile_features(static_subgraph_cache_test PRIVATE cxx_std_20)
 gtest_discover_tests(
     static_subgraph_cache_test

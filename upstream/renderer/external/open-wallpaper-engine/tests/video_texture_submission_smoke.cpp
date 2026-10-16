@@ -1,4 +1,4 @@
-#include "Vulkan/TextureCache.hpp"
+#include "Video/VideoTextureSource.hpp"
 
 #include <gtest/gtest.h>
 
@@ -20,7 +20,7 @@ TEST(VideoTextureSubmissionSmoke, MergesGlobalAndLayerVideoPlaybackState) {
     };
 
     const auto merged =
-        vulkan::ResolveEffectiveVideoPlaybackState(global_state, layer_state);
+        video::ResolveEffectiveVideoPlaybackState(global_state, layer_state);
 
     EXPECT_TRUE(merged.paused);
     EXPECT_FLOAT_EQ(merged.rate, 0.5f);
@@ -38,7 +38,7 @@ TEST(VideoTextureSubmissionSmoke, ClampsNegativeVideoPlaybackRates) {
     };
 
     const auto merged =
-        vulkan::ResolveEffectiveVideoPlaybackState(global_state, layer_state);
+        video::ResolveEffectiveVideoPlaybackState(global_state, layer_state);
 
     EXPECT_TRUE(merged.paused);
     EXPECT_FLOAT_EQ(merged.rate, 0.0f);

@@ -2,7 +2,7 @@
 
 #include "MetalRender/MetalRender.hpp"
 #include "Scene/include/Scene/SceneBackendSelection.hpp"
-#include "VulkanRender/StaticSubgraphCache.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
 #include "VulkanRender/VulkanRender.hpp"
 
 #include <memory>

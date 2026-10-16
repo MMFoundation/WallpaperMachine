@@ -64,6 +64,7 @@ add_subdirectory(Scene/Timer)
 add_subdirectory(Scene/Particle)
 add_subdirectory(Scene/VulkanRender)
 add_subdirectory(Scene/RenderGraph)
+add_subdirectory(Scene/RenderCommon)
 add_subdirectory(Scene/MetalRender)
 
 add_library(
@@ -122,6 +123,7 @@ set(InteralLib
     wpAudio
     wpLooper
     wpMetalRender
+    wpRenderCommon
     wpVulkanRender
     wpFs
     wpScene

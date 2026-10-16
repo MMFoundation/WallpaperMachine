@@ -19,9 +19,10 @@
 #include "VulkanPass.hpp"
 #include "CustomShaderPass.hpp"
 #include "CopyPass.hpp"
-#include "VulkanRender/StaticSubgraphCache.hpp"
-#include "VulkanRender/UnchangedPresent.hpp"
-#include "VulkanRender/CopyElision.hpp"
+#include "VulkanRender/WallpaperViewport.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
+#include "RenderCommon/UnchangedPresent.hpp"
+#include "RenderCommon/CopyElision.hpp"
 #include "PrePass.hpp"
 #include "FinPass.hpp"
 #include "Resource.hpp"
@@ -1148,7 +1149,7 @@ SceneRasterSurface VulkanRender::Impl::rasterSurface() const {
 
 void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) {
     auto&      ext     = m_device->out_extent();
-    const auto extents = ResolveScreenBoundRenderTargetSizes(scene, ext, rasterSurface());
+    const auto extents = ResolveScreenBoundRenderTargetSizes(scene, FromVkExtent2D(ext), rasterSurface());
     const auto render_scale = ResolveSceneRenderScale(scene);
     for (auto& item : scene.renderTargets) {
         auto& rt = item.second;
