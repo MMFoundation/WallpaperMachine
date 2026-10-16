@@ -155,32 +155,9 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
         _ image: CGImage, pixelSize: CGSize, backingScale: CGFloat, mode: BridgeScalingMode,
         factor: Double
     ) -> CGImage? {
-        guard pixelSize.width.isFinite, pixelSize.height.isFinite,
-              pixelSize.width > 0, pixelSize.height > 0,
-              pixelSize.width <= 16_384, pixelSize.height <= 16_384 else { return nil }
-        let width = Int(pixelSize.width.rounded(.up)), height = Int(pixelSize.height.rounded(.up))
-        guard width * height <= 32 * 1024 * 1024,
-              let space = CGColorSpace(name: CGColorSpace.sRGB),
-              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
-                  bytesPerRow: width * 4, space: space,
-                  bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.noneSkipLast.rawValue)
-        else { return nil }
-        // Whatever the picture does not cover is black, as the window is.
-        context.setFillColor(CGColor(colorSpace: space, components: [0, 0, 0, 1]) ?? .black)
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        // The context is the display in device pixels, so the layout is asked
-        // for the same display expressed in points.
-        let scale = CGFloat(NativeVideoLayout.normalizedFactor(Double(backingScale)))
-        let rect = NativeVideoLayout.pictureRect(
-            mode: mode, factor: factor,
-            videoSize: CGSize(width: image.width, height: image.height),
-            viewport: CGSize(width: CGFloat(width) / scale, height: CGFloat(height) / scale),
-            backingScale: scale)
-        // The layout measures from the top edge and a bitmap context from the
-        // bottom; the picture is centred, so only rounding could tell them apart.
-        context.draw(image, in: CGRect(
-            x: rect.x, y: height - rect.y - rect.height, width: rect.width, height: rect.height))
-        return context.makeImage()
+        NativeVideoLayout.composeFrame(
+            image, pixelSize: pixelSize, backingScale: backingScale, mode: mode.layoutMode,
+            factor: factor)
     }
     /// Forwarded straight to the player, which is what observes
     /// `AVPlayerItem.status` and knows its own surface generation.
@@ -233,5 +210,17 @@ final class NativeVideoContainerView: NSView {
 
     private func relayoutPlayer() {
         player?.relayout(bounds: bounds, backingScale: window?.backingScaleFactor ?? 1)
+    }
+}
+
+extension BridgeScalingMode {
+    /// The same choice as the layout rules, which the lock-screen extension shares, name it.
+    var layoutMode: NativeVideoScalingMode {
+        switch self {
+        case .none: .none
+        case .stretch: .stretch
+        case .match: .match
+        case .fill: .fill
+        }
     }
 }

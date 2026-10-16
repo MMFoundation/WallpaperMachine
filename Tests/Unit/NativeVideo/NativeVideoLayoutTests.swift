@@ -11,7 +11,7 @@ import XCTest
 final class NativeVideoLayoutTests: XCTestCase {
     private struct Golden {
         var name: String
-        var mode: BridgeScalingMode
+        var mode: NativeVideoScalingMode
         var factor: Double
         var video: CGSize
         /// The display in points.
@@ -126,7 +126,7 @@ final class NativeVideoLayoutTests: XCTestCase {
     func testTheDefaultPlacementIsTheGravityItReplaces() {
         let viewport = CGSize(width: 1512, height: 982)
         let video = CGSize(width: 1920, height: 1080)
-        let expected: [(BridgeScalingMode, AVLayerVideoGravity)] = [
+        let expected: [(NativeVideoScalingMode, AVLayerVideoGravity)] = [
             (.fill, .resizeAspectFill), (.match, .resizeAspect), (.stretch, .resize),
         ]
         for (mode, gravity) in expected {
@@ -150,7 +150,7 @@ final class NativeVideoLayoutTests: XCTestCase {
     func testOriginalSizeAndScaleFactorsWaitForThePicturesSize() {
         let viewport = CGSize(width: 1512, height: 982)
         for (mode, factor) in [
-            (BridgeScalingMode.none, 1.0), (.fill, 1.25), (.match, 0.5), (.stretch, 2),
+            (NativeVideoScalingMode.none, 1.0), (.fill, 1.25), (.match, 0.5), (.stretch, 2),
         ] {
             XCTAssertEqual(
                 NativeVideoLayout.placement(
@@ -179,5 +179,90 @@ final class NativeVideoLayoutTests: XCTestCase {
                 mode: .match, factor: 0.5, videoSize: video,
                 viewport: CGSize(width: 1920, height: 1080), backingScale: 1),
             .frame(CGRect(x: 480, y: 270, width: 960, height: 540)))
+    }
+
+    // MARK: - A position in the room around the picture
+
+    /// The renderer's own rule: the slack the display has left after the picture, negative
+    /// when the picture overflows it, is divided by the fraction on each axis.
+    func testAPositionDividesTheRoomTheWayTheRendererDoes() {
+        let video = CGSize(width: 1920, height: 1080)
+        let viewport = CGSize(width: 1000, height: 1000)
+        // Fit: 1000x562.5 at x0, with 437.5 of room above and below it.
+        let top = NativeVideoLayout.pictureRect(
+            mode: .match, factor: 1, videoSize: video, viewport: viewport, backingScale: 1,
+            pan: .init(x: 0, y: 0))
+        XCTAssertEqual(top, rect(0, 0, 1000, 563))
+        let bottom = NativeVideoLayout.pictureRect(
+            mode: .match, factor: 1, videoSize: video, viewport: viewport, backingScale: 1,
+            pan: .init(x: 1, y: 1))
+        XCTAssertEqual(bottom, rect(0, 438, 1000, 563))
+        XCTAssertEqual(
+            NativeVideoLayout.pictureRect(
+                mode: .match, factor: 1, videoSize: video, viewport: viewport, backingScale: 1,
+                pan: .init(x: 0.5, y: 0.5)),
+            NativeVideoLayout.pictureRect(
+                mode: .match, factor: 1, videoSize: video, viewport: viewport, backingScale: 1))
+        // Fill overflows sideways: 1778x1000, so a pan of 0 puts its left edge on the display's.
+        let left = NativeVideoLayout.pictureRect(
+            mode: .fill, factor: 1, videoSize: video, viewport: viewport, backingScale: 1,
+            pan: .init(x: 0, y: 0.5))
+        XCTAssertEqual(left.x, 0)
+        let right = NativeVideoLayout.pictureRect(
+            mode: .fill, factor: 1, videoSize: video, viewport: viewport, backingScale: 1,
+            pan: .init(x: 1, y: 0.5))
+        XCTAssertEqual(right.x, -778)
+        // Stretch has no room, so no position moves it.
+        XCTAssertEqual(
+            NativeVideoLayout.pictureRect(
+                mode: .stretch, factor: 1, videoSize: video, viewport: viewport, backingScale: 1,
+                pan: .init(x: 0, y: 1)),
+            rect(0, 0, 1000, 1000))
+    }
+
+    func testAnUnusablePositionIsHeldToTheEdgeOrTheMiddleAsTheRendererDoes() {
+        let video = CGSize(width: 1920, height: 1080)
+        let viewport = CGSize(width: 1000, height: 1000)
+        func rectAt(_ x: Double, _ y: Double) -> NativeVideoLayout.PixelRect {
+            NativeVideoLayout.pictureRect(
+                mode: .match, factor: 1, videoSize: video, viewport: viewport, backingScale: 1,
+                pan: .init(x: x, y: y))
+        }
+        XCTAssertEqual(rectAt(-3, -3), rectAt(0, 0))
+        XCTAssertEqual(rectAt(7, 7), rectAt(1, 1))
+        XCTAssertEqual(rectAt(.nan, .infinity), rectAt(0.5, 0.5))
+    }
+
+    func testAPositionNeedsAnExplicitFrameBecauseGravityCentres() {
+        let viewport = CGSize(width: 1000, height: 1000)
+        let video = CGSize(width: 1920, height: 1080)
+        XCTAssertEqual(
+            NativeVideoLayout.placement(
+                mode: .match, factor: 1, videoSize: video, viewport: viewport, backingScale: 1,
+                pan: .init(x: 0.5, y: 0.5)),
+            .gravity(.resizeAspect))
+        XCTAssertEqual(
+            NativeVideoLayout.placement(
+                mode: .match, factor: 1, videoSize: video, viewport: viewport, backingScale: 1,
+                pan: .init(x: 0.5, y: 0)),
+            .frame(CGRect(x: 0, y: 0, width: 1000, height: 563)))
+        // The size is not known yet, so there is nothing to place.
+        XCTAssertEqual(
+            NativeVideoLayout.placement(
+                mode: .match, factor: 1, videoSize: nil, viewport: viewport, backingScale: 1,
+                pan: .init(x: 0.5, y: 0)),
+            .pending)
+    }
+
+    func testTheModeNumbersAreTheConfigurationsAndTheRenderers() {
+        XCTAssertEqual(NativeVideoScalingMode(rawValue: 0), NativeVideoScalingMode.none)
+        XCTAssertEqual(NativeVideoScalingMode(rawValue: 1), .stretch)
+        XCTAssertEqual(NativeVideoScalingMode(rawValue: 2), .match)
+        XCTAssertEqual(NativeVideoScalingMode(rawValue: 3), .fill)
+        XCTAssertNil(NativeVideoScalingMode(rawValue: 4))
+        XCTAssertEqual(BridgeScalingMode.none.layoutMode, NativeVideoScalingMode.none)
+        XCTAssertEqual(BridgeScalingMode.stretch.layoutMode, .stretch)
+        XCTAssertEqual(BridgeScalingMode.match.layoutMode, .match)
+        XCTAssertEqual(BridgeScalingMode.fill.layoutMode, .fill)
     }
 }

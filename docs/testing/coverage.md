@@ -871,7 +871,9 @@ need an authorized runtime check
   pixel per point; an unusable factor is 1; rounding ties fall on the renderer's
   side), degenerate sizes and absurd factors stay valid, and the plain modes at
   factor 1 stay AVFoundation's gravity while Original size and a factor wait for the
-  picture's size. The host suite checks the user's mode and factor reach a running
+  picture's size, and a position (the room is divided as the renderer divides it, an unusable
+  one is held to the edge or the middle, and any position but the middle needs an explicit
+  frame because gravity centres). The host suite checks the user's mode and factor reach a running
   surface without reopening or re-probing it, and the desktop-picture poster is drawn
   with the same layout (Fit leaves black bars, Original size is not scaled to the
   display, a factor zooms). To regenerate or extend the expected rectangles, compile

@@ -183,7 +183,7 @@ final class NativeVideoPlayer {
     private func applyPlacement() {
         guard !stopped else { return }
         let placement = NativeVideoLayout.placement(
-            mode: scalingMode, factor: scalingFactor, videoSize: presentationSize,
+            mode: scalingMode.layoutMode, factor: scalingFactor, videoSize: presentationSize,
             viewport: viewportBounds.size, backingScale: backingScale)
         // Implicit animation would visibly slide the picture to its new place
         // every time the display is resized or the user changes the mode.

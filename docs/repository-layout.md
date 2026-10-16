@@ -46,7 +46,8 @@ App/                               WallpaperMachine application target sources o
                                    (InstanceLock, SingleInstance)
     Localization/                  AppLanguage.swift: shipped-language registry and the language preference store
     LockScreen/                    lock-screen selection overrides, extension registration and configuration publishing
-    NativeVideo/                   AVFoundation video backend: admission, player and host window
+    NativeVideo/                   AVFoundation video backend: player and host window (the admission rule
+                                   and the layout rules are in Shared/)
     Pixiv/                         pixiv browsing, sign-in session, downloads and still-wallpaper packaging
     Playlist/                      per-display playlists: model, planner, store and the scheduler that switches wallpapers
     Preview/                       isolated live preview inputs, lifecycle, WebKit and scene/video surfaces
@@ -80,7 +81,8 @@ Extension/                         WallpaperMachineExtension sources, Info.plist
                                    its own string catalog (Localizable.xcstrings), third-party notice
 Shared/                            contracts compiled into both targets: lock-screen configuration, status and surface
                                    lifecycle, web-wallpaper protocol and screen-saver surface, RuntimeCounters,
-                                   WallpaperPresentationAuthority, display power and its re-check burst
+                                   WallpaperPresentationAuthority, display power and its re-check burst,
+                                   and the native video admission and layout rules
 Resources/StarterWallpaper/        bundled sample wallpaper (Aurora.mp4, preview.jpg, project.json)
 Resources/ReleaseBanners/          bundled release banners, x.y.z.jpg and x.y.z.zh-Hans.jpg (or .png), shown by What's New and the release page
 Tests/Unit/<Domain>/               WallpaperMachineTests, one folder per App/Services domain plus Panel for

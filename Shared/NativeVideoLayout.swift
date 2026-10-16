@@ -1,6 +1,15 @@
 import AVFoundation
 import CoreGraphics
 
+/// How a picture is scaled to its display, by the numbers the lock-screen configuration
+/// and the renderer use: none (original size) 0, stretch 1, fit 2, fill 3.
+enum NativeVideoScalingMode: Int32, Equatable, Sendable {
+    case none = 0
+    case stretch = 1
+    case match = 2
+    case fill = 3
+}
+
 /// Where a clip's picture goes on a display under each scaling mode.
 ///
 /// Pure arithmetic, shared by the live layer, the desktop poster and the
@@ -15,9 +24,31 @@ import CoreGraphics
 ///   exactly as Compatibility draws it.
 /// - The scale factor multiplies whichever of those applies. A factor that is
 ///   not a finite positive number counts as 1.
-/// - The picture is centred, and its origin and size are rounded in device
-///   pixels the way the renderer rounds them.
+/// - The picture is centred unless a position is given: `pan` is the fraction of
+///   the room the picture leaves on each axis that lies before it (0 the left or
+///   top edge, 1 the right or bottom edge), as the renderer's `WallpaperScaling`
+///   divides it. Its origin and size are rounded in device pixels the way the
+///   renderer rounds them.
+///
+/// Compiled by the app and by the lock-screen extension, so it names no bridge
+/// type: `NativeVideoScalingMode` carries the same four values by the same numbers.
 enum NativeVideoLayout {
+    /// Where the picture sits in the room around it, as `LockScreenFraming` publishes it.
+    struct Pan: Equatable {
+        static let centered = Pan(x: 0.5, y: 0.5)
+        var x: Double
+        var y: Double
+
+        /// What the renderer does with a position it is given: a number outside 0...1
+        /// is held to the nearest edge and one that is not a number is the middle.
+        var normalized: Pan {
+            func clamp(_ value: Double) -> Double {
+                value.isFinite ? min(max(value, 0), 1) : 0.5
+            }
+            return Pan(x: clamp(x), y: clamp(y))
+        }
+    }
+
     /// A rectangle in device pixels, measured from the display's top-left
     /// corner. Negative origins and sizes larger than the display are normal:
     /// Fill and Original size overflow it, and the overflow is cropped.
@@ -55,8 +86,8 @@ enum NativeVideoLayout {
     /// Sizes are never below one, the same floor the renderer applies, so a
     /// degenerate input yields a degenerate but valid rectangle, not a crash.
     static func pictureRect(
-        mode: BridgeScalingMode, factor: Double, videoSize: CGSize, viewport: CGSize,
-        backingScale: CGFloat
+        mode: NativeVideoScalingMode, factor: Double, videoSize: CGSize, viewport: CGSize,
+        backingScale: CGFloat, pan: Pan = .centered
     ) -> PixelRect {
         let scale = normalizedFactor(Double(backingScale))
         let sceneWidth = Double(max(1, rounded(Double(videoSize.width))))
@@ -74,7 +105,7 @@ enum NativeVideoLayout {
         var scaleX = 1.0
         var scaleY = 1.0
         switch mode {
-        case BridgeScalingMode.none:
+        case .none:
             break
         case .stretch:
             scaleX = ratioX
@@ -92,8 +123,9 @@ enum NativeVideoLayout {
 
         let width = sceneWidth * scaleX
         let height = sceneHeight * scaleY
-        let x = (displayWidth - width) * 0.5
-        let y = (displayHeight - height) * 0.5
+        let pan = pan.normalized
+        let x = (displayWidth - width) * pan.x
+        let y = (displayHeight - height) * pan.y
         return PixelRect(
             x: rounded(x * scale), y: rounded(y * scale),
             width: max(1, rounded(width * scale)), height: max(1, rounded(height * scale)))
@@ -102,26 +134,60 @@ enum NativeVideoLayout {
     /// How to position the layer for this choice. `videoSize` is `nil` until
     /// the platform player has reported the picture's size.
     static func placement(
-        mode: BridgeScalingMode, factor: Double, videoSize: CGSize?, viewport: CGSize,
-        backingScale: CGFloat
+        mode: NativeVideoScalingMode, factor: Double, videoSize: CGSize?, viewport: CGSize,
+        backingScale: CGFloat, pan: Pan = .centered
     ) -> Placement {
-        if normalizedFactor(factor) == 1 {
+        // The gravity rules centre the picture, so a position needs the explicit frame.
+        if normalizedFactor(factor) == 1, pan.normalized == .centered {
             switch mode {
             case .fill: return .gravity(.resizeAspectFill)
             case .match: return .gravity(.resizeAspect)
             case .stretch: return .gravity(.resize)
-            case BridgeScalingMode.none: break
+            case .none: break
             }
         }
         guard let videoSize, videoSize.width > 0, videoSize.height > 0 else { return .pending }
         let rect = pictureRect(
             mode: mode, factor: factor, videoSize: videoSize, viewport: viewport,
-            backingScale: backingScale)
+            backingScale: backingScale, pan: pan)
         let scale = CGFloat(normalizedFactor(Double(backingScale)))
         return .frame(
             CGRect(
                 x: CGFloat(rect.x) / scale, y: CGFloat(rect.y) / scale,
                 width: CGFloat(rect.width) / scale, height: CGFloat(rect.height) / scale))
+    }
+
+    /// `image` drawn on black where the live layer puts the picture: a bitmap of the display in
+    /// device pixels, for a poster or the frame behind a layer. `nil` for a size no display has.
+    /// The layout measures from the top edge and a bitmap context from the bottom.
+    static func composeFrame(
+        _ image: CGImage, pixelSize: CGSize, backingScale: CGFloat, mode: NativeVideoScalingMode,
+        factor: Double, pan: Pan = .centered
+    ) -> CGImage? {
+        guard pixelSize.width.isFinite, pixelSize.height.isFinite,
+              pixelSize.width > 0, pixelSize.height > 0,
+              pixelSize.width <= 16_384, pixelSize.height <= 16_384 else { return nil }
+        let width = Int(pixelSize.width.rounded(.up)), height = Int(pixelSize.height.rounded(.up))
+        guard width * height <= 32 * 1024 * 1024,
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                  bytesPerRow: width * 4, space: space,
+                  bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.noneSkipLast.rawValue)
+        else { return nil }
+        // Whatever the picture does not cover is black, as the window is.
+        context.setFillColor(CGColor(colorSpace: space, components: [0, 0, 0, 1]) ?? .black)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        // The context is the display in device pixels, so the layout is asked
+        // for the same display expressed in points.
+        let scale = CGFloat(normalizedFactor(Double(backingScale)))
+        let rect = pictureRect(
+            mode: mode, factor: factor,
+            videoSize: CGSize(width: image.width, height: image.height),
+            viewport: CGSize(width: CGFloat(width) / scale, height: CGFloat(height) / scale),
+            backingScale: scale, pan: pan)
+        context.draw(image, in: CGRect(
+            x: rect.x, y: height - rect.y - rect.height, width: rect.width, height: rect.height))
+        return context.makeImage()
     }
 
     /// `lround`: halves away from zero, held inside 32 bits so an absurd scale
