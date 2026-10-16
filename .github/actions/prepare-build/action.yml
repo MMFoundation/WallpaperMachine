@@ -33,7 +33,7 @@ runs:
         set -euo pipefail
         brew install --quiet xcodegen cmake quickjs-ng glslang freetype lz4 \
           vulkan-loader vulkan-headers molten-vk eigen nlohmann-json argparse shaderc \
-          spirv-tools glm dav1d ccache
+          spirv-tools dav1d ccache
         echo "dav1d=$(brew list --versions dav1d | tr ' ' '-')" >> "$GITHUB_OUTPUT"
         # Bottles, FFmpeg and compiled objects differ per macOS release, so every
         # cache key carries the runner's (macos-15, macos-26).

@@ -21,7 +21,7 @@ Homebrew packages the renderer links against, exactly as listed in
 
 ```sh
 brew install quickjs-ng glslang freetype lz4 vulkan-loader \
-  vulkan-headers molten-vk eigen nlohmann-json argparse shaderc spirv-tools glm
+  vulkan-headers molten-vk eigen nlohmann-json argparse shaderc spirv-tools
 python3 scripts/install_ffmpeg.py
 ```
 

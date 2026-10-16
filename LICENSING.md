@@ -217,7 +217,7 @@ see [Rust crates](#rust-crates) for how.
 | Vulkan Memory Allocator | `upstream/renderer/external/open-wallpaper-engine/third_party/vk_mem_alloc.h` | MIT (stated in the header) | Compatible |
 | **spirv_reflect** | `upstream/renderer/external/open-wallpaper-engine/third_party/spirv_reflect`, linked statically (`spirv-reflect-static`) | Apache-2.0 | **Incompatible with GPLv2** (see below) |
 | Eigen | Homebrew `eigen` 5.0.1, header-only | MPL-2.0 AND Apache-2.0 AND BSD-3-Clause AND Minpack (Homebrew metadata) | Not audited file by file; `Eigen/Core` includes `src/Core/arch/Default/BFloat16.h`, whose header is Apache-2.0, so every Eigen user has an Apache-2.0 file in its include closure; `scripts/check_licenses.py` lists Eigen as Apache-2.0 and, for Minpack, unknown until the Minpack terms are reviewed |
-| nlohmann-json, argparse, glm | Homebrew, header-only | MIT | Compatible |
+| nlohmann-json, argparse | Homebrew, header-only | MIT | Compatible |
 | quickjs-ng | Homebrew `quickjs-ng` 0.16.2, `libqjs` in the verified Debug dependency closure | MIT | Compatible |
 | lz4 | Homebrew `lz4` 1.10.0 | BSD-2-Clause | Compatible |
 | FreeType | Homebrew `freetype` 2.14.3 | FTL or GPL-2.0-or-later, licensee's choice (`LICENSE.TXT` in the keg) | Compatible under the GPLv2 option; the FTL option is not GPLv2-compatible and is not the one used |
