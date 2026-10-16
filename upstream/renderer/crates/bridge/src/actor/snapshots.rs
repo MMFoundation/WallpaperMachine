@@ -736,7 +736,7 @@ impl BridgeActorState {
             launch_at_login_needs_approval: launch_at_login == LaunchAtLoginStatus::RequiresApproval,
             battery_mode: self.app_config.power.on_battery.into(),
             verbose_logging: self.app_config.diagnostics.verbose_logging,
-            git_sha: match option_env!("GIT_SHORT_COMMIT").unwrap_or(crate::build::SHORT_COMMIT) {
+            git_sha: match option_env!("GIT_SHORT_COMMIT").unwrap_or(env!("WM_FALLBACK_GIT_SHORT_COMMIT")) {
                 value if value.trim().is_empty() => UNKNOWN_GIT_SHA.to_string(),
                 value => value.to_string(),
             },
