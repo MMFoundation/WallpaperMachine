@@ -160,6 +160,8 @@ struct BlockSpec {
     Lacing             lacing { Lacing::None };
     std::int64_t       discardPaddingNs { 0 };
     bool               invisible { false };
+    /// BlockGroup: add a BlockAdditions element (the way VP9 alpha is carried).
+    bool               additions { false };
     /// Bytes written after the block header in place of the lace table and frames (no frame is recorded).
     std::optional<Bytes> rawPayload;
 };
@@ -327,6 +329,7 @@ inline Part BlockPart(const BlockSpec& block, std::int64_t clusterTimecode)
     Append(group, blockElement.bytes);
     if (block.duration) Append(group, UintElement(0x9B, static_cast<std::uint64_t>(*block.duration)));
     if (block.reference) Append(group, IntElement(0xFB, -1));
+    if (block.additions) Append(group, Element(0x75A1, Element(0xA6, Cat(UintElement(0xEE, 1), Element(0xA5, Bytes(17, 0x5A))))));
     if (block.discardPaddingNs != 0) Append(group, IntElement(0x75A2, block.discardPaddingNs));
     Part out;
     out.bytes = Element(0xA0, group);

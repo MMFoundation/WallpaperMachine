@@ -20,6 +20,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace wallpaper::media
@@ -119,6 +120,13 @@ std::vector<FrameRecord> FramesOf(const BuiltMkv& built, std::uint32_t track)
 }
 
 std::string ErrorText(const Error& error) { return Describe(error); }
+
+std::vector<std::tuple<std::uint64_t, std::int64_t, bool>> Shape(const MatroskaReader& reader)
+{
+    std::vector<std::tuple<std::uint64_t, std::int64_t, bool>> shape;
+    for (const Sample& sample : reader.videoSamples()) shape.emplace_back(sample.size, sample.pts, sample.sync);
+    return shape;
+}
 
 // --- The index of a plain file -----------------------------------------------------
 
@@ -261,6 +269,36 @@ TEST(MatroskaReader, BlockGroupsAreKeyFramesUnlessTheyReferenceAnotherFrame)
     for (std::size_t index = 0; index < frames.size(); ++index) {
         EXPECT_EQ(reader->videoSamples()[index].offset, frames[index].offset) << "frame inside a BlockGroup, " << index;
     }
+}
+
+TEST(MatroskaReader, BlockAdditionsAreIgnoredSoVp9AlphaPlaysOpaque)
+{
+    MkvSpec plain;
+    plain.tracks.push_back(VideoTrack());
+    ClusterSpec cluster;
+    for (std::size_t index = 0; index < 6; ++index) {
+        BlockSpec block = VideoBlock(index, 3);
+        block.group     = true;
+        block.reference = ! block.key;
+        block.duration  = 40;
+        cluster.blocks.push_back(block);
+    }
+    plain.clusters.push_back(cluster);
+    MkvSpec alpha = plain;
+    for (BlockSpec& block : alpha.clusters[0].blocks) block.additions = true;
+    BuiltMkv built;
+    auto     without = OpenMkv(plain);
+    auto     with    = OpenMkv(alpha, &built);
+    ASSERT_NE(without, nullptr);
+    ASSERT_NE(with, nullptr);
+    EXPECT_EQ(Shape(*with), Shape(*without)) << "the alpha channel changes nothing about the colour frames";
+    const auto frames = FramesOf(built, 1);
+    ASSERT_EQ(frames.size(), 6U);
+    for (std::size_t index = 0; index < frames.size(); ++index) {
+        EXPECT_EQ(with->videoSamples()[index].offset, frames[index].offset);
+        EXPECT_EQ(with->videoSamples()[index].size, frames[index].data.size());
+    }
+    EXPECT_TRUE(with->warnings().empty());
 }
 
 TEST(MatroskaReader, DerivesDecodeTimesForReorderedFrames)
@@ -784,13 +822,6 @@ TEST(MatroskaReader, TooManyLacedFramesIsALimitNotCorruption)
 }
 
 // --- Segment and Cluster shapes ----------------------------------------------------
-
-std::vector<std::tuple<std::uint64_t, std::int64_t, bool>> Shape(const MatroskaReader& reader)
-{
-    std::vector<std::tuple<std::uint64_t, std::int64_t, bool>> shape;
-    for (const Sample& sample : reader.videoSamples()) shape.emplace_back(sample.size, sample.pts, sample.sync);
-    return shape;
-}
 
 TEST(MatroskaReader, UnknownSizeSegmentAndClustersAreFollowedToTheirEnd)
 {
