@@ -4,12 +4,15 @@
 // shells out or reads files.
 #include <cstddef>
 #include <cstdint>
+#include <span>
+#include <string>
 #include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "Utils/Random.hpp"
+#include "Utils/Sha.hpp"
 
 namespace wallpaper
 {
@@ -92,6 +95,60 @@ TEST(Random, EachThreadOwnsItsStream) {
         for (int i = 0; i < 100; ++i) Random::get(0.0, 1.0);
     }).join();
     EXPECT_EQ(Random::get(0.0, 1.0), expected);
+}
+} // namespace
+
+namespace
+{
+std::string Digest(const std::string& bytes) { return utils::genSha1(std::span<const char>(bytes)); }
+
+// Bytes 0..255 cycling in an order that is not a plain ramp, NULs included.
+std::string Pattern(std::size_t size) {
+    std::string bytes(size, '\0');
+    for (std::size_t i = 0; i < size; ++i) bytes[i] = static_cast<char>((i * 131 + 7) & 0xff);
+    return bytes;
+}
+
+// File names under the video cache and the in-memory shader and script cache
+// keys come from this digest, so it has to stay the standard 40-character
+// lowercase hex SHA-1 for the cached names to keep matching.
+TEST(Sha1, MatchesTheFipsVectors) {
+    EXPECT_EQ(Digest(""), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
+    EXPECT_EQ(Digest("abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
+    EXPECT_EQ(Digest("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+              "84983e441c3bd26ebaae4aa1f95129e5e54670f1");
+    EXPECT_EQ(Digest(std::string(1000000, 'a')), "34aa973cd4c4daa4f61eeb2bdbad27316534016f");
+}
+
+// Captured from the digest this one replaced. The lengths straddle the padding
+// edges (55/56, 63/64/65, 119/120) and the pattern carries NUL bytes.
+TEST(Sha1, MatchesTheReplacedImplementationAcrossBlockEdges) {
+    const struct {
+        std::size_t size;
+        const char* digest;
+    } cases[] = {
+        { 1, "5d1be7e9dda1ee8896be5b7e34a85ee16452a7b4" },
+        { 55, "9e5a20c2604688df0b1eecf4474b58bfe7227881" },
+        { 56, "bd367cf3b85dc2cac8f6b4827cb850e4c83c521c" },
+        { 63, "a8f606c343b26fa851dfd149f7b12fc2dbf1af34" },
+        { 64, "1abec92bfbde4197236cfba30b6b61c69d605d88" },
+        { 65, "362ce7bc4bc2b47979741db349c65fd550840dc3" },
+        { 119, "e7ceee9817914eef9ec7001a43033f16a086b7c7" },
+        { 120, "9c9d46758300bc1f2c6953d4a2652ed72a202cf3" },
+        { 128, "8abf03d87a20327b0a0dfbee98f04a881350d8f4" },
+        { 1000, "425b5f2d2d344f4f6467cda9065cdc840619dc2d" },
+        { 100003, "0d3f93f2dccadedcae5c5624cb456a4c8256d796" },
+    };
+    for (const auto& c : cases) {
+        EXPECT_EQ(Digest(Pattern(c.size)), c.digest) << "size " << c.size;
+        EXPECT_EQ(Digest(Pattern(c.size)).size(), utils::SHA1_LEN);
+    }
+}
+
+TEST(Sha1, ASpanIsHashedByItsLengthNotItsFirstNul) {
+    const std::string bytes("a\0b", 3);
+    EXPECT_NE(Digest(bytes), Digest("a"));
+    EXPECT_EQ(utils::genSha1(std::span<const char>(bytes.data(), 1)), Digest("a"));
 }
 } // namespace
 } // namespace wallpaper
