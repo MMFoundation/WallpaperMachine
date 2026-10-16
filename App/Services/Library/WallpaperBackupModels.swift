@@ -106,6 +106,7 @@ struct WallpaperBackupPreferences: Sendable {
         "WallpaperMachine.lowBatteryAction", "WallpaperMachine.lowBatteryThreshold",
         "WallpaperMachine.playOnlyOnActiveDisplay",
         "WallpaperMachine.hideAfterActivating", "WallpaperMachine.concurrentDownloads",
+        "WallpaperMachine.hideDockIcon",
         "WallpaperMachine.workshopUpdateChecks", "WallpaperMachineAssetsPath",
         "WallpaperMachine.workshopFiltersCollapsed", "WallpaperMachine.installedFiltersCollapsed",
         "WallpaperMachine.pixivFiltersCollapsed",

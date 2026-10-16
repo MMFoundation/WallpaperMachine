@@ -53,7 +53,14 @@ long-lived services (lock screen, desktop poster sync, presentation policy, play
 automation schedulers, the web and native-video wallpaper hosts, system media).
 
 - **Activation policy.** `.accessory` while no control-panel, What's New or preview window is
-  open, `.regular` while one is.
+  open, `.regular` while one is unless `DockIconVisibility` asks to hide the Dock icon.
+  All five ordinary-window promotion paths use `applyWindowActivationPolicy`. A preference
+  change is coalesced onto the next main-queue turn, outside its notification callback, and
+  preserves the already-focused window without activating a background app.
+  Ordinary-window closure uses the same deferred calculation, including independent
+  sign-in windows and minimized panels. Startup and the hosted-test `.prohibited`
+  policy keep their existing paths.
+  The user-facing behavior is in [Dock icon](features/control-panel.md#dock-icon).
 - **Spaces and minimizing.** The four ordinary windows (control panel, What's New, wallpaper
   preview, web sign-in) call `ControlPanelWindow.moveToActiveSpace`, which inserts
   `.moveToActiveSpace` into their collection behavior, so opening one shows it on the Space the

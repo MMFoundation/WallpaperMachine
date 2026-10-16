@@ -575,6 +575,7 @@ extension WebPanelController {
       "keepWindowsOnWallpaperClick": !DesktopClickRevealPreference.isEnabled,
       "refreshDesktopPicture": playback.refreshesDesktopPicturePeriodically,
       "hotkeys": hotKeyRows,
+      "hideDockIcon": DockIconVisibility.isHidden(defaults: defaults),
       "hideAfterActivating": hidesAfterActivating,
       "telemetry": store.telemetry?.isEnabled ?? false, "telemetryAvailable": store.telemetry != nil,
       "telemetryLastSent": store.telemetry?.lastSentAt.map { $0.timeIntervalSince1970 * 1000 } as Any? ?? null,

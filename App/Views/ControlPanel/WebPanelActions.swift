@@ -572,6 +572,8 @@ extension WebPanelController {
         playback.playsOnlyOnActiveDisplay = try request.boolean("value")
       case "wallpapersMuted":
         playback.wallpapersMuted = try request.boolean("value")
+      case "hideDockIcon":
+        DockIconVisibility.setHidden(try request.boolean("value"), defaults: defaults)
       case "hideAfterActivating":
         defaults.set(try request.boolean("value"), forKey: Self.hideAfterActivatingKey)
       case "telemetry":

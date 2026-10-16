@@ -13,6 +13,27 @@ Documented separately: the [first-run guide and support prompt](first-run.md),
 the black-bar check](wallpaper-properties.md), [local backup and restore](backup-restore.md), and
 [app updates and What's New](updates.md).
 
+## Dock icon
+
+**Settings > General > Startup & desktop > Hide Dock icon** keeps WallpaperMachine
+in the menu bar even while the control panel, wallpaper preview or What's New is
+open. It is off by default: the existing behavior, showing the Dock icon while an
+ordinary app window is open and removing it when the last one closes, is unchanged.
+The choice is saved, applies without restarting, and is included in settings backups.
+
+Use the menu bar's **Control Panel** to reopen the window and **Exit** to quit. The
+menu bar icon is not hidden by this preference. macOS accessory activation also
+removes the app from Command-Tab and does not provide a normal application menu;
+this is not a Dock-only cosmetic change. Window commands and text-editing shortcuts
+need to be checked on supported macOS versions when changing activation behavior.
+
+This controls the running application's presence. It does not remove a launcher the
+person pinned to the Dock, change system Dock preferences, or remove minimized-window
+thumbnails. **Appearance > App icon** keeps the selected icon while it is hidden and
+explains that it will be used when shown again. Wallpaper playback, login-item
+registration, Spaces, and the separate **Hide window after applying a wallpaper**
+preference are not changed.
+
 ## Language
 
 The app ships in English, Simplified Chinese (简体中文), Traditional Chinese

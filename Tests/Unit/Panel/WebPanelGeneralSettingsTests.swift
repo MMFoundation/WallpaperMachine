@@ -129,6 +129,62 @@ final class WebPanelGeneralSettingsTests: ControlPanelTestCase {
     }
   }
 
+  func testDockVisibilityRoundTripsAndRefusesNonBooleans() async throws {
+    let panel = try makePanel()
+    let controller = panel.makeController()
+    defer { controller.stop() }
+    func reported(_ controller: WebPanelController) throws -> Bool? {
+      let settings = try XCTUnwrap(controller.snapshot()["settings"] as? [String: Any])
+      return settings["hideDockIcon"] as? Bool
+    }
+
+    XCTAssertEqual(try reported(controller), false)
+    try await controller.perform("setting", body: ["key": "hideDockIcon", "value": true])
+    XCTAssertTrue(DockIconVisibility.isHidden(defaults: panel.defaults))
+    XCTAssertEqual(try reported(controller), true)
+    for bad: Any in ["true", "yes", 1, NSNull()] {
+      do {
+        try await controller.perform("setting", body: ["key": "hideDockIcon", "value": bad])
+        XCTFail("\(bad) must not be accepted for Dock visibility")
+      } catch {}
+    }
+    do {
+      try await controller.perform("setting", body: ["key": "hideDockIcon"])
+      XCTFail("A missing Dock visibility value must be rejected")
+    } catch {}
+    XCTAssertTrue(DockIconVisibility.isHidden(defaults: panel.defaults))
+    let reopened = panel.makeController()
+    defer { reopened.stop() }
+    XCTAssertEqual(try reported(reopened), true)
+    try await reopened.perform("setting", body: ["key": "hideDockIcon", "value": false])
+    XCTAssertFalse(DockIconVisibility.isHidden(defaults: panel.defaults))
+    XCTAssertEqual(try reported(reopened), false)
+  }
+
+  /// The existing panel harness exercises the actual switch and bridge;
+  /// this does not exercise AppKit Dock presentation or drive the user's desktop.
+  func testDockVisibilityRowCanBeEnabledAndDisabledFromGeneralSettings() async throws {
+    try await withPanel { panel in
+      try await panel.finishWelcome()
+      panel.navigation.selection = .settings
+      panel.show()
+      try await panel.waitJS("powerProbe.received.at(-1)?.page === 'settings'")
+      _ = try await panel.js("document.querySelector('[data-section=\"general\"]').click()")
+      let toggle = "document.querySelector('.settings-row[data-key=\"hideDockIcon\"] input[type=\"checkbox\"]')"
+      try await panel.waitJS(toggle)
+      let initial = try await panel.js("return \(toggle).checked")
+      XCTAssertEqual(initial as? Bool, false)
+      let usable = try await panel.js("return !\(toggle).disabled")
+      XCTAssertEqual(usable as? Bool, true)
+      _ = try await panel.js("\(toggle).click()")
+      try await panel.waitJS("powerProbe.received.at(-1)?.settings?.hideDockIcon === true")
+      try await panel.waitJS("\(toggle).checked")
+      _ = try await panel.js("\(toggle).click()")
+      try await panel.waitJS("powerProbe.received.at(-1)?.settings?.hideDockIcon === false")
+      try await panel.waitJS("!\(toggle).checked")
+    }
+  }
+
   func testHidingAfterApplyingIsOffUntilTurnedOnAndPersists() async throws {
     let panel = try makePanel()
     let controller = panel.makeController()

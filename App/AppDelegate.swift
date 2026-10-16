@@ -5,6 +5,9 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem?
+    private var dockVisibilityObserver: NSObjectProtocol?
+    private var dockWindowCloseObserver: NSObjectProtocol?
+    private var dockVisibilityRefreshScheduled = false
     private var controlPanelWindow: NSWindow?
     private var whatsNewWindow: NSWindow?
     private var previewWindow: WallpaperPreviewWindowController?
@@ -178,6 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         AppLog.info("startup: display change observer installed")
         installPowerOffObserver()
         installApplicationMenu()
+        installDockVisibilityObserver()
         AppLog.info("startup: application menu installed")
         if let store {
             workshopStore.startDownloadLifecycle(bridge: store)
@@ -880,11 +884,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     func applicationDidBecomeActive(_ notification: Notification) {
         guard !shutdownInProgress, !shutdownComplete,
               let window = controlPanelWindow, !window.isVisible || window.isMiniaturized else { return }
-        NSApp.setActivationPolicy(.regular)
+        applyWindowActivationPolicy()
         ControlPanelWindow.bringForward(window)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let dockVisibilityObserver {
+            NotificationCenter.default.removeObserver(dockVisibilityObserver)
+            self.dockVisibilityObserver = nil
+        }
+        if let dockWindowCloseObserver {
+            NotificationCenter.default.removeObserver(dockWindowCloseObserver)
+            self.dockWindowCloseObserver = nil
+        }
         globalHotKeys?.stop()
         AppAutomation.shared.handler = nil
         AppAutomation.shared.displays = nil
@@ -1154,7 +1166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             showControlPanel(selection: controlPanelNavigation.selection ?? .wallpaper)
         }
         if whatsNew, let whatsNewWindow {
-            NSApp.setActivationPolicy(.regular)
+            applyWindowActivationPolicy()
             whatsNewWindow.makeKeyAndOrderFront(nil)
         }
         rebuildMenu()
@@ -1333,7 +1345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if window === whatsNewWindow {
             whatsNewWindow = nil
             window.contentViewController = nil
-            if controlPanelWindow?.isVisible != true, previewWindow == nil { NSApp.setActivationPolicy(.accessory) }
+            scheduleDockVisibilityRefresh()
             retryHeldUpdatePrompt()
             return
         }
@@ -1343,7 +1355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         // Closing releases the page and its WebKit processes; reopening builds a
         // fresh view around the existing stores and navigation.
         window.contentViewController = nil
-        if whatsNewWindow == nil, previewWindow == nil { NSApp.setActivationPolicy(.accessory) }
+        scheduleDockVisibilityRefresh()
         rebuildMenu()
     }
 
@@ -1474,6 +1486,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             defer { posterRefreshTask = nil }
             guard !Task.isCancelled, !shutdownInProgress, !shutdownComplete else { return }
             desktopWallpaperSync?.refresh()
+        }
+    }
+
+    // MARK: Dock visibility
+
+    /// All ordinary window entry points use the same policy, including reopening and
+    /// recovery after a refused quit. Startup and last-window close remain accessory.
+    private func applyWindowActivationPolicy() {
+        _ = updateDockActivationPolicy(hasOpenWindow: true)
+    }
+
+    @discardableResult
+    private func updateDockActivationPolicy(hasOpenWindow: Bool) -> Bool {
+        let presence = DockIconVisibility.presence(
+            hidesDockIcon: DockIconVisibility.isHidden(), hasOpenWindow: hasOpenWindow)
+        let policy: NSApplication.ActivationPolicy = presence == .regular ? .regular : .accessory
+        guard NSApp.activationPolicy() != policy else { return false }
+        guard NSApp.setActivationPolicy(policy) else {
+            AppLog.error("Dock visibility: AppKit refused activation policy \(policy.rawValue)")
+            return false
+        }
+        return true
+    }
+
+    private func installDockVisibilityObserver() {
+        dockVisibilityObserver = NotificationCenter.default.addObserver(
+            forName: DockIconVisibility.didChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleDockVisibilityRefresh() }
+        }
+        // Sign-in windows have their own delegate. Recalculate after any ordinary
+        // window closes, once AppKit and the owning controller have released it.
+        dockWindowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let window = note.object as? NSWindow, window.styleMask.contains(.titled) else { return }
+                self?.scheduleDockVisibilityRefresh()
+            }
+        }
+    }
+
+    /// Defer activation changes out of the preference notification callback. Rapid
+    /// toggles coalesce and read the latest preference, not a captured intermediate value.
+    private func scheduleDockVisibilityRefresh() {
+        guard !dockVisibilityRefreshScheduled else { return }
+        dockVisibilityRefreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.dockVisibilityRefreshScheduled = false
+            guard !self.shutdownInProgress, !self.shutdownComplete else { return }
+            let focused = NSApp.isActive ? NSApp.keyWindow : nil
+            let preserveFocus = focused?.isVisible == true && focused?.isMiniaturized == false
+            // A minimized or hidden panel is still open. Also include independent
+            // sign-in windows, but never count borderless desktop wallpaper windows.
+            let hasOpenWindow = self.controlPanelWindow != nil || self.whatsNewWindow != nil
+                || self.previewWindow != nil || NSApp.windows.contains {
+                    $0.styleMask.contains(.titled) && ($0.isVisible || $0.isMiniaturized)
+                }
+            guard self.updateDockActivationPolicy(hasOpenWindow: hasOpenWindow) else { return }
+            // A policy transition can change activation. Restore only the window the
+            // person was using; never activate a background app or unminimize a window.
+            if preserveFocus, let focused,
+               NSApp.windows.contains(where: { $0 === focused }), !focused.isMiniaturized {
+                NSApp.activate(ignoringOtherApps: true)
+                focused.makeKeyAndOrderFront(nil)
+            }
         }
     }
 
@@ -1917,7 +1996,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             window.center()
             ControlPanelWindow.moveToActiveSpace(window)
             whatsNewWindow = window
-            NSApp.setActivationPolicy(.regular)
+            applyWindowActivationPolicy()
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             whatsNewStore.didPresent(announcement)
@@ -1928,7 +2007,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private func showControlPanel(selection: SidebarSelection) {
         controlPanelNavigation.selection = selection
-        NSApp.setActivationPolicy(.regular)
+        applyWindowActivationPolicy()
 
         if let controlPanelWindow {
             ControlPanelWindow.constrainToScreen(controlPanelWindow)
@@ -2032,13 +2111,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 self.previewWindow = nil
                 self.wallpaperEnergy?.invalidate()
                 self.telemetry?.invalidateFrames()
-                if self.controlPanelWindow?.isVisible != true, self.whatsNewWindow == nil {
-                    NSApp.setActivationPolicy(.accessory)
-                }
+                self.scheduleDockVisibilityRefresh()
             }
             previewWindow = controller
         }
-        NSApp.setActivationPolicy(.regular)
+        applyWindowActivationPolicy()
         previewWindow?.present(selection)
     }
 

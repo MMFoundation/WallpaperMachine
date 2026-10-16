@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-16 — Optional Dock icon visibility
+
+- JavaScript syntax and panel localization: passed (6 localization tests); English, Simplified Chinese, Traditional Chinese and Japanese.
+- python3 scripts/build.py --renderer-only: exit 0; renderer compiled and Swift bindings generated without renderer source changes.
+- python3 scripts/test.py --only DockIconVisibilityTests --only DockIconBackupTests --only WebPanelGeneralSettingsTests: exit 0; 23 passed, 0 failed, 0 skipped; native Debug app and tests compiled.
+- First python3 scripts/test.py: 316 Python tests passed; native 2696 passed, 1 timing assertion failed, 45 skipped. The 10000-wallpaper snapshot timing test passed in isolation without source or threshold changes (195 ms full, 56 ms mean progress).
+- Second parallel full run: 316 Python tests passed; native 2689 passed, 8 WebKit/page-initialization or async-wait failures, 45 skipped. The earlier timing test passed; default parallel execution remains unstable on this machine.
+- python3 scripts/test.py --serial: exit 0; all 316 Python tests passed; native 2697 passed, 0 failed, 45 skipped of 2742 in 535 seconds. Opt-in network/media and unavailable private-asset checks remain skipped.
+- XcodeGen: generated project includes the three new Swift files; a second generation was byte-identical. git diff --check passed.
+- Not checked visually: Dock/focus/keyboard, login/relaunch, sign-in windows, minimizing/full screen/Spaces/displays and refused quit. No desktop automation, wallpaper changes, system Dock changes, app installation or Release delivery.
+
 ## 2026-10-14 — Send performance data, sharing and the one-time prompts
 
 Opt-in telemetry (docs/features/telemetry.md), share buttons, and a prompt store that schedules the support, star and performance data prompts. The website endpoint lives in the website repository and is not deployed.
@@ -127,14 +138,3 @@ Shader legalizer repairs for permissive-path expressions that dropped whole Work
 - `python3 scripts/check_renderer.py` — exit 0; generated cases pixel-equal pooled/isolated, no diagnostics; reload cycles clean
 - `python3 scripts/test.py` — first run 1 failure in EnergyUsageMonitorTests.testKernelCountersForThisProcessAdvanceWithGPUWork (8.05 mW < 10 mW, own compute kernel, while another session ran GPU probes); class alone 13/13; rerun exit 0: 2,564 passed, 45 skipped
 - Not checked: whether each restored effect looks as it does in Wallpaper Engine; no desktop run
-
-## 2026-10-13 — Robustness, web, video, lock-screen and panel port: integrated gate
-
-105 commits of independently implemented reliability, web-host, native-video, lock-screen, power, Workshop, playlist, menu-bar, switch-hold and per-display position work, verified together on one tree on top of 20f44470 (the per-commit entries record each area's targeted runs).
-
-- `python3 scripts/test.py` — exit 0 on the second run; Python 316 tests OK; Swift 2564 passed, 0 failed, 45 skipped of 2609. The first run had one failure, ControlPanelLibraryTests.testHoldAndDragSelectsARunOfTilesWithoutWindow, under load from another build; the class passed alone (17/17) and the sweep code is unchanged by this work
-- `python3 scripts/check_rust.py` — exit 0; core 293, bridge 542, core-integration 15, shader 534 passed; desktop window tests and corpus smoke cases skipped
-- `python3 scripts/check_renderer.py` — exit 0; 708 gtest cases passed, 4 skipped (local-asset cases), 0 failed; no --project corpus, so authored-reference compatibility is not verified
-- `python3 scripts/build.py --configuration Release` — exit 0; regenerated bindings identical to the committed ones
-- Commits that change the bridge API or move test helpers were each compiled on their own with `scripts/test.py --only` at that commit
-- Not verified: no desktop run. The switch-hold picture during a wallpaper change, wake and stall repair, the lock screen, menu-bar submenus, the position controls on real displays, native-video layout on real displays and live Steam downloads still need an authorized desktop check

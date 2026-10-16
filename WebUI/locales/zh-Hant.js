@@ -2,6 +2,9 @@
    and data-i18n in WebUI/; see docs/localization.md for how a catalog is maintained. */
 
 export default {
+  'Hide Dock icon': '隱藏 Dock 圖示',
+  'Keeps the app out of the Dock and Command-Tab, even with a window open. Use its menu bar icon to reopen the control panel or quit.': '即使視窗開啟，也不在 Dock 和 Command-Tab 中顯示 App。使用選單列圖示重新開啟控制面板或結束 App。',
+  'The Dock icon is hidden. Your choice is kept for when you show it again. Finder and the menu bar stay unchanged.': 'Dock 圖示已隱藏。你選擇的圖示會被保留，在恢復顯示時使用。Finder 和選單列保持不變。',
   'Follow desktop Space': '跟隨桌面空間',
   'Experimental. Switching desktops reloads their chosen wallpaper or playlist and may briefly show the previous wallpaper. Full-screen app Spaces keep the last choice.': '實驗功能。切換桌面會重新載入該桌面的桌布或播放列表，期間可能短暫顯示上一張桌布。全螢幕 App 空間會保留上一次選擇。',
   'Turn off animated lock-screen wallpaper to use desktop Space choices.': '請先關閉動態鎖定畫面桌布，再使用依桌面空間切換。',
