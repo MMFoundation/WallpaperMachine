@@ -33,6 +33,7 @@
 #include "Scene/Scene.h"
 #include "Scene/SceneBackendSelection.hpp"
 #include "Scene/SceneUpdateDemand.hpp"
+#include "Scene/SceneImageEffectLayer.h"
 #include "Scene/SceneNode.h"
 #include "Scene/SceneMesh.h"
 #include "Scene/SceneTexture.h"
@@ -12691,6 +12692,244 @@ TEST_F(MetalSceneDraw, ARopeTrailPastTheOldSixteenBitIndexLimitStaysARopeTrail)
 
     const auto selection = SelectSceneBackend(*loaded.scene);
     EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+}
+
+namespace
+{
+
+/// Calls `visit(where, mesh)` for each mesh the runtime rewrites every frame that the scene
+/// draws with: the nodes of the scene graph and the nodes of every effect chain.
+void ForEachPerFrameMesh(Scene& scene,
+                         const std::function<void(const std::string&, SceneMesh&)>& visit)
+{
+    const auto offer = [&visit](const std::string& where, SceneMesh* mesh) {
+        if (mesh != nullptr && mesh->Dynamic()) visit(where, *mesh);
+    };
+    const std::function<void(SceneNode*)> walk = [&](SceneNode* node) {
+        if (node == nullptr) return;
+        offer("node " + std::to_string(node->ID()), node->Mesh());
+        for (const auto& child : node->GetChildren()) walk(child.get());
+    };
+    walk(scene.sceneGraph.get());
+    for (const auto& [name, camera] : scene.cameras) {
+        if (camera == nullptr || ! camera->HasImgEffect()) continue;
+        // The chain's final card is only a held mesh until the graph lowering moves it
+        // onto the chain's last node, which a reading after the lowering sees.
+        auto& layer = *camera->GetImgEffect();
+        for (std::size_t i = 0; i < layer.EffectCount(); ++i) {
+            const auto& effect = layer.GetEffect(i);
+            if (effect == nullptr) continue;
+            for (const auto& effect_node : effect->nodes) {
+                if (effect_node.sceneNode != nullptr) {
+                    offer("effect chain " + name, effect_node.sceneNode->Mesh());
+                }
+            }
+        }
+    }
+}
+
+/// Which layout a per-frame mesh is, from the flags the parser writes on it.
+std::string PerFrameMeshLayout(const SceneMesh& mesh)
+{
+    if (mesh.Submeshes().empty() || mesh.Submeshes().front().VertexCount() == 0) return "empty";
+    const auto& vertices = mesh.Submeshes().front().GetVertexArray(0);
+    const bool  trail    = vertices.GetOption(WE_PRENDER_TRAIL);
+    if (vertices.GetOption(WE_PRENDER_ROPE)) {
+        return vertices.GetOption(WE_PRENDER_ROPETRAIL) ? "rope trail" : "rope";
+    }
+    if (vertices.GetOption(WE_PRENDER_SPRITE)) return trail ? "sprite trail" : "sprite";
+    return "card";
+}
+
+/// A scene's states that the native backend has no way to draw, or that an earlier
+/// version of its admission gate refused a scene for on sight: a multisampled target, a
+/// target that is only a depth buffer (the one kind a pass could sample as "a depth
+/// texture"), and a per-frame mesh whose storage the draw path cannot size. Read from
+/// the scene as the parser built it and again from the render graph's lowering, which
+/// is the last place a target can be added.
+std::vector<std::string> StatesTheDrawPathCannotAllocate(Scene& scene)
+{
+    std::vector<std::string> found;
+    for (const auto& [name, target] : scene.renderTargets) {
+        if (target.sample_count != 1) found.push_back("multisampled target " + name);
+        // A depth attachment belongs to a colour target of its own size.
+        if (target.withDepth && target.width <= 0) found.push_back("depth-only target " + name);
+    }
+    ForEachPerFrameMesh(scene, [&found](const std::string& where, SceneMesh& mesh) {
+        // The card a text layer rewrites, a sprite and a rope all come out of the
+        // parser as one material over one submesh with one vertex stream and at most
+        // one index stream, sized for the emitter's maximum.
+        if (mesh.MaterialSlots().size() != 1 || mesh.Submeshes().size() != 1) {
+            found.push_back(where + ": a per-frame mesh with several materials or submeshes");
+            return;
+        }
+        const auto& submesh = mesh.Submeshes().front();
+        if (submesh.VertexCount() != 1 || submesh.IndexCount() > 1) {
+            found.push_back(where + ": a per-frame mesh with several vertex or index streams");
+            return;
+        }
+        const auto& vertices = submesh.GetVertexArray(0);
+        if (vertices.CapacitySizeOf() == 0 || vertices.OneSizeOf() == 0) {
+            found.push_back(where + ": a per-frame mesh with no vertex storage");
+        }
+        if (submesh.IndexCount() == 1 && submesh.GetIndexArray(0).CapacitySizeof() == 0) {
+            found.push_back(where + ": a per-frame mesh with no index storage");
+        }
+    });
+    return found;
+}
+
+/// A scene of three particles under `renderers_json` with `maxcount` live at most,
+/// through the parser's own particle path.
+std::filesystem::path WriteParticleKindFixture(const std::filesystem::path& root,
+                                               std::string_view renderers_json, int maxcount)
+{
+    const auto project = WriteFixture(root);
+    std::ofstream(root / "shaders/metal_probe.vert") << R"(
+uniform mat4 g_ModelViewProjectionMatrix;
+attribute vec3 a_Position;
+attribute vec4 a_TexCoordVec4;
+attribute vec4 a_Color;
+varying vec4 v_Color;
+void main() {
+    gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);
+    v_Color = a_Color;
+}
+)";
+    std::ofstream(root / "shaders/metal_probe.frag") << R"(
+varying vec4 v_Color;
+void main() { gl_FragColor = v_Color; }
+)";
+    // The parser draws a rope with the shader of this name, whatever the material names.
+    std::ofstream(root / "shaders/genericropeparticle.vert") << R"(
+uniform mat4 g_ModelViewProjectionMatrix;
+attribute vec4 a_PositionVec4;
+attribute vec4 a_TexCoordVec4;
+attribute vec4 a_Color;
+varying vec4 v_Color;
+void main() {
+    gl_Position = mul(vec4(a_PositionVec4.xyz, 1.0), g_ModelViewProjectionMatrix);
+    v_Color = a_Color;
+}
+)";
+    std::ofstream(root / "shaders/genericropeparticle.frag") << R"(
+varying vec4 v_Color;
+void main() { gl_FragColor = v_Color; }
+)";
+    std::filesystem::create_directories(root / "particles");
+    std::ofstream(root / "particles/kind.json")
+        << R"({"maxcount":)" << maxcount << R"(,"starttime":0,"flags":0,)"
+        << R"("emitter":[{"id":1,"name":"sphererandom","rate":20,"distancemin":0,"distancemax":40,)"
+        << R"("directions":[1,1,1],"origin":[0,0,0],"speedmin":10,"speedmax":20}],)"
+        << R"("initializer":[{"id":2,"name":"lifetimerandom","min":1,"max":2},)"
+        << R"({"id":3,"name":"sizerandom","min":20,"max":30},)"
+        << R"({"id":4,"name":"colorrandom","min":[255,255,255],"max":[255,255,255]}],)"
+        << R"("operator":[],"renderer":)" << renderers_json
+        << R"(,"material":"materials/tile.json"})";
+    std::ofstream(root / "layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0,0,0],)"
+           R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+           R"("objects":[{"id":1,"name":"particles","particle":"particles/kind.json",)"
+           R"("origin":[192,128,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true}]})";
+    return project;
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, ParserBuildsOnlyTargetsTheDrawPathCanAllocate)
+{
+    // The native backend allocates single-sample colour targets, a depth buffer only as
+    // an attachment, and per-frame storage sized from the mesh's own capacity. It used to
+    // refuse a scene that held anything else, and no scene could: nothing the parser
+    // builds is multisampled, a depth buffer is only ever the default target's own
+    // attachment and is never named as a texture, and every per-frame mesh is one
+    // material over one vertex stream. This builds every kind of scene that reaches those
+    // states -- plain cards, effect chains, history and feedback reads, text, and each
+    // particle layout the parser writes -- and states the invariant; a parser change that
+    // starts producing one of them fails here, before a frame is drawn.
+    struct Kind
+    {
+        std::string                                                        name;
+        std::function<std::filesystem::path(const std::filesystem::path&)> write;
+        /// The per-frame meshes the parser is expected to have built, sorted. Stated so
+        /// that a fixture which stopped building the layout it names fails rather than
+        /// passing for want of anything to check.
+        std::vector<std::string>                                           layouts;
+    };
+    const auto particles = [](std::string renderers, int maxcount) {
+        return [renderers = std::move(renderers), maxcount](const std::filesystem::path& dir) {
+            return WriteParticleKindFixture(dir, renderers, maxcount);
+        };
+    };
+    const std::vector<Kind> kinds {
+        { "plain", [](const auto& dir) { return WriteFixture(dir); }, {} },
+        { "layered", [](const auto& dir) { return WriteLayeredFixture(dir, "true", true); }, {} },
+        { "feedback", [](const auto& dir) { return WriteFeedbackFixture(dir); }, {} },
+        { "history", [](const auto& dir) { return WriteHistoryFixture(dir); }, {} },
+        { "effect depth sorted",
+          [](const auto& dir) {
+              return WriteEffectDepthFixture(dir, "enabled", "enabled", "disabled", "disabled",
+                                             DepthLayerKind::Card, DepthFixtureScene::Sorted, true);
+          },
+          {} },
+        { "text", [](const auto& dir) { return WriteTextFixture(dir, "HELLO"); }, { "card" } },
+        { "text under an effect chain",
+          [](const auto& dir) { return WriteTextFixture(dir, "HELLO", true); },
+          { "card" } },
+        { "sprite particles", particles(R"([{"name":"sprite"}])", 16), { "sprite" } },
+        { "sprite trail", particles(R"([{"name":"sprite"},{"name":"spritetrail"}])", 16),
+          { "sprite", "sprite trail" } },
+        { "rope", particles(R"([{"name":"rope"}])", 16), { "rope" } },
+        { "rope trail", particles(R"([{"name":"ropetrail"}])", 16), { "rope trail" } },
+        { "single particle", particles(R"([{"name":"sprite"}])", 1), { "sprite" } },
+        // The parser leaves a zero-capacity particle layer out of the scene.
+        { "no particles", particles(R"([{"name":"sprite"}])", 0), {} },
+    };
+    for (const auto& kind : kinds) {
+        SCOPED_TRACE(kind.name);
+        const auto  project = kind.write(root_ / ("states-" + std::to_string(&kind - kinds.data())));
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / ("states-cache-" + kind.name), loaded, error))
+            << error;
+        const auto layouts_built = [&loaded] {
+            std::vector<std::string> layouts;
+            ForEachPerFrameMesh(*loaded.scene, [&layouts](const std::string&, SceneMesh& mesh) {
+                layouts.push_back(PerFrameMeshLayout(mesh));
+            });
+            std::sort(layouts.begin(), layouts.end());
+            return layouts;
+        };
+        EXPECT_EQ(layouts_built(), kind.layouts);
+        EXPECT_EQ(StatesTheDrawPathCannotAllocate(*loaded.scene), std::vector<std::string> {});
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        ASSERT_NE(graph, nullptr);
+        // The lowering gives a text layer's effect chain its final card as a second one.
+        EXPECT_GE(layouts_built().size(), kind.layouts.size());
+        EXPECT_EQ(StatesTheDrawPathCannotAllocate(*loaded.scene), std::vector<std::string> {});
+    }
+}
+
+TEST_F(MetalSceneDraw, TheCheckForStatesTheDrawPathCannotAllocateSeesEachOfThem)
+{
+    // The proof above is only as good as its check: each state it names, set by hand on a
+    // scene the parser built, has to be reported.
+    const auto  project = WriteTextFixture(root_ / "control", "HELLO", true);
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "control-cache", loaded, error)) << error;
+    ASSERT_TRUE(StatesTheDrawPathCannotAllocate(*loaded.scene).empty());
+
+    auto& targets = loaded.scene->renderTargets;
+    ASSERT_FALSE(targets.empty());
+    auto& target = targets.begin()->second;
+    target.sample_count = 4;
+    EXPECT_EQ(StatesTheDrawPathCannotAllocate(*loaded.scene).size(), 1u);
+    target.sample_count = 1;
+    target.withDepth    = true;
+    target.width        = 0;
+    EXPECT_EQ(StatesTheDrawPathCannotAllocate(*loaded.scene).size(), 1u);
 }
 
 namespace

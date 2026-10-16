@@ -214,71 +214,6 @@ std::shared_ptr<SceneMesh> ParticleMesh(std::string_view shader_name, std::size_
     return mesh;
 }
 
-/// What `SetParticleMesh` builds with the thick format: the velocity in
-/// `a_TexCoordVec4C1` is what a sprite trail's author shader stretches from.
-std::shared_ptr<SceneMesh> ThickSpriteMesh(std::string_view shader_name = "genericparticle",
-                                           std::size_t      count       = 64)
-{
-    auto mesh = std::make_shared<SceneMesh>(MeshUpdate::PerFrame);
-    std::vector<SceneVertexArray::SceneVertexAttribute> attributes {
-        { std::string(WE_IN_POSITION), VertexType::FLOAT3 },
-        { std::string(WE_IN_TEXCOORDVEC4), VertexType::FLOAT4 },
-        { std::string(WE_IN_COLOR), VertexType::FLOAT4 },
-        { std::string(WE_IN_TEXCOORDVEC4C1), VertexType::FLOAT4 },
-        { std::string(WE_IN_TEXCOORDC2), VertexType::FLOAT2 },
-    };
-    mesh->AddVertexArray(SceneVertexArray(attributes, count * 4));
-    mesh->AddIndexArray(SceneIndexArray(count));
-    mesh->GetVertexArray(0).SetOption(WE_PRENDER_SPRITE, true);
-    mesh->GetVertexArray(0).SetOption(WE_CB_THICK_FORMAT, true);
-
-    SceneMaterial material;
-    material.name     = std::string(shader_name);
-    material.textures = { "materials/card.tex" };
-    material.blenmode = BlendMode::Additive;
-    material.customShader.shader                = std::make_shared<SceneShader>();
-    material.customShader.shader->name          = std::string(shader_name);
-    material.customShader.shader->metal_program = TranslatedProgram();
-    mesh->AddMaterial(std::move(material));
-    return mesh;
-}
-
-/// What `SetRopeParticleMesh` builds. Thin and thick differ in the extra
-/// texcoord attributes; a rope trail is the thick layout plus the trail flags.
-std::shared_ptr<SceneMesh> RopeMesh(bool thick, std::string_view shader_name = "genericropeparticle",
-                                    std::size_t count = 64)
-{
-    auto mesh = std::make_shared<SceneMesh>(MeshUpdate::PerFrame);
-    std::vector<SceneVertexArray::SceneVertexAttribute> attributes {
-        { std::string(WE_IN_POSITIONVEC4), VertexType::FLOAT4 },
-        { std::string(WE_IN_TEXCOORDVEC4), VertexType::FLOAT4 },
-        { std::string(WE_IN_TEXCOORDVEC4C1), VertexType::FLOAT4 },
-    };
-    if (thick) {
-        attributes.push_back({ std::string(WE_IN_TEXCOORDVEC4C2), VertexType::FLOAT4 });
-        attributes.push_back({ std::string(WE_IN_TEXCOORDVEC4C3), VertexType::FLOAT4 });
-        attributes.push_back({ std::string(WE_IN_TEXCOORDC4), VertexType::FLOAT4 });
-    } else {
-        attributes.push_back({ std::string(WE_IN_TEXCOORDVEC3C2), VertexType::FLOAT4 });
-        attributes.push_back({ std::string(WE_IN_TEXCOORDC3), VertexType::FLOAT4 });
-    }
-    attributes.push_back({ std::string(WE_IN_COLOR), VertexType::FLOAT4 });
-    mesh->AddVertexArray(SceneVertexArray(attributes, count * 4));
-    mesh->AddIndexArray(SceneIndexArray(count));
-    mesh->GetVertexArray(0).SetOption(WE_PRENDER_ROPE, true);
-    mesh->GetVertexArray(0).SetOption(WE_CB_THICK_FORMAT, thick);
-
-    SceneMaterial material;
-    material.name     = std::string(shader_name);
-    material.textures = { "materials/card.tex" };
-    material.blenmode = BlendMode::Additive;
-    material.customShader.shader                = std::make_shared<SceneShader>();
-    material.customShader.shader->name          = std::string(shader_name);
-    material.customShader.shader->metal_program = TranslatedProgram();
-    mesh->AddMaterial(std::move(material));
-    return mesh;
-}
-
 /// A static skinned card: position, blend indices, blend weights, texcoord.
 /// Deformation lives in the author's vertex shader, so the mesh itself is
 /// not rewritten per frame.
@@ -420,38 +355,6 @@ TEST(MetalCapability, EveryUnsupportedConstructHasItsOwnReason)
     std::vector<std::pair<std::string, std::string>> reasons;
 
     {
-        ImageScene fixture;
-        auto       mesh = ParticleMesh("genericparticle");
-        mesh->GetVertexArray(0).SetOption(WE_PRENDER_TRAIL, true);
-        AttachParticleLayer(fixture, std::move(mesh));
-        reasons.emplace_back("sprite trail without velocity", RejectionFor(fixture));
-    }
-    {
-        ImageScene fixture;
-        auto       mesh = ParticleMesh("genericropeparticle");
-        mesh->GetVertexArray(0).SetOption(WE_PRENDER_SPRITE, false);
-        mesh->GetVertexArray(0).SetOption(WE_PRENDER_ROPE, true);
-        AttachParticleLayer(fixture, std::move(mesh));
-        reasons.emplace_back("rope-marked sprite layout", RejectionFor(fixture));
-    }
-    {
-        ImageScene fixture;
-        auto       mesh = RopeMesh(false);
-        mesh->GetVertexArray(0).SetOption(WE_PRENDER_TRAIL, true);
-        mesh->GetVertexArray(0).SetOption(WE_PRENDER_ROPETRAIL, true);
-        AttachParticleLayer(fixture, std::move(mesh));
-        reasons.emplace_back("thin rope trail", RejectionFor(fixture));
-    }
-    {
-        // Every other mesh the runtime rewrites per frame -- a text layer's
-        // card, most obviously -- is still refused: nothing has checked the
-        // shape of its upload.
-        ImageScene fixture;
-        auto       mesh = ParticleMesh("text");
-        AttachParticleLayer(fixture, std::move(mesh));
-        reasons.emplace_back("other dynamic mesh", RejectionFor(fixture));
-    }
-    {
         // A plain video wallpaper has its own host path; a scene that merely
         // binds a video texture is decided by the video module instead.
         ImageScene fixture;
@@ -533,59 +436,14 @@ TEST(MetalCapability, AcceptsAPlainSpriteSheetTexture)
 
 TEST(MetalCapability, AcceptsAStandardTwoDimensionalSpriteParticleLayer)
 {
-    // Presence of an emitter is no longer the question. The simulation belongs
-    // to the shared runtime either way; what is decided here is whether the
-    // geometry it produces is a shape the draw path can feed.
+    // The simulation belongs to the shared runtime either way, and the geometry
+    // it produces is whatever layout the parser built: nothing about a particle
+    // layer is a reason to refuse the scene.
     ImageScene fixture;
     AttachParticleLayer(fixture, ParticleMesh("genericparticle"));
 
     const auto selection = EvaluateMetalSupport(fixture.scene);
     EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-}
-
-TEST(MetalCapability, AcceptsAThickSpriteTrail)
-{
-    ImageScene fixture;
-    auto       mesh = ThickSpriteMesh();
-    mesh->GetVertexArray(0).SetOption(WE_PRENDER_TRAIL, true);
-    AttachParticleLayer(fixture, std::move(mesh));
-
-    const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-    EXPECT_TRUE(selection.fallback_reason.empty());
-}
-
-TEST(MetalCapability, AcceptsAThinRopeParticleLayer)
-{
-    ImageScene fixture;
-    AttachParticleLayer(fixture, RopeMesh(false));
-
-    const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-    EXPECT_TRUE(selection.fallback_reason.empty());
-}
-
-TEST(MetalCapability, AcceptsAThickRopeParticleLayer)
-{
-    ImageScene fixture;
-    AttachParticleLayer(fixture, RopeMesh(true));
-
-    const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-    EXPECT_TRUE(selection.fallback_reason.empty());
-}
-
-TEST(MetalCapability, AcceptsARopeTrail)
-{
-    ImageScene fixture;
-    auto       mesh = RopeMesh(true);
-    mesh->GetVertexArray(0).SetOption(WE_PRENDER_TRAIL, true);
-    mesh->GetVertexArray(0).SetOption(WE_PRENDER_ROPETRAIL, true);
-    AttachParticleLayer(fixture, std::move(mesh));
-
-    const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-    EXPECT_TRUE(selection.fallback_reason.empty());
 }
 
 TEST(MetalCapability, AcceptsASkinnedMeshWithAPuppetShader)
@@ -667,27 +525,6 @@ TEST(MetalCapability, APuppetUnderAnEffectChainIsJudgedByTheMeshTheChainResolves
               "a puppet shader is bound to a mesh without bone weights");
 }
 
-TEST(MetalCapability, AParticleLayerWithNoLiveParticlesIsStillAccepted)
-{
-    // Emptiness is a moment in a simulation, not a property of the scene: the
-    // mesh carries the capacity its emitter will use, and refusing it here
-    // would make the backend depend on when the question was asked.
-    ImageScene fixture;
-    auto       mesh = ParticleMesh("genericparticle");
-    EXPECT_EQ(mesh->GetVertexArray(0).DataSizeOf(), 0u);
-    AttachParticleLayer(fixture, std::move(mesh));
-
-    EXPECT_EQ(EvaluateMetalSupport(fixture.scene).backend, SceneBackend::NativeMetal);
-}
-
-TEST(MetalCapability, AZeroCapacityDynamicMeshIsRefusedRatherThanDrawnEmpty)
-{
-    ImageScene fixture;
-    AttachParticleLayer(fixture, ParticleMesh("genericparticle", 0));
-
-    EXPECT_NE(EvaluateMetalSupport(fixture.scene).backend, SceneBackend::NativeMetal);
-}
-
 TEST(MetalCapability, ASceneWithLightsIsAccepted)
 {
     // Lighting is the author's shader reading uniforms the shared value updater
@@ -756,29 +593,6 @@ TEST(MetalGraph, ReadingATargetThatIsOnlyWrittenLaterIsAcceptedAsHistory)
     AddCopy(graph, std::string(SpecTex_Default), std::string(WE_MIP_MAPPED_FRAME_BUFFER));
 
     EXPECT_EQ(MetalGraphRejection(fixture.scene, graph), "");
-}
-
-TEST(MetalGraph, ATargetThisBackendCannotAllocateRejectsTheWholeScene)
-{
-    ImageScene fixture;
-    fixture.scene.renderTargets["_rt_msaa"] = SceneRenderTarget {
-        .width = 1920, .height = 1080, .sample_count = 4,
-    };
-    rg::RenderGraph graph;
-    AddDraw(graph, "_rt_msaa", { "materials/card.tex" });
-    AddDraw(graph, std::string(SpecTex_Default), { "_rt_msaa" });
-
-    EXPECT_EQ(MetalGraphRejection(fixture.scene, graph),
-              "an effect uses a render-target format the native renderer cannot create");
-}
-
-TEST(MetalGraph, ADepthAttachmentOnAColourTargetIsNotARefusal)
-{
-    ImageScene fixture;
-    fixture.scene.renderTargets[std::string(SpecTex_Default)].withDepth = true;
-    rg::RenderGraph graph;
-    AddDraw(graph, std::string(SpecTex_Default), { "materials/card.tex" });
-    EXPECT_TRUE(MetalGraphRejection(fixture.scene, graph).empty());
 }
 
 TEST(MetalCapability, RecognisedPassKindsAreClassifiedAndAnythingElseFallsBack)

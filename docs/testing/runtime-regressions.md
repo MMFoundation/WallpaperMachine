@@ -15,10 +15,8 @@ All in `metal_scene_draw_smoke` unless noted; `metal_backend_test` needs no
 device.
 
 - **Native backend admission** — `metal_backend_test`: every refused construct
-  keeps its own distinct reason; plain sheets, sprite particles, sprite trails,
-  thin and thick ropes, rope trails and a skinned mesh under a `g_Bones` shader
-  are accepted by their actual layout; a sprite trail without velocity, a
-  rope-marked sprite layout, a thin rope trail, a skinning shader on a mesh
+  keeps its own distinct reason; a plain sheet, a sprite particle layer and a
+  skinned mesh under a `g_Bones` shader are accepted; a skinning shader on a mesh
   without bone weights and a bone stride that cannot hold a 4x4 matrix are
   refused; a puppet under an effect chain is judged by the chain's final mesh,
   and only on the chain's last node. An unused perspective camera does not
@@ -27,6 +25,14 @@ device.
   accepted (`MetalCapability.ASceneWithLightsIsAccepted`), and so is a graph
   that reads a target before it writes it
   (`MetalGraph.ReadingATargetThatIsOnlyWrittenLaterIsAcceptedAsHistory`).
+- **No target or mesh the draw path cannot allocate** —
+  `MetalSceneDraw.ParserBuildsOnlyTargetsTheDrawPathCanAllocate`: plain, layered,
+  feedback, history, effect-chain, text and every particle layout the parser writes
+  (sprite, sprite trail, rope, rope trail, one particle, none) leave no multisampled
+  target, no depth-only target and no per-frame mesh with several streams or no
+  storage, before and after the graph lowering, so the native backend has no gate for
+  them; `TheCheckForStatesTheDrawPathCannotAllocateSeesEachOfThem` sets each by hand
+  to show the check reports it.
 - **Lighting** — `MetalSceneDraw.ASceneLightReachesTheAuthorsLightingUniforms`:
   a point light's premultiplied colour (colour x intensity x radius squared)
   and position reach the author's `g_LightsColorPremultiplied` and

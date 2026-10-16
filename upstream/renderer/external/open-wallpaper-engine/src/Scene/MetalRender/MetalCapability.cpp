@@ -29,36 +29,6 @@ namespace
 /// that is rejected.
 constexpr std::string_view kBonesUniform { "g_Bones" };
 
-/// Whether this per-frame mesh is the four-corner card a text layer's relayout
-/// rewrites.
-///
-/// A positive statement about the geometry, not about who owns it: one submesh
-/// holding one vertex array of exactly a float3 position and a float2 texture
-/// coordinate, four vertices of fixed capacity and no index array. That is what
-/// `ResizeCardMesh` writes when the runtime re-lays out a text layer -- for the
-/// layer's own card, for an effect chain's final card and for the node an
-/// effect chain resolves its last pass onto -- and it is exactly the upload the
-/// native backend's dynamic path performs. Anything with a second stream, a
-/// different attribute set or a growing vertex count is not this shape and is
-/// judged by the particle rules below.
-bool IsDynamicCardMesh(const SceneMesh& mesh)
-{
-    if (mesh.MaterialSlots().size() != 1 || mesh.Submeshes().size() != 1) return false;
-    const auto& submesh = mesh.Submeshes().front();
-    if (submesh.VertexCount() != 1 || submesh.IndexCount() != 0) return false;
-    const auto& vertices = submesh.GetVertexArray(0);
-    const auto& attributes = vertices.Attributes();
-    if (attributes.size() != 2) return false;
-    if (attributes[0].name != WE_IN_POSITION || attributes[0].type != VertexType::FLOAT3) {
-        return false;
-    }
-    if (attributes[1].name != WE_IN_TEXCOORD || attributes[1].type != VertexType::FLOAT2) {
-        return false;
-    }
-    if (vertices.OneSize() == 0) return false;
-    return vertices.CapacitySize() / vertices.OneSize() == 4;
-}
-
 /// Name and type together: a puppet's blend indices occupy the same slot a
 /// float4 would, and a rope's `a_TexCoordVec3C2` is stored as a float4.
 bool HasAttribute(const SceneVertexArray& vertices, std::string_view name, VertexType type)
@@ -67,83 +37,6 @@ bool HasAttribute(const SceneVertexArray& vertices, std::string_view name, Verte
         if (attribute.name == name && attribute.type == type) return true;
     }
     return false;
-}
-
-/// Whether a mesh the runtime rewrites every frame is one this backend knows
-/// how to feed, and why not when it is not.
-///
-/// A text layer's card is accepted first: its shape is checked above and the
-/// dynamic upload path writes exactly it. Everything else must be one material,
-/// one submesh, one vertex stream and one index stream. Sprite and rope are
-/// exclusive; a rope-trail flag without both rope and trail is not a layout
-/// this path fills. A sprite trail is the thick sprite-particle mesh, stretched
-/// from the velocity in `a_TexCoordVec4C1`. A rope -- and a rope trail, which
-/// is always thick -- must carry the vertex layout `SetRopeParticleMesh` writes.
-/// Capacity, not current size, decides whether there is anywhere to put a
-/// frame. Anything else that rebuilds its geometry per frame is still refused.
-std::string RejectDynamicMesh(SceneMesh& mesh)
-{
-    constexpr std::string_view kNotParticles = "the scene rebuilds mesh geometry every frame";
-
-    if (IsDynamicCardMesh(mesh)) return {};
-
-    const auto* material = mesh.MaterialForSlot(0);
-    if (material == nullptr) return std::string(kNotParticles);
-    if (mesh.MaterialSlots().size() != 1 || mesh.Submeshes().size() != 1) {
-        return std::string(kNotParticles);
-    }
-    const auto& submesh = mesh.Submeshes().front();
-    // One vertex stream and one index stream is what the particle generator
-    // writes. A second of either would be a shape this upload path has not
-    // been written against.
-    if (submesh.VertexCount() != 1 || submesh.IndexCount() != 1) {
-        return std::string(kNotParticles);
-    }
-    const auto& vertices   = submesh.GetVertexArray(0);
-    const bool  sprite     = vertices.GetOption(WE_PRENDER_SPRITE);
-    const bool  rope       = vertices.GetOption(WE_PRENDER_ROPE);
-    const bool  trail      = vertices.GetOption(WE_PRENDER_TRAIL);
-    const bool  rope_trail = vertices.GetOption(WE_PRENDER_ROPETRAIL);
-    const bool  thick      = vertices.GetOption(WE_CB_THICK_FORMAT);
-    if (sprite == rope) return std::string(kNotParticles);
-    if (rope_trail && ! (rope && trail)) return std::string(kNotParticles);
-    if (sprite && trail) {
-        // The author shader stretches the quad from the velocity the thick
-        // sprite record already carries; without it there is nothing to read.
-        if (! thick || ! HasAttribute(vertices, WE_IN_TEXCOORDVEC4C1, VertexType::FLOAT4)) {
-            return "a sprite trail's mesh carries no particle velocity";
-        }
-    }
-    if (rope) {
-        // The shared runtime fills this layout; a sprite-shaped buffer would
-        // draw the right number of triangles with the wrong geometry.
-        bool has_layout =
-            HasAttribute(vertices, WE_IN_POSITIONVEC4, VertexType::FLOAT4) &&
-            HasAttribute(vertices, WE_IN_TEXCOORDVEC4, VertexType::FLOAT4) &&
-            HasAttribute(vertices, WE_IN_TEXCOORDVEC4C1, VertexType::FLOAT4) &&
-            HasAttribute(vertices, WE_IN_COLOR, VertexType::FLOAT4);
-        if (thick) {
-            has_layout = has_layout &&
-                         HasAttribute(vertices, WE_IN_TEXCOORDVEC4C2, VertexType::FLOAT4) &&
-                         HasAttribute(vertices, WE_IN_TEXCOORDVEC4C3, VertexType::FLOAT4) &&
-                         HasAttribute(vertices, WE_IN_TEXCOORDC4, VertexType::FLOAT4);
-        } else {
-            has_layout = has_layout &&
-                         HasAttribute(vertices, WE_IN_TEXCOORDVEC3C2, VertexType::FLOAT4) &&
-                         HasAttribute(vertices, WE_IN_TEXCOORDC3, VertexType::FLOAT4);
-        }
-        // A rope trail's shader is always compiled with the thick format, so a
-        // thin buffer under it would be read two attributes short.
-        if (rope_trail && ! thick) return "a rope trail's mesh is not in the thick rope format";
-        if (! has_layout) return "a rope particle mesh does not have the rope vertex layout";
-    }
-    // Capacity, not current size: a particle mesh is legitimately empty until
-    // the first emission, and a zero-capacity one has nowhere to put a frame.
-    if (vertices.CapacitySizeOf() == 0 || vertices.OneSizeOf() == 0) {
-        return std::string(kNotParticles);
-    }
-    if (submesh.GetIndexArray(0).CapacitySizeof() == 0) return std::string(kNotParticles);
-    return {};
 }
 
 const SceneCamera* FindCamera(const Scene& scene, const std::string& name)
@@ -228,9 +121,6 @@ std::string RejectNodes(const Scene& scene, const SceneNode* node)
     if (node == nullptr) return {};
 
     if (auto* mesh = const_cast<SceneNode*>(node)->Mesh(); mesh != nullptr) {
-        if (mesh->Dynamic()) {
-            if (auto reason = RejectDynamicMesh(*mesh); ! reason.empty()) return reason;
-        }
         if (mesh->Primitive() != MeshPrimitive::TRIANGLE) {
             return "the scene draws a primitive the native renderer does not support";
         }
@@ -365,11 +255,10 @@ std::string RejectShaders(const Scene& scene, const SceneNode* node, bool& saw_a
 std::string SceneMetalStructuralRejection(const Scene& scene)
 {
     if (scene.sceneGraph == nullptr) return "the scene has no drawable content";
-    // Emitters are no longer refused on sight. The simulation is the shared
-    // runtime's either way -- this backend never emits, ages or kills a
-    // particle -- so what decides is whether the geometry that simulation
-    // produces is a shape the draw path can consume, which `RejectDynamicMesh`
-    // answers per mesh while the scene graph is walked below.
+    // Emitters are not refused. The simulation is the shared runtime's -- this
+    // backend never emits, ages or kills a particle -- and the geometry it
+    // produces is only ever the card, sprite and rope layouts the parser builds,
+    // which the dynamic upload path writes whatever its vertex layout.
     // Lights are not refused. Wallpaper Engine lighting is the author's own
     // shader reading `g_LightsPosition` and `g_LightsColorPremultiplied`, which
     // the shared value updater writes for either backend through reflection.
@@ -511,34 +400,12 @@ std::string MetalGraphRejection(const Scene& scene, const rg::RenderGraph& graph
         steps.push_back(std::move(step));
     }
 
-    // Multisampled attachments are the target shape this backend has no
-    // allocation for. A depth buffer is created only for passes that actually
-    // depth-test, so `withDepth` on a target is not itself a refusal -- sampling
-    // that depth as a texture still is, below. Checked against the targets the
-    // graph actually names, so an unused declaration cannot reject a scene.
-    const auto unrenderable = [&scene](const std::string& key) {
-        const auto* target = scene.FindRenderTarget(key);
-        return target != nullptr && target->sample_count > 1;
-    };
-    const auto samples_depth = [&scene](const std::string& key) {
-        const auto* target = scene.FindRenderTarget(key);
-        // A colour target may carry a depth attachment for its own draws; that
-        // colour is still a colour sample. A target that is only a depth buffer
-        // has no colour to sample, which this backend cannot bind.
-        return target != nullptr && target->withDepth && target->width <= 0;
-    };
-
+    // Targets the parser builds are single-sample, and a depth buffer is only ever
+    // an attachment of the scene's own target, never a texture a pass reads
+    // (`ParserBuildsOnlyTargetsTheDrawPathCanAllocate` pins both), so no target is
+    // refused for its shape here.
     for (std::size_t i = 0; i < steps.size(); ++i) {
-        if (unrenderable(steps[i].writes)) {
-            return "an effect uses a render-target format the native renderer cannot create";
-        }
         for (const auto& read : steps[i].reads) {
-            if (unrenderable(read)) {
-                return "an effect uses a render-target format the native renderer cannot create";
-            }
-            if (samples_depth(read)) {
-                return "an effect samples a depth buffer";
-            }
             // The graph breaks a read-while-write by copying the target first,
             // so a pass still naming its own output has a cycle nothing broke.
             if (! read.empty() && read == steps[i].writes) {

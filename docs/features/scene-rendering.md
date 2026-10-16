@@ -50,10 +50,8 @@ plays, and BGRA or 8-bit NV12 video textures — the latter either converted onc
 frame or, with
 [**Direct video plane sampling**](performance.md#direct-video-plane-sampling) on,
 sampled by the layer's own shader. A scene falls back as a whole for HDR or 10-bit
-video, a plain video wallpaper, a shader that does not translate, particle geometry
-in a layout it does not recognise (lit particles among them), a multisampled target,
-an effect that samples a depth buffer, or a layer that reads its own previous frame (its `_b` composite, bound anywhere but its
-own effects).
+video, a plain video wallpaper, a shader that does not translate, or a layer that
+reads its own previous frame (its `_b` composite, bound anywhere but its own effects).
 A scene with `camerashake` on shakes its camera as Wallpaper Engine does: the eye and
 what it looks at move together by `(cos t, sin 1.333t, sin t)` at
 `t = camerashakespeed² × time`, its length raised to `camerashakeroughness³`, scaled
