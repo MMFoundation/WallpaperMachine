@@ -282,7 +282,7 @@ Services are grouped by domain under `App/Services/`; each domain has a matching
 | `Lifecycle/` | `QuitReason`, `QuitSupervisor`, `QuitTimings`, `TerminationSignalRelay`, `ProcessSignals`, `InstanceLock`, `SingleInstance` | Why the app is quitting, the deadline each quit stage gets, SIGTERM and SIGHUP as a quit, broken pipes as write errors, and the one-copy-per-library lock taken before anything else starts with what a second launch does about the copy that owns it; see [features/crash-recovery.md](features/crash-recovery.md) |
 | `Localization/` | `AppLanguage`, `AppLanguageStore` | Shipped-language registry and the language preference; see [localization.md](localization.md) |
 | `LockScreen/` | `LockScreenWallpaperSelection`, `LockScreenWallpaperService`, `LockScreenExtensionRegistration` | System lock-screen selection overrides and configuration publishing |
-| `NativeVideo/` | `NativeVideoPlayer`, `NativeVideoWallpaperHost`, `NativeVideoWallpaperWindow` | AVFoundation video backend: player and desktop window. `NativeVideoAdmission` (a refusal routes back to the scene engine) and `NativeVideoLayout` live in `Shared/` because the lock-screen extension applies the same rules |
+| `NativeVideo/` | `NativeVideoPlayer`, `NativeVideoWallpaperHost`, `NativeVideoWallpaperWindow` | AVFoundation video backend: player and desktop window. `NativeVideoAdmission` (a refusal routes back to the scene engine) and `NativeVideoLayout` live in `Shared/` because the lock-screen extension applies the same rules: with the Video backend set to Native preferred it plays a plain video through `LockScreenVideoPlayer` (an AVFoundation layer), and it follows the Scene renderer setting for scenes (see [features/lock-screen.md](features/lock-screen.md#scene-renderer)) |
 | `Pixiv/` | `PixivService`, `PixivTransport`, `PixivStore`, `PixivSessionStore`, `PixivDownloadQueue`, `PixivWallpaperPackager` | pixiv browsing, the signed-in session (keychain), downloads and packaging as still `web` wallpapers; see [features/pixiv.md](features/pixiv.md) |
 | `Playlist/` | `WallpaperPlaylist`, `PlaylistPlanner`, `PlaylistStore`, `PlaylistScheduler` | Per-display rotation and day/night wallpapers, switched through the display's command slot; see [features/playlists.md](features/playlists.md) |
 | `Preview/` | `WallpaperPreviewSession`, `WallpaperPreviewRequest`, `SceneWallpaperPreviewSurface`, `WebWallpaperPreviewSurface` | Isolated live-preview inputs, lifecycle and surfaces |
@@ -638,7 +638,7 @@ only on macOS 26 and later (`LockScreenConfiguration.isSupportedBySystem`).
 | `WallpaperExtension.swift` | `@main AppExtension`; XPC handler for the whole system protocol (21 requests on macOS 27.0): `acquire`/`update`/`invalidate`/`snapshot`/`provideSettingsViewModels`/`isChoiceDownloaded`/`selectedChoicesDidChange`/`handleNotification` do the work, the rest reply "nothing to do"; connection acceptance |
 | `WallpaperRuntime.swift` | Loads and checks the private hosting ABI, verifies the caller's code signature via its audit token, resolves `CAContext`, compares the exported XPC protocol with the system's (`verifyXPCProtocol`), reads the published configuration and asset paths, logging |
 | `WallpaperController.swift` | Singleton surface registry; screen and system sleep/wake, `com.apple.screenIsLocked`/`Unlocked` and the wallpaper service's `hostDidWake` notice each start a bounded re-check burst of every surface (display power and lock state are read from the system, never remembered); reloads on the Darwin notification `app.wallpapermachine.lock-screen.changed` |
-| `WallpaperSurface.swift` | One `WallpaperID` to one `CAContext` with a scene/video `CAMetalLayer` or live WebKit layer tree; bounded geometry, readiness and snapshots |
+| `WallpaperSurface.swift` | One `WallpaperID` to one `CAContext` with a scene/video `CAMetalLayer`, an AVFoundation `AVPlayerLayer` (a plain video when the Video backend is Native preferred and `LockScreenVideoPlanner` admits it; otherwise the scene engine) or live WebKit layer tree; bounded geometry, readiness and snapshots |
 | `WallpaperSettingsProvider.swift` | Encodes the private wallpaper settings view-model payload |
 | `WallpaperExtensionBridge.h` | Objective-C bridging header declaring the private `CAContext`, `NSXPCConnection.auditToken` and the XPC protocol, selector for selector as the system declares it; also includes `SceneWallpaperBindings.h` |
 
@@ -652,11 +652,11 @@ contracts they must agree on:
   `LockScreenConfiguration.changedNotification`. The extension reloads and writes
   `LockScreenReadiness` back once a GPU-ready non-preview surface exists, or with the error when
   acquiring or replacing that surface's renderer failed. A scene field added later is optional
-  (for example `framing`, the picture's position, or `sceneRenderer`, the app's Scene renderer
-  setting, which the extension applies once per configuration load before any surface starts), so
-  the version stays and an extension copy that predates it ignores the key;
-  `LockScreenScene.sharesRenderer(with:)` names which differences make the extension replace a
-  renderer rather than update it.
+  (for example `framing`, the picture's position, `sceneRenderer`, the app's Scene renderer
+  setting, which the extension applies once per configuration load before any surface starts, and
+  `nativeVideoFile`, the clip a plain video plays natively), so the version stays and an extension
+  copy that predates it ignores the key; `LockScreenScene.sharesRenderer(with:)` names which
+  differences make the extension replace a renderer rather than update it.
 - `LockScreenExtensionStatus` is a separate diagnostic exchange (`activation-request.json`,
   `extension-status.json`) that reports a configuration error even when the scene schema cannot
   be decoded; configuration success never substitutes for a rendered-frame acknowledgement. See
@@ -669,6 +669,12 @@ contracts they must agree on:
   screen saver (selected by `LockScreenScene.webEntryFile`); `LockScreenSurfaceRegistry`,
   `LockScreenFrameBacking` and `LockScreenIdleExit` manage surface lifecycle, pixel backing and
   the extension process's exit once nothing uses it, so the next launch runs the registered copy.
+- `LockScreenVideoPlanner` decides, from a scene and the file, whether a plain video plays natively
+  or through the scene engine (`NativeVideoAdmission` at the scene's frame rate, and a regular file
+  inside the project); `LockScreenVideoPlayer` plays it as a muted, video-track-only
+  `AVQueuePlayer` + `AVPlayerLooper` in an `AVPlayerLayer`, placed by `NativeVideoLayout` (also
+  used by the desktop video window). Any refusal, open or playback failure, stall after resume or
+  missing first frame within 10 s falls back to the scene engine.
 - `DisplayPowerProbe` answers whether a surface's display is asleep (`CGDisplayIsAsleep`, or
   every online display for a surface with none) each time `WallpaperPresentationAuthority` is
   asked, and `LockScreenReevaluationBurst` turns a sleep, wake, lock or unlock signal into

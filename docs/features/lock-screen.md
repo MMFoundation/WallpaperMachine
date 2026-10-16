@@ -92,6 +92,46 @@ renderer, like moving the picture. After the first frame the extension logs
 `fallback=<reason>` when the whole scene fell back, so a lock screen drawn by Compatibility
 can be told from one the setting asked for.
 
+### Plain video wallpapers
+
+A plain video plays on the lock screen and as the screen saver through the same path the
+app's **Video backend** setting picks for the desktop. With **Compatibility**, the default,
+nothing changes: the scene engine draws it. With **Native preferred** the app publishes the
+clip's file as an optional `nativeVideoFile` (a path inside the project, only for a video
+project, only for a regular file that lies in it; a scene, a web page, a missing file or a
+configuration an older app wrote has none and a copy of the extension that predates the key
+ignores it). The extension then plays the clip in an AVFoundation layer in its own layer
+tree, decoded in hardware, instead of through the scene engine. The configuration version is
+unchanged.
+
+The native player takes a clip only where the desktop's does: it is judged by the same
+admission rule (`NativeVideoAdmission`, compiled into both targets) at the frame rate the lock
+screen was given, because an AVFoundation layer cannot be capped. A clip that can be presented
+faster than that rate, one whose rate cannot be bounded from its metadata, and one AVFoundation
+cannot open (WebM, a damaged or unreadable file) go to the scene engine, and the extension logs
+`Native video not used display=…: <reason>`. The same happens if the player fails after it
+started, or a resumed player does not advance within four seconds: the scene engine takes the
+scene behind the held frame (`Native video failed display=…`). The attempt, from the decision
+to the first frame, has its own 10-second deadline, well inside the 30-second first-frame
+deadline: a player that neither shows a frame nor fails is dropped and the scene engine then
+gets that whole deadline. A failure is held against the clip it was about (its path inside the
+published revision), not the surface: that clip is drawn by the scene engine from then on, while
+a different file or a replaced revision tries the native player again. A failure that arrives
+before the surface has taken its handler is held and delivered when it does. Because the rate
+decides which player may take a clip, a change of the frame rate replaces a native player, the
+way a change of the file does.
+
+The clip is never heard. The player is built from the video track alone, so no audio is decoded,
+no audio output or session is opened, it is muted as well, and it asks neither to keep the display
+awake nor to become the system's playing media. The picture is placed by `NativeVideoLayout`, the
+rule the desktop's native player and the scene engine share (Fit, Fill, Stretch, Original size,
+the scale factor), and, unlike the desktop's native player, it applies the position the app
+publishes as `framing`. The surface pauses the player exactly when it pauses the scene engine,
+for the same reasons, and a paused player decodes nothing and keeps its last frame on the layer.
+The frame the system asks for in a snapshot, and the one held behind the layer, are read through
+an image generator for that one request; nothing is read between requests. The extension reads the
+file through the exchange-directory access it already has.
+
 ### Display changes
 
 Topology refreshes stage the next complete configuration before
@@ -397,6 +437,9 @@ In `extension.log`:
   after its first frame, `Backend display=... preferred=... drew=native Metal` (or
   `Compatibility`, with ` fallback=<reason>` when the scene did not fit the native
   renderer). It changes nothing.
+- `Backend display=… drew=AVFoundation video`: the first frame of a plain video came from the
+  native player; `Native video not used display=…: <reason>` and `Native video failed
+  display=…: <reason>` say why the scene engine drew it instead.
 
 In the app log (the [diagnostics report](diagnostics.md#diagnostics-report) includes it):
 `Native lock screen: first frame acknowledged after 4.2 s (waited from selection reload)`
@@ -490,7 +533,12 @@ request-shape lines report after a real activation (see [What the logs
 record](#what-the-logs-record)) and a moved picture appearing at its position on the lock
 screen and as the screen saver (the extension logs `Framing display=… panX=… panY=…` each
 time it builds a renderer) and the extension drawing with Native Metal rather than
-Compatibility (the `Backend display=…` line) still require an authorized desktop check.
+Compatibility (the `Backend display=…` line) still require an authorized desktop check. So do
+a plain video playing in the AVFoundation layer on a real lock screen and as the screen saver
+(that the sandboxed extension may open the clip, hardware decode, the picture hosted in the
+compositor's remote layer tree, resuming after sleep) and the fall back to the scene engine
+with a clip the player cannot open; only the decision, the layout, the failure of the open and
+the publication are covered offscreen.
 
 ### After sleep, wake, lock and unlock
 

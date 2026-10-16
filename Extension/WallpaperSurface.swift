@@ -18,6 +18,13 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   private var layer: CAMetalLayer?
   private var renderer: OpaquePointer?
   private var web: ScreenSaverWebSurface?
+  /// The AVFoundation layer playing a plain video wallpaper, in place of `renderer`.
+  private var video: LockScreenVideoPlayer?
+  private var nativeStart: Task<Void, Never>?
+  /// The clip the native player failed on (after its first frame, or by not producing one in
+  /// time), so the replacement that follows draws that clip with the scene engine instead of
+  /// trying the same player again, while a different or replaced clip tries it afresh.
+  private var nativeFailures = LockScreenNativeVideoMemory()
   private var contentError: Error?
   private var frameObserver: NSObjectProtocol?
   private var firstFrameReply: ((Error?) -> Void)?
@@ -28,7 +35,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   private var latestSnapshot: IOSurface?
   private var stopped = false
   var isReusable: Bool { !stopped && contentError == nil }
-  var hasContent: Bool { renderer != nil || (web != nil && contentError == nil) }
+  var hasContent: Bool { renderer != nil || video != nil || (web != nil && contentError == nil) }
   private var rendererPaused = false
   /// When this surface started presenting, set once its first frame arrived.
   /// Kept apart from readiness so rendering one frame for a snapshot or a
@@ -75,7 +82,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   }
 
   func start(completion: @escaping (Error?) -> Void) {
-    guard !stopped, renderer == nil, web == nil else {
+    guard !stopped, renderer == nil, web == nil, video == nil else {
       completion(WallpaperRuntime.failure("Wallpaper surface is not available."))
       return
     }
@@ -92,72 +99,219 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       else {
         throw WallpaperRuntime.failure("Invalid lock-screen playback configuration.")
       }
-      let cache = WallpaperRuntime.documents.appendingPathComponent("ShaderCache")
-        .appendingPathComponent(project.deletingLastPathComponent().lastPathComponent)
-      try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
-      let metal = CAMetalLayer()
-      metal.device = MTLCreateSystemDefaultDevice()
-      metal.frame = root.bounds
-      metal.contentsScale = scale
-      metal.drawableSize = CGSize(width: size.width * scale, height: size.height * scale)
-      metal.pixelFormat = .bgra8Unorm
-      metal.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
-      metal.framebufferOnly = false
-      // An absent/purged drawable must reveal the committed frame underneath.
-      metal.isOpaque = false
-      guard metal.device != nil else {
-        throw WallpaperRuntime.failure("Metal rendering is unavailable.")
+      if LockScreenVideoPlanner.mediaPath(of: scene) != nil {
+        startNativeVideo(project: project, assets: assets, completion: completion)
+        return
       }
-      root.addSublayer(metal)
-      layer = metal
-      CATransaction.flush()
-      frameObserver = NotificationCenter.default.addObserver(
-        forName: .init("WallpaperMachine.desktopPosterReady"), object: metal, queue: .main
-      ) { [weak self] notification in
-        MainActor.assumeIsolated { self?.receive(notification) }
-      }
-      try check(owe_scene_wallpaper_new(&renderer))
-      try check(owe_scene_wallpaper_init(renderer))
-      try check(
-        owe_scene_wallpaper_init_metal_vulkan(
-          renderer, Unmanaged.passUnretained(metal).toOpaque(), UInt32(metal.drawableSize.width),
-          UInt32(metal.drawableSize.height), 0, 0, Double(scale)))
-      // The lock-screen process never plays sound, reads input, or receives media data.
-      try check(owe_scene_wallpaper_set_audio_muted(renderer, true))
-      try check(
-        owe_scene_wallpaper_set_property_bool(
-          renderer, owe_property_audio_response_enabled(), false))
-      try check(
-        owe_scene_wallpaper_apply_config(
-          renderer, project.path, assets.path, cache.path, scene.fps, false, false,
-          scene.propertiesJSON))
-      try check(
-        owe_scene_wallpaper_set_property_bool(
-          renderer, owe_property_media_integration_enabled(), false))
-      try check(
-        owe_scene_wallpaper_set_property_int32(
-          renderer, owe_property_scaling_mode(), scene.scalingMode))
-      try check(
-        owe_scene_wallpaper_set_property_float(
-          renderer, owe_property_scaling_factor(), Float(scene.scalingFactor)))
-      let framing = scene.effectiveFraming
-      try check(owe_scene_wallpaper_set_framing(renderer, framing.panX, framing.panY))
-      WallpaperRuntime.log(
-        "Framing display=\(scene.displayID) panX=\(framing.panX) panY=\(framing.panY)")
-      firstFrameReply = completion
-      requestFrame()
-      deadline = Task { [weak self] in
-        do { try await Task.sleep(for: .seconds(30)) } catch { return }
-        guard let self, let reply = self.firstFrameReply else { return }
-        self.firstFrameReply = nil
-        self.stop()
-        reply(
-          WallpaperRuntime.failure(
-            "The lock-screen renderer did not produce a frame within 30 seconds."))
-      }
+      try startEngine(project: project, assets: assets, completion: completion)
     } catch {
       stop()
       completion(error)
+    }
+  }
+
+  /// The scene engine's start: its Metal layer, the renderer and its configuration.
+  private func startEngine(
+    project: URL, assets: URL, completion: @escaping (Error?) -> Void
+  ) throws {
+    let cache = WallpaperRuntime.documents.appendingPathComponent("ShaderCache")
+      .appendingPathComponent(project.deletingLastPathComponent().lastPathComponent)
+    try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+    let metal = CAMetalLayer()
+    metal.device = MTLCreateSystemDefaultDevice()
+    metal.frame = root.bounds
+    metal.contentsScale = scale
+    metal.drawableSize = CGSize(width: size.width * scale, height: size.height * scale)
+    metal.pixelFormat = .bgra8Unorm
+    metal.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
+    metal.framebufferOnly = false
+    // An absent/purged drawable must reveal the committed frame underneath.
+    metal.isOpaque = false
+    guard metal.device != nil else {
+      throw WallpaperRuntime.failure("Metal rendering is unavailable.")
+    }
+    root.addSublayer(metal)
+    layer = metal
+    CATransaction.flush()
+    frameObserver = NotificationCenter.default.addObserver(
+      forName: .init("WallpaperMachine.desktopPosterReady"), object: metal, queue: .main
+    ) { [weak self] notification in
+      MainActor.assumeIsolated { self?.receive(notification) }
+    }
+    try check(owe_scene_wallpaper_new(&renderer))
+    try check(owe_scene_wallpaper_init(renderer))
+    try check(
+      owe_scene_wallpaper_init_metal_vulkan(
+        renderer, Unmanaged.passUnretained(metal).toOpaque(), UInt32(metal.drawableSize.width),
+        UInt32(metal.drawableSize.height), 0, 0, Double(scale)))
+    // The lock-screen process never plays sound, reads input, or receives media data.
+    try check(owe_scene_wallpaper_set_audio_muted(renderer, true))
+    try check(
+      owe_scene_wallpaper_set_property_bool(
+        renderer, owe_property_audio_response_enabled(), false))
+    try check(
+      owe_scene_wallpaper_apply_config(
+        renderer, project.path, assets.path, cache.path, scene.fps, false, false,
+        scene.propertiesJSON))
+    try check(
+      owe_scene_wallpaper_set_property_bool(
+        renderer, owe_property_media_integration_enabled(), false))
+    try check(
+      owe_scene_wallpaper_set_property_int32(
+        renderer, owe_property_scaling_mode(), scene.scalingMode))
+    try check(
+      owe_scene_wallpaper_set_property_float(
+        renderer, owe_property_scaling_factor(), Float(scene.scalingFactor)))
+    let framing = scene.effectiveFraming
+    try check(owe_scene_wallpaper_set_framing(renderer, framing.panX, framing.panY))
+    WallpaperRuntime.log(
+      "Framing display=\(scene.displayID) panX=\(framing.panX) panY=\(framing.panY)")
+    firstFrameReply = completion
+    requestFrame()
+    armDeadline()
+  }
+
+  private func armDeadline() {
+    deadline?.cancel()
+    deadline = Task { [weak self] in
+      do { try await Task.sleep(for: .seconds(30)) } catch { return }
+      guard let self, let reply = self.firstFrameReply else { return }
+      self.firstFrameReply = nil
+      self.stop()
+      reply(
+        WallpaperRuntime.failure(
+          "The lock-screen renderer did not produce a frame within 30 seconds."))
+    }
+  }
+
+  /// What the native attempt came to: the scene engine, or a player showing its first frame.
+  private enum NativeAttempt {
+    case engine(reason: String)
+    case ready(LockScreenVideoPlayer, CGImage)
+  }
+
+  /// A plain video the app asked the native player for: decided against the same admission
+  /// rule the desktop uses, played through an AVFoundation layer, and drawn by the scene engine
+  /// instead whenever the native player cannot take it, before the first frame or after it.
+  /// The attempt, from the decision to the first frame, has its own deadline, so a player that
+  /// neither shows a frame nor fails leaves the scene engine its whole first-frame deadline.
+  private func startNativeVideo(
+    project: URL, assets: URL, completion: @escaping (Error?) -> Void
+  ) {
+    firstFrameReply = completion
+    armDeadline()
+    let scene = scene
+    nativeStart = Task { @MainActor [weak self] in
+      guard let self else { return }
+      let enabled = self.nativeFailures.allows(scene)
+      let attempt: NativeAttempt
+      do {
+        attempt = try await LockScreenDeadline.run(within: LockScreenDeadline.nativeAttempt) {
+          [weak self] in
+          guard let self else { throw CancellationError() }
+          return try await self.attemptNativeVideo(scene: scene, enabled: enabled)
+        }
+      } catch {
+        guard !Task.isCancelled, !self.stopped, self.firstFrameReply != nil else { return }
+        self.video?.stop()
+        self.video = nil
+        if error is LockScreenDeadline.Expired {
+          // Held against the clip, so a replacement does not wait for it again.
+          self.nativeFailures.recordFailure(of: scene)
+        }
+        self.fallBackToEngine(error.localizedDescription, project: project, assets: assets)
+        return
+      }
+      guard !Task.isCancelled, !self.stopped, self.firstFrameReply != nil else {
+        if case .ready(let player, _) = attempt, self.video !== player { player.stop() }
+        return
+      }
+      switch attempt {
+      case .engine(let reason):
+        self.fallBackToEngine(reason, project: project, assets: assets)
+      case .ready(let player, let first):
+        guard self.video === player else { return }
+        do {
+          let snapshot = try Self.snapshot(first)
+          try LockScreenFrameBacking.install(snapshot, on: self.root)
+          self.latestSnapshot = snapshot
+        } catch {
+          player.stop()
+          self.video = nil
+          self.fallBackToEngine(error.localizedDescription, project: project, assets: assets)
+          return
+        }
+        self.contentFrameReady()
+        self.finishSnapshots(error: nil)
+        // Last, so a failure the player already held is heard once the surface is ready for it.
+        player.onFailure = { [weak self] detail in
+          MainActor.assumeIsolated { self?.nativeVideoDidFail(detail) }
+        }
+      }
+    }
+  }
+
+  private func attemptNativeVideo(scene: LockScreenScene, enabled: Bool) async throws
+    -> NativeAttempt
+  {
+    let path = await LockScreenVideoPlanner.decide(
+      scene: scene, enabled: enabled, resolve: { try WallpaperRuntime.asset($0) })
+    try Task.checkCancellation()
+    guard case .avFoundation(let url) = path else {
+      if case .sceneEngine(let reason?) = path { return .engine(reason: reason) }
+      return .engine(reason: "no native clip")
+    }
+    let framing = scene.effectiveFraming
+    let player = LockScreenVideoPlayer(
+      url: url, mode: NativeVideoScalingMode(rawValue: scene.scalingMode) ?? .fill,
+      factor: scene.scalingFactor, pan: .init(x: framing.panX, y: framing.panY),
+      viewport: size, backingScale: self.scale)
+    video = player
+    player.attach(to: root)
+    do {
+      guard let first = try await player.prepare() else {
+        throw LockScreenVideoPlayer.Failure.unplayable("no frame could be read from the clip")
+      }
+      try Task.checkCancellation()
+      return .ready(player, first)
+    } catch {
+      // Stopped here, not by the caller, which may have moved on to another player.
+      player.stop()
+      if video === player { video = nil }
+      if error is CancellationError || (error as? LockScreenVideoPlayer.Failure) == .stopped {
+        throw error
+      }
+      return .engine(reason: error.localizedDescription)
+    }
+  }
+
+  private func fallBackToEngine(_ reason: String, project: URL, assets: URL) {
+    WallpaperRuntime.log(
+      "Native video not used display=\(scene.displayID): \(reason); drawing it with the scene engine")
+    guard let reply = firstFrameReply else { return }
+    firstFrameReply = nil
+    deadline?.cancel()
+    deadline = nil
+    nativeStart = nil
+    do {
+      try startEngine(project: project, assets: assets, completion: reply)
+    } catch {
+      stop()
+      reply(error)
+    }
+  }
+
+  /// The native player stopped being able to play a clip it was playing. The scene engine
+  /// takes the same scene, behind the held frame.
+  private func nativeVideoDidFail(_ detail: String) {
+    guard !stopped, video != nil else { return }
+    nativeFailures.recordFailure(of: scene)
+    WallpaperRuntime.log(
+      "Native video failed display=\(scene.displayID): \(detail); replacing it with the scene engine")
+    replace(scene: scene, size: size, scale: scale) { [weak self] error in
+      guard let self else { return }
+      if let error { WallpaperRuntime.log("Replacement failed: \(error.localizedDescription)") }
+      WallpaperController.shared.acknowledge(surface: self, error: error)
     }
   }
 
@@ -214,6 +368,10 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   /// Which backend drew the first frame, and why it is not the preferred one when it is not.
   /// The backend is only known once the scene is parsed, which the first frame proves.
   private func logBackend() {
+    if video != nil {
+      WallpaperRuntime.log("Backend display=\(scene.displayID) drew=AVFoundation video")
+      return
+    }
     guard let renderer else { return }
     let scene = UnsafeMutableRawPointer(renderer)
     let backend: String
@@ -361,7 +519,9 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   }
 
   func applyPolicy() {
-    guard firstFrameReply == nil, !stopped, renderer != nil || web != nil else { return }
+    guard firstFrameReply == nil, !stopped, renderer != nil || web != nil || video != nil else {
+      return
+    }
     let request = authorityRequest
     // Keep the last drawable and scene state through unlock/sleep. Replacing
     // them with a poster forces a cold load after the display is already lit.
@@ -372,6 +532,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     do {
       if let web {
         web.setPaused(shouldPause)
+      } else if let video {
+        video.setPaused(shouldPause)
       } else if let renderer {
         try check(owe_scene_wallpaper_set_paused(renderer, shouldPause))
       }
@@ -379,6 +541,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       // The held frame becomes what snapshots and the backing show, in place of
       // the readiness frame (often an intro's black opening).
       if shouldPause, renderer != nil { requestFrame() }
+      if shouldPause, video != nil { refreshVideoFrame() }
       counters.record(shouldPause ? .presentationSuspended : .presentationAuthorized, for: surfaceKey)
       WallpaperRuntime.log(
         "Playback display=\(scene.displayID) mode=\(presentation) activity=\(activity) locked=\(request.sessionLocked) paused=\(shouldPause) reasons=\(reasons.rawValue)"
@@ -403,6 +566,20 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     }
   }
 
+  /// The held frame of a paused clip becomes what snapshots and the backing show, in place of
+  /// the frame it opened with.
+  private func refreshVideoFrame() {
+    guard let video else { return }
+    Task { @MainActor [weak self, weak video] in
+      guard let self, let video, self.video === video, self.rendererPaused,
+        let frame = await video.frame(), self.video === video, self.rendererPaused,
+        let snapshot = try? Self.snapshot(frame)
+      else { return }
+      try? LockScreenFrameBacking.install(snapshot, on: self.root)
+      self.latestSnapshot = snapshot
+    }
+  }
+
   func snapshot(reply: @escaping (Any?, Error?) -> Void) {
     if let web, !web.isPaused, !rendererPaused, !stopped {
       web.snapshot { [weak self] result in
@@ -415,6 +592,22 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
           let frame = try Self.snapshot(pixels)
           self.latestSnapshot = frame
           reply(try WallpaperRuntime.snapshotReply(frame), nil)
+        } catch { reply(nil, error) }
+      }
+      return
+    }
+    if let video, !rendererPaused, !stopped {
+      Task { @MainActor [weak self] in
+        guard let self else { reply(nil, CancellationError()); return }
+        do {
+          if let frame = await video.frame(), !self.stopped {
+            let snapshot = try Self.snapshot(frame)
+            self.latestSnapshot = snapshot
+          }
+          guard let latest = self.latestSnapshot else {
+            throw WallpaperRuntime.failure("Wallpaper frame is not ready.")
+          }
+          reply(try WallpaperRuntime.snapshotReply(latest), nil)
         } catch { reply(nil, error) }
       }
       return
@@ -503,6 +696,10 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     frameObserver = nil
     web?.stop()
     web = nil
+    nativeStart?.cancel()
+    nativeStart = nil
+    video?.stop()
+    video = nil
     contentError = nil
     if let renderer {
       _ = owe_scene_wallpaper_begin_surface_reconfigure(renderer)

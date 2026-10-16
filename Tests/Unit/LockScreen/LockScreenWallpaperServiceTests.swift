@@ -2239,4 +2239,60 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
       "the extension replaces its renderer to change the backend")
     try await service.shutdown()
   }
+
+  /// The scene the app publishes for a project of `type` with the Video backend `backend`.
+  @MainActor
+  private func publishedVideoScene(
+    type: String, backend: String?, file: String = "clip.mp4", makeFile: Bool = true
+  ) async throws -> LockScreenScene {
+    try Data(#"{"type":"\#(type)","title":"t","file":"\#(file)"}"#.utf8).write(
+      to: project.appendingPathComponent("project.json"))
+    let media = project.appendingPathComponent(file)
+    if makeFile { try Data("bytes".utf8).write(to: media) }
+    var record = scene()
+    record.displayId = 1
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in "one" }, videoBackendSetting: { backend })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try service.start()
+    service.setEnabled(true)
+    await waitFor("\(type) published") { service.isEnabled && !service.isBusy }
+    let published = try XCTUnwrap(publishedConfiguration().scenes.first)
+    try await service.shutdown()
+    return published
+  }
+
+  /// The lock screen follows the app's Video backend setting: with the native player selected
+  /// a video project carries its media file for the extension, and with Compatibility, the
+  /// default, nothing changes. Scenes never carry it.
+  @MainActor
+  func testAVideoCarriesItsMediaFileOnlyWhenTheNativePlayerIsSelected() async throws {
+    let native = try await publishedVideoScene(type: "video", backend: "native_preferred")
+    XCTAssertEqual(native.nativeVideoFile, "clip.mp4")
+    for backend in [nil, "compatibility"] as [String?] {
+      let compatibility = try await publishedVideoScene(type: "video", backend: backend)
+      XCTAssertNil(compatibility.nativeVideoFile, "\(backend ?? "no setting")")
+    }
+    let scene = try await publishedVideoScene(type: "scene", backend: "native_preferred")
+    XCTAssertNil(scene.nativeVideoFile, "a scene is not a plain video")
+  }
+
+  @MainActor
+  func testAMediaFileThatIsNotARegularFileInsideTheProjectIsLeftToTheSceneEngine() async throws {
+    let missing = try await publishedVideoScene(
+      type: "video", backend: "native_preferred", makeFile: false)
+    XCTAssertNil(missing.nativeVideoFile)
+    let folder = project.appendingPathComponent("sub", isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data("x".utf8).write(to: folder.appendingPathComponent("a.txt"))
+    let directory = try await publishedVideoScene(
+      type: "video", backend: "native_preferred", file: "sub", makeFile: false)
+    XCTAssertNil(directory.nativeVideoFile, "a folder is not a clip")
+    let outside = try await publishedVideoScene(
+      type: "video", backend: "native_preferred", file: "../escape.mp4", makeFile: false)
+    XCTAssertNil(outside.nativeVideoFile)
+  }
 }

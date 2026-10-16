@@ -668,6 +668,22 @@ or depend on a second physical monitor.
   from switching a mode off and on again; a scene or video publishes its display's position
   and a web page none, and moving the picture publishes a new revision that reuses the
   project while the same position publishes nothing.
+- `LockScreenVideoPlannerTests` — which path draws a plain video on the lock screen: the
+  native player only when the app asked for it and admission accepts the clip at the frame
+  rate it was given, the scene engine for every refusal (not playable, unreadable, faster than
+  the rate, no bound), for a clip that is missing, for one the player already failed on and
+  for a path that leaves the project, and that a file AVFoundation cannot open (garbage bytes,
+  a missing file) fails the player's `prepare()`, which is what sends the surface back to the
+  scene engine; that a failure is held against its clip and a different or replaced one tries
+  the native player again; that the attempt's deadline expires on an injected clock without
+  waiting and is bounded below the surface's 30 seconds; and that a player failure that beats
+  the handler's assignment is delivered once when it is assigned. The surface wiring and the
+  order in which the scene renderer preference is applied live in the extension target, which
+  no unit test compiles, so they are checked by building it. `LockScreenWallpaperTests` also covers the configuration keys `sceneRenderer`
+  and `nativeVideoFile` (round trip with and without, the default, an unknown name, which
+  changes replace a renderer, and that a changed frame rate replaces a native player only),
+  and the service tests that the Scene renderer and Video backend settings are published and
+  a change republishes. Not covered: a real lock screen, the player playing a clip there.
 - `LockScreenExtensionRegistrationTests` use synthetic app bundles and an
   injected registry: current-copy selection, duplicate and removed-copy cleanup,
   symlink aliases, invalid inventory rejection, cancellation, command failures;

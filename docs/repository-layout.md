@@ -82,7 +82,8 @@ Extension/                         WallpaperMachineExtension sources, Info.plist
 Shared/                            contracts compiled into both targets: lock-screen configuration, status and surface
                                    lifecycle, web-wallpaper protocol and screen-saver surface, RuntimeCounters,
                                    WallpaperPresentationAuthority, display power and its re-check burst,
-                                   and the native video admission and layout rules
+                                   the native video admission and layout rules, and the lock-screen
+                                   video planner and player
 Resources/StarterWallpaper/        bundled sample wallpaper (Aurora.mp4, preview.jpg, project.json)
 Resources/ReleaseBanners/          bundled release banners, x.y.z.jpg and x.y.z.zh-Hans.jpg (or .png), shown by What's New and the release page
 Tests/Unit/<Domain>/               WallpaperMachineTests, one folder per App/Services domain plus Panel for

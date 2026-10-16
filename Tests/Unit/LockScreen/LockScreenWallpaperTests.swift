@@ -1546,4 +1546,51 @@ final class LockScreenWallpaperTests: XCTestCase {
       LockScreenConfiguration(scenes: [web, publishedScene(sceneRenderer: .compatibility)])
         .sceneRenderer, .compatibility)
   }
+
+  // MARK: The native video player the extension may use
+
+  func testTheNativeVideoFileTravelsInTheFileAndAnOlderFileKeepsTheOldShape() throws {
+    let encoder = JSONEncoder()
+    var scene = publishedScene()
+    scene.nativeVideoFile = "clip.mp4"
+    let decoded = try JSONDecoder().decode(LockScreenScene.self, from: encoder.encode(scene))
+    XCTAssertEqual(decoded.nativeVideoFile, "clip.mp4")
+    XCTAssertEqual(decoded, scene)
+    let plain = try XCTUnwrap(
+      try JSONSerialization.jsonObject(with: encoder.encode(publishedScene())) as? [String: Any])
+    XCTAssertNil(plain["nativeVideoFile"], "without the choice no key is written")
+    let json = Data(#"{"displayID":1,"title":"t","projectPath":"p","assetsPath":"a","fps":30,"scalingMode":3,"scalingFactor":1,"paused":false}"#.utf8)
+    XCTAssertNil(try JSONDecoder().decode(LockScreenScene.self, from: json).nativeVideoFile)
+  }
+
+  func testChoosingOrLeavingTheNativeVideoPlayerReplacesTheRenderer() {
+    let scene = publishedScene()
+    var native = scene
+    native.nativeVideoFile = "clip.mp4"
+    XCTAssertFalse(scene.sharesRenderer(with: native))
+    XCTAssertFalse(native.sharesRenderer(with: scene))
+    var other = native
+    other.nativeVideoFile = "other.mp4"
+    XCTAssertFalse(native.sharesRenderer(with: other))
+  }
+
+  /// The native player cannot cap the rate a clip is presented at, so whether it may play one
+  /// depends on the frame rate it is asked for. A change of it is decided anew, which only a
+  /// replaced renderer does; the scene engine takes the new rate while it runs.
+  func testANewFrameRateReplacesTheNativePlayerButNotTheSceneEngine() {
+    var native = publishedScene()
+    native.nativeVideoFile = "clip.mp4"
+    var faster = native
+    faster.fps = 60
+    XCTAssertFalse(native.sharesRenderer(with: faster))
+    let engine = publishedScene()
+    var engineFaster = engine
+    engineFaster.fps = 60
+    XCTAssertTrue(engine.sharesRenderer(with: engineFaster))
+    // Pause and title still apply to a running player.
+    var paused = native
+    paused.paused = true
+    paused.title = "renamed"
+    XCTAssertTrue(native.sharesRenderer(with: paused))
+  }
 }

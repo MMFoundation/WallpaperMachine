@@ -184,7 +184,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let lockScreen = LockScreenConfiguration.isSupportedBySystem
                 ? LockScreenWallpaperService(
                     bridge: store.bridge, contentRevision: { [weak store] in store?.wallpaperContentRevision ?? 0 },
-                    sceneRendererSetting: { [weak store] in store?.settingsSnapshot.sceneRenderer }) : nil
+                    sceneRendererSetting: { [weak store] in store?.settingsSnapshot.sceneRenderer },
+                    videoBackendSetting: { [weak store] in store?.settingsSnapshot.videoBackend }) : nil
             if let lockScreen {
                 store.lockScreenWallpaper = lockScreen
                 lockScreen.beforeActivation = { [weak self] in

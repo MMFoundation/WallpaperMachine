@@ -61,6 +61,13 @@ struct LockScreenScene: Codable, Equatable {
   /// `LockScreenSceneRenderer.default`, the app's own default, and a copy of the
   /// extension that predates the key ignores it.
   var sceneRenderer: LockScreenSceneRenderer? = nil
+  /// The media file of a plain video wallpaper, relative to its project folder, present only
+  /// when the app's Video backend setting selects the native player: the extension then plays
+  /// it through an AVFoundation layer when AVFoundation can open it, and otherwise, like every
+  /// scene that lacks the key, through the scene engine. Absent from a configuration an older
+  /// app wrote and for scenes and web pages; a copy of the extension that predates the key
+  /// ignores it.
+  var nativeVideoFile: String? = nil
 
   var effectiveFraming: LockScreenFraming { framing ?? .centered }
   var effectiveSceneRenderer: LockScreenSceneRenderer { sceneRenderer ?? .default }
@@ -69,13 +76,18 @@ struct LockScreenScene: Codable, Equatable {
   /// renderer. Frame rate, title and pause apply to the running renderer, and the
   /// preview path is not read by it. The scaling and the position are, like the
   /// project, only read when the renderer is built, so a change of either replaces it.
-  /// So is the scene renderer: the engine picks its backend once, when the scene is parsed.
+  /// So is the scene renderer, which the engine reads once, when the scene is parsed, and the
+  /// choice of the native video player and the file it plays.
   func sharesRenderer(with other: LockScreenScene) -> Bool {
     projectPath == other.projectPath && assetsPath == other.assetsPath
       && webEntryFile == other.webEntryFile && propertiesJSON == other.propertiesJSON
       && scalingMode == other.scalingMode && scalingFactor == other.scalingFactor
       && effectiveFraming == other.effectiveFraming
       && effectiveSceneRenderer == other.effectiveSceneRenderer
+      && nativeVideoFile == other.nativeVideoFile
+      // The native player cannot cap the rate a clip is presented at, so whether it may play
+      // a clip depends on the frame rate it is asked for, and a change of it is decided anew.
+      && (nativeVideoFile == nil || fps == other.fps)
   }
 }
 
