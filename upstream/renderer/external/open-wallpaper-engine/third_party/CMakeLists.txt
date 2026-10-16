@@ -59,7 +59,6 @@ promote_imported_target(qjs::qjs)
 promote_imported_target(glslang::glslang)
 promote_imported_target(glslang::SPIRV)
 
-add_subdirectory(glad)
 add_subdirectory(spirv_reflect EXCLUDE_FROM_ALL)
 
 if(TARGET nlohmann_json::nlohmann_json AND NOT TARGET nlohmann_json)
