@@ -15,7 +15,7 @@
 
 #include "Utils/Logging.h"
 #include "Utils/Algorism.h"
-#include "Core/Random.hpp"
+#include "Utils/Random.hpp"
 
 using namespace wallpaper;
 using namespace Eigen;

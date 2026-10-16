@@ -1,7 +1,7 @@
 // Explicit diagnostic tool. Renders only imported scene assets to private GPU
 // images: no surface, swapchain, AppKit window, audio device or desktop capture.
 #include "Audio/SoundManager.h"
-#include "Core/Random.hpp"
+#include "Utils/Random.hpp"
 #include "Audio/AudioResponseService.h"
 #include "Particle/ParticleSystem.h"
 #include "Fs/PhysicalFs.h"

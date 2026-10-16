@@ -5,11 +5,12 @@
 #include "Scene/SceneNode.h"
 #include "ParticleModify.h"
 #include "Scene/SceneMesh.h"
-#include "Core/Random.hpp"
+#include "Utils/Random.hpp"
 
 #include "Utils/Logging.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 
 using namespace wallpaper;

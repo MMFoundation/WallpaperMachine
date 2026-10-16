@@ -617,6 +617,8 @@ cmake --build artifacts/renderer/bin --target scene_schema_tests
 artifacts/renderer/bin/tests/scene_schema_tests --gtest_filter='SceneSchema.*CameraZoom*'
 ```
 
+`scene_schema_tests` also compiles `tests/utils_known_answer_tests.cpp`, which pins the `Random` draws that `WE_TEST_RANDOM_SEED` replays, so replacing the implementation cannot change them silently.
+
 `tex_schema_tests` links `PkgConfig::TEST_LZ4` itself
 (`tests/CMakeLists.txt`), the way the video suites re-resolve FFmpeg: the
 renderer links LZ4 `PRIVATE`, so the include directory does not propagate to a

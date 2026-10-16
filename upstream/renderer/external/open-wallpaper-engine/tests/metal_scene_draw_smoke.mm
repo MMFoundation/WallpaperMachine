@@ -23,7 +23,7 @@
 
 #include "Audio/AudioResponseService.h"
 #include "Audio/SoundManager.h"
-#include "Core/Random.hpp"
+#include "Utils/Random.hpp"
 #include "Fs/PhysicalFs.h"
 #include "Fs/VFS.h"
 #include "Particle/ParticleSystem.h"

@@ -1,6 +1,6 @@
 #include "Runtime/CameraPath.hpp"
 #include "Runtime/SceneSettingResolver.hpp"
-#include "Core/Random.hpp"
+#include "Utils/Random.hpp"
 #include "Scene/SceneCamera.h"
 #include "Scene/SceneNode.h"
 #include "Utils/Logging.h"
