@@ -335,6 +335,24 @@ TEST(LayerTextureReference, SelfBInItsOwnEffectsIsNotAReference) {
     EXPECT_TRUE(ClassifyLayerTextureReferences(refs, index).empty());
 }
 
+TEST(LayerTextureReference, ALayersOwnCompositeOutsideItsEffectsIsNotARefusal) {
+    // Its own `_a` or `_b` outside its effects is the composite as the frame before left it,
+    // which the render graph keeps for it; neither slot is a reason to refuse a scene,
+    // and neither is a reference to another layer.
+    for (const char* slot : { "a", "b" }) {
+        SCOPED_TRACE(slot);
+        const auto objects = nlohmann::json::parse(
+            R"([{"id":7,"name":"self","image":"image.json","textures":["_rt_imageLayerComposite_7_)" +
+            std::string(slot) + R"("]}])");
+        const auto index = BuildLayerObjectIndex(objects);
+        const auto refs  = CollectLayerTextureRefs(objects, index, nullptr);
+        ASSERT_EQ(refs.size(), 1u);
+        EXPECT_EQ(refs.front().consumer_id, 7);
+        EXPECT_EQ(refs.front().source_id, 7);
+        EXPECT_TRUE(ClassifyLayerTextureReferences(refs, index).empty());
+    }
+}
+
 TEST(LayerTextureReference, FileNameIsNotALayerEvenWhenNamesMatch) {
     fs::VFS vfs;
     MountFiles(vfs);

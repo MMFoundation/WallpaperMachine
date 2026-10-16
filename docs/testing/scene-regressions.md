@@ -1234,7 +1234,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   targets and a render pass per hidden first-use clear every frame.
 - **Layer as texture** — `layer_texture_reference_test` (CPU, in the gate):
   `_rt_imageLayerComposite_<id>[_a|_b]` forward refs, duplicate names, missing
-  targets, cycles, history `_b`, file names vs layer names, invisible sources
+  targets, cycles, a layer's own composite outside its effects, file names vs layer names, invisible sources
   kept, producer-before-consumer graph order, and an effect-chain source linking
   from its composite rather than `_rt_default`.
   - A composite is the source layer's card in its own texture space, whatever
@@ -1303,8 +1303,20 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     Taken as history, the name made native Metal refuse the scene, and an
     effect naming `_b` in its first slot without a `bind` (a wave after an
     audio-bar effect) logged `slot 0 (_rt_link_<id>) has no image` on the
-    compatibility renderer. A self `_b` outside the layer's effects still
-    refuses the scene.
+    compatibility renderer.
+  - A layer's own `_a` or `_b` outside its effects is its composite as the frame
+    before left it. The shared graph copies each composite into the layer's
+    `_rt_link_<id>` after the layer draws, so a read of it ahead of that copy is
+    history, and `sceneToRenderGraph` declares the link as a target that carries
+    its previous frame, shaped like the composite it is copied from. Without the
+    declaration the compatibility renderer had no image for the link on its first
+    draw (the `slot 0 (_rt_link_<id>) has no image` line above) and drew the layer
+    from nothing every frame, while native Metal kept the picture, so the two
+    differed; with it they are byte-identical after 1 and 4 frames
+    (`MetalSceneDraw.ALayerReadingItsOwnCompositeSeesTheFrameBeforeOnBothRenderers`,
+    with the material naming `_a` or `_b` and with the layer's object also naming
+    `_b`, which no parser reads). Native Metal no longer refuses a scene for such a
+    name (`ALayersOwnCompositeOutsideItsEffectsIsNotARefusal`).
   - Older editors also list the layer in its own `dependencies`, once for each
     self name its effects bind. A dependency names no slot, so it cannot ask
     for the last frame, and a layer waits on nothing of its own; whatever it

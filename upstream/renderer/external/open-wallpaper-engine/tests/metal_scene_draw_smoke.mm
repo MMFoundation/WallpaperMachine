@@ -10869,6 +10869,118 @@ TEST_F(MetalSceneDraw, ALayersOwnEffectReadsItsBufferBAsTheImageItWorksOn)
     }
 }
 
+namespace
+{
+
+/// One card whose own material reads `material_texture`, the layer's own composite: last
+/// frame's picture of the card. Each frame it draws the red it read plus a twentieth, so
+/// frame n shows n twentieths of red, with green and blue at a half and a quarter.
+/// `object_texture`, when given, is also named in the layer's object, outside its effects.
+std::filesystem::path WriteSelfHistoryFixture(const std::filesystem::path& root,
+                                              std::string_view             material_texture,
+                                              std::string_view             object_texture = {})
+{
+    const auto project = WriteFixture(root);
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\n"
+        "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+        "varying vec2 v_TexCoord;\n"
+        "void main(){ gl_Position=g_ModelViewProjectionMatrix*vec4(a_Position,1.0);"
+        "v_TexCoord=a_TexCoord; }\n";
+    const std::map<std::string, std::string> files {
+        { "models/card.json", R"({"width":128,"height":64,"material":"materials/card.json"})" },
+        { "materials/card.json",
+          R"({"passes":[{"shader":"self_accumulate","blending":"normal","cullmode":"nocull",)"
+          R"("depthtest":"disabled","depthwrite":"disabled","textures":[")" + std::string(material_texture) + R"("]}]})" },
+        { "shaders/self_accumulate.vert", vertex },
+        { "shaders/self_accumulate.frag",
+          "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+          "void main(){ vec4 before=texture(g_Texture0,v_TexCoord);"
+          "gl_FragColor=vec4(min(before.r+0.05,1.0),0.5,0.25,1.0); }\n" },
+        { "layout.json",
+          R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+          R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+          R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+          R"("objects":[{"id":1,"name":"card","image":"models/card.json","origin":[192,128,0],)"
+          + (object_texture.empty() ? std::string()
+                                    : R"("textures":[")" + std::string(object_texture) + R"("],)") +
+          R"("scale":[1,1,1]}]})" },
+    };
+    for (const auto& [name, contents] : files) {
+        const auto path = root / name;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << contents;
+    }
+    return project;
+}
+
+} // namespace
+
+// A layer whose own material samples its `_a` or `_b` composite reads the picture the layer
+// drew the frame before. The graph both renderers share copies each composite into the
+// layer's link after the layer draws, so the link read ahead of that copy is history: the
+// compatibility backend had no image for it on its first draw and drew the layer from
+// nothing every frame, while the native one kept the picture. The layer's link is now
+// declared as a target that carries its previous frame, and the two draw the same thing.
+// The native backend also refused the whole scene when the layout merely named the
+// layer's own `_b` outside its effects, which the parser reads as nothing.
+TEST_F(MetalSceneDraw, ALayerReadingItsOwnCompositeSeesTheFrameBeforeOnBothRenderers)
+{
+    struct Variant
+    {
+        const char* name;
+        const char* material;
+        /// A name in the object itself, which no parser reads: it only used to refuse the scene.
+        const char* object;
+    };
+    for (const Variant v : { Variant { "material-b", "_rt_imageLayerComposite_1_b", "" },
+                             Variant { "material-a", "_rt_imageLayerComposite_1_a", "" },
+                             Variant { "named-b-in-the-object", "_rt_imageLayerComposite_1_a",
+                                       "_rt_imageLayerComposite_1_b" } }) {
+        SCOPED_TRACE(v.name);
+        std::map<int, std::map<bool, RendererPicture>> pictures;
+        for (const int frames : { 1, 4 }) {
+            for (const bool native : { false, true }) {
+                const std::string name = std::string("self-history-") + v.name + "-" +
+                                         std::to_string(frames) + (native ? "-native" : "-compat");
+                const auto  project = WriteSelfHistoryFixture(root_ / name, v.material, v.object);
+                LoadedScene loaded;
+                std::string error;
+                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+                EXPECT_TRUE(loaded.scene->layer_texture_error.empty())
+                    << loaded.scene->layer_texture_error;
+                if (native) {
+                    const auto selection = SelectSceneBackend(*loaded.scene);
+                    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal)
+                        << selection.fallback_reason;
+                }
+                auto& picture = pictures[frames][native] =
+                    DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+                ASSERT_TRUE(picture.error.empty()) << picture.error;
+                ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            }
+            EXPECT_EQ(pictures[frames][true].rgb, pictures[frames][false].rgb)
+                << "the renderers draw a layer's own previous composite differently after "
+                << frames << " frames";
+        }
+        const auto red = [&](int frames, bool native) {
+            return int(pictures[frames][native].rgb[(128 * 384 + 192) * 3]);
+        };
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            // A twentieth of red on top of what the layer read, every frame: three more
+            // frames show three twentieths more, and a layer that read nothing would show
+            // the same red after four as after one.
+            EXPECT_GT(red(1, native), 0);
+            EXPECT_GE(red(4, native), red(1, native) + 3 * 255 * 0.05 - 8)
+                << "the layer did not see the frame before";
+            const auto* centre = pictures[4][native].rgb.data() + (128 * 384 + 192) * 3;
+            EXPECT_NEAR(centre[1], 128, 3);
+            EXPECT_NEAR(centre[2], 64, 3);
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, TextThatHasNotChangedIsNeitherLaidOutNorUploadedAgain)
 {
     // The round's optimisation, stated as what must NOT happen: the scripts and
@@ -13179,6 +13291,16 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             ASSERT_TRUE(render.init(info)) << render.lastError();
             auto graph = sceneToRenderGraph(*loaded.scene);
             ASSERT_NE(graph, nullptr);
+            // Layers that read a composite before the frame has made it: a nonzero count is a
+            // scene whose picture depends on the frame before.
+            std::size_t link_history = 0;
+            for (const auto& [name, target] : loaded.scene->renderTargets) {
+                if (target.carriesPreviousFrame && IsSpecLinkTex(name)) ++link_history;
+            }
+            if (link_history != 0) {
+                std::cout << "[ LOCAL    ] " << paths.scene_id << ": " << link_history
+                          << " layer link texture(s) read before the frame fills them" << std::endl;
+            }
             if (! render.compileRenderGraph(*loaded.scene, *graph)) {
                 // The production router treats this as a fallback too, with
                 // this text as the reason.

@@ -44,14 +44,13 @@ Native Metal draws image layers, text layers, sprite-sheet animation,
 two-dimensional puppets, two-dimensional sprite, sprite-trail, rope and rope-trail
 particles, 3D models and skyboxes, perspective cameras, scene lights, ordinary
 effect chains and scene post-processing, layers that read an image another layer
-produced in the same frame, effects that read the previous frame (a motion-blur
-trail, a fluid or ripple simulation), images the runtime replaces while the scene
+produced in the same frame, effects and layers that read the previous frame (a motion-blur
+trail, a fluid or ripple simulation, a layer sampling its own last composite), images the runtime replaces while the scene
 plays, and BGRA or 8-bit NV12 video textures — the latter either converted once per
 frame or, with
 [**Direct video plane sampling**](performance.md#direct-video-plane-sampling) on,
 sampled by the layer's own shader. A scene falls back as a whole for HDR or 10-bit
-video, a plain video wallpaper, a shader that does not translate, or a layer that
-reads its own previous frame (its `_b` composite, bound anywhere but its own effects).
+video, a plain video wallpaper, or a shader that does not translate.
 A scene with `camerashake` on shakes its camera as Wallpaper Engine does: the eye and
 what it looks at move together by `(cos t, sin 1.333t, sin t)` at
 `t = camerashakespeed² × time`, its length raised to `camerashakeroughness³`, scaled

@@ -721,9 +721,31 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
     // done with it, and that target's pixels are what the next frame reads --
     // a motion blur trail then shows whatever else was drawn at that size. The
     // scene output is exempt: the frame's prepass clears it before any reader.
+    //
+    // A layer's link texture is the one such target no pass has declared yet: the
+    // copy that fills it gives it the shape of the layer's composite when it runs.
+    // A layer that samples its own composite (or one drawn after it) reads the link
+    // before that copy, so it is declared here, from the copy's source, to be kept
+    // across frames like any other history target; without that, the backend that
+    // makes it on the copy has no image to read on the first draw.
+    const auto declare_link_history = [&scene, &rgraph](const std::string& key) {
+        if (! IsSpecLinkTex(key)) return;
+        for (const auto node_id : rgraph->topologicalOrder()) {
+            const auto* copy = dynamic_cast<vulkan::CopyPass*>(rgraph->getPass(node_id));
+            if (copy == nullptr || scene.ResolveRenderTargetName(copy->desc().dst) != key) continue;
+            const auto* source =
+                scene.FindRenderTarget(scene.ResolveRenderTargetName(copy->desc().src));
+            if (source == nullptr) return;
+            auto history       = *source;
+            history.allowReuse = false;
+            scene.renderTargets[key] = std::move(history);
+            return;
+        }
+    };
     for (const auto& key : rgraph->getCarriedOverKeys(rgraph->topologicalOrder())) {
         if (scene.ResolveRenderTargetName(key) == scene.ResolveRenderTargetName(SpecTex_Default))
             continue;
+        if (scene.FindRenderTarget(key) == nullptr) declare_link_history(key);
         auto* target = scene.FindRenderTarget(key);
         if (target == nullptr) continue;
         target->carriesPreviousFrame = true;
