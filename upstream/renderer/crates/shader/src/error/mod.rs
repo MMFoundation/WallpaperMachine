@@ -115,9 +115,9 @@ impl ShaderError {
         }
     }
 
-    /// Renders diagnostic-bearing errors with `miette`.
+    /// Renders diagnostic-bearing errors as plain text.
     #[must_use]
-    pub fn to_miette_report(&self) -> String {
+    pub fn render_report(&self) -> String {
         let diagnostics = match self {
             Self::Parse { diagnostics }
             | Self::Codegen { diagnostics }
@@ -137,7 +137,7 @@ impl ShaderError {
 
         diagnostics
             .iter()
-            .map(|diagnostic| diagnostic.to_miette_report(None))
+            .map(|diagnostic| diagnostic.render_report(None))
             .collect::<Vec<_>>()
             .join("\n")
     }

@@ -1,6 +1,6 @@
 //! Shader diagnostic records.
 
-use super::{SourceSpan, report::MietteReport};
+use super::{SourceSpan, report::{Report, ReportLabel, ReportSource}};
 use crate::model::ShaderStageKind;
 
 /// Diagnostic information produced while handling a shader.
@@ -101,23 +101,25 @@ impl ShaderDiagnostic {
         self.generated_source_path.as_deref()
     }
 
-    /// Renders this diagnostic with `miette` using optional source text.
+    /// Renders this diagnostic as plain text using optional source text.
     #[must_use]
-    pub fn to_miette_report(&self, source: Option<&str>) -> String {
-        let source = self.generated_source.as_deref().or(source).map(|source| {
-            miette::NamedSource::new(
-                self.generated_source_path()
-                    .unwrap_or("generated/shader.glsl"),
-                source.to_owned(),
-            )
-            .with_language("glsl")
+    pub fn render_report(&self, source: Option<&str>) -> String {
+        let source = self.generated_source.as_deref().or(source).map(|text| ReportSource {
+            name: self
+                .generated_source_path()
+                .unwrap_or("generated/shader.glsl")
+                .to_owned(),
+            text: text.to_owned(),
         });
-        let label = self.span().map(|span| {
-            miette::LabeledSpan::new_primary_with_span(
-                self.pass().map(ToOwned::to_owned),
-                (span.start(), span.end().saturating_sub(span.start())),
-            )
-        });
+        let labels = self
+            .span()
+            .map(|span| ReportLabel {
+                start: span.start(),
+                len: span.end().saturating_sub(span.start()),
+                text: self.pass().map(ToOwned::to_owned),
+            })
+            .into_iter()
+            .collect();
         let help_parts = [
             self.stage().map(|stage| format!("stage: {stage:?}")),
             self.pass().map(|pass| format!("pass: {pass}")),
@@ -130,11 +132,11 @@ impl ShaderDiagnostic {
             .collect::<Vec<_>>()
             .join(", ");
 
-        MietteReport {
+        Report {
             message: self.message().to_owned(),
             help: (!help.is_empty()).then_some(help),
             source,
-            label,
+            labels,
         }
         .render()
     }

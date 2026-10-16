@@ -1398,7 +1398,7 @@ fn compile_for_both_targets(legalized: &CodegenStageSource, expectation: &str) {
         {
             panic!(
                 "{expectation} ({target:?}): {}\n{}",
-                error.to_miette_report(),
+                error.render_report(),
                 legalized.source()
             );
         }

@@ -240,7 +240,7 @@ fn compile_metal(stage: ShaderStageKind, source: &str) -> MetalStageCode {
         .unwrap_or_else(|error| {
             panic!(
                 "{stage:?} shader should compile to MSL: {}",
-                error.to_miette_report()
+                error.render_report()
             )
         });
     metal(&artifact).clone()
@@ -386,7 +386,7 @@ fn matrix_inverse_of_every_square_size_compiles_to_metal_and_stays_native_in_spi
         .unwrap_or_else(|error| {
             panic!(
                 "a stage that inverts matrices must translate to MSL: {}\n{}",
-                error.to_miette_report(),
+                error.render_report(),
                 legalized.source()
             )
         });
@@ -505,7 +505,7 @@ fn a_stage_declaring_its_own_matrix_inverse_compiles_on_both_targets_and_calls_i
     let metal_artifact = NagaCompiler
         .compile_stage(ShaderTarget::MetalMsl, ShaderStageKind::Vertex, &legalized)
         .unwrap_or_else(|error| {
-            panic!("the stage must translate to MSL: {}\n{}", error.to_miette_report(), legalized.source())
+            panic!("the stage must translate to MSL: {}\n{}", error.render_report(), legalized.source())
         });
     assert!(
         !legalized.source().contains("_we_Inverse"),
@@ -549,7 +549,7 @@ fn a_redeclared_vertex_and_instance_index_reach_metal_as_builtins_not_attributes
         .unwrap_or_else(|error| {
             panic!(
                 "the stage must translate to MSL: {}\n{}",
-                error.to_miette_report(),
+                error.render_report(),
                 legalized.source()
             )
         });

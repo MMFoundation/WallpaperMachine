@@ -110,7 +110,7 @@ pub unsafe extern "C" fn rs_shader_compile_program(
             RS_SHADER_OK
         }
         Ok(Err(error)) => {
-            set_last_error(error.to_miette_report());
+            set_last_error(error.render_report());
             RS_SHADER_ERR
         }
         Err(_) => {

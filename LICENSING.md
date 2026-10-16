@@ -230,11 +230,9 @@ see [Rust crates](#rust-crates) for how.
 | shaderc | Homebrew `shaderc`, in `build_environment()` | Apache-2.0 | Not present in the app's dynamic link closure; its role is limited to the build environment list and is to be confirmed |
 | **codespan-reporting** 0.13.1 | Rust crate, a required dependency of naga 29, which the `shader` crate uses for every shader | Apache-2.0 | **Incompatible with GPLv2** |
 | **spirv** 0.4.0 | Rust crate, from naga's `spv-out` feature (the Compatibility path's SPIR-V output) | Apache-2.0 | **Incompatible with GPLv2** |
-| **miette** 7.6.0, **supports-color** 3.0.2, **supports-hyperlinks** 3.2.0, **supports-unicode** 3.0.0 | Rust crates, from the `shader` crate's `miette` dependency with the `fancy` feature | Apache-2.0 | **Incompatible with GPLv2** |
-| **unicode-linebreak** 0.1.5 | Rust crate, from textwrap's `unicode-linebreak` feature, which miette's `fancy` turns on | Apache-2.0 | **Incompatible with GPLv2** |
 | uniffi 0.28.3 (`uniffi`, `uniffi_core`, `uniffi_bindgen`, `uniffi_meta`, `uniffi_udl`, `uniffi_testing`), option-ext 0.2.0 | Rust crates: the Swift bridge, and `dirs` | MPL-2.0 | Compatible through MPL-2.0 section 3.3, which names GPL-2.0 as a Secondary License; none of their source files carries the "Incompatible With Secondary Licenses" notice |
 | ffmpeg-next, ffmpeg-sys-next 8.1.0 | Rust crates, the FFmpeg bindings in `wallpaper-core` | WTFPL | Compatible |
-| The other 155 linked Rust crates | `upstream/renderer/Cargo.lock` | 150 offer MIT, alone or as a choice; the rest are Zlib (foldhash), ISC (is_ci), BSD-3-Clause (pp-rs) or BSD-3-Clause OR Apache-2.0 (moxcms, pxfm) | Compatible under the MIT, Zlib, ISC or BSD-3-Clause terms |
+| The other 145 linked Rust crates | `upstream/renderer/Cargo.lock` | 141 offer MIT, alone or as a choice; the rest are Zlib (foldhash), BSD-3-Clause (pp-rs) or BSD-3-Clause OR Apache-2.0 (moxcms, pxfm) | Compatible under the MIT, Zlib or BSD-3-Clause terms |
 | Valve SteamCMD | installed at runtime into the app's support directory, never bundled | Valve's terms | Outside the GPL entirely; see [Rights outside software licenses](#rights-outside-software-licenses) |
 
 "Compatible" in this table means compatible with GPLv2 according to the FSF's
@@ -247,7 +245,7 @@ Checked 2026-10-17 against `upstream/renderer/Cargo.lock` with `cargo tree
 --offline --workspace -e normal,no-proc-macro --target aarch64-apple-darwin`.
 That resolves features the way `scripts/build.py`'s `cargo build --workspace
 --release` does. Each crate's license is the one its manifest declares; no
-crate was reviewed file by file. The result is 171 third-party crates, all
+crate was reviewed file by file. The result is 156 third-party crates, all
 compiled into `libwallpaper_bridge.a`, which the app links
 (`-lwallpaper_bridge` in `project.yml`).
 
@@ -259,12 +257,9 @@ renderers described in [docs/features/scene-rendering.md](docs/features/scene-re
 |---|---|---|
 | codespan-reporting | naga 29, as a dependency naga cannot be built without | Every shader compile, for Native Metal (MSL) and for Compatibility (SPIR-V) |
 | spirv | naga's `spv-out` feature, enabled in `upstream/renderer/crates/shader/Cargo.toml` | Only Compatibility's SPIR-V output (`ShaderTarget::VulkanSpirv`) |
-| miette, supports-color, supports-hyperlinks, supports-unicode | `miette = { features = ["fancy"] }` in `upstream/renderer/crates/shader/Cargo.toml`; the shader crate formats its diagnostics with miette's `GraphicalReportHandler` | Both paths' shader error reports. The three `supports-*` crates come from the `fancy` feature, not from miette's core |
-| unicode-linebreak | textwrap 0.16's `unicode-linebreak` feature, which miette's `fancy` turns on (uniffi also uses textwrap, without that feature) | Both paths, through miette |
 
-A Release executable built 2026-10-16 contains code from codespan-reporting,
-spirv, miette, the three `supports-*` crates and unicode-linebreak (by their
-names in its symbol table). That describes one build and clears nothing; the
+A Release executable built 2026-10-16 contains code from codespan-reporting
+and spirv, among others (by their names in its symbol table). That describes one build and clears nothing; the
 crates stay in the dependency closure and are counted as blockers until they
 are removed or reviewed.
 
@@ -273,7 +268,7 @@ because the package's `uniffi-bindgen` binary needs it. As a result
 `uniffi_bindgen` (MPL-2.0) is compiled into the app executable as well.
 
 Not covered: build-dependencies and proc-macros, which run inside the compiler
-and are not linked (among them `miette-derive`, Apache-2.0); and the contents
+and are not linked; and the contents
 of each crate beyond its declared license.
 
 ## FFmpeg
@@ -326,16 +321,14 @@ or compiled into, the same process as the GPL-2.0-only renderer:
 - `libSPIRV-Tools` / `libSPIRV-Tools-opt`, loaded by glslang's `libSPIRV`;
 - the Apache-2.0 portion of glslang proper;
 - `spirv_reflect`, vendored and statically linked into the scene engine;
-- the Rust crates `codespan-reporting`, `spirv`, `miette`, `supports-color`,
-  `supports-hyperlinks`, `supports-unicode` and `unicode-linebreak`
-  (Apache-2.0), all compiled into `libwallpaper_bridge.a`
+- the Rust crates `codespan-reporting` and `spirv` (Apache-2.0), both compiled
+  into `libwallpaper_bridge.a`
   ([Rust crates](#rust-crates)).
 
 Retiring the Compatibility (Vulkan) path does not clear the Rust crates on its
 own. `spirv` leaves only if naga's `spv-out` feature is dropped as well.
 `codespan-reporting` stays, because naga requires it for every shader,
-Native Metal's included. The `miette` group serves
-neither renderer path and stays until the shader crate stops using it.
+Native Metal's included.
 
 Until each of these is resolved, no binary of this program may be distributed,
 sold or given away. Resolution means one of:

@@ -293,7 +293,7 @@ fn compile_fragment(
         Ok(artifact) => artifact,
         Err(error) => panic!(
             "{target:?}: {}\n{}",
-            error.to_miette_report(),
+            error.render_report(),
             legalized.source()
         ),
     }
