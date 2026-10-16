@@ -22,7 +22,8 @@ Which renderer scene wallpapers prefer. **Native Metal preferred**, the default,
 asks for the native Metal backend; a scene it cannot draw runs on Compatibility as a
 whole (an effect is never dropped to keep a scene native) and the status line says
 why. **Compatibility** is the Vulkan-through-MoltenVK path for every scene.
-Lock-screen playback always uses Compatibility.
+The lock screen and the screen saver follow the setting too (see [lock
+screen](lock-screen.md#scene-renderer)).
 
 Native Metal became the default once it drew every scene of the local test library
 the way Compatibility does (drawn by both renderers in one harness, the pictures

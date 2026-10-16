@@ -182,7 +182,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if let store {
             workshopStore.startDownloadLifecycle(bridge: store)
             let lockScreen = LockScreenConfiguration.isSupportedBySystem
-                ? LockScreenWallpaperService(bridge: store.bridge, contentRevision: { [weak store] in store?.wallpaperContentRevision ?? 0 }) : nil
+                ? LockScreenWallpaperService(
+                    bridge: store.bridge, contentRevision: { [weak store] in store?.wallpaperContentRevision ?? 0 },
+                    sceneRendererSetting: { [weak store] in store?.settingsSnapshot.sceneRenderer }) : nil
             if let lockScreen {
                 store.lockScreenWallpaper = lockScreen
                 lockScreen.beforeActivation = { [weak self] in

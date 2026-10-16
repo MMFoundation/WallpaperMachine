@@ -1531,6 +1531,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     let web = try await publishedScene(type: "web", framing: position)
     XCTAssertEqual(web.webEntryFile, "index.html")
     XCTAssertNil(web.framing, "a web page fills its window, so it carries no position")
+    XCTAssertNil(web.sceneRenderer, "a web page has no scene renderer")
   }
 
   /// Moving a wallpaper on its display has to reach the extension. It publishes a new
@@ -2191,5 +2192,51 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     global["Type"] = "linked"
     root["AllSpacesAndDisplays"] = global
     try write(root)
+  }
+
+  /// The Scene renderer setting has to reach the extension: the lock screen follows the
+  /// app. A change republishes, a refresh that changes nothing does not, and a web page
+  /// carries no renderer.
+  @MainActor
+  func testTheSceneRendererSettingIsPublishedAndAChangeRepublishes() async throws {
+    var record = scene()
+    record.displayId = 1
+    var setting: String? = nil
+    var publications = 0
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in "one" },
+      persistConfiguration: { url, bytes in
+        try bytes.write(to: url, options: .atomic)
+        publications += 1
+      },
+      sceneRendererSetting: { setting })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try service.start()
+    service.setEnabled(true)
+    await waitFor("first publication") { service.isEnabled && !service.isBusy }
+    let first = try publishedConfiguration()
+    XCTAssertEqual(first.scenes.first?.sceneRenderer, .default, "no setting is the app default")
+    let count = publications
+
+    service.refresh()
+    await waitFor("unchanged refresh") { !service.isBusy }
+    XCTAssertEqual(publications, count, "the same renderer publishes nothing")
+
+    setting = "compatibility"
+    service.refresh()
+    await waitFor("changed publication") {
+      publications > count && service.isEnabled && !service.isBusy
+    }
+    let changed = try publishedConfiguration()
+    XCTAssertNotEqual(changed.revision, first.revision, "the extension reloads on a new revision")
+    XCTAssertEqual(changed.scenes.first?.sceneRenderer, .compatibility)
+    XCTAssertEqual(changed.scenes.first?.projectPath, first.scenes.first?.projectPath)
+    XCTAssertFalse(
+      try XCTUnwrap(first.scenes.first).sharesRenderer(with: try XCTUnwrap(changed.scenes.first)),
+      "the extension replaces its renderer to change the backend")
+    try await service.shutdown()
   }
 }

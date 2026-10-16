@@ -652,9 +652,11 @@ contracts they must agree on:
   `LockScreenConfiguration.changedNotification`. The extension reloads and writes
   `LockScreenReadiness` back once a GPU-ready non-preview surface exists, or with the error when
   acquiring or replacing that surface's renderer failed. A scene field added later is optional
-  (for example `framing`, the picture's position), so the version stays and an extension copy that
-  predates it ignores the key; `LockScreenScene.sharesRenderer(with:)` names which differences
-  make the extension replace a renderer rather than update it.
+  (for example `framing`, the picture's position, or `sceneRenderer`, the app's Scene renderer
+  setting, which the extension applies once per configuration load before any surface starts), so
+  the version stays and an extension copy that predates it ignores the key;
+  `LockScreenScene.sharesRenderer(with:)` names which differences make the extension replace a
+  renderer rather than update it.
 - `LockScreenExtensionStatus` is a separate diagnostic exchange (`activation-request.json`,
   `extension-status.json`) that reports a configuration error even when the scene schema cannot
   be decoded; configuration success never substitutes for a rendered-frame acknowledgement. See

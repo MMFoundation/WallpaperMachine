@@ -74,7 +74,7 @@ struct PerformanceSettingsSection: View {
   static let sceneRenderer = SettingsItem(
     id: "performance.scene-renderer", section: .performance, group: scene, inside: advanced,
     title: "Scene renderer",
-    note: "Unsupported scenes use Compatibility. Lock screen playback always uses Compatibility.",
+    note: "Unsupported scenes use Compatibility. The lock screen and screen saver follow this setting too.",
     keywords: ["Compatibility", "Native Metal preferred"])
   static let sceneOptimization = SettingsItem(
     id: "performance.scene-optimization", section: .performance, group: scene, inside: advanced,
@@ -264,7 +264,7 @@ struct PerformanceSettingsSection: View {
       SettingsDisclosure(Self.sceneCompatibility) {
         SettingsProse {
           Text(
-            "Native Metal draws a scene only if it supports everything in it: image layers, sprite-sheet animation, 2D puppets with their own skinning shader, 2D sprite, sprite-trail, rope and rope-trail particles, 3D models, perspective cameras, scene lights, standard effect chains and post-processing, effects that read the previous frame, layer links, and BGRA or 8-bit NV12 video textures. Scenes with anything else, such as lit particles or HDR video, use Compatibility. This applies to desktop wallpapers only; the lock screen always uses Compatibility."
+            "Native Metal draws a scene only if it supports everything in it: image layers, sprite-sheet animation, 2D puppets with their own skinning shader, 2D sprite, sprite-trail, rope and rope-trail particles, 3D models, perspective cameras, scene lights, standard effect chains and post-processing, effects that read the previous frame, layer links, and BGRA or 8-bit NV12 video textures. Scenes with anything else, such as lit particles or HDR video, use Compatibility. This applies to the lock screen and screen saver too."
           )
         }
       }

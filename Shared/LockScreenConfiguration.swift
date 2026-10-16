@@ -56,18 +56,62 @@ struct LockScreenScene: Codable, Equatable {
   /// configuration an older app wrote and for a web page, which fills its window; both
   /// read as centred, and a copy of the extension that predates the key ignores it.
   var framing: LockScreenFraming? = nil
+  /// The app's Scene renderer setting for this scene. Absent from a configuration an
+  /// older app wrote and for a web page, which has no scene renderer; absent reads as
+  /// `LockScreenSceneRenderer.default`, the app's own default, and a copy of the
+  /// extension that predates the key ignores it.
+  var sceneRenderer: LockScreenSceneRenderer? = nil
 
   var effectiveFraming: LockScreenFraming { framing ?? .centered }
+  var effectiveSceneRenderer: LockScreenSceneRenderer { sceneRenderer ?? .default }
 
   /// Whether a surface already showing `other` can take this scene without a new
   /// renderer. Frame rate, title and pause apply to the running renderer, and the
   /// preview path is not read by it. The scaling and the position are, like the
   /// project, only read when the renderer is built, so a change of either replaces it.
+  /// So is the scene renderer: the engine picks its backend once, when the scene is parsed.
   func sharesRenderer(with other: LockScreenScene) -> Bool {
     projectPath == other.projectPath && assetsPath == other.assetsPath
       && webEntryFile == other.webEntryFile && propertiesJSON == other.propertiesJSON
       && scalingMode == other.scalingMode && scalingFactor == other.scalingFactor
       && effectiveFraming == other.effectiveFraming
+      && effectiveSceneRenderer == other.effectiveSceneRenderer
+  }
+}
+
+/// Which renderer draws a scene, by the names the app's Scene renderer setting and the
+/// engine use. A preference, not an outcome: a scene the native backend cannot draw as a
+/// whole is drawn by Compatibility, and the extension logs which one drew.
+enum LockScreenSceneRenderer: String, Codable, Equatable {
+  case compatibility
+  case nativeMetalPreferred = "native_metal_preferred"
+
+  /// What the app's setting defaults to, and so what a configuration without the key means.
+  static let `default` = LockScreenSceneRenderer.nativeMetalPreferred
+
+  /// The value of `owe_scene_renderer_preference`.
+  var enginePreference: Int32 {
+    switch self {
+    case .compatibility: 0
+    case .nativeMetalPreferred: 1
+    }
+  }
+
+  /// A name this build does not know, written by a newer app, reads as the default
+  /// rather than making the whole configuration unreadable: the default is itself only
+  /// a preference, so the worst outcome is Compatibility for a scene Metal cannot draw.
+  init(from decoder: Decoder) throws {
+    let name = try decoder.singleValueContainer().decode(String.self)
+    self = Self(rawValue: name) ?? .default
+  }
+}
+
+extension LockScreenConfiguration {
+  /// The renderer every scene of this configuration shares: the engine's preference is
+  /// process-wide, and the app writes one value for all of them. A configuration without
+  /// scenes has none.
+  var sceneRenderer: LockScreenSceneRenderer? {
+    scenes.first(where: { $0.webEntryFile == nil })?.effectiveSceneRenderer
   }
 }
 

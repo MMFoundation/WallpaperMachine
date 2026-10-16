@@ -202,12 +202,35 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     deadline?.cancel()
     deadline = nil
     presentingSince = ContinuousClock.now
+    logBackend()
     counters.record(.readinessFrameRendered, for: surfaceKey)
     applyPolicy()
     reply(nil)
     let waiters = readyWaiters
     readyWaiters.removeAll()
     waiters.forEach { $0(nil) }
+  }
+
+  /// Which backend drew the first frame, and why it is not the preferred one when it is not.
+  /// The backend is only known once the scene is parsed, which the first frame proves.
+  private func logBackend() {
+    guard let renderer else { return }
+    let scene = UnsafeMutableRawPointer(renderer)
+    let backend: String
+    switch owe_scene_wallpaper_backend(scene) {
+    case Int32(OWE_SCENE_BACKEND_NATIVE_METAL.rawValue): backend = "native Metal"
+    case Int32(OWE_SCENE_BACKEND_LEGACY_VULKAN.rawValue): backend = "Compatibility"
+    default: backend = "unknown"
+    }
+    var reason = ""
+    let needed = owe_scene_wallpaper_backend_fallback_reason(scene, nil, 0)
+    if needed > 0 {
+      var buffer = [CChar](repeating: 0, count: needed + 1)
+      _ = owe_scene_wallpaper_backend_fallback_reason(scene, &buffer, buffer.count)
+      reason = " fallback=" + String(cString: buffer)
+    }
+    WallpaperRuntime.log(
+      "Backend display=\(self.scene.displayID) preferred=\(self.scene.effectiveSceneRenderer.rawValue) drew=\(backend)\(reason)")
   }
 
   private func startWeb(project: URL, entry: String, completion: @escaping (Error?) -> Void) throws {

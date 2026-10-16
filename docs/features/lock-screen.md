@@ -73,6 +73,25 @@ A position outside 0 to 1 is refused with the usual invalid-playback-configurati
 error rather than drawn somewhere else. Web wallpapers fill their page and carry no
 position, and a display that mirrors another is published centred, as on the desktop.
 
+### Scene renderer
+
+The extension draws scenes with the renderer the app's **Scene renderer** setting names
+(see [scene rendering](scene-rendering.md#scene-renderer)): Native Metal preferred by
+default, so a scene the native renderer draws whole costs the lock screen what it costs the
+desktop, and Compatibility for a scene it cannot, or when the setting says so. The engine's
+preference is process-wide and its own default is Compatibility, so the extension sets it
+from the configuration, once per load and before any surface starts or is replaced. The
+app publishes the choice with each scene as an optional `sceneRenderer`
+(`compatibility` or `native_metal_preferred`); a file without it, such as one an older app
+wrote, reads as the app's default, a name this build does not know reads the same, and a
+copy of the extension that predates the key ignores it and keeps using Compatibility. The
+configuration version is unchanged. Web pages carry none. The engine picks its backend when
+a scene is parsed, so changing the setting publishes a new revision and replaces the
+renderer, like moving the picture. After the first frame the extension logs
+`Backend display=… preferred=… drew=native Metal|Compatibility`, with
+`fallback=<reason>` when the whole scene fell back, so a lock screen drawn by Compatibility
+can be told from one the setting asked for.
+
 ### Display changes
 
 Topology refreshes stage the next complete configuration before
@@ -373,6 +392,11 @@ In `extension.log`:
   names are recorded, never what they hold: no paths, titles, identifiers or sizes; dictionary
   keys and set members, which are data, are left out, and a name that is not a plain
   identifier shows as `?`. The line is capped in length.
+- `Scene renderer preference=native_metal_preferred`: the engine's process-wide preference
+  was changed to the app's setting (logged only when it changed), and, once per surface
+  after its first frame, `Backend display=... preferred=... drew=native Metal` (or
+  `Compatibility`, with ` fallback=<reason>` when the scene did not fit the native
+  renderer). It changes nothing.
 
 In the app log (the [diagnostics report](diagnostics.md#diagnostics-report) includes it):
 `Native lock screen: first frame acknowledged after 4.2 s (waited from selection reload)`
@@ -465,7 +489,8 @@ completing without an error in WallpaperAgent's log, what the timing, connection
 request-shape lines report after a real activation (see [What the logs
 record](#what-the-logs-record)) and a moved picture appearing at its position on the lock
 screen and as the screen saver (the extension logs `Framing display=… panX=… panY=…` each
-time it builds a renderer) still require an authorized desktop check.
+time it builds a renderer) and the extension drawing with Native Metal rather than
+Compatibility (the `Backend display=…` line) still require an authorized desktop check.
 
 ### After sleep, wake, lock and unlock
 

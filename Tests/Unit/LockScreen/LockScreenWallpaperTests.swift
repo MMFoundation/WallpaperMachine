@@ -1386,12 +1386,14 @@ final class LockScreenWallpaperTests: XCTestCase {
   // MARK: The scene the extension is handed
 
   private func publishedScene(
-    framing: LockScreenFraming? = nil, scalingMode: Int32 = 3
+    framing: LockScreenFraming? = nil, scalingMode: Int32 = 3,
+    sceneRenderer: LockScreenSceneRenderer? = nil
   ) -> LockScreenScene {
     LockScreenScene(
       displayID: 1, title: "t", projectPath: "revisions/a/project.json",
       assetsPath: "revisions/a", previewPath: nil, fps: 30, scalingMode: scalingMode,
-      scalingFactor: 1, propertiesJSON: nil, paused: false, framing: framing)
+      scalingFactor: 1, propertiesJSON: nil, paused: false, framing: framing,
+      sceneRenderer: sceneRenderer)
   }
 
   /// A configuration an app that predates the position wrote has no `framing` key.
@@ -1480,5 +1482,68 @@ final class LockScreenWallpaperTests: XCTestCase {
     ] {
       XCTAssertFalse(LockScreenFraming(panX: panX, panY: panY).isValid, "\(panX), \(panY)")
     }
+  }
+
+  // MARK: The scene renderer the extension draws with
+
+  func testTheSceneRendererTravelsInTheFileAndAnOlderFileKeepsTheOldShape() throws {
+    let encoder = JSONEncoder()
+    for renderer in [LockScreenSceneRenderer.compatibility, .nativeMetalPreferred] {
+      let scene = publishedScene(sceneRenderer: renderer)
+      let decoded = try JSONDecoder().decode(LockScreenScene.self, from: encoder.encode(scene))
+      XCTAssertEqual(decoded.sceneRenderer, renderer)
+      XCTAssertEqual(decoded, scene)
+    }
+    let plain = try XCTUnwrap(
+      try JSONSerialization.jsonObject(with: encoder.encode(publishedScene())) as? [String: Any])
+    XCTAssertNil(plain["sceneRenderer"], "a scene without the choice writes no key")
+
+    let json = """
+      {"version":2,"revision":"r","lockScreenEnabled":true,"screenSaverEnabled":false,\
+      "scenes":[{"displayID":1,"title":"t","projectPath":"revisions/a/project.json",\
+      "assetsPath":"revisions/a","fps":30,"scalingMode":3,"scalingFactor":1,"paused":false}]}
+      """
+    let configuration = try JSONDecoder().decode(LockScreenConfiguration.self, from: Data(json.utf8))
+    XCTAssertEqual(configuration.version, LockScreenConfiguration.supportedVersion)
+    XCTAssertNil(configuration.scenes.first?.sceneRenderer)
+    XCTAssertEqual(configuration.sceneRenderer, .nativeMetalPreferred)
+  }
+
+  /// An absent key is the app's own default, which is Native Metal preferred, so a file
+  /// without it and a file that names the default are the same renderer.
+  func testNoSceneRendererMeansTheAppDefaultAndNeedsNoNewRenderer() {
+    XCTAssertEqual(LockScreenSceneRenderer.default, .nativeMetalPreferred)
+    let unset = publishedScene()
+    let named = publishedScene(sceneRenderer: .default)
+    XCTAssertEqual(unset.effectiveSceneRenderer, .nativeMetalPreferred)
+    XCTAssertTrue(unset.sharesRenderer(with: named))
+    XCTAssertTrue(named.sharesRenderer(with: unset))
+    XCTAssertEqual(LockScreenSceneRenderer.compatibility.enginePreference, 0)
+    XCTAssertEqual(LockScreenSceneRenderer.nativeMetalPreferred.enginePreference, 1)
+  }
+
+  func testAChangedSceneRendererReplacesTheRenderer() {
+    let metal = publishedScene(sceneRenderer: .nativeMetalPreferred)
+    let compatibility = publishedScene(sceneRenderer: .compatibility)
+    XCTAssertFalse(metal.sharesRenderer(with: compatibility))
+    XCTAssertFalse(compatibility.sharesRenderer(with: metal))
+    XCTAssertFalse(
+      publishedScene().sharesRenderer(with: compatibility), "the default against Compatibility")
+  }
+
+  func testANameANewerAppWroteReadsAsTheDefaultInsteadOfBreakingTheFile() throws {
+    let json = Data(#"{"displayID":1,"title":"t","projectPath":"p","assetsPath":"a","fps":30,"scalingMode":3,"scalingFactor":1,"paused":false,"sceneRenderer":"somethingNew"}"#.utf8)
+    let scene = try JSONDecoder().decode(LockScreenScene.self, from: json)
+    XCTAssertEqual(scene.effectiveSceneRenderer, .default)
+  }
+
+  func testTheConfigurationRendererIsTheOneTheSceneWritersChose() {
+    var web = publishedScene()
+    web.webEntryFile = "index.html"
+    XCTAssertNil(LockScreenConfiguration(scenes: []).sceneRenderer)
+    XCTAssertNil(LockScreenConfiguration(scenes: [web]).sceneRenderer, "a web page has none")
+    XCTAssertEqual(
+      LockScreenConfiguration(scenes: [web, publishedScene(sceneRenderer: .compatibility)])
+        .sceneRenderer, .compatibility)
   }
 }
