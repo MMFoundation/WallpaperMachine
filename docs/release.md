@@ -160,10 +160,11 @@ source of the notes: write them for the reader
 
 The instructions also carry the project's rules on claims, because CI commits the
 notes without review: no energy, battery or power-saving claims, nothing called
-fully supported or fully compatible, and opt-in features (native video, content
-pacing, on-demand scene idle, the animated lock screen) keep their optional,
-experimental or off-by-default qualifier in both languages; Native Metal is the
-default renderer and is never called optional. The model groups many commits about
+fully supported or fully compatible, and opt-in features (content pacing,
+on-demand scene idle, the animated lock screen) keep their optional, experimental
+or off-by-default qualifier in both languages; Native Metal is the default
+renderer and native video is the default video player, and neither is ever called
+optional. The model groups many commits about
 one area (text layers, particles, lighting) into one bullet that names what users
 see, keeping each section to about 15 bullets, and is told whether the version is a
 feature release, which decides whether it writes highlights. Places in

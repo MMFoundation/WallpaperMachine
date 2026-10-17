@@ -40,6 +40,13 @@ pub struct AppConfig {
     /// builds ignore the key.
     #[serde(default)]
     pub native_metal_default_applied: bool,
+    /// Whether this config has been through the one-time move to native video
+    /// preferred as the default for plain videos. Absent (false) in a config
+    /// written before that change, where `video_backend` holds the old default
+    /// more often than a choice; see [`AppConfig::migrate_legacy_keys`]. Older
+    /// builds ignore the key.
+    #[serde(default)]
+    pub native_video_default_applied: bool,
     #[serde(default)]
     pub quality: QualityCfg,
     #[serde(default)]
@@ -61,6 +68,7 @@ impl Default for AppConfig {
             video_backend: VideoBackendModeCfg::default(),
             scene_renderer: SceneRendererModeCfg::default(),
             native_metal_default_applied: true,
+            native_video_default_applied: true,
             quality: QualityCfg::default(),
             monitors: Vec::new(),
             monitor_settings: Vec::new(),
@@ -76,15 +84,15 @@ pub struct GeneralCfg {
 
 /// Which renderer plays a plain local video wallpaper.
 ///
+/// `NativePreferred`, the default, asks for the platform player where the
+/// wallpaper falls inside its declared subset and falls back to the scene
+/// engine otherwise, so the choice is a preference rather than a guarantee.
 /// `Compatibility` is the scene engine, which supports every wallpaper.
-/// `NativePreferred` asks for the platform player where the wallpaper falls
-/// inside its declared subset and falls back to the scene engine otherwise, so
-/// the choice is a preference rather than a guarantee.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VideoBackendModeCfg {
-    #[default]
     Compatibility,
+    #[default]
     NativePreferred,
 }
 
@@ -557,6 +565,11 @@ impl AppConfig {
     /// stores `compatibility` whether or not anyone chose it, so it moves to the
     /// new default once; the marker it gains keeps any later choice, including
     /// a return to Compatibility, from being moved again.
+    ///
+    /// Native video preferred became the default for plain videos the same way:
+    /// `video_backend` is always written, so a config saved before then holds
+    /// `compatibility` whether or not anyone chose it. It moves to native once,
+    /// and the marker it gains keeps a later return to Compatibility.
     pub fn migrate_legacy_keys(&mut self) {
         if !self.native_metal_default_applied {
             self.scene_renderer = SceneRendererModeCfg::NativeMetalPreferred;
@@ -566,6 +579,10 @@ impl AppConfig {
         let legacy_native = self.experimental.legacy_native_video_backend.take();
         if legacy_native == Some(true) && self.video_backend == VideoBackendModeCfg::Compatibility {
             self.video_backend = VideoBackendModeCfg::NativePreferred;
+        }
+        if !self.native_video_default_applied {
+            self.video_backend = VideoBackendModeCfg::NativePreferred;
+            self.native_video_default_applied = true;
         }
 
         let legacy_pause = self.power.legacy_pause_on_battery_power.take();

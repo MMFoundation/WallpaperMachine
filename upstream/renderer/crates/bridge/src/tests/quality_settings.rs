@@ -245,25 +245,30 @@ async fn video_backend_report_names_the_running_backend_and_only_real_fallbacks(
     let bridge = bridge_with(&engine, &temp);
     commit(&bridge, "300", "video", "7").await;
 
-    let compatibility = settings(&bridge).await;
+    let native = settings(&bridge).await;
+    assert_eq!(native.video_backend, "native_preferred", "native video is the default");
+    assert_eq!(native.video_backends.len(), 1);
+    assert_eq!(native.video_backends[0].display_id, 7);
+    assert_eq!(native.video_backends[0].wallpaper_id, "300");
+    assert_eq!(native.video_backends[0].backend, "native");
+    assert_eq!(native.video_backends[0].fallback_reason, None);
+
+    let compatibility = bridge
+        .set_video_backend("compatibility".into())
+        .await
+        .unwrap()
+        .settings;
     assert_eq!(compatibility.video_backend, "compatibility");
-    assert_eq!(compatibility.video_backends.len(), 1);
-    assert_eq!(compatibility.video_backends[0].display_id, 7);
-    assert_eq!(compatibility.video_backends[0].wallpaper_id, "300");
     assert_eq!(compatibility.video_backends[0].backend, "legacy");
     assert_eq!(
         compatibility.video_backends[0].fallback_reason, None,
         "the scene engine is not a fallback when it is what the user chose"
     );
 
-    let native = bridge
+    bridge
         .set_video_backend("native_preferred".into())
         .await
-        .unwrap()
-        .settings;
-    assert_eq!(native.video_backend, "native_preferred");
-    assert_eq!(native.video_backends[0].backend, "native");
-    assert_eq!(native.video_backends[0].fallback_reason, None);
+        .unwrap();
 
     let key = bridge
         .native_video_wallpapers()
@@ -294,25 +299,30 @@ async fn battery_video_backend_report_preserves_native_rejection() {
     let bridge = bridge_with(&engine, &temp);
     commit(&bridge, "300", "video", "7").await;
 
-    let compatibility = settings(&bridge).await;
+    let native = settings(&bridge).await;
+    assert_eq!(native.video_backend, "native_preferred", "native video is the default");
+    assert_eq!(native.video_backends.len(), 1);
+    assert_eq!(native.video_backends[0].display_id, 7);
+    assert_eq!(native.video_backends[0].wallpaper_id, "300");
+    assert_eq!(native.video_backends[0].backend, "native");
+    assert_eq!(native.video_backends[0].fallback_reason, None);
+
+    let compatibility = bridge
+        .set_video_backend("compatibility".into())
+        .await
+        .unwrap()
+        .settings;
     assert_eq!(compatibility.video_backend, "compatibility");
-    assert_eq!(compatibility.video_backends.len(), 1);
-    assert_eq!(compatibility.video_backends[0].display_id, 7);
-    assert_eq!(compatibility.video_backends[0].wallpaper_id, "300");
     assert_eq!(compatibility.video_backends[0].backend, "legacy");
     assert_eq!(
         compatibility.video_backends[0].fallback_reason, None,
         "the scene engine is not a fallback when it is what the user chose"
     );
 
-    let native = bridge
+    bridge
         .set_video_backend("native_preferred".into())
         .await
-        .unwrap()
-        .settings;
-    assert_eq!(native.video_backend, "native_preferred");
-    assert_eq!(native.video_backends[0].backend, "native");
-    assert_eq!(native.video_backends[0].fallback_reason, None);
+        .unwrap();
 
     bridge.set_battery_quality_profile(0.5, 24).await.unwrap();
     bridge.set_battery_mode(crate::BridgeBatteryMode::ReducedQuality).await.unwrap();

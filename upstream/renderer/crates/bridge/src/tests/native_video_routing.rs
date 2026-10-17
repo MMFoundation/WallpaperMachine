@@ -202,15 +202,38 @@ async fn retarget_fps(bridge: &crate::api::WallpaperBridge, wallpaper: &str, dis
 }
 
 #[tokio::test]
-async fn the_backend_is_off_until_it_is_turned_on() {
+async fn a_plain_video_is_routed_natively_by_default() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
     let bridge = video_bridge(&engine, &temp).await;
     commit(&bridge, "300", "7").await;
 
     assert!(
+        bridge
+            .native_video_wallpapers()
+            .await
+            .unwrap()
+            .iter()
+            .any(|row| row.wallpaper_id == "300"),
+        "native video is the default, so a fresh install offers the clip to the platform player"
+    );
+    assert!(
+        !scene_ids(&engine).iter().any(|path| path.contains("300")),
+        "a natively routed clip is not also handed to the scene engine"
+    );
+}
+
+#[tokio::test]
+async fn choosing_compatibility_keeps_the_wallpaper_in_the_scene_engine() {
+    let temp = tempfile::tempdir().unwrap();
+    let engine = FakeEngineFacade::default();
+    let bridge = video_bridge(&engine, &temp).await;
+    commit(&bridge, "300", "7").await;
+    bridge.set_native_video_backend_enabled(false).await.unwrap();
+
+    assert!(
         bridge.native_video_wallpapers().await.unwrap().is_empty(),
-        "nothing may be routed natively before the user opts in"
+        "nothing may be routed natively once the user chose Compatibility"
     );
     assert!(
         scene_ids(&engine).iter().any(|path| path.contains("300")),

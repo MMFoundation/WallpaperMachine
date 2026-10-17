@@ -517,10 +517,10 @@ earlier wallpaper (select it again in System Settings once).
 macOS refuses screenshots while locked, so the final lock-screen appearance and
 smoothness cannot be captured and have to be judged by eye.
 
-## Native video backend (experimental, opt-in)
+## Native video backend
 
-Set **Video playback** to **Native video preferred** and apply a plain video that
-**In use now** lists as `native`. The rows below are what no headless test can show about
+**Native video preferred** is the default for **Video playback** (confirm it is not set to
+Compatibility), so apply a plain video that **In use now** lists as `native`. The rows below are what no headless test can show about
 the native player on a real desktop; the tests cover the rules and the media tests the
 player on synthetic clips ([coverage](coverage.md#nativevideo) lists what is not covered).
 Turn on **Detailed logging** ([diagnostics](../features/diagnostics.md#levels-and-detailed-logging))

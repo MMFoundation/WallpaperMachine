@@ -661,7 +661,13 @@ and **Update only when the scene changes**) is described in
 
 | Setting | Values | Default |
 | --- | --- | --- |
-| Video playback | **Compatibility**, **Native video preferred** | Compatibility |
+| Video playback | **Compatibility**, **Native video preferred** | Native video preferred |
+
+Native video preferred is the default. A config saved before that default moved
+holds `compatibility` whether or not anyone chose it, so the first launch of a build
+with the default moves every such config to native once and records
+`native_video_default_applied = true` in `config.toml`; choosing Compatibility
+afterwards is kept, the way the scene renderer's move to Native Metal was.
 
 Native is a preference, not a guarantee: the engine selects a backend per running
 wallpaper and keeps anything that does not qualify on Compatibility. **In use now**
@@ -756,7 +762,7 @@ Mac wakes or the session becomes active again (an unlock, or a switch back to th
 A wake waits one second first, so the system can hand the decoder back, and the
 notifications that arrive in a burst make one check, taken after the last of them. Only
 clips that are playing are asked: a clip the user paused stays paused, and a hidden
-display is not looked at. With no native clip open, which is every Mac on the default
+display is not looked at. With no native clip open, which is every Mac that chose the
 Compatibility backend, a wake starts no wait at all.
 
 A check waits half a second and then, for up to 2 seconds, looks every tenth of a second

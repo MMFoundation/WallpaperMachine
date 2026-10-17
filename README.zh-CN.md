@@ -110,7 +110,7 @@
 | **Swift 外壳** | AppKit 应用。控制面板是原生 SwiftUI 界面（[`App/Views/ControlPanel`](App/Views/ControlPanel)），[网页壁纸](docs/features/web-wallpapers.md)在各自的 web view 中运行。 |
 | **Rust 核心** | 内置的渲染器（[`upstream/renderer`](upstream/renderer)）：负责显示器、壁纸窗口、视频解码和音频捕获，通过 uniffi 桥接到 Swift。 |
 | **C++ 场景引擎** | Open Wallpaper Engine，静态链接进 Rust 核心，负责绘制场景壁纸。 |
-| **Metal** | 场景直接用原生 Metal 渲染，原生渲染器无法绘制的场景会回退为经由 MoltenVK 在 Metal 上运行的 Vulkan。AVFoundation 视频可在[设置 → 性能](docs/features/performance.md)中选择开启，场景渲染器也可在那里改为兼容模式。 |
+| **Metal** | 场景直接用原生 Metal 渲染，原生渲染器无法绘制的场景会回退为经由 MoltenVK 在 Metal 上运行的 Vulkan。视频壁纸默认通过 AVFoundation 播放；[设置 → 性能](docs/features/performance.md)中可将视频和场景渲染器改为兼容模式。 |
 | **锁定屏幕** | 一个沙盒化的 ExtensionKit 扩展（[`Extension/`](Extension)）。 |
 
 各部分如何协作：[docs/architecture.md](docs/architecture.md)。每个文件放在哪里：[docs/repository-layout.md](docs/repository-layout.md)。

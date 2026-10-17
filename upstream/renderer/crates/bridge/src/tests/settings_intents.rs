@@ -2375,8 +2375,10 @@ async fn assert_reconcile_keeps_the_scene(bridge: &WallpaperBridge, engine: &Fak
     let running = template.for_display(entry.desc);
     let calls_before = engine.calls().len();
 
+    // Native video is the default, so the switch that changes anything is the
+    // one away from it.
     bridge
-        .set_video_backend("native_preferred".into())
+        .set_video_backend("compatibility".into())
         .await
         .unwrap();
 

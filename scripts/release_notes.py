@@ -218,10 +218,12 @@ first, in both languages, or empty strings in both when the lists say it all. Ne
 fill only one. Do not list the changes again.
 - Claims: never claim energy, battery or power savings, even when a commit measured \
 less work. Never call anything fully supported or fully compatible. Keep \
-"optional", "experimental" or "off by default" on opt-in features such as native \
-video playback, content pacing and on-demand scene idle, and on the animated lock \
-screen. Native Metal is the default scene renderer, not an option. The Chinese keeps \
-the same qualifier.
+"optional", "experimental" or "off by default" on opt-in features such as content \
+pacing and on-demand scene idle, and on the animated lock screen. Native Metal is \
+the default scene renderer, not an option, and native video playback is the default \
+way a video wallpaper plays (a format macOS cannot play still plays through \
+Compatibility where the scene engine reads it), not an option either. The Chinese \
+keeps the same qualifier.
 
 Reply with only a JSON object, no prose and no code fence, with exactly these keys:
 {"summary": {"english": string, "chinese": string}, "highlights": [{"english": string, "chinese": string}], "breaking": [{"english": string, "chinese": string}], "new": [{"english": string, "chinese": string}], "improved": [{"english": string, "chinese": string}], "fixed": [{"english": string, "chinese": string}]}

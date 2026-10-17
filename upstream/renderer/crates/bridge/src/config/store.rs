@@ -248,10 +248,61 @@ mod tests {
     }
 
     #[test]
-    fn config_without_the_legacy_opt_in_stays_on_compatibility() {
+    fn config_without_the_legacy_opt_in_reads_the_native_default() {
         let config = load_config("[experimental]\n");
 
-        assert_eq!(config.video_backend, VideoBackendModeCfg::Compatibility);
+        assert_eq!(config.video_backend, VideoBackendModeCfg::NativePreferred);
+    }
+
+    /// A config saved before native video became the default stores the old
+    /// default, `compatibility`, whether or not anyone chose it. It moves to the
+    /// new default once, and the marker it is saved with keeps a later choice.
+    #[test]
+    fn a_config_from_before_the_native_video_default_moves_to_it_once() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        std::fs::write(&path, "video_backend = \"compatibility\"\n").unwrap();
+        let store = ConfigStore::open(root.path().to_path_buf());
+
+        let mut config = store.load().expect("config load").config;
+        assert_eq!(config.video_backend, VideoBackendModeCfg::NativePreferred);
+        assert!(config.native_video_default_applied);
+
+        config.video_backend = VideoBackendModeCfg::Compatibility;
+        store.save_app_config(&config).expect("config save");
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("native_video_default_applied = true"), "{written}");
+        let reloaded = store.load().expect("config load").config;
+        assert_eq!(
+            reloaded.video_backend,
+            VideoBackendModeCfg::Compatibility,
+            "a return to Compatibility after the move is a choice and stays"
+        );
+    }
+
+    /// The video move and the scene move are independent: a config that has been
+    /// through only the scene move still moves its video backend.
+    #[test]
+    fn the_native_video_move_is_independent_of_the_scene_renderer_move() {
+        let config = load_config(
+            "native_metal_default_applied = true\nscene_renderer = \"compatibility\"\n\
+             video_backend = \"compatibility\"\n",
+        );
+
+        assert_eq!(config.video_backend, VideoBackendModeCfg::NativePreferred);
+        assert_eq!(config.scene_renderer, SceneRendererModeCfg::Compatibility);
+    }
+
+    #[test]
+    fn a_new_install_starts_with_native_video_and_the_marker_set() {
+        let root = tempfile::tempdir().unwrap();
+        let config = ConfigStore::open(root.path().to_path_buf())
+            .load()
+            .expect("config load")
+            .config;
+
+        assert_eq!(config.video_backend, VideoBackendModeCfg::NativePreferred);
+        assert!(config.native_video_default_applied);
     }
 
     #[test]

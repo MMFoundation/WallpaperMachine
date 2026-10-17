@@ -95,8 +95,8 @@ can be told from one the setting asked for.
 ### Plain video wallpapers
 
 A plain video plays on the lock screen and as the screen saver through the same path the
-app's **Video backend** setting picks for the desktop. With **Compatibility**, the default,
-nothing changes: the scene engine draws it. With **Native preferred** the app publishes the
+app's **Video backend** setting picks for the desktop. With **Compatibility** the scene
+engine draws it. With **Native preferred**, the default, the app publishes the
 clip's file as an optional `nativeVideoFile` (a path inside the project, only for a video
 project, only for a regular file that lies in it; a scene, a web page, a missing file or a
 configuration an older app wrote has none and a copy of the extension that predates the key

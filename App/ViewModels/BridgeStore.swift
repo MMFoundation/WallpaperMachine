@@ -1446,7 +1446,7 @@ final class BridgeStore {
                         activeFileSizeBytes: 0
                     )
                 ),
-                videoBackend: "compatibility",
+                videoBackend: "native_preferred",
                 videoBackends: [],
                 contentPacingEnabled: false,
                 sharedVideoDecodeEnabled: false,

@@ -20,7 +20,7 @@ three hooks on `BridgeStore` that tell the hold when a switch starts, settles or
   previous picture is replaced at once when the new wallpaper has drawn.
 - The held picture is a still taken up to a quarter of a second before the switch. An
   animated wallpaper may therefore jump a little at the moment the new one appears.
-- With the experimental native video backend the same picture covers the new clip's window
+- With the native video player (the default for videos) the same picture covers the new clip's window
   until the clip shows its first frame, then fades out. That fade is the dissolve from the
   old wallpaper to the clip, whether the old one was a clip or a scene.
 - With a web wallpaper the same picture covers the new page's window until the page has
