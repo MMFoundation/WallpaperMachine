@@ -13,8 +13,15 @@ use crate::request::StageKind;
 use super::collect::{Bound, Dir, IfaceDecl, StageDecls, collect, location_count};
 use super::error::LegalizeError;
 
-/// The highest interface location the renderer-neutral model accepts (R30).
+/// The highest location of a vertex input or a fragment output the renderer-neutral model accepts
+/// (R30). Cross-stage varyings have no cap on their location numbers (amendment c2 R90): their limit
+/// is [`MAX_INTERSTAGE_COMPONENTS`].
 pub const MAX_LOCATION: u32 = 31;
+
+/// The most components of stage-to-stage varyings the Metal compiler accepts in a fragment stage's
+/// inputs (amendment d R66). A fixed number, not a value asked of a device, so the layer stays a
+/// pure function of the request.
+pub const MAX_INTERSTAGE_COMPONENTS: u32 = 124;
 
 /// The prefix of a synthesized vertex output whose plain name is taken (`<out-prefix>`).
 const SYNTH_PREFIX: &str = "_we_out_";
@@ -252,6 +259,42 @@ fn check_location(d: &IfaceDecl, location: u32, count: u32, kind: StageKind) -> 
     Ok(())
 }
 
+/// The components a varying of type `ty` and `array` elements adds to the inter-stage budget (R66): a
+/// scalar is 1, a vector of width N is N, a matrix is columns times rows, an array multiplies. A type
+/// this layer cannot size counts as a four-wide vector, the conservative reading.
+fn component_count(ty: &str, array: Option<u32>) -> u32 {
+    use crate::dialect::ty::{Ty, builtin_type};
+    let each = match builtin_type(ty) {
+        Some(Ty::Scalar(_)) => 1,
+        Some(Ty::Vec(_, width)) => u32::from(width),
+        Some(Ty::Mat(columns, rows)) => u32::from(columns) * u32::from(rows),
+        _ => 4,
+    };
+    each.saturating_mul(array.unwrap_or(1))
+}
+
+/// R66: the components of the fragment stage's varying inputs, in source order, must not exceed
+/// [`MAX_INTERSTAGE_COMPONENTS`]. Vertex outputs no fragment input names are free. The failure names
+/// the total, the limit, the stage and the varying whose addition first crossed the limit.
+fn check_component_budget(inputs: &[IfaceDecl], kind: StageKind) -> Result<(), LegalizeError> {
+    let mut total = 0u32;
+    let mut crossed: Option<&IfaceDecl> = None;
+    for d in inputs {
+        total = total.saturating_add(component_count(&d.ty, d.bound.count()));
+        if total > MAX_INTERSTAGE_COMPONENTS && crossed.is_none() {
+            crossed = Some(d);
+        }
+    }
+    match crossed {
+        Some(first) => Err(LegalizeError::request(format!(
+            "the {} stage declares {total} components of stage-to-stage varyings, above the limit of {MAX_INTERSTAGE_COMPONENTS} (the addition of `{}` crossed it)",
+            kind.name(),
+            first.author
+        ))),
+        None => Ok(()),
+    }
+}
+
 fn by_item(mut list: Vec<IfaceDecl>) -> Vec<IfaceDecl> {
     list.sort_by_key(|d| d.item);
     list
@@ -279,6 +322,7 @@ pub(crate) fn assign_program(
     // Varyings: the fragment stage drives, vertex-only ones follow (R33).
     let f_in = by_item(fragment.inputs.clone());
     let v_out = by_item(vertex.outputs.clone());
+    check_component_budget(&f_in, StageKind::Fragment)?;
     let mut running = 0u32;
     let mut vertex_out_loc: Vec<Option<u32>> = vec![None; v_out.len()];
     let mut fragment_vars: Vec<Placed> = Vec::new();
@@ -286,9 +330,8 @@ pub(crate) fn assign_program(
     let mut taken: HashSet<String> = vertex.top_names.clone();
     for d in f_in {
         let count = d.location_count();
-        check_location(&d, running, count, StageKind::Fragment)?;
         let location = running;
-        running += count;
+        running = running.saturating_add(count);
         let matched = v_out.iter().position(|o| o.author == d.author);
         let mut synthesized = None;
         match matched {
@@ -316,9 +359,8 @@ pub(crate) fn assign_program(
             Some(l) => l,
             None => {
                 let count = d.location_count();
-                check_location(&d, running, count, StageKind::Vertex)?;
                 let l = running;
-                running += count;
+                running = running.saturating_add(count);
                 plans.push(VaryingPlan {
                     name: d.author.clone(),
                     location: l,
@@ -371,12 +413,19 @@ pub(crate) fn assign_standalone(stage: &StageDecls) -> Result<StageInterface, Le
     let (mut next_in, mut next_out) = (0u32, 0u32);
     let mut all: Vec<IfaceDecl> = stage.inputs.iter().chain(&stage.outputs).cloned().collect();
     all.sort_by_key(|d| d.item);
+    if stage.kind == StageKind::Fragment {
+        check_component_budget(&by_item(stage.inputs.clone()), stage.kind)?;
+    }
     for d in all {
         let counter = if d.dir == Dir::In { &mut next_in } else { &mut next_out };
         let count = d.location_count();
-        check_location(&d, *counter, count, stage.kind)?;
+        // Only vertex inputs and fragment outputs have a location cap; a varying is limited by components.
+        let is_varying = (d.dir == Dir::Out) == (stage.kind == StageKind::Vertex);
+        if !is_varying {
+            check_location(&d, *counter, count, stage.kind)?;
+        }
         let location = *counter;
-        *counter += count;
+        *counter = counter.saturating_add(count);
         vars.push(Placed { decl: d, location, synthesized: false });
     }
     Ok(StageInterface { vars })

@@ -145,15 +145,10 @@ fn workshop_programs_legalize_and_compile_through_naga() {
         }
     }
     report("workshop programs", &total);
-    // What still fails does so for reasons that are not this part's: a varying with 49 elements
-    // (above the highest interface location of the model, R30), text that is not GLSL, an
-    // undeclared varying, and a `#if` the preprocessor refuses.
-    const KNOWN: [&str; 4] = [
-        "above the highest location",
-        "found Identifier(\"varying\")",
-        "Unknown variable: v_TexCoordOpacity",
-        "#if expression is unsupported",
-    ];
+    // What still fails does so for reasons that are not this part's: an undeclared varying and a
+    // `#if` the preprocessor refuses (a varying past location 31 and a member-access suffix on a
+    // declared name compile since amendments 1).
+    const KNOWN: [&str; 2] = ["Unknown variable: v_TexCoordOpacity", "#if expression is unsupported"];
     for cause in total.failures.keys() {
         assert!(KNOWN.iter().any(|k| cause.contains(k)), "a new kind of failure: {cause}");
     }

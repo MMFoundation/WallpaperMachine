@@ -151,6 +151,101 @@ fn programs() -> Vec<(&'static str, wm_shader::ValidRequest)> {
     ]
 }
 
+/// Builds a render pipeline state from the two stages of `program` with the system's Metal device
+/// (tests/probes/render_pipeline.swift). `Err` carries the runner's words; `None` when it cannot run here.
+fn pipeline_state(dir: &Path, name: &str, program: &CompiledProgram) -> Option<Result<(), String>> {
+    static BUILT: OnceLock<Option<PathBuf>> = OnceLock::new();
+    let runner = BUILT
+        .get_or_init(|| {
+            let dir = scratch("pipeline_runner");
+            let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/probes/render_pipeline.swift");
+            let binary = dir.join("render_pipeline");
+            match Command::new("swiftc").arg("-O").arg(&source).arg("-o").arg(&binary).output() {
+                Ok(o) if o.status.success() => Some(binary),
+                _ => {
+                    eprintln!("skipped: swiftc could not build the pipeline runner");
+                    None
+                }
+            }
+        })
+        .clone()?;
+    let mut parts = Vec::new();
+    for kind in [StageKind::Vertex, StageKind::Fragment] {
+        let stage = program.stage(kind)?;
+        let file = dir.join(format!("{name}-{}.metal", kind.name()));
+        std::fs::write(&file, &stage.payload.msl_source).unwrap();
+        parts.push(format!("{}::{}", file.display(), stage.payload.entry_point));
+    }
+    let formats: Vec<String> = program
+        .reflection
+        .vertex_inputs
+        .iter()
+        .map(|i| match i.format.name().as_str() {
+            "r32_sfloat" => "float",
+            "r32g32_sfloat" => "float2",
+            "r32g32b32_sfloat" => "float3",
+            _ => "float4",
+        })
+        .map(str::to_string)
+        .collect();
+    let out = Command::new(&runner).args(&parts).args(&formats).output().expect("the runner starts");
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    for part in &parts {
+        let _ = std::fs::remove_file(part.split("::").next().unwrap());
+    }
+    if text.contains("no-device") {
+        eprintln!("skipped: no Metal device");
+        return None;
+    }
+    Some(if text.trim() == "ok" { Ok(()) } else { Err(text) })
+}
+
+/// Amendment d R66 (5): the stage pairs the budget lets through are accepted by real pipeline creation.
+#[test]
+fn programs_near_the_inter_stage_budget_build_a_render_pipeline_state() {
+    if !metal_available() {
+        return;
+    }
+    let both = |declarations: &str, writes: &str, reads: &str| {
+        request(
+            "budget",
+            &format!("attribute vec3 a_Position; attribute vec2 a_Coord;\n{declarations}\nvoid main() {{ gl_Position = vec4(a_Position, 1.0);\n{writes} }}"),
+            &format!("{declarations}\nvoid main() {{ vec4 c = vec4(0.0);\n{reads} gl_FragColor = c; }}"),
+            &[],
+            vec![],
+        )
+    };
+    let cases: Vec<(&str, String, String, String)> = vec![
+        // 49 vec2 and a vec4: 102 components, locations up to 49.
+        (
+            "ring",
+            "varying vec2 v_Ring[49];\nvarying vec4 v_Main;".into(),
+            format!("{} v_Main = vec4(a_Coord, 0.5, 1.0);", (0..49).map(|i| format!("v_Ring[{i}] = a_Coord * {i}.0;")).collect::<String>()),
+            "c = v_Main + vec4(v_Ring[0], v_Ring[48]);".into(),
+        ),
+        // 31 vec4: exactly 124 components.
+        (
+            "thirty_one",
+            (0..31).map(|i| format!("varying vec4 v_{i};")).collect::<Vec<_>>().join("\n"),
+            (0..31).map(|i| format!("v_{i} = vec4(a_Coord, {i}.0, 1.0);")).collect::<String>(),
+            (0..31).map(|i| format!("c += v_{i};")).collect::<String>(),
+        ),
+        // 62 vec2: 124 components.
+        (
+            "sixty_two",
+            "varying vec2 v_Ring[62];".into(),
+            (0..62).map(|i| format!("v_Ring[{i}] = a_Coord * {i}.0;")).collect::<String>(),
+            "c.xy += v_Ring[0] + v_Ring[61];".into(),
+        ),
+    ];
+    let dir = scratch("pipeline_state");
+    for (name, declarations, writes, reads) in cases {
+        let program = compile(&both(&declarations, &writes, &reads), &NoIncludes).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let Some(result) = pipeline_state(&dir, name, &program) else { return };
+        assert!(result.is_ok(), "{name}: the Metal device refused the pipeline: {}", result.unwrap_err());
+    }
+}
+
 fn items(name: &str, program: &CompiledProgram) -> Vec<(String, String, String)> {
     program
         .stages

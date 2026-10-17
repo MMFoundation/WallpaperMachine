@@ -152,6 +152,8 @@ fn shipped_programs_compile_end_to_end() {
         assert!(labels.iter().all(|l| l.starts_with("shadowcasterfoliage4 ")), "{labels:?}");
     }
     assert!(s.ok >= 158, "{} shipped programs compiled", s.ok);
+    // Amendment d R66 (7): no shipped program has more than 124 fragment components.
+    assert!(s.failures.keys().all(|c| !c.contains("limit of 124")), "{:?}", s.failures.keys().collect::<Vec<_>>());
     assert!(s.deepest <= crate::backend::depth::STACK_BUDGET / 2, "a shipped stage is near the stack limit: {}", s.deepest);
     assert!(s.refused_names.is_empty(), "binding names the host would refuse: {:?}", s.refused_names.keys().collect::<Vec<_>>());
 }
@@ -202,6 +204,52 @@ fn workshop_programs_compile_end_to_end() {
         }
     }
     report("workshop programs", &total);
-    assert!(total.ok > 790, "{} workshop programs compiled", total.ok);
+    // What still fails does so for reasons outside the amendments: a varying the fragment stage
+    // reads without declaring it, and a `#if` the preprocessor refuses. None is a location cap or a
+    // member-access suffix on a declared name, and none exceeds the component budget.
+    for (cause, labels) in &total.failures {
+        assert!(
+            cause.contains("Unknown variable: v_TexCoordOpacity") || cause.contains("#if expression is unsupported"),
+            "a new kind of workshop failure: {cause}: {labels:?}"
+        );
+    }
+    assert!(total.ok >= 805, "{} workshop programs compiled", total.ok);
     assert!(total.deepest <= crate::backend::depth::STACK_BUDGET / 2, "a workshop stage is near the stack limit: {}", total.deepest);
+}
+
+/// Programs of the amendments' own examples: `frame_builder` (a member-access suffix on a declared
+/// varying, amendment c1 R107) and `textoutline7x7` (a varying array of 49 elements, d R66), found
+/// in the shipped tree or among the unpacked workshop items. Skips with a message when absent.
+#[test]
+fn the_effects_the_amendments_name_compile_when_present() {
+    let wanted = ["frame_builder", "textoutline7x7"];
+    let Some(stock) = shaders_root() else {
+        eprintln!("skipped: the shipped shader folder is absent");
+        return;
+    };
+    let mut dirs = vec![(stock.clone(), stock.clone())];
+    if let Some(workshop) = workshop_root() {
+        let mut entries: Vec<_> = fs::read_dir(&workshop).unwrap().filter_map(Result::ok).collect();
+        entries.sort_by_key(|e| e.file_name());
+        dirs.extend(entries.into_iter().map(|e| (e.path().join("shaders"), stock.clone())));
+    }
+    let mut compiled: BTreeMap<&str, usize> = BTreeMap::new();
+    for (own, stock) in dirs {
+        let files: Vec<_> = shader_files(&own).into_iter().filter(|(name, _, _)| wanted.iter().any(|w| name.ends_with(w))).collect();
+        if files.is_empty() {
+            continue;
+        }
+        let includes = Layered { dirs: vec![own, stock] };
+        let s = sweep(&files, &includes, |_| false, &[]);
+        assert!(s.failures.is_empty(), "{:?}", s.failures);
+        for w in wanted {
+            if s.ok > 0 && files.iter().any(|(n, _, _)| n.ends_with(w)) {
+                *compiled.entry(w).or_default() += s.ok;
+            }
+        }
+    }
+    if compiled.is_empty() {
+        eprintln!("skipped: neither effect is present in the shipped tree or the unpacked workshop items");
+    }
+    eprintln!("amendment effects compiled: {compiled:?}");
 }

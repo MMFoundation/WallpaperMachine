@@ -305,14 +305,11 @@ fn workshop_shaders_convert_and_compile_through_naga() {
     }
     report("workshop shaders", &total);
     // What still fails does so for reasons that are not this part's: an undeclared varying, a
-    // declaration that is not valid GLSL, a varying whose width only the program (both stages
-    // together) can reconcile, a varying with more elements than the model has locations, and a
-    // `#if` the preprocessor refuses.
-    const NOT_OURS: [&str; 5] = [
+    // varying whose width only the program (both stages together) can reconcile, and a `#if` the
+    // preprocessor refuses.
+    const NOT_OURS: [&str; 3] = [
         "Invalid swizzle for vector \"zw\"",
         "Unknown variable: v_TexCoordOpacity",
-        "found Identifier(\"varying\")",
-        "above the highest location",
         "#if expression is unsupported",
     ];
     for cause in total.failures.keys() {
