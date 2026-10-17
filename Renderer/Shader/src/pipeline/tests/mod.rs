@@ -5,6 +5,7 @@
 
 pub(crate) mod support;
 
+mod amendments;
 mod corpus;
 mod globals;
 mod inputs;

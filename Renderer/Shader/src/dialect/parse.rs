@@ -5,7 +5,9 @@
 //! The grammar is C-like. It is lenient on purpose (P3): a statement or item it cannot
 //! place is carried through as raw text for the downstream compiler to judge, and a stray
 //! punctuation character never fails the stage by itself (R5, E19). Only delimiter
-//! problems are hard failures (R6): an opener without a closer reports the opener.
+//! problems are hard failures (R6): an opener without a closer reports the opener. The other
+//! hard failure is a malformed member-access suffix on a declared interface name (amendment
+//! c1 R107), which reports the declaration.
 
 use std::collections::HashSet;
 
@@ -109,7 +111,7 @@ fn check_delimiters(tokens: &[Token]) -> Result<(), ParseError> {
 
 pub fn parse(tokens: &[Token]) -> Result<Module, ParseError> {
     check_delimiters(tokens)?;
-    let mut p = Parser { toks: tokens, pos: 0, structs: HashSet::new(), depth: 0 };
+    let mut p = Parser { toks: tokens, pos: 0, structs: HashSet::new(), depth: 0, hard: None };
     let mut items = Vec::new();
     while p.pos < p.toks.len() {
         let start = p.pos;
@@ -117,6 +119,9 @@ pub fn parse(tokens: &[Token]) -> Result<Module, ParseError> {
             Ok(Some(item)) => items.push(item),
             Ok(None) => {}
             Err(Soft) => {
+                if let Some(error) = p.hard.take() {
+                    return Err(error);
+                }
                 p.pos = start;
                 items.push(p.raw_item());
             }
@@ -134,6 +139,14 @@ struct Parser<'a> {
     pos: usize,
     structs: HashSet<String>,
     depth: u32,
+    /// A failure that must not fall back to raw text: set where the step fails, read by [`parse`].
+    hard: Option<ParseError>,
+}
+
+/// The letters a member-access suffix on a declared name may be made of (R107): component letters of
+/// any of the three sets, in any mix (the suffix is discarded, so no set has to be consistent).
+fn is_component_name(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(|c| "xyzwrgbastpq".contains(c))
 }
 
 fn is_assign_op(op: Operator) -> bool {
@@ -315,7 +328,7 @@ impl<'a> Parser<'a> {
         self.pos += 1;
         let mut declarators = Vec::new();
         if !self.at_kind(TokenKind::Semicolon) && self.peek().is_some_and(|t| t.kind == TokenKind::Identifier) {
-            declarators = self.declarators(false)?;
+            declarators = self.declarators(None)?;
         }
         // The final `;` may be missing (R2).
         self.eat_kind(TokenKind::Semicolon);
@@ -326,7 +339,7 @@ impl<'a> Parser<'a> {
         let start = self.pos;
         let quals = self.qualifiers(true);
         let ty = self.type_ref()?;
-        let declarators = self.declarators(false)?;
+        let declarators = self.declarators(None)?;
         self.expect_kind(TokenKind::Semicolon)?;
         Ok(VarDecl { quals, ty, declarators, span: self.span_from(start) })
     }
@@ -455,8 +468,38 @@ impl<'a> Parser<'a> {
         Ok(Some(Expr::new(ExprKind::Opaque(text), span)))
     }
 
-    fn declarators(&mut self, allow_init: bool) -> PResult<Vec<Declarator>> {
-        let _ = allow_init;
+    /// The member-access suffix after a declared interface name, `.xy` in `varying vec4 v.xy;`
+    /// (R107): consumed and dropped when it is a dot, component letters and then `;` or `,`.
+    /// Anything else after the dot is a hard failure that reports the declaration that began at
+    /// token `decl_start`, so the failure is at that declaration and not at the next one.
+    fn member_suffix(&mut self, decl_start: usize) -> PResult<()> {
+        let dot = self.pos;
+        self.pos += 1;
+        let well_formed = match self.peek() {
+            Some(t) if t.kind == TokenKind::Identifier && is_component_name(&t.text) => {
+                self.pos += 1;
+                matches!(self.peek().map(|t| t.kind), Some(TokenKind::Semicolon | TokenKind::Comma))
+            }
+            _ => false,
+        };
+        if well_formed { Ok(()) } else { self.bad_suffix(decl_start, dot) }
+    }
+
+    /// Records the hard failure of a malformed suffix: the span is the declaration, from its first
+    /// token through the `;` that ends it (or the last token when there is none).
+    fn bad_suffix<T>(&mut self, decl_start: usize, from: usize) -> PResult<T> {
+        let end = (from..self.toks.len()).find(|&i| self.toks[i].kind == TokenKind::Semicolon).unwrap_or(self.toks.len() - 1);
+        self.hard = Some(ParseError {
+            message: "a declared name may only be followed by a member-access suffix of component letters, such as `.xy`".to_string(),
+            start: self.toks[decl_start].start,
+            end: self.toks[end].end,
+        });
+        self.soft()
+    }
+
+    /// Declarators separated by commas. `suffix_from` is the first token of the declaration when
+    /// it is a top-level interface declaration that tolerates a member-access suffix on a name.
+    fn declarators(&mut self, suffix_from: Option<usize>) -> PResult<Vec<Declarator>> {
         let mut list = Vec::new();
         loop {
             let name_tok = match self.peek() {
@@ -464,6 +507,14 @@ impl<'a> Parser<'a> {
                 _ => return self.soft(),
             };
             self.pos += 1;
+            if let Some(decl_start) = suffix_from {
+                if self.at_op(Operator::Dot) {
+                    self.member_suffix(decl_start)?;
+                } else if self.peek().is_some_and(|t| t.kind == TokenKind::Number && t.text.starts_with('.')) {
+                    // `v.12`: the lexer took the dot into a number, and no identifier follows it.
+                    return self.bad_suffix(decl_start, self.pos);
+                }
+            }
             let mut dims = Vec::new();
             while self.at_op(Operator::LBracket) {
                 dims.push(self.dim()?);
@@ -531,7 +582,7 @@ impl<'a> Parser<'a> {
             }
             self.pos += 1;
             let instance = if self.peek().is_some_and(|t| t.kind == TokenKind::Identifier) {
-                self.declarators(false)?.into_iter().next()
+                self.declarators(None)?.into_iter().next()
             } else {
                 None
             };
@@ -563,7 +614,8 @@ impl<'a> Parser<'a> {
                 span: self.span_from(start),
             }));
         }
-        let declarators = self.declarators(true)?;
+        let interface = quals.iter().any(|q| ["uniform", "attribute", "varying", "in", "out"].iter().any(|w| q.is_word(w)));
+        let declarators = self.declarators(interface.then_some(start))?;
         self.expect_kind(TokenKind::Semicolon)?;
         Ok(Item::Var(VarDecl { quals, ty, declarators, span: self.span_from(start) }))
     }
@@ -705,7 +757,7 @@ impl<'a> Parser<'a> {
         let start = self.pos;
         let quals = self.qualifiers(false);
         let ty = self.type_ref()?;
-        let declarators = self.declarators(true)?;
+        let declarators = self.declarators(None)?;
         Ok(VarDecl { quals, ty, declarators, span: self.span_from(start) })
     }
 

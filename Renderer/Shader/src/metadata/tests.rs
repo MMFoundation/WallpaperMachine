@@ -327,3 +327,20 @@ fn json_annotations_with_trailing_text_or_no_object_are_ignored() {
     let m = run("uniform float a; // { this is prose }\n");
     assert!(m.default_uniforms.is_empty());
 }
+
+// ---- amendment b R81: the scan tolerates a member-access suffix after a declared name ----
+
+#[test]
+fn annotations_after_a_suffixed_declaration_are_still_found() {
+    let suffixed = "varying vec4 v_Haze.xy;\n// [COMBO] {\"combo\":\"AFTER\",\"default\":2}\nuniform sampler2D g_Texture1; // {\"material\":\"mask\",\"default\":\"util/white\"}\nuniform float g_Gain; // {\"material\":\"gain\",\"default\":0.5}\nvoid main() {}\n";
+    let plain = suffixed.replace("v_Haze.xy", "v_Haze");
+    let m = run(suffixed);
+    assert_eq!(combos(&m), [("AFTER", "2")]);
+    assert_eq!(m.default_textures.len(), 1);
+    assert_eq!((m.default_textures[0].slot, m.default_textures[0].path.as_str()), (1, "util/white"));
+    assert_eq!(m, run(&plain));
+    // The texture-switch scan finds the default texture past the suffixed declaration too.
+    let only = extract_with(suffixed, &[], ExtractMode::TextureSwitchOnly).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(only, extract_with(&plain, &[], ExtractMode::TextureSwitchOnly).unwrap());
+    assert_eq!(only.default_textures.len(), 1);
+}

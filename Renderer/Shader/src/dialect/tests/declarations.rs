@@ -266,3 +266,69 @@ o = vec4(sz, float(cell + side), float(lit) + float(dim) + hue + gain + bias.x +
     assert!(t.contains("float w = float(k), z = f;"), "{t}");
     compile_glsl(StageKind::Fragment, &t).unwrap();
 }
+
+// ---- amendment c1 R107: a member-access suffix after a declared interface name ----
+
+#[test]
+fn a_member_access_suffix_after_an_interface_name_is_dropped_and_changes_nothing() {
+    let body = "void main() { gl_FragColor = vec4(v_Haze.xy, 0.0, 1.0); }";
+    let plain = frag(&format!("varying vec4 v_Haze;\n{body}"));
+    for written in [
+        "varying vec4 v_Haze.xy;",
+        "varying vec4 v_Haze . xyz ;",
+        "varying vec4 v_Haze /* note */ .xy;",
+        "varying vec4 v_Haze // note\n  .rgba;",
+        "varying vec4 v_Haze.stpq;",
+        "varying vec4 v_Haze.xg;",
+    ] {
+        assert_eq!(frag(&format!("{written}\n{body}")), plain, "{written}");
+    }
+    // The type and the width are the ones written before the name; the suffix does not narrow them.
+    assert!(plain.contains("varying vec4 v_Haze;"), "{plain}");
+    // The same leniency for every interface qualifier (one code path).
+    assert_eq!(frag("in vec4 v_Haze.xy;\nvoid main() { gl_FragColor = v_Haze; }"), frag("in vec4 v_Haze;\nvoid main() { gl_FragColor = v_Haze; }"));
+    assert_eq!(
+        vert("attribute vec3 a_Position.xyz;\nvoid main() { gl_Position = vec4(a_Position, 1.0); }"),
+        vert("attribute vec3 a_Position;\nvoid main() { gl_Position = vec4(a_Position, 1.0); }")
+    );
+    assert_eq!(
+        frag("uniform float g_Gain.x;\nvoid main() { gl_FragColor = vec4(g_Gain); }"),
+        frag("uniform float g_Gain;\nvoid main() { gl_FragColor = vec4(g_Gain); }")
+    );
+}
+
+#[test]
+fn a_suffixed_declarator_in_a_list_is_accepted_and_does_not_disturb_the_next_declaration() {
+    let t = frag("varying vec4 a.xy, b;\nvarying float c;\nvoid main() { gl_FragColor = a + b + vec4(c); }");
+    assert_eq!(t, frag("varying vec4 a, b;\nvarying float c;\nvoid main() { gl_FragColor = a + b + vec4(c); }"));
+    assert!(t.contains("varying float c;"), "{t}");
+}
+
+#[test]
+fn a_member_access_suffix_is_not_a_use_of_the_variable() {
+    use crate::dialect::{parse_stage, usage::use_facts};
+    let (module, _) = parse_stage(StageKind::Fragment, "varying vec4 v_Haze.xyz;\nvoid main() { gl_FragColor = vec4(v_Haze.x, 0.0, 0.0, 1.0); }").unwrap();
+    let facts = use_facts(&module, "v_Haze");
+    assert_eq!((facts.max_component, facts.read_whole, facts.assigned_whole), (1, false, false));
+}
+
+#[test]
+fn a_malformed_suffix_is_a_failure_at_that_declaration() {
+    for (text, declaration) in [
+        ("varying vec4 v_Haze.;", "varying vec4 v_Haze.;"),
+        ("varying vec4 v_Haze.xy = 1.0;", "varying vec4 v_Haze.xy = 1.0;"),
+        ("varying vec4 v_Haze.xy[2];", "varying vec4 v_Haze.xy[2];"),
+        ("varying vec4 v_Haze.12;", "varying vec4 v_Haze.12;"),
+        ("varying vec4 v_Haze.foo;", "varying vec4 v_Haze.foo;"),
+        ("varying vec4 v_Haze.xy.zw;", "varying vec4 v_Haze.xy.zw;"),
+    ] {
+        let src = format!("uniform float g_Before;\n{text}\nvarying float v_After;\nvoid main() {{ gl_FragColor = vec4(0.0); }}\n");
+        let failure = match crate::dialect::convert_stage(StageKind::Fragment, &src) {
+            Ok(c) => panic!("{text} converted: {}", c.text),
+            Err(d) => d,
+        };
+        let span = failure[0].span.unwrap_or_else(|| panic!("{text}: no span"));
+        let at = src.find(declaration).unwrap();
+        assert_eq!((span.start(), span.end()), (at, at + declaration.len()), "{text}: {failure:?}");
+    }
+}

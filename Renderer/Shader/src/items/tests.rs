@@ -371,3 +371,29 @@ fn a_directive_does_not_swallow_the_declaration_that_follows_it() {
     let items = scan(src, BraceMode::Conditional);
     assert_eq!(kind_names(&items), ["directive", "declaration", "directive", "declaration", "annotation"]);
 }
+
+// ---- amendment b R81: a member-access suffix after the declared name ----
+
+#[test]
+fn a_member_access_suffix_after_the_declared_name_stays_inside_one_declaration() {
+    for text in ["varying vec4 v_Haze.xy;", "varying vec4 v_Haze . xyz ;", "varying vec4 v_Haze /* c */ . rg ;", "varying vec4 v_Haze\n  .\n  xy;"] {
+        let src = format!("{text}\nuniform float g_After;\nvoid main() {{}}\n");
+        let items = compiled(&src);
+        assert_eq!(kind_names(&items), ["declaration", "declaration", "function"], "{text}");
+        let d = items[0].declaration().unwrap();
+        assert_eq!((d.qualifier, d.type_text.as_deref(), d.name.as_deref()), (Some(Qualifier::Varying), Some("vec4"), Some("v_Haze")), "{text}");
+        assert!(d.array.is_none(), "{text}");
+        // The declarations after it are found as before.
+        assert_eq!(items[1].declaration().unwrap().name.as_deref(), Some("g_After"), "{text}");
+        assert_eq!(items[2].function().unwrap().name, "main", "{text}");
+        assert_eq!(items[0].span, 0..text.len(), "{text}");
+    }
+}
+
+#[test]
+fn the_conditional_view_scans_a_suffixed_declaration_the_same_way() {
+    let src = "#if A\nvarying vec4 v_Haze.xy;\n#else\nvarying vec4 v_Haze;\n#endif\nuniform float g_After;\nvoid main() {}\n";
+    let items = scan(src, BraceMode::Conditional);
+    let names: Vec<Option<&str>> = items.iter().filter_map(Item::declaration).map(|d| d.name.as_deref()).collect();
+    assert_eq!(names, [Some("v_Haze"), Some("v_Haze"), Some("g_After")]);
+}
