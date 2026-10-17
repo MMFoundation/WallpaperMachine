@@ -459,24 +459,48 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 
+# The synthetic media the video tests decode. It is this project's own code and
+# lives outside upstream/: a VideoToolbox encoder and an AVAssetWriter, so the
+# files a decoder under test is shown were not produced by that decoder's
+# library. `synthetic_video_test` checks the fixture itself, with AVFoundation.
+get_filename_component(WESCENE_RENDERER_TESTING_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Renderer/Testing" ABSOLUTE)
+if(APPLE)
+    add_subdirectory(${WESCENE_RENDERER_TESTING_DIR} ${CMAKE_CURRENT_BINARY_DIR}/synthetic_video)
+    add_executable(synthetic_video_test
+        ${WESCENE_RENDERER_TESTING_DIR}/synthetic_video_test.mm)
+    target_link_libraries(synthetic_video_test PRIVATE
+        wescene_testing_media GTest::gtest_main)
+    target_include_directories(synthetic_video_test PRIVATE .)
+    target_compile_features(synthetic_video_test PRIVATE cxx_std_20)
+    set_target_properties(synthetic_video_test PROPERTIES
+        OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+    target_compile_options(synthetic_video_test PRIVATE
+        $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+    gtest_discover_tests(synthetic_video_test
+        TEST_PREFIX synthetic_video_test.
+        PROPERTIES TIMEOUT 120
+        DISCOVERY_TIMEOUT 60)
+endif()
+
 # A pure-video wallpaper's media is decode input, not a payload. The test drives
-# the real construction path against media it encodes itself, so it links the
-# renderer and FFmpeg rather than standing in a fake source.
+# the real construction path against media the fixture encodes, so it links the
+# renderer rather than standing in a fake source. Only the software-frame suite
+# of apple_video_frame_test.mm still builds libav frames of its own.
 pkg_check_modules(TEST_AVFORMAT REQUIRED IMPORTED_TARGET libavformat)
 pkg_check_modules(TEST_AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
 pkg_check_modules(TEST_AVUTIL REQUIRED IMPORTED_TARGET libavutil)
 if(APPLE)
     target_sources(playback_gpu_test PRIVATE apple_video_frame_test.mm)
-    target_link_libraries(playback_gpu_test PRIVATE
+    target_link_libraries(playback_gpu_test PRIVATE wescene_testing_media
         PkgConfig::TEST_AVFORMAT PkgConfig::TEST_AVCODEC PkgConfig::TEST_AVUTIL)
     wescene_prefer_ffmpeg_headers(playback_gpu_test "TEST_")
 endif()
 add_executable(video_source_input_test video_source_input_test.cpp)
 target_link_libraries(video_source_input_test PRIVATE ${PROJECT_NAME}
-    PkgConfig::TEST_AVFORMAT PkgConfig::TEST_AVCODEC PkgConfig::TEST_AVUTIL GTest::gtest_main)
+    wescene_testing_media GTest::gtest_main)
 target_include_directories(video_source_input_test PRIVATE
     . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/include)
-wescene_prefer_ffmpeg_headers(video_source_input_test "TEST_")
 target_compile_features(video_source_input_test PRIVATE cxx_std_20)
 gtest_discover_tests(
     video_source_input_test
@@ -485,15 +509,15 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 
-# One decoder serving several surfaces. Driven against media the test encodes,
-# for the same reason as video_source_input_test: the thing under test is the
-# real decoder's lifetime and frame ownership, which a fake source cannot show.
+# One decoder serving several surfaces. Driven against media the fixture
+# encodes, for the same reason as video_source_input_test: the thing under test
+# is the real decoder's lifetime and frame ownership, which a fake source cannot
+# show.
 add_executable(shared_video_session_test shared_video_session_test.cpp)
 target_link_libraries(shared_video_session_test PRIVATE ${PROJECT_NAME}
-    PkgConfig::TEST_AVFORMAT PkgConfig::TEST_AVCODEC PkgConfig::TEST_AVUTIL GTest::gtest_main)
+    wescene_testing_media GTest::gtest_main)
 target_include_directories(shared_video_session_test PRIVATE
     . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/include)
-wescene_prefer_ffmpeg_headers(shared_video_session_test "TEST_")
 target_compile_features(shared_video_session_test PRIVATE cxx_std_20)
 gtest_discover_tests(
     shared_video_session_test
@@ -504,16 +528,15 @@ gtest_discover_tests(
 
 # A frame that would repeat the picture already on the surface is not drawn,
 # submitted or presented. Driven through the whole scene wallpaper on a Metal
-# layer no window owns, against media the test encodes.
+# layer no window owns, against media the fixture encodes.
 if(APPLE)
     add_executable(unchanged_present_test unchanged_present_test.mm)
     target_link_libraries(unchanged_present_test PRIVATE ${PROJECT_NAME}
         wpScene wpRenderCommon wpVulkan wpVulkanRender wpRGraph
-        PkgConfig::TEST_AVFORMAT PkgConfig::TEST_AVCODEC PkgConfig::TEST_AVUTIL GTest::gtest_main)
+        wescene_testing_media GTest::gtest_main)
     target_include_directories(unchanged_present_test PRIVATE
         . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/include
         ${CMAKE_SOURCE_DIR}/src/Scene/RenderCommon/include)
-    wescene_prefer_ffmpeg_headers(unchanged_present_test "TEST_")
     target_compile_features(unchanged_present_test PRIVATE cxx_std_20)
     set_target_properties(unchanged_present_test PROPERTIES
         OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
@@ -601,13 +624,12 @@ if(APPLE)
   target_link_libraries(metal_scene_draw_smoke PRIVATE
       ${PROJECT_NAME} wpMetalRender wpVulkanRender wpVulkan wpScene wpRGraph
       wpParticle wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest_main
-      # The video-layer case needs a real decodable file, which the test
-      # encodes for itself rather than shipping one.
-      PkgConfig::TEST_AVFORMAT PkgConfig::TEST_AVCODEC PkgConfig::TEST_AVUTIL)
+      # The video-layer case needs a real decodable file, which the fixture
+      # encodes rather than shipping one.
+      wescene_testing_media)
   target_include_directories(metal_scene_draw_smoke PRIVATE
       . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/MetalRender/include
       ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender)
-  wescene_prefer_ffmpeg_headers(metal_scene_draw_smoke "TEST_")
   target_compile_features(metal_scene_draw_smoke PRIVATE cxx_std_20)
   set_target_properties(metal_scene_draw_smoke PROPERTIES
       OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)

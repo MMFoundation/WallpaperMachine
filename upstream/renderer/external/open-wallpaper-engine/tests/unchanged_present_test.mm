@@ -510,7 +510,7 @@ TEST_F(UnchangedPresent, PinnedTargetAccountingReturnsToBaselineWhenScenesClose)
 
 TEST_F(UnchangedPresent, APlainVideoPresentsEveryNewFrameAndNothingElse)
 {
-    ASSERT_FALSE(testing_media::SharedGop().packets.empty())
+    ASSERT_TRUE(testing_media::EncoderAvailable())
         << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
     const auto project = WriteVideoProject(root_ / "video");
 
@@ -571,7 +571,7 @@ TEST_F(UnchangedPresent, APlainVideoPresentsEveryNewFrameAndNothingElse)
 // the surface, and their PTS, are the same sequence with the skip on and off.
 TEST_F(UnchangedPresent, TheSkipPresentsTheSameVideoFramesInTheSameOrder)
 {
-    ASSERT_FALSE(testing_media::SharedGop().packets.empty())
+    ASSERT_TRUE(testing_media::EncoderAvailable())
         << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
     const auto project = WriteVideoProject(root_ / "video");
 
@@ -626,7 +626,7 @@ TEST_F(UnchangedPresent, TheSkipPresentsTheSameVideoFramesInTheSameOrder)
 
 TEST_F(UnchangedPresent, ARepeatedVideoFramePresentsAgainOnlyWhenSomethingChanges)
 {
-    ASSERT_FALSE(testing_media::SharedGop().packets.empty())
+    ASSERT_TRUE(testing_media::EncoderAvailable())
         << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
     const auto project = WriteVideoProject(root_ / "video");
     vulkan::SetSceneOptimizationEnabled(true);
@@ -949,7 +949,7 @@ TEST_F(UnchangedPresent, APropertyPreviewShowsOnAStillSceneAndWakesAnIdleOneForO
 // each must present once -- the held frame, again -- and then repeat again.
 TEST_F(UnchangedPresent, OutputChangesOnAHeldVideoFramePresentOnceEach)
 {
-    ASSERT_FALSE(testing_media::SharedGop().packets.empty())
+    ASSERT_TRUE(testing_media::EncoderAvailable())
         << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
     const auto project = WriteVideoProject(root_ / "video");
     vulkan::SetSceneOptimizationEnabled(true);

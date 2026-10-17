@@ -22,12 +22,6 @@
 
 #include <gtest/gtest.h>
 
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavutil/frame.h>
-}
-
 #include <mach/mach.h>
 #include <unistd.h>
 
@@ -54,7 +48,7 @@ namespace
 
 using testing_media::kFrameHeight;
 using testing_media::kFrameWidth;
-using testing_media::SharedGop;
+using testing_media::EncoderAvailable;
 using testing_media::WriteSyntheticVideo;
 
 std::vector<char> ReadWholeFile(const std::filesystem::path& path) {
@@ -121,7 +115,7 @@ uint64_t PhysicalFootprintBytes() {
 class VideoSourceInput : public ::testing::Test {
 protected:
     void SetUp() override {
-        ASSERT_FALSE(SharedGop().packets.empty())
+        ASSERT_TRUE(EncoderAvailable())
             << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
         static std::atomic<uint64_t> serial { 0 };
         project_dir = std::filesystem::temp_directory_path() /

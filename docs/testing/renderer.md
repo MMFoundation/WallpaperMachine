@@ -617,10 +617,12 @@ cmake --build artifacts/renderer/bin --target scene_schema_tests
 artifacts/renderer/bin/tests/scene_schema_tests --gtest_filter='SceneSchema.*CameraZoom*'
 ```
 
+The video suites (`video_source_input_test`, `shared_video_session_test`, `unchanged_present_test`, `metal_scene_draw_smoke`, `playback_gpu_test`'s `apple_video_frame_test.mm`) decode H.264 clips written by `Renderer/Testing/synthetic_video.mm`, which is this project's own code and uses Apple frameworks only: a `VTCompressionSession` encodes one group of pictures per binary (640x360, 30 fps, no B-frames, a 200 Mbit/s noise group and a 600-frame single-keyframe bar clip), and an `AVAssetWriter` passthrough input re-times the compressed samples for as many repeats as a test needs, with the salt as iTunes comment metadata and the display matrix as the input transform. The clips carry no colour tags, so the decoders infer the matrix from the picture size and the absolute colours the tests expect depend on that. `EncoderAvailable()` is the guard (a machine with no VideoToolbox H.264 encoder reports it instead of failing on a missing file). `synthetic_video_test` (CPU only, no decoder under test) reads the files back with AVFoundation: frame times, one keyframe per repeat, the eight orientations, no colour extensions and the luma the encoder was given.
+
 `scene_schema_tests` also compiles `tests/utils_known_answer_tests.cpp`, which pins the `Random` draws that `WE_TEST_RANDOM_SEED` replays and the `genSha1` digests that name video caches and key the shader and script caches, so replacing either implementation cannot change them silently.
 
 `tex_schema_tests` links `PkgConfig::TEST_LZ4` itself
-(`tests/CMakeLists.txt`), the way the video suites re-resolve FFmpeg: the
+(`tests/CMakeLists.txt`), the way `playback_gpu_test` re-resolves FFmpeg for its software-frame suite: the
 renderer links LZ4 `PRIVATE`, so the include directory does not propagate to a
 test that builds its own compressed `.tex` fixtures. Run it when touching
 `WPTexImageParser`. Other useful filters:

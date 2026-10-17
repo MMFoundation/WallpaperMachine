@@ -64,7 +64,7 @@ bool AdvanceUntilFrameChanges(const std::shared_ptr<VideoTextureSource>& source,
 class SharedVideoSessionTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        ASSERT_FALSE(testing_media::SharedGop().packets.empty())
+        ASSERT_TRUE(testing_media::EncoderAvailable())
             << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
         static std::atomic<uint64_t> serial { 0 };
         dir = std::filesystem::temp_directory_path() /
