@@ -25,6 +25,18 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-17 — Native video default, native scene video textures, scene sounds without FFmpeg
+
+Integration of the plain-video, scene-video and scene-sound lanes on one branch (16 commits over 06c37925), after each lane passed its own gate.
+
+- `python3 scripts/build.py --renderer-only` — exit 0; bridge bindings regenerated with no diff.
+- `python3 scripts/check_rust.py` — exit 0; 1524 tests passed, 0 failed (asset and corpus tests skipped: no Wallpaper Engine assets or unpack corpus on this machine).
+- `python3 scripts/check_renderer.py` — exit 0; 2083 headless engine tests passed, 0 failed across every registered binary (including video_probe_test, vt_frame_decoder_test, sound_core_tests, sound_apple_tests, sound_vorbis_tests, audio_tests); report.json has no nonzero counter; 20 distinct tests skipped (local corpus, local clips and Workshop projects).
+- `python3 scripts/test.py` — first run: 3889 passed, 1 failed (DownloaderLifecycleTests/testSteamCMDInheritsTheStagingClaim, unrelated to this wave, passed alone 47/47); full rerun exit 0: Python 376 tests, native 3890 passed, 0 failed, 46 skipped of 3936.
+- Lock screen and screen saver were checked on the real desktop earlier today: AVFoundation video and Native Metal scenes both render.
+- Gap: WebM plain videos still fall back to the scene engine until the WebM surface lands; its audio track and any other container FFmpeg still decodes are unchanged.
+- Gap: no Release build was made for this entry; the AudioToolbox MP3 decoder clips at full scale where FFmpeg kept float peaks (documented in docs/sound-decoding.md).
+
 ## 2026-10-16 — Per-language release banners, bulleted What's New
 
 Each language block opens with its own banner (x.y.z.jpg, x.y.z.zh-Hans.jpg; Chinese falls back to English); What's New swaps the banner with the language tab, bullets list entries with a hanging indent and shows Highlights in the accent colour with ✦ markers. 1.5.0 now has English and Chinese banners.
@@ -111,14 +123,3 @@ Worktree steps T11, T12 and T10 of the text parity work, checked in an isolated 
 - the Consolas clock of workshop 3299228616 rendered with `render_ours.py` against Wallpaper Engine's frame: digit rows 87 tall in both (101 with the first stand-in tried) and rows 362-448 here against 361-447, the date's 471-491 against 470-491; before the ascender was set to 0.743 em the clock stood 12 pixels low
 - probetext1 against Wallpaper Engine's frame: cap tops and baselines unchanged and equal (793.0/651.0 and 602.5/320.1)
 - gaps: the probe of the eight font keys at three alignments (`probefont1`) was queued and the capture loader was not running, so the ascender and descender of Cambria, Segoe UI and Calibri stay the fonts' remembered tables with only their sum checked; no Wallpaper Engine frame of Cambria, Segoe UI, Calibri or an opaque background was compared; the web stand-ins' glyphs and line metrics were not compared with a Wallpaper Engine frame; the lock-screen extension was not run
-
-## 2026-10-15 — Text through effects is composed over the scene behind it, and padded only while an effect is visible
-
-Worktree step T9 and T5 of the text parity work, checked in an isolated worktree with the renderer test binaries; the app gate (`scripts/test.py`) and `scripts/check_renderer.py` were not run, and the spec's generated-picture case for the composite is covered by drawn `metal_scene_draw_smoke` cases instead.
-
-- `ctest` over every renderer test binary built from the worktree — all 1476 that ran passed; 2 are disabled and 8 skipped for lack of local corpus, video or project inputs
-- `text_object_runtime_test` 145, `metal_scene_draw_smoke` 106 (2 skipped: the local-project tests), `scene_schema_tests` 137, `script_runtime_compat_test` 163, `layer_texture_reference_test` 37, `project_property_preview_test` 23, `mouse_input_test` 22, `static_subgraph_cache_test` 26, `metal_backend_test` 36 — all passed, on both renderers where a test draws
-- probetext4 rendered with `render_ours.py` against Wallpaper Engine's frames: stems at alpha 1, 0.65 and 0.5 are 1.000, 0.651, 0.498 plain and 1.000, 0.275, 0.125 through `opacity`, equal to Wallpaper Engine's
-- a scene of three text layers whose shipped `opacity` effect a script switches on from 0.5 s to 1 s, drawn natively at 1920x1080 with the shipped assets (`LocalProjectsDrawTheSamePictureOnBothRenderers`, native only): ink at frames 10, 45 and 90 with the same box, where frames 10 and 90 had none before the passthrough took a white `g_Color4`
-- the new draw cases fail without their fix: the scripted, add and shipped-effects cases without the white `g_Color4`, the add case without `SetIdleFinalBlend`; the no-pass case fails without `EffectCountsForText` and the skip of effects with no pass
-- gaps: whether an effect that leaves alpha alone composes at the alpha cubed is open (the VHS frame of 3465215190 reads the alpha squared) and the capture that settles it was not taken; no Wallpaper Engine frame of HDR text through an effect, nor of mode 31 text with an effect, was compared
