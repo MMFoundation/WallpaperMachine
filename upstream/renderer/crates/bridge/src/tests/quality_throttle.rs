@@ -439,9 +439,9 @@ async fn new_scenes_and_every_host_descriptor_follow_the_throttle() {
         exported.iter().map(|row| (row.display_id, row.fps)).collect::<Vec<_>>()
     );
 
-    // The native player is judged against the same target rate.
+    // The native player plays the clip at the clip's own rate, so the ceiling is
+    // neither in its descriptor nor in the key its admission is judged under.
     let at_throttle = bridge.native_video_wallpapers().await.unwrap();
-    assert_eq!(at_throttle[0].admission_fps, PROFILE_FPS);
 
     // Clearing hands every descriptor the user's own values back.
     bridge.set_quality_throttle(Vec::new()).await.unwrap();
@@ -457,184 +457,58 @@ async fn new_scenes_and_every_host_descriptor_follow_the_throttle() {
             .all(|row| row.fps == 60)
     );
     let at_full = bridge.native_video_wallpapers().await.unwrap();
-    assert_eq!(at_full[0].admission_fps, 60);
-    assert_ne!(
-        at_full[0].admission_key, at_throttle[0].admission_key,
-        "the target rate is part of what the host judges, so it is part of the key"
-    );
-
-    // A refusal recorded for one rate does not outlive that rate: the native
-    // player is offered the clip again, and the engine lets go of it.
-    bridge
-        .reject_native_video("400".into(), at_full[0].admission_key, "refused at 60".into())
-        .await
-        .unwrap();
-    assert!(bridge.native_video_wallpapers().await.unwrap().is_empty());
-    assert!(
-        engine
-            .rendered_scenes()
-            .iter()
-            .any(|scene| scene.scene_path.contains("/400/")),
-        "a refused clip plays in the scene engine"
-    );
-    bridge.set_quality_throttle(heat()).await.unwrap();
-    // Before the host polls: the change itself has to hand the clip back.
-    assert!(
-        !engine
-            .rendered_scenes()
-            .iter()
-            .any(|scene| scene.scene_path.contains("/400/")),
-        "the refusal described a rate that is no longer the target"
-    );
     assert_eq!(
-        bridge.native_video_wallpapers().await.unwrap()[0].admission_fps,
-        PROFILE_FPS
+        at_full[0].admission_key, at_throttle[0].admission_key,
+        "the target rate is not part of what the host judges, so it is not part of the key"
     );
 }
 
-/// A scene on display 7 and a clip on display 9 that the native player was
-/// offered at the display's own 60 fps and refused, so the scene engine plays
-/// it. The scene's handle is live, so a quality change reaches a renderer and
-/// can be refused by it.
-async fn clip_refused_at_full_rate() -> (FakeEngineFacade, crate::api::WallpaperBridge, Scratch) {
+/// A refusal describes the file, never the frame-rate ceiling: every change that
+/// moves the ceiling leaves a refused clip with the scene engine, which is the
+/// only backend that can play it, and leaves a clip the native player took where
+/// it is.
+#[tokio::test]
+async fn a_frame_rate_ceiling_neither_refuses_nor_hands_back_a_clip() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
-    let release = EngineRelease::of(&engine);
+    let _release = EngineRelease::of(&engine);
     engine.set_snapshot(vec![display(7, Some(1)), display(9, None)]);
     let bridge = bridge_with(&engine, &temp);
     bridge.set_video_backend("native_preferred".into()).await.unwrap();
     commit(&bridge, "100", SCENE, "7").await;
     commit(&bridge, "400", CLIP, "9").await;
-    refuse_clip(&bridge, &engine, 60).await;
-    (
-        engine,
-        bridge,
-        Scratch {
-            _release: release,
-            _folder: temp,
-        },
-    )
-}
+    let plays_in_scene_engine = || {
+        engine
+            .rendered_scenes()
+            .iter()
+            .any(|scene| scene.scene_path.contains("/400/"))
+    };
 
-/// The host judges the clip against the target rate in force and cannot
-/// honour it, so the scene engine has to be playing it.
-async fn refuse_clip(
-    bridge: &crate::api::WallpaperBridge,
-    engine: &FakeEngineFacade,
-    expected_fps: u32,
-) {
+    // Taken by the native player, and every ceiling leaves it there.
+    let key = bridge.native_video_wallpapers().await.unwrap()[0].admission_key;
+    bridge.set_frame_rate_cap(Some(30)).await.unwrap();
+    bridge.set_quality_throttle(heat()).await.unwrap();
+    bridge.set_battery_quality_profile(PROFILE_SCALE, 45).await.unwrap();
+    bridge.set_battery_mode(BridgeBatteryMode::ReducedQuality).await.unwrap();
+    bridge.set_power_source_for_test(PowerSource::Battery).await;
     let offered = bridge.native_video_wallpapers().await.unwrap();
-    assert_eq!(offered.len(), 1, "the clip is offered to the native player");
-    assert_eq!(offered[0].admission_fps, expected_fps);
+    assert_eq!(offered.len(), 1, "no ceiling sends a clip to the scene engine");
+    assert_eq!(offered[0].admission_key, key);
+    assert!(!plays_in_scene_engine());
+
+    // Refused for a reason about the file, and no ceiling gives it back.
     bridge
-        .reject_native_video("400".into(), offered[0].admission_key, "refused".into())
+        .reject_native_video("400".into(), key, "the player cannot decode it".into())
         .await
         .unwrap();
-    assert!(plays_in_scene_engine(engine), "a refused clip plays in the scene engine");
-}
-
-fn plays_in_scene_engine(engine: &FakeEngineFacade) -> bool {
-    engine
-        .rendered_scenes()
-        .iter()
-        .any(|scene| scene.scene_path.contains("/400/"))
-}
-
-/// A request that moved the ceiling and failed halfway has already changed
-/// what it asked for when it is repeated, so the repeat cannot find the change
-/// by comparing before with after.
-#[tokio::test]
-async fn a_clip_is_handed_back_when_the_throttle_that_refused_it_failed_halfway_and_is_asked_again() {
-    let (engine, bridge, _scratch) = clip_refused_at_full_rate().await;
-
-    engine.fail_next_render_scale();
-    bridge
-        .set_quality_throttle(heat())
-        .await
-        .expect_err("the renderer refused the new scale");
-    bridge.set_quality_throttle(heat()).await.unwrap();
-
-    assert!(
-        !plays_in_scene_engine(&engine),
-        "the refusal described a rate that is no longer the target, so the engine lets go of the clip"
-    );
-    let offered = bridge.native_video_wallpapers().await.unwrap();
-    assert_eq!(offered[0].admission_fps, PROFILE_FPS);
-}
-
-#[tokio::test]
-async fn a_clip_is_handed_back_when_the_hand_back_itself_failed() {
-    let (engine, bridge, _scratch) = clip_refused_at_full_rate().await;
-
-    // The throttle takes effect and the scene list cannot be rebuilt, so the
-    // refusal is gone and the engine still plays the clip.
-    engine.fail_reconcile_with("the engine is busy");
-    bridge
-        .set_quality_throttle(heat())
-        .await
-        .expect_err("the scene list could not be rebuilt");
-    assert!(plays_in_scene_engine(&engine));
-    engine.clear_reconcile_failure();
-
-    // There is no refusal left to drop, yet the host must not be offered a
-    // clip the engine still plays.
-    let offered = bridge.native_video_wallpapers().await.unwrap();
-
-    assert_eq!(offered.len(), 1);
-    assert!(
-        !plays_in_scene_engine(&engine),
-        "the engine let go of the clip before the native player was offered it"
-    );
-}
-
-/// Every change that moves the ceiling ends in the same place, so a refusal
-/// recorded at the old ceiling is released whichever of them moved it, without
-/// waiting for the host to ask what to play.
-#[tokio::test]
-async fn editing_the_reduced_frame_rate_under_a_throttle_hands_a_refused_clip_back() {
-    let (engine, bridge, _scratch) = clip_refused_at_full_rate().await;
-    bridge.set_quality_throttle(heat()).await.unwrap();
-    assert!(!plays_in_scene_engine(&engine), "the throttle moved the ceiling to 30");
-    refuse_clip(&bridge, &engine, PROFILE_FPS).await;
-
-    bridge.set_battery_quality_profile(PROFILE_SCALE, 45).await.unwrap();
-
-    assert!(
-        !plays_in_scene_engine(&engine),
-        "'Frame rate when reduced' moved the ceiling the throttle holds"
-    );
-}
-
-#[tokio::test]
-async fn leaving_reduced_quality_on_battery_hands_a_refused_clip_back() {
-    let (engine, bridge, _scratch) = clip_refused_at_full_rate().await;
-    bridge.set_battery_mode(BridgeBatteryMode::ReducedQuality).await.unwrap();
-    bridge.set_power_source_for_test(PowerSource::Battery).await;
-    assert!(!plays_in_scene_engine(&engine), "the profile moved the ceiling to 30");
-    refuse_clip(&bridge, &engine, PROFILE_FPS).await;
-
+    assert!(plays_in_scene_engine());
+    bridge.set_quality_throttle(Vec::new()).await.unwrap();
     bridge.set_battery_mode(BridgeBatteryMode::KeepRunning).await.unwrap();
-
-    assert!(!plays_in_scene_engine(&engine), "leaving the mode lifted the ceiling");
-}
-
-#[tokio::test]
-async fn plugging_in_while_reduced_quality_is_chosen_hands_a_refused_clip_back() {
-    let (engine, bridge, _scratch) = clip_refused_at_full_rate().await;
-    bridge.set_battery_mode(BridgeBatteryMode::ReducedQuality).await.unwrap();
-    bridge.set_power_source_for_test(PowerSource::Battery).await;
-    refuse_clip(&bridge, &engine, PROFILE_FPS).await;
-
     bridge.set_power_source_for_test(PowerSource::External).await;
-
-    assert!(!plays_in_scene_engine(&engine), "the power source lifted the ceiling");
-}
-
-#[tokio::test]
-async fn the_users_own_frame_rate_cap_hands_a_refused_clip_back() {
-    let (engine, bridge, _scratch) = clip_refused_at_full_rate().await;
-
-    bridge.set_frame_rate_cap(Some(30)).await.unwrap();
-
-    assert!(!plays_in_scene_engine(&engine), "the cap moved the ceiling to 30");
+    bridge.set_frame_rate_cap(None).await.unwrap();
+    assert!(bridge.native_video_wallpapers().await.unwrap().is_empty());
+    assert!(
+        plays_in_scene_engine(),
+        "the refusal was about the file, which no frame-rate change touched"
+    );
 }

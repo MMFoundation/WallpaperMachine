@@ -141,7 +141,7 @@ actor WallpaperCompatibilityService {
           let outcome = await probe(file)
           let refusal: NativeVideoRefusal?
           switch outcome {
-          case .probed(let metadata): refusal = NativeVideoAdmission.decide(probe: metadata, targetFps: context.targetFPS)
+          case .probed(let metadata): refusal = NativeVideoAdmission.decide(probe: metadata)
           case .refused(let failure): refusal = failure
           }
           cacheable = refusal?.isSettled ?? true
@@ -149,8 +149,8 @@ actor WallpaperCompatibilityService {
           append("nativeVideo", refusal == nil ? .ok : refusal?.isSettled == true ? .warning : .unknown,
                  String(localized: "Native video admission"), refusal.map(\.reason)
                  ?? (selected
-                     ? String(localized: "AVFoundation metadata meets this target frame-rate constraint. Actual player preparation and on-screen presentation are not verified by this check.")
-                     : String(localized: "AVFoundation metadata meets this target frame-rate constraint. Compatibility remains selected; this check does not change your backend.")))
+                     ? String(localized: "AVFoundation can open this video, which plays at its own frame rate. Actual player preparation and on-screen presentation are not verified by this check.")
+                     : String(localized: "AVFoundation can open this video, which plays at its own frame rate. Compatibility remains selected; this check does not change your backend.")))
         } else {
           append("nativeVideo", .unavailable, String(localized: "Native video admission"),
                  String(localized: "Native admission needs a supported installed video, a readable entry and a valid target display."))

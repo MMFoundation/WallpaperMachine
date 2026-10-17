@@ -286,12 +286,6 @@
     "Native video admission" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Native video admission"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブ動画の適合確認"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生视频准入"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生影片准入"}}}
     },
-    "AVFoundation metadata meets this target frame-rate constraint. Actual player preparation and on-screen presentation are not verified by this check." : {
-      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation metadata meets this target frame-rate constraint. Actual player preparation and on-screen presentation are not verified by this check."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation のメタデータは対象のフレームレート制約を満たしています。実際のプレイヤーの準備や画面表示は、この確認では検証しません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 元数据符合目标帧率约束。此检查不验证实际播放器准备和屏幕显示。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 中繼資料符合目標影格率限制。此檢查不驗證實際播放器準備和螢幕顯示。"}}}
-    },
-    "AVFoundation metadata meets this target frame-rate constraint. Compatibility remains selected; this check does not change your backend." : {
-      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation metadata meets this target frame-rate constraint. Compatibility remains selected; this check does not change your backend."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation のメタデータは対象のフレームレート制約を満たしています。互換モードの選択は維持され、この確認でバックエンドは変更されません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 元数据符合目标帧率约束。仍选择兼容模式；此检查不会更改后端。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 中繼資料符合目標影格率限制。仍選擇相容模式；此檢查不會變更後端。"}}}
-    },
     "Native admission needs a supported installed video, a readable entry and a valid target display." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Native admission needs a supported installed video, a readable entry and a valid target display."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブ適合確認には、対応するインストール済み動画、読み取れるエントリ、有効な対象ディスプレイが必要です。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生准入需要受支持的已安装视频、可读入口和有效目标显示器。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生准入需要支援的已安裝影片、可讀取入口和有效目標顯示器。"}}}
     },
@@ -5228,9 +5222,6 @@
     "%lld fps" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "%lld fps"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "%lld fps"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "%lld fps"}}}
     },
-    "At the top of the slider there is no limit, and each display runs at its own frame rate: up to 60 fps unless you chose more for it. A lower value caps every display; saved per-display frame rates are not rewritten." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "スライダの一番上では制限がなく、各ディスプレイがそれぞれのフレームレートで動作します（個別により高い値を選択していない限り最大60 fps）。低い値にするとすべてのディスプレイに上限が適用されます。ディスプレイごとに保存されたフレームレートは書き換えられません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "滑块最顶端表示不限制，每台显示器按各自的帧率运行：除非你为它选了更高的帧率，否则最高 60 fps。更低的值会限制每台显示器，但不会改写各显示器已保存的帧率。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "滑桿拉到最頂端時沒有限制，每台顯示器會以各自的影格率執行：除非你為它選擇了更高的值，否則最高為 60 fps。較低的值會限制每台顯示器，但不會改寫各顯示器已儲存的影格率。"}}}
-    },
     "Limited to %lld fps by Performance settings" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "パフォーマンス設定により%lld fpsに制限されています"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "受性能设置限制为 %lld fps"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已由「效能」設定限制為 %lld fps"}}}
     },
@@ -5266,9 +5257,6 @@
     },
     "App rules pause, mute or stop wallpapers while a chosen app is running or in front. Your own Play and Pause are not changed." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "Appルールは、選択したAppが実行中または最前面にあるときに壁紙を一時停止、消音、または停止します。手動での再生と一時停止は変更されません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "应用规则会在所选应用正在运行或位于前台时暂停、静音或停止壁纸，不会改动你自己的播放和暂停。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "App 規則會在所選 App 執行中或位於前景時暫停、靜音或停止桌布，不會變更你自己的播放與暫停操作。"}}}
-    },
-    "A quality preset sets the frame-rate limit and render scale together. The frame-rate limit caps every display without rewriting the frame rate saved for each wallpaper. Internal render scale sets how many pixels are rendered before the image is scaled to fit." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "画質プリセットは、フレームレートの上限とレンダリングスケールをまとめて設定します。フレームレートの上限はすべてのディスプレイに適用され、壁紙ごとに保存されたフレームレートは書き換えられません。内部レンダリングスケールは、画像を画面に合わせて拡大縮小する前に描画するピクセル数を設定します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "画质预设会同时设置帧率上限和渲染比例。帧率上限限制每台显示器，但不会改写各壁纸已保存的帧率。内部渲染比例决定放大到屏幕之前要渲染多少像素。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "畫質預設集會同時設定影格率上限與渲染比例。影格率上限會限制每台顯示器，但不會改寫各桌布已儲存的影格率。內部渲染比例決定影像縮放至適當大小前要渲染多少像素。"}}}
     },
     "Video playback picks a backend for each wallpaper. Native is used only for videos it supports; the rest play in Compatibility." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ビデオ再生では、壁紙ごとにバックエンドを選択します。「ネイティブ」は対応しているビデオにのみ使用され、それ以外は互換モードで再生されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频播放会为每张壁纸选择后端。原生模式只用于它支持的视频，其余使用兼容模式。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片播放會為每張桌布選擇後端。「原生」只用於它支援的影片，其餘影片會以「相容模式」播放。"}}}
@@ -7266,6 +7254,18 @@
     },
     "SteamCMD is Valve’s free download tool. Install it into this app’s own folder or locate a copy you already have; the sign-in follows on its own." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "SteamCMDはValveの無料ダウンロードツールです。このアプリ専用のフォルダにインストールするか、既存のコピーを指定してください。完了すると自動的にサインインに進みます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "SteamCMD 是 Valve 的免费下载工具。可以安装到应用自己的文件夹，也可以选择已有副本，完成后会自动继续登录。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "SteamCMD 是 Valve 的免費下載工具。你可以安裝到此 App 自己的資料夾，或指定現有副本；完成後會自動接著登入。"}}}
+    },
+    "A quality preset sets the frame-rate limit and render scale together. The frame-rate limit caps scenes and web wallpapers on every display without rewriting the frame rate saved for each wallpaper; a video plays at its own frame rate. Internal render scale sets how many pixels are rendered before the image is scaled to fit." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "画質プリセットは、フレームレートの上限とレンダリングスケールをまとめて設定します。フレームレートの上限はすべてのディスプレイのシーンとWeb壁紙に適用され、壁紙ごとに保存されたフレームレートは書き換えられません。ビデオは動画自体のフレームレートで再生されます。内部レンダリングスケールは、画像を画面に合わせて拡大縮小する前に描画するピクセル数を設定します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "画质预设会同时设置帧率上限和渲染比例。帧率上限限制每台显示器上的场景和网页壁纸，但不会改写各壁纸已保存的帧率；视频按自身帧率播放。内部渲染比例决定放大到屏幕之前要渲染多少像素。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "畫質預設集會同時設定影格率上限與渲染比例。影格率上限會限制每台顯示器上的場景與網頁桌布，但不會改寫各桌布已儲存的影格率；影片會以自身的影格率播放。內部渲染比例決定影像縮放至適當大小前要渲染多少像素。"}}}
+    },
+    "At the top of the slider there is no limit, and each display runs at its own frame rate: up to 60 fps unless you chose more for it. A lower value caps scenes and web wallpapers on every display, while a video plays at its own frame rate; saved per-display frame rates are not rewritten." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "スライダの一番上では制限がなく、各ディスプレイがそれぞれのフレームレートで動作します（個別により高い値を選択していない限り最大60 fps）。低い値にすると、すべてのディスプレイのシーンとWeb壁紙に上限が適用されます。ビデオは動画自体のフレームレートで再生されます。ディスプレイごとに保存されたフレームレートは書き換えられません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "滑块最顶端表示不限制，每台显示器按各自的帧率运行：除非你为它选了更高的帧率，否则最高 60 fps。更低的值会限制每台显示器上的场景和网页壁纸，而视频按自身帧率播放；不会改写各显示器已保存的帧率。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "滑桿拉到最頂端時沒有限制，每台顯示器會以各自的影格率執行：除非你為它選擇了更高的值，否則最高為 60 fps。較低的值會限制每台顯示器上的場景與網頁桌布，而影片會以自身的影格率播放；不會改寫各顯示器已儲存的影格率。"}}}
+    },
+    "AVFoundation can open this video, which plays at its own frame rate. Actual player preparation and on-screen presentation are not verified by this check." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation はこのビデオを開けます。ビデオは動画自体のフレームレートで再生されます。実際のプレイヤーの準備や画面表示は、この確認では検証しません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 可以打开此视频，视频按自身帧率播放。此检查不验证实际播放器准备和屏幕显示。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 可以開啟此影片，影片會以自身的影格率播放。此檢查不驗證實際播放器準備和螢幕顯示。"}}}
+    },
+    "AVFoundation can open this video, which plays at its own frame rate. Compatibility remains selected; this check does not change your backend." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation はこのビデオを開けます。ビデオは動画自体のフレームレートで再生されます。互換モードの選択は維持され、この確認でバックエンドは変更されません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 可以打开此视频，视频按自身帧率播放。仍选择兼容模式；此检查不会更改后端。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 可以開啟此影片，影片會以自身的影格率播放。仍選擇相容模式；此檢查不會變更後端。"}}}
     }
   },
   "version" : "1.0"

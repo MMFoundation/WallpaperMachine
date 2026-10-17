@@ -327,7 +327,11 @@ async fn battery_video_backend_report_preserves_native_rejection() {
     bridge.set_battery_quality_profile(0.5, 24).await.unwrap();
     bridge.set_battery_mode(crate::BridgeBatteryMode::ReducedQuality).await.unwrap();
     bridge.set_power_source_for_test(PowerSource::Battery).await;
-    assert_eq!(bridge.native_video_wallpapers().await.unwrap()[0].admission_fps, 24);
+    assert_eq!(
+        bridge.native_video_wallpapers().await.unwrap().len(),
+        1,
+        "a battery frame rate does not take a clip off the native player"
+    );
 
     let key = bridge
         .native_video_wallpapers()

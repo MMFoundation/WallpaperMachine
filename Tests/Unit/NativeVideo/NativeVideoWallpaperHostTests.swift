@@ -15,8 +15,6 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
     private func wallpaper(
         displayID: UInt32 = 7,
         id: String = "300",
-        fps: UInt32 = 60,
-        admissionFps: UInt32? = nil,
         paused: Bool = false,
         volume: Float = 1.0,
         muted: Bool = false,
@@ -31,8 +29,6 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             wallpaperId: id,
             title: "Clip",
             mediaPath: mediaPath,
-            fps: fps,
-            admissionFps: admissionFps ?? fps,
             admissionKey: admissionKey,
             paused: paused,
             volume: volume,
@@ -41,12 +37,15 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             scalingFactor: scalingFactor)
     }
 
+    /// A clip the injected admission refuses, where a test needs one wallpaper refused and another not.
+    private static let refusedPath = "/tmp/does-not-need-to-exist/refused.mp4"
+
     private final class Recorder {
         var rejected: [(id: String, key: UInt64, reason: String)] = []
         var fetched = 0
         var presented = 0
         var stopped = 0
-        var admissionProbes: [UInt64] = []
+        var admissionProbes: [String] = []
         var refusalSequence: [NativeVideoRefusal?] = []
         /// Files whose metadata read never returns until the gate opens, from
         /// the probe numbered `gateFromProbe` (1 is the first) onward.
@@ -196,7 +195,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
     private func makeHost(
         wallpapers: [BridgeNativeVideoWallpaper],
         refusal: NativeVideoRefusal? = nil,
-        refusalByKey: [UInt64: NativeVideoRefusal] = [:],
+        refusalByPath: [String: NativeVideoRefusal] = [:],
         /// Consumed one entry per probe, so a transient failure that clears on
         /// a retry can be expressed. Falls through to the other two once empty.
         refusalSequence: [NativeVideoRefusal?] = [],
@@ -234,12 +233,11 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
                 await recorder.rejectGate?.wait()
             },
             screens: { [weak self] in self?.screenFrames ?? [] },
-            refusal: { url, fps in
+            refusal: { url in
                 recorder.events.append("probe")
-                // The injected decision stands in for the asset probe; the key
-                // is reconstructed from the target rate the host passed, which
-                // is the input the real rule reads.
-                recorder.admissionProbes.append(UInt64(fps))
+                // The injected decision stands in for the asset probe, which
+                // reads the file and nothing else.
+                recorder.admissionProbes.append(url.path)
                 if recorder.admissionProbes.count >= recorder.gateFromProbe,
                     let gate = recorder.probeGates[url.path]
                 {
@@ -248,7 +246,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
                 if !recorder.refusalSequence.isEmpty {
                     return recorder.refusalSequence.removeFirst()
                 }
-                return refusalByKey[UInt64(fps)] ?? refusal
+                return refusalByPath[url.path] ?? refusal
             },
             makeSurface: { [weak self] url, frame, key, paused in
                 recorder.made.append(url.path)
@@ -340,9 +338,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
     }
 
     func testAWallpaperTheBackendCannotHonourIsHandedBack() async {
-        // A 60 fps clip under a 30 fps target cannot be honoured without either
-        // slowing the video down or copying every frame through the CPU, so the
-        // scene engine has to take it.
+        // A file the player cannot open has to be taken by the scene engine.
         //
         // This deliberately does NOT assert "exactly once across two offers".
         // That was the old local skip list, and it is what left a display with
@@ -353,76 +349,72 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         // what it is actually offered.
         let recorder = Recorder()
         let host = makeHost(
-            wallpapers: [wallpaper(fps: 30)],
-            refusal: .targetFrameRateBelowContent(target: 30, bound: 60, source: "minFrameDuration"),
+            wallpapers: [wallpaper()],
+            refusal: .notPlayable("asset reports itself unplayable"),
             recorder: recorder)
 
-        await host.apply([wallpaper(fps: 30)])
+        await host.apply([wallpaper()])
 
         XCTAssertEqual(recorder.rejected.count, 1)
         XCTAssertEqual(recorder.rejected.first?.id, "300")
-        XCTAssertTrue(recorder.rejected.first?.reason.contains("target frame rate") == true)
+        XCTAssertTrue(recorder.rejected.first?.reason.contains("not playable") == true)
         XCTAssertTrue(host.isEmpty, "a refused wallpaper must not leave a window behind")
         host.shutdown()
     }
 
     func testTheRefusalTravelsWithTheKeyItWasDecidedAgainst() async {
-        // A verdict that arrives after the user changed the target rate
-        // describes a configuration that no longer exists. The bridge can only
-        // tell that if the key is reported with the refusal.
+        // A verdict that arrives after the user replaced the file describes a
+        // configuration that no longer exists. The bridge can only tell that if
+        // the key is reported with the refusal.
         let recorder = Recorder()
         let host = makeHost(
-            wallpapers: [wallpaper(fps: 30, admissionKey: 0xBEEF)],
-            refusal: .targetFrameRateBelowContent(target: 30, bound: 60, source: "nominalFrameRate"),
+            wallpapers: [wallpaper(admissionKey: 0xBEEF)],
+            refusal: .playbackFailed("decoder error"),
             recorder: recorder)
 
-        await host.apply([wallpaper(fps: 30, admissionKey: 0xBEEF)])
+        await host.apply([wallpaper(admissionKey: 0xBEEF)])
 
         XCTAssertEqual(recorder.rejected.first?.key, 0xBEEF)
         host.shutdown()
     }
 
-    func testChangingTheTargetRateIsEvaluatedAgainRatherThanStayingRefused() async {
-        // The round-3 behaviour: once refused, refused for the session. Raising
-        // the target to something the clip fits has to bring it back.
+    func testANewKeyIsEvaluatedAgainRatherThanStayingRefused() async {
+        // Once refused, refused for the session, for that key. A replaced file
+        // is a new key, and it has to be judged on its own bytes.
         let recorder = Recorder()
         let host = makeHost(
             wallpapers: [],
-            refusalByKey: [
-                30: .targetFrameRateBelowContent(target: 30, bound: 60, source: "nominalFrameRate")
-            ],
+            refusalSequence: [.notPlayable("no video track"), nil],
             recorder: recorder)
 
-        await host.apply([wallpaper(fps: 30, admissionKey: 30)])
+        await host.apply([wallpaper(admissionKey: 30)])
         XCTAssertTrue(host.isEmpty)
         XCTAssertEqual(recorder.rejected.count, 1)
 
-        await host.apply([wallpaper(fps: 60, admissionKey: 60)])
+        await host.apply([wallpaper(admissionKey: 60)])
 
         XCTAssertEqual(host.activeDisplayIDs, [7], "the new configuration must be evaluated")
         XCTAssertEqual(recorder.rejected.count, 1, "and must not inherit the old verdict")
         host.shutdown()
     }
 
-    func testLoweringTheTargetRateUnderARunningClipReEvaluatesIt() async {
-        // The wallpaper id does not change, so round 4's first version kept
-        // the player and only pushed the new descriptor at it: a 60 fps clip
-        // carried on playing at 60 under a 30 fps target. Admission exists to
-        // stop exactly that, so a changed admission key has to go through it.
+    func testANewKeyUnderARunningClipReEvaluatesIt() async {
+        // The wallpaper id does not change, so an early version kept the player
+        // and only pushed the new descriptor at it, and a replaced file carried
+        // on playing the old one. A changed admission key has to go through
+        // admission again.
         let recorder = Recorder()
         let host = makeHost(
             wallpapers: [],
-            refusalByKey: [
-                30: .targetFrameRateBelowContent(target: 30, bound: 60, source: "minFrameDuration")
-            ],
+            refusalSequence: [nil, .notPlayable("no video track")],
             recorder: recorder)
-        await host.apply([wallpaper(fps: 60, admissionKey: 60)])
+        await host.apply([wallpaper(admissionKey: 60)])
         XCTAssertEqual(host.activeDisplayIDs, [7])
 
-        await host.apply([wallpaper(fps: 30, admissionKey: 30)])
+        await host.apply([wallpaper(admissionKey: 30)])
 
         XCTAssertTrue(
-            host.isEmpty, "the accepted player must not survive a target it was never admitted for")
+            host.isEmpty, "the accepted player must not survive a file it was never admitted for")
         XCTAssertEqual(recorder.rejected.count, 1)
         XCTAssertEqual(recorder.rejected.first?.key, 30)
         XCTAssertEqual(recorder.stopped, 1, "and it must be stopped, not merely dropped")
@@ -546,7 +538,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let host = makeHost(wallpapers: [], recorder: recorder)
         await host.apply([wallpaper(id: "300", admissionKey: 1)])
         let stale = surfacesMade[7]
-        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
         XCTAssertEqual(host.activeDisplayIDs, [7])
 
         stale?.failPreparation("late failure", generation: 1)
@@ -1437,7 +1429,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         defer { host.shutdown() }
         let old = try await openAndWaitForTheCountdown(host, wallpaper(id: "300", admissionKey: 1))
 
-        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
         await sleeper.waitUntilPending()
         let new = try XCTUnwrap(surfacesMade[7])
         XCTAssertFalse(new === old)
@@ -1961,18 +1953,16 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let recorder = Recorder()
         let host = makeHost(
             wallpapers: [],
-            refusalByKey: [
-                30: .targetFrameRateBelowContent(target: 30, bound: 60, source: "minFrameDuration")
-            ],
+            refusalSequence: [.notPlayable("no video track"), nil],
             recorder: recorder)
 
-        await host.apply([wallpaper(fps: 30, admissionKey: 30)])
+        await host.apply([wallpaper(admissionKey: 30)])
         XCTAssertEqual(recorder.rejected.count, 1)
 
-        await host.apply([wallpaper(fps: 60, admissionKey: 60)])
+        await host.apply([wallpaper(admissionKey: 60)])
         XCTAssertEqual(host.activeDisplayIDs, [7], "60 is admissible")
 
-        await host.apply([wallpaper(fps: 30, admissionKey: 30)])
+        await host.apply([wallpaper(admissionKey: 30)])
 
         XCTAssertTrue(host.isEmpty, "30 is still not admissible")
         XCTAssertEqual(
@@ -2003,29 +1993,23 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         host.shutdown()
     }
 
-    func testAMirrorIsJudgedByItsGroupsStrictestTargetNotTheSourcesOwn() async {
-        // A 60 fps clip on a source display targeting 60, mirrored to a display
-        // targeting 30. The bridge gives both members the same admission key
-        // and an admissionFps of 30 — the strictest in the group. Probing the
-        // per-display `fps` instead would evaluate 60, accept, and then play
-        // the mirror at 60 under a 30 fps target: the silent rate change
-        // admission exists to prevent, reached through the one path that used
-        // to skip admission entirely.
+    func testAMirrorGroupIsJudgedOnceAndRefusedAsAUnit() async {
+        // A source display and its mirror share one admission key, because the
+        // mirror has no scene of its own to fall back to. The file is read once
+        // for the pair, and one recorded refusal sends all of it back.
         let recorder = Recorder()
         let host = makeHost(
             wallpapers: [],
-            refusalByKey: [
-                30: .targetFrameRateBelowContent(target: 30, bound: 60, source: "minFrameDuration")
-            ],
+            refusal: .notPlayable("no video track"),
             recorder: recorder)
 
         await host.apply([
-            wallpaper(displayID: 7, fps: 60, admissionFps: 30, admissionKey: 99),
-            wallpaper(displayID: 9, fps: 30, admissionFps: 30, admissionKey: 99),
+            wallpaper(displayID: 7, admissionKey: 99),
+            wallpaper(displayID: 9, admissionKey: 99),
         ])
 
-        XCTAssertEqual(recorder.admissionProbes, [30], "the group is probed at its strictest target")
-        XCTAssertTrue(host.isEmpty, "neither member may play a rate the group cannot honour")
+        XCTAssertEqual(recorder.admissionProbes.count, 1, "the group is probed once")
+        XCTAssertTrue(host.isEmpty, "neither member may play a clip the group cannot")
         XCTAssertFalse(recorder.rejected.isEmpty)
         XCTAssertTrue(
             recorder.rejected.allSatisfy { $0.key == 99 },
@@ -2033,17 +2017,17 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         host.shutdown()
     }
 
-    func testAMirrorGroupWithinTheClipsRateIsStillAdmitted() async {
+    func testAMirrorGroupOfAPlayableClipIsAdmitted() async {
         let recorder = Recorder()
         let host = makeHost(wallpapers: [], recorder: recorder)
 
         await host.apply([
-            wallpaper(displayID: 7, fps: 120, admissionFps: 60, admissionKey: 100),
-            wallpaper(displayID: 9, fps: 60, admissionFps: 60, admissionKey: 100),
+            wallpaper(displayID: 7, admissionKey: 100),
+            wallpaper(displayID: 9, admissionKey: 100),
         ])
 
         XCTAssertEqual(host.activeDisplayIDs, [7, 9])
-        XCTAssertEqual(recorder.admissionProbes, [60], "one probe covers the group")
+        XCTAssertEqual(recorder.admissionProbes.count, 1, "one probe covers the group")
         XCTAssertTrue(recorder.rejected.isEmpty)
         host.shutdown()
     }
@@ -2213,7 +2197,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         await host.apply([wallpaper(id: "300")])
         let firstGeneration = host.surfaceGenerationForTest
 
-        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
 
         XCTAssertEqual(host.activeDisplayIDs, [7])
         XCTAssertNotEqual(
@@ -2245,7 +2229,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         center.post(
             name: DesktopPosterNotification.request, object: surfacesMade[7]?.posterLayer)
         // Replace the wallpaper while the request is still in flight.
-        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
         try? await Task.sleep(for: .milliseconds(200))
 
         XCTAssertTrue(
@@ -2533,7 +2517,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         XCTAssertEqual(harness.state(), .armed)
         recorder.events.removeAll()
 
-        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
 
         let second = try XCTUnwrap(surfacesMade[7])
         XCTAssertFalse(second === first)
@@ -2564,7 +2548,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
         defer { host.shutdown() }
         _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
-        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
         let second = try XCTUnwrap(surfacesMade[7])
 
         second.isReadyForDisplay = true
@@ -2592,7 +2576,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         surfaceReadyAtBirth = true
         recorder.events.removeAll()
 
-        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
 
         XCTAssertEqual(recorder.events, ["probe", "stop", "make", "present+veil"])
         XCTAssertNil(harness.state(), "nothing is left covering a clip that is already showing")
@@ -2608,7 +2592,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
         defer { host.shutdown() }
         _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
-        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
         let second = try XCTUnwrap(surfacesMade[7])
         XCTAssertNotNil(harness.veil(on: second.posterLayer))
 
@@ -2662,7 +2646,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
         defer { host.shutdown() }
         _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
-        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
         let second = try XCTUnwrap(surfacesMade[7])
         XCTAssertEqual(harness.state(), .onHost)
 
@@ -2682,7 +2666,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
         defer { host.shutdown() }
         _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
-        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
         let second = try XCTUnwrap(surfacesMade[7])
         XCTAssertEqual(harness.state(), .onHost)
         XCTAssertNotNil(harness.veil(on: second.posterLayer))
@@ -2702,12 +2686,12 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         defer { host.shutdown() }
         let both = screenFrames
         _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
-        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
         let second = try XCTUnwrap(surfacesMade[7])
         XCTAssertEqual(harness.state(), .onHost)
 
         screenFrames = both.filter { $0.id != 7 }
-        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
 
         XCTAssertTrue(second.isStopped, "there is nothing to draw on")
         XCTAssertNil(harness.state())
@@ -2765,13 +2749,14 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         openedAtTeardown.append(gate)
         recorder.rejectGate = gate
         let host = makeHost(
-            wallpapers: [], refusalByKey: [30: .notPlayable("synthetic: no video track")],
+            wallpapers: [],
+            refusalByPath: [Self.refusedPath: .notPlayable("synthetic: no video track")],
             recorder: recorder, switchHold: harness.hold)
         defer { host.shutdown() }
         let first = try await showAndHold(
-            wallpaper(id: "300", fps: 60, admissionKey: 1), on: host, harness)
+            wallpaper(id: "300", admissionKey: 1), on: host, harness)
 
-        let pass = Task { await host.apply([wallpaper(id: "301", fps: 30, admissionKey: 2)]) }
+        let pass = Task { await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)]) }
         await gate.waitUntilWaiting()
 
         // The bridge has the refusal and the engine is taking the wallpaper over.
@@ -2799,12 +2784,13 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let harness = HoldHarness()
         defer { harness.finish() }
         let host = makeHost(
-            wallpapers: [], refusalByKey: [30: .notPlayable("synthetic: no video track")],
+            wallpapers: [],
+            refusalByPath: [Self.refusedPath: .notPlayable("synthetic: no video track")],
             recorder: recorder, switchHold: harness.hold)
         defer { host.shutdown() }
-        _ = try await showAndHold(wallpaper(id: "300", fps: 60, admissionKey: 1), on: host, harness)
+        _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
 
-        await host.apply([wallpaper(id: "301", fps: 30, admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
 
         XCTAssertEqual(recorder.rejected.count, 1)
         XCTAssertEqual(harness.state(), .armed, "a window may still come")
@@ -2877,7 +2863,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         await host.apply([wallpaper(id: "300", admissionKey: 1)])
         recorder.events.removeAll()
 
-        await host.apply([wallpaper(id: "301", admissionKey: 2)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
 
         let second = try XCTUnwrap(surfacesMade[7])
         XCTAssertEqual(recorder.events, ["probe", "stop", "make", "present"])

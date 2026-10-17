@@ -293,22 +293,19 @@ async fn battery_fps_caps_web_and_native_descriptors() {
     let b = build(&e, s, &home);
     let web = b.web_wallpapers().await.unwrap();
     let native = b.native_video_wallpapers().await.unwrap();
-    assert_eq!(
-        (web[0].fps, native[0].fps, native[0].admission_fps),
-        (24, 24, 24),
-        "Host descriptors ignored effective battery ceiling"
-    );
+    let key = native[0].admission_key;
+    assert_eq!(web[0].fps, 24, "Host descriptors ignored effective battery ceiling");
     b.set_frame_rate_cap(Some(15)).await.unwrap();
     assert_eq!(b.web_wallpapers().await.unwrap()[0].fps, 15);
     assert_eq!(
-        b.native_video_wallpapers().await.unwrap()[0].admission_fps,
-        15
+        b.native_video_wallpapers().await.unwrap()[0].admission_key,
+        key,
+        "a frame-rate ceiling leaves a native video's identity alone: it plays at its own rate"
     );
     b.set_power_source_for_test(crate::power::PowerSource::External)
         .await;
     b.set_frame_rate_cap(None).await.unwrap();
     assert_eq!(b.web_wallpapers().await.unwrap()[0].fps, 60);
-    assert_eq!(b.native_video_wallpapers().await.unwrap()[0].fps, 60);
 }
 #[tokio::test]
 async fn scene_audio_enable_recomputes_demand() {

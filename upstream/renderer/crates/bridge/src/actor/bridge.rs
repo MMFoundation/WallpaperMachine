@@ -1272,11 +1272,12 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
     /// Hands a clip back to the native player once the refusal that kept it on
     /// the scene engine describes a configuration that is gone.
     ///
-    /// The frame-rate ceiling is part of a native video's admission key, so a
-    /// change of it makes the refusal recorded at the old rate stale. The
-    /// refusal is dropped and the scene list is rebuilt, which is what lets the
-    /// engine give up a clip the native player is about to be offered; left
-    /// alone, both would decode and play it.
+    /// A replaced media file changes a native video's admission key, which makes
+    /// the refusal recorded for the old file stale. The refusal is dropped and
+    /// the scene list is rebuilt, which is what lets the engine give up a clip
+    /// the native player is about to be offered; left alone, both would decode
+    /// and play it. The frame-rate ceiling is not part of the key: the player
+    /// plays a clip at its own rate, so a cap never makes a refusal stale.
     ///
     /// This does not compare the keys before and after one change, because a
     /// change that fails halfway has already been made when it is asked for
@@ -1338,8 +1339,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     wallpaper_id: desc.wallpaper_id,
                     title,
                     media_path,
-                    fps: desc.fps,
-                    admission_fps: desc.admission_fps,
                     admission_key: desc.admission_key,
                     paused: desc.paused,
                     volume: desc.volume,

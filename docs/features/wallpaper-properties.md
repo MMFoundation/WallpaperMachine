@@ -414,8 +414,9 @@ running backend reports, so a wallpaper with no report yet shows the plain note.
 ### Compatibility check
 
 An installed wallpaper's **Compatibility check** reads entry/shared resources and,
-for video, asynchronously checks native admission for the selected display and
-frame-rate constraints. Checks are explicit and version/configuration-bound.
+for video, asynchronously checks native admission for the selected display: whether
+macOS can open the file, since a clip plays at its own frame rate. Checks are explicit
+and version/configuration-bound.
 Unknown scene shader/graph or Web runtime behavior remains **unknown**; readable
 files and video metadata are not proof of a displayed frame. The same card shows
 the actual running backend and fallback reason when the runtime reports them.

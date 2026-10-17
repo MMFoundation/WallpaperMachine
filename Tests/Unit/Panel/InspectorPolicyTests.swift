@@ -242,6 +242,23 @@ final class InspectorPolicyTests: InspectorTestCase {
     XCTAssertEqual(displays.map(InspectorPolicy.positionNote(for:)), [.nativePlayer, .explains])
   }
 
+  // MARK: Frame rate
+
+  func testADisplayTheNativePlayerDrawsOnHasNoFrameRateToSet() {
+    let snapshot = BridgeSnapshotFixtures.options(
+      wallpaperId: "clip", kind: .video,
+      displayConfigurations: [
+        InspectorRenderFixture.config("primary", "Studio Display (1 - Primary)", mode: .fill, factor: 1, pan: (0.5, 0.5)),
+        InspectorRenderFixture.config("second", "LG UltraFine (2 - Secondary)", mode: .fill, factor: 1, pan: (0.5, 0.5)),
+      ])
+    var inputs = InspectorOptions.Inputs()
+    inputs.nativePlayerDisplays = [1]
+    let displays = InspectorOptions.make(snapshot, inputs: inputs).displays
+    XCTAssertEqual(
+      displays.map(InspectorPolicy.offersFrameRate(for:)), [false, true],
+      "a clip plays at its own rate on the native player; another display of it keeps the row")
+  }
+
   func testAStillTheAppPackagedIsToldByItsIdAndTheArtworkIdIsRead() {
     XCTAssertTrue(InspectorPolicy.isPackagedStill("pixiv-12345-p0"))
     XCTAssertTrue(InspectorPolicy.isPackagedStill("image-3F.png"))

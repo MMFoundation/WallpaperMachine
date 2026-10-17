@@ -5387,12 +5387,12 @@ public func FfiConverterTypeBridgeMonitorInformationSnapshot_lower(_ value: Brid
  * A plain local video routed to the native platform player instead of the
  * scene engine.
  *
- * Only the declared subset appears here. `fps` is this display's own target
- * rate and is a requirement, not a hint. Admission, however, is judged against
- * `admission_fps`, which is the strictest target across the mirror group this
- * display belongs to: the host must refuse the wallpaper rather than play any
- * member at a rate its own target does not allow, and a refusal sends the
- * whole group back to the scene engine, which supports everything.
+ * Only the declared subset appears here. The player plays a clip at the clip's
+ * own frame rate: the frame-rate cap applies to scenes and web wallpapers, so
+ * no rate travels with this descriptor and none decides whether the host may
+ * take the clip. The host refuses a wallpaper only for a reason about the file
+ * itself, and a refusal sends the whole mirror group back to the scene engine,
+ * which supports everything the platform player does not.
  */
 public struct BridgeNativeVideoWallpaper {
     public var displayId: UInt32
@@ -5408,25 +5408,9 @@ public struct BridgeNativeVideoWallpaper {
      */
     public var mediaPath: String
     /**
-     * This display's own target frame rate: what the player runs at here.
-     */
-    public var fps: UInt32
-    /**
-     * The target rate the accept-or-refuse decision must be judged against:
-     * the strictest `fps` across this display's mirror group, equal to `fps`
-     * when the display mirrors nothing and is mirrored by nothing.
-     *
-     * A mirror is only ever given a scene by copying its source's, so it
-     * cannot fall back to the scene engine on its own; the group is admitted
-     * or refused as a unit and is only safe at its strictest member's rate.
-     * Probing `fps` on a mirror would accept a verdict taken for a faster
-     * source and play this display above its own target without ever asking.
-     */
-    public var admissionFps: UInt32
-    /**
      * Identifies the exact configuration this descriptor was produced from:
-     * the media file, its length and modification time, and `admission_fps`.
-     * Identical for every member of a mirror group. The host must pass it back
+     * the media file, its length and its modification time. Identical for every
+     * member of a mirror group. The host must pass it back
      * to `reject_native_video` when it refuses, so that a refusal arriving
      * after the user changed something is discarded instead of killing a
      * configuration the host never judged.
@@ -5453,23 +5437,9 @@ public struct BridgeNativeVideoWallpaper {
          * project directory.
          */mediaPath: String, 
         /**
-         * This display's own target frame rate: what the player runs at here.
-         */fps: UInt32, 
-        /**
-         * The target rate the accept-or-refuse decision must be judged against:
-         * the strictest `fps` across this display's mirror group, equal to `fps`
-         * when the display mirrors nothing and is mirrored by nothing.
-         *
-         * A mirror is only ever given a scene by copying its source's, so it
-         * cannot fall back to the scene engine on its own; the group is admitted
-         * or refused as a unit and is only safe at its strictest member's rate.
-         * Probing `fps` on a mirror would accept a verdict taken for a faster
-         * source and play this display above its own target without ever asking.
-         */admissionFps: UInt32, 
-        /**
          * Identifies the exact configuration this descriptor was produced from:
-         * the media file, its length and modification time, and `admission_fps`.
-         * Identical for every member of a mirror group. The host must pass it back
+         * the media file, its length and its modification time. Identical for every
+         * member of a mirror group. The host must pass it back
          * to `reject_native_video` when it refuses, so that a refusal arriving
          * after the user changed something is discarded instead of killing a
          * configuration the host never judged.
@@ -5483,8 +5453,6 @@ public struct BridgeNativeVideoWallpaper {
         self.wallpaperId = wallpaperId
         self.title = title
         self.mediaPath = mediaPath
-        self.fps = fps
-        self.admissionFps = admissionFps
         self.admissionKey = admissionKey
         self.paused = paused
         self.volume = volume
@@ -5511,12 +5479,6 @@ extension BridgeNativeVideoWallpaper: Equatable, Hashable {
             return false
         }
         if lhs.mediaPath != rhs.mediaPath {
-            return false
-        }
-        if lhs.fps != rhs.fps {
-            return false
-        }
-        if lhs.admissionFps != rhs.admissionFps {
             return false
         }
         if lhs.admissionKey != rhs.admissionKey {
@@ -5546,8 +5508,6 @@ extension BridgeNativeVideoWallpaper: Equatable, Hashable {
         hasher.combine(wallpaperId)
         hasher.combine(title)
         hasher.combine(mediaPath)
-        hasher.combine(fps)
-        hasher.combine(admissionFps)
         hasher.combine(admissionKey)
         hasher.combine(paused)
         hasher.combine(volume)
@@ -5570,8 +5530,6 @@ public struct FfiConverterTypeBridgeNativeVideoWallpaper: FfiConverterRustBuffer
                 wallpaperId: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
                 mediaPath: FfiConverterString.read(from: &buf), 
-                fps: FfiConverterUInt32.read(from: &buf), 
-                admissionFps: FfiConverterUInt32.read(from: &buf), 
                 admissionKey: FfiConverterUInt64.read(from: &buf), 
                 paused: FfiConverterBool.read(from: &buf), 
                 volume: FfiConverterFloat.read(from: &buf), 
@@ -5587,8 +5545,6 @@ public struct FfiConverterTypeBridgeNativeVideoWallpaper: FfiConverterRustBuffer
         FfiConverterString.write(value.wallpaperId, into: &buf)
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterString.write(value.mediaPath, into: &buf)
-        FfiConverterUInt32.write(value.fps, into: &buf)
-        FfiConverterUInt32.write(value.admissionFps, into: &buf)
         FfiConverterUInt64.write(value.admissionKey, into: &buf)
         FfiConverterBool.write(value.paused, into: &buf)
         FfiConverterFloat.write(value.volume, into: &buf)

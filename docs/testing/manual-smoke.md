@@ -409,10 +409,10 @@ describes what should happen and the log lines to read afterwards.
 - [ ] Switch from a scene to a native clip, and from a clip to a scene: the system picture may
       show for as long as the clip's metadata read takes after a scene (the engine closes the
       scene's window first); a clip to a scene behaves like any scene switch.
-- [ ] Apply a video the native backend refuses (no video track, or a frame rate above the
-      target rate): the held picture stays until the scene engine's fallback has drawn, the
-      log has `veil on scene layer` and `released ... (scene first frame)`, and no clip
-      window appears.
+- [ ] Apply a WebM or Matroska video that macOS cannot open (the native backend refuses it
+      and the scene engine plays it): the held picture stays until the scene engine's
+      fallback has drawn, the log has `veil on scene layer` and `released ... (scene first
+      frame)`, and no clip window appears.
 - [ ] Apply a clip stored on a slow or sleeping external drive: the old clip keeps playing
       through the read. If the read outlasts 8 seconds the clip's window opens without a
       picture over it and the log says `no window took it`.

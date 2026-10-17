@@ -669,9 +669,9 @@ or depend on a second physical monitor.
   and a web page none, and moving the picture publishes a new revision that reuses the
   project while the same position publishes nothing.
 - `LockScreenVideoPlannerTests` — which path draws a plain video on the lock screen: the
-  native player only when the app asked for it and admission accepts the clip at the frame
-  rate it was given, the scene engine for every refusal (not playable, unreadable, faster than
-  the rate, no bound), for a clip that is missing, for one the player already failed on and
+  native player only when the app asked for it and admission accepts the clip (the frame rate
+  it was given takes no part), the scene engine for every refusal (not playable, unreadable),
+  for a clip that is missing, for one the player already failed on and
   for a path that leaves the project, and that a file AVFoundation cannot open (garbage bytes,
   a missing file) fails the player's `prepare()`, which is what sends the surface back to the
   scene engine; that a failure is held against its clip and a different or replaced one tries
@@ -681,7 +681,7 @@ or depend on a second physical monitor.
   order in which the scene renderer preference is applied live in the extension target, which
   no unit test compiles, so they are checked by building it. `LockScreenWallpaperTests` also covers the configuration keys `sceneRenderer`
   and `nativeVideoFile` (round trip with and without, the default, an unknown name, which
-  changes replace a renderer, and that a changed frame rate replaces a native player only),
+  changes replace a renderer, and that a changed frame rate replaces neither a native player nor the scene engine),
   and the service tests that the Scene renderer and Video backend settings are published and
   a change republishes. Not covered: a real lock screen, the player playing a clip there.
 - `LockScreenExtensionRegistrationTests` use synthetic app bundles and an
@@ -748,14 +748,13 @@ need an authorized runtime check
 
 ## NativeVideo
 
-- `NativeVideoAdmissionTests` — the frame-rate rules (whole-number and NTSC
-  rates against the target, variable-rate clips judged by their fastest interval,
-  a zero target not meaning unlimited) and refusal of corrupt, missing, audio-only
-  and interlaced content.
+- `NativeVideoAdmissionTests` — a clip is admitted at every rate it was written at
+  (including 120 fps) and as a variable-rate clip, since it plays at its own rate; refusal
+  of corrupt, missing, audio-only and unplayable content.
 - `NativeVideoWallpaperHostTests` — startup waits for surface readiness, refused
   wallpapers are handed back to the scene engine with their reason, re-evaluation
-  when the target rate changes, one surface per display, mirrors judged by their
-  group's strictest target, hidden-display and user-pause handling, a clip stopped
+  when the admission key (the file) changes, one surface per display, a mirror group
+  judged once under its source's key, hidden-display and user-pause handling, a clip stopped
   by a reading taken while the desktop (or one display) was covered playing again
   once `WallpaperHosts.reconcile` has the host read the bridge again (that
   `AppDelegate` makes the call after each delivery is not run by any test),

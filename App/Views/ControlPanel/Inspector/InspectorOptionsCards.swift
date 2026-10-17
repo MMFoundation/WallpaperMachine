@@ -188,15 +188,19 @@ struct DisplayCard: View {
       }
       .disabled(controller.isInspectorControlDisabled(options, key: modeKey))
       ScaleFactorRow(options: options, display: display)
-      FrameRateRow(options: options, display: display)
-      if let limit = display.frameRateLimit {
-        InspectorCardRow {
-          VStack(alignment: .leading, spacing: 4) {
-            InspectorNote(verbatim: limit.note)
-            Button(limit.section.openTitle) {
-              controller.launch("openSettings") { try await controller.openSettings(limit.section) }
+      // The native player plays a clip at the clip's own rate, so neither the display's frame rate
+      // nor a ceiling on it applies to what it draws.
+      if InspectorPolicy.offersFrameRate(for: display) {
+        FrameRateRow(options: options, display: display)
+        if let limit = display.frameRateLimit {
+          InspectorCardRow {
+            VStack(alignment: .leading, spacing: 4) {
+              InspectorNote(verbatim: limit.note)
+              Button(limit.section.openTitle) {
+                controller.launch("openSettings") { try await controller.openSettings(limit.section) }
+              }
+              .buttonStyle(.inspectorLink)
             }
-            .buttonStyle(.inspectorLink)
           }
         }
       }

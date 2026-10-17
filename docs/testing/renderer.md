@@ -438,13 +438,11 @@ cargo test -p shader --test pipeline -- --nocapture
   deduplicated and reported sorted, one cause ending keeps the others in force, it is
   never written to `config.toml` and a new bridge starts without one, a wallpaper applied
   under it opens at the lowered rate and scale, web, lock-screen and native-video
-  descriptors follow it (a refusal recorded for the old rate is dropped, as for a cap),
-  playback is never touched, and asking again after a refused renderer update re-applies it.
-  A clip the native player refused at the old rate goes back to it the moment the ceiling
-  moves, whichever change moved it (a throttle, the cap, the rate or mode of the battery
-  profile, the power source), and a request that failed halfway or whose scene rebuild failed
-  still hands the clip back when it is repeated or the host asks what to play next, because
-  the rebuild stays owed until one succeeds. The engine is the fake one, so a live Metal or
+  descriptors follow it (a native-video descriptor carries no rate and its admission key does not
+  change), playback is never touched, and asking again after a refused renderer update re-applies it.
+  A native clip stays with the native player and a refused one stays with the scene engine through
+  every change of the ceiling (a throttle, the cap, the rate or mode of the battery profile, the
+  power source): a refusal describes the file, never the frame rate. The engine is the fake one, so a live Metal or
   Vulkan scene following the change and any power effect are desktop checks.
 - `wallpaper-core` and `wallpaper-bridge` drag previews (`cargo test --release -p
   wallpaper-core --lib framing`; `cargo test --release -p wallpaper-bridge --lib

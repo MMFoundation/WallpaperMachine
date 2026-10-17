@@ -592,9 +592,8 @@ conditions are observed as above).
   [comparison rules](../testing/power-benchmark.md#comparison-rules) call a lowered
   frame rate or scale a quality tier, not an equal-quality saving. It needs an
   authorized desktop session.
-  Whether a change made while the Mac is locked, and a native-video clip whose target
-  rate changes (it may be offered natively again, as for any changed target rate),
-  behave as intended has likewise not been exercised on a Mac.
+  Whether a change made while the Mac is locked behaves as intended has likewise not
+  been exercised on a Mac.
 
 A Focus can act on wallpapers through a Focus filter (`WallpaperFocusFilter`, an
 App Intents `SetFocusFilterIntent`): in System Settings → Focus → a Focus → Focus
@@ -684,6 +683,17 @@ in Matroska. This applies both to **Apply** and **Apply changes**, with either
 backend preference. Missing or empty files fail before display settings change;
 decoder failures still go through the engine's apply recovery.
 
+A clip on the native player plays at **its own frame rate**. An `AVPlayerLayer` cannot
+be capped without copying every frame through the CPU, so the frame-rate limit
+(**Frame rate limit**, a quality preset, **Reduced quality** on battery or in Low
+Power Mode, a hot Mac or a throttle) and a display's own frame rate apply to scenes,
+web wallpapers and any clip the scene engine draws, not to a clip the native player
+draws. The native player never refuses a clip because it is faster than a target, and
+changing a target neither reopens a running clip nor moves it between backends: its
+identity is its file. The inspector hides **Frame rate** on a display the native
+player draws, because the field would do nothing there, and shows it again for a
+display the scene engine draws.
+
 Native playback honours the wallpaper's scaling mode and scale factor the way
 Compatibility does, so switching backends does not move the picture: **Fill**,
 **Fit** and **Stretch** scale it to the display, **Original size** shows one video
@@ -718,9 +728,9 @@ waiting on. It is not retried within the pass and is not remembered by the app a
 verdict on the file, so a clip that is offered natively again is read afresh; but
 while the first read is still blocked, that file is not read a second time, so one
 stuck file never holds more than one blocked call. The hand-off itself lasts for the
-session: the bridge records the refusal against the clip's file and target frame rate
-and does not offer them natively again, so a clip handed over by a slow disk stays on
-Compatibility until its file or its target frame rate changes, or **Video playback**
+session: the bridge records the refusal against the clip's file and does not offer it
+natively again, so a clip handed over by a slow disk stays on Compatibility until its
+file changes, or **Video playback**
 is switched to Compatibility and back to **Native video preferred**. Nothing retries
 it on its own, since the bridge never passes a wallpaper back and forth between
 backends. A diagnostic recording counts these as `nativeVideoProbeTimeout`; a count on
@@ -785,7 +795,7 @@ of repairs, looking again after each:
    to Compatibility like any other player failure, and **In use now** says that playback
    stalled after the trigger (`the displays woke`), what was seen, what was tried and how
    much of the allowance was spent. The bridge keeps the refusal for the session, so the
-   clip stays on Compatibility until its file or its target frame rate changes or **Video
+   clip stays on Compatibility until its file changes or **Video
    playback** is switched to Compatibility and back. The native host does not remember the
    hand-off as a verdict on the file, unlike a decoder failure: a decoder the system took
    back during a long sleep says nothing about the clip, so when the bridge does offer the

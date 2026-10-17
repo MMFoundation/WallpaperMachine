@@ -1574,15 +1574,15 @@ final class LockScreenWallpaperTests: XCTestCase {
     XCTAssertFalse(native.sharesRenderer(with: other))
   }
 
-  /// The native player cannot cap the rate a clip is presented at, so whether it may play one
-  /// depends on the frame rate it is asked for. A change of it is decided anew, which only a
-  /// replaced renderer does; the scene engine takes the new rate while it runs.
-  func testANewFrameRateReplacesTheNativePlayerButNotTheSceneEngine() {
+  /// A clip plays at its own rate, so no frame rate decides whether the native player may play
+  /// it: a new rate keeps the running player, and the scene engine takes the new rate while it
+  /// runs.
+  func testANewFrameRateKeepsTheNativePlayerAndTheSceneEngine() {
     var native = publishedScene()
     native.nativeVideoFile = "clip.mp4"
     var faster = native
     faster.fps = 60
-    XCTAssertFalse(native.sharesRenderer(with: faster))
+    XCTAssertTrue(native.sharesRenderer(with: faster))
     let engine = publishedScene()
     var engineFaster = engine
     engineFaster.fps = 60

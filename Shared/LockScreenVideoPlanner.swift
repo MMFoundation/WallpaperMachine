@@ -18,9 +18,8 @@ enum LockScreenVideoPath: Equatable {
 ///
 /// It mirrors the app: the native player takes a clip only when the Video backend setting
 /// selects it (the app publishes `nativeVideoFile` then and only then), and only when
-/// `NativeVideoAdmission` accepts the clip at the frame rate the lock screen was given, the
-/// same rule the desktop applies. A clip AVFoundation cannot open, such as WebM, or can only
-/// present faster than that rate goes to the scene engine, which paces its own frames.
+/// `NativeVideoAdmission` accepts the clip, the same rule the desktop applies. The clip plays at
+/// its own frame rate. A clip AVFoundation cannot open, such as WebM, goes to the scene engine.
 enum LockScreenVideoPlanner {
   /// The scene's media file in the exchange directory, as a path relative to it. Nil when the
   /// scene does not ask for the native player, or names a file that cannot lie inside its
@@ -41,8 +40,8 @@ enum LockScreenVideoPlanner {
   static func decide(
     scene: LockScreenScene, enabled: Bool = true,
     resolve: (String) throws -> URL,
-    admission: (URL, UInt32) async -> NativeVideoRefusal? = { url, fps in
-      await NativeVideoAdmission.evaluate(url: url, targetFps: fps)
+    admission: (URL) async -> NativeVideoRefusal? = { url in
+      await NativeVideoAdmission.evaluate(url: url)
     }
   ) async -> LockScreenVideoPath {
     guard scene.webEntryFile == nil, scene.nativeVideoFile != nil else {
@@ -56,7 +55,7 @@ enum LockScreenVideoPlanner {
     do { url = try resolve(path) } catch {
       return .sceneEngine(reason: "the clip is unavailable: \(error.localizedDescription)")
     }
-    if let refusal = await admission(url, scene.fps) {
+    if let refusal = await admission(url) {
       return .sceneEngine(reason: refusal.reason)
     }
     return .avFoundation(url)

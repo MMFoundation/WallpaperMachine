@@ -150,6 +150,16 @@ enum InspectorPolicy {
     display.isDrawnByNativePlayer ? .nativePlayer : .explains
   }
 
+  // MARK: Frame rate
+
+  /// Whether a display's Frame rate row, and the note about the ceiling on it, are shown. The
+  /// native video player plays a clip at the clip's own rate, so neither the display's frame rate
+  /// nor a limit on it applies to what it draws; the row comes back for any other player, which
+  /// the scene engine's own drawing of a clip is.
+  static func offersFrameRate(for display: InspectorOptions.DisplayRow) -> Bool {
+    !display.isDrawnByNativePlayer
+  }
+
   // MARK: Sections
 
   /// Displays opens by itself once the wallpaper is on a display. The state is the person's from the

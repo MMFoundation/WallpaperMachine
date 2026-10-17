@@ -23,7 +23,7 @@ final class LockScreenVideoPlannerTests: XCTestCase {
 
   private func decide(
     _ scene: LockScreenScene, enabled: Bool = true,
-    admission: @escaping (URL, UInt32) async -> NativeVideoRefusal? = { _, _ in nil },
+    admission: @escaping (URL) async -> NativeVideoRefusal? = { _ in nil },
     resolved: @escaping (String) throws -> URL = { URL(fileURLWithPath: "/exchange/" + $0) }
   ) async -> LockScreenVideoPath {
     await LockScreenVideoPlanner.decide(
@@ -31,19 +31,20 @@ final class LockScreenVideoPlannerTests: XCTestCase {
   }
 
   func testAClipTheAppAskedTheNativePlayerForIsPlayedByAVFoundationWhenAdmissionAccepts() async {
-    var asked: [(URL, UInt32)] = []
-    let path = await decide(scene(fps: 24)) { url, fps in
-      asked.append((url, fps))
+    var asked: [URL] = []
+    let path = await decide(scene(fps: 24)) { url in
+      asked.append(url)
       return nil
     }
     XCTAssertEqual(path, .avFoundation(URL(fileURLWithPath: "/exchange/revisions/abc/clip.mp4")))
     XCTAssertTrue(path.isNative)
-    XCTAssertEqual(asked.map(\.1), [24], "the rule is judged at the frame rate the lock screen was given")
+    XCTAssertEqual(asked, [URL(fileURLWithPath: "/exchange/revisions/abc/clip.mp4")],
+      "the rule is about the file: the frame rate the lock screen was given takes no part")
   }
 
   func testAClipTheAppDidNotAskTheNativePlayerForStaysWithTheSceneEngine() async {
     var admissionAsked = false
-    let path = await decide(scene(file: nil)) { _, _ in
+    let path = await decide(scene(file: nil)) { _ in
       admissionAsked = true
       return nil
     }
@@ -61,10 +62,8 @@ final class LockScreenVideoPlannerTests: XCTestCase {
       NativeVideoRefusal.notPlayable("asset reports itself unplayable"),
       .preparationFailed("the file could not be read"),
       .playbackFailed("decoder error"),
-      .targetFrameRateBelowContent(target: 30, bound: 60, source: "minFrameDuration"),
-      .frameRateNotDeterminable("no bound"),
     ] {
-      let path = await decide(scene()) { _, _ in refusal }
+      let path = await decide(scene()) { _ in refusal }
       XCTAssertEqual(path, .sceneEngine(reason: refusal.reason), "\(refusal)")
       XCTAssertFalse(path.isNative)
     }
@@ -78,7 +77,7 @@ final class LockScreenVideoPlannerTests: XCTestCase {
 
   func testAClipThePlayerAlreadyFailedOnIsNotTriedAgain() async {
     var admissionAsked = false
-    let path = await decide(scene(), enabled: false) { _, _ in
+    let path = await decide(scene(), enabled: false) { _ in
       admissionAsked = true
       return nil
     }

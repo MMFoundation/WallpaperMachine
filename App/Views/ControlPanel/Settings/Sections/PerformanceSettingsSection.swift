@@ -33,7 +33,7 @@ struct PerformanceSettingsSection: View {
     id: "performance.frame-rate-limit", section: .performance, group: quality,
     title: "Frame rate limit",
     note:
-      "At the top of the slider there is no limit, and each display runs at its own frame rate: up to 60 fps unless you chose more for it. A lower value caps every display; saved per-display frame rates are not rewritten.",
+      "At the top of the slider there is no limit, and each display runs at its own frame rate: up to 60 fps unless you chose more for it. A lower value caps scenes and web wallpapers on every display, while a video plays at its own frame rate; saved per-display frame rates are not rewritten.",
     keywords: ["No limit"])
   static let renderScale = SettingsItem(
     id: "performance.render-scale", section: .performance, group: quality,

@@ -27,10 +27,10 @@ fn display_snapshot(display_id: u32) -> DisplaySnapshotEntry {
     }
 }
 
-/// A workshop tree with one video project whose media file exists, and one
-/// whose declared media file does not.
+/// A workshop tree with two video projects whose media files exist (300 and
+/// 500), and one whose declared media file does not (400).
 fn workshop_with_videos(paths: &BridgePaths) {
-    for (id, write_media) in [("300", true), ("400", false)] {
+    for (id, write_media) in [("300", true), ("400", false), ("500", true)] {
         let dir = paths.steam_workshop_root().join(id);
         fs::create_dir_all(&dir).unwrap();
         fs::write(
@@ -166,8 +166,9 @@ async fn native_display_ids(bridge: &crate::api::WallpaperBridge, wallpaper: &st
     ids
 }
 
-/// One clip on two displays at two different target rates, so the two slots
-/// have two distinct admission keys.
+/// Two different clips on two displays, so the two slots have two distinct
+/// admission keys. The key identifies a file; two displays showing the same file
+/// share one.
 async fn two_display_bridge(
     engine: &FakeEngineFacade,
     temp: &tempfile::TempDir,
@@ -181,11 +182,19 @@ async fn two_display_bridge(
         .build()
         .unwrap();
     commit(&bridge, "300", "7").await;
-    commit(&bridge, "300", "9").await;
+    commit(&bridge, "500", "9").await;
     bridge.set_native_video_backend_enabled(true).await.unwrap();
-    retarget_fps(&bridge, "300", "7", 30).await;
-    retarget_fps(&bridge, "300", "9", 60).await;
     bridge
+}
+
+/// Replaces a clip's media file, keeping its path, so the bytes behind the
+/// admission key change.
+fn replace_media(temp: &tempfile::TempDir, wallpaper: &str) {
+    let media = BridgePaths::for_home(temp.path().to_path_buf())
+        .steam_workshop_root()
+        .join(wallpaper)
+        .join("clip.mp4");
+    fs::write(&media, b"a different clip entirely, with a different length").unwrap();
 }
 
 /// Retargets the display's frame rate and commits it, which is the user action
@@ -359,10 +368,6 @@ async fn the_native_descriptor_carries_the_users_own_settings() {
     assert_eq!(native.len(), 1);
     assert!((native[0].volume - 0.25).abs() < f32::EPSILON);
     assert!(native[0].muted);
-    // The target rate is the user's requirement, so it has to reach the host
-    // rather than being left for the player to choose.
-    assert!(native[0].fps > 0);
-    assert!(native[0].fps <= 60);
 }
 
 #[tokio::test]
@@ -397,81 +402,52 @@ async fn hiding_a_display_pauses_only_its_native_wallpaper() {
 }
 
 #[tokio::test]
-async fn a_refusal_at_one_target_rate_does_not_survive_a_new_target_rate() {
+async fn a_refusal_holds_whatever_the_target_rate_is() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
     let bridge = video_bridge(&engine, &temp).await;
     commit(&bridge, "300", "7").await;
     bridge.set_native_video_backend_enabled(true).await.unwrap();
 
-    // The host judges a 60 fps clip against a 30 fps target and cannot honour
-    // it, so the wallpaper goes back to the engine.
-    retarget_fps(&bridge, "300", "7", 30).await;
-    let key_at_30 = admission_key(&bridge, "300").await;
+    // The host cannot decode the file, so the wallpaper goes back to the engine.
+    let key = admission_key(&bridge, "300").await;
     bridge
-        .reject_native_video("300".into(), key_at_30, "clip runs at 60, target is 30".into())
+        .reject_native_video("300".into(), key, "the player cannot decode it".into())
         .await
         .unwrap();
     assert!(!is_offered_natively(&bridge, "300").await);
 
-    // Nothing about the refused configuration changed, so asking again must not
-    // hand it back: that is the loop the fallback exists to terminate.
-    assert!(
-        !is_offered_natively(&bridge, "300").await,
-        "a refusal must keep holding while the configuration it describes is live"
-    );
-    retarget_fps(&bridge, "300", "7", 30).await;
-    assert!(
-        !is_offered_natively(&bridge, "300").await,
-        "re-committing the same target rate is not a change and must not re-offer it"
-    );
-
-    // The user raises the target to a rate the clip can meet. The refusal
-    // described the 30 fps configuration and says nothing about this one.
-    retarget_fps(&bridge, "300", "7", 60).await;
-    assert!(
-        is_offered_natively(&bridge, "300").await,
-        "a refusal at 30 must not outlive the 30 fps target it was recorded for"
-    );
-    assert_eq!(
-        scenes_for(&engine, "300"),
-        0,
-        "the engine has to let go the moment the native player takes it back"
-    );
+    // Nothing about the refused file changed, so asking again must not hand it
+    // back: that is the loop the fallback exists to terminate. A frame rate says
+    // nothing about the file, so retargeting is not a change either.
+    for fps in [30, 60, 24] {
+        retarget_fps(&bridge, "300", "7", fps).await;
+        assert!(
+            !is_offered_natively(&bridge, "300").await,
+            "a refusal about the file must keep holding at {fps} fps"
+        );
+        assert_eq!(scenes_for(&engine, "300"), 1, "the engine keeps playing it, once");
+    }
 }
 
 #[tokio::test]
-async fn a_refusal_stops_applying_when_the_setting_it_describes_is_restored() {
+async fn the_target_rate_is_not_part_of_the_admission_key() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
     let bridge = video_bridge(&engine, &temp).await;
     commit(&bridge, "300", "7").await;
     bridge.set_native_video_backend_enabled(true).await.unwrap();
     retarget_fps(&bridge, "300", "7", 60).await;
-    let supported_key = admission_key(&bridge, "300").await;
+    let at_60 = admission_key(&bridge, "300").await;
 
-    // The user drops the display to a rate the host cannot serve this clip at.
+    // The player plays a clip at its own rate, so no target rate decides whether
+    // it may take one, and a clip it took stays with it at every target.
     retarget_fps(&bridge, "300", "7", 24).await;
-    let unsupported_key = admission_key(&bridge, "300").await;
-    assert_ne!(
-        supported_key, unsupported_key,
-        "the target rate is part of what the host judges, so it has to be part of the key"
-    );
-    bridge
-        .reject_native_video("300".into(), unsupported_key, "unsupported target rate".into())
-        .await
-        .unwrap();
-    assert!(!is_offered_natively(&bridge, "300").await);
     assert_eq!(
-        scenes_for(&engine, "300"),
-        1,
-        "the engine renders a refused wallpaper, and renders it once"
+        admission_key(&bridge, "300").await,
+        at_60,
+        "the key identifies the file, so a new target rate must not change it"
     );
-
-    // Putting the setting back to the value the host already accepted restores
-    // the routing; a session-permanent refusal would strand it on the engine.
-    retarget_fps(&bridge, "300", "7", 60).await;
-    assert_eq!(admission_key(&bridge, "300").await, supported_key);
     assert!(is_offered_natively(&bridge, "300").await);
     assert_eq!(scenes_for(&engine, "300"), 0);
 }
@@ -517,15 +493,14 @@ async fn a_refusal_carrying_a_stale_admission_key_is_dropped() {
     let bridge = video_bridge(&engine, &temp).await;
     commit(&bridge, "300", "7").await;
     bridge.set_native_video_backend_enabled(true).await.unwrap();
-    retarget_fps(&bridge, "300", "7", 30).await;
     let stale_key = admission_key(&bridge, "300").await;
 
-    // The user raises the target while the host is still deciding about the
-    // old one, then the host's refusal for the old configuration lands.
-    retarget_fps(&bridge, "300", "7", 60).await;
+    // The user replaces the clip while the host is still deciding about the old
+    // one, then the host's refusal for the old file lands.
+    replace_media(&temp, "300");
     let reconciles_before = engine.calls().len();
     bridge
-        .reject_native_video("300".into(), stale_key, "clip runs at 60, target is 30".into())
+        .reject_native_video("300".into(), stale_key, "cannot decode the old file".into())
         .await
         .unwrap();
 
@@ -577,25 +552,23 @@ async fn refusing_one_display_leaves_the_other_on_the_native_player() {
     let bridge = two_display_bridge(&engine, &temp).await;
 
     let key_7 = admission_key_on(&bridge, "300", 7).await;
-    let key_9 = admission_key_on(&bridge, "300", 9).await;
-    assert_ne!(
-        key_7, key_9,
-        "two target rates are two separate admission decisions"
-    );
+    let key_9 = admission_key_on(&bridge, "500", 9).await;
+    assert_ne!(key_7, key_9, "two files are two separate admission decisions");
 
     bridge
-        .reject_native_video("300".into(), key_7, "target rate below the clip's rate".into())
+        .reject_native_video("300".into(), key_7, "the player cannot decode it".into())
         .await
         .unwrap();
 
     assert_eq!(
-        native_display_ids(&bridge, "300").await,
+        native_display_ids(&bridge, "500").await,
         vec![9],
         "refusing one display must not take the clip off the display that accepted it"
     );
+    assert!(native_display_ids(&bridge, "300").await.is_empty());
     assert_eq!(scenes_on(&engine, "300", 7), 1, "the refused display falls back");
     assert_eq!(
-        scenes_on(&engine, "300", 9),
+        scenes_on(&engine, "500", 9),
         0,
         "the display still on the native player must not also get a scene"
     );
@@ -608,13 +581,13 @@ async fn refusing_both_displays_leaves_neither_without_a_backend() {
     let bridge = two_display_bridge(&engine, &temp).await;
 
     let key_7 = admission_key_on(&bridge, "300", 7).await;
-    let key_9 = admission_key_on(&bridge, "300", 9).await;
+    let key_9 = admission_key_on(&bridge, "500", 9).await;
     bridge
-        .reject_native_video("300".into(), key_7, "unsupported at 30".into())
+        .reject_native_video("300".into(), key_7, "unsupported clip 300".into())
         .await
         .unwrap();
     bridge
-        .reject_native_video("300".into(), key_9, "unsupported at 60".into())
+        .reject_native_video("500".into(), key_9, "unsupported clip 500".into())
         .await
         .unwrap();
 
@@ -624,7 +597,8 @@ async fn refusing_both_displays_leaves_neither_without_a_backend() {
     // and activation has excluded the display as natively routed, so display 7
     // shows nothing at all.
     assert!(
-        native_display_ids(&bridge, "300").await.is_empty(),
+        native_display_ids(&bridge, "300").await.is_empty()
+            && native_display_ids(&bridge, "500").await.is_empty(),
         "both refusals stand; neither may be erased by the other"
     );
     assert_eq!(
@@ -633,44 +607,44 @@ async fn refusing_both_displays_leaves_neither_without_a_backend() {
         "display 7 must have exactly one backend, and it is the engine"
     );
     assert_eq!(
-        scenes_on(&engine, "300", 9),
+        scenes_on(&engine, "500", 9),
         1,
         "display 9 must have exactly one backend, and it is the engine"
     );
 }
 
 #[tokio::test]
-async fn changing_one_refused_displays_target_re_offers_only_that_display() {
+async fn replacing_one_refused_displays_clip_re_offers_only_that_display() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
     let bridge = two_display_bridge(&engine, &temp).await;
 
     let key_7 = admission_key_on(&bridge, "300", 7).await;
-    let key_9 = admission_key_on(&bridge, "300", 9).await;
+    let key_9 = admission_key_on(&bridge, "500", 9).await;
     bridge
-        .reject_native_video("300".into(), key_7, "unsupported at 30".into())
+        .reject_native_video("300".into(), key_7, "unsupported clip 300".into())
         .await
         .unwrap();
     bridge
-        .reject_native_video("300".into(), key_9, "unsupported at 60".into())
+        .reject_native_video("500".into(), key_9, "unsupported clip 500".into())
         .await
         .unwrap();
-    assert!(native_display_ids(&bridge, "300").await.is_empty());
+    assert!(native_display_ids(&bridge, "500").await.is_empty());
 
-    // Display 9's configuration changes; display 7's does not.
-    retarget_fps(&bridge, "300", "9", 24).await;
+    // Display 9's file is replaced; display 7's is not.
+    replace_media(&temp, "500");
 
     assert_eq!(
-        native_display_ids(&bridge, "300").await,
+        native_display_ids(&bridge, "500").await,
         vec![9],
-        "only the display whose configuration changed is offered again"
+        "only the display whose file changed is offered again"
     );
     assert_eq!(
         scenes_on(&engine, "300", 7),
         1,
         "the display nobody touched stays refused and stays on the engine"
     );
-    assert_eq!(scenes_on(&engine, "300", 9), 0);
+    assert_eq!(scenes_on(&engine, "500", 9), 0);
 }
 
 /// Display 7 plays the clip; display 9 mirrors it at `mirror_fps`.
@@ -714,27 +688,23 @@ fn native_row(
 }
 
 #[tokio::test]
-async fn a_mirror_group_is_judged_at_its_strictest_target() {
+async fn a_mirror_shares_its_sources_key_and_carries_no_rate() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
     let bridge = mirror_group_bridge(&engine, &temp, 60, 30).await;
 
     let rows = bridge.native_video_wallpapers().await.unwrap();
-    let source = native_row(&rows, 7);
+    let source = native_row(&rows, 7).clone();
     let mirror = native_row(&rows, 9);
 
-    assert_eq!(source.fps, 60, "the source still runs at its own target");
-    assert_eq!(mirror.fps, 30, "the mirror still runs at its own target");
-    assert_eq!(
-        (source.admission_fps, mirror.admission_fps),
-        (30, 30),
-        "the group must be judged at the strictest target, or the mirror plays \
-         at 60 under a 30 fps target without anyone ever evaluating 30"
-    );
     assert_eq!(
         source.admission_key, mirror.admission_key,
         "one verdict has to cover the group, so the group needs one key"
     );
+    // No member's target rate takes part in the key.
+    bridge.set_mirror_target_fps("9".into(), 24).await.unwrap();
+    retarget_fps(&bridge, "300", "7", 30).await;
+    assert_eq!(admission_key_on(&bridge, "300", 7).await, source.admission_key);
 }
 
 #[tokio::test]
@@ -766,51 +736,41 @@ async fn refusing_a_mirror_group_returns_every_member_to_the_engine() {
 }
 
 #[tokio::test]
-async fn a_mirror_group_whose_members_all_meet_the_target_is_admitted() {
+async fn a_mirror_group_stays_native_whatever_its_members_targets() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
-    let bridge = mirror_group_bridge(&engine, &temp, 60, 60).await;
+    let bridge = mirror_group_bridge(&engine, &temp, 60, 30).await;
 
-    let rows = bridge.native_video_wallpapers().await.unwrap();
-    assert_eq!(native_row(&rows, 7).admission_fps, 60);
-    assert_eq!(native_row(&rows, 9).admission_fps, 60);
     assert_eq!(
         native_display_ids(&bridge, "300").await,
         vec![7, 9],
-        "nothing here is stricter than the source, so the group stays native"
+        "a clip plays at its own rate, so a stricter mirror does not take the group off the player"
     );
     assert_eq!(scenes_on(&engine, "300", 7), 0);
     assert_eq!(scenes_on(&engine, "300", 9), 0);
 }
 
 #[tokio::test]
-async fn raising_a_mirrors_target_re_evaluates_the_whole_group() {
+async fn a_mirrors_target_never_re_evaluates_a_refused_group() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
     let bridge = mirror_group_bridge(&engine, &temp, 60, 30).await;
     let refused_key = admission_key_on(&bridge, "300", 7).await;
     bridge
-        .reject_native_video("300".into(), refused_key, "30 is below the clip's rate".into())
+        .reject_native_video("300".into(), refused_key, "the player cannot decode it".into())
         .await
         .unwrap();
     assert!(native_display_ids(&bridge, "300").await.is_empty());
 
-    // The mirror was the strict member. Raising it raises the group minimum, so
-    // the refusal describes a group target that no longer exists.
+    // The refusal is about the file, which a target rate does not touch, so the
+    // group stays where the host's verdict put it.
     bridge.set_mirror_target_fps("9".into(), 60).await.unwrap();
 
-    let rows = bridge.native_video_wallpapers().await.unwrap();
-    assert_eq!(
-        native_display_ids(&bridge, "300").await,
-        vec![7, 9],
-        "a new group minimum is a new decision the host has not made yet"
+    assert!(
+        native_display_ids(&bridge, "300").await.is_empty(),
+        "a new mirror target is not a new decision about the file"
     );
-    assert_eq!(native_row(&rows, 7).admission_fps, 60);
-    assert_ne!(
-        native_row(&rows, 7).admission_key,
-        refused_key,
-        "the group minimum is part of the key, so changing it must change the key"
-    );
-    assert_eq!(scenes_on(&engine, "300", 7), 0);
-    assert_eq!(scenes_on(&engine, "300", 9), 0);
+    assert_eq!(scenes_on(&engine, "300", 7), 1);
+    assert_eq!(scenes_on(&engine, "300", 9), 1);
 }
+

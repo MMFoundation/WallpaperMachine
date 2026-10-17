@@ -629,7 +629,7 @@ final class NativeVideoPlayerMediaTests: XCTestCase {
         // End to end through the production entry point: admission refuses and
         // the player is never constructed for it.
         let url = try SyntheticVideoFixture.writeCorrupt(name: "corrupt-media", into: directory)
-        let refusal = await NativeVideoAdmission.evaluate(url: url, targetFps: 60)
+        let refusal = await NativeVideoAdmission.evaluate(url: url)
         XCTAssertNotNil(refusal)
         print("[media] corrupt -> \(refusal?.reason ?? "ACCEPTED")")
     }

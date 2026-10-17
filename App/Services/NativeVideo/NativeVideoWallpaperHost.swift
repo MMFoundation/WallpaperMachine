@@ -16,7 +16,7 @@ final class NativeVideoWallpaperHost {
     private let screens: @MainActor () -> [(id: UInt32, frame: NSRect)]
     /// Decides whether a wallpaper can be honoured. Injected so the routing and
     /// fallback rules can be tested without an asset or a window server.
-    private let refusal: @MainActor (URL, UInt32) async -> NativeVideoRefusal?
+    private let refusal: @MainActor (URL) async -> NativeVideoRefusal?
     /// Builds one display's surface. Injected so the routing and suspension
     /// rules can be exercised without opening a desktop window.
     private let makeSurface: @MainActor (URL, NSRect, RuntimeSurfaceKey, Bool) -> NativeVideoSurface
@@ -111,7 +111,7 @@ final class NativeVideoWallpaperHost {
         fetch: @escaping @MainActor () async throws -> [BridgeNativeVideoWallpaper],
         reject: @escaping @MainActor (String, UInt64, String) async throws -> Void,
         screens: (@MainActor () -> [(id: UInt32, frame: NSRect)])? = nil,
-        refusal: (@MainActor (URL, UInt32) async -> NativeVideoRefusal?)? = nil,
+        refusal: (@MainActor (URL) async -> NativeVideoRefusal?)? = nil,
         makeSurface: (
             @MainActor (URL, NSRect, RuntimeSurfaceKey, Bool) -> NativeVideoSurface
         )? = nil,
@@ -125,8 +125,8 @@ final class NativeVideoWallpaperHost {
         self.fetch = fetch
         self.reject = reject
         self.screens = screens ?? { WebWallpaperHost.systemScreens() }
-        self.refusal = refusal ?? { url, fps in
-            await NativeVideoAdmission.evaluate(url: url, targetFps: fps)
+        self.refusal = refusal ?? { url in
+            await NativeVideoAdmission.evaluate(url: url)
         }
         let sharedCounters = counters ?? .shared
         self.makeSurface = makeSurface ?? { url, frame, surface, paused in
@@ -317,11 +317,11 @@ final class NativeVideoWallpaperHost {
         // A surface is bound to the admission key it was accepted under, not
         // just to a wallpaper id. When the key changes the decision that
         // allowed this player to run no longer applies to what is being asked
-        // for: lowering the target rate under a running 60 fps clip, or
-        // replacing the media at the same path, both leave the id untouched.
-        // Keeping the player would be the silent rate change, or the stale
-        // file, that admission exists to prevent — so the surface is torn down
-        // and the new identity goes through admission from the start.
+        // for: replacing the media at the same path leaves the id untouched.
+        // Keeping the player would show the stale file — so the surface is
+        // torn down and the new identity goes through admission from the
+        // start. A frame-rate target is not part of the identity: the clip
+        // plays at its own rate, whatever the target.
         //
         // The decision is taken first and the old surface closed after it. Reading
         // the file can take seconds, and a surface closed before that read would
@@ -460,7 +460,7 @@ final class NativeVideoWallpaperHost {
         let url = URL(fileURLWithPath: wallpaper.mediaPath)
         let load = AppLog.beginLoad("native video", project: wallpaper.mediaPath, detail: """
             wallpaper \(wallpaper.wallpaperId) “\(wallpaper.title)” media \(url.lastPathComponent), \
-            \(DiagnosticEnvironment.display(displayID)), fps \(wallpaper.fps) (admission \(wallpaper.admissionFps)), \
+            \(DiagnosticEnvironment.display(displayID)), \
             scaling \(wallpaper.scalingMode) x\(wallpaper.scalingFactor), paused \(wallpaper.paused)
             """)
         logLoads[displayID] = load
@@ -795,12 +795,9 @@ final class NativeVideoWallpaperHost {
         let location = await storage(url)
         guard !stopped, !Task.isCancelled else { return Self.probeAbandoned }
         let limit = NativeVideoStoragePolicy.metadataProbeDeadline(location)
-        // `admissionFps` is the strictest target across this display's mirror
-        // group, not this display's own. A mirror cannot fall back on its own
-        // — the engine only ever gives it a scene by copying its source's — so
-        // the group is judged together, against the member that constrains it
-        // most. Probing `fps` here would let a 60 fps clip accepted for a
-        // 60 fps source play unchecked on a 30 fps mirror.
+        // A mirror cannot fall back on its own — the engine only ever gives it
+        // a scene by copying its source's — so the group shares its source's
+        // key and is judged once, on the file all of it plays.
         var read = await boundedProbe(
             url: url, wallpaper: wallpaper, location: location, limit: limit, load: load)
         var attempt = 1
@@ -847,10 +844,9 @@ final class NativeVideoWallpaperHost {
         probeSerial += 1
         let serial = probeSerial
         let refusal = self.refusal
-        let fps = wallpaper.admissionFps
         let outcome = await NativeVideoDeadline.race(limit, sleep: sleep) { [weak self] in
             self?.outstandingProbes[path] = serial
-            let decision = await refusal(url, fps)
+            let decision = await refusal(url)
             if self?.outstandingProbes[path] == serial { self?.outstandingProbes[path] = nil }
             return decision
         }
@@ -886,7 +882,7 @@ final class NativeVideoWallpaperHost {
     /// it. The bridge records it as a refusal of this admission key and holds
     /// it for the rest of the session, so that a wallpaper the player cannot
     /// honour never passes back and forth between the two backends. It lets go
-    /// only when the key changes (the file, or the target frame rate it was
+    /// only when the key changes (the file it was
     /// judged at) or when Video playback is switched to Compatibility and back;
     /// nothing here retries on the host's own initiative. Whether the cause was
     /// settled (`NativeVideoRefusal.isSettled`) decides only what this host

@@ -85,9 +85,6 @@ struct LockScreenScene: Codable, Equatable {
       && effectiveFraming == other.effectiveFraming
       && effectiveSceneRenderer == other.effectiveSceneRenderer
       && nativeVideoFile == other.nativeVideoFile
-      // The native player cannot cap the rate a clip is presented at, so whether it may play
-      // a clip depends on the frame rate it is asked for, and a change of it is decided anew.
-      && (nativeVideoFile == nil || fps == other.fps)
   }
 }
 

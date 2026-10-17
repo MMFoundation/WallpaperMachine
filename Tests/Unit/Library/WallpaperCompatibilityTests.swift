@@ -33,26 +33,27 @@ final class WallpaperCompatibilityTests: XCTestCase {
     checks.first { $0.id == id }?.status
   }
 
-  func testFPSConstraintIsAdmissionNotPlaybackSpeedChange() async throws {
+  func testATargetFrameRateNeverRefusesAClip() async throws {
+    // The clip plays at its own frame rate, so the display's target (or a cap on it) takes no part
+    // in whether macOS can play it.
     try install()
     let probe = ProbeRecorder()
     let service = WallpaperCompatibilityService(libraryURL: root, probe: { await probe.read($0) })
     let accepted = await service.check(context())
     let capped = await service.check(context(fps: 30))
     XCTAssertEqual(status(accepted, "nativeVideo"), .ok)
-    XCTAssertEqual(status(capped, "nativeVideo"), .warning)
-    XCTAssertTrue(capped.first { $0.id == "nativeVideo" }!.detail.contains("target frame rate 30"))
+    XCTAssertEqual(status(capped, "nativeVideo"), .ok)
+    XCTAssertFalse(capped.first { $0.id == "nativeVideo" }!.detail.contains("target frame rate"))
   }
 
-  func testAverageOnlyMetadataDoesNotPromiseNativeCompatibility() async throws {
+  func testAFileTheNativePlayerCannotOpenIsAWarning() async throws {
     try install()
     let service = WallpaperCompatibilityService(libraryURL: root, probe: { _ in
-      .probed(.init(isPlayable: true, hasVideoTrack: true, nominalFrameRate: 24,
-                    minFrameDuration: .invalid))
+      .refused(.notPlayable("asset reports itself unplayable"))
     })
     let checks = await service.check(context())
     XCTAssertEqual(status(checks, "nativeVideo"), .warning)
-    XCTAssertTrue(checks.first { $0.id == "nativeVideo" }!.detail.contains("no upper bound"))
+    XCTAssertTrue(checks.first { $0.id == "nativeVideo" }!.detail.contains("unplayable"))
   }
 
   func testCacheSeparatesContentSettingsAndRetry() async throws {
@@ -164,8 +165,7 @@ private actor ProbeRecorder {
   private(set) var count = 0
   func read(_ url: URL) -> NativeVideoProbeOutcome {
     count += 1
-    return .probed(.init(isPlayable: true, hasVideoTrack: true, nominalFrameRate: 60,
-                        minFrameDuration: CMTime(value: 1, timescale: 60)))
+    return .probed(.init(isPlayable: true, hasVideoTrack: true))
   }
 }
 
@@ -178,8 +178,7 @@ private actor ProbeGate {
     }
   }
   func release() {
-    pending?.resume(returning: .probed(.init(isPlayable: true, hasVideoTrack: true,
-                          nominalFrameRate: 60, minFrameDuration: CMTime(value: 1, timescale: 60))))
+    pending?.resume(returning: .probed(.init(isPlayable: true, hasVideoTrack: true)))
     pending = nil
   }
 }

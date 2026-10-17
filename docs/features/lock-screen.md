@@ -105,10 +105,10 @@ tree, decoded in hardware, instead of through the scene engine. The configuratio
 unchanged.
 
 The native player takes a clip only where the desktop's does: it is judged by the same
-admission rule (`NativeVideoAdmission`, compiled into both targets) at the frame rate the lock
-screen was given, because an AVFoundation layer cannot be capped. A clip that can be presented
-faster than that rate, one whose rate cannot be bounded from its metadata, and one AVFoundation
-cannot open (WebM, a damaged or unreadable file) go to the scene engine, and the extension logs
+admission rule (`NativeVideoAdmission`, compiled into both targets), which is about the file
+alone. The clip plays at its own frame rate whatever rate the lock screen was given, because an
+AVFoundation layer cannot be capped. A clip AVFoundation cannot open (WebM, a damaged or
+unreadable file) goes to the scene engine, and the extension logs
 `Native video not used display=…: <reason>`. The same happens if the player fails after it
 started, or a resumed player does not advance within four seconds: the scene engine takes the
 scene behind the held frame (`Native video failed display=…`). The attempt, from the decision
@@ -117,9 +117,9 @@ deadline: a player that neither shows a frame nor fails is dropped and the scene
 gets that whole deadline. A failure is held against the clip it was about (its path inside the
 published revision), not the surface: that clip is drawn by the scene engine from then on, while
 a different file or a replaced revision tries the native player again. A failure that arrives
-before the surface has taken its handler is held and delivered when it does. Because the rate
-decides which player may take a clip, a change of the frame rate replaces a native player, the
-way a change of the file does.
+before the surface has taken its handler is held and delivered when it does. A change of the
+frame rate keeps a native player, since the clip does not follow it; a change of the file
+replaces it.
 
 The clip is never heard. The player is built from the video track alone, so no audio is decoded,
 no audio output or session is opened, it is muted as well, and it asks neither to keep the display
