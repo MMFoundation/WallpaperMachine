@@ -111,7 +111,6 @@ add_library(
   Video/VideoFramePacing.cpp
   Video/VideoMedia.cpp
   Video/NativeVideoBackend.cpp
-  Video/SharedVideoSession.cpp
   Video/VideoBackendSelection.cpp
   Video/VideoTextureSourceFactory.cpp
   ${PLATFORM_APPLE_SOURCES}

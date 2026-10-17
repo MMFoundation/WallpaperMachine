@@ -15,6 +15,6 @@ pub(crate) use facade::{
 #[cfg(test)]
 pub use facade::FakeEngineFacade;
 pub(crate) use facade::displays_awaiting_first_frame;
-pub use facade::{AudioCaptureDemand, EngineFacade, RealEngineFacade, RendererVideoPipelineState, SceneRuntimeReport};
+pub use facade::{AudioCaptureDemand, EngineFacade, RealEngineFacade, SceneRuntimeReport};
 pub(crate) use load_journal::build_stamp;
 pub use load_journal::{LoadJournal, LoadTicket};

@@ -317,19 +317,11 @@ decode-correctness defect.
 
 | Switch | Off (default) | On |
 |---|---|---|
-| Settings → Performance → Advanced → Experimental → Content pacing (`experimental.content_pacing`) | Tick at the configured ceiling | Pace video to its observed content rate |
 | `WALLPAPER_MACHINE_FEEDBACK_COPIES=1` | Native Metal trades textures for a copy a layer only makes to read the image it draws into | Every such copy is made as a copy; the picture is byte-identical either way |
 | `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` | Native Metal lets targets never alive together share images, and traded copies share a small set | Every target keeps an image of its own; the picture is byte-identical either way, the target memory is not |
 | Settings → Performance → Quality → 2D scene resolution (`scene_resolution` under `[quality]`) | Display resolution: a 2D scene is rasterized at the size it is presented at | Canvas size: rasterized at the authored canvas and stretched; less GPU time and memory |
 
-`WALLPAPER_MACHINE_CONTENT_PACING=1` switches content pacing on in headless
-probes. An explicit setting wins over it and the app pushes its saved value at
-launch, so measure the app through the Settings switch.
-
-Demand-driven pacing is off by default because its remaining exposure cannot be
-bounded here: the content period only reaches the frame clock after a completed
-frame, so a rate that turns out tighter than the interval being waited out loses
-every frame produced during the remainder of it. Changes that are not switchable
+Changes that are not switchable
 (correctness and resource-lifetime fixes) need a separate build directory or
 worktree. Whichever way two versions are compared, they need isolated
 `WALLPAPER_MACHINE_HOME` directories and must be measured serially, never

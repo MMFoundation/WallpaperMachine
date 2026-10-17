@@ -280,14 +280,6 @@ pub struct SetBatteryQualityProfile {
     pub target_fps: u32,
 }
 
-pub struct SetContentPacingEnabled {
-    pub enabled: bool,
-}
-
-pub struct SetSharedVideoDecodeEnabled {
-    pub enabled: bool,
-}
-
 pub struct SetSceneOptimizationEnabled {
     pub enabled: bool,
 }
@@ -483,8 +475,6 @@ pub type SetRenderScaleReply = AllSnapshotsReply;
 pub type SetFrameRateCapReply = AllSnapshotsReply;
 pub type SetQualityThrottleReply = AllSnapshotsReply;
 pub type SetBatteryQualityProfileReply = AllSnapshotsReply;
-pub type SetContentPacingEnabledReply = AllSnapshotsReply;
-pub type SetSharedVideoDecodeEnabledReply = AllSnapshotsReply;
 pub type SetSceneOptimizationEnabledReply = AllSnapshotsReply;
 pub type SetSceneResolutionReply = AllSnapshotsReply;
 pub type SetSceneOnDemandEnabledReply = AllSnapshotsReply;

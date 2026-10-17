@@ -82,11 +82,6 @@ extension PanelController {
       activePreset: QualityPreset.active(
         frameRateCap: settings.frameRateCap, preferredRenderScale: settings.preferredRenderScale),
       videoBackends: settings.videoBackends.map(VideoBackendReport.init),
-      contentPacing: settings.contentPacingEnabled,
-      sharedVideoDecode: settings.sharedVideoDecodeEnabled,
-      sharedDecode: SharedDecodeReport(
-        sessions: Int(settings.sharedVideoDecodeSessions),
-        consumers: Int(settings.sharedVideoDecodeConsumers)),
       sceneResolution: SceneResolutionMode(rawValue: settings.sceneResolution) ?? .display,
       sceneOptimization: settings.sceneOptimizationEnabled,
       sceneOnDemand: settings.sceneOnDemandEnabled,

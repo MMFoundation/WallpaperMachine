@@ -1006,18 +1006,6 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func setBatteryQualityProfile(renderScale: Float, targetFps: UInt32) async throws  -> BridgeSnapshotBundle
     
     /**
-     * Turns content pacing on or off for the renderer process.
-     *
-     * Off by default.
-     *
-     * # Errors
-     *
-     * Returns an error when the setting cannot be saved or the renderer
-     * rejects the call.
-     */
-    func setContentPacingEnabled(enabled: Bool) async throws  -> BridgeSnapshotBundle
-    
-    /**
      * # Errors
      *
      * Returns an error when the wallpaper or display id is unknown.
@@ -1348,20 +1336,6 @@ public protocol WallpaperBridgeProtocol : AnyObject {
      * rejects the call.
      */
     func setSceneVideoPlaneSamplingEnabled(enabled: Bool) async throws  -> BridgeSnapshotBundle
-    
-    /**
-     * Turns shared video decoding on or off for the renderer process.
-     *
-     * Off by default. Turning it on permits sharing; it does not by itself
-     * mean any decode is shared. The snapshot's session and consumer counts
-     * are where that shows up.
-     *
-     * # Errors
-     *
-     * Returns an error when the setting cannot be saved or the renderer
-     * rejects the call.
-     */
-    func setSharedVideoDecodeEnabled(enabled: Bool) async throws  -> BridgeSnapshotBundle
     
     /**
      * # Errors
@@ -2559,33 +2533,6 @@ open func setBatteryQualityProfile(renderScale: Float, targetFps: UInt32)async t
 }
     
     /**
-     * Turns content pacing on or off for the renderer process.
-     *
-     * Off by default.
-     *
-     * # Errors
-     *
-     * Returns an error when the setting cannot be saved or the renderer
-     * rejects the call.
-     */
-open func setContentPacingEnabled(enabled: Bool)async throws  -> BridgeSnapshotBundle {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_content_pacing_enabled(
-                    self.uniffiClonePointer(),
-                    FfiConverterBool.lower(enabled)
-                )
-            },
-            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeBridgeSnapshotBundle.lift,
-            errorHandler: FfiConverterTypeBridgeError.lift
-        )
-}
-    
-    /**
      * # Errors
      *
      * Returns an error when the wallpaper or display id is unknown.
@@ -3325,35 +3272,6 @@ open func setSceneVideoPlaneSamplingEnabled(enabled: Bool)async throws  -> Bridg
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_scene_video_plane_sampling_enabled(
-                    self.uniffiClonePointer(),
-                    FfiConverterBool.lower(enabled)
-                )
-            },
-            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeBridgeSnapshotBundle.lift,
-            errorHandler: FfiConverterTypeBridgeError.lift
-        )
-}
-    
-    /**
-     * Turns shared video decoding on or off for the renderer process.
-     *
-     * Off by default. Turning it on permits sharing; it does not by itself
-     * mean any decode is shared. The snapshot's session and consumer counts
-     * are where that shows up.
-     *
-     * # Errors
-     *
-     * Returns an error when the setting cannot be saved or the renderer
-     * rejects the call.
-     */
-open func setSharedVideoDecodeEnabled(enabled: Bool)async throws  -> BridgeSnapshotBundle {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_shared_video_decode_enabled(
                     self.uniffiClonePointer(),
                     FfiConverterBool.lower(enabled)
                 )
@@ -6543,17 +6461,6 @@ public struct BridgeSettingsSnapshot {
     public var storage: BridgeStorageStatus
     public var videoBackends: [BridgeVideoBackendReport]
     /**
-     * Read back from the renderer process, not from the saved preference.
-     */
-    public var contentPacingEnabled: Bool
-    public var sharedVideoDecodeEnabled: Bool
-    /**
-     * Live decoder instances, and the surfaces consuming them. Sharing is
-     * consumers exceeding sessions; the setting being on does not imply it.
-     */
-    public var sharedVideoDecodeSessions: UInt32
-    public var sharedVideoDecodeConsumers: UInt32
-    /**
      * The saved preference for the scene renderer's static-subgraph caching
      * and copy-pass elimination. On by default. Unlike the video pipeline
      * fields above this is the preference, not a renderer read-back: the
@@ -6639,13 +6546,6 @@ public struct BridgeSettingsSnapshot {
          * Debug-level lines are recorded too; see `set_verbose_logging`.
          */verboseLogging: Bool, gitSha: String, bridgeVersion: String, coreVersion: String, shaderPipelineVersion: String, storage: BridgeStorageStatus, videoBackends: [BridgeVideoBackendReport], 
         /**
-         * Read back from the renderer process, not from the saved preference.
-         */contentPacingEnabled: Bool, sharedVideoDecodeEnabled: Bool, 
-        /**
-         * Live decoder instances, and the surfaces consuming them. Sharing is
-         * consumers exceeding sessions; the setting being on does not imply it.
-         */sharedVideoDecodeSessions: UInt32, sharedVideoDecodeConsumers: UInt32, 
-        /**
          * The saved preference for the scene renderer's static-subgraph caching
          * and copy-pass elimination. On by default. Unlike the video pipeline
          * fields above this is the preference, not a renderer read-back: the
@@ -6714,10 +6614,6 @@ public struct BridgeSettingsSnapshot {
         self.shaderPipelineVersion = shaderPipelineVersion
         self.storage = storage
         self.videoBackends = videoBackends
-        self.contentPacingEnabled = contentPacingEnabled
-        self.sharedVideoDecodeEnabled = sharedVideoDecodeEnabled
-        self.sharedVideoDecodeSessions = sharedVideoDecodeSessions
-        self.sharedVideoDecodeConsumers = sharedVideoDecodeConsumers
         self.sceneOptimizationEnabled = sceneOptimizationEnabled
         self.sceneOnDemandEnabled = sceneOnDemandEnabled
         self.sceneVideoPlaneSamplingEnabled = sceneVideoPlaneSamplingEnabled
@@ -6775,18 +6671,6 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
             return false
         }
         if lhs.videoBackends != rhs.videoBackends {
-            return false
-        }
-        if lhs.contentPacingEnabled != rhs.contentPacingEnabled {
-            return false
-        }
-        if lhs.sharedVideoDecodeEnabled != rhs.sharedVideoDecodeEnabled {
-            return false
-        }
-        if lhs.sharedVideoDecodeSessions != rhs.sharedVideoDecodeSessions {
-            return false
-        }
-        if lhs.sharedVideoDecodeConsumers != rhs.sharedVideoDecodeConsumers {
             return false
         }
         if lhs.sceneOptimizationEnabled != rhs.sceneOptimizationEnabled {
@@ -6853,10 +6737,6 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
         hasher.combine(shaderPipelineVersion)
         hasher.combine(storage)
         hasher.combine(videoBackends)
-        hasher.combine(contentPacingEnabled)
-        hasher.combine(sharedVideoDecodeEnabled)
-        hasher.combine(sharedVideoDecodeSessions)
-        hasher.combine(sharedVideoDecodeConsumers)
         hasher.combine(sceneOptimizationEnabled)
         hasher.combine(sceneOnDemandEnabled)
         hasher.combine(sceneVideoPlaneSamplingEnabled)
@@ -6896,10 +6776,6 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
                 shaderPipelineVersion: FfiConverterString.read(from: &buf), 
                 storage: FfiConverterTypeBridgeStorageStatus.read(from: &buf), 
                 videoBackends: FfiConverterSequenceTypeBridgeVideoBackendReport.read(from: &buf), 
-                contentPacingEnabled: FfiConverterBool.read(from: &buf), 
-                sharedVideoDecodeEnabled: FfiConverterBool.read(from: &buf), 
-                sharedVideoDecodeSessions: FfiConverterUInt32.read(from: &buf), 
-                sharedVideoDecodeConsumers: FfiConverterUInt32.read(from: &buf), 
                 sceneOptimizationEnabled: FfiConverterBool.read(from: &buf), 
                 sceneOnDemandEnabled: FfiConverterBool.read(from: &buf), 
                 sceneVideoPlaneSamplingEnabled: FfiConverterBool.read(from: &buf), 
@@ -6932,10 +6808,6 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
         FfiConverterString.write(value.shaderPipelineVersion, into: &buf)
         FfiConverterTypeBridgeStorageStatus.write(value.storage, into: &buf)
         FfiConverterSequenceTypeBridgeVideoBackendReport.write(value.videoBackends, into: &buf)
-        FfiConverterBool.write(value.contentPacingEnabled, into: &buf)
-        FfiConverterBool.write(value.sharedVideoDecodeEnabled, into: &buf)
-        FfiConverterUInt32.write(value.sharedVideoDecodeSessions, into: &buf)
-        FfiConverterUInt32.write(value.sharedVideoDecodeConsumers, into: &buf)
         FfiConverterBool.write(value.sceneOptimizationEnabled, into: &buf)
         FfiConverterBool.write(value.sceneOnDemandEnabled, into: &buf)
         FfiConverterBool.write(value.sceneVideoPlaneSamplingEnabled, into: &buf)
@@ -10237,9 +10109,6 @@ private var initializationResult: InitializationResult = {
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_battery_quality_profile() != 23514) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_content_pacing_enabled() != 63477) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_display_config_enabled() != 62288) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -10322,9 +10191,6 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_video_plane_sampling_enabled() != 11000) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_shared_video_decode_enabled() != 19328) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_target_fps() != 37128) {

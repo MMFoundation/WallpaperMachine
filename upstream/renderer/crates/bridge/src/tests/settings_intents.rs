@@ -2364,61 +2364,15 @@ async fn a_display_refresh_does_not_reload_a_scene_paused_by_a_lock_or_a_covered
     assert_refresh_keeps_the_scene(&bridge, &engine).await;
 }
 
-/// A reconcile hands the engine every configured scene, and the engine reopens
-/// any scene whose descriptor differs from the one it runs. Turning shared video decode on
-/// reconciles the whole list without changing a scene wallpaper.
-async fn assert_reconcile_keeps_the_scene(bridge: &WallpaperBridge, engine: &FakeEngineFacade) {
-    let entry = engine.display_snapshot().remove(0);
-    let Some(WallpaperAssignment::Direct(template)) = entry.assignment else {
-        panic!("the scene should be running on the primary display");
-    };
-    let running = template.for_display(entry.desc);
-    let calls_before = engine.calls().len();
-
-    bridge.set_shared_video_decode_enabled(true).await.unwrap();
-
-    let calls = engine.calls();
-    assert_eq!(calls.len(), calls_before + 1, "the switch reconciles the scene list");
-    let handed = &calls[calls_before][0];
-    assert!(
-        running.same_wallpaper(handed) && running.display == handed.display,
-        "nothing about the wallpaper changed, so a reconcile must hand the engine the scene \
-         it runs rather than one it reloads: running {running:?}, handed {handed:?}"
-    );
-}
-
 #[tokio::test]
-async fn a_reconcile_does_not_reload_a_scene_held_to_the_frame_rate_cap() {
+async fn a_display_refresh_does_not_reload_a_scene_held_to_the_frame_rate_cap() {
     // A 120 Hz display under a 60 fps cap: the scene runs at 60.
     let engine = FakeEngineFacade::default();
     let (bridge, _root) = running_scene_bridge(&engine).await;
     bridge.set_frame_rate_cap(Some(60)).await.unwrap();
     assert_eq!(engine.fps_calls().last(), Some(&(SceneHandle::new(1), 60)));
 
-    assert_reconcile_keeps_the_scene(&bridge, &engine).await;
-}
-
-#[tokio::test]
-async fn a_reconcile_does_not_reload_a_scene_held_to_the_quality_throttle() {
-    let engine = FakeEngineFacade::default();
-    let _release = EngineRelease::of(&engine);
-    let (bridge, _root) = running_scene_bridge(&engine).await;
-    bridge
-        .set_quality_throttle(vec![crate::BridgeQualityThrottleCause::Heat])
-        .await
-        .unwrap();
-    assert_eq!(engine.fps_calls().last(), Some(&(SceneHandle::new(1), 30)));
-
-    assert_reconcile_keeps_the_scene(&bridge, &engine).await;
-}
-
-#[tokio::test]
-async fn a_reconcile_does_not_reload_a_scene_muted_for_other_audio() {
-    let engine = FakeEngineFacade::default();
-    let (bridge, _root) = running_scene_bridge(&engine).await;
-    bridge.set_audio_suppressed(true).await.unwrap();
-
-    assert_reconcile_keeps_the_scene(&bridge, &engine).await;
+    assert_refresh_keeps_the_scene(&bridge, &engine).await;
 }
 
 #[tokio::test]

@@ -37,21 +37,6 @@ pub struct AudioCaptureDemand {
     pub external_consumers: bool,
 }
 
-/// What the renderer process actually has switched on, and what its video
-/// decode is actually doing, right now.
-///
-/// Read back from the renderer rather than inferred from the config: a
-/// persisted preference is what the user asked for, this is what is running.
-/// A session is one live decoder instance, not one file; sharing shows up as
-/// consumers exceeding sessions and is never implied by the setting alone.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RendererVideoPipelineState {
-    pub content_pacing_enabled: bool,
-    pub shared_video_decode_enabled: bool,
-    pub shared_video_decode_sessions: u32,
-    pub shared_video_decode_consumers: u32,
-}
-
 /// What one open scene is actually doing right now: whether its clock is
 /// running and which backend drew it.
 ///
@@ -210,25 +195,6 @@ pub trait EngineFacade: Send + Sync + 'static {
     fn renderer_counters(&self) -> EngineFuture<(Vec<RendererSurfaceCounters>, Vec<u64>)> {
         async move { Ok((Vec::new(), Vec::new())) }.boxed()
     }
-    /// Turns content pacing on or off for the whole process. Off by default.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the renderer rejects the call.
-    fn set_content_pacing_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        let _ = enabled;
-        Ok(())
-    }
-    /// Turns shared video decoding on or off for the whole process. Off by
-    /// default.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the renderer rejects the call.
-    fn set_shared_video_decode_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        let _ = enabled;
-        Ok(())
-    }
     /// Turns the scene renderer's static-subgraph caching and redundant
     /// copy-pass elimination on or off for the whole process. On by default.
     ///
@@ -318,10 +284,6 @@ pub trait EngineFacade: Send + Sync + 'static {
     /// Returns an error when the renderer rejects the call.
     fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {
         Ok(None)
-    }
-    /// What the renderer has switched on and what its decode is doing now.
-    fn video_pipeline_state(&self) -> RendererVideoPipelineState {
-        RendererVideoPipelineState::default()
     }
 }
 
@@ -477,14 +439,6 @@ impl EngineFacade for RealEngineFacade {
         .boxed()
     }
 
-    fn set_content_pacing_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        self.engine.set_content_pacing_enabled(enabled)
-    }
-
-    fn set_shared_video_decode_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        self.engine.set_shared_video_decode_enabled(enabled)
-    }
-
     fn set_scene_optimization_enabled(&self, enabled: bool) -> Result<(), EngineError> {
         self.engine.set_scene_optimization_enabled(enabled)
     }
@@ -521,22 +475,6 @@ impl EngineFacade for RealEngineFacade {
 
     fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {
         self.engine.current_audio_spectrum()
-    }
-
-    fn video_pipeline_state(&self) -> RendererVideoPipelineState {
-        // A renderer that cannot answer is reported as off with nothing
-        // running, which is what "not observed" has to look like here: the
-        // alternative is showing the persisted preference as if it were live.
-        let (sessions, consumers) = self.engine.shared_video_decode_counts().unwrap_or((0, 0));
-        RendererVideoPipelineState {
-            content_pacing_enabled: self.engine.content_pacing_enabled().unwrap_or(false),
-            shared_video_decode_enabled: self
-                .engine
-                .shared_video_decode_enabled()
-                .unwrap_or(false),
-            shared_video_decode_sessions: sessions,
-            shared_video_decode_consumers: consumers,
-        }
     }
 
     fn set_renderer_counters_enabled(&self, enabled: bool) -> Result<(), EngineError> {
@@ -1169,9 +1107,6 @@ pub struct FakeEngineFacade {
     fps_calls: Arc<ArcSwap<Vec<(SceneHandle, u32)>>>,
     render_scale_calls: Arc<ArcSwap<Vec<(SceneHandle, f32)>>>,
     render_scale_failure: Arc<ArcSwap<Option<String>>>,
-    content_pacing_enabled: Arc<ArcSwap<bool>>,
-    shared_video_decode_enabled: Arc<ArcSwap<bool>>,
-    shared_video_decode_counts: Arc<ArcSwap<(u32, u32)>>,
     scene_optimization_calls: Arc<ArcSwap<Vec<bool>>>,
     scene_on_demand_calls: Arc<ArcSwap<Vec<bool>>>,
     scene_video_plane_sampling_calls: Arc<ArcSwap<Vec<bool>>>,
@@ -1705,12 +1640,6 @@ impl FakeEngineFacade {
     #[must_use]
     pub fn render_scale_calls(&self) -> Vec<(SceneHandle, f32)> {
         load_log(&self.render_scale_calls)
-    }
-
-    /// Decode counts the next [`EngineFacade::video_pipeline_state`] reports.
-    pub fn set_shared_video_decode_counts(&self, sessions: u32, consumers: u32) {
-        self.shared_video_decode_counts
-            .store(Arc::new((sessions, consumers)));
     }
 
     #[must_use]
@@ -2339,16 +2268,6 @@ impl EngineFacade for FakeEngineFacade {
         .boxed()
     }
 
-    fn set_content_pacing_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        self.content_pacing_enabled.store(Arc::new(enabled));
-        Ok(())
-    }
-
-    fn set_shared_video_decode_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        self.shared_video_decode_enabled.store(Arc::new(enabled));
-        Ok(())
-    }
-
     fn set_scene_optimization_enabled(&self, enabled: bool) -> Result<(), EngineError> {
         push_log(&self.scene_optimization_calls, enabled);
         Ok(())
@@ -2393,16 +2312,6 @@ impl EngineFacade for FakeEngineFacade {
 
     fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {
         Ok(**self.audio_spectrum.load())
-    }
-
-    fn video_pipeline_state(&self) -> RendererVideoPipelineState {
-        let (sessions, consumers) = **self.shared_video_decode_counts.load();
-        RendererVideoPipelineState {
-            content_pacing_enabled: **self.content_pacing_enabled.load(),
-            shared_video_decode_enabled: **self.shared_video_decode_enabled.load(),
-            shared_video_decode_sessions: sessions,
-            shared_video_decode_consumers: consumers,
-        }
     }
 
     fn poll_mouse_position(&self) -> EngineFuture<()> {

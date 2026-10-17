@@ -183,10 +183,6 @@ public:
     /// both backends.
     void SetVideoPlaybackPaused(bool paused);
     void SetVideoPlaybackRate(float rate);
-    /// The shortest frame period among the scene's video textures, or 0.0 when
-    /// it binds none -- in which case the frame clock keeps its configured
-    /// cadence.
-    [[nodiscard]] double ShortestVideoFramePeriod() const;
 
     /// How this scene's video textures reached the shaders that sample them on
     /// the last frame drawn. A report, not a request: a scene with no video, or

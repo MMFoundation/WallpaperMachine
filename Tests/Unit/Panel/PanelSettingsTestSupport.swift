@@ -13,8 +13,6 @@ final class SettingsRecordingBridge: LayoutSnapshotBridge {
   }
 
   var batteryProfileCalls: [Profile] = []
-  var contentPacingCalls: [Bool] = []
-  var sharedVideoDecodeCalls: [Bool] = []
   var sceneOptimizationCalls: [Bool] = []
   var sceneOnDemandCalls: [Bool] = []
   var sceneVideoPlaneSamplingCalls: [Bool] = []
@@ -40,16 +38,6 @@ final class SettingsRecordingBridge: LayoutSnapshotBridge {
     try await record({ $0.batteryProfileCalls.append(Profile(renderScale: renderScale, targetFps: targetFps)) }) {
       $0.batteryRenderScale = renderScale
       $0.batteryTargetFps = targetFps
-    }
-  }
-
-  override func setContentPacingEnabled(enabled: Bool) async throws -> BridgeSnapshotBundle {
-    try await record({ $0.contentPacingCalls.append(enabled) }) { $0.contentPacingEnabled = enabled }
-  }
-
-  override func setSharedVideoDecodeEnabled(enabled: Bool) async throws -> BridgeSnapshotBundle {
-    try await record({ $0.sharedVideoDecodeCalls.append(enabled) }) {
-      $0.sharedVideoDecodeEnabled = enabled
     }
   }
 

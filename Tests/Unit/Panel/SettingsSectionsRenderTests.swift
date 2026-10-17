@@ -33,7 +33,6 @@ final class SettingsSectionsRenderTests: PanelTestCase {
           displayId: 1, displayName: name, wallpaperId: "beach", wallpaperTitle: name,
           backend: "native", fallbackReason: long ? longName : nil)
       ],
-      sharedVideoDecodeEnabled: true, sharedVideoDecodeSessions: 1, sharedVideoDecodeConsumers: 2,
       sceneUpdateModes: [
         BridgeSceneUpdateModeReport(
           displayId: 1, displayName: name, wallpaperId: "a", wallpaperTitle: name,

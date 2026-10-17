@@ -11,7 +11,6 @@
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Scene/Scene.h"
 #include "Utils/Logging.h"
-#include "Video/SharedVideoSession.hpp"
 #include "Video/VideoColorConversion.hpp"
 #include "Video/VideoConversionMetal.hpp"
 #include "Video/VideoFramePacing.hpp"
@@ -490,10 +489,8 @@ bool MetalVideoTextures::prepare(Scene&                          scene,
             // the ordinary texture path and are simply not ours.
             if (! image->header.isVideo) continue;
 
-            // Through the registry, exactly as the compatibility backend's texture
-            // cache does: with shared decode off this is a private source per
-            // call, and with it on an equivalent running decoder is reused.
-            auto source = video::AcquireVideoTextureSource(image, &source_error);
+            // A private source per call: every surface decodes its own clip.
+            auto source = video::CreateVideoTextureSource(image, &source_error);
             if (! source) {
                 return SetError(error,
                                 "failed to open video texture \"" + key + "\": " + source_error);
@@ -639,21 +636,6 @@ void MetalVideoTextures::setCounters(RendererCounters* counters)
 void MetalVideoTextures::setDemand(std::map<std::string, VideoConsumerDemand> demand)
 {
     m_state->demand = std::move(demand);
-}
-
-double MetalVideoTextures::shortestFramePeriod() const
-{
-    double shortest = 0.0;
-    for (const auto& [key, entry] : m_state->sources) {
-        (void)key;
-        if (! entry.source) continue;
-        const double period = entry.source->frameDurationSeconds();
-        // A source that cannot report its rate makes the whole answer unknown:
-        // pacing on the others could skip its changes.
-        if (! (period > 0.0)) return 0.0;
-        if (shortest == 0.0 || period < shortest) shortest = period;
-    }
-    return shortest;
 }
 
 bool MetalVideoTextures::advancesOnItsOwn() const

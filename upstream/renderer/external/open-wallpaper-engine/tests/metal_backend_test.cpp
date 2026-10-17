@@ -354,13 +354,6 @@ TEST(MetalCapability, EveryUnsupportedConstructHasItsOwnReason)
     std::vector<std::pair<std::string, std::string>> reasons;
 
     {
-        // A plain video wallpaper has its own host path; a scene that merely
-        // binds a video texture is decided by the video module instead.
-        ImageScene fixture;
-        fixture.scene.single_video_source = true;
-        reasons.emplace_back("video wallpaper", RejectionFor(fixture));
-    }
-    {
         // A sheet that is also a video would need both the uploaded-image and
         // the decoded-frame path at once.
         ImageScene fixture;

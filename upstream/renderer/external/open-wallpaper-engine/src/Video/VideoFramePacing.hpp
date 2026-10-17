@@ -64,42 +64,6 @@ private:
     std::uint64_t m_previous_seek_ticket { 0 };
 };
 
-/// Wall-clock period at which the frame clock has to tick for this content, or
-/// 0 when it cannot be proven.
-///
-/// The source period is measured on the media's own timeline. Playback speed
-/// maps that timeline onto the wall clock: at 2x a 30 fps clip delivers a new
-/// frame every 16.7 ms of real time, so pacing on 33.3 ms would drop every
-/// other frame. A non-positive or non-finite rate reports unknown rather than
-/// inventing a period.
-[[nodiscard]] double ResolveContentPeriodSeconds(double source_period_seconds,
-                                                 double playback_rate);
-
-/// Whether an environment value asks for demand-driven pacing to be switched
-/// on. Null, empty, "0" and "false" all mean off.
-///
-/// Pacing is **opt-in**, and the reason is a bound that cannot be removed
-/// without an event-driven clock. The content period only reaches the frame
-/// clock from `refreshFrameDemand`, which runs after a completed frame. A
-/// source whose rate turns out to be tighter than the interval currently being
-/// waited out therefore produces frames that are superseded before the next
-/// frame boundary: up to `interval / period - 1` of them, not one. The safe
-/// baseline — ticking at the configured ceiling — is the default, and this
-/// switch is also the A/B entry point, so a comparison measures one scheduling
-/// strategy in one binary rather than two builds. It covers a scheduling
-/// strategy only; it never restores a resource-lifetime or decode-correctness
-/// defect.
-[[nodiscard]] bool ContentPacingEnabledByEnvironment(const char* value);
-
-/// Process-wide content-pacing switch, settable from the app's settings rather
-/// than only from the environment.
-///
-/// The environment variable still seeds it at first read, so an existing debug
-/// workflow keeps working; a later explicit call wins, because a persisted user
-/// setting has to be able to override an inherited environment.
-void SetContentPacingEnabled(bool enabled);
-[[nodiscard]] bool ContentPacingEnabled();
-
 struct VideoFrameSelection {
     /// A newer decoded frame became the displayed frame.
     bool selected { false };

@@ -287,7 +287,7 @@ struct PlaybackSettingsSection: View {
         "Scene render optimisation reuses work inside a scene and produces the same picture. It only affects scene wallpapers."
       )
       Text(
-        "Content pacing, shared video decode and direct video plane sampling are experimental. Shared decode merges only the decoding; each screen still draws its own frames. Direct plane sampling skips a color conversion when a layer’s shader can handle it; otherwise the picture is produced as before."
+        "Direct video plane sampling is experimental. It skips a color conversion when a layer’s shader can handle it; otherwise the picture is produced as before."
       )
     }
   }

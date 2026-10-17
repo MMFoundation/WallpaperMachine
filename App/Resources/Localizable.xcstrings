@@ -5600,47 +5600,17 @@
     "Live diagnostics" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "現在の動作状況"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "实时诊断"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "即時診斷"}}}
     },
-    "Content pacing" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "コンテンツペーシング"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "内容节拍"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "內容步調"}}}
-    },
-    "Experimental. Presents frames at the content’s own frame rate instead of the display’s refresh rate." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "実験的機能です。ディスプレイのリフレッシュレートではなく、コンテンツ自体のフレームレートでフレームを表示します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "实验性功能。按内容自身的帧率呈现画面，而不是跟随显示器刷新率。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "實驗性功能。以內容本身的影格率呈現畫面，而非顯示器的更新頻率。"}}}
-    },
-    "Shared video decode" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ビデオデコードの共有"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "共享视频解码"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "共用影片解碼"}}}
-    },
-    "Experimental. Screens showing the same video share one decoder." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "実験的機能です。同じビデオを表示している画面で1つのデコーダを共有します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "实验性功能。显示同一视频的多个画面共用一个解码器。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "實驗性功能。顯示相同影片的螢幕會共用一個解碼器。"}}}
-    },
     "Direct video plane sampling" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ビデオプレーンの直接サンプリング"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "直接采样视频平面"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "直接取樣影片平面"}}}
     },
     "Experimental. In scenes drawn by Native Metal, lets a layer’s shader read video frames directly instead of converting them to a color image every frame. Only works with 8-bit NV12 video and shaders that support it; everything else converts as before. Live diagnostics under Scene wallpapers shows which path each scene uses." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "実験的機能です。ネイティブMetalで描画されるシーンで、フレームごとにカラー画像へ変換する代わりに、レイヤーのシェーダがビデオフレームを直接読み取れるようにします。8ビットNV12ビデオと、これに対応したシェーダでのみ機能します。それ以外は従来どおり変換されます。「シーン壁紙」の「現在の動作状況」に、各シーンで使用されている方式が表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "实验性功能。在由原生 Metal 绘制的场景中，让图层着色器直接读取视频帧，省去每帧一次的颜色转换。仅适用于 8 位 NV12 视频和支持的着色器，其他情况照常转换。“场景壁纸”下的“实时诊断”会显示每个场景实际采用的方式。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "實驗性功能。在由原生 Metal 繪製的場景中，讓圖層的著色器直接讀取影片影格，而不必每個影格都轉換成彩色影像。僅適用於 8 位元 NV12 影片及支援此功能的著色器；其他情況照舊轉換。「場景桌布」下的「即時診斷」會顯示每個場景使用的方式。"}}}
     },
-    "Shared decode in use" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "デコード共有の使用状況"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "共享解码使用情况"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "共用解碼使用情況"}}}
-    },
-    "%@ serving %@" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "%1$@で%2$@に供給中"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "%1$@，供 %2$@使用"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "%1$@，供 %2$@使用"}}}
-    },
-    "%lld session" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "%lld個のセッション"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "%lld 个会话"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "%lld 個工作階段"}}}
-    },
-    "%lld sessions" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "%lld個のセッション"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "%lld 个会话"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "%lld 個工作階段"}}}
-    },
-    "%lld surface" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "%lld個のサーフェス"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "%lld 个表面"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "%lld 個表面"}}}
-    },
-    "%lld surfaces" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "%lld個のサーフェス"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "%lld 个表面"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "%lld 個表面"}}}
-    },
     "What these settings change" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "これらの設定で変わること"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "这些设置会改变什么"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "這些設定會改變什麼"}}}
     },
-    "Content pacing, shared video decode and direct video plane sampling are experimental. Shared decode merges only the decoding; each screen still draws its own frames. Direct plane sampling skips a color conversion when a layer’s shader can handle it; otherwise the picture is produced as before." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "コンテンツペーシング、ビデオデコードの共有、ビデオプレーンの直接サンプリングは実験的機能です。デコードの共有で統合されるのはデコード処理のみで、各画面はそれぞれ独自にフレームを描画します。プレーンの直接サンプリングでは、レイヤーのシェーダが対応している場合にカラー変換を省略します。それ以外の場合は、従来どおりに画像が生成されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "内容节拍、共享视频解码和直接采样视频平面都是实验性功能。共享解码只合并解码，每个画面仍各自绘制。直接采样在图层着色器能处理时省去一次颜色转换，否则画面与之前完全一样。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "內容步調、共用影片解碼與直接取樣影片平面都是實驗性功能。共用解碼只會合併解碼工作，每個螢幕仍會各自繪製影格。當圖層的著色器能夠處理時，直接取樣平面會省略一次色彩轉換；否則畫面會照舊產生。"}}}
+    "Direct video plane sampling is experimental. It skips a color conversion when a layer’s shader can handle it; otherwise the picture is produced as before." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ビデオプレーンの直接サンプリングは実験的機能です。レイヤーのシェーダが対応している場合にカラー変換を省略します。それ以外の場合は、従来どおりに画像が生成されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "直接采样视频平面是实验性功能。在图层着色器能处理时省去一次颜色转换，否则画面与之前完全一样。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "直接取樣影片平面是實驗性功能。當圖層的著色器能夠處理時，會省略一次色彩轉換；否則畫面會照舊產生。"}}}
     },
     "System (Auto)" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "システム（自動）"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "跟随系统（自动）"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "系統（自動）"}}}

@@ -65,19 +65,6 @@ struct VideoBackendReport: Equatable, Identifiable, Sendable {
   }
 }
 
-/// "1 session serving 3 surfaces", the report under Shared video decode, or nil while nothing is shared.
-struct SharedDecodeReport: Equatable, Sendable {
-  var sessions: Int
-  var consumers: Int
-
-  @MainActor var text: String? {
-    guard sessions != 0 || consumers != 0 else { return nil }
-    let sessionText = sessions == 1 ? L("\(sessions) session") : L("\(sessions) sessions")
-    let surfaceText = consumers == 1 ? L("\(consumers) surface") : L("\(consumers) surfaces")
-    return L("\(sessionText) serving \(surfaceText)")
-  }
-}
-
 // MARK: - Scene wallpapers
 
 /// The renderer that draws a scene, as the engine read it back. Native Metal is the only one.

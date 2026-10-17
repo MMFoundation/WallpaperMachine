@@ -884,17 +884,17 @@ reasons include each error's domain and code, so a report shows which part of pl
 
 ## Experimental switches
 
-All three switches are experimental and off by default.
+The one experimental switch is off by default.
 
 | Setting | Notes |
 | --- | --- |
-| Content pacing | Drives presentation from the content's own frame cadence instead of the display refresh |
-| Shared video decode | Lets equivalent display surfaces showing the same video share one decode session |
 | Direct video plane sampling | Lets a Native Metal scene's own shader read the decoder's two video planes instead of a colour image converted for it each frame |
 
-When shared decode is actually merging work, **Shared decode in use** reports the
-live session and surface counts the engine publishes. Sharing is reported only
-where it genuinely happens: surfaces still submit and present separately.
+Content pacing and Shared video decode, the two other switches this page once
+listed, are gone. Both only reached a plain video that the scene engine played,
+and the app's own players play every plain video now; a configuration file that
+still holds `content_pacing` or `shared_video_decode` loads, and the keys are not
+written back.
 
 ### Direct video plane sampling
 

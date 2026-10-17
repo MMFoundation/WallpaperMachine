@@ -8,7 +8,6 @@
 #include "Utils/Logging.h"
 #include "MetalRender/MetalVideoSupport.hpp"
 #include "RenderCommon/StaticSubgraphCache.hpp"
-#include "Video/SharedVideoSession.hpp"
 #include "Video/VideoFramePacing.hpp"
 
 #import <QuartzCore/CAMetalLayer.h>
@@ -898,36 +897,6 @@ extern "C" const char* owe_property_project_property_reset(void)
 extern "C" const char* owe_property_project_property_preview_json(void)
 {
     return property_name(wallpaper::PROPERTY_PROJECT_PROPERTY_PREVIEW_JSON);
-}
-
-extern "C" void owe_set_content_pacing_enabled(bool enabled)
-{
-    wallpaper::video::SetContentPacingEnabled(enabled);
-}
-
-extern "C" bool owe_content_pacing_enabled(void)
-{
-    return wallpaper::video::ContentPacingEnabled();
-}
-
-extern "C" void owe_set_shared_video_decode_enabled(bool enabled)
-{
-    wallpaper::video::SetSharedVideoDecodeEnabled(enabled);
-}
-
-extern "C" bool owe_shared_video_decode_enabled(void)
-{
-    return wallpaper::video::SharedVideoDecodeEnabled();
-}
-
-extern "C" uint32_t owe_shared_video_decode_session_count(void)
-{
-    return wallpaper::video::SharedVideoDecodeSessionCount();
-}
-
-extern "C" uint32_t owe_shared_video_decode_consumer_count(void)
-{
-    return wallpaper::video::SharedVideoDecodeConsumerCount();
 }
 
 extern "C" int owe_audio_spectrum_is_stereo(void)

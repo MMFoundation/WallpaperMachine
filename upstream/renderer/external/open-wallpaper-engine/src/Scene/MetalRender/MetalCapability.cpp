@@ -264,10 +264,6 @@ std::string SceneMetalStructuralRejection(const Scene& scene)
     // Lights are not refused. Wallpaper Engine lighting is the author's own
     // shader reading `g_LightsPosition` and `g_LightsColorPremultiplied`, which
     // the shared value updater writes for either backend through reflection.
-    // A plain video wallpaper is not a scene this backend competes for: the
-    // host has a dedicated path for it.
-    if (scene.single_video_source) return "the wallpaper is a video";
-
     for (const auto& [name, texture] : scene.textures) {
         // A sprite sheet is one uploaded image whose frame rectangle arrives as
         // a uniform, so it is not refused any more. A sheet that is also a

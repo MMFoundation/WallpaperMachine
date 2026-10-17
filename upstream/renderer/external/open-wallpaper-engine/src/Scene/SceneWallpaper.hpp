@@ -219,14 +219,6 @@ struct SceneWallpaperInputTestAccess {
     /// How many property-preview commands the render thread has handled. A burst
     /// of documents is one pending command plus the one it was waiting behind.
     static uint64_t PropertyPreviewCommandsHandled(SceneWallpaper&);
-    /// The production plain-video project scene for `project_json`, built the
-    /// way `loadScene` builds it, without needing a render surface.
-    static std::shared_ptr<Scene> CreateVideoProjectScene(const std::string& project_json,
-                                                          std::string*       error);
-    /// The production plain-video layer -- its quad and its copy shader --
-    /// sampling `texture`, without a media file to probe.
-    static std::shared_ptr<SceneNode> CreateVideoProjectNode(const std::string& texture,
-                                                             std::string*       error);
 #if defined(__APPLE__)
     static SceneWallpaper& FromNative(owe_scene_wallpaper&);
 #endif

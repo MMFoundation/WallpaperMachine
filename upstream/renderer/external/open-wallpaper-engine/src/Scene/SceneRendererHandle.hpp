@@ -210,10 +210,6 @@ public:
     }
     void SetVideoPlaybackPaused(bool value) { OWE_FORWARD_VOID(SetVideoPlaybackPaused(value)); }
     void SetVideoPlaybackRate(float value) { OWE_FORWARD_VOID(SetVideoPlaybackRate(value)); }
-    double ShortestVideoFramePeriod() const {
-        OWE_FORWARD(ShortestVideoFramePeriod());
-        return 0.0;
-    }
     /// `UnknownInput` with no backend, never 0: 0 means the graph was analysed
     /// and proved static, which would let the on-demand path stop the clock for
     /// a scene nothing has looked at yet.

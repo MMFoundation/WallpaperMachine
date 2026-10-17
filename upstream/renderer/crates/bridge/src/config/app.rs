@@ -156,14 +156,6 @@ impl Default for QualityCfg {
 /// expected to be reported as experimental wherever it is surfaced.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExperimentalCfg {
-    /// Pace scene content production to the target rate instead of producing a
-    /// frame per display refresh.
-    #[serde(default)]
-    pub content_pacing: bool,
-    /// Let displays showing the same video share one decode session instead of
-    /// decoding the file once per surface.
-    #[serde(default)]
-    pub shared_video_decode: bool,
     /// Let a native Metal scene's materials sample a video's NV12 planes
     /// directly instead of one pre-converted colour image. Off by default: the
     /// pre-converted path is what every Metal scene has been drawing, and the

@@ -140,36 +140,6 @@ TEST(RenderScale, ReturningToFullScaleRestoresTheExactAuthoredSize) {
     EXPECT_EQ(scene.renderTargets["_rt_4FrameBuffer"].width, 480);
 }
 
-TEST(RenderScale, MediaSizedTargetsKeepTheirOwnResolution) {
-    Scene scene;
-    scene.scene_extent[0] = 1280;
-    scene.scene_extent[1] = 720;
-    scene.renderTargets[std::string(SpecTex_Default)] = SceneRenderTarget {
-        .width           = 1280,
-        .height          = 720,
-        .authored_width  = 1280,
-        .authored_height = 720,
-        .media_sized     = true,
-        .bind            = { .enable = true, .screen = true },
-    };
-    scene.render_scale = 0.5;
-
-    ResolveScreenBoundRenderTargetSizes(scene, kOutput);
-
-    // The frame was already decoded at this size. Shrinking the target it is
-    // copied into would resample it twice for no saving upstream.
-    EXPECT_EQ(scene.renderTargets[std::string(SpecTex_Default)].width, 1280);
-    EXPECT_EQ(scene.renderTargets[std::string(SpecTex_Default)].height, 720);
-}
-
-TEST(RenderScale, PlainVideoScenesReportTheScaleAsNotApplied) {
-    Scene scene;
-    scene.single_video_source = true;
-    scene.render_scale        = 0.5;
-
-    EXPECT_DOUBLE_EQ(ResolveSceneRenderScale(scene), 1.0);
-}
-
 TEST(RenderScale, ScalesBelowTheFloorAreClampedRatherThanHonoured) {
     Scene scene;
     scene.render_scale = 0.01;
@@ -447,34 +417,7 @@ TEST(RasterResolution, PerspectiveScenesAreAlreadyDisplaySized) {
     }
 }
 
-TEST(RasterResolution, AMediaSizedDefaultTargetKeepsTheFramesOwnSize) {
-    for (const bool single_video_source : { false, true }) {
-        Scene scene;
-        scene.scene_extent[0] = 1280;
-        scene.scene_extent[1] = 720;
-        scene.renderTargets[std::string(SpecTex_Default)] = SceneRenderTarget {
-            .width           = 1280,
-            .height          = 720,
-            .authored_width  = 1280,
-            .authored_height = 720,
-            .media_sized     = true,
-            .bind            = { .enable = true, .screen = true },
-        };
-        scene.single_video_source = single_video_source;
-        scene.resolution          = SceneResolution::Display;
-
-        ResolveScreenBoundRenderTargetSizes(scene, kLaptop, Surface(2.0));
-
-        EXPECT_EQ(scene.renderTargets[std::string(SpecTex_Default)].width, 1280);
-        EXPECT_EQ(scene.renderTargets[std::string(SpecTex_Default)].height, 720);
-    }
-}
-
 TEST(RasterResolution, TheResolutionOnlyMattersToASceneWithACanvasToRasterize) {
-    Scene video;
-    video.single_video_source = true;
-    EXPECT_FALSE(SceneResolutionAffectsRaster(video));
-
     Scene perspective;
     perspective.display_sized = true;
     EXPECT_FALSE(SceneResolutionAffectsRaster(perspective));

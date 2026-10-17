@@ -199,62 +199,6 @@ impl OweBackend {
         })
     }
 
-    /// Turns content pacing on or off for the whole process.
-    ///
-    /// Off is the default: with it off the renderer produces a frame per
-    /// display refresh as before.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if the call unwinds.
-    pub fn set_content_pacing_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        unsafe {
-            UnwindSafeFFI::new("owe_set_content_pacing_enabled")
-                .call(|| sys::owe_set_content_pacing_enabled(enabled))
-        }
-    }
-
-    /// Whether the renderer process currently has content pacing on.
-    ///
-    /// Read back from the renderer rather than from persisted settings, so a
-    /// report describes what is running.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if the call unwinds.
-    pub fn content_pacing_enabled(&self) -> Result<bool, EngineError> {
-        unsafe {
-            UnwindSafeFFI::new("owe_content_pacing_enabled")
-                .call(|| sys::owe_content_pacing_enabled())
-        }
-    }
-
-    /// Turns shared video decoding on or off for the whole process.
-    ///
-    /// Off is the default: with it off every surface opens its own decoder.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if the call unwinds.
-    pub fn set_shared_video_decode_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        unsafe {
-            UnwindSafeFFI::new("owe_set_shared_video_decode_enabled")
-                .call(|| sys::owe_set_shared_video_decode_enabled(enabled))
-        }
-    }
-
-    /// Whether the renderer process currently has shared video decoding on.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if the call unwinds.
-    pub fn shared_video_decode_enabled(&self) -> Result<bool, EngineError> {
-        unsafe {
-            UnwindSafeFFI::new("owe_shared_video_decode_enabled")
-                .call(|| sys::owe_shared_video_decode_enabled())
-        }
-    }
-
     /// Turns scene render optimisation on or off for the whole renderer
     /// process. On by default; switching it off makes every pass execute every
     /// frame so the two paths can be compared directly.
@@ -344,28 +288,6 @@ impl OweBackend {
             stereo: stereo == 1,
             bins,
         }))
-    }
-
-    /// Live decoder instances currently serving at least one surface, and the
-    /// number of surfaces consuming them.
-    ///
-    /// A session is one running decoder, not one file: two decoders of the
-    /// same clip are two sessions. Sharing shows up as consumers exceeding
-    /// sessions.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if either call unwinds.
-    pub fn shared_video_decode_counts(&self) -> Result<(u32, u32), EngineError> {
-        let sessions = unsafe {
-            UnwindSafeFFI::new("owe_shared_video_decode_session_count")
-                .call(|| sys::owe_shared_video_decode_session_count())
-        }?;
-        let consumers = unsafe {
-            UnwindSafeFFI::new("owe_shared_video_decode_consumer_count")
-                .call(|| sys::owe_shared_video_decode_consumer_count())
-        }?;
-        Ok((sessions, consumers))
     }
 
     /// Copies process-wide renderer counters, in `owe_renderer_shared_counter`

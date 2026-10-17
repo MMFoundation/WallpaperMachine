@@ -22,7 +22,7 @@ use crate::{
         bridge_log_status,
     },
     config::{SceneResolutionCfg, SerializedSelector},
-    engine::{ActivationInputs, RendererVideoPipelineState, SceneRuntimeReport},
+    engine::{ActivationInputs, SceneRuntimeReport},
     display::{DisplayLabelExt, DisplaySelectorExt, DisplaySnapshotExt},
     logging::{ApplicationLogger, LogStatus},
     login::LaunchAtLoginStatus,
@@ -536,7 +536,6 @@ impl BridgeActorState {
         displays: &[DisplaySnapshotEntry],
         launch_at_login: LaunchAtLoginStatus,
         paths: &BridgePaths,
-        renderer: RendererVideoPipelineState,
         scene_reports: &[SceneRuntimeReport],
     ) -> BridgeSettingsSnapshot {
         let app_config = self.app_config.normalized(displays);
@@ -747,10 +746,6 @@ impl BridgeActorState {
                 ),
             },
             video_backends,
-            content_pacing_enabled: renderer.content_pacing_enabled,
-            shared_video_decode_enabled: renderer.shared_video_decode_enabled,
-            shared_video_decode_sessions: renderer.shared_video_decode_sessions,
-            shared_video_decode_consumers: renderer.shared_video_decode_consumers,
             scene_optimization_enabled: self.app_config.quality.scene_optimization_enabled,
             scene_on_demand_enabled: self.app_config.quality.scene_on_demand_enabled,
             scene_video_plane_sampling_enabled: self
@@ -829,7 +824,6 @@ mod tests {
                 &[],
                 status,
                 &paths,
-                crate::engine::RendererVideoPipelineState::default(),
                 &[],
             );
             assert_eq!(
@@ -866,7 +860,6 @@ mod tests {
             &[],
             LaunchAtLoginStatus::Unavailable,
             &paths,
-            crate::engine::RendererVideoPipelineState::default(),
             &[],
         );
 

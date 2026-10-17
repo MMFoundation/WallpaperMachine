@@ -116,10 +116,6 @@ public:
     /// image" -- the behaviour every consumer had before planes existed.
     void setDemand(std::map<std::string, VideoConsumerDemand> demand);
 
-    /// Shortest frame period among the sources, in seconds, or 0 when any of
-    /// them cannot say — pacing on the others would skip its changes.
-    [[nodiscard]] double shortestFramePeriod() const;
-
     /// True when at least one source is unpaused with a positive rate: the
     /// scene must not idle, because its content changes without an event.
     [[nodiscard]] bool advancesOnItsOwn() const;

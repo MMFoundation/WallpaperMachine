@@ -22,10 +22,6 @@ struct SceneRenderTarget {
     /// scale, so repeated scale changes never compound rounding.
     i32           authored_width { 0 };
     i32           authored_height { 0 };
-    /// Set for targets whose size is dictated by decoded media rather than by
-    /// the author's canvas. Those must not be rescaled: shrinking them only
-    /// resamples a frame that was already decoded at its own resolution.
-    bool          media_sized { false };
     bool          allowReuse { false };
     bool          forceClear { false };
     bool          withDepth { false };

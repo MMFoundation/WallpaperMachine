@@ -574,23 +574,6 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 
-# One decoder serving several surfaces. Driven against media the fixture
-# encodes, for the same reason as video_source_input_test: the thing under test
-# is the real decoder's lifetime and frame ownership, which a fake source cannot
-# show.
-add_executable(shared_video_session_test shared_video_session_test.cpp)
-target_link_libraries(shared_video_session_test PRIVATE ${PROJECT_NAME}
-    wescene_testing_media GTest::gtest_main)
-target_include_directories(shared_video_session_test PRIVATE
-    . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/include)
-target_compile_features(shared_video_session_test PRIVATE cxx_std_20)
-gtest_discover_tests(
-    shared_video_session_test
-    TEST_PREFIX shared_video_session_test.
-    PROPERTIES TIMEOUT 120
-    DISCOVERY_TIMEOUT 60
-)
-
 # A frame that would repeat the picture already on the surface is not drawn,
 # submitted or presented. Driven through the whole scene wallpaper on a Metal
 # layer no window owns, against media the fixture encodes.

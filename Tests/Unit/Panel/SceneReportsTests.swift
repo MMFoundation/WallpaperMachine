@@ -235,13 +235,6 @@ final class SceneReportsTests: PanelTestCase {
     XCTAssertEqual(plain.line, "Display 3 — id3: native", "The id stands in for a missing title")
   }
 
-  func testSharedDecodeIsReportedOnlyWhileSomethingIsShared() throws {
-    try pinPanelLanguageToEnglish()
-    XCTAssertNil(SharedDecodeReport(sessions: 0, consumers: 0).text)
-    XCTAssertEqual(SharedDecodeReport(sessions: 1, consumers: 3).text, "1 session serving 3 surfaces")
-    XCTAssertEqual(SharedDecodeReport(sessions: 2, consumers: 1).text, "2 sessions serving 1 surface")
-  }
-
   func testThePerformanceSettingsCarryTheReportsAndFlagANativeScene() async throws {
     try await withRecordingPanel { panel, _ in
       panel.store.settingsSnapshot = BridgeSnapshotFixtures.settings(

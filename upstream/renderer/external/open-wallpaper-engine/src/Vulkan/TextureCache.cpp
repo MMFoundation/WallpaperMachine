@@ -7,7 +7,6 @@
 
 #include "Image.hpp"
 #include "Platform/Apple/VideoFrameLease.hpp"
-#include "Video/SharedVideoSession.hpp"
 #include "Video/VideoMedia.hpp"
 #include "Core/MapSet.hpp"
 #include "Core/ArrayHelper.hpp"
@@ -811,12 +810,7 @@ ImageSlotsRef TextureCache::CreateTex(Image& image, TextureUploadSynchronization
         if (auto open = FindVideoTex(image.key, video_state)) return std::move(*open);
 
         std::string error;
-        // Goes through the registry rather than straight to the factory: when
-        // shared decode is on and another surface already has this media open,
-        // this returns a consumer handle onto that running decoder instead of
-        // starting a second one. With sharing off it is a private source, as
-        // before.
-        auto source = video::AcquireVideoTextureSource(video::SnapshotVideoImage(image), &error);
+        auto source = video::CreateVideoTextureSource(video::SnapshotVideoImage(image), &error);
         if (! source) {
             LOG_ERROR("failed to create FFmpeg video texture source for \"%s\": %s",
                       image.key.c_str(),

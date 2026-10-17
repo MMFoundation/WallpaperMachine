@@ -463,7 +463,7 @@ not rebuild, pixel for pixel: the seeks of this wallpaper's clips land while the
 are still opening, so the head of a clip is not seen on it, only the wait.
 
 A video that is opened while the clock is already some way into the clip (a scene that falls
-back to the other renderer, a surface split off a shared decoder with shared decode on) opens
+back to the other renderer) opens
 at the head of the clip, as any open does, and the first call that gives it the clock seeks it
 there. The open waits for no seek, so it costs what opening at the head costs. The head of the
 clip is on screen until the seek has landed and the decoder has caught up with the clock, which
@@ -1123,8 +1123,7 @@ players and web view draw them. It is on the
 [Performance page](performance.md#advanced) so it can be turned off and on for an
 A/B comparison without an environment variable.
 
-Unlike [content pacing and shared video decode](performance.md#experimental-switches),
-which are read back from the renderer, its row reports the saved preference: the renderer publishes no query for
+Its row reports the saved preference: the renderer publishes no query for
 it. The engine applies a change to a running scene in place, on that scene's next
 frame in either direction — the copy plan, the targets it governs and the reuse
 table are rebuilt over the graph that is already compiled, without reparsing the
@@ -1175,9 +1174,8 @@ previous frame, leaving only the final composition to redo.
 The frame clock still ticks at the configured rate, and the scene still runs its
 scripts, timeline, sound and events on every tick; only drawing an identical
 picture is left out. A newly decoded video frame of a scene layer is presented on the tick that
-selects it, so this is neither content pacing (an
-[experimental switch](performance.md#experimental-switches)) nor updating only when
-the scene changes, and no drawable is held to keep the picture. A resize, fill, scaling,
+selects it, so this is not updating only when the scene changes, and no drawable is held
+to keep the picture. A resize, fill, scaling,
 position or flip change, a render-scale or scene-optimisation change, a rebuilt graph or
 surface, a resumed wallpaper, a failed frame or a poster request makes the next
 frame present. The renderer counters report these frames as

@@ -38,7 +38,7 @@ use crate::{
             ReplaceLibraryForTest,
             ReplaceWallpaperConfigForTest, RestoreAllPropertyDefaults, RestorePropertyDefault,
             SelectWallpaper,
-            SetAudioResponseEnabled, SetBatteryQualityProfile, SetContentPacingEnabled,
+            SetAudioResponseEnabled, SetBatteryQualityProfile,
             SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode, SetDisplayPosition,
             SetDisplayPresentationSuspended,
             FanOutSystemMediaArtwork, FanOutSystemMediaEvent, GetSystemMediaConsentHandles,
@@ -52,7 +52,7 @@ use crate::{
             SetRenderScale,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
             SetSceneOnDemandEnabled, SetSceneOptimizationEnabled,
-            SetSceneResolution, SetSceneVideoPlaneSamplingEnabled, SetSharedVideoDecodeEnabled,
+            SetSceneResolution, SetSceneVideoPlaneSamplingEnabled,
             SetTargetFps, SetVerboseLogging, SetVolume, SetWebAudioSubscribed,
             Shutdown,
         },
@@ -569,7 +569,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 .as_ref()
                 .and_then(|id| self.state.options(&displays, id.clone(), &self.paths).ok()),
             monitor_information: self.state.monitor_info(&displays),
-            settings: self.state.settings(&displays, launch_at_login, &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports()),
+            settings: self.state.settings(&displays, launch_at_login, &self.paths, &self.engine.scene_runtime_reports()),
         }
     }
 
@@ -584,7 +584,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             library: self.library_snapshot(),
             wallpaper_options: Some(self.state.options(&displays, wallpaper_id, &self.paths)?),
             monitor_information: self.state.monitor_info(&displays),
-            settings: self.state.settings(&displays, launch_at_login, &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports()),
+            settings: self.state.settings(&displays, launch_at_login, &self.paths, &self.engine.scene_runtime_reports()),
         })
     }
 
@@ -599,7 +599,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             library: self.library_snapshot(),
             wallpaper_options: self.state.options(&displays, wallpaper_id, &self.paths)?,
             monitor_information: self.state.monitor_info(&displays),
-            settings: self.state.settings(&displays, launch_at_login, &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports()),
+            settings: self.state.settings(&displays, launch_at_login, &self.paths, &self.engine.scene_runtime_reports()),
         })
     }
 
@@ -610,7 +610,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             app: self.app_snapshot(),
             library: self.library_snapshot(),
             monitor_information: self.state.monitor_info(&displays),
-            settings: self.state.settings(&displays, launch_at_login, &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports()),
+            settings: self.state.settings(&displays, launch_at_login, &self.paths, &self.engine.scene_runtime_reports()),
         }
     }
 
@@ -1973,7 +1973,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         let mut candidate_state = self.state.clone();
         candidate_state.app_config = app_config.clone();
         candidate_state
-            .settings(displays, self.launch_at_login.status(), &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports())
+            .settings(displays, self.launch_at_login.status(), &self.paths, &self.engine.scene_runtime_reports())
             .displays
             .into_iter()
             .map(|row| (row.display_id.clone(), row))
@@ -2293,18 +2293,6 @@ impl<E: EngineFacade + Clone> Message<Bootstrap> for BridgeActor<E> {
         let experimental = self.state.app_config.experimental;
         if let Err(error) = self
             .engine
-            .set_content_pacing_enabled(experimental.content_pacing)
-        {
-            self.state.errors.push(error.to_string());
-        }
-        if let Err(error) = self
-            .engine
-            .set_shared_video_decode_enabled(experimental.shared_video_decode)
-        {
-            self.state.errors.push(error.to_string());
-        }
-        if let Err(error) = self
-            .engine
             .set_scene_optimization_enabled(self.state.app_config.quality.scene_optimization_enabled)
         {
             self.state.errors.push(error.to_string());
@@ -2441,7 +2429,7 @@ impl<E: EngineFacade + Clone> Message<GetSettingsSnapshot> for BridgeActor<E> {
         let displays = self.engine.display_snapshot();
         Ok(self
             .state
-            .settings(&displays, self.launch_at_login.status(), &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports()))
+            .settings(&displays, self.launch_at_login.status(), &self.paths, &self.engine.scene_runtime_reports()))
     }
 }
 
@@ -2516,7 +2504,7 @@ impl<E: EngineFacade + Clone> Message<ClearShaderCache> for BridgeActor<E> {
         let displays = self.engine.display_snapshot();
         Ok(self
             .state
-            .settings(&displays, self.launch_at_login.status(), &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports()))
+            .settings(&displays, self.launch_at_login.status(), &self.paths, &self.engine.scene_runtime_reports()))
     }
 }
 
@@ -3564,57 +3552,6 @@ impl<E: EngineFacade + Clone> Message<SetBatteryQualityProfile> for BridgeActor<
         // A machine already on reduced quality has to pick the new scale and
         // rate up now. Leaving that mode is `SetBatteryMode`'s restore.
         self.apply_quality_profile().await?;
-        self.bump_generation();
-        Ok(self.all_snapshots())
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetContentPacingEnabled> for BridgeActor<E> {
-    type Reply = messages::SetContentPacingEnabledReply;
-
-    async fn handle(
-        &mut self,
-        msg: SetContentPacingEnabled,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        self.state.app_config.experimental.content_pacing = msg.enabled;
-        if let Some(store) = &self.config_store {
-            store.save_app_config(&self.state.app_config)?;
-        }
-        self.engine
-            .set_content_pacing_enabled(msg.enabled)
-            .map_err(|error| BridgeError::engine(error.to_string()))?;
-        self.bump_generation();
-        Ok(self.all_snapshots())
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetSharedVideoDecodeEnabled> for BridgeActor<E> {
-    type Reply = messages::SetSharedVideoDecodeEnabledReply;
-
-    async fn handle(
-        &mut self,
-        msg: SetSharedVideoDecodeEnabled,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        if self.state.app_config.experimental.shared_video_decode == msg.enabled {
-            return Ok(self.all_snapshots());
-        }
-        self.state.app_config.experimental.shared_video_decode = msg.enabled;
-        if let Some(store) = &self.config_store {
-            store.save_app_config(&self.state.app_config)?;
-        }
-        self.engine
-            .set_shared_video_decode_enabled(msg.enabled)
-            .map_err(|error| BridgeError::engine(error.to_string()))?;
-        // A decoder is chosen when its source is opened, so a wallpaper that is
-        // already running keeps the decoder it started with. Rebuilding the
-        // scene list is what makes the new setting describe what is on screen
-        // rather than only what the next wallpaper change will get.
-        let app_config = self.state.app_config.clone();
-        let wallpaper_configs = self.state.wallpaper_configs.clone();
-        let scenes = self.reconcile_engine(app_config, wallpaper_configs).await?;
-        self.state.set_active_ids_from_scenes(&scenes);
         self.bump_generation();
         Ok(self.all_snapshots())
     }

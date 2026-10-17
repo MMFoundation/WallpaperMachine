@@ -1378,11 +1378,7 @@ bool VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
             m_direct_present_pass = FindDirectPresentationPass(scene, m_passes);
             if (m_direct_present_pass != nullptr) {
                 m_direct_present_pass->desc().presentation_format = format;
-                // The plain-video scene is built as the final composition's
-                // own quad copying one texture (CreateVideoProjectScene), so
-                // presenting it may resample the source instead of the copy.
-                m_direct_present_pass->desc().presents_through_final_viewport =
-                    scene.single_video_source;
+                m_direct_present_pass->desc().presents_through_final_viewport = false;
             }
         }
     }
@@ -1784,11 +1780,9 @@ bool VulkanRender::Impl::frameRepeatsLastPresent(const Scene& scene) {
     // so a pending request is answered by drawing. Asked without taking it;
     // with no way to ask, a request is always assumed possible.
     if (m_wants_poster && (! m_poster_pending || m_poster_pending())) return false;
-    // Two proofs that the scene's own pixels are the ones already shown: the
-    // engine's plain-video scene is one video texture behind a copy, so its
-    // picture is its video frame; any other scene must have had every pass
+    // The scene's own pixels are the ones already shown only when every pass was
     // reused, leaving nothing to record but the final composition.
-    if (! scene.single_video_source && ! frameRecordsOnlyComposition()) return false;
+    if (! frameRecordsOnlyComposition()) return false;
     return m_present_gate.Matches(m_present_key, m_present_videos);
 }
 
@@ -1870,7 +1864,7 @@ bool VulkanRender::Impl::applyRenderScale(Scene& scene, rg::RenderGraph& rg, dou
         (scene.resolution != resolution && render::SceneResolutionAffectsRaster(scene));
     scene.render_scale = clamped;
     scene.resolution   = resolution;
-    if (scene.single_video_source || ! resizes) return true;
+    if (! resizes) return true;
 
     // Nothing is prepared yet, so the next compile reads the new scale anyway.
     if (! m_inited || m_device_lost || m_frame_faulted || ! m_pass_loaded) return true;

@@ -97,19 +97,6 @@ struct PerformanceSettingsSection: View {
     id: "performance.scene-compatibility", section: .performance, group: scene, inside: advanced,
     title: "Renderer compatibility")
 
-  static let contentPacing = SettingsItem(
-    id: "performance.content-pacing", section: .performance, group: experimental,
-    inside: advanced, title: "Content pacing",
-    note:
-      "Experimental. Presents frames at the content’s own frame rate instead of the display’s refresh rate."
-  )
-  static let sharedVideoDecode = SettingsItem(
-    id: "performance.shared-video-decode", section: .performance, group: experimental,
-    inside: advanced, title: "Shared video decode",
-    note: "Experimental. Screens showing the same video share one decoder.")
-  static let sharedDecodeInUse = SettingsItem(
-    id: "performance.shared-decode-in-use", section: .performance, group: experimental,
-    inside: advanced, title: "Shared decode in use")
   static let videoPlaneSampling = SettingsItem(
     id: "performance.video-plane-sampling", section: .performance, group: experimental,
     inside: advanced, title: "Direct video plane sampling",
@@ -121,20 +108,18 @@ struct PerformanceSettingsSection: View {
     energyUse, energyMethod, preset, frameRateLimit, renderScale, renderScaleEffective,
     sceneResolution, advanced, videoDiagnostics, videoInUse, sceneOptimization, sceneOnDemand,
     sceneDiagnostics, sceneDrawnBy, sceneInForce, sceneUpdating, sceneCompatibility,
-    contentPacing, sharedVideoDecode, sharedDecodeInUse, videoPlaneSampling,
+    videoPlaneSampling,
   ]
 
   /// The live rows this page leaves out while they have nothing to say, by the values its body
   /// draws them from: Effective now while the saved frame-rate limit and scale are the ones in
-  /// force, In force now while no scene has a backend, and Shared decode in use while nothing is
-  /// shared.
+  /// force, and In force now while no scene has a backend.
   @MainActor
   static func unofferedItems(_ controller: PanelController) -> Set<String> {
     let performance = controller.performanceSettings
     var hidden: [SettingsItem] = []
     if performance.quality.effectiveNowText == nil { hidden.append(renderScaleEffective) }
     if performance.optimization.text == nil { hidden.append(sceneInForce) }
-    if performance.sharedDecode.text == nil { hidden.append(sharedDecodeInUse) }
     return Set(hidden.map(\.id))
   }
 
@@ -250,11 +235,6 @@ struct PerformanceSettingsSection: View {
 
   private func experimentalGroup(_ performance: PerformanceSettings) -> some View {
     SettingsGroup(Self.experimental, in: .performance) {
-      SettingsRow(Self.contentPacing) { SettingsSwitchControl(key: .contentPacing) }
-      SettingsRow(Self.sharedVideoDecode) { SettingsSwitchControl(key: .sharedVideoDecode) }
-      if let text = performance.sharedDecode.text {
-        SettingsRow(Self.sharedDecodeInUse) { SettingsStatusText(text) }
-      }
       SettingsRow(Self.videoPlaneSampling) {
         SettingsSwitchControl(key: .sceneVideoPlaneSampling)
       }

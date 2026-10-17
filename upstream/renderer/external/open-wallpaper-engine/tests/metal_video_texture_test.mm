@@ -619,23 +619,16 @@ TEST_F(MetalVideoTexture, SurvivesReleaseWhileAFrameIsInFlight)
     EXPECT_NE(command.status, MTLCommandBufferStatusError);
 }
 
-TEST_F(MetalVideoTexture, ReportsTheShortestFramePeriod)
+TEST_F(MetalVideoTexture, OwnsTheKeysItPreparedUntilItIsReleased)
 {
     auto fast = std::make_shared<FakeVideoSource>(16, 16);
     fast->produce(128, 128, 128);
-    fast->frame_duration_seconds = 1.0 / 60.0;
     auto slow = std::make_shared<FakeVideoSource>(16, 16);
     slow->produce(128, 128, 128);
-    slow->frame_duration_seconds = 1.0 / 24.0;
 
     std::string error;
     ASSERT_TRUE(textures->prepareForTests("fast", fast, &error)) << error;
     ASSERT_TRUE(textures->prepareForTests("slow", slow, &error)) << error;
-    EXPECT_NEAR(textures->shortestFramePeriod(), 1.0 / 60.0, 1e-9);
-
-    // A source that cannot report its rate makes the whole answer unknown.
-    slow->frame_duration_seconds = 0.0;
-    EXPECT_EQ(textures->shortestFramePeriod(), 0.0);
 
     EXPECT_TRUE(textures->owns("fast"));
     EXPECT_FALSE(textures->owns("missing"));

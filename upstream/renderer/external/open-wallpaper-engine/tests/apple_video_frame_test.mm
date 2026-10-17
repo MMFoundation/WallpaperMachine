@@ -26,6 +26,7 @@ extern "C" {
 #include "Platform/Apple/VideoFrameInterop.hpp"
 #include "Platform/Apple/VideoFrameLease.hpp"
 #include "Video/VideoMedia.hpp"
+#include "video_project_image.hpp"
 #include "Video/VideoTextureSource.hpp"
 #include "synthetic_video.hpp"
 

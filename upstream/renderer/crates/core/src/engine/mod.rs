@@ -770,48 +770,6 @@ impl WallpaperEngine {
         self.backend.set_counters_enabled(enabled)
     }
 
-    /// Turns content pacing on or off for the whole process.
-    ///
-    /// Off by default. With it on the renderer produces content at the target
-    /// rate instead of once per display refresh.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the renderer rejects the call.
-    pub fn set_content_pacing_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        self.backend.set_content_pacing_enabled(enabled)
-    }
-
-    /// Whether the renderer process currently has content pacing on.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the renderer rejects the call.
-    pub fn content_pacing_enabled(&self) -> Result<bool, EngineError> {
-        self.backend.content_pacing_enabled()
-    }
-
-    /// Turns shared video decoding on or off for the whole process.
-    ///
-    /// Off by default. With it on, surfaces showing the same video source can
-    /// consume one decoder instance instead of one each.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the renderer rejects the call.
-    pub fn set_shared_video_decode_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        self.backend.set_shared_video_decode_enabled(enabled)
-    }
-
-    /// Whether the renderer process currently has shared video decoding on.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the renderer rejects the call.
-    pub fn shared_video_decode_enabled(&self) -> Result<bool, EngineError> {
-        self.backend.shared_video_decode_enabled()
-    }
-
     /// Turns scene render optimisation on or off for the renderer process.
     ///
     /// On by default. It reuses the previous frame's pixels for render targets
@@ -895,19 +853,6 @@ impl WallpaperEngine {
     /// Returns an error if the renderer rejects the call.
     pub fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {
         self.backend.current_audio_spectrum()
-    }
-
-    /// Live decode sessions and the number of surfaces consuming them.
-    ///
-    /// A session is one running decoder instance, not one file: two decoders
-    /// of the same clip count as two. Sharing is visible as consumers
-    /// exceeding sessions, and is not implied by the setting being on.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the renderer rejects either call.
-    pub fn shared_video_decode_counts(&self) -> Result<(u32, u32), EngineError> {
-        self.backend.shared_video_decode_counts()
     }
 
     /// Reads renderer work counters for every open scene, plus the process-wide

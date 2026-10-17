@@ -1,12 +1,12 @@
-// What a pure-video wallpaper is allowed to do with the user's media file.
+// What a video source is allowed to do with a media file.
 //
 // A plain local file is decode input, not a payload: it must be opened where it
 // lies, never read into the process and never copied into the shared cache.
 // Media that only exists inside a package still has to be extracted, and that
 // extraction must be published whole so a second opener cannot observe a
-// half-written file. Everything below drives the production construction path -
-// `CreateVideoProjectImage` followed by `CreateVideoTextureSource` - over media
-// the test encodes for itself.
+// half-written file. Everything below drives `CreateVideoTextureSource` over
+// media the test encodes for itself, on an image that names its file the way the
+// engine once built one for a video project (`video_project_image.hpp`).
 //
 // The last group is the clock a consumer gives a source: a source opened when
 // the scene is already some way into the clip, and what a jump of that clock
@@ -23,9 +23,9 @@
 #include "Video/NativeVideoBackend.hpp"
 #include "Video/VideoBackendSelection.hpp"
 #include "Video/VideoMedia.hpp"
+#include "video_project_image.hpp"
 #include "Video/VideoSeekPolicy.hpp"
 #include "Video/VideoTextureSource.hpp"
-#include "Scene/SceneWallpaper.hpp"
 #include "embedded_clips.hpp"
 #include "synthetic_video.hpp"
 #include "video_orientation_cases.hpp"
@@ -851,48 +851,6 @@ TEST(VideoSeekPolicy, ALandingThatCameLateIsCaughtUpWithByDecodingOn) {
     // A seek that took 3.6 seconds landed 3.6 seconds behind the clock; asking for
     // another because of that would land as late again.
     EXPECT_DOUBLE_EQ(ForwardResyncSeconds(1.0 / 30.0, 8.0, ClockRunOnSeconds(3.6, 1.0)), 4.6);
-}
-
-// A plain video wallpaper has no material, particle, uniform or script that
-// could read system audio, so it must never ask for the system-audio tap.
-TEST_P(VideoSourceInput, PlainVideoProjectNeverReportsAnAudioRequirement) {
-    ASSERT_TRUE(WriteSyntheticVideo(project_dir / "media.mp4", 2, "audio-requirement"));
-    const auto project_json = project_dir / "project.json";
-    std::ofstream(project_json) << R"({"type":"video","file":"media.mp4","title":"clip"})";
-
-    std::string error;
-    auto        scene = SceneWallpaperInputTestAccess::CreateVideoProjectScene(
-        project_json.string(), &error);
-    ASSERT_NE(scene, nullptr) << error;
-
-    std::mutex              mutex;
-    std::condition_variable changed;
-    std::vector<bool>       audio;
-    int                     commits = 0;
-    SceneWallpaper          wallpaper;
-    ASSERT_TRUE(wallpaper.init());
-    wallpaper.setPropertyObject(PROPERTY_AUDIO_REQUIREMENT_CALLBACK,
-        std::make_shared<AudioRequirementCallback>([&](bool requires_audio) {
-            std::lock_guard lock(mutex);
-            audio.push_back(requires_audio);
-            changed.notify_all();
-        }));
-    // The pointer report follows the audio report of the same commit on the
-    // same looper, so seeing it means the audio report has been handled.
-    wallpaper.setPropertyObject(PROPERTY_POINTER_INPUT_CALLBACK,
-        std::make_shared<PointerInputCallback>([&](bool) {
-            std::lock_guard lock(mutex);
-            ++commits;
-            changed.notify_all();
-        }));
-    SceneWallpaperInputTestAccess::PostScene(wallpaper, scene);
-    {
-        std::unique_lock lock(mutex);
-        ASSERT_TRUE(changed.wait_for(lock, std::chrono::seconds(5), [&] { return commits >= 2; }));
-    }
-    wallpaper.shutdown();
-    std::lock_guard lock(mutex);
-    EXPECT_EQ(audio, (std::vector<bool> { false }));
 }
 
 // ---------------------------------------------------------------------------

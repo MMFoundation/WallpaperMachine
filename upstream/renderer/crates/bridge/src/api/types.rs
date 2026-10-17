@@ -551,13 +551,6 @@ pub struct BridgeSettingsSnapshot {
     pub shader_pipeline_version: String,
     pub storage: BridgeStorageStatus,
     pub video_backends: Vec<BridgeVideoBackendReport>,
-    /// Read back from the renderer process, not from the saved preference.
-    pub content_pacing_enabled: bool,
-    pub shared_video_decode_enabled: bool,
-    /// Live decoder instances, and the surfaces consuming them. Sharing is
-    /// consumers exceeding sessions; the setting being on does not imply it.
-    pub shared_video_decode_sessions: u32,
-    pub shared_video_decode_consumers: u32,
     /// The saved preference for the scene renderer's static-subgraph caching
     /// and copy-pass elimination. On by default. Unlike the video pipeline
     /// fields above this is the preference, not a renderer read-back: the

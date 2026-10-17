@@ -120,37 +120,6 @@ uint16_t ReadPkgVersionFromFile(const std::string& pkg_path) {
     return ParsePkgVersionStamp(stamp);
 }
 
-class NoOpShaderValueUpdater final : public wallpaper::IShaderValueUpdater {
-public:
-    void FrameBegin() override {}
-    void InitUniforms(wallpaper::SceneNode*, const wallpaper::ExistsUniformOp&) override {}
-    void UpdateUniforms(wallpaper::SceneNode*, wallpaper::sprite_map_t&,
-                        const wallpaper::UpdateUniformOp&) override {}
-    void FrameEnd() override {}
-    void MouseInput(double, double) override {}
-    void SetTexelSize(float, float) override {}
-    void SetScreenSize(i32, i32) override {}
-};
-
-class SingleVideoImageParser final : public wallpaper::IImageParser {
-public:
-    explicit SingleVideoImageParser(std::shared_ptr<wallpaper::Image> image)
-        : m_image(std::move(image)) {}
-
-    std::shared_ptr<wallpaper::Image> Parse(const std::string& name) override {
-        if (m_image != nullptr && name == m_image->key) return m_image;
-        return nullptr;
-    }
-
-    wallpaper::ImageHeader ParseHeader(const std::string& name) override {
-        if (m_image != nullptr && name == m_image->key) return m_image->header;
-        return {};
-    }
-
-private:
-    std::shared_ptr<wallpaper::Image> m_image;
-};
-
 class ScopedGlslang final {
 public:
     ScopedGlslang() { wallpaper::WPShaderParser::InitGlslang(); }
@@ -163,176 +132,6 @@ struct SystemMediaArtworkPayload {
     std::vector<uint8_t> rgba;
 };
 
-bool BuildVideoCopyShader(wallpaper::fs::VFS& vfs, std::string_view scene_id,
-                          std::shared_ptr<wallpaper::SceneShader>* shader, std::string* error) {
-    if (shader == nullptr) return SetError(error, "video copy shader output must not be null");
-
-    std::string vertex_src = "in vec3 a_Position;\n"
-                             "in vec2 a_TexCoord;\n"
-                             "void main() {\n"
-                             "gl_Position = vec4(a_Position, 1.0);\n"
-                             "v_TexCoord = a_TexCoord;\n"
-                             "}\n";
-
-    std::string fragment_src = "uniform sampler2D g_Texture0;\n"
-                               "in vec2 v_TexCoord;\n"
-                               "void main() {\n"
-                               "gl_FragColor = texture(g_Texture0, v_TexCoord);\n"
-                               "}\n";
-
-    wallpaper::WPShaderInfo                 shader_info;
-    std::vector<wallpaper::WPShaderTexInfo> tex_infos(1);
-    tex_infos[0].enabled = true;
-
-    std::array units {
-        wallpaper::WPShaderUnit {
-            .stage           = wallpaper::ShaderType::VERTEX,
-            .src             = std::move(vertex_src),
-            .preprocess_info = {},
-        },
-        wallpaper::WPShaderUnit {
-            .stage           = wallpaper::ShaderType::FRAGMENT,
-            .src             = std::move(fragment_src),
-            .preprocess_info = {},
-        },
-    };
-
-    auto compiled_shader  = std::make_shared<wallpaper::SceneShader>();
-    compiled_shader->name = "commands/copy";
-    std::string reflection_json;
-    if (! wallpaper::WPShaderParser::CompileToSpvRust(
-            scene_id, "commands/copy", units, compiled_shader->codes, vfs, &shader_info, tex_infos, &reflection_json)) {
-        return SetError(error, "failed to compile pure-video copy shader");
-    }
-
-    compiled_shader->rust_reflection_json = std::move(reflection_json);
-    compiled_shader->default_uniforms = shader_info.svs;
-    *shader                           = std::move(compiled_shader);
-    return true;
-}
-
-void InstallVideoProjectCameras(wallpaper::Scene& scene) {
-    scene.ortho[0] = 2;
-    scene.ortho[1] = 2;
-
-    auto global_node = std::make_shared<wallpaper::SceneNode>();
-    scene.sceneGraph->AppendChild(global_node);
-
-    auto global_camera = std::make_shared<wallpaper::SceneCamera>(2, 2, -1.0f, 1.0f);
-    global_camera->AttatchNode(global_node);
-    scene.cameras["global"] = global_camera;
-    scene.activeCamera      = global_camera.get();
-
-    auto perspective_node = std::make_shared<wallpaper::SceneNode>();
-    scene.sceneGraph->AppendChild(perspective_node);
-
-    auto perspective_camera = std::make_shared<wallpaper::SceneCamera>(1.0f, 0.1f, 1000.0f, 45.0f);
-    perspective_camera->AttatchNode(perspective_node);
-    scene.cameras["global_perspective"] = perspective_camera;
-}
-
-std::shared_ptr<wallpaper::SceneNode>
-CreateVideoProjectNode(std::string_view                               texture_name,
-                       const std::shared_ptr<wallpaper::SceneShader>& shader) {
-    constexpr std::array<float, 12> positions {
-        -1.0f, -1.0f, 0.0f, -1.0f, 1.0f, 0.0f, 1.0f, -1.0f, 0.0f, 1.0f, 1.0f, 0.0f,
-    };
-    constexpr std::array<float, 8> tex_coords {
-        0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.0f,
-    };
-
-    auto                        mesh = std::make_shared<wallpaper::SceneMesh>();
-    wallpaper::SceneVertexArray vertex(
-        {
-            { std::string(wallpaper::WE_IN_POSITION), wallpaper::VertexType::FLOAT3 },
-            { std::string(wallpaper::WE_IN_TEXCOORD), wallpaper::VertexType::FLOAT2 },
-        },
-        4);
-    vertex.SetVertex(wallpaper::WE_IN_POSITION, positions);
-    vertex.SetVertex(wallpaper::WE_IN_TEXCOORD, tex_coords);
-    mesh->AddVertexArray(std::move(vertex));
-
-    wallpaper::SceneMaterial material;
-    material.name = "video_project_copy";
-    material.textures.push_back(std::string(texture_name));
-    material.defines.push_back(std::string(wallpaper::WE_GLTEX_NAMES[0]));
-    material.blenmode            = wallpaper::BlendMode::Normal;
-    material.customShader.shader = shader;
-    mesh->AddMaterial(std::move(material));
-
-    auto node  = std::make_shared<wallpaper::SceneNode>();
-    node->ID() = 1;
-    node->AddMesh(mesh);
-    return node;
-}
-
-std::shared_ptr<wallpaper::Scene>
-CreateVideoProjectScene(std::unique_ptr<wallpaper::fs::VFS> vfs,
-                        const std::filesystem::path&        project_path,
-                        const wallpaper::ProjectManifest& manifest, std::string* error) {
-    if (vfs == nullptr) {
-        SetError(error, "video project VFS must not be null");
-        return nullptr;
-    }
-
-    if (! wallpaper::InstallVirtualAssets(*vfs)) {
-        SetError(error, "failed to install runtime virtual assets for video project");
-        return nullptr;
-    }
-
-    auto image =
-        wallpaper::video::CreateVideoProjectImage(project_path.parent_path(), manifest.file, error);
-    if (image == nullptr) return nullptr;
-
-    std::string scene_id = manifest.workshop_id;
-    if (scene_id.empty()) {
-        scene_id = project_path.parent_path().filename().string();
-    }
-
-    std::shared_ptr<wallpaper::SceneShader> shader;
-    if (! BuildVideoCopyShader(*vfs, scene_id, &shader, error)) return nullptr;
-
-    auto scene                = std::make_shared<wallpaper::Scene>();
-    scene->accepts_pointer_input = false;
-    // Everything below this line is what makes the claim true: one video
-    // texture, a copy shader, a no-op shader value updater, and no script,
-    // particle or audio layer. Keep them together so the marker cannot drift
-    // away from the construction that justifies it.
-    scene->single_video_source   = true;
-    scene->scene_id           = scene_id;
-    scene->project_path       = project_path.string();
-    scene->clearColor         = { 0.0f, 0.0f, 0.0f };
-    scene->shaderValueUpdater = std::make_unique<NoOpShaderValueUpdater>();
-    scene->imageParser        = std::make_unique<SingleVideoImageParser>(image);
-    scene->vfs                = std::move(vfs);
-
-    InstallVideoProjectCameras(*scene);
-    // This target holds one decoded frame at the resolution the file was
-    // encoded at, so it is media-sized: an internal render scale must not
-    // shrink it. Downsampling an already-decoded frame and upsampling it again
-    // at present costs quality and saves almost nothing, because the decode it
-    // would have to make cheaper is upstream of this target.
-    const auto video_width  = std::max(1, image->header.width);
-    const auto video_height = std::max(1, image->header.height);
-    scene->scene_extent[0]  = video_width;
-    scene->scene_extent[1]  = video_height;
-    scene->renderTargets[std::string(wallpaper::SpecTex_Default)] = wallpaper::SceneRenderTarget {
-        .width           = video_width,
-        .height          = video_height,
-        .authored_width  = video_width,
-        .authored_height = video_height,
-        .media_sized     = true,
-        .bind            = { .enable = true, .screen = true },
-    };
-    scene->textures[image->key] = wallpaper::SceneTexture {
-        .url     = image->key,
-        .sample  = image->header.sample,
-        .isVideo = true,
-    };
-    scene->sceneGraph->AppendChild(CreateVideoProjectNode(image->key, shader));
-
-    return scene;
-}
 } // namespace
 
 namespace wallpaper
@@ -420,7 +219,7 @@ private:
     /// later load reads, so the saved look is what the next load shows.
     void previewProjectProperties(const std::string& json);
     void loadScene();
-    bool loadNonSceneProject(const ProjectManifest& manifest, std::unique_ptr<fs::VFS> vfs);
+    bool loadNonSceneProject(const ProjectManifest& manifest);
 
     MHANDLER_CMD(LOAD_SCENE);
     MHANDLER_CMD(APPLY_CONFIG);
@@ -591,48 +390,14 @@ public:
         return m_render_init_info != nullptr || m_render->inited();
     }
 
-    /// Tells the frame clock how often this scene's content can actually
-    /// change. Only the engine's own plain-video scene can answer: it is one
-    /// video texture behind a copy shader with a no-op shader value updater and
-    /// no script, particle, audio or pointer input, so the video's frame period
-    /// is the whole scene's period. Rendering faster than that presents
-    /// identical pixels. Every other scene reports nothing and keeps the fixed
-    /// cadence, because an authored scene may change on a time uniform, a
-    /// script, a particle system, audio or a feedback texture that this code
-    /// does not enumerate.
-    ///
-    /// **Opt-in, and the reason is a bound this function cannot remove.** The
-    /// period only reaches the frame clock from here, and this runs after a
-    /// completed frame. A source whose rate turns out to be tighter than the
-    /// interval currently being waited out therefore produces frames that are
-    /// superseded before the next frame boundary — up to
-    /// `interval / period - 1` of them. Removing that needs the source to wake
-    /// the clock itself, which is a different change. Until then the default is
-    /// the safe baseline: tick at the configured ceiling.
+    /// Tells the frame clock whether this scene's content is still changing: it
+    /// keeps its configured cadence while it is, and waits for an event or a
+    /// deadline once the scene proves it is still.
     ///
     /// Runs on the render thread; the frame clock only reads the value it
     /// stores.
     void refreshFrameDemand() {
-        // Also the A/B entry point, so a comparison measures one scheduling
-        // strategy in one binary rather than two builds. Read per frame now
-        // that it is a live setting rather than an environment variable: the
-        // read is one relaxed atomic load, and a user toggling the option has
-        // to take effect without restarting the wallpaper.
-        const bool pacing_enabled = video::ContentPacingEnabled();
-
         FrameTimer::FrameDemand demand {};
-        if (pacing_enabled && m_scene != nullptr && m_scene->single_video_source &&
-            renderInited()) {
-            // The source reports a period on the media's own timeline. Playback
-            // speed maps it onto the wall clock, so a 2x wallpaper needs twice
-            // the tick rate for the same content.
-            const double period_seconds = video::ResolveContentPeriodSeconds(
-                m_render->ShortestVideoFramePeriod(), static_cast<double>(m_speed));
-            if (period_seconds > 0.0) {
-                demand.content_period = std::chrono::duration_cast<std::chrono::microseconds>(
-                    std::chrono::duration<double>(period_seconds));
-            }
-        }
 
         const SceneUpdateDemand update = evaluateSceneUpdateDemand();
         m_scene_demand_reasons.store(update.reasons, std::memory_order_relaxed);
@@ -2004,34 +1769,6 @@ void SceneWallpaperInputTestAccess::InjectFrameFailure(SceneWallpaper& wallpaper
         ->post();
 }
 
-std::shared_ptr<Scene>
-SceneWallpaperInputTestAccess::CreateVideoProjectScene(const std::string& project_json,
-                                                       std::string*       error) {
-    SceneSourceResolution resolution;
-    if (! ResolveSceneSourcePaths(project_json, &resolution, error)) return nullptr;
-    if (resolution.kind != SceneSourceResolutionKind::NotSceneProject ||
-        resolution.manifest.type != WallpaperProjectType::Video) {
-        SetError(error, "not a video project");
-        return nullptr;
-    }
-    return ::CreateVideoProjectScene(std::make_unique<fs::VFS>(),
-                                     std::filesystem::path(project_json),
-                                     resolution.manifest,
-                                     error);
-}
-
-std::shared_ptr<SceneNode>
-SceneWallpaperInputTestAccess::CreateVideoProjectNode(const std::string& texture,
-                                                      std::string*       error) {
-    fs::VFS vfs;
-    if (! InstallVirtualAssets(vfs)) {
-        SetError(error, "failed to install runtime virtual assets for video project");
-        return nullptr;
-    }
-    std::shared_ptr<SceneShader> shader;
-    if (! BuildVideoCopyShader(vfs, "video-project-test", &shader, error)) return nullptr;
-    return ::CreateVideoProjectNode(texture, shader);
-}
 #endif
 
 void SceneWallpaper::initSurface(const RenderInitInfo& info) {
@@ -2559,7 +2296,7 @@ void MainHandler::loadScene() {
         return;
     }
     if (source_resolution.kind != SceneSourceResolutionKind::Scene) {
-        loadNonSceneProject(source_resolution.manifest, std::move(pVfs));
+        loadNonSceneProject(source_resolution.manifest);
         return;
     }
     if (! vfs.IsMounted("assets")) {
@@ -2660,37 +2397,15 @@ void MainHandler::loadScene() {
     }
 }
 
-bool MainHandler::loadNonSceneProject(const ProjectManifest&   manifest,
-                                      std::unique_ptr<fs::VFS> vfs) {
+bool MainHandler::loadNonSceneProject(const ProjectManifest& manifest) {
     switch (manifest.type) {
-    case WallpaperProjectType::Video: {
-        std::string error;
-        auto        scene = CreateVideoProjectScene(
-            std::move(vfs), std::filesystem::path(m_source), manifest, &error);
-        if (scene == nullptr) {
-            LOG_ERROR("failed to load video wallpaper project: %s", error.c_str());
-            return false;
-        }
-
-        std::filesystem::path media_path(manifest.file);
-        if (media_path.is_relative()) {
-            media_path = std::filesystem::path(m_source).parent_path() / media_path;
-        }
-        if (auto stream = audio::CreateMediaSoundStream(media_path, &error, {}, true); stream != nullptr) {
-            m_sound_manager->MountStream(std::move(stream));
-        } else if (!error.empty()) {
-            LOG_ERROR("failed to create pure-video wallpaper audio stream: %s", error.c_str());
-        }
-
-        auto msg = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_SET_SCENE);
-        msg->setObject("scene", scene);
-        msg->setString("cache_path", m_cache_path);
-        msg->post();
-
-        auto draw_msg = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_DRAW);
-        draw_msg->post();
-        return true;
-    }
+    case WallpaperProjectType::Video:
+        // The host plays a plain video with its own players and never hands one to
+        // the scene engine, so a project of this kind reaching here is a host fault.
+        LOG_ERROR("video wallpaper projects are played by the host's own players, not the "
+                  "scene engine: %s",
+                  manifest.file.c_str());
+        return false;
     case WallpaperProjectType::Web:
         LOG_ERROR("web wallpaper projects are not supported: %s", manifest.file.c_str());
         return false;

@@ -157,19 +157,13 @@ final class PanelPerformanceSettingsTests: PanelTestCase {
       XCTAssertFalse(
         shipped.sceneVideoPlaneSampling,
         "A sampling path whose equivalence is bounded rather than total ships off")
-      XCTAssertFalse(shipped.contentPacing)
-      XCTAssertFalse(shipped.sharedVideoDecode)
 
       try await panel.controller.setSceneOnDemand(true)
       try await panel.controller.setSceneVideoPlaneSampling(true)
-      try await panel.controller.setContentPacing(true)
-      try await panel.controller.setSharedVideoDecode(true)
       XCTAssertEqual(bridge.sceneOnDemandCalls, [true])
       XCTAssertEqual(bridge.sceneVideoPlaneSamplingCalls, [true])
-      XCTAssertEqual(bridge.contentPacingCalls, [true])
-      XCTAssertEqual(bridge.sharedVideoDecodeCalls, [true])
       let on = panel.controller.performanceSettings
-      XCTAssertTrue(on.sceneOnDemand && on.sceneVideoPlaneSampling && on.contentPacing && on.sharedVideoDecode)
+      XCTAssertTrue(on.sceneOnDemand && on.sceneVideoPlaneSampling)
     }
   }
 

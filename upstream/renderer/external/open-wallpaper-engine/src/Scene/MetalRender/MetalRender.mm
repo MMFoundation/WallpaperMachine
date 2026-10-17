@@ -4674,11 +4674,6 @@ void MetalRender::SetVideoPlaybackRate(float rate)
 
 VideoFramePath MetalRender::VideoPath() const { return pImpl->reported_path.load(); }
 
-double MetalRender::ShortestVideoFramePeriod() const
-{
-    return pImpl->video.shortestFramePeriod();
-}
-
 uint32_t MetalRender::ShaderUpdateDemandReasons() const
 {
     uint32_t reasons = pImpl->demand_reasons;

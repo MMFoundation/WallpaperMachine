@@ -1084,16 +1084,6 @@ final class BridgeStore {
         finishSnapshotApply()
     }
 
-    func setContentPacingEnabledAsync(_ enabled: Bool) async throws {
-        let bundle = try await bridge.setContentPacingEnabled(enabled: enabled)
-        apply(bundle)
-    }
-
-    func setSharedVideoDecodeEnabledAsync(_ enabled: Bool) async throws {
-        let bundle = try await bridge.setSharedVideoDecodeEnabled(enabled: enabled)
-        apply(bundle)
-    }
-
     /// Scene subgraph reuse and redundant-pass removal. The engine publishes the saved
     /// preference rather than a reading taken from a running scene, so the snapshot this
     /// returns is what the page reports back.
@@ -1445,10 +1435,6 @@ final class BridgeStore {
                     )
                 ),
                 videoBackends: [],
-                contentPacingEnabled: false,
-                sharedVideoDecodeEnabled: false,
-                sharedVideoDecodeSessions: 0,
-                sharedVideoDecodeConsumers: 0,
                 sceneOptimizationEnabled: true,
                 sceneOnDemandEnabled: false,
                 sceneVideoPlaneSamplingEnabled: false,

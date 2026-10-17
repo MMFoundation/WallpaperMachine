@@ -64,13 +64,7 @@ inline constexpr double kMinRenderScale = 0.25;
 
 /// Scene-wide internal render scale, clamped to (0, 1].
 ///
-/// Returns 1.0 for the engine's own plain-video scene: there the only content
-/// is a decoded frame that already has its own resolution, so scaling the
-/// target it is copied into would downsample and then upsample the same pixels
-/// for no useful reduction in work. Those wallpapers report the control as not
-/// applicable rather than pretending to honour it.
 inline double ResolveSceneRenderScale(const wallpaper::Scene& scene) {
-    if (scene.single_video_source) return 1.0;
     const double scale = scene.render_scale;
     if (! std::isfinite(scale) || scale >= 1.0) return 1.0;
     return std::max(kMinRenderScale, scale);
@@ -84,11 +78,6 @@ inline void ResolveRenderScaledSize(SceneRenderTarget& target, double render_sca
     if (target.authored_width <= 0 || target.authored_height <= 0) {
         target.authored_width  = target.width;
         target.authored_height = target.height;
-    }
-    if (target.media_sized) {
-        target.width  = target.authored_width;
-        target.height = target.authored_height;
-        return;
     }
     target.width =
         ResolveScreenBoundRenderTargetDimension(target.authored_width, render_scale);
@@ -153,11 +142,10 @@ struct SceneRasterSurface {
 
 /// Whether `Scene::resolution` decides anything for this scene.
 ///
-/// A perspective scene already rasterizes at the output size, and a plain video
-/// keeps the size of the frame it copies, so for neither is there a canvas whose
-/// raster could be sized one way or the other.
+/// A perspective scene already rasterizes at the output size, so for it there is
+/// no canvas whose raster could be sized one way or the other.
 inline bool SceneResolutionAffectsRaster(const wallpaper::Scene& scene) {
-    return ! scene.display_sized && ! scene.single_video_source;
+    return ! scene.display_sized;
 }
 
 /// The output pixels the authored canvas covers once it is presented: the FILL
@@ -320,13 +308,8 @@ inline SceneRasterExtents ResolveScreenBoundRenderTargetSizes(Scene&            
                 target.authored_width  = static_cast<i32>(source_extent.width);
                 target.authored_height = static_cast<i32>(source_extent.height);
             }
-            if (target.media_sized) {
-                target.width  = target.authored_width;
-                target.height = target.authored_height;
-            } else {
-                target.width  = static_cast<i32>(raster_extent.width);
-                target.height = static_cast<i32>(raster_extent.height);
-            }
+            target.width  = static_cast<i32>(raster_extent.width);
+            target.height = static_cast<i32>(raster_extent.height);
             continue;
         }
         if (target.bind.enable && target.bind.screen) {

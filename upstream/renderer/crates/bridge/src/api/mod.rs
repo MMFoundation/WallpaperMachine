@@ -78,14 +78,14 @@ use crate::{
             SetDisplayPresentationSuspended,
             SetFilter, SetGlobalPlayback, SetLaunchAtLogin, SetMirrorMuted, SetMirrorScalingFactor,
             SetMirrorScalingMode, SetMirrorTarget, SetMirrorTargetFps, SetMirrorVolume, SetMuted,
-            SetAudioSuppressed, SetBatteryMode, SetBatteryQualityProfile, SetContentPacingEnabled,
+            SetAudioSuppressed, SetBatteryMode, SetBatteryQualityProfile,
             SetFrameRateCap, SetLabelLanguages, SetMediaIntegrationEnabled,
             SetPresentationUnloaded, SetPresentationSuspended, SetPropertyPath,
             SetQualityThrottle, SetRenderScale,
             SetVerboseLogging,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
             SetSceneOnDemandEnabled, SetSceneOptimizationEnabled,
-            SetSceneResolution, SetSceneVideoPlaneSamplingEnabled, SetSharedVideoDecodeEnabled,
+            SetSceneResolution, SetSceneVideoPlaneSamplingEnabled,
             SetTargetFps, SetVolume,
             SetWebAudioSubscribed, Shutdown,
         },
@@ -247,8 +247,8 @@ impl<E: EngineFacade> BridgeBuilder<E> {
             log::info!(
                 "configuration: render scale {}, \
                  battery mode {:?} ({} fps, scale {}), frame-rate cap {}, scene optimization \
-                 {}, on-demand {}, scene resolution {:?}, content pacing {}, shared video \
-                 decode {}, video plane sampling {}",
+                 {}, on-demand {}, scene resolution {:?}, video plane \
+                 sampling {}",
                 config.quality.render_scale,
                 config.power.on_battery,
                 config.quality.battery.target_fps,
@@ -260,8 +260,6 @@ impl<E: EngineFacade> BridgeBuilder<E> {
                 config.quality.scene_optimization_enabled,
                 config.quality.scene_on_demand_enabled,
                 config.quality.scene_resolution,
-                config.experimental.content_pacing,
-                config.experimental.shared_video_decode,
                 config.experimental.scene_video_plane_sampling,
             );
         }
@@ -695,20 +693,6 @@ impl EngineFacade for ArcEngineFacade {
         self.0.set_renderer_counters_enabled(enabled)
     }
 
-    fn set_content_pacing_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<(), wallpaper_core::EngineError> {
-        self.0.set_content_pacing_enabled(enabled)
-    }
-
-    fn set_shared_video_decode_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<(), wallpaper_core::EngineError> {
-        self.0.set_shared_video_decode_enabled(enabled)
-    }
-
     fn set_scene_optimization_enabled(
         &self,
         enabled: bool,
@@ -758,10 +742,6 @@ impl EngineFacade for ArcEngineFacade {
         &self,
     ) -> Result<Option<wallpaper_core::AudioSpectrum128>, wallpaper_core::EngineError> {
         self.0.current_audio_spectrum()
-    }
-
-    fn video_pipeline_state(&self) -> crate::engine::RendererVideoPipelineState {
-        self.0.video_pipeline_state()
     }
 
     fn renderer_counters(
@@ -1883,38 +1863,6 @@ impl WallpaperBridge {
                 target_fps,
             })
             .await
-    }
-
-    /// Turns content pacing on or off for the renderer process.
-    ///
-    /// Off by default.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the setting cannot be saved or the renderer
-    /// rejects the call.
-    pub async fn set_content_pacing_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<BridgeSnapshotBundle, BridgeError> {
-        self.actor.ask(SetContentPacingEnabled { enabled }).await
-    }
-
-    /// Turns shared video decoding on or off for the renderer process.
-    ///
-    /// Off by default. Turning it on permits sharing; it does not by itself
-    /// mean any decode is shared. The snapshot's session and consumer counts
-    /// are where that shows up.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the setting cannot be saved or the renderer
-    /// rejects the call.
-    pub async fn set_shared_video_decode_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<BridgeSnapshotBundle, BridgeError> {
-        self.actor.ask(SetSharedVideoDecodeEnabled { enabled }).await
     }
 
     /// Turns the scene renderer's static-subgraph caching and redundant

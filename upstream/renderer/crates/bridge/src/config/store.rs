@@ -237,10 +237,12 @@ mod tests {
             .config
     }
 
-    /// Neither plain videos nor scenes have a renderer setting any more. A config an earlier build
-    /// wrote may still hold the keys it used (`video_backend`, `scene_renderer`, their one-time
-    /// markers, and the older `experimental.native_video_backend` flag), whatever their values;
-    /// it loads, the other settings in it are kept, and the keys are not written back.
+    /// Neither plain videos nor scenes have a renderer setting any more, and the scene engine no
+    /// longer plays a plain video, so the two experimental switches for it are gone too. A config
+    /// an earlier build wrote may still hold the keys it used (`video_backend`, `scene_renderer`,
+    /// their one-time markers, and `experimental.native_video_backend`, `content_pacing` and
+    /// `shared_video_decode`), whatever their values; it loads, the other settings in it are
+    /// kept, and the keys are not written back.
     #[test]
     fn a_config_with_the_old_renderer_keys_loads_and_does_not_write_them_back() {
         for scene_renderer in ["compatibility", "native_metal_preferred", "native_metal_only"] {
@@ -251,21 +253,32 @@ mod tests {
                 format!(
                     "video_backend = \"compatibility\"\nnative_video_default_applied = true\n\
                      native_metal_default_applied = true\nscene_renderer = \"{scene_renderer}\"\n\
-                     [experimental]\nnative_video_backend = true\ncontent_pacing = true\n"
+                     [experimental]\nnative_video_backend = true\ncontent_pacing = true\n\
+                     shared_video_decode = true\nscene_video_plane_sampling = true\n"
                 ),
             )
             .unwrap();
             let store = ConfigStore::open(root.path().to_path_buf());
 
             let config = store.load().expect("config load").config;
-            assert!(config.experimental.content_pacing, "the rest of the file is read as before");
+            assert!(
+                config.experimental.scene_video_plane_sampling,
+                "the rest of the file is read as before"
+            );
 
             store.save_app_config(&config).expect("config save");
             let written = std::fs::read_to_string(&path).unwrap();
-            for key in ["video_backend", "native_video", "scene_renderer", "native_metal"] {
+            for key in [
+                "video_backend",
+                "native_video",
+                "scene_renderer",
+                "native_metal",
+                "content_pacing",
+                "shared_video_decode",
+            ] {
                 assert!(!written.contains(key), "{scene_renderer}: {key} was written back: {written}");
             }
-            assert!(written.contains("content_pacing = true"), "{written}");
+            assert!(written.contains("scene_video_plane_sampling = true"), "{written}");
         }
     }
 

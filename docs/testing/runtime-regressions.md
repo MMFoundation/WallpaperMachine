@@ -296,8 +296,7 @@ device.
   FFmpeg. A payload the native backend refuses and FFmpeg plays (a fragmented MP4) still plays
   when the source is the image's only owner, as on the Vulkan path
   (`AutoHandsARefusedPayloadToFfmpegWhenTheSourceIsTheImagesOnlyOwner`).
-- **Decoded frames carry real timestamps** — `video_source_input_test` and
-  `shared_video_session_test` against media the tests encode. A frame whose
+- **Decoded frames carry real timestamps** — `video_source_input_test` against media the tests encode. A frame whose
   timestamp is always zero looks like playback for as long as frames keep
   arriving and then freezes, so a video regression here reads as "the picture
   stopped" rather than as a decode failure; the FFmpeg header/library check in
@@ -338,8 +337,7 @@ device.
 - **A reopened source is sought once and left to land, and a jump of the clock is one seek** —
   `Decoders/VideoSourceClock.*` (both decoders) and `VideoSeekPolicy.*` in `video_source_input_test`, against media the
   tests encode (a 10 second clip of 30 frames a second whose frames have their own pts). A source
-  that is opened while the clip is playing (a scene that falls back to the other renderer, a
-  surface split off a shared decoder) opens at the head, and gives it the clock by the first
+  that is opened while the clip is playing (a scene that falls back to the other renderer) opens at the head, and gives it the clock by the first
   call. `.AReopenedSourceIsSoughtToTheClockOnceAndLeftToLand` requires the open to return the
   head's frame whatever clock it was handed before (it waits for no seek), one seek request by
   the first call with the clock after it (6.5 s of a 10 s clip; 7.2 s of a 3 s clip, which is in
@@ -365,11 +363,6 @@ device.
   the one second of slack fixed, a seek on its way was asked for again each second, and the
   600 frame clip did not land at 5 s in six seconds (six requests) and took three requests and
   3.2 to 3.7 s from 9.9 s on.
-- **One clock per shared decoder** — `Decoders/SharedVideoSessionTest.AFrameStaysValidAfterTheDecoderMovesOn/*`
-  and `.PausingOneSurfaceLeavesTheOtherPlaying/*`: exactly one elected consumer
-  moves a shared session's clock, so a test that advances the non-driving
-  consumer observes nothing. Make the advancing consumer the driver rather than
-  loosening the election.
 - **Consumption decided before import** — `MetalVideoTexture.PlanesOnlyDemandEncodesNoConversion`,
   `.MixedDemandConvertsOnceAndStillPublishesThePlanes` and
   `.ADemandChangeReImportsTheSameGenerationInsteadOfWaiting`: a frame every
@@ -429,25 +422,11 @@ device.
   default target, a first clear, no depth/mip/MSAA or feedback, UNORM RGBA/BGRA,
   and identical graphics/present queue families. Each frame also requires the
   exact full-target viewport/scissor, matching extent, ready descriptors and no
-  flip — except for the plain-video scene, whose one pass is by construction the
-  final composition's own quad copying one texture: it presents through the final
-  composition's viewport, scissor and sampler whenever its bound frame is exactly
-  the scene's size and the picture is not mirrored. Other frames render the
-  normal intermediate plus `FinPass`. Both pipelines are prepared once, and all
+  flip. Other frames render the normal intermediate plus `FinPass`. Both pipelines are prepared once, and all
   paths retain frame/presentation waits. Private-target tests compare complete
   same-format bytes over poisoned target rotation, graph resize, transparency,
   fallback and error recovery; they never transition private images to
-  `PRESENT_SRC_KHR`. `PlaybackGPU.PlainVideoPresentsThroughTheFinalViewportByteForByte`
-  drives the production video layer (`SceneWallpaperInputTestAccess::CreateVideoProjectNode`)
-  over fit, fill, stretch, none, user scale, 2x displays, exact halving and
-  uneven reduction, RGBA and BGRA sources sampled linearly or nearest, and
-  requires the copy path's bytes; mirrored, smaller frames and other passes fall
-  back. The rows with a position (fill pinned to the leading and to the trailing
-  edges, fit against the bottom, a 2x display pinned to the top, an unscaled picture
-  at 0.25/0.75) hold the same bar, and also require the picture's footprint, the first
-  and last rows and columns that are not the clear colour, to equal the layout's
-  viewport, and the pixels to differ from the centred rendering, so a position that is
-  ignored leaves the picture in the middle and fails.
+  `PRESENT_SRC_KHR`.
 - **Posters** — the Compatibility swapchain is `COLOR_ATTACHMENT` only, so
   MoltenVK makes the layer framebuffer-only. A requested poster is composed a
   second time by the pass that composed the drawable (`FinPass::recordComposition`
@@ -529,28 +508,21 @@ device.
   and never drops below the five-second floor, so an ordinary frame boundary at
   the pacing clamp reports its real elapsed time instead of one ideal frame,
   while an eight-hour gap is still treated as a resume.
-  - Only the engine's own plain-video scene reports a period, and only because
-    `CreateVideoProjectScene` builds it with a single video texture, a copy
-    shader, a no-op shader value updater and no script, particle, audio or
-    pointer input. Authored scenes report nothing. A change that lets any other
-    scene answer needs a positive account of every dynamic render-graph input
-    first; guessing freezes a live wallpaper.
+  - Nothing in the app asks for a content period any more. The scene engine never
+    plays a plain video, and no authored scene may answer: that needs a positive
+    account of every dynamic render-graph input first, and guessing freezes a live
+    wallpaper. The clock keeps the capability, and these tests keep it correct,
+    until it has a consumer again.
   - The period a source reports is evidence, not metadata. `avg_frame_rate` is
     an average and `r_frame_rate` an estimate, so neither describes a particular
-    gap in a variable-frame-rate clip. `video_frame_pacing_test` pins the rules:
-    declared rates are an upper bound on the period and never unlock pacing on
-    their own; the shortest gap actually decoded does, after enough samples; the
-    result is monotonically non-increasing, so a burst that appears once keeps
-    the clock fast afterwards; deltas across a loop seam or a seek are discarded;
-    and repeated, rewound or non-finite timestamps are not counted as evidence at
-    all, which leaves the fixed cadence in place. Rational rates keep their exact
-    period (`24000/1001`, not `1/24`), and playback speed maps the content's own
-    timeline onto the wall clock, so a 2x wallpaper needs twice the tick rate for
-    the same clip.
-  - `WALLPAPER_MACHINE_CONTENT_PACING=1` switches content pacing on in the same
-    binary so a comparison measures one strategy rather than two builds. The
-    default is the fixed cadence; an unset or empty value (or `0`/`false`) never
-    enables pacing.
+    gap in a variable-frame-rate clip. `video_frame_pacing_test` pins the rules
+    for the estimator that reads it: declared rates are an upper bound on the
+    period and never stand in for evidence; the shortest gap actually decoded
+    does, after enough samples; the result is monotonically non-increasing, so a
+    burst that appears once keeps the period short afterwards; deltas across a
+    loop seam or a seek are discarded; and repeated, rewound or non-finite
+    timestamps are not counted as evidence at all. Rational rates keep their
+    exact period (`24000/1001`, not `1/24`).
 - **Pointer-driven clock wakes** — `FrameTimerTest.ABurstOfWakeOnceAtTheCeilingDoesNotAddCallbacks`
   and `.AnIdleBurstOfWakeOnceProducesOneCallback` in `timer_tests`. Two hundred
   `WakeOnce` calls in one second at 30 fps stay inside about one callback per

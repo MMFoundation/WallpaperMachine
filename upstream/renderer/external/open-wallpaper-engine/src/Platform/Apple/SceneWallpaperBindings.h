@@ -267,31 +267,6 @@ const char* owe_property_project_property_reset(void);
  */
 const char* owe_property_project_property_preview_json(void);
 
-/*
- * Process-wide playback options, applied to every renderer scene.
- *
- * `content_pacing` is the experimental content-demand frame scheduler; it stays
- * off unless explicitly enabled. Setting these replaces the corresponding
- * environment-variable overrides for new scenes and takes effect on the next
- * scene that reads them.
- */
-void owe_set_content_pacing_enabled(bool enabled);
-bool owe_content_pacing_enabled(void);
-
-/*
- * Shared video decode: one decoder instance serving several display surfaces
- * that show equivalent video content. Off by default.
- *
- * The counts describe live sharing right now: `session_count` is the number of
- * distinct decoder instances currently held by the registry, and
- * `consumer_count` is the number of surfaces consuming them. Equal counts mean
- * nothing is actually being shared.
- */
-void owe_set_shared_video_decode_enabled(bool enabled);
-bool owe_shared_video_decode_enabled(void);
-uint32_t owe_shared_video_decode_session_count(void);
-uint32_t owe_shared_video_decode_consumer_count(void);
-
 /* Audio-response sample submission shared by all renderer scenes. */
 int owe_audio_submit_mono_frames(uint32_t sample_rate, uint32_t frame_count,
                                  const float* pcm_frames);

@@ -248,9 +248,6 @@ struct PerformanceSettings: Equatable {
   /// The preset the saved values match, nil for Custom.
   var activePreset: QualityPreset?
   var videoBackends: [VideoBackendReport]
-  var contentPacing: Bool
-  var sharedVideoDecode: Bool
-  var sharedDecode: SharedDecodeReport
   var sceneResolution: SceneResolutionMode
   var sceneOptimization: Bool
   var sceneOnDemand: Bool
