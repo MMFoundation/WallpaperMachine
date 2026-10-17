@@ -44,7 +44,11 @@ uint64_t NextVideoSourceInstanceId()
     return next.fetch_add(1, std::memory_order_relaxed);
 }
 
+std::atomic<int> g_open_decoders { 0 };
+
 } // namespace
+
+int OpenVideoDecoderCount() { return g_open_decoders.load(std::memory_order_relaxed); }
 
 ClockedVideoSource::ClockedVideoSource(std::unique_ptr<VideoFrameBackend> backend,
                                        std::string                        debug_label,
@@ -62,6 +66,7 @@ ClockedVideoSource::~ClockedVideoSource()
     stop();
     clearFrames();
     if (m_backend != nullptr) m_backend->close();
+    if (m_counted_open) g_open_decoders.fetch_sub(1, std::memory_order_relaxed);
 }
 
 bool ClockedVideoSource::prime(std::string* error)
@@ -135,6 +140,8 @@ bool ClockedVideoSource::primeOnce(std::string* error)
     }
 
     m_primed = true;
+    m_counted_open = true;
+    g_open_decoders.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 

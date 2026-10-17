@@ -193,11 +193,15 @@ this app's own windows is not a click on the wallpaper, so neither scripts
 dragged onto the desktop before the button is let go. A press the wallpaper did get is
 always released, wherever the pointer ends up.
 
-Both scene renderers share video decoder selection. On macOS, an eligible FFmpeg
-default is kept; a software-only default does not rule out another decoder for
-the same codec that supports VideoToolbox, as with dav1d and native AV1. A codec
-with no VideoToolbox-capable decoder is still rejected, and the first frame must
-still decode successfully. This does not enable software-only decoders.
+Both scene renderers share one video decoder. A video texture in a scene is read by the
+project's own MP4/QuickTime and WebM/Matroska readers and decoded by VideoToolbox (H.264,
+HEVC, VP9 through its supplemental decoder, and AV1 on a Mac with an AV1 hardware decoder);
+the payload is read where it lies instead of being written out for a demuxer. FFmpeg decodes
+only what those readers do not read (another container, or an MP4 feature they refuse such as
+fragmentation). A codec with no hardware or VideoToolbox decoder (VP8, AV1 on an M1 or M2) is
+refused with a "format not supported" reason that names it, and the first frame must still
+decode successfully. This does not enable software-only decoders.
+[container-readers.md](../container-readers.md) has the details.
 
 
 An effect that composes its layer over the screen (refraction among them) reads

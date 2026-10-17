@@ -119,6 +119,8 @@ private:
     bool                             m_running { false };
     bool                             m_stop_requested { false };
     bool                             m_primed { false };
+    /// Counted in `OpenVideoDecoderCount` from a successful prime until destruction.
+    bool                             m_counted_open { false };
     std::once_flag                   m_prime_once;
     bool                             m_prime_succeeded { false };
     std::string                      m_prime_error;

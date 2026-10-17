@@ -53,6 +53,7 @@
 #include "Shader/RustShaderBridge.hpp"
 #include "WPSceneParser.hpp"
 #include "SceneSourceResolver.hpp"
+#include "Video/VideoTextureSource.hpp"
 #include "synthetic_video.hpp"
 #include "scene_probe_controls.hpp"
 
@@ -8534,18 +8535,11 @@ struct CountersOn
     ~CountersOn() { RendererCounters::SetEnabled(false); }
 };
 
-/// How many media files this process has open: a decoder holds its file for as long as it
+/// How many video decoders this process has open: a source holds its decoder for as long as it
 /// lives, so this is what tells a video that was closed from one that was set aside.
 int OpenMediaFiles()
 {
-    int open = 0;
-    for (int fd = 0; fd < 4096; ++fd) {
-        char path[PATH_MAX];
-        if (fcntl(fd, F_GETPATH, path) == -1) continue;
-        const std::string_view name(path);
-        if (name.size() > 4 && name.substr(name.size() - 4) == ".mp4") ++open;
-    }
-    return open;
+    return video::OpenVideoDecoderCount();
 }
 
 } // namespace

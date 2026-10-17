@@ -3,6 +3,7 @@
 #include "Media/ByteSource.hpp"
 #include "Media/DisplayMatrix.hpp"
 #include "Media/IsoBmff/IsoBmffReader.hpp"
+#include "Media/Matroska/MatroskaReader.hpp"
 #include "Media/VideoTypes.hpp"
 #include "Video/VideoDisplayTransform.hpp"
 
@@ -41,13 +42,33 @@ std::optional<VideoMetadata> ProbeVideoMetadataFromMemory(std::span<const char> 
     // The payload outlives this call and nothing keeps the source, so it owns nothing.
     const auto source = media::MakeMemoryByteSource(
         std::shared_ptr<const void>(), reinterpret_cast<const std::uint8_t*>(payload.data()), payload.size());
-    if (! media::LooksLikeIsoBmff(*source)) return decline("not an ISO base media file");
 
-    media::Error error;
-    const auto   reader = media::IsoBmffReader::Open(source, &error);
-    if (reader == nullptr) return decline(media::Describe(error));
+    media::VideoStreamInfo info;
+    media::Error           error;
+    if (media::LooksLikeIsoBmff(*source)) {
+        const auto reader = media::IsoBmffReader::Open(source, &error);
+        if (reader == nullptr) return decline(media::Describe(error));
+        info = reader->info();
+    } else if (std::uint8_t header[4] {};
+               media::ReadExact(*source, 0, header, sizeof(header)) && header[0] == 0x1A && header[1] == 0x45 &&
+               header[2] == 0xDF && header[3] == 0xA3) {
+        // WebM and Matroska: the headers alone give the size and the length the file
+        // states, which is what FFmpeg reports. Only a file that states no length is
+        // indexed whole to find where its last frame ends.
+        media::MatroskaOptions options;
+        options.buildIndex = false;
+        auto reader        = media::MatroskaReader::Open(source, &error, options);
+        if (reader == nullptr) return decline(media::Describe(error));
+        if (reader->videoInfo().durationTicks <= 0) {
+            options.buildIndex = true;
+            reader             = media::MatroskaReader::Open(source, &error, options);
+            if (reader == nullptr) return decline(media::Describe(error));
+        }
+        info = reader->videoInfo();
+    } else {
+        return decline("neither an ISO base media file nor Matroska");
+    }
 
-    const auto& info = reader->info();
     VideoMetadata metadata;
     if (! DisplaySizeOf(info, &metadata.width, &metadata.height)) {
         return decline("video display transform is not a valid affine transform");

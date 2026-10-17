@@ -8,12 +8,13 @@ extension and the test binaries. They only locate and describe samples; decoding
 is another layer's job.
 
 `wmMedia` is a static library the scene engine links, with `wmMediaApple` (the
-VideoToolbox layer, below) beside it. The scene texture parser uses the ISO-BMFF
-reader to learn the size and length of an MP4 or QuickTime video from memory
-(`Video/VideoContainerProbe.cpp`), where it used to write the payload to a
-temporary file for FFmpeg; any other payload, and one the reader refuses, is still
-probed by FFmpeg. The native video backend (see "Playing video" below) plays video
-textures from both readers. Where the readers sit in the build and the tree is in
+VideoToolbox layer, below) beside it. The scene texture parser uses the readers
+to learn the size and length of an MP4, QuickTime, WebM or Matroska video from
+memory (`Video/VideoContainerProbe.cpp`), where it used to write the payload to
+a temporary file for FFmpeg; any other payload, and one a reader refuses, is still
+probed by FFmpeg. The native video backend (see "Playing video" below), which is
+the default decoder for video textures, plays them from both readers. Where the
+readers sit in the build and the tree is in
 [repository-layout.md](repository-layout.md).
 
 ## Layout
@@ -186,7 +187,7 @@ copied into an anonymous file once the stream is known to play and the image's b
 let go, so a long video does not stay resident for as long as it plays.
 `WALLPAPER_MACHINE_VIDEO_SPILL_BYTES` changes the 8 MiB.
 
-`WALLPAPER_MACHINE_VIDEO_BACKEND` (`auto`, `ffmpeg`, `native`) chooses the decoder, and
+`WALLPAPER_MACHINE_VIDEO_BACKEND` (`auto`, the default, `ffmpeg`, `native`) chooses the decoder, and
 `Video/VideoBackendSelection.hpp` sets it from code (the tests run both). `native` plays
 only what the readers and VideoToolbox play and fails with the reason otherwise. `auto`
 plays with the native backend and hands the media to FFmpeg only when the native one says

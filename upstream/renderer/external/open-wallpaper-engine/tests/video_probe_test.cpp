@@ -13,6 +13,7 @@
 #include "Video/VideoMedia.hpp"
 #include "WPPkgFs.hpp"
 #include "WPTexImageParser.hpp"
+#include "embedded_clips.hpp"
 #include "synthetic_video.hpp"
 #include "video_orientation_cases.hpp"
 
@@ -21,6 +22,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <iterator>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -199,6 +201,74 @@ TEST_F(VideoProbe, ThroughTheTextureParserAnMp4PayloadWritesNoFile)
     EXPECT_FALSE(stdfs::exists(stdfs::temp_directory_path() / "wallpaper-engine-video"));
 }
 
+TEST_F(VideoProbe, AWebmAndAMatroskaPayloadReadTheSameAsTheFfmpegProbe)
+{
+    struct Clip {
+        const char*          name;
+        const unsigned char* bytes;
+        std::size_t          size;
+        int                  width, height;
+    };
+    for (const Clip& clip : { Clip { "webm", testing_media::kVp9Webm, sizeof(testing_media::kVp9Webm),
+                                     testing_media::kVp9WebmWidth, testing_media::kVp9WebmHeight },
+                              Clip { "mkv", testing_media::kH264Matroska, sizeof(testing_media::kH264Matroska),
+                                     testing_media::kH264MatroskaWidth, testing_media::kH264MatroskaHeight } }) {
+        SCOPED_TRACE(clip.name);
+        const std::vector<char> payload(reinterpret_cast<const char*>(clip.bytes),
+                                        reinterpret_cast<const char*>(clip.bytes) + clip.size);
+        std::string why;
+        const auto  native = ProbeVideoMetadataFromMemory({ payload.data(), payload.size() }, &why);
+        ASSERT_TRUE(native.has_value()) << why;
+        std::string error;
+        const auto  ffmpeg = FfmpegProbe(root, payload, &error);
+        ASSERT_TRUE(ffmpeg.has_value()) << error;
+        EXPECT_EQ(native->width, static_cast<uint32_t>(clip.width));
+        EXPECT_EQ(native->width, ffmpeg->width);
+        EXPECT_EQ(native->height, ffmpeg->height);
+        EXPECT_NEAR(native->duration_seconds, ffmpeg->duration_seconds, 0.001);
+        EXPECT_GT(native->duration_seconds, 0.9);
+    }
+}
+
+TEST_F(VideoProbe, ThroughTheParserAWebmPayloadWritesNoFileEither)
+{
+    stdfs::path directory = root / "assets";
+    stdfs::create_directories(directory);
+    {
+        std::ofstream file(directory / "loose.webm", std::ios::binary);
+        file.write(reinterpret_cast<const char*>(testing_media::kVp9Webm), sizeof(testing_media::kVp9Webm));
+    }
+    wallpaper::fs::VFS vfs;
+    auto physical = wallpaper::fs::CreatePhysicalFs(directory.string());
+    ASSERT_NE(physical, nullptr);
+    ASSERT_TRUE(vfs.Mount("/assets", std::move(physical)));
+    WPTexImageParser parser(&vfs);
+
+    const auto header = parser.ParseHeader("loose");
+    EXPECT_TRUE(header.isVideo);
+    EXPECT_EQ(header.width, testing_media::kVp9WebmWidth);
+    EXPECT_EQ(header.height, testing_media::kVp9WebmHeight);
+    EXPECT_NEAR(header.durationSeconds, 1.0, 0.05);
+    EXPECT_FALSE(stdfs::exists(stdfs::temp_directory_path() / "wallpaper-engine-video"))
+        << "a webm payload was staged for FFmpeg";
+}
+
+TEST_F(VideoProbe, AVideoTheReadersRefuseIsLeftToFfmpegsProbe)
+{
+    // VP8 in a Matroska file: the reader names it unsupported, so the memory probe
+    // declines, and FFmpeg's probe (a file, as before) still gives the size, which is
+    // what lets such a file be imported and refused when it is applied.
+    std::vector<char> payload(reinterpret_cast<const char*>(testing_media::kVp9Webm),
+                              reinterpret_cast<const char*>(testing_media::kVp9Webm) + sizeof(testing_media::kVp9Webm));
+    const char id[] = { 'V', '_', 'V', 'P', '9' };
+    const auto at   = std::search(payload.begin(), payload.end(), std::begin(id), std::end(id));
+    ASSERT_NE(at, payload.end());
+    *(at + 4) = '8';
+    std::string why;
+    EXPECT_FALSE(ProbeVideoMetadataFromMemory({ payload.data(), payload.size() }, &why).has_value());
+    EXPECT_NE(why.find("VP8"), std::string::npos) << why;
+}
+
 TEST_F(VideoProbe, PayloadsThatAreNotMp4AreDeclinedNotCrashedOn)
 {
     std::string why;
@@ -214,7 +284,7 @@ TEST_F(VideoProbe, PayloadsThatAreNotMp4AreDeclinedNotCrashedOn)
     EXPECT_FALSE(ProbeVideoMetadataFromMemory({ noise.data(), noise.size() }, &why).has_value());
     EXPECT_FALSE(why.empty());
 
-    // A WebM header is not this reader's format, whatever follows it.
+    // A Matroska header with nothing after it is declined, not read past.
     const unsigned char ebml[] = { 0x1A, 0x45, 0xDF, 0xA3, 0x93, 0x42, 0x82, 0x84, 'w', 'e', 'b', 'm' };
     EXPECT_FALSE(ProbeVideoMetadataFromMemory({ reinterpret_cast<const char*>(ebml), sizeof(ebml) }, &why).has_value());
 }

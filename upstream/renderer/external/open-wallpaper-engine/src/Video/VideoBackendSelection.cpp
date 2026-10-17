@@ -10,7 +10,7 @@ namespace
 {
 
 /// What a build plays video with when nothing says otherwise.
-constexpr VideoBackendPreference kDefaultPreference = VideoBackendPreference::Ffmpeg;
+constexpr VideoBackendPreference kDefaultPreference = VideoBackendPreference::Auto;
 
 /// -1: not decided yet, so the first read can seed from the environment while a
 /// later explicit setting still wins over it.

@@ -120,6 +120,12 @@ public:
 std::shared_ptr<VideoTextureSource> CreateVideoTextureSource(std::shared_ptr<const Image> image,
                                                              std::string* error);
 
+/// How many clocked sources have a decoder open right now: primed successfully
+/// and not yet destroyed. A source holds its media and decoder for as long as it
+/// lives, so this is what tells a video that was closed from one that was only
+/// set aside, whichever decoder plays it.
+[[nodiscard]] int OpenVideoDecoderCount();
+
 /// Opens a source directly on a media file, without an `Image`. Needed when a
 /// consumer is split off a shared session: by then the `Image` that started the
 /// first decoder is gone.

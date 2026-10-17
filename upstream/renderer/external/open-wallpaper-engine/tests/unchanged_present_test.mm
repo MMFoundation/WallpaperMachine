@@ -13,6 +13,7 @@
 #include "Scene/SceneWallpaper.hpp"
 #include "Scene/SceneWallpaperSurface.hpp"
 #include "RenderCommon/StaticSubgraphCache.hpp"
+#include "Video/VideoBackendSelection.hpp"
 #include "synthetic_video.hpp"
 
 #import <Metal/Metal.h>
@@ -1228,6 +1229,10 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
 
     SceneWallpaper wallpaper;
     ASSERT_TRUE(wallpaper.init());
+    // A measurement makes no sound, whatever the scene mounts: muted before the
+    // scene exists, so no output device is ever started for it.
+    wallpaper.setPropertyBool(PROPERTY_MUTED, true);
+    wallpaper.setPropertyFloat(PROPERTY_VOLUME, 0.0f);
     wallpaper.setPropertyObject(PROPERTY_FIRST_FRAME_CALLBACK,
                                 std::make_shared<FirstFrameCallback>([&] {
                                     std::scoped_lock lock(mutex);
@@ -1283,6 +1288,8 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
     std::cout << "ENERGY {\"renderer\":\"" << renderer << "\",\"resolution\":\""
               << (display ? "display" : "canvas") << "\",\"backend\":\""
               << (selection.backend == SceneBackend::NativeMetal ? "native" : "compatibility")
+              << "\",\"video_decoder\":\""
+              << video::VideoBackendPreferenceName(video::CurrentVideoBackendPreference())
               << "\",\"seconds\":" << seconds
               << ",\"cpu_seconds\":" << (after.cpu_seconds - before.cpu_seconds)
               << ",\"cpu_mj\":" << double(after.cpu_energy_nj - before.cpu_energy_nj) / 1e6

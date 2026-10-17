@@ -624,6 +624,36 @@ TEST_P(VideoSourceInput, TwoSourcesOnOnePayloadPlayIndependently) {
     EXPECT_TRUE(second->currentFrame().valid());
 }
 
+// B-frames: the order the samples are stored in is not the order they are shown in, and the first
+// pictures of the file are decoded before the ones that precede them in time.
+TEST_P(VideoSourceInput, AClipWithBFramesPlaysFromItsFirstFrameInDisplayOrder) {
+    ASSERT_TRUE(testing_media::WriteReorderedVideo(project_dir / "reordered.mp4", "reordered-" + std::to_string(::getpid())));
+    std::string error;
+    auto        image = CreateVideoProjectImage(project_dir, "reordered.mp4", &error);
+    ASSERT_NE(image, nullptr) << error;
+    auto source = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(source, nullptr) << error;
+    ASSERT_TRUE(source->prime(&error)) << error;
+    EXPECT_NEAR(source->currentFrame().pts_seconds, 0.0, 0.001) << "the first picture shown is not the first of the clip";
+    EXPECT_NEAR(source->durationSeconds(), testing_media::kReorderedFrames / 30.0, 0.05);
+
+    double last_pts = -1.0;
+    for (int frame = 0; frame < testing_media::kReorderedFrames; ++frame) {
+        const double clock = frame / 30.0;
+        ASSERT_TRUE(source->syncPlayback(VideoPlaybackState { false, 1.0f, clock }, &error)) << error;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        do {
+            ASSERT_TRUE(source->refreshFrame(&error)) << error;
+            if (std::abs(source->currentFrame().pts_seconds - clock) < 0.034) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        } while (std::chrono::steady_clock::now() < deadline);
+        const double pts = source->currentFrame().pts_seconds;
+        EXPECT_NEAR(pts, clock, 0.034) << "frame " << frame;
+        EXPECT_GE(pts + 1e-9, last_pts) << "frame " << frame << " came out of display order";
+        last_pts = pts;
+    }
+}
+
 TEST_P(VideoSourceInput, DestroyingASourceMidDecodeCancelsPromptly) {
     const auto media = project_dir / "cancelled.mp4";
     ASSERT_TRUE(WriteSyntheticVideo(media, 96, "cancelled"));
@@ -1201,6 +1231,36 @@ TEST_F(NativePayloads, BothDecodersAgreeOnTheLengthAndTheFrameRateOfAClip) {
     EXPECT_GT(numbers[1].observed_period, 0.0);
     EXPECT_EQ(numbers[0].width, numbers[1].width);
     EXPECT_EQ(numbers[0].height, numbers[1].height);
+}
+
+// Nothing here says which decoder: this is what a scene gets by default.
+TEST_F(VideoSourceInputBase, ByDefaultAnEmbeddedPayloadIsPlayedNativelyWithoutStagingAFile) {
+    if (std::getenv("WALLPAPER_MACHINE_VIDEO_BACKEND") != nullptr) {
+        GTEST_SKIP() << "WALLPAPER_MACHINE_VIDEO_BACKEND is set, so the default is not in force";
+    }
+    EXPECT_EQ(CurrentVideoBackendPreference(), VideoBackendPreference::Auto);
+
+    const auto media = project_dir / "default.mp4";
+    ASSERT_TRUE(WriteSyntheticVideo(media, 2, "default-" + std::to_string(::getpid())));
+    const auto payload = ReadWholeFile(media);
+    ASSERT_FALSE(payload.empty());
+    const auto cache_before = VideoCacheEntries();
+
+    auto        image = MakeInlinePayloadImage("default.mp4", payload);
+    std::string error;
+    auto        source = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(source, nullptr) << error;
+    ASSERT_TRUE(source->prime(&error)) << error;
+    EXPECT_TRUE(source->currentFrame().valid());
+    EXPECT_TRUE(CacheEntriesAddedSince(cache_before).empty()) << "the default decoder staged the payload in a file";
+
+    // A WebM payload is played by the same decoder.
+    auto webm = MakeEmbeddedClipImage("default.webm", testing_media::kVp9Webm, sizeof(testing_media::kVp9Webm));
+    auto webm_source = CreateVideoTextureSource(webm, &error);
+    ASSERT_NE(webm_source, nullptr) << error;
+    ASSERT_TRUE(webm_source->prime(&error)) << error;
+    EXPECT_TRUE(webm_source->currentFrame().valid());
+    EXPECT_TRUE(CacheEntriesAddedSince(cache_before).empty());
 }
 
 // A clip that runs on past its end starts over, in the clip's own time and in
