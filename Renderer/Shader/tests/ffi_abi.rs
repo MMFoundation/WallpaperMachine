@@ -1103,3 +1103,92 @@ fn a_signature_the_header_does_not_declare_is_not_exported_by_the_module() {
     assert_eq!(declared.len(), exported.len(), "the header declares exactly the contract: {declared:?}");
     assert!(!header.contains("spv"), "no SPIR-V accessors");
 }
+
+// ------------------------------------------------------------------------------------------
+// Amendment a-contract R111 and R77: the one target, and the identity string
+
+#[test]
+fn only_the_metal_target_exists() {
+    // Every other spelling, the retired Vulkan one included, is a request error that names the
+    // string and carries the request-parse marker of R16; it is never mapped or defaulted.
+    for spelling in ["vulkan_spirv", "", "made_up_target", "Metal_MSL", "metal", "0", "vulkan_spirv "] {
+        let request = with_extra(&format!(r#","target":{}"#, json::string(spelling)));
+        let c = compile_plain(&request);
+        assert_eq!(c.status, RS_SHADER_ERROR, "target {spelling:?} must be refused");
+        assert!(c.handle.is_null());
+        let text = last_error();
+        assert!(text.contains("json request parse failed"), "{spelling:?}: {text}");
+        // The exact string is in the text (for the empty one, as an empty pair of quotes or backticks).
+        assert!(text.contains(spelling), "{spelling:?}: {text}");
+    }
+    // A target of the wrong JSON type is refused too, not read as the default.
+    for wrong in ["null", "1", "true", "[\"metal_msl\"]"] {
+        let c = compile_plain(&with_extra(&format!(r#","target":{wrong}"#)));
+        assert_eq!(c.status, RS_SHADER_ERROR, "target {wrong}");
+    }
+    // An omitted target and the Metal one give identical documents.
+    let omitted = ok(&textured());
+    let explicit = ok(&request_with(VERTEX, FRAGMENT, false, r#","target":"metal_msl","textures":[{"slot":0,"enabled":true,"format":"rgba8"}]"#));
+    for i in 0..2 {
+        assert_eq!(omitted.msl(i), explicit.msl(i));
+        assert_eq!(omitted.stage_doc(i), explicit.stage_doc(i));
+    }
+    assert_eq!(omitted.metadata(), explicit.metadata());
+    assert_eq!(omitted.reflection(), explicit.reflection());
+    assert_eq!(omitted.diagnostics(), explicit.diagnostics());
+    assert_eq!(omitted.key(), explicit.key());
+}
+
+#[test]
+fn the_stage_target_is_one_for_a_valid_stage_and_never_zero() {
+    let c = ok(&textured());
+    unsafe {
+        for i in 0..2usize {
+            assert_eq!(rs_shader_program_stage_target(c.handle, i), 1);
+        }
+        for bad in [2usize, 7, usize::MAX] {
+            assert_eq!(rs_shader_program_stage_target(c.handle, bad), -1);
+        }
+        assert_eq!(rs_shader_program_stage_target(ptr::null(), 0), -1);
+    }
+    // The old Vulkan code is retired for good: the header says so, next to the Metal value.
+    let header = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/include/rs_shader.h")).unwrap();
+    assert!(header.contains("RS_SHADER_TARGET_METAL 1"));
+    assert!(header.contains("0 is retired"), "the header must say that target 0 is retired");
+    assert!(!header.contains("RS_SHADER_TARGET_VULKAN"), "no name may exist for the retired target");
+}
+
+#[test]
+fn the_identity_is_an_opaque_string_that_is_not_the_retired_libraries() {
+    let identity = text_of(rs_shader_cache_identity());
+    // `<revision>:<text>`, compared only for equality; it names Metal, never the retired target.
+    let (revision, rest) = identity.split_once(':').expect("a revision, a colon, then text");
+    assert!(!revision.is_empty() && revision.bytes().all(|b| b.is_ascii_digit()), "{identity}");
+    assert!(!identity.contains("spv") && !identity.contains("spirv") && !identity.contains("vulkan"), "{identity}");
+    assert_ne!(revision, "17", "the retired library's revision is never reused: {identity}");
+    assert!(rest.contains("msl"), "{identity}");
+    // Stable across calls and threads.
+    let again = thread::spawn(|| text_of(rs_shader_cache_identity())).join().unwrap();
+    assert_eq!(identity, again);
+}
+
+#[test]
+fn a_success_diagnostics_document_has_one_codegen_entry_per_stage_with_a_valid_span() {
+    let c = ok(&textured());
+    let diagnostics = c.diagnostics();
+    let entries = items(&diagnostics);
+    assert_eq!(entries.len(), 2, "{diagnostics:?}");
+    for (entry, stage) in entries.iter().zip(["Vertex", "Fragment"]) {
+        assert_eq!(member(entry, "pass"), &Value::String("Codegen".into()));
+        assert_eq!(member(entry, "stage"), &Value::String(stage.into()));
+        let span = member(entry, "span");
+        assert!(matches!(span, Value::Object(_)), "{entry:?}");
+        let number = |key: &str| match member(span, key) {
+            Value::Number(n) => n.as_u64().expect("a plain integer"),
+            other => panic!("span {key} is {other:?}"),
+        };
+        // The start is not after the end; that the span lies inside the text of the pass is checked
+        // where the text is known (the pipeline tests).
+        assert!(number("start") <= number("end"), "{span:?}");
+    }
+}

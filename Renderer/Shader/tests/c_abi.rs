@@ -117,6 +117,30 @@ fn a_c_program_links_the_static_library_and_runs() {
 }
 
 #[test]
+fn a_caller_that_declares_only_the_thirteen_functions_links_and_compiles_a_quad() {
+    if !have("clang") {
+        eprintln!("skipped: clang is not available");
+        return;
+    }
+    let Some(lib) = static_library() else { return };
+    let dir = scratch("thirteen");
+    let binary = dir.join("thirteen_only");
+    let compile = Command::new("clang")
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
+        .arg(manifest_dir().join("tests/c/thirteen_only.c"))
+        .arg(&lib)
+        .args(["-lSystem", "-lc", "-lm", "-o"])
+        .arg(&binary)
+        .output()
+        .expect("clang starts");
+    assert!(compile.status.success(), "{}", show(&compile));
+    let run = Command::new(&binary).output().expect("the C program starts");
+    assert!(run.status.success(), "{}", show(&run));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "thirteen ok\n");
+    let _ = std::fs::remove_file(&binary);
+}
+
+#[test]
 fn the_header_parses_as_c_and_as_cplusplus() {
     if !have("clang") {
         eprintln!("skipped: clang is not available");
@@ -155,5 +179,39 @@ fn the_archive_exports_exactly_the_contract() {
     let header = std::fs::read_to_string(manifest_dir().join("include/rs_shader.h")).unwrap();
     for name in EXPORTED {
         assert!(header.contains(&format!("{name}(")), "{name}");
+    }
+}
+
+/// Amendment a-contract R113 (a) and (c): the package is `wm-shader`, the archive `libwm_shader.a`,
+/// and no other manifest of the workspace names the crate (the host's own dependency table is the
+/// only Rust-level coupling and lives outside this crate).
+#[test]
+fn the_crate_has_the_new_names_and_no_other_manifest_names_it() {
+    let manifest = std::fs::read_to_string(manifest_dir().join("Cargo.toml")).unwrap();
+    assert!(manifest.lines().any(|l| l.trim() == "name = \"wm-shader\""), "{manifest}");
+    assert!(manifest.contains("staticlib"), "the archive is built");
+    // The old names are retired: no manifest line names a package `shader`.
+    let workspace = manifest_dir().parent().unwrap().to_path_buf();
+    let mut manifests = Vec::new();
+    let mut stack = vec![workspace.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|n| n != "target") {
+                    stack.push(path);
+                }
+            } else if path.file_name().is_some_and(|n| n == "Cargo.toml") {
+                manifests.push(path);
+            }
+        }
+    }
+    assert!(!manifests.is_empty());
+    for path in &manifests {
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(!text.lines().any(|l| l.trim() == "name = \"shader\""), "{}", path.display());
+        if path != &manifest_dir().join("Cargo.toml") {
+            assert!(!text.contains("wm-shader"), "{} names the crate", path.display());
+        }
     }
 }

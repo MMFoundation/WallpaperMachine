@@ -86,3 +86,17 @@ fn a_contained_panic_writes_nothing_to_standard_streams() {
     assert!(!stderr.contains("panicked"), "the hook was not quiet: {stderr}");
     assert!(!String::from_utf8_lossy(&output.stdout).contains("child panic"));
 }
+
+#[test]
+fn the_keep_alive_entry_names_the_compile_function_and_is_not_part_of_the_c_interface() {
+    let address = keep_exports_alive();
+    assert_ne!(address, 0);
+    assert_eq!(address, keep_exports_alive(), "the same address every time");
+    assert_eq!(address, rs_shader_compile_program as unsafe extern "C" fn(_, _, _, _) -> c_int as usize);
+    // Exactly one such entry: a second function that names exports would be a second thing to keep in step.
+    let source = include_str!("mod.rs");
+    assert_eq!(source.matches("as unsafe extern \"C\" fn(_, _, _, _) -> c_int) as usize").count(), 1);
+    // And it carries no export attribute: the archive's symbol list stays at the thirteen.
+    let at = source.find("pub fn keep_exports_alive").unwrap();
+    assert!(!source[at - 40..at].contains("no_mangle"));
+}

@@ -37,7 +37,10 @@ extern "C" {
 #define RS_SHADER_STAGE_FRAGMENT 1
 #define RS_SHADER_INVALID (-1)
 
-/* Stage targets. Metal is the only one. */
+/* Stage targets. Metal is the only one. The value 0 was the Vulkan-style target of an earlier
+ * library. The value 0 is retired: never returned, never given another meaning. A caller that
+ * still compares a stage target with 0 reads "retired"; 1 reads "Metal". The request key
+ * "target" accepts "metal_msl" or no key at all; any other string is refused (status 1). */
 #define RS_SHADER_TARGET_METAL 1
 
 /* A compiled program. Declared incomplete: never dereferenced by callers. */
@@ -74,12 +77,16 @@ size_t rs_shader_program_stage_count(const RsShaderProgram* program);
 /* RS_SHADER_STAGE_VERTEX or RS_SHADER_STAGE_FRAGMENT; RS_SHADER_INVALID for null or a bad index.
  * Stage i is the stage at position i of the request's `stages` array. */
 int rs_shader_program_stage_kind(const RsShaderProgram* program, size_t i);
-/* RS_SHADER_TARGET_METAL; RS_SHADER_INVALID for null or a bad index. */
+/* RS_SHADER_TARGET_METAL (1) for every valid index; RS_SHADER_INVALID for null or a bad index.
+ * Never 0 (retired, see above). There is no accessor for SPIR-V words: the layer compiles
+ * for Metal alone and the library exports exactly the thirteen functions of this header. */
 int rs_shader_program_stage_target(const RsShaderProgram* program, size_t i);
 /* Metal source text of the stage; "" for null or a bad index. */
 const char* rs_shader_program_stage_msl_source(const RsShaderProgram* program, size_t i);
 /* Per-stage payload JSON (entry_point, language_version, bindings, conventions);
- * "{}" for null or a bad index. */
+ * "{}" for null or a bad index. A binding record's `slot` is its Metal argument-table slot,
+ * numbered per stage and per kind (buffers, textures, samplers each from 0); it normally
+ * differs from `binding`, and a caller finds a resource by name and copies the `slot`. */
 const char* rs_shader_program_stage_metal_json(const RsShaderProgram* program, size_t i);
 /* Metadata JSON (combos, aliases, default_uniforms, default_textures, active_texture_slots);
  * "{}" for null. */

@@ -39,8 +39,18 @@ pub const RS_SHADER_STAGE_VERTEX: c_int = 0;
 pub const RS_SHADER_STAGE_FRAGMENT: c_int = 1;
 /// Returned for a null handle or an index out of range, for kind and target alike.
 pub const RS_SHADER_INVALID: c_int = -1;
-/// The only target a stage can have.
+/// The only target a stage can have. The value 0 was the Vulkan-style target of an earlier
+/// library: it is retired, never returned and never to be given another meaning (R111).
 pub const RS_SHADER_TARGET_METAL: c_int = 1;
+
+/// The host's keep-alive entry (R113). The thirteen `rs_shader_*` functions are called only from the
+/// engine's C++, so a Rust host that links this crate as an rlib must name one of them for the
+/// linker to keep the object that holds them all. The host calls this once from its backend
+/// initialisation. It returns the address of the compile entry (a non-zero number the caller
+/// ignores) and does nothing else; it is Rust-internal and not part of the C interface.
+pub fn keep_exports_alive() -> usize {
+    std::hint::black_box(rs_shader_compile_program as unsafe extern "C" fn(_, _, _, _) -> c_int) as usize
+}
 
 /// What `rs_shader_last_error` reads before any compile on a thread and after a successful one.
 const NO_ERROR_TEXT: &str = "no shader error";
