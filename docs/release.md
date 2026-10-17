@@ -519,13 +519,15 @@ as they were.
 Code scanning on every push to `main`, every pull request into it, weekly, and on
 demand. It replaces GitHub's default setup, which can only autobuild Swift and
 fails at the extension's link because the renderer library and the Homebrew
-libraries do not exist yet. Actions, JavaScript/TypeScript, Python and Rust are
-analyzed without a build on Linux. Swift runs on `macos-26`: `prepare-build` and
+libraries do not exist yet. Actions, Python and Rust are analyzed without a build
+on Linux. Swift runs on `macos-26`: `prepare-build` and
 `python3 scripts/build.py --renderer-only` first, untraced, then CodeQL traces
 `scripts/build.py --swift-only` with the `--xcode-setting` overrides CodeQL's own
 Swift autobuild uses (no signing, no compilation cache, no integrated driver), so
 the extractor sees every Swift compile. C/C++ (only vendored third-party code is
-visible to it) and Ruby (only the FFmpeg formula) are deliberately not analyzed.
+visible to it), Ruby (only the FFmpeg formula) and JavaScript/TypeScript (none since
+the SwiftUI control panel; CodeQL fails a language with no code) are deliberately not
+analyzed.
 Default setup must stay off under **Settings -> Code security -> CodeQL
 analysis**; while it is on, GitHub rejects this workflow's results.
 
