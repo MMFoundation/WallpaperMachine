@@ -21,6 +21,10 @@ struct Sweep {
 }
 
 fn sweep(files: &[(String, StageKind, String)], includes: &Layered, skip: impl Fn(&str) -> bool) -> Sweep {
+    sweep_with_planes(files, includes, skip, &[])
+}
+
+fn sweep_with_planes(files: &[(String, StageKind, String)], includes: &Layered, skip: impl Fn(&str) -> bool, planes: &[u8]) -> Sweep {
     let mut s = Sweep { ok: 0, failures: BTreeMap::new() };
     for (set_name, combos) in combo_sets() {
         for (name, vertex, fragment) in pairs(files) {
@@ -56,7 +60,7 @@ fn sweep(files: &[(String, StageKind, String)], includes: &Layered, skip: impl F
                 continue;
             }
             let label = format!("{name} ({set_name})");
-            let program = match legalize(&ProgramInput::program(&v, &f)) {
+            let program = match legalize(&ProgramInput::program(&v, &f).with_planes(planes)) {
                 Ok(p) => p,
                 Err(e) => {
                     s.failures.entry(format!("legalize: {}", cause(&e.message()))).or_default().push(label);
@@ -229,4 +233,25 @@ fn mutated_shipped_programs_never_panic_the_legalizer() {
         }
     }
     eprintln!("mutated programs: {ok} legalized, {refused} refused");
+}
+
+/// Every shipped program with slot 0 or 1 flagged as an NV12 video: it either compiles with the
+/// plane helper or is refused because a use of the texture cannot be reproduced; nothing else.
+#[test]
+fn shipped_programs_with_a_video_plane_compile_or_are_refused_by_name() {
+    let Some(root) = shaders_root() else {
+        eprintln!("skipped: the shipped shader folder is absent (set WALLPAPER_MACHINE_ASSETS_ROOT)");
+        return;
+    };
+    let files = shader_files(&root);
+    let includes = Layered { dirs: vec![root.clone()] };
+    for slots in [[0u8], [1u8]] {
+        let s = sweep_with_planes(&files, &includes, |n| n.starts_with("HLSL/") || n.starts_with("volumetricsfront"), &slots);
+        report(&format!("shipped programs with slot {} as video planes", slots[0]), &s);
+        for (cause, labels) in &s.failures {
+            let known = cause.contains("cannot be sampled as planes") || cause.contains("Unknown variable: g_Texture1Texel");
+            assert!(known, "slot {}: {cause}: {labels:?}", slots[0]);
+        }
+        assert!(s.ok > 100, "{} programs", s.ok);
+    }
 }

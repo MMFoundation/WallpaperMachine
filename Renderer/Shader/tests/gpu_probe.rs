@@ -414,3 +414,92 @@ void main() {{
         assert!(near(out[i], w), "data[{i}] = {}, wanted {w}", out[i]);
     }
 }
+
+// ----- the NV12 plane conversion of the interface part -----
+
+/// The pure conversion function the legalizer emits for a flagged video slot, cut out of the
+/// legalized fragment stage so that the GPU can evaluate it on its own.
+fn plane_conversion_source() -> String {
+    let fragment = "uniform sampler2D g_Texture0; varying vec2 v_T;\nvoid main() { gl_FragColor = texSample2D(g_Texture0, v_T); }";
+    let vertex = "attribute vec3 a_P;\nvoid main() { gl_Position = vec4(a_P, 1.0); }";
+    let program = wm_shader::legalize::legalize(&wm_shader::legalize::ProgramInput::program(vertex, fragment).with_planes(&[0])).unwrap();
+    let text = program.fragment.unwrap().text;
+    let start = text.find("vec4 _we_nv12_convert0(").expect("the conversion function");
+    let end = start + text[start..].find("\n}\n").expect("its end") + 3;
+    text[start..end].to_string()
+}
+
+/// The conversion as the contract states it (R48), evaluated on the CPU.
+fn plane_reference(y: f32, c: [f32; 2], p: [f32; 2], t: [f32; 4], r: [f32; 4], m: [f32; 4]) -> [f32; 4] {
+    let l = ((y - r[0]) * r[1]).clamp(0.0, 1.0);
+    let (c1, c2) = ((c[0] - r[2]) * r[3], (c[1] - r[2]) * r[3]);
+    let rgb = [(l + m[0] * c2).clamp(0.0, 1.0), (l + m[1] * c1 + m[2] * c2).clamp(0.0, 1.0), (l + m[3] * c1).clamp(0.0, 1.0)];
+    let skewed = (t[0] * t[1]).abs() > 1e-6 || (t[2] * t[3]).abs() > 1e-6;
+    let inside = (0.0..=1.0).contains(&p[0]) && (0.0..=1.0).contains(&p[1]);
+    let cover = if skewed && !inside { 0.0 } else { 1.0 };
+    [rgb[0] * cover, rgb[1] * cover, rgb[2] * cover, cover]
+}
+
+#[test]
+fn the_plane_conversion_matches_the_contract_arithmetic_on_the_gpu() {
+    let function = plane_conversion_source();
+    let src = format!(
+        "{KERNEL_HEAD}{function}
+void main() {{
+  vec4 o = _we_nv12_convert0(data[0], vec2(data[1], data[2]), vec2(data[3], data[4]), vec4(data[5], data[6], data[7], data[8]),
+                              vec4(data[9], data[10], data[11], data[12]), vec4(data[13], data[14], data[15], data[16]));
+  data[20] = o.x; data[21] = o.y; data[22] = o.z; data[23] = o.w;
+}}"
+    );
+    // limited-range BT.601: the eight constants a host would upload
+    let range = [16.0 / 255.0, 255.0 / 219.0, 128.0 / 255.0, 255.0 / 224.0];
+    let matrix = [1.402, -0.344136, -0.714136, 1.772];
+    let identity = [1.0, 0.0, 0.0, 1.0];
+    let rotated = [0.0, 1.0, -1.0, 0.0];
+    let cases = [
+        (0.5, [0.4, 0.6], [0.3, 0.7], identity),
+        (0.9, [0.2, 0.9], [0.5, 0.5], identity),
+        (0.1, [0.5, 0.5], [0.0, 1.0], identity),
+        (0.6, [0.3, 0.3], [0.25, 0.75], rotated), // inside: coverage 1
+        (0.6, [0.3, 0.3], [1.5, 0.25], rotated),  // outside: coverage 0
+        (0.6, [0.3, 0.3], [-0.2, 0.5], rotated),
+    ];
+    for (y, c, p, t) in cases {
+        let mut input = vec![y, c[0], c[1], p[0], p[1]];
+        input.extend(t);
+        input.extend(range);
+        input.extend(matrix);
+        let Some(out) = gpu_run(&src, &input) else { return };
+        let want = plane_reference(y, c, p, t, range, matrix);
+        for i in 0..4 {
+            assert!((out[20 + i] - want[i]).abs() <= 1.0 / 255.0, "y {y} c {c:?} p {p:?} t {t:?}: channel {i} is {}, wanted {}", out[20 + i], want[i]);
+        }
+    }
+}
+
+#[test]
+fn a_float_remainder_has_the_truncated_values_on_the_gpu() {
+    // The `%` operator on floats is Metal's fmod: truncated, sign of the dividend, componentwise,
+    // with a scalar operand broadcast (C2 R69 to R76).
+    let src = format!(
+        "{KERNEL_HEAD}void main() {{
+  float a = data[0];                              // -7.25
+  vec2 v = vec2(data[1], data[2]);                // 5.5, -3.0
+  data[8] = a % 2.0;                              // -1.25
+  vec2 r = v % 2.0;                               // 1.5, -1.0
+  data[9] = r.x; data[10] = r.y;
+  vec2 q = 7.0 % v;                               // 1.5, 1.0
+  data[11] = q.x; data[12] = q.y;
+  float u = data[3];                              // 9.0
+  u %= 4.0;                                       // 1
+  data[13] = u;
+  int n = 7; int c = 3;
+  data[14] = float(n % c);                        // integer remainder: 1
+  data[15] = a % -0.75;                           // -0.5 (the sign of the dividend)
+}}"
+    );
+    let Some(out) = gpu_run(&src, &[-7.25, 5.5, -3.0, 9.0]) else { return };
+    for (i, w) in [(8, -1.25), (9, 1.5), (10, -1.0), (11, 1.5), (12, 1.0), (13, 1.0), (14, 1.0), (15, -0.5)] {
+        assert!(near(out[i], w), "data[{i}] = {}, wanted {w}", out[i]);
+    }
+}
