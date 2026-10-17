@@ -35,6 +35,11 @@ enum class SceneVideoPath : uint8_t
     /// coming. A scene whose variant is refused, or for which none applies,
     /// reports `Nv12Converted` and stays there.
     Nv12ConvertedPreparing,
+    /// 10-bit video (P010, `x420`) converted once into one BGRA image, which
+    /// every consumer samples: an HDR picture tone mapped to SDR in linear light,
+    /// or an SDR one carried over as it is. The planes are never sampled
+    /// directly, so a layer whose shader could read them still reads the image.
+    Yuv10Converted,
 };
 
 /// The name the diagnostics surface uses for one path.
@@ -46,6 +51,7 @@ enum class SceneVideoPath : uint8_t
     case SceneVideoPath::Nv12Converted: return "nv12_converted";
     case SceneVideoPath::Nv12Mixed: return "nv12_mixed";
     case SceneVideoPath::Nv12ConvertedPreparing: return "nv12_converted_preparing";
+    case SceneVideoPath::Yuv10Converted: return "yuv10_converted";
     case SceneVideoPath::None: break;
     }
     return "none";

@@ -1105,6 +1105,7 @@ extern "C" int owe_scene_wallpaper_video_path(void* scene)
     // reported as having no video path at all.
     case wallpaper::SceneVideoPath::Nv12ConvertedPreparing:
         return OWE_SCENE_VIDEO_PATH_NV12_CONVERTED_PREPARING;
+    case wallpaper::SceneVideoPath::Yuv10Converted: return OWE_SCENE_VIDEO_PATH_YUV10_CONVERTED;
     case wallpaper::SceneVideoPath::None: break;
     }
     return OWE_SCENE_VIDEO_PATH_NONE;

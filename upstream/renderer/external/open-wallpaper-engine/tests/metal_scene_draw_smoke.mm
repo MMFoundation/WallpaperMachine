@@ -54,6 +54,7 @@
 #include "WPSceneParser.hpp"
 #include "SceneSourceResolver.hpp"
 #include "Video/VideoTextureSource.hpp"
+#include "hdr_reference.hpp"
 #include "synthetic_video.hpp"
 #include "scene_probe_controls.hpp"
 
@@ -6847,7 +6848,8 @@ constexpr uint32_t kVideoHeight = 360;
 /// smaller one exercises the scaled case.
 std::filesystem::path WriteVideoFixture(const std::filesystem::path& root, uint32_t canvas_width,
                                         uint32_t canvas_height,
-                                        std::optional<std::array<int32_t, 9>> display_matrix = std::nullopt)
+                                        std::optional<std::array<int32_t, 9>> display_matrix = std::nullopt,
+                                        const std::function<bool(const std::filesystem::path&)>& write_media = {})
 {
     const std::string vertex =
         "uniform mat4 g_ModelViewProjectionMatrix;\n"
@@ -6901,8 +6903,10 @@ std::filesystem::path WriteVideoFixture(const std::filesystem::path& root, uint3
     // The media the material's texture slot names, encoded here rather than
     // shipped. `clip.mp4` is what the loose-asset resolver finds for "clip".
     std::filesystem::create_directories(root / "materials");
-    if (! video::testing_media::WriteSyntheticVideo(root / "materials" / "clip.mp4", 1,
-                                                    "metal-video-draw", display_matrix)) {
+    if (write_media) {
+        if (! write_media(root / "materials" / "clip.mp4")) return {};
+    } else if (! video::testing_media::WriteSyntheticVideo(root / "materials" / "clip.mp4", 1,
+                                                           "metal-video-draw", display_matrix)) {
         return {};
     }
     return root / "project.json";
@@ -7367,6 +7371,147 @@ TEST_F(MetalSceneDraw, ScaledSamplingStaysInsideTheClampExcursionTheStreamImplie
                          << " code values on average, which is a picture difference rather than "
                             "a clamp-order effect at the edges";
     RecordProperty("worst_delta", worst);
+}
+
+namespace
+{
+
+/// One 10-bit clip through the whole native path: a real HEVC Main10 file the
+/// fixture encoded, its format read by the container reader, decoded by
+/// VideoToolbox, imported as 16-bit planes, converted and tone mapped by the
+/// kernel, sampled by the author's own material, and read back off the GPU.
+struct TenBitDraw {
+    bool                   ran { false };
+    std::string            reason;
+    SceneVideoPath         path { SceneVideoPath::None };
+    SceneBackend           backend { SceneBackend::LegacyVulkan };
+    std::array<int, 3>     center {};   // red, green, blue of the middle pixel
+};
+
+TenBitDraw DrawTenBitClip(const std::filesystem::path& directory,
+                          video::testing_media::TenBitTagging tagging,
+                          video::testing_media::TenBitPicture picture)
+{
+    TenBitDraw result;
+    const auto project = WriteVideoFixture(
+        directory, kVideoWidth, kVideoHeight, std::nullopt, [&](const std::filesystem::path& media) {
+            return video::testing_media::WriteTenBitVideo(media, tagging, picture, "metal-ten-bit-draw");
+        });
+    if (project.empty()) {
+        result.reason = "the 10-bit clip could not be written";
+        return result;
+    }
+    LoadedScene loaded;
+    if (! LoadScene(project, directory / "cache", loaded, result.reason)) return result;
+    // Decided by what the scene is made of, before any decoder is opened: a
+    // 10-bit video is not a reason to leave the native backend.
+    result.backend = SelectSceneBackend(*loaded.scene).backend;
+
+    @autoreleasepool {
+        id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
+        CAMetalLayer* layer   = [CAMetalLayer layer];
+        layer.device          = device;
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(kVideoWidth, kVideoHeight);
+        layer.framebufferOnly = NO;
+
+        MetalRender         render;
+        MetalRenderInitInfo info {
+            .metal_layer          = (__bridge void*)layer,
+            .width                = kVideoWidth,
+            .height               = kVideoHeight,
+            .render_width         = kVideoWidth,
+            .render_height        = kVideoHeight,
+            .display_scale_factor = 1.0,
+        };
+        if (! render.init(info)) {
+            result.reason = render.lastError();
+            return result;
+        }
+        auto graph = sceneToRenderGraph(*loaded.scene);
+        if (graph == nullptr || ! render.compileRenderGraph(*loaded.scene, *graph)) {
+            result.reason = render.lastError();
+            return result;
+        }
+        render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
+        for (int frame = 0; frame < 3; ++frame) {
+            if (! render.drawFrame(*loaded.scene)) {
+                result.reason = render.lastError();
+                return result;
+            }
+            loaded.scene->PassFrameTime(1.0 / 60.0);
+        }
+        DrawUntilVideoPath(render, *loaded.scene, SceneVideoPath::Yuv10Converted);
+        result.path = render.VideoPath();
+
+        std::vector<uint8_t> pixels;
+        uint32_t             width  = 0;
+        uint32_t             height = 0;
+        if (! render.ReadRenderTargetForTests(loaded.scene->ResolveRenderTargetName(SpecTex_Default), pixels,
+                                              width, height) ||
+            pixels.size() != static_cast<std::size_t>(width) * height * 4u) {
+            result.reason = "the scene output could not be read back";
+            return result;
+        }
+        const std::size_t at = (static_cast<std::size_t>(height / 2) * width + width / 2) * 4u;
+        result.center        = { pixels[at], pixels[at + 1], pixels[at + 2] };
+        result.ran           = true;
+        render.destroy();
+    }
+    return result;
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, ATenBitVideoLayerStaysOnNativeMetalAndIsToneMappedToSdr)
+{
+    namespace tm  = video::testing_media;
+    namespace ref = video::testing_media::hdr;
+    if (! tm::TenBitEncoderAvailable()) GTEST_SKIP() << "no VideoToolbox HEVC Main10 encoder on this machine";
+
+    struct Case {
+        const char*       name;
+        tm::TenBitTagging tagging;
+        tm::TenBitPicture picture;
+        ref::Input        expected;
+    };
+    // A PQ grey at 300 nits, an HLG grey a little above its reference white,
+    // and a coloured picture that says it is plain BT.709.
+    const auto pq_code = static_cast<uint16_t>(ref::PqLumaCode(300.0));
+    const Case cases[] = {
+        { "PQ", tm::TenBitTagging::Pq, { pq_code, 512, 512 },
+          { .y = pq_code, .cb = 512, .cr = 512, .transfer = ref::Transfer::Pq } },
+        { "HLG", tm::TenBitTagging::Hlg, { 700, 512, 512 },
+          { .y = 700, .cb = 512, .cr = 512, .transfer = ref::Transfer::Hlg } },
+        { "BT.709", tm::TenBitTagging::Bt709, { 520, 430, 600 },
+          { .y = 520, .cb = 430, .cr = 600, .bt2020_matrix = false, .transfer = ref::Transfer::Sdr,
+            .primaries = ref::Primaries::Bt709 } },
+    };
+    // The direct plane path is switched on, as it would be for a user who has
+    // turned it on: a 10-bit frame has no planes to offer it, and the layer
+    // reads the converted image instead.
+    ScopedPlaneSampling sampling(true);
+    for (const Case& test : cases) {
+        SCOPED_TRACE(test.name);
+        const auto drawn = DrawTenBitClip(root_ / (std::string("ten-bit-") + test.name), test.tagging, test.picture);
+        if (! drawn.ran && drawn.path == SceneVideoPath::None && drawn.reason.find("could not be written") != std::string::npos) {
+            GTEST_SKIP() << drawn.reason;
+        }
+        ASSERT_TRUE(drawn.ran) << drawn.reason;
+        EXPECT_EQ(drawn.backend, SceneBackend::NativeMetal);
+        if (drawn.path != SceneVideoPath::Yuv10Converted) {
+            GTEST_SKIP() << "the decoder produced " << SceneVideoPathName(drawn.path)
+                         << " rather than 10-bit planes, so the 10-bit path was not exercised";
+        }
+        const auto expected = ref::ToBgra8(ref::ReferenceRgb(test.expected));
+        // The encoder is lossy and the layer is drawn through the scene's own
+        // blending, so a few codes of slack on top of the kernel's own.
+        EXPECT_NEAR(drawn.center[0], expected[0], 6) << "red";
+        EXPECT_NEAR(drawn.center[1], expected[1], 6) << "green";
+        EXPECT_NEAR(drawn.center[2], expected[2], 6) << "blue";
+        // Not black: whatever else is wrong, a picture was produced.
+        EXPECT_GT(drawn.center[0] + drawn.center[1] + drawn.center[2], 30);
+    }
 }
 
 namespace

@@ -699,9 +699,12 @@ if(APPLE)
         wpParticle wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest_main
         ${METAL_FRAMEWORK} ${CORE_VIDEO_FRAMEWORK} ${IOSURFACE_FRAMEWORK}
         ${FOUNDATION_FRAMEWORK})
+    # `hdr_reference.hpp`, the standards-derived CPU reference for the 10-bit
+    # kernel, is header only and lives with the synthetic media.
     target_include_directories(${metal_module_test} PRIVATE
         . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/MetalRender
-        ${CMAKE_SOURCE_DIR}/src/Scene/MetalRender/include)
+        ${CMAKE_SOURCE_DIR}/src/Scene/MetalRender/include
+        ${WESCENE_RENDERER_TESTING_DIR})
     target_compile_features(${metal_module_test} PRIVATE cxx_std_20)
     set_target_properties(${metal_module_test} PROPERTIES
         OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)

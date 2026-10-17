@@ -1,6 +1,7 @@
 #include "Video/VideoColorConversion.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace wallpaper::video
@@ -29,6 +30,77 @@ constexpr MatrixCoefficients CoefficientsFor(YuvMatrix matrix)
         break;
     }
     return { 1.402f, -0.344136f, -0.714136f, 1.772f };
+}
+
+/// CIE 1931 xy chromaticities of a set of primaries and its white point. All
+/// three sets here use D65.
+struct Chromaticities {
+    double red[2];
+    double green[2];
+    double blue[2];
+    double white[2];
+};
+
+constexpr Chromaticities ChromaticitiesOf(ColorPrimaries primaries)
+{
+    switch (primaries) {
+    case ColorPrimaries::Bt2020:
+        return { { 0.708, 0.292 }, { 0.170, 0.797 }, { 0.131, 0.046 }, { 0.3127, 0.3290 } };
+    case ColorPrimaries::P3D65:
+        return { { 0.680, 0.320 }, { 0.265, 0.690 }, { 0.150, 0.060 }, { 0.3127, 0.3290 } };
+    case ColorPrimaries::Bt709:
+        break;
+    }
+    return { { 0.640, 0.330 }, { 0.300, 0.600 }, { 0.150, 0.060 }, { 0.3127, 0.3290 } };
+}
+
+using Matrix3 = std::array<std::array<double, 3>, 3>;
+
+Matrix3 Inverse(const Matrix3& m)
+{
+    const double a = m[0][0], b = m[0][1], c = m[0][2];
+    const double d = m[1][0], e = m[1][1], f = m[1][2];
+    const double g = m[2][0], h = m[2][1], i = m[2][2];
+    const double determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    const double s = 1.0 / determinant;
+    return {{
+        { (e * i - f * h) * s, (c * h - b * i) * s, (b * f - c * e) * s },
+        { (f * g - d * i) * s, (a * i - c * g) * s, (c * d - a * f) * s },
+        { (d * h - e * g) * s, (b * g - a * h) * s, (a * e - b * d) * s },
+    }};
+}
+
+Matrix3 Multiply(const Matrix3& l, const Matrix3& r)
+{
+    Matrix3 out {};
+    for (size_t row = 0; row < 3; ++row)
+        for (size_t column = 0; column < 3; ++column)
+            for (size_t k = 0; k < 3; ++k) out[row][column] += l[row][k] * r[k][column];
+    return out;
+}
+
+/// Linear RGB of `primaries` to CIE XYZ: the primaries' own columns, scaled so
+/// that RGB (1, 1, 1) lands on the white point.
+Matrix3 RgbToXyz(ColorPrimaries primaries)
+{
+    const Chromaticities c = ChromaticitiesOf(primaries);
+    const auto xyz = [](const double (&xy)[2]) {
+        return std::array<double, 3> { xy[0] / xy[1], 1.0, (1.0 - xy[0] - xy[1]) / xy[1] };
+    };
+    const auto r = xyz(c.red);
+    const auto g = xyz(c.green);
+    const auto b = xyz(c.blue);
+    const auto w = xyz(c.white);
+    const Matrix3 columns {{ { r[0], g[0], b[0] }, { r[1], g[1], b[1] }, { r[2], g[2], b[2] } }};
+    const Matrix3 inverse = Inverse(columns);
+    std::array<double, 3> scale {};
+    for (size_t row = 0; row < 3; ++row) {
+        scale[row] = inverse[row][0] * w[0] + inverse[row][1] * w[1] + inverse[row][2] * w[2];
+    }
+    Matrix3 out {};
+    for (size_t row = 0; row < 3; ++row)
+        for (size_t column = 0; column < 3; ++column) out[row][column] = columns[row][column] * scale[column];
+    return out;
 }
 
 uint8_t QuantizeUnitToCode(float value)
@@ -79,6 +151,24 @@ YuvColorParams MakeYuvColorParams(const YuvColorDescription& description)
     // reusing the luma scale, or treating chroma as `sample - 0.5`, desaturates
     // and shifts every limited-range frame.
     params.chroma_scale = maximum_code / (224.0f * depth_scale);
+    return params;
+}
+
+HdrConversionParams MakeHdrConversionParams(const YuvColorDescription& description)
+{
+    HdrConversionParams params {};
+    params.transfer = static_cast<uint32_t>(description.transfer);
+    const float stated = description.peak_nits > 0.0f ? description.peak_nits : kDefaultHdrPeakNits;
+    params.source_peak_nits = std::min(stated, kMaximumHdrPeakNits);
+    params.reference_white_nits = kReferenceWhiteNits;
+    if (description.primaries != ColorPrimaries::Bt709) {
+        params.convert_gamut = 1;
+        const Matrix3 conversion =
+            Multiply(Inverse(RgbToXyz(ColorPrimaries::Bt709)), RgbToXyz(description.primaries));
+        for (size_t row = 0; row < 3; ++row)
+            for (size_t column = 0; column < 3; ++column)
+                params.gamut[row][column] = static_cast<float>(conversion[row][column]);
+    }
     return params;
 }
 

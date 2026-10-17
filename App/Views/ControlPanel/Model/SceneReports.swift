@@ -151,6 +151,7 @@ enum SceneVideoPath: String, Sendable {
   case nv12Converted = "nv12_converted"
   case nv12Mixed = "nv12_mixed"
   case nv12ConvertedPreparing = "nv12_converted_preparing"
+  case yuv10Converted = "yuv10_converted"
 
   @MainActor var title: String {
     switch self {
@@ -159,6 +160,7 @@ enum SceneVideoPath: String, Sendable {
     case .nv12Converted: L("converted once per frame")
     case .nv12Mixed: L("planes sampled directly, plus one shared conversion")
     case .nv12ConvertedPreparing: L("converted once per frame, direct sampling still being prepared")
+    case .yuv10Converted: L("10-bit, converted once per frame (HDR tone mapped to SDR)")
     }
   }
 }

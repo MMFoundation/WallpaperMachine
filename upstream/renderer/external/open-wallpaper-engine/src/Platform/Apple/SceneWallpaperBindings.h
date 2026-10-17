@@ -479,7 +479,8 @@ typedef enum owe_scene_video_path {
     OWE_SCENE_VIDEO_PATH_NV12_DIRECT = 2,
     OWE_SCENE_VIDEO_PATH_NV12_CONVERTED = 3,
     OWE_SCENE_VIDEO_PATH_NV12_MIXED = 4,
-    OWE_SCENE_VIDEO_PATH_NV12_CONVERTED_PREPARING = 5
+    OWE_SCENE_VIDEO_PATH_NV12_CONVERTED_PREPARING = 5,
+    OWE_SCENE_VIDEO_PATH_YUV10_CONVERTED = 6
 } owe_scene_video_path;
 
 /*
@@ -492,6 +493,9 @@ typedef enum owe_scene_video_path {
  * is ready. It is distinct from `NONE` because the scene does have a path and
  * is working towards it; reporting `NONE` there told the host there was no
  * video at all.
+ *
+ * `..._YUV10_CONVERTED` is 10-bit video (HDR tone mapped to SDR, or 10-bit SDR
+ * carried over), converted once per frame into one image.
  */
 int owe_scene_wallpaper_video_path(void* scene);
 

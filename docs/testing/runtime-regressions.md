@@ -220,6 +220,32 @@ device.
   own. `PlaybackGPU.MetalConversionMatchesTheCpuColorReference` compares the
   Metal `nv12_to_bgra` kernel against the same CPU reference so the two paths
   cannot drift apart.
+- **10-bit and HDR scene video** — `MetalVideoTexture.P010ConvertedMatchesCpuReference`
+  in `metal_video_texture_test` imports synthetic `x420` frames through the real
+  Core Video cache and compares the GPU's BGRA with `Renderer/Testing/hdr_reference.hpp`,
+  a double-precision reference written from BT.2100, ST 2084 and BT.2390 with
+  its gamut rotation derived from chromaticities (PQ and HLG greys across the
+  range, saturated BT.2020 colour, P3-D65, full range, display-referred 10-bit, and
+  BT.2020 primaries on an SDR curve), within three code values. Beside it:
+  `PqTransferToneMapsPeakBelowOne` (the stated peak lands on white and no higher, greys
+  stay grey, the sequence below it is ordered), `HlgTransferToneMaps`,
+  `SdrTenBitSkipsToneMap` (the same codes tagged PQ come out differently, so the choice is
+  the transfer function's and not the bit depth's), `TenBitPeakComesFromTheStreamsOwnMetadata`
+  (content light level over mastering display over the 1000-nit default),
+  `TenBitForcesConvertedPathEvenWhenPlanesAreDemanded` (one conversion, no planes offered,
+  a demand change re-imports nothing), `TenBitFramesApplyEveryDisplayOrientationToTheirPixels`,
+  `AFormatChangeFromEightToTenBitSwitchesPathWithoutLosingTheTexture`, and
+  `EightBitVideoNeverBuildsTheTenBitPipeline`, which is the proof that an 8-bit scene pays
+  nothing for any of it. `VideoColorConversion.GamutRotationIntoBt709IsDerivedFromThePrimaries`
+  pins the derived BT.2020 and P3-D65 rotations against the published matrices.
+  `MetalSceneDraw.ATenBitVideoLayerStaysOnNativeMetalAndIsToneMappedToSdr` draws real
+  HEVC Main 10 clips (PQ, HLG, BT.709) that the VideoToolbox encoder wrote through the
+  readers and the hardware decoder, with plane sampling on, and compares the scene's own
+  output pixel with the reference. `VtFrameDecoderTest.TenBitHevcClipsDecodeToTenBitFramesThatCarryTheirTags`
+  proves the chain delivers `x420` frames with the curve, primaries and matrix attached,
+  and `SyntheticTenBitVideo.*` checks the fixture itself with AVFoundation. The content light
+  level an encoder may or may not carry is reported, not required; no real HDR10 file was
+  checked.
 - **Display matrices** survive metadata probing and frame extraction: the decoded
   buffer keeps its coded dimensions, while output dimensions and sampling use the
   affine display transform. `VideoDisplayTransform.*` in

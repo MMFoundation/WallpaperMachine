@@ -155,7 +155,13 @@ the engine's CMake adds it (the readers' standalone build stays pure C++).
   description, when the stream does (the VUI `video_full_range_flag` of H.264 and HEVC,
   read by Core Media from the parameter sets; the sequence header of AV1; VP9's colour
   config), `x420` for 10-bit. Asking for video range on a full-range stream would have
-  VideoToolbox squeeze 0-255 into 16-235.
+  VideoToolbox squeeze 0-255 into 16-235. The container's `colr` (primaries, transfer
+  function, matrix) goes into the format description, and VideoToolbox puts it on every decoded
+  frame as attachments; that is where a scene's 10-bit video import reads whether a stream is
+  PQ or HLG ([scene rendering](features/scene-rendering.md#10-bit-and-hdr-video-textures)).
+  The `mdcv` (mastering display) and `clli` (content light level) boxes of a sample entry are
+  not read or forwarded, so a stream's own peak reaches the tone map only when VideoToolbox
+  takes it from the bitstream's SEI messages.
   It refuses, with a message that starts "format not supported: ", VP8, AV1 without
   hardware decoding, 4:2:2 and 4:4:4 chroma, bit depths other than 8 and 10 and
   unknown codecs; a damaged record is a different message. VP9 registers
@@ -203,7 +209,7 @@ make); a format nobody here plays fails with the native message that names it.
 |---|---|
 | `media_core_tests` | error, checked arithmetic, fractions, byte cursor, memory and file byte sources |
 | `media_isobmff_tests` | the ISO-BMFF reader on files built in memory by `tests/mp4_builder.hpp`: tables and layouts, every codec entry, composition offsets, edit lists, all eight orientations, seeking, fragmented/unsupported/oversized/truncated/junk input and a deterministic random-mutation loop; plus corpus A/B checks: the bundled starter wallpaper against recorded expectations, and the local library against `ffprobe` |
-| `vt_frame_decoder_test` (engine tests, source in `Renderer/Media/Apple/tests`) | the Apple layer on real VideoToolbox decoding of the synthetic clips: display order on a clip with B-frames (and on H.264 in Matroska), a VP9 clip from WebM, seek epochs, draining, bounds, prompt cancellation, format description building (in-band parameter sets, colour range, 10-bit) and every refusal |
+| `vt_frame_decoder_test` (engine tests, source in `Renderer/Media/Apple/tests`) | the Apple layer on real VideoToolbox decoding of the synthetic clips: display order on a clip with B-frames (and on H.264 in Matroska), a VP9 clip from WebM, seek epochs, draining, bounds, prompt cancellation, format description building (in-band parameter sets, colour range, 10-bit), Main 10 clips (PQ, HLG, BT.709) that decode to `x420` frames carrying their curve, primaries and matrix, and every refusal |
 | `media_matroska_tests` | the Matroska reader on files built in memory by `tests/mkv_builder.hpp`: the index, SimpleBlock and BlockGroup, lacing, unknown-size Segment and Clusters, Cues present or absent, EBML header checks, codecs and encodings, limits, truncation at every length, malformed elements and a deterministic random-mutation loop; the VP9 header parser on the first frames of real libvpx clips; plus a corpus A/B check of `.webm`/`.mkv` files against `ffprobe` |
 
 The corpus checks read the local wallpaper library, or the folder in

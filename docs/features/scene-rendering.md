@@ -47,11 +47,13 @@ particles, 3D models and skyboxes, perspective cameras, scene lights, ordinary
 effect chains and scene post-processing, layers that read an image another layer
 produced in the same frame, effects and layers that read the previous frame (a motion-blur
 trail, a fluid or ripple simulation, a layer sampling its own last composite), images the runtime replaces while the scene
-plays, and BGRA or 8-bit NV12 video textures — the latter either converted once per
-frame or, with
+plays, and BGRA, 8-bit NV12 or 10-bit video textures — an 8-bit one either converted
+once per frame or, with
 [**Direct video plane sampling**](performance.md#direct-video-plane-sampling) on,
-sampled by the layer's own shader. A scene falls back as a whole for HDR or 10-bit
-video, a plain video wallpaper, or a shader that does not translate.
+sampled by the layer's own shader, a 10-bit one always converted once per frame
+([10-bit and HDR video](#10-bit-and-hdr-video-textures)). A scene falls back as a
+whole for a plain video wallpaper, a video format the decoder cannot produce (4:2:2,
+4:4:4, 12-bit or an unsupported codec), or a shader that does not translate.
 A scene with `camerashake` on shakes its camera as Wallpaper Engine does: the eye and
 what it looks at move together by `(cos t, sin 1.333t, sin t)` at
 `t = camerashakespeed² × time`, its length raised to `camerashakeroughness³`, scaled
@@ -202,6 +204,50 @@ fragmentation). A codec with no hardware or VideoToolbox decoder (VP8, AV1 on an
 refused with a "format not supported" reason that names it, and the first frame must still
 decode successfully. This does not enable software-only decoders.
 [container-readers.md](../container-readers.md) has the details.
+
+#### 10-bit and HDR video textures
+
+On Native Metal a 10-bit video texture (HEVC Main 10, 10-bit VP9 or AV1) stays in the scene
+and is shown as an SDR picture. The decoder is asked for 10-bit biplanar 4:2:0 (`x420`); the
+two planes are imported as 16-bit images without a copy, and one conversion per new frame
+turns them into the same BGRA image an 8-bit video produces, which every layer that samples
+the video then reads. What the conversion does depends on the transfer function the stream
+declares, which the decoder attaches to each frame:
+
+- **PQ (SMPTE ST 2084) and HLG (BT.2100)**, the two HDR curves, are tone mapped. The picture
+  is converted from YCbCr with the BT.2020 matrix (or whichever the stream states), brought
+  to light in nits (PQ directly, HLG through its inverse OETF and the OOTF of a 1000-nit
+  display), compressed with the BT.2390 EETF in linear light, rotated from the stream's
+  primaries (BT.2020, or P3-D65 when it says so) into BT.709, and encoded with the sRGB
+  curve. Linear light is scaled so that 203 nits, the reference white of BT.2408, is 1.0,
+  and the EETF maps the stream's peak to that SDR white: the peak is the stream's maximum
+  content light level, else its mastering display's maximum luminance, else 1000 nits, and
+  never more than the 10000 nits the curves can express. The compression acts on the
+  brightest channel of each pixel, so the ratio between channels survives it. A colour that
+  falls outside BT.709 is desaturated towards its own luminance just far enough that no
+  channel is negative, and scaled down if a channel exceeds one, rather than cut off per
+  channel. Mapping a 1000-nit peak onto SDR white leaves a stream's 203-nit diffuse white a
+  little under white (about 90% in encoded value); a stream that states a lower peak is
+  compressed less.
+- **Anything else** (BT.709, BT.601, an unstated transfer) is display-referred 10-bit
+  video, and is not tone mapped: the codes are converted with their matrix and written as
+  they decode, exactly as an 8-bit frame is. If such a stream names BT.2020 or P3-D65
+  primaries, its linear light (with a 2.4 power law standing for the display) is rotated into
+  BT.709 and encoded back with the same law, so mid-tones stay where they were.
+
+A stream that declares PQ or HLG without naming primaries or a matrix is taken to be BT.2020.
+The peak comes from the decoded frame's own attachments; the content light level and mastering
+display boxes of an MP4 are not forwarded to the decoder, so a stream that carries them only
+there is tone mapped from 1000 nits.
+
+A 10-bit frame has no direct-plane path: its planes are 16-bit and belong to the conversion, so
+a material that could sample 8-bit planes reads the converted image instead, whatever
+[**Direct video plane sampling**](performance.md#direct-video-plane-sampling) says, and the
+scene reports its video path as `yuv10_converted`. The 10-bit conversion kernel is compiled
+when a scene whose video is 10-bit is prepared, not before: an 8-bit video never compiles it
+and its frames take exactly the path they did before. The compatibility renderer still does
+not take a 10-bit frame, so a scene that falls back to it for another reason keeps whatever
+that renderer did with such a video.
 
 
 An effect that composes its layer over the screen (refraction among them) reads

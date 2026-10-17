@@ -6442,8 +6442,10 @@ public struct BridgeSceneBackendReport {
     /**
      * How this scene's video textures reached the shaders that sample them on
      * the last frame it drew: `"none"`, `"bgra"`, `"nv12_direct"`,
-     * `"nv12_converted"` or `"nv12_mixed"`. A read-back, not a preference: a
-     * scene with no video, or one still starting, reports `"none"`.
+     * `"nv12_converted"`, `"nv12_mixed"`, `"nv12_converted_preparing"` or
+     * `"yuv10_converted"` (10-bit video, HDR tone mapped to SDR). A read-back,
+     * not a preference: a scene with no video, or one still starting, reports
+     * `"none"`.
      */
     public var videoPath: String
     /**
@@ -6460,8 +6462,10 @@ public struct BridgeSceneBackendReport {
         /**
          * How this scene's video textures reached the shaders that sample them on
          * the last frame it drew: `"none"`, `"bgra"`, `"nv12_direct"`,
-         * `"nv12_converted"` or `"nv12_mixed"`. A read-back, not a preference: a
-         * scene with no video, or one still starting, reports `"none"`.
+         * `"nv12_converted"`, `"nv12_mixed"`, `"nv12_converted_preparing"` or
+         * `"yuv10_converted"` (10-bit video, HDR tone mapped to SDR). A read-back,
+         * not a preference: a scene with no video, or one still starting, reports
+         * `"none"`.
          */videoPath: String, 
         /**
          * Whether this scene is really running under the saved

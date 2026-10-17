@@ -136,6 +136,7 @@ final class SceneReportsTests: PanelTestCase {
       ("nv12_converted", "converted once per frame"),
       ("nv12_mixed", "planes sampled directly, plus one shared conversion"),
       ("nv12_converted_preparing", "converted once per frame, direct sampling still being prepared"),
+      ("yuv10_converted", "10-bit, converted once per frame (HDR tone mapped to SDR)"),
       ("none", nil), ("something_new", nil),
     ]
     for (name, words) in paths {

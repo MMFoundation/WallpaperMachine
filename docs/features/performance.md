@@ -910,13 +910,17 @@ With the switch off nothing is prepared at all, and no shader is ever compiled
 inside a frame either way.
 
 **Drawn by** reports per scene what each running scene actually did: sampled
-directly, converted once per frame, both for a scene whose materials differ, or
+directly, converted once per frame, both for a scene whose materials differ,
 converted while the direct program is still being prepared (the wallpaper is playing
-normally and a second program is on its way). A material whose shader the
+normally and a second program is on its way), or 10-bit video converted once per
+frame. A material whose shader the
 translation cannot reproduce — an explicit level-of-detail sample, a size query, a
 texel fetch, two video slots in one material — keeps converting and says nothing; so
 does any frame that is not 8-bit NV12, which is what a software decoder produces for
-the same file. Nothing here changes which renderer draws a scene
+the same file. A 10-bit video is always converted, with HDR tone mapped to SDR in the
+same pass ([10-bit and HDR video](scene-rendering.md#10-bit-and-hdr-video-textures)),
+whatever this switch says, and costs no more per frame than an 8-bit conversion
+plus the extra arithmetic of the curve; an 8-bit video is untouched by it. Nothing here changes which renderer draws a scene
 ([scene renderer](scene-rendering.md#scene-renderer)).
 
 **Where the two differ.** At a one-to-one mapping between video texels and output

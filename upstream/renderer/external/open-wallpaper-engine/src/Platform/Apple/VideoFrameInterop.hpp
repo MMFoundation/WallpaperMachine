@@ -30,10 +30,21 @@ std::string DescribeAppleVideoFrame(const VideoTextureFrame& frame);
 /// nothing, allocates nothing and converts nothing; a frame that is not
 /// biplanar YCbCr has no meaningful answer and gets the defaults.
 [[nodiscard]] YuvColorParams AppleVideoFrameColorParams(const VideoTextureFrame& frame);
+/// What a decoded biplanar frame says about its own colour: range, matrix,
+/// bit depth, and for an HDR frame its transfer function, primaries and peak
+/// (the content light level, else the mastering display's). A frame with no
+/// pixel buffer gets the defaults. `AppleVideoFrameColorParams` is this, turned
+/// into constants.
+[[nodiscard]] YuvColorDescription AppleVideoFrameColorDescription(const VideoTextureFrame& frame);
 /// Logs, once per distinct colorimetry, that a matrix had to be inferred from
 /// the picture size because the stream declared none. Silent for a declared
 /// matrix. Shared by every path that turns a frame's colorimetry into
 /// conversion constants so the log reads the same whichever one ran.
 void ReportInferredColor(const YuvColorDescription& description);
+
+/// Logs, once per distinct colorimetry, how a 10-bit frame is being converted:
+/// the curve and primaries it declared and, for HDR, the peak the tone map starts
+/// from and whether that peak was stated or assumed.
+void ReportTenBitColor(const YuvColorDescription& description);
 
 } // namespace wallpaper::video

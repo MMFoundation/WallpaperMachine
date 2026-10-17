@@ -42,7 +42,7 @@ struct VideoConsumerDemand
     bool rgb { true };
 };
 
-/// The decoder's two planes and the constants that turn them into colour.
+/// The decoder's two 8-bit planes and the constants that turn them into colour.
 struct VideoFramePlanes
 {
     id<MTLTexture>          luma { nil };
@@ -135,7 +135,9 @@ public:
     [[nodiscard]] id<MTLTexture> texture(const std::string& key) const;
 
     /// The planes of `key`'s current frame, valid only while the current frame
-    /// really is NV12 and the planes were published for it.
+    /// really is 8-bit NV12 and the planes were published for it. A 10-bit frame
+    /// has none: its planes are 16-bit, belong to its conversion, and its one
+    /// image is `texture`.
     [[nodiscard]] VideoFramePlanes planes(const std::string& key) const;
 
     /// How `key`'s current frame reached its consumers.
@@ -158,6 +160,9 @@ public:
                          std::string*                               error);
     [[nodiscard]] std::uint64_t conversionsEncodedForTests() const;
     [[nodiscard]] std::uint64_t importsForTests() const;
+    /// Whether the 10-bit conversion pipeline has been compiled. An 8-bit scene
+    /// must never have paid for it.
+    [[nodiscard]] bool tenBitPipelineBuiltForTests() const;
 #endif
 
 private:

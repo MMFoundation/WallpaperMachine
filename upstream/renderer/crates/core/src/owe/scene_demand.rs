@@ -423,6 +423,9 @@ pub enum SceneVideoPath {
     /// Converted, with the optional direct program still being prepared. The
     /// wallpaper is playing; only the second program is still coming.
     Nv12ConvertedPreparing,
+    /// 10-bit video converted once into one image: HDR tone mapped to SDR, or
+    /// 10-bit SDR carried over. Its planes are never sampled directly.
+    Yuv10Converted,
 }
 
 impl SceneVideoPath {
@@ -436,6 +439,7 @@ impl SceneVideoPath {
             3 => Self::Nv12Converted,
             4 => Self::Nv12Mixed,
             5 => Self::Nv12ConvertedPreparing,
+            6 => Self::Yuv10Converted,
             _ => Self::None,
         }
     }
@@ -450,6 +454,7 @@ impl SceneVideoPath {
             Self::Nv12Converted => "nv12_converted",
             Self::Nv12Mixed => "nv12_mixed",
             Self::Nv12ConvertedPreparing => "nv12_converted_preparing",
+            Self::Yuv10Converted => "yuv10_converted",
         }
     }
 }
@@ -555,7 +560,7 @@ mod tests {
         // optional program is still being prepared: folding it into the plain
         // converting path would tell a user "this content will not use direct
         // sampling" when the answer is "not yet".
-        let named: Vec<&str> = (0..=5).map(|raw| SceneVideoPath::from_raw(raw).name()).collect();
+        let named: Vec<&str> = (0..=6).map(|raw| SceneVideoPath::from_raw(raw).name()).collect();
         assert_eq!(named, vec![
             "none",
             "bgra",
@@ -563,9 +568,26 @@ mod tests {
             "nv12_converted",
             "nv12_mixed",
             "nv12_converted_preparing",
+            "yuv10_converted",
         ]);
+        // The two ends agree on the numbers: the header's enumerators are what
+        // the renderer returns, and these are what the host reads them as.
+        use crate::owe::sys;
+        for (path, raw) in [
+            (SceneVideoPath::Bgra, sys::owe_scene_video_path_OWE_SCENE_VIDEO_PATH_BGRA),
+            (SceneVideoPath::Nv12Direct, sys::owe_scene_video_path_OWE_SCENE_VIDEO_PATH_NV12_DIRECT),
+            (SceneVideoPath::Nv12Converted, sys::owe_scene_video_path_OWE_SCENE_VIDEO_PATH_NV12_CONVERTED),
+            (SceneVideoPath::Nv12Mixed, sys::owe_scene_video_path_OWE_SCENE_VIDEO_PATH_NV12_MIXED),
+            (
+                SceneVideoPath::Nv12ConvertedPreparing,
+                sys::owe_scene_video_path_OWE_SCENE_VIDEO_PATH_NV12_CONVERTED_PREPARING,
+            ),
+            (SceneVideoPath::Yuv10Converted, sys::owe_scene_video_path_OWE_SCENE_VIDEO_PATH_YUV10_CONVERTED),
+        ] {
+            assert_eq!(SceneVideoPath::from_raw(raw as i32), path);
+        }
         // A renderer newer than this binary must not be read as a path this
         // build happens to know.
-        assert_eq!(SceneVideoPath::from_raw(6), SceneVideoPath::None);
+        assert_eq!(SceneVideoPath::from_raw(7), SceneVideoPath::None);
     }
 }
