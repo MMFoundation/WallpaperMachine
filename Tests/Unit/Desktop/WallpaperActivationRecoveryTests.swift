@@ -127,6 +127,8 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
 
     func testVideoDecoderFailurePreservesErrorAndAllowsRetry() async throws {
         for applyChanges in [false, true] {
+            // Under Compatibility the scene engine decodes the file, so the format check does not
+            // apply and a corrupt file reaches it: its own failure is what the apply reports.
             let folder = try writeVideoProject(entry: "broken.mov")
             _ = try SyntheticVideoFixture.writeCorrupt(name: "broken", into: folder)
             let (store, bridge) = try await videoStore(backend: "compatibility")
@@ -149,8 +151,6 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
             XCTAssertNil(store.activatingWallpaperID)
             XCTAssertNil(store.applyingWallpaperID)
 
-            _ = try writeVideoProject(entry: "compatibility.mkv")
-            _ = try SyntheticVideoFixture.writeMatroska(name: "compatibility", into: folder)
             bridge.applyError = nil
             if applyChanges {
                 try await store.applyWallpaperOptionsAsync(wallpaperId: "failing")
@@ -159,6 +159,107 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
             }
             XCTAssertEqual(store.monitorInformationSnapshot.rows.first?.wallpaperId, "failing")
         }
+    }
+
+    /// A file no player can open is refused with its format named, before any display changes,
+    /// and the same file can be applied once it is replaced by one that plays.
+    func testAFormatNothingCanPlayIsRefusedWithItsNameBeforeAnythingChanges() async throws {
+        // The first bytes of an AVI file, which AVFoundation does not open.
+        var avi = Data("RIFF".utf8)
+        avi.append(contentsOf: [0x24, 0, 0, 0])
+        avi.append(Data("AVI LIST".utf8))
+        avi.append(Data(repeating: 0, count: 64))
+
+        for applyChanges in [false, true] {
+            let folder = try writeVideoProject(entry: "clip.avi")
+            try avi.write(to: folder.appendingPathComponent("clip.avi"))
+            let (store, bridge) = try await videoStore(backend: "native_preferred")
+            bridge.applyError = nil
+
+            do {
+                if applyChanges {
+                    try await store.applyWallpaperOptionsAsync(wallpaperId: "failing")
+                } else {
+                    try await store.activateWallpaperAsync(id: "failing", displayId: "primary")
+                }
+                XCTFail("an unplayable format must not be applied")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.contains("AVI"), error.localizedDescription)
+                XCTAssertTrue(
+                    error.localizedDescription.localizedCaseInsensitiveContains("isn’t supported"),
+                    error.localizedDescription)
+            }
+            XCTAssertEqual(
+                store.monitorInformationSnapshot.rows.first?.wallpaperId, "",
+                "the display keeps what it had")
+            XCTAssertEqual(bridge.applyRequests.count, 0, "nothing reached the renderer")
+            XCTAssertFalse(store.activationNeedsRefresh)
+            XCTAssertNil(store.activatingWallpaperID)
+            XCTAssertNil(store.applyingWallpaperID)
+
+            // A playable copy of the same wallpaper goes through.
+            _ = try writeVideoProject(entry: "compatibility.mkv")
+            _ = try SyntheticVideoFixture.writeMatroska(name: "compatibility", into: folder)
+            if applyChanges {
+                try await store.applyWallpaperOptionsAsync(wallpaperId: "failing")
+            } else {
+                try await store.activateWallpaperAsync(id: "failing", displayId: "primary")
+            }
+            XCTAssertEqual(store.monitorInformationSnapshot.rows.first?.wallpaperId, "failing")
+        }
+    }
+
+    /// A user who chose Compatibility has the scene engine decode every video, so a format
+    /// macOS cannot open is not refused for them.
+    func testAFormatMacOSCannotPlayStillAppliesUnderCompatibility() async throws {
+        var avi = Data("RIFF".utf8)
+        avi.append(contentsOf: [0x24, 0, 0, 0])
+        avi.append(Data("AVI LIST".utf8))
+        avi.append(Data(repeating: 0, count: 64))
+        for applyChanges in [false, true] {
+            let folder = try writeVideoProject(entry: "clip.avi")
+            try avi.write(to: folder.appendingPathComponent("clip.avi"))
+            let (store, bridge) = try await videoStore(backend: "compatibility")
+            bridge.applyError = nil
+            store.videoFormatCheck = { _ in
+                XCTFail("the format check is for the native player only")
+                return .unsupported(.init(container: "AVI", codec: nil), .notPlayable)
+            }
+            if applyChanges {
+                try await store.applyWallpaperOptionsAsync(wallpaperId: "failing")
+            } else {
+                try await store.activateWallpaperAsync(id: "failing", displayId: "primary")
+            }
+            XCTAssertEqual(store.monitorInformationSnapshot.rows.first?.wallpaperId, "failing")
+        }
+    }
+
+    func testAnAV1ClipOnAMacWithoutHardwareDecodeIsRefusedAndNamedAsAV1() async throws {
+        let folder = try writeVideoProject(entry: "clip.mp4")
+        try Data(repeating: 1, count: 64).write(to: folder.appendingPathComponent("clip.mp4"))
+        let (store, bridge) = try await videoStore(backend: "native_preferred")
+        bridge.applyError = nil
+        store.videoFormatCheck = { _ in
+            .unsupported(.init(container: "MP4", codec: "AV1"), .needsHardwareAV1Decode)
+        }
+
+        await XCTAssertThrowsErrorAsync(
+            try await store.activateWallpaperAsync(id: "failing", displayId: "primary"))
+        do {
+            try await store.applyWallpaperOptionsAsync(wallpaperId: "failing")
+            XCTFail("AV1 without hardware decode must not be applied")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("AV1"), error.localizedDescription)
+            XCTAssertTrue(
+                error.localizedDescription.localizedCaseInsensitiveContains("hardware"),
+                error.localizedDescription)
+        }
+        XCTAssertEqual(store.monitorInformationSnapshot.rows.first?.wallpaperId, "")
+
+        // A transient read problem says nothing about the format, so it refuses nothing.
+        store.videoFormatCheck = { _ in .unreadable("the volume is busy") }
+        try await store.activateWallpaperAsync(id: "failing", displayId: "primary")
+        XCTAssertEqual(store.monitorInformationSnapshot.rows.first?.wallpaperId, "failing")
     }
 
     private func writeVideoProject(entry: String?) throws -> URL {

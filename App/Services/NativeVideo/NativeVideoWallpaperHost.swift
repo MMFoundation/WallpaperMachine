@@ -126,7 +126,7 @@ final class NativeVideoWallpaperHost {
         self.reject = reject
         self.screens = screens ?? { WebWallpaperHost.systemScreens() }
         self.refusal = refusal ?? { url in
-            await NativeVideoAdmission.evaluate(url: url)
+            await VideoFormatSupport.refusal(url: url)
         }
         let sharedCounters = counters ?? .shared
         self.makeSurface = makeSurface ?? { url, frame, surface, paused in
@@ -371,6 +371,13 @@ final class NativeVideoWallpaperHost {
                 continue
             }
             guard currentFrame(of: displayID) != nil else { continue }
+            // A file already found to be in a format nothing can play is not opened again for
+            // every snapshot: the failure stays what the display and the panel show, and is
+            // restated under this offer's startup revision so the bridge's wait for it ends.
+            if let refusal = knownUnsupportedFormat(of: wallpaper) {
+                recordState(wallpaper, phase: .failed, message: refusal.reason)
+                continue
+            }
             await open(wallpaper: wallpaper, displayID: displayID, generation: generation)
         }
         // A newer pass reports its own result, and reporting this one's would
@@ -401,6 +408,15 @@ final class NativeVideoWallpaperHost {
                     + "which this host cannot see (AppKit screens: \(listed.isEmpty ? "none" : listed)); "
                     + "nothing is shown there until the screen lists agree")
         }
+    }
+
+    /// The settled verdict this host holds for the offer's file when it is a format nothing can
+    /// play, so the file is neither read nor opened again until its key changes.
+    private func knownUnsupportedFormat(of wallpaper: BridgeNativeVideoWallpaper) -> NativeVideoRefusal? {
+        guard let entry = admissionCache[wallpaper.admissionKey], let refusal = entry,
+            case .unsupportedFormat = refusal
+        else { return nil }
+        return refusal
     }
 
     private func currentFrame(of displayID: UInt32) -> NSRect? {
@@ -469,6 +485,20 @@ final class NativeVideoWallpaperHost {
         if let refusal = await admission(for: url, wallpaper: wallpaper, load: load) {
             guard !stopped, !Task.isCancelled else { return }
             recordState(wallpaper, phase: .failed, message: refusal.reason)
+            if case .unsupportedFormat = refusal {
+                // No player can play this file, so the scene engine is not asked either: the
+                // display keeps the picture it had and the panel shows the message. Nothing
+                // retries it on its own; the verdict is cached under the admission key, so the
+                // file is read again only when it changes.
+                counters.record(
+                    .nativeVideoRefused,
+                    for: RuntimeSurfaceKey(kind: .desktopNativeVideo, displayID: 0))
+                AppLog.warn(
+                    "native video wallpaper \(wallpaper.wallpaperId): \(refusal.reason); "
+                        + "not played, the previous picture stays", load: load)
+                switchHold?.engineSettled(displays: [wallpaper.displayId])
+                return
+            }
             await handOff(wallpaper: wallpaper, refusal: refusal, load: load)
             return
         }

@@ -98,6 +98,11 @@ final class BridgeStore {
     @ObservationIgnored var willSwitchWallpaper: (@MainActor ([UInt32]) async -> Void)?
     @ObservationIgnored var didSettleWallpaperSwitch: (@MainActor ([UInt32]) -> Void)?
     @ObservationIgnored var didAbandonWallpaperSwitch: (@MainActor ([UInt32]) -> Void)?
+    /// Reads a video file's format when it is about to be applied, so one nothing can play is
+    /// refused with its format named before any display changes. A test stands in for the file read.
+    @ObservationIgnored var videoFormatCheck: @Sendable (URL) async -> VideoFormatSupport.Verdict = {
+        await VideoFormatSupport.inspect(url: $0)
+    }
     /// Where the activation lines go: the app's log. A test collects them instead.
     @ObservationIgnored var activationLogWriter: (_ line: String, _ isFailure: Bool) -> Void = ActivationLog.write
     /// Performance data, when the user has turned it on (`TelemetryService`). Each activation
@@ -368,7 +373,7 @@ final class BridgeStore {
             throw WallpaperActionError(message: String(localized: "No configuration is available for this display. Refresh Displays and retry."))
         }
         try validatePendingWallpaperEdits(id: id, options: options)
-        try validateWallpaperForPlayback(id: id)
+        try await validateWallpaperForPlayback(id: id)
         try await commitPendingWallpaperEditsAsync(id: id)
         // Validation and async draft commits may outlive a display topology change.
         try validateActivationTarget(displayId)
@@ -447,7 +452,7 @@ final class BridgeStore {
             if let options = wallpaperOptionsSnapshot, options.wallpaperId == id {
                 try validatePendingWallpaperEdits(id: id, options: options)
             }
-            try validateWallpaperForPlayback(id: id)
+            try await validateWallpaperForPlayback(id: id)
             try await ejectWallpaperFromDisplayAsync(displayId: displayId, wallpaperId: id)
             try await activateWallpaperAsync(id: id, displayId: displayId, origin: .user,
                                              recordsHistory: false, restarting: true)
@@ -1148,7 +1153,7 @@ final class BridgeStore {
             $0.wallpaperId == wallpaperId && $0.mirrorTargetDisplayId == nil
         }.map(\.displayId))
         let previousAssignments = independentAssignments()
-        try validateWallpaperForPlayback(id: wallpaperId)
+        try await validateWallpaperForPlayback(id: wallpaperId)
         try await commitPendingWallpaperEditsAsync(id: wallpaperId)
         do {
             try await applyValidatedWallpaperOptionsAsync(wallpaperId: wallpaperId, userInitiated: userInitiated)
@@ -1193,18 +1198,26 @@ final class BridgeStore {
         }
     }
 
-    private func validateWallpaperForPlayback(id wallpaperId: String) throws {
+    private func validateWallpaperForPlayback(id wallpaperId: String) async throws {
         let folder = ClientPaths.libraryURL.appendingPathComponent(wallpaperId)
         let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("project.json"))) as? [String: Any]
         if (manifest?["type"] as? String)?.lowercased() == "video" {
-            // AVFoundation admission belongs to the native host, which can hand
-            // unsupported containers/codecs to Compatibility. Applying must let
-            // the chosen backend try decoding and report its own failures.
+            // Whether macOS can play the file is the native host's to decide at playback, but a
+            // format nothing can play is refused here, before any display changes, with the
+            // format named. Matroska and WebM stay: the scene engine still plays them.
             guard let file = manifest?["file"] as? String, !file.isEmpty,
                   let values = try? folder.appendingPathComponent(file).resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
                   values.isRegularFile == true, (values.fileSize ?? 0) > 0,
                   FileManager.default.isReadableFile(atPath: folder.appendingPathComponent(file).path) else {
                 throw NSError(domain: "WallpaperMachine", code: 1, userInfo: [NSLocalizedDescriptionKey: String(localized: "This video cannot be decoded. Import a complete, playable video file before applying it.")])
+            }
+            // Only where macOS would be the one to play it: a user who chose Compatibility has
+            // the scene engine (FFmpeg) decode every video, so an AVI it plays must not be refused.
+            if settingsSnapshot.videoBackend == "native_preferred" {
+                let verdict = await videoFormatCheck(folder.appendingPathComponent(file))
+                if let message = VideoFormatSupport.message(for: verdict) {
+                    throw WallpaperActionError(message: message)
+                }
             }
         }
         if (manifest?["type"] as? String)?.lowercased() == "scene" {

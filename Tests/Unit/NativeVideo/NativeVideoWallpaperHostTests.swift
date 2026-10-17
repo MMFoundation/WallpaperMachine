@@ -540,7 +540,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let host = makeHost(wallpapers: [], recorder: recorder)
         await host.apply([wallpaper(id: "300", admissionKey: 1)])
         let stale = surfacesMade[7]
-        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
         XCTAssertEqual(host.activeDisplayIDs, [7])
 
         stale?.failPreparation("late failure", generation: 1)
@@ -1431,7 +1431,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         defer { host.shutdown() }
         let old = try await openAndWaitForTheCountdown(host, wallpaper(id: "300", admissionKey: 1))
 
-        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
         await sleeper.waitUntilPending()
         let new = try XCTUnwrap(surfacesMade[7])
         XCTAssertFalse(new === old)
@@ -2064,6 +2064,66 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         host.shutdown()
     }
 
+    func testAFormatNothingCanPlayKeepsThePreviousPictureAndShowsItsMessage() async {
+        // An already-assigned file in a format no player reads (a library item applied before,
+        // or a migrated config): the scene engine is not asked either. The display keeps the
+        // picture it had, the panel gets the message through the wallpaper's state, and the
+        // bridge is told nothing, so nothing is handed back and forth.
+        let recorder = Recorder()
+        let message = "This video’s format isn’t supported (AVI), or the file is damaged."
+        let host = makeHost(
+            wallpapers: [wallpaper()],
+            refusal: .unsupportedFormat(message),
+            recorder: recorder)
+        var states: [HostWallpaperState] = []
+        host.onStateChanged = { states.append($0) }
+
+        await host.apply([wallpaper()])
+
+        XCTAssertTrue(recorder.rejected.isEmpty, "the scene engine is not the answer for this file")
+        XCTAssertTrue(recorder.made.isEmpty, "no window, so nothing covers the previous picture")
+        XCTAssertTrue(host.isEmpty)
+        XCTAssertEqual(states.last?.phase, .failed, "the wallpaper's startup ends")
+        XCTAssertEqual(states.last?.message, message, "and the panel can show why")
+        XCTAssertFalse(states.contains { $0.phase == .ready })
+        host.shutdown()
+    }
+
+    func testAnUnsupportedFormatIsReadOnceAndAnsweredEachTimeItIsOffered() async {
+        let recorder = Recorder()
+        let host = makeHost(
+            wallpapers: [],
+            refusal: .unsupportedFormat("not supported"),
+            recorder: recorder)
+        var states: [HostWallpaperState] = []
+        host.onStateChanged = { states.append($0) }
+
+        await host.apply([wallpaper(admissionKey: 5)])
+        await host.apply([wallpaper(admissionKey: 5)])
+
+        XCTAssertEqual(recorder.admissionProbes.count, 1, "the verdict is kept under the key")
+        XCTAssertTrue(recorder.rejected.isEmpty)
+        XCTAssertEqual(states.filter { $0.phase == .failed }.count, 1, "and the state is not repeated")
+        host.shutdown()
+    }
+
+    func testAReplacedFileIsJudgedAgainAfterAnUnsupportedOne() async {
+        let recorder = Recorder()
+        let host = makeHost(
+            wallpapers: [],
+            refusalSequence: [.unsupportedFormat("not supported"), nil],
+            recorder: recorder)
+
+        await host.apply([wallpaper(admissionKey: 5)])
+        XCTAssertTrue(host.isEmpty)
+
+        await host.apply([wallpaper(admissionKey: 6)])
+
+        XCTAssertEqual(host.activeDisplayIDs, [7], "a file that plays is opened as usual")
+        XCTAssertTrue(recorder.rejected.isEmpty)
+        host.shutdown()
+    }
+
     func testAnAcceptedWallpaperOpensExactlyOneSurfacePerDisplay() async {
         let recorder = Recorder()
         let host = makeHost(
@@ -2199,7 +2259,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         await host.apply([wallpaper(id: "300")])
         let firstGeneration = host.surfaceGenerationForTest
 
-        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
 
         XCTAssertEqual(host.activeDisplayIDs, [7])
         XCTAssertNotEqual(
@@ -2231,7 +2291,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         center.post(
             name: DesktopPosterNotification.request, object: surfacesMade[7]?.posterLayer)
         // Replace the wallpaper while the request is still in flight.
-        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
         try? await Task.sleep(for: .milliseconds(200))
 
         XCTAssertTrue(
@@ -2573,7 +2633,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         XCTAssertEqual(harness.state(), .armed)
         recorder.events.removeAll()
 
-        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
 
         let second = try XCTUnwrap(surfacesMade[7])
         XCTAssertFalse(second === first)
@@ -2604,7 +2664,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
         defer { host.shutdown() }
         _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
-        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
         let second = try XCTUnwrap(surfacesMade[7])
 
         second.isReadyForDisplay = true
@@ -2632,7 +2692,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         surfaceReadyAtBirth = true
         recorder.events.removeAll()
 
-        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
 
         XCTAssertEqual(recorder.events, ["probe", "stop", "make", "present+veil"])
         XCTAssertNil(harness.state(), "nothing is left covering a clip that is already showing")
@@ -2648,7 +2708,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
         defer { host.shutdown() }
         _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
-        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
         let second = try XCTUnwrap(surfacesMade[7])
         XCTAssertNotNil(harness.veil(on: second.posterLayer))
 
@@ -2702,7 +2762,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
         defer { host.shutdown() }
         _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
-        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
         let second = try XCTUnwrap(surfacesMade[7])
         XCTAssertEqual(harness.state(), .onHost)
 
@@ -2722,7 +2782,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         let host = makeHost(wallpapers: [], recorder: recorder, switchHold: harness.hold)
         defer { host.shutdown() }
         _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
-        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
         let second = try XCTUnwrap(surfacesMade[7])
         XCTAssertEqual(harness.state(), .onHost)
         XCTAssertNotNil(harness.veil(on: second.posterLayer))
@@ -2742,12 +2802,12 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         defer { host.shutdown() }
         let both = screenFrames
         _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
-        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
         let second = try XCTUnwrap(surfacesMade[7])
         XCTAssertEqual(harness.state(), .onHost)
 
         screenFrames = both.filter { $0.id != 7 }
-        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
 
         XCTAssertTrue(second.isStopped, "there is nothing to draw on")
         XCTAssertNil(harness.state())
@@ -2919,7 +2979,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         await host.apply([wallpaper(id: "300", admissionKey: 1)])
         recorder.events.removeAll()
 
-        await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
+        await host.apply([wallpaper(id: "301", admissionKey: 2)])
 
         let second = try XCTUnwrap(surfacesMade[7])
         XCTAssertEqual(recorder.events, ["probe", "stop", "make", "present"])

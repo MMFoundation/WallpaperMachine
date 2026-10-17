@@ -46,8 +46,8 @@ App/                               WallpaperMachine application target sources o
                                    (InstanceLock, SingleInstance)
     Localization/                  AppLanguage.swift: shipped-language registry and the language preference store
     LockScreen/                    lock-screen selection overrides, extension registration and configuration publishing
-    NativeVideo/                   AVFoundation video backend: player and host window (the admission rule
-                                   and the layout rules are in Shared/)
+    NativeVideo/                   AVFoundation video backend: player and host window, and the format
+                                   check Apply uses (the admission rule and the layout rules are in Shared/)
     Pixiv/                         pixiv browsing, sign-in session, downloads and still-wallpaper packaging
     Playlist/                      per-display playlists: model, planner, store and the scheduler that switches wallpapers
     Preview/                       isolated live preview inputs, lifecycle, WebKit and scene/video surfaces

@@ -104,7 +104,7 @@ macOS accepting or restoring native selections. Both are on
 application preflight and recovery, not decoded frames or desktop playback.
 Missing, empty and non-file video entries are rejected before any change; an
 original synthetic H.264 Matroska clip applies through Apply and Apply changes
-with either backend preference; decoder failures keep the error and leave the
+with either backend preference (the playable-format refusal applies to Native video preferred only: an AVI applies under Compatibility); decoder failures keep the error and leave the
 library usable for retry; history changes only after a successful activation;
 playback-environment changes (suspend/resume, unload/reload, audio, reduced quality) and library
 refreshes wait for an in-flight apply and the reverse, while explicit Pause still
@@ -751,8 +751,19 @@ need an authorized runtime check
 - `NativeVideoAdmissionTests` — a clip is admitted at every rate it was written at
   (including 120 fps) and as a variable-rate clip, since it plays at its own rate; refusal
   of corrupt, missing, audio-only and unplayable content.
+- `VideoFormatSupportTests` — the container told from the first bytes (the extension is not
+  trusted over them; a file whose bytes show none is named by its extension), codec names, and
+  the rule: a playable clip with a video track is supported, AV1 is refused without hardware
+  decode and named as AV1, a file nothing opens (or with no video track) is refused with its
+  container and codec named, Matroska and WebM that AVFoundation cannot open are left to the
+  scene engine, an unreadable file refuses nothing; real files: an H.264 clip supported, garbage
+  named by its extension, an audio-only file refused, Matroska left alone. `WallpaperActivationRecoveryTests`
+  checks Apply, Apply changes and an AV1 verdict refuse before the renderer is reached with the
+  format named, and the same wallpaper applies once its file plays.
 - `NativeVideoWallpaperHostTests` — startup waits for surface readiness, refused
-  wallpapers are handed back to the scene engine with their reason, re-evaluation
+  wallpapers are handed back to the scene engine with their reason, a format nothing can play
+  is not handed back (no window, no rejection, the failure and its message in the wallpaper's
+  state, read once and not reopened for every snapshot, judged afresh when the file changes), re-evaluation
   when the admission key (the file) changes, one surface per display, a mirror group
   judged once under its source's key, hidden-display and user-pause handling, a clip stopped
   by a reading taken while the desktop (or one display) was covered playing again

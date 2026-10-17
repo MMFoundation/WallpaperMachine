@@ -684,7 +684,9 @@ page. Quitting cancels and awaits an active local import.
 
 An import takes Wallpaper Engine project folders, a Steam library, a Wallpaper
 Engine folder, a project's own files, videos (`mp4`, `m4v`, `mov`, `webm`, `mkv`,
-`avi`), HTML files and pictures (`jpg`, `jpeg`, `png`, `gif`, `webp`, `heic`,
+`avi`; importing never checks the format, so a file macOS cannot play is imported and
+refused when applied, [with its format named](performance.md#video-backend)), HTML
+files and pictures (`jpg`, `jpeg`, `png`, `gif`, `webp`, `heic`,
 `heif`, `tif`, `tiff`, `bmp`, `avif`, at most 512 MB). A picture becomes a still
 `web` wallpaper with the id `image-<file name>`, packaged the way pixiv pages are
 (`StillImageWallpaper`; see [pixiv](pixiv.md#saving-a-page)): the original kept as

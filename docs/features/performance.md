@@ -676,12 +676,35 @@ video wallpaper is running.` when nothing is playing video. An unrecognised back
 name is refused rather than silently mapped to Compatibility, so a stale page cannot
 report a choice that was never applied.
 
-Applying a video checks that its entry is a readable, nonempty file. Container and
-codec support are decided by the playback backend: AVFoundation's native admission
-check must not block a file the Compatibility backend can decode, including H.264
-in Matroska. This applies both to **Apply** and **Apply changes**, with either
-backend preference. Missing or empty files fail before display settings change;
-decoder failures still go through the engine's apply recovery.
+Applying a video checks that its entry is a readable, nonempty file. A file that is
+missing or empty fails with the usual error, whichever backend is chosen. With
+**Native video preferred** it also checks that the format can be played, on both
+**Apply** and **Apply changes** (and on Reapply), before any display changes. With
+**Compatibility** that second check is skipped, because the scene engine decodes
+every video there (FFmpeg opens an AVI that macOS does not) and refusing a file it
+plays would be wrong. A file nothing can play is refused with a message that names its format, for example "This video's
+format isn't supported (AVI), or the file is damaged. Convert it to MP4 or MOV with
+H.264 or HEVC, or import a complete copy, then apply it again.", and the display
+keeps what it showed. The format check (`VideoFormatSupport`) asks AVFoundation
+whether the file is playable and has a video track, reads the container from the
+file's first bytes (MP4, MOV, WebM, Matroska, AVI, Ogg, WMV, FLV, MPEG; the file
+extension only names a file whose bytes show none), and refuses AV1 on a Mac with no
+hardware AV1 decoder, with its own message, because software AV1 decoding of a
+wallpaper that runs all day is a cost the app does not take on. Two cases are not
+refused: Matroska and WebM that AVFoundation cannot open stay with the scene engine
+(**In use now** says so), because the app has no WebM player of its own yet and that
+is where they play, H.264 in Matroska included; and a file that could not be read
+at that moment (a busy volume, a file still being written) says nothing about its
+format, so the apply goes on and the native host tries it. Importing never checks the
+format: an `avi` or an AV1 file is imported and refused only when it is applied.
+Decoder failures after this check still go through the engine's apply recovery.
+
+A file already assigned to a display that is found to be in such a format when the
+wallpaper loads (a library item applied before this check existed, or a migrated
+config) is not handed to the scene engine either. The display keeps the picture it
+had, no window covers it, and the wallpaper's state in the panel reads **Wallpaper
+could not load** with the same message. The verdict is kept under the file's key, so
+the file is not read again until it changes, and a replaced file is judged afresh.
 
 A clip on the native player plays at **its own frame rate**. An `AVPlayerLayer` cannot
 be capped without copying every frame through the CPU, so the frame-rate limit

@@ -25,6 +25,11 @@ enum NativeVideoRefusal: Equatable {
     /// Distinct from `preparationFailed`, which is a metadata read that did
     /// not complete and says nothing about the content.
     case playbackFailed(String)
+    /// The file is in a format nothing in this app can play: not the platform player, and not
+    /// the scene engine, which is no longer the answer for it. The string is the message a
+    /// person reads, naming the format. A settled answer, and one the host does not hand to the
+    /// scene engine: the display keeps the picture it had.
+    case unsupportedFormat(String)
 
     /// Whether this answer is settled for the inputs it was decided on. A
     /// settled refusal may be recorded and reported once; an unsettled one
@@ -42,6 +47,8 @@ enum NativeVideoRefusal: Equatable {
             return "asset metadata could not be read: \(detail)"
         case let .playbackFailed(detail):
             return "the platform player could not play the asset: \(detail)"
+        case let .unsupportedFormat(message):
+            return message
         }
     }
 }

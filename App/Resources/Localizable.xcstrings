@@ -7263,6 +7263,12 @@
     },
     "AVFoundation can open this video, which plays at its own frame rate. Compatibility remains selected; this check does not change your backend." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation はこのビデオを開けます。ビデオは動画自体のフレームレートで再生されます。互換モードの選択は維持され、この確認でバックエンドは変更されません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 可以打开此视频，视频按自身帧率播放。仍选择兼容模式；此检查不会更改后端。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 可以開啟此影片，影片會以自身的影格率播放。仍選擇相容模式；此檢查不會變更後端。"}}}
+    },
+    "AV1 video needs hardware decoding, which this Mac doesn’t have. Convert it to MP4 or MOV with H.264 or HEVC, then import it again." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "AV1ビデオにはハードウェアデコードが必要ですが、このMacには搭載されていません。H.264またはHEVCのMP4またはMOVに変換してから、もう一度読み込んでください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "AV1 视频需要硬件解码，而这台 Mac 不支持。请先将其转换为 H.264 或 HEVC 编码的 MP4 或 MOV，再重新导入。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "AV1 影片需要硬體解碼，但這台 Mac 不支援。請先轉換為 H.264 或 HEVC 編碼的 MP4 或 MOV，再重新匯入。"}}}
+    },
+    "This video’s format isn’t supported (%@), or the file is damaged. Convert it to MP4 or MOV with H.264 or HEVC, or import a complete copy, then apply it again." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "このビデオの形式（%@）には対応していないか、ファイルが破損しています。H.264またはHEVCのMP4またはMOVに変換するか、完全なコピーを読み込んでから、もう一度適用してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "不支持此视频的格式（%@），或文件已损坏。请将其转换为 H.264 或 HEVC 编码的 MP4 或 MOV，或导入完整的副本，然后重新应用。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "不支援此影片的格式（%@），或檔案已損毀。請轉換為 H.264 或 HEVC 編碼的 MP4 或 MOV，或匯入完整的副本，然後重新套用。"}}}
     }
   },
   "version" : "1.0"
