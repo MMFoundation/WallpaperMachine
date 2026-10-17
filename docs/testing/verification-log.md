@@ -25,6 +25,17 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-17 — Shader layer swapped for the clean-room wm-shader
+
+Swap step of the own-code plan (Phase 5, shader): Renderer/Shader replaces upstream/renderer/crates/shader; the engine compiles each program once, for Metal.
+
+- `python3 scripts/check_rust.py` — exit 0; wm-shader 915 unit tests plus the ffi_abi and c_abi targets, core 314, bridge 581; asset-dependent corpus sweeps skip with a printed reason when the shipped shaders are absent
+- `python3 scripts/check_renderer.py` — every binary passes, generated cases pixel-equal; FrameTimerTest.ADrawSlightlyLongerThanTheIntervalDoesNotHalveTheRate failed once under load and passed on rerun alone (known flake); first run exposed the engine still asking for the retired analysis target, fixed by compiling once for Metal
+- `python3 scripts/test.py` — exit 0; 3976 tests: 3930 passed, 46 skipped, 0 failed
+- `python3 scripts/check_licenses.py --enforce` on the Release app — 174 components, 0 Apache-2.0, 0 GPL-3.0 family, 0 unknown, 0 not in LICENSING.md (172 with --skip-app)
+- Posters, 67 local scenes, 6 interleaved runs per build against the build before the swap: 38 byte-identical, 29 inside each build's own run-to-run noise (mean absolute difference at most 0.33 of 255), no stable difference
+- Shader compile over the 67 scenes 111.7 s to 3.8 s, programs compiled 3771 to 2263; five heaviest scenes load 4.4-8.2 s to 0.5-1.7 s (median of three)
+
 ## 2026-10-17 — FFmpeg removed: native video and sound only, no libav* in the app
 
 Four commits (3c55d52b audio, f0e3b270 video, d2c891aa Rust decoder, b6ba0c32 build and packaging) delete every FFmpeg use; nothing was run on a desktop, the lock screen or an audio device.
@@ -125,12 +136,3 @@ Feature releases can carry a bundled 3:1 banner (Resources/ReleaseBanners/x.y.z.
 - `python3 scripts/test.py --only WhatsNewTests` / `--only AppUpdateTests` — passed while iterating
 - Visual: temporary offscreen XCTest snapshot of the What's New window with the bundled 1.5.0 banner (dark), banner above the header at 712 pt, notes below; probe deleted
 - Skipped: live --ai model run (no RELEASE_NOTES_API_KEY locally), so the 1.5.0 wording is written by CI at release; the raw.githubusercontent banner URL is checked only by unit test until v1.5.0 is tagged
-
-## 2026-10-16 — Tabs in the title bar, Now Playing bar and one-colour title bar on top of the Filters sidebar
-
-- Rebased onto main's Filters sidebar (69955b77, cf9f5ebe): my own filters panel was dropped; the sidebar now slides from the window's leading edge, and Installed's has the Collections group at its top.
-- Window: no window sidebar; Library, Steam Workshop, pixiv and Settings are tabs centred in the title bar (symbols only under 960 points) with the mark, name and version leading; Library has All wallpapers and Favorites chips; Now Playing is a bottom bar whose wallpaper part opens a details popover; Settings searches above its own section list.
-- Title bar: macOS 26 draws a band per window column (opaque grey over a page without a top scroll view, its own dark band over the system inspector). The inspector is now an in-page InspectorColumn (260-420, drag to resize) and the Filters sidebar, page and inspector sit in one full-width scroll host, so the bar is one colour.
-- Real window (desktop control allowed by the user): Library with Filters sidebar and inspector open, and Settings, sampled 29,29,31 across the whole bar in dark; inspector edge drag resized it.
-- Gate: python3 scripts/test.py passed, 3826 passed, 0 failed, 45 skipped. Targeted shell, root, welcome, installed, inspector, pixiv and workshop classes: 160 passed.
-- Not run: desktop UI tests (Tests/UI updated, not executed); light appearance not checked on the real window.

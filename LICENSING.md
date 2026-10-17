@@ -346,7 +346,11 @@ with the same zeros. The third-party libraries the app loads are `lz4`,
 `freetype` (with its `libpng`), `quickjs-ng` and the unlinked `MediaRemoteAdapter`
 framework; no `libav*` library is among them ([FFmpeg](#ffmpeg)). The
 earlier run, after the Vulkan deletion and before the FFmpeg removal, reported 181
-(178 with `--skip-app`). The Apache-2.0 and GPL-3.0 parts that
+(178 with `--skip-app`). After the shader layer was replaced by `wm-shader` (`7141a105`), the same
+command on a Release app built from it reports 174 components (3 Mach-O roots, 5 third-party libraries,
+24 inventory entries and 148 third-party Rust crates) with the same zeros; with `--skip-app` it reports
+172. `linkme`, `logos` and `smol_str` (all MIT OR Apache-2.0) left the closure with the old crate.
+The Apache-2.0 and GPL-3.0 parts that
 used to be loaded into, or compiled into, the same process as the GPL-2.0-only renderer
 are gone (see the table of removed components above): `libvulkan` and `libMoltenVK`,
 `libSPIRV-Tools` and `libSPIRV-Tools-opt`, glslang (its Apache-2.0 portion and its
@@ -513,7 +517,7 @@ prefix is `app.wallpapermachine`.
   converter from Wallpaper Engine's HLSL-flavoured GLSL to GLSL 450, the legalizer that lays out
   resources and interfaces for naga, the Metal back end and reflection, and the C ABI the scene
   engine calls) replaced the shader crate that came with the imported renderer, in the commit
-  titled "replace the imported shader crate with the clean-room wm-shader" (2026-10-17). It was written under a clean-room protocol: one session studied the
+  `7141a105` (2026-10-17). It was written under a clean-room protocol: one session studied the
   retired crate and wrote plain-prose specifications (contract, preprocessor, dialect and types,
   legalization and structure, pipeline and back end, and a first amendment list); separate sessions
   that never opened the retired crate, its history or the study notes wrote the code and its tests
