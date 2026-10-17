@@ -9,6 +9,7 @@ mod amendments;
 mod budget;
 mod corpus;
 mod globals;
+mod golden;
 mod inputs;
 mod merge;
 mod pins;

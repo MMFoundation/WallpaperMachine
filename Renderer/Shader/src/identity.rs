@@ -18,6 +18,12 @@ use std::sync::OnceLock;
 
 /// Counts behavioural revisions of this layer. The first release of the
 /// rewrite is 1; stored programs of the earlier implementation are stale.
+///
+/// The identity is compared only for equality: the revision is an opaque counter, not an ordered
+/// version, and no consumer may compare identities numerically. It only ever grows: a counter that is
+/// reset or reused would make a later build return a string an earlier build returned, so a stored
+/// program of different output would hit. The table of shipped identities and the digest of their Metal
+/// text is `SHIPPED` in `pipeline/tests/golden.rs`; a change of output appends a row there.
 pub const PIPELINE_REVISION: u32 = 1;
 
 /// Version of the vendored compiler library, checked against its manifest by a test.
