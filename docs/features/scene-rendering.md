@@ -648,10 +648,10 @@ samples, is built at the card's width and height with the fraction cut off, at l
 texels, whatever the size of the scene or of the editor's box, as the scene loads and
 again whenever a change of the text gives the card another size in texels (the renderer
 allocates the targets again under the render graph it has, once for that change, in about
-0.5 ms on a scene of 72 passes; none while the card only moves, as when its alignment
-flips, or grows by less than a texel). The graph is not built again for it: that compiled
-every pass, decoded and uploaded every image and copied every vertex buffer of the scene,
-39 to 50 ms and more on a scene of large models, and a text with a visible effect whose
+0.8 ms on a scene of 42 render passes a frame; none while the card only moves, as when its
+alignment flips, or grows by less than a texel). The graph is not built again for it: that
+compiled every pass, decoded and uploaded every image and copied every vertex buffer of
+the scene, about 54 ms each time on that scene, and a text with a visible effect whose
 card changes in texels every few frames (proportional digits, a readout, a typewriter) did
 it each time, which held a scene of seven models and 17 text layers to 19 frames a second.
 Nothing the scene loaded is touched, so a video playing in the scene is not either. An effect on the text therefore sees
@@ -917,7 +917,7 @@ language and the engine's own English explanation beside it:
 
 | Stage | What happened | Where the engine found out |
 |---|---|---|
-| `unsupported` | The admission gate refused the scene (HDR video, a plain video wallpaper, a shader that does not translate for Metal, ...) | `SelectSceneBackend`, before any renderer exists |
+| `unsupported` | The admission gate refused the scene (HDR video, a plain video wallpaper, a shader that does not compile for Metal, ...) | `SelectSceneBackend`, before any renderer exists |
 | `prepare` | The native renderer could not be created on the surface (also a surface with no Metal layer, such as an offscreen probe) | `createMetal` |
 | `compile` | The scene's shaders or pipelines did not compile for Metal | `compileRenderGraph` |
 | `frame` | A frame failed after the scene was running | `drawFrame` |
@@ -953,12 +953,30 @@ now** as "stopped after a rendering failure" with **Retry**, the inspector's Com
 check card says the same, and the diagnostics report and a library issue report name the
 stage and reason. The reason itself stays English.
 
+**A shader that does not compile holds the scene.** The parser compiles every material's
+program for Metal once; when one does not compile, the layer, effect, text card,
+particle, puppet or shape that wanted it cannot load, and the parse records the shader
+(`Scene::shader_compile_error`, the first failure and a count of the rest) instead of
+carrying on without the part. The admission gate refuses the scene on it first, before
+any other finding, because the parts that look wrong after a drop follow from the drop:
+the stage is `unsupported` and the reason names the shader and gives the compiler's
+first line, as `the shader 'effects/waterripple' could not be translated to Metal
+(<compiler message>)`, with "; N more shaders failed too" when several did. The scene
+never draws with an effect, layer or text missing: the last picture or the preview stays,
+and the failure is said once. The reason is the engine's English like every other; no
+new catalog string is involved. One path is not a scene load: a layer a script creates
+with `createLayer` after the scene is drawing is parsed as it runs, and a shader that
+does not compile there fails that call (the script gets no layer, and the log says why)
+without stopping a scene that is already on screen.
+
 A retry really retries: the engine neither remembers a failure against the scene nor
 consults one, so **Retry** (or the host's recovery) asks the native renderer again.
 
 The same faults are forced in `scene_failure_policy_test`, on a layer no window owns, and
 each leaves the failure logged once, the frame loop stopped without presenting again, and
-the last frame or the preview in place.
+the last frame or the preview in place. The shader case uses a scene whose card compiles
+and whose one effect does not: it is held with the effect's shader named and no frame
+presented, and the same scene with a compiling effect draws.
 
 ### Live property edits
 

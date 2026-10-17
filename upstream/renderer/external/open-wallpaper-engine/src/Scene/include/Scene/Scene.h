@@ -96,6 +96,11 @@ public:
     /// here leaves the scene undrawn.
     std::unordered_set<int32_t> layer_texture_sources;
     std::string                 layer_texture_error;
+    /// Set when a shader of the scene could not be compiled for Metal: the
+    /// effect, layer or text that wanted it did not load, so the scene is not the
+    /// one the author made. It names the shader and the compiler's reason, and
+    /// leaves the scene undrawn (held), never drawn without the missing part.
+    std::string                 shader_compile_error;
     /// Layers the current render graph leaves out, each the top of a subtree:
     /// hidden by a settled visibility (`SceneNode::VisibilitySettled`) of their
     /// own or an ancestor's, and sampled by no other layer. Written by

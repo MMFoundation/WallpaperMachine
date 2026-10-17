@@ -95,6 +95,55 @@ std::filesystem::path WriteScene(const std::filesystem::path& root, bool with_pr
     return root / "project.json";
 }
 
+/// `WriteScene`'s card under one effect whose fragment shader is `effect_body`
+/// (the statements of `main`, which may use `c`, the layer's colour). The effect
+/// chain's closing passthrough is the plain copy Wallpaper Engine's is.
+std::filesystem::path WriteSceneWithEffect(const std::filesystem::path& root,
+                                           const std::string& effect_body)
+{
+    const auto project = WriteScene(root);
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\n"
+        "attribute vec3 a_Position;\n"
+        "attribute vec2 a_TexCoord;\n"
+        "varying vec2 v_TexCoord;\n"
+        "void main() {\n"
+        "gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+        "v_TexCoord = a_TexCoord;\n"
+        "}\n";
+    const auto pass = [&](const std::string& shader) {
+        return R"({"passes":[{"shader":")" + shader + R"(","blending":"normal","cullmode":"nocull",)"
+               R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})";
+    };
+    WriteText(root / "shaders/effects/tint.vert", vertex);
+    WriteText(root / "shaders/effects/tint.frag",
+              "uniform sampler2D g_Texture0;\n"
+              "varying vec2 v_TexCoord;\n"
+              "void main() {\n"
+              "vec4 c = texture2D(g_Texture0, v_TexCoord);\n" + effect_body + "\n"
+              "}\n");
+    WriteText(root / "materials/effects/tint.json", pass("effects/tint"));
+    WriteText(root / "effects/tint/effect.json",
+              R"({"name":"tint","passes":[{"material":"materials/effects/tint.json"}]})");
+    WriteText(root / "shaders/through.vert", vertex);
+    WriteText(root / "shaders/through.frag",
+              "uniform sampler2D g_Texture0;\n"
+              "varying vec2 v_TexCoord;\n"
+              "void main() {\n"
+              "gl_FragColor = texture2D(g_Texture0, v_TexCoord);\n"
+              "}\n");
+    WriteText(root / "materials/util/effectpassthrough.json", pass("through"));
+    WriteText(root / "layout.json",
+              R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+              R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],)"
+              R"("clearcolor":[0.1,0.2,0.3],"cameraparallax":false,)"
+              R"("orthogonalprojection":{"width":384,"height":256}},)"
+              R"("objects":[{"id":1,"name":"card","image":"models/card.json",)"
+              R"("origin":[192,128,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,)"
+              R"("effects":[{"file":"effects/tint/effect.json","id":2,"visible":true}]}]})");
+    return project;
+}
+
 /// Lines of the engine's own log, kept while a test runs.
 class LogCapture {
 public:
@@ -362,6 +411,55 @@ TEST_F(SceneFailurePolicy, AShaderThatDoesNotCompileIsHeld)
     ExpectHeld(running, SceneFailureStage::Compile, "forced compile failure");
     EXPECT_EQ(running.Presented(), 0u);
     EXPECT_EQ(running.layer().sublayers.count, 1u);
+}
+
+// A shader that cannot be compiled takes its effect out of the parsed scene. The
+// scene is then not the one the author made, and is not drawn without the part:
+// it is held with the shader named, once, and nothing else is drawn. The card
+// under the broken effect compiles and would have drawn, so a presented frame
+// is the partial picture this must not produce.
+TEST_F(SceneFailurePolicy, AnEffectWhoseShaderCannotBeCompiledHoldsTheWholeScene)
+{
+    LogCapture log;
+    Running running(
+        WriteSceneWithEffect(root_ / "scene", "gl_FragColor = vec4(no_such_value, 0.0, 0.0, 1.0);"),
+        root_ / "run");
+    ASSERT_TRUE(running.WaitForFirstFrame()) << "the host would have waited for ever";
+    std::this_thread::sleep_for(500ms);
+
+    ExpectHeld(running, SceneFailureStage::Unsupported, "effects/tint");
+    const auto selection = running.wallpaper().sceneBackendSelection();
+    EXPECT_NE(selection.failure_reason.find("could not be translated to Metal"), std::string::npos)
+        << selection.failure_reason;
+    EXPECT_EQ(running.wallpaper().surfaceHealth().stop_reason, SurfaceStopReason::GraphFailed);
+    EXPECT_EQ(running.Presented(), 0u) << "a partial picture was drawn";
+    EXPECT_EQ(running.Completed(), 0u);
+    EXPECT_EQ(running.FirstFrames(), 1) << "the host is told once";
+    EXPECT_EQ(running.wallpaper().surfaceHealth().failed_frames, 0u);
+    ASSERT_EQ(running.layer().sublayers.count, 1u) << "the project's preview is what shows";
+    EXPECT_NE(running.layer().sublayers[0].contents, nil);
+
+    // Nothing keeps saying it once the scene is held.
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(LogCapture::Count(kFailureLine), 1) << "the failure is said once, not per frame";
+}
+
+// The same scene with an effect whose shader compiles is drawn: the refusal
+// above is the shader's, not the effect chain's.
+TEST_F(SceneFailurePolicy, ASceneWhoseShadersAllCompileIsNotHeld)
+{
+    LogCapture log;
+    Running running(WriteSceneWithEffect(root_ / "scene", "gl_FragColor = c;"), root_ / "run");
+    ASSERT_TRUE(running.WaitForFirstFrame());
+    std::this_thread::sleep_for(500ms);
+
+    const auto selection = running.wallpaper().sceneBackendSelection();
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
+    EXPECT_TRUE(selection.created);
+    EXPECT_EQ(LogCapture::Count(kFailureLine), 0);
+    EXPECT_EQ(running.wallpaper().surfaceHealth().stop_reason, SurfaceStopReason::Running);
+    EXPECT_GT(running.Presented(), 0u);
+    EXPECT_EQ(running.layer().sublayers.count, 0u);
 }
 
 // A frame that fails after the scene has been drawing stops the clock, says so

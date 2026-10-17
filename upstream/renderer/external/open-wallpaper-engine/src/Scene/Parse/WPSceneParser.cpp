@@ -103,6 +103,35 @@ struct PendingMetalTranslation {
 /// so the queue is per-thread rather than global.
 thread_local std::vector<PendingMetalTranslation> g_pending_metal_translations;
 thread_local const LayerObjectIndex* g_parse_layer_index { nullptr };
+/// The shaders of this parse that could not be compiled, one sentence each, in
+/// the order the parse met them. The layer or effect that wanted one is left out
+/// of the scene (its material did not load), so the parse ends by handing these
+/// to the scene, whose capability gate refuses it with the first as the reason:
+/// a scene is never drawn with a part of it missing.
+thread_local std::vector<std::string> g_shader_failures;
+
+/// Records that `shader_name` could not be compiled, with the compiler's own
+/// explanation when it has one (its first line, so a long diagnostic does not
+/// become the panel's reason).
+void NoteShaderFailure(std::string_view shader_name, std::string detail) {
+    constexpr std::size_t kMaxDetail = 240;
+    if (const auto line = detail.find('\n'); line != std::string::npos) detail.resize(line);
+    if (detail.size() > kMaxDetail) detail.resize(kMaxDetail);
+    std::string reason = "the shader '" + std::string(shader_name) + "' could not be translated to Metal";
+    if (! detail.empty() && detail != "no shader error") reason += " (" + detail + ")";
+    g_shader_failures.push_back(std::move(reason));
+}
+
+/// What the scene reports when the parse met shaders that did not compile.
+std::string ShaderFailureReason() {
+    if (g_shader_failures.empty()) return {};
+    std::string reason = g_shader_failures.front();
+    if (g_shader_failures.size() > 1) {
+        reason += "; " + std::to_string(g_shader_failures.size() - 1) + " more shader" +
+                  (g_shader_failures.size() == 2 ? "" : "s") + " failed too";
+    }
+    return reason;
+}
 
 /// Compiles one iteration of a material's shader to Metal, merging what the
 /// compile learned into `units` and `shader_info`, and queues the program it
@@ -140,6 +169,7 @@ bool CompileAndQueueMetalProgram(const std::shared_ptr<SceneShader>& shader,
                                            std::nullopt,
                                            &pending.includes)) {
         if (replaces) g_pending_metal_translations.pop_back();
+        NoteShaderFailure(shader_name, shader::LastRustShaderError());
         return false;
     }
     if (reflection_json != nullptr) *reflection_json = pending.reflection_json;
@@ -1610,6 +1640,7 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
             LOG_ERROR("Rust shader default texture list did not stabilize after %zu compile passes for '%s'",
                       static_cast<std::size_t>(kMaxDefaultTextureCompilePasses),
                       wpmat.shader.c_str());
+            NoteShaderFailure(wpmat.shader, "its default textures never settled");
             return false;
         }
         textures = std::move(next_textures);
@@ -6219,6 +6250,9 @@ struct LazyShaderParseScope {
     }
     ~LazyShaderParseScope() {
         g_pending_metal_translations.clear();
+        // A layer a script creates after the scene is drawing: its failure is the
+        // script's (the layer is not made), never a reason to refuse the scene.
+        g_shader_failures.clear();
         g_parse_layer_index = previous;
         WPShaderParser::EndShaderSession();
     }
@@ -6231,6 +6265,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
     // A previous parse that returned early would otherwise leave records
     // pointing at a VFS that is gone.
     g_pending_metal_translations.clear();
+    g_shader_failures.clear();
     g_parse_layer_index = nullptr;
     nlohmann::json json;
     if (! PARSE_JSON(buf, json)) return nullptr;
@@ -6544,6 +6579,8 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
     // Last, once the scene graph, the cameras and the textures are all in
     // place: the structural check it consults needs the finished scene.
     FlushPendingMetalTranslations(*context.scene);
+    context.scene->shader_compile_error = ShaderFailureReason();
+    g_shader_failures.clear();
 
     WPShaderParser::EndShaderSession();
     g_parse_layer_index = nullptr;

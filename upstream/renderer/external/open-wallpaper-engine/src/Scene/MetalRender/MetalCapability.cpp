@@ -292,6 +292,10 @@ std::string SceneMetalStructuralRejection(const Scene& scene)
 
 SceneBackendSelection EvaluateMetalSupport(const Scene& scene)
 {
+    // First: the cause. A shader that did not compile took its layer or effect
+    // out of the scene, and whatever else looks wrong about the rest follows
+    // from that.
+    if (! scene.shader_compile_error.empty()) return NativeRefusal(scene.shader_compile_error);
     if (! scene.layer_texture_error.empty()) return NativeRefusal(scene.layer_texture_error);
     if (auto reason = SceneMetalStructuralRejection(scene); ! reason.empty()) {
         return NativeRefusal(std::move(reason));
