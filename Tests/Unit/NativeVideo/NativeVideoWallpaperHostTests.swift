@@ -21,7 +21,8 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         admissionKey: UInt64 = 1,
         scalingMode: BridgeScalingMode = .fill,
         scalingFactor: Double = 1.0,
-        mediaPath: String = "/tmp/does-not-need-to-exist/clip.mp4"
+        mediaPath: String = "/tmp/does-not-need-to-exist/clip.mp4",
+        framing: BridgeFraming = BridgeFraming(panX: 0.5, panY: 0.5)
     ) -> BridgeNativeVideoWallpaper {
         BridgeNativeVideoWallpaper(
             displayId: displayID,
@@ -30,6 +31,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             title: "Clip",
             mediaPath: mediaPath,
             admissionKey: admissionKey,
+            framing: framing,
             paused: paused,
             volume: volume,
             muted: muted,
@@ -134,9 +136,9 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             volumeHistory.append(volume)
         }
         /// Every scaling choice the host handed this surface, in order.
-        private(set) var scalingCalls: [(mode: BridgeScalingMode, factor: Double)] = []
-        func setScaling(_ mode: BridgeScalingMode, factor: Double) {
-            scalingCalls.append((mode: mode, factor: factor))
+        private(set) var scalingCalls: [(mode: BridgeScalingMode, factor: Double, pan: NativeVideoLayout.Pan)] = []
+        func setScaling(_ mode: BridgeScalingMode, factor: Double, pan: NativeVideoLayout.Pan) {
+            scalingCalls.append((mode: mode, factor: factor, pan: pan))
         }
         /// Every restart the host asked this surface for, with its reason.
         private(set) var restartReasons: [String] = []
@@ -2316,6 +2318,40 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         XCTAssertTrue(surface.isPlaying)
     }
 
+    func testTheUsersPositionReachesTheSurfaceWithoutReopeningIt() async throws {
+        let recorder = Recorder()
+        let moved = wallpaper(framing: BridgeFraming(panX: 0.9, panY: 0.1))
+        let host = makeHost(wallpapers: [moved], recorder: recorder)
+        defer { host.shutdown() }
+        await host.apply([moved])
+        let surface = try XCTUnwrap(surfacesMade[7])
+        XCTAssertEqual(surface.scalingCalls.last?.pan, NativeVideoLayout.Pan(x: 0.9, y: 0.1),
+            "the surface opens where the user put the picture, not in the middle")
+        let generation = host.surfaceGenerationForTest
+
+        // Center, saved: same clip, same key. The running surface is told and
+        // nothing is reread or reopened.
+        await host.apply([wallpaper()])
+
+        XCTAssertTrue(surfacesMade[7] === surface)
+        XCTAssertEqual(surface.scalingCalls.last?.pan, NativeVideoLayout.Pan.centered)
+        XCTAssertEqual(recorder.admissionProbes.count, 1)
+        XCTAssertEqual(host.surfaceGenerationForTest, generation)
+        XCTAssertEqual(recorder.stopped, 0)
+    }
+
+    func testEachDisplayKeepsItsOwnPosition() async throws {
+        let recorder = Recorder()
+        let first = wallpaper(displayID: 7, framing: BridgeFraming(panX: 0, panY: 1))
+        let second = wallpaper(displayID: 9)
+        let host = makeHost(wallpapers: [first, second], recorder: recorder)
+        defer { host.shutdown() }
+        await host.apply([first, second])
+
+        XCTAssertEqual(try XCTUnwrap(surfacesMade[7]).scalingCalls.last?.pan, NativeVideoLayout.Pan(x: 0, y: 1))
+        XCTAssertEqual(try XCTUnwrap(surfacesMade[9]).scalingCalls.last?.pan, NativeVideoLayout.Pan.centered)
+    }
+
     func testEachDisplayKeepsItsOwnScaling() async throws {
         let recorder = Recorder()
         let first = wallpaper(displayID: 7, scalingMode: .match, scalingFactor: 1)
@@ -2416,6 +2452,26 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
             source, pixelSize: CGSize(width: 4, height: 4), backingScale: 1, mode: .stretch, factor: 0.5))
         XCTAssertEqual(try pixel(shrunk, 0, 0), [0, 0, 0])
         XCTAssertEqual(try pixel(shrunk, 3, 3), [0, 0, 0])
+    }
+
+    func testPosterPutsThePictureWhereThePositionSays() throws {
+        let source = try stripedSource()
+        // 8x4 points on a 16x16 point display leaves 8 points of room across and 12 down.
+        // Top-left puts the picture's corner on the display's.
+        let topLeft = try XCTUnwrap(NativeVideoWallpaperWindow.fittedPoster(
+            source, pixelSize: CGSize(width: 16, height: 16), backingScale: 1, mode: .none, factor: 1,
+            pan: .init(x: 0, y: 0)))
+        XCTAssertTrue(isColor(try pixel(topLeft, 0, 0), [255, 0, 0]), "the picture's first column")
+        XCTAssertTrue(isColor(try pixel(topLeft, 7, 3), [255, 255, 255]), "its last column")
+        XCTAssertEqual(try pixel(topLeft, 8, 0), [0, 0, 0], "right of the picture")
+        XCTAssertEqual(try pixel(topLeft, 0, 4), [0, 0, 0], "below the picture")
+
+        let bottomRight = try XCTUnwrap(NativeVideoWallpaperWindow.fittedPoster(
+            source, pixelSize: CGSize(width: 16, height: 16), backingScale: 1, mode: .none, factor: 1,
+            pan: .init(x: 1, y: 1)))
+        XCTAssertTrue(isColor(try pixel(bottomRight, 8, 12), [255, 0, 0]), "the picture's first column")
+        XCTAssertTrue(isColor(try pixel(bottomRight, 15, 15), [255, 255, 255]), "its last column")
+        XCTAssertEqual(try pixel(bottomRight, 0, 0), [0, 0, 0])
     }
 
     func testPosterRefusesADisplayItCannotDrawInto() throws {

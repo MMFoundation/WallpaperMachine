@@ -708,6 +708,29 @@ async fn a_mirror_shares_its_sources_key_and_carries_no_rate() {
 }
 
 #[tokio::test]
+async fn a_mirror_of_a_moved_clip_is_centred() {
+    let temp = tempfile::tempdir().unwrap();
+    let engine = FakeEngineFacade::default();
+    let bridge = mirror_group_bridge(&engine, &temp, 60, 60).await;
+    bridge
+        .set_display_position("300".into(), "7".into(), Some(0.2), Some(0.8))
+        .await
+        .unwrap();
+
+    let rows = bridge.native_video_wallpapers().await.unwrap();
+    assert_eq!(
+        (native_row(&rows, 7).framing.pan_x, native_row(&rows, 7).framing.pan_y),
+        (0.2, 0.8),
+        "the source follows its own position"
+    );
+    assert_eq!(
+        (native_row(&rows, 9).framing.pan_x, native_row(&rows, 9).framing.pan_y),
+        (0.5, 0.5),
+        "a mirror's own settings carry no position, as the scene engine draws it"
+    );
+}
+
+#[tokio::test]
 async fn refusing_a_mirror_group_returns_every_member_to_the_engine() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();

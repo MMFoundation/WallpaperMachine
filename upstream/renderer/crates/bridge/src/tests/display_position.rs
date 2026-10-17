@@ -715,6 +715,45 @@ async fn the_lock_screen_export_carries_each_displays_saved_position() {
 }
 
 #[tokio::test]
+async fn the_native_video_descriptor_carries_the_saved_position_and_follows_a_move() {
+    let (engine, _release) = new_engine();
+    let (bridge, _temp) = shown_in_every_kind(&engine).await;
+    let offered = bridge.native_video_wallpapers().await.unwrap();
+    assert_eq!(offered.len(), 1);
+    assert_eq!(
+        offered[0].framing,
+        reported(0.5, 0.5),
+        "nothing was moved, so the clip is offered centred"
+    );
+
+    bridge
+        .set_display_position("400".into(), "2".into(), Some(0.9), Some(0.1))
+        .await
+        .unwrap();
+
+    let moved = bridge.native_video_wallpapers().await.unwrap();
+    assert_eq!(
+        moved[0].framing,
+        reported(0.9, 0.1),
+        "the player has to be told where the user put the picture"
+    );
+    assert_eq!(
+        moved[0].admission_key, offered[0].admission_key,
+        "a position says nothing about the file, so it must not reopen the clip"
+    );
+
+    bridge
+        .set_display_position("400".into(), "2".into(), Some(0.5), Some(0.5))
+        .await
+        .unwrap();
+    assert_eq!(
+        bridge.native_video_wallpapers().await.unwrap()[0].framing,
+        reported(0.5, 0.5),
+        "Center puts it back"
+    );
+}
+
+#[tokio::test]
 async fn the_lock_screen_export_follows_a_position_at_once_but_not_an_unapplied_scale() {
     let (engine, _release) = new_engine();
     let (bridge, _temp) = shown_in_every_kind(&engine).await;

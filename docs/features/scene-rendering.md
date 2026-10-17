@@ -803,8 +803,9 @@ display is centred, so an older build ignores it and a file nobody positioned is
 unchanged. A hand-edited value never costs the file its other settings: a fraction
 outside 0 to 1 is clamped, and anything that is not a number reads as the centre. A
 mirror display is always centred, because it has its own display settings and a live
-change to its source's position never reaches it. The native video player ignores the
-position. The bridge moves a wallpaper on one display (`set_display_position`, an axis
+change to its source's position never reaches it. The native video player places its layer
+by the saved position through the same layout (`NativeVideoLayout`), centred for a mirror, and
+moves when the position is saved (it has no per-step preview). The bridge moves a wallpaper on one display (`set_display_position`, an axis
 passed as nothing keeps its saved value): it refuses a fraction outside 0 to 1 or not a
 number instead of clamping it, saves the position at once and moves the scene that runs
 on that display without rebuilding it. Like the scaling mode, and unlike the scale factor,

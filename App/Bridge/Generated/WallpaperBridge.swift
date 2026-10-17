@@ -5417,6 +5417,12 @@ public struct BridgeNativeVideoWallpaper {
      */
     public var admissionKey: UInt64
     /**
+     * Where the picture sits on this display when it is larger or smaller than
+     * it, as the saved Position of this wallpaper on this display; centred for a
+     * mirror, as the scene engine draws it. The host places the picture with it.
+     */
+    public var framing: BridgeFraming
+    /**
      * Presentation suspension or the user's own pause, already combined for
      * this display by the activation rules.
      */
@@ -5445,6 +5451,11 @@ public struct BridgeNativeVideoWallpaper {
          * configuration the host never judged.
          */admissionKey: UInt64, 
         /**
+         * Where the picture sits on this display when it is larger or smaller than
+         * it, as the saved Position of this wallpaper on this display; centred for a
+         * mirror, as the scene engine draws it. The host places the picture with it.
+         */framing: BridgeFraming, 
+        /**
          * Presentation suspension or the user's own pause, already combined for
          * this display by the activation rules.
          */paused: Bool, volume: Float, muted: Bool, scalingMode: BridgeScalingMode, scalingFactor: Double) {
@@ -5454,6 +5465,7 @@ public struct BridgeNativeVideoWallpaper {
         self.title = title
         self.mediaPath = mediaPath
         self.admissionKey = admissionKey
+        self.framing = framing
         self.paused = paused
         self.volume = volume
         self.muted = muted
@@ -5484,6 +5496,9 @@ extension BridgeNativeVideoWallpaper: Equatable, Hashable {
         if lhs.admissionKey != rhs.admissionKey {
             return false
         }
+        if lhs.framing != rhs.framing {
+            return false
+        }
         if lhs.paused != rhs.paused {
             return false
         }
@@ -5509,6 +5524,7 @@ extension BridgeNativeVideoWallpaper: Equatable, Hashable {
         hasher.combine(title)
         hasher.combine(mediaPath)
         hasher.combine(admissionKey)
+        hasher.combine(framing)
         hasher.combine(paused)
         hasher.combine(volume)
         hasher.combine(muted)
@@ -5531,6 +5547,7 @@ public struct FfiConverterTypeBridgeNativeVideoWallpaper: FfiConverterRustBuffer
                 title: FfiConverterString.read(from: &buf), 
                 mediaPath: FfiConverterString.read(from: &buf), 
                 admissionKey: FfiConverterUInt64.read(from: &buf), 
+                framing: FfiConverterTypeBridgeFraming.read(from: &buf), 
                 paused: FfiConverterBool.read(from: &buf), 
                 volume: FfiConverterFloat.read(from: &buf), 
                 muted: FfiConverterBool.read(from: &buf), 
@@ -5546,6 +5563,7 @@ public struct FfiConverterTypeBridgeNativeVideoWallpaper: FfiConverterRustBuffer
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterString.write(value.mediaPath, into: &buf)
         FfiConverterUInt64.write(value.admissionKey, into: &buf)
+        FfiConverterTypeBridgeFraming.write(value.framing, into: &buf)
         FfiConverterBool.write(value.paused, into: &buf)
         FfiConverterFloat.write(value.volume, into: &buf)
         FfiConverterBool.write(value.muted, into: &buf)

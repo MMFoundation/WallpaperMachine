@@ -121,6 +121,11 @@ pub struct NativeVideoWallpaperDesc {
     /// The frame-rate cap is deliberately not part of it: the player plays a
     /// clip at the clip's own rate, so no cap decides whether it may take one.
     pub admission_key: u64,
+    /// Where the picture sits on this display when it is larger or smaller than
+    /// it: the saved Position of this wallpaper on this display, or centred. A
+    /// mirror is centred, as the scene engine draws it, because a mirror's
+    /// display settings carry no position.
+    pub framing: SceneFraming,
     pub paused: bool,
     pub volume: f32,
     pub muted: bool,
@@ -669,6 +674,9 @@ impl ActivationInputs<'_> {
                 wallpaper_id: slot.wallpaper_id.to_string(),
                 media_path: admission.media_path,
                 admission_key: admission.admission_key,
+                framing: render
+                    .map(|render| render.framing.to_scene())
+                    .unwrap_or_default(),
                 paused: self.display_paused(slot.display.display_id),
                 volume: slot.wallpaper.audio.volume,
                 muted: slot.wallpaper.audio.muted || self.audio_suppressed,
@@ -703,6 +711,7 @@ impl ActivationInputs<'_> {
             // sharing one key is what makes a refusal move the whole group and
             // keeps this display from going dark.
             videos.push(NativeVideoWallpaperDesc {
+                framing: SceneFraming::default(),
                 paused: self.display_paused(mirror.display.display_id),
                 volume: mirror.settings.volume,
                 muted: mirror.settings.muted || self.audio_suppressed,

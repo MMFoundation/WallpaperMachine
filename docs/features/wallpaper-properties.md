@@ -403,13 +403,14 @@ picture is taken again ([desktop picture](desktop-picture.md#when-a-poster-is-ta
 and the lock screen and screen saver draw the wallpaper at the same position
 ([lock screen](lock-screen.md#where-the-picture-sits)).
 
-Both scene renderers honour the position, and so does Compatibility video playback,
-which draws a video as a one-texture scene. The native video player draws a video
-centred whatever the position says. A video it draws shows a note saying so, with a
-link to Performance settings, where choosing Compatibility for **Video playback** lets
-the position apply; the sliders stay available, and the saved position still reaches
-the lock screen. The panel learns which displays the native player draws from the
-running backend reports, so a wallpaper with no report yet shows the plain note.
+Both scene renderers honour the position, and so does video playback: Compatibility
+draws a video as a one-texture scene, and the native video player places its layer by
+the same layout (`NativeVideoLayout`), so a clip that is larger than the display, or
+smaller, sits where the sliders put it whichever player draws it. A mirror is centred,
+as it is for a scene. The native player has no per-step preview: while a slider is
+dragged the picture on a clip it draws stays where it was, and it moves once the
+drag settles on a value, which is what is saved. The Mission Control picture is
+taken again after the move.
 
 ### Compatibility check
 

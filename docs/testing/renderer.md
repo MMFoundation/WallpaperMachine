@@ -408,8 +408,8 @@ cargo test -p shader --test pipeline -- --nocapture
   without losing the file's other settings, because a file that fails to parse is set
   aside whole; the scene built for a display carries that display's position and no
   other display's, whichever selector (Primary or identity) addresses it; a mirror is
-  centred even when its source is positioned; and a position changes neither the
-  native video descriptor nor its admission key, so moving a clip never restarts the
+  centred even when its source is positioned; and a position reaches the
+  native video descriptor as `framing` (centred for a mirror) but never its admission key, so moving a clip never restarts the
   native player.
 - `wallpaper-bridge` position setter (`cargo test --release -p wallpaper-bridge --lib
   -- display_position wallpaper_options_draft drafts::`): `set_display_position`

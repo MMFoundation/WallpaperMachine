@@ -982,16 +982,18 @@ fn a_mirror_is_centred_even_when_its_source_is_positioned() {
     assert_eq!(scene_framing(&scenes, 2), SceneFraming::default());
 }
 
-/// The native player ignores a position, so moving a clip must not look like a
-/// change to it: the descriptor it is handed and the key its admission is
-/// judged by stay what they were, and the clip does not fall back to the engine.
+/// The native player places its picture by the saved position, so the
+/// descriptor it is handed carries it. A position says nothing about the file,
+/// so the key its admission is judged by stays what it was, and the clip does
+/// not fall back to the engine.
 #[test]
-fn a_position_does_not_change_what_the_native_video_player_is_handed() {
+fn a_position_reaches_the_native_video_player_without_changing_its_admission() {
     let mut fixture = HeldFixture::new();
     let none = BTreeSet::new();
     let before = fixture.inputs(&none).build_native_video().unwrap();
     let keys_before = fixture.inputs(&none).native_video_admission_keys();
     assert_eq!(before.len(), 1);
+    assert_eq!(before[0].framing, SceneFraming::default(), "centred until moved");
 
     let clip_on_display_3 = SerializedSelector::LiveDisplayId { display_id: 3 };
     fixture
@@ -1004,11 +1006,16 @@ fn a_position_does_not_change_what_the_native_video_player_is_handed() {
             framing: framing(0.1, 0.9),
             ..MonitorRender::default()
         });
+    let moved = fixture.inputs(&none).build_native_video().unwrap();
+    assert_eq!(moved.len(), 1);
     assert_eq!(
-        fixture.inputs(&none).build_native_video().unwrap(),
-        before,
-        "the player is handed the same clip with the same settings"
+        moved[0].framing,
+        framing(0.1, 0.9).to_scene(),
+        "the player is handed where the user put the picture"
     );
+    let mut recentred = moved[0].clone();
+    recentred.framing = SceneFraming::default();
+    assert_eq!(recentred, before[0], "and nothing else about the descriptor moved");
     assert_eq!(
         fixture.inputs(&none).native_video_admission_keys(),
         keys_before
@@ -1019,8 +1026,6 @@ fn a_position_does_not_change_what_the_native_video_player_is_handed() {
         "and the engine is still given only the scene wallpaper"
     );
 
-    // The same record does reach the player once it holds something the
-    // player honours, so the equality above is not a record that was never found.
     fixture.wallpapers.get_mut("500").unwrap().monitors[0].scaling_mode = "fit".to_string();
     let fitted = fixture.inputs(&none).build_native_video().unwrap();
     assert_eq!(fitted[0].scaling_mode, ScalingMode::Fit);

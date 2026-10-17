@@ -343,9 +343,11 @@ reuse, or visual behavior, which is why these items are manual.
 - [ ] Position is remembered: relaunch and it returns; the same wallpaper on another display and
       another wallpaper on the same display keep their own; the lock screen and screen saver
       (when enabled) draw it; the Mission Control picture is retaken after a move.
-- [ ] With **Video playback** on Native video preferred and a supported clip, the Position
-      block shows the native-player note and **Open Performance** and the video stays
-      centred; choosing Compatibility lets the sliders move it.
+- [ ] With **Video playback** on Native video preferred and a supported clip larger than the
+      display, the Position sliders move the video: it stays where it was while a slider is
+      dragged and moves when the drag settles; the Mission Control picture matches; **Center**
+      puts it back; a mirror of it stays centred. The Position block has no native-player
+      note, and the **Frame rate** row is absent on the display the native player draws.
 
 ## Wallpaper switching
 

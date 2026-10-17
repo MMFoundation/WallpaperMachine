@@ -125,7 +125,7 @@ The clip is never heard. The player is built from the video track alone, so no a
 no audio output or session is opened, it is muted as well, and it asks neither to keep the display
 awake nor to become the system's playing media. The picture is placed by `NativeVideoLayout`, the
 rule the desktop's native player and the scene engine share (Fit, Fill, Stretch, Original size,
-the scale factor), and, unlike the desktop's native player, it applies the position the app
+the scale factor), and, like the desktop's native player, it applies the position the app
 publishes as `framing`. The surface pauses the player exactly when it pauses the scene engine,
 for the same reasons, and a paused player decodes nothing and keeps its last frame on the layer.
 The frame the system asks for in a snapshot, and the one held behind the layer, are read through

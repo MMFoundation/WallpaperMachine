@@ -1340,6 +1340,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     title,
                     media_path,
                     admission_key: desc.admission_key,
+                    framing: desc.framing.into(),
                     paused: desc.paused,
                     volume: desc.volume,
                     muted: desc.muted,

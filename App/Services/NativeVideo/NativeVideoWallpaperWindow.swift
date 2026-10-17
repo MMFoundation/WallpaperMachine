@@ -13,10 +13,10 @@ protocol NativeVideoSurface: AnyObject {
     var posterLayer: CALayer? { get }
     func setScreenFrame(_ frame: NSRect)
     func setVolume(_ volume: Float, muted: Bool)
-    /// The user's scaling mode and scale factor. Both are honoured on this
-    /// backend exactly as Compatibility draws them, so the surface never
-    /// substitutes another mode for the one chosen.
-    func setScaling(_ mode: BridgeScalingMode, factor: Double)
+    /// The user's scaling mode, scale factor and position. All three are honoured on
+    /// this backend exactly as Compatibility draws them, so the surface never
+    /// substitutes another mode, or a centred picture, for the one chosen.
+    func setScaling(_ mode: BridgeScalingMode, factor: Double, pan: NativeVideoLayout.Pan)
     func setUserPaused(_ paused: Bool)
     func setPresentationSuspended(_ suspended: Bool)
     var isPlaying: Bool { get }
@@ -88,6 +88,7 @@ final class NativeVideoWallpaperWindow: NSWindow {
     let player: NativeVideoPlayer
     private var scalingMode: BridgeScalingMode = .fill
     private var scalingFactor = 1.0
+    private var scalingPan = NativeVideoLayout.Pan.centered
 
     init(frame: NSRect, player: NativeVideoPlayer) {
         self.player = player
@@ -125,10 +126,11 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
         if self.frame != frame { setFrame(frame, display: false) }
     }
     func setVolume(_ volume: Float, muted: Bool) { player.setVolume(volume, muted: muted) }
-    func setScaling(_ mode: BridgeScalingMode, factor: Double) {
+    func setScaling(_ mode: BridgeScalingMode, factor: Double, pan: NativeVideoLayout.Pan) {
         scalingMode = mode
         scalingFactor = factor
-        player.setScaling(mode, factor: factor)
+        scalingPan = pan
+        player.setScaling(mode, factor: factor, pan: pan)
     }
     func setUserPaused(_ paused: Bool) { player.setUserPaused(paused) }
     func setPresentationSuspended(_ suspended: Bool) {
@@ -144,20 +146,21 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
         guard let image = await player.posterImage() else { return nil }
         return Self.fittedPoster(image, pixelSize: CGSize(
             width: frame.width * backingScaleFactor, height: frame.height * backingScaleFactor),
-            backingScale: backingScaleFactor, mode: scalingMode, factor: scalingFactor)
+            backingScale: backingScaleFactor, mode: scalingMode, factor: scalingFactor,
+            pan: scalingPan)
     }
 
     /// The desktop picture API stretches the supplied poster to the display.
     /// Draw the clip's frame where the live layer puts the picture first, so
     /// other Spaces show the same crop, bars and zoom: Fit leaves black bars,
-    /// Fill and Original size crop, and a scale factor magnifies.
+    /// Fill and Original size crop, a scale factor magnifies, and a position moves it.
     static func fittedPoster(
         _ image: CGImage, pixelSize: CGSize, backingScale: CGFloat, mode: BridgeScalingMode,
-        factor: Double
+        factor: Double, pan: NativeVideoLayout.Pan = .centered
     ) -> CGImage? {
         NativeVideoLayout.composeFrame(
             image, pixelSize: pixelSize, backingScale: backingScale, mode: mode.layoutMode,
-            factor: factor)
+            factor: factor, pan: pan)
     }
     /// Forwarded straight to the player, which is what observes
     /// `AVPlayerItem.status` and knows its own surface generation.

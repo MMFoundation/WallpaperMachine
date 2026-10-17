@@ -888,10 +888,12 @@ need an authorized runtime check
   factor 1 stay AVFoundation's gravity while Original size and a factor wait for the
   picture's size, and a position (the room is divided as the renderer divides it, an unusable
   one is held to the edge or the middle, and any position but the middle needs an explicit
-  frame because gravity centres). The host suite checks the user's mode and factor reach a running
-  surface without reopening or re-probing it, and the desktop-picture poster is drawn
-  with the same layout (Fit leaves black bars, Original size is not scaled to the
-  display, a factor zooms). To regenerate or extend the expected rectangles, compile
+  frame because gravity centres). The host suite checks the user's mode, factor and position reach
+  a running surface without reopening or re-probing it, each display keeping its own, and the
+  desktop-picture poster is drawn with the same layout (Fit leaves black bars, Original size is
+  not scaled to the display, a factor zooms, a position puts the picture in its corner); the
+  player suite places the live layer for a position (flush to each edge, gravity back at the
+  middle, a position that is not a position held to the edge or the middle). To regenerate or extend the expected rectangles, compile
   `upstream/renderer/external/open-wallpaper-engine/src/Presentation/WallpaperScaling.cpp`
   directly (it needs no Vulkan header), hand `ComputeWallpaperScalingLayout` the display as
   `lround(devicePixels / scale)` logical points (as `MetalRender::Impl::scalingLayout`

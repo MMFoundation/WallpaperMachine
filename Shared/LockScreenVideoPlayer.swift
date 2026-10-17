@@ -187,7 +187,8 @@ final class LockScreenVideoPlayer {
     case .frame(let rect):
       // The rectangle already has the picture's own aspect.
       layer.videoGravity = .resize
-      layer.frame = rect
+      // The layout measures from the top edge and the root layer grows upward.
+      layer.frame = NativeVideoLayout.layerFrame(rect, viewportHeight: viewport.height)
     case .pending:
       break
     }

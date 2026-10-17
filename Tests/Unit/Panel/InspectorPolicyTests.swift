@@ -227,21 +227,6 @@ final class InspectorPolicyTests: InspectorTestCase {
     }
   }
 
-  // MARK: Position
-
-  func testOnlyTheDisplayTheNativePlayerDrawsOnSaysSoAndOffersPerformance() {
-    let snapshot = BridgeSnapshotFixtures.options(
-      wallpaperId: "clip", kind: .video,
-      displayConfigurations: [
-        InspectorRenderFixture.config("primary", "Studio Display (1 - Primary)", mode: .fill, factor: 1, pan: (0.5, 0.5)),
-        InspectorRenderFixture.config("second", "LG UltraFine (2 - Secondary)", mode: .fill, factor: 1, pan: (0.5, 0.5)),
-      ])
-    var inputs = InspectorOptions.Inputs()
-    inputs.nativePlayerDisplays = [1]
-    let displays = InspectorOptions.make(snapshot, inputs: inputs).displays
-    XCTAssertEqual(displays.map(InspectorPolicy.positionNote(for:)), [.nativePlayer, .explains])
-  }
-
   // MARK: Frame rate
 
   func testADisplayTheNativePlayerDrawsOnHasNoFrameRateToSet() {

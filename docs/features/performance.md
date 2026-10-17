@@ -703,11 +703,13 @@ the picture centred and anything outside the display cropped. A factor that is n
 positive number counts as 1. Changing the mode or factor moves the running picture;
 it does not reopen the clip or read the file again. The desktop picture shown in
 other Spaces and Mission Control is drawn with the same layout. The wallpaper's
-position on the display is not honoured: the native player always centres, and the
-inspector's Position block says so ([display position](wallpaper-properties.md#display-position)).
-The lock screen and screen saver do apply the position: with this backend selected, a plain video
-there is played by an AVFoundation layer in the lock-screen extension, placed by the same layout
-with the position the app publishes ([lock screen](lock-screen.md#plain-video-wallpapers)). One known difference:
+position on the display is honoured too: the layer is placed by the same layout with the
+saved Position of the wallpaper on that display, and the desktop picture shown in other Spaces
+is drawn with it ([display position](wallpaper-properties.md#display-position)). The lock
+screen and screen saver apply the position the same way: with this backend selected, a plain
+video there is played by an AVFoundation layer in the lock-screen extension, placed by the same
+layout with the position the app publishes ([lock screen](lock-screen.md#plain-video-wallpapers)).
+A mirror is centred. One known difference:
 the native player applies a clip's pixel aspect ratio to the picture's size and
 Compatibility ignores it, so an anamorphic clip is laid out by its displayed size
 here. Layer placement is in `NativeVideoLayout`; its expected rectangles come from

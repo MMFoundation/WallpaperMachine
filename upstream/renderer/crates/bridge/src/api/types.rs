@@ -767,6 +767,10 @@ pub struct BridgeNativeVideoWallpaper {
     /// after the user changed something is discarded instead of killing a
     /// configuration the host never judged.
     pub admission_key: u64,
+    /// Where the picture sits on this display when it is larger or smaller than
+    /// it, as the saved Position of this wallpaper on this display; centred for a
+    /// mirror, as the scene engine draws it. The host places the picture with it.
+    pub framing: BridgeFraming,
     /// Presentation suspension or the user's own pause, already combined for
     /// this display by the activation rules.
     pub paused: bool,

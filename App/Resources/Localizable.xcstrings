@@ -7045,9 +7045,6 @@
     "Choose which part of the wallpaper stays in view when it is larger than the display, or where it sits when it is smaller. Nothing moves when it already fits the display exactly." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "壁紙がディスプレイより大きいときは表示する部分を、小さいときは置く位置を選びます。ディスプレイにぴったり収まる壁紙は動きません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "壁纸比显示器大时，选择保留哪一部分在画面内；比显示器小时，选择它摆放的位置。壁纸与显示器完全吻合时不会移动。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "桌布比顯示器大時，選擇要保留哪一部分在畫面內；比顯示器小時，選擇它擺放的位置。桌布與顯示器完全吻合時不會移動。"}}}
     },
-    "This video is drawn by the native video player, which keeps it centered. Choose Compatibility for Video playback in Performance settings to move it." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "このビデオはネイティブのビデオプレーヤーで描画されるため、常に中央に表示されます。動かすには、パフォーマンス設定の「ビデオ再生」で「互換モード」を選んでください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "此视频由原生视频播放器绘制，始终居中显示。要移动它，请在“性能”设置中将“视频播放”选为“兼容模式”。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "此影片由原生影片播放器繪製，一律置中顯示。若要移動，請在「效能」設定中將「影片播放」選為「相容模式」。"}}}
-    },
     "Active Display Only" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "使用中のディスプレイのみ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "仅当前显示器"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "僅目前顯示器"}}}
     },

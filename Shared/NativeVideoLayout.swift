@@ -157,6 +157,14 @@ enum NativeVideoLayout {
                 width: CGFloat(rect.width) / scale, height: CGFloat(rect.height) / scale))
     }
 
+    /// `rect`, which `placement` measures from the display's top edge, as a layer frame inside a
+    /// parent whose y axis grows upward, as the plain layers of a window and of the lock-screen
+    /// surface do. The Position sliders are measured from the top (0 is the top edge), so a
+    /// layer given the rectangle unconverted would sit at the bottom instead.
+    static func layerFrame(_ rect: CGRect, viewportHeight: CGFloat) -> CGRect {
+        CGRect(x: rect.minX, y: viewportHeight - rect.maxY, width: rect.width, height: rect.height)
+    }
+
     /// `image` drawn on black where the live layer puts the picture: a bitmap of the display in
     /// device pixels, for a poster or the frame behind a layer. `nil` for a size no display has.
     /// The layout measures from the top edge and a bitmap context from the bottom.

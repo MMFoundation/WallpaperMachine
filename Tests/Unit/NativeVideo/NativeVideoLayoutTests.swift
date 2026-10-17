@@ -6,7 +6,8 @@ import XCTest
 /// Where the native backend puts the picture, against the numbers the
 /// Compatibility backend's own layout code produces.
 ///
-/// Pure arithmetic: no player, no layer, no media. Whether the real layer then
+/// Pure arithmetic: no player, no media (one test draws plain layers to pin the
+/// vertical convention). Whether the real player layer then
 /// lands there is in `NativeVideoPlayerMediaTests`, which is opt-in.
 final class NativeVideoLayoutTests: XCTestCase {
     private struct Golden {
@@ -252,6 +253,50 @@ final class NativeVideoLayoutTests: XCTestCase {
                 mode: .match, factor: 1, videoSize: nil, viewport: viewport, backingScale: 1,
                 pan: .init(x: 0.5, y: 0)),
             .pending)
+    }
+
+    /// The Position sliders measure from the top (0 is the top edge) and a window's layer grows
+    /// upward, so the layout's rectangle has to be flipped into it. Checked on pixels, because a
+    /// frame that is numerically right in the wrong convention puts the picture at the bottom.
+    func testAPictureAtTheTopEdgeIsDrawnAtTheTopOfAnUpwardGrowingLayer() throws {
+        let viewport = CGSize(width: 40, height: 30)
+        let rect = NativeVideoLayout.pictureRect(
+            mode: .none, factor: 1, videoSize: CGSize(width: 20, height: 10),
+            viewport: viewport, backingScale: 1, pan: .init(x: 0, y: 0))
+        XCTAssertEqual(rect.y, 0, "the layout puts it on the top edge")
+
+        let root = CALayer()
+        root.frame = CGRect(origin: .zero, size: viewport)
+        root.backgroundColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+        let picture = CALayer()
+        picture.backgroundColor = CGColor(red: 1, green: 0, blue: 0, alpha: 1)
+        picture.frame = NativeVideoLayout.layerFrame(
+            CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height),
+            viewportHeight: viewport.height)
+        root.addSublayer(picture)
+
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 40, height: 30, bitsPerComponent: 8, bytesPerRow: 40 * 4,
+            space: space,
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue))
+        root.render(in: context)
+        let image = try XCTUnwrap(context.makeImage())
+        let data = try XCTUnwrap(image.dataProvider?.data as Data?)
+        // Rows of a CGImage run from the top.
+        func red(atRow row: Int) -> UInt8 { data[row * image.bytesPerRow + 5 * 4] }
+        XCTAssertEqual(red(atRow: 2), 255, "the picture is at the top of the picture")
+        XCTAssertEqual(red(atRow: 27), 0, "and not at the bottom")
+    }
+
+    func testALayerFrameKeepsItsSizeAndFlipsOnlyTheVerticalPlace() {
+        XCTAssertEqual(
+            NativeVideoLayout.layerFrame(CGRect(x: 3, y: 4, width: 20, height: 10), viewportHeight: 50),
+            CGRect(x: 3, y: 36, width: 20, height: 10))
+        // A picture taller than the display overflows both edges alike.
+        XCTAssertEqual(
+            NativeVideoLayout.layerFrame(CGRect(x: 0, y: -5, width: 10, height: 60), viewportHeight: 50),
+            CGRect(x: 0, y: -5, width: 10, height: 60))
     }
 
     func testTheModeNumbersAreTheConfigurationsAndTheRenderers() {

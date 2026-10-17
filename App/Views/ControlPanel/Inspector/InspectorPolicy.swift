@@ -132,24 +132,6 @@ enum InspectorPolicy {
     }
   }
 
-  // MARK: Position
-
-  /// What the note under a display's Position sliders says.
-  enum PositionNote: Equatable {
-    /// The native video player draws the wallpaper on this display and keeps it centred, with
-    /// **Open Performance** to choose Compatibility instead. The sliders stay: the position is kept
-    /// for when another player draws it.
-    case nativePlayer
-    /// What the sliders do.
-    case explains
-  }
-
-  /// Only the display the native player draws on gets its note; another display of the same
-  /// wallpaper is moved as usual.
-  static func positionNote(for display: InspectorOptions.DisplayRow) -> PositionNote {
-    display.isDrawnByNativePlayer ? .nativePlayer : .explains
-  }
-
   // MARK: Frame rate
 
   /// Whether a display's Frame rate row, and the note about the ceiling on it, are shown. The

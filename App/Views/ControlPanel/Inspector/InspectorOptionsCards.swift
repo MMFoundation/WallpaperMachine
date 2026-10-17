@@ -455,20 +455,9 @@ private struct PositionRows: View {
         .buttonStyle(.inspectorLink)
         .disabled(display.position.isCentered)
         .help(L("Center the wallpaper on the display"))
-        switch InspectorPolicy.positionNote(for: display) {
-        case .nativePlayer:
-          InspectorNote(
-            "This video is drawn by the native video player, which keeps it centered. Choose Compatibility for Video playback in Performance settings to move it."
-          )
-          Button("Open Performance") {
-            controller.launch("openSettings") { try await controller.openSettings(.performance) }
-          }
-          .buttonStyle(.inspectorLink)
-        case .explains:
-          InspectorNote(
-            "Choose which part of the wallpaper stays in view when it is larger than the display, or where it sits when it is smaller. Nothing moves when it already fits the display exactly."
-          )
-        }
+        InspectorNote(
+          "Choose which part of the wallpaper stays in view when it is larger than the display, or where it sits when it is smaller. Nothing moves when it already fits the display exactly."
+        )
       }
     }
     // A drag cut off by the rows going away settles with its newest value.

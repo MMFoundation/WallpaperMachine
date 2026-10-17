@@ -929,14 +929,19 @@ final class NativeVideoWallpaperHost {
         // report shows which choice the picture followed.
         if let before = priorDescriptor, before.scalingMode != wallpaper.scalingMode
             || before.scalingFactor != wallpaper.scalingFactor
+            || before.framing != wallpaper.framing
         {
             AppLog.debug(
                 "native video wallpaper \(wallpaper.wallpaperId): scaling "
-                    + "\(before.scalingMode) x\(before.scalingFactor) -> "
-                    + "\(wallpaper.scalingMode) x\(wallpaper.scalingFactor)",
+                    + "\(before.scalingMode) x\(before.scalingFactor) at "
+                    + "\(before.framing.panX),\(before.framing.panY) -> "
+                    + "\(wallpaper.scalingMode) x\(wallpaper.scalingFactor) at "
+                    + "\(wallpaper.framing.panX),\(wallpaper.framing.panY)",
                 load: logLoads[displayID])
         }
-        surface.setScaling(wallpaper.scalingMode, factor: wallpaper.scalingFactor)
+        surface.setScaling(
+            wallpaper.scalingMode, factor: wallpaper.scalingFactor,
+            pan: .init(x: wallpaper.framing.panX, y: wallpaper.framing.panY))
         // The descriptor's paused flag already carries the user's own choice
         // and this display's suspension, as the activation rules combined them.
         surface.setUserPaused(wallpaper.paused)
