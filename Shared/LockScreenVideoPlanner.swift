@@ -1,4 +1,5 @@
 import Foundation
+import WallpaperMedia
 
 /// Which path draws a plain video wallpaper on the lock screen and as the screen saver.
 enum LockScreenVideoPath: Equatable {
@@ -7,10 +8,24 @@ enum LockScreenVideoPath: Equatable {
   case sceneEngine(reason: String?)
   /// An AVFoundation layer with hardware decode.
   case avFoundation(URL)
+  /// A WebM or Matroska file AVFoundation cannot open, opened with the app's own reader and played
+  /// by `WebMPlayer` (`LockScreenWebMPlayer`).
+  case webM(URL, WebMFile)
 
   var isNative: Bool {
-    if case .avFoundation = self { return true }
-    return false
+    switch self {
+    case .avFoundation, .webM: return true
+    case .sceneEngine: return false
+    }
+  }
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    switch (lhs, rhs) {
+    case let (.sceneEngine(a), .sceneEngine(b)): return a == b
+    case let (.avFoundation(a), .avFoundation(b)): return a == b
+    case let (.webM(a, fileA), .webM(b, fileB)): return a == b && fileA === fileB
+    default: return false
+    }
   }
 }
 
@@ -19,7 +34,8 @@ enum LockScreenVideoPath: Equatable {
 /// It mirrors the app: the native player takes a clip only when the Video backend setting
 /// selects it (the app publishes `nativeVideoFile` then and only then), and only when
 /// `NativeVideoAdmission` accepts the clip, the same rule the desktop applies. The clip plays at
-/// its own frame rate. A clip AVFoundation cannot open, such as WebM, goes to the scene engine.
+/// its own frame rate. A clip AVFoundation cannot open is tried with the app's own WebM reader (a
+/// Matroska or WebM file it plays goes to `WebMPlayer`); anything else goes to the scene engine.
 enum LockScreenVideoPlanner {
   /// The scene's media file in the exchange directory, as a path relative to it. Nil when the
   /// scene does not ask for the native player, or names a file that cannot lie inside its
@@ -42,6 +58,10 @@ enum LockScreenVideoPlanner {
     resolve: (String) throws -> URL,
     admission: (URL) async -> NativeVideoRefusal? = { url in
       await NativeVideoAdmission.evaluate(url: url)
+    },
+    openWebM: (URL) -> WebMFile? = { url in
+      if case .success(let file) = WebMOpening.open(url: url) { return file }
+      return nil
     }
   ) async -> LockScreenVideoPath {
     guard scene.webEntryFile == nil, scene.nativeVideoFile != nil else {
@@ -56,6 +76,9 @@ enum LockScreenVideoPlanner {
       return .sceneEngine(reason: "the clip is unavailable: \(error.localizedDescription)")
     }
     if let refusal = await admission(url) {
+      // AVFoundation never opens Matroska or WebM; the app's reader may. Anything it does not play
+      // keeps the refusal AVFoundation gave.
+      if case .notPlayable = refusal, let file = openWebM(url) { return .webM(url, file) }
       return .sceneEngine(reason: refusal.reason)
     }
     return .avFoundation(url)

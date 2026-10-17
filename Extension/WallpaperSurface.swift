@@ -18,8 +18,9 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   private var layer: CAMetalLayer?
   private var renderer: OpaquePointer?
   private var web: ScreenSaverWebSurface?
-  /// The AVFoundation layer playing a plain video wallpaper, in place of `renderer`.
-  private var video: LockScreenVideoPlayer?
+  /// The player of a plain video wallpaper (an AVFoundation layer, or the WebM player for the files
+  /// AVFoundation cannot open), in place of `renderer`.
+  private var video: LockScreenVideoPlaying?
   private var nativeStart: Task<Void, Never>?
   /// The clip the native player failed on (after its first frame, or by not producing one in
   /// time), so the replacement that follows draws that clip with the scene engine instead of
@@ -297,7 +298,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   /// What the native attempt came to: the scene engine, or a player showing its first frame.
   private enum NativeAttempt {
     case engine(reason: String)
-    case ready(LockScreenVideoPlayer, CGImage)
+    case ready(LockScreenVideoPlaying, CGImage)
   }
 
   /// A plain video the app asked the native player for: decided against the same admission
@@ -367,15 +368,22 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     let path = await LockScreenVideoPlanner.decide(
       scene: scene, enabled: enabled, resolve: { try WallpaperRuntime.asset($0) })
     try Task.checkCancellation()
-    guard case .avFoundation(let url) = path else {
-      if case .sceneEngine(let reason?) = path { return .engine(reason: reason) }
-      return .engine(reason: "no native clip")
-    }
     let framing = scene.effectiveFraming
-    let player = LockScreenVideoPlayer(
-      url: url, mode: NativeVideoScalingMode(rawValue: scene.scalingMode) ?? .fill,
-      factor: scene.scalingFactor, pan: .init(x: framing.panX, y: framing.panY),
-      viewport: size, backingScale: self.scale)
+    let mode = NativeVideoScalingMode(rawValue: scene.scalingMode) ?? .fill
+    let pan = NativeVideoLayout.Pan(x: framing.panX, y: framing.panY)
+    let player: LockScreenVideoPlaying
+    switch path {
+    case .avFoundation(let url):
+      player = LockScreenVideoPlayer(
+        url: url, mode: mode, factor: scene.scalingFactor, pan: pan, viewport: size,
+        backingScale: self.scale)
+    case .webM(_, let file):
+      player = LockScreenWebMPlayer(
+        file: file, mode: mode, factor: scene.scalingFactor, pan: pan, viewport: size,
+        backingScale: self.scale)
+    case .sceneEngine(let reason):
+      return .engine(reason: reason ?? "no native clip")
+    }
     video = player
     player.attach(to: root)
     do {
@@ -479,7 +487,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   /// The backend is only known once the scene is parsed, which the first frame proves.
   private func logBackend() {
     if video != nil {
-      WallpaperRuntime.log("Backend display=\(scene.displayID) drew=AVFoundation video")
+      WallpaperRuntime.log(
+        "Backend display=\(scene.displayID) drew=\(video is LockScreenWebMPlayer ? "WebM video" : "AVFoundation video")")
       return
     }
     guard let renderer else { return }

@@ -1,5 +1,6 @@
 import AVFoundation
 import XCTest
+import WallpaperMedia
 
 @testable import WallpaperMachine
 
@@ -24,18 +25,60 @@ final class LockScreenVideoPlannerTests: XCTestCase {
   private func decide(
     _ scene: LockScreenScene, enabled: Bool = true,
     admission: @escaping (URL) async -> NativeVideoRefusal? = { _ in nil },
-    resolved: @escaping (String) throws -> URL = { URL(fileURLWithPath: "/exchange/" + $0) }
+    resolved: @escaping (String) throws -> URL = { URL(fileURLWithPath: "/exchange/" + $0) },
+    openWebM: @escaping (URL) -> WebMFile? = { _ in nil }
   ) async -> LockScreenVideoPath {
     await LockScreenVideoPlanner.decide(
-      scene: scene, enabled: enabled, resolve: resolved, admission: admission)
+      scene: scene, enabled: enabled, resolve: resolved, admission: admission, openWebM: openWebM)
+  }
+
+  private func webMFile() throws -> WebMFile {
+    guard case .success(let file) = WebMOpening.open(data: WebMFixture.vp9) else {
+      throw XCTSkip("the embedded WebM no longer opens")
+    }
+    return file
+  }
+
+  func testAMatroskaOrWebMFileAVFoundationCannotOpenIsPlayedByTheWebMPlayerWhenItsReaderTakesIt() async throws {
+    let file = try webMFile()
+    var opened: [URL] = []
+    let path = await decide(
+      scene(file: "clip.webm"), admission: { _ in .notPlayable("asset reports itself unplayable") },
+      openWebM: { url in
+        opened.append(url)
+        return file
+      })
+    XCTAssertEqual(path, .webM(URL(fileURLWithPath: "/exchange/revisions/abc/clip.webm"), file))
+    XCTAssertTrue(path.isNative)
+    XCTAssertEqual(opened, [URL(fileURLWithPath: "/exchange/revisions/abc/clip.webm")])
+  }
+
+  func testAFileTheWebMReaderDoesNotTakeKeepsAVFoundationsRefusalAndGoesToTheSceneEngine() async {
+    let path = await decide(
+      scene(file: "clip.webm"), admission: { _ in .notPlayable("asset reports itself unplayable") },
+      openWebM: { _ in nil })
+    XCTAssertEqual(path, .sceneEngine(reason: "asset is not playable: asset reports itself unplayable"))
+  }
+
+  func testOnlyAnUnplayableAnswerIsPassedToTheWebMReader() async throws {
+    let file = try webMFile()
+    for refusal in [NativeVideoRefusal.preparationFailed("busy"), .playbackFailed("decoder")] {
+      var asked = false
+      let path = await decide(scene(), admission: { _ in refusal }, openWebM: { _ in
+        asked = true
+        return file
+      })
+      XCTAssertFalse(path.isNative, "\(refusal)")
+      XCTAssertFalse(asked, "a read that failed or a decoder that gave up says nothing about the container")
+    }
   }
 
   func testAClipTheAppAskedTheNativePlayerForIsPlayedByAVFoundationWhenAdmissionAccepts() async {
     var asked: [URL] = []
-    let path = await decide(scene(fps: 24)) { url in
+    let path = await decide(scene(fps: 24), admission: { url in
       asked.append(url)
       return nil
-    }
+    })
     XCTAssertEqual(path, .avFoundation(URL(fileURLWithPath: "/exchange/revisions/abc/clip.mp4")))
     XCTAssertTrue(path.isNative)
     XCTAssertEqual(asked, [URL(fileURLWithPath: "/exchange/revisions/abc/clip.mp4")],
@@ -44,10 +87,10 @@ final class LockScreenVideoPlannerTests: XCTestCase {
 
   func testAClipTheAppDidNotAskTheNativePlayerForStaysWithTheSceneEngine() async {
     var admissionAsked = false
-    let path = await decide(scene(file: nil)) { _ in
+    let path = await decide(scene(file: nil), admission: { _ in
       admissionAsked = true
       return nil
-    }
+    })
     XCTAssertEqual(path, .sceneEngine(reason: nil))
     XCTAssertFalse(admissionAsked, "nothing is opened for a scene that never asked")
   }
@@ -63,7 +106,7 @@ final class LockScreenVideoPlannerTests: XCTestCase {
       .preparationFailed("the file could not be read"),
       .playbackFailed("decoder error"),
     ] {
-      let path = await decide(scene()) { _ in refusal }
+      let path = await decide(scene(), admission: { _ in refusal })
       XCTAssertEqual(path, .sceneEngine(reason: refusal.reason), "\(refusal)")
       XCTAssertFalse(path.isNative)
     }
@@ -77,10 +120,10 @@ final class LockScreenVideoPlannerTests: XCTestCase {
 
   func testAClipThePlayerAlreadyFailedOnIsNotTriedAgain() async {
     var admissionAsked = false
-    let path = await decide(scene(), enabled: false) { _ in
+    let path = await decide(scene(), enabled: false, admission: { _ in
       admissionAsked = true
       return nil
-    }
+    })
     guard case .sceneEngine(let reason?) = path else { return XCTFail("\(path)") }
     XCTAssertFalse(reason.isEmpty)
     XCTAssertFalse(admissionAsked)

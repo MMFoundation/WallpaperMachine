@@ -638,7 +638,7 @@ only on macOS 26 and later (`LockScreenConfiguration.isSupportedBySystem`).
 | `WallpaperExtension.swift` | `@main AppExtension`; XPC handler for the whole system protocol (21 requests on macOS 27.0): `acquire`/`update`/`invalidate`/`snapshot`/`provideSettingsViewModels`/`isChoiceDownloaded`/`selectedChoicesDidChange`/`handleNotification` do the work, the rest reply "nothing to do"; connection acceptance |
 | `WallpaperRuntime.swift` | Loads and checks the private hosting ABI, verifies the caller's code signature via its audit token, resolves `CAContext`, compares the exported XPC protocol with the system's (`verifyXPCProtocol`), reads the published configuration and asset paths, logging |
 | `WallpaperController.swift` | Singleton surface registry; screen and system sleep/wake, `com.apple.screenIsLocked`/`Unlocked` and the wallpaper service's `hostDidWake` notice each start a bounded re-check burst of every surface (display power and lock state are read from the system, never remembered); reloads on the Darwin notification `app.wallpapermachine.lock-screen.changed` |
-| `WallpaperSurface.swift` | One `WallpaperID` to one `CAContext` with a scene/video `CAMetalLayer`, an AVFoundation `AVPlayerLayer` (a plain video when the Video backend is Native preferred and `LockScreenVideoPlanner` admits it; otherwise the scene engine) or live WebKit layer tree; bounded geometry, readiness and snapshots |
+| `WallpaperSurface.swift` | One `WallpaperID` to one `CAContext` with a scene/video `CAMetalLayer`, an AVFoundation `AVPlayerLayer` or the WebM player (`LockScreenWebMPlayer`) for a plain video that `LockScreenVideoPlanner` admits, otherwise the scene engine or live WebKit layer tree; bounded geometry, readiness and snapshots |
 | `WallpaperSettingsProvider.swift` | Encodes the private wallpaper settings view-model payload |
 | `WallpaperExtensionBridge.h` | Objective-C bridging header declaring the private `CAContext`, `NSXPCConnection.auditToken` and the XPC protocol, selector for selector as the system declares it; also includes `SceneWallpaperBindings.h` |
 
@@ -671,10 +671,12 @@ contracts they must agree on:
   the extension process's exit once nothing uses it, so the next launch runs the registered copy.
 - `LockScreenVideoPlanner` decides, from a scene and the file, whether a plain video plays natively
   or through the scene engine (`NativeVideoAdmission`, which judges the file alone, and a regular file
-  inside the project); `LockScreenVideoPlayer` plays it as a muted, video-track-only
-  `AVQueuePlayer` + `AVPlayerLooper` in an `AVPlayerLayer`, placed by `NativeVideoLayout` (also
-  used by the desktop video window). Any refusal, open or playback failure, stall after resume or
-  missing first frame within 10 s falls back to the scene engine.
+  inside the project; a clip AVFoundation cannot open but the project's Matroska reader takes is
+  planned onto the WebM player). `LockScreenVideoPlayer` plays it as a muted, video-track-only
+  `AVQueuePlayer` + `AVPlayerLooper` in an `AVPlayerLayer`, `LockScreenWebMPlayer` as the WebM
+  player with no audio decoded; both sit behind `LockScreenVideoPlaying` and are placed by
+  `NativeVideoLayout` (also used by the desktop video windows). Any refusal, open or playback
+  failure, stall after resume or missing first frame within 10 s falls back to the scene engine.
 - `DisplayPowerProbe` answers whether a surface's display is asleep (`CGDisplayIsAsleep`, or
   every online display for a surface with none) each time `WallpaperPresentationAuthority` is
   asked, and `LockScreenReevaluationBurst` turns a sleep, wake, lock or unlock signal into

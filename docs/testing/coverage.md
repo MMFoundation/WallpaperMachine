@@ -768,7 +768,7 @@ need an authorized runtime check
   wraps, repositioning to the key frame before a time and dropping sound the clock has passed, a turned
   clip's axes), and the player on a layer that is not in a window: first picture, running and looping,
   pause and resume, start paused, a restart that spends its allowance, an upright poster, a decoder
-  that refuses the frames. `WebMVideoWallpaperWindowTests` — the desktop surface for WebM: ready and
+  that refuses the frames. `LockScreenWebMPlayerTests` (the lock screen's WebM player: the first frame composed at the display's size, pause with a frame still readable, a stop before the first picture ending `prepare`, a held failure delivered once) and the planner's WebM cases (`LockScreenVideoPlannerTests`: an unplayable answer goes to the reader, only that answer, and a file the reader refuses keeps AVFoundation's reason). `WebMVideoWallpaperWindowTests` — the desktop surface for WebM: ready and
   playing, user pause and suspension as separate reasons, the scaling choice and position moving the
   picture, a file that cannot be opened failing as a verdict (held until a handler arrives), a window
   opening its own file, the poster at the display's size, stopping.

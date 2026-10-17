@@ -125,9 +125,15 @@ unchanged.
 The native player takes a clip only where the desktop's does: it is judged by the same
 admission rule (`NativeVideoAdmission`, compiled into both targets), which is about the file
 alone. The clip plays at its own frame rate whatever rate the lock screen was given, because an
-AVFoundation layer cannot be capped. A clip AVFoundation cannot open (WebM, a damaged or
-unreadable file) goes to the scene engine, and the extension logs
-`Native video not used display=…: <reason>`. The same happens if the player fails after it
+AVFoundation layer cannot be capped. A clip AVFoundation cannot open is tried with the app's own
+Matroska reader: a WebM or Matroska file it plays (H.264, HEVC and VP9 in it, and AV1 with
+hardware decoding) is played by `LockScreenWebMPlayer`, the desktop's `WebMPlayer` without sound
+in the extension's layer tree (the extension logs `Backend display=… drew=WebM video`), with the
+same planner, deadline and failure memory as the AVFoundation layer. Anything the reader does not
+take (VP8, a damaged or unreadable file) goes to the scene engine, and the extension logs
+`Native video not used display=…: <reason>`. Whether the sandboxed extension can use VideoToolbox's
+supplemental VP9 decoder has not been checked on a lock screen; if it cannot, a VP9 clip fails its
+first frame and the scene engine takes it like any other failure. The same happens if the player fails after it
 started, or a resumed player does not advance within four seconds: the scene engine takes the
 scene behind the held frame (`Native video failed display=…`). The attempt, from the decision
 to the first frame, has its own 10-second deadline, well inside the 30-second first-frame
@@ -139,7 +145,7 @@ before the surface has taken its handler is held and delivered when it does. A c
 frame rate keeps a native player, since the clip does not follow it; a change of the file
 replaces it.
 
-The clip is never heard. The player is built from the video track alone, so no audio is decoded,
+The clip is never heard. The player (either one) is built from the video track alone, so no audio is decoded,
 no audio output or session is opened, it is muted as well, and it asks neither to keep the display
 awake nor to become the system's playing media. The picture is placed by `NativeVideoLayout`, the
 rule the desktop's native player and the scene engine share (Fit, Fill, Stretch, Original size,
@@ -147,7 +153,8 @@ the scale factor), and, like the desktop's native player, it applies the positio
 publishes as `framing`. The surface pauses the player exactly when it pauses the scene engine,
 for the same reasons, and a paused player decodes nothing and keeps its last frame on the layer.
 The frame the system asks for in a snapshot, and the one held behind the layer, are read through
-an image generator for that one request; nothing is read between requests. The extension reads the
+an image generator for that one request (for a WebM clip, decoded from one key frame of the file);
+nothing is read between requests. The extension reads the
 file through the exchange-directory access it already has.
 
 ### Display changes

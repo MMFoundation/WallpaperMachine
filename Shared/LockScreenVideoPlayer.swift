@@ -3,6 +3,26 @@ import CoreGraphics
 import Foundation
 import QuartzCore
 
+/// What the lock-screen surface needs of whatever plays a plain video: the AVFoundation layer below or
+/// the WebM player (`LockScreenWebMPlayer`). Both are built from the clip's video alone, muted, and
+/// leave the sound out entirely.
+@MainActor
+protocol LockScreenVideoPlaying: AnyObject {
+  var isPaused: Bool { get }
+  /// Called once, with the reason, when a clip that was playing can no longer be: the surface then
+  /// draws it with the scene engine. A failure that arrives with no handler is held until one is set.
+  var onFailure: ((String) -> Void)? { get set }
+  /// Puts the picture's layer into `root`, whose bounds are the display.
+  func attach(to root: CALayer)
+  /// Starts the clip and returns once a frame can be shown, with that frame composed at the display's
+  /// size. Throws when the clip cannot be played.
+  func prepare() async throws -> CGImage?
+  func setPaused(_ paused: Bool)
+  /// The picture on the display now, composed where the layer puts it.
+  func frame() async -> CGImage?
+  func stop()
+}
+
 /// Plays a plain video wallpaper on the lock screen and as the screen saver through an
 /// `AVPlayerLayer` in the extension's own layer tree, so the system decodes it in hardware and
 /// the process does no per-frame work.
@@ -17,7 +37,7 @@ import QuartzCore
 /// Compiled by both targets so the failure behaviour is tested: a clip AVFoundation cannot open
 /// fails `prepare()`, and the surface then draws it with the scene engine.
 @MainActor
-final class LockScreenVideoPlayer {
+final class LockScreenVideoPlayer: LockScreenVideoPlaying {
   enum Failure: Error, LocalizedError, Equatable {
     case unplayable(String)
     case stopped
