@@ -6,7 +6,8 @@
 //! responses, reflection, diagnostics, errors, cache identity) does not depend
 //! on the compiler; the compiler pipeline plugs into it.
 #![deny(warnings)]
-#![cfg_attr(not(feature = "ffi"), forbid(unsafe_code))]
+// Unsafe code lives only in the C ABI module, and only when that feature is on.
+#![deny(unsafe_code)]
 
 pub mod annotation;
 pub mod backend;
@@ -15,6 +16,9 @@ pub mod cache_key;
 pub mod diagnostic;
 pub mod dialect;
 pub mod error;
+#[cfg(feature = "ffi")]
+#[allow(unsafe_code)]
+pub mod ffi;
 pub mod facts;
 pub mod identity;
 pub mod include;

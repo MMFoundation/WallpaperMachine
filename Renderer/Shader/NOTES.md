@@ -9,8 +9,8 @@ toolchain facts. Keep it current as later steps land.
 
 `Renderer/Cargo.toml` is the workspace (resolver 2, edition 2024, GPL-2.0-only
 until the relicensing phase). `Renderer/Shader` is the crate `wm-shader`
-(`rlib` + `staticlib`; the non-default `ffi` feature is declared and reserved
-for the C ABI, which a later step adds).
+(`rlib` + `staticlib`; the non-default `ffi` feature adds the C ABI of Step 6, declared by
+`include/rs_shader.h`).
 
 Modules by spec part. Step 1: `request`, `request_json`, `json`, `names`,
 `include` (path rules), `response`, `reflection`, `uniforms`, `binding`,
@@ -59,6 +59,15 @@ all sizes, remainder, truncation, bool and number conversions, `!`/`&&`, `mul` w
 `CAST3X3`, array-parameter specialisation, moved global initializers, float subscripts and loop
 bounds). Run them with `WM_SHADER_GPU_PROBES=1 cargo test -p wm-shader --test gpu_probe`; without the
 variable they print why they did nothing.
+
+Step 6 (part A of the spec, the boundary) is the module `ffi` (feature `ffi` only), the header
+`include/rs_shader.h`, and `backend::depth`. `ffi` holds the thirteen exported functions, the handle
+(`RsShaderProgram`, built once when the compile returns and then immutable), the per-thread last-error
+buffer, the include provider over the callback (`CallbackSource: IncludeSource`) and the panic
+containment. Tests: `src/ffi/tests.rs` (forced panic, hook silence, flag bookkeeping),
+`tests/ffi_abi.rs` (the ABI through raw pointers, 34 tests) and `tests/c_abi.rs` (a C program built
+from `tests/c/abi_smoke.c` against the header and `libwm_shader.a`, the header as C and C++, the
+archive's exported symbols).
 
 ## Dependencies
 
@@ -609,12 +618,85 @@ the last-error text. The include provider of the C ABI implements `IncludeSource
 
 ## Not yet done (planned for later steps)
 
-The C ABI and last-error buffer (R1 to R9, R70 buffer, R89 to R93) and the engine-backed include
-provider (callback, free callback; the in-memory and closure providers exist), and the engine-side
-checks of test 34 (draw tests). R79's optional early failure for a program the engine would refuse.
+The engine-side checks of test 34 (draw tests) and the engine-side items of spec A section 8 (the
+request builder, the merge contract, R107's refusal, the golden check of R88 against the engine's own
+documents). R79's optional early failure for a program the engine would refuse.
 `src/dialect/tests/boundary.rs` pins a digest of the converter's output per `PIPELINE_REVISION`, so the
 first change of converted output after that revision forces a deliberate bump. Two-row matrices and
 arrays of booleans in the block (NOTES 93).
+
+## Step 6 choices (the C ABI)
+
+96. **Thirteen functions, no SPIR-V accessors.** The spec lists fifteen exports "today" and thirteen
+    after plan phase 2d, with the two `spv` accessors deleted. This crate is the post-2d layer (the
+    target `vulkan_spirv` is a request error), so only the thirteen exist, in the header and in the
+    archive (a test lists the archive's `rs_shader_` symbols with `nm`). A swap step that links this
+    archive in place of the old one must land with the engine change of 2d that stops declaring them.
+    `rs_shader_program_stage_target` is kept (always 1).
+97. **Library file name.** The package is `wm-shader`, so the archive is `libwm_shader.a`
+    (`target/<profile>/`), not `libshader.a`. The swap step points the engine's build at it (spec 2.8 names
+    the file; it is a build detail, not part of the C contract). The host-callable initialiser of 2.8
+    (Q15) is dropped: the exports are `#[unsafe(no_mangle)]` and the engine force-loads the archive.
+98. **Error wording of the pointer checks.** `compile request failed: the request pointer is null` and
+    `... the out program pointer is null` (R2). With both null the request pointer is named. The
+    out pointer is set to null before anything else, so every failure path leaves null (R1), even the
+    null-request one.
+99. **Nullable function pointers.** The callback and the callback's `free` are `Option<unsafe extern
+    "C" fn ...>`, which has the layout of a nullable C function pointer. `RsShaderOwnedBytes` is
+    `repr(C)` with the four fields of 2.3, in that order. A `free` set with a null `ptr` is never
+    called; `ptr` non-null with `len == 0` is an empty include and is freed (with `len` 0). A buffer
+    is released by a drop guard, so it is freed once on every path out of the read (copy, bad UTF-8,
+    unwinding), after the bytes were copied. A length above `isize::MAX` with a non-null pointer is
+    treated as "could not read" (the bytes are not touched) and the buffer is still released.
+100. **NULs.** Every string handed to C goes through one conversion that turns a NUL into a space (R5):
+    stage text, the five documents, the key, the last error. JSON documents cannot contain one
+    (the writer escapes it); MSL text can only if the source did, and then it is refused earlier.
+101. **Last error.** A thread-local `CString`; `rs_shader_last_error` returns its pointer, and a compile
+    replaces the buffer, so the pointer is valid until the same thread's next compile (R70). A thread
+    that is being torn down gets the static text `no shader error`.
+102. **Panics and the panic hook (R4, R93).** The body of a compile runs under `catch_unwind`; a panic
+    becomes status 1 with `the shader layer failed internally: <message>`. The default hook would
+    write that panic to standard error, which R93 forbids for the layer. A hook is installed once, on
+    the first compile, that stays silent while the panicking thread is inside a compile (a
+    thread-local flag, restored after nesting) and otherwise calls the hook that was there before.
+    This is the one process-wide effect of the library; a host that installs its own hook later
+    replaces it and merely gets the default message back. A test mutates the hook away and sees it
+    fail. A panic inside the C callback cannot be caught (the callback is C), as the spec says.
+103. **Unsafe confinement.** `#![deny(unsafe_code)]` for the crate with `#[allow(unsafe_code)]` on
+    `mod ffi`; without the feature there is no unsafe code at all. Every unsafe block says what it
+    relies on. The accessors are `unsafe extern "C" fn` in Rust (raw handle in), plain C functions to a
+    caller.
+104. **No test hook in the library.** The forced internal failure of section 8 is a `#[cfg(test)]`
+    thread-local in `ffi`; a build without `cfg(test)` has no hook and no way to trigger one.
+105. **R91 on the downstream compiler (a real finding).** naga's GLSL front end, validator and Metal
+    writer recurse over nesting. With only the earlier parts' bounds, 320 nested parentheses, 209
+    nested calls, 138 nested `if`/`for` blocks, 480 chained `+` or unary minus, or 280 `else if`
+    links overflowed a 512 KiB stack in a release build (the C ABI test with 1,000 parentheses
+    aborted the process). The layer cannot start a thread (R89) and cannot patch naga, so
+    `backend::depth::stack_cost` measures the legalized text before it is handed over: each open
+    bracket adds a weight (block 4, parenthesis or index 3), each operator or member access in an
+    expression still being read adds 1, each `else` of a chain adds 3, and the largest running total is
+    the measure. Over `STACK_BUDGET` (128) the stage fails at the `GlslParse` pass with a message that
+    gives the measure and the limit. Calibration (release build, naga 29.0.3): one unit costs at most
+    about a kilobyte in the worst shape; a random mix of nested statements and expressions at a
+    measure of 128 (2,200 accepted inputs over five seeds, all compiled) needs between 96 and 128 KiB, so
+    the budget has a margin of four on 512 KiB. The deepest shipped stage measures 47, the deepest
+    workshop stage 35 (the corpus tests print it and fail above 64). An unoptimised build needs far
+    more stack (a mixed input at 128 overflowed 2 MiB), so the ABI test runs on 16 MiB in a debug
+    build and on 512 KiB in release, with `WM_SHADER_TEST_STACK_KIB` to probe; the release bound is
+    the one that is specified. The hostile ABI test passes in release down to 256 KiB (128 KiB
+    overflows in the earlier parts), so the margin of the whole pipeline is two at the plain minimum.
+    No `PIPELINE_REVISION` bump: output for every accepted request is unchanged and only an
+    absurdly deep text that used to compile is now refused.
+106. **Includes through the callback.** The path handed to the callback is the validated, normalised
+    one; a path with a NUL, which the preprocessor already refuses, would be reported as invalid
+    rather than reaching C. The provider is wrapped by the preprocessor's `CachingSource`, so a path
+    is asked for at most once per compile (R22), checked by a test with both stages including it.
+107. **Debug-build tests of the C program.** `tests/c_abi.rs` runs `cargo build --lib --features ffi`
+    in its own profile and target directory (the library is built for `rlib` only when a test needs
+    it) and skips with a printed reason without clang, nm or the build; the C program's stdout and
+    stderr must be exactly `c abi ok` and empty, which doubles as the check that a failed compile
+    writes nothing (R93).
 
 ## Measurements (step 3)
 

@@ -11,8 +11,16 @@ crate-type = ["rlib", "staticlib"]
 
 [features]
 default = []
-# The C ABI (rs_shader_* functions). Added in a later step.
+# The C ABI (rs_shader_* functions) declared by include/rs_shader.h.
 ffi = []
 
 [dependencies]
 naga.workspace = true
+
+[[test]]
+name = "ffi_abi"
+required-features = ["ffi"]
+
+[[test]]
+name = "c_abi"
+required-features = ["ffi"]
