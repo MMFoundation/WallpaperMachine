@@ -17,6 +17,13 @@
 #define MA_NO_DSOUND
 #define MA_NO_WINMM
 #define MA_NO_ENCODING
+// Only the output device is used: sounds are decoded by the project's own path
+// (Renderer/Sound), so miniaudio's decoders and the resource manager, node graph and
+// engine built on them are left out. The standalone miniaudio test builds the same.
+#define MA_NO_DECODING
+#define MA_NO_RESOURCE_MANAGER
+#define MA_NO_NODE_GRAPH
+#define MA_NO_ENGINE
 #define MINIAUDIO_IMPLEMENTATION
 #include <miniaudio.h>
 
