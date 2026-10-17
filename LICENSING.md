@@ -19,7 +19,7 @@ source is linked.
 |---|---|
 | Under which license is this repository's source offered? | GNU GPL version 2 only, the text in the root [`LICENSE`](LICENSE). See [Source license](#source-license-gpl-20-only). |
 | Is anything sold? | Only the Supporter purchase: a one-time payment for a sponsor place and priority support. The signed download is free and no copy of the software is sold. See [Supporter model](#supporter-model-free-signed-download-paid-sponsorship-and-support). |
-| Can it be distributed today? | Not cleared. Homebrew's GPLv3 FFmpeg was replaced, and the Apache-2.0 components (the Khronos/Vulkan libraries, MoltenVK, glslang's Apache-2.0 and GPL-3.0 parts, `spirv_reflect` and the `spirv` Rust crate) were removed from the link closure on 2026-10-17; this record has not been reviewed by counsel and the items under [Before any distribution](#before-any-distribution) are open. See [Remaining blockers](#remaining-blockers). |
+| Can it be distributed today? | Not cleared. FFmpeg is no longer used, and the Apache-2.0 components (the Khronos/Vulkan libraries, MoltenVK, glslang's Apache-2.0 and GPL-3.0 parts, `spirv_reflect` and the `spirv` Rust crate) were removed from the link closure on 2026-10-17; this record has not been reviewed by counsel and the items under [Before any distribution](#before-any-distribution) are open. See [Remaining blockers](#remaining-blockers). |
 | Is a Developer ID signed, notarized build available? | No. `scripts/package.py` signs ad hoc, or with a self-signed project certificate for releases. Signing is a platform mechanism, not a license grant. See [Signing and notarization](#signing-and-notarization). |
 | Can it be listed on the Mac App Store? | Not as the app is built today, and not without first settling the GPLv2 question. See [Mac App Store](#mac-app-store). |
 | Does publishing this source resolve the blockers? | No. Distribution of the combined program is what the licenses govern; posting the repository changes nothing about it. |
@@ -46,10 +46,10 @@ contributions so that the whole is under one license.
 What the root `LICENSE` does and does not do:
 
 - It states the terms under which this project's own code (`App/`, `Extension/`,
-  `Shared/`, `Renderer/`, `Tests/`, `scripts/`, `project.yml`, `Formula/`) is
+  `Shared/`, `Renderer/`, `Tests/`, `scripts/`, `project.yml`) is
   offered, and it is the same license the vendored GPL code is already under.
 - It does not transfer, merge or relicense anyone's copyright. The
-  bigsaltyfishes projects, the FFmpeg authors, the mediaremote-adapter authors,
+  bigsaltyfishes projects, the mediaremote-adapter authors,
   Phosphene and every other holder named in `upstream/provenance.json`
   and in the notices under `upstream/` keep their copyright and their own
   license terms. Third-party notices are retained where they were found and are
@@ -131,15 +131,13 @@ The policy that follows from that:
   the third-party notices and with no additional end-user agreement. There is
   no anti-redistribution clause, no reverse-engineering prohibition, no
   per-seat or per-device term, and no claim of ownership over third-party
-  code (the FFmpeg project's checklist items 11-13 at
-  https://ffmpeg.org/legal.html describe exactly the terms that would be
-  incompatible). The website's account and checkout terms cover the Supporter
+  code (terms of that kind are what the GPL forbids). The website's account and checkout terms cover the Supporter
   purchase only.
 - **Corresponding source travels with every binary.** Each signed download is
   produced from a Git tag `vx.y.z` ([docs/release.md](docs/release.md)). The
   complete corresponding source for that exact binary—including this repository,
   vendored code, all covered linked dependencies, modifications, `project.yml`,
-  build/install scripts and the FFmpeg formula—is offered alongside the
+  build/install scripts—is offered alongside the
   download with equivalent access and no fee (GPLv2 section 3(a) and its
   download provision). Mirror the exact dependency source, not merely links to
   third-party servers. A future section 3(b) written-offer route would instead
@@ -222,11 +220,8 @@ see [Rust crates](#rust-crates) for how.
 | lz4 | Homebrew `lz4` 1.10.0 | BSD-2-Clause | Compatible |
 | FreeType | Homebrew `freetype` 2.14.3 | FTL or GPL-2.0-or-later, licensee's choice (`LICENSE.TXT` in the keg) | Compatible under the GPLv2 option; the FTL option is not GPLv2-compatible and is not the one used |
 | libpng | Homebrew `libpng` 1.6.58 (FreeType dependency) | libpng-2.0 | Compatible |
-| FFmpeg | `Formula/mwe-ffmpeg.rb`, FFmpeg 8.1.2 | LGPL-2.1-or-later as configured | Compatible; see [FFmpeg](#ffmpeg) |
-| dav1d | Homebrew `dav1d` 1.5.4 (FFmpeg dependency) | BSD-2-Clause | Compatible |
 | naga 29.0.3 | Rust crate, a patched copy vendored in `upstream/naga` (`upstream/naga/PATCHES.md`): the shader translator and validator the `shader` crate uses for every shader; built with `glsl-in` and `msl-out` only | MIT OR Apache-2.0, used under MIT | Compatible under the MIT terms; the patch makes Apache-2.0 `codespan-reporting` an optional dependency the `shader` crate does not enable, so it is no longer linked, and dropping `spv-out` removed the Apache-2.0 `spirv` crate |
 | uniffi 0.28.3 (`uniffi`, `uniffi_core`, `uniffi_bindgen`, `uniffi_meta`, `uniffi_udl`, `uniffi_testing`), option-ext 0.2.0 | Rust crates: the Swift bridge, and `dirs` | MPL-2.0 | Compatible through MPL-2.0 section 3.3, which names GPL-2.0 as a Secondary License; none of their source files carries the "Incompatible With Secondary Licenses" notice |
-| ffmpeg-next, ffmpeg-sys-next 8.1.0 | Rust crates, the FFmpeg bindings in `wallpaper-core` | WTFPL | Compatible |
 | The other 143 linked Rust crates | `upstream/renderer/Cargo.lock` | 139 offer MIT, alone or as a choice; the rest are Zlib (foldhash), BSD-3-Clause (pp-rs) or BSD-3-Clause OR Apache-2.0 (moxcms, pxfm) | Compatible under the MIT, Zlib or BSD-3-Clause terms |
 | Valve SteamCMD | installed at runtime into the app's support directory, never bundled | Valve's terms | Outside the GPL entirely; see [Rights outside software licenses](#rights-outside-software-licenses) |
 
@@ -248,14 +243,18 @@ commits are in this repository's history, and `upstream/provenance.json` records
 | Vulkan loader (`libvulkan`) | Apache-2.0 | `19aeb2e8` (linking), `a289d5e9` (Homebrew dependency) |
 | MoltenVK (`libMoltenVK`, the Vulkan ICD) and `MoltenVK_icd.json` | Apache-2.0 | `19aeb2e8` (use), `a289d5e9` (bundling) |
 | vulkan-headers, spirv-headers, shaderc (Homebrew, build-time) | Apache-2.0 / MIT | `a289d5e9` |
+| FFmpeg 8.1.2 (`libavformat`, `libavcodec`, `libavutil`, `libswresample`, built by `Formula/mwe-ffmpeg.rb`; the formula and `scripts/install_ffmpeg.py` are deleted) | LGPL-2.1-or-later as configured | `3c55d52b` (audio decoder), `f0e3b270` (video backend, engine link), `d2c891aa` (Rust decoder, link lines), `b6ba0c32` (app link flags, formula, installer, preflight, CI cache) |
+| dav1d (Homebrew, FFmpeg's AV1 decoder) | BSD-2-Clause | `b6ba0c32` |
+| `ffmpeg-next`, `ffmpeg-sys-next` 8.1.0, Rust crates (the FFmpeg bindings in `wallpaper-core`) | WTFPL | `d2c891aa` |
+| `hermit-abi`, `num_cpus`, `pkg-config`, `vcpkg`, Rust crates (build dependencies only `ffmpeg-sys-next` pulled in) | MIT OR Apache-2.0 (`vcpkg`: MIT/Apache-2.0) | `d2c891aa` |
 
 ### Rust crates
 
-Checked 2026-10-17 against `upstream/renderer/Cargo.lock` with `cargo tree
+Checked 2026-10-17 (and again after the FFmpeg crates left, `d2c891aa`) against `upstream/renderer/Cargo.lock` with `cargo tree
 --offline --workspace -e normal,no-proc-macro --target aarch64-apple-darwin`.
 That resolves features the way `scripts/build.py`'s `cargo build --workspace
 --release` does. Each crate's license is the one its manifest declares; no
-crate was reviewed file by file. The result is 153 third-party crates (naga counted among them, as the
+crate was reviewed file by file. The result is 151 third-party crates (naga counted among them, as the
 vendored copy in `upstream/naga`), all compiled into `libwallpaper_bridge.a`,
 which the app links (`-lwallpaper_bridge` in `project.yml`).
 
@@ -280,41 +279,55 @@ of each crate beyond its declared license.
 
 ## FFmpeg
 
-Homebrew's `ffmpeg@8` is configured with `--enable-gpl --enable-version3
---enable-openssl`. That makes its libraries GPL-3.0-or-later and links
-Apache-2.0 OpenSSL, neither of which can be combined with this GPL-2.0-only
-program. It is no longer used.
+FFmpeg is no longer used. It was removed on 2026-10-17 (`3c55d52b`, `f0e3b270`,
+`d2c891aa`, `b6ba0c32`; [Components and their licenses](#components-and-their-licenses)
+lists them), so the app links, bundles and caches no `libav*`, `libsw*` or
+`libpostproc` library, no FFmpeg bindings and no dav1d, and the repository has
+no FFmpeg formula or installer. Checked on the Release
+app built from `b6ba0c32` has no `libav*` among its Mach-O dependencies (`otool
+-L` on the app executable and on the lock-screen extension lists only
+`liblz4`, `libfreetype` and `libqjs` outside Apple's libraries, and
+`Contents/Frameworks` of a built bundle holds only the unlinked
+`MediaRemoteAdapter.framework` until packaging), and no `_av_*`, `_avcodec_*`,
+`_avformat_*`, `_sws_*` or `_swr_*` symbol is undefined in it.
 
-`Formula/mwe-ffmpeg.rb` builds the same FFmpeg release (8.1.2, pinned by URL and
-SHA-256) with `--disable-gpl --disable-version3 --disable-nonfree
---disable-autodetect`, so `avcodec_license()` reports "LGPL version 2.1 or
-later" and the only libraries underneath it are Apple frameworks, BSD-2-Clause
-dav1d and the system zlib/bzip2. FFmpeg itself states that it is LGPL-2.1-or-
-later unless the GPL-only parts are enabled (https://ffmpeg.org/legal.html).
+What replaced it, all written for this project or taken from the system:
 
-The formula is an LGPL build, **not a decode-only build**. FFmpeg's native
-decoders and encoders remain, and the VideoToolbox and AudioToolbox hardware
-encoders are enabled; the formula's own test asserts that `h264_videotoolbox`
-is present. What is left out is the network stack, device inputs, external
-encoder libraries and everything gated behind `--enable-gpl`,
-`--enable-version3` or `--enable-nonfree`. Describing the build as decode-only
-elsewhere is a mistake; the renderer uses decode, but the libraries can encode.
+- Video: the project's own MP4/QuickTime and WebM/Matroska readers
+  (`Renderer/Media`) feed VideoToolbox, which decodes H.264, HEVC, VP9 and, where
+  the Mac has the hardware, AV1. The app's own players (AVFoundation, and the WebM
+  player) play a plain video wallpaper and the lock screen; the scene engine
+  plays a scene's video textures with the same readers and decoder.
+- Sound: AudioToolbox decodes MP3, AAC, FLAC, WAV and the rest the system reads;
+  Ogg Vorbis is the vendored, public-domain `stb_vorbis`; remixing, resampling and
+  looping are `Renderer/Sound`.
 
-How this project follows FFmpeg's LGPL checklist (https://ffmpeg.org/legal.html):
+What stopped working with it: VP8, AV1 on a Mac without an AV1 hardware decoder,
+4:2:2 video, a fragmented MP4 and a container other than the four above. Each now
+fails with a reason that starts "format not supported: " where the format is the
+cause, and the wallpaper keeps its last picture.
 
-| Item | State |
-|---|---|
-| Built without `--enable-gpl` and `--enable-nonfree` | Yes, and without `--enable-version3` |
-| Dynamic linking | Yes: the app links `libav*.dylib` and `scripts/package.py` relocates them into `Contents/Frameworks` |
-| Corresponding FFmpeg source with the exact configure line | Policy above: the formula records URL, checksum and configure arguments; the tarball is to be mirrored beside each signed download |
-| No GPL libraries such as libx264 | None are enabled; `scripts/package.py` refuses libraries whose embedded configuration shows a forbidden flag ([Tooling that enforces this record](#tooling-that-enforces-this-record)) |
-| Attribution in the program's about box | Not yet shown. Settings -> About names the renderer and links the GPLv2 text (`App/Views/ControlPanel/Settings/Sections/AboutSettingsSection.swift`); an FFmpeg/LGPL line there is an open item and is not part of this record |
-| Do not rename the libraries to obscure names | They keep their upstream names |
+Before this change the project had already replaced Homebrew's `ffmpeg@8`
+(configured with `--enable-gpl --enable-version3 --enable-openssl`, so
+GPL-3.0-or-later with Apache-2.0 OpenSSL, neither of which can be combined with
+this GPL-2.0-only program) by an LGPL-2.1-or-later build of the same release. Neither
+is part of the product now.
 
-FFmpeg's page also notes that companies making money from products that use
-patented codecs have been approached by patent licensors. That is a business
-risk of offering the signed download beside a paid Supporter purchase,
-separate from copyright, and is recorded here rather than resolved.
+FFmpeg's command-line tools are not part of the repository, the build or any
+distribution. A developer may have `ffmpeg` or `ffprobe` installed: the test fixtures
+under `Tests/Unit/NativeVideo` and `Renderer/Sound/tests` record the commands that
+generated them (embedded as bytes, so no test needs the tool), and the container
+readers' optional corpus checks compare with `ffprobe` when it is present
+(`docs/container-readers.md`). That is use of a tool by a developer, not a
+dependency of the program.
+
+The earlier note about patented codecs (that FFmpeg's page says companies
+making money from products using them have been approached by patent licensors) was
+recorded while FFmpeg's software codecs were bundled. The program now carries no
+codec implementation of its own beyond `stb_vorbis` (Vorbis) and delegates the rest
+to Apple's VideoToolbox and AudioToolbox. That is a statement of what is bundled, not
+a legal conclusion: Apple's terms for those frameworks and the business risk of a
+signed download beside a paid Supporter purchase have not been reviewed by counsel.
 
 ## Remaining blockers
 
@@ -323,12 +336,16 @@ version 2 because of its patent-termination and indemnification terms
 (https://www.gnu.org/licenses/license-list.html#apache2), and this project's policy
 table rejects the GPL-3.0 family for the same GPL-2.0-only combination.
 
-**State on 2026-10-17.** `python3 scripts/check_licenses.py`, run on the tree after the
-Vulkan deletion and on a Release app built from it, reports 181 components (3 Mach-O
-roots, 13 third-party libraries walked from them, 25 compiled-in or statically linked
-inventory entries and 153 third-party Rust crates) with 0 Apache-2.0, 0 GPL-3.0 family, 0
-unknown and 0 not named in this file; with `--skip-app` it reports 178 with the same
-zeros. The Apache-2.0 and GPL-3.0 parts that
+**State on 2026-10-17.** `python3 scripts/check_licenses.py --enforce`, run on the tree
+after the FFmpeg removal (`b6ba0c32`) and on a Release app built from it, reports 177
+components (3 Mach-O roots, 5 third-party libraries walked from them, 24 compiled-in or
+statically linked inventory entries and 151 third-party Rust crates) with 0 Apache-2.0, 0
+GPL-3.0 family, 0 unknown and 0 not named in this file; with `--skip-app` it reports 175
+with the same zeros. The third-party libraries the app loads are `lz4`,
+`freetype` (with its `libpng`), `quickjs-ng` and the unlinked `MediaRemoteAdapter`
+framework; no `libav*` library is among them ([FFmpeg](#ffmpeg)). The
+earlier run, after the Vulkan deletion and before the FFmpeg removal, reported 181
+(178 with `--skip-app`). The Apache-2.0 and GPL-3.0 parts that
 used to be loaded into, or compiled into, the same process as the GPL-2.0-only renderer
 are gone (see the table of removed components above): `libvulkan` and `libMoltenVK`,
 `libSPIRV-Tools` and `libSPIRV-Tools-opt`, glslang (its Apache-2.0 portion and its
@@ -339,10 +356,9 @@ loads Vulkan, glslang, SPIRV or MoltenVK libraries (`otool -L`), and the bundle 
 
 What this does not establish: it counts declared licenses, not files (the Rust crates
 were audited by declared license only, and the vendored sources by their notices); it is
-not a legal opinion, and none has been obtained; FFmpeg is still linked under
-LGPL-2.1-or-later, which the table above records as compatible, until the planned
-replacement of FFmpeg lands. No grant or permission from any copyright holder was
-requested or received, and none is described as existing.
+not a legal opinion, and none has been obtained. FFmpeg, the only LGPL component the table
+above listed, is no longer linked. No grant or permission from any copyright holder was requested or received,
+and none is described as existing.
 
 Should a component under Apache-2.0 or the GPL-3.0 family enter the closure again,
 the check reports it and no binary may be distributed, sold or given away until it is
@@ -410,11 +426,10 @@ As implemented by `scripts/package.py` and `.github/workflows/build.yml`
 ([docs/build.md](docs/build.md), [docs/release.md](docs/release.md)):
 
 - `scripts/package.py` runs a preflight before touching the bundle. It refuses
-  to package FFmpeg libraries whose embedded configuration is not an LGPL
-  build (license string other than "LGPL version 2.1 or later", or
-  `--enable-gpl`, `--enable-version3` or `--enable-nonfree` present), and it
-  refuses when any notice it must bundle is missing. `--check` runs only the
-  preflight.
+  when any notice it must bundle is missing, or any Homebrew keg it bundles ships
+  no license file. `--check` runs only the preflight. (It used to refuse FFmpeg
+  libraries whose embedded configuration was not an LGPL build; no FFmpeg library
+  is linked now.)
 - `.github/workflows/build.yml` used to fail at its first step, citing this
   file. The maintainer removed that step for 1.0.0 (2026-09-26), so CI now
   publishes release disk images while the items under [Before any distribution](#before-any-distribution) are open.
@@ -434,10 +449,11 @@ As implemented by `scripts/package.py` and `.github/workflows/build.yml`
   this file does not name. It is report-only by default; `--enforce` exits 1.
   It needs a built app, Homebrew and Cargo, so the routine gate does not run it.
 
-The packaging checks catch the GPLv3 FFmpeg mistake and a missing notice. An
-Apache-2.0 component is a matter of what is linked, not of a string in one
-library; `scripts/check_licenses.py` reports it from the link closure, in
-report-only mode unless `--enforce` is given.
+The packaging checks catch a missing notice. An Apache-2.0 component is a matter of
+what is linked, not of a string in one library; `scripts/check_licenses.py` reports
+it from the link closure, in report-only mode unless `--enforce` is given. Its
+license table carries no entry for FFmpeg or dav1d, so a `libav*` library or CMake
+package that returns is reported as unknown.
 
 ### Notice payload
 
@@ -482,14 +498,14 @@ prefix is `app.wallpapermachine`.
   ISO/IEC 14496-12/-15, Matroska element and RFC 8794 EBML specifications and the VP9 and
   AV1 bitstream specifications. Their Apple layer (`Renderer/Media/Apple`, the codec format
   descriptions, the VideoToolbox decoder wrapper and `WebMReader`, the Objective-C face of the Matroska reader that the app's WebM player and the lock-screen extension use) and the scene engine's native video
-  backend (`Video/NativeVideoBackend.cpp`, `Video/VideoBackendSelection.cpp` and
+  backend (`Video/NativeVideoBackend.cpp` and
   `Video/VideoTextureSourceFactory.cpp`) were written from Apple's public VideoToolbox, Core
   Media and Core Video headers and documentation. `Video/ClockedVideoSource.cpp` is not new
   code: it is the clock, queue, seek and promotion logic of the engine's existing
   open-wallpaper-engine `FfmpegVideoTextureSource.cpp` (GPL-2.0), moved into its own file and
   left otherwise as it was. No code from FFmpeg, libav, libwebm, libmatroska, libvpx, mp4v2,
-  Bento4, GPAC or any other implementation was copied into the new code. FFmpeg is still
-  linked and still plays any container the native readers do not read, until it is removed.
+  Bento4, GPAC or any other implementation was copied into the new code. FFmpeg was removed
+  on 2026-10-17 ([FFmpeg](#ffmpeg)): the native backend is the only video decoder.
 - The sound path in `Renderer/Sound` (channel remix, resampler, loop pipeline the AudioToolbox and Ogg Vorbis decoder adapters, and `Renderer/Sound/Matroska`, which decodes the audio of a WebM or Matroska file: Opus, AAC and MP3 packets through an AudioToolbox AudioConverter, Vorbis packets re-framed as an in-memory Ogg stream for stb_vorbis, written from the Matroska, RFC 6716, RFC 7845 and RFC 3533 specifications and Apple's documentation) was written for this project from the documented behaviour of a conventional downmix, the mathematics of windowed-sinc resampling and Apple's AudioToolbox documentation. No code from FFmpeg, libswresample, libvorbis, opus or any other implementation was copied; Ogg Vorbis decoding is the public-domain stb_vorbis, vendored unchanged. FFmpeg no longer decodes scene sounds, and no longer decodes the audio of a plain video wallpaper on the desktop, where the app's own players play it (AVFoundation, or the WebM player over the sound decoders above); the scene engine no longer builds a plain-video scene at all (removed 2026-10-17), so it decodes no plain video's audio anywhere.
 - The still preview in `Renderer/Surface` (`wmSurface`: the rule that picks a project's preview file inside the project's own folder, and an ImageIO decoder that lays the picture over a surface's layer as a Core Animation sublayer) was written for this project from Apple's ImageIO and Core Animation documentation. No code from any other implementation was copied. It is linked into the app and, through the scene engine, into the lock-screen extension, and it adds no third-party dependency.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
@@ -504,8 +520,6 @@ prefix is `app.wallpapermachine`.
 - The control panel's icons are SF Symbols, drawn by macOS at run time; no
   icon artwork is copied into the app or the repository, so no icon notice
   ships.
-- FFmpeg comes from `Formula/mwe-ffmpeg.rb` via `python3
-  scripts/install_ffmpeg.py`, replacing Homebrew's `ffmpeg@8`.
 
 ## Before any distribution
 
@@ -518,9 +532,8 @@ prefix is `app.wallpapermachine`.
 - Implement Developer ID signing and notarization in the release pipeline, and
   remove the unconditional failure from `.github/workflows/build.yml` only
   after the review above is recorded as done.
-- Add the FFmpeg/LGPL attribution to Settings -> About.
-- Mirror the corresponding source (repository at the tag, FFmpeg tarball) at
-  the place the signed download is offered.
+- Mirror the corresponding source (the repository at the tag) at the place the
+  signed download is offered.
 - Review Valve's terms and the product-name question with counsel before the
   first public download or Supporter sale.
 - Before any Mac App Store listing, settle both questions under
@@ -553,7 +566,6 @@ Dated verification history: [docs/testing/verification-log.md](docs/testing/veri
 - GPL FAQ, aggregation versus combined work: https://www.gnu.org/licenses/gpl-faq.html#MereAggregation
 - FSF license list, Apache 2.0 incompatible with GPLv2: https://www.gnu.org/licenses/license-list.html#apache2
 - FSF, selling free software: https://www.gnu.org/philosophy/selling.html
-- FFmpeg license and LGPL compliance checklist: https://ffmpeg.org/legal.html
 - Renderer license file: https://github.com/bigsaltyfishes/wallpaper-engine-for-macos/blob/main/LICENSE
 - FSF, App Store terms and GPL section 6: https://www.fsf.org/blogs/licensing/more-about-the-app-store-gpl-enforcement
 - Apple App Review Guidelines: https://developer.apple.com/app-store/review/guidelines/

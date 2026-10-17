@@ -35,8 +35,8 @@ manages itself at run time; it is not a build dependency. See
 
 FFmpeg is not used any more: video plays with the app's own container readers and
 VideoToolbox, sounds with AudioToolbox and a vendored public-domain Ogg Vorbis
-decoder, and nothing links or bundles a `libav*` library (checkpoint C3 in
-[../LICENSING.md](../LICENSING.md)). The Homebrew `ffmpeg` formulas, `mwe-ffmpeg` and
+decoder, and nothing links or bundles a `libav*` library (the check is recorded in
+[../LICENSING.md](../LICENSING.md#ffmpeg)). The Homebrew `ffmpeg` formulas, `mwe-ffmpeg` and
 `dav1d` that an earlier checkout installed are not needed and can be uninstalled;
 nothing in the build looks at them.
 
