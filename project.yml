@@ -124,6 +124,7 @@ targets:
           - -liconv
           - -framework Accelerate
           - -framework AppKit
+          - -framework AudioToolbox
           - -framework CoreAudio
           - -framework CoreData
           - -framework CoreFoundation

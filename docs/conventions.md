@@ -22,7 +22,8 @@ raise the conflict rather than reformatting someone else's code in passing.
   under `upstream/`: pure C++17 until a layer needs a platform API, written from
   public specifications rather than copied from another implementation, with its
   tests in `Renderer/<Area>/tests/` registered in `scripts/check_renderer.py`
-  (today `Renderer/Media/`, see [container-readers.md](container-readers.md)).
+  (today `Renderer/Media/` and `Renderer/Sound/`, see
+  [container-readers.md](container-readers.md) and [sound-decoding.md](sound-decoding.md)).
 - Tests go in `Tests/Unit/<Domain>/` (non-interactive) or `Tests/UI/`
   (XCUITest, takes over the desktop).
 - Developer commands go in `scripts/`; their shared helpers in `scripts/lib/`;

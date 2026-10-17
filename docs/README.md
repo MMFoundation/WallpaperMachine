@@ -24,6 +24,7 @@ live under `testing/`.
 | [architecture.md](architecture.md) | Runtime architecture and module boundaries, including the SwiftUI control panel's controller, actions and window hosting |
 | [repository-layout.md](repository-layout.md) | Directory map and where new code goes |
 | [container-readers.md](container-readers.md) | `Renderer/Media`: the project's own MP4 and Matroska/WebM readers, what they parse and refuse, their limits, and how they are tested |
+| [sound-decoding.md](sound-decoding.md) | `Renderer/Sound`: how a scene's sounds are decoded, remixed, resampled and looped for the output device, which decoder serves which file, and how that is tested |
 | [localization.md](localization.md) | Language resolution, the string catalogs and the panel's live language switch, how to add or remove a language |
 
 ## Process

@@ -46,6 +46,8 @@ REGRESSION_BINARIES = {
     "version_tests": False,
     # Renderer/Media/tests: the project's own container readers, pure C++ and headless.
     "media_core_tests": False, "media_isobmff_tests": False, "media_matroska_tests": False,
+    # Renderer/Sound/tests: the project's own remix, resample and loop path, pure C++ and headless.
+    "sound_core_tests": False, "sound_apple_tests": False,
 }
 # Executables in tests/CMakeLists.txt that the check neither builds nor runs, and
 # why. Every other one is registered above or is one of the two probes below.

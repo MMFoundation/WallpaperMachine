@@ -1,7 +1,13 @@
 set(LIB_NAME wpAudio)
 
+if(NOT TARGET wmSound)
+    message(FATAL_ERROR "wpAudio needs wmSound (Renderer/Sound in this repository)")
+endif()
+
 add_library(${LIB_NAME}
     STATIC
+    BinaryStreamByteSource.cpp
+    PcmSoundStream.cpp
     AudioResponseAnalyzerVdsp.cpp
     AudioResponseService.cpp
     FfmpegSoundStream.cpp
@@ -12,6 +18,7 @@ add_library(${LIB_NAME}
 target_link_libraries(${LIB_NAME}
 PUBLIC
     wpUtils
+    wmSound
 PRIVATE
     wpFs
     PkgConfig::AVFORMAT

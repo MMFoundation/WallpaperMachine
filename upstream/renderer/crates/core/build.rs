@@ -95,6 +95,9 @@ fn emit_static_link_flags(build_dir: &Path) {
     for lib in [
         "wescene-renderer",
         "wpAudio",
+        // The project's own sound path (Renderer/Sound), after wpAudio, which calls
+        // it. It reads through Renderer/Media's byte source, so wmMedia comes later.
+        "wmSound",
         "wpLooper",
         // Both renderers come before wpRenderCommon: the scene logic they
         // share (static reuse, copy elision, presentation layout, the step
@@ -137,6 +140,7 @@ fn emit_static_link_flags(build_dir: &Path) {
     for framework in [
         "Accelerate",
         "AppKit",
+        "AudioToolbox",
         "CoreGraphics",
         "CoreMedia",
         "CoreVideo",
@@ -166,6 +170,7 @@ fn static_link_search_paths(build_dir: &Path) -> Vec<PathBuf> {
         build_dir.join("src/Utils"),
         build_dir.join("src/Vulkan"),
         build_dir.join("third_party/spirv_reflect"),
+        build_dir.join("Renderer/Sound"),
         build_dir.join("Renderer/Media"),
         build_dir.join("Renderer/Media/Apple"),
     ]

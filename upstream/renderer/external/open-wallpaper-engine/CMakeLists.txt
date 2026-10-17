@@ -65,6 +65,15 @@ if(EXISTS "${WESCENE_MEDIA_DIR}/CMakeLists.txt")
     endif()
 endif()
 
+# This project's own sound path (wmSound): remixing, resampling, looping and the
+# decoders behind scene sounds, in the repository's top-level Renderer/Sound. It
+# needs wmMedia's ByteSource, so it is only built where wmMedia is.
+get_filename_component(
+    WESCENE_SOUND_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../Renderer/Sound" ABSOLUTE)
+if(TARGET wmMedia AND EXISTS "${WESCENE_SOUND_DIR}/CMakeLists.txt")
+    add_subdirectory("${WESCENE_SOUND_DIR}" "${CMAKE_BINARY_DIR}/Renderer/Sound")
+endif()
+
 include_directories(SYSTEM third_party)
 add_subdirectory(third_party)
 
@@ -108,6 +117,9 @@ if(BUILD_TESTS)
     # wmMedia's tests use the googletest that tests/ just fetched.
     if(TARGET wmMedia)
         add_subdirectory("${WESCENE_MEDIA_DIR}/tests" "${CMAKE_BINARY_DIR}/Renderer/Media/tests")
+    endif()
+    if(TARGET wmSound)
+        add_subdirectory("${WESCENE_SOUND_DIR}/tests" "${CMAKE_BINARY_DIR}/Renderer/Sound/tests")
     endif()
 endif()
 

@@ -268,9 +268,9 @@ ALIASES = {
     "effolkronium": "effolkronium-random", "glad": "glad", "miniaudio": "miniaudio",
     "vog": "vog-sha1", "stb_image": "stb_image", "vk_mem_alloc": "vulkan-memory-allocator",
 }
-# The project's own archives are first party: the scene engine's (src/ of
-# open-wallpaper-engine) and the top-level Renderer/ libraries (wmMedia, wmMediaApple).
-FIRST_PARTY_ARCHIVE = re.compile(r"^(wp[A-Z]\w*|wm[A-Z]\w*|wescene-renderer)$")
+# The scene engine's own archives (src/ of open-wallpaper-engine, `wp*`) and this project's own
+# renderer libraries (top-level Renderer/, `wm*`: wmMedia, wmSound) are first party.
+FIRST_PARTY_ARCHIVE = re.compile(r"^((wp|wm)[A-Z]\w*|wescene-renderer)$")
 # A library file's stem -> its component, for libraries whose Homebrew keg cannot be found
 # (an already packaged app, or a machine without Homebrew).
 LIBRARY_STEMS = {

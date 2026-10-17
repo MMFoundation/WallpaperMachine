@@ -13,7 +13,9 @@ to learn the size and length of an MP4, QuickTime, WebM or Matroska video from
 memory (`Video/VideoContainerProbe.cpp`), where it used to write the payload to
 a temporary file for FFmpeg; any other payload, and one a reader refuses, is still
 probed by FFmpeg. The native video backend (see "Playing video" below), which is
-the default decoder for video textures, plays them from both readers. Where the
+the default decoder for video textures, plays them from both readers. The sound
+decoders (`wmSound`) read their files through its `ByteSource`
+([sound-decoding.md](sound-decoding.md)). Where the
 readers sit in the build and the tree is in
 [repository-layout.md](repository-layout.md).
 
