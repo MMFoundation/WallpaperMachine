@@ -113,6 +113,9 @@ upstream/                          vendored third-party code only
   renderer/                        Rust workspace (crates/), C++ scene engine (external/), cargo target/;
                                    trimmed to what the build and renderer checks use
   mediaremote-adapter/             ungive/mediaremote-adapter, BSD-3-Clause; built as an embedded framework
+  naga/                            naga 29.0.3 (MIT OR Apache-2.0, used under MIT), patched so codespan-reporting is
+                                   optional (PATCHES.md lists the differences); wired in by [patch.crates-io] in
+                                   upstream/renderer/Cargo.toml
 artifacts/                         Git-ignored: all test and verification evidence
 build/                             Git-ignored: Xcode derived data and built products only
 .github/FUNDING.yml                the repository's Sponsor button; links the website's pricing page
@@ -130,7 +133,8 @@ directories and `CLAUDE.local.md` named in `AGENTS.md`, and the root `node_modul
 
 Things that must not appear:
 
-- No product code under `upstream/` — it is vendored renderer code only; new renderer code goes in `Renderer/`.
+- No product code under `upstream/` — it is vendored third-party code only (the renderer,
+  the MediaRemote adapter, the patched `naga` crate); new renderer code goes in `Renderer/`.
 - No app-target code under `Shared/`; it must stay compilable with
   `APPLICATION_EXTENSION_API_ONLY`.
 - No generated Xcode settings edited in `WallpaperMachine.xcodeproj`; change `project.yml`.

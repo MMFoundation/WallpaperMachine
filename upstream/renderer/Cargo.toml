@@ -28,3 +28,7 @@ unwrap_used = "deny"
 dbg_macro = "warn"
 todo = "warn"
 undocumented_unsafe_blocks = "warn"
+
+# Naga 29.0.3 with `codespan-reporting` made optional (upstream/naga/PATCHES.md).
+[patch.crates-io]
+naga = { path = "../naga" }
