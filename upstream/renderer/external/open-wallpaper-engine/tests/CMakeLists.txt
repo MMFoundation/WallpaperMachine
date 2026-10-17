@@ -590,6 +590,24 @@ if(APPLE)
     gtest_discover_tests(unchanged_present_test PROPERTIES TIMEOUT 120 DISCOVERY_TIMEOUT 60)
 endif()
 
+# What a scene does when the native backend cannot draw it and nothing else may:
+# held on its last frame or its preview and reported, never drawn by the
+# compatibility backend. The failures are forced where real ones strike.
+if(APPLE)
+    add_executable(scene_failure_policy_test scene_failure_policy_test.mm)
+    target_link_libraries(scene_failure_policy_test PRIVATE ${PROJECT_NAME}
+        wpScene wpRenderCommon wpVulkan wpVulkanRender wpRGraph GTest::gtest_main)
+    target_include_directories(scene_failure_policy_test PRIVATE
+        . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/include
+        ${CMAKE_SOURCE_DIR}/src/Scene/RenderCommon/include)
+    target_compile_features(scene_failure_policy_test PRIVATE cxx_std_20)
+    set_target_properties(scene_failure_policy_test PROPERTIES
+        OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+    target_compile_options(scene_failure_policy_test PRIVATE
+        $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+    gtest_discover_tests(scene_failure_policy_test PROPERTIES TIMEOUT 120 DISCOVERY_TIMEOUT 60)
+endif()
+
 # Render-target sizing only: no device, no surface, no GPU.
 add_executable(render_scale_test render_scale_test.cpp)
 target_link_libraries(render_scale_test PRIVATE ${PROJECT_NAME} wpScene wpVulkanRender wpVulkan wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)

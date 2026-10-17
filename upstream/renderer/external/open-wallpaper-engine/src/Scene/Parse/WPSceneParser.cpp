@@ -96,7 +96,7 @@ thread_local std::vector<PendingMetalTranslation> g_pending_metal_translations;
 thread_local const LayerObjectIndex* g_parse_layer_index { nullptr };
 
 bool MetalTranslationRequested() {
-    return CurrentSceneRendererPreference() == SceneRendererPreference::NativeMetalPreferred;
+    return SceneRendererWantsNative(CurrentSceneRendererPreference());
 }
 
 /// The one material texture slot a direct NV12 variant could be compiled for,

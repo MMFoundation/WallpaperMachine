@@ -1043,9 +1043,16 @@ extern "C" void owe_set_scene_renderer_preference(int preference)
     // An unrecognised value falls back to compatibility rather than being
     // stored: a host built against a newer enum must not silently select a
     // backend this binary does not have.
-    const auto value = preference == OWE_SCENE_RENDERER_NATIVE_METAL_PREFERRED
-                           ? wallpaper::SceneRendererPreference::NativeMetalPreferred
-                           : wallpaper::SceneRendererPreference::Compatibility;
+    auto value = wallpaper::SceneRendererPreference::Compatibility;
+    switch (preference) {
+    case OWE_SCENE_RENDERER_NATIVE_METAL_PREFERRED:
+        value = wallpaper::SceneRendererPreference::NativeMetalPreferred;
+        break;
+    case OWE_SCENE_RENDERER_NATIVE_METAL_ONLY:
+        value = wallpaper::SceneRendererPreference::NativeMetalOnly;
+        break;
+    default: break;
+    }
     wallpaper::SetSceneRendererPreference(value);
     // A remembered prepare failure is only meaningful for the preference that
     // was in force when it happened. Turning the preference off and on again is
@@ -1057,6 +1064,8 @@ extern "C" void owe_set_scene_renderer_preference(int preference)
 extern "C" int owe_current_scene_renderer_preference(void)
 {
     switch (wallpaper::CurrentSceneRendererPreference()) {
+    case wallpaper::SceneRendererPreference::NativeMetalOnly:
+        return OWE_SCENE_RENDERER_NATIVE_METAL_ONLY;
     case wallpaper::SceneRendererPreference::NativeMetalPreferred:
         return OWE_SCENE_RENDERER_NATIVE_METAL_PREFERRED;
     case wallpaper::SceneRendererPreference::Compatibility:
@@ -1073,7 +1082,9 @@ extern "C" int owe_scene_wallpaper_backend(void* scene)
     // Same -1 as "no scene": the host shows it as preparing. A backend is only
     // chosen once the scene is parsed, and naming one before that would make
     // the panel claim a renderer that has not been created.
-    if (! selection.created) return -1;
+    // A scene held in a failure has no backend drawing it right now, whatever
+    // renderer it had before; the failure accessors say why.
+    if (! selection.created || selection.failed()) return -1;
     switch (selection.backend) {
     case wallpaper::SceneBackend::NativeMetal: return OWE_SCENE_BACKEND_NATIVE_METAL;
     case wallpaper::SceneBackend::LegacyVulkan: break;
@@ -1126,6 +1137,27 @@ extern "C" size_t owe_scene_wallpaper_backend_fallback_reason(void* scene, char*
     const auto reason = wallpaper_scene->sceneBackendSelection().fallback_reason;
     if (reason.empty()) return 0;
     // Sizing call: report what would be needed without writing anything.
+    if (out == nullptr || out_len == 0) return reason.size();
+    const size_t copied = std::min(reason.size(), out_len - 1);
+    std::memcpy(out, reason.data(), copied);
+    out[copied] = '\0';
+    return reason.size();
+}
+
+extern "C" int owe_scene_wallpaper_backend_failure(void* scene)
+{
+    auto* wallpaper_scene = static_cast<wallpaper::SceneWallpaper*>(scene);
+    if (wallpaper_scene == nullptr) return OWE_SCENE_FAILURE_NONE;
+    return static_cast<int>(wallpaper_scene->sceneBackendSelection().failure_stage);
+}
+
+extern "C" size_t owe_scene_wallpaper_backend_failure_reason(void* scene, char* out,
+                                                             size_t out_len)
+{
+    auto* wallpaper_scene = static_cast<wallpaper::SceneWallpaper*>(scene);
+    if (wallpaper_scene == nullptr) return 0;
+    const auto reason = wallpaper_scene->sceneBackendSelection().failure_reason;
+    if (reason.empty()) return 0;
     if (out == nullptr || out_len == 0) return reason.size();
     const size_t copied = std::min(reason.size(), out_len - 1);
     std::memcpy(out, reason.data(), copied);

@@ -12,7 +12,7 @@ The three scene controls in **Advanced**:
 
 | Setting | Values | Default |
 | --- | --- | --- |
-| Scene renderer | Compatibility / Native Metal preferred | Native Metal preferred |
+| Scene renderer | Compatibility / Native Metal preferred / Native Metal only | Native Metal preferred |
 | Scene render optimisation | Off / On | **On** |
 | Update only when the scene changes | Off / On | Off |
 
@@ -22,6 +22,10 @@ Which renderer scene wallpapers prefer. **Native Metal preferred**, the default,
 asks for the native Metal backend; a scene it cannot draw runs on Compatibility as a
 whole (an effect is never dropped to keep a scene native) and the status line says
 why. **Compatibility** is the Vulkan-through-MoltenVK path for every scene.
+**Native Metal only** has no Compatibility to run on: a scene Native Metal cannot draw
+is held and reported instead ([below](#when-native-metal-cannot-draw-a-scene)). It is
+never the default; it is the failure policy that replaces the fallback once the
+Compatibility path is deleted, available now so that can be a deletion.
 The lock screen and the screen saver follow the setting too (see [lock
 screen](lock-screen.md#scene-renderer)).
 
@@ -908,6 +912,65 @@ compiles each wallpaper's shaders again the first time that copy loads it, once.
 Compiled pipelines are shared between copies. The native backend's binary archive
 stores pipelines, so it covers the smaller part. Method and what recompiles:
 [renderer testing](../testing/renderer.md#metal-compile-across-processes).
+
+### When Native Metal cannot draw a scene
+
+With **Native Metal only** (`scene_renderer = "native_metal_only"`, `OWE_SCENE_RENDERER_NATIVE_METAL_ONLY`
+in the C API) a scene Native Metal cannot draw is not drawn by anything else. No Vulkan
+renderer is created, and no layer, effect or pass is dropped to make the scene fit. The
+scene is **held** instead, and the failure is said once, with its reason, in the log and
+in the panel. Five things can stop a scene, each with a stage the host words in the user's
+language and the engine's own English explanation beside it:
+
+| Stage | What happened | Where the engine found out |
+|---|---|---|
+| `unsupported` | The admission gate refused the scene (HDR video, a plain video wallpaper, a shader that does not translate for Metal, ...) | `SelectSceneBackend`, before any renderer exists |
+| `prepare` | The native renderer could not be created on the surface (also a surface with no Metal layer, such as an offscreen probe) | `createMetal` |
+| `compile` | The scene's shaders or pipelines did not compile for Metal | `compileRenderGraph` |
+| `frame` | A frame failed after the scene was running | `drawFrame` |
+| `surface` | The renderer could not take the replacement surface after a display change | `resetSurface` |
+
+What a held scene leaves on the display:
+
+- **A layer that has drawn keeps its last frame.** The engine stops the frame clock and
+  never touches the layer again: no drawable is acquired, nothing is cleared, nothing
+  is presented over it. A scene refused while another scene was drawing (a wallpaper
+  switch) also releases the outgoing scene's renderer, so a later surface rebuild
+  cannot draw the refused scene on it; the layer still holds the outgoing last frame. The host's [recovery ladder](#recovery) still runs after a
+  frame that fails once the scene had shown one.
+- **A layer that has drawn nothing shows the project's preview picture.** The engine
+  finds it (the `preview` key of `project.json`, else `preview.jpg`, `preview.jpeg`,
+  `preview.png` or `preview.gif`, always inside the project's own folder and under
+  32 MB), decodes it once with ImageIO and lays it over the layer as a plain Core
+  Animation sublayer, scaled to fill: no GPU pipeline, no per-frame work, nothing
+  while the surface is idle (`Renderer/Surface`, `StillPreview`). The first real frame
+  that is later presented takes it away. A project with no preview picture shows
+  nothing made up: the layer stays as it was, and the failure is still reported.
+- **The host is told a first picture exists.** Its activation waits for one for up to
+  90 seconds and then puts the previous wallpaper back; a held scene settles that wait
+  at once, so the wallpaper stays assigned, failed and visible, instead of being
+  rolled back with a message that names no cause. This happens once per scene.
+
+The failure is published as the scene's `failure_stage` and `failure_reason` in the
+bridge's `scene_renderers` row, with `backend` `unknown` (nothing is drawing it) and no
+`fallback_reason`. The engine's log line, at error level and once per failure, is
+`scene cannot be drawn with native Metal (<stage>): <reason>; holding the last frame|preview picture`.
+**Settings → Performance → Advanced → Drawn by** words it as "not drawn — <stage in the
+user's language> (reason: …). Showing its last picture.", the scene is in **Updating
+now** as "stopped after a rendering failure" with **Retry**, the inspector's Compatibility
+check card says the same, and the diagnostics report and a library issue report name the
+stage and reason. The reason itself stays English, as the fallback reason always has.
+
+A retry really retries: under this mode the engine neither remembers a failure against
+the scene nor consults one, so **Retry** (or the host's recovery) asks the native renderer
+again. The mode is read when a scene's backend is chosen and held for that scene, so
+changing it while a scene runs affects the next scene, not this one. Under the other two
+settings nothing changes: the same failures still end in Compatibility with their
+reason, which is what the tests pin.
+
+The same faults are forced in `scene_failure_policy_test`, on a layer no window owns, and
+each leaves no Vulkan renderer created, the failure logged once, the frame loop stopped
+without presenting again, and the last frame or the preview in place.
 
 ### Live property edits
 

@@ -2,6 +2,7 @@
 
 #include "Scene/SceneBackendSelection.hpp"
 
+#include <string>
 #include <string_view>
 
 namespace wallpaper
@@ -21,7 +22,21 @@ namespace metal
 ///
 /// Choosing compatibility because the user asked for it is not a fallback, so
 /// it carries no reason. Every other compatibility answer carries one.
+///
+/// Under `SceneRendererPreference::NativeMetalOnly` there is no compatibility
+/// answer: a scene the capability gate refuses comes back with `failure_stage`
+/// `Unsupported` and the gate's own reason as `failure_reason`, and the
+/// remembered failures are neither read nor written, so asking again (a retry)
+/// really tries the native backend again.
 [[nodiscard]] SceneBackendSelection SelectSceneBackend(const Scene& scene);
+
+/// What a scene gets when the native backend refuses it for `reason`: the
+/// compatibility backend with that reason as the fallback, or, when the
+/// preference allows no compatibility backend, no backend and the reason as an
+/// `Unsupported` failure. The one place that turns a refusal into a selection,
+/// so the capability gate and anything standing in for it agree.
+[[nodiscard]] SceneBackendSelection NativeRefusal(SceneRendererPreference preference,
+                                                  std::string             reason);
 
 /// Records that the native backend failed to prepare this scene.
 ///

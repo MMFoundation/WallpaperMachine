@@ -3,6 +3,7 @@
 #include "MetalRender/MetalRender.hpp"
 #include "Scene/include/Scene/SceneBackendSelection.hpp"
 #include "RenderCommon/StaticSubgraphCache.hpp"
+#include "SceneBackendFaults.hpp"
 #include "VulkanRender/VulkanRender.hpp"
 
 #include <memory>
@@ -63,7 +64,15 @@ public:
     [[nodiscard]] bool createVulkan(const RenderInitInfo& info) {
         release();
         auto candidate = std::make_unique<vulkan::VulkanRender>();
-        if (! candidate->init(info)) return false;
+        if (! candidate->init(info)) {
+#ifdef WESCENE_BUILD_TESTS
+            testing::SceneBackendFaults::Instance().NoteVulkanCreated(false);
+#endif
+            return false;
+        }
+#ifdef WESCENE_BUILD_TESTS
+        testing::SceneBackendFaults::Instance().NoteVulkanCreated(true);
+#endif
         m_vulkan = std::move(candidate);
         if (! m_pipeline_cache_path.empty()) m_vulkan->SetPipelineCachePath(m_pipeline_cache_path);
         return true;
@@ -78,6 +87,13 @@ public:
     /// drawing from the routine that has to publish it.
     [[nodiscard]] bool createMetal(const RenderInitInfo& info, std::string& error) {
         release();
+#ifdef WESCENE_BUILD_TESTS
+        if (auto forced = testing::SceneBackendFaults::Instance().Consume(
+                testing::SceneBackendFault::NativeCreate)) {
+            error = *forced;
+            return false;
+        }
+#endif
         auto candidate = std::make_unique<metal::MetalRender>();
         if (! candidate->init(toMetalInitInfo(info))) {
             error = candidate->lastError();
@@ -90,6 +106,9 @@ public:
 
     /// Destroys whichever backend exists, leaving the handle empty.
     void release() {
+#ifdef WESCENE_BUILD_TESTS
+        m_forced_error.clear();
+#endif
         if (m_metal != nullptr) {
             m_metal->destroy();
             m_metal.reset();
@@ -130,6 +149,15 @@ public:
     /// switched silently would leave the panel reporting a backend that is no
     /// longer drawing.
     bool resetSurface(const RenderInitInfo& info) {
+#ifdef WESCENE_BUILD_TESTS
+        if (m_metal != nullptr) {
+            if (auto forced = testing::SceneBackendFaults::Instance().Consume(
+                    testing::SceneBackendFault::NativeSurface)) {
+                m_forced_error = *forced;
+                return false;
+            }
+        }
+#endif
         if (m_metal != nullptr) return m_metal->resetSurface(toMetalInitInfo(info));
         if (m_vulkan != nullptr) return m_vulkan->resetSurface(info);
         return false;
@@ -138,6 +166,9 @@ public:
     /// Why the active backend last failed, for the fallback reason shown to
     /// the user. Empty when nothing failed.
     [[nodiscard]] std::string lastError() const {
+#ifdef WESCENE_BUILD_TESTS
+        if (! m_forced_error.empty()) return m_forced_error;
+#endif
         if (m_metal != nullptr) return m_metal->lastError();
         return std::string {};
     }
@@ -153,6 +184,15 @@ public:
         return false;
     }
     bool compileRenderGraph(Scene& scene, rg::RenderGraph& graph) {
+#ifdef WESCENE_BUILD_TESTS
+        if (m_metal != nullptr) {
+            if (auto forced = testing::SceneBackendFaults::Instance().Consume(
+                    testing::SceneBackendFault::NativeCompile)) {
+                m_forced_error = *forced;
+                return false;
+            }
+        }
+#endif
         OWE_FORWARD(compileRenderGraph(scene, graph));
         return false;
     }
@@ -186,6 +226,16 @@ public:
     /// succeed without producing one, and the caller's first-frame bookkeeping
     /// has to tell the two apart.
     bool drawFrame(Scene& scene, bool* presented = nullptr) {
+#ifdef WESCENE_BUILD_TESTS
+        if (m_metal != nullptr) {
+            if (auto forced = testing::SceneBackendFaults::Instance().Consume(
+                    testing::SceneBackendFault::NativeDraw)) {
+                m_forced_error = *forced;
+                if (presented != nullptr) *presented = false;
+                return false;
+            }
+        }
+#endif
         OWE_FORWARD(drawFrame(scene, presented));
         if (presented != nullptr) *presented = false;
         return false;
@@ -271,6 +321,11 @@ private:
     std::unique_ptr<vulkan::VulkanRender> m_vulkan;
     std::unique_ptr<metal::MetalRender>   m_metal;
     std::string                           m_pipeline_cache_path;
+#ifdef WESCENE_BUILD_TESTS
+    /// The reason of the last fault a test armed that fired, so `lastError`
+    /// reads like the real renderer's own message.
+    std::string m_forced_error;
+#endif
 };
 
 } // namespace wallpaper

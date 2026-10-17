@@ -423,13 +423,18 @@ int owe_scene_wallpaper_surface_health(void* scene, owe_surface_health* out);
 /*
  * Scene renderer preference, process-wide. Compatibility by default.
  *
- * A preference, not an outcome. A scene the native backend cannot draw falls
- * back to the compatibility backend and says why; the preference is never
- * reported as the backend in use.
+ * A preference, not an outcome. Under NATIVE_METAL_PREFERRED a scene the native
+ * backend cannot draw falls back to the compatibility backend and says why.
+ * Under NATIVE_METAL_ONLY there is no compatibility backend: such a scene is not
+ * drawn, the surface keeps the last frame it showed (or shows the project's
+ * preview picture when it has drawn nothing), and the failure is reported
+ * through owe_scene_wallpaper_backend_failure. The preference is never reported
+ * as the backend in use.
  */
 typedef enum owe_scene_renderer_preference {
     OWE_SCENE_RENDERER_COMPATIBILITY = 0,
-    OWE_SCENE_RENDERER_NATIVE_METAL_PREFERRED = 1
+    OWE_SCENE_RENDERER_NATIVE_METAL_PREFERRED = 1,
+    OWE_SCENE_RENDERER_NATIVE_METAL_ONLY = 2
 } owe_scene_renderer_preference;
 
 typedef enum owe_scene_backend {
@@ -443,7 +448,8 @@ int  owe_current_scene_renderer_preference(void);
 /*
  * Which backend actually drew this scene, or -1 when nothing has been observed
  * yet -- no scene, or a surface whose backend has not been created because the
- * scene it depends on is still being parsed.
+ * scene it depends on is still being parsed -- or when the scene is held in a
+ * failure and nothing is drawing it (see owe_scene_wallpaper_backend_failure).
  *
  * `owe_scene_wallpaper_backend_fallback_reason` writes a NUL-terminated reason
  * into `out` and returns the length excluding the terminator; passing a null
@@ -452,6 +458,29 @@ int  owe_current_scene_renderer_preference(void);
  */
 int    owe_scene_wallpaper_backend(void* scene);
 size_t owe_scene_wallpaper_backend_fallback_reason(void* scene, char* out, size_t out_len);
+
+/*
+ * Why a scene is not being drawn natively when nothing else may draw it
+ * (OWE_SCENE_RENDERER_NATIVE_METAL_ONLY), or OWE_SCENE_FAILURE_NONE.
+ *
+ * A failed scene reports backend -1 from owe_scene_wallpaper_backend: nothing is
+ * drawing it. The stage is a category the host words for the user;
+ * owe_scene_wallpaper_backend_failure_reason writes the engine's own
+ * NUL-terminated explanation (English, for diagnostics) with the same sizing
+ * convention as the fallback reason. The two clear together when a recovery
+ * makes the scene draw again.
+ */
+typedef enum owe_scene_failure_stage {
+    OWE_SCENE_FAILURE_NONE = 0,
+    OWE_SCENE_FAILURE_UNSUPPORTED = 1,
+    OWE_SCENE_FAILURE_PREPARE = 2,
+    OWE_SCENE_FAILURE_COMPILE = 3,
+    OWE_SCENE_FAILURE_FRAME = 4,
+    OWE_SCENE_FAILURE_SURFACE = 5
+} owe_scene_failure_stage;
+
+int    owe_scene_wallpaper_backend_failure(void* scene);
+size_t owe_scene_wallpaper_backend_failure_reason(void* scene, char* out, size_t out_len);
 
 /*
  * Direct NV12 plane sampling inside native Metal scenes, process-wide. Off by

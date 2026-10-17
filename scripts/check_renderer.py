@@ -36,7 +36,7 @@ REGRESSION_BINARIES = {
     "mouse_input_test": False, "mdl_schema_tests": False, "tex_schema_tests": False,
     "timer_tests": False, "playback_gpu_test": True, "metal_backend_test": False,
     "metal_scene_draw_smoke": True, "metal_poster_capture_test": True,
-    "metal_video_texture_test": True, "unchanged_present_test": True,
+    "metal_video_texture_test": True, "unchanged_present_test": True, "scene_failure_policy_test": True,
     "audio_tests": False, "miniaudio_failure_paths_test": False, "sprite_animation_test": False,
     "vulkan_sample_count_smoke": False, "rendergraph_smoke": False,
     "rust_shader_bridge_test": False, "stb_image_regression_test": False,

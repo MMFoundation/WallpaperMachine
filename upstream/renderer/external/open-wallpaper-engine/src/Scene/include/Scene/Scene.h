@@ -88,6 +88,10 @@ public:
     std::vector<std::shared_ptr<const SceneMetalProgram>> metal_variant_candidates;
 
     std::string scene_id { "unknown_id" };
+    /// The project file (`project.json`) this scene was loaded from, or empty for
+    /// a scene built some other way. What the surface reads to find the project's
+    /// preview picture when the scene cannot be drawn.
+    std::string project_path;
     /// Shared layer-as-texture resolution. Both backends read this; an error
     /// here is unsupported on both, not a Metal-only fallback.
     std::unordered_set<int32_t> layer_texture_sources;
