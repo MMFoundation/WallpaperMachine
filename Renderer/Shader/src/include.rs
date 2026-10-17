@@ -78,17 +78,18 @@ pub struct IncludeError {
 
 impl fmt::Display for IncludeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let path = quote(&self.path);
+        // The wording of R9 for the three provider failures.
+        let path = sanitize(&self.path).replace('\n', " ");
         let text = match &self.kind {
-            IncludeErrorKind::NotFound => format!("include {path} was not found"),
+            IncludeErrorKind::NotFound => format!("shader include not found: {path}"),
             IncludeErrorKind::Unreadable { len } => format!(
-                "could not read include {path}: the provider returned a null pointer with a non-zero length ({len})"
+                "shader source read failed for {path}: the provider returned a null pointer with a non-zero length ({len})"
             ),
-            IncludeErrorKind::NotUtf8 => format!("include {path} is not valid UTF-8"),
+            IncludeErrorKind::NotUtf8 => format!("shader source utf-8 invalid for {path}"),
             IncludeErrorKind::Cycle { chain } => {
                 format!("include cycle: {}", chain.iter().map(|p| sanitize(p)).collect::<Vec<_>>().join(" -> "))
             }
-            IncludeErrorKind::InvalidPath(class) => format!("#include path {path} is invalid: {class}"),
+            IncludeErrorKind::InvalidPath(class) => format!("#include path {} is invalid: {class}", quote(&self.path)),
         };
         f.write_str(&sanitize(&text))
     }
@@ -140,12 +141,16 @@ mod tests {
     #[test]
     fn failure_text_names_the_path_and_the_kind() {
         let t = |kind| IncludeError { path: "common/x.h".into(), kind }.to_string();
-        let text = t(IncludeErrorKind::NotFound);
-        assert!(text.contains("`common/x.h`") && text.contains("not found"), "{text}");
+        assert_eq!(t(IncludeErrorKind::NotFound), "shader include not found: common/x.h");
         let text = t(IncludeErrorKind::Unreadable { len: 12 });
-        assert!(text.contains("`common/x.h`") && text.contains("null pointer") && text.contains("non-zero length") && text.contains("12"), "{text}");
-        let text = t(IncludeErrorKind::NotUtf8);
-        assert!(text.contains("`common/x.h`") && text.contains("UTF-8"), "{text}");
+        assert!(
+            text.starts_with("shader source read failed for common/x.h: ")
+                && text.contains("null pointer")
+                && text.contains("non-zero length")
+                && text.contains("12"),
+            "{text}"
+        );
+        assert_eq!(t(IncludeErrorKind::NotUtf8), "shader source utf-8 invalid for common/x.h");
         let text = t(IncludeErrorKind::InvalidPath(InvalidPathClass::ParentComponent));
         assert!(text.contains("`common/x.h`") && text.contains("`..`"), "{text}");
     }

@@ -283,6 +283,9 @@ pub enum RequestError {
     DuplicateTextureSlot(u8),
     EmptyPropertyName,
     PropertyHasNoValue(String),
+    /// A shader annotation that cannot be used (R75): an unparsable default,
+    /// an empty material alias.
+    Metadata(String),
 }
 
 impl fmt::Display for RequestError {
@@ -326,6 +329,7 @@ impl fmt::Display for RequestError {
             RequestError::PropertyHasNoValue(name) => {
                 format!("invalid shader request: property {} has no value", quote(name))
             }
+            RequestError::Metadata(message) => format!("invalid shader request: {message}"),
         };
         f.write_str(&sanitize(&text))
     }

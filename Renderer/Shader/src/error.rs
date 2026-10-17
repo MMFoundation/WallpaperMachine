@@ -158,7 +158,7 @@ mod tests {
     fn include_failures_carry_path_and_kind() {
         let e: ShaderError = IncludeError { path: "common.h".into(), kind: IncludeErrorKind::NotFound }.into();
         let text = e.to_string();
-        assert!(text.contains("`common.h`") && text.contains("not found"), "{text}");
+        assert!(text.contains("common.h") && text.contains("not found"), "{text}");
     }
 
     #[test]

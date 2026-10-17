@@ -102,11 +102,15 @@ pub struct Diagnostic {
     pub span: Option<Span>,
     pub message: String,
     pub generated_source_path: Option<String>,
+    /// A label for the text the span refers to when it is not the stage's own
+    /// source, such as `include common.h`. Used by the text renderer only; it
+    /// is not a key of the diagnostics document.
+    pub origin: Option<String>,
 }
 
 impl Diagnostic {
     pub fn new(message: impl Into<String>) -> Diagnostic {
-        Diagnostic { stage: None, pass: None, span: None, message: message.into(), generated_source_path: None }
+        Diagnostic { stage: None, pass: None, span: None, message: message.into(), generated_source_path: None, origin: None }
     }
 
     pub fn in_stage(mut self, stage: StageKind) -> Diagnostic {
@@ -121,6 +125,12 @@ impl Diagnostic {
 
     pub fn at(mut self, span: Span) -> Diagnostic {
         self.span = Some(span);
+        self
+    }
+
+    /// Names the text the span refers to when it is not the stage's own source.
+    pub fn in_origin(mut self, label: impl Into<String>) -> Diagnostic {
+        self.origin = Some(label.into());
         self
     }
 
@@ -237,6 +247,8 @@ impl Diagnostic {
     fn origin(&self, ctx: &RenderContext<'_>) -> String {
         let origin = if let Some(path) = &self.generated_source_path {
             path.clone()
+        } else if let Some(label) = &self.origin {
+            label.clone()
         } else {
             match (ctx.shader_name, self.stage) {
                 (Some(name), Some(StageKind::Vertex)) => format!("{name}.vert"),
