@@ -44,7 +44,7 @@ contributions so that the whole is under one license.
 What the root `LICENSE` does and does not do:
 
 - It states the terms under which this project's own code (`App/`, `Extension/`,
-  `Shared/`, `Tests/`, `scripts/`, `project.yml`, `Formula/`) is
+  `Shared/`, `Renderer/`, `Tests/`, `scripts/`, `project.yml`, `Formula/`) is
   offered, and it is the same license the vendored GPL code is already under.
 - It does not transfer, merge or relicense anyone's copyright. The
   bigsaltyfishes projects, the FFmpeg authors, the mediaremote-adapter authors,
@@ -209,7 +209,7 @@ see [Rust crates](#rust-crates) for how.
 |---|---|---|---|
 | Renderer (`wallpaper-core`, `shader`, `wallpaper-bridge`) | `upstream/renderer`, revision in `provenance.json` | GPL-2.0-only | Same license |
 | Scene engine (open-wallpaper-engine) | `upstream/renderer/external/open-wallpaper-engine` | GPL-2.0-only (vendored under the renderer) | Same license |
-| Application shell, extension, Workshop browser, control panel, scripts | `App/`, `Extension/`, `Shared/`, `scripts/` | GPL-2.0-only (this project) | Same license |
+| Application shell, extension, Workshop browser, control panel, scripts, new renderer code | `App/`, `Extension/`, `Shared/`, `Renderer/`, `scripts/` | GPL-2.0-only (this project) | Same license |
 | Phosphene ABI reference | notice in `Extension/Phosphene-LICENSE.txt` | MIT | Compatible |
 | ungive/mediaremote-adapter | `upstream/mediaremote-adapter` | BSD-3-Clause | Compatible; embedded as an unlinked framework |
 | miniaudio | `upstream/renderer/external/open-wallpaper-engine/third_party/miniaudio` | Public domain or MIT-0 (choice) | Compatible |

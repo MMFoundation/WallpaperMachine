@@ -176,6 +176,9 @@ class RegistryCoverageTests(unittest.TestCase):
     def test_every_test_executable_runs_in_the_check_or_says_why_not(self):
         cmake = (check_renderer.RENDERER / "external/open-wallpaper-engine/tests/CMakeLists.txt").read_text()
         built = set(re.findall(r"add_executable\(\s*(\w+)", cmake))
+        # The project's own readers define theirs through wm_media_test() in Renderer/Media/tests.
+        own = (check_renderer.ROOT / "Renderer/Media/tests/CMakeLists.txt").read_text()
+        built |= set(re.findall(r"^wm_media_test\(\s*(\w+)", own, re.MULTILINE))
         run = {*check_renderer.REGRESSION_BINARIES, check_renderer.OFFSCREEN_PROBE, check_renderer.RELOAD_PROBE}
         self.assertEqual(built - run - set(check_renderer.MANUAL_BINARIES), set())
         self.assertEqual(run & set(check_renderer.MANUAL_BINARIES), set())

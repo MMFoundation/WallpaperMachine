@@ -51,6 +51,17 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(_wescene_is_top_level ON)
 endif()
 
+# This project's own container readers (wmMedia). The sources live outside
+# upstream/, in the repository's top-level Renderer/Media, and are pure C++17 with
+# no dependency on anything else here: added before the directory-wide
+# link_libraries() below so the library does not inherit Eigen. Skipped when the
+# engine is configured without the rest of the repository.
+get_filename_component(
+    WESCENE_MEDIA_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../Renderer/Media" ABSOLUTE)
+if(EXISTS "${WESCENE_MEDIA_DIR}/CMakeLists.txt")
+    add_subdirectory("${WESCENE_MEDIA_DIR}" "${CMAKE_BINARY_DIR}/Renderer/Media")
+endif()
+
 include_directories(SYSTEM third_party)
 add_subdirectory(third_party)
 
@@ -93,6 +104,10 @@ add_subdirectory(src)
 if(BUILD_TESTS)
     include(CTest)
     add_subdirectory(tests)
+    # wmMedia's tests use the googletest that tests/ just fetched.
+    if(TARGET wmMedia)
+        add_subdirectory("${WESCENE_MEDIA_DIR}/tests" "${CMAKE_BINARY_DIR}/Renderer/Media/tests")
+    endif()
 endif()
 
 # The waywallen host, QML helper and standalone viewer were removed from this

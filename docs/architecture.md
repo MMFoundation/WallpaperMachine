@@ -741,6 +741,7 @@ therefore still depends on Homebrew until `scripts/package.py` bundles those lib
 | Path | Origin |
 |---|---|
 | `App/`, `Extension/`, `Shared/`, `Tests/`, `scripts/`, `Formula/`, `project.yml` | This project, GPL-2.0-only (root `LICENSE`); `App/` is a derived work of the renderer's former `app/WallpaperEngine` |
+| `Renderer/` | This project's own renderer code, GPL-2.0-only, outside `upstream/`; pure C++17 with no Apple or third-party dependency. `Renderer/Media` (`wmMedia`) holds the MP4 and Matroska/WebM container readers, a static library the scene engine's CMake includes and that nothing links yet ([container-readers.md](container-readers.md)) |
 | `App/Bridge/Generated/` | Build output of the vendored bridge crate |
 | `upstream/renderer/` | Fork of `bigsaltyfishes/wallpaper-engine-for-macos`, GPL-2.0-only, modified |
 | `upstream/renderer/external/open-wallpaper-engine/` | Fork of `bigsaltyfishes/open-wallpaper-engine`, modified; vendors Apache-2.0 `spirv_reflect` and public-domain/MIT-0 `miniaudio` under `third_party/` |

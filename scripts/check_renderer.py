@@ -43,6 +43,8 @@ REGRESSION_BINARIES = {
     "shader_preprocessor_compat_test": False, "unpack_shader_compile_smoke": False,
     "video_texture_submission_smoke": False, "vulkan_render_batch_planner_smoke": False,
     "version_tests": False,
+    # Renderer/Media/tests: the project's own container readers, pure C++ and headless.
+    "media_core_tests": False,
 }
 # Executables in tests/CMakeLists.txt that the check neither builds nor runs, and
 # why. Every other one is registered above or is one of the two probes below.
