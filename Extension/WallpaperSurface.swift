@@ -26,6 +26,12 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   /// trying the same player again, while a different or replaced clip tries it afresh.
   private var nativeFailures = LockScreenNativeVideoMemory()
   private var contentError: Error?
+  /// Set once, when the engine reports it cannot draw the scene and Native Metal is the only renderer it
+  /// may use. The surface then keeps what it shows and says why; it is not a `contentError`, because the
+  /// surface is alive and showing a picture, and the same scene can reuse it.
+  private var heldFailure: LockScreenHeldFailure?
+  /// The localized note about `heldFailure` the readiness file carries to the app.
+  private(set) var heldNotice: String?
   private var frameObserver: NSObjectProtocol?
   private var firstFrameReply: ((Error?) -> Void)?
   private var readyWaiters: [(Error?) -> Void] = []
@@ -166,9 +172,113 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     try check(owe_scene_wallpaper_set_framing(renderer, framing.panX, framing.panY))
     WallpaperRuntime.log(
       "Framing display=\(scene.displayID) panX=\(framing.panX) panY=\(framing.panY)")
+    try installEngineSignals(renderer)
     firstFrameReply = completion
     requestFrame()
     armDeadline()
+  }
+
+  /// What the engine tells this surface without being asked, read when it does. A held scene never
+  /// produces the poster the first frame waits for, so the engine's own first-frame edge, which it
+  /// raises for a held failure too, is what ends that wait. A frame that fails after the scene drew has
+  /// no poster to wait for and nothing to replace: the surface already shows the last frame.
+  private enum EngineSignal { case firstFrame, renderFailed }
+
+  private final class EngineSignalBox {
+    let fire: () -> Void
+    init(_ fire: @escaping () -> Void) { self.fire = fire }
+  }
+
+  private func installEngineSignals(_ renderer: OpaquePointer?) throws {
+    func callback(_ signal: EngineSignal) -> UnsafeMutableRawPointer {
+      Unmanaged.passRetained(
+        EngineSignalBox { [weak self] in
+          Task { @MainActor in self?.engineSignalled(signal) }
+        }
+      ).toOpaque()
+    }
+    let drop: @convention(c) (UnsafeMutableRawPointer?) -> Void = { pointer in
+      if let pointer { Unmanaged<EngineSignalBox>.fromOpaque(pointer).release() }
+    }
+    let fire: @convention(c) (UnsafeMutableRawPointer?) -> Void = { pointer in
+      guard let pointer else { return }
+      Unmanaged<EngineSignalBox>.fromOpaque(pointer).takeUnretainedValue().fire()
+    }
+    let first = callback(.firstFrame)
+    let firstResult = owe_scene_wallpaper_set_first_frame_callback(renderer, fire, first, drop)
+    // A refusal does not take ownership of the box.
+    if firstResult != 0 { drop(first) }
+    try check(firstResult)
+    let failed = callback(.renderFailed)
+    let failedResult = owe_scene_wallpaper_set_render_failure_callback(renderer, fire, failed, drop)
+    if failedResult != 0 { drop(failed) }
+    try check(failedResult)
+  }
+
+  private func engineSignalled(_ signal: EngineSignal) {
+    guard !stopped, renderer != nil, let held = engineHeldFailure() else { return }
+    settleHeld(held, afterSignal: signal)
+  }
+
+  /// The engine's reason for holding this scene, when it is held.
+  private func engineHeldFailure() -> LockScreenHeldFailure? {
+    guard let renderer else { return nil }
+    let scene = UnsafeMutableRawPointer(renderer)
+    var reason = ""
+    let needed = owe_scene_wallpaper_backend_failure_reason(scene, nil, 0)
+    if needed > 0 {
+      var buffer = [CChar](repeating: 0, count: needed + 1)
+      _ = owe_scene_wallpaper_backend_failure_reason(scene, &buffer, buffer.count)
+      reason = String(cString: buffer)
+    }
+    return LockScreenHeldFailure(rawStage: owe_scene_wallpaper_backend_failure(scene), reason: reason)
+  }
+
+  /// Native Metal is the only renderer and could not draw the scene. Said once, in the log and in the
+  /// readiness the app reads; the surface keeps its last frame, or shows the engine's preview picture.
+  private func settleHeld(_ held: LockScreenHeldFailure, afterSignal signal: EngineSignal) {
+    guard heldFailure == nil else { return }
+    heldFailure = held
+    heldNotice = Self.heldMessage(held)
+    WallpaperRuntime.log(
+      "Held display=\(scene.displayID) preferred=\(scene.effectiveSceneRenderer.rawValue) "
+        + "\(held.logDetail); not drawn, holding the last frame or the preview picture")
+    switch signal {
+    case .firstFrame:
+      // The picture the wait was for is the one on the surface, so the wait is over. The preview, when
+      // the project has one, is a sublayer the engine put on this surface's layer.
+      guard let reply = firstFrameReply else { break }
+      firstFrameReply = nil
+      deadline?.cancel()
+      deadline = nil
+      presentingSince = ContinuousClock.now
+      applyPolicy()
+      reply(nil)
+      let waiters = readyWaiters
+      readyWaiters.removeAll()
+      waiters.forEach { $0(nil) }
+      finishSnapshots(error: latestSnapshot == nil ? WallpaperRuntime.failure("Wallpaper frame is not ready.") : nil)
+    case .renderFailed:
+      // After the scene drew: nothing to replace. The note reaches the app with the next readiness.
+      WallpaperController.shared.acknowledge(surface: self)
+    }
+  }
+
+  /// The words the app shows for a held scene, in the extension's language.
+  static func heldMessage(_ held: LockScreenHeldFailure) -> String {
+    let stage: String
+    switch held.stage {
+    case .unsupported: stage = String(localized: "it uses something Native Metal can't draw")
+    case .prepare: stage = String(localized: "Native Metal couldn't start")
+    case .compile: stage = String(localized: "its shaders didn't compile for Metal")
+    case .frame: stage = String(localized: "a frame failed in Native Metal")
+    case .surface: stage = String(localized: "Native Metal couldn't take the new display")
+    }
+    let detail = held.reason.isEmpty ? stage : stage + " " + String(localized: "(reason: \(held.reason))")
+    return String(
+      localized:
+        "Native Metal can't draw this wallpaper: \(detail). The lock screen shows its last frame, or its preview picture when it has drawn nothing yet."
+    )
   }
 
   private func armDeadline() {
@@ -656,6 +766,9 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       reply(contentError)
     } else if latestSnapshot != nil, firstFrameReply == nil {
       reply(nil)
+    } else if heldFailure != nil, firstFrameReply == nil {
+      // Held, with a picture on the surface but no snapshot of it: that is as ready as it will get.
+      reply(nil)
     } else {
       readyWaiters.append(reply)
     }
@@ -701,6 +814,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     video?.stop()
     video = nil
     contentError = nil
+    heldFailure = nil
+    heldNotice = nil
     if let renderer {
       _ = owe_scene_wallpaper_begin_surface_reconfigure(renderer)
       _ = owe_scene_wallpaper_shutdown(renderer)

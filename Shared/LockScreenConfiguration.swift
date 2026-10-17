@@ -90,10 +90,14 @@ struct LockScreenScene: Codable, Equatable {
 
 /// Which renderer draws a scene, by the names the app's Scene renderer setting and the
 /// engine use. A preference, not an outcome: a scene the native backend cannot draw as a
-/// whole is drawn by Compatibility, and the extension logs which one drew.
+/// whole is drawn by Compatibility, and the extension logs which one drew. With
+/// `nativeMetalOnly` there is no Compatibility to fall to, and the scene is held instead.
 enum LockScreenSceneRenderer: String, Codable, Equatable {
   case compatibility
   case nativeMetalPreferred = "native_metal_preferred"
+  /// Native Metal and nothing else: a scene it cannot draw is held, on its last frame or its preview
+  /// picture, and reported as a failure (`LockScreenHeldFailure`) instead of being drawn by Compatibility.
+  case nativeMetalOnly = "native_metal_only"
 
   /// What the app's setting defaults to, and so what a configuration without the key means.
   static let `default` = LockScreenSceneRenderer.nativeMetalPreferred
@@ -103,6 +107,7 @@ enum LockScreenSceneRenderer: String, Codable, Equatable {
     switch self {
     case .compatibility: 0
     case .nativeMetalPreferred: 1
+    case .nativeMetalOnly: 2
     }
   }
 
@@ -142,8 +147,15 @@ struct LockScreenFraming: Codable, Equatable {
 
 /// Written once a non-preview surface has GPU-ready pixels, or with `error` when
 /// acquiring or replacing its renderer failed; never optimistically.
+///
+/// `held` is the other way a surface can be ready without drawing: Native Metal is the only renderer it
+/// may use and could not draw the scene, so it shows its last frame or the project's preview picture and
+/// says why, in words the extension has already localized. It is not an `error`: the surface exists and
+/// shows a picture, and the app keeps the lock screen on it and shows the note. A file an older
+/// extension wrote has no such key and reads as nil.
 struct LockScreenReadiness: Codable {
   var revision: String
   var displayID: UInt32
   var error: String?
+  var held: String? = nil
 }

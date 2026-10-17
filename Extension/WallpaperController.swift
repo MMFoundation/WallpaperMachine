@@ -111,7 +111,7 @@ final class WallpaperController {
       Self.record(
         LockScreenReadiness(
           revision: configuration.revision, displayID: scene.displayID,
-          error: (error ?? readyError)?.localizedDescription))
+          error: (error ?? readyError)?.localizedDescription, held: surface.heldNotice))
     }
   }
 

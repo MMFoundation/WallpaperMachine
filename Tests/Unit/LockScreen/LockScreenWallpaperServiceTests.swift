@@ -134,7 +134,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
   }
 
   /// Answers the extension's readiness files like the real lock-screen renderer.
-  private func readinessResponder() -> Task<Void, Never> {
+  private func readinessResponder(held: String? = nil) -> Task<Void, Never> {
     let exchange = self.exchange
     return Task.detached {
       while !Task.isCancelled {
@@ -144,7 +144,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
         {
           for scene in configuration.scenes {
             let readiness = LockScreenReadiness(
-              revision: configuration.revision, displayID: scene.displayID, error: nil)
+              revision: configuration.revision, displayID: scene.displayID, error: nil, held: held)
             try? JSONEncoder().encode(readiness).write(
               to: exchange.appendingPathComponent("ready-\(scene.displayID).json"),
               options: .atomic)
@@ -153,6 +153,27 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(50))
       }
     }
+  }
+
+  /// A scene the extension holds because Native Metal is the only renderer and could not draw it is not an
+  /// activation failure: the surface exists and shows its picture, so the lock screen stays on it, and the
+  /// extension's own words about why ride on the status instead of an error that would restore the original.
+  @MainActor
+  func testAHeldSceneKeepsTheLockScreenOnAndShowsTheExtensionsNote() async throws {
+    try XCTSkipIf(CGDisplayIsOnline(CGMainDisplayID()) == 0, "No online main display")
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [self.scene()] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor)
+    let note = "Native Metal can't draw this wallpaper: it uses something Native Metal can't draw."
+    let responder = readinessResponder(held: note)
+    defer { responder.cancel() }
+    service.setEnabled(true)
+    await waitFor("the lock screen to enable on the held scene") { service.isEnabled }
+    XCTAssertNil(service.errorMessage, "a held scene is not an activation failure")
+    XCTAssertTrue(service.status.hasPrefix("Enabled for 1 display"), service.status)
+    XCTAssertTrue(service.status.hasSuffix(note), service.status)
+    XCTAssertTrue(service.ownsDesktopProvider, "the lock screen stays on the held surface")
   }
 
   @MainActor

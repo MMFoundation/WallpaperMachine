@@ -82,7 +82,7 @@ desktop, and Compatibility for a scene it cannot, or when the setting says so. T
 preference is process-wide and its own default is Compatibility, so the extension sets it
 from the configuration, once per load and before any surface starts or is replaced. The
 app publishes the choice with each scene as an optional `sceneRenderer`
-(`compatibility` or `native_metal_preferred`); a file without it, such as one an older app
+(`compatibility`, `native_metal_preferred` or `native_metal_only`); a file without it, such as one an older app
 wrote, reads as the app's default, a name this build does not know reads the same, and a
 copy of the extension that predates the key ignores it and keeps using Compatibility. The
 configuration version is unchanged. Web pages carry none. The engine picks its backend when
@@ -91,6 +91,24 @@ renderer, like moving the picture. After the first frame the extension logs
 `Backend display=… preferred=… drew=native Metal|Compatibility`, with
 `fallback=<reason>` when the whole scene fell back, so a lock screen drawn by Compatibility
 can be told from one the setting asked for.
+
+With **Native Metal only** a scene the native renderer cannot draw is held, as on the
+desktop ([scene rendering](scene-rendering.md#when-native-metal-cannot-draw-a-scene)):
+the engine puts no Compatibility renderer behind it, and the surface keeps what it shows,
+the last frame or, when it has drawn nothing yet, the project's preview picture (a
+sublayer of the surface's Metal layer, so it is part of the context WallpaperAgent
+hosts). The extension listens to the engine's first-frame and render-failure edges, which
+a held scene raises too, instead of waiting out the 30-second first-frame deadline, and
+replies that the surface is ready: the lock screen stays on the picture. It logs
+`Held display=… preferred=… stage=<stage> reason=<reason>` once, and writes the failure
+into the readiness file as `held`, a note in the extension's own language. It is not an
+`error`, which would make the app restore the original wallpaper: the app waits for the
+frame as usual, keeps the lock screen on, and appends the note to the lock screen's
+status line ("Enabled for 1 display(s) — Native Metal can't draw this wallpaper: …"). A
+scene whose frame fails after it drew has nothing to replace, since the surface already
+shows the last frame; the extension logs it the same way and the note reaches the app
+with the next readiness it waits for. Snapshot requests for a held scene that has drawn
+nothing answer with the extension's usual "frame is not ready" error.
 
 ### Plain video wallpapers
 
@@ -432,6 +450,10 @@ In `extension.log`:
   names are recorded, never what they hold: no paths, titles, identifiers or sizes; dictionary
   keys and set members, which are data, are left out, and a name that is not a plain
   identifier shows as `?`. The line is capped in length.
+- `Held display=… preferred=… stage=… reason=…`: the scene engine could not draw the scene
+  with Native Metal and **Native Metal only** allows nothing else, so the surface holds its
+  last frame or its preview picture. Once per failure. See [Scene
+  renderer](#scene-renderer).
 - `Scene renderer preference=native_metal_preferred`: the engine's process-wide preference
   was changed to the app's setting (logged only when it changed), and, once per surface
   after its first frame, `Backend display=... preferred=... drew=native Metal` (or

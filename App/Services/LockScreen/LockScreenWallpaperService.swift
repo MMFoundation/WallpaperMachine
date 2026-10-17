@@ -50,6 +50,11 @@ final class LockScreenWallpaperService {
   @ObservationIgnored private var work: Task<Void, Never>?
   @ObservationIgnored private var extensionPreparation: Task<Void, Error>?
   @ObservationIgnored private var copyRecoveryAttempted = false
+  /// What the extension said about scenes it holds because Native Metal is the only renderer and could not
+  /// draw them (`LockScreenReadiness.held`), by display, for the revision it was read for. The extension
+  /// words it in its own language, so it is shown as written. Not a failure: the surface exists and shows
+  /// a picture, so the lock screen stays on it and the note rides on the status.
+  @ObservationIgnored private var heldNotices: (revision: String, byDisplay: [UInt32: String]) = ("", [:])
   /// The last activation stopped because macOS has the renderer switched off, so a Retry may
   /// switch it on again. Cleared by any other outcome and when nothing is requested any more.
   @ObservationIgnored private var electionRepairOffered = false
@@ -560,11 +565,21 @@ final class LockScreenWallpaperService {
         : hasWebWallpapers
           ? String(localized: "Not applicable — web wallpapers have no lock-screen support")
           : String(localized: "Waiting for an applied video or live scene on a connected display")
+    if isEnabled, errorMessage == nil, let held = heldNotice(for: configuration) {
+      status += " — " + held
+    }
     let count = configuration.scenes.count
     screenSaverStatus = !screenSaverRequested ? String(localized: "Off") : screenSaverEnabled
       ? String(localized: "Selected for \(count) display(s) — starts when macOS is idle")
       : String(localized: "Waiting for an applied wallpaper on a connected display")
     screenSaverError = nil
+  }
+
+  /// The first note a display of `configuration` is held with, in display order, when the extension wrote one.
+  private func heldNotice(for configuration: LockScreenConfiguration) -> String? {
+    guard heldNotices.revision == configuration.revision else { return nil }
+    let notices = heldNotices.byDisplay
+    return configuration.scenes.lazy.compactMap { notices[$0.displayID] }.first
   }
 
   private func checkReadinessFailures(_ configuration: LockScreenConfiguration) throws {
@@ -651,6 +666,7 @@ final class LockScreenWallpaperService {
       try Task.checkCancellation()
       try checkExtensionFailure(configuration)
       var ready = true
+      var noted: [UInt32: String] = [:]
       for scene in configuration.scenes where scene.webEntryFile == nil {
         let file = exchange.appendingPathComponent("ready-\(scene.displayID).json")
         guard let data = try? Data(contentsOf: file),
@@ -661,8 +677,12 @@ final class LockScreenWallpaperService {
           continue
         }
         if let error = state.error { throw LockScreenWallpaperFailure(message: error) }
+        if let held = state.held { noted[scene.displayID] = held }
       }
-      if ready { return }
+      if ready {
+        heldNotices = (configuration.revision, noted)
+        return
+      }
       try await Task.sleep(for: .milliseconds(100))
     }
     try Task.checkCancellation()

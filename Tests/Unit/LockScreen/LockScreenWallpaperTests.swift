@@ -1488,7 +1488,9 @@ final class LockScreenWallpaperTests: XCTestCase {
 
   func testTheSceneRendererTravelsInTheFileAndAnOlderFileKeepsTheOldShape() throws {
     let encoder = JSONEncoder()
-    for renderer in [LockScreenSceneRenderer.compatibility, .nativeMetalPreferred] {
+    for renderer in [
+      LockScreenSceneRenderer.compatibility, .nativeMetalPreferred, .nativeMetalOnly,
+    ] {
       let scene = publishedScene(sceneRenderer: renderer)
       let decoded = try JSONDecoder().decode(LockScreenScene.self, from: encoder.encode(scene))
       XCTAssertEqual(decoded.sceneRenderer, renderer)
@@ -1520,11 +1522,17 @@ final class LockScreenWallpaperTests: XCTestCase {
     XCTAssertTrue(named.sharesRenderer(with: unset))
     XCTAssertEqual(LockScreenSceneRenderer.compatibility.enginePreference, 0)
     XCTAssertEqual(LockScreenSceneRenderer.nativeMetalPreferred.enginePreference, 1)
+    XCTAssertEqual(
+      LockScreenSceneRenderer.nativeMetalOnly.enginePreference, 2,
+      "the value of `OWE_SCENE_RENDERER_NATIVE_METAL_ONLY`")
   }
 
   func testAChangedSceneRendererReplacesTheRenderer() {
     let metal = publishedScene(sceneRenderer: .nativeMetalPreferred)
     let compatibility = publishedScene(sceneRenderer: .compatibility)
+    XCTAssertFalse(
+      metal.sharesRenderer(with: publishedScene(sceneRenderer: .nativeMetalOnly)),
+      "falling back and not falling back are different renderers")
     XCTAssertFalse(metal.sharesRenderer(with: compatibility))
     XCTAssertFalse(compatibility.sharesRenderer(with: metal))
     XCTAssertFalse(

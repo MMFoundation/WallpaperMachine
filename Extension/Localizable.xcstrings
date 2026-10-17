@@ -105,6 +105,27 @@
     },
     "WallpaperMachine does not handle debug requests." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine does not handle debug requests."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineはデバッグリクエストを処理しません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 不处理调试请求。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 不處理除錯請求。"}}}
+    },
+    "it uses something Native Metal can't draw" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "it uses something Native Metal can't draw"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalで描画できない要素が含まれています"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "其中包含原生 Metal 无法绘制的内容"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "其中包含原生 Metal 無法繪製的內容"}}}
+    },
+    "Native Metal couldn't start" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Native Metal couldn't start"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalを開始できませんでした"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 无法启动"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 無法啟動"}}}
+    },
+    "its shaders didn't compile for Metal" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "its shaders didn't compile for Metal"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "シェーダがMetal用にコンパイルされませんでした"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "其着色器无法编译为 Metal"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "其著色器無法編譯為 Metal"}}}
+    },
+    "a frame failed in Native Metal" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "a frame failed in Native Metal"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalでフレームの描画に失敗しました"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 绘制某一帧失败"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 繪製某個影格失敗"}}}
+    },
+    "Native Metal couldn't take the new display" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Native Metal couldn't take the new display"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalが新しいディスプレイを引き継げませんでした"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 无法接管新的显示器"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 無法接手新的顯示器"}}}
+    },
+    "(reason: %@)" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "(reason: %@)"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "（理由：%@）"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "（原因：%@）"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "（原因：%@）"}}}
+    },
+    "Native Metal can't draw this wallpaper: %@. The lock screen shows its last frame, or its preview picture when it has drawn nothing yet." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Native Metal can't draw this wallpaper: %@. The lock screen shows its last frame, or its preview picture when it has drawn nothing yet."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalではこの壁紙を描画できません：%@。ロック画面には最後のフレーム（まだ何も描画していない場合はプレビュー画像）が表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 无法绘制此壁纸：%@。锁屏会显示最后一帧（尚未绘制任何内容时则显示预览图）。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 無法繪製此桌布：%@。鎖定畫面會顯示最後一個影格（尚未繪製任何內容時則顯示預覽圖）。"}}}
     }
   },
   "version" : "1.0"
