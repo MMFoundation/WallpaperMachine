@@ -642,7 +642,8 @@ the block (NOTES 93).
 97. **Library file name.** The package is `wm-shader`, so the archive is `libwm_shader.a`
     (`target/<profile>/`), not `libshader.a`. The swap step points the engine's build at it (spec 2.8 names
     the file; it is a build detail, not part of the C contract). The host-callable initialiser of 2.8
-    (Q15) is dropped: the exports are `#[unsafe(no_mangle)]` and the engine force-loads the archive.
+    (Q15) was dropped here and is back since amendments 1 (R113(b)): `ffi::keep_exports_alive`, see
+    note 113.
 98. **Error wording of the pointer checks.** `compile request failed: the request pointer is null` and
     `... the out program pointer is null` (R2). With both null the request pointer is named. The
     out pointer is set to null before anything else, so every failure path leaves null (R1), even the
@@ -714,6 +715,87 @@ the block (NOTES 93).
     it) and skips with a printed reason without clang, nm or the build; the C program's stdout and
     stderr must be exactly `c abi ok` and empty, which doubles as the check that a failed compile
     writes nothing (R93).
+
+## Amendments 1 choices (a-contract R111 to R113, b R81, c1 R107, c2 R90, d R66)
+
+The amendments are in `.plans/own-code/specs/shader/amendments-1.md`. What it leaves open, and the
+reading chosen as the most consistent with it:
+
+108. **Member-access suffix (c1 R107).** The suffix is a dot, then one identifier whose letters are all
+    component letters (`xyzw`, `rgba`, `stpq`, mixed freely: it is discarded, so no set has to be
+    consistent), then `;` or `,`. It is read only directly after the declared name, not after an array
+    suffix (`v[2].xy` is not tolerated). It applies to every top-level declaration that carries one of
+    `uniform attribute varying in out`, so there is one code path; a declarator list accepts a suffix on
+    each declarator. Anything else after the dot, a number the lexer made of the dot (`v.12`), a
+    non-component identifier or a following `=`, `[` or `.`, is a hard parse failure, reported by
+    `dialect::parse` as a `Parse` diagnostic spanning the declaration from its first token through its
+    `;`. The tree drops the suffix, so the converted text, reflection and Metal text are those of the
+    plain declaration (the cache key still differs: it hashes the raw source, note 9) and the use facts
+    of R7 never see it.
+109. **Metadata scan (b R81).** Nothing changed: the item scan reads a declaration up to its `;`, so a
+    suffix stays inside one declaration whose name is the identifier before the dot. Tests pin it for
+    the compiled and the conditional shape and for annotations after the declaration.
+110. **Component budget (d R66).** `legalize::interface::check_component_budget` sums, in source order,
+    the components of the fragment stage's varying inputs after the width reconciliation (scalar 1,
+    vector N, matrix columns times rows, arrays multiply, a type it cannot size counts 4). It runs in
+    the program numbering and when a fragment stage is legalized alone; a vertex stage alone, and vertex
+    outputs no fragment input names, are free. The failure is a `LegalizeError::Request` (category
+    `InvalidRequest`) naming the total, 124, the stage and the varying whose addition first crossed the
+    limit. Location numbers of varyings are unbounded (running totals saturate instead of overflowing, so
+    a hostile array bound cannot panic a debug build). The location cap of 31 stays for vertex inputs
+    and fragment outputs, and reflection still refuses a vertex input above 30 (d R61), the stricter
+    figure winning as c2 R90 says. A vertex-only varying array with an enormous bound is not limited
+    by the budget (it is free by the amendment); it is only as costly as naga makes it.
+111. **Target and accessors (a R111).** Already true of the code; added: the header says target 0 is
+    retired, never returned, never reassigned; a C caller that declares only the thirteen functions
+    (`tests/c/thirteen_only.c`) links and compiles a quad; tests refuse the Vulkan spelling, the empty
+    string, a made-up name, a wrong-case Metal name and a target of the wrong JSON type, each with the
+    request-parse marker and the offending string, and show that an omitted target and `metal_msl` give
+    identical documents. No name exists for the retired target in the header.
+112. **Parity corpus (a R112, check 4).** The golden files "recorded from the old library" cannot be
+    made from this side of the clean room. `tests/golden/parity/` holds metadata and reflection documents
+    of three fresh programs recorded from this library (bless with `WM_SHADER_BLESS=1`), and the shipped
+    and workshop sweeps of the crate's tests (printed pass rates, skipped with a reason when the tree is
+    absent) stand in for "every program that compiled then compiles now". The real parity comparison
+    against the retired library's documents is for the swap step, which has both.
+113. **Host linkage (a R113).** The package and archive names were already `wm-shader` and
+    `libwm_shader.a`. `ffi::keep_exports_alive()` is the one documented host-callable entry: it returns
+    the address of `rs_shader_compile_program` and is not exported to C. A test checks that it names that
+    function, that there is a single such entry, and that the archive still exports only the thirteen
+    names; another that no manifest of the workspace but this crate's names it. Not done here, because it
+    is the swap step's and lives outside this worktree: the engine's `RUST_SHADER_STATICLIB` configure
+    step, the release gate and the renderer and Rust check scripts, the licence-check fixtures and the
+    architecture and build docs, which still name the old crate in the old workspace (changing them
+    before the old crate leaves would break the gate that still builds it). The engine-side obligations
+    of R111(d) (removing the two accessor declarations, compiling each program once for Metal, removing
+    the Vulkan-renderer tests) are the engine's.
+114. **Slots (D5).** The code already implements d R46 (per stage, per namespace, rank by ascending
+    binding, gap-free); `binding.rs` documents that the R35 limits apply to the dense slot and that the
+    block is buffer slot 0 as the stage's only buffer. Tests pin the properties of D5 (1) to (5). The
+    sixteen-sampler positive case cannot be written with canonical texture names (sixteen textures, their
+    samplers and the block need 33 binding numbers, and R30 caps bindings at 31), so the limit is pinned
+    from above (seventeen fail with the argument-table text) and by thirteen below.
+115. **Plane block order (D6).** The code numbers the block before the chroma resources in the plain
+    layout (block 4, chroma texture 5, sampler 6 in the amendment's example), which the relaxed rule
+    allows. The two tests that pinned block 2 and chroma 3 now assert only uniqueness, the author's
+    bindings unchanged, and the chroma bindings above the author's; no test orders the block against the
+    chroma resources.
+116. **Identity (a R77).** `pipeline/tests/golden.rs` records a digest of the Metal text of three fixed
+    programs per identity (append-only, revisions strictly increasing and equal to the newest row), so a
+    change of output without a new identity fails. `PIPELINE_REVISION` stays 1: output of every program
+    that compiled before is unchanged; programs that failed before (a suffix, a varying past location 31)
+    now compile. The diagnostics test checks `Codegen` and a span with start not after end through the C
+    ABI; that the span lies inside the stage text is the diagnostics module's own test (R73).
+117. **D4 and D8 (confirmed, left alone).** Tests pin c1 R58, R52 and R53 with c2 R62, R11 and R67 at any
+    parameter position beside `in`, `out` and `inout`. No macro name is added (the `SAMPLERND` spelling of
+    the report is read as the 2D one). Cosmetic Metal differences (D8) are not pinned beyond the digest
+    of note 116; the scene crash and poster noise (D9) are not a shader-layer matter; no timing assertion
+    was added (H2), the 512 KiB stack test stays.
+
+Pass rates after these amendments are in the final report of the change: the workshop pipeline sweep
+compiles 807 of 813 programs (798 before), the dialect sweep 1,665 of 1,680 stages (1,653 before); the
+remainder is an undeclared varying (`phantomtransitionfx`), a `#if` the preprocessor refuses
+(`lens_distorsion`) and `v_TexCoord.zw` on a two-component varying, none of them in the amendments.
 
 ## Measurements (step 3)
 
