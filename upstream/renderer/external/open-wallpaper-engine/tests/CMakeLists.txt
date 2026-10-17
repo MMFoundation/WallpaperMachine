@@ -499,6 +499,25 @@ if(APPLE)
         PkgConfig::TEST_AVFORMAT PkgConfig::TEST_AVCODEC PkgConfig::TEST_AVUTIL)
     wescene_prefer_ffmpeg_headers(playback_gpu_test "TEST_")
 endif()
+# Reading a video's size and length from memory with the project's own MP4
+# reader, against the FFmpeg probe it replaces: the fixtures and, when there is
+# a local wallpaper library, the video payloads inside its `.tex` files.
+if(APPLE)
+    pkg_check_modules(TEST_LZ4_PROBE REQUIRED IMPORTED_TARGET liblz4)
+    add_executable(video_probe_test video_probe_test.cpp)
+    target_link_libraries(video_probe_test PRIVATE ${PROJECT_NAME} wpFs wpScene
+        wescene_testing_media PkgConfig::TEST_LZ4_PROBE GTest::gtest_main)
+    target_include_directories(video_probe_test PRIVATE
+        . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/include)
+    target_compile_features(video_probe_test PRIVATE cxx_std_20)
+    gtest_discover_tests(
+        video_probe_test
+        TEST_PREFIX video_probe_test.
+        PROPERTIES TIMEOUT 300
+        DISCOVERY_TIMEOUT 60
+    )
+endif()
+
 add_executable(video_source_input_test video_source_input_test.cpp)
 target_link_libraries(video_source_input_test PRIVATE ${PROJECT_NAME}
     wescene_testing_media GTest::gtest_main)

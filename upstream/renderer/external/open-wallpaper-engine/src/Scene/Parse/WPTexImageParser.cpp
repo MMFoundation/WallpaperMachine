@@ -3,6 +3,7 @@
 
 #include "Type.hpp"
 #include "Utils/Sha.hpp"
+#include "Video/VideoContainerProbe.hpp"
 #include "Video/VideoMedia.hpp"
 #include "Video/VideoTextureSource.hpp"
 #include "WPCommon.hpp"
@@ -409,6 +410,10 @@ std::optional<video::VideoMetadata> ProbeVideoMetadataFromPayload(
     std::string_view      extension,
     std::span<const char> payload)
 {
+    // An MP4 or QuickTime payload is read where it lies. Only a payload the
+    // project's own readers do not understand is staged for FFmpeg.
+    if (auto metadata = video::ProbeVideoMetadataFromMemory(payload)) return metadata;
+
     const auto temp_path = WriteVideoPayloadToTemp(debug_label, extension, payload);
     if (temp_path.empty()) return std::nullopt;
 

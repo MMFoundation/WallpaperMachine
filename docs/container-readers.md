@@ -7,9 +7,12 @@ the same sources can be compiled into the app, the sandboxed lock-screen
 extension and the test binaries. They only locate and describe samples; decoding
 is another layer's job.
 
-Nothing in the app links them yet: `wmMedia` is a static library that only its
-own tests use. Where they sit in the build and the tree is in
-[repository-layout.md](repository-layout.md).
+`wmMedia` is a static library the scene engine links. Today the scene texture
+parser uses the ISO-BMFF reader to learn the size and length of an MP4 or
+QuickTime video from memory (`Video/VideoContainerProbe.cpp`), where it used to
+write the payload to a temporary file for FFmpeg; any other payload, and one the
+reader refuses, is still probed by FFmpeg. Where the readers sit in the build and
+the tree is in [repository-layout.md](repository-layout.md).
 
 ## Layout
 

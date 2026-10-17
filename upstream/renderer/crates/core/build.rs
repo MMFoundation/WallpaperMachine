@@ -25,6 +25,9 @@ fn main() {
     println!("cargo:rerun-if-env-changed=CMAKE_BUILD_TYPE");
     println!("cargo:rerun-if-env-changed=OWE_NIX_LIBRARY_PATH");
     println!("cargo:rerun-if-changed={}", owe_source.display());
+    // The engine also builds and links the project's own renderer code, which
+    // lives beside upstream/ rather than inside it.
+    println!("cargo:rerun-if-changed={}", workspace_root.join("../../Renderer").display());
     println!("cargo:rerun-if-changed={}", owe_bindings_header.display());
     println!("cargo:rerun-if-changed={}", owe_bindings_source.display());
 
@@ -105,6 +108,8 @@ fn emit_static_link_flags(build_dir: &Path) {
         "wpParticle",
         "wpTimer",
         "wpUtils",
+        // The project's own container readers (Renderer/Media).
+        "wmMedia",
         "spirv-reflect-static",
     ] {
         println!("cargo:rustc-link-lib=static={lib}");
@@ -159,6 +164,7 @@ fn static_link_search_paths(build_dir: &Path) -> Vec<PathBuf> {
         build_dir.join("src/Utils"),
         build_dir.join("src/Vulkan"),
         build_dir.join("third_party/spirv_reflect"),
+        build_dir.join("Renderer/Media"),
     ]
 }
 

@@ -23,7 +23,7 @@ REGRESSION_BINARIES = {
     "render_target_lifetime_test": False, "text_object_runtime_test": False,
     "shader_cache_metadata_test": False, "video_decode_pump_test": False,
     "video_color_conversion_test": False, "video_frame_pacing_test": False,
-    "video_conversion_budget_test": False, "video_source_input_test": False,
+    "video_conversion_budget_test": False, "video_source_input_test": False, "video_probe_test": False,
     "shared_video_session_test": False, "synthetic_video_test": False,
     "render_scale_test": False,
     "static_subgraph_cache_test": False, "texture_prefetch_test": False,

@@ -104,6 +104,7 @@ add_library(
   Runtime/VirtualAssetRegistry.cpp
   Video/FfmpegVideoTextureSource.cpp
   Video/VideoColorConversion.cpp
+  Video/VideoContainerProbe.cpp
   Video/VideoConversionBudget.cpp
   Video/VideoDecodePump.cpp
   Video/VideoFramePacing.cpp
@@ -135,10 +136,18 @@ set(InteralLib
     wpParticle
     wpTimer)
 
+# This project's own container readers (Renderer/Media), added by the top-level
+# CMakeLists.txt from the repository checkout the engine now depends on.
+if(NOT TARGET wmMedia)
+  message(FATAL_ERROR "wescene-renderer needs Renderer/Media (target wmMedia): "
+                      "configure it from a full WallpaperMachine checkout")
+endif()
+set(WESCENE_MEDIA_LIBS wmMedia)
+
 target_link_libraries(
   ${PROJECT_NAME}
   PUBLIC wpUtils
-  PRIVATE ${InteralLib} nlohmann_json::nlohmann_json quickjs::quickjs PkgConfig::LZ4
+  PRIVATE ${InteralLib} ${WESCENE_MEDIA_LIBS} nlohmann_json::nlohmann_json quickjs::quickjs PkgConfig::LZ4
           Freetype::Freetype
           PkgConfig::AVFORMAT
           PkgConfig::AVCODEC

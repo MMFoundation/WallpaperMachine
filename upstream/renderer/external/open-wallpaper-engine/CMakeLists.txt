@@ -53,8 +53,8 @@ endif()
 
 # This project's own container readers (wmMedia). The sources live outside
 # upstream/, in the repository's top-level Renderer/Media, and are pure C++17 with
-# no dependency on anything else here. Skipped when the engine is configured
-# without the rest of the repository.
+# no dependency on anything else here. The engine links it, so it has to be
+# configured from a full checkout.
 get_filename_component(
     WESCENE_MEDIA_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../Renderer/Media" ABSOLUTE)
 if(EXISTS "${WESCENE_MEDIA_DIR}/CMakeLists.txt")
