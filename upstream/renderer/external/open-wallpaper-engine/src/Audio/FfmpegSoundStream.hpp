@@ -6,20 +6,16 @@
 #include <memory>
 #include <string>
 
-namespace wallpaper::fs
-{
-class IBinaryStream;
-}
-
 namespace wallpaper::audio
 {
 
+// The audio track of a video file on disk, decoded with FFmpeg. Only
+// CreateMediaSoundStream calls it, for a plain video wallpaper's audio, until the
+// WebM and MP4 audio of the own container readers replaces it. Scene sounds never
+// reach FFmpeg: see SoundStreamFactory.
 std::unique_ptr<SoundStream> CreateFfmpegSoundStream(const std::filesystem::path& media_path,
                                                      std::string* error,
                                                      SoundStream::Options options = {},
                                                      bool audio_optional = false);
-std::unique_ptr<SoundStream> CreateFfmpegSoundStream(std::shared_ptr<fs::IBinaryStream> stream,
-                                                     std::string* error,
-                                                     SoundStream::Options options = {});
 
 } // namespace wallpaper::audio

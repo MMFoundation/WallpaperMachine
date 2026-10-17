@@ -32,6 +32,14 @@ A scene sound reaches the device in four steps.
 A sound the engine cannot decode (an unsupported codec, a file that is not
 audio, a file whose headers are cut off) is not played: the layer stays silent
 and the log names the reason. A file cut short in its audio plays what is there.
+No scene sound reaches FFmpeg.
+
+The audio track of a plain video wallpaper that falls back to the scene engine
+(`CreateMediaSoundStream`) is the one remaining use of FFmpeg for sound
+(`src/Audio/FfmpegSoundStream`, with `AudioDecodePump`): it takes a path, not a
+stream, and handles WebM and the other containers AudioToolbox cannot open. It
+goes when WebM audio (Opus and Vorbis, through the project's own Matroska reader)
+lands.
 
 ## What is ours and what is the system's
 

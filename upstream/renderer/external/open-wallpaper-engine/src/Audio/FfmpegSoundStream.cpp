@@ -1,7 +1,6 @@
 #include "Audio/FfmpegSoundStream.hpp"
 #include "AudioDecodePump.hpp"
 
-#include "Fs/IBinaryStream.h"
 #include "Video/FfmpegAbi.hpp"
 #include "Utils/Logging.h"
 
@@ -15,7 +14,6 @@ extern "C" {
 }
 
 #include <algorithm>
-#include <cerrno>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -82,119 +80,6 @@ private:
     std::string           m_description;
 };
 
-class StreamFfmpegInputSource final : public FfmpegInputSource {
-public:
-    explicit StreamFfmpegInputSource(std::shared_ptr<fs::IBinaryStream> stream)
-        : m_stream(std::move(stream))
-    {
-    }
-
-    ~StreamFfmpegInputSource() override
-    {
-        FreeAvio();
-    }
-
-    const std::string& Description() const override { return m_description; }
-
-    bool Open(AVFormatContext** format_context, std::string* error) override
-    {
-        if (!m_stream->Rewind()) {
-            return SetError(error, "failed to rewind VFS audio stream");
-        }
-        FreeAvio();
-
-        auto* context = avformat_alloc_context();
-        if (context == nullptr) {
-            return SetError(error, "failed to allocate an FFmpeg media context");
-        }
-
-        constexpr int avio_buffer_size = 32 * 1024;
-        auto* buffer = static_cast<unsigned char*>(av_malloc(avio_buffer_size));
-        if (buffer == nullptr) {
-            avformat_free_context(context);
-            return SetError(error, "failed to allocate an FFmpeg AVIO buffer");
-        }
-
-        m_avio_context = avio_alloc_context(
-            buffer,
-            avio_buffer_size,
-            0,
-            this,
-            &StreamFfmpegInputSource::ReadPacket,
-            nullptr,
-            &StreamFfmpegInputSource::Seek);
-        if (m_avio_context == nullptr) {
-            av_free(buffer);
-            avformat_free_context(context);
-            return SetError(error, "failed to allocate an FFmpeg AVIO context");
-        }
-
-        context->pb = m_avio_context;
-        context->flags |= AVFMT_FLAG_CUSTOM_IO;
-
-        if (const int result = avformat_open_input(&context, nullptr, nullptr, nullptr); result < 0) {
-            if (context != nullptr) {
-                context->pb = nullptr;
-                avformat_free_context(context);
-            }
-            FreeAvio();
-            return SetError(error, "failed to open FFmpeg audio input: " + AvErrorString(result));
-        }
-
-        *format_context = context;
-        return true;
-    }
-
-    void Close() override
-    {
-        FreeAvio();
-    }
-
-private:
-    static int ReadPacket(void* opaque, uint8_t* buffer, int buffer_size)
-    {
-        auto* source = static_cast<StreamFfmpegInputSource*>(opaque);
-        const auto bytes_read = source->m_stream->Read(
-            buffer,
-            static_cast<usize>(std::max(buffer_size, 0)));
-        if (bytes_read == 0) return AVERROR_EOF;
-        return static_cast<int>(bytes_read);
-    }
-
-    static int64_t Seek(void* opaque, int64_t offset, int whence)
-    {
-        auto* source = static_cast<StreamFfmpegInputSource*>(opaque);
-
-        if (whence == AVSEEK_SIZE) {
-            const auto size = source->m_stream->Size();
-            return size >= 0 ? static_cast<int64_t>(size) : AVERROR(EIO);
-        }
-
-        bool seek_result { false };
-        switch (whence & ~AVSEEK_FORCE) {
-        case SEEK_SET: seek_result = source->m_stream->SeekSet(static_cast<idx>(offset)); break;
-        case SEEK_CUR: seek_result = source->m_stream->SeekCur(static_cast<idx>(offset)); break;
-        case SEEK_END: seek_result = source->m_stream->SeekEnd(static_cast<idx>(offset)); break;
-        default: return AVERROR(EINVAL);
-        }
-
-        if (!seek_result) return AVERROR(EIO);
-        return source->m_stream->Tell();
-    }
-
-    void FreeAvio()
-    {
-        if (m_avio_context == nullptr) return;
-
-        av_freep(&m_avio_context->buffer);
-        avio_context_free(&m_avio_context);
-    }
-
-    std::shared_ptr<fs::IBinaryStream> m_stream;
-    AVIOContext*                       m_avio_context { nullptr };
-    std::string                        m_description { "VFS audio stream" };
-};
-
 bool ProbeHasAudioStream(FfmpegInputSource& input_source, std::string* error, bool audio_optional = false)
 {
     if (auto mismatch = video::FfmpegAbiMismatch(); !mismatch.empty()) {
@@ -228,12 +113,6 @@ class FfmpegSoundStream final : public SoundStream, private detail::AudioDecodeS
 public:
     explicit FfmpegSoundStream(std::filesystem::path media_path, Options options = {})
         : FfmpegSoundStream(std::make_unique<PathFfmpegInputSource>(std::move(media_path)),
-                            options)
-    {
-    }
-
-    explicit FfmpegSoundStream(std::shared_ptr<fs::IBinaryStream> stream, Options options = {})
-        : FfmpegSoundStream(std::make_unique<StreamFfmpegInputSource>(std::move(stream)),
                             options)
     {
     }
@@ -570,23 +449,6 @@ std::unique_ptr<SoundStream> CreateFfmpegSoundStream(const std::filesystem::path
     }
 
     return std::make_unique<FfmpegSoundStream>(media_path, options);
-}
-
-std::unique_ptr<SoundStream> CreateFfmpegSoundStream(std::shared_ptr<fs::IBinaryStream> stream,
-                                                     std::string* error,
-                                                     SoundStream::Options options)
-{
-    if (stream == nullptr) {
-        SetError(error, "VFS audio stream must not be null");
-        return nullptr;
-    }
-
-    auto input_source = std::make_unique<StreamFfmpegInputSource>(std::move(stream));
-    if (!ProbeHasAudioStream(*input_source, error)) {
-        return nullptr;
-    }
-
-    return std::make_unique<FfmpegSoundStream>(std::move(input_source), options);
 }
 
 } // namespace wallpaper::audio

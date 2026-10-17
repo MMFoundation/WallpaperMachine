@@ -1,18 +1,21 @@
+// The FFmpeg stream that remains: the audio track of a plain video wallpaper's
+// file on disk (CreateMediaSoundStream). Scene sounds no longer reach FFmpeg;
+// their tests are in sound_stream_test.cpp. These cases use small files the test
+// writes to the temporary directory (never next to the repository).
 #include "Audio/FfmpegSoundStream.hpp"
-#include "Fs/IBinaryStream.h"
-#include "Fs/CBinaryStream.h"
+#include "Audio/SoundStreamFactory.hpp"
+#include "audio/sound_test_support.hpp"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <memory>
 #include <string>
 #include <vector>
+
 #include <unistd.h>
 
 namespace wallpaper::audio
@@ -20,295 +23,135 @@ namespace wallpaper::audio
 namespace
 {
 
-class MemoryBinaryStream final : public fs::IBinaryStream {
+using namespace testing;
+
+/// A file in the temporary directory, removed with the object.
+class TempFile {
 public:
-    explicit MemoryBinaryStream(std::vector<uint8_t> data)
-        : m_data(std::move(data))
+    explicit TempFile(const std::vector<uint8_t>& bytes)
     {
+        auto name = (std::filesystem::temp_directory_path() / "wallpaper-audio-XXXXXX").string();
+        const int descriptor = mkstemp(name.data());
+        EXPECT_GE(descriptor, 0);
+        if (descriptor >= 0) close(descriptor);
+        m_path = name;
+        std::ofstream file(m_path, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     }
-
-    usize Read(void* buffer, usize sizeInByte) override
+    ~TempFile()
     {
-        const auto bytes_to_read = std::min<usize>(
-            sizeInByte,
-            static_cast<usize>(m_data.size() - m_position));
-        if (bytes_to_read > 0) {
-            std::memcpy(buffer, m_data.data() + m_position, bytes_to_read);
-            m_position += bytes_to_read;
-        }
-        return bytes_to_read;
+        std::error_code error;
+        std::filesystem::remove(m_path, error);
     }
+    TempFile(const TempFile&)            = delete;
+    TempFile& operator=(const TempFile&) = delete;
 
-    char* Gets(char* buffer, usize sizeStr) override
-    {
-        if (buffer == nullptr || sizeStr == 0) return buffer;
-
-        usize copied = 0;
-        while (copied + 1 < sizeStr && m_position < m_data.size()) {
-            const auto byte = static_cast<char>(m_data[m_position++]);
-            buffer[copied++] = byte;
-            if (byte == '\n') break;
-        }
-        buffer[copied] = '\0';
-        return copied == 0 ? nullptr : buffer;
-    }
-
-    idx Tell() const override { return static_cast<idx>(m_position); }
-
-    bool SeekSet(idx offset) override
-    {
-        if (!IsValidOffset(offset)) return false;
-        m_position = static_cast<std::size_t>(offset);
-        return true;
-    }
-
-    bool SeekCur(idx offset) override
-    {
-        return SeekSet(static_cast<idx>(m_position) + offset);
-    }
-
-    bool SeekEnd(idx offset) override
-    {
-        return SeekSet(static_cast<idx>(m_data.size()) + offset);
-    }
-
-    isize Size() const override { return static_cast<isize>(m_data.size()); }
-
-protected:
-    usize Write_impl(const void*, usize) override { return 0; }
+    const std::filesystem::path& path() const { return m_path; }
 
 private:
-    bool IsValidOffset(idx offset) const
-    {
-        return offset >= 0 && static_cast<std::size_t>(offset) <= m_data.size();
-    }
-
-    std::vector<uint8_t> m_data;
-    std::size_t          m_position { 0 };
+    std::filesystem::path m_path;
 };
 
-void AppendFourCc(std::vector<uint8_t>& bytes, const std::array<char, 4>& value)
+// A 1x1 PNG: a file FFmpeg recognises that has a video stream and no audio.
+const std::vector<uint8_t> kPng {
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
+    0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+    0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60, 0x00, 0x02, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0d, 0x0a,
+    0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
+};
+
+TEST(FfmpegSoundStreamTest, AFileOnDiskDecodesLikeTheSameBytesAsASceneSound)
 {
-    bytes.insert(bytes.end(), value.begin(), value.end());
-}
-
-void AppendU16Le(std::vector<uint8_t>& bytes, uint16_t value)
-{
-    bytes.push_back(static_cast<uint8_t>(value & 0xffu));
-    bytes.push_back(static_cast<uint8_t>((value >> 8u) & 0xffu));
-}
-
-void AppendU32Le(std::vector<uint8_t>& bytes, uint32_t value)
-{
-    bytes.push_back(static_cast<uint8_t>(value & 0xffu));
-    bytes.push_back(static_cast<uint8_t>((value >> 8u) & 0xffu));
-    bytes.push_back(static_cast<uint8_t>((value >> 16u) & 0xffu));
-    bytes.push_back(static_cast<uint8_t>((value >> 24u) & 0xffu));
-}
-
-std::vector<uint8_t> MakeWavS16Mono(uint32_t sample_rate, uint16_t frame_count)
-{
-    constexpr uint16_t channel_count = 1;
-    constexpr uint16_t bits_per_sample = 16;
-    constexpr uint16_t bytes_per_sample = bits_per_sample / 8;
-    const uint32_t data_size = static_cast<uint32_t>(frame_count) * bytes_per_sample;
-    const uint32_t byte_rate = sample_rate * channel_count * bytes_per_sample;
-    const uint16_t block_align = channel_count * bytes_per_sample;
-
-    std::vector<uint8_t> bytes;
-    bytes.reserve(44u + data_size);
-    AppendFourCc(bytes, { 'R', 'I', 'F', 'F' });
-    AppendU32Le(bytes, 36u + data_size);
-    AppendFourCc(bytes, { 'W', 'A', 'V', 'E' });
-    AppendFourCc(bytes, { 'f', 'm', 't', ' ' });
-    AppendU32Le(bytes, 16);
-    AppendU16Le(bytes, 1);
-    AppendU16Le(bytes, channel_count);
-    AppendU32Le(bytes, sample_rate);
-    AppendU32Le(bytes, byte_rate);
-    AppendU16Le(bytes, block_align);
-    AppendU16Le(bytes, bits_per_sample);
-    AppendFourCc(bytes, { 'd', 'a', 't', 'a' });
-    AppendU32Le(bytes, data_size);
-
-    for (uint16_t frame = 0; frame < frame_count; ++frame) {
-        const int16_t sample = (frame % 32u) < 16u ? 12'000 : -12'000;
-        AppendU16Le(bytes, static_cast<uint16_t>(sample));
+    const auto wav = MakeWav(WavFormat::Int16, 2, 44'100, 1500);
+    TempFile   file(wav);
+    std::string error;
+    auto media = CreateMediaSoundStream(file.path(), &error, { .loop = false });
+    ASSERT_NE(media, nullptr) << error;
+    media->PassDesc({ 2, 48'000 });
+    const auto from_file  = ReadAll(*media, { 2, 48'000 });
+    const auto from_scene = Decode(wav, { 2, 48'000 });
+    ASSERT_EQ(from_file.size(), from_scene.size());
+    // Two resamplers: the same lengths and the same tone, not the same bits.
+    for (size_t index = 200; index + 200 < from_file.size(); ++index) {
+        ASSERT_NEAR(from_file[index], from_scene[index], 2e-3f) << index;
     }
-
-    return bytes;
-}
-
-TEST(FfmpegSoundStreamTest, VfsBackedStreamDecodesPcm)
-{
-    auto stream = std::make_shared<MemoryBinaryStream>(MakeWavS16Mono(12'000, 512));
-    std::string error;
-
-    auto sound = CreateFfmpegSoundStream(stream, &error);
-
-    ASSERT_NE(sound, nullptr) << error;
-    sound->PassDesc({ .channels = 2, .sampleRate = 48'000 });
-
-    std::array<float, 256> output {};
-    const auto frames = sound->NextPcmData(output.data(), 128);
-
-    EXPECT_GT(frames, 0u);
-    EXPECT_TRUE(std::any_of(output.begin(), output.end(), [](float sample) {
-        return sample != 0.0f;
-    }));
-}
-
-TEST(FfmpegSoundStreamTest, SmallPhysicalWavMatchesTheMemoryInput)
-{
-    auto name = (std::filesystem::temp_directory_path() / "wallpaper-audio-XXXXXX").string();
-    const int descriptor = mkstemp(name.data());
-    ASSERT_GE(descriptor, 0);
-    close(descriptor);
-    struct RemoveFile {
-        std::filesystem::path path;
-        ~RemoveFile() { std::error_code error; std::filesystem::remove(path, error); }
-    } cleanup { name };
-    const auto bytes = MakeWavS16Mono(12'000, 512);
-    std::ofstream file(name, std::ios::binary);
-    file.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-    file.close();
-    ASSERT_TRUE(file);
-    auto physical = fs::CreateCBinaryStream(name);
-    ASSERT_NE(physical, nullptr);
-    std::vector<uint8_t> read(bytes.size() + 128);
-    EXPECT_EQ(physical->Read(read.data(), read.size()), bytes.size());
-    EXPECT_TRUE(std::equal(bytes.begin(), bytes.end(), read.begin()));
-    EXPECT_EQ(physical->Read(read.data(), read.size()), 0u);
-    ASSERT_TRUE(physical->Rewind());
-
-    std::string error;
-    auto disk = CreateFfmpegSoundStream(physical, &error, { .loop = false });
-    ASSERT_NE(disk, nullptr) << error;
-    auto memory = CreateFfmpegSoundStream(std::make_shared<MemoryBinaryStream>(bytes),
-                                         &error, { .loop = false });
-    ASSERT_NE(memory, nullptr) << error;
-    disk->PassDesc({ .channels = 1, .sampleRate = 12'000 });
-    memory->PassDesc({ .channels = 1, .sampleRate = 12'000 });
-    std::array<float, 1024> disk_output {}, memory_output {};
-    EXPECT_EQ(disk->NextPcmData(disk_output.data(), 1024), 512u);
-    EXPECT_EQ(memory->NextPcmData(memory_output.data(), 1024), 512u);
-    EXPECT_EQ(disk_output, memory_output);
 }
 
 TEST(FfmpegSoundStreamTest, ResampledTailPreservesTheAuthoredDuration)
 {
     for (const auto [input_rate, output_rate, input_frames, expected_frames] :
-         { std::array<uint32_t, 4> {12000, 48000, 512, 2048},
-           std::array<uint32_t, 4> {44100, 48000, 441, 480},
-           std::array<uint32_t, 4> {48000, 44100, 480, 441} }) {
+         { std::array<uint32_t, 4> { 12'000, 48'000, 512, 2048 },
+           std::array<uint32_t, 4> { 44'100, 48'000, 441, 480 },
+           std::array<uint32_t, 4> { 48'000, 44'100, 480, 441 } }) {
         SCOPED_TRACE(input_rate);
+        TempFile    file(MakeWav(WavFormat::Int16, 1, input_rate, input_frames));
         std::string error;
-        auto sound = CreateFfmpegSoundStream(std::make_shared<MemoryBinaryStream>(
-            MakeWavS16Mono(input_rate, input_frames)), &error, { .loop = false });
+        auto sound = CreateMediaSoundStream(file.path(), &error, { .loop = false });
         ASSERT_NE(sound, nullptr) << error;
-        sound->PassDesc({ .channels = 2, .sampleRate = output_rate });
-        uint64_t total = 0;
+        sound->PassDesc({ 2, output_rate });
+        EXPECT_EQ(ReadAll(*sound, { 2, output_rate }).size() / 2, expected_frames);
         std::array<float, 2 * 97> output {};
-        for (int read = 0; read < 100; ++read) {
-            const auto frames = sound->NextPcmData(output.data(), 97);
-            total += frames;
-            if (frames == 0) break;
-        }
-        EXPECT_EQ(total, expected_frames);
+        output.fill(1.0f);
         EXPECT_EQ(sound->NextPcmData(output.data(), 97), 0u);
         EXPECT_TRUE(std::all_of(output.begin(), output.end(), [](float s) { return s == 0.0f; }));
     }
 }
 
-TEST(FfmpegSoundStreamTest, LoopIncludesTheCompleteResampledTail)
+TEST(FfmpegSoundStreamTest, ALoopIncludesTheCompleteResampledTail)
 {
-    const auto bytes = MakeWavS16Mono(12000, 512);
+    TempFile    file(MakeWav(WavFormat::Int16, 1, 12'000, 512));
     std::string error;
-    auto once = CreateFfmpegSoundStream(std::make_shared<MemoryBinaryStream>(bytes),
-                                      &error, { .loop = false });
-    auto loop = CreateFfmpegSoundStream(std::make_shared<MemoryBinaryStream>(bytes), &error);
+    auto once = CreateMediaSoundStream(file.path(), &error, { .loop = false });
+    auto loop = CreateMediaSoundStream(file.path(), &error, { .loop = true });
     ASSERT_NE(once, nullptr) << error;
     ASSERT_NE(loop, nullptr) << error;
-    once->PassDesc({ .channels = 2, .sampleRate = 48000 });
-    loop->PassDesc({ .channels = 2, .sampleRate = 48000 });
-    std::array<float, 4096> one_cycle {};
-    ASSERT_EQ(once->NextPcmData(one_cycle.data(), 2048), 2048u);
-    std::array<float, 2 * 97> output {};
-    size_t offset = 0;
-    for (int read = 0; read < 100; ++read) {
-        ASSERT_EQ(loop->NextPcmData(output.data(), 97), 97u);
-        for (const float sample : output) {
-            ASSERT_EQ(sample, one_cycle[offset % one_cycle.size()]) << "sample " << offset;
-            ++offset;
-        }
+    once->PassDesc({ 2, 48'000 });
+    loop->PassDesc({ 2, 48'000 });
+    const auto pass = ReadAll(*once, { 2, 48'000 });
+    ASSERT_EQ(pass.size(), 2u * 2048u);
+    const auto cycles = ReadAll(*loop, { 2, 48'000 }, 97, 2048 * 3);
+    ASSERT_GE(cycles.size(), pass.size() * 3);
+    for (size_t index = 0; index < pass.size() * 3; ++index) {
+        ASSERT_EQ(cycles[index], pass[index % pass.size()]) << index;
     }
 }
 
-TEST(FfmpegSoundStreamTest, NonLoopingVfsStreamReportsEndOfFile)
+TEST(FfmpegSoundStreamTest, AVideoWallpapersAudioLoopsByDefault)
 {
-    auto stream = std::make_shared<MemoryBinaryStream>(MakeWavS16Mono(12'000, 16));
+    TempFile    file(MakeWav(WavFormat::Int16, 1, 12'000, 16));
     std::string error;
-
-    auto sound = CreateFfmpegSoundStream(stream, &error, { .loop = false });
-
+    auto sound = CreateMediaSoundStream(file.path(), &error);
     ASSERT_NE(sound, nullptr) << error;
-    sound->PassDesc({ .channels = 1, .sampleRate = 12'000 });
-
-    std::array<float, 64> output {};
-    EXPECT_GT(sound->NextPcmData(output.data(), 16), 0u);
-
-    bool reached_eof = false;
-    for (int attempt = 0; attempt < 8; ++attempt) {
-        std::fill(output.begin(), output.end(), 1.0f);
-        const auto frames = sound->NextPcmData(output.data(), 16);
-        if (frames == 0u) {
-            reached_eof = true;
-            EXPECT_TRUE(std::all_of(output.begin(), output.begin() + 16, [](float sample) {
-                return sample == 0.0f;
-            }));
-            break;
-        }
-    }
-
-    EXPECT_TRUE(reached_eof);
+    sound->PassDesc({ 1, 12'000 });
+    EXPECT_GT(ReadAll(*sound, { 1, 12'000 }, 16, 160).size(), 16u * 4u);
 }
 
-TEST(FfmpegSoundStreamTest, DefaultVfsStreamLoopsForVideoWallpaperAudio)
+TEST(FfmpegSoundStreamTest, AFileWithNoAudioIsSilentWhenAudioIsOptionalAndAnErrorOtherwise)
 {
-    auto stream = std::make_shared<MemoryBinaryStream>(MakeWavS16Mono(12'000, 16));
+    TempFile    file(kPng);
     std::string error;
+    EXPECT_EQ(CreateMediaSoundStream(file.path(), &error, {}, false), nullptr);
+    EXPECT_FALSE(error.empty());
 
-    auto sound = CreateFfmpegSoundStream(stream, &error);
-
-    ASSERT_NE(sound, nullptr) << error;
-    sound->PassDesc({ .channels = 1, .sampleRate = 12'000 });
-
-    std::array<float, 16> output {};
-    bool                  produced_after_first_read = false;
-    EXPECT_GT(sound->NextPcmData(output.data(), 16), 0u);
-    for (int attempt = 0; attempt < 8; ++attempt) {
-        std::fill(output.begin(), output.end(), 0.0f);
-        const auto frames = sound->NextPcmData(output.data(), 16);
-        if (frames > 0u &&
-            std::any_of(output.begin(), output.end(), [](float sample) {
-                return sample != 0.0f;
-            })) {
-            produced_after_first_read = true;
-            break;
-        }
-    }
-
-    EXPECT_TRUE(produced_after_first_read);
+    error = "stale";
+    EXPECT_EQ(CreateMediaSoundStream(file.path(), &error, {}, true), nullptr);
+    EXPECT_TRUE(error.empty()) << error;
 }
 
-TEST(FfmpegSoundStreamTest, InvalidVfsStreamFailsGracefully)
+TEST(FfmpegSoundStreamTest, PathsThatAreNotAudioFilesFailWithAReason)
 {
-    auto stream = std::make_shared<MemoryBinaryStream>(std::vector<uint8_t> { 1, 2, 3, 4 });
     std::string error;
-
-    auto sound = CreateFfmpegSoundStream(stream, &error);
-
-    EXPECT_EQ(sound, nullptr);
+    EXPECT_EQ(CreateMediaSoundStream("", &error), nullptr);
+    EXPECT_FALSE(error.empty());
+    error.clear();
+    EXPECT_EQ(CreateMediaSoundStream("/nonexistent/wallpaper-audio-test.wav", &error, {}, true), nullptr);
+    EXPECT_FALSE(error.empty()) << "a missing file is an error even when audio is optional";
+    error.clear();
+    EXPECT_EQ(CreateMediaSoundStream(std::filesystem::temp_directory_path(), &error), nullptr);
+    EXPECT_FALSE(error.empty());
+    TempFile garbage({ 1, 2, 3, 4 });
+    error.clear();
+    EXPECT_EQ(CreateMediaSoundStream(garbage.path(), &error), nullptr);
     EXPECT_FALSE(error.empty());
 }
 

@@ -651,9 +651,13 @@ device.
   on miniaudio's null backend: the output device starts only with channels
   mounted, playing and unmuted; muted hosts (the lock-screen extension) never
   start it; positions stay frozen while paused or muted.
-  `FfmpegSoundStreamTest.ResampledTailPreservesTheAuthoredDuration` and
-  `.LoopIncludesTheCompleteResampledTail` pin the resampled PCM: the tail keeps
-  the authored duration and a looping stream repeats one cycle sample for sample.
+  `SoundStreamTest.ResamplingKeepsTheAuthoredDurationExactlyWhenTheRatioIsWhole`
+  and `.ALoopIncludesTheCompleteResampledTail` (with `.EncodedSoundsLoopWithoutAGapOrAnOverlap`)
+  pin the resampled PCM of a scene sound whichever decoder serves it: the tail keeps
+  the authored duration and a looping stream repeats one cycle sample for sample,
+  seam included. `sound_core_tests`, `sound_apple_tests` and `sound_vorbis_tests`
+  (`Renderer/Sound/tests`) cover the resampler, remix, pipeline and the two decoders
+  ([sound decoding](../sound-decoding.md)).
   `SoundLayerControlTest` checks authored random playback delays between clips
   against emitted sample counts, including different callback sizes,
   pause/resume, stop/restart and seeded bounds, on the null backend, which never
