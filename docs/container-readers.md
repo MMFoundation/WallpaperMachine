@@ -23,6 +23,10 @@ own tests use. Where they sit in the build and the tree is in
 | `VideoTypes.hpp/.cpp` | what every reader reports: `VideoStreamInfo` (codec fourcc and raw config record, coded and display size, matrix, colour, bit depth, timescale, duration, exact frame periods) and the per-frame `Sample` |
 | `CodecConfig.hpp/.cpp` | bit depth (and VP9 colour) read out of an `avcC`, `hvcC`, `av1C` or `vpcC` record; a record too short for its type is refused |
 | `IsoBmff/IsoBmffReader.hpp/.cpp` | the MP4/QuickTime reader, below |
+| `KeyframeIndex.hpp` | keyframe seeking over a `Sample` table, shared by both readers |
+| `Matroska/Ebml.hpp` | EBML ids, sizes, integers, floats and strings (RFC 8794) |
+| `Matroska/MatroskaReader.hpp/.cpp` | the Matroska/WebM reader, below |
+| `Matroska/Vp9Header.hpp/.cpp` | the VP9 uncompressed header: profile, bit depth, colour space, subsampling and size of a key frame |
 | `ByteReader.hpp` | a bounds-checked big-endian cursor over bytes in memory; a short read latches a failure and returns 0 |
 | `tests/` | googletest executables, defined with `wm_media_test()` in `tests/CMakeLists.txt` |
 
@@ -78,9 +82,74 @@ size, dts, pts, duration, sync, in decode order) and a `VideoStreamInfo`.
   `readSample`. Every count read from the file is checked against the box that
   holds it before anything is allocated.
 
+## Matroska and WebM
+
+`MatroskaReader::Open(source, &error)` makes one sequential pass over the Segment,
+reading element and block headers only (frame payloads are skipped by size), and
+indexes every frame of every video and audio track. Cues are ignored on purpose:
+the index gives exact durations and frame periods, keyframe seeking without Cues,
+and works when Cues are missing, wrong or after the media.
+
+- **Structure:** EBML header (`DocType` must be `webm` or `matroska`,
+  `DocTypeReadVersion` at most 4, id length at most 4 and size length at most 8),
+  `Segment` and `Cluster` of unknown size (a Cluster then ends at the next
+  Segment-level element), `Info` (`TimecodeScale`, `Duration`), `Tracks`
+  (including `Video`, `Colour`, `Projection`, `Audio`, `ContentEncodings`),
+  `SimpleBlock`, `BlockGroup` (`Block`, `BlockDuration`, `ReferenceBlock`,
+  `DiscardPadding`), Xiph, EBML and fixed lacing. Tracks must come before the
+  first Cluster. `BlockAdditions` are ignored, so a VP9-alpha file plays opaque.
+- **Codecs:** `V_VP9`, `V_AV1`, `V_MPEG4/ISO/AVC`, `V_MPEGH/ISO/HEVC` for video and
+  `A_OPUS`, `A_VORBIS`, `A_AAC`, `A_MPEG/L3` for audio, each with `CodecPrivate`
+  exposed verbatim (an `avcC`, `hvcC` or `av1C` record for video, so H.264 and
+  HEVC in Matroska reach a decoder exactly like MP4). `V_VP8` and any other id
+  are unsupported and named in the error (`unsupported: video codec V_VP8 is not
+  supported`). The reader only reports codec and configuration; whether the
+  Mac can decode it (AV1 needs hardware decode, for one) is the adapter's call.
+- **Video track:** the first enabled video track whose codec is supported; `Open`
+  fails with `Unsupported` when there is none. A VP9 track has no `vpcC` in WebM,
+  so the first key frame's header is parsed (`vp9KeyFrame()`) for the profile, bit
+  depth, colour space and size. Colour comes from the `Colour` element, the
+  display matrix from a `ProjectionPoseRoll` of whole quarter turns (the sign
+  matches what FFmpeg writes and reads), the pixel aspect ratio from
+  `DisplayWidth`/`DisplayHeight`.
+- **Times:** nanoseconds. Matroska stores only presentation times, so `dts` of a
+  video sample is derived: the sorted presentation times, moved earlier by the
+  least amount that keeps every `dts` at or before its `pts` (equal to `pts` when
+  nothing is reordered). The index, not `Info.Duration`, decides `durationTicks`
+  (the end of the last frame; `Info.Duration` is only used for a headers-only open
+  and stays available as `info().infoDurationNs`).
+- **Content encodings:** header stripping is understood (`readSample`/`readPacket`
+  put the stripped bytes back); encryption, zlib/bzip2/lzo compression and
+  anything else is `Unsupported` for that track.
+- **Damage:** a problem inside the media data (a corrupt or cut block, a bad lace
+  table, an oversized frame) ends the index and keeps what was read, with a
+  warning, once at least one video key frame is indexed; before that it is an
+  error. Limits and unsupported features always fail the open.
+- **Limits (`MatroskaLimits`):** 16 MiB of header data, 64 tracks, 1 MiB
+  `CodecPrivate`, 256 frames per laced block, 64 MiB per frame (a video frame is
+  also capped at the larger of 64 KiB and width x height x 4), 4,000,000 indexed
+  frames, 60 s of scanning, 256 MiB per `readSample`. `MatroskaOptions::buildIndex
+  = false` reads the headers only, to probe tracks without scanning the file.
+
 ## Tests
 
 | Binary | Covers |
 |---|---|
 | `media_core_tests` | error, checked arithmetic, fractions, byte cursor, memory and file byte sources |
-| `media_isobmff_tests` | the ISO-BMFF reader on files built in memory by `tests/mp4_builder.hpp`: tables and layouts, every codec entry, composition offsets, edit lists, all eight orientations, seeking, fragmented/unsupported/oversized/truncated/junk input and a deterministic random-mutation loop; plus corpus A/B checks: the bundled starter wallpaper against recorded expectations, and the local library (or `WALLPAPER_MACHINE_VIDEO_ROOT`) against `ffprobe` when installed (`WALLPAPER_MACHINE_FFPROBE` overrides its path), skipping with a printed reason when no file exists |
+| `media_isobmff_tests` | the ISO-BMFF reader on files built in memory by `tests/mp4_builder.hpp`: tables and layouts, every codec entry, composition offsets, edit lists, all eight orientations, seeking, fragmented/unsupported/oversized/truncated/junk input and a deterministic random-mutation loop; plus corpus A/B checks: the bundled starter wallpaper against recorded expectations, and the local library against `ffprobe` |
+| `media_matroska_tests` | the Matroska reader on files built in memory by `tests/mkv_builder.hpp`: the index, SimpleBlock and BlockGroup, lacing, unknown-size Segment and Clusters, Cues present or absent, EBML header checks, codecs and encodings, limits, truncation at every length, malformed elements and a deterministic random-mutation loop; the VP9 header parser on the first frames of real libvpx clips; plus a corpus A/B check of `.webm`/`.mkv` files against `ffprobe` |
+
+The corpus checks read the local wallpaper library, or the folder in
+`WALLPAPER_MACHINE_VIDEO_ROOT`, and compare with `ffprobe` when it is installed
+(`WALLPAPER_MACHINE_FFPROBE` overrides its path). With no file they skip with a
+printed reason; a skip is not a pass. Nothing is written, and only the file's
+base name is printed.
+
+The mutation loops are most useful under sanitizers, which the routine gate does
+not run. To run all three binaries that way:
+
+```sh
+cmake -S Renderer/Media -B artifacts/media/asan -G Ninja -DWM_MEDIA_SANITIZE=address,undefined
+cmake --build artifacts/media/asan
+artifacts/media/asan/tests/media_matroska_tests
+```

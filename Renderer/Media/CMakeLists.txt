@@ -24,6 +24,8 @@ set(WM_MEDIA_SOURCES
     DisplayMatrix.cpp
     Error.cpp
     IsoBmff/IsoBmffReader.cpp
+    Matroska/MatroskaReader.cpp
+    Matroska/Vp9Header.cpp
     Rational.cpp
     VideoTypes.cpp
 )

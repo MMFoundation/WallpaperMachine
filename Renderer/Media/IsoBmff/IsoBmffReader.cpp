@@ -779,16 +779,7 @@ private:
         }
         info.durationTicks = duration > 0 ? duration : std::max<std::int64_t>(end, 0);
 
-        IsoBmffReader& reader = *m_reader;
-        for (std::size_t index = 0; index < samples.size(); ++index) {
-            if (samples[index].sync) reader.m_syncIndices.push_back(static_cast<std::uint32_t>(index));
-        }
-        for (std::size_t index = 1; index < reader.m_syncIndices.size(); ++index) {
-            if (samples[reader.m_syncIndices[index]].pts < samples[reader.m_syncIndices[index - 1]].pts) {
-                reader.m_syncPtsIncreasing = false;
-                break;
-            }
-        }
+        m_reader->m_keyframes.build(samples);
     }
 
     // --- The sample description ---------------------------------------------------
@@ -933,21 +924,7 @@ std::unique_ptr<IsoBmffReader> IsoBmffReader::Open(std::shared_ptr<ByteSource> s
 
 std::optional<std::size_t> IsoBmffReader::findKeyframeAtOrBefore(std::int64_t pts) const
 {
-    if (m_syncIndices.empty()) return std::nullopt;
-    if (m_syncPtsIncreasing) {
-        // The first sync sample that starts after `pts`; the one before it is the answer.
-        const auto after = std::upper_bound(m_syncIndices.begin(), m_syncIndices.end(), pts,
-                                            [this](std::int64_t value, std::uint32_t index) {
-                                                return value < m_samples[index].pts;
-                                            });
-        return after == m_syncIndices.begin() ? m_syncIndices.front() : *(after - 1);
-    }
-    // Sync samples out of presentation order: scan for the latest one at or before.
-    std::optional<std::size_t> best;
-    for (std::uint32_t index : m_syncIndices) {
-        if (m_samples[index].pts <= pts && (! best || m_samples[index].pts >= m_samples[*best].pts)) best = index;
-    }
-    return best ? best : std::optional<std::size_t> { m_syncIndices.front() };
+    return m_keyframes.findAtOrBefore(m_samples, pts);
 }
 
 bool IsoBmffReader::readSample(std::size_t index, std::vector<std::uint8_t>* out, Error* error) const

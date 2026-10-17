@@ -584,7 +584,7 @@ mount opens the system output device even when nothing plays. Temporary files
 carry the process id, because other checkouts run the same binaries at the same
 time and share the temporary directory, and are removed when the test ends.
 
-Two registered binaries also read a local corpus when there is one; the roots
+Two registered binaries (`version_tests` and `unchanged_present_test`) and the media binaries' corpus A/B tests described above also read a local corpus when there is one; the roots
 and their defaults are in
 [wallpaper-corpus.md](wallpaper-corpus.md#pointing-the-tests-at-your-local-corpus).
 `version_tests` parses every `<id>/scene.pkg` under
@@ -725,6 +725,8 @@ end and Metal program reuse across renderers), `metal_poster_capture_test`
 `metal_video_texture_test` (BGRA import and NV12 conversion against the CPU
 color reference, from synthetic frames). All four run in the check and draw only
 into private textures; the three that draw skip visibly without a Metal device.
+
+The project's own container readers in `Renderer/Media` ([container-readers.md](../container-readers.md)) add three headless binaries built by the same CMake tree into `tests/` and registered in `REGRESSION_BINARIES`: `media_core_tests` (error, checked arithmetic, fractions, byte cursor, memory and file byte sources), `media_isobmff_tests` (the MP4 reader on files assembled in memory by `Renderer/Media/tests/mp4_builder.hpp`: sample tables and layouts, every codec entry, composition offsets, edit lists, all eight orientations, keyframe seeking, fragmented, junk, truncated, oversized and randomly mutated input) and `media_matroska_tests` (the Matroska/WebM reader on files from `mkv_builder.hpp`: the frame index, SimpleBlock and BlockGroup, Xiph/EBML/fixed lacing, unknown-size Segment and Clusters, Cues present or absent, codec and encoding refusals, limits, truncation at every length, mutations, and the VP9 header parser on real libvpx frames). They need no GPU, window or audio and take about a second. Their corpus A/B tests read the bundled starter wallpaper (recorded expectations) and the local library or `WALLPAPER_MACHINE_VIDEO_ROOT`, compare with `ffprobe` when installed (`WALLPAPER_MACHINE_FFPROBE` overrides the path) and skip with a printed reason when no file exists. Their mutation loops are meant to be run under sanitizers too: `cmake -S Renderer/Media -B artifacts/media/asan -G Ninja -DWM_MEDIA_SANITIZE=address,undefined`, then build and run the three binaries from that tree's `tests/` (not part of the routine check; the option instruments the library as well as the tests). `tests.test_check_renderer` also reads `Renderer/Media/tests/CMakeLists.txt` (`wm_media_test()`), so an unregistered media test binary fails it.
 
 ## Known limitations
 

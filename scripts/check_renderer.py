@@ -44,7 +44,7 @@ REGRESSION_BINARIES = {
     "video_texture_submission_smoke": False, "vulkan_render_batch_planner_smoke": False,
     "version_tests": False,
     # Renderer/Media/tests: the project's own container readers, pure C++ and headless.
-    "media_core_tests": False, "media_isobmff_tests": False,
+    "media_core_tests": False, "media_isobmff_tests": False, "media_matroska_tests": False,
 }
 # Executables in tests/CMakeLists.txt that the check neither builds nor runs, and
 # why. Every other one is registered above or is one of the two probes below.

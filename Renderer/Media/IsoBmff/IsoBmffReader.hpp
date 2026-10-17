@@ -17,6 +17,7 @@
 
 #include "Media/ByteSource.hpp"
 #include "Media/Error.hpp"
+#include "Media/KeyframeIndex.hpp"
 #include "Media/VideoTypes.hpp"
 
 #include <cstddef>
@@ -84,8 +85,7 @@ private:
     IsoBmffLimits               m_limits;
     VideoStreamInfo             m_info;
     std::vector<Sample>         m_samples;
-    std::vector<std::uint32_t>  m_syncIndices;
-    bool                        m_syncPtsIncreasing { true };
+    KeyframeIndex               m_keyframes;
     std::uint32_t               m_majorBrand { 0 };
     std::vector<std::string>    m_warnings;
 

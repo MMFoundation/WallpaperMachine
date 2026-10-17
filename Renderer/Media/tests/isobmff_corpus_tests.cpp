@@ -8,6 +8,8 @@
 #include "Media/ByteSource.hpp"
 #include "Media/IsoBmff/IsoBmffReader.hpp"
 
+#include "corpus_support.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -15,7 +17,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -24,55 +25,7 @@ namespace wallpaper::media
 namespace
 {
 
-namespace fs = std::filesystem;
-
-std::string Lower(std::string text)
-{
-    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return text;
-}
-
-bool IsIsoBmffName(const fs::path& path)
-{
-    const std::string extension = Lower(path.extension().string());
-    return extension == ".mp4" || extension == ".m4v" || extension == ".mov";
-}
-
-std::string FindFfprobe()
-{
-    if (const char* chosen = std::getenv("WALLPAPER_MACHINE_FFPROBE")) return fs::exists(chosen) ? chosen : "";
-    for (const char* candidate : { "/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe" }) {
-        if (fs::exists(candidate)) return candidate;
-    }
-    return "";
-}
-
-std::string ShellQuote(const std::string& text)
-{
-    std::string quoted = "'";
-    for (char c : text) quoted += c == '\'' ? std::string("'\\''") : std::string(1, c);
-    return quoted + "'";
-}
-
-// key=value lines of `ffprobe -show_entries stream=...`.
-std::map<std::string, std::string> Ffprobe(const std::string& ffprobe, const fs::path& file)
-{
-    std::map<std::string, std::string> values;
-    const std::string command = ShellQuote(ffprobe) +
-        " -v error -select_streams v:0 -count_packets -show_entries stream=width,height,nb_read_packets,duration"
-        " -of default=nw=1 " + ShellQuote(file.string()) + " 2>/dev/null";
-    FILE* pipe = ::popen(command.c_str(), "r");
-    if (pipe == nullptr) return values;
-    char line[256];
-    while (std::fgets(line, sizeof(line), pipe) != nullptr) {
-        std::string text(line);
-        while (! text.empty() && (text.back() == '\n' || text.back() == '\r')) text.pop_back();
-        const auto equals = text.find('=');
-        if (equals != std::string::npos) values[text.substr(0, equals)] = text.substr(equals + 1);
-    }
-    ::pclose(pipe);
-    return values;
-}
+using namespace testing;
 
 double Seconds(const IsoBmffReader& reader)
 {
@@ -109,28 +62,10 @@ TEST(IsoBmffCorpus, TheStarterWallpaperMatchesItsRecordedExpectations)
 
 TEST(IsoBmffCorpus, LibraryVideosAgreeWithFfprobeOrTheirOwnSampleTables)
 {
-    fs::path root;
-    if (const char* chosen = std::getenv("WALLPAPER_MACHINE_VIDEO_ROOT")) {
-        root = chosen;
-    } else if (const char* home = std::getenv("HOME")) {
-        root = fs::path(home) / "Library/Application Support/WallpaperMachine/Library";
-    }
-    std::error_code ignored;
-    if (root.empty() || ! fs::is_directory(root, ignored)) {
-        GTEST_SKIP() << "skipped: no video corpus (set WALLPAPER_MACHINE_VIDEO_ROOT or install wallpapers in the app library)";
-    }
-    std::vector<fs::path> files;
-    for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ignored), end;
-         it != end && files.size() < 60; it.increment(ignored)) {
-        if (ignored) break;
-        if (it.depth() > 3) {
-            it.disable_recursion_pending();
-            continue;
-        }
-        if (it->is_regular_file(ignored) && IsIsoBmffName(it->path())) files.push_back(it->path());
-    }
+    const auto root = CorpusRoot();
+    if (! root) GTEST_SKIP() << "skipped: no video corpus (set WALLPAPER_MACHINE_VIDEO_ROOT or install wallpapers in the app library)";
+    const std::vector<fs::path> files = CorpusFiles(*root, { ".mp4", ".m4v", ".mov" });
     if (files.empty()) GTEST_SKIP() << "skipped: no .mp4/.m4v/.mov file under the corpus root";
-    std::sort(files.begin(), files.end());
 
     const std::string ffprobe = FindFfprobe();
     if (ffprobe.empty()) std::printf("note: no ffprobe found; comparing header duration with the sample table only\n");

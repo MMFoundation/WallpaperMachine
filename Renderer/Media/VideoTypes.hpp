@@ -100,8 +100,9 @@ struct Sample {
     std::uint64_t offset { 0 };
     std::int64_t  dts { 0 };
     std::int64_t  pts { 0 };
+    /// Ticks the frame is shown for; 0 when the container does not say.
+    std::int64_t  duration { 0 };
     std::uint32_t size { 0 };
-    std::uint32_t duration { 0 };
     bool          sync { false };
 };
 

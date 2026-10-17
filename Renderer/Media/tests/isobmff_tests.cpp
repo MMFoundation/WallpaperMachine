@@ -98,7 +98,7 @@ TEST(IsoBmffReader, ReadsTheSampleTableAndStreamDescriptionOfAPlainFile)
     std::vector<bool> sync;
     for (const Sample& sample : reader->samples()) {
         sync.push_back(sample.sync);
-        EXPECT_EQ(sample.duration, 40U);
+        EXPECT_EQ(sample.duration, 40);
     }
     EXPECT_EQ(sync, (std::vector<bool> { true, false, false, true, false }));
 

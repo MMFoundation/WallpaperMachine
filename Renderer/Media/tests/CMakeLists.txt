@@ -23,3 +23,4 @@ endfunction()
 
 wm_media_test(media_core_tests core_tests.cpp byte_source_tests.cpp)
 wm_media_test(media_isobmff_tests isobmff_tests.cpp isobmff_corpus_tests.cpp)
+wm_media_test(media_matroska_tests matroska_tests.cpp matroska_corpus_tests.cpp)

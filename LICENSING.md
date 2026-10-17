@@ -470,6 +470,10 @@ prefix is `app.wallpapermachine`.
   protocol/Codable layout used as an ABI reference.
 - The Workshop browser and downloader were independently implemented for this
   client.
+- The container readers in `Renderer/Media` were written for this project from the public
+  ISO/IEC 14496-12/-15, Matroska element and RFC 8794 EBML specifications and the VP9
+  bitstream specification. No code from FFmpeg, libav, libwebm, libmatroska, mp4v2, Bento4,
+  GPAC or any other implementation was copied.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
   at revision `73f14ab1568371e6e3c44063f21c34c5e2712c4d`, BSD-3-Clause, vendored
   under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes
