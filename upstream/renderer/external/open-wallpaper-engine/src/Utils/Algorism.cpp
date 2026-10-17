@@ -1,8 +1,8 @@
 #include "Utils/Algorism.h"
-#include "Utils/Eigen.h"
+#include "Utils/Linalg.hpp"
 
 using namespace wallpaper;
-using namespace Eigen;
+using namespace wallpaper::linalg;
 
 double algorism::CalculatePersperctiveDistance(double fov, double height) noexcept {
     double k = std::tan(Radians(fov / 2.0f)) * 2.0f;

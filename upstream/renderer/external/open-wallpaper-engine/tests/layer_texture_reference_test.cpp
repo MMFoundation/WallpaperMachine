@@ -205,21 +205,21 @@ std::map<std::string, ShaderValue, std::less<>> PassUniforms(
 }
 
 /// Where `pass` puts a corner of its card, in normalised device coordinates.
-Eigen::Vector2d CardCornerNdc(Scene& scene, const vulkan::CustomShaderPass& pass,
-                              Eigen::Vector2d corner) {
+linalg::Vector2d CardCornerNdc(Scene& scene, const vulkan::CustomShaderPass& pass,
+                              linalg::Vector2d corner) {
     const auto uniforms = PassUniforms(scene, pass, { "g_ModelViewProjectionMatrix" });
     const auto found    = uniforms.find("g_ModelViewProjectionMatrix");
     if (found == uniforms.end() || found->second.size() != 16) {
         ADD_FAILURE() << "the pass was given no model-view-projection matrix";
-        return Eigen::Vector2d::Constant(std::nan(""));
+        return linalg::Vector2d::Constant(std::nan(""));
     }
-    const Eigen::Matrix4f mvp  = Eigen::Map<const Eigen::Matrix4f>(found->second.data());
-    const Eigen::Vector4f clip = mvp * Eigen::Vector4f(corner.x(), corner.y(), 0.0f, 1.0f);
+    const linalg::Matrix4f mvp  = linalg::Map<const linalg::Matrix4f>(found->second.data());
+    const linalg::Vector4f clip = mvp * linalg::Vector4f(corner.x(), corner.y(), 0.0f, 1.0f);
     return { clip.x() / clip.w(), clip.y() / clip.w() };
 }
 
 void ExpectCardFillsItsTarget(Scene& scene, const vulkan::CustomShaderPass& pass,
-                              Eigen::Vector2d lower_left_corner, Eigen::Vector2d upper_right_corner) {
+                              linalg::Vector2d lower_left_corner, linalg::Vector2d upper_right_corner) {
     const auto lower_left  = CardCornerNdc(scene, pass, lower_left_corner);
     const auto upper_right = CardCornerNdc(scene, pass, upper_right_corner);
     EXPECT_NEAR(lower_left.x(), -1.0, 1e-4);
@@ -229,24 +229,24 @@ void ExpectCardFillsItsTarget(Scene& scene, const vulkan::CustomShaderPass& pass
 }
 
 void ExpectCardFillsItsTarget(Scene& scene, const vulkan::CustomShaderPass& pass,
-                              Eigen::Vector2d half_extent) {
+                              linalg::Vector2d half_extent) {
     ExpectCardFillsItsTarget(scene, pass, -half_extent, half_extent);
 }
 
 /// The lower-left and upper-right corners of a card mesh, in the space it is
 /// authored in.
-std::pair<Eigen::Vector2d, Eigen::Vector2d> CardCorners(const SceneMesh& mesh) {
+std::pair<linalg::Vector2d, linalg::Vector2d> CardCorners(const SceneMesh& mesh) {
     const auto& vertices = mesh.GetVertexArray(0);
     const auto  offsets  = vertices.GetAttrOffsetMap();
     const auto  position = offsets.find(std::string(WE_IN_POSITION));
-    Eigen::Vector2d lower = Eigen::Vector2d::Constant(std::numeric_limits<double>::infinity());
-    Eigen::Vector2d upper = -lower;
+    linalg::Vector2d lower = linalg::Vector2d::Constant(std::numeric_limits<double>::infinity());
+    linalg::Vector2d upper = -lower;
     if (position == offsets.end()) return { lower, upper };
     for (std::size_t vertex = 0; vertex < vertices.VertexCount(); ++vertex) {
         const float* xy = vertices.Data() + vertex * vertices.OneSize() +
                           position->second.offset / sizeof(float);
-        lower = lower.cwiseMin(Eigen::Vector2d(xy[0], xy[1]));
-        upper = upper.cwiseMax(Eigen::Vector2d(xy[0], xy[1]));
+        lower = lower.cwiseMin(linalg::Vector2d(xy[0], xy[1]));
+        upper = upper.cwiseMax(linalg::Vector2d(xy[0], xy[1]));
     }
     return { lower, upper };
 }
@@ -1006,10 +1006,10 @@ TEST(LayerTextureReference, AProjectLayerTakesTheCanvasSizeAndKeepsItsOrigin) {
     ASSERT_NE(parsed, nullptr);
     ASSERT_NE(parsed->runtime, nullptr);
     // The scene's canvas is 64 by 32.
-    EXPECT_TRUE(parsed->runtime->NodeSize("project").isApprox(Eigen::Vector2f(64.0f, 32.0f)));
-    EXPECT_TRUE(parsed->runtime->NodeTranslate("project").isApprox(Eigen::Vector3f(40.0f, 12.0f, 0.0f)));
+    EXPECT_TRUE(parsed->runtime->NodeSize("project").isApprox(linalg::Vector2f(64.0f, 32.0f)));
+    EXPECT_TRUE(parsed->runtime->NodeTranslate("project").isApprox(linalg::Vector3f(40.0f, 12.0f, 0.0f)));
     // `autosize` alone sizes from the texture, which the scene file's size already is.
-    EXPECT_TRUE(parsed->runtime->NodeSize("plain").isApprox(Eigen::Vector2f(10.0f, 10.0f)));
+    EXPECT_TRUE(parsed->runtime->NodeSize("plain").isApprox(linalg::Vector2f(10.0f, 10.0f)));
 }
 
 // What a `shape` object needs of an effect: its shader only compiles with the
@@ -1116,8 +1116,8 @@ TEST(LayerTextureReference, AShapeDrawsItsLastEffectAdditivelyOntoTheScene) {
     // Without the four corners it is the whole square, as tall as the canvas.
     ASSERT_NE(whole->Mesh(), nullptr);
     const auto [lower, upper] = CardCorners(*whole->Mesh());
-    EXPECT_TRUE(lower.isApprox(Eigen::Vector2d(-16.0, -16.0)));
-    EXPECT_TRUE(upper.isApprox(Eigen::Vector2d(16.0, 16.0)));
+    EXPECT_TRUE(lower.isApprox(linalg::Vector2d(-16.0, -16.0)));
+    EXPECT_TRUE(upper.isApprox(linalg::Vector2d(16.0, 16.0)));
 
     // And it reaches the scene's own target as a pass of its own.
     AddScreenTarget(*parsed);
@@ -1335,7 +1335,7 @@ TEST(LayerTextureReference, ASampledTextLayerIsItsCardInItsOwnComposite) {
                 // draws there.
                 struct Composite {
                     const vulkan::CustomShaderPass* pass { nullptr };
-                    Eigen::Vector2d                 lower, upper;
+                    linalg::Vector2d                 lower, upper;
                 };
                 const auto find_composite = [&](const rg::RenderGraph& graph) {
                     Composite found;
@@ -1876,7 +1876,7 @@ TEST(CameraFraming, AFullscreenEffectCoversAPerspectiveScene) {
     ASSERT_NE(graph, nullptr);
     const auto* post = FindPassByOutput(*graph, SpecTex_Default);
     ASSERT_NE(post, nullptr);
-    const Eigen::Vector2d half_extent(parsed->scene_extent[0] / 2.0,
+    const linalg::Vector2d half_extent(parsed->scene_extent[0] / 2.0,
                                       parsed->scene_extent[1] / 2.0);
     ExpectCardFillsItsTarget(*parsed, *post, half_extent);
     parsed->activeCamera->SetFov(75);
@@ -2026,7 +2026,7 @@ TEST(CameraFraming, TheChildrenOfAFullscreenLayerAreSavedAgainstItsSavedTransfor
         const char* name;
         const char* post_fields;
         const char* group;
-        Eigen::Vector3d expected;  // the child's world position
+        linalg::Vector3d expected;  // the child's world position
     };
     const std::array<Case, 4> cases { {
         { "no origin", "", "", { 7.0, 9.0, 0.0 } },
@@ -2052,7 +2052,7 @@ TEST(CameraFraming, TheChildrenOfAFullscreenLayerAreSavedAgainstItsSavedTransfor
         ASSERT_NE(parsed, nullptr);
         ASSERT_NE(parsed->runtime, nullptr);
         for (int tick = 0; tick < 2; ++tick) parsed->runtime->Tick(1.0 / 60.0);
-        const Eigen::Matrix4d picture = parsed->runtime->NodeTransformMatrix("picture");
+        const linalg::Matrix4d picture = parsed->runtime->NodeTransformMatrix("picture");
         EXPECT_NEAR(picture(0, 3), item.expected.x(), 1.0e-4);
         EXPECT_NEAR(picture(1, 3), item.expected.y(), 1.0e-4);
         // The layer itself still covers the screen, whatever was saved for it.
@@ -2091,10 +2091,10 @@ TEST(CameraFraming, APerspectiveCameraKeepsItsLensAndFollowsEveryWayTheCanvasIsF
         EXPECT_NEAR(eye.z(), (canvas.VisibleHeight() / 2.0) / std::tan(fov * M_PI / 360.0), 1e-3);
         for (const auto& [fx, fy] : {std::pair { -0.5, -0.5 }, std::pair { 0.5, 0.5 },
                                      std::pair { 0.3, -0.2 }}) {
-            const Eigen::Vector4d point(centre.x() + fx * canvas.VisibleWidth(),
+            const linalg::Vector4d point(centre.x() + fx * canvas.VisibleWidth(),
                                         centre.y() + fy * canvas.VisibleHeight(), 0.0, 1.0);
-            const Eigen::Vector4d flat = canvas.GetViewProjectionMatrix() * point;
-            const Eigen::Vector4d deep = perspective.GetViewProjectionMatrix() * point;
+            const linalg::Vector4d flat = canvas.GetViewProjectionMatrix() * point;
+            const linalg::Vector4d deep = perspective.GetViewProjectionMatrix() * point;
             EXPECT_NEAR(deep.x() / deep.w(), flat.x() / flat.w(), 1e-5);
             EXPECT_NEAR(deep.y() / deep.w(), flat.y() / flat.w(), 1e-5);
         }
@@ -2115,9 +2115,9 @@ TEST(CameraFraming, APerspectiveCameraKeepsItsLensAndFollowsEveryWayTheCanvasIsF
         vulkan::ApplyCameraFillMode(*parsed, output.mode, output.width, output.height);
         expect_framed(output.name);
     }
-    parsed->FrameCanvas(2.0, Eigen::Vector2f(8.0f, 4.0f));
+    parsed->FrameCanvas(2.0, linalg::Vector2f(8.0f, 4.0f));
     expect_framed("zoomed and panned");
-    parsed->FrameCanvas(1.0, Eigen::Vector2f(0.0f, 0.0f));
+    parsed->FrameCanvas(1.0, linalg::Vector2f(0.0f, 0.0f));
     expect_framed("back to the whole canvas");
 }
 
@@ -2139,7 +2139,7 @@ TEST(CameraFraming, MovingTheCameraChangesTheStaticSampleOfAPassItDraws) {
 
     const auto still = backdrop->frameSample(*parsed).hash;
     EXPECT_EQ(backdrop->frameSample(*parsed).hash, still) << "an unchanged pass must be reusable";
-    parsed->FrameCanvas(2.0, Eigen::Vector2f(8.0f, 4.0f));
+    parsed->FrameCanvas(2.0, linalg::Vector2f(8.0f, 4.0f));
     EXPECT_NE(backdrop->frameSample(*parsed).hash, still)
         << "the view moved and the pass would still be reused";
 }

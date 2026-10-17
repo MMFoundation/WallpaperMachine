@@ -216,7 +216,6 @@ see [Rust crates](#rust-crates) for how.
 | stb_image | `upstream/renderer/external/open-wallpaper-engine/third_party/stb_image.h`, v2.26 | Public domain or MIT, licensee's choice (end of the header) | Compatible |
 | Vulkan Memory Allocator | `upstream/renderer/external/open-wallpaper-engine/third_party/vk_mem_alloc.h` | MIT (stated in the header) | Compatible |
 | **spirv_reflect** | `upstream/renderer/external/open-wallpaper-engine/third_party/spirv_reflect`, linked statically (`spirv-reflect-static`) | Apache-2.0 | **Incompatible with GPLv2** (see below) |
-| Eigen | Homebrew `eigen` 5.0.1, header-only | MPL-2.0 AND Apache-2.0 AND BSD-3-Clause AND Minpack (Homebrew metadata) | Not audited file by file; `Eigen/Core` includes `src/Core/arch/Default/BFloat16.h`, whose header is Apache-2.0, so every Eigen user has an Apache-2.0 file in its include closure; `scripts/check_licenses.py` lists Eigen as Apache-2.0 and, for Minpack, unknown until the Minpack terms are reviewed |
 | nlohmann-json, argparse | Homebrew, header-only | MIT | Compatible |
 | quickjs-ng | Homebrew `quickjs-ng` 0.16.2, `libqjs` in the verified Debug dependency closure | MIT | Compatible |
 | lz4 | Homebrew `lz4` 1.10.0 | BSD-2-Clause | Compatible |
@@ -366,10 +365,9 @@ publishing one does not make its combination with incompatible code lawful to
 distribute. Private use and private builds are unaffected
 (https://www.gnu.org/licenses/gpl-faq.html#WhatDoesCompatMean).
 
-Also still open, independent of the Apache-2.0 question: the file-by-file
-review of Eigen; the exact set of glslang files under each of its licenses;
-and the Rust crates beyond their declared licenses, including
-build-dependencies and proc-macros.
+Also still open, independent of the Apache-2.0 question: the exact set of
+glslang files under each of its licenses; and the Rust crates beyond their
+declared licenses, including build-dependencies and proc-macros.
 
 ## Rights outside software licenses
 
@@ -490,7 +488,7 @@ prefix is `app.wallpapermachine`.
 - Resolve every entry under [Remaining blockers](#remaining-blockers) by
   replacement or by written permission from the actual copyright holders, and
   record the outcome here with the evidence.
-- Complete the file-level review of Eigen and glslang, and review the Rust
+- Complete the file-level review of glslang, and review the Rust
   crates beyond their declared licenses.
 - Bundle the notices of the Rust crates the app links.
 - Implement Developer ID signing and notarization in the release pipeline, and

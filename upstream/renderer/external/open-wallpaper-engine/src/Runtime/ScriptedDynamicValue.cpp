@@ -105,8 +105,8 @@ void ScriptedDynamicValue::DispatchAnimationEvent(const ScriptHostContext& host_
     if (m_program != nullptr) m_program->DispatchAnimationEvent(host_context, event_name, frame);
 }
 
-void ScriptedDynamicValue::DispatchMediaThumbnailChanged(const Eigen::Vector3f& primary_color,
-                                                         const Eigen::Vector3f& text_color) {
+void ScriptedDynamicValue::DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
+                                                         const linalg::Vector3f& text_color) {
     if (m_program != nullptr) {
         m_program->DispatchMediaThumbnailChanged(primary_color, text_color);
     }

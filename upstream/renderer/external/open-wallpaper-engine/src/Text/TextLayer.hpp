@@ -2,7 +2,7 @@
 
 #include "Text/SystemFontResolver.hpp"
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include <array>
 #include <cstddef>
@@ -63,14 +63,14 @@ private:
 struct TextStyle {
     bool            outline { false };
     float           outline_thickness { 4.0f };
-    Eigen::Vector3f outline_color { Eigen::Vector3f::Zero() };
+    linalg::Vector3f outline_color { linalg::Vector3f::Zero() };
     bool            blur { false };
     float           blur_size { 6.0f };
     bool            drop_shadow { false };
     float           shadow_size { 6.0f };
     float           shadow_opacity { 1.0f };
-    Eigen::Vector2f shadow_offset { 4.0f, 4.0f };
-    Eigen::Vector3f shadow_color { Eigen::Vector3f::Zero() };
+    linalg::Vector2f shadow_offset { 4.0f, 4.0f };
+    linalg::Vector3f shadow_color { linalg::Vector3f::Zero() };
 };
 
 /// True when the text is drawn through the font shader's outline, blur or
@@ -122,17 +122,17 @@ struct TextLayerState {
     // a visible effect pass, a colour blend or an opaque background -- and zero on
     // a plain text layer. Which effects are visible changes while a scene runs, so
     // the runtime switches it (`TextLayer::SetPaddingApplies`).
-    Eigen::Vector2f      padding { Eigen::Vector2f::Zero() };
+    linalg::Vector2f      padding { linalg::Vector2f::Zero() };
     // The padding the scene file gives, capped like `padding`, whether or not the
     // layer has the margin now. Set by the parser, for the runtime to switch
     // `padding` between this and zero.
-    Eigen::Vector2f      authored_padding { Eigen::Vector2f::Zero() };
+    linalg::Vector2f      authored_padding { linalg::Vector2f::Zero() };
     // Whether `padding` is `authored_padding` or zero.
     bool                 padding_applies { true };
     // The authored `spacing`: pixels added to every glyph's advance (x) and to
     // the line pitch (y), at the rasterised size.
-    Eigen::Vector2f      spacing { Eigen::Vector2f::Zero() };
-    Eigen::Vector3f      color { Eigen::Vector3f::Ones() };
+    linalg::Vector2f      spacing { linalg::Vector2f::Zero() };
+    linalg::Vector3f      color { linalg::Vector3f::Ones() };
     float                alpha { 1.0f };
     float                brightness { 1.0f };
     // The words `horizontalalign` and `verticalalign` take, read through
@@ -180,18 +180,18 @@ struct TextLayerLayout {
     uint32_t rows { 0 };
     // The margin kept clear around the block on each axis, already gated and capped
     // (`TextLayerState::padding`).
-    Eigen::Vector2f padding { Eigen::Vector2f::Zero() };
+    linalg::Vector2f padding { linalg::Vector2f::Zero() };
     // The block plus twice the padding, never under a pixel; 2 by 2 plus twice the
     // padding with no text. This is the layer's size.
-    Eigen::Vector2f card { Eigen::Vector2f::Zero() };
+    linalg::Vector2f card { linalg::Vector2f::Zero() };
     // Where the card's centre lies from the layer's origin, y up, along the layer's own
     // axes. The layer's alignment is this and nothing else: the origin sits on the edge
     // of the block the text is aligned to (the left, middle or right of it across, and
     // the ascender line, the middle of the rows or the last row's descender line down),
     // and the padding grows the card outward from there. The node is not moved by it.
-    Eigen::Vector2f centre { Eigen::Vector2f::Zero() };
+    linalg::Vector2f centre { linalg::Vector2f::Zero() };
 
-    Eigen::Vector2f BlockSize() const { return { max_x - min_x, top - bottom }; }
+    linalg::Vector2f BlockSize() const { return { max_x - min_x, top - bottom }; }
 };
 
 /// Wallpaper Engine's text `anchor`: pins the layer to an edge or corner of the
@@ -232,7 +232,7 @@ TextScreenAnchor ParseTextScreenAnchor(std::string_view name);
 /// own axes, y up (`SceneNode::SetDrawOffset`): the layer follows the edge or corner of
 /// the presented area it is pinned to, and nothing parented to it or read from its origin
 /// moves.
-Eigen::Vector2f TextScreenAnchorOffset(TextScreenAnchor anchor, const PresentedMargins& margins);
+linalg::Vector2f TextScreenAnchorOffset(TextScreenAnchor anchor, const PresentedMargins& margins);
 
 struct TextLayerRenderBounds {
     float left { 0.0f };
@@ -243,8 +243,8 @@ struct TextLayerRenderBounds {
 
 struct TextLayerRenderFrame {
     TextLayerRenderBounds bounds;
-    Eigen::Vector2f       size { Eigen::Vector2f::Zero() };
-    Eigen::Vector2f       center { Eigen::Vector2f::Zero() };
+    linalg::Vector2f       size { linalg::Vector2f::Zero() };
+    linalg::Vector2f       center { linalg::Vector2f::Zero() };
 };
 
 class TextLayer {
@@ -258,9 +258,9 @@ public:
     const TextLayerLayout& layout() const { return m_layout; }
     const std::string&     text() const { return m_state.text; }
     /// The card the text is laid out in.
-    Eigen::Vector2f        size() const { return m_layout.card; }
+    linalg::Vector2f        size() const { return m_layout.card; }
     /// The card and the room the style reaches on every side: the raster's size.
-    Eigen::Vector2f        rasterSize() const;
+    linalg::Vector2f        rasterSize() const;
     TextLayerRenderBounds renderBounds() const;
     bool                  dirty() const { return m_state.dirty; }
     bool                  layoutPending() const { return m_state.layout_pending; }
@@ -295,16 +295,16 @@ private:
 /// card the layer draws grows with it, so nothing is cut off at the layout box.
 float TextStyleMargin(const TextLayerState& state);
 
-Eigen::Vector2f EstimateTextLayerSize(std::string_view text, float point_size, float padding);
+linalg::Vector2f EstimateTextLayerSize(std::string_view text, float point_size, float padding);
 /// Lays the text out: the block of ink, the face's ascender, descender and pitch, and
 /// the card around them.
 TextLayerLayout MeasureTextLayerLayout(const TextLayerState& state);
 /// The card of `MeasureTextLayerLayout`.
-Eigen::Vector2f MeasureTextLayerSize(const TextLayerState& state);
+linalg::Vector2f MeasureTextLayerSize(const TextLayerState& state);
 /// The raster of a laid-out text: its card and the room the style reaches on every side.
-Eigen::Vector2f TextLayerRasterSizeForLayout(const TextLayerState& state,
+linalg::Vector2f TextLayerRasterSizeForLayout(const TextLayerState& state,
                                              const TextLayerLayout& layout);
-Eigen::Vector2f TextLayerRasterSize(const TextLayerState& state);
+linalg::Vector2f TextLayerRasterSize(const TextLayerState& state);
 /// Where the quad of a laid-out text lies from the layer's origin: the card, centred
 /// where the layout puts it, and the room the style reaches on every side.
 TextLayerRenderBounds TextLayerRenderBoundsForLayout(const TextLayerState& state,
@@ -315,7 +315,7 @@ TextLayerRenderFrame TextLayerRenderFrameForLayout(const TextLayerState& state,
 /// card's width and height with the fraction cut off, and at least 4 each. Every buffer
 /// built for a card, as the scene loads and again when the card changes, takes its size
 /// from here, so that none rounds where another cuts.
-std::array<int32_t, 2> TextCardTexelExtent(Eigen::Vector2f card);
+std::array<int32_t, 2> TextCardTexelExtent(linalg::Vector2f card);
 /// The most texels a side of the buffers an effect chain draws into holds. Wallpaper Engine
 /// has no limit of its own on them; a card past this is drawn cut off to it, centred.
 constexpr int32_t kTextEffectExtentLimit = 4096;
@@ -328,7 +328,7 @@ TextLayerRenderFrame TextLayerEffectFrame(const TextLayerRenderFrame& card);
 /// Where the card lies in the raster of a laid-out text, as the fraction of the raster that lies
 /// outside the card on each side: the raster holds the card with the room the style reaches on
 /// every side, so the card begins that far in. Zero for a text with no style.
-Eigen::Vector2f TextCardInsetInRaster(const TextLayerState& state, const TextLayerLayout& layout);
+linalg::Vector2f TextCardInsetInRaster(const TextLayerState& state, const TextLayerLayout& layout);
 std::string     TextTextureName(std::string_view layer_key);
 void            RasterizeTextLayer(const TextLayerState& state, uint32_t width, uint32_t height,
                                    std::vector<uint8_t>& rgba);

@@ -5,7 +5,7 @@
 #include <vector>
 #include <memory>
 #include <span>
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include "Scene/SceneMesh.h"
 #include "WPPuppet.hpp"
@@ -93,7 +93,7 @@ struct WPMdl {
     };
     std::vector<MorphSection> morph_sections;
 
-    // std::vector<Eigen::Matrix<float, 3, 4>> bones;
+    // std::vector<linalg::Matrix<float, 3, 4>> bones;
     std::shared_ptr<WPPuppet> puppet;
     // combo
     // SKINNING = 1

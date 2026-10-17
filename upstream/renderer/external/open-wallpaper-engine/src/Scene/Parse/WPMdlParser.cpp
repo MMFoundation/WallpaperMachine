@@ -356,7 +356,7 @@ bool ParseMDAT(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
         att.bone_index = f.ReadUint16();
         if (! ReadCStringBefore(f, static_cast<idx>(end_offset), att.name)) return false;
         if (f.Tell() + mdat_attachment_data_byte_length > end_offset) return false;
-        att.local_xform = Eigen::Affine3f::Identity();
+        att.local_xform = linalg::Affine3f::Identity();
         for (auto col : att.local_xform.matrix().colwise()) {
             for (auto& v : col) v = f.ReadFloat();
         }
@@ -743,7 +743,7 @@ bool ParseMDLE(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view tag,
     if (! FitsInBlock(f, payload_bytes, end_offset)) return false;
 
     for (auto& bone : mdl.puppet->bones) {
-        bone.file_world_bind = Eigen::Affine3f::Identity();
+        bone.file_world_bind = linalg::Affine3f::Identity();
         for (auto col : bone.file_world_bind.matrix().colwise()) {
             for (auto& v : col) v = f.ReadFloat();
         }
@@ -800,7 +800,7 @@ bool ParseMDLS(fs::MemBinaryStream& f, WPMdl& mdl, std::string_view path) {
             LOG_ERROR("mdl unsupported bones size: %u", size);
             return false;
         }
-        bone.local_bind = Eigen::Affine3f::Identity();
+        bone.local_bind = linalg::Affine3f::Identity();
         for (auto col : bone.local_bind.matrix().colwise()) {
             for (auto& x : col) x = f.ReadFloat();
         }

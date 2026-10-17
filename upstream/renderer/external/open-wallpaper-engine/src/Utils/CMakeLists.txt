@@ -5,6 +5,7 @@ STATIC
 Logging.cpp
 FpsCounter.cpp
 Algorism.cpp	
+Linalg.cpp
 Sha.cpp
 DynamicLibrary.cpp
 )

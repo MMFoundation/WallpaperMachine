@@ -19,7 +19,7 @@
 #include "Scene/Scene.h"
 #include "SpriteAnimation.hpp"
 #include "SpecTexs.hpp"
-#include "Utils/Eigen.h"
+#include "Utils/Linalg.hpp"
 #include "VulkanRender/CopyPass.hpp"
 #include "VulkanRender/CustomShaderPass.hpp"
 
@@ -531,7 +531,7 @@ TEST(MetalCapability, ASceneWithLightsIsAccepted)
     // writes for either backend; a light on its own asks nothing else of it.
     ImageScene fixture;
     fixture.scene.lights.push_back(
-        std::make_unique<SceneLight>(Eigen::Vector3f { 1.0f, 1.0f, 1.0f }, 100.0f, 1.0f));
+        std::make_unique<SceneLight>(linalg::Vector3f { 1.0f, 1.0f, 1.0f }, 100.0f, 1.0f));
     const auto selection = EvaluateMetalSupport(fixture.scene);
     EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
 }
@@ -745,20 +745,20 @@ TEST(MetalProjection, LandsAuthorGeometryOnTheSameWindowPixelAsTheCompatibilityB
 
     // The scene's own camera, built the way the parser builds it.
     SceneCamera camera(1920, 1080, -1.0, 1.0);
-    const Eigen::Matrix4d compatibility_vp = camera.GetViewProjectionMatrix();
-    const Eigen::Matrix4d metal_vp         = MetalViewProjection(compatibility_vp);
+    const linalg::Matrix4d compatibility_vp = camera.GetViewProjectionMatrix();
+    const linalg::Matrix4d metal_vp         = MetalViewProjection(compatibility_vp);
 
     // The author's canvas corners plus its centre and an off-centre point, so a
     // sign error cannot cancel against symmetry.
-    const std::array<Eigen::Vector4d, 5> author_points {
-        Eigen::Vector4d { -960.0, -540.0, 0.0, 1.0 }, Eigen::Vector4d { -960.0, 540.0, 0.0, 1.0 },
-        Eigen::Vector4d { 960.0, -540.0, 0.0, 1.0 },  Eigen::Vector4d { 960.0, 540.0, 0.0, 1.0 },
-        Eigen::Vector4d { -300.0, 210.0, 0.0, 1.0 },
+    const std::array<linalg::Vector4d, 5> author_points {
+        linalg::Vector4d { -960.0, -540.0, 0.0, 1.0 }, linalg::Vector4d { -960.0, 540.0, 0.0, 1.0 },
+        linalg::Vector4d { 960.0, -540.0, 0.0, 1.0 },  linalg::Vector4d { 960.0, 540.0, 0.0, 1.0 },
+        linalg::Vector4d { -300.0, 210.0, 0.0, 1.0 },
     };
 
     for (const auto& point : author_points) {
-        const Eigen::Vector4d compatibility_clip = compatibility_vp * point;
-        const Eigen::Vector4d metal_clip         = metal_vp * point;
+        const linalg::Vector4d compatibility_clip = compatibility_vp * point;
+        const linalg::Vector4d metal_clip         = metal_vp * point;
 
         const auto want = ClipToWindowVulkan(compatibility_clip, vulkan_viewport);
         const auto got  = ClipToWindowMetal(metal_clip, metal_viewport);
@@ -772,10 +772,10 @@ TEST(MetalProjection, LandsAuthorGeometryOnTheSameWindowPixelAsTheCompatibilityB
 
     // A y-flip inserted anywhere in the fold is exactly the regression this
     // guards: with it, the top and bottom canvas edges swap window rows.
-    Eigen::Matrix4d flipped_fold = Eigen::Matrix4d::Identity();
+    linalg::Matrix4d flipped_fold = linalg::Matrix4d::Identity();
     flipped_fold(1, 1)           = -1.0;
-    const Eigen::Matrix4d wrong_vp = flipped_fold * metal_vp;
-    const Eigen::Vector4d top      = author_points[1];
+    const linalg::Matrix4d wrong_vp = flipped_fold * metal_vp;
+    const linalg::Vector4d top      = author_points[1];
     const auto correct = ClipToWindowMetal(metal_vp * top, metal_viewport);
     const auto wrong   = ClipToWindowMetal(wrong_vp * top, metal_viewport);
     EXPECT_GT(std::abs(correct.y() - wrong.y()), 1.0)
@@ -799,34 +799,34 @@ TEST(MetalProjection, PerspectiveUsesFovAspectNearFarAndAHomogeneousDivide)
     // front of the authored canvas, far plane well beyond it.
     SceneCamera camera(16.0f / 9.0f, 0.1f, 10000.0f, 50.0f);
     auto        node = std::make_shared<SceneNode>(
-        Eigen::Vector3f { 0.0f, 0.0f, 1000.0f }, Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-        Eigen::Vector3f::Zero());
+        linalg::Vector3f { 0.0f, 0.0f, 1000.0f }, linalg::Vector3f { 1.0f, 1.0f, 1.0f },
+        linalg::Vector3f::Zero());
     camera.AttatchNode(node);
 
-    const Eigen::Matrix4d vp = camera.GetViewProjectionMatrix();
-    const Eigen::Vector4d centre = vp * Eigen::Vector4d { 0.0, 0.0, 0.0, 1.0 };
+    const linalg::Matrix4d vp = camera.GetViewProjectionMatrix();
+    const linalg::Vector4d centre = vp * linalg::Vector4d { 0.0, 0.0, 0.0, 1.0 };
     ASSERT_NE(centre.w(), 0.0);
     EXPECT_GT(std::abs(centre.w() - 1.0), 1e-6) << "a perspective projection must not be affine";
     EXPECT_NEAR(centre.x() / centre.w(), 0.0, 1e-9);
     EXPECT_NEAR(centre.y() / centre.w(), 0.0, 1e-9);
     EXPECT_TRUE(MetalDepthInClipRange(centre.z(), centre.w()));
 
-    const Eigen::Vector4d off = vp * Eigen::Vector4d { 100.0, 0.0, 0.0, 1.0 };
+    const linalg::Vector4d off = vp * linalg::Vector4d { 100.0, 0.0, 0.0, 1.0 };
     const double          ndc_x = off.x() / off.w();
 
     SceneCamera tighter(16.0f / 9.0f, 0.1f, 10000.0f, 20.0f);
     tighter.AttatchNode(node);
-    const Eigen::Vector4d tight =
-        tighter.GetViewProjectionMatrix() * Eigen::Vector4d { 100.0, 0.0, 0.0, 1.0 };
+    const linalg::Vector4d tight =
+        tighter.GetViewProjectionMatrix() * linalg::Vector4d { 100.0, 0.0, 0.0, 1.0 };
     EXPECT_GT(std::abs(tight.x() / tight.w()), std::abs(ndc_x))
         << "a narrower FOV must enlarge the same world offset";
 
     // 0.05 in front of the camera, nearer than the 0.1 near plane.
-    const Eigen::Vector4d close = vp * Eigen::Vector4d { 0.0, 0.0, 999.95, 1.0 };
+    const linalg::Vector4d close = vp * linalg::Vector4d { 0.0, 0.0, 999.95, 1.0 };
     EXPECT_FALSE(MetalDepthInClipRange(close.z(), close.w()))
         << "a point in front of the near plane must fail the clip range";
 
-    const Eigen::Matrix4d metal_vp = MetalViewProjection(vp);
+    const linalg::Matrix4d metal_vp = MetalViewProjection(vp);
     EXPECT_TRUE(metal_vp.isApprox(vp, 1e-12))
         << "the Metal clip-space fold is the identity; a flip or scale here is a second correction";
 }
@@ -835,20 +835,20 @@ TEST(MetalProjection, UnprojectingNdcHitsTheLayerPlane)
 {
     SceneCamera camera(16.0f / 9.0f, 0.1f, 10000.0f, 50.0f);
     auto        cam_node = std::make_shared<SceneNode>(
-        Eigen::Vector3f { 0.0f, 0.0f, 1000.0f }, Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-        Eigen::Vector3f::Zero());
+        linalg::Vector3f { 0.0f, 0.0f, 1000.0f }, linalg::Vector3f { 1.0f, 1.0f, 1.0f },
+        linalg::Vector3f::Zero());
     camera.AttatchNode(cam_node);
 
-    SceneNode layer(Eigen::Vector3f::Zero(), Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-                    Eigen::Vector3f::Zero());
+    SceneNode layer(linalg::Vector3f::Zero(), linalg::Vector3f { 1.0f, 1.0f, 1.0f },
+                    linalg::Vector3f::Zero());
     const auto centre = IntersectNdcWithNodePlane(camera, layer, 0.0, 0.0);
     ASSERT_TRUE(centre.has_value());
     EXPECT_NEAR(centre->x(), 0.0, 1e-6);
     EXPECT_NEAR(centre->y(), 0.0, 1e-6);
     EXPECT_NEAR(centre->z(), 0.0, 1e-6);
 
-    const Eigen::Vector4d world { 40.0, -15.0, 0.0, 1.0 };
-    const Eigen::Vector4d clip = camera.GetViewProjectionMatrix() * world;
+    const linalg::Vector4d world { 40.0, -15.0, 0.0, 1.0 };
+    const linalg::Vector4d clip = camera.GetViewProjectionMatrix() * world;
     ASSERT_NE(clip.w(), 0.0);
     const auto hit =
         IntersectNdcWithNodePlane(camera, layer, clip.x() / clip.w(), clip.y() / clip.w());
@@ -857,8 +857,8 @@ TEST(MetalProjection, UnprojectingNdcHitsTheLayerPlane)
     EXPECT_NEAR(hit->y(), -15.0, 1e-4);
     EXPECT_NEAR(hit->z(), 0.0, 1e-4);
 
-    SceneNode rotated(Eigen::Vector3f { 0.0f, 0.0f, 0.0f }, Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-                      Eigen::Vector3f { 0.4f, 0.0f, 0.0f });
+    SceneNode rotated(linalg::Vector3f { 0.0f, 0.0f, 0.0f }, linalg::Vector3f { 1.0f, 1.0f, 1.0f },
+                      linalg::Vector3f { 0.4f, 0.0f, 0.0f });
     const auto rotated_hit = IntersectNdcWithNodePlane(camera, rotated, 0.0, 0.0);
     ASSERT_TRUE(rotated_hit.has_value());
     EXPECT_NEAR(rotated_hit->z(), 0.0, 1e-6);
@@ -868,17 +868,17 @@ TEST(MetalProjection, TheLayerPlaneIsWhereTheLayerIsDrawn)
 {
     SceneCamera camera(16.0f / 9.0f, 0.1f, 10000.0f, 50.0f);
     auto        cam_node = std::make_shared<SceneNode>(
-        Eigen::Vector3f { 0.0f, 0.0f, 1000.0f }, Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-        Eigen::Vector3f::Zero());
+        linalg::Vector3f { 0.0f, 0.0f, 1000.0f }, linalg::Vector3f { 1.0f, 1.0f, 1.0f },
+        linalg::Vector3f::Zero());
     camera.AttatchNode(cam_node);
 
     // A layer a screen anchor draws 25 right and 10 down of where its node is: the point
     // under the cursor is that far from the layer's own origin.
-    SceneNode layer(Eigen::Vector3f::Zero(), Eigen::Vector3f { 2.0f, 2.0f, 1.0f },
-                    Eigen::Vector3f::Zero());
-    layer.SetDrawOffset(Eigen::Vector3f { 25.0f, -10.0f, 0.0f });
-    const Eigen::Vector4d world { 40.0, -15.0, 0.0, 1.0 };
-    const Eigen::Vector4d clip = camera.GetViewProjectionMatrix() * world;
+    SceneNode layer(linalg::Vector3f::Zero(), linalg::Vector3f { 2.0f, 2.0f, 1.0f },
+                    linalg::Vector3f::Zero());
+    layer.SetDrawOffset(linalg::Vector3f { 25.0f, -10.0f, 0.0f });
+    const linalg::Vector4d world { 40.0, -15.0, 0.0, 1.0 };
+    const linalg::Vector4d clip = camera.GetViewProjectionMatrix() * world;
     ASSERT_NE(clip.w(), 0.0);
     const auto hit =
         IntersectNdcWithNodePlane(camera, layer, clip.x() / clip.w(), clip.y() / clip.w());
@@ -892,8 +892,8 @@ TEST(MetalProjection, CameraAxesFollowTheAttachedNode)
 {
     SceneCamera camera(16.0f / 9.0f, 0.1f, 1000.0f, 50.0f);
     auto        node = std::make_shared<SceneNode>(
-        Eigen::Vector3f { 10.0f, 20.0f, 30.0f }, Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-        Eigen::Vector3f { 0.0f, static_cast<float>(EIGEN_PI / 2.0), 0.0f });
+        linalg::Vector3f { 10.0f, 20.0f, 30.0f }, linalg::Vector3f { 1.0f, 1.0f, 1.0f },
+        linalg::Vector3f { 0.0f, static_cast<float>(linalg::Pi / 2.0), 0.0f });
     camera.AttatchNode(node);
     const auto axes = camera.GetAxes();
     EXPECT_NEAR(axes.right.x(), 0.0, 1e-5);

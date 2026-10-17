@@ -16,15 +16,15 @@ namespace wallpaper
 struct ParticleControlpoint {
     bool            link_mouse { false };
     bool            worldspace { false };
-    Eigen::Vector3d base_offset { 0, 0, 0 };
-    Eigen::Vector3d offset { 0, 0, 0 };
+    linalg::Vector3d base_offset { 0, 0, 0 };
+    linalg::Vector3d offset { 0, 0, 0 };
     /// Where `offset` was at the end of the previous step. Operators that
     /// follow a moving control point (maintain distance, ...) read the
     /// difference. Equal to `offset` until the control point first moves.
-    Eigen::Vector3d prev_offset { 0, 0, 0 };
+    linalg::Vector3d prev_offset { 0, 0, 0 };
     /// Orientation of the control point. Identity unless the scene object
     /// (`instanceoverride.controlpointangleN`) or the preset turns it.
-    Eigen::Matrix3d rotation { Eigen::Matrix3d::Identity() };
+    linalg::Matrix3d rotation { linalg::Matrix3d::Identity() };
     /// Whether `rotation` is a real orientation (not the identity default).
     bool has_rotation { false };
     /// A world-space system only: the rotation and scale of its layer's matrix.
@@ -35,7 +35,7 @@ struct ParticleControlpoint {
     /// layer scaled up spreads the particles it spawns wider while each one
     /// keeps its size. Identity, with `has_world_linear` clear, for a layer-space
     /// system and for a pinned control point.
-    Eigen::Matrix3d world_linear { Eigen::Matrix3d::Identity() };
+    linalg::Matrix3d world_linear { linalg::Matrix3d::Identity() };
     bool            has_world_linear { false };
 };
 
@@ -46,7 +46,7 @@ struct ParticleInfo {
     double                                time_pass;
     /// Rotation that carries a direction authored in the world (screen) frame
     /// into the owner layer's local frame. Identity for an unrotated layer.
-    Eigen::Matrix3d world_to_local { Eigen::Matrix3d::Identity() };
+    linalg::Matrix3d world_to_local { linalg::Matrix3d::Identity() };
     /// The second step of a run that was split in two half steps, or an
     /// ordinary step. Reserved for operators that need to tell them apart.
     bool prewarm { false };
@@ -74,7 +74,7 @@ struct ParticleSpawnContext {
     /// by it: a layer stretched along x launches its particles faster along x.
     /// Each emitter writes it before its particles are initialized (see
     /// `ParticleBoxEmitterArgs::spawn`).
-    Eigen::Matrix3d world_linear { Eigen::Matrix3d::Identity() };
+    linalg::Matrix3d world_linear { linalg::Matrix3d::Identity() };
     bool            has_world_linear { false };
 };
 

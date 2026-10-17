@@ -8,7 +8,7 @@
 #include <optional>
 #include <memory>
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include "Core/MapSet.hpp"
 #include "Core/ArrayHelper.hpp"
@@ -36,28 +36,24 @@ public:
     ShaderValue(const value_type* ptr, std::size_t num) noexcept { fromSpan({ ptr, num }); }
 
     template<typename Derived>
-    static ShaderValue fromMatrix(const Eigen::MatrixBase<Derived>& mat) {
+    static ShaderValue fromMatrix(const linalg::DenseBase<Derived>& mat) {
         ShaderValue result;
         result.m_size    = static_cast<size_t>(mat.size());
         result.m_dynamic = result.m_size > result.m_value.size();
         // Match fromSpan's allocation-failure semantics for the final owning storage.
+        // Matrices, blocks and maps hold their values already, in the original scalar
+        // type, so narrowing to the shader's float is the only conversion.
         const auto pack = [&](const auto& evaluated) noexcept {
             if (result.m_dynamic) result.m_dvalue.resize(result.m_size);
             auto* destination = result.m_dynamic ? result.m_dvalue.data() : result.m_value.data();
             size_t index = 0;
-            for (Eigen::Index column = 0; column < evaluated.cols(); ++column) {
-                for (Eigen::Index row = 0; row < evaluated.rows(); ++row) {
+            for (linalg::Index column = 0; column < evaluated.cols(); ++column) {
+                for (linalg::Index row = 0; row < evaluated.rows(); ++row) {
                     destination[index++] = static_cast<value_type>(evaluated.coeff(row, column));
                 }
             }
         };
-        if constexpr ((Derived::Flags & Eigen::DirectAccessBit) != 0) {
-            pack(mat);
-        } else {
-            // Evaluate once in the original scalar type before narrowing the result.
-            const typename Derived::PlainObject evaluated = mat;
-            pack(evaluated);
-        }
+        pack(mat.derived());
         return result;
     }
     const auto& operator[](std::size_t index) const { return _value()[index]; }

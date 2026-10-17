@@ -7,7 +7,7 @@
 #include <span>
 #include <array>
 #include <optional>
-#include <Eigen/Geometry>
+#include "Utils/Linalg.hpp"
 
 #include "Core/Literals.hpp"
 
@@ -31,13 +31,13 @@ public:
 
         std::string     name;
         int32_t         sim_type { 0 };
-        Eigen::Affine3f local_bind { Eigen::Affine3f::Identity() };
+        linalg::Affine3f local_bind { linalg::Affine3f::Identity() };
         // Character-sheet bind geometry and assembled animation reference pose differ.
-        Eigen::Affine3f local_reference { Eigen::Affine3f::Identity() };
+        linalg::Affine3f local_reference { linalg::Affine3f::Identity() };
         bool has_local_reference { false };
-        Eigen::Vector3f reference_position { Eigen::Vector3f::Zero() };
-        Eigen::Vector3f reference_scale { Eigen::Vector3f::Ones() };
-        Eigen::Quaterniond reference_rotation { Eigen::Quaterniond::Identity() };
+        linalg::Vector3f reference_position { linalg::Vector3f::Zero() };
+        linalg::Vector3f reference_scale { linalg::Vector3f::Ones() };
+        linalg::Quaterniond reference_rotation { linalg::Quaterniond::Identity() };
         // Local dump/schema compatibility mirror. Runtime hierarchy follows
         // upstream's bind_parent/anim_parent/file_parent fields below.
         uint32_t        parent { NO_PARENT };
@@ -50,33 +50,33 @@ public:
         bool noBindParent() const { return bind_parent == NO_PARENT; }
         bool noAnimParent() const { return anim_parent == NO_PARENT; }
         // prepared
-        Eigen::Affine3f offset_trans { Eigen::Affine3f::Identity() };
-        Eigen::Affine3f world_bind { Eigen::Affine3f::Identity() };
-        Eigen::Affine3f inv_bind { Eigen::Affine3f::Identity() };
-        Eigen::Vector3f vertex_centroid_offset { 0.0f, 0.0f, 0.0f };
-        Eigen::Vector3f file_skin_pivot { 0.0f, 0.0f, 0.0f };
-        Eigen::Matrix4f file_skin_mat { Eigen::Matrix4f::Identity() };
+        linalg::Affine3f offset_trans { linalg::Affine3f::Identity() };
+        linalg::Affine3f world_bind { linalg::Affine3f::Identity() };
+        linalg::Affine3f inv_bind { linalg::Affine3f::Identity() };
+        linalg::Vector3f vertex_centroid_offset { 0.0f, 0.0f, 0.0f };
+        linalg::Vector3f file_skin_pivot { 0.0f, 0.0f, 0.0f };
+        linalg::Matrix4f file_skin_mat { linalg::Matrix4f::Identity() };
         bool            has_file_skin_pivot { false };
-        Eigen::Affine3f file_world_bind { Eigen::Affine3f::Identity() };
+        linalg::Affine3f file_world_bind { linalg::Affine3f::Identity() };
         bool            has_file_world_bind { false };
         /*
-        Eigen::Vector3f world_axis_x;
-        Eigen::Vector3f world_axis_y;
-        Eigen::Vector3f world_axis_z;
+        linalg::Vector3f world_axis_x;
+        linalg::Vector3f world_axis_y;
+        linalg::Vector3f world_axis_z;
         */
     };
     struct Attachment {
         uint16_t        bone_index { 0 };
         std::string     name;
-        Eigen::Affine3f local_xform { Eigen::Affine3f::Identity() };
+        linalg::Affine3f local_xform { linalg::Affine3f::Identity() };
     };
     struct BoneFrame {
-        Eigen::Vector3f position;
-        Eigen::Vector3f angle;
-        Eigen::Vector3f scale;
+        linalg::Vector3f position;
+        linalg::Vector3f angle;
+        linalg::Vector3f scale;
 
         // prepared
-        Eigen::Quaterniond quaternion;
+        linalg::Quaterniond quaternion;
     };
     struct Animation {
         i32         id;
@@ -145,12 +145,12 @@ public:
         uint32_t val { 0 };
     };
     struct IkConfig {
-        Eigen::Matrix4f                         chain_a_target { Eigen::Matrix4f::Identity() };
+        linalg::Matrix4f                         chain_a_target { linalg::Matrix4f::Identity() };
         uint8_t                                 ik_version { 0 };
         std::array<uint32_t, 2>                 ik_header {};
-        Eigen::Matrix4f                         chain_b_target { Eigen::Matrix4f::Identity() };
+        linalg::Matrix4f                         chain_b_target { linalg::Matrix4f::Identity() };
         std::array<uint8_t, 7>                  ik_flags {};
-        std::array<Eigen::Vector3f, 6>          pole_targets {};
+        std::array<linalg::Vector3f, 6>          pole_targets {};
         std::vector<BoneDir>                    rest_rotations;
         std::vector<ChainBoneDir>               ik_targets;
         std::optional<BoneDir>                  ik_target_root;
@@ -172,7 +172,7 @@ public:
 
 private:
     friend class WPPuppetLayer;
-    void evaluatePose(const WPPuppetLayer&, std::span<Eigen::Affine3f>) const noexcept;
+    void evaluatePose(const WPPuppetLayer&, std::span<linalg::Affine3f>) const noexcept;
 };
 
 // One puppet's animation-layer stack. Copies share playback state: the image
@@ -207,7 +207,7 @@ public:
 
     void prepared(std::span<AnimationLayer>);
 
-    std::span<const Eigen::Affine3f> genFrame(double time) noexcept;
+    std::span<const linalg::Affine3f> genFrame(double time) noexcept;
 
     // SceneScript IAnimationLayer surface. Layers resolve by authored name
     // first, then by stack index; -1 means no such layer.
@@ -251,7 +251,7 @@ private:
 
         std::vector<Layer> m_layers;
         std::vector<i32>   m_finished_layers;
-        std::vector<Eigen::Affine3f> m_final_affines;
+        std::vector<linalg::Affine3f> m_final_affines;
         bool m_pose_valid { false };
         uint64_t m_pose_time_bits { 0 };
     };

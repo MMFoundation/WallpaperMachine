@@ -576,10 +576,10 @@ TEST(SceneScriptMediaEventSmoke, BottomAlignedLayerScalesUpFromBottomEdge) {
     auto fixture = CreateRuntimeWithProbeNodes();
     ASSERT_NE(fixture.runtime, nullptr);
 
-    fixture.exported_probe->SetTranslate(Eigen::Vector3f(100.0f, 50.0f, 0.0f));
-    fixture.exported_probe->SetScale(Eigen::Vector3f(1.0f, 1.0f, 1.0f));
+    fixture.exported_probe->SetTranslate(linalg::Vector3f(100.0f, 50.0f, 0.0f));
+    fixture.exported_probe->SetScale(linalg::Vector3f(1.0f, 1.0f, 1.0f));
     fixture.runtime->RegisterNode("exportedProbe", fixture.exported_probe.get());
-    fixture.runtime->RegisterNodeSize("exportedProbe", Eigen::Vector2f(20.0f, 10.0f));
+    fixture.runtime->RegisterNodeSize("exportedProbe", linalg::Vector2f(20.0f, 10.0f));
 
     fixture.runtime->RegisterSceneScript(
         R"JS(
@@ -606,10 +606,10 @@ TEST(SceneScriptMediaEventSmoke, BottomAlignedLayerAppliesRenderedTransform) {
     auto fixture = CreateRuntimeWithProbeNodes();
     ASSERT_NE(fixture.runtime, nullptr);
 
-    fixture.exported_probe->SetTranslate(Eigen::Vector3f(100.0f, 50.0f, 0.0f));
-    fixture.exported_probe->SetScale(Eigen::Vector3f(1.0f, 1.0f, 1.0f));
+    fixture.exported_probe->SetTranslate(linalg::Vector3f(100.0f, 50.0f, 0.0f));
+    fixture.exported_probe->SetScale(linalg::Vector3f(1.0f, 1.0f, 1.0f));
     fixture.runtime->RegisterNode("exportedProbe", fixture.exported_probe.get());
-    fixture.runtime->RegisterNodeSize("exportedProbe", Eigen::Vector2f(20.0f, 10.0f));
+    fixture.runtime->RegisterNodeSize("exportedProbe", linalg::Vector2f(20.0f, 10.0f));
 
     fixture.runtime->RegisterSceneScript(
         R"JS(
@@ -722,10 +722,10 @@ export function update(value) {
     // shows, in scene units. It used to drive this value, which handed a script
     // the author's canvas back and called it the screen.
     runtime->SetCursorViewport(CursorViewport {
-        .origin         = Eigen::Vector2f::Zero(),
-        .size           = Eigen::Vector2f(2560.0f, 1440.0f),
-        .content_origin = Eigen::Vector2f::Zero(),
-        .content_size   = Eigen::Vector2f(2560.0f, 1440.0f),
+        .origin         = linalg::Vector2f::Zero(),
+        .size           = linalg::Vector2f(2560.0f, 1440.0f),
+        .content_origin = linalg::Vector2f::Zero(),
+        .content_size   = linalg::Vector2f(2560.0f, 1440.0f),
     });
     runtime->Tick(1.0 / 60.0);
     EXPECT_FLOAT_EQ(runtime->NodeTranslate("Probe").x(), 1920.0f);
@@ -733,13 +733,13 @@ export function update(value) {
 
     // The display's pixels do. A 1512-point Retina panel is 3024 pixels wide,
     // which is what the surface already carries and what the script reads.
-    runtime->SetScreenResolution(Eigen::Vector2f(3024.0f, 1964.0f));
+    runtime->SetScreenResolution(linalg::Vector2f(3024.0f, 1964.0f));
     runtime->Tick(1.0 / 60.0);
     EXPECT_FLOAT_EQ(runtime->NodeTranslate("Probe").x(), 3024.0f);
     EXPECT_FLOAT_EQ(runtime->NodeTranslate("Probe").y(), 1964.0f);
 
     // A resolution that is not a size is refused rather than published.
-    runtime->SetScreenResolution(Eigen::Vector2f(0.0f, 1964.0f));
+    runtime->SetScreenResolution(linalg::Vector2f(0.0f, 1964.0f));
     runtime->Tick(1.0 / 60.0);
     EXPECT_FLOAT_EQ(runtime->NodeTranslate("Probe").x(), 3024.0f);
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);

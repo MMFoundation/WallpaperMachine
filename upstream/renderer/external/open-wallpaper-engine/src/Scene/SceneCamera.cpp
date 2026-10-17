@@ -5,11 +5,10 @@
 #include <cmath>
 #include <iostream>
 #include <optional>
-#include "Utils/Eigen.h"
-#include <Eigen/LU>
+#include "Utils/Linalg.hpp"
 
 using namespace wallpaper;
-using namespace Eigen;
+using namespace wallpaper::linalg;
 
 Vector3d SceneCamera::GetPosition() const {
 	if(m_node) {
@@ -116,32 +115,32 @@ SceneCamera::Axes SceneCamera::GetAxes() const {
 	Axes axes;
 	if (! m_node) return axes;
 	m_node->UpdateTrans();
-	const Eigen::Matrix4d& model = m_node->ModelTrans();
-	const Eigen::Vector3d right   = model.col(0).head<3>();
-	const Eigen::Vector3d up      = model.col(1).head<3>();
-	const Eigen::Vector3d forward = model.col(2).head<3>();
+	const linalg::Matrix4d& model = m_node->ModelTrans();
+	const linalg::Vector3d right   = model.col(0).head<3>();
+	const linalg::Vector3d up      = model.col(1).head<3>();
+	const linalg::Vector3d forward = model.col(2).head<3>();
 	if (right.squaredNorm() > 1e-20) axes.right = right.normalized();
 	if (up.squaredNorm() > 1e-20) axes.up = up.normalized();
 	if (forward.squaredNorm() > 1e-20) axes.forward = forward.normalized();
 	return axes;
 }
 
-std::optional<Eigen::Vector3d> wallpaper::IntersectNdcWithNodePlane(
+std::optional<linalg::Vector3d> wallpaper::IntersectNdcWithNodePlane(
 	const SceneCamera& camera, SceneNode& node, double ndc_x, double ndc_y) {
 	node.UpdateTrans();
 	// The plane of the node where it is drawn: its world matrix, and the draw offset
 	// a screen-anchored layer adds to where it is shown.
-	Eigen::Matrix4d drawn = node.ModelTrans();
+	linalg::Matrix4d drawn = node.ModelTrans();
 	drawn.block<3, 1>(0, 3) += node.DrawOffset().cast<double>();
-	const Eigen::Matrix4d clip_from_local = camera.GetViewProjectionMatrix() * drawn;
-	Eigen::FullPivLU<Eigen::Matrix4d> lu(clip_from_local);
+	const linalg::Matrix4d clip_from_local = camera.GetViewProjectionMatrix() * drawn;
+	linalg::FullPivLU<linalg::Matrix4d> lu(clip_from_local);
 	if (! lu.isInvertible()) return std::nullopt;
-	const Eigen::Matrix4d local_from_clip = lu.inverse();
+	const linalg::Matrix4d local_from_clip = lu.inverse();
 
-	const auto unproject = [&](double clip_z) -> std::optional<Eigen::Vector3d> {
-		const Eigen::Vector4d local = local_from_clip * Eigen::Vector4d(ndc_x, ndc_y, clip_z, 1.0);
+	const auto unproject = [&](double clip_z) -> std::optional<linalg::Vector3d> {
+		const linalg::Vector4d local = local_from_clip * linalg::Vector4d(ndc_x, ndc_y, clip_z, 1.0);
 		if (local.w() == 0.0 || ! std::isfinite(local.w())) return std::nullopt;
-		const Eigen::Vector3d point = local.head<3>() / local.w();
+		const linalg::Vector3d point = local.head<3>() / local.w();
 		if (! point.allFinite()) return std::nullopt;
 		return point;
 	};
@@ -149,7 +148,7 @@ std::optional<Eigen::Vector3d> wallpaper::IntersectNdcWithNodePlane(
 	const auto near_p = unproject(0.0);
 	const auto far_p  = unproject(1.0);
 	if (! near_p || ! far_p) return std::nullopt;
-	const Eigen::Vector3d delta = *far_p - *near_p;
+	const linalg::Vector3d delta = *far_p - *near_p;
 	if (! delta.allFinite()) return std::nullopt;
 	constexpr double kParallel = 1e-12;
 	if (std::abs(delta.z()) < kParallel) {
@@ -158,12 +157,12 @@ std::optional<Eigen::Vector3d> wallpaper::IntersectNdcWithNodePlane(
 	}
 	const double t = -near_p->z() / delta.z();
 	if (t < 0.0 || t > 1.0) return std::nullopt;
-	const Eigen::Vector3d hit = *near_p + t * delta;
+	const linalg::Vector3d hit = *near_p + t * delta;
 	if (! hit.allFinite()) return std::nullopt;
 	return hit;
 }
 
-std::optional<Eigen::Vector3d> wallpaper::UnprojectNdcAtDepth(
+std::optional<linalg::Vector3d> wallpaper::UnprojectNdcAtDepth(
 	const SceneCamera& camera, double ndc_x, double ndc_y, double depth) {
 	if (! camera.IsPerspective() || ! std::isfinite(ndc_x) || ! std::isfinite(ndc_y) ||
 		! std::isfinite(depth) || depth <= 0.0) {
@@ -174,13 +173,13 @@ std::optional<Eigen::Vector3d> wallpaper::UnprojectNdcAtDepth(
 		camera.Aspect() <= 0.0) {
 		return std::nullopt;
 	}
-	Eigen::FullPivLU<Eigen::Matrix4d> lu(camera.GetViewMatrix());
+	linalg::FullPivLU<linalg::Matrix4d> lu(camera.GetViewMatrix());
 	if (! lu.isInvertible()) return std::nullopt;
 	// The projection divides view x and y by -z, the half extent at unit
 	// distance and (for x) the aspect, so this is its inverse at one depth.
-	const Eigen::Vector4d view_space(
+	const linalg::Vector4d view_space(
 		ndc_x * tan_half_fov * camera.Aspect() * depth, ndc_y * tan_half_fov * depth, -depth, 1.0);
-	const Eigen::Vector4d world = lu.inverse() * view_space;
+	const linalg::Vector4d world = lu.inverse() * view_space;
 	if (! world.allFinite() || world.w() == 0.0) return std::nullopt;
-	return Eigen::Vector3d(world.head<3>() / world.w());
+	return linalg::Vector3d(world.head<3>() / world.w());
 }

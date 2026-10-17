@@ -183,7 +183,7 @@ public:
     /// The orthographic camera and the perspective one perspective layers draw
     /// through follow it together, so every layer is framed alike. A zoom of 1
     /// with no offset shows the whole canvas.
-    void FrameCanvas(double zoom, const Eigen::Vector2f& offset);
+    void FrameCanvas(double zoom, const linalg::Vector2f& offset);
 
     std::string ResolveRenderTargetName(std::string_view name) const {
         auto alias = renderTargetAliases.find(std::string(name));

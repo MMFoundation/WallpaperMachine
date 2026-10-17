@@ -32,9 +32,9 @@ namespace
 {
 constexpr float kPi = 3.14159265358979323846f;
 
-Eigen::Vector3f DegreesToRadians(const Eigen::Vector3f& value) { return value * (kPi / 180.0f); }
+linalg::Vector3f DegreesToRadians(const linalg::Vector3f& value) { return value * (kPi / 180.0f); }
 
-Eigen::Vector3f RadiansToDegrees(const Eigen::Vector3f& value) { return value * (180.0f / kPi); }
+linalg::Vector3f RadiansToDegrees(const linalg::Vector3f& value) { return value * (180.0f / kPi); }
 
 struct SceneScriptBridgeState {
     SceneRuntimeContext* runtime = nullptr;
@@ -924,27 +924,27 @@ bool FillDynamicValueFromJS(JSContext* context, JSValue value, DynamicValue::Und
 
         switch (hint) {
         case DynamicValue::Vec2:
-            result.update(Eigen::Vector2f(read_float("x"), read_float("y")));
+            result.update(linalg::Vector2f(read_float("x"), read_float("y")));
             break;
         case DynamicValue::Vec3:
-            result.update(Eigen::Vector3f(read_float("x"), read_float("y"), read_float("z")));
+            result.update(linalg::Vector3f(read_float("x"), read_float("y"), read_float("z")));
             break;
         case DynamicValue::Vec4:
-            result.update(Eigen::Vector4f(
+            result.update(linalg::Vector4f(
                 read_float("x"), read_float("y"), read_float("z"), read_float("w")));
             break;
         case DynamicValue::IVec2:
-            result.update(Eigen::Vector2i(read_int("x"), read_int("y")));
+            result.update(linalg::Vector2i(read_int("x"), read_int("y")));
             break;
         case DynamicValue::IVec3:
-            result.update(Eigen::Vector3i(read_int("x"), read_int("y"), read_int("z")));
+            result.update(linalg::Vector3i(read_int("x"), read_int("y"), read_int("z")));
             break;
         case DynamicValue::IVec4:
             result.update(
-                Eigen::Vector4i(read_int("x"), read_int("y"), read_int("z"), read_int("w")));
+                linalg::Vector4i(read_int("x"), read_int("y"), read_int("z"), read_int("w")));
             break;
         default:
-            result.update(Eigen::Vector3f(read_float("x"), read_float("y"), read_float("z")));
+            result.update(linalg::Vector3f(read_float("x"), read_float("y"), read_float("z")));
             break;
         }
         return true;
@@ -2699,14 +2699,14 @@ JSValue JsLayerGetOrigin(JSContext* context, JSValueConst, int argc, JSValueCons
 
     const char* layer_name = JS_ToCString(context, argv[0]);
     const auto  value      = layer_name != nullptr ? bridge->runtime->NodeTranslate(layer_name)
-                                                   : Eigen::Vector3f::Zero();
+                                                   : linalg::Vector3f::Zero();
     if (layer_name != nullptr) JS_FreeCString(context, layer_name);
     return CreateJsVec3(context, value.x(), value.y(), value.z());
 }
 
 JSValue JsLayerGetTransformMatrix(JSContext* context, JSValueConst, int argc,
                                   JSValueConst* argv) {
-    Eigen::Matrix4d matrix = Eigen::Matrix4d::Identity();
+    linalg::Matrix4d matrix = linalg::Matrix4d::Identity();
     auto*           bridge = GetBridgeState(context);
     if (argc >= 1 && bridge != nullptr && bridge->runtime != nullptr) {
         if (const char* layer_name = JS_ToCString(context, argv[0]); layer_name != nullptr) {
@@ -2714,8 +2714,8 @@ JSValue JsLayerGetTransformMatrix(JSContext* context, JSValueConst, int argc,
             JS_FreeCString(context, layer_name);
         }
     }
-    // Eigen keeps a matrix column after column, which is how a script's Mat4
-    // keeps its elements.
+    // A matrix is kept column after column, which is how a script's Mat4 keeps
+    // its elements.
     JSValue elements = JS_NewArray(context);
     for (int index = 0; index < 16; ++index) {
         JS_SetPropertyUint32(
@@ -2749,7 +2749,7 @@ JSValue JsLayerGetScale(JSContext* context, JSValueConst, int argc, JSValueConst
 
     const char* layer_name = JS_ToCString(context, argv[0]);
     const auto  value =
-        layer_name != nullptr ? bridge->runtime->NodeScale(layer_name) : Eigen::Vector3f::Ones();
+        layer_name != nullptr ? bridge->runtime->NodeScale(layer_name) : linalg::Vector3f::Ones();
     if (layer_name != nullptr) JS_FreeCString(context, layer_name);
     return CreateJsVec3(context, value.x(), value.y(), value.z());
 }
@@ -2776,8 +2776,8 @@ JSValue JsLayerGetColor(JSContext* context, JSValueConst, int argc, JSValueConst
     if (argc < 1 || bridge == nullptr || bridge->runtime == nullptr)
         return CreateJsVec3(context, 1.0, 1.0, 1.0);
     const char* name = JS_ToCString(context, argv[0]);
-    const Eigen::Vector3f color = name != nullptr ? bridge->runtime->NodeColor(name)
-                                                  : Eigen::Vector3f::Ones();
+    const linalg::Vector3f color = name != nullptr ? bridge->runtime->NodeColor(name)
+                                                  : linalg::Vector3f::Ones();
     if (name != nullptr) JS_FreeCString(context, name);
     return CreateJsVec3(context, color.x(), color.y(), color.z());
 }
@@ -2818,7 +2818,7 @@ JSValue JsLayerGetAngles(JSContext* context, JSValueConst, int argc, JSValueCons
     const char* layer_name = JS_ToCString(context, argv[0]);
     const auto  value      = layer_name != nullptr
                                  ? RadiansToDegrees(bridge->runtime->NodeRotation(layer_name))
-                                 : Eigen::Vector3f::Zero();
+                                 : linalg::Vector3f::Zero();
     if (layer_name != nullptr) JS_FreeCString(context, layer_name);
     return CreateJsVec3(context, value.x(), value.y(), value.z());
 }
@@ -2847,7 +2847,7 @@ JSValue JsLayerGetSize(JSContext* context, JSValueConst, int argc, JSValueConst*
 
     const char* layer_name = JS_ToCString(context, argv[0]);
     const auto  value =
-        layer_name != nullptr ? bridge->runtime->NodeSize(layer_name) : Eigen::Vector2f::Zero();
+        layer_name != nullptr ? bridge->runtime->NodeSize(layer_name) : linalg::Vector2f::Zero();
     if (layer_name != nullptr) JS_FreeCString(context, layer_name);
     return CreateJsVec2(context, value.x(), value.y());
 }
@@ -3107,15 +3107,15 @@ JSValue JsLayerSetSize(JSContext* context, JSValueConst, int argc, JSValueConst*
     }
     return JS_NewBool(context,
                       runtime->SetNodeSize(ArgumentString(context, argc, argv, 0),
-                                           Eigen::Vector2f(static_cast<float>(width),
+                                           linalg::Vector2f(static_cast<float>(width),
                                                            static_cast<float>(height))));
 }
 
 JSValue JsLayerGetParallaxDepth(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
     auto* runtime = BridgeRuntime(context);
-    const Eigen::Vector2f depth = runtime != nullptr
+    const linalg::Vector2f depth = runtime != nullptr
                                       ? runtime->NodeParallaxDepth(ArgumentString(context, argc, argv, 0))
-                                      : Eigen::Vector2f::Zero();
+                                      : linalg::Vector2f::Zero();
     return CreateJsVec2(context, depth.x(), depth.y());
 }
 
@@ -4411,8 +4411,8 @@ void PropertyScriptProgram::DispatchAnimationEvent(const ScriptHostContext& host
     JS_FreeValue(context_handle, event_object);
 }
 
-void PropertyScriptProgram::DispatchMediaThumbnailChanged(const Eigen::Vector3f& primary_color,
-                                                          const Eigen::Vector3f& text_color) {
+void PropertyScriptProgram::DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
+                                                          const linalg::Vector3f& text_color) {
     if (! m_valid) return;
     auto* context_handle = static_cast<JSContext*>(m_impl_context);
     if (context_handle == nullptr) return;
@@ -4705,8 +4705,8 @@ void SceneScriptProgram::DispatchAnimationEvent(const ScriptHostContext& host_co
     JS_FreeValue(context_handle, event_object);
 }
 
-void SceneScriptProgram::DispatchMediaThumbnailChanged(const Eigen::Vector3f& primary_color,
-                                                       const Eigen::Vector3f& text_color) {
+void SceneScriptProgram::DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
+                                                       const linalg::Vector3f& text_color) {
     if (! m_valid) return;
     auto* context_handle = static_cast<JSContext*>(m_impl_context);
     if (context_handle == nullptr) return;

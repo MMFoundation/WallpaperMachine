@@ -58,7 +58,10 @@ gtest_discover_tests(
 )
 
 # utils_known_answer_tests.cpp pins outputs of the utils the scene engine relies on bit for bit.
-add_executable(scene_schema_tests scene_schema_tests.cpp utils_known_answer_tests.cpp)
+# linalg_tests.cpp does the same for Utils/Linalg.hpp (against linalg_golden.inc, and the
+# behaviour its call sites rely on).
+add_executable(scene_schema_tests scene_schema_tests.cpp utils_known_answer_tests.cpp
+                                  linalg_tests.cpp)
 target_link_libraries(scene_schema_tests PRIVATE ${PROJECT_NAME} wpAudio wpFs wpScene wpParticle nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(scene_schema_tests PRIVATE .)
 target_compile_features(scene_schema_tests PRIVATE cxx_std_20)

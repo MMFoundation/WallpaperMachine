@@ -1143,7 +1143,7 @@ private:
         if (m_scene == nullptr || m_scene->runtime == nullptr) return;
         if (m_render_init_info == nullptr) return;
         m_scene->runtime->SetScreenResolution(
-            Eigen::Vector2f(static_cast<float>(m_render_init_info->width),
+            linalg::Vector2f(static_cast<float>(m_render_init_info->width),
                             static_cast<float>(m_render_init_info->height)));
     }
 
@@ -1191,15 +1191,15 @@ private:
                     const auto mapping = m_render->CursorMapping(*m_scene);
                     if (mapping.valid) {
                         m_scene->runtime->SetCursorViewport(CursorViewport {
-                            .origin = Eigen::Vector2f(static_cast<float>(mapping.origin_x),
+                            .origin = linalg::Vector2f(static_cast<float>(mapping.origin_x),
                                                       static_cast<float>(mapping.origin_y)),
-                            .size   = Eigen::Vector2f(static_cast<float>(mapping.size_x),
+                            .size   = linalg::Vector2f(static_cast<float>(mapping.size_x),
                                                     static_cast<float>(mapping.size_y)),
                             .content_origin =
-                                Eigen::Vector2f(static_cast<float>(mapping.content_origin_x),
+                                linalg::Vector2f(static_cast<float>(mapping.content_origin_x),
                                                 static_cast<float>(mapping.content_origin_y)),
                             .content_size =
-                                Eigen::Vector2f(static_cast<float>(mapping.content_size_x),
+                                linalg::Vector2f(static_cast<float>(mapping.content_size_x),
                                                 static_cast<float>(mapping.content_size_y)),
                         });
                     }

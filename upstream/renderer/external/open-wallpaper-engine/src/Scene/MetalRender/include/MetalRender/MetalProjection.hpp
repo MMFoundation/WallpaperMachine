@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 namespace wallpaper::metal
 {
@@ -31,7 +31,7 @@ struct MetalViewportBox
 ///   y_w = y_ndc * (h/2) + (y + h/2)
 /// With a negative `h` the second line reduces to y_w = y + h*(1 - y_ndc)/2,
 /// which puts clip y = +1 at the top of the box.
-[[nodiscard]] Eigen::Vector2d ClipToWindowVulkan(const Eigen::Vector4d& clip,
+[[nodiscard]] linalg::Vector2d ClipToWindowVulkan(const linalg::Vector4d& clip,
                                                  const VulkanViewportBox& viewport);
 
 /// Clip space to window pixels under Metal's viewport transform. Metal's
@@ -39,7 +39,7 @@ struct MetalViewportBox
 /// while its render targets have their origin at the top left, so:
 ///   x_w = origin_x + width  * (x_ndc + 1) / 2
 ///   y_w = origin_y + height * (1 - y_ndc) / 2
-[[nodiscard]] Eigen::Vector2d ClipToWindowMetal(const Eigen::Vector4d& clip,
+[[nodiscard]] linalg::Vector2d ClipToWindowMetal(const linalg::Vector4d& clip,
                                                 const MetalViewportBox& viewport);
 
 /// The matrix the Metal backend folds into every view-projection it uploads,
@@ -58,11 +58,11 @@ struct MetalViewportBox
 /// this stays a derivation a test can falsify: `MetalClipSpaceFold` changes if
 /// either convention above is edited, and the Y-flip test fails if anyone
 /// inserts a flip or deletes the derivation.
-[[nodiscard]] Eigen::Matrix4d MetalClipSpaceFold();
+[[nodiscard]] linalg::Matrix4d MetalClipSpaceFold();
 
 /// The view-projection to upload to a Metal shader, given the one the
 /// compatibility backend would upload for the same camera.
-[[nodiscard]] Eigen::Matrix4d MetalViewProjection(const Eigen::Matrix4d& compatibility_vp);
+[[nodiscard]] linalg::Matrix4d MetalViewProjection(const linalg::Matrix4d& compatibility_vp);
 
 /// The Metal viewport that covers the same window region as a Vulkan viewport,
 /// including one written with a negative height.

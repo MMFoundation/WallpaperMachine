@@ -1,9 +1,9 @@
 #include "SceneNode.h"
 
-#include <Eigen/Geometry>
+#include "Utils/Linalg.hpp"
 
 using namespace wallpaper;
-using namespace Eigen;
+using namespace wallpaper::linalg;
 
 Matrix4d SceneNode::LocalTransOf(const Vector3f& translate, const Vector3f& scale,
                                  const Vector3f& rotation) {

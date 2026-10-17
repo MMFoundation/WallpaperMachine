@@ -335,7 +335,7 @@ class InventoryTests(unittest.TestCase):
         (self.engine / "third_party/mystery_lib").mkdir()
         (self.engine / "third_party/stb_image.h").write_text("")
         (self.engine / "third_party/CMakeLists.txt").write_text(
-            "find_package(PkgConfig REQUIRED)\nfind_package(Eigen3 CONFIG REQUIRED)\n# find_package(Commented REQUIRED)\n"
+            "find_package(PkgConfig REQUIRED)\nfind_package(nlohmann_json CONFIG REQUIRED)\n# find_package(Commented REQUIRED)\n"
             "find_package(glslang CONFIG REQUIRED)\n")
         (self.engine / "src/CMakeLists.txt").write_text(
             "find_package(Threads REQUIRED)\npkg_check_modules(LZ4 REQUIRED IMPORTED_TARGET liblz4)\n"

@@ -32,7 +32,7 @@
 #include "Utils/AutoDeletor.hpp"
 #include "Utils/Logging.h"
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -3623,8 +3623,8 @@ void MetalRender::Impl::writeUniforms(Scene& scene, const ScenePassDescription& 
         const float*          data  = value.data();
         std::size_t           count = value.size();
         if (count == 16 && slot.fold != 0) {
-            Eigen::Matrix4f matrix = Eigen::Map<const Eigen::Matrix4f>(value.data());
-            const Eigen::Matrix4f fold = MetalClipSpaceFold().cast<float>();
+            linalg::Matrix4f matrix = linalg::Map<const linalg::Matrix4f>(value.data());
+            const linalg::Matrix4f fold = MetalClipSpaceFold().cast<float>();
             matrix = slot.fold == 1 ? (fold * matrix).eval() : (matrix * fold).eval();
             std::memcpy(folded.data(), matrix.data(), sizeof(folded));
             data = folded.data();

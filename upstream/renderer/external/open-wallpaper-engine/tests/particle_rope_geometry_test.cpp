@@ -21,7 +21,7 @@ namespace
 
 constexpr uint32_t kMeshCapacity = 16;
 
-Particle LiveAt(const Eigen::Vector3f& pos, float size = 20.0f, float lifetime = 1.0f) {
+Particle LiveAt(const linalg::Vector3f& pos, float size = 20.0f, float lifetime = 1.0f) {
     Particle particle;
     particle.position = pos;
     particle.size     = size;
@@ -29,7 +29,7 @@ Particle LiveAt(const Eigen::Vector3f& pos, float size = 20.0f, float lifetime =
     return particle;
 }
 
-Particle DeadAt(const Eigen::Vector3f& pos) {
+Particle DeadAt(const linalg::Vector3f& pos) {
     Particle particle;
     particle.position = pos;
     particle.lifetime = 0.0f;
@@ -82,14 +82,14 @@ const float* QuadVertex(const SceneVertexArray& vertices, std::size_t quad, std:
     return vertices.Data() + (quad * 4 + vert) * vertices.OneSize();
 }
 
-void ExpectVec3(const float* components, const Eigen::Vector3f& expected) {
+void ExpectVec3(const float* components, const linalg::Vector3f& expected) {
     EXPECT_FLOAT_EQ(components[0], expected.x());
     EXPECT_FLOAT_EQ(components[1], expected.y());
     EXPECT_FLOAT_EQ(components[2], expected.z());
 }
 
-void ExpectSegment(const SceneVertexArray& vertices, std::size_t quad, const Eigen::Vector3f& start,
-                   const Eigen::Vector3f& end, float trail_length, float trail_position) {
+void ExpectSegment(const SceneVertexArray& vertices, std::size_t quad, const linalg::Vector3f& start,
+                   const linalg::Vector3f& end, float trail_length, float trail_position) {
     const float* vertex = QuadVertex(vertices, quad, 0);
     ExpectVec3(vertex + 0, start);
     ExpectVec3(vertex + 4, end);
@@ -121,7 +121,7 @@ struct SlotSnap {
     Particle                   particle;
     uint32_t                   trail_count { 0 };
     uint32_t                   trail_capacity { 0 };
-    std::vector<Eigen::Vector3f> trail;
+    std::vector<linalg::Vector3f> trail;
 };
 
 class CapturingParticleRawGener final : public IParticleRawGener {
@@ -259,9 +259,9 @@ TEST(ParticleRopeGeometry, SubdivisionThreeSplitsThreeParticlesIntoSixQuadsThrou
     SceneMesh mesh(MeshUpdate::PerFrame);
     AddRopeParticleMesh(mesh, kMeshCapacity, false);
 
-    const Eigen::Vector3f a { 0.0f, 0.0f, 0.0f };
-    const Eigen::Vector3f b { 10.0f, 0.0f, 0.0f };
-    const Eigen::Vector3f c { 20.0f, 0.0f, 0.0f };
+    const linalg::Vector3f a { 0.0f, 0.0f, 0.0f };
+    const linalg::Vector3f b { 10.0f, 0.0f, 0.0f };
+    const linalg::Vector3f c { 20.0f, 0.0f, 0.0f };
     std::vector<std::unique_ptr<ParticleInstance>> instances;
     instances.push_back(MakeInstance({ LiveAt(a), LiveAt(b), LiveAt(c) }));
 
@@ -354,7 +354,7 @@ TEST(ParticleRopeGeometry, InstanceBoundedOffsetIsAddedToRopePositions) {
                   { 104.0f, 205.0f, 306.0f }, 2.0f, 0.0f);
 }
 
-void PushOldestFirst(ParticleTrailHistory& history, std::initializer_list<Eigen::Vector3f> points) {
+void PushOldestFirst(ParticleTrailHistory& history, std::initializer_list<linalg::Vector3f> points) {
     for (const auto& point : points) {
         history.Push({ .position = point });
     }

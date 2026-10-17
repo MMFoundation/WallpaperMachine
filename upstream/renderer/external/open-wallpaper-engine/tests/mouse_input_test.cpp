@@ -262,9 +262,9 @@ TEST(MouseInput, LayerHitTestingFollowsWhereTheWallpaperIsPresented) {
     ASSERT_NE(runtime, nullptr);
 
     auto layer = std::make_shared<SceneNode>();
-    layer->SetTranslate(Eigen::Vector3f(3850.0f, 865.0f, 0.0f));
+    layer->SetTranslate(linalg::Vector3f(3850.0f, 865.0f, 0.0f));
     runtime->RegisterNode("layer", layer.get());
-    runtime->RegisterNodeSize("layer", Eigen::Vector2f(275.0f, 134.0f));
+    runtime->RegisterNodeSize("layer", linalg::Vector2f(275.0f, 134.0f));
     auto marker = std::make_shared<SceneNode>();
     marker->SetVisible(false);
     runtime->RegisterNode("marker", marker.get());
@@ -280,13 +280,13 @@ function cursorLeave() { scene.getObject('marker').visible = false; }
     const auto mapping = ComputeWallpaperCursorMapping(layout, 3840.0, 1080.0, 7680.0, 2160.0);
     ASSERT_TRUE(mapping.valid);
     runtime->SetCursorViewport(CursorViewport {
-        .origin = Eigen::Vector2f(static_cast<float>(mapping.origin_x),
+        .origin = linalg::Vector2f(static_cast<float>(mapping.origin_x),
                                   static_cast<float>(mapping.origin_y)),
         .size =
-            Eigen::Vector2f(static_cast<float>(mapping.size_x), static_cast<float>(mapping.size_y)),
-        .content_origin = Eigen::Vector2f(static_cast<float>(mapping.content_origin_x),
+            linalg::Vector2f(static_cast<float>(mapping.size_x), static_cast<float>(mapping.size_y)),
+        .content_origin = linalg::Vector2f(static_cast<float>(mapping.content_origin_x),
                                           static_cast<float>(mapping.content_origin_y)),
-        .content_size   = Eigen::Vector2f(static_cast<float>(mapping.content_size_x),
+        .content_size   = linalg::Vector2f(static_cast<float>(mapping.content_size_x),
                                         static_cast<float>(mapping.content_size_y)),
     });
 
@@ -339,9 +339,9 @@ TEST(MouseInput, HitTestingFollowsACameraObjectZoomAcrossAResize) {
     // Off centre, where a zoomed and an unzoomed mapping disagree, and inside
     // the tighter frustum so the probe never leaves the drawn rectangle.
     auto layer = std::make_shared<SceneNode>();
-    layer->SetTranslate(Eigen::Vector3f(1200.0f, 540.0f, 0.0f));
+    layer->SetTranslate(linalg::Vector3f(1200.0f, 540.0f, 0.0f));
     runtime->RegisterNode("layer", layer.get());
-    runtime->RegisterNodeSize("layer", Eigen::Vector2f(80.0f, 80.0f));
+    runtime->RegisterNodeSize("layer", linalg::Vector2f(80.0f, 80.0f));
     auto marker = std::make_shared<SceneNode>();
     marker->SetVisible(false);
     runtime->RegisterNode("marker", marker.get());
@@ -354,7 +354,7 @@ function cursorLeave() { scene.getObject('marker').visible = false; }
 
     // The scene's own ortho camera: parked at the canvas centre, zoomed 2x.
     auto camera_node = std::make_shared<SceneNode>();
-    camera_node->SetTranslate(Eigen::Vector3f(960.0f, 540.0f, 0.0f));
+    camera_node->SetTranslate(linalg::Vector3f(960.0f, 540.0f, 0.0f));
     SceneCamera camera(1920, 1080, -5000.0f, 5000.0f);
     camera.AttatchNode(camera_node);
     camera.SetZoom(2.0);
@@ -374,19 +374,19 @@ function cursorLeave() { scene.getObject('marker').visible = false; }
                                                            camera.VisibleHeight());
         EXPECT_TRUE(mapping.valid);
         runtime->SetCursorViewport(CursorViewport {
-            .origin = Eigen::Vector2f(static_cast<float>(mapping.origin_x),
+            .origin = linalg::Vector2f(static_cast<float>(mapping.origin_x),
                                       static_cast<float>(mapping.origin_y)),
-            .size   = Eigen::Vector2f(static_cast<float>(mapping.size_x),
+            .size   = linalg::Vector2f(static_cast<float>(mapping.size_x),
                                     static_cast<float>(mapping.size_y)),
-            .content_origin = Eigen::Vector2f(static_cast<float>(mapping.content_origin_x),
+            .content_origin = linalg::Vector2f(static_cast<float>(mapping.content_origin_x),
                                               static_cast<float>(mapping.content_origin_y)),
-            .content_size   = Eigen::Vector2f(static_cast<float>(mapping.content_size_x),
+            .content_size   = linalg::Vector2f(static_cast<float>(mapping.content_size_x),
                                             static_cast<float>(mapping.content_size_y)),
         });
         // Ground truth: the projection the frame is drawn with, taken to window
         // fractions through the presented viewport rectangle.
-        const Eigen::Vector4d clip =
-            camera.GetViewProjectionMatrix() * Eigen::Vector4d(world_x, world_y, 0.0, 1.0);
+        const linalg::Vector4d clip =
+            camera.GetViewProjectionMatrix() * linalg::Vector4d(world_x, world_y, 0.0, 1.0);
         const double ndc_x = clip.x() / clip.w();
         const double ndc_y = clip.y() / clip.w();
         const double px = layout.viewport_px.x + (ndc_x * 0.5 + 0.5) * layout.viewport_px.width;
@@ -420,9 +420,9 @@ TEST(MouseInput, LetterboxBarsDoNotTriggerLayersThatCrossTheCanvasEdge) {
     // Half of this layer hangs below the canvas, so it is drawn only down to
     // the bottom edge of the wallpaper.
     auto layer = std::make_shared<SceneNode>();
-    layer->SetTranslate(Eigen::Vector3f(960.0f, 40.0f, 0.0f));
+    layer->SetTranslate(linalg::Vector3f(960.0f, 40.0f, 0.0f));
     runtime->RegisterNode("layer", layer.get());
-    runtime->RegisterNodeSize("layer", Eigen::Vector2f(400.0f, 200.0f));
+    runtime->RegisterNodeSize("layer", linalg::Vector2f(400.0f, 200.0f));
     auto marker = std::make_shared<SceneNode>();
     marker->SetVisible(false);
     runtime->RegisterNode("marker", marker.get());
@@ -438,13 +438,13 @@ function cursorLeave() { scene.getObject('marker').visible = false; }
     const auto mapping = ComputeWallpaperCursorMapping(layout, 960.0, 540.0, 1920.0, 1080.0);
     ASSERT_TRUE(mapping.valid);
     runtime->SetCursorViewport(CursorViewport {
-        .origin = Eigen::Vector2f(static_cast<float>(mapping.origin_x),
+        .origin = linalg::Vector2f(static_cast<float>(mapping.origin_x),
                                   static_cast<float>(mapping.origin_y)),
         .size =
-            Eigen::Vector2f(static_cast<float>(mapping.size_x), static_cast<float>(mapping.size_y)),
-        .content_origin = Eigen::Vector2f(static_cast<float>(mapping.content_origin_x),
+            linalg::Vector2f(static_cast<float>(mapping.size_x), static_cast<float>(mapping.size_y)),
+        .content_origin = linalg::Vector2f(static_cast<float>(mapping.content_origin_x),
                                           static_cast<float>(mapping.content_origin_y)),
-        .content_size   = Eigen::Vector2f(static_cast<float>(mapping.content_size_x),
+        .content_size   = linalg::Vector2f(static_cast<float>(mapping.content_size_x),
                                         static_cast<float>(mapping.content_size_y)),
     });
 
@@ -477,9 +477,9 @@ TEST(MouseInput, StationarySampleRemapsEveryFrameAndRechecksLiveLayerGeometry) {
     });
     auto layer = std::make_shared<SceneNode>();
     auto marker = std::make_shared<SceneNode>();
-    layer->SetTranslate(Eigen::Vector3f(100, 50, 0));
+    layer->SetTranslate(linalg::Vector3f(100, 50, 0));
     runtime->RegisterNode("layer", layer.get());
-    runtime->RegisterNodeSize("layer", Eigen::Vector2f(20, 20));
+    runtime->RegisterNodeSize("layer", linalg::Vector2f(20, 20));
     runtime->RegisterNode("marker", marker.get());
     runtime->RegisterSceneScript(R"JS(
 function emit(component) {
@@ -494,7 +494,7 @@ function cursorMove() { emit('z'); }
 )JS", "layer");
     // One window-normalized sample, retained by the native renderer even when
     // the Rust delivery cache suppresses all subsequent identical writes.
-    const Eigen::Vector2f sample(0.5f, 0.5f);
+    const linalg::Vector2f sample(0.5f, 0.5f);
     bool was_inside = false;
     const auto frame = [&](const CursorViewport& viewport) {
         runtime->BeginFrame();
@@ -503,20 +503,20 @@ function cursorMove() { emit('z'); }
         runtime->SetCursorEnter(true);
         was_inside = runtime->DispatchCursorFrameEvents(was_inside);
     };
-    frame(CursorViewport { .origin = Eigen::Vector2f::Zero(), .size = Eigen::Vector2f(200, 100) });
-    EXPECT_TRUE(runtime->hostContext().cursor_world_position.isApprox(Eigen::Vector3f(100, 50, 0)));
-    EXPECT_TRUE(marker->Translate().isApprox(Eigen::Vector3f(1, 0, 1)));
-    frame(CursorViewport { .origin = Eigen::Vector2f(100, 0), .size = Eigen::Vector2f(200, 100) });
-    EXPECT_TRUE(runtime->hostContext().cursor_world_position.isApprox(Eigen::Vector3f(200, 50, 0)));
-    EXPECT_TRUE(marker->Translate().isApprox(Eigen::Vector3f(1, 1, 1)));
-    layer->SetTranslate(Eigen::Vector3f(200, 50, 0));
-    frame(CursorViewport { .origin = Eigen::Vector2f(100, 0), .size = Eigen::Vector2f(200, 100) });
-    EXPECT_TRUE(marker->Translate().isApprox(Eigen::Vector3f(2, 1, 2)));
+    frame(CursorViewport { .origin = linalg::Vector2f::Zero(), .size = linalg::Vector2f(200, 100) });
+    EXPECT_TRUE(runtime->hostContext().cursor_world_position.isApprox(linalg::Vector3f(100, 50, 0)));
+    EXPECT_TRUE(marker->Translate().isApprox(linalg::Vector3f(1, 0, 1)));
+    frame(CursorViewport { .origin = linalg::Vector2f(100, 0), .size = linalg::Vector2f(200, 100) });
+    EXPECT_TRUE(runtime->hostContext().cursor_world_position.isApprox(linalg::Vector3f(200, 50, 0)));
+    EXPECT_TRUE(marker->Translate().isApprox(linalg::Vector3f(1, 1, 1)));
+    layer->SetTranslate(linalg::Vector3f(200, 50, 0));
+    frame(CursorViewport { .origin = linalg::Vector2f(100, 0), .size = linalg::Vector2f(200, 100) });
+    EXPECT_TRUE(marker->Translate().isApprox(linalg::Vector3f(2, 1, 2)));
     frame(CursorViewport {
-        .origin = Eigen::Vector2f(100, 0), .size = Eigen::Vector2f(200, 100),
-        .content_origin = Eigen::Vector2f(0, 0), .content_size = Eigen::Vector2f(100, 100),
+        .origin = linalg::Vector2f(100, 0), .size = linalg::Vector2f(200, 100),
+        .content_origin = linalg::Vector2f(0, 0), .content_size = linalg::Vector2f(100, 100),
     });
-    EXPECT_TRUE(marker->Translate().isApprox(Eigen::Vector3f(2, 2, 2)));
+    EXPECT_TRUE(marker->Translate().isApprox(linalg::Vector3f(2, 2, 2)));
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
@@ -536,8 +536,8 @@ TEST(MouseInput, GlobalReleaseRemainsObservableOutsidePresentedContentAndWindow)
     runtime->DispatchCursorFrameEvents(false);
     EXPECT_FLOAT_EQ(marker->Translate().x(), 1.0f);
     runtime->SetCursorViewport(CursorViewport {
-        .origin = Eigen::Vector2f::Zero(), .size = Eigen::Vector2f(200, 100),
-        .content_origin = Eigen::Vector2f::Zero(), .content_size = Eigen::Vector2f(20, 20),
+        .origin = linalg::Vector2f::Zero(), .size = linalg::Vector2f(200, 100),
+        .content_origin = linalg::Vector2f::Zero(), .content_size = linalg::Vector2f(20, 20),
     });
     runtime->SetCursorInput(0.5f, 0.5f);
     runtime->SetCursorEnter(true);
@@ -554,7 +554,7 @@ TEST(MouseInput, HiddenCallbackHelperDrivesOverlayAcrossProjectedOpaqueEnterAndE
     });
     runtime->AttachScene(&scene);
     auto camera_node = std::make_shared<SceneNode>();
-    camera_node->SetTranslate(Eigen::Vector3f(0, 0, 100));
+    camera_node->SetTranslate(linalg::Vector3f(0, 0, 100));
     auto lens = std::make_shared<SceneCamera>(1920.0f / 1080.0f, 0.1f, 500.0f, 45.0f);
     lens->AttatchNode(camera_node);
     scene.cameras["lens"] = lens;
@@ -562,18 +562,18 @@ TEST(MouseInput, HiddenCallbackHelperDrivesOverlayAcrossProjectedOpaqueEnterAndE
     scene.activeCamera = canvas_camera.get();
 
     auto parent = std::make_shared<SceneNode>();
-    parent->SetTranslate(Eigen::Vector3f(12, 8, 0));
-    parent->SetScale(Eigen::Vector3f(1.3f, 0.8f, 1));
-    parent->SetRotation(Eigen::Vector3f(0, 0, 0.2f));
+    parent->SetTranslate(linalg::Vector3f(12, 8, 0));
+    parent->SetScale(linalg::Vector3f(1.3f, 0.8f, 1));
+    parent->SetRotation(linalg::Vector3f(0, 0, 0.2f));
     auto helper = std::make_shared<SceneNode>();
-    helper->SetTranslate(Eigen::Vector3f(3, -2, -5));
-    helper->SetRotation(Eigen::Vector3f(0.3f, 0, 0));
+    helper->SetTranslate(linalg::Vector3f(3, -2, -5));
+    helper->SetRotation(linalg::Vector3f(0.3f, 0, 0));
     helper->SetCamera("lens");
     parent->AppendChild(helper);
     auto overlay = std::make_shared<SceneNode>();
     runtime->RegisterNode("overlay", overlay.get());
     runtime->RegisterNode("helper", helper.get());
-    runtime->RegisterNodeSize("helper", Eigen::Vector2f(20, 20));
+    runtime->RegisterNodeSize("helper", linalg::Vector2f(20, 20));
     runtime->RegisterNodeHitMask("helper", NodeHitMask {
         .width = 2, .height = 1, .alpha = {255, 0},
     });
@@ -612,8 +612,8 @@ export function update(value) {
     bool was_in_window = false;
     const auto pointer_at = [&](double local_x) {
         helper->UpdateTrans();
-        const Eigen::Vector4d clip = lens->GetViewProjectionMatrix() *
-            helper->ModelTrans() * Eigen::Vector4d(local_x, 0, 0, 1);
+        const linalg::Vector4d clip = lens->GetViewProjectionMatrix() *
+            helper->ModelTrans() * linalg::Vector4d(local_x, 0, 0, 1);
         runtime->SetCursorInput(static_cast<float>(0.5 + 0.5 * clip.x() / clip.w()),
                                 static_cast<float>(0.5 - 0.5 * clip.y() / clip.w()));
         runtime->SetCursorEnter(true);
@@ -623,18 +623,18 @@ export function update(value) {
     };
     EXPECT_FLOAT_EQ(pointer_at(5), 0.0f); // Transparent part is not a hit.
     EXPECT_FLOAT_EQ(pointer_at(-5), 0.5f);
-    EXPECT_TRUE(overlay->Translate().isApprox(Eigen::Vector3f(1, 0, 0)));
+    EXPECT_TRUE(overlay->Translate().isApprox(linalg::Vector3f(1, 0, 0)));
     EXPECT_FLOAT_EQ(pointer_at(-5), 0.75f);
-    EXPECT_TRUE(overlay->Translate().isApprox(Eigen::Vector3f(1, 0, 0)));
+    EXPECT_TRUE(overlay->Translate().isApprox(linalg::Vector3f(1, 0, 0)));
     EXPECT_FLOAT_EQ(pointer_at(5), 0.375f); // Crossing coverage exits once.
-    EXPECT_TRUE(overlay->Translate().isApprox(Eigen::Vector3f(1, 1, 0)));
+    EXPECT_TRUE(overlay->Translate().isApprox(linalg::Vector3f(1, 1, 0)));
     EXPECT_FLOAT_EQ(pointer_at(-5), 0.6875f);
     runtime->SetCursorEnter(false);
     was_in_window = runtime->DispatchCursorFrameEvents(was_in_window);
     runtime->Tick(0.01);
     EXPECT_FALSE(was_in_window);
     EXPECT_FLOAT_EQ(material->customShader.constValues.at("g_Alpha")[0], 0.34375f);
-    EXPECT_TRUE(overlay->Translate().isApprox(Eigen::Vector3f(2, 2, 0)));
+    EXPECT_TRUE(overlay->Translate().isApprox(linalg::Vector3f(2, 2, 0)));
     EXPECT_FALSE(helper->Visible());
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
@@ -660,9 +660,9 @@ struct CursorStage {
     // Layers register back to front, as the scene lists them.
     void AddLayer(const std::string& name, float x, float size = 100.0f, bool script = true) {
         auto node = std::make_shared<SceneNode>();
-        node->SetTranslate(Eigen::Vector3f(x, 500.0f, 0.0f));
+        node->SetTranslate(linalg::Vector3f(x, 500.0f, 0.0f));
         runtime->RegisterNode(name, node.get());
-        runtime->RegisterNodeSize(name, Eigen::Vector2f(size, size));
+        runtime->RegisterNodeSize(name, linalg::Vector2f(size, size));
         nodes.push_back(node);
         order.push_back(name);
         runtime->SetLayerOrder(order);
@@ -709,9 +709,9 @@ struct TextCursorStage {
     TextCursorStage() {
         runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
             .canvas_width = 1920, .canvas_height = 1080 });
-        node->SetTranslate(Eigen::Vector3f(800.0f, 500.0f, 0.0f));
-        node->SetScale(Eigen::Vector3f(1.5f, 0.8f, 1.0f));
-        node->SetRotation(Eigen::Vector3f(0.0f, 0.0f, 0.4f));
+        node->SetTranslate(linalg::Vector3f(800.0f, 500.0f, 0.0f));
+        node->SetScale(linalg::Vector3f(1.5f, 0.8f, 1.0f));
+        node->SetRotation(linalg::Vector3f(0.0f, 0.0f, 0.4f));
         runtime->RegisterNode("text", node.get());
         runtime->RegisterTextLayer("text", TextLayerState {
             .text = "HHHHHH", .font_key = "Arial", .point_size = 20.0f,
@@ -727,9 +727,9 @@ struct TextCursorStage {
     TextLayerLayout Layout() const { return runtime->NodeTextLayout("text").value(); }
 
     // Where a point of the layer's own plane is drawn, in the scene.
-    Eigen::Vector3d Drawn(double x, double y) const {
+    linalg::Vector3d Drawn(double x, double y) const {
         node->UpdateTrans();
-        return (node->RenderTrans() * Eigen::Vector4d(x, y, 0.0, 1.0)).head<3>();
+        return (node->RenderTrans() * linalg::Vector4d(x, y, 0.0, 1.0)).head<3>();
     }
 
     // The cursor at the point of the card `across` and `down` fractions of the way over its
@@ -801,12 +801,12 @@ TEST(MouseInput, ACursorHitFollowsAScreenAnchoredCard) {
     const auto layout = stage.Layout();
     // Over the card near its far end where it is drawn ...
     EXPECT_TRUE(stage.OverCard(0.97, 0.5));
-    EXPECT_TRUE(stage.node->DrawOffset().isApprox(Eigen::Vector3f(-70.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(stage.node->DrawOffset().isApprox(linalg::Vector3f(-70.0f, 0.0f, 0.0f)));
     // ... and not at the world point that same spot is at without the anchor, 70 columns
     // right of the end of the card.
-    const Eigen::Vector4d spot(layout.centre.x() + 0.47 * layout.card.x(), layout.centre.y(), 0.0, 1.0);
+    const linalg::Vector4d spot(layout.centre.x() + 0.47 * layout.card.x(), layout.centre.y(), 0.0, 1.0);
     stage.node->UpdateTrans();
-    const Eigen::Vector4d unshifted = stage.node->ModelTrans() * spot;
+    const linalg::Vector4d unshifted = stage.node->ModelTrans() * spot;
     stage.runtime->SetCursorInput(
         static_cast<float>((unshifted.x() - 10.0) / 1840.0),
         static_cast<float>(1.0 - unshifted.y() / 1080.0));
@@ -1020,9 +1020,9 @@ TEST(MouseInput, ARolledBackRegistrationRestoresTheCursorTargetOfTheLayerItRepla
     // A reload registers the layer again as something the cursor passes through,
     // then fails.
     auto failed = std::make_shared<SceneNode>();
-    failed->SetTranslate(Eigen::Vector3f(150.0f, 500.0f, 0.0f));
+    failed->SetTranslate(linalg::Vector3f(150.0f, 500.0f, 0.0f));
     stage.runtime->RegisterNode("front", failed.get());
-    stage.runtime->RegisterNodeSize("front", Eigen::Vector2f(100.0f, 100.0f));
+    stage.runtime->RegisterNodeSize("front", linalg::Vector2f(100.0f, 100.0f));
     stage.runtime->SetNodeCursorTarget("front", false, false, false);
     stage.runtime->RollbackNodeRegistration("front", failed.get(), snapshot);
 
@@ -1076,12 +1076,12 @@ struct PerspectiveStage {
         scene.display_sized                 = true;
     }
 
-    Eigen::Vector3f Cursor() const { return runtime->hostContext().cursor_world_position; }
+    linalg::Vector3f Cursor() const { return runtime->hostContext().cursor_world_position; }
 
     // The window fraction at which `point` is drawn.
-    std::pair<float, float> PointerAt(const Eigen::Vector3d& point) const {
-        const Eigen::Vector4d clip = camera->GetViewProjectionMatrix() *
-                                     Eigen::Vector4d(point.x(), point.y(), point.z(), 1.0);
+    std::pair<float, float> PointerAt(const linalg::Vector3d& point) const {
+        const linalg::Vector4d clip = camera->GetViewProjectionMatrix() *
+                                     linalg::Vector4d(point.x(), point.y(), point.z(), 1.0);
         return { static_cast<float>(0.5 + 0.5 * clip.x() / clip.w()),
                  static_cast<float>(0.5 - 0.5 * clip.y() / clip.w()) };
     }
@@ -1090,7 +1090,7 @@ struct PerspectiveStage {
 
 TEST(MouseInput, APerspectiveSceneHandsScriptsTheCursorRayPointAtTheFarPlane) {
     PerspectiveStage stage(16.0 / 9.0, 0.1, 500.0, 45.0);
-    stage.camera_node->SetTranslate(Eigen::Vector3f(10, 5, 100));
+    stage.camera_node->SetTranslate(linalg::Vector3f(10, 5, 100));
     stage.camera->Update();
 
     // The middle of the window is straight down the view axis.
@@ -1110,38 +1110,38 @@ TEST(MouseInput, APerspectiveSceneHandsScriptsTheCursorRayPointAtTheFarPlane) {
 
 TEST(MouseInput, ThePerspectiveCursorPointLiesOnTheCursorRayOfAMovedAndShakenCamera) {
     PerspectiveStage stage(2.0, 0.01, 5389.07, 42.4);
-    stage.camera_node->SetTranslate(Eigen::Vector3f(0.5f, 2.2f, 4.4f));
-    stage.camera_node->SetRotation(Eigen::Vector3f(0.3f, -0.7f, 0.0f));
-    stage.camera->SetShakeOffset(Eigen::Vector3d(0.2, -0.1, 0.3));
+    stage.camera_node->SetTranslate(linalg::Vector3f(0.5f, 2.2f, 4.4f));
+    stage.camera_node->SetRotation(linalg::Vector3f(0.3f, -0.7f, 0.0f));
+    stage.camera->SetShakeOffset(linalg::Vector3d(0.2, -0.1, 0.3));
     stage.camera->Update();
 
     for (const auto [x, y] : { std::pair { 0.5f, 0.5f }, std::pair { 0.0f, 0.0f },
                                std::pair { 1.0f, 0.2f }, std::pair { 0.3f, 0.9f } }) {
         stage.runtime->SetCursorInput(x, y);
-        const Eigen::Vector3d point = stage.Cursor().cast<double>();
+        const linalg::Vector3d point = stage.Cursor().cast<double>();
         // The point is drawn exactly where the pointer is...
         const auto [pointer_x, pointer_y] = stage.PointerAt(point);
         EXPECT_NEAR(pointer_x, x, 1.0e-4f);
         EXPECT_NEAR(pointer_y, y, 1.0e-4f);
         // ...and is `farz` in front of the eye, measured along the view axis.
-        const Eigen::Vector4d seen =
-            stage.camera->GetViewMatrix() * Eigen::Vector4d(point.x(), point.y(), point.z(), 1.0);
+        const linalg::Vector4d seen =
+            stage.camera->GetViewMatrix() * linalg::Vector4d(point.x(), point.y(), point.z(), 1.0);
         EXPECT_NEAR(seen.z(), -5389.07, 0.5);
     }
 }
 
 TEST(MouseInput, ACameraPointAtDepthIsOnlyDefinedForAPerspectiveViewAndARealDepth) {
     auto node = std::make_shared<SceneNode>();
-    node->SetTranslate(Eigen::Vector3f(1, 2, 3));
+    node->SetTranslate(linalg::Vector3f(1, 2, 3));
     SceneCamera lens(2.0f, 0.1f, 100.0f, 90.0f);
     lens.AttatchNode(node);
     const auto centre = UnprojectNdcAtDepth(lens, 0.0, 0.0, 10.0);
     ASSERT_TRUE(centre.has_value());
-    EXPECT_TRUE(centre->isApprox(Eigen::Vector3d(1, 2, -7), 1.0e-9));
+    EXPECT_TRUE(centre->isApprox(linalg::Vector3d(1, 2, -7), 1.0e-9));
     // A 90 degree frustum is as wide as it is far at the top edge; twice that wide at 2:1.
     const auto corner = UnprojectNdcAtDepth(lens, 1.0, 1.0, 10.0);
     ASSERT_TRUE(corner.has_value());
-    EXPECT_TRUE(corner->isApprox(Eigen::Vector3d(1 + 20, 2 + 10, -7), 1.0e-6));
+    EXPECT_TRUE(corner->isApprox(linalg::Vector3d(1 + 20, 2 + 10, -7), 1.0e-6));
 
     EXPECT_FALSE(UnprojectNdcAtDepth(lens, 0.0, 0.0, 0.0).has_value());
     EXPECT_FALSE(UnprojectNdcAtDepth(lens, 0.0, 0.0, -5.0).has_value());
@@ -1160,12 +1160,12 @@ TEST(MouseInput, ACameraPointAtDepthIsOnlyDefinedForAPerspectiveViewAndARealDept
 // cursor sat at (960, 540) beside a head at (4.8, 0.8): pitch about -15, yaw about -6.
 TEST(MouseInput, AHeadScriptThatFollowsThePerspectiveCursorTurnsAsInWallpaperEngine) {
     PerspectiveStage stage(16.0 / 9.0, 0.01, 5389.0698, 42.43);
-    stage.camera_node->SetTranslate(Eigen::Vector3f(0.53864f, 2.22436f, 4.44038f));
-    stage.camera_node->SetRotation(Eigen::Vector3f(0.04597f, 0.224f, 0.0f));
+    stage.camera_node->SetTranslate(linalg::Vector3f(0.53864f, 2.22436f, 4.44038f));
+    stage.camera_node->SetRotation(linalg::Vector3f(0.04597f, 0.224f, 0.0f));
     stage.camera->Update();
 
     auto head = std::make_shared<SceneNode>();
-    head->SetTranslate(Eigen::Vector3f(4.7824f, 0.80878f, -20.62969f));
+    head->SetTranslate(linalg::Vector3f(4.7824f, 0.80878f, -20.62969f));
     stage.runtime->RegisterNode("head", head.get());
     auto pose = std::make_shared<SceneNode>();
     stage.runtime->RegisterNode("pose", pose.get());
@@ -1199,12 +1199,12 @@ TEST(MouseInput, ACanvasSceneKeepsTheCursorInCanvasUnitsEvenWithAPerspectiveCame
         .canvas_width = 1920, .canvas_height = 1080 });
     runtime->AttachScene(&scene);
     auto lens_node = std::make_shared<SceneNode>();
-    lens_node->SetTranslate(Eigen::Vector3f(960, 540, 1000));
+    lens_node->SetTranslate(linalg::Vector3f(960, 540, 1000));
     auto lens = std::make_shared<SceneCamera>(16.0f / 9.0f, 5.0f, 15000.0f, 60.0f);
     lens->AttatchNode(lens_node);
     scene.cameras["global_perspective"] = lens;
     auto canvas_node = std::make_shared<SceneNode>();
-    canvas_node->SetTranslate(Eigen::Vector3f(960, 540, 0));
+    canvas_node->SetTranslate(linalg::Vector3f(960, 540, 0));
     auto canvas = std::make_shared<SceneCamera>(1920, 1080, -5000.0f, 5000.0f);
     canvas->AttatchNode(canvas_node);
     scene.cameras["global"] = canvas;
@@ -1212,26 +1212,26 @@ TEST(MouseInput, ACanvasSceneKeepsTheCursorInCanvasUnitsEvenWithAPerspectiveCame
     ASSERT_FALSE(scene.display_sized);
 
     runtime->SetCursorInput(0.25f, 0.75f);
-    EXPECT_TRUE(runtime->hostContext().cursor_world_position.isApprox(Eigen::Vector3f(480, 270, 0)));
+    EXPECT_TRUE(runtime->hostContext().cursor_world_position.isApprox(linalg::Vector3f(480, 270, 0)));
 
     // Even when something makes the perspective camera the active one: a scene
     // authored on a canvas has no far-plane point to hand over.
     scene.activeCamera = lens.get();
     runtime->SetCursorInput(0.25f, 0.75f);
-    EXPECT_TRUE(runtime->hostContext().cursor_world_position.isApprox(Eigen::Vector3f(480, 270, 0)));
+    EXPECT_TRUE(runtime->hostContext().cursor_world_position.isApprox(linalg::Vector3f(480, 270, 0)));
 }
 
 // Layers are still hit in their own plane through the real view-projection; the
 // far-plane point scripts read is not what the hit test consults.
 TEST(MouseInput, APerspectiveSceneStillHitsLayersWhereTheyAreDrawn) {
     PerspectiveStage stage(16.0 / 9.0, 0.1, 500.0, 45.0);
-    stage.camera_node->SetTranslate(Eigen::Vector3f(0, 0, 100));
+    stage.camera_node->SetTranslate(linalg::Vector3f(0, 0, 100));
     stage.camera->Update();
 
     auto layer = std::make_shared<SceneNode>();
-    layer->SetTranslate(Eigen::Vector3f(8, -3, 0));
+    layer->SetTranslate(linalg::Vector3f(8, -3, 0));
     stage.runtime->RegisterNode("layer", layer.get());
-    stage.runtime->RegisterNodeSize("layer", Eigen::Vector2f(20, 20));
+    stage.runtime->RegisterNodeSize("layer", linalg::Vector2f(20, 20));
     auto marker = std::make_shared<SceneNode>();
     marker->SetVisible(false);
     stage.runtime->RegisterNode("marker", marker.get());
@@ -1244,18 +1244,18 @@ function cursorLeave() { scene.getObject('marker').visible = false; }
     stage.runtime->Tick(0.01);
 
     bool was_in_window = false;
-    const auto move_to = [&](const Eigen::Vector3d& point) {
+    const auto move_to = [&](const linalg::Vector3d& point) {
         const auto [x, y] = stage.PointerAt(point);
         stage.runtime->SetCursorInput(x, y);
         stage.runtime->SetCursorEnter(true);
         was_in_window = stage.runtime->DispatchCursorFrameEvents(was_in_window);
         stage.runtime->Tick(0.01);
     };
-    move_to(Eigen::Vector3d(8, -3, 0));
+    move_to(linalg::Vector3d(8, -3, 0));
     EXPECT_TRUE(marker->Visible());
-    move_to(Eigen::Vector3d(40, -3, 0));
+    move_to(linalg::Vector3d(40, -3, 0));
     EXPECT_FALSE(marker->Visible());
-    move_to(Eigen::Vector3d(14, 4, 0));
+    move_to(linalg::Vector3d(14, 4, 0));
     EXPECT_TRUE(marker->Visible());
     EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
 }
@@ -1265,7 +1265,7 @@ function cursorLeave() { scene.getObject('marker').visible = false; }
 // perspective scene, nowhere near where a particle is drawn.
 TEST(MouseInput, AParticleControlPointFollowsTheCanvasPlaneCursorInAPerspectiveScene) {
     PerspectiveStage stage(16.0 / 9.0, 0.1, 500.0, 45.0);
-    stage.camera_node->SetTranslate(Eigen::Vector3f(10, 5, 100));
+    stage.camera_node->SetTranslate(linalg::Vector3f(10, 5, 100));
     stage.camera->Update();
 
     stage.runtime->SetCursorInput(0.25f, 0.75f);
@@ -1285,7 +1285,7 @@ TEST(MouseInput, AParticleControlPointFollowsTheCanvasPlaneCursorInAPerspectiveS
 // letterboxed one past the frustum's edge. Hit tests read the same mapping.
 TEST(MouseInput, ThePerspectiveCursorPointFollowsThePictureWhenTheWindowCropsOrLetterboxesIt) {
     PerspectiveStage stage(16.0 / 9.0, 0.1, 500.0, 45.0);
-    stage.camera_node->SetTranslate(Eigen::Vector3f(10, 5, 100));
+    stage.camera_node->SetTranslate(linalg::Vector3f(10, 5, 100));
     stage.camera->Update();
 
     const auto present = [&](double wallpaper_scale) {
@@ -1294,25 +1294,25 @@ TEST(MouseInput, ThePerspectiveCursorPointFollowsThePictureWhenTheWindowCropsOrL
         const auto mapping = ComputeWallpaperCursorMapping(layout, 960.0, 540.0, 1920.0, 1080.0);
         EXPECT_TRUE(mapping.valid);
         stage.runtime->SetCursorViewport(CursorViewport {
-            .origin = Eigen::Vector2f(static_cast<float>(mapping.origin_x),
+            .origin = linalg::Vector2f(static_cast<float>(mapping.origin_x),
                                       static_cast<float>(mapping.origin_y)),
-            .size = Eigen::Vector2f(static_cast<float>(mapping.size_x),
+            .size = linalg::Vector2f(static_cast<float>(mapping.size_x),
                                     static_cast<float>(mapping.size_y)),
-            .content_origin = Eigen::Vector2f(static_cast<float>(mapping.content_origin_x),
+            .content_origin = linalg::Vector2f(static_cast<float>(mapping.content_origin_x),
                                               static_cast<float>(mapping.content_origin_y)),
-            .content_size = Eigen::Vector2f(static_cast<float>(mapping.content_size_x),
+            .content_size = linalg::Vector2f(static_cast<float>(mapping.content_size_x),
                                             static_cast<float>(mapping.content_size_y)),
         });
     };
     const auto expect_on_ray_at = [&](float window_x, float window_y, float picture_x,
                                       float picture_y) {
         stage.runtime->SetCursorInput(window_x, window_y);
-        const Eigen::Vector3d point = stage.Cursor().cast<double>();
+        const linalg::Vector3d point = stage.Cursor().cast<double>();
         const auto [pointer_x, pointer_y] = stage.PointerAt(point);
         EXPECT_NEAR(pointer_x, picture_x, 1.0e-4f) << window_x << "," << window_y;
         EXPECT_NEAR(pointer_y, picture_y, 1.0e-4f) << window_x << "," << window_y;
-        const Eigen::Vector4d seen =
-            stage.camera->GetViewMatrix() * Eigen::Vector4d(point.x(), point.y(), point.z(), 1.0);
+        const linalg::Vector4d seen =
+            stage.camera->GetViewMatrix() * linalg::Vector4d(point.x(), point.y(), point.z(), 1.0);
         EXPECT_NEAR(seen.z(), -500.0, 0.05) << window_x << "," << window_y;
     };
 

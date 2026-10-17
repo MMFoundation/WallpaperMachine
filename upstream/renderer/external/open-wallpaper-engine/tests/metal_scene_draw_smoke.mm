@@ -456,7 +456,7 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
         render.SetWallpaperFraming(WallpaperFraming {});
         render.SetWallpaperHorizontalFlip(false);
         if (scene.runtime != nullptr) {
-            scene.runtime->SetScreenResolution(Eigen::Vector2f(width, height));
+            scene.runtime->SetScreenResolution(linalg::Vector2f(width, height));
         }
         int      last_frame = frames - 1;
         bool     final_requested      = false;
@@ -2397,7 +2397,7 @@ TEST_F(MetalSceneDraw, APerspectiveCameraDrawsThroughTheAuthoredShader)
     ASSERT_NE(node, nullptr);
     ASSERT_NE(loaded.scene->cameras["global_perspective"], nullptr);
     node->SetCamera("global_perspective");
-    node->SetRotation(Eigen::Vector3f { 0.0f, 0.55f, 0.0f });
+    node->SetRotation(linalg::Vector3f { 0.0f, 0.55f, 0.0f });
 
     const auto selection = SelectSceneBackend(*loaded.scene);
     ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
@@ -3054,7 +3054,7 @@ TEST_F(MetalSceneDraw, ADepthTestedDrawCullsTheSameFacesAsCompatibility)
             auto* node = FirstDrawableNode(loaded.scene->sceneGraph.get());
             ASSERT_NE(node, nullptr);
             node->SetCamera("global_perspective");
-            node->SetRotation(Eigen::Vector3f { 0.0f, c.yaw, 0.0f });
+            node->SetRotation(linalg::Vector3f { 0.0f, c.yaw, 0.0f });
             auto* material        = node->Mesh()->Material();
             material->depth_test  = true;
             material->depth_write = true;
@@ -6180,7 +6180,7 @@ TEST_F(MetalSceneDraw, AnUnchangedTargetIsReusedAndProducesTheSamePixels)
         // sample. The target has to be redrawn, and the picture has to change.
         auto* node = FirstDrawableNode(loaded.scene->sceneGraph.get());
         ASSERT_NE(node, nullptr);
-        node->SetTranslate(Eigen::Vector3f { 96.0f, 64.0f, 0.0f });
+        node->SetTranslate(linalg::Vector3f { 96.0f, 64.0f, 0.0f });
         const auto moved = DrawOneFrame(render, *loaded.scene);
         EXPECT_EQ(moved.skipped, 0u)
             << "a moved layer reused its target; the transform is not in the sample";
@@ -6308,7 +6308,7 @@ TEST_F(MetalSceneDraw, AFrameThatWouldRepeatThePictureTakesNoDrawableAndPresents
         // A changed layer is new content: it draws and presents.
         auto* node = FirstDrawableNode(loaded.scene->sceneGraph.get());
         ASSERT_NE(node, nullptr);
-        node->SetTranslate(Eigen::Vector3f { 96.0f, 64.0f, 0.0f });
+        node->SetTranslate(linalg::Vector3f { 96.0f, 64.0f, 0.0f });
         EXPECT_TRUE(draw()) << "a moved layer was not presented";
         EXPECT_FALSE(draw());
 
@@ -6698,7 +6698,7 @@ TEST_F(MetalSceneDraw, TurningTheOptimisationBackOnDoesNotReuseAFrameDrawnWhileI
 
     auto* node = FirstDrawableNode(loaded.scene->sceneGraph.get());
     ASSERT_NE(node, nullptr);
-    const Eigen::Vector3f home = node->Translate();
+    const linalg::Vector3f home = node->Translate();
 
     @autoreleasepool {
         id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -6732,7 +6732,7 @@ TEST_F(MetalSceneDraw, TurningTheOptimisationBackOnDoesNotReuseAFrameDrawnWhileI
 
         // Off: the layer moves and is drawn there. Nothing records that.
         wallpaper::vulkan::SetSceneOptimizationEnabled(false);
-        node->SetTranslate(Eigen::Vector3f { home.x() + 96.0f, home.y(), home.z() });
+        node->SetTranslate(linalg::Vector3f { home.x() + 96.0f, home.y(), home.z() });
         const auto moved = DrawOneFrame(render, *loaded.scene);
         EXPECT_EQ(moved.skipped, 0u) << "pixels were reused with the setting switched off";
         const auto away = ReadOutput(render, *loaded.scene);
@@ -11903,9 +11903,9 @@ WPPuppetLayer MakeSlidingPuppetLayer()
     anim.name                         = "slide";
     auto still_frame                  = []() {
         WPPuppet::BoneFrame frame;
-        frame.position = Eigen::Vector3f::Zero();
-        frame.angle    = Eigen::Vector3f::Zero();
-        frame.scale    = Eigen::Vector3f::Ones();
+        frame.position = linalg::Vector3f::Zero();
+        frame.angle    = linalg::Vector3f::Zero();
+        frame.scale    = linalg::Vector3f::Ones();
         return frame;
     };
     // Sized first: a reference taken from `emplace_back` would dangle as soon as
@@ -13312,7 +13312,7 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTCROP);
             tests::SceneProbeControls controls;
             loaded.scene->runtime->SetScreenResolution(
-                Eigen::Vector2f(surface_width, surface_height));
+                linalg::Vector2f(surface_width, surface_height));
             const auto capture = [&](const std::string& filename) {
                 const char* output = std::getenv("WE_TEST_OUTPUT");
                 if (output == nullptr || *output == '\0') return;
@@ -14614,7 +14614,7 @@ TEST_F(MetalSceneDraw, InterleavedFeedbackCopiesPreserveEachReadersImage)
         ASSERT_NE(tile, nullptr);
         ASSERT_NE(lens, nullptr);
         ASSERT_NE(broad_lens, nullptr);
-        broad_lens->SetScale(Eigen::Vector3f { 2.0f, 2.0f, 1.0f });
+        broad_lens->SetScale(linalg::Vector3f { 2.0f, 2.0f, 1.0f });
         loaded.scene->renderTargets[b] = SceneRenderTarget { .width = 384, .height = 256 };
 
         @autoreleasepool {

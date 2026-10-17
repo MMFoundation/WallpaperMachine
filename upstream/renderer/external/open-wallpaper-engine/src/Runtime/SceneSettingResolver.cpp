@@ -23,18 +23,18 @@ const nlohmann::json& unwrap_value(const nlohmann::json& value)
     return value;
 }
 
-Eigen::Vector3f parse_vec3(const nlohmann::json& value)
+linalg::Vector3f parse_vec3(const nlohmann::json& value)
 {
     const auto& source = unwrap_value(value);
     if (source.is_array() && source.size() >= 3) {
-        return Eigen::Vector3f(
+        return linalg::Vector3f(
             source.at(0).get<float>(),
             source.at(1).get<float>(),
             source.at(2).get<float>());
     }
     if (source.is_number()) {
         const float scalar = source.get<float>();
-        return Eigen::Vector3f(scalar, scalar, scalar);
+        return linalg::Vector3f(scalar, scalar, scalar);
     }
     if (source.is_string()) {
         std::istringstream stream(source.get<std::string>());
@@ -42,9 +42,9 @@ Eigen::Vector3f parse_vec3(const nlohmann::json& value)
         float y = 0.0f;
         float z = 0.0f;
         stream >> x >> y >> z;
-        return Eigen::Vector3f(x, y, z);
+        return linalg::Vector3f(x, y, z);
     }
-    return Eigen::Vector3f::Zero();
+    return linalg::Vector3f::Zero();
 }
 
 float parse_float(const nlohmann::json& value)
@@ -473,9 +473,9 @@ std::unique_ptr<DynamicValue> ResolveVectorSetting(
     };
     auto value = components == 2
                      ? std::make_unique<DynamicValue>(
-                           Eigen::Vector2f(component(0), component(1)))
+                           linalg::Vector2f(component(0), component(1)))
                      : std::make_unique<DynamicValue>(
-                           Eigen::Vector4f(component(0), component(1), component(2), component(3)));
+                           linalg::Vector4f(component(0), component(1), component(2), component(3)));
     value = wrap_script_if_needed(
         context,
         setting,

@@ -3,7 +3,7 @@
 #include "Project/ProjectProperties.hpp"
 #include "Runtime/DynamicValue.hpp"
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include <map>
 #include <cstdint>
@@ -20,10 +20,10 @@ namespace wallpaper
 class SceneRuntimeContext;
 
 struct ScriptHostContext {
-    Eigen::Vector2f canvas_size { 0.0f, 0.0f };
-    Eigen::Vector2f screen_resolution { 0.0f, 0.0f };
-    Eigen::Vector2f cursor_normalized_position { 0.5f, 0.5f };
-    Eigen::Vector3f cursor_world_position { 0.0f, 0.0f, 0.0f };
+    linalg::Vector2f canvas_size { 0.0f, 0.0f };
+    linalg::Vector2f screen_resolution { 0.0f, 0.0f };
+    linalg::Vector2f cursor_normalized_position { 0.5f, 0.5f };
+    linalg::Vector3f cursor_world_position { 0.0f, 0.0f, 0.0f };
     double          frame_time { 0.0 };
     double          runtime_seconds { 0.0 };
     bool            cursor_in_window { false };
@@ -98,8 +98,8 @@ public:
     void                  DispatchCursorUp(const ScriptHostContext& host_context);
     void                  DispatchAnimationEvent(const ScriptHostContext& host_context,
                                                  std::string_view event_name, double frame);
-    void                  DispatchMediaThumbnailChanged(const Eigen::Vector3f& primary_color,
-                                                        const Eigen::Vector3f& text_color);
+    void                  DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
+                                                        const linalg::Vector3f& text_color);
     void                  DispatchMediaEventJson(std::string_view event_json);
     // The display's size or the interface language changed since the script
     // started. A script that has not run `init` yet has nothing to be told:
@@ -157,8 +157,8 @@ public:
     void               DispatchCursorUp(const ScriptHostContext& host_context);
     void               DispatchAnimationEvent(const ScriptHostContext& host_context,
                                               std::string_view event_name, double frame);
-    void               DispatchMediaThumbnailChanged(const Eigen::Vector3f& primary_color,
-                                                     const Eigen::Vector3f& text_color);
+    void               DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
+                                                     const linalg::Vector3f& text_color);
     void               DispatchMediaEventJson(std::string_view event_json);
     void               ApplyProjectProperties(const ProjectProperties& project_properties,
                                                const ProjectProperties& changed_properties);

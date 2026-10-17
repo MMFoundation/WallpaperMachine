@@ -8,7 +8,7 @@
 #include <optional>
 #include <functional>
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include "Core/Core.hpp"
 #include "Interface/IShaderValueUpdater.h"
@@ -78,7 +78,7 @@ struct WPUniformInfo {
 
 struct WPShaderValueData {
     SceneNode* effect_owner { nullptr };
-    Eigen::Vector2f effect_extent { 2.0f, 2.0f };
+    linalg::Vector2f effect_extent { 2.0f, 2.0f };
     std::array<float, 2> parallaxDepth { 0.0f, 0.0f };
     /// The layer whose outermost parent anchors this draw's parallax in a 2D
     /// scene, for a draw that is not that layer's own node (an effect pass);
@@ -138,7 +138,7 @@ public:
     struct PuppetAttachment {
         SceneNode* node;
         uint32_t bone_index;
-        Eigen::Affine3f bind_transform;
+        linalg::Affine3f bind_transform;
     };
     void RegisterPuppetAttachments(WPPuppetLayer layer, std::vector<PuppetAttachment> attachments);
 

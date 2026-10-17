@@ -20,19 +20,19 @@ Scene::~Scene() {
     if (runtime != nullptr) runtime->TearDownScripts();
 }
 
-void Scene::FrameCanvas(double zoom, const Eigen::Vector2f& offset) {
+void Scene::FrameCanvas(double zoom, const linalg::Vector2f& offset) {
     const auto global = cameras.find("global");
     if (global == cameras.end() || global->second == nullptr) return;
     auto& camera = *global->second;
 
-    const Eigen::Vector2f centre = Eigen::Vector2f(static_cast<float>(ortho[0]),
+    const linalg::Vector2f centre = linalg::Vector2f(static_cast<float>(ortho[0]),
                                                    static_cast<float>(ortho[1])) * 0.5f + offset;
     // Aiming moves only the view's centre. How far the perspective camera then
     // sits in front of the canvas plane follows from the view's size, below.
     const auto aim = [&centre](SceneCamera& target) {
         const auto node = target.GetAttachedNode();
         if (node == nullptr) return;
-        Eigen::Vector3f translate = node->Translate();
+        linalg::Vector3f translate = node->Translate();
         translate.head<2>()       = centre;
         node->SetTranslate(translate);
     };

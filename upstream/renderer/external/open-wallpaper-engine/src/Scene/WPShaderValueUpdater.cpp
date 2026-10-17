@@ -1,6 +1,5 @@
 #include "WPShaderValueUpdater.hpp"
-#include "Eigen/src/Core/Matrix.h"
-#include "Eigen/src/Geometry/Transform.h"
+#include "Utils/Linalg.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Scene/Scene.h"
 #include "SpriteAnimation.hpp"
@@ -9,8 +8,6 @@
 #include "Utils/Algorism.h"
 #include "Utils/TimeOfDay.hpp"
 
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
 #include <iostream>
 #include <chrono>
 #include <ctime>
@@ -21,7 +18,7 @@
 #include <cmath>
 
 using namespace wallpaper;
-using namespace Eigen;
+using namespace wallpaper::linalg;
 
 namespace
 {
@@ -646,7 +643,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
 
     //	g_EffectTextureProjectionMatrix
     // shadervs.push_back({"g_EffectTextureProjectionMatrixInverse",
-    // ShaderValue::ValueOf(Eigen::Matrix4f::Identity())});
+    // ShaderValue::ValueOf(linalg::Matrix4f::Identity())});
     if (info.has_TIME) updateOp(G_TIME, (float)m_scene->elapsingTime);
 
     if (info.has_DAYTIME) updateOp(G_DAYTIME, (float)m_dayTime);
@@ -778,7 +775,7 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_sl
             view_camera = m_scene->activeCamera;
         }
         if (view_camera != nullptr) {
-            const auto to_array = [](const Eigen::Vector3d& value) {
+            const auto to_array = [](const linalg::Vector3d& value) {
                 return std::array<float, 3> { static_cast<float>(value.x()),
                                               static_cast<float>(value.y()),
                                               static_cast<float>(value.z()) };

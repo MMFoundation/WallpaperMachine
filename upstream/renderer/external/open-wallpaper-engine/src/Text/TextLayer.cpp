@@ -593,7 +593,7 @@ float LineSpacing(const TextLayerState& state) {
 
 // The card's margin on each axis. Wallpaper Engine caps it at 512 pixels and
 // does not floor it: a negative padding takes the card in around the text.
-Eigen::Vector2f CardPadding(const TextLayerState& state) {
+linalg::Vector2f CardPadding(const TextLayerState& state) {
     constexpr float kMaxCardPadding = 512.0f;
     const auto lane = [=](float value) {
         return std::isfinite(value) ? std::min(value, kMaxCardPadding) : 0.0f;
@@ -953,7 +953,7 @@ float ReferenceLine(TextVerticalAlign vertical, const TextBlock& block) {
 // block's width to the right of it, on it, or half to the left; down, the origin is on the
 // reference line, and the card's centre is where the block's is from it. The padding adds
 // nothing to either: it grows the card outward from the block.
-Eigen::Vector2f CardCentre(const TextLayerState& state, const TextBlock& block) {
+linalg::Vector2f CardCentre(const TextLayerState& state, const TextBlock& block) {
     float across = 0.0f;
     switch (ParseTextHorizontalAlign(state.horizontal_align)) {
     case TextHorizontalAlign::Left: across = block.Width() * 0.5f; break;
@@ -1020,7 +1020,7 @@ struct StyleMetrics {
     float           outline_px { 0.0f };
     float           edge_half_px { 0.5f };
     float           shadow_half_px { 0.5f };
-    Eigen::Vector2f shadow_offset_px { Eigen::Vector2f::Zero() };
+    linalg::Vector2f shadow_offset_px { linalg::Vector2f::Zero() };
     float           shadow_opacity { 1.0f };
     // How far the field reaches from a glyph; farther is outside every edge.
     float           range_px { 0.0f };
@@ -1042,14 +1042,14 @@ StyleMetrics ResolveStyleMetrics(const TextStyle& style, float point_size) {
     const float outline = style.outline ? std::max(FiniteOr(style.outline_thickness, 1.0f), 1.0f) : 0.0f;
     const float blur    = style.blur ? std::max(FiniteOr(style.blur_size, 0.01f), 0.01f) : 0.0f;
     const float shadow  = style.drop_shadow ? std::max(FiniteOr(style.shadow_size, 0.01f), 0.01f) : 0.0f;
-    const Eigen::Vector2f offset = style.drop_shadow
-        ? Eigen::Vector2f(FiniteOr(style.shadow_offset.x(), 0.0f), FiniteOr(style.shadow_offset.y(), 0.0f))
-        : Eigen::Vector2f::Zero();
+    const linalg::Vector2f offset = style.drop_shadow
+        ? linalg::Vector2f(FiniteOr(style.shadow_offset.x(), 0.0f), FiniteOr(style.shadow_offset.y(), 0.0f))
+        : linalg::Vector2f::Zero();
 
     float outline_atlas = std::min(outline * k, kOutlineCap);
     const float blur_atlas   = std::min(blur * k, kBlurCap);
     const float shadow_atlas = std::min(shadow * k, kShadowCap);
-    const Eigen::Vector2f offset_atlas(std::min(offset.x() * k, kShadowOffsetCap),
+    const linalg::Vector2f offset_atlas(std::min(offset.x() * k, kShadowOffsetCap),
                                        std::min(offset.y() * k, kShadowOffsetCap));
     if (outline_atlas + blur_atlas > kOutlineCap) {
         outline_atlas = std::max(kOutlineCap - blur_atlas, 0.0f);
@@ -1262,8 +1262,8 @@ void RasterizeFallbackText(const TextLayerState& state, uint32_t width, uint32_t
     const auto lines    = BuildFallbackLines(state);
     const auto metrics  = FallbackMetrics(state);
     const auto block    = MeasureTextBlock(lines, metrics);
-    const Eigen::Vector2f padding =
-        CardPadding(state) + Eigen::Vector2f::Constant(TextStyleMargin(state));
+    const linalg::Vector2f padding =
+        CardPadding(state) + linalg::Vector2f::Constant(TextStyleMargin(state));
     const float glyph_height = std::max(1.0f, metrics.ascender);
     // The block sits under the padding, the first row's baseline its tallest ink down; a
     // row's pen starts where the rows are aligned in the widest, from the pen origin of
@@ -1303,8 +1303,8 @@ bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t
     const auto metrics = FaceMetrics(state, faces);
     const auto block   = MeasureTextBlock(lines, metrics);
     // The style's margin is clear room around the card the text is laid out in.
-    const Eigen::Vector2f padding =
-        CardPadding(state) + Eigen::Vector2f::Constant(TextStyleMargin(state));
+    const linalg::Vector2f padding =
+        CardPadding(state) + linalg::Vector2f::Constant(TextStyleMargin(state));
 
     // The block sits under the padding, the first row's baseline its tallest ink down; a
     // row's pen starts where the rows are aligned in the widest, from the pen origin of
@@ -1383,12 +1383,12 @@ std::size_t LongestLineCodepoints(std::string_view text) {
 } // namespace
 
 // The raster holds the card with the room its style reaches into on every side.
-Eigen::Vector2f TextLayerRasterSizeForLayout(const TextLayerState& state,
+linalg::Vector2f TextLayerRasterSizeForLayout(const TextLayerState& state,
                                              const TextLayerLayout& layout) {
-    return layout.card + Eigen::Vector2f::Constant(2.0f * TextStyleMargin(state));
+    return layout.card + linalg::Vector2f::Constant(2.0f * TextStyleMargin(state));
 }
 
-Eigen::Vector2f TextCardInsetInRaster(const TextLayerState& state, const TextLayerLayout& layout) {
+linalg::Vector2f TextCardInsetInRaster(const TextLayerState& state, const TextLayerLayout& layout) {
     const auto raster = TextLayerRasterSizeForLayout(state, layout);
     const float margin = TextStyleMargin(state);
     return { raster.x() > 0.0f ? margin / raster.x() : 0.0f, raster.y() > 0.0f ? margin / raster.y() : 0.0f };
@@ -1432,7 +1432,7 @@ float TextStyleMargin(const TextLayerState& state) {
     return std::ceil(StyleReach(ResolveStyleMetrics(state.style, state.point_size))) + 1.0f;
 }
 
-Eigen::Vector2f EstimateTextLayerSize(std::string_view text, float point_size, float padding) {
+linalg::Vector2f EstimateTextLayerSize(std::string_view text, float point_size, float padding) {
     if (! std::isfinite(padding) || padding < 0.0f) padding = 0.0f;
 
     const float pixel_size  = PointSizeToPixels(point_size);
@@ -1441,7 +1441,7 @@ Eigen::Vector2f EstimateTextLayerSize(std::string_view text, float point_size, f
     const auto  columns     = std::max<std::size_t>(1u, LongestLineCodepoints(text));
     const auto  lines       = std::max<std::size_t>(1u, LineCount(text));
 
-    return Eigen::Vector2f(static_cast<float>(columns) * glyph_width + padding * 2.0f,
+    return linalg::Vector2f(static_cast<float>(columns) * glyph_width + padding * 2.0f,
                            static_cast<float>(lines) * line_height + padding * 2.0f);
 }
 
@@ -1460,11 +1460,11 @@ TextLayerLayout MeasureTextLayerLayout(const TextLayerState& state) {
     return MeasureFallbackText(state);
 }
 
-Eigen::Vector2f MeasureTextLayerSize(const TextLayerState& state) {
+linalg::Vector2f MeasureTextLayerSize(const TextLayerState& state) {
     return MeasureTextLayerLayout(state).card;
 }
 
-Eigen::Vector2f TextLayerRasterSize(const TextLayerState& state) {
+linalg::Vector2f TextLayerRasterSize(const TextLayerState& state) {
     return TextLayerRasterSizeForLayout(state, MeasureTextLayerLayout(state));
 }
 
@@ -1486,7 +1486,7 @@ TextScreenAnchor ParseTextScreenAnchor(std::string_view name) {
     return TextScreenAnchor::None;
 }
 
-Eigen::Vector2f TextScreenAnchorOffset(TextScreenAnchor anchor, const PresentedMargins& margins) {
+linalg::Vector2f TextScreenAnchorOffset(TextScreenAnchor anchor, const PresentedMargins& margins) {
     const float centre_x = (margins.left - margins.right) * 0.5f;
     const float centre_y = (margins.bottom - margins.top) * 0.5f;
     switch (anchor) {
@@ -1501,7 +1501,7 @@ Eigen::Vector2f TextScreenAnchorOffset(TextScreenAnchor anchor, const PresentedM
     case TextScreenAnchor::BottomRight: return { -margins.right, margins.bottom };
     case TextScreenAnchor::None: break;
     }
-    return Eigen::Vector2f::Zero();
+    return linalg::Vector2f::Zero();
 }
 
 TextLayerRenderBounds TextLayerRenderBoundsForLayout(const TextLayerState& state,
@@ -1509,7 +1509,7 @@ TextLayerRenderBounds TextLayerRenderBoundsForLayout(const TextLayerState& state
     // The card is centred on the layout's centre; the room the style needs lies outside
     // it on every side.
     const float margin = TextStyleMargin(state);
-    const Eigen::Vector2f half = layout.card * 0.5f + Eigen::Vector2f::Constant(margin);
+    const linalg::Vector2f half = layout.card * 0.5f + linalg::Vector2f::Constant(margin);
     return {
         .left   = layout.centre.x() - half.x(),
         .right  = layout.centre.x() + half.x(),
@@ -1523,13 +1523,13 @@ TextLayerRenderFrame TextLayerRenderFrameForLayout(const TextLayerState& state,
     const auto bounds = TextLayerRenderBoundsForLayout(state, layout);
     return {
         .bounds = bounds,
-        .size   = Eigen::Vector2f(bounds.right - bounds.left, bounds.top - bounds.bottom),
-        .center = Eigen::Vector2f((bounds.left + bounds.right) * 0.5f,
+        .size   = linalg::Vector2f(bounds.right - bounds.left, bounds.top - bounds.bottom),
+        .center = linalg::Vector2f((bounds.left + bounds.right) * 0.5f,
                                   (bounds.bottom + bounds.top) * 0.5f),
     };
 }
 
-std::array<int32_t, 2> TextCardTexelExtent(Eigen::Vector2f card) {
+std::array<int32_t, 2> TextCardTexelExtent(linalg::Vector2f card) {
     return {
         std::max(4, static_cast<int32_t>(std::max(1.0f, card.x()))),
         std::max(4, static_cast<int32_t>(std::max(1.0f, card.y()))),
@@ -1538,7 +1538,7 @@ std::array<int32_t, 2> TextCardTexelExtent(Eigen::Vector2f card) {
 
 TextLayerRenderFrame TextLayerEffectFrame(const TextLayerRenderFrame& card) {
     const auto texels = TextCardTexelExtent(card.size);
-    const Eigen::Vector2f size(static_cast<float>(std::min(texels[0], kTextEffectExtentLimit)),
+    const linalg::Vector2f size(static_cast<float>(std::min(texels[0], kTextEffectExtentLimit)),
                                static_cast<float>(std::min(texels[1], kTextEffectExtentLimit)));
     return {
         .bounds = {
@@ -1739,7 +1739,7 @@ void TextLayer::SetAlignment(std::string horizontal, std::string vertical) {
 void TextLayer::SetPaddingApplies(bool applies) {
     if (m_state.padding_applies == applies) return;
     m_state.padding_applies = applies;
-    m_state.padding         = applies ? m_state.authored_padding : Eigen::Vector2f::Zero();
+    m_state.padding         = applies ? m_state.authored_padding : linalg::Vector2f::Zero();
     m_state.dirty           = true;
     m_state.layout_pending  = true;
     MarkCacheDirty();
@@ -1759,7 +1759,7 @@ void TextLayer::ClearDirty() {
     m_state.full_dirty  = false;
 }
 
-Eigen::Vector2f TextLayer::rasterSize() const {
+linalg::Vector2f TextLayer::rasterSize() const {
     return TextLayerRasterSizeForLayout(m_state, m_layout);
 }
 

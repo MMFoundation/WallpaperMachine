@@ -8,7 +8,7 @@
 #include "Type.hpp"
 #include "Utils/Algorism.h"
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include <algorithm>
 #include <array>
@@ -418,7 +418,7 @@ inline uint64_t FoldPassCameras(uint64_t hash, const wallpaper::Scene& scene,
                                 const wallpaper::SceneNode* node) {
     const auto fold = [&hash](const wallpaper::SceneCamera* camera) {
         if (camera == nullptr) return;
-        const Eigen::Matrix4d matrix = camera->GetViewProjectionMatrix();
+        const linalg::Matrix4d matrix = camera->GetViewProjectionMatrix();
         hash = StaticHashBytes(hash, matrix.data(), sizeof(double) * 16);
     };
     const std::string& camera_name =

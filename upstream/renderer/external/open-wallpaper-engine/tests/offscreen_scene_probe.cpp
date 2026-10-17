@@ -326,7 +326,7 @@ int main() {
             locate(locate, scene->sceneGraph.get());
             Check(target != nullptr, "click layer missing");
             target->UpdateTrans();
-            Eigen::Vector3f position = (target->ModelTrans() * Eigen::Vector4d(0, 0, 0, 1)).head<3>().cast<float>();
+            linalg::Vector3f position = (target->ModelTrans() * linalg::Vector4d(0, 0, 0, 1)).head<3>().cast<float>();
             if (const char* offset = std::getenv("WE_TEST_CLICK_OFFSET")) {
                 // World-space "dx dy" from the layer origin, e.g. to probe a
                 // texel-covered corner instead of the centre.
@@ -381,14 +381,14 @@ int main() {
                     camera->second->VisibleWidth(), camera->second->VisibleHeight());
                 Check(mapping.valid, "cursor mapping must be valid for this display");
                 scene->runtime->SetCursorViewport(CursorViewport {
-                    .origin = Eigen::Vector2f(static_cast<float>(mapping.origin_x),
+                    .origin = linalg::Vector2f(static_cast<float>(mapping.origin_x),
                                               static_cast<float>(mapping.origin_y)),
-                    .size   = Eigen::Vector2f(static_cast<float>(mapping.size_x),
+                    .size   = linalg::Vector2f(static_cast<float>(mapping.size_x),
                                             static_cast<float>(mapping.size_y)),
                     .content_origin =
-                        Eigen::Vector2f(static_cast<float>(mapping.content_origin_x),
+                        linalg::Vector2f(static_cast<float>(mapping.content_origin_x),
                                         static_cast<float>(mapping.content_origin_y)),
-                    .content_size = Eigen::Vector2f(static_cast<float>(mapping.content_size_x),
+                    .content_size = linalg::Vector2f(static_cast<float>(mapping.content_size_x),
                                                     static_cast<float>(mapping.content_size_y)),
                 });
                 const double normalized_x =
@@ -426,10 +426,10 @@ int main() {
             const auto dump = [&](auto&& self, SceneNode* node) -> void {
                 if (!node) return;
                 node->UpdateTrans();
-                const Eigen::Vector3d world =
-                    (node->ModelTrans() * Eigen::Vector4d(0, 0, 0, 1)).head<3>();
-                const Eigen::Vector3d rendered =
-                    (node->RenderTrans() * Eigen::Vector4d(0, 0, 0, 1)).head<3>();
+                const linalg::Vector3d world =
+                    (node->ModelTrans() * linalg::Vector4d(0, 0, 0, 1)).head<3>();
+                const linalg::Vector3d rendered =
+                    (node->RenderTrans() * linalg::Vector4d(0, 0, 0, 1)).head<3>();
                 nodes << node->ID() << ' ' << node->Name() << " visible=" << node->Visible()
                       << " effective=" << node->EffectiveVisible()
                       << " translate=" << node->Translate().transpose()
@@ -637,7 +637,7 @@ int main() {
         const bool capture_last = std::getenv("WE_TEST_CAPTURE_LAST") != nullptr;
         tests::SceneProbeControls controls;
         scene->runtime->SetScreenResolution(
-            Eigen::Vector2f(surface_extent.width, surface_extent.height));
+            linalg::Vector2f(surface_extent.width, surface_extent.height));
         const auto cursor_layout = ComputeWallpaperScalingLayout(
             WallpaperScalingMode::FILL, extents.source.width, extents.source.height,
             surface_extent.width, surface_extent.height, 1.0, 1.0);

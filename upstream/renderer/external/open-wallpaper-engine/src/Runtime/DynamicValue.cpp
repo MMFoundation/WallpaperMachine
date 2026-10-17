@@ -9,23 +9,23 @@ namespace wallpaper
 {
 namespace
 {
-Eigen::Vector3f ParseVec3String(const std::string& value)
+linalg::Vector3f ParseVec3String(const std::string& value)
 {
     std::istringstream stream(value);
     float x = 0.0f;
     float y = 0.0f;
     float z = 0.0f;
     stream >> x >> y >> z;
-    return Eigen::Vector3f(x, y, z);
+    return linalg::Vector3f(x, y, z);
 }
 } // namespace
 
-DynamicValue::DynamicValue(const Eigen::Vector4i& value) { update(value); }
-DynamicValue::DynamicValue(const Eigen::Vector3i& value) { update(value); }
-DynamicValue::DynamicValue(const Eigen::Vector2i& value) { update(value); }
-DynamicValue::DynamicValue(const Eigen::Vector4f& value) { update(value); }
-DynamicValue::DynamicValue(const Eigen::Vector3f& value) { update(value); }
-DynamicValue::DynamicValue(const Eigen::Vector2f& value) { update(value); }
+DynamicValue::DynamicValue(const linalg::Vector4i& value) { update(value); }
+DynamicValue::DynamicValue(const linalg::Vector3i& value) { update(value); }
+DynamicValue::DynamicValue(const linalg::Vector2i& value) { update(value); }
+DynamicValue::DynamicValue(const linalg::Vector4f& value) { update(value); }
+DynamicValue::DynamicValue(const linalg::Vector3f& value) { update(value); }
+DynamicValue::DynamicValue(const linalg::Vector2f& value) { update(value); }
 DynamicValue::DynamicValue(float value) { update(value); }
 DynamicValue::DynamicValue(int value) { update(value); }
 DynamicValue::DynamicValue(bool value) { update(value); }
@@ -38,12 +38,12 @@ DynamicValue::~DynamicValue()
     m_listeners.clear();
 }
 
-const Eigen::Vector4i& DynamicValue::getIVec4() const { return m_ivec4; }
-const Eigen::Vector3i& DynamicValue::getIVec3() const { return m_ivec3; }
-const Eigen::Vector2i& DynamicValue::getIVec2() const { return m_ivec2; }
-const Eigen::Vector4f& DynamicValue::getVec4() const { return m_vec4; }
-const Eigen::Vector3f& DynamicValue::getVec3() const { return m_vec3; }
-const Eigen::Vector2f& DynamicValue::getVec2() const { return m_vec2; }
+const linalg::Vector4i& DynamicValue::getIVec4() const { return m_ivec4; }
+const linalg::Vector3i& DynamicValue::getIVec3() const { return m_ivec3; }
+const linalg::Vector2i& DynamicValue::getIVec2() const { return m_ivec2; }
+const linalg::Vector4f& DynamicValue::getVec4() const { return m_vec4; }
+const linalg::Vector3f& DynamicValue::getVec3() const { return m_vec3; }
+const linalg::Vector2f& DynamicValue::getVec2() const { return m_vec2; }
 const float& DynamicValue::getFloat() const { return m_float; }
 const int& DynamicValue::getInt() const { return m_int; }
 const bool& DynamicValue::getBool() const { return m_bool; }
@@ -80,12 +80,12 @@ std::string DynamicValue::toString() const
 
 void DynamicValue::update(float new_value)
 {
-    m_ivec4  = Eigen::Vector4i::Constant(static_cast<int>(new_value));
-    m_ivec3  = Eigen::Vector3i::Constant(static_cast<int>(new_value));
-    m_ivec2  = Eigen::Vector2i::Constant(static_cast<int>(new_value));
-    m_vec4   = Eigen::Vector4f::Constant(new_value);
-    m_vec3   = Eigen::Vector3f::Constant(new_value);
-    m_vec2   = Eigen::Vector2f::Constant(new_value);
+    m_ivec4  = linalg::Vector4i::Constant(static_cast<int>(new_value));
+    m_ivec3  = linalg::Vector3i::Constant(static_cast<int>(new_value));
+    m_ivec2  = linalg::Vector2i::Constant(static_cast<int>(new_value));
+    m_vec4   = linalg::Vector4f::Constant(new_value);
+    m_vec3   = linalg::Vector3f::Constant(new_value);
+    m_vec2   = linalg::Vector2f::Constant(new_value);
     m_float  = new_value;
     m_int    = static_cast<int>(new_value);
     m_bool   = static_cast<int>(new_value) != 0;
@@ -96,12 +96,12 @@ void DynamicValue::update(float new_value)
 
 void DynamicValue::update(int new_value)
 {
-    m_ivec4  = Eigen::Vector4i::Constant(new_value);
-    m_ivec3  = Eigen::Vector3i::Constant(new_value);
-    m_ivec2  = Eigen::Vector2i::Constant(new_value);
-    m_vec4   = Eigen::Vector4f::Constant(static_cast<float>(new_value));
-    m_vec3   = Eigen::Vector3f::Constant(static_cast<float>(new_value));
-    m_vec2   = Eigen::Vector2f::Constant(static_cast<float>(new_value));
+    m_ivec4  = linalg::Vector4i::Constant(new_value);
+    m_ivec3  = linalg::Vector3i::Constant(new_value);
+    m_ivec2  = linalg::Vector2i::Constant(new_value);
+    m_vec4   = linalg::Vector4f::Constant(static_cast<float>(new_value));
+    m_vec3   = linalg::Vector3f::Constant(static_cast<float>(new_value));
+    m_vec2   = linalg::Vector2f::Constant(static_cast<float>(new_value));
     m_float  = static_cast<float>(new_value);
     m_int    = new_value;
     m_bool   = new_value != 0;
@@ -113,12 +113,12 @@ void DynamicValue::update(int new_value)
 void DynamicValue::update(bool new_value)
 {
     const auto numeric = new_value ? 1.0f : 0.0f;
-    m_ivec4  = Eigen::Vector4i::Constant(new_value ? 1 : 0);
-    m_ivec3  = Eigen::Vector3i::Constant(new_value ? 1 : 0);
-    m_ivec2  = Eigen::Vector2i::Constant(new_value ? 1 : 0);
-    m_vec4   = Eigen::Vector4f::Constant(numeric);
-    m_vec3   = Eigen::Vector3f::Constant(numeric);
-    m_vec2   = Eigen::Vector2f::Constant(numeric);
+    m_ivec4  = linalg::Vector4i::Constant(new_value ? 1 : 0);
+    m_ivec3  = linalg::Vector3i::Constant(new_value ? 1 : 0);
+    m_ivec2  = linalg::Vector2i::Constant(new_value ? 1 : 0);
+    m_vec4   = linalg::Vector4f::Constant(numeric);
+    m_vec3   = linalg::Vector3f::Constant(numeric);
+    m_vec2   = linalg::Vector2f::Constant(numeric);
     m_float  = numeric;
     m_int    = new_value ? 1 : 0;
     m_bool   = new_value;
@@ -127,14 +127,14 @@ void DynamicValue::update(bool new_value)
     propagate();
 }
 
-void DynamicValue::update(const Eigen::Vector2f& new_value)
+void DynamicValue::update(const linalg::Vector2f& new_value)
 {
-    m_ivec4  = Eigen::Vector4i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()), 0, 0);
-    m_ivec3  = Eigen::Vector3i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()), 0);
-    m_ivec2  = Eigen::Vector2i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()));
+    m_ivec4  = linalg::Vector4i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()), 0, 0);
+    m_ivec3  = linalg::Vector3i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()), 0);
+    m_ivec2  = linalg::Vector2i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()));
     m_vec2   = new_value;
-    m_vec3   = Eigen::Vector3f(new_value.x(), new_value.y(), 0.0f);
-    m_vec4   = Eigen::Vector4f(new_value.x(), new_value.y(), 0.0f, 0.0f);
+    m_vec3   = linalg::Vector3f(new_value.x(), new_value.y(), 0.0f);
+    m_vec4   = linalg::Vector4f(new_value.x(), new_value.y(), 0.0f, 0.0f);
     m_float  = new_value.x();
     m_int    = static_cast<int>(new_value.x());
     m_bool   = new_value.x() != 0.0f;
@@ -143,14 +143,14 @@ void DynamicValue::update(const Eigen::Vector2f& new_value)
     propagate();
 }
 
-void DynamicValue::update(const Eigen::Vector3f& new_value)
+void DynamicValue::update(const linalg::Vector3f& new_value)
 {
-    m_ivec4  = Eigen::Vector4i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()), static_cast<int>(new_value.z()), 0);
-    m_ivec3  = Eigen::Vector3i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()), static_cast<int>(new_value.z()));
-    m_ivec2  = Eigen::Vector2i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()));
-    m_vec2   = Eigen::Vector2f(new_value.x(), new_value.y());
+    m_ivec4  = linalg::Vector4i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()), static_cast<int>(new_value.z()), 0);
+    m_ivec3  = linalg::Vector3i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()), static_cast<int>(new_value.z()));
+    m_ivec2  = linalg::Vector2i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()));
+    m_vec2   = linalg::Vector2f(new_value.x(), new_value.y());
     m_vec3   = new_value;
-    m_vec4   = Eigen::Vector4f(new_value.x(), new_value.y(), new_value.z(), 0.0f);
+    m_vec4   = linalg::Vector4f(new_value.x(), new_value.y(), new_value.z(), 0.0f);
     m_float  = new_value.x();
     m_int    = static_cast<int>(new_value.x());
     m_bool   = new_value.x() != 0.0f;
@@ -159,13 +159,13 @@ void DynamicValue::update(const Eigen::Vector3f& new_value)
     propagate();
 }
 
-void DynamicValue::update(const Eigen::Vector4f& new_value)
+void DynamicValue::update(const linalg::Vector4f& new_value)
 {
-    m_ivec4  = Eigen::Vector4i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()), static_cast<int>(new_value.z()), static_cast<int>(new_value.w()));
-    m_ivec3  = Eigen::Vector3i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()), static_cast<int>(new_value.z()));
-    m_ivec2  = Eigen::Vector2i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()));
-    m_vec2   = Eigen::Vector2f(new_value.x(), new_value.y());
-    m_vec3   = Eigen::Vector3f(new_value.x(), new_value.y(), new_value.z());
+    m_ivec4  = linalg::Vector4i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()), static_cast<int>(new_value.z()), static_cast<int>(new_value.w()));
+    m_ivec3  = linalg::Vector3i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()), static_cast<int>(new_value.z()));
+    m_ivec2  = linalg::Vector2i(static_cast<int>(new_value.x()), static_cast<int>(new_value.y()));
+    m_vec2   = linalg::Vector2f(new_value.x(), new_value.y());
+    m_vec3   = linalg::Vector3f(new_value.x(), new_value.y(), new_value.z());
     m_vec4   = new_value;
     m_float  = new_value.x();
     m_int    = static_cast<int>(new_value.x());
@@ -175,14 +175,14 @@ void DynamicValue::update(const Eigen::Vector4f& new_value)
     propagate();
 }
 
-void DynamicValue::update(const Eigen::Vector2i& new_value)
+void DynamicValue::update(const linalg::Vector2i& new_value)
 {
-    m_ivec4  = Eigen::Vector4i(new_value.x(), new_value.y(), 0, 0);
-    m_ivec3  = Eigen::Vector3i(new_value.x(), new_value.y(), 0);
+    m_ivec4  = linalg::Vector4i(new_value.x(), new_value.y(), 0, 0);
+    m_ivec3  = linalg::Vector3i(new_value.x(), new_value.y(), 0);
     m_ivec2  = new_value;
-    m_vec2   = Eigen::Vector2f(new_value.cast<float>());
-    m_vec3   = Eigen::Vector3f(static_cast<float>(new_value.x()), static_cast<float>(new_value.y()), 0.0f);
-    m_vec4   = Eigen::Vector4f(static_cast<float>(new_value.x()), static_cast<float>(new_value.y()), 0.0f, 0.0f);
+    m_vec2   = linalg::Vector2f(new_value.cast<float>());
+    m_vec3   = linalg::Vector3f(static_cast<float>(new_value.x()), static_cast<float>(new_value.y()), 0.0f);
+    m_vec4   = linalg::Vector4f(static_cast<float>(new_value.x()), static_cast<float>(new_value.y()), 0.0f, 0.0f);
     m_float  = static_cast<float>(new_value.x());
     m_int    = new_value.x();
     m_bool   = new_value.x() != 0;
@@ -191,14 +191,14 @@ void DynamicValue::update(const Eigen::Vector2i& new_value)
     propagate();
 }
 
-void DynamicValue::update(const Eigen::Vector3i& new_value)
+void DynamicValue::update(const linalg::Vector3i& new_value)
 {
-    m_ivec4  = Eigen::Vector4i(new_value.x(), new_value.y(), new_value.z(), 0);
+    m_ivec4  = linalg::Vector4i(new_value.x(), new_value.y(), new_value.z(), 0);
     m_ivec3  = new_value;
-    m_ivec2  = Eigen::Vector2i(new_value.x(), new_value.y());
-    m_vec2   = Eigen::Vector2f(static_cast<float>(new_value.x()), static_cast<float>(new_value.y()));
+    m_ivec2  = linalg::Vector2i(new_value.x(), new_value.y());
+    m_vec2   = linalg::Vector2f(static_cast<float>(new_value.x()), static_cast<float>(new_value.y()));
     m_vec3   = new_value.cast<float>();
-    m_vec4   = Eigen::Vector4f(static_cast<float>(new_value.x()), static_cast<float>(new_value.y()), static_cast<float>(new_value.z()), 0.0f);
+    m_vec4   = linalg::Vector4f(static_cast<float>(new_value.x()), static_cast<float>(new_value.y()), static_cast<float>(new_value.z()), 0.0f);
     m_float  = static_cast<float>(new_value.x());
     m_int    = new_value.x();
     m_bool   = new_value.x() != 0;
@@ -207,13 +207,13 @@ void DynamicValue::update(const Eigen::Vector3i& new_value)
     propagate();
 }
 
-void DynamicValue::update(const Eigen::Vector4i& new_value)
+void DynamicValue::update(const linalg::Vector4i& new_value)
 {
     m_ivec4  = new_value;
-    m_ivec3  = Eigen::Vector3i(new_value.x(), new_value.y(), new_value.z());
-    m_ivec2  = Eigen::Vector2i(new_value.x(), new_value.y());
-    m_vec2   = Eigen::Vector2f(static_cast<float>(new_value.x()), static_cast<float>(new_value.y()));
-    m_vec3   = Eigen::Vector3f(static_cast<float>(new_value.x()), static_cast<float>(new_value.y()), static_cast<float>(new_value.z()));
+    m_ivec3  = linalg::Vector3i(new_value.x(), new_value.y(), new_value.z());
+    m_ivec2  = linalg::Vector2i(new_value.x(), new_value.y());
+    m_vec2   = linalg::Vector2f(static_cast<float>(new_value.x()), static_cast<float>(new_value.y()));
+    m_vec3   = linalg::Vector3f(static_cast<float>(new_value.x()), static_cast<float>(new_value.y()), static_cast<float>(new_value.z()));
     m_vec4   = new_value.cast<float>();
     m_float  = static_cast<float>(new_value.x());
     m_int    = new_value.x();
@@ -225,12 +225,12 @@ void DynamicValue::update(const Eigen::Vector4i& new_value)
 
 void DynamicValue::update(const std::string& new_value)
 {
-    m_ivec4  = Eigen::Vector4i::Zero();
-    m_ivec3  = Eigen::Vector3i::Zero();
-    m_ivec2  = Eigen::Vector2i::Zero();
-    m_vec2   = Eigen::Vector2f::Zero();
-    m_vec3   = Eigen::Vector3f::Zero();
-    m_vec4   = Eigen::Vector4f::Zero();
+    m_ivec4  = linalg::Vector4i::Zero();
+    m_ivec3  = linalg::Vector3i::Zero();
+    m_ivec2  = linalg::Vector2i::Zero();
+    m_vec2   = linalg::Vector2f::Zero();
+    m_vec3   = linalg::Vector3f::Zero();
+    m_vec4   = linalg::Vector4f::Zero();
     m_float  = 0.0f;
     m_int    = 0;
     // A flag bound to a choice without a condition reads the choice as a flag; one
@@ -265,12 +265,12 @@ void DynamicValue::update(const DynamicValue& other)
 
 void DynamicValue::update()
 {
-    m_ivec4  = Eigen::Vector4i::Zero();
-    m_ivec3  = Eigen::Vector3i::Zero();
-    m_ivec2  = Eigen::Vector2i::Zero();
-    m_vec2   = Eigen::Vector2f::Zero();
-    m_vec3   = Eigen::Vector3f::Zero();
-    m_vec4   = Eigen::Vector4f::Zero();
+    m_ivec4  = linalg::Vector4i::Zero();
+    m_ivec3  = linalg::Vector3i::Zero();
+    m_ivec2  = linalg::Vector2i::Zero();
+    m_vec2   = linalg::Vector2f::Zero();
+    m_vec3   = linalg::Vector3f::Zero();
+    m_vec4   = linalg::Vector4f::Zero();
     m_float  = 0.0f;
     m_int    = 0;
     m_bool   = false;

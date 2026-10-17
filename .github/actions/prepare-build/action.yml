@@ -32,7 +32,7 @@ runs:
       run: |
         set -euo pipefail
         brew install --quiet xcodegen cmake quickjs-ng glslang freetype lz4 \
-          vulkan-loader vulkan-headers molten-vk eigen nlohmann-json argparse shaderc \
+          vulkan-loader vulkan-headers molten-vk nlohmann-json argparse shaderc \
           spirv-tools dav1d ccache
         echo "dav1d=$(brew list --versions dav1d | tr ' ' '-')" >> "$GITHUB_OUTPUT"
         # Bottles, FFmpeg and compiled objects differ per macOS release, so every

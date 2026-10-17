@@ -3,8 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-#include <Eigen/Core>
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 namespace wallpaper
 {
@@ -16,7 +15,7 @@ namespace wallpaper
 /// Position only. A trail is drawn with the particle's current colour, alpha
 /// and size along its whole length, so nothing else is worth remembering.
 struct ParticleTrailSample {
-    Eigen::Vector3f position { 0.0f, 0.0f, 0.0f };
+    linalg::Vector3f position { 0.0f, 0.0f, 0.0f };
 };
 
 /// What a rope trail renderer asks the simulation to remember.
@@ -58,10 +57,10 @@ public:
 
     /// Carries every recorded point through `transform`, a change of the space
     /// the points are expressed in.
-    void Transform(const Eigen::Matrix4d& transform) noexcept {
+    void Transform(const linalg::Matrix4d& transform) noexcept {
         for (auto& sample : m_samples) {
-            const Eigen::Vector4d moved =
-                transform * Eigen::Vector4d(sample.position.x(), sample.position.y(),
+            const linalg::Vector4d moved =
+                transform * linalg::Vector4d(sample.position.x(), sample.position.y(),
                                             sample.position.z(), 1.0);
             sample.position = moved.head<3>().cast<float>();
         }

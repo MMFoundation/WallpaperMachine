@@ -88,25 +88,25 @@ void CameraPathPlayback::Apply(SceneNode& node, SceneCamera& camera) const {
     if (empty()) return;
     const auto& path = m_paths[m_index];
     const auto sample = [this](const auto& curves) {
-        return Eigen::Vector3d(curves[0].Evaluate(m_seconds), curves[1].Evaluate(m_seconds),
+        return linalg::Vector3d(curves[0].Evaluate(m_seconds), curves[1].Evaluate(m_seconds),
                                curves[2].Evaluate(m_seconds));
     };
     const auto eye = sample(path.eye);
     const auto center = sample(path.center);
     const auto up = sample(path.up);
     if (!eye.allFinite() || !center.allFinite() || !up.allFinite()) return;
-    const Eigen::Vector3d backward = eye - center;
+    const linalg::Vector3d backward = eye - center;
     if (backward.squaredNorm() < 1e-12) return;
-    const Eigen::Vector3d z = backward.normalized();
-    const Eigen::Vector3d right = up.cross(z);
+    const linalg::Vector3d z = backward.normalized();
+    const linalg::Vector3d right = up.cross(z);
     if (right.squaredNorm() < 1e-12) return;
-    Eigen::Matrix3d rotation;
+    linalg::Matrix3d rotation;
     rotation.col(0) = right.normalized();
     rotation.col(1) = z.cross(rotation.col(0));
     rotation.col(2) = z;
-    const Eigen::Vector3d zyx = rotation.eulerAngles(2, 1, 0);
+    const linalg::Vector3d zyx = rotation.eulerAngles(2, 1, 0);
     node.SetTranslate(eye.cast<float>());
-    node.SetRotation(Eigen::Vector3f(zyx[2], zyx[1], zyx[0]));
+    node.SetRotation(linalg::Vector3f(zyx[2], zyx[1], zyx[0]));
     if (path.fov) {
         const double fov = path.fov->Evaluate(m_seconds);
         if (std::isfinite(fov) && fov > 0 && fov < 180) camera.SetFov(fov);

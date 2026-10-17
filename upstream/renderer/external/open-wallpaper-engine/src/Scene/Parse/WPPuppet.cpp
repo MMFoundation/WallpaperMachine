@@ -6,7 +6,7 @@
 #include <cmath>
 
 using namespace wallpaper;
-using namespace Eigen;
+using namespace wallpaper::linalg;
 
 static Quaterniond ToQuaternion(Vector3f euler) {
     const std::array<Vector3d, 3> axis { Vector3d::UnitX(), Vector3d::UnitY(), Vector3d::UnitZ() };
@@ -45,7 +45,7 @@ void WPPuppet::prepared() {
         const auto& reference = b.has_local_reference ? b.local_reference : b.local_bind;
         b.reference_position = reference.translation();
         b.reference_scale = reference.linear().colwise().norm();
-        Eigen::Matrix3f rotation = reference.linear();
+        linalg::Matrix3f rotation = reference.linear();
         for (int axis = 0; axis < 3; ++axis) {
             if (b.reference_scale[axis] != 0.0f) rotation.col(axis) /= b.reference_scale[axis];
         }
@@ -53,7 +53,7 @@ void WPPuppet::prepared() {
             b.reference_scale.x() = -b.reference_scale.x();
             rotation.col(0) = -rotation.col(0);
         }
-        b.reference_rotation = Eigen::Quaterniond(rotation.cast<double>()).normalized();
+        b.reference_rotation = linalg::Quaterniond(rotation.cast<double>()).normalized();
     }
     for (auto& anim : anims) {
         anim.frame_time = 1.0f / anim.fps;
@@ -67,7 +67,7 @@ void WPPuppet::prepared() {
 }
 
 void WPPuppet::evaluatePose(const WPPuppetLayer& puppet_layer,
-                            std::span<Eigen::Affine3f> final_affines) const noexcept {
+                            std::span<linalg::Affine3f> final_affines) const noexcept {
     const auto& state = *puppet_layer.m_state;
     double global_blend = state.m_global_blend;
 
@@ -278,7 +278,7 @@ void WPPuppetLayer::rebuildBlend() noexcept {
     }
 }
 
-std::span<const Eigen::Affine3f> WPPuppetLayer::genFrame(double time) noexcept {
+std::span<const linalg::Affine3f> WPPuppetLayer::genFrame(double time) noexcept {
     if (! m_puppet || ! m_state) return {};
     auto& state = *m_state;
     const auto time_bits = std::bit_cast<uint64_t>(time);

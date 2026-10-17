@@ -95,8 +95,8 @@ public:
         }
         if (followed_) {
             followed_->UpdateTrans();
-            const Eigen::Vector4d world = followed_->ModelTrans() * Eigen::Vector4d(0, 0, 0, 1);
-            const Eigen::Vector4d clip = scene.activeCamera->GetViewProjectionMatrix() * world;
+            const linalg::Vector4d world = followed_->ModelTrans() * linalg::Vector4d(0, 0, 0, 1);
+            const linalg::Vector4d clip = scene.activeCamera->GetViewProjectionMatrix() * world;
             if (clip.w() > 0.0 && std::isfinite(clip.w())) {
                 const double cx = mapping.content_origin_x + (clip.x() / clip.w() + 1.0) * 0.5 * mapping.content_size_x;
                 const double cy = mapping.content_origin_y + (clip.y() / clip.w() + 1.0) * 0.5 * mapping.content_size_y;
@@ -111,10 +111,10 @@ public:
         }
         auto& runtime = *scene.runtime;
         runtime.SetCursorViewport(CursorViewport {
-            .origin = Eigen::Vector2f(mapping.origin_x, mapping.origin_y),
-            .size = Eigen::Vector2f(mapping.size_x, mapping.size_y),
-            .content_origin = Eigen::Vector2f(mapping.content_origin_x, mapping.content_origin_y),
-            .content_size = Eigen::Vector2f(mapping.content_size_x, mapping.content_size_y),
+            .origin = linalg::Vector2f(mapping.origin_x, mapping.origin_y),
+            .size = linalg::Vector2f(mapping.size_x, mapping.size_y),
+            .content_origin = linalg::Vector2f(mapping.content_origin_x, mapping.content_origin_y),
+            .content_size = linalg::Vector2f(mapping.content_size_x, mapping.content_size_y),
         });
         runtime.SetCursorInput(x_, y_);
         runtime.SetCursorEnter(inside_);

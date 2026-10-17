@@ -15,7 +15,7 @@
 #include "Utils/Algorism.h"
 #include "WPSoundParser.hpp"
 
-#include <Eigen/Geometry>
+#include "Utils/Linalg.hpp"
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -88,7 +88,7 @@ bool SetRuntimeTextTexture(Scene& scene, const TextLayerState& state, uint32_t w
 RuntimePreparedTextLayerImage PrepareTextLayerImage(std::string name, uint64_t revision,
                                                     TextLayerState state) {
     const auto layout = MeasureTextLayerLayout(state);
-    const Eigen::Vector2f raster_size = TextLayerRasterSizeForLayout(state, layout);
+    const linalg::Vector2f raster_size = TextLayerRasterSizeForLayout(state, layout);
     const uint32_t width =
         std::clamp(static_cast<uint32_t>(std::ceil(std::max(1.0f, raster_size.x()))), 1u, 4096u);
     const uint32_t height =
@@ -111,8 +111,8 @@ RuntimePreparedTextLayerImage PrepareTextLayerImage(std::string name, uint64_t r
 
 // The box a card mesh covers, by its size and its centre in the layer's own plane.
 struct CardMeshBox {
-    Eigen::Vector2f size { Eigen::Vector2f::Zero() };
-    Eigen::Vector2f centre { Eigen::Vector2f::Zero() };
+    linalg::Vector2f size { linalg::Vector2f::Zero() };
+    linalg::Vector2f centre { linalg::Vector2f::Zero() };
 };
 
 CardMeshBox CardMeshBoxOf(const SceneMesh& mesh) {
@@ -137,11 +137,11 @@ CardMeshBox CardMeshBoxOf(const SceneMesh& mesh) {
         max_y         = std::max(max_y, y);
     }
 
-    return { .size   = Eigen::Vector2f(max_x - min_x, max_y - min_y),
-             .centre = Eigen::Vector2f((min_x + max_x) * 0.5f, (min_y + max_y) * 0.5f) };
+    return { .size   = linalg::Vector2f(max_x - min_x, max_y - min_y),
+             .centre = linalg::Vector2f((min_x + max_x) * 0.5f, (min_y + max_y) * 0.5f) };
 }
 
-bool SizeNearlyEqual(Eigen::Vector2f lhs, Eigen::Vector2f rhs, float tolerance) {
+bool SizeNearlyEqual(linalg::Vector2f lhs, linalg::Vector2f rhs, float tolerance) {
     return (lhs - rhs).cwiseAbs().maxCoeff() <= tolerance;
 }
 
@@ -173,11 +173,11 @@ void ResizeCardMesh(SceneMesh& mesh, TextLayerRenderBounds bounds) {
     mesh.SetDirty();
 }
 
-Eigen::Vector2d CursorWorldToNdc(const CursorViewport& viewport, const Eigen::Vector3f& cursor) {
+linalg::Vector2d CursorWorldToNdc(const CursorViewport& viewport, const linalg::Vector3f& cursor) {
     if (viewport.content_size.x() == 0.0f || viewport.content_size.y() == 0.0f) {
-        return Eigen::Vector2d { 0.0, 0.0 };
+        return linalg::Vector2d { 0.0, 0.0 };
     }
-    return Eigen::Vector2d {
+    return linalg::Vector2d {
         2.0 * (static_cast<double>(cursor.x()) - viewport.content_origin.x()) /
                 viewport.content_size.x() -
             1.0,
@@ -202,26 +202,26 @@ const SceneCamera* CameraForHitNode(const Scene& scene, const SceneNode& node) {
 // The rectangle is `size` across, centred on `centre` in the layer's own plane (a
 // text layer's card hangs off its origin by its alignment) and drawn where the
 // node's draw offset puts it.
-bool HitTestNode(SceneNode& node, Eigen::Vector2f size, Eigen::Vector2f centre,
-                 const Eigen::Vector3f& cursor, const NodeHitMask* mask,
-                 const SceneCamera* camera, Eigen::Vector2d ndc) {
+bool HitTestNode(SceneNode& node, linalg::Vector2f size, linalg::Vector2f centre,
+                 const linalg::Vector3f& cursor, const NodeHitMask* mask,
+                 const SceneCamera* camera, linalg::Vector2d ndc) {
     node.UpdateTrans();
     if (size.x() <= 0.0f && size.y() <= 0.0f) {
-        size = Eigen::Vector2f(100.0f, 100.0f);
+        size = linalg::Vector2f(100.0f, 100.0f);
     }
 
-    Eigen::Vector4d local;
+    linalg::Vector4d local;
     if (camera != nullptr && camera->IsPerspective()) {
         const auto hit = IntersectNdcWithNodePlane(*camera, node, ndc.x(), ndc.y());
         if (! hit) return false;
-        local = Eigen::Vector4d(hit->x(), hit->y(), hit->z(), 1.0);
+        local = linalg::Vector4d(hit->x(), hit->y(), hit->z(), 1.0);
     } else {
-        Eigen::Matrix4d model = node.ModelTrans();
+        linalg::Matrix4d model = node.ModelTrans();
         model.block<3, 1>(0, 3) += node.DrawOffset().cast<double>();
         if (! std::isfinite(model.determinant()) || std::abs(model.determinant()) < 1e-12) {
             return false;
         }
-        local = model.inverse() * Eigen::Vector4d(cursor.x(), cursor.y(), cursor.z(), 1.0);
+        local = model.inverse() * linalg::Vector4d(cursor.x(), cursor.y(), cursor.z(), 1.0);
     }
 
     const double half_width  = static_cast<double>(size.x()) * 0.5;
@@ -390,7 +390,7 @@ void ApplyMaterialTint(SceneMaterial& material) {
     };
 }
 
-void ApplyMaterialColor(SceneMaterial& material, const Eigen::Vector3f& color) {
+void ApplyMaterialColor(SceneMaterial& material, const linalg::Vector3f& color) {
     material.tint.color = { color.x(), color.y(), color.z() };
     material.customShader.constValues["g_Color"] =
         std::array<float, 3> { color.x(), color.y(), color.z() };
@@ -459,10 +459,10 @@ bool AlignmentContains(std::string_view alignment, std::string_view part) {
 
 // The rotation `SceneNode::GetLocalTrans` applies to the layer's geometry:
 // x first, then y, then z.
-Eigen::Matrix3f NodeRotationMatrix(const Eigen::Vector3f& angles) {
-    return (Eigen::AngleAxisf(angles.z(), Eigen::Vector3f::UnitZ()) *
-            Eigen::AngleAxisf(angles.y(), Eigen::Vector3f::UnitY()) *
-            Eigen::AngleAxisf(angles.x(), Eigen::Vector3f::UnitX()))
+linalg::Matrix3f NodeRotationMatrix(const linalg::Vector3f& angles) {
+    return (linalg::AngleAxisf(angles.z(), linalg::Vector3f::UnitZ()) *
+            linalg::AngleAxisf(angles.y(), linalg::Vector3f::UnitY()) *
+            linalg::AngleAxisf(angles.x(), linalg::Vector3f::UnitX()))
         .toRotationMatrix();
 }
 
@@ -503,18 +503,18 @@ SceneRuntimeContext::SceneRuntimeContext(SceneRuntimeBootstrap bootstrap)
       m_default_project_properties(
           bootstrap.authored_project_properties.value_or(bootstrap.project_properties)),
       m_project_properties(bootstrap.project_properties) {
-    m_host_context->canvas_size = Eigen::Vector2f(static_cast<float>(bootstrap.canvas_width),
+    m_host_context->canvas_size = linalg::Vector2f(static_cast<float>(bootstrap.canvas_width),
                                                   static_cast<float>(bootstrap.canvas_height));
     m_host_context->screen_resolution = m_host_context->canvas_size;
     // Until the renderer reports its presentation, the window is the canvas.
     m_cursor_viewport = CursorViewport {
-        .origin         = Eigen::Vector2f::Zero(),
+        .origin         = linalg::Vector2f::Zero(),
         .size           = m_host_context->canvas_size,
-        .content_origin = Eigen::Vector2f::Zero(),
+        .content_origin = linalg::Vector2f::Zero(),
         .content_size   = m_host_context->canvas_size,
     };
-    m_host_context->cursor_normalized_position = Eigen::Vector2f(0.5f, 0.5f);
-    m_host_context->cursor_world_position      = Eigen::Vector3f::Zero();
+    m_host_context->cursor_normalized_position = linalg::Vector2f(0.5f, 0.5f);
+    m_host_context->cursor_world_position      = linalg::Vector3f::Zero();
     m_host_context->frame_time                 = 0.0;
     m_host_context->runtime_seconds            = 0.0;
 
@@ -617,7 +617,7 @@ void SceneRuntimeContext::Tick(double frame_time) {
             alignment.transform_dirty = true;
         }
         ApplyNodeTransform(*binding.transform_node, alignment,
-                           binding.size != nullptr ? *binding.size : Eigen::Vector2f::Zero());
+                           binding.size != nullptr ? *binding.size : linalg::Vector2f::Zero());
     }
     for (auto& [name, binding] : m_node_scale) {
         (void)name;
@@ -633,7 +633,7 @@ void SceneRuntimeContext::Tick(double frame_time) {
             binding.node->SetScale(value);
         } else if (binding.transform_node != nullptr) {
             ApplyNodeTransform(*binding.transform_node, alignment,
-                               binding.size != nullptr ? *binding.size : Eigen::Vector2f::Zero());
+                               binding.size != nullptr ? *binding.size : linalg::Vector2f::Zero());
         }
     }
     for (auto& [name, binding] : m_node_rotation) {
@@ -646,7 +646,7 @@ void SceneRuntimeContext::Tick(double frame_time) {
         if (binding.alignment != nullptr && ! binding.alignment->alignment.empty() &&
             binding.transform_node != nullptr) {
             ApplyNodeTransform(*binding.transform_node, *binding.alignment,
-                               binding.size != nullptr ? *binding.size : Eigen::Vector2f::Zero());
+                               binding.size != nullptr ? *binding.size : linalg::Vector2f::Zero());
         }
     }
     for (auto& binding : m_text_values) {
@@ -793,7 +793,7 @@ std::vector<std::string> SceneRuntimeContext::ResetProjectPropertyOverride() {
 
 void SceneRuntimeContext::AttachScene(Scene* scene) { m_scene = scene; }
 
-void SceneRuntimeContext::SetCursorWorldPosition(const Eigen::Vector3f& value) {
+void SceneRuntimeContext::SetCursorWorldPosition(const linalg::Vector3f& value) {
     m_cursor_plane_position               = value;
     m_host_context->cursor_world_position = value;
 }
@@ -840,7 +840,7 @@ void SceneRuntimeContext::UpdatePresentedMargins() {
 /// against the screen got the author's canvas back instead. The rasterization
 /// size is not it either: internal quality may halve that, and a quality
 /// setting must not move a layout.
-void SceneRuntimeContext::SetScreenResolution(const Eigen::Vector2f& resolution) {
+void SceneRuntimeContext::SetScreenResolution(const linalg::Vector2f& resolution) {
     if (! resolution.allFinite()) return;
     if (resolution.x() <= 0.0f || resolution.y() <= 0.0f) return;
     // A new size is news to the scripts, which are told on the next tick.
@@ -869,9 +869,9 @@ const std::string& SceneRuntimeContext::Language() const { return m_host_context
 void SceneRuntimeContext::SetCursorInput(float x, float y) {
     x                                          = std::clamp(x, 0.0f, 1.0f);
     y                                          = std::clamp(y, 0.0f, 1.0f);
-    m_host_context->cursor_normalized_position = Eigen::Vector2f(x, y);
+    m_host_context->cursor_normalized_position = linalg::Vector2f(x, y);
     m_cursor_plane_position =
-        Eigen::Vector3f(m_cursor_viewport.origin.x() + x * m_cursor_viewport.size.x(),
+        linalg::Vector3f(m_cursor_viewport.origin.x() + x * m_cursor_viewport.size.x(),
                         m_cursor_viewport.origin.y() + (1.0f - y) * m_cursor_viewport.size.y(),
                         0.0f);
     m_host_context->cursor_world_position = ScriptCursorWorldPosition();
@@ -898,13 +898,13 @@ void SceneRuntimeContext::SetCursorInput(float x, float y) {
 // scripts and camera shake move the camera, so it is the pose the last tick
 // left. A camera with no usable view (a far plane or aspect that is not
 // positive) keeps the canvas point rather than a made-up depth.
-Eigen::Vector3f SceneRuntimeContext::ScriptCursorWorldPosition() const {
+linalg::Vector3f SceneRuntimeContext::ScriptCursorWorldPosition() const {
     const SceneCamera* camera =
         m_scene != nullptr && m_scene->display_sized ? m_scene->activeCamera : nullptr;
     if (camera == nullptr || ! camera->IsPerspective()) return m_cursor_plane_position;
-    const Eigen::Vector2d ndc = CursorWorldToNdc(m_cursor_viewport, m_cursor_plane_position);
+    const linalg::Vector2d ndc = CursorWorldToNdc(m_cursor_viewport, m_cursor_plane_position);
     const auto point = UnprojectNdcAtDepth(*camera, ndc.x(), ndc.y(), camera->FarClip());
-    return point.has_value() ? Eigen::Vector3f(point->cast<float>()) : m_cursor_plane_position;
+    return point.has_value() ? linalg::Vector3f(point->cast<float>()) : m_cursor_plane_position;
 }
 
 void SceneRuntimeContext::SetCursorEnter(bool entered) {
@@ -1077,7 +1077,7 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
 
     auto& layer = iterator->second;
     if (layer.state().texture_cache_key != prepared.state.texture_cache_key) return false;
-    const Eigen::Vector2f raster_size = TextLayerRasterSizeForLayout(prepared.state, prepared.layout);
+    const linalg::Vector2f raster_size = TextLayerRasterSizeForLayout(prepared.state, prepared.layout);
     // The card is the text and its padding, and the raster the card and the style's
     // margin, so the two change together. Where the card hangs from the layer's origin
     // changes with its width for a text aligned to one side, and with the alignment
@@ -1125,7 +1125,7 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
             camera->SetWidth(frame.size.x());
             camera->SetHeight(frame.size.y());
             camera->GetAttachedNode()->SetTranslate(
-                Eigen::Vector3f(frame.center.x(), frame.center.y(), 0.0f));
+                linalg::Vector3f(frame.center.x(), frame.center.y(), 0.0f));
             camera->Update();
             if (resized) {
                 // The first buffer and every buffer sized from it.
@@ -1183,7 +1183,7 @@ void SceneRuntimeContext::FitTextLayerComposite(SceneNode& node,
     camera->second->SetWidth(card.size.x());
     camera->second->SetHeight(card.size.y());
     camera->second->GetAttachedNode()->SetTranslate(
-        Eigen::Vector3f(card.center.x(), card.center.y(), 0.0f));
+        linalg::Vector3f(card.center.x(), card.center.y(), 0.0f));
     camera->second->Update();
     // One texel per unit of the card with the fraction cut off, as at parse
     // time: a consumer may place the image by its size (`g_Texture1Resolution`),
@@ -1451,7 +1451,7 @@ SceneRuntimeContext::CaptureNodeRegistration(std::string_view name) const {
     return snapshot;
 }
 
-void SceneRuntimeContext::RegisterNodeSize(std::string name, Eigen::Vector2f value) {
+void SceneRuntimeContext::RegisterNodeSize(std::string name, linalg::Vector2f value) {
     if (name.empty()) return;
     const auto previous = m_node_size.find(name);
     if (previous != m_node_size.end() && (previous->second.array() == value.array()).all()) return;
@@ -1519,7 +1519,7 @@ std::string SceneRuntimeContext::PuppetAnimationLayerName(std::string_view layer
 
 void SceneRuntimeContext::RegisterLayerTemplate(std::string                template_path,
                                                 std::shared_ptr<SceneNode> node,
-                                                Eigen::Vector2f            size) {
+                                                linalg::Vector2f            size) {
     if (node == nullptr) return;
 
     const std::string canonical_path = NormalizeTemplatePath(template_path);
@@ -1603,7 +1603,7 @@ void SceneRuntimeContext::ApplyNodeVec3Animation(NodeVec3Binding& binding) {
     const double frame = binding.animation->playback->frame;
     if (frame == binding.sampled_animation_frame) return;
     const auto value = binding.animation->Value();
-    binding.value->update(Eigen::Vector3f(value[0], value[1], value[2]));
+    binding.value->update(linalg::Vector3f(value[0], value[1], value[2]));
     binding.sampled_animation_frame = frame;
 }
 
@@ -1612,7 +1612,7 @@ void SceneRuntimeContext::ApplyMaterialColorAnimation(MaterialColorBinding& bind
     const double frame = binding.animation->playback->frame;
     if (frame == binding.sampled_animation_frame) return;
     const auto value = binding.animation->Value();
-    const Eigen::Vector3f color(value[0], value[1], value[2]);
+    const linalg::Vector3f color(value[0], value[1], value[2]);
     for (const auto& weak : binding.materials) {
         if (const auto material = weak.lock()) ApplyMaterialColor(*material, color);
     }
@@ -1780,7 +1780,7 @@ void SceneRuntimeContext::ApplyCameraShots() {
     if (m_scene == nullptr || m_camera_shots.empty()) return;
 
     double          zoom   = 1.0;
-    Eigen::Vector2f offset = Eigen::Vector2f::Zero();
+    linalg::Vector2f offset = linalg::Vector2f::Zero();
     for (auto& shot : m_camera_shots) {
         const auto& timeline = shot.timeline;
         const auto  sample   = [&timeline](const ScalarAnimation& curve) {
@@ -1793,7 +1793,7 @@ void SceneRuntimeContext::ApplyCameraShots() {
         if (timeline.clock != nullptr &&
             std::any_of(timeline.origin.begin(), timeline.origin.end(),
                         [](const auto& curve) { return curve.has_value(); })) {
-            Eigen::Vector3f origin = timeline.origin_base;
+            linalg::Vector3f origin = timeline.origin_base;
             for (std::size_t index = 0; index < timeline.origin.size(); ++index) {
                 const auto& curve = timeline.origin[index];
                 if (! curve.has_value()) continue;
@@ -1805,8 +1805,8 @@ void SceneRuntimeContext::ApplyCameraShots() {
         if (! shot.node->EffectiveVisible()) continue;
         zoom = timeline.clock != nullptr && timeline.zoom.has_value() ? sample(*timeline.zoom)
                                                                       : shot.zoom->getFloat();
-        offset = shot.origin_pending ? Eigen::Vector2f(Eigen::Vector2f::Zero())
-                                     : Eigen::Vector2f(shot.node->Translate().head<2>());
+        offset = shot.origin_pending ? linalg::Vector2f(linalg::Vector2f::Zero())
+                                     : linalg::Vector2f(shot.node->Translate().head<2>());
     }
 
     if (m_framed_camera_shot.has_value() && m_framed_camera_shot->first == zoom &&
@@ -1888,12 +1888,12 @@ void SceneRuntimeContext::ApplyCameraShake() {
     }
     auto& camera = *m_scene->activeCamera;
     if (! m_camera_shake.enabled) {
-        camera.SetShakeOffset(Eigen::Vector3d::Zero());
+        camera.SetShakeOffset(linalg::Vector3d::Zero());
         return;
     }
     const double t =
         double(m_camera_shake.speed) * m_camera_shake.speed * m_host_context->runtime_seconds;
-    Eigen::Vector3d offset(std::cos(t), std::sin(t * 1.333), std::sin(t));
+    linalg::Vector3d offset(std::cos(t), std::sin(t * 1.333), std::sin(t));
     double amplitude = m_camera_shake.amplitude * 0.1;
     if (! camera.IsPerspective()) {
         offset.z() = 0.0;
@@ -2530,17 +2530,17 @@ void SceneRuntimeContext::ReleaseRetiredLayers() {
     m_retired_layers.clear();
 }
 
-Eigen::Vector3f SceneRuntimeContext::NodeColor(std::string_view name) const {
+linalg::Vector3f SceneRuntimeContext::NodeColor(std::string_view name) const {
     const auto node = m_nodes.find(std::string(name));
     if (node == m_nodes.end() || node->second == nullptr || node->second->Mesh() == nullptr ||
-        node->second->Mesh()->Material() == nullptr) return Eigen::Vector3f::Ones();
+        node->second->Mesh()->Material() == nullptr) return linalg::Vector3f::Ones();
     const auto& values = node->second->Mesh()->Material()->customShader.constValues;
     const auto color = values.find("g_Color");
-    if (color == values.end() || color->second.size() < 3) return Eigen::Vector3f::Ones();
-    return Eigen::Vector3f(color->second[0], color->second[1], color->second[2]);
+    if (color == values.end() || color->second.size() < 3) return linalg::Vector3f::Ones();
+    return linalg::Vector3f(color->second[0], color->second[1], color->second[2]);
 }
 
-bool SceneRuntimeContext::SetNodeColor(std::string_view name, const Eigen::Vector3f& color) {
+bool SceneRuntimeContext::SetNodeColor(std::string_view name, const linalg::Vector3f& color) {
     // A colour bound to a property or a script takes what a script writes as
     // its value, as a script's visibility and origin writes do: the next
     // evaluation continues from it, where an `update()` that returns nothing
@@ -2646,7 +2646,7 @@ void SceneRuntimeContext::RequestGraphForShownLayers() {
     }
 }
 
-bool SceneRuntimeContext::SetNodeTranslate(std::string_view name, const Eigen::Vector3f& value) {
+bool SceneRuntimeContext::SetNodeTranslate(std::string_view name, const linalg::Vector3f& value) {
     if (const auto binding = m_node_translate.find(std::string(name));
         binding != m_node_translate.end() && binding->second.value != nullptr) {
         binding->second.value->update(value);
@@ -2662,7 +2662,7 @@ bool SceneRuntimeContext::SetNodeTranslate(std::string_view name, const Eigen::V
     return true;
 }
 
-bool SceneRuntimeContext::SetNodeScale(std::string_view name, const Eigen::Vector3f& value) {
+bool SceneRuntimeContext::SetNodeScale(std::string_view name, const linalg::Vector3f& value) {
     if (const auto binding = m_node_scale.find(std::string(name));
         binding != m_node_scale.end() && binding->second.value != nullptr) {
         binding->second.value->update(value);
@@ -2706,7 +2706,7 @@ bool SceneRuntimeContext::SetNodeAlignment(std::string_view name, std::string al
 }
 
 bool SceneRuntimeContext::SetNodeAnchorAlignment(std::string_view name, std::string alignment,
-                                                 const Eigen::Vector3f& origin) {
+                                                 const linalg::Vector3f& origin) {
     const auto iterator = m_nodes.find(std::string(name));
     if (iterator == m_nodes.end() || iterator->second == nullptr) return false;
 
@@ -2736,7 +2736,7 @@ bool SceneRuntimeContext::SetNodeScreenAnchor(std::string_view name, TextScreenA
     return true;
 }
 
-bool SceneRuntimeContext::SetNodeRotation(std::string_view name, const Eigen::Vector3f& value) {
+bool SceneRuntimeContext::SetNodeRotation(std::string_view name, const linalg::Vector3f& value) {
     if (const auto binding = m_node_rotation.find(std::string(name));
         binding != m_node_rotation.end() && binding->second.value != nullptr) {
         binding->second.value->update(value);
@@ -2748,25 +2748,25 @@ bool SceneRuntimeContext::SetNodeRotation(std::string_view name, const Eigen::Ve
     return true;
 }
 
-Eigen::Vector3f SceneRuntimeContext::NodeTranslate(std::string_view name) const {
+linalg::Vector3f SceneRuntimeContext::NodeTranslate(std::string_view name) const {
     const auto iterator = m_nodes.find(std::string(name));
-    if (iterator == m_nodes.end() || iterator->second == nullptr) return Eigen::Vector3f::Zero();
+    if (iterator == m_nodes.end() || iterator->second == nullptr) return linalg::Vector3f::Zero();
     const auto alignment = m_node_alignment.find(std::string(name));
     if (alignment != m_node_alignment.end() && ! alignment->second.alignment.empty())
         return alignment->second.origin;
     return iterator->second->Translate();
 }
 
-Eigen::Vector3f SceneRuntimeContext::NodeScale(std::string_view name) const {
+linalg::Vector3f SceneRuntimeContext::NodeScale(std::string_view name) const {
     const auto iterator = m_nodes.find(std::string(name));
-    if (iterator == m_nodes.end() || iterator->second == nullptr) return Eigen::Vector3f::Zero();
+    if (iterator == m_nodes.end() || iterator->second == nullptr) return linalg::Vector3f::Zero();
     return iterator->second->Scale();
 }
 
-Eigen::Matrix4d SceneRuntimeContext::NodeTransformMatrix(std::string_view name) const {
+linalg::Matrix4d SceneRuntimeContext::NodeTransformMatrix(std::string_view name) const {
     const auto iterator = m_nodes.find(std::string(name));
     if (iterator == m_nodes.end() || iterator->second == nullptr) {
-        return Eigen::Matrix4d::Identity();
+        return linalg::Matrix4d::Identity();
     }
     // The node's own matrix, not the one it is drawn with: a layer drawn
     // through its effects renders from an identity of its own and a camera
@@ -2775,21 +2775,21 @@ Eigen::Matrix4d SceneRuntimeContext::NodeTransformMatrix(std::string_view name) 
     return iterator->second->ModelTrans();
 }
 
-Eigen::Vector3f SceneRuntimeContext::NodeRotation(std::string_view name) const {
+linalg::Vector3f SceneRuntimeContext::NodeRotation(std::string_view name) const {
     const auto iterator = m_nodes.find(std::string(name));
-    if (iterator == m_nodes.end() || iterator->second == nullptr) return Eigen::Vector3f::Zero();
+    if (iterator == m_nodes.end() || iterator->second == nullptr) return linalg::Vector3f::Zero();
     return iterator->second->Rotation();
 }
 
-Eigen::Vector2f SceneRuntimeContext::NodeSize(std::string_view name) const {
+linalg::Vector2f SceneRuntimeContext::NodeSize(std::string_view name) const {
     const auto iterator = m_node_size.find(std::string(name));
-    if (iterator == m_node_size.end()) return Eigen::Vector2f::Zero();
+    if (iterator == m_node_size.end()) return linalg::Vector2f::Zero();
     return iterator->second;
 }
 
-Eigen::Vector2f SceneRuntimeContext::NodeBoxCentre(std::string_view name) const {
+linalg::Vector2f SceneRuntimeContext::NodeBoxCentre(std::string_view name) const {
     const auto iterator = m_text_layers.find(std::string(name));
-    if (iterator == m_text_layers.end()) return Eigen::Vector2f::Zero();
+    if (iterator == m_text_layers.end()) return linalg::Vector2f::Zero();
     return iterator->second.layout().centre;
 }
 
@@ -3154,7 +3154,7 @@ void SceneRuntimeContext::ApplyAnchoredNodeTransform(std::string_view name) {
 }
 
 void SceneRuntimeContext::ApplyNodeTransform(SceneNode& node, NodeAlignmentBinding& binding,
-                                             const Eigen::Vector2f& size) {
+                                             const linalg::Vector2f& size) {
     if (! (binding.rotation.array() == node.Rotation().array()).all()) {
         binding.rotation        = node.Rotation();
         binding.transform_dirty = true;
@@ -3167,7 +3167,7 @@ void SceneRuntimeContext::ApplyNodeTransform(SceneNode& node, NodeAlignmentBindi
             const float scale = binding.scale[axis];
             return size[axis] * (binding.size_anchor ? scale : scale - 1.0f) * 0.5f;
         };
-        Eigen::Vector3f offset = Eigen::Vector3f::Constant(-0.0f);
+        linalg::Vector3f offset = linalg::Vector3f::Constant(-0.0f);
         bool            anchored = false;
         if (AlignmentContains(binding.alignment, "bottom")) {
             offset.y() = half(1);
@@ -3195,7 +3195,7 @@ void SceneRuntimeContext::ApplyNodeTransform(SceneNode& node, NodeAlignmentBindi
     // A screen anchor moves where the layer is drawn and nothing else: the node, which its
     // children are placed from and a script reads the origin of, stays where the scene
     // put it.
-    node.SetDrawOffset(Eigen::Vector3f(binding.screen_offset.x(), binding.screen_offset.y(), 0.0f));
+    node.SetDrawOffset(linalg::Vector3f(binding.screen_offset.x(), binding.screen_offset.y(), 0.0f));
 }
 
 void SceneRuntimeContext::DispatchMediaPlaybackChanged(std::string_view name, bool playing) {
@@ -3243,7 +3243,7 @@ bool SceneRuntimeContext::CursorHitsLayerGeometry(std::string_view name) const {
         mask_iterator == m_node_hit_masks.end() ? nullptr : &mask_iterator->second;
     const SceneCamera* camera =
         m_scene != nullptr ? CameraForHitNode(*m_scene, *node_iterator->second) : nullptr;
-    const Eigen::Vector2d ndc = CursorWorldToNdc(m_cursor_viewport, m_cursor_plane_position);
+    const linalg::Vector2d ndc = CursorWorldToNdc(m_cursor_viewport, m_cursor_plane_position);
     return HitTestNode(*node_iterator->second,
                        NodeSize(name),
                        NodeBoxCentre(name),
@@ -3586,8 +3586,8 @@ bool SceneRuntimeContext::DispatchCursorFrameEvents(bool cursor_was_in_window) {
     return cursor_in_window;
 }
 
-void SceneRuntimeContext::DispatchMediaThumbnailChanged(const Eigen::Vector3f& primary_color,
-                                                        const Eigen::Vector3f& text_color) {
+void SceneRuntimeContext::DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
+                                                        const linalg::Vector3f& text_color) {
     ForEachEventScript([&](auto* script) { script->DispatchMediaThumbnailChanged(primary_color, text_color); });
 }
 
@@ -4059,14 +4059,14 @@ bool SceneRuntimeContext::SetNodeParent(std::string_view name, std::string_view 
     return true;
 }
 
-bool SceneRuntimeContext::SetNodeSize(std::string_view name, const Eigen::Vector2f& size) {
+bool SceneRuntimeContext::SetNodeSize(std::string_view name, const linalg::Vector2f& size) {
     const std::string key(name);
     const auto        found = m_nodes.find(key);
     if (found == m_nodes.end() || found->second == nullptr || ! size.allFinite() ||
         size.x() <= 0.0f || size.y() <= 0.0f || m_text_layers.contains(key)) {
         return false;
     }
-    const Eigen::Vector2f previous = NodeSize(key);
+    const linalg::Vector2f previous = NodeSize(key);
     if (previous.x() <= 0.0f || previous.y() <= 0.0f) return false;
     if (SizeNearlyEqual(previous, size, 1.0e-3f)) return true;
 
@@ -4106,18 +4106,18 @@ bool SceneRuntimeContext::SetNodeSize(std::string_view name, const Eigen::Vector
     return true;
 }
 
-Eigen::Vector2f SceneRuntimeContext::NodeParallaxDepth(std::string_view name) const {
+linalg::Vector2f SceneRuntimeContext::NodeParallaxDepth(std::string_view name) const {
     const auto found = m_nodes.find(std::string(name));
     if (found == m_nodes.end() || found->second == nullptr || m_scene == nullptr ||
         m_scene->shaderValueUpdater == nullptr) {
-        return Eigen::Vector2f::Zero();
+        return linalg::Vector2f::Zero();
     }
     const auto depth = m_scene->shaderValueUpdater->NodeParallaxDepth(found->second);
-    return Eigen::Vector2f(depth[0], depth[1]);
+    return linalg::Vector2f(depth[0], depth[1]);
 }
 
 bool SceneRuntimeContext::SetNodeParallaxDepth(std::string_view name,
-                                               const Eigen::Vector2f& depth) {
+                                               const linalg::Vector2f& depth) {
     const auto found = m_nodes.find(std::string(name));
     if (found == m_nodes.end() || found->second == nullptr || m_scene == nullptr ||
         m_scene->shaderValueUpdater == nullptr || ! depth.allFinite()) {

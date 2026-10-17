@@ -1270,13 +1270,13 @@ std::shared_ptr<WPPuppet> BuildOneBonePuppet(WPPuppet::PlayMode mode,
     auto& track = anim.bone_tracks.emplace_back();
     track.bone_index = 0;
     auto& first_frame = track.frames.emplace_back();
-    first_frame.position = Eigen::Vector3f(0.0f, first_frame_y, 0.0f);
-    first_frame.angle = Eigen::Vector3f::Zero();
-    first_frame.scale = Eigen::Vector3f::Ones();
+    first_frame.position = linalg::Vector3f(0.0f, first_frame_y, 0.0f);
+    first_frame.angle = linalg::Vector3f::Zero();
+    first_frame.scale = linalg::Vector3f::Ones();
     auto& final_frame = track.frames.emplace_back();
-    final_frame.position = Eigen::Vector3f(0.0f, final_frame_y, 0.0f);
-    final_frame.angle = Eigen::Vector3f::Zero();
-    final_frame.scale = Eigen::Vector3f::Ones();
+    final_frame.position = linalg::Vector3f(0.0f, final_frame_y, 0.0f);
+    final_frame.angle = linalg::Vector3f::Zero();
+    final_frame.scale = linalg::Vector3f::Ones();
 
     puppet->prepared();
     return puppet;
@@ -1316,12 +1316,12 @@ TEST(MdlSchema, AdditiveLoopPreservesInitialCollapsedPoseAndWraps) {
     frames[0].scale.y() = 0.0f;
     puppet->prepared();
     auto layer = BuildAdditiveLayer(puppet);
-    const Eigen::Vector3f vertex(2, 3, 0);
+    const linalg::Vector3f vertex(2, 3, 0);
 
-    const Eigen::Vector3f initial = layer.genFrame(0)[0] * vertex;
+    const linalg::Vector3f initial = layer.genFrame(0)[0] * vertex;
     EXPECT_NEAR(initial.x(), 0, 1e-5);
     EXPECT_NEAR(initial.y(), 14, 1e-5);
-    const Eigen::Vector3f halfway = layer.genFrame(0.5)[0] * vertex;
+    const linalg::Vector3f halfway = layer.genFrame(0.5)[0] * vertex;
     EXPECT_NEAR(halfway.x(), -1.5, 1e-5);
     EXPECT_NEAR(halfway.y(), 16, 1e-5);
     EXPECT_TRUE((layer.genFrame(1)[0] * vertex).isApprox(initial, 1e-5));
@@ -1330,13 +1330,13 @@ TEST(MdlSchema, AdditiveLoopPreservesInitialCollapsedPoseAndWraps) {
 TEST(MdlSchema, CharacterSheetReferencePoseSurvivesAdditiveMixingAndLoopWrap) {
     auto puppet = BuildOneBonePuppet(WPPuppet::PlayMode::Loop, 12.0f, 16.0f);
     auto& bone = puppet->bones[0];
-    bone.local_bind.translate(Eigen::Vector3f(0, 100, 0));
-    bone.local_reference.translate(Eigen::Vector3f(0, 10, 0));
+    bone.local_bind.translate(linalg::Vector3f(0, 100, 0));
+    bone.local_reference.translate(linalg::Vector3f(0, 10, 0));
     bone.has_local_reference = true;
     puppet->prepared();
     WPPuppetLayer still(puppet);
     still.prepared({});
-    const Eigen::Vector3f vertex(0, 103, 0);
+    const linalg::Vector3f vertex(0, 103, 0);
     EXPECT_NEAR((still.genFrame(0)[0] * vertex).y(), 13, 1e-5);
     auto layer = BuildAdditiveLayer(puppet);
     EXPECT_NEAR((layer.genFrame(0)[0] * vertex).y(), 15, 1e-5);
@@ -1356,15 +1356,15 @@ TEST(MdlSchema, CharacterSheetReferencePoseSurvivesAdditiveMixingAndLoopWrap) {
 TEST(MdlSchema, NonAdditiveLayersShareTheWholePoseWeight) {
     auto puppet = BuildOneBonePuppet(WPPuppet::PlayMode::Loop, 12.0f, 16.0f);
     auto& bone = puppet->bones[0];
-    bone.local_bind.translate(Eigen::Vector3f(0, 100, 0));
-    bone.local_reference.translate(Eigen::Vector3f(0, 10, 0));
+    bone.local_bind.translate(linalg::Vector3f(0, 100, 0));
+    bone.local_reference.translate(linalg::Vector3f(0, 10, 0));
     bone.has_local_reference = true;
     for (auto& frame : puppet->anims[0].bone_tracks[0].frames) {
         frame.angle.z() = 0.6f;
-        frame.scale = Eigen::Vector3f(2, 3, 1);
+        frame.scale = linalg::Vector3f(2, 3, 1);
     }
     puppet->prepared();
-    const Eigen::Vector3f vertex(2, 103, 0);
+    const linalg::Vector3f vertex(2, 103, 0);
     struct Case { double first, second, weight; };
     for (const auto weights : { Case { 1, 1, 1 }, Case { 2, 1, 1 },
                                Case { 0.5, 0.5, 0.75 }, Case { 0.25, 0.5, 0.625 },
@@ -1381,12 +1381,12 @@ TEST(MdlSchema, NonAdditiveLayersShareTheWholePoseWeight) {
         for (const double time : { 0.0, 0.5, 1.0, 1.0 }) {
             const float w = static_cast<float>(weights.weight);
             const float delta_y = time == 0.5 ? 4.0f : 2.0f;
-            Eigen::Affine3f expected = Eigen::Affine3f::Identity();
-            expected.translate(Eigen::Vector3f(0, 10 + w * delta_y, 0));
-            expected.rotate(Eigen::AngleAxisf(0.6f * w, Eigen::Vector3f::UnitZ()));
-            expected.scale(Eigen::Vector3f(1 + w, 1 + 2 * w, 1));
+            linalg::Affine3f expected = linalg::Affine3f::Identity();
+            expected.translate(linalg::Vector3f(0, 10 + w * delta_y, 0));
+            expected.rotate(linalg::AngleAxisf(0.6f * w, linalg::Vector3f::UnitZ()));
+            expected.scale(linalg::Vector3f(1 + w, 1 + 2 * w, 1));
             EXPECT_TRUE((layer.genFrame(time)[0] * vertex).isApprox(
-                expected * Eigen::Vector3f(2, 3, 0), 1e-5));
+                expected * linalg::Vector3f(2, 3, 0), 1e-5));
         }
     }
 }
@@ -1423,15 +1423,15 @@ TEST(MdlSchema, FullWeightAnimationReplacesRotatedReferencePose) {
     auto puppet = BuildOneBonePuppet(WPPuppet::PlayMode::Loop, 0.0f, 0.0f);
     auto& bone = puppet->bones[0];
     const float quarter_turn = std::acos(-1.0f) / 2.0f;
-    bone.local_bind.rotate(Eigen::AngleAxisf(quarter_turn, Eigen::Vector3f::UnitX()));
+    bone.local_bind.rotate(linalg::AngleAxisf(quarter_turn, linalg::Vector3f::UnitX()));
     for (auto& frame : puppet->anims[0].bone_tracks[0].frames) {
         frame.angle.z() = quarter_turn;
     }
     puppet->prepared();
     auto layer = BuildAdditiveLayer(puppet);
-    const Eigen::Vector3f bind_vertex = bone.local_bind * Eigen::Vector3f(1, 2, 3);
-    const Eigen::Vector3f result = layer.genFrame(0)[0] * bind_vertex;
-    EXPECT_TRUE(result.isApprox(Eigen::Vector3f(-2, 1, 3), 1e-5));
+    const linalg::Vector3f bind_vertex = bone.local_bind * linalg::Vector3f(1, 2, 3);
+    const linalg::Vector3f result = layer.genFrame(0)[0] * bind_vertex;
+    EXPECT_TRUE(result.isApprox(linalg::Vector3f(-2, 1, 3), 1e-5));
 }
 
 TEST(MdlSchema, Mdls2ReferencePoseReassemblesBindVerticesWithoutAnimation) {
@@ -1465,7 +1465,7 @@ TEST(MdlSchema, Mdls2ReferencePoseReassemblesBindVerticesWithoutAnimation) {
     ASSERT_TRUE(WPMdlParser::Parse("sample.mdl", vfs, mdl));
     WPPuppetLayer layer(mdl.puppet);
     layer.prepared({});
-    const Eigen::Vector3f result = layer.genFrame(0)[0] * Eigen::Vector3f(103, 204, 0);
+    const linalg::Vector3f result = layer.genFrame(0)[0] * linalg::Vector3f(103, 204, 0);
     EXPECT_NEAR(result.x(), 13, 1e-5);
     EXPECT_NEAR(result.y(), 24, 1e-5);
 }
@@ -1983,9 +1983,9 @@ TEST(MdlSchema, PuppetAnimationAdvancesOncePerAbsoluteElapsedTime) {
     anim.bone_tracks.resize(1);
     anim.bone_tracks[0].frames.resize(3);
     for (auto& frame : anim.bone_tracks[0].frames) {
-        frame.position = Eigen::Vector3f::Zero();
-        frame.angle = Eigen::Vector3f::Zero();
-        frame.scale = Eigen::Vector3f::Ones();
+        frame.position = linalg::Vector3f::Zero();
+        frame.angle = linalg::Vector3f::Zero();
+        frame.scale = linalg::Vector3f::Ones();
     }
     anim.bone_tracks[0].frames[1].position.x() = 10.0f;
     anim.bone_tracks[0].frames[2].position.x() = 20.0f;
@@ -2084,10 +2084,10 @@ TEST(MdlSchema, PuppetReprepareResetsBlendWithoutResettingTheSharedClock) {
     EXPECT_FLOAT_EQ(RootTranslationY(copy, 0.25), 12.5);
     EXPECT_FLOAT_EQ(RootTranslationY(layer, 0.75), 25);
     copy.prepared({});
-    EXPECT_TRUE(layer.genFrame(0.75)[0].matrix().isApprox(Eigen::Matrix4f::Identity()));
+    EXPECT_TRUE(layer.genFrame(0.75)[0].matrix().isApprox(linalg::Matrix4f::Identity()));
     authored.id = 999;
     layer.prepared(std::span(&authored, 1));
-    EXPECT_TRUE(copy.genFrame(0.75)[0].matrix().isApprox(Eigen::Matrix4f::Identity()));
+    EXPECT_TRUE(copy.genFrame(0.75)[0].matrix().isApprox(linalg::Matrix4f::Identity()));
     EXPECT_FALSE(copy.setFrame(0, 0.5));
 }
 
@@ -2124,7 +2124,7 @@ TEST(MdlSchema, IndependentPuppetStatesDoNotOverwriteBorrowedPoses) {
     second.genFrame(0);
     const auto first_pose = first.genFrame(0.25);
     ASSERT_EQ(first_pose.size(), 1u);
-    const Eigen::Matrix4f saved = first_pose[0].matrix();
+    const linalg::Matrix4f saved = first_pose[0].matrix();
     EXPECT_FLOAT_EQ(RootTranslationY(second, 0.75), 75);
     EXPECT_TRUE(first_pose[0].matrix().isApprox(saved));
     ASSERT_TRUE(shared.setFrame(0, 0.5));
@@ -2172,7 +2172,7 @@ TEST(MdlSchema, VertexCentroidOffsetOnlyBracketsWorldAnchoredRoots) {
         puppet->bones[0].parent = WPPuppet::Bone::NO_PARENT;
         puppet->bones[0].bind_parent = WPPuppet::Bone::NO_PARENT;
         puppet->bones[0].anim_parent = WPPuppet::Bone::NO_PARENT;
-        puppet->bones[0].vertex_centroid_offset = Eigen::Vector3f(2.0f, 0.0f, 0.0f);
+        puppet->bones[0].vertex_centroid_offset = linalg::Vector3f(2.0f, 0.0f, 0.0f);
 
         WPPuppet::Animation anim;
         anim.id = 9;
@@ -2182,9 +2182,9 @@ TEST(MdlSchema, VertexCentroidOffsetOnlyBracketsWorldAnchoredRoots) {
         anim.bone_tracks.resize(1);
         anim.bone_tracks[0].frames.resize(3);
         for (auto& frame : anim.bone_tracks[0].frames) {
-            frame.position = Eigen::Vector3f::Zero();
-            frame.angle = Eigen::Vector3f::Zero();
-            frame.scale = Eigen::Vector3f::Ones();
+            frame.position = linalg::Vector3f::Zero();
+            frame.angle = linalg::Vector3f::Zero();
+            frame.scale = linalg::Vector3f::Ones();
         }
         anim.bone_tracks[0].frames[1].scale.x() = 2.0f;
         anim.bone_tracks[0].frames[2].scale.x() = 3.0f;
@@ -2272,8 +2272,8 @@ TEST(MdlSchema, Mdls3SkinningPreservesAuthoredHierarchyAndPivotsAcrossMeshVersio
             for (int sample = 0; sample < 2; ++sample) {
                 auto& frame = track.frames.emplace_back();
                 frame.position = bone.local_bind.translation();
-                frame.scale = Eigen::Vector3f::Ones();
-                frame.angle = Eigen::Vector3f::Zero();
+                frame.scale = linalg::Vector3f::Ones();
+                frame.angle = linalg::Vector3f::Zero();
             }
         }
         for (auto& frame : animation.bone_tracks[0].frames) {
@@ -2283,10 +2283,10 @@ TEST(MdlSchema, Mdls3SkinningPreservesAuthoredHierarchyAndPivotsAcrossMeshVersio
         puppet->anims.push_back(std::move(animation));
         puppet->prepared();
         auto layer = BuildAdditiveLayer(puppet);
-        const Eigen::Vector3f point(17, 3, 0);
+        const linalg::Vector3f point(17, 3, 0);
         for (double time : {0.0, 0.5, 0.5, 1.0}) {
-            const Eigen::Vector3f actual = layer.genFrame(time)[2] * point;
-            EXPECT_TRUE(actual.isApprox(Eigen::Vector3f(10, 7, 0), 1e-5)) << actual.transpose();
+            const linalg::Vector3f actual = layer.genFrame(time)[2] * point;
+            EXPECT_TRUE(actual.isApprox(linalg::Vector3f(10, 7, 0), 1e-5)) << actual.transpose();
         }
     }
 }

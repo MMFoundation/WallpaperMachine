@@ -140,7 +140,7 @@ void ParticleSubSystem::UpdateMouseControlpoints() {
     // and is wrong by half the cropped-away span at either edge.
     const auto& scene_pointer = m_sys.scene.pointerScenePosition;
     const auto  pointer       = m_sys.scene.pointerPosition;
-    const Eigen::Vector3d mouse_world {
+    const linalg::Vector3d mouse_world {
         scene_pointer.has_value()
             ? static_cast<double>((*scene_pointer)[0])
             : static_cast<double>(pointer[0]) * static_cast<double>(m_sys.scene.ortho[0]),
@@ -149,15 +149,15 @@ void ParticleSubSystem::UpdateMouseControlpoints() {
             : (1.0 - static_cast<double>(pointer[1])) * static_cast<double>(m_sys.scene.ortho[1]),
         0.0,
     };
-    Eigen::Vector3d mouse_local = mouse_world;
+    linalg::Vector3d mouse_local = mouse_world;
     if (const auto world = m_world_space ? OwnerWorldFrame() : std::nullopt) {
         // A world-space system measures from its layer's origin along the
         // scene's own axes.
         mouse_local = mouse_world - world->origin;
     } else if (auto owner = m_owner_node.lock()) {
         owner->UpdateTrans();
-        const Eigen::Vector4d local =
-            owner->ModelTrans().inverse() * Eigen::Vector4d(mouse_world.x(), mouse_world.y(), 0.0, 1.0);
+        const linalg::Vector4d local =
+            owner->ModelTrans().inverse() * linalg::Vector4d(mouse_world.x(), mouse_world.y(), 0.0, 1.0);
         mouse_local = local.head<3>();
     }
     for (auto& cp : m_controlpoints) {
@@ -214,7 +214,7 @@ std::optional<ParticleSubSystem::WorldFrame> ParticleSubSystem::OwnerWorldFrame(
     const auto owner = m_owner_node.lock();
     if (! owner) return std::nullopt;
     owner->UpdateTrans();
-    const Eigen::Matrix4d model = owner->ModelTrans();
+    const linalg::Matrix4d model = owner->ModelTrans();
     WorldFrame            frame;
     frame.linear = model.topLeftCorner<3, 3>();
     frame.origin = model.topRightCorner<3, 1>();
@@ -238,10 +238,10 @@ void ParticleSubSystem::UpdateControlpoints() {
             auto&      cp     = m_controlpoints[i];
             const bool pinned = cp.worldspace && ! cp.link_mouse && i != 0;
             cp.has_world_linear = ! pinned;
-            cp.world_linear     = pinned ? Eigen::Matrix3d(Eigen::Matrix3d::Identity()) : world->linear;
+            cp.world_linear     = pinned ? linalg::Matrix3d(linalg::Matrix3d::Identity()) : world->linear;
             if (cp.link_mouse) continue;
-            cp.offset = pinned ? Eigen::Vector3d(cp.base_offset - world->origin)
-                               : Eigen::Vector3d(world->linear * cp.base_offset);
+            cp.offset = pinned ? linalg::Vector3d(cp.base_offset - world->origin)
+                               : linalg::Vector3d(world->linear * cp.base_offset);
         }
     } else {
         // A control point pinned to the world (flag 2, never the first) holds
@@ -258,9 +258,9 @@ void ParticleSubSystem::UpdateControlpoints() {
                 if (owner) owner->UpdateTrans();
             }
             if (! owner) continue;
-            const Eigen::Vector4d local =
+            const linalg::Vector4d local =
                 owner->ModelTrans().inverse() *
-                Eigen::Vector4d(cp.base_offset.x(), cp.base_offset.y(), cp.base_offset.z(), 1.0);
+                linalg::Vector4d(cp.base_offset.x(), cp.base_offset.y(), cp.base_offset.z(), 1.0);
             cp.offset = local.head<3>();
         }
     }
@@ -281,11 +281,11 @@ void ParticleSubSystem::KeepWorldPositions() {
     // The matrix the system is drawn by is the layer's origin and nothing else:
     // the particles are already in scene units. Every node that draws one of its
     // renderers takes it; a node under the layer keeps its own place.
-    Eigen::Matrix4d draw = Eigen::Matrix4d::Identity();
+    linalg::Matrix4d draw = linalg::Matrix4d::Identity();
     draw.topRightCorner<3, 1>() = world->origin;
     const auto place = [&draw](SceneNode& node) {
         // A shift a screen anchor adds to where the node is drawn goes with it.
-        Eigen::Matrix4d placed = draw;
+        linalg::Matrix4d placed = draw;
         placed.topRightCorner<3, 1>() += node.DrawOffset().cast<double>();
         if (! node.HasRenderTransformOverride() ||
             ! (node.RenderTrans().array() == placed.array()).all()) {
@@ -300,8 +300,8 @@ void ParticleSubSystem::KeepWorldPositions() {
         // Where the layer was, relative to where it is: what a point kept at one
         // place in the scene has to be called now. Only the move counts; a turn
         // or a rescale of the layer is not a move of the scene.
-        const Eigen::Vector3f shift = (m_prev_model.topRightCorner<3, 1>() - world->origin).cast<float>();
-        Eigen::Matrix4d       delta = Eigen::Matrix4d::Identity();
+        const linalg::Vector3f shift = (m_prev_model.topRightCorner<3, 1>() - world->origin).cast<float>();
+        linalg::Matrix4d       delta = linalg::Matrix4d::Identity();
         delta.topRightCorner<3, 1>() = shift.cast<double>();
         for (auto& inst : m_instances) {
             for (auto& p : inst->ParticlesVec()) {

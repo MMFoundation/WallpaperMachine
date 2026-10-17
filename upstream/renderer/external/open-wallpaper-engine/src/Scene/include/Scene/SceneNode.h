@@ -4,7 +4,7 @@
 #include <memory>
 #include <optional>
 #include <utility>
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 #include "SceneMesh.h"
 #include "SceneCamera.h"
 
@@ -19,11 +19,11 @@ public:
     SceneNode()
         : m_name(),
           m_dirty(true),
-          m_translate(Eigen::Vector3f::Zero()),
+          m_translate(linalg::Vector3f::Zero()),
           m_scale { 1.0f, 1.0f, 1.0f },
-          m_rotation(Eigen::Vector3f::Zero()) {}
-    SceneNode(const Eigen::Vector3f& translate, const Eigen::Vector3f& scale,
-              const Eigen::Vector3f& rotation, const std::string& name = "")
+          m_rotation(linalg::Vector3f::Zero()) {}
+    SceneNode(const linalg::Vector3f& translate, const linalg::Vector3f& scale,
+              const linalg::Vector3f& rotation, const std::string& name = "")
         : m_name(name),
           m_dirty(true),
           m_translate(translate),
@@ -44,10 +44,10 @@ public:
                // its own local coordinates instead of its parent's.
                sub->MarkTransDirty();
     }
-    Eigen::Matrix4d GetLocalTrans() const;
-    static Eigen::Matrix4d LocalTransOf(const Eigen::Vector3f& translate,
-                                        const Eigen::Vector3f& scale,
-                                        const Eigen::Vector3f& rotation);
+    linalg::Matrix4d GetLocalTrans() const;
+    static linalg::Matrix4d LocalTransOf(const linalg::Vector3f& translate,
+                                        const linalg::Vector3f& scale,
+                                        const linalg::Vector3f& rotation);
 
     const auto& Translate() const { return m_translate; }
     const auto& Scale() const { return m_scale; }
@@ -97,17 +97,17 @@ public:
     /// this one's visibility, since from then on the script decides.
     bool        VisibilitySettled() const { return m_visibility_settled; }
     void        SetVisibilitySettled(bool settled) { m_visibility_settled = settled; }
-    void        SetRotation(Eigen::Vector3f v) {
+    void        SetRotation(linalg::Vector3f v) {
         if (m_rotation.isApprox(v, 1.0e-6f)) return;
         m_rotation = v;
         MarkTransDirty();
     }
-    void        SetTranslate(Eigen::Vector3f v) {
+    void        SetTranslate(linalg::Vector3f v) {
         if (m_translate.isApprox(v, 1.0e-6f)) return;
         m_translate = v;
         MarkTransDirty();
     }
-    void        SetScale(Eigen::Vector3f v) {
+    void        SetScale(linalg::Vector3f v) {
         if (m_scale.isApprox(v, 1.0e-6f)) return;
         m_scale = v;
         MarkTransDirty();
@@ -131,8 +131,8 @@ public:
     /// from the transform the scene saved for it (none saved, none added), under
     /// whatever groups it sits in. Without one a child is placed from the node's
     /// own `ModelTrans`.
-    void SetChildFrame(const Eigen::Vector3f& translate, const Eigen::Vector3f& scale,
-                       const Eigen::Vector3f& rotation) {
+    void SetChildFrame(const linalg::Vector3f& translate, const linalg::Vector3f& scale,
+                       const linalg::Vector3f& rotation) {
         m_childLocal = LocalTransOf(translate, scale, rotation);
         MarkTransDirty();
     }
@@ -144,7 +144,7 @@ public:
         MarkTransDirty();
     }
 
-    void SetAttachmentTransform(const Eigen::Matrix4d& transform) {
+    void SetAttachmentTransform(const linalg::Matrix4d& transform) {
         if (m_attachmentTransform && m_attachmentTransform->isApprox(transform, 1.0e-10)) return;
         m_attachmentTransform = transform;
         MarkTransDirty();
@@ -157,7 +157,7 @@ public:
         m_renderTransformOverride = node.m_renderTransformOverride;
     }
 
-    void SetRenderTransformOverride(Eigen::Matrix4d transform) {
+    void SetRenderTransformOverride(linalg::Matrix4d transform) {
         m_renderTransformOverride = std::move(transform);
     }
     void ClearRenderTransformOverride() { m_renderTransformOverride.reset(); }
@@ -167,21 +167,21 @@ public:
     /// cameras and its hit test compose from, does not (a hit test adds it itself).
     /// A node drawn through a `RenderTransformOverride` draws where that says, which
     /// is a whole matrix already.
-    void SetDrawOffset(const Eigen::Vector3f& offset) { m_drawOffset = offset; }
-    const Eigen::Vector3f& DrawOffset() const { return m_drawOffset; }
-    Eigen::Matrix4d RenderTrans() const {
+    void SetDrawOffset(const linalg::Vector3f& offset) { m_drawOffset = offset; }
+    const linalg::Vector3f& DrawOffset() const { return m_drawOffset; }
+    linalg::Matrix4d RenderTrans() const {
         if (m_renderTransformOverride) return *m_renderTransformOverride;
         if (m_drawOffset.isZero()) return m_trans;
-        Eigen::Matrix4d moved = m_trans;
+        linalg::Matrix4d moved = m_trans;
         moved.block<3, 1>(0, 3) += m_drawOffset.cast<double>();
         return moved;
     }
 
     // update self modle trans (will update parent before)
     void            UpdateTrans();
-    Eigen::Matrix4d ModelTrans() const { return m_trans; };
+    linalg::Matrix4d ModelTrans() const { return m_trans; };
     /// The matrix the children's own are composed on (after `UpdateTrans`).
-    Eigen::Matrix4d ChildTrans() const { return m_childTrans; }
+    linalg::Matrix4d ChildTrans() const { return m_childTrans; }
 
     SceneMesh* Mesh() { return m_mesh.get(); }
     bool       HasMaterial() const { return m_mesh && m_mesh->Material() != nullptr; };
@@ -211,16 +211,16 @@ private:
     std::optional<double> m_textureAnimationFrame;
 
     bool            m_dirty;
-    Eigen::Matrix4d m_trans { Eigen::Matrix4d::Identity() };
-    Eigen::Matrix4d m_childTrans { Eigen::Matrix4d::Identity() };
-    std::optional<Eigen::Matrix4d> m_childLocal;
+    linalg::Matrix4d m_trans { linalg::Matrix4d::Identity() };
+    linalg::Matrix4d m_childTrans { linalg::Matrix4d::Identity() };
+    std::optional<linalg::Matrix4d> m_childLocal;
 
-    Eigen::Vector3f m_translate { 0.0f, 0.0f, 0.0f };
-    Eigen::Vector3f m_scale { 1.0f, 1.0f, 1.0f };
-    Eigen::Vector3f m_rotation { 0.0f, 0.0f, 0.0f };
-    std::optional<Eigen::Matrix4d> m_renderTransformOverride {};
-    Eigen::Vector3f m_drawOffset { 0.0f, 0.0f, 0.0f };
-    std::optional<Eigen::Matrix4d> m_attachmentTransform;
+    linalg::Vector3f m_translate { 0.0f, 0.0f, 0.0f };
+    linalg::Vector3f m_scale { 1.0f, 1.0f, 1.0f };
+    linalg::Vector3f m_rotation { 0.0f, 0.0f, 0.0f };
+    std::optional<linalg::Matrix4d> m_renderTransformOverride {};
+    linalg::Vector3f m_drawOffset { 0.0f, 0.0f, 0.0f };
+    std::optional<linalg::Matrix4d> m_attachmentTransform;
 
     std::shared_ptr<SceneMesh> m_mesh;
 

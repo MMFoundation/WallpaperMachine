@@ -3,7 +3,7 @@
 #include <vector>
 #include <memory>
 #include <string_view>
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 #include "SceneNode.h"
 #include "Runtime/ScalarAnimation.hpp"
 
@@ -50,14 +50,14 @@ struct SceneLightConfig {
 
 class SceneLight {
 public:
-    SceneLight(Eigen::Vector3f color, float radius, float intensity)
+    SceneLight(linalg::Vector3f color, float radius, float intensity)
         : m_color(color), m_radius(radius), m_intensity(intensity) {}
-    SceneLight(SceneLightType type, Eigen::Vector3f color, float radius, float intensity)
+    SceneLight(SceneLightType type, linalg::Vector3f color, float radius, float intensity)
         : m_type(type), m_color(color), m_radius(radius), m_intensity(intensity) {}
     ~SceneLight() = default;
 
     SceneLightType  type() const { return m_type; }
-    Eigen::Vector3f color() const { return m_color; }
+    linalg::Vector3f color() const { return m_color; }
     float           radius() const { return m_radius; }
     /// The intensity this frame: its timeline's value when it has one.
     float           intensity() const {
@@ -68,11 +68,11 @@ public:
     float           innerCone() const { return m_inner_cone; }
     float           outerCone() const { return m_outer_cone; }
     /// A tube's far end, in the light's own space; its near end is the origin.
-    Eigen::Vector3f controlPoint() const { return m_control_point; }
+    linalg::Vector3f controlPoint() const { return m_control_point; }
     SceneNode*      node() const { return m_node.get(); }
 
     /// The legacy light's colour as `g_LightsColorPremultiplied` holds it.
-    Eigen::Vector3f premultipliedColor() const {
+    linalg::Vector3f premultipliedColor() const {
         return m_color * intensity() * m_radius * m_radius;
     }
 
@@ -80,7 +80,7 @@ public:
     bool visible() const { return m_node == nullptr || m_node->EffectiveVisible(); }
 
     void setNode(std::shared_ptr<SceneNode> node) { m_node = std::move(node); }
-    void setColor(const Eigen::Vector3f& color) { m_color = color; }
+    void setColor(const linalg::Vector3f& color) { m_color = color; }
     void setRadius(float radius) { m_radius = radius; }
     void setIntensity(float intensity) { m_intensity = intensity; }
     void setIntensityAnimation(std::shared_ptr<ScalarAnimationPlayback> animation) {
@@ -91,18 +91,18 @@ public:
         m_inner_cone = inner_degrees;
         m_outer_cone = outer_degrees;
     }
-    void setControlPoint(const Eigen::Vector3f& point) { m_control_point = point; }
+    void setControlPoint(const linalg::Vector3f& point) { m_control_point = point; }
 
 private:
     SceneLightType  m_type { SceneLightType::Legacy };
-    Eigen::Vector3f m_color { Eigen::Vector3f::Zero() };
+    linalg::Vector3f m_color { linalg::Vector3f::Zero() };
     float           m_radius { 0.0f };
     float           m_intensity { 1.0f };
     // Wallpaper Engine's defaults for a light that leaves these out.
     float           m_exponent { 2.0f };
     float           m_inner_cone { 20.0f };
     float           m_outer_cone { 30.0f };
-    Eigen::Vector3f m_control_point { 2.0f, 0.0f, 0.0f };
+    linalg::Vector3f m_control_point { 2.0f, 0.0f, 0.0f };
 
     std::shared_ptr<ScalarAnimationPlayback> m_intensity_animation;
     std::shared_ptr<SceneNode>               m_node { nullptr };

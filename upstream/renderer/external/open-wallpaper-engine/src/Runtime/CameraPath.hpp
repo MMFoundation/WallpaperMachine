@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Runtime/ScalarAnimation.hpp"
-#include <Eigen/Core>
+#include "Utils/Linalg.hpp"
 #include <array>
 #include <optional>
 #include <string_view>

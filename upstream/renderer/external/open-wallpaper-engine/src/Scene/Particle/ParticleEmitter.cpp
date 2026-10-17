@@ -5,7 +5,7 @@
 #include "Utils/Algorism.h"
 #include "Utils/Random.hpp"
 
-#include <Eigen/src/Core/Matrix.h>
+#include "Utils/Linalg.hpp"
 #include <random>
 #include <array>
 #include <tuple>
@@ -100,7 +100,7 @@ inline Particle Spwan(GenParticleOp gen, std::vector<ParticleInitOp>& inis, doub
     return particle;
 }
 
-inline void ApplySign(Eigen::Vector3d& p, int32_t x, int32_t y, int32_t z) noexcept {
+inline void ApplySign(linalg::Vector3d& p, int32_t x, int32_t y, int32_t z) noexcept {
     if (x != 0) {
         p.x() = std::abs(p.x()) * (float)x;
     }
@@ -114,19 +114,19 @@ inline void ApplySign(Eigen::Vector3d& p, int32_t x, int32_t y, int32_t z) noexc
 
 /// Where a spawn offset is measured from and how the control point turns it.
 struct EmitterFrame {
-    Eigen::Vector3d origin { Eigen::Vector3d::Zero() };
-    Eigen::Matrix3d rotation { Eigen::Matrix3d::Identity() };
+    linalg::Vector3d origin { linalg::Vector3d::Zero() };
+    linalg::Matrix3d rotation { linalg::Matrix3d::Identity() };
     bool            rotated { false };
     /// The layer's rotation and scale, for a world-space system: the spawn
     /// offset is turned and scaled by it, the origin added after, as it is.
-    Eigen::Matrix3d world_linear { Eigen::Matrix3d::Identity() };
+    linalg::Matrix3d world_linear { linalg::Matrix3d::Identity() };
     bool            world { false };
 };
 
 inline EmitterFrame ResolveEmitterFrame(std::span<const ParticleControlpoint> cps, i32 cp_index,
                                         const std::array<float, 3>& authored) {
     EmitterFrame frame;
-    frame.origin = Eigen::Vector3d {
+    frame.origin = linalg::Vector3d {
         static_cast<double>(authored[0]),
         static_cast<double>(authored[1]),
         static_cast<double>(authored[2]),
@@ -169,11 +169,11 @@ inline double UnitRandom() { return Random::get(0.0, 1.0); }
 /// Direction a particle leaves its spawn point in: away from the emitter
 /// centre, or, when it spawned on the centre, along a random direction drawn
 /// over `directions` (Wallpaper Engine's fallback for a degenerate offset).
-inline Eigen::Vector3d SpawnDirection(const Eigen::Vector3d& offset,
+inline linalg::Vector3d SpawnDirection(const linalg::Vector3d& offset,
                                       const std::array<float, 3>& directions,
                                       const EmitterFrame& frame) {
     if (offset.squaredNorm() >= 1.0e-4) return offset.normalized();
-    Eigen::Vector3d random {
+    linalg::Vector3d random {
         static_cast<double>(directions[0]) * (2.0 * UnitRandom() - 1.0),
         static_cast<double>(directions[1]) * (2.0 * UnitRandom() - 1.0),
         static_cast<double>(directions[2]) * (2.0 * UnitRandom() - 1.0),
@@ -181,7 +181,7 @@ inline Eigen::Vector3d SpawnDirection(const Eigen::Vector3d& offset,
     if (frame.rotated) random = frame.rotation * random;
     if (frame.world) random = frame.world_linear * random;
     const double length = random.norm();
-    return length > 1.0e-12 ? Eigen::Vector3d(random / length) : Eigen::Vector3d(Eigen::Vector3d::Zero());
+    return length > 1.0e-12 ? linalg::Vector3d(random / length) : linalg::Vector3d(linalg::Vector3d::Zero());
 }
 
 /// The emitter's schedule: when it waits, emits, pauses and stops, and how
@@ -382,7 +382,7 @@ ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
             // Per axis a signed draw scaled by `directions`; the minimum bounds
             // the distance from the centre, so a hollow box leaves its centre
             // empty and a negative minimum folds the two halves together.
-            Eigen::Vector3d pos;
+            linalg::Vector3d pos;
             for (int32_t i = 0; i < 3; i++) {
                 const double s   = (2.0 * UnitRandom() - 1.0) * static_cast<double>(a.directions[i]);
                 const double sgn = s > 0.0 ? 1.0 : (s < 0.0 ? -1.0 : 0.0);
@@ -412,7 +412,7 @@ ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
 }
 
 ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs a) {
-    using namespace Eigen;
+    using namespace wallpaper::linalg;
     EmitterClock clock(a.timing, a.instantaneous, a.one_per_frame, a.emitSpeed);
     return [a, clock](std::vector<Particle>&       ps,
                       std::vector<ParticleInitOp>& inis,
@@ -422,7 +422,7 @@ ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs
                           controlpoints) mutable {
         const EmitterFrame frame = ResolveEmitterFrame(controlpoints, a.controlpoint, a.orgin);
         HandOnWorldLinear(a.spawn, frame);
-        const double       cone_floor = -std::cos(EIGEN_PI * static_cast<double>(a.cone));
+        const double       cone_floor = -std::cos(linalg::Pi * static_cast<double>(a.cone));
         auto               GenSphere = [&]() {
             auto p = Particle();
             // A point of the unit ball, uniform by volume, stretched by
@@ -433,7 +433,7 @@ ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs
             // a cone about +x.
             const double z      = UnitRandom() * (1.0 - cone_floor) + cone_floor;
             const double s      = std::sqrt(std::max(0.0, 1.0 - z * z));
-            const double phi    = 2.0 * EIGEN_PI * UnitRandom();
+            const double phi    = 2.0 * linalg::Pi * UnitRandom();
             const double radius = std::cbrt(UnitRandom());
             Vector3d     v {
                 radius * z * static_cast<double>(a.directions[0]),

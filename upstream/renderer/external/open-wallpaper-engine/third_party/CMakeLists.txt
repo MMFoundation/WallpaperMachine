@@ -7,7 +7,6 @@ set(SPIRV_REFLECT_EXAMPLES    OFF CACHE INTERNAL "")
 set(SPIRV_REFLECT_INSTALL     OFF CACHE INTERNAL "")
 
 find_package(PkgConfig REQUIRED)
-find_package(Eigen3 CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(argparse CONFIG REQUIRED)
 
@@ -52,7 +51,6 @@ function(promote_imported_target target_name)
     endif()
 endfunction()
 
-promote_imported_target(Eigen3::Eigen)
 promote_imported_target(nlohmann_json::nlohmann_json)
 promote_imported_target(qjs)
 promote_imported_target(qjs::qjs)

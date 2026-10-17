@@ -59,10 +59,10 @@
 #include <span>
 #include <limits>
 #include <variant>
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 using namespace wallpaper;
-using namespace Eigen;
+using namespace wallpaper::linalg;
 
 std::string getAddr(void* p) { return std::to_string(reinterpret_cast<intptr_t>(p)); }
 
@@ -873,7 +873,7 @@ void GenPassthroughCardMesh(SceneMesh& mesh, const std::array<uint16_t, 2> size,
     const float height    = std::max(1.0f, static_cast<float>(projection_height));
 
     const auto tex_coord_for = [&](float x, float y) {
-        const auto world = transform * Eigen::Vector4d(x, y, 0.0, 1.0);
+        const auto world = transform * linalg::Vector4d(x, y, 0.0, 1.0);
         return std::array<float, 2> {
             static_cast<float>(world.x()) / width,
             1.0f - (static_cast<float>(world.y()) / height),
@@ -925,7 +925,7 @@ void GenPassthroughClipSpaceMesh(SceneMesh& mesh, const std::array<uint16_t, 2> 
     };
 
     const auto vertex_for = [&](float x, float y) {
-        const auto  world = transform * Eigen::Vector4d(x, y, 0.0, 1.0);
+        const auto  world = transform * linalg::Vector4d(x, y, 0.0, 1.0);
         const float u     = static_cast<float>(world.x()) / width;
         const float y01   = static_cast<float>(world.y()) / height;
         return VertexData {
@@ -1024,7 +1024,7 @@ void LoadControlPoint(ParticleSubSystem& pSys, const wpscene::Particle& wp) {
     usize                           s   = std::min(pcs.size(), wp.controlpoints.size());
     for (usize i = 0; i < s; i++) {
         pcs[i].base_offset =
-            Eigen::Vector3d { array_cast<double>(wp.controlpoints[i].offset).data() };
+            linalg::Vector3d { array_cast<double>(wp.controlpoints[i].offset).data() };
         pcs[i].offset = pcs[i].base_offset;
         pcs[i].link_mouse =
             wp.controlpoints[i].flags[wpscene::ParticleControlpoint::FlagEnum::link_mouse];
@@ -1088,7 +1088,7 @@ void LoadOperator(ParticleSubSystem& pSys, const wpscene::Particle& wp,
 void LoadEmitter(ParticleSubSystem& pSys, const wpscene::Particle& wp,
                  const std::shared_ptr<const wpscene::ParticleInstanceoverride>& over,
                  bool ordered_slots, Scene* scene, i32 cp_start_index = 0,
-                 Eigen::Vector3f world_scale = Eigen::Vector3f::Ones(),
+                 linalg::Vector3f world_scale = linalg::Vector3f::Ones(),
                  bool in_scene_units = false) {
     bool sort = ordered_slots;
     for (const auto& em : wp.emitters) {
@@ -1881,7 +1881,7 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
 }
 
 void RegisterTextTexture(Scene& scene, const std::string& texture_name,
-                         const TextLayerState& state, Eigen::Vector2f size) {
+                         const TextLayerState& state, linalg::Vector2f size) {
     if (scene.textures.contains(texture_name)) return;
 
     auto* runtime_images = dynamic_cast<RuntimeImageSource*>(scene.imageParser.get());
@@ -1944,7 +1944,7 @@ SceneCamera& RegisterLayerComposite(ParseContext& context, int32_t id, SceneNode
 void RegisterTextComposite(ParseContext& context, const wpscene::WPTextObject& object,
                            SceneNode& node, const TextLayerRenderFrame& card) {
     auto camera_node = std::make_shared<SceneNode>();
-    camera_node->SetTranslate(Eigen::Vector3f(card.center.x(), card.center.y(), 0.0f));
+    camera_node->SetTranslate(linalg::Vector3f(card.center.x(), card.center.y(), 0.0f));
     auto& camera = RegisterLayerComposite(context,
                                           object.id,
                                           node,
@@ -2024,7 +2024,7 @@ AttachEffectsToNode(ParseContext& context,
                     std::span<const wpscene::WPImageEffect> effects,
                     const std::string& runtime_name,
                     std::array<int32_t, 2> render_extent,
-                    Eigen::Vector2f render_center,
+                    linalg::Vector2f render_center,
                     BlendMode final_blend,
                     const ShaderValueMap& base_const_svs,
                     std::array<float, 2> parallax_depth,
@@ -2093,7 +2093,7 @@ bool EffectIsBuilt(const wpscene::WPImageEffect& effect) {
 
 /// The padding a text object's file gives, on each axis: capped at 512 pixels from above and not
 /// floored, since Wallpaper Engine lets a negative padding take the card in around the text.
-Eigen::Vector2f AuthoredTextCardPadding(const wpscene::WPTextObject& obj) {
+linalg::Vector2f AuthoredTextCardPadding(const wpscene::WPTextObject& obj) {
     constexpr float kMaxCardPadding = 512.0f;
     const auto lane = [=](float value) {
         return std::isfinite(value) ? std::min(value, kMaxCardPadding) : 0.0f;
@@ -2138,18 +2138,18 @@ bool TextCardIsPadded(const wpscene::WPTextObject& obj, bool scene_fog) {
 TextLayerState ResolveTextLayerState(const wpscene::WPTextObject& obj, fs::VFS& vfs,
                                      std::string text, std::string font_key,
                                      std::string layer_key, bool scene_fog) {
-    const Eigen::Vector2f authored_padding = AuthoredTextCardPadding(obj);
+    const linalg::Vector2f authored_padding = AuthoredTextCardPadding(obj);
     const bool            padded           = TextCardIsPadded(obj, scene_fog);
     TextLayerState state {
         .text             = std::move(text),
         .layer_key        = std::move(layer_key),
         .font_key         = font_key,
         .point_size       = obj.pointsize,
-        .padding          = padded ? authored_padding : Eigen::Vector2f::Zero().eval(),
+        .padding          = padded ? authored_padding : linalg::Vector2f::Zero().eval(),
         .authored_padding = authored_padding,
         .padding_applies  = padded,
-        .spacing          = Eigen::Vector2f(obj.spacing[0], obj.spacing[1]),
-        .color            = Eigen::Vector3f(obj.color.data()),
+        .spacing          = linalg::Vector2f(obj.spacing[0], obj.spacing[1]),
+        .color            = linalg::Vector3f(obj.color.data()),
         .alpha            = obj.alpha,
         .brightness       = obj.brightness,
         .horizontal_align = std::string(
@@ -2165,14 +2165,14 @@ TextLayerState ResolveTextLayerState(const wpscene::WPTextObject& obj, fs::VFS& 
         .style            = TextStyle {
             .outline           = obj.outline,
             .outline_thickness = obj.outlinethickness,
-            .outline_color     = Eigen::Vector3f(obj.outlinecolor.data()),
+            .outline_color     = linalg::Vector3f(obj.outlinecolor.data()),
             .blur              = obj.blur,
             .blur_size         = obj.blursize,
             .drop_shadow       = obj.dropshadow,
             .shadow_size       = obj.dropshadowsize,
             .shadow_opacity    = obj.dropshadowopacity,
-            .shadow_offset     = Eigen::Vector2f(obj.dropshadowoffset[0], obj.dropshadowoffset[1]),
-            .shadow_color      = Eigen::Vector3f(obj.dropshadowcolor.data()),
+            .shadow_offset     = linalg::Vector2f(obj.dropshadowoffset[0], obj.dropshadowoffset[1]),
+            .shadow_color      = linalg::Vector3f(obj.dropshadowcolor.data()),
         },
     };
 
@@ -2329,7 +2329,7 @@ void ParseTextObj(ParseContext& context, wpscene::WPTextObject& obj) {
                                             scene_fog);
     // Cache glyph coverage, not animated styling. A fade or colour change only
     // updates uniforms; it must never measure, rasterize or upload the text again.
-    text_state.color = Eigen::Vector3f::Ones();
+    text_state.color = linalg::Vector3f::Ones();
     text_state.alpha = 1.0f;
     text_state.brightness = 1.0f;
     // Measured once: the card, the texture and the layer's runtime state all start from it.
@@ -2653,13 +2653,13 @@ MakeMaterialConstantValue(const wpscene::WPConstantShaderValue& source) {
 
     if (value.size() >= 4) {
         return std::make_unique<DynamicValue>(
-            Eigen::Vector4f(value[0], value[1], value[2], value[3]));
+            linalg::Vector4f(value[0], value[1], value[2], value[3]));
     }
     if (value.size() == 3) {
-        return std::make_unique<DynamicValue>(Eigen::Vector3f(value[0], value[1], value[2]));
+        return std::make_unique<DynamicValue>(linalg::Vector3f(value[0], value[1], value[2]));
     }
     if (value.size() == 2) {
-        return std::make_unique<DynamicValue>(Eigen::Vector2f(value[0], value[1]));
+        return std::make_unique<DynamicValue>(linalg::Vector2f(value[0], value[1]));
     }
     if (value.size() == 1) return std::make_unique<DynamicValue>(value[0]);
 
@@ -2922,7 +2922,7 @@ AttachEffectsToNode(ParseContext& context,
                     std::span<const wpscene::WPImageEffect> effects,
                     const std::string& runtime_name,
                     std::array<int32_t, 2> render_extent,
-                    Eigen::Vector2f render_center,
+                    linalg::Vector2f render_center,
                     BlendMode final_blend,
                     const ShaderValueMap& base_const_svs,
                     std::array<float, 2> parallax_depth,
@@ -2938,7 +2938,7 @@ AttachEffectsToNode(ParseContext& context,
     const auto nodeAddr = getAddr(&node);
     auto  camera   = std::make_shared<SceneCamera>(render_extent[0], render_extent[1], -1.0f, 1.0f);
     auto camera_node = std::make_shared<SceneNode>();
-    camera_node->SetTranslate(Eigen::Vector3f(render_center.x(), render_center.y(), 0.0f));
+    camera_node->SetTranslate(linalg::Vector3f(render_center.x(), render_center.y(), 0.0f));
     camera->AttatchNode(camera_node);
     scene.sceneGraph->AppendChild(camera_node);
     scene.cameras[nodeAddr] = camera;
@@ -2957,7 +2957,7 @@ AttachEffectsToNode(ParseContext& context,
     effect_layer->FinalMesh().ChangeMeshDataFrom(final_mesh);
     effect_layer->SetFinalMeshDynamic(final_mesh.UpdateDriver());
     effect_layer->FinalNode().CopyTrans(node);
-    node.SetRenderTransformOverride(Eigen::Matrix4d::Identity());
+    node.SetRenderTransformOverride(linalg::Matrix4d::Identity());
     if (! copy_background) node.SetSkipRenderPass(true);
     scene.cameras.at(nodeAddr)->AttatchImgEffect(effect_layer);
     if (scene.runtime != nullptr) {
@@ -2972,7 +2972,7 @@ AttachEffectsToNode(ParseContext& context,
                     .bottom = render_center.y() - static_cast<float>(render_extent[1]) * 0.5f,
                     .top = render_center.y() + static_cast<float>(render_extent[1]) * 0.5f,
                 },
-                .size = Eigen::Vector2f(static_cast<float>(render_extent[0]),
+                .size = linalg::Vector2f(static_cast<float>(render_extent[0]),
                                         static_cast<float>(render_extent[1])),
                 .center = render_center,
             });
@@ -3061,9 +3061,9 @@ AttachEffectsToNode(ParseContext& context,
             WPShaderValueData shader_value_data;
             shader_info.baseConstSvs = base_const_svs;
             shader_info.baseConstSvs["g_EffectTextureProjectionMatrix"] =
-                ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
+                ShaderValue::fromMatrix(linalg::Matrix4f::Identity());
             shader_info.baseConstSvs["g_EffectTextureProjectionMatrixInverse"] =
-                ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
+                ShaderValue::fromMatrix(linalg::Matrix4f::Identity());
             // The pass that blends the layer onto the screen draws it with a
             // white colour: the layer's own colour and alpha are in what it blends.
             if (&effect == screen_blend_effect) {
@@ -3115,18 +3115,18 @@ AttachEffectsToNode(ParseContext& context,
 
 /// The four corners `point0` to `point3` of the first effect's first pass, in the
 /// 0..1 square of the shape, if all four are there.
-std::optional<std::array<Eigen::Vector2f, 4>>
+std::optional<std::array<linalg::Vector2f, 4>>
 ShapeCornerPoints(const wpscene::WPShapeObject& obj) {
     if (obj.effects.empty() || obj.effects.front().materials.empty()) return std::nullopt;
     auto material = obj.effects.front().materials.front();
     if (! obj.effects.front().passes.empty()) material.MergePass(obj.effects.front().passes.front());
-    std::array<Eigen::Vector2f, 4> points;
+    std::array<linalg::Vector2f, 4> points;
     for (std::size_t index = 0; index < points.size(); ++index) {
         const auto value = material.constantshadervalues.find("point" + std::to_string(index));
         if (value == material.constantshadervalues.end() || value->second.value.size() < 2) {
             return std::nullopt;
         }
-        points[index] = Eigen::Vector2f(value->second.value[0], value->second.value[1]);
+        points[index] = linalg::Vector2f(value->second.value[0], value->second.value[1]);
     }
     return points;
 }
@@ -3134,7 +3134,7 @@ ShapeCornerPoints(const wpscene::WPShapeObject& obj) {
 /// A shape's geometry: with its four corners the quad they make, a corner at
 /// `(p.x, 1 - p.y)` of a square `size` on a side centred on the layer, with
 /// texture coordinates `p`; without them the whole square.
-void GenShapeMesh(SceneMesh& mesh, float size, const std::optional<std::array<Eigen::Vector2f, 4>>& corners) {
+void GenShapeMesh(SceneMesh& mesh, float size, const std::optional<std::array<linalg::Vector2f, 4>>& corners) {
     if (! corners.has_value()) {
         const auto side = static_cast<uint16_t>(std::clamp(std::lround(size), 1l, 65535l));
         GenCardMesh(mesh, { side, side });
@@ -3198,9 +3198,9 @@ void ParseShapeObj(ParseContext& context, wpscene::WPShapeObject& obj) {
     WPShaderInfo      shader_info;
     shader_info.baseConstSvs = context.global_base_uniforms;
     shader_info.baseConstSvs["g_EffectTextureProjectionMatrix"] =
-        ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
+        ShaderValue::fromMatrix(linalg::Matrix4f::Identity());
     shader_info.baseConstSvs["g_EffectTextureProjectionMatrixInverse"] =
-        ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
+        ShaderValue::fromMatrix(linalg::Matrix4f::Identity());
     if (! LoadMaterial(vfs, wpmat, context.scene.get(), &node, &material, &shader_value_data,
                        &shader_info)) {
         LOG_ERROR("shape '%s': its effect failed to load", obj.name.c_str());
@@ -4454,7 +4454,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
         context.scene->runtime->RegisterNodeSize(
             runtime_name,
-            Eigen::Vector2f(static_cast<float>(wpimgobj.size[0]),
+            linalg::Vector2f(static_cast<float>(wpimgobj.size[0]),
                             static_cast<float>(wpimgobj.size[1])));
         if (runtime_owns_anchor) {
             context.scene->runtime->SetNodeAnchorAlignment(
@@ -4759,7 +4759,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             imgEffectLayer->FinalMesh().ChangeMeshDataFrom(effct_final_mesh);
             imgEffectLayer->FinalNode().CopyTrans(*spImgNode);
             if (! render_as_compose) {
-                spImgNode->SetRenderTransformOverride(Eigen::Matrix4d::Identity());
+                spImgNode->SetRenderTransformOverride(linalg::Matrix4d::Identity());
             } else {
                 spImgNode->ClearRenderTransformOverride();
             }
@@ -4914,9 +4914,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 WPShaderInfo wpEffShaderInfo;
                 wpEffShaderInfo.baseConstSvs = baseConstSvs;
                 wpEffShaderInfo.baseConstSvs["g_EffectTextureProjectionMatrix"] =
-                    ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
+                    ShaderValue::fromMatrix(linalg::Matrix4f::Identity());
                 wpEffShaderInfo.baseConstSvs["g_EffectTextureProjectionMatrixInverse"] =
-                    ShaderValue::fromMatrix(Eigen::Matrix4f::Identity());
+                    ShaderValue::fromMatrix(linalg::Matrix4f::Identity());
                 if (blends_onto_screen) {
                     wpEffShaderInfo.baseConstSvs["g_Color4"] =
                         std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -4927,7 +4927,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 WPShaderValueData svData;
                 svData.effect_owner   = spImgNode.get();
                 svData.parallax_layer = spImgNode.get();
-                svData.effect_extent = Eigen::Vector2f(
+                svData.effect_extent = linalg::Vector2f(
                     float(render_extent[0]), float(render_extent[1]));
                 if (! LoadMaterial(vfs,
                                    wpmat,
@@ -5001,7 +5001,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         context.scene->runtime->RegisterLayerTemplate(
             wpimgobj.image,
             spImgNode,
-            Eigen::Vector2f(static_cast<float>(wpimgobj.size[0]),
+            linalg::Vector2f(static_cast<float>(wpimgobj.size[0]),
                             static_cast<float>(wpimgobj.size[1])));
         if (ImageObjectHandlesCursorEvents(wpimgobj)) {
             if (auto mask = BuildImageHitMask(context, wpimgobj); mask.has_value()) {
@@ -5017,7 +5017,7 @@ struct ParticleChildPtr {
     ParticleSubSystem*      particle_parent { nullptr };
 
     i32 max_instancecount { 1 };
-    Eigen::Vector3f world_scale { Eigen::Vector3f::Ones() };
+    linalg::Vector3f world_scale { linalg::Vector3f::Ones() };
     /// The parent system's file carries the `worldspace` flag: its particles
     /// are in world units, so a child hangs at its authored origin unscaled.
     bool parent_worldspace { false };
@@ -5082,7 +5082,7 @@ void ApplyParticleOverrideControlpoints(const wpscene::ParticleInstanceoverride&
     for (std::size_t i = 0; i < points.size() && i < 8; ++i) {
         auto& point = points[i];
         if (over.controlpointSet[i] && ! point.link_mouse) {
-            point.base_offset = Eigen::Vector3d(over.controlpoint[i][0],
+            point.base_offset = linalg::Vector3d(over.controlpoint[i][0],
                                                 over.controlpoint[i][1],
                                                 over.controlpoint[i][2]);
             // A pinned control point is carried into the layer's space each
@@ -5092,9 +5092,9 @@ void ApplyParticleOverrideControlpoints(const wpscene::ParticleInstanceoverride&
         if (over.controlpointangleSet[i]) {
             const auto& a = over.controlpointangle[i];
             point.rotation =
-                (Eigen::AngleAxisd(a[2], Eigen::Vector3d::UnitZ()) *
-                 Eigen::AngleAxisd(a[1], Eigen::Vector3d::UnitY()) *
-                 Eigen::AngleAxisd(a[0], Eigen::Vector3d::UnitX()))
+                (linalg::AngleAxisd(a[2], linalg::Vector3d::UnitZ()) *
+                 linalg::AngleAxisd(a[1], linalg::Vector3d::UnitY()) *
+                 linalg::AngleAxisd(a[0], linalg::Vector3d::UnitX()))
                     .toRotationMatrix();
             point.has_rotation = true;
         }
@@ -5109,20 +5109,20 @@ MakeParticleOverrideDynamicValue(SceneRuntimeContext& runtime,
     std::unique_ptr<DynamicValue> value;
     if (field == "color") {
         value = std::make_unique<DynamicValue>(
-            Eigen::Vector3f(over.color[0], over.color[1], over.color[2]));
+            linalg::Vector3f(over.color[0], over.color[1], over.color[2]));
     } else if (field == "colorn") {
         value = std::make_unique<DynamicValue>(
-            Eigen::Vector3f(over.colorn[0], over.colorn[1], over.colorn[2]));
+            linalg::Vector3f(over.colorn[0], over.colorn[1], over.colorn[2]));
     } else if (field == "brightness") {
         value = std::make_unique<DynamicValue>(over.brightness);
     } else if (field.rfind("controlpointangle", 0) == 0 && field.size() == 18 &&
                field.back() >= '0' && field.back() <= '7') {
         const auto& a = over.controlpointangle[static_cast<std::size_t>(field.back() - '0')];
-        value = std::make_unique<DynamicValue>(Eigen::Vector3f(a[0], a[1], a[2]));
+        value = std::make_unique<DynamicValue>(linalg::Vector3f(a[0], a[1], a[2]));
     } else if (field.rfind("controlpoint", 0) == 0 && field.size() == 13 &&
                field.back() >= '0' && field.back() <= '7') {
         const auto& a = over.controlpoint[static_cast<std::size_t>(field.back() - '0')];
-        value = std::make_unique<DynamicValue>(Eigen::Vector3f(a[0], a[1], a[2]));
+        value = std::make_unique<DynamicValue>(linalg::Vector3f(a[0], a[1], a[2]));
     } else if (field == "alpha") {
         value = std::make_unique<DynamicValue>(over.alpha);
     } else if (field == "size") {
@@ -5211,7 +5211,7 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
                                              runtime_name);
     }
 
-    const Eigen::Vector3f node_world_scale =
+    const linalg::Vector3f node_world_scale =
         child_ptr.world_scale.cwiseProduct(spNode->Scale());
 
     RuntimeNodeRegistrationRollback runtime_node_registration(
@@ -5875,7 +5875,7 @@ void ParseCameraObj(ParseContext& context, wpscene::WPCameraObject& obj, float r
                                        ResolveFloatSetting(runtime, zoom_setting, runtime_name),
                                        std::move(timeline), obj.dynamic_origin);
         } else if (obj.visible) {
-            context.scene->FrameCanvas(obj.zoom, Eigen::Vector2f(obj.origin[0], obj.origin[1]));
+            context.scene->FrameCanvas(obj.zoom, linalg::Vector2f(obj.origin[0], obj.origin[1]));
         }
     } else if (perspective_camera) {
         std::vector<CameraPath> paths;

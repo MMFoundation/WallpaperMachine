@@ -28,7 +28,7 @@ find_package(PkgConfig REQUIRED)
 # Homebrew keeps each formula in its own cellar and links the default one into
 # the shared `/opt/homebrew/include`, so a machine with both `ffmpeg` and
 # `ffmpeg@8` installed offers two sets of libav* headers with different
-# `AVFrame`/`AVCodecContext` layouts. Every other dependency (Eigen, freetype,
+# `AVFrame`/`AVCodecContext` layouts. Every other dependency (freetype,
 # nlohmann, quickjs) drags that shared prefix in, and because it is reached
 # through a linked target it lands ahead of the cellar path pkg-config chose --
 # so the build reads one major's struct offsets out of the other major's
@@ -53,9 +53,8 @@ endif()
 
 # This project's own container readers (wmMedia). The sources live outside
 # upstream/, in the repository's top-level Renderer/Media, and are pure C++17 with
-# no dependency on anything else here: added before the directory-wide
-# link_libraries() below so the library does not inherit Eigen. Skipped when the
-# engine is configured without the rest of the repository.
+# no dependency on anything else here. Skipped when the engine is configured
+# without the rest of the repository.
 get_filename_component(
     WESCENE_MEDIA_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../Renderer/Media" ABSOLUTE)
 if(EXISTS "${WESCENE_MEDIA_DIR}/CMakeLists.txt")
@@ -64,8 +63,6 @@ endif()
 
 include_directories(SYSTEM third_party)
 add_subdirectory(third_party)
-
-link_libraries(Eigen3::Eigen)
 
 # Test suite — gated by BUILD_TESTS. Include CTest so
 # gtest_discover_tests / add_test inside tests/ register with ctest.

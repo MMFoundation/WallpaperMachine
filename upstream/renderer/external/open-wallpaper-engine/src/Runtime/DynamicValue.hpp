@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -38,24 +38,24 @@ public:
     };
 
     DynamicValue() = default;
-    explicit DynamicValue(const Eigen::Vector4i& value);
-    explicit DynamicValue(const Eigen::Vector3i& value);
-    explicit DynamicValue(const Eigen::Vector2i& value);
-    explicit DynamicValue(const Eigen::Vector4f& value);
-    explicit DynamicValue(const Eigen::Vector3f& value);
-    explicit DynamicValue(const Eigen::Vector2f& value);
+    explicit DynamicValue(const linalg::Vector4i& value);
+    explicit DynamicValue(const linalg::Vector3i& value);
+    explicit DynamicValue(const linalg::Vector2i& value);
+    explicit DynamicValue(const linalg::Vector4f& value);
+    explicit DynamicValue(const linalg::Vector3f& value);
+    explicit DynamicValue(const linalg::Vector2f& value);
     explicit DynamicValue(float value);
     explicit DynamicValue(int value);
     explicit DynamicValue(bool value);
     explicit DynamicValue(std::string value);
     virtual ~DynamicValue();
 
-    [[nodiscard]] const Eigen::Vector4i& getIVec4() const;
-    [[nodiscard]] const Eigen::Vector3i& getIVec3() const;
-    [[nodiscard]] const Eigen::Vector2i& getIVec2() const;
-    [[nodiscard]] const Eigen::Vector4f& getVec4() const;
-    [[nodiscard]] const Eigen::Vector3f& getVec3() const;
-    [[nodiscard]] const Eigen::Vector2f& getVec2() const;
+    [[nodiscard]] const linalg::Vector4i& getIVec4() const;
+    [[nodiscard]] const linalg::Vector3i& getIVec3() const;
+    [[nodiscard]] const linalg::Vector2i& getIVec2() const;
+    [[nodiscard]] const linalg::Vector4f& getVec4() const;
+    [[nodiscard]] const linalg::Vector3f& getVec3() const;
+    [[nodiscard]] const linalg::Vector2f& getVec2() const;
     [[nodiscard]] const float&           getFloat() const;
     [[nodiscard]] const int&             getInt() const;
     [[nodiscard]] const bool&            getBool() const;
@@ -67,12 +67,12 @@ public:
     virtual void update(float new_value);
     virtual void update(int new_value);
     virtual void update(bool new_value);
-    virtual void update(const Eigen::Vector2f& new_value);
-    virtual void update(const Eigen::Vector3f& new_value);
-    virtual void update(const Eigen::Vector4f& new_value);
-    virtual void update(const Eigen::Vector2i& new_value);
-    virtual void update(const Eigen::Vector3i& new_value);
-    virtual void update(const Eigen::Vector4i& new_value);
+    virtual void update(const linalg::Vector2f& new_value);
+    virtual void update(const linalg::Vector3f& new_value);
+    virtual void update(const linalg::Vector4f& new_value);
+    virtual void update(const linalg::Vector2i& new_value);
+    virtual void update(const linalg::Vector3i& new_value);
+    virtual void update(const linalg::Vector4i& new_value);
     virtual void update(const std::string& new_value);
     virtual void update(const DynamicValue& other);
     virtual void update();
@@ -91,12 +91,12 @@ private:
     std::list<std::function<void(const DynamicValue&)>> m_listeners {};
     std::vector<std::function<void()>>              m_connections {};
 
-    Eigen::Vector4i m_ivec4 = Eigen::Vector4i::Zero();
-    Eigen::Vector3i m_ivec3 = Eigen::Vector3i::Zero();
-    Eigen::Vector2i m_ivec2 = Eigen::Vector2i::Zero();
-    Eigen::Vector4f m_vec4  = Eigen::Vector4f::Zero();
-    Eigen::Vector3f m_vec3  = Eigen::Vector3f::Zero();
-    Eigen::Vector2f m_vec2  = Eigen::Vector2f::Zero();
+    linalg::Vector4i m_ivec4 = linalg::Vector4i::Zero();
+    linalg::Vector3i m_ivec3 = linalg::Vector3i::Zero();
+    linalg::Vector2i m_ivec2 = linalg::Vector2i::Zero();
+    linalg::Vector4f m_vec4  = linalg::Vector4f::Zero();
+    linalg::Vector3f m_vec3  = linalg::Vector3f::Zero();
+    linalg::Vector2f m_vec2  = linalg::Vector2f::Zero();
     float           m_float = 0.0f;
     int             m_int   = 0;
     bool            m_bool  = false;

@@ -222,7 +222,7 @@ struct MeshBounds {
     float min_y { 0.0f };
     float max_y { 0.0f };
 
-    Eigen::Vector2f Size() const { return Eigen::Vector2f(max_x - min_x, max_y - min_y); }
+    linalg::Vector2f Size() const { return linalg::Vector2f(max_x - min_x, max_y - min_y); }
 };
 
 MeshBounds MeshLocalBounds(const SceneMesh& mesh) {
@@ -250,13 +250,13 @@ MeshBounds MeshLocalBounds(const SceneMesh& mesh) {
     return bounds;
 }
 
-Eigen::Vector2f MeshSize(const SceneMesh& mesh) {
+linalg::Vector2f MeshSize(const SceneMesh& mesh) {
     return MeshLocalBounds(mesh).Size();
 }
 
-Eigen::Vector2f MeshCenter(const SceneMesh& mesh) {
+linalg::Vector2f MeshCenter(const SceneMesh& mesh) {
     const auto bounds = MeshLocalBounds(mesh);
-    return Eigen::Vector2f((bounds.min_x + bounds.max_x) * 0.5f,
+    return linalg::Vector2f((bounds.min_x + bounds.max_x) * 0.5f,
                            (bounds.min_y + bounds.max_y) * 0.5f);
 }
 
@@ -709,7 +709,7 @@ TEST(TextObjectRuntime, ParserCreatesRuntimeTextNodeAndState) {
     ASSERT_NE(node, nullptr);
     ASSERT_NE(node->Mesh(), nullptr);
     // The layer's alignment hangs the card from its origin and leaves the node on it.
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
     const auto layout = scene->runtime->NodeTextLayout("caption");
     ASSERT_TRUE(layout.has_value());
     const auto bounds = MeshLocalBounds(*node->Mesh());
@@ -844,14 +844,14 @@ std::string ParallaxTextScene(std::string objects_json) {
 
 // How far the model matrix a pass hands its shader sits from where the layer's
 // node places it: the whole of what camera parallax does to a layer.
-Eigen::Vector2f ParallaxDisplacement(WPShaderValueUpdater& updater, SceneNode& node) {
+linalg::Vector2f ParallaxDisplacement(WPShaderValueUpdater& updater, SceneNode& node) {
     sprite_map_t sprites;
     ShaderValue  model;
     updater.UpdateUniforms(&node, sprites, [&](std::string_view name, const ShaderValue& value) {
         if (name == "g_ModelMatrix") model = value;
     });
     node.UpdateTrans();
-    return Eigen::Vector2f(model[12] - static_cast<float>(node.ModelTrans()(0, 3)),
+    return linalg::Vector2f(model[12] - static_cast<float>(node.ModelTrans()(0, 3)),
                            model[13] - static_cast<float>(node.ModelTrans()(1, 3)));
 }
 
@@ -1843,7 +1843,7 @@ TEST(TextObjectRuntime, AlignedTextEffectTracksMeasuredRenderFrameWhenRasterExpa
     const auto card = scene->runtime->NodeSize("caption");
     EXPECT_TRUE(card.isApprox(layout->card));
     EXPECT_GT(card.x(), 400.0f);
-    EXPECT_TRUE(text->Translate().isApprox(Eigen::Vector3f::Zero()));
+    EXPECT_TRUE(text->Translate().isApprox(linalg::Vector3f::Zero()));
     const auto render_frame = TextLayerRenderFrameForLayout(*state, *layout);
     EXPECT_NEAR(render_frame.center.x(), -card.x() * 0.5f, 1.0e-3f);
 
@@ -2033,7 +2033,7 @@ TEST(TextObjectRuntime, AlignedTextEffectCoversMeasuredRasterWithoutScaling) {
     EXPECT_NEAR(MeshCenter(*resolved_final->Mesh()).x(), text_mesh_center.x(), 1.0e-4f);
     EXPECT_NEAR(MeshCenter(*resolved_final->Mesh()).y(), text_mesh_center.y(), 1.0e-4f);
 
-    EXPECT_TRUE(text->Translate().isApprox(Eigen::Vector3f::Zero()));
+    EXPECT_TRUE(text->Translate().isApprox(linalg::Vector3f::Zero()));
 }
 
 TEST(TextObjectRuntime, ParserStabilizesCascadingRustShaderDefaultTextureMetadata) {
@@ -2204,7 +2204,7 @@ TEST(TextObjectRuntime, EveryTexelOfRasterizedTextCarriesTheTextsColourWhateverI
         .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
         .point_size             = 40.0f,
         .padding                = { 4.0f, 4.0f },
-        .color                  = Eigen::Vector3f(1.0f, 0.5f, 0.25f),
+        .color                  = linalg::Vector3f(1.0f, 0.5f, 0.25f),
     };
 #ifdef __APPLE__
     ASSERT_FALSE(state.resolved_font_path.empty());
@@ -2240,7 +2240,7 @@ TEST(TextObjectRuntime, StyledTextLeavesEveryTexelOutsideItsMasksClear) {
         .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
         .point_size             = 40.0f,
         .padding                = { 4.0f, 4.0f },
-        .color                  = Eigen::Vector3f(1.0f, 0.5f, 0.25f),
+        .color                  = linalg::Vector3f(1.0f, 0.5f, 0.25f),
     };
     state.style.outline = true;
 #ifdef __APPLE__
@@ -2271,7 +2271,7 @@ TEST(TextObjectRuntime, SansSerifAliasRasterizesClockDigits) {
         .resolved_font_path     = ResolveSceneFont("systemfont_sansserif").path,
         .point_size             = 33.0f,
         .padding                = { 32.0f, 32.0f },
-        .color                  = Eigen::Vector3f(1.0f, 0.81176f, 0.87059f),
+        .color                  = linalg::Vector3f(1.0f, 0.81176f, 0.87059f),
         .horizontal_align       = "center",
         .vertical_align         = "center",
     };
@@ -3789,7 +3789,7 @@ TEST(TextObjectRuntime, AlignedTextKeepsItsNodeAndMovesItsCardWhenTheTextChanges
     ASSERT_NE(scene->runtime, nullptr);
     auto* node = FindRootChild(*scene, "caption");
     ASSERT_NE(node, nullptr);
-    const Eigen::Vector3f origin(100.0f, 50.0f, 0.0f);
+    const linalg::Vector3f origin(100.0f, 50.0f, 0.0f);
     EXPECT_TRUE(node->Translate().isApprox(origin));
     const auto before_size = scene->runtime->NodeSize("caption");
     EXPECT_NEAR(MeshLocalBounds(*node->Mesh()).max_x, 0.0f, 1.0e-3f);
@@ -3841,7 +3841,7 @@ TEST(TextObjectRuntime, AScaledAlignedTextHasItsCardEdgeOnTheOriginWhateverItsSi
         const auto  bounds = MeshLocalBounds(*node->Mesh());
         const auto  layout = scene->runtime->NodeTextLayout("caption");
         EXPECT_TRUE(layout.has_value());
-        EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+        EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
         EXPECT_NEAR(node->Translate().x() + 2.0f * bounds.max_x, 100.0f, 1.0e-3f);
         EXPECT_NEAR(node->Translate().y() + 3.0f * bounds.max_y,
                     50.0f + 3.0f * (layout->top + layout->descender), 1.0e-3f);
@@ -4155,7 +4155,7 @@ TEST(TextObjectRuntime, HorizontalAlignIsTheOnlyKeyThatAlignsTheTextHorizontally
     // Neither is moved: the key only says which edge of the text the origin sits on. The
     // key-less layer is centred (the card straddles the origin), the other ends on it.
     for (auto* node : { fallback, override }) {
-        EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+        EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
     }
     ASSERT_NE(fallback->Mesh(), nullptr);
     ASSERT_NE(override->Mesh(), nullptr);
@@ -4190,7 +4190,7 @@ TEST(TextObjectRuntime, VerticalAlignIsTheOnlyKeyThatAlignsTheTextVertically) {
     ASSERT_NE(fallback, nullptr);
     ASSERT_NE(override, nullptr);
     for (auto* node : { fallback, override }) {
-        EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+        EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
     }
     ASSERT_NE(fallback->Mesh(), nullptr);
     ASSERT_NE(override->Mesh(), nullptr);
@@ -4712,11 +4712,11 @@ TEST(TextObjectRuntime, LayoutRecordMatchesFreeType) {
 
     // The card is the block and the padding on both sides, on each axis.
     state.text    = "H";
-    state.spacing = Eigen::Vector2f::Zero();
+    state.spacing = linalg::Vector2f::Zero();
     state.padding = { 8.0f, 3.0f };
     const auto padded = MeasureTextLayerLayout(state);
-    EXPECT_TRUE(padded.padding.isApprox(Eigen::Vector2f(8.0f, 3.0f)));
-    EXPECT_TRUE(padded.card.isApprox(one.BlockSize() + Eigen::Vector2f(16.0f, 6.0f)));
+    EXPECT_TRUE(padded.padding.isApprox(linalg::Vector2f(8.0f, 3.0f)));
+    EXPECT_TRUE(padded.card.isApprox(one.BlockSize() + linalg::Vector2f(16.0f, 6.0f)));
     EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(padded.card));
 
     // No text has no block and no rows, and a 2 by 2 card; the face's numbers stay.
@@ -4724,7 +4724,7 @@ TEST(TextObjectRuntime, LayoutRecordMatchesFreeType) {
     const auto empty = MeasureTextLayerLayout(state);
     EXPECT_EQ(empty.rows, 0u);
     EXPECT_TRUE(empty.BlockSize().isZero());
-    EXPECT_TRUE(empty.card.isApprox(Eigen::Vector2f(18.0f, 8.0f)));
+    EXPECT_TRUE(empty.card.isApprox(linalg::Vector2f(18.0f, 8.0f)));
     EXPECT_FLOAT_EQ(empty.ascender, ascender);
     // It has no offsets either: the 2 by 2 card is on the origin whatever the alignment.
     state.horizontal_align = "right";
@@ -4751,7 +4751,7 @@ TEST(TextObjectRuntime, BoxLayoutHasTheSameRecordAsAFace) {
     EXPECT_NEAR(layout.max_x, 0.6f * em + 0.45f * em, 1.0e-3f);
     EXPECT_NEAR(layout.top, 0.9f * em, 1.0e-3f);
     EXPECT_NEAR(layout.bottom, 0.9f * em - 2.0f * (1.2f * em + 5.0f), 1.0e-3f);
-    EXPECT_TRUE(layout.card.isApprox(layout.BlockSize() + Eigen::Vector2f(8.0f, 4.0f)));
+    EXPECT_TRUE(layout.card.isApprox(layout.BlockSize() + linalg::Vector2f(8.0f, 4.0f)));
 }
 
 TEST(TextObjectRuntime, PointSizeIsClampedToTheRangeWallpaperEngineAccepts) {
@@ -4770,7 +4770,7 @@ TEST(TextObjectRuntime, PointSizeIsClampedToTheRangeWallpaperEngineAccepts) {
 TEST(TextObjectRuntime, EmptyTextIsATwoByTwoCardPlusPadding) {
     auto state    = HelveticaState("", 20.0f);
     state.padding = { 8.0f, 3.0f };
-    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(Eigen::Vector2f(18.0f, 8.0f)));
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(linalg::Vector2f(18.0f, 8.0f)));
 }
 
 TEST(TextObjectRuntime, CardPaddingSizesTheCardAndNeverNarrowsTheWrap) {
@@ -5061,12 +5061,12 @@ TEST(TextObjectRuntime, ANegativePaddingTakesTheCardInAndOnlyTheTopIsCapped) {
     auto state = HelveticaState("HHHH", 20.0f);
     const auto natural = MeasureTextLayerSize(state);
     state.padding      = { -6.0f, -4.0f };
-    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(natural + Eigen::Vector2f(-12.0f, -8.0f)));
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(natural + linalg::Vector2f(-12.0f, -8.0f)));
     state.padding = { 900.0f, 600.0f };
-    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(natural + Eigen::Vector2f(1024.0f, 1024.0f)));
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(natural + linalg::Vector2f(1024.0f, 1024.0f)));
     // Taken in further than the text is wide, the card is a pixel, not nothing.
     state.padding = { -4000.0f, -4000.0f };
-    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(Eigen::Vector2f(1.0f, 1.0f)));
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(linalg::Vector2f(1.0f, 1.0f)));
 }
 
 
@@ -5206,21 +5206,21 @@ TEST(TextObjectRuntime, PaddingAndSpacingReadTheFormsWallpaperEngineReads) {
     ASSERT_NE(fixture.scene, nullptr);
     ASSERT_NE(fixture.scene->runtime, nullptr);
 
-    EXPECT_TRUE(fixture.State("number").padding.isApprox(Eigen::Vector2f(8.0f, 8.0f)));
-    EXPECT_TRUE(fixture.State("number").spacing.isApprox(Eigen::Vector2f(2.0f, 2.0f)));
-    EXPECT_TRUE(fixture.State("pair").padding.isApprox(Eigen::Vector2f(6.0f, 10.0f)));
-    EXPECT_TRUE(fixture.State("pair").spacing.isApprox(Eigen::Vector2f(-3.58f, 1.0f)));
+    EXPECT_TRUE(fixture.State("number").padding.isApprox(linalg::Vector2f(8.0f, 8.0f)));
+    EXPECT_TRUE(fixture.State("number").spacing.isApprox(linalg::Vector2f(2.0f, 2.0f)));
+    EXPECT_TRUE(fixture.State("pair").padding.isApprox(linalg::Vector2f(6.0f, 10.0f)));
+    EXPECT_TRUE(fixture.State("pair").spacing.isApprox(linalg::Vector2f(-3.58f, 1.0f)));
     // A string with one number sets only the x lane.
-    EXPECT_TRUE(fixture.State("lone").padding.isApprox(Eigen::Vector2f(5.0f, 0.0f)));
-    EXPECT_TRUE(fixture.State("lone").spacing.isApprox(Eigen::Vector2f(4.0f, 0.0f)));
+    EXPECT_TRUE(fixture.State("lone").padding.isApprox(linalg::Vector2f(5.0f, 0.0f)));
+    EXPECT_TRUE(fixture.State("lone").spacing.isApprox(linalg::Vector2f(4.0f, 0.0f)));
     // A binding is read through its value.
-    EXPECT_TRUE(fixture.State("bound").padding.isApprox(Eigen::Vector2f(3.0f, 4.0f)));
+    EXPECT_TRUE(fixture.State("bound").padding.isApprox(linalg::Vector2f(3.0f, 4.0f)));
     // No key: 32 on both axes. Each lane is capped at 512 and not floored: a
     // negative padding stays negative.
-    EXPECT_TRUE(fixture.State("absent").padding.isApprox(Eigen::Vector2f(32.0f, 32.0f)));
-    EXPECT_TRUE(fixture.State("huge").padding.isApprox(Eigen::Vector2f(512.0f, -20.0f)));
+    EXPECT_TRUE(fixture.State("absent").padding.isApprox(linalg::Vector2f(32.0f, 32.0f)));
+    EXPECT_TRUE(fixture.State("huge").padding.isApprox(linalg::Vector2f(512.0f, -20.0f)));
     // A JSON array is not a form the reference reads, so it leaves the default.
-    EXPECT_TRUE(fixture.State("array").padding.isApprox(Eigen::Vector2f(32.0f, 32.0f)));
+    EXPECT_TRUE(fixture.State("array").padding.isApprox(linalg::Vector2f(32.0f, 32.0f)));
 }
 
 TEST(TextObjectRuntime, CardPaddingAppliesOnlyToLayersWallpaperEnginePads) {
@@ -5242,8 +5242,8 @@ TEST(TextObjectRuntime, CardPaddingAppliesOnlyToLayersWallpaperEnginePads) {
     ASSERT_NE(fixture.scene, nullptr);
     ASSERT_NE(fixture.scene->runtime, nullptr);
 
-    const Eigen::Vector2f none = Eigen::Vector2f::Zero();
-    const Eigen::Vector2f pad(32.0f, 32.0f);
+    const linalg::Vector2f none = linalg::Vector2f::Zero();
+    const linalg::Vector2f pad(32.0f, 32.0f);
     EXPECT_TRUE(fixture.State("plain").padding.isApprox(none));
     EXPECT_TRUE(fixture.State("effect").padding.isApprox(pad));
     EXPECT_TRUE(fixture.State("hidden effect").padding.isApprox(none));
@@ -5255,7 +5255,7 @@ TEST(TextObjectRuntime, CardPaddingAppliesOnlyToLayersWallpaperEnginePads) {
 
     // The layer's card is its text plus the padding, only where it applies.
     const auto plain = fixture.scene->runtime->NodeSize("plain");
-    EXPECT_TRUE(fixture.scene->runtime->NodeSize("effect").isApprox(plain + Eigen::Vector2f(64.0f, 64.0f)));
+    EXPECT_TRUE(fixture.scene->runtime->NodeSize("effect").isApprox(plain + linalg::Vector2f(64.0f, 64.0f)));
     EXPECT_TRUE(fixture.scene->runtime->NodeSize("add").isApprox(plain));
 }
 
@@ -5285,10 +5285,10 @@ TEST(TextObjectRuntime, ACardKeepsItsPaddingOnlyWhileAnEffectPassIsVisible) {
     ASSERT_NE(fixture.scene->runtime, nullptr);
     auto& runtime = *fixture.scene->runtime;
 
-    const Eigen::Vector2f none = Eigen::Vector2f::Zero();
-    const Eigen::Vector2f pad(32.0f, 24.0f);
-    const Eigen::Vector2f bare = runtime.NodeSize("plain");
-    const Eigen::Vector2f padded = bare + Eigen::Vector2f(64.0f, 48.0f);
+    const linalg::Vector2f none = linalg::Vector2f::Zero();
+    const linalg::Vector2f pad(32.0f, 24.0f);
+    const linalg::Vector2f bare = runtime.NodeSize("plain");
+    const linalg::Vector2f padded = bare + linalg::Vector2f(64.0f, 48.0f);
     const auto holds = [&](const char* name, bool padded_now, const char* when) {
         SCOPED_TRACE(std::string(name) + " " + when);
         EXPECT_TRUE(fixture.State(name).padding.isApprox(padded_now ? pad : none));
@@ -5357,8 +5357,8 @@ TEST(TextObjectRuntime, AnEffectWithNoPassCountsForNeitherTheMarginNorTheComposi
                                  std::string("text-effect-no-pass-") + item.name, assets);
         ASSERT_NE(fixture.scene, nullptr);
         const auto state = fixture.State("caption");
-        EXPECT_TRUE(state.padding.isApprox(item.padded ? Eigen::Vector2f(32.0f, 24.0f)
-                                                       : Eigen::Vector2f::Zero()));
+        EXPECT_TRUE(state.padding.isApprox(item.padded ? linalg::Vector2f(32.0f, 24.0f)
+                                                       : linalg::Vector2f::Zero()));
         EXPECT_FALSE(state.layout_pending) << "the margin was changed as the scene loaded";
         auto* node = FindRootChild(*fixture.scene, "caption");
         ASSERT_NE(node, nullptr);
@@ -5426,8 +5426,8 @@ TEST(TextObjectRuntime, ASceneWithFogPadsEveryTextLayerWhateverItsEffects) {
       {"id":2,"name":"add","text":"a","font":"Arial","padding":"32 32","colorBlendMode":31,
        "visible":true}
     ])";
-    const Eigen::Vector2f none = Eigen::Vector2f::Zero();
-    const Eigen::Vector2f pad(32.0f, 32.0f);
+    const linalg::Vector2f none = linalg::Vector2f::Zero();
+    const linalg::Vector2f pad(32.0f, 32.0f);
     {
         TextSceneFixture clear(layers, "text-no-fog", ColorBlendAssets());
         ASSERT_NE(clear.scene, nullptr);
@@ -5442,7 +5442,7 @@ TEST(TextObjectRuntime, ASceneWithFogPadsEveryTextLayerWhateverItsEffects) {
         EXPECT_TRUE(fogged.State("add").padding.isApprox(pad));
         const auto plain_card = fogged.scene->runtime->NodeSize("plain");
         TextSceneFixture clear(layers, "text-fog-reference", ColorBlendAssets());
-        EXPECT_TRUE(plain_card.isApprox(clear.scene->runtime->NodeSize("plain") + Eigen::Vector2f(64.0f, 64.0f)));
+        EXPECT_TRUE(plain_card.isApprox(clear.scene->runtime->NodeSize("plain") + linalg::Vector2f(64.0f, 64.0f)));
     }
     // A flag that is false pads nothing.
     TextSceneFixture off(layers, "text-fog-off", ColorBlendAssets(), {},
@@ -5496,15 +5496,15 @@ TEST(TextObjectRuntime, StyleColoursFollowTheirPropertiesAndTheBakedKeysAreReadO
     ASSERT_NE(material, nullptr);
     const auto colour = [&](const char* name) {
         const auto& value = material->customShader.constValues.at(name);
-        return Eigen::Vector3f(value[0], value[1], value[2]);
+        return linalg::Vector3f(value[0], value[1], value[2]);
     };
-    EXPECT_TRUE(colour("g_OutlineColor").isApprox(Eigen::Vector3f(1.0f, 0.0f, 0.0f)));
-    EXPECT_TRUE(colour("g_ShadowColor").isApprox(Eigen::Vector3f(0.0f, 0.0f, 1.0f)));
+    EXPECT_TRUE(colour("g_OutlineColor").isApprox(linalg::Vector3f(1.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(colour("g_ShadowColor").isApprox(linalg::Vector3f(0.0f, 0.0f, 1.0f)));
     runtime.ApplyProjectPropertyOverride({ { "ink", RuntimeScalarValue::String("0 1 0") },
                                            { "shade", RuntimeScalarValue::String("1 1 0") } });
     runtime.Tick(1.0 / 60.0);
-    EXPECT_TRUE(colour("g_OutlineColor").isApprox(Eigen::Vector3f(0.0f, 1.0f, 0.0f)));
-    EXPECT_TRUE(colour("g_ShadowColor").isApprox(Eigen::Vector3f(1.0f, 1.0f, 0.0f)));
+    EXPECT_TRUE(colour("g_OutlineColor").isApprox(linalg::Vector3f(0.0f, 1.0f, 0.0f)));
+    EXPECT_TRUE(colour("g_ShadowColor").isApprox(linalg::Vector3f(1.0f, 1.0f, 0.0f)));
 
     // A document that asks for other baked values is held at the ones the scene
     // loaded with and says so; the colours move (`shade`, left out, returns to the
@@ -5517,7 +5517,7 @@ TEST(TextObjectRuntime, StyleColoursFollowTheirPropertiesAndTheBakedKeysAreReadO
     EXPECT_EQ(preview.changed, (std::vector<std::string> { "ink", "shade" }));
     EXPECT_EQ(preview.deferred, (std::vector<std::string> { "edge", "thick" }));
     runtime.Tick(1.0 / 60.0);
-    EXPECT_TRUE(colour("g_OutlineColor").isApprox(Eigen::Vector3f(0.0f, 0.0f, 1.0f)));
+    EXPECT_TRUE(colour("g_OutlineColor").isApprox(linalg::Vector3f(0.0f, 0.0f, 1.0f)));
     EXPECT_FLOAT_EQ(fixture.State("caption").style.outline_thickness, 2.0f);
 }
 
@@ -5758,9 +5758,9 @@ TEST(TextObjectRuntime, SpacingAndBlockAlignReachTheLayerState) {
     ])", "text-spacing-state");
     ASSERT_NE(fixture.scene, nullptr);
     ASSERT_NE(fixture.scene->runtime, nullptr);
-    EXPECT_TRUE(fixture.State("set").spacing.isApprox(Eigen::Vector2f(6.0f, 0.0f)));
+    EXPECT_TRUE(fixture.State("set").spacing.isApprox(linalg::Vector2f(6.0f, 0.0f)));
     EXPECT_TRUE(fixture.State("set").block_align);
-    EXPECT_TRUE(fixture.State("unset").spacing.isApprox(Eigen::Vector2f::Zero()));
+    EXPECT_TRUE(fixture.State("unset").spacing.isApprox(linalg::Vector2f::Zero()));
     EXPECT_FALSE(fixture.State("unset").block_align);
     // Spacing is a property of the glyphs, not of the card: a plain layer keeps
     // it. Three glyphs have two gaps between them, each 6 pixels wider.
@@ -5871,12 +5871,12 @@ TEST(TextObjectRuntime, AddColorBlendTextIsDrawnAdditivelyOntoTheSceneUnlessItGo
 namespace
 {
 // Where the layer's origin is drawn: its draw matrix taken on the point.
-Eigen::Vector3d DrawnOrigin(SceneNode& node) {
+linalg::Vector3d DrawnOrigin(SceneNode& node) {
     node.UpdateTrans();
-    return (node.RenderTrans() * Eigen::Vector4d(0.0, 0.0, 0.0, 1.0)).head<3>();
+    return (node.RenderTrans() * linalg::Vector4d(0.0, 0.0, 0.0, 1.0)).head<3>();
 }
 
-Eigen::Vector3d ModelOrigin(SceneNode& node) {
+linalg::Vector3d ModelOrigin(SceneNode& node) {
     node.UpdateTrans();
     return node.ModelTrans().block<3, 1>(0, 3);
 }
@@ -5899,15 +5899,15 @@ TEST(TextObjectRuntime, ScreenAnchorOffsetsPinTheLayerToTheEdgeItNames) {
     const auto offset = [&](std::string_view name) {
         return TextScreenAnchorOffset(ParseTextScreenAnchor(name), margins);
     };
-    EXPECT_TRUE(offset("center").isApprox(Eigen::Vector2f(-10.0f, 1.0f)));
-    EXPECT_TRUE(offset("top").isApprox(Eigen::Vector2f(-10.0f, -4.0f)));
-    EXPECT_TRUE(offset("bottom").isApprox(Eigen::Vector2f(-10.0f, 6.0f)));
-    EXPECT_TRUE(offset("left").isApprox(Eigen::Vector2f(10.0f, 1.0f)));
-    EXPECT_TRUE(offset("right").isApprox(Eigen::Vector2f(-30.0f, 1.0f)));
-    EXPECT_TRUE(offset("topleft").isApprox(Eigen::Vector2f(10.0f, -4.0f)));
-    EXPECT_TRUE(offset("topright").isApprox(Eigen::Vector2f(-30.0f, -4.0f)));
-    EXPECT_TRUE(offset("bottomleft").isApprox(Eigen::Vector2f(10.0f, 6.0f)));
-    EXPECT_TRUE(offset("bottomright").isApprox(Eigen::Vector2f(-30.0f, 6.0f)));
+    EXPECT_TRUE(offset("center").isApprox(linalg::Vector2f(-10.0f, 1.0f)));
+    EXPECT_TRUE(offset("top").isApprox(linalg::Vector2f(-10.0f, -4.0f)));
+    EXPECT_TRUE(offset("bottom").isApprox(linalg::Vector2f(-10.0f, 6.0f)));
+    EXPECT_TRUE(offset("left").isApprox(linalg::Vector2f(10.0f, 1.0f)));
+    EXPECT_TRUE(offset("right").isApprox(linalg::Vector2f(-30.0f, 1.0f)));
+    EXPECT_TRUE(offset("topleft").isApprox(linalg::Vector2f(10.0f, -4.0f)));
+    EXPECT_TRUE(offset("topright").isApprox(linalg::Vector2f(-30.0f, -4.0f)));
+    EXPECT_TRUE(offset("bottomleft").isApprox(linalg::Vector2f(10.0f, 6.0f)));
+    EXPECT_TRUE(offset("bottomright").isApprox(linalg::Vector2f(-30.0f, 6.0f)));
     EXPECT_TRUE(offset("none").isZero());
     EXPECT_TRUE(offset("").isZero());
     EXPECT_TRUE(offset("sideways").isZero());
@@ -5941,8 +5941,8 @@ TEST(TextObjectRuntime, ScreenAnchoredTextFollowsThePresentedAreaAndNothingElseD
     }
     ASSERT_FALSE(runtime.TextLayoutInFlight());
     const auto names = { "top right", "left", "centre", "free", "no key", "edge only" };
-    std::map<std::string, Eigen::Vector3f> resting;
-    const auto placed = [&](const char* name) -> Eigen::Vector3f {
+    std::map<std::string, linalg::Vector3f> resting;
+    const auto placed = [&](const char* name) -> linalg::Vector3f {
         // Where the layer's origin is drawn, which the anchor offset moves.
         return DrawnOrigin(*FindRootChild(*fixture.scene, name)).cast<float>();
     };
@@ -5957,24 +5957,24 @@ TEST(TextObjectRuntime, ScreenAnchoredTextFollowsThePresentedAreaAndNothingElseD
     runtime.SetCursorViewport(CursorViewport {
         .origin = { 10.0f, 0.0f }, .size = { 560.0f, 360.0f },
         .content_origin = { 10.0f, 0.0f }, .content_size = { 560.0f, 360.0f } });
-    const auto moved = [&](const char* name) -> Eigen::Vector3f {
+    const auto moved = [&](const char* name) -> linalg::Vector3f {
         return placed(name) - resting[name];
     };
     // left = 10, right = 640 - 570 = 70, top = bottom = 0.
-    EXPECT_TRUE(moved("top right").isApprox(Eigen::Vector3f(-70.0f, 0.0f, 0.0f)));
-    EXPECT_TRUE(moved("left").isApprox(Eigen::Vector3f(10.0f, 0.0f, 0.0f)));
-    EXPECT_TRUE(moved("centre").isApprox(Eigen::Vector3f(-30.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(moved("top right").isApprox(linalg::Vector3f(-70.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(moved("left").isApprox(linalg::Vector3f(10.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(moved("centre").isApprox(linalg::Vector3f(-30.0f, 0.0f, 0.0f)));
     EXPECT_TRUE(moved("free").isZero());
     EXPECT_TRUE(moved("no key").isZero());
-    EXPECT_TRUE(moved("edge only").isApprox(Eigen::Vector3f(-70.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(moved("edge only").isApprox(linalg::Vector3f(-70.0f, 0.0f, 0.0f)));
 
     // A display that shows more than the canvas moves the layers outward.
     runtime.SetCursorViewport(CursorViewport {
         .origin = { 0.0f, -45.0f }, .size = { 640.0f, 450.0f },
         .content_origin = { 0.0f, 0.0f }, .content_size = { 640.0f, 360.0f } });
-    EXPECT_TRUE(moved("top right").isApprox(Eigen::Vector3f(0.0f, 45.0f, 0.0f)));
+    EXPECT_TRUE(moved("top right").isApprox(linalg::Vector3f(0.0f, 45.0f, 0.0f)));
     // Centred, the extra room is the same on both sides, so "center" stays put.
-    EXPECT_TRUE(moved("centre").isApprox(Eigen::Vector3f::Zero()));
+    EXPECT_TRUE(moved("centre").isApprox(linalg::Vector3f::Zero()));
     EXPECT_TRUE(moved("free").isZero());
 
     // Presenting the canvas whole puts everything back.
@@ -6015,7 +6015,7 @@ InkBox ChannelBounds(const Rastered& image, std::size_t channel, uint8_t thresho
 
 TextLayerState StyledState(float point_size = 40.0f) {
     auto state = HelveticaState("H", point_size);
-    state.style.outline_color = Eigen::Vector3f(1.0f, 0.0f, 0.0f);
+    state.style.outline_color = linalg::Vector3f(1.0f, 0.0f, 0.0f);
     return state;
 }
 } // namespace
@@ -6155,7 +6155,7 @@ TEST(TextObjectRuntime, StyledTextCardGrowsOutwardAndKeepsTheLayoutBoxWhereItWas
     const float margin = TextStyleMargin(state);
     ASSERT_GE(margin, 5.0f);
     const auto size = TextLayerRasterSize(state);
-    EXPECT_TRUE(size.isApprox(plain_size + Eigen::Vector2f::Constant(2.0f * margin)));
+    EXPECT_TRUE(size.isApprox(plain_size + linalg::Vector2f::Constant(2.0f * margin)));
     // The layout card, which the layer is placed by, does not move: the raster gains
     // the margin on every side.
     EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(plain_size));
@@ -6196,15 +6196,15 @@ TEST(TextObjectRuntime, ParserReadsTheFontShaderStyleAndPicksTheStyledShader) {
     const auto outlined = fixture.State("outlined").style;
     EXPECT_TRUE(outlined.outline);
     EXPECT_FLOAT_EQ(outlined.outline_thickness, 2.45f);
-    EXPECT_TRUE(outlined.outline_color.isApprox(Eigen::Vector3f(1.0f, 0.5f, 0.25f)));
+    EXPECT_TRUE(outlined.outline_color.isApprox(linalg::Vector3f(1.0f, 0.5f, 0.25f)));
     EXPECT_FALSE(outlined.drop_shadow);
 
     const auto shadowed = fixture.State("shadowed").style;
     EXPECT_TRUE(shadowed.drop_shadow);
     EXPECT_FLOAT_EQ(shadowed.shadow_size, 1.0f);
     EXPECT_FLOAT_EQ(shadowed.shadow_opacity, 0.75f);
-    EXPECT_TRUE(shadowed.shadow_offset.isApprox(Eigen::Vector2f(2.0f, 3.0f)));
-    EXPECT_TRUE(shadowed.shadow_color.isApprox(Eigen::Vector3f(0.4f, 0.3f, 0.6f)));
+    EXPECT_TRUE(shadowed.shadow_offset.isApprox(linalg::Vector2f(2.0f, 3.0f)));
+    EXPECT_TRUE(shadowed.shadow_color.isApprox(linalg::Vector3f(0.4f, 0.3f, 0.6f)));
 
     const auto blurred = fixture.State("blurred").style;
     EXPECT_TRUE(blurred.blur);
@@ -6216,7 +6216,7 @@ TEST(TextObjectRuntime, ParserReadsTheFontShaderStyleAndPicksTheStyledShader) {
     EXPECT_FLOAT_EQ(defaults.blur_size, 6.0f);
     EXPECT_FLOAT_EQ(defaults.shadow_size, 6.0f);
     EXPECT_FLOAT_EQ(defaults.shadow_opacity, 1.0f);
-    EXPECT_TRUE(defaults.shadow_offset.isApprox(Eigen::Vector2f(4.0f, 4.0f)));
+    EXPECT_TRUE(defaults.shadow_offset.isApprox(linalg::Vector2f(4.0f, 4.0f)));
     EXPECT_TRUE(defaults.outline_color.isZero());
 
     const auto shader_of = [&](std::string_view name) -> const SceneMaterial* {
@@ -6782,7 +6782,7 @@ TEST(TextObjectRuntime, ArialAtThirtyTwoPointsHangsFromTheOriginByTheReferenceLi
 // way the text is aligned. The same offsets with the padding gate on or off differ by the
 // padding and by nothing else.
 TEST(TextObjectRuntime, TheCardHangsFromTheOriginByTheEdgeTheTextIsAlignedTo) {
-    for (const Eigen::Vector2f padding : { Eigen::Vector2f(0.0f, 0.0f), Eigen::Vector2f(24.0f, 10.0f) }) {
+    for (const linalg::Vector2f padding : { linalg::Vector2f(0.0f, 0.0f), linalg::Vector2f(24.0f, 10.0f) }) {
         for (const std::string_view text : { "Hg", "Hg\nHgHg\nH" }) {
             for (const std::string_view horizontal : { "left", "center", "right" }) {
                 for (const std::string_view vertical : { "top", "center", "bottom" }) {
@@ -7056,8 +7056,8 @@ TEST(TextObjectRuntime, AlignmentOffsetsTheQuadAndNeverTheNode) {
             auto* node = FindRootChild(*fixture.scene, name);
             ASSERT_NE(node, nullptr);
             ASSERT_NE(node->Mesh(), nullptr);
-            EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(300.0f, 120.0f, 0.0f)));
-            EXPECT_TRUE(node->Scale().isApprox(Eigen::Vector3f(2.0f, 3.0f, 1.0f)));
+            EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(300.0f, 120.0f, 0.0f)));
+            EXPECT_TRUE(node->Scale().isApprox(linalg::Vector3f(2.0f, 3.0f, 1.0f)));
             EXPECT_GT(node->Rotation().z(), 0.1f);
             const auto layout = fixture.scene->runtime->NodeTextLayout(name);
             ASSERT_TRUE(layout.has_value());
@@ -7071,14 +7071,14 @@ TEST(TextObjectRuntime, AlignmentOffsetsTheQuadAndNeverTheNode) {
             // the point of the right edge, the left edge or the middle at the quad's height,
             // taken into the scene, lies on the layer's rotated vertical axis.
             node->UpdateTrans();
-            const Eigen::Matrix4d model = node->ModelTrans();
+            const linalg::Matrix4d model = node->ModelTrans();
             const double edge_x = std::string_view(horizontal) == "left"    ? bounds.min_x
                                   : std::string_view(horizontal) == "right" ? bounds.max_x
                                                                            : (bounds.min_x + bounds.max_x) * 0.5;
-            const Eigen::Vector3d origin = model.block<3, 1>(0, 3);
-            const Eigen::Vector3d edge =
-                (model * Eigen::Vector4d(edge_x, layout->centre.y(), 0.0, 1.0)).head<3>();
-            const Eigen::Vector3d across = model.block<3, 1>(0, 0).normalized();
+            const linalg::Vector3d origin = model.block<3, 1>(0, 3);
+            const linalg::Vector3d edge =
+                (model * linalg::Vector4d(edge_x, layout->centre.y(), 0.0, 1.0)).head<3>();
+            const linalg::Vector3d across = model.block<3, 1>(0, 0).normalized();
             EXPECT_NEAR((edge - origin).dot(across), 0.0, 1.0e-3);
         }
     }
@@ -7100,9 +7100,9 @@ TEST(TextObjectRuntime, ChildrenOfAlignedTextStayOnTheParentsOrigin) {
     parent->UpdateTrans();
     child->UpdateTrans();
     // The child's own origin is its place in the parent's space: (0, 35) from the parent's.
-    const Eigen::Vector3d expected =
-        (parent->ModelTrans() * Eigen::Vector4d(0.0, 35.0, 0.0, 1.0)).head<3>();
-    const Eigen::Vector3d actual = child->ModelTrans().block<3, 1>(0, 3);
+    const linalg::Vector3d expected =
+        (parent->ModelTrans() * linalg::Vector4d(0.0, 35.0, 0.0, 1.0)).head<3>();
+    const linalg::Vector3d actual = child->ModelTrans().block<3, 1>(0, 3);
     EXPECT_NEAR(actual.x(), expected.x(), 1.0e-3);
     EXPECT_NEAR(actual.y(), expected.y(), 1.0e-3);
     // And the parent's origin is where the scene put it.
@@ -7132,7 +7132,7 @@ TEST(TextObjectRuntime, ChangingTheAlignmentMovesTheQuadWithoutResizingIt) {
     bounds = MeshLocalBounds(*node->Mesh());
     EXPECT_NEAR(bounds.min_x, 0.0f, 1.0e-3f);
     EXPECT_NEAR(bounds.max_x, card.x(), 1.0e-3f);
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
 
     ASSERT_TRUE(runtime.SetNodeTextStyle("caption", "verticalalign", "bottom"));
     PumpTextUntilClean(runtime);
@@ -7140,7 +7140,7 @@ TEST(TextObjectRuntime, ChangingTheAlignmentMovesTheQuadWithoutResizingIt) {
     const auto layout = runtime.NodeTextLayout("caption");
     ASSERT_TRUE(layout.has_value());
     EXPECT_NEAR(bounds.max_y, layout->top + layout->descender, 1.0e-3f);
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
 }
 
 // The chain a text layer draws through follows its card when the alignment moves it: the
@@ -7189,7 +7189,7 @@ TEST(TextObjectRuntime, AnEffectChainFollowsTheCardWhenTheAlignmentMovesIt) {
     ASSERT_TRUE(runtime.SetNodeTextStyle("caption", "horizontalalign", "left"));
     PumpTextUntilClean(runtime);
     expect_card_at(1.0f);
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
     EXPECT_TRUE(runtime.NodeSize("caption").isApprox(card));
     EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag())
         << "moving a card that kept its size rebuilt the graph";
@@ -7209,8 +7209,8 @@ TEST(TextObjectRuntime, ScriptsCannotSetAnAlignmentOnATextLayer) {
     const auto before = MeshLocalBounds(*node->Mesh());
     EXPECT_FALSE(runtime.SetNodeAlignment("caption", "right bottom"));
     runtime.Tick(1.0 / 60.0);
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
-    EXPECT_TRUE(runtime.NodeTranslate("caption").isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
+    EXPECT_TRUE(runtime.NodeTranslate("caption").isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
     const auto after = MeshLocalBounds(*node->Mesh());
     EXPECT_FLOAT_EQ(after.min_x, before.min_x);
     EXPECT_FLOAT_EQ(after.max_y, before.max_y);
@@ -7231,7 +7231,7 @@ TEST(TextObjectRuntime, TheBoxesOfTheFallbackAreSetByTheRuleTheGlyphsAre) {
             };
             const auto layout = TextLayerBoxLayoutForTests(state);
             ASSERT_EQ(layout.rows, 3u);
-            const auto size = layout.card + Eigen::Vector2f::Constant(2.0f * TextStyleMargin(state));
+            const auto size = layout.card + linalg::Vector2f::Constant(2.0f * TextStyleMargin(state));
             Rastered   image;
             image.width  = static_cast<uint32_t>(std::ceil(size.x()));
             image.height = static_cast<uint32_t>(std::ceil(size.y()));
@@ -7297,7 +7297,7 @@ TEST(TextObjectRuntime, ScreenAnchorDoesNotMoveTheChildrenOfTheLayer) {
 
     runtime.SetCursorViewport(PannedViewport());
     // The parent is drawn 70 columns to the left, by the right edge of what is shown ...
-    EXPECT_TRUE(DrawnOrigin(*parent).isApprox(parent_at + Eigen::Vector3d(-70.0, 0.0, 0.0)));
+    EXPECT_TRUE(DrawnOrigin(*parent).isApprox(parent_at + linalg::Vector3d(-70.0, 0.0, 0.0)));
     // ... and what hangs from it is placed from where the parent is, not from where it is drawn.
     EXPECT_TRUE(ModelOrigin(*parent).isApprox(parent_at));
     EXPECT_TRUE(ModelOrigin(*child).isApprox(child_at));
@@ -7324,17 +7324,17 @@ TEST(TextObjectRuntime, ScreenAnchorIsAWorldTranslationWhateverTheLayerScaleAndT
     runtime.SetCursorViewport(PannedViewport());
     // 10 columns to the right in the scene, whatever scale and turn the layer has.
     for (auto* node : { plain, turned }) {
-        EXPECT_TRUE(DrawnOrigin(*node).isApprox(ModelOrigin(*node) + Eigen::Vector3d(10.0, 0.0, 0.0)))
+        EXPECT_TRUE(DrawnOrigin(*node).isApprox(ModelOrigin(*node) + linalg::Vector3d(10.0, 0.0, 0.0)))
             << node->Name();
-        EXPECT_TRUE(node->DrawOffset().isApprox(Eigen::Vector3f(10.0f, 0.0f, 0.0f))) << node->Name();
+        EXPECT_TRUE(node->DrawOffset().isApprox(linalg::Vector3f(10.0f, 0.0f, 0.0f))) << node->Name();
     }
     // The matrix that places the node, and so the layer's own axes, is untouched.
-    EXPECT_TRUE(turned->Translate().isApprox(Eigen::Vector3f(320.0f, 180.0f, 0.0f)));
-    EXPECT_TRUE(turned->Scale().isApprox(Eigen::Vector3f(3.0f, 0.5f, 1.0f)));
+    EXPECT_TRUE(turned->Translate().isApprox(linalg::Vector3f(320.0f, 180.0f, 0.0f)));
+    EXPECT_TRUE(turned->Scale().isApprox(linalg::Vector3f(3.0f, 0.5f, 1.0f)));
     // And the draw matrix keeps the layer's own scale and turn.
     turned->UpdateTrans();
-    const Eigen::Matrix3d drawn_axes = turned->RenderTrans().block<3, 3>(0, 0);
-    const Eigen::Matrix3d model_axes = turned->ModelTrans().block<3, 3>(0, 0);
+    const linalg::Matrix3d drawn_axes = turned->RenderTrans().block<3, 3>(0, 0);
+    const linalg::Matrix3d model_axes = turned->ModelTrans().block<3, 3>(0, 0);
     EXPECT_TRUE(drawn_axes.isApprox(model_axes));
 
     runtime.SetCursorViewport(WholeCanvas());
@@ -7356,7 +7356,7 @@ TEST(TextObjectRuntime, AScreenAnchoredLayersOriginReadsBackAsTheSceneGaveIt) {
     auto* node    = FindRootChild(*fixture.scene, "caption");
     ASSERT_NE(node, nullptr);
     runtime.SetCursorViewport(PannedViewport());
-    const Eigen::Vector3f origin(600.0f, 340.0f, 0.0f);
+    const linalg::Vector3f origin(600.0f, 340.0f, 0.0f);
     EXPECT_TRUE(runtime.NodeTranslate("caption").isApprox(origin));
     EXPECT_TRUE(node->Translate().isApprox(origin));
 
@@ -7366,8 +7366,8 @@ TEST(TextObjectRuntime, AScreenAnchoredLayersOriginReadsBackAsTheSceneGaveIt) {
         value.x() += 5.0f;
         ASSERT_TRUE(runtime.SetNodeTranslate("caption", value));
     }
-    EXPECT_TRUE(runtime.NodeTranslate("caption").isApprox(Eigen::Vector3f(610.0f, 340.0f, 0.0f)));
-    EXPECT_TRUE(DrawnOrigin(*node).isApprox(Eigen::Vector3d(610.0 - 70.0, 340.0, 0.0)));
+    EXPECT_TRUE(runtime.NodeTranslate("caption").isApprox(linalg::Vector3f(610.0f, 340.0f, 0.0f)));
+    EXPECT_TRUE(DrawnOrigin(*node).isApprox(linalg::Vector3d(610.0 - 70.0, 340.0, 0.0)));
 }
 
 // The card another pass of the layer draws, the final card of an effect chain, is drawn
@@ -7387,13 +7387,13 @@ TEST(TextObjectRuntime, ScreenAnchorMovesTheFinalCardOfALayerWithAnEffectChain) 
     ASSERT_NE(effect_layer, nullptr);
 
     runtime.Tick(1.0 / 60.0);
-    const Eigen::Vector3d resting = DrawnOrigin(effect_layer->FinalNode());
-    EXPECT_TRUE(resting.isApprox(Eigen::Vector3d(600.0, 340.0, 0.0)));
+    const linalg::Vector3d resting = DrawnOrigin(effect_layer->FinalNode());
+    EXPECT_TRUE(resting.isApprox(linalg::Vector3d(600.0, 340.0, 0.0)));
     runtime.SetCursorViewport(PannedViewport());
     runtime.Tick(1.0 / 60.0);
-    EXPECT_TRUE(DrawnOrigin(effect_layer->FinalNode()).isApprox(resting + Eigen::Vector3d(-70.0, 0.0, 0.0)));
+    EXPECT_TRUE(DrawnOrigin(effect_layer->FinalNode()).isApprox(resting + linalg::Vector3d(-70.0, 0.0, 0.0)));
     // The pass that draws into the chain's own buffer is not moved by it.
-    EXPECT_TRUE(DrawnOrigin(*node).isApprox(Eigen::Vector3d::Zero()));
+    EXPECT_TRUE(DrawnOrigin(*node).isApprox(linalg::Vector3d::Zero()));
 }
 
 TEST(TextObjectRuntime, PenAdvancesAreUnhintedWholePixelsKernedWithTheNextGlyph) {

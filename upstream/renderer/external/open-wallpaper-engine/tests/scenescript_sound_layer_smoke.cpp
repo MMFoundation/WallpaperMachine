@@ -151,9 +151,9 @@ TEST(SceneScriptSoundLayerSmoke, LayerSceneScriptIgnoresClicksOutsideOwningNode)
     ASSERT_NE(runtime, nullptr);
 
     auto owner = std::make_shared<SceneNode>();
-    owner->SetTranslate(Eigen::Vector3f(200.0f, 270.0f, 0.0f));
+    owner->SetTranslate(linalg::Vector3f(200.0f, 270.0f, 0.0f));
     runtime->RegisterNode("buttonLayer", owner.get());
-    runtime->RegisterNodeSize("buttonLayer", Eigen::Vector2f(100.0f, 40.0f));
+    runtime->RegisterNodeSize("buttonLayer", linalg::Vector2f(100.0f, 40.0f));
 
     WPSoundStream::StreamFactory factory = [](const audio::SoundStream::Desc&) {
         return std::make_shared<FakeSoundStream>();
@@ -200,9 +200,9 @@ TEST(SceneScriptSoundLayerSmoke, PropertyScriptIgnoresClicksOutsideOwningNode) {
     ASSERT_NE(runtime, nullptr);
 
     auto owner = std::make_shared<SceneNode>();
-    owner->SetTranslate(Eigen::Vector3f(200.0f, 270.0f, 0.0f));
+    owner->SetTranslate(linalg::Vector3f(200.0f, 270.0f, 0.0f));
     runtime->RegisterNode("buttonLayer", owner.get());
-    runtime->RegisterNodeSize("buttonLayer", Eigen::Vector2f(100.0f, 40.0f));
+    runtime->RegisterNodeSize("buttonLayer", linalg::Vector2f(100.0f, 40.0f));
 
     WPSoundStream::StreamFactory factory = [](const audio::SoundStream::Desc&) {
         return std::make_shared<FakeSoundStream>();
@@ -257,14 +257,14 @@ TEST(SceneScriptSoundLayerSmoke, DuplicateImageLayerScriptsHitTestOwnNode) {
     ASSERT_NE(runtime, nullptr);
 
     auto first = std::make_shared<SceneNode>();
-    first->SetTranslate(Eigen::Vector3f(100.0f, 150.0f, 0.0f));
+    first->SetTranslate(linalg::Vector3f(100.0f, 150.0f, 0.0f));
     auto second = std::make_shared<SceneNode>();
-    second->SetTranslate(Eigen::Vector3f(300.0f, 150.0f, 0.0f));
+    second->SetTranslate(linalg::Vector3f(300.0f, 150.0f, 0.0f));
 
     runtime->RegisterNode("__we_layer_20", first.get());
-    runtime->RegisterNodeSize("__we_layer_20", Eigen::Vector2f(80.0f, 80.0f));
+    runtime->RegisterNodeSize("__we_layer_20", linalg::Vector2f(80.0f, 80.0f));
     runtime->RegisterNode("__we_layer_21", second.get());
-    runtime->RegisterNodeSize("__we_layer_21", Eigen::Vector2f(80.0f, 80.0f));
+    runtime->RegisterNodeSize("__we_layer_21", linalg::Vector2f(80.0f, 80.0f));
 
     std::map<std::string, std::shared_ptr<WPSoundStream>> sounds;
     for (const auto& name : { "leftAudio", "rightAudio" }) {
@@ -335,9 +335,9 @@ TEST(SceneScriptSoundLayerSmoke, PropertyScriptCursorEnterLeaveFollowOwningNodeH
 
     auto owner = std::make_shared<SceneNode>();
     owner->SetVisible(false);
-    owner->SetTranslate(Eigen::Vector3f(200.0f, 270.0f, 0.0f));
+    owner->SetTranslate(linalg::Vector3f(200.0f, 270.0f, 0.0f));
     runtime->RegisterNode("buttonLayer", owner.get());
-    runtime->RegisterNodeSize("buttonLayer", Eigen::Vector2f(100.0f, 40.0f));
+    runtime->RegisterNodeSize("buttonLayer", linalg::Vector2f(100.0f, 40.0f));
 
     auto visible = ResolveBoolSetting(*runtime,
                                       nlohmann::json {
@@ -390,9 +390,9 @@ TEST(SceneScriptSoundLayerSmoke, LayerScriptReceivesCursorUpForItsPressAfterLeav
 
     auto owner = std::make_shared<SceneNode>();
     owner->SetVisible(false);
-    owner->SetTranslate(Eigen::Vector3f(200.0f, 270.0f, 0.0f));
+    owner->SetTranslate(linalg::Vector3f(200.0f, 270.0f, 0.0f));
     runtime->RegisterNode("buttonLayer", owner.get());
-    runtime->RegisterNodeSize("buttonLayer", Eigen::Vector2f(100.0f, 40.0f));
+    runtime->RegisterNodeSize("buttonLayer", linalg::Vector2f(100.0f, 40.0f));
 
     runtime->RegisterSceneScript(
         R"JS(
@@ -445,9 +445,9 @@ TEST(SceneScriptSoundLayerSmoke, LayerScriptDoesNotReceiveCursorUpForAnotherPres
 
     auto owner = std::make_shared<SceneNode>();
     owner->SetVisible(false);
-    owner->SetTranslate(Eigen::Vector3f(200.0f, 270.0f, 0.0f));
+    owner->SetTranslate(linalg::Vector3f(200.0f, 270.0f, 0.0f));
     runtime->RegisterNode("buttonLayer", owner.get());
-    runtime->RegisterNodeSize("buttonLayer", Eigen::Vector2f(100.0f, 40.0f));
+    runtime->RegisterNodeSize("buttonLayer", linalg::Vector2f(100.0f, 40.0f));
 
     runtime->RegisterSceneScript(
         R"JS(

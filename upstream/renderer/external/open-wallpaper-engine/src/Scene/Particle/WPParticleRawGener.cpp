@@ -7,7 +7,7 @@
 #include <vector>
 #include <limits>
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include "Core/Literals.hpp"
 #include "SpecTexs.hpp"
@@ -17,7 +17,7 @@
 #include "Utils/Logging.h"
 
 using namespace wallpaper;
-using namespace Eigen;
+using namespace wallpaper::linalg;
 
 struct WPGOption {
     bool thick_format { false };
@@ -103,14 +103,14 @@ inline usize GenParticleData(std::span<const std::unique_ptr<ParticleInstance>> 
 }
 
 struct RopePoint {
-    Eigen::Vector3f position;
-    Eigen::Vector3f color;
+    linalg::Vector3f position;
+    linalg::Vector3f color;
     float           alpha;
     float           half_size;
 };
 
-inline Eigen::Vector3f CatmullRom(const Eigen::Vector3f& p0, const Eigen::Vector3f& p1,
-                                  const Eigen::Vector3f& p2, const Eigen::Vector3f& p3, float t) {
+inline linalg::Vector3f CatmullRom(const linalg::Vector3f& p0, const linalg::Vector3f& p1,
+                                  const linalg::Vector3f& p2, const linalg::Vector3f& p3, float t) {
     const float t2 = t * t;
     const float t3 = t2 * t;
     return 0.5f * (2.0f * p1 + (-p0 + p2) * t + (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 +
@@ -118,8 +118,8 @@ inline Eigen::Vector3f CatmullRom(const Eigen::Vector3f& p0, const Eigen::Vector
 }
 
 inline void WriteRopeQuad(SceneVertexArray& sv, usize quad_index, bool thick, const RopePoint& a,
-                          const RopePoint& b, const Eigen::Vector3f& tangent_a,
-                          const Eigen::Vector3f& tangent_b, float trail_length,
+                          const RopePoint& b, const linalg::Vector3f& tangent_a,
+                          const linalg::Vector3f& tangent_b, float trail_length,
                           float trail_position) {
     const usize               one_size = sv.OneSize();
     std::array<float, 32 * 4> buffer {};

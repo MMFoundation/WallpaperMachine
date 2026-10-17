@@ -10,7 +10,7 @@
 #include "Text/TextLayer.hpp"
 #include "Video/VideoTextureSource.hpp"
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include <array>
 #include <atomic>
@@ -69,10 +69,10 @@ struct ProjectPropertyPreview {
 // world = origin + (x, 1 - y) * size. `content` is the part of that rectangle
 // the wallpaper draws; input outside it is over letterbox bars, not the scene.
 struct CursorViewport {
-    Eigen::Vector2f origin { Eigen::Vector2f::Zero() };
-    Eigen::Vector2f size { Eigen::Vector2f::Zero() };
-    Eigen::Vector2f content_origin { Eigen::Vector2f::Zero() };
-    Eigen::Vector2f content_size { Eigen::Vector2f::Zero() };
+    linalg::Vector2f origin { linalg::Vector2f::Zero() };
+    linalg::Vector2f size { linalg::Vector2f::Zero() };
+    linalg::Vector2f content_origin { linalg::Vector2f::Zero() };
+    linalg::Vector2f content_size { linalg::Vector2f::Zero() };
 };
 
 struct RuntimePreparedTextLayerImage {
@@ -149,14 +149,14 @@ public:
     void          AttachScene(Scene* scene);
     /// Puts the cursor at a scene position, canvas units for hit tests and
     /// scripts alike, whatever the camera: the probes' way to click a layer.
-    void          SetCursorWorldPosition(const Eigen::Vector3f& value);
+    void          SetCursorWorldPosition(const linalg::Vector3f& value);
     // World rectangle the window shows, so window-normalized cursor input lands
     // where the presented wallpaper actually draws each layer.
     void          SetCursorViewport(const CursorViewport& viewport);
     /// The display's pixel resolution, which `engine.screenResolution` reports.
     /// Distinct from the cursor viewport above, which is scene world units,
     /// and from the rasterization size, which internal quality may reduce.
-    void          SetScreenResolution(const Eigen::Vector2f& resolution);
+    void          SetScreenResolution(const linalg::Vector2f& resolution);
     /// The interface language scripts are told about in `applyGeneralSettings`,
     /// as a lower-case BCP-47 tag (`en-us`, `zh-cn`). A tag in any case, or with
     /// `_` for `-`, is normalized; nothing more is: mapping an operating-system
@@ -232,7 +232,7 @@ public:
                      std::shared_ptr<const NodeRegistrationSnapshot> previous);
     [[nodiscard]] std::shared_ptr<NodeRegistrationSnapshot>
                   CaptureNodeRegistration(std::string_view name) const;
-    void          RegisterNodeSize(std::string name, Eigen::Vector2f value);
+    void          RegisterNodeSize(std::string name, linalg::Vector2f value);
     void          RegisterNodeHitMask(std::string name, NodeHitMask mask);
     // The copy shares playback state with the render passes that own it.
     void          RegisterPuppetLayer(std::string name, WPPuppetLayer layer);
@@ -251,7 +251,7 @@ public:
     std::string   PuppetAnimationLayerName(std::string_view layer_name,
                                            std::string_view animation_layer);
     void          RegisterLayerTemplate(std::string template_path, std::shared_ptr<SceneNode> node,
-                                        Eigen::Vector2f size);
+                                        linalg::Vector2f size);
     // Called synchronously on a registry miss. The loader registers the requested
     // normalized template without attaching a drawable source to the scene graph.
     void          SetLayerTemplateLoader(std::function<bool(std::string_view)> loader);
@@ -323,7 +323,7 @@ public:
         std::optional<ScalarAnimation>                zoom;
         std::array<std::optional<ScalarAnimation>, 3> origin;
         bool                                          origin_relative { false };
-        Eigen::Vector3f                               origin_base { Eigen::Vector3f::Zero() };
+        linalg::Vector3f                               origin_base { linalg::Vector3f::Zero() };
     };
     /// A camera layer of a scene projected by its canvas. Shots are kept in
     /// authored order and the last visible one frames the view -- its zoom
@@ -427,8 +427,8 @@ public:
     // before still points at them. A layer the scene file made, or an unknown
     // name, is left alone and answers false.
     bool            DestroyLayer(std::string_view name, std::vector<std::string>* destroyed = nullptr);
-    Eigen::Vector3f NodeColor(std::string_view name) const;
-    bool            SetNodeColor(std::string_view name, const Eigen::Vector3f& color);
+    linalg::Vector3f NodeColor(std::string_view name) const;
+    bool            SetNodeColor(std::string_view name, const linalg::Vector3f& color);
     bool            SortNode(std::string_view name, int index);
     bool            NodeVisible(std::string_view name) const;
     // A layer's parent as scripts address layers: by name. Empty when the layer
@@ -453,17 +453,17 @@ public:
     std::optional<float> NodeAlpha(std::string_view name) const;
     bool            SetNodeAlpha(std::string_view name, float value);
     bool            SetNodeVisible(std::string_view name, bool visible);
-    bool            SetNodeTranslate(std::string_view name, const Eigen::Vector3f& value);
-    bool            SetNodeScale(std::string_view name, const Eigen::Vector3f& value);
+    bool            SetNodeTranslate(std::string_view name, const linalg::Vector3f& value);
+    bool            SetNodeScale(std::string_view name, const linalg::Vector3f& value);
     bool            SetNodeAlignment(std::string_view name, std::string alignment);
     // Authored anchor alignment: the origin is the anchor point, so the runtime
     // re-derives the offset whenever a dynamic origin or scale replaces it.
     bool            SetNodeAnchorAlignment(std::string_view name, std::string alignment,
-                                           const Eigen::Vector3f& origin);
+                                           const linalg::Vector3f& origin);
     // A text layer's `anchor`: pins it to an edge or corner of the area the
     // display shows (`SetCursorViewport`), on top of wherever its origin puts it.
     bool            SetNodeScreenAnchor(std::string_view name, TextScreenAnchor anchor);
-    bool            SetNodeRotation(std::string_view name, const Eigen::Vector3f& value);
+    bool            SetNodeRotation(std::string_view name, const linalg::Vector3f& value);
     // How the cursor treats a layer: only image, text and model layers that are
     // `solid` are hit-tested, and a visible one under the cursor with
     // `disablepropagation` hides every layer behind it from the cursor. A layer
@@ -476,18 +476,18 @@ public:
         bool blocks { false };
     };
     std::optional<NodeCursorTarget> NodeCursorTargetOf(std::string_view name) const;
-    Eigen::Vector3f NodeTranslate(std::string_view name) const;
-    Eigen::Vector3f NodeScale(std::string_view name) const;
+    linalg::Vector3f NodeTranslate(std::string_view name) const;
+    linalg::Vector3f NodeScale(std::string_view name) const;
     /// Where the layer stands in the scene: its own placement with every
     /// ancestor's applied, in canvas units. A name with no node is nowhere in
     /// particular and answers the identity.
-    Eigen::Matrix4d NodeTransformMatrix(std::string_view name) const;
-    Eigen::Vector3f NodeRotation(std::string_view name) const;
-    Eigen::Vector2f NodeSize(std::string_view name) const;
+    linalg::Matrix4d NodeTransformMatrix(std::string_view name) const;
+    linalg::Vector3f NodeRotation(std::string_view name) const;
+    linalg::Vector2f NodeSize(std::string_view name) const;
     /// Where the centre of the layer's box (`NodeSize` across) lies from its origin, in
     /// its own plane, y up: zero for a layer centred on its origin, and for a text layer
     /// the card's offset from it (`TextLayerLayout::centre`).
-    Eigen::Vector2f NodeBoxCentre(std::string_view name) const;
+    linalg::Vector2f NodeBoxCentre(std::string_view name) const;
     std::string     NodeText(std::string_view name) const;
     bool            NodeTextDirty(std::string_view name) const;
     std::optional<TextLayerState> NodeTextState(std::string_view name) const;
@@ -541,14 +541,14 @@ public:
     /// a script made, and the same properties of any layer afterwards.
     bool                          NameLayer(std::string_view runtime_name, std::string authored_name);
     bool                          SetNodeParent(std::string_view name, std::string_view parent_name);
-    bool                          SetNodeSize(std::string_view name, const Eigen::Vector2f& size);
+    bool                          SetNodeSize(std::string_view name, const linalg::Vector2f& size);
     /// `parallaxDepth`: how far the cursor moves a layer. A write reaches the
     /// layer, its effect passes and the layers below it (Wallpaper Engine moves
     /// a whole tree by its outermost layer's depth, so a write on a child
     /// changes only that child's drift), and a layer that starts or stops
     /// following the cursor asks for a new render graph.
-    Eigen::Vector2f               NodeParallaxDepth(std::string_view name) const;
-    bool                          SetNodeParallaxDepth(std::string_view name, const Eigen::Vector2f& depth);
+    linalg::Vector2f               NodeParallaxDepth(std::string_view name) const;
+    bool                          SetNodeParallaxDepth(std::string_view name, const linalg::Vector2f& depth);
     bool                          ClearNodeTextDirty(std::string_view name);
     void                          PumpTextLayerCache();
     bool                          SetNodeTextureFrame(std::string_view name, double frame);
@@ -591,8 +591,8 @@ public:
     void                         DispatchCursorMove();
     void                         DispatchCursorUp(int button = 0);
     bool                         DispatchCursorFrameEvents(bool cursor_was_in_window);
-    void                         DispatchMediaThumbnailChanged(const Eigen::Vector3f& primary_color,
-                                                               const Eigen::Vector3f& text_color);
+    void                         DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
+                                                               const linalg::Vector3f& text_color);
     void                         SetMediaIntegrationEnabled(bool enabled);
     bool                         MediaIntegrationEnabled() const;
     void                         DispatchMediaEventJson(std::string_view event_json);
@@ -640,21 +640,21 @@ private:
     };
     struct NodeAlignmentBinding {
         std::string     alignment;
-        Eigen::Vector3f origin { Eigen::Vector3f::Zero() };
-        Eigen::Vector3f scale { Eigen::Vector3f::Ones() };
+        linalg::Vector3f origin { linalg::Vector3f::Zero() };
+        linalg::Vector3f scale { linalg::Vector3f::Ones() };
         bool            size_anchor { false };
         bool transform_dirty { true };
-        Eigen::Vector3f cached_translate { Eigen::Vector3f::Zero() };
+        linalg::Vector3f cached_translate { linalg::Vector3f::Zero() };
         /// Node rotation `cached_translate` was derived for; the anchor sits
         /// in the layer's own axes, so turning the layer moves the offset.
-        Eigen::Vector3f rotation { Eigen::Vector3f::Zero() };
+        linalg::Vector3f rotation { linalg::Vector3f::Zero() };
         /// The edge or corner of the presented area the node is pinned to, and
         /// the shift that puts it there. The shift is a translation in world space
         /// added to where the node is drawn (`SceneNode::SetDrawOffset`), so the
         /// node's own scale and rotation do not touch it and neither does anything
         /// that is parented to the node or reads its origin.
         TextScreenAnchor screen_anchor { TextScreenAnchor::None };
-        Eigen::Vector2f  screen_offset { Eigen::Vector2f::Zero() };
+        linalg::Vector2f  screen_offset { linalg::Vector2f::Zero() };
     };
     /// What the cursor walk makes of a layer: under the cursor, not under it, or
     /// never reached because a layer in front of it stopped the walk.
@@ -669,7 +669,7 @@ private:
         DynamicValue* value { nullptr };
         SceneNode* transform_node { nullptr };
         NodeAlignmentBinding* alignment { nullptr };
-        const Eigen::Vector2f* size { nullptr };
+        const linalg::Vector2f* size { nullptr };
         std::shared_ptr<const NodeVec3Animation> animation;
         double sampled_animation_frame { std::numeric_limits<double>::quiet_NaN() };
     };
@@ -722,7 +722,7 @@ public:
         std::optional<NodeVec3Binding>          scale;
         std::optional<NodeVec3Binding>          rotation;
         std::optional<NodeEffectFinalBinding>   effect_final;
-        std::optional<Eigen::Vector2f>          size;
+        std::optional<linalg::Vector2f>          size;
         std::optional<NodeHitMask>              hit_mask;
         std::optional<WPPuppetLayer>            puppet_layer;
         std::optional<TextLayer>                text_layer;
@@ -770,7 +770,7 @@ private:
     struct LayerTemplateBinding {
         std::string                canonical_path;
         std::shared_ptr<SceneNode> node;
-        Eigen::Vector2f            size { Eigen::Vector2f::Zero() };
+        linalg::Vector2f            size { linalg::Vector2f::Zero() };
     };
     std::shared_ptr<WPSoundStream> LockSoundLayer(std::string_view name) const;
     void DispatchMediaPlaybackChanged(std::string_view name, bool playing);
@@ -786,7 +786,7 @@ private:
     /// layer pinned to a screen anchor if they changed.
     void UpdatePresentedMargins();
     void RefreshNodeTransformBindings(const std::string& name);
-    void ApplyNodeTransform(SceneNode& node, NodeAlignmentBinding& binding, const Eigen::Vector2f& size);
+    void ApplyNodeTransform(SceneNode& node, NodeAlignmentBinding& binding, const linalg::Vector2f& size);
     /// Frees the layers `DestroyLayer` retired once the mutation they caused
     /// has been consumed, that is once no compiled graph can still draw them.
     void ReleaseRetiredLayers();
@@ -797,7 +797,7 @@ private:
     void ApplyPerspectiveCameraShots(double seconds);
     void DispatchPendingAnimationEvents();
     bool                           CursorInsidePresentedContent() const;
-    Eigen::Vector3f ScriptCursorWorldPosition() const;
+    linalg::Vector3f ScriptCursorWorldPosition() const;
     bool CursorHitsLayer(std::string_view name) const;
     bool CursorHitsLayerGeometry(std::string_view name) const;
     CursorVisit VisitCursorLayer(std::string_view name) const;
@@ -837,7 +837,7 @@ private:
     // The cursor in the canvas plane, where the viewport maps the window pointer
     // (z = 0). Layers are hit in it and particles follow it. It is not what a
     // perspective scene's scripts read as `input.cursorWorldPosition`.
-    Eigen::Vector3f                                                m_cursor_plane_position { Eigen::Vector3f::Zero() };
+    linalg::Vector3f                                                m_cursor_plane_position { linalg::Vector3f::Zero() };
     ProjectProperties                                              m_default_project_properties;
     ProjectProperties                                              m_project_property_overrides;
     ProjectProperties                                              m_project_properties;
@@ -914,12 +914,12 @@ private:
     SceneCamera* m_fallback_active_camera { nullptr };
     std::size_t m_perspective_shot_count { 0 };
     /// What the view was last framed with, so an unchanged shot costs nothing.
-    std::optional<std::pair<double, Eigen::Vector2f>> m_framed_camera_shot;
+    std::optional<std::pair<double, linalg::Vector2f>> m_framed_camera_shot;
     std::vector<MaterialConstantBinding>                           m_material_constants;
     std::vector<TextValueBinding>                                  m_text_values;
     OwnTextWrite*                                                  m_own_text_write { nullptr };
     std::vector<DynamicValueListenerBinding>                       m_dynamic_value_listeners;
-    std::unordered_map<std::string, Eigen::Vector2f>               m_node_size;
+    std::unordered_map<std::string, linalg::Vector2f>               m_node_size;
     std::unordered_map<std::string, NodeHitMask>                   m_node_hit_masks;
     std::unordered_map<std::string, WPPuppetLayer>                 m_puppet_layers;
     std::unordered_map<std::string, TextLayer>                     m_text_layers;

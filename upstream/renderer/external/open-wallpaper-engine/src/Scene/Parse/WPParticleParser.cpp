@@ -10,15 +10,14 @@
 #include <limits>
 #include <sstream>
 
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
+#include "Utils/Linalg.hpp"
 
 #include "Utils/Logging.h"
 #include "Utils/Algorism.h"
 #include "Utils/Random.hpp"
 
 using namespace wallpaper;
-using namespace Eigen;
+using namespace wallpaper::linalg;
 namespace PM = ParticleModify;
 
 namespace

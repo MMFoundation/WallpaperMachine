@@ -118,30 +118,30 @@ void AddSingleSizedParticleEmitter(ParticleSubSystem& subsystem, float size) {
     });
 }
 
-Eigen::Vector2d ProjectFirstBillboardExtent(const SceneMesh& mesh, SceneNode& owner,
+linalg::Vector2d ProjectFirstBillboardExtent(const SceneMesh& mesh, SceneNode& owner,
                                            const SceneCamera& camera) {
     const auto& vertices = mesh.GetVertexArray(0);
     const auto offsets = vertices.GetAttrOffsetMap();
     const auto position = offsets.find(WE_IN_POSITION)->second.offset / sizeof(float);
     const auto texcoord = offsets.find(WE_IN_TEXCOORDVEC4)->second.offset / sizeof(float);
     owner.UpdateTrans();
-    const Eigen::Matrix4d mvp = camera.GetViewProjectionMatrix() * owner.RenderTrans();
-    Eigen::Vector2d minimum = Eigen::Vector2d::Constant(1.0e30);
-    Eigen::Vector2d maximum = -minimum;
+    const linalg::Matrix4d mvp = camera.GetViewProjectionMatrix() * owner.RenderTrans();
+    linalg::Vector2d minimum = linalg::Vector2d::Constant(1.0e30);
+    linalg::Vector2d maximum = -minimum;
     for (std::size_t i = 0; i < 4; ++i) {
         const float* vertex = vertices.Data() + i * vertices.OneSize();
         // The unrotated genericparticle billboard expands its UV corners by
         // ParticleSize before applying the model/view/projection transform.
         const double half_size = vertex[texcoord + 3];
-        const Eigen::Vector4d corner {
+        const linalg::Vector4d corner {
             vertex[position] + (vertex[texcoord] * 2.0 - 1.0) * half_size,
             vertex[position + 1] + (vertex[texcoord + 1] * 2.0 - 1.0) * half_size,
             vertex[position + 2],
             1.0,
         };
-        const Eigen::Vector4d clip = mvp * corner;
+        const linalg::Vector4d clip = mvp * corner;
         EXPECT_GT(clip.w(), 0.0);
-        const Eigen::Vector2d ndc = clip.head<2>() / clip.w();
+        const linalg::Vector2d ndc = clip.head<2>() / clip.w();
         minimum = minimum.cwiseMin(ndc);
         maximum = maximum.cwiseMax(ndc);
     }
@@ -154,7 +154,7 @@ TEST(ParticleMouseControlpoint, DisplaySizedBillboardsFollowObjectScaleAndPerspe
     scene.frameTime = 1.0 / 60.0;
     SceneCamera camera(1.0f, 0.1f, 100.0f, 90.0f);
     auto owner = std::make_shared<SceneNode>();
-    owner->SetTranslate(Eigen::Vector3f(0.0f, 0.0f, -10.0f));
+    owner->SetTranslate(linalg::Vector3f(0.0f, 0.0f, -10.0f));
     auto mesh = MakeParticleMesh(1);
     ParticleSystem system(scene);
     system.gener = std::make_unique<WPParticleRawGener>();
@@ -163,23 +163,23 @@ TEST(ParticleMouseControlpoint, DisplaySizedBillboardsFollowObjectScaleAndPerspe
     AddSingleSizedParticleEmitter(*subsystem, 2.0f);
 
     for (float scale : { 0.25f, 0.75f, 1.0f }) {
-        owner->SetScale(Eigen::Vector3f::Constant(scale));
+        owner->SetScale(linalg::Vector3f::Constant(scale));
         subsystem->Emitt();
         const auto extent = ProjectFirstBillboardExtent(*mesh, *owner, camera);
         EXPECT_NEAR(extent.x(), 0.2 * scale, 1.0e-6);
         EXPECT_NEAR(extent.y(), 0.2 * scale, 1.0e-6);
     }
 
-    owner->SetTranslate(Eigen::Vector3f(0.0f, 0.0f, -20.0f));
+    owner->SetTranslate(linalg::Vector3f(0.0f, 0.0f, -20.0f));
     subsystem->Emitt();
     const auto farther = ProjectFirstBillboardExtent(*mesh, *owner, camera);
     EXPECT_NEAR(farther.x(), 0.1, 1.0e-6);
     EXPECT_NEAR(farther.y(), 0.1, 1.0e-6);
 
     auto parent = std::make_shared<SceneNode>();
-    parent->SetScale(Eigen::Vector3f(2.0f, 3.0f, 1.0f));
+    parent->SetScale(linalg::Vector3f(2.0f, 3.0f, 1.0f));
     parent->AppendChild(owner);
-    owner->SetScale(Eigen::Vector3f(-0.5f, 0.5f, 1.0f));
+    owner->SetScale(linalg::Vector3f(-0.5f, 0.5f, 1.0f));
     subsystem->Emitt();
     const auto inherited = ProjectFirstBillboardExtent(*mesh, *owner, camera);
     EXPECT_NEAR(inherited.x(), 0.1, 1.0e-6);
@@ -195,7 +195,7 @@ TEST(ParticleMouseControlpoint, AuthoredCanvasBillboardsScaleWithTheirLayer) {
     scene.frameTime = 1.0 / 60.0;
     SceneCamera camera(100, 100, 0.1f, 100.0f);
     auto owner = std::make_shared<SceneNode>();
-    owner->SetTranslate(Eigen::Vector3f(0.0f, 0.0f, -10.0f));
+    owner->SetTranslate(linalg::Vector3f(0.0f, 0.0f, -10.0f));
     auto mesh = MakeParticleMesh(1);
     ParticleSystem system(scene);
     system.gener = std::make_unique<WPParticleRawGener>();
@@ -205,7 +205,7 @@ TEST(ParticleMouseControlpoint, AuthoredCanvasBillboardsScaleWithTheirLayer) {
 
     for (float scale : { 0.25f, 0.75f, -1.5f }) {
         SCOPED_TRACE(scale);
-        owner->SetScale(Eigen::Vector3f(scale, scale, 1.0f));
+        owner->SetScale(linalg::Vector3f(scale, scale, 1.0f));
         subsystem->Emitt();
         const double factor = std::abs(scale);
         const auto   extent = ProjectFirstBillboardExtent(*mesh, *owner, camera);
@@ -228,7 +228,7 @@ TEST(ParticleMouseControlpoint, AWorldspaceSystemKeepsItsBillboardSizeWhateverIt
     scene.frameTime = 1.0 / 60.0;
     SceneCamera camera(100, 100, 0.1f, 100.0f);
     auto owner = std::make_shared<SceneNode>();
-    owner->SetTranslate(Eigen::Vector3f(0.0f, 0.0f, -10.0f));
+    owner->SetTranslate(linalg::Vector3f(0.0f, 0.0f, -10.0f));
     auto mesh = MakeParticleMesh(1);
     ParticleSystem system(scene);
     system.gener = std::make_unique<WPParticleRawGener>();
@@ -237,19 +237,19 @@ TEST(ParticleMouseControlpoint, AWorldspaceSystemKeepsItsBillboardSizeWhateverIt
     subsystem->SetWorldSpace(true);
     AddSingleSizedParticleEmitter(*subsystem, 2.0f);
 
-    for (const Eigen::Vector3f scale : { Eigen::Vector3f { 0.25f, 0.25f, 1.0f },
-                                         Eigen::Vector3f { 24.0f, 1.0f, 1.05f },
-                                         Eigen::Vector3f { -1.5f, 3.0f, 1.0f } }) {
+    for (const linalg::Vector3f scale : { linalg::Vector3f { 0.25f, 0.25f, 1.0f },
+                                         linalg::Vector3f { 24.0f, 1.0f, 1.05f },
+                                         linalg::Vector3f { -1.5f, 3.0f, 1.0f } }) {
         SCOPED_TRACE(testing::Message() << "scale " << scale.transpose());
         owner->SetScale(scale);
-        owner->SetRotation(Eigen::Vector3f(0.0f, 0.0f, 0.4f));
+        owner->SetRotation(linalg::Vector3f(0.0f, 0.0f, 0.4f));
         subsystem->Emitt();
         const auto extent = ProjectFirstBillboardExtent(*mesh, *owner, camera);
         EXPECT_NEAR(extent.x(), 0.04, 1.0e-6);
         EXPECT_NEAR(extent.y(), 0.04, 1.0e-6);
         // Drawn from the layer's origin, with none of its turn or scale.
-        const Eigen::Matrix4d drawn  = owner->RenderTrans();
-        const Eigen::Matrix3d linear = drawn.topLeftCorner<3, 3>();
+        const linalg::Matrix4d drawn  = owner->RenderTrans();
+        const linalg::Matrix3d linear = drawn.topLeftCorner<3, 3>();
         EXPECT_TRUE(linear.isIdentity(1.0e-12));
         EXPECT_NEAR(drawn(2, 3), -10.0, 1.0e-9);
     }
@@ -270,7 +270,7 @@ TEST(ParticleMouseControlpoint, AWorldspaceEmitterStretchesItsSpawnsAndTheirHead
     args.maxSpeed      = 3.0f;
 
     std::array<ParticleControlpoint, 8> controlpoints {};
-    controlpoints[0].world_linear     = Eigen::Vector3d(24.0, 1.0, 1.0).asDiagonal();
+    controlpoints[0].world_linear     = linalg::Vector3d(24.0, 1.0, 1.0).asDiagonal();
     controlpoints[0].has_world_linear = true;
 
     for (int i = 0; i < 8; ++i) {
@@ -298,7 +298,7 @@ TEST(ParticleMouseControlpoint, AWorldspaceLayersMatrixScalesTheVelocityInitiali
     for (const bool world : { true, false }) {
         SCOPED_TRACE(world);
         auto spawn              = std::make_shared<ParticleSpawnContext>();
-        spawn->world_linear     = Eigen::Vector3d(24.0, 1.0, 1.0).asDiagonal();
+        spawn->world_linear     = linalg::Vector3d(24.0, 1.0, 1.0).asDiagonal();
         spawn->has_world_linear = world;
         ParticleParseContext ctx;
         ctx.spawn = spawn;
@@ -330,20 +330,20 @@ TEST(ParticleMouseControlpoint, AWorldspaceSystemsControlpointsAreWhereItsLayers
     subsystem->SetDrawn(false);
     subsystem->SetWorldSpace(true);
     auto owner = std::make_shared<SceneNode>();
-    owner->SetTranslate(Eigen::Vector3f(100.0f, 50.0f, 0.0f));
-    owner->SetScale(Eigen::Vector3f(2.0f, 3.0f, 1.0f));
-    owner->SetRotation(Eigen::Vector3f(0.0f, 0.0f, static_cast<float>(M_PI / 2.0)));
+    owner->SetTranslate(linalg::Vector3f(100.0f, 50.0f, 0.0f));
+    owner->SetScale(linalg::Vector3f(2.0f, 3.0f, 1.0f));
+    owner->SetRotation(linalg::Vector3f(0.0f, 0.0f, static_cast<float>(M_PI / 2.0)));
     subsystem->SetOwnerNode(owner);
 
     auto controlpoints = subsystem->Controlpoints();
     // The flag on the first control point does not pin it.
     controlpoints[0].worldspace   = true;
-    controlpoints[0].base_offset  = Eigen::Vector3d(1.0, 2.0, 0.0);
+    controlpoints[0].base_offset  = linalg::Vector3d(1.0, 2.0, 0.0);
     controlpoints[1].worldspace   = true;
-    controlpoints[1].base_offset  = Eigen::Vector3d(500.0, 400.0, 0.0);
-    controlpoints[2].base_offset  = Eigen::Vector3d(10.0, 0.0, 0.0);
+    controlpoints[1].base_offset  = linalg::Vector3d(500.0, 400.0, 0.0);
+    controlpoints[2].base_offset  = linalg::Vector3d(10.0, 0.0, 0.0);
     controlpoints[3].link_mouse   = true;
-    controlpoints[3].base_offset  = Eigen::Vector3d(1.0, 2.0, 3.0);
+    controlpoints[3].base_offset  = linalg::Vector3d(1.0, 2.0, 3.0);
 
     subsystem->Emitt();
 
@@ -366,7 +366,7 @@ TEST(ParticleMouseControlpoint, AWorldspaceSystemsControlpointsAreWhereItsLayers
     EXPECT_TRUE(controlpoints[2].has_world_linear);
     EXPECT_TRUE(controlpoints[3].has_world_linear);
     owner->UpdateTrans();
-    const Eigen::Matrix3d linear = owner->ModelTrans().topLeftCorner<3, 3>();
+    const linalg::Matrix3d linear = owner->ModelTrans().topLeftCorner<3, 3>();
     EXPECT_TRUE(controlpoints[2].world_linear.isApprox(linear, 1.0e-9));
 }
 
@@ -392,13 +392,13 @@ TEST(ParticleMouseControlpoint, AWorldspaceEmitterOnAPinnedControlpointIsNotStre
         subsystem->SetDrawn(false);
         subsystem->SetWorldSpace(true);
         auto owner = std::make_shared<SceneNode>();
-        owner->SetTranslate(Eigen::Vector3f(100.0f, 50.0f, 0.0f));
-        owner->SetScale(Eigen::Vector3f(24.0f, 1.0f, 1.0f));
+        owner->SetTranslate(linalg::Vector3f(100.0f, 50.0f, 0.0f));
+        owner->SetScale(linalg::Vector3f(24.0f, 1.0f, 1.0f));
         subsystem->SetOwnerNode(owner);
         auto controlpoints          = subsystem->Controlpoints();
         controlpoints[1].worldspace = pinned;
         controlpoints[1].base_offset =
-            pinned ? Eigen::Vector3d(500.0, 400.0, 0.0) : Eigen::Vector3d(10.0, 0.0, 0.0);
+            pinned ? linalg::Vector3d(500.0, 400.0, 0.0) : linalg::Vector3d(10.0, 0.0, 0.0);
 
         ParticleBoxEmitterArgs args {};
         args.directions    = { 1.0f, 0.0f, 0.0f };
@@ -444,7 +444,7 @@ TEST(ParticleMouseControlpoint, EmitterControlpointOffsetsBoxSpawnOrigin) {
     args.controlpoint  = 2;
 
     std::array<ParticleControlpoint, 8> controlpoints {};
-    controlpoints[2].offset = Eigen::Vector3d(5.0, 6.0, 7.0);
+    controlpoints[2].offset = linalg::Vector3d(5.0, 6.0, 7.0);
 
     auto           emitter  = ParticleBoxEmitterArgs::MakeEmittOp(args);
     const Particle particle = FirstSpawnedParticle(emitter, controlpoints);
@@ -852,7 +852,7 @@ TEST(ParticleMouseControlpoint, ControlpointAttractFallsOffLinearlyToTheThreshol
         std::make_shared<wpscene::ParticleInstanceoverride>());
 
     std::array<ParticleControlpoint, 8> controlpoints {};
-    controlpoints[1].offset = Eigen::Vector3d(3.0, 0.0, 0.0);
+    controlpoints[1].offset = linalg::Vector3d(3.0, 0.0, 0.0);
 
     std::array<Particle, 1> particles {};
     ParticleModify::MoveTo(particles[0], 0.0, 0.0, 0.0);
@@ -870,7 +870,7 @@ TEST(ParticleMouseControlpoint, ControlpointAttractFallsOffLinearlyToTheThreshol
 
     // At the threshold and beyond there is no pull; at the control point the
     // distance is zero and nothing is divided by it.
-    particles[0].velocity = Eigen::Vector3f::Zero();
+    particles[0].velocity = linalg::Vector3f::Zero();
     ParticleModify::MoveTo(particles[0], -1.0, 0.0, 0.0);
     op(info);
     EXPECT_FLOAT_EQ(particles[0].velocity.x(), 0.0f);
@@ -879,7 +879,7 @@ TEST(ParticleMouseControlpoint, ControlpointAttractFallsOffLinearlyToTheThreshol
     op                = parser.genParticleOperatorOp(
         json,
         std::make_shared<wpscene::ParticleInstanceoverride>());
-    particles[0].velocity = Eigen::Vector3f::Zero();
+    particles[0].velocity = linalg::Vector3f::Zero();
     ParticleModify::MoveTo(particles[0], 0.0, 0.0, 0.0);
     op(info);
     EXPECT_NEAR(particles[0].velocity.x(), 5.0f, 1.0e-5f);
@@ -890,7 +890,7 @@ TEST(ParticleMouseControlpoint, ControlpointAttractFallsOffLinearlyToTheThreshol
     op                 = parser.genParticleOperatorOp(
         json,
         std::make_shared<wpscene::ParticleInstanceoverride>());
-    particles[0].velocity = Eigen::Vector3f::Zero();
+    particles[0].velocity = linalg::Vector3f::Zero();
     op(info);
     EXPECT_NEAR(particles[0].velocity.x(), 2.5f, 1.0e-5f);
 }
@@ -912,8 +912,8 @@ TEST(ParticleMouseControlpoint, ControlpointAttractNamesTheLastControlpointForAn
             std::make_shared<wpscene::ParticleInstanceoverride>());
 
         std::array<ParticleControlpoint, 8> controlpoints {};
-        controlpoints[0].offset = Eigen::Vector3d(-10.0, 0.0, 0.0);
-        controlpoints[7].offset = Eigen::Vector3d(10.0, 0.0, 0.0);
+        controlpoints[0].offset = linalg::Vector3d(-10.0, 0.0, 0.0);
+        controlpoints[7].offset = linalg::Vector3d(10.0, 0.0, 0.0);
 
         std::array<Particle, 1> particles {};
         ParticleModify::MoveTo(particles[0], 0.0, 0.0, 0.0);
@@ -944,7 +944,7 @@ TEST(ParticleMouseControlpoint, ControlpointAttractSkipsZeroDistance) {
         std::make_shared<wpscene::ParticleInstanceoverride>());
 
     std::array<ParticleControlpoint, 8> controlpoints {};
-    controlpoints[1].offset = Eigen::Vector3d(5.0, 0.0, 0.0);
+    controlpoints[1].offset = linalg::Vector3d(5.0, 0.0, 0.0);
 
     std::array<Particle, 1> particles {};
     ParticleModify::MoveTo(particles[0], 5.0, 0.0, 0.0);
@@ -983,7 +983,7 @@ TEST(ParticleMouseControlpoint, MouseControlpointUpdatesEmitterOrigin) {
                                 });
     auto              controlpoints = subsystem.Controlpoints();
     controlpoints[0].link_mouse     = true;
-    controlpoints[0].base_offset    = Eigen::Vector3d(1.0, 2.0, 3.0);
+    controlpoints[0].base_offset    = linalg::Vector3d(1.0, 2.0, 3.0);
     controlpoints[0].offset         = controlpoints[0].base_offset;
 
     subsystem.UpdateMouseControlpoints();
@@ -1013,10 +1013,10 @@ TEST(ParticleMouseControlpoint, MouseControlpointFollowsTheCroppedPresentation) 
     runtime->AttachScene(&scene);
     // 40 canvas units cropped off each side: the window shows x in [40, 160].
     runtime->SetCursorViewport(CursorViewport {
-        .origin         = Eigen::Vector2f(40.0f, 0.0f),
-        .size           = Eigen::Vector2f(120.0f, 100.0f),
-        .content_origin = Eigen::Vector2f(0.0f, 0.0f),
-        .content_size   = Eigen::Vector2f(200.0f, 100.0f),
+        .origin         = linalg::Vector2f(40.0f, 0.0f),
+        .size           = linalg::Vector2f(120.0f, 100.0f),
+        .content_origin = linalg::Vector2f(0.0f, 0.0f),
+        .content_size   = linalg::Vector2f(200.0f, 100.0f),
     });
 
     auto              mesh = std::make_shared<SceneMesh>(MeshUpdate::PerFrame);
@@ -1065,8 +1065,8 @@ TEST(ParticleMouseControlpoint, MouseControlpointUsesOwnerNodeLocalSpace) {
     scene.pointerPosition = { 0.75f, 0.25f };
 
     auto node = std::make_shared<SceneNode>();
-    node->SetTranslate(Eigen::Vector3f(100.0f, 50.0f, 0.0f));
-    node->SetScale(Eigen::Vector3f(2.0f, 1.0f, 1.0f));
+    node->SetTranslate(linalg::Vector3f(100.0f, 50.0f, 0.0f));
+    node->SetScale(linalg::Vector3f(2.0f, 1.0f, 1.0f));
 
     auto              mesh = std::make_shared<SceneMesh>(MeshUpdate::PerFrame);
     ParticleSystem    system(scene);
@@ -1082,7 +1082,7 @@ TEST(ParticleMouseControlpoint, MouseControlpointUsesOwnerNodeLocalSpace) {
     subsystem.SetOwnerNode(node);
     auto              controlpoints = subsystem.Controlpoints();
     controlpoints[0].link_mouse     = true;
-    controlpoints[0].base_offset    = Eigen::Vector3d(1.0, 2.0, 3.0);
+    controlpoints[0].base_offset    = linalg::Vector3d(1.0, 2.0, 3.0);
     controlpoints[0].offset         = controlpoints[0].base_offset;
 
     subsystem.UpdateMouseControlpoints();
@@ -1100,18 +1100,18 @@ TEST(ParticleMouseControlpoint, UnlinkedControlpointsKeepEveryAuthoredOffset) {
     ParticleSystem system(scene);
     auto subsystem = MakeTestSubsystem(system, std::make_shared<SceneMesh>(MeshUpdate::PerFrame));
     auto owner = std::make_shared<SceneNode>();
-    owner->SetTranslate(Eigen::Vector3f(100.0f, 50.0f, 0.0f));
+    owner->SetTranslate(linalg::Vector3f(100.0f, 50.0f, 0.0f));
     subsystem->SetOwnerNode(owner);
     auto controlpoints = subsystem->Controlpoints();
-    std::array<Eigen::Vector3d, 8> authored;
+    std::array<linalg::Vector3d, 8> authored;
     for (std::size_t i = 0; i < controlpoints.size(); ++i) {
-        authored[i] = Eigen::Vector3d(double(i + 1), double(i + 11), double(i + 21));
-        controlpoints[i].base_offset = Eigen::Vector3d::Zero();
+        authored[i] = linalg::Vector3d(double(i + 1), double(i + 11), double(i + 21));
+        controlpoints[i].base_offset = linalg::Vector3d::Zero();
         controlpoints[i].offset = authored[i];
     }
     subsystem->UpdateMouseControlpoints();
     scene.pointerPosition = { 0.0f, 1.0f };
-    owner->SetScale(Eigen::Vector3f(2.0f, 3.0f, 1.0f));
+    owner->SetScale(linalg::Vector3f(2.0f, 3.0f, 1.0f));
     subsystem->UpdateMouseControlpoints();
     for (std::size_t i = 0; i < controlpoints.size(); ++i) {
         EXPECT_EQ(controlpoints[i].offset, authored[i]) << i;
@@ -1126,34 +1126,34 @@ TEST(ParticleMouseControlpoint, RuntimeLinksFollowAncestorChangesWithStationaryP
     ParticleSystem system(scene);
     auto subsystem = MakeTestSubsystem(system, std::make_shared<SceneMesh>(MeshUpdate::PerFrame));
     auto parent = std::make_shared<SceneNode>();
-    parent->SetTranslate(Eigen::Vector3f(100.0f, 20.0f, 0.0f));
-    parent->SetScale(Eigen::Vector3f(2.0f, 1.0f, 1.0f));
+    parent->SetTranslate(linalg::Vector3f(100.0f, 20.0f, 0.0f));
+    parent->SetScale(linalg::Vector3f(2.0f, 1.0f, 1.0f));
     auto owner = std::make_shared<SceneNode>();
-    owner->SetTranslate(Eigen::Vector3f(10.0f, 5.0f, 0.0f));
-    owner->SetScale(Eigen::Vector3f(1.0f, 2.0f, 1.0f));
+    owner->SetTranslate(linalg::Vector3f(10.0f, 5.0f, 0.0f));
+    owner->SetScale(linalg::Vector3f(1.0f, 2.0f, 1.0f));
     parent->AppendChild(owner);
     subsystem->SetOwnerNode(owner);
     auto controlpoints = subsystem->Controlpoints();
     auto& cp = controlpoints.back();
-    cp.base_offset = Eigen::Vector3d(1.0, 2.0, 3.0);
-    cp.offset = Eigen::Vector3d(9.0, 8.0, 7.0);
+    cp.base_offset = linalg::Vector3d(1.0, 2.0, 3.0);
+    cp.offset = linalg::Vector3d(9.0, 8.0, 7.0);
     subsystem->UpdateMouseControlpoints();
-    EXPECT_EQ(cp.offset, Eigen::Vector3d(9.0, 8.0, 7.0));
+    EXPECT_EQ(cp.offset, linalg::Vector3d(9.0, 8.0, 7.0));
     cp.link_mouse = true;
     subsystem->UpdateMouseControlpoints();
-    EXPECT_EQ(cp.offset, Eigen::Vector3d(16.0, 27.0, 3.0));
-    parent->SetTranslate(Eigen::Vector3f(80.0f, 40.0f, 0.0f));
+    EXPECT_EQ(cp.offset, linalg::Vector3d(16.0, 27.0, 3.0));
+    parent->SetTranslate(linalg::Vector3f(80.0f, 40.0f, 0.0f));
     subsystem->UpdateMouseControlpoints();
-    EXPECT_EQ(cp.offset, Eigen::Vector3d(26.0, 17.0, 3.0));
+    EXPECT_EQ(cp.offset, linalg::Vector3d(26.0, 17.0, 3.0));
     cp.link_mouse = false;
-    parent->SetTranslate(Eigen::Vector3f::Zero());
+    parent->SetTranslate(linalg::Vector3f::Zero());
     subsystem->UpdateMouseControlpoints();
-    EXPECT_EQ(cp.offset, Eigen::Vector3d(26.0, 17.0, 3.0));
+    EXPECT_EQ(cp.offset, linalg::Vector3d(26.0, 17.0, 3.0));
     cp.link_mouse = true;
     subsystem->UpdateMouseControlpoints();
-    EXPECT_EQ(cp.offset, Eigen::Vector3d(66.0, 37.0, 3.0));
+    EXPECT_EQ(cp.offset, linalg::Vector3d(66.0, 37.0, 3.0));
     for (std::size_t i = 0; i + 1 < controlpoints.size(); ++i) {
-        EXPECT_EQ(controlpoints[i].offset, Eigen::Vector3d::Zero());
+        EXPECT_EQ(controlpoints[i].offset, linalg::Vector3d::Zero());
     }
 }
 
@@ -1166,18 +1166,18 @@ TEST(ParticleMouseControlpoint, MissingAndExpiredOwnersUseWorldCoordinates) {
     auto subsystem = MakeTestSubsystem(system, std::make_shared<SceneMesh>(MeshUpdate::PerFrame));
     auto& cp = subsystem->Controlpoints()[3];
     cp.link_mouse = true;
-    cp.base_offset = Eigen::Vector3d(1.0, 2.0, 3.0);
+    cp.base_offset = linalg::Vector3d(1.0, 2.0, 3.0);
     subsystem->UpdateMouseControlpoints();
-    EXPECT_EQ(cp.offset, Eigen::Vector3d(151.0, 77.0, 3.0));
+    EXPECT_EQ(cp.offset, linalg::Vector3d(151.0, 77.0, 3.0));
     {
         auto owner = std::make_shared<SceneNode>();
-        owner->SetTranslate(Eigen::Vector3f(100.0f, 0.0f, 0.0f));
+        owner->SetTranslate(linalg::Vector3f(100.0f, 0.0f, 0.0f));
         subsystem->SetOwnerNode(owner);
         subsystem->UpdateMouseControlpoints();
-        EXPECT_EQ(cp.offset, Eigen::Vector3d(51.0, 77.0, 3.0));
+        EXPECT_EQ(cp.offset, linalg::Vector3d(51.0, 77.0, 3.0));
     }
     subsystem->UpdateMouseControlpoints();
-    EXPECT_EQ(cp.offset, Eigen::Vector3d(151.0, 77.0, 3.0));
+    EXPECT_EQ(cp.offset, linalg::Vector3d(151.0, 77.0, 3.0));
 }
 
 TEST(ParticleMouseControlpoint, RawParticleSizeIsTheAuthoredSizeWhateverTheLayerScale) {
@@ -1187,8 +1187,8 @@ TEST(ParticleMouseControlpoint, RawParticleSizeIsTheAuthoredSizeWhateverTheLayer
     // authored size, whatever the owner's or a parent's scale, flipped, uneven
     // or turned.
     struct Case {
-        Eigen::Vector3f parent;
-        Eigen::Vector3f owner;
+        linalg::Vector3f parent;
+        linalg::Vector3f owner;
         float           angle;
     };
     for (const auto& c : { Case { { 1.0f, 1.0f, 1.0f }, { 2.0f, 2.0f, 1.0f }, 0.0f },
@@ -1204,7 +1204,7 @@ TEST(ParticleMouseControlpoint, RawParticleSizeIsTheAuthoredSizeWhateverTheLayer
         parent->SetScale(c.parent);
         auto owner = std::make_shared<SceneNode>();
         owner->SetScale(c.owner);
-        owner->SetRotation(Eigen::Vector3f(0.0f, 0.0f, c.angle));
+        owner->SetRotation(linalg::Vector3f(0.0f, 0.0f, c.angle));
         parent->AppendChild(owner);
 
         auto mesh = MakeParticleMesh(1);
@@ -1242,7 +1242,7 @@ TEST(ParticleMouseControlpoint, MovementMovesTheParticleAtItsPlaceAmongTheOperat
                                 [](const Particle&, const ParticleRawGenSpec&) {
                                 });
 
-    subsystem.Controlpoints()[0].offset = Eigen::Vector3d(10.0, 0.0, 0.0);
+    subsystem.Controlpoints()[0].offset = linalg::Vector3d(10.0, 0.0, 0.0);
 
     subsystem.AddEmitter([](std::vector<Particle>& particles,
                             std::vector<ParticleInitOp>&,
@@ -1302,7 +1302,7 @@ TEST(ParticleMouseControlpoint, AttractBeforeMovementIsIntegratedTheSameStep) {
                                 ParticleSubSystem::SpawnType::STATIC,
                                 [](const Particle&, const ParticleRawGenSpec&) {
                                 });
-    subsystem.Controlpoints()[0].offset = Eigen::Vector3d(10.0, 0.0, 0.0);
+    subsystem.Controlpoints()[0].offset = linalg::Vector3d(10.0, 0.0, 0.0);
     subsystem.AddEmitter([](std::vector<Particle>& particles,
                             std::vector<ParticleInitOp>&,
                             uint32_t,
@@ -1362,7 +1362,7 @@ TEST(ParticleMouseControlpoint, MovementOperatorReadsRuntimeMutatedSpeedOverride
     EXPECT_FLOAT_EQ(particles[0].velocity.x(), 2.0f);
 
     override->speed = 0.5f;
-    particles[0].velocity = Eigen::Vector3f::Zero();
+    particles[0].velocity = linalg::Vector3f::Zero();
     op(info);
 
     EXPECT_FLOAT_EQ(particles[0].velocity.x(), 0.5f);

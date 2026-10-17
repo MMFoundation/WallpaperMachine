@@ -395,7 +395,7 @@ TEST(MediaThumbnailTextureSmoke, RuntimeMaterialConstantsFollowProjectProperties
         BoundValue(
             *runtime,
             "ypcolor",
-            std::make_unique<DynamicValue>(Eigen::Vector3f(0.0f, 0.0f, 0.0f))));
+            std::make_unique<DynamicValue>(linalg::Vector3f(0.0f, 0.0f, 0.0f))));
     runtime->RegisterMaterialConstant(
         material,
         "g_UserAlpha",
@@ -523,9 +523,9 @@ TEST(MediaThumbnailTextureSmoke, GeneratedTemplateLayersKeepMaterialConstantBind
     runtime->AttachScene(scene.get());
 
     auto source_node = std::make_shared<SceneNode>(
-        Eigen::Vector3f(100.0f, 50.0f, 0.0f),
-        Eigen::Vector3f::Ones(),
-        Eigen::Vector3f::Zero(),
+        linalg::Vector3f(100.0f, 50.0f, 0.0f),
+        linalg::Vector3f::Ones(),
+        linalg::Vector3f::Zero(),
         "source");
     auto source_mesh = std::make_shared<SceneMesh>();
     source_mesh->AddMaterial(SceneMaterial {});
@@ -535,14 +535,14 @@ TEST(MediaThumbnailTextureSmoke, GeneratedTemplateLayersKeepMaterialConstantBind
     runtime->RegisterNode("source", source_node.get());
     runtime->RegisterLayerTemplate("models/workshop/2652493753/bar.json",
                                    source_node,
-                                   Eigen::Vector2f(20.0f, 10.0f));
+                                   linalg::Vector2f(20.0f, 10.0f));
     runtime->RegisterMaterialConstant(
         source_mesh->MaterialSlotPtr(),
         "g_Color",
         BoundValue(
             *runtime,
             "ypcolor",
-            std::make_unique<DynamicValue>(Eigen::Vector3f(0.0f, 0.0f, 0.0f))));
+            std::make_unique<DynamicValue>(linalg::Vector3f(0.0f, 0.0f, 0.0f))));
 
     const auto generated_name = runtime->CreateLayerFromTemplate("models/bar.json", "source");
     ASSERT_FALSE(generated_name.empty());

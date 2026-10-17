@@ -4,7 +4,7 @@
 #include <vector>
 #include <memory>
 #include <optional>
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 #include "SceneImageEffectLayer.h"
 
 namespace wallpaper
@@ -84,24 +84,24 @@ public:
     void  SetChildrenUseSceneCamera(bool scene) { m_childrenUseSceneCamera = scene; }
     bool  ChildrenUseSceneCamera() const { return m_childrenUseSceneCamera; }
 
-    Eigen::Vector3d GetPosition() const;
-    Eigen::Vector3d GetDirection() const;
-    Eigen::Vector3d GetUp() const;
-    Eigen::Vector3d GetRight() const;
+    linalg::Vector3d GetPosition() const;
+    linalg::Vector3d GetDirection() const;
+    linalg::Vector3d GetUp() const;
+    linalg::Vector3d GetRight() const;
 
     void LockFov(bool lock) { m_fovLocked = lock; }
     bool FovLocked() const { return m_fovLocked; }
 
-    Eigen::Matrix4d GetViewMatrix() const;
-    Eigen::Matrix4d GetViewProjectionMatrix() const;
+    linalg::Matrix4d GetViewMatrix() const;
+    linalg::Matrix4d GetViewProjectionMatrix() const;
 
     /// World-space axes of the attached node, which is the basis the particle
     /// shaders read as `g_Orientation*`. Identity when no node is attached,
     /// matching the constants the parser writes for an unrotated camera.
     struct Axes {
-        Eigen::Vector3d right { 1.0, 0.0, 0.0 };
-        Eigen::Vector3d up { 0.0, 1.0, 0.0 };
-        Eigen::Vector3d forward { 0.0, 0.0, 1.0 };
+        linalg::Vector3d right { 1.0, 0.0, 0.0 };
+        linalg::Vector3d up { 0.0, 1.0, 0.0 };
+        linalg::Vector3d forward { 0.0, 0.0, 1.0 };
     };
     Axes GetAxes() const;
 
@@ -109,8 +109,8 @@ public:
 
     /// Camera shake: moves the eye and what it looks at together, on top of
     /// wherever the camera's node puts them.
-    void SetShakeOffset(const Eigen::Vector3d& offset) { m_shake = offset; }
-    const Eigen::Vector3d& ShakeOffset() const { return m_shake; }
+    void SetShakeOffset(const linalg::Vector3d& offset) { m_shake = offset; }
+    const linalg::Vector3d& ShakeOffset() const { return m_shake; }
 
     void Clone(const SceneCamera& cam) {
         m_width       = cam.m_width;
@@ -135,7 +135,7 @@ private:
         return (std::isfinite(m_zoom) && m_zoom > 0.0) ? m_zoom : 1.0;
     }
 
-    Eigen::Vector3d m_shake { Eigen::Vector3d::Zero() };
+    linalg::Vector3d m_shake { linalg::Vector3d::Zero() };
     double m_width { 1.0f };
     double m_height { 1.0f };
     double m_aspect { 16.0f / 9.0f };
@@ -146,8 +146,8 @@ private:
     bool   m_perspective;
     bool   m_fovLocked { false };
 
-    Eigen::Matrix4d m_viewMat { Eigen::Matrix4d::Identity() };
-    Eigen::Matrix4d m_viewProjectionMat { Eigen::Matrix4d::Identity() };
+    linalg::Matrix4d m_viewMat { linalg::Matrix4d::Identity() };
+    linalg::Matrix4d m_viewProjectionMat { linalg::Matrix4d::Identity() };
 
     std::shared_ptr<SceneNode>             m_node;
     std::shared_ptr<SceneImageEffectLayer> m_imgEffect { nullptr };
@@ -183,7 +183,7 @@ inline constexpr float kCanvasShaderEyeDepth = 2000.0f;
 /// engine's near = 0 and far = 1. Returns local coordinates on the plane, or
 /// nullopt if the inverse is degenerate, the ray is parallel to the plane, or the
 /// hit lies outside the clip volume.
-[[nodiscard]] std::optional<Eigen::Vector3d> IntersectNdcWithNodePlane(
+[[nodiscard]] std::optional<linalg::Vector3d> IntersectNdcWithNodePlane(
     const SceneCamera& camera, SceneNode& node, double ndc_x, double ndc_y);
 
 /// The world-space point on the camera ray through NDC `(ndc_x, ndc_y)` that is
@@ -192,7 +192,7 @@ inline constexpr float kCanvasShaderEyeDepth = 2000.0f;
 /// the frustum. NDC x/y span the frustum in [-1, 1] as the projection does.
 /// Perspective cameras only: nullopt for an orthographic one, for a depth that
 /// is not positive and finite, or when the camera has no usable view.
-[[nodiscard]] std::optional<Eigen::Vector3d> UnprojectNdcAtDepth(const SceneCamera& camera,
+[[nodiscard]] std::optional<linalg::Vector3d> UnprojectNdcAtDepth(const SceneCamera& camera,
                                                                  double ndc_x, double ndc_y,
                                                                  double depth);
 } // namespace wallpaper

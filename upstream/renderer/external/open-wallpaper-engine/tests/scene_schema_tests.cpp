@@ -18,7 +18,7 @@
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include "Fs/Fs.h"
 #include "Fs/MemBinaryStream.h"
@@ -1094,14 +1094,14 @@ TEST(SceneSchema, AttachingAParentRefreshesAWorldTransformThatWasAlreadyComputed
     child->SetTranslate({ 0.0f, 5.0f, 0.0f });
 
     child->UpdateTrans();
-    ASSERT_EQ((child->ModelTrans() * Eigen::Vector4d(0, 0, 0, 1)).head<3>(),
-              Eigen::Vector3d(0.0, 5.0, 0.0));
+    ASSERT_EQ((child->ModelTrans() * linalg::Vector4d(0, 0, 0, 1)).head<3>(),
+              linalg::Vector3d(0.0, 5.0, 0.0));
 
     parent->AppendChild(child);
     child->UpdateTrans();
 
-    EXPECT_EQ((child->ModelTrans() * Eigen::Vector4d(0, 0, 0, 1)).head<3>(),
-              Eigen::Vector3d(2560.0, 1085.0, 0.0));
+    EXPECT_EQ((child->ModelTrans() * linalg::Vector4d(0, 0, 0, 1)).head<3>(),
+              linalg::Vector3d(2560.0, 1085.0, 0.0));
 
     // The same has to hold deeper than one level: attaching a grandparent to an
     // already-evaluated subtree re-dirties it through MarkTransDirty's
@@ -1110,15 +1110,15 @@ TEST(SceneSchema, AttachingAParentRefreshesAWorldTransformThatWasAlreadyComputed
     grandchild->SetTranslate({ 7.0f, 0.0f, 0.0f });
     child->AppendChild(grandchild);
     grandchild->UpdateTrans();
-    EXPECT_EQ((grandchild->ModelTrans() * Eigen::Vector4d(0, 0, 0, 1)).head<3>(),
-              Eigen::Vector3d(2567.0, 1085.0, 0.0));
+    EXPECT_EQ((grandchild->ModelTrans() * linalg::Vector4d(0, 0, 0, 1)).head<3>(),
+              linalg::Vector3d(2567.0, 1085.0, 0.0));
 
     auto root = std::make_shared<SceneNode>();
     root->SetTranslate({ 100.0f, 200.0f, 0.0f });
     root->AppendChild(parent);
     grandchild->UpdateTrans();
-    EXPECT_EQ((grandchild->ModelTrans() * Eigen::Vector4d(0, 0, 0, 1)).head<3>(),
-              Eigen::Vector3d(2667.0, 1285.0, 0.0));
+    EXPECT_EQ((grandchild->ModelTrans() * linalg::Vector4d(0, 0, 0, 1)).head<3>(),
+              linalg::Vector3d(2667.0, 1285.0, 0.0));
 }
 
 TEST(SceneSchema, MaterialConstantShaderValueUserBindingsSurvivePassParsingAndMerge) {
@@ -1413,7 +1413,7 @@ TEST(SceneSchema, OrthogonalprojectionNullActivatesPerspective) {
     EXPECT_NEAR(eye.y(), 10.0, 1e-4);
     EXPECT_NEAR(eye.z(), 20.0, 1e-4);
     const auto forward = parsed->activeCamera->GetDirection().normalized();
-    EXPECT_GT(forward.dot(Eigen::Vector3d(0.0, -10.0, -20.0).normalized()), 0.99);
+    EXPECT_GT(forward.dot(linalg::Vector3d(0.0, -10.0, -20.0).normalized()), 0.99);
     const auto* default_rt = parsed->FindRenderTarget(SpecTex_Default);
     ASSERT_NE(default_rt, nullptr);
     EXPECT_TRUE(default_rt->withDepth);
@@ -1530,7 +1530,7 @@ TEST(SceneSchema, PerspectiveCameraSelectionFollowsVisibilityWithoutHiddenOverri
        "visible":{"user":"alternate","value":false}}
     ])"), vfs, sound_manager);
     ASSERT_NE(scene, nullptr);
-    const auto check = [&](Eigen::Vector3d eye, double fov) {
+    const auto check = [&](linalg::Vector3d eye, double fov) {
         EXPECT_TRUE(scene->activeCamera->GetPosition().isApprox(eye, 1e-5));
         EXPECT_DOUBLE_EQ(scene->activeCamera->Fov(), fov);
     };
@@ -1585,7 +1585,7 @@ TEST(SceneSchema, PerspectiveShotsInheritSceneFovUnlessExplicitlyOverridden) {
                     auto* camera = scene->cameras.at(named ? camera_name : "global_perspective").get();
                     ASSERT_EQ(scene->activeCamera, camera);
                     EXPECT_DOUBLE_EQ(camera->Fov(), expected);
-                    EXPECT_TRUE(camera->GetPosition().isApprox(Eigen::Vector3d(6,0,8), 1e-5));
+                    EXPECT_TRUE(camera->GetPosition().isApprox(linalg::Vector3d(6,0,8), 1e-5));
                     if (!runtime_enabled) {
                         EXPECT_EQ(scene->runtime, nullptr);
                         continue;
@@ -1601,7 +1601,7 @@ TEST(SceneSchema, PerspectiveShotsInheritSceneFovUnlessExplicitlyOverridden) {
                     ASSERT_TRUE(scene->runtime->SetNodeVisible("earlier", false));
                     scene->runtime->Tick(0.1);
                     EXPECT_DOUBLE_EQ(scene->activeCamera->Fov(), scene_fov);
-                    EXPECT_TRUE(scene->activeCamera->GetPosition().isApprox(Eigen::Vector3d(0,10,20), 1e-5));
+                    EXPECT_TRUE(scene->activeCamera->GetPosition().isApprox(linalg::Vector3d(0,10,20), 1e-5));
                     if (named) EXPECT_DOUBLE_EQ(camera->Fov(), expected);
                 }
             }
@@ -1640,10 +1640,10 @@ TEST(SceneSchema, PerspectiveCameraPathsSampleAndQueueAuthoredCurves) {
        "visible":{"user":"alternate","value":false}}
     ])"), vfs, sound_manager);
     ASSERT_NE(scene, nullptr);
-    EXPECT_TRUE(scene->activeCamera->GetPosition().isApprox(Eigen::Vector3d(0,0,10), 1e-5));
+    EXPECT_TRUE(scene->activeCamera->GetPosition().isApprox(linalg::Vector3d(0,0,10), 1e-5));
     scene->runtime->Tick(0.5);
-    EXPECT_TRUE(scene->activeCamera->GetPosition().isApprox(Eigen::Vector3d(1,0,10), 1e-5));
-    EXPECT_TRUE(scene->activeCamera->GetDirection().isApprox(-Eigen::Vector3d::UnitZ(), 1e-5));
+    EXPECT_TRUE(scene->activeCamera->GetPosition().isApprox(linalg::Vector3d(1,0,10), 1e-5));
+    EXPECT_TRUE(scene->activeCamera->GetDirection().isApprox(-linalg::Vector3d::UnitZ(), 1e-5));
     EXPECT_NEAR(scene->activeCamera->Fov(), 50, 1e-5);
     EXPECT_NE(scene->runtime->DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u);
     scene->runtime->Tick(0.75); // overshoot is carried, not discarded at a cut
@@ -1653,13 +1653,13 @@ TEST(SceneSchema, PerspectiveCameraPathsSampleAndQueueAuthoredCurves) {
     ASSERT_TRUE(scene->runtime->SetNodeVisible("moving", false));
     scene->runtime->Tick(0.5);
     EXPECT_EQ(scene->runtime->DescribeTimeAdvancingWork() & SceneDemandReason::Animation, 0u);
-    EXPECT_TRUE(scene->activeCamera->GetPosition().isApprox(Eigen::Vector3d(0,10,20), 1e-5));
+    EXPECT_TRUE(scene->activeCamera->GetPosition().isApprox(linalg::Vector3d(0,10,20), 1e-5));
 }
 
 TEST(SceneSchema, CameraPathsPreserveSteepAndRolledLookAtOrientation) {
-    for (const auto& up : { Eigen::Vector3d(0, 1, 0), Eigen::Vector3d(0.2, 1, 0.3) }) {
-        for (const auto& eye : { Eigen::Vector3d(0.001, 10, 0.002),
-                                Eigen::Vector3d(10, 0.001, 0.002) }) {
+    for (const auto& up : { linalg::Vector3d(0, 1, 0), linalg::Vector3d(0.2, 1, 0.3) }) {
+        for (const auto& eye : { linalg::Vector3d(0.001, 10, 0.002),
+                                linalg::Vector3d(10, 0.001, 0.002) }) {
             auto path = CameraPathFixture(0);
             for (int axis = 0; axis < 3; ++axis) {
                 const auto key = "c" + std::to_string(axis);
@@ -1674,9 +1674,9 @@ TEST(SceneSchema, CameraPathsPreserveSteepAndRolledLookAtOrientation) {
             camera.AttatchNode(node);
             for (int frame = 0; frame < 5; ++frame) {
                 playback.Apply(*node, camera);
-                const Eigen::Vector3d sampled(eye.x(), eye.y(), eye.z() * (1 - frame * 0.4));
-                const Eigen::Vector3d forward = -sampled.normalized();
-                const Eigen::Vector3d right = forward.cross(up).normalized();
+                const linalg::Vector3d sampled(eye.x(), eye.y(), eye.z() * (1 - frame * 0.4));
+                const linalg::Vector3d forward = -sampled.normalized();
+                const linalg::Vector3d right = forward.cross(up).normalized();
                 EXPECT_TRUE(camera.GetDirection().isApprox(forward, 1e-5));
                 EXPECT_TRUE(camera.GetUp().isApprox(right.cross(forward), 1e-5));
                 EXPECT_TRUE(camera.GetViewMatrix().allFinite());
@@ -1819,10 +1819,10 @@ TEST(SceneSchema, CameraObjectKeepsAnOrthographicSceneOnItsCanvas) {
     ASSERT_NE(parsed->activeCamera, nullptr);
     EXPECT_FALSE(parsed->activeCamera->IsPerspective());
 
-    const Eigen::Matrix4d projection = parsed->activeCamera->GetViewProjectionMatrix();
+    const linalg::Matrix4d projection = parsed->activeCamera->GetViewProjectionMatrix();
     const auto            to_ndc     = [&projection](double x, double y) {
-        const Eigen::Vector4d clip = projection * Eigen::Vector4d(x, y, 0.0, 1.0);
-        return Eigen::Vector2d(clip.x() / clip.w(), clip.y() / clip.w());
+        const linalg::Vector4d clip = projection * linalg::Vector4d(x, y, 0.0, 1.0);
+        return linalg::Vector2d(clip.x() / clip.w(), clip.y() / clip.w());
     };
     const auto centre = to_ndc(320.0, 180.0);
     EXPECT_NEAR(centre.x(), 0.0, 1e-6);
@@ -1875,10 +1875,10 @@ TEST(SceneSchema, CameraObjectZoomTightensTheOrthographicFrustum) {
     ASSERT_NE(parsed->activeCamera, nullptr);
     EXPECT_FALSE(parsed->activeCamera->IsPerspective());
 
-    const Eigen::Matrix4d projection = parsed->activeCamera->GetViewProjectionMatrix();
+    const linalg::Matrix4d projection = parsed->activeCamera->GetViewProjectionMatrix();
     const auto            to_ndc     = [&projection](double x, double y) {
-        const Eigen::Vector4d clip = projection * Eigen::Vector4d(x, y, 0.0, 1.0);
-        return Eigen::Vector2d(clip.x() / clip.w(), clip.y() / clip.w());
+        const linalg::Vector4d clip = projection * linalg::Vector4d(x, y, 0.0, 1.0);
+        return linalg::Vector2d(clip.x() / clip.w(), clip.y() / clip.w());
     };
     // Same centre, half the canvas in view: the corner that used to sit on the
     // edge of the frame is now twice as far out.
@@ -1905,8 +1905,8 @@ TEST(SceneSchema, CameraObjectZoomThatIsNotPositiveFramesTheWholeCanvas) {
         ASSERT_NE(parsed, nullptr);
         ASSERT_NE(parsed->activeCamera, nullptr);
 
-        const Eigen::Matrix4d projection = parsed->activeCamera->GetViewProjectionMatrix();
-        const Eigen::Vector4d clip = projection * Eigen::Vector4d(640.0, 360.0, 0.0, 1.0);
+        const linalg::Matrix4d projection = parsed->activeCamera->GetViewProjectionMatrix();
+        const linalg::Vector4d clip = projection * linalg::Vector4d(640.0, 360.0, 0.0, 1.0);
         EXPECT_NEAR(clip.x() / clip.w(), 1.0, 1e-6);
         EXPECT_NEAR(clip.y() / clip.w(), 1.0, 1e-6);
     }
@@ -1941,20 +1941,20 @@ std::shared_ptr<Scene> ParseOrthoShotScene(fs::VFS& vfs, audio::SoundManager& so
 
 /// Where the canvas-plane point `canvas` lands in normalised device coordinates
 /// when seen through `camera`.
-Eigen::Vector2d CanvasToNdc(const SceneCamera& camera, Eigen::Vector2d canvas) {
-    const Eigen::Matrix4d projection = camera.GetViewProjectionMatrix();
-    const Eigen::Vector4d clip = projection * Eigen::Vector4d(canvas.x(), canvas.y(), 0.0, 1.0);
+linalg::Vector2d CanvasToNdc(const SceneCamera& camera, linalg::Vector2d canvas) {
+    const linalg::Matrix4d projection = camera.GetViewProjectionMatrix();
+    const linalg::Vector4d clip = projection * linalg::Vector4d(canvas.x(), canvas.y(), 0.0, 1.0);
     return { clip.x() / clip.w(), clip.y() / clip.w() };
 }
 
-Eigen::Vector2d CanvasToNdc(const Scene& scene, Eigen::Vector2d canvas) {
+linalg::Vector2d CanvasToNdc(const Scene& scene, linalg::Vector2d canvas) {
     return CanvasToNdc(*scene.activeCamera, canvas);
 }
 
 /// The 640x360 canvas is shown `zoom` times closer about the scene point
 /// `centre`, by the orthographic camera 2D layers draw through and by the
 /// perspective one perspective layers draw through alike.
-void ExpectViewFrames(const Scene& scene, Eigen::Vector2d centre, double zoom) {
+void ExpectViewFrames(const Scene& scene, linalg::Vector2d centre, double zoom) {
     ASSERT_NE(scene.activeCamera, nullptr);
     EXPECT_FALSE(scene.activeCamera->IsPerspective());
     const auto perspective = scene.cameras.find("global_perspective");
@@ -1964,7 +1964,7 @@ void ExpectViewFrames(const Scene& scene, Eigen::Vector2d centre, double zoom) {
         const auto middle = CanvasToNdc(*camera, centre);
         EXPECT_NEAR(middle.x(), 0.0, 1e-4);
         EXPECT_NEAR(middle.y(), 0.0, 1e-4);
-        const auto corner = CanvasToNdc(*camera, centre + Eigen::Vector2d(320.0, 180.0) / zoom);
+        const auto corner = CanvasToNdc(*camera, centre + linalg::Vector2d(320.0, 180.0) / zoom);
         EXPECT_NEAR(corner.x(), 1.0, 1e-4);
         EXPECT_NEAR(corner.y(), 1.0, 1e-4);
     }
@@ -2173,7 +2173,7 @@ void ExpectSlot(const CapturedUniforms& captured, const std::string& name, std::
     }
 }
 
-Eigen::Vector3d WorldAxisX(SceneNode& node) {
+linalg::Vector3d WorldAxisX(SceneNode& node) {
     node.UpdateTrans();
     return node.ModelTrans().block<3, 1>(0, 0);
 }
@@ -2402,13 +2402,13 @@ TEST(SceneSchema, TheSceneCameraShakesAsWallpaperEngineWhileItsPropertyIsOn) {
     ASSERT_NE(scene, nullptr);
     ASSERT_NE(scene->runtime, nullptr);
     ASSERT_NE(scene->activeCamera, nullptr);
-    const Eigen::Matrix4d still = scene->activeCamera->GetViewProjectionMatrix();
+    const linalg::Matrix4d still = scene->activeCamera->GetViewProjectionMatrix();
 
     scene->runtime->Tick(0.25);
     // t = speed^2 * time = 1; amplitude / 10 times a tenth of the canvas height;
     // a 2D scene shakes in its plane only.
     const double amplitude = 1.0 * 0.1 * 360.0 * 0.1;
-    const Eigen::Vector3d expected(std::cos(1.0) * amplitude, std::sin(1.333) * amplitude, 0.0);
+    const linalg::Vector3d expected(std::cos(1.0) * amplitude, std::sin(1.333) * amplitude, 0.0);
     EXPECT_TRUE(scene->activeCamera->ShakeOffset().isApprox(expected, 1e-6));
     EXPECT_FALSE(scene->activeCamera->GetViewProjectionMatrix().isApprox(still, 1e-9))
         << "the shake did not move the view";
@@ -2442,7 +2442,7 @@ TEST(SceneSchema, TheNormalMatrixIsTheDrawsRotationWithoutItsScale) {
     const auto& matrix = captured.at("g_NormalModelMatrix");
     ASSERT_EQ(matrix.size(), 12u);
     for (int column = 0; column < 3; ++column) {
-        const Eigen::Vector3f v(matrix[column * 4], matrix[column * 4 + 1], matrix[column * 4 + 2]);
+        const linalg::Vector3f v(matrix[column * 4], matrix[column * 4 + 1], matrix[column * 4 + 2]);
         EXPECT_NEAR(v.norm(), 1.0f, 1e-4f);
     }
 }
@@ -2634,7 +2634,7 @@ TEST(SceneSchema, SchemaOnlyObjectPreservesRenderableChildParentTransform) {
 TEST(SceneSchema, CameraUsesParentModelTransform) {
     auto parent = std::make_shared<SceneNode>();
     parent->SetTranslate({ 10.0f, 20.0f, 30.0f });
-    parent->SetRotation({ 0.0f, 0.0f, static_cast<float>(EIGEN_PI / 2.0) });
+    parent->SetRotation({ 0.0f, 0.0f, static_cast<float>(linalg::Pi / 2.0) });
 
     auto child = std::make_shared<SceneNode>();
     child->SetTranslate({ 2.0f, 3.0f, 4.0f });
@@ -2861,38 +2861,38 @@ void main() {
 // world matrix keep the matrix the node has, and a node drawn through an override draws
 // where the override says.
 TEST(SceneSchema, ANodesDrawOffsetMovesItsDrawAndNothingParentedToIt) {
-    SceneNode parent(Eigen::Vector3f(10, 20, 0), Eigen::Vector3f(2, 3, 1), Eigen::Vector3f(0, 0, 0.5f),
+    SceneNode parent(linalg::Vector3f(10, 20, 0), linalg::Vector3f(2, 3, 1), linalg::Vector3f(0, 0, 0.5f),
                      "parent");
-    auto child = std::make_shared<SceneNode>(Eigen::Vector3f(5, 7, 0), Eigen::Vector3f::Ones(),
-                                              Eigen::Vector3f::Zero(), "child");
+    auto child = std::make_shared<SceneNode>(linalg::Vector3f(5, 7, 0), linalg::Vector3f::Ones(),
+                                              linalg::Vector3f::Zero(), "child");
     parent.AppendChild(child);
     parent.UpdateTrans();
     child->UpdateTrans();
-    const Eigen::Matrix4d model       = parent.ModelTrans();
-    const Eigen::Matrix4d child_model = child->ModelTrans();
+    const linalg::Matrix4d model       = parent.ModelTrans();
+    const linalg::Matrix4d child_model = child->ModelTrans();
     EXPECT_TRUE(parent.RenderTrans().isApprox(model, 0.0));
     EXPECT_TRUE(parent.DrawOffset().isZero());
 
-    parent.SetDrawOffset(Eigen::Vector3f(-70, 4, 0));
+    parent.SetDrawOffset(linalg::Vector3f(-70, 4, 0));
     parent.UpdateTrans();
     child->UpdateTrans();
     EXPECT_TRUE(parent.ModelTrans().isApprox(model, 0.0));
     EXPECT_TRUE(child->ModelTrans().isApprox(child_model, 0.0));
     // Drawn 70 left and 4 up in the scene, whatever the node's scale and turn: the offset
     // is not scaled or turned with the node.
-    Eigen::Matrix4d moved = model;
+    linalg::Matrix4d moved = model;
     moved(0, 3) -= 70.0;
     moved(1, 3) += 4.0;
     EXPECT_TRUE(parent.RenderTrans().isApprox(moved, 1.0e-12));
-    EXPECT_TRUE(Eigen::Matrix3d(parent.RenderTrans().block<3, 3>(0, 0))
-                    .isApprox(Eigen::Matrix3d(model.block<3, 3>(0, 0)), 0.0));
+    EXPECT_TRUE(linalg::Matrix3d(parent.RenderTrans().block<3, 3>(0, 0))
+                    .isApprox(linalg::Matrix3d(model.block<3, 3>(0, 0)), 0.0));
 
     // A node drawn through an override draws where it says; the offset is not added to it.
-    parent.SetRenderTransformOverride(Eigen::Matrix4d::Identity());
-    EXPECT_TRUE(parent.RenderTrans().isApprox(Eigen::Matrix4d::Identity(), 0.0));
+    parent.SetRenderTransformOverride(linalg::Matrix4d::Identity());
+    EXPECT_TRUE(parent.RenderTrans().isApprox(linalg::Matrix4d::Identity(), 0.0));
     parent.ClearRenderTransformOverride();
     EXPECT_TRUE(parent.RenderTrans().isApprox(moved, 1.0e-12));
-    parent.SetDrawOffset(Eigen::Vector3f::Zero());
+    parent.SetDrawOffset(linalg::Vector3f::Zero());
     EXPECT_TRUE(parent.RenderTrans().isApprox(model, 0.0));
 }
 
@@ -2999,11 +2999,11 @@ TEST(SceneSchema, LayerTransformMatrixOfParsedLayersIsWhereTheirParentsPutThem) 
     ASSERT_TRUE(drawn->HasRenderTransformOverride());
 
     runtime.Tick(0.01);
-    EXPECT_TRUE(runtime.NodeTranslate("reads plain").isApprox(Eigen::Vector3f(120, 240, 0)))
+    EXPECT_TRUE(runtime.NodeTranslate("reads plain").isApprox(linalg::Vector3f(120, 240, 0)))
         << runtime.NodeTranslate("reads plain").transpose();
-    EXPECT_TRUE(runtime.NodeTranslate("reads drawn").isApprox(Eigen::Vector3f(160, 200, 0)))
+    EXPECT_TRUE(runtime.NodeTranslate("reads drawn").isApprox(linalg::Vector3f(160, 200, 0)))
         << runtime.NodeTranslate("reads drawn").transpose();
-    EXPECT_TRUE(runtime.NodeTranslate("reads group").isApprox(Eigen::Vector3f(100, 200, 0)))
+    EXPECT_TRUE(runtime.NodeTranslate("reads group").isApprox(linalg::Vector3f(100, 200, 0)))
         << runtime.NodeTranslate("reads group").transpose();
     for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
 }
@@ -3037,13 +3037,13 @@ TEST(SceneSchema, LayerTransformMatrixOfAnAnchoredLayerIsTheCentreOfItsQuad) {
     ASSERT_GT(half_width, 0.0f);
 
     runtime.Tick(0.01);
-    EXPECT_TRUE(runtime.NodeTranslate("reads origin").isApprox(Eigen::Vector3f(100, 70, 0)))
+    EXPECT_TRUE(runtime.NodeTranslate("reads origin").isApprox(linalg::Vector3f(100, 70, 0)))
         << runtime.NodeTranslate("reads origin").transpose();
     EXPECT_TRUE(runtime.NodeTranslate("reads matrix")
-                    .isApprox(Eigen::Vector3f(100 + half_width, 70, 0)))
+                    .isApprox(linalg::Vector3f(100 + half_width, 70, 0)))
         << runtime.NodeTranslate("reads matrix").transpose();
     EXPECT_TRUE(runtime.NodeTranslate("moves anchor")
-                    .isApprox(Eigen::Vector3f(300 + half_width, 70, 0)))
+                    .isApprox(linalg::Vector3f(300 + half_width, 70, 0)))
         << runtime.NodeTranslate("moves anchor").transpose();
     for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
 }
@@ -4373,30 +4373,30 @@ TEST(SceneSchema, PuppetAttachmentFollowsAnimatedAffineAndPreservesLocalEdits) {
     updater.SetCameraParallax({ false, 0.0f, 1.0f, 0.0f });
     auto puppet = std::make_shared<WPPuppet>();
     auto& root = puppet->bones.emplace_back();
-    root.local_bind.translate(Eigen::Vector3f(100, 200, 0));
+    root.local_bind.translate(linalg::Vector3f(100, 200, 0));
     auto& animation = puppet->anims.emplace_back();
     animation.id = 1;
     animation.fps = 1;
     animation.length = 1;
     animation.mode = WPPuppet::PlayMode::Single;
     auto& track = animation.bone_tracks.emplace_back();
-    track.frames.push_back({ Eigen::Vector3f(10, 20, 0), Eigen::Vector3f::Zero(),
-                             Eigen::Vector3f::Ones() });
-    track.frames.push_back({ Eigen::Vector3f(30, 40, 0), Eigen::Vector3f(0, 0, 1.57079632679f),
-                             Eigen::Vector3f(2, 3, 1) });
+    track.frames.push_back({ linalg::Vector3f(10, 20, 0), linalg::Vector3f::Zero(),
+                             linalg::Vector3f::Ones() });
+    track.frames.push_back({ linalg::Vector3f(30, 40, 0), linalg::Vector3f(0, 0, 1.57079632679f),
+                             linalg::Vector3f(2, 3, 1) });
     puppet->prepared();
     WPPuppetLayer layer(puppet);
     WPPuppetLayer::AnimationLayer settings;
     settings.id = 1;
     layer.prepared(std::span(&settings, 1));
     auto parent = std::make_shared<SceneNode>();
-    parent->SetTranslate(Eigen::Vector3f(5, 7, 0));
-    parent->SetScale(Eigen::Vector3f(2, 2, 1));
+    parent->SetTranslate(linalg::Vector3f(5, 7, 0));
+    parent->SetScale(linalg::Vector3f(2, 2, 1));
     auto child = std::make_shared<SceneNode>();
-    child->SetTranslate(Eigen::Vector3f(1, 2, 0));
+    child->SetTranslate(linalg::Vector3f(1, 2, 0));
     parent->AppendChild(child);
     auto attachment = puppet->bones[0].world_bind;
-    attachment.translate(Eigen::Vector3f(4, 5, 0));
+    attachment.translate(linalg::Vector3f(4, 5, 0));
     updater.RegisterPuppetAttachments(layer, { { child.get(), 0, attachment } });
     child->UpdateTrans();
     EXPECT_NEAR(child->ModelTrans()(0, 3), 35, 1e-4);
@@ -4408,11 +4408,11 @@ TEST(SceneSchema, PuppetAttachmentFollowsAnimatedAffineAndPreservesLocalEdits) {
     EXPECT_NEAR(child->ModelTrans()(1, 3), 107, 1e-4);
     EXPECT_NEAR(child->ModelTrans()(0, 1), -6, 1e-4);
     EXPECT_NEAR(child->ModelTrans()(1, 0), 4, 1e-4);
-    const Eigen::Matrix4d sampled = child->ModelTrans();
+    const linalg::Matrix4d sampled = child->ModelTrans();
     updater.FrameBegin();
     child->UpdateTrans();
     EXPECT_TRUE(child->ModelTrans().isApprox(sampled, 1e-6));
-    child->SetTranslate(Eigen::Vector3f(3, 2, 0));
+    child->SetTranslate(linalg::Vector3f(3, 2, 0));
     updater.FrameBegin();
     child->UpdateTrans();
     EXPECT_NEAR(child->ModelTrans()(0, 3), 23, 1e-4);
@@ -4427,7 +4427,7 @@ TEST(SceneSchema, PuppetAttachmentFollowsAnimatedAffineAndPreservesLocalEdits) {
     updater.SetNodeData(parent.get(), shader_data);
     updater.InitUniforms(parent.get(), [](std::string_view name) { return name == "g_Bones"; });
     sprite_map_t sprites;
-    Eigen::Matrix4f uniform = Eigen::Matrix4f::Zero();
+    linalg::Matrix4f uniform = linalg::Matrix4f::Zero();
     int bone_updates = 0;
     const auto capture_bones = [&](std::string_view name, const ShaderValue& value) {
         if (name != "g_Bones") return;
@@ -4441,24 +4441,24 @@ TEST(SceneSchema, PuppetAttachmentFollowsAnimatedAffineAndPreservesLocalEdits) {
     updater.FrameBegin();
     updater.UpdateUniforms(parent.get(), sprites, capture_bones);
     ASSERT_EQ(bone_updates, 2);
-    Eigen::Affine3f expected = Eigen::Affine3f::Identity();
-    expected.translate(Eigen::Vector3f(20, 30, 0));
-    expected.rotate(Eigen::AngleAxisf(0.785398163395f, Eigen::Vector3f::UnitZ()));
-    expected.scale(Eigen::Vector3f(1.5f, 2.0f, 1.0f));
+    linalg::Affine3f expected = linalg::Affine3f::Identity();
+    expected.translate(linalg::Vector3f(20, 30, 0));
+    expected.rotate(linalg::AngleAxisf(0.785398163395f, linalg::Vector3f::UnitZ()));
+    expected.scale(linalg::Vector3f(1.5f, 2.0f, 1.0f));
     expected = expected * puppet->bones[0].inv_bind;
     EXPECT_TRUE(uniform.isApprox(expected.matrix(), 1e-5));
-    Eigen::Affine3d local = Eigen::Affine3d::Identity();
-    local.translate(Eigen::Vector3d(3, 2, 0));
+    linalg::Affine3d local = linalg::Affine3d::Identity();
+    local.translate(linalg::Vector3d(3, 2, 0));
     child->UpdateTrans();
     EXPECT_TRUE(child->ModelTrans().isApprox(
         parent->ModelTrans() * (expected * attachment).matrix().cast<double>() * local.matrix(), 1e-5));
-    child->SetTranslate(Eigen::Vector3f(4, 6, 0));
+    child->SetTranslate(linalg::Vector3f(4, 6, 0));
     updater.FrameBegin();
     updater.UpdateUniforms(parent.get(), sprites, capture_bones);
     ASSERT_EQ(bone_updates, 3);
     EXPECT_TRUE(uniform.isApprox(expected.matrix(), 1e-5));
-    local = Eigen::Affine3d::Identity();
-    local.translate(Eigen::Vector3d(4, 6, 0));
+    local = linalg::Affine3d::Identity();
+    local.translate(linalg::Vector3d(4, 6, 0));
     child->UpdateTrans();
     EXPECT_TRUE(child->ModelTrans().isApprox(
         parent->ModelTrans() * (expected * attachment).matrix().cast<double>() * local.matrix(), 1e-5));
@@ -4565,8 +4565,8 @@ TEST(SceneSchema, ParserUsesStableRuntimeNamesForDuplicateImageLayerNames) {
     EXPECT_FALSE(scene->runtime->HasNodeNamed("tap target"));
     EXPECT_TRUE(scene->runtime->HasNodeNamed("__we_layer_20"));
     EXPECT_TRUE(scene->runtime->HasNodeNamed("__we_layer_21"));
-    EXPECT_EQ(scene->runtime->NodeSize("__we_layer_20"), Eigen::Vector2f(64.0f, 32.0f));
-    EXPECT_EQ(scene->runtime->NodeSize("__we_layer_21"), Eigen::Vector2f(64.0f, 32.0f));
+    EXPECT_EQ(scene->runtime->NodeSize("__we_layer_20"), linalg::Vector2f(64.0f, 32.0f));
+    EXPECT_EQ(scene->runtime->NodeSize("__we_layer_21"), linalg::Vector2f(64.0f, 32.0f));
 }
 
 TEST(SceneSchema, DuplicateNamesResolveInAuthoredOrderWithoutSharingThisLayerBindings) {
@@ -4599,10 +4599,10 @@ TEST(SceneSchema, DuplicateNamesResolveInAuthoredOrderWithoutSharingThisLayerBin
     ASSERT_NE(scene->runtime, nullptr);
     for (int frame = 0; frame < 3; ++frame) {
         scene->runtime->Tick(1.0 / 60.0);
-        EXPECT_EQ(scene->runtime->NodeScale("__we_layer_10"), Eigen::Vector3f::Constant(0.125f));
-        EXPECT_EQ(scene->runtime->NodeScale("__we_layer_11"), Eigen::Vector3f::Constant(9.0f));
-        EXPECT_EQ(scene->runtime->NodeScale("__we_layer_20"), Eigen::Vector3f::Constant(0.25f));
-        EXPECT_EQ(scene->runtime->NodeScale("__we_layer_21"), Eigen::Vector3f::Constant(7.0f));
+        EXPECT_EQ(scene->runtime->NodeScale("__we_layer_10"), linalg::Vector3f::Constant(0.125f));
+        EXPECT_EQ(scene->runtime->NodeScale("__we_layer_11"), linalg::Vector3f::Constant(9.0f));
+        EXPECT_EQ(scene->runtime->NodeScale("__we_layer_20"), linalg::Vector3f::Constant(0.25f));
+        EXPECT_EQ(scene->runtime->NodeScale("__we_layer_21"), linalg::Vector3f::Constant(7.0f));
     }
     EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
     auto without_scripts = parser.Parse("duplicate-name-no-runtime", source, vfs, sound);
@@ -4643,8 +4643,8 @@ TEST(SceneSchema, DuplicateLayerAliasesIgnoreMalformedEntriesAndKeepValidLookup)
         ASSERT_NE(scene->runtime, nullptr);
         EXPECT_EQ(scene->runtime->ResolveLayerName("shared"), "__we_layer_10");
         scene->runtime->Tick(1.0 / 60.0);
-        EXPECT_EQ(scene->runtime->NodeScale("__we_layer_10"), Eigen::Vector3f::Constant(0.125f));
-        EXPECT_EQ(scene->runtime->NodeScale("__we_layer_11"), Eigen::Vector3f::Ones());
+        EXPECT_EQ(scene->runtime->NodeScale("__we_layer_10"), linalg::Vector3f::Constant(0.125f));
+        EXPECT_EQ(scene->runtime->NodeScale("__we_layer_11"), linalg::Vector3f::Ones());
         EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
     }
 }
@@ -4843,7 +4843,7 @@ TEST(SceneSchema, OriginTimelineComponentsUseOneLoopAndPreserveUnkeyedAxes) {
     ASSERT_NE(scene, nullptr);
     auto& runtime = *scene->runtime;
     const auto expect_origin = [&](float x, float y) {
-        EXPECT_EQ(runtime.NodeTranslate("looping card"), Eigen::Vector3f(x, y, 30));
+        EXPECT_EQ(runtime.NodeTranslate("looping card"), linalg::Vector3f(x, y, 30));
     };
     runtime.Tick(5.0);
     expect_origin(10, 20); // before the first x key: zero relative offset
@@ -4919,7 +4919,7 @@ TEST(SceneSchema, OriginTimelineDoesNotOverrideAScriptOrUserProperty) {
         ASSERT_NE(scene, nullptr);
         auto& runtime = *scene->runtime;
         runtime.Tick(1.0);
-        EXPECT_EQ(runtime.NodeTranslate("bound card"), Eigen::Vector3f(7, 8, 9));
+        EXPECT_EQ(runtime.NodeTranslate("bound card"), linalg::Vector3f(7, 8, 9));
         EXPECT_EQ(runtime.FindScalarAnimation("bound card", "unused"), nullptr);
         EXPECT_EQ(runtime.scriptErrorCount(), 0u);
     }
@@ -5151,7 +5151,7 @@ TEST(SceneSchema, ScaleAndAnglesTimelinesDoNotOverrideAScriptOrUserProperty) {
             runtime.Tick(1.0);
             const auto pose = std::string_view(key) == "scale" ? runtime.NodeScale("bound card")
                                                               : runtime.NodeRotation("bound card");
-            EXPECT_EQ(pose, Eigen::Vector3f(7, 8, 9));
+            EXPECT_EQ(pose, linalg::Vector3f(7, 8, 9));
             EXPECT_EQ(runtime.FindScalarAnimation("bound card", "unused"), nullptr);
             EXPECT_EQ(runtime.scriptErrorCount(), 0u);
         }
@@ -6549,9 +6549,9 @@ TEST(SceneSchema, CameraZoomTimelineRevealsFullCanvasWithoutResizingRenderTarget
                 270.0 / std::tan(initial_fov * M_PI / 360.0), 1e-3);
     EXPECT_DOUBLE_EQ(perspective->Aspect(), camera->Aspect());
     for (const auto* view : {camera.get(), perspective.get(), linked.get()}) {
-        for (const auto& corner : {Eigen::Vector4d(0, 0, 0, 1),
-                                   Eigen::Vector4d(960, 540, 0, 1)}) {
-            const Eigen::Vector4d clip = view->GetViewProjectionMatrix() * corner;
+        for (const auto& corner : {linalg::Vector4d(0, 0, 0, 1),
+                                   linalg::Vector4d(960, 540, 0, 1)}) {
+            const linalg::Vector4d clip = view->GetViewProjectionMatrix() * corner;
             EXPECT_NEAR(std::abs(clip.x() / clip.w()), 1.0, 1e-6);
             EXPECT_NEAR(std::abs(clip.y() / clip.w()), 1.0, 1e-6);
         }
@@ -6586,8 +6586,8 @@ std::shared_ptr<Scene> ParseCanvasPerspectiveScene(int width, int height,
     }, source.dump(), vfs, sound);
 }
 
-Eigen::Vector4d ClipOf(const SceneCamera& camera, double x, double y, double z) {
-    return camera.GetViewProjectionMatrix() * Eigen::Vector4d(x, y, z, 1.0);
+linalg::Vector4d ClipOf(const SceneCamera& camera, double x, double y, double z) {
+    return camera.GetViewProjectionMatrix() * linalg::Vector4d(x, y, z, 1.0);
 }
 
 TEST(SceneSchema, A2DScenesPerspectiveCameraSitsWhereItsFieldOfViewPutsTheEye) {
@@ -6715,7 +6715,7 @@ TEST(SceneSchema, A2DScenesPerspectiveModelReadsTheEyeTwoThousandUnitsOutWhateve
 
     // A reframed canvas moves the view's centre and the projection's eye; the
     // shader's eye follows the centre and keeps its distance.
-    parsed->FrameCanvas(3.0, Eigen::Vector2f(40.0f, -20.0f));
+    parsed->FrameCanvas(3.0, linalg::Vector2f(40.0f, -20.0f));
     ASSERT_GT(std::abs(perspective.GetPosition().z() - 494.6), 100.0);
     eye = read_eye();
     EXPECT_NEAR(eye[0], 360.0f, 1e-3f);
@@ -7276,14 +7276,14 @@ void main() {
 TEST(SceneSchema, RuntimeScopedUnregisterPreservesExistingSameNameNode) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto previous_node = std::make_shared<SceneNode>(
-        Eigen::Vector3f(25.0f, 0.0f, 0.0f),
-        Eigen::Vector3f::Ones(),
-        Eigen::Vector3f::Zero(),
+        linalg::Vector3f(25.0f, 0.0f, 0.0f),
+        linalg::Vector3f::Ones(),
+        linalg::Vector3f::Zero(),
         "runtime target");
     auto failed_node = std::make_shared<SceneNode>(
-        Eigen::Vector3f(50.0f, 0.0f, 0.0f),
-        Eigen::Vector3f::Ones(),
-        Eigen::Vector3f::Zero(),
+        linalg::Vector3f(50.0f, 0.0f, 0.0f),
+        linalg::Vector3f::Ones(),
+        linalg::Vector3f::Zero(),
         "runtime target");
 
     runtime->RegisterNode("runtime target", previous_node.get());
@@ -7613,8 +7613,8 @@ TEST(SceneSchema, AnEmitterOriginScalesWithItsLayerUnlessTheFileIsWorldspace) {
         ASSERT_NE(layer, nullptr);
         layer->UpdateTrans();
         const auto& at = particles.front().position;
-        const Eigen::Vector3d drawn =
-            (layer->RenderTrans() * Eigen::Vector4d(at.x(), at.y(), at.z(), 1.0)).head<3>();
+        const linalg::Vector3d drawn =
+            (layer->RenderTrans() * linalg::Vector4d(at.x(), at.y(), at.z(), 1.0)).head<3>();
         EXPECT_NEAR(drawn.x(), 320.0, 1.0e-3);
         EXPECT_NEAR(drawn.y(), world_y, 1.0e-3);
     }
@@ -7677,7 +7677,7 @@ TEST(SceneSchema, AWorldspaceLayerStretchesItsSpawnsButNotTheSpeedOfItsParticles
             EXPECT_FALSE(particles.empty());
             layer->UpdateTrans();
             const auto& at = particles.front().position;
-            return Eigen::Vector3d((layer->RenderTrans() * Eigen::Vector4d(at.x(), at.y(), at.z(), 1.0))
+            return linalg::Vector3d((layer->RenderTrans() * linalg::Vector4d(at.x(), at.y(), at.z(), 1.0))
                                        .head<3>());
         };
         const auto first  = drawn_position();
@@ -7748,8 +7748,8 @@ TEST(SceneSchema, AChildSystemOriginScalesWithItsLayerUnlessItsParentIsWorldspac
         ASSERT_EQ(layer->GetChildren().size(), 1u);
         const auto& child_node = layer->GetChildren().front();
         child_node->UpdateTrans();
-        const Eigen::Vector3d placed =
-            (child_node->ModelTrans() * Eigen::Vector4d(0, 0, 0, 1)).head<3>();
+        const linalg::Vector3d placed =
+            (child_node->ModelTrans() * linalg::Vector4d(0, 0, 0, 1)).head<3>();
         EXPECT_NEAR(placed.x(), 320.0, 1.0e-3);
         EXPECT_NEAR(placed.y(), world_y, 1.0e-3);
     }
@@ -8178,14 +8178,14 @@ TEST(SceneSchema, ParserCoverageUsesAuthoredRegionOfPaddedRgbaTexture) {
     ASSERT_NE(scene->runtime, nullptr);
     auto& runtime = *scene->runtime;
     runtime.Tick(0.0);
-    EXPECT_EQ(runtime.NodeSize("puppet image"), Eigen::Vector2f(40.0f, 20.0f));
+    EXPECT_EQ(runtime.NodeSize("puppet image"), linalg::Vector2f(40.0f, 20.0f));
     EXPECT_TRUE(runtime.NodeVisible("puppet image"));
     runtime.SetCursorEnter(true);
     runtime.SetCursorButtons(0, 1, 1);
-    runtime.SetCursorWorldPosition(Eigen::Vector3f(90, 100, 0));
+    runtime.SetCursorWorldPosition(linalg::Vector3f(90, 100, 0));
     runtime.DispatchCursorFrameEvents(false);
     EXPECT_TRUE(runtime.NodeVisible("puppet image"));
-    runtime.SetCursorWorldPosition(Eigen::Vector3f(110, 100, 0));
+    runtime.SetCursorWorldPosition(linalg::Vector3f(110, 100, 0));
     runtime.DispatchCursorFrameEvents(true);
     EXPECT_FALSE(runtime.NodeVisible("puppet image"));
     EXPECT_EQ(runtime.scriptErrorCount(), 0u);
@@ -8474,7 +8474,7 @@ TEST(SceneSchema, TheProgressFillFollowsAPublishedTimeline) {
     SceneNode node;
     runtime->RegisterNodeTranslate("Solid", &node,
                                    std::make_unique<DynamicValue>(
-                                       Eigen::Vector3f(0.0F, 700.0F, 0.0F)));
+                                       linalg::Vector3f(0.0F, 700.0F, 0.0F)));
 
     ScriptedDynamicValue fill(*runtime, R"JS('use strict';
 
@@ -8555,7 +8555,7 @@ export function getDuration() {
     return dur; // Restituisce la durata della canzone
 }
 )JS", "Solid", {},
-                              DynamicValue(Eigen::Vector3f(0.0F, 700.0F, 0.0F)));
+                              DynamicValue(linalg::Vector3f(0.0F, 700.0F, 0.0F)));
 
     // The author places the fill before recording the duration it divides by,
     // so the very first event divides by an unset `dur` and puts the layer at
@@ -8669,7 +8669,7 @@ export function applyUserProperties(changedUserProperties) {
 }
 )JS", "avanti",
                                std::move(script_properties),
-                               DynamicValue(Eigen::Vector3f(1.0F, 1.0F, 1.0F)));
+                               DynamicValue(linalg::Vector3f(1.0F, 1.0F, 1.0F)));
     const ScriptHostContext host {};
 
     scale.reevaluate();
@@ -8827,7 +8827,7 @@ TEST(SceneSchema, ALayerCreatedFromAWorkshopModelIsSizedByItsPictureAndShows) {
     ASSERT_NE(created, nullptr);
     EXPECT_NE(created->Mesh(), nullptr);
     EXPECT_TRUE(created->Visible());
-    EXPECT_TRUE(scene->runtime->NodeSize(created->Name()).isApprox(Eigen::Vector2f(12, 6)));
+    EXPECT_TRUE(scene->runtime->NodeSize(created->Name()).isApprox(linalg::Vector2f(12, 6)));
     EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
 }
 
@@ -9055,8 +9055,8 @@ TEST(SceneSchema, ATextLayerAScriptMakesHangsFromItsOriginLikeASceneOne) {
     }
     ASSERT_NE(node, nullptr);
     ASSERT_NE(node->Mesh(), nullptr);
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(300.0f, 100.0f, 0.0f)));
-    EXPECT_TRUE(runtime.NodeTranslate(name).isApprox(Eigen::Vector3f(300.0f, 100.0f, 0.0f)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(300.0f, 100.0f, 0.0f)));
+    EXPECT_TRUE(runtime.NodeTranslate(name).isApprox(linalg::Vector3f(300.0f, 100.0f, 0.0f)));
     const auto layout = runtime.NodeTextLayout(name);
     ASSERT_TRUE(layout.has_value());
     const auto& vertices = node->Mesh()->GetVertexArray(0);

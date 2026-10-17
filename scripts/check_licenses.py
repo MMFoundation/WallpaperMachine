@@ -221,8 +221,6 @@ class Entry:
 
 COMPONENTS = {
     "spirv_reflect": Entry("Apache-2.0", "vendored, linked as the static archive spirv-reflect-static"),
-    "eigen": Entry("MPL-2.0 AND Apache-2.0 AND BSD-3-Clause AND Minpack",
-                   "Homebrew metadata; header-only, and Eigen/Core includes an Apache-2.0 file (BFloat16.h)"),
     "nlohmann-json": Entry("MIT", "header-only"),
     "argparse": Entry("MIT", "header-only"),
     "miniaudio": Entry("Unlicense OR MIT-0", "vendored header; public domain or MIT-0 at the user's choice"),
@@ -262,7 +260,7 @@ ALIASES = {
     "avfilter": "mwe-ffmpeg", "avdevice": "mwe-ffmpeg", "swscale": "mwe-ffmpeg", "postproc": "mwe-ffmpeg",
     "qjs": "quickjs-ng", "glslang": "glslang", "spirv": "glslang", "glslang-default-resource-limits": "glslang",
     # find_package / pkg_check_modules
-    "eigen3": "eigen", "nlohmann_json": "nlohmann-json", "argparse": "argparse", "vulkan-loader": "vulkan-loader",
+    "nlohmann_json": "nlohmann-json", "argparse": "argparse", "vulkan-loader": "vulkan-loader",
     "opengl": "(apple system)", "threads": "(apple system)", "pkgconfig": "(build tool)",
     "liblz4": "lz4", "libavformat": "mwe-ffmpeg", "libavcodec": "mwe-ffmpeg", "libavutil": "mwe-ffmpeg",
     "libswresample": "mwe-ffmpeg",
