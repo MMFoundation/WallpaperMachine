@@ -112,6 +112,9 @@ Renderer/                          this project's own renderer code (not vendore
   Sound/                           wmSound: the scene-sound path (channel remix, resampler, loop pipeline, the
                                    AudioToolbox decoder and the Ogg Vorbis decoder over the vendored stb_vorbis),
                                    tests/ (see sound-decoding.md)
+  Surface/                         wmSurface: the still preview a wallpaper that cannot be drawn shows instead of an empty
+                                   layer (ImageIO and Core Animation, ObjC++ with a C++ header) and the pure rule that
+                                   keeps the picture inside the project's folder; tests/ (see scene-rendering.md)
   Testing/                         synthetic video for the renderer tests: a VideoToolbox H.264 encoder (with and without
                                    B-frames) and an AVAssetWriter passthrough writer behind a C++ header, its own test,
                                    and two small embedded clips (VP9 in WebM, H.264 with B-frames in Matroska)

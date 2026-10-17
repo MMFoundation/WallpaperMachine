@@ -74,6 +74,15 @@ if(TARGET wmMedia AND EXISTS "${WESCENE_SOUND_DIR}/CMakeLists.txt")
     add_subdirectory("${WESCENE_SOUND_DIR}" "${CMAKE_BINARY_DIR}/Renderer/Sound")
 endif()
 
+# This project's own surface pieces (wmSurface): the still preview a wallpaper
+# that cannot be drawn shows instead of an empty layer, in the repository's
+# top-level Renderer/Surface. Self-contained: ImageIO and Core Animation only.
+get_filename_component(
+    WESCENE_SURFACE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../Renderer/Surface" ABSOLUTE)
+if(EXISTS "${WESCENE_SURFACE_DIR}/CMakeLists.txt")
+    add_subdirectory("${WESCENE_SURFACE_DIR}" "${CMAKE_BINARY_DIR}/Renderer/Surface")
+endif()
+
 include_directories(SYSTEM third_party)
 add_subdirectory(third_party)
 
@@ -120,6 +129,9 @@ if(BUILD_TESTS)
     endif()
     if(TARGET wmSound)
         add_subdirectory("${WESCENE_SOUND_DIR}/tests" "${CMAKE_BINARY_DIR}/Renderer/Sound/tests")
+    endif()
+    if(TARGET wmSurface)
+        add_subdirectory("${WESCENE_SURFACE_DIR}/tests" "${CMAKE_BINARY_DIR}/Renderer/Surface/tests")
     endif()
 endif()
 

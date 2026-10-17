@@ -176,12 +176,15 @@ class RegistryCoverageTests(unittest.TestCase):
     def test_every_test_executable_runs_in_the_check_or_says_why_not(self):
         cmake = (check_renderer.RENDERER / "external/open-wallpaper-engine/tests/CMakeLists.txt").read_text()
         built = set(re.findall(r"add_executable\(\s*(\w+)", cmake))
-        # The project's own readers and sound path define theirs through wm_media_test() and
-        # wm_sound_test() in Renderer/Media/tests and Renderer/Sound/tests.
+        # The project's own readers, sound path and surface pieces define theirs through
+        # wm_media_test(), wm_sound_test() and wm_surface_test() in Renderer/Media/tests,
+        # Renderer/Sound/tests and Renderer/Surface/tests.
         own = (check_renderer.ROOT / "Renderer/Media/tests/CMakeLists.txt").read_text()
         built |= set(re.findall(r"^wm_media_test\(\s*(\w+)", own, re.MULTILINE))
         sound = (check_renderer.ROOT / "Renderer/Sound/tests/CMakeLists.txt").read_text()
         built |= set(re.findall(r"^\s*wm_sound_test\(\s*(\w+)", sound, re.MULTILINE))
+        surface = (check_renderer.ROOT / "Renderer/Surface/tests/CMakeLists.txt").read_text()
+        built |= set(re.findall(r"^\s*wm_surface_test\(\s*(\w+)", surface, re.MULTILINE))
         run = {*check_renderer.REGRESSION_BINARIES, check_renderer.OFFSCREEN_PROBE, check_renderer.RELOAD_PROBE}
         self.assertEqual(built - run - set(check_renderer.MANUAL_BINARIES), set())
         self.assertEqual(run & set(check_renderer.MANUAL_BINARIES), set())

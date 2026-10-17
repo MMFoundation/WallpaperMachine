@@ -117,6 +117,9 @@ fn emit_static_link_flags(build_dir: &Path) {
         // layer; the layer depends on the readers, so it comes first.
         "wmMediaApple",
         "wmMedia",
+        // The still preview a wallpaper that cannot be drawn shows (Renderer/Surface);
+        // the scene engine calls it, and it needs nothing else of ours.
+        "wmSurface",
         "spirv-reflect-static",
     ] {
         println!("cargo:rustc-link-lib=static={lib}");
@@ -176,6 +179,7 @@ fn static_link_search_paths(build_dir: &Path) -> Vec<PathBuf> {
         build_dir.join("Renderer/Sound"),
         build_dir.join("Renderer/Media"),
         build_dir.join("Renderer/Media/Apple"),
+        build_dir.join("Renderer/Surface"),
     ]
 }
 

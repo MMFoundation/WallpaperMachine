@@ -156,10 +156,16 @@ if(APPLE)
   list(APPEND WESCENE_MEDIA_LIBS wmMediaApple)
 endif()
 
+# The still preview a wallpaper that cannot be drawn shows (Renderer/Surface).
+if(NOT TARGET wmSurface)
+  message(FATAL_ERROR "wescene-renderer needs Renderer/Surface (target wmSurface): "
+                      "configure it from a full WallpaperMachine checkout")
+endif()
+
 target_link_libraries(
   ${PROJECT_NAME}
   PUBLIC wpUtils
-  PRIVATE ${InteralLib} ${WESCENE_MEDIA_LIBS} nlohmann_json::nlohmann_json quickjs::quickjs PkgConfig::LZ4
+  PRIVATE ${InteralLib} ${WESCENE_MEDIA_LIBS} wmSurface nlohmann_json::nlohmann_json quickjs::quickjs PkgConfig::LZ4
           Freetype::Freetype
           PkgConfig::AVFORMAT
           PkgConfig::AVCODEC
