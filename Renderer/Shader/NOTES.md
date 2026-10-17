@@ -23,6 +23,15 @@ over the shipped shaders (and over workshop shaders unpacked under
 `artifacts/p5/workshop-shaders/<id>/shaders/`, which it skips when absent);
 `tests/robustness.rs` feeds it garbled and hostile text.
 
+Step 3 (part C1 of the spec) is the module `dialect`: `expand` (macro expansion),
+`parse` (tokens to the tree of `ast`), `ty` and `builtins` (the type model and what is
+known about calls by name), `convert` (the typed rewrite: `expr`, `coerce`, `call`, `stmt`,
+`items`, `special`, `helpers`), `print` (tree to GLSL text) and `usage` (the use facts of
+R7). `dialect::convert_stage` is the entry point; its result carries the text *and* the
+rewritten tree, so the interface and resource parts can work on the tree.
+`tests/dialect_robustness.rs` is the hostile-input test of this part (run on a 2 MiB stack),
+`tests/gpu_probe.rs` the opt-in Metal probes.
+
 ## Dependencies
 
 - `naga` 29.0.3 by path (`../upstream/naga` from `Renderer/`), features
@@ -238,16 +247,146 @@ Metadata and protocol:
     an include; `Diagnostic.origin` is a renderer-only field, not a key of the
     diagnostics document.
 
+## Step 3 choices (dialect front end, type rules, conversions)
+
+Design:
+
+43. **Macros are expanded here.** Wallpaper Engine's compiler expands macros before it sees
+    types, so every type rule (R20, R101, R102, R104a) is satisfied by expanding them once,
+    before parsing; no rule has to look into a replacement list. `#define` and `#undef` lines are
+    consumed in source order (a macro defined in a function body applies from there on); the
+    converted text therefore carries no `#define` (spec 2.2 and 10.22 allow this; the few
+    "definition stays present" checks are replaced by checks of the expanded meaning). Expansion
+    follows the usual rescanning model with a hide set; a function-like macro name without `(`,
+    or with the wrong argument count, is left alone; `#` and `##` are not supported (no shipped or
+    workshop shader uses them). Replacement tokens take the span of the use. Bounds: 1,000,000
+    produced tokens, invocations nested 64 deep in arguments.
+44. **Comments.** Ordinary comments are dropped (the lexer drops them). WE annotation lines
+    between top-level items are kept as written; inside a function body they are dropped.
+    Strings pass through as tokens.
+45. **Leniency.** The parser is a real C-like grammar. Only delimiter problems are hard failures
+    (R6, reported at the opening delimiter, or at a closer that closes nothing). An item or
+    statement the grammar cannot place is carried through as raw text for naga to judge (P3),
+    and so is a stray character (R5, E19). Statements nest at most 128 deep, parenthesised
+    expressions likewise, and an expression tree is at most 256 deep (hostile input becomes raw
+    text instead of a stack overflow; `ast::Expr::depth` makes the check O(1)).
+46. **Types are coarse** (`ty.rs`): scalars, vectors, float matrices, arrays, structs, samplers,
+    `void`, and `Unknown`. `Unknown` switches every rule off for the construct (P3): a
+    conversion is inserted only where both types are known. An undeclared name, a call of an
+    undeclared function and a swizzle with letters of no set are `Unknown`.
+47. **What naga does is measured, not assumed** (naga 29.0.3, checked with a harness before
+    the rules were fixed): int to float and int to uint scalars convert implicitly in arithmetic
+    and in initializers, uint to int does not, `vec3(bool)` is refused, `float(bool)` works,
+    `mat3(mat4)` and `mat3(mat4x3)` work, float `%` works and writes Metal `fmod`, vector `%`
+    scalar does not, `min(vec3, 2)` works, `pow(vec3, 2.0)` does not, a `for` condition that
+    starts with a type name is read as a declaration, and the declarators after an array
+    declarator in one declaration list get the array type.
+48. **Conversions** (R23 to R45). Number to bool is `x != 0` with the zero of the number's type;
+    bool to number is the constructor `float(b)`, `int(b)`, `uint(b)` (`vecN(float(b))` for a
+    vector target); float to int and uint to int are constructors; int to float is a
+    constructor for a variable and a rewritten literal (`3` to `3.0`, `2u` to `2.0`, `3`
+    to `3u`); a vector narrows with a leading swizzle (`(expr).xy`), a scalar broadcasts with the
+    constructor of the target type, a vector into a scalar takes `.x`. Widening a vector is never
+    done (R32) except the one case of R31.
+49. **Float `%` stays the operator.** naga's glsl-in accepts `%` on floats and the Metal writer
+    emits `metal::fmod`, the remainder with the sign of the dividend (R47). The probe of
+    `tests/gpu_probe.rs` checks that value on the GPU. So no helper function is generated: both
+    operands become floats of one shape (an `int` side is converted, a scalar beside a vector
+    is broadcast) and `%=` likewise. `fmod(a, b)` is the same operator. Integer `%` is untouched
+    (R46) and `%` of unknown types is left alone (R50).
+50. **Comparison of an integer with a float** compares as floats (`float(i) < x`), except that an
+    integral float literal beside an integer counter is rewritten as an integer (`i < 4.0` to
+    `i < 4`), which is R39's loop-bound case; `i < 2.5` compares in float.
+51. **R31** pads a `vec2(...)` or `CAST2(...)` operand of `+` or `-` with a zero third component
+    when the sum flows into a 3-vector (initializer, assignment or return) and the other operand
+    is a 3-vector by type. Nothing else widens.
+52. **`mul`** is `(b) * (a)` with the operands typed as a product (`mat4x3 * vec4` is a `vec3`),
+    and two float vectors of one width are `dot(a, b)` (decided in the spec). A user two-argument
+    `mul` wins for the calls it accepts. A user function whose name is also a built-in or dialect
+    name wins only when every argument is known and matches without a change of shape (R65, R71);
+    otherwise the dialect meaning applies.
+53. **`ddy`** keeps the old compiler's `dFdy(-(x))`. The sign depends on the renderer's clip-space
+    orientation, which a front-end test cannot see; parity with today's pictures decides it until
+    a derivative probe in the renderer says otherwise (R15, open question 4).
+54. **`smoothstep` with reversed edges** is not rewritten. The Metal probe
+    (`tests/probes/smoothstep_reversed.swift`, run with `WM_SHADER_GPU_PROBES=1 cargo test --test
+    gpu_probe`) shows that `metal::smoothstep(0.9, 0.4, x)` already returns the saturated-ratio
+    Hermite curve of Direct3D, for edges the compiler can fold, for runtime edges and for
+    vectors; R106 says nothing is rewritten then. Only the shape rules of R28 apply.
+55. **Helpers** (`convert/helpers.rs`) are emitted only when used, once each, ahead of the first
+    function, under the prefix `_wm_` (or `_wm1_`, `_wm2_`... when the stage uses an identifier
+    that starts with it): `clip` for float and the vectors, the matrix `inverse` for 2, 3 and 4
+    (checked numerically against a reference; all three sizes are emitted when the argument
+    type is unknown), and the stand-in `PerformLighting_V1` (both overloads, under its own name,
+    emitted when the stage calls it and nothing declares it).
+56. **Array and sampler parameters** (R66, R67). A function with such a parameter is kept as a
+    template and dropped from the output. Each call specialises it for the global array or sampler
+    it passes: the clone is named `<name>_wm<N>` (N counts distinct specialisations), loses the
+    parameter, reads the global (substitution respects shadowing locals and never touches member
+    names), and is emitted ahead of the function that first calls it. An array parameter the body
+    writes is copied into a local initialised from the global instead. A call that passes a local
+    or computed value is refused with a diagnostic that names "array-parameter specialisation".
+    `MAKE_SAMPLER2D_ARGUMENT(t)` is just `t`.
+57. **Stage inputs the shader writes** (R75). The interface variable is declared as `_we_in_<name>`
+    and the author's name becomes a global of the same type, assigned from it at the start of
+    `main` (ahead of the moved global initializers). A write is an assignment, a compound
+    assignment or `++`/`--` rooted at the input, or the input passed to an `out`/`inout`
+    parameter; shadowing locals are told apart by scope.
+58. **Global initializers** (R72): an initializer that is not built from literals, constants and
+    constructors (calls of functions, uniforms, inputs, mutable globals, `gl_` names) moves to the
+    start of `main`, in declaration order, and the declarator loses `const`; a declaration list is
+    split so only the moved declarators change. A stage without `main` keeps its initializers.
+59. **Reserved words** (R70) are renamed to `<name>_wm` (a taken spelling gets a number) for
+    locals, parameters, struct fields, globals and function names, consistently across
+    declaration and uses; `sample` is the qualifier only in a qualifier run in front of a type.
+60. **Alpha-to-coverage** (R83): the colour output is `gl_FragColor` or a fragment `out vec4`; the
+    form is matched on the tree, so spacing, parentheses and the order of the `saturate` wrapper
+    do not matter, and the constants compare by value (`0.5`, `0.0001`).
+61. **Builtin variables** (R88): `gl_VertexID` and `gl_InstanceID` read as the `uint` builtins
+    `gl_VertexIndex` and `gl_InstanceIndex`; a restating `in`/`attribute`/`varying uint
+    gl_VertexID;` is dropped; any other `gl_` declaration is left as written.
+62. **Header and idempotence.** The text starts with `#version 450` and `precision highp float;`.
+    An input `#version` line is dropped and a `precision highp float;` statement is not repeated,
+    so converting the output again gives the same text. `#extension` and `#pragma` lines pass
+    through in place.
+63. **Spans and diagnostics.** A syntax failure (R6) has pass `Parse`; a refusal of this part
+    (unsupported name, sampler3D coordinate, array-parameter specialisation) has pass `Codegen`
+    and the span of the construct; success carries the one informational `Codegen` entry.
+64. **Float swizzle on a scalar** (`f.x`, `f.xxx`, legal HLSL) is not supported: the swizzle's
+    type is `Unknown` and naga refuses it (the spec asks for no such rule).
+
+## What a later step takes from this one
+
+The interface and resource steps (C2, D) receive `Converted::module`. Still in the form
+the author wrote it, for them to rewrite: `uniform`, `attribute`, `varying`, `in` and `out`
+declarations (including `layout(...)`), `uniform sampler2D` declarations and the
+`texture(name, coord)` / `textureLod(name, ...)` calls on them (R84: the texture-and-sampler
+split), `gl_FragColor`, widened scalar uniform arrays (R104b), the 3D texture check (R105d) and
+the cross-stage varying widths (R89). `src/dialect/tests/layout.rs` is a stand-in that does the
+minimum of that to compile converted stages with naga; it is test code and not the interface step.
+
 ## Not yet done (planned for later steps)
 
-The C ABI and last-error buffer (R1 to R9, R70 buffer, R89 to R93), the
-engine-backed include provider (callback, free callback; the in-memory and
-closure providers exist), uniform declaration merging across stages (R46),
-array-bound resolution (R100), resource index allocation (R31 to R35, R102),
-the legalizer (including the lowering of `CASTI`, `CASTU`, `CASTF`, `CAST4U`,
-`DECLARE_SAMPLER2D_PARAMETER`, `MAKE_SAMPLER2D_ARGUMENT`: this step only passes
-them through, test item 65), GLSL generation, the naga calls and the MSL
-writer, the NV12 variant (R63 to R69 of the contract part), the MSL/golden
-checks of R88, and the end-to-end checks of test items 58 (compile half) and
-66. The cache identity is not bumped yet: nothing this step adds reaches a
-compiled program until the pipeline uses it.
+The C ABI and last-error buffer (R1 to R9, R70 buffer, R89 to R93), the engine-backed include
+provider (callback, free callback; the in-memory and closure providers exist), uniform
+declaration merging across stages (R46), array-bound resolution (R100), resource index
+allocation (R31 to R35, R102), the declaration planning, interface and resource layout of part
+C2, the naga calls and the MSL writer in the pipeline, the NV12 variant (R63 to R69 of the
+contract part), the MSL/golden checks of R88, and the end-to-end checks of test items 58
+(compile half) and 66. The cache identity is not bumped: nothing this step adds reaches a
+compiled program until the pipeline uses it. `src/dialect/tests/boundary.rs` pins a
+digest of the converter's output per `PIPELINE_REVISION`, so the first change of converted
+output after that revision forces a deliberate bump.
+
+## Measurements (step 3)
+
+Release build, converting the preprocessed stages of the shipped shaders under three combo sets
+(318 stages) and of the local workshop library (1,677 stages): median 32 µs and worst 0.9 ms per
+stage for the shipped ones, median 74 µs and worst 0.7 ms for the workshop ones. Every shipped
+stage converts and compiles to Metal through naga (with the test-only layout stand-in), converting
+the output again gives the same text for all of them, and 1,653 of 1,680 workshop stages
+compile; the 27 that do not are named in `workshop_shaders_convert_and_compile_through_naga`
+(an undeclared varying, a declaration that is not GLSL, the varying-width and widened-array
+cases that belong to the interface and resource parts, and a `#if` the preprocessor refuses).
+Mutation fuzzing of the shipped shaders (600,000 edited stages, release) and random token soup
+(300,000 stages) produced no panic.

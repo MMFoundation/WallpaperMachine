@@ -12,6 +12,7 @@ pub mod annotation;
 pub mod binding;
 pub mod cache_key;
 pub mod diagnostic;
+pub mod dialect;
 pub mod error;
 pub mod facts;
 pub mod identity;
