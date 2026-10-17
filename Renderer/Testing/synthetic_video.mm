@@ -198,6 +198,160 @@ std::unique_ptr<EncodedGop> EncodeFrames(int frames, int gop_size, int64_t bit_r
     return gop;
 }
 
+/// A flat picture in 10-bit biplanar 4:2:0, the layout the HEVC Main10 encoder
+/// takes. Each code sits in the top ten bits of its 16-bit word, where the
+/// format keeps it. Tagged the way the stream is to be.
+CVPixelBufferRef MakeTenBitPicture(const TenBitPicture& picture, TenBitTagging tagging,
+                                   int max_content_light_nits) {
+    NSDictionary* attributes = @{
+        (__bridge NSString*)kCVPixelBufferIOSurfacePropertiesKey : @{},
+    };
+    CVPixelBufferRef buffer = nullptr;
+    if (CVPixelBufferCreate(kCFAllocatorDefault, kFrameWidth, kFrameHeight,
+                            kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange,
+                            (__bridge CFDictionaryRef)attributes, &buffer) != kCVReturnSuccess) {
+        return nullptr;
+    }
+    CVPixelBufferLockBaseAddress(buffer, 0);
+    auto*        luma        = static_cast<uint8_t*>(CVPixelBufferGetBaseAddressOfPlane(buffer, 0));
+    const size_t luma_stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0);
+    for (int y = 0; y < kFrameHeight; ++y) {
+        auto* row = reinterpret_cast<uint16_t*>(luma + static_cast<size_t>(y) * luma_stride);
+        for (int x = 0; x < kFrameWidth; ++x) row[x] = static_cast<uint16_t>(picture.y << 6);
+    }
+    auto*        chroma        = static_cast<uint8_t*>(CVPixelBufferGetBaseAddressOfPlane(buffer, 1));
+    const size_t chroma_stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 1);
+    for (int y = 0; y < kFrameHeight / 2; ++y) {
+        auto* row = reinterpret_cast<uint16_t*>(chroma + static_cast<size_t>(y) * chroma_stride);
+        for (int x = 0; x < kFrameWidth; x += 2) {
+            row[x]     = static_cast<uint16_t>(picture.cb << 6);
+            row[x + 1] = static_cast<uint16_t>(picture.cr << 6);
+        }
+    }
+    CVPixelBufferUnlockBaseAddress(buffer, 0);
+
+    const bool bt709 = tagging == TenBitTagging::Bt709;
+    CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey,
+                          bt709 ? kCVImageBufferColorPrimaries_ITU_R_709_2 : kCVImageBufferColorPrimaries_ITU_R_2020,
+                          kCVAttachmentMode_ShouldPropagate);
+    CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey,
+                          bt709 ? kCVImageBufferYCbCrMatrix_ITU_R_709_2 : kCVImageBufferYCbCrMatrix_ITU_R_2020,
+                          kCVAttachmentMode_ShouldPropagate);
+    CFStringRef transfer = kCVImageBufferTransferFunction_ITU_R_709_2;
+    if (tagging == TenBitTagging::Pq) transfer = kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ;
+    if (tagging == TenBitTagging::Hlg) transfer = kCVImageBufferTransferFunction_ITU_R_2100_HLG;
+    CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, transfer, kCVAttachmentMode_ShouldPropagate);
+    if (max_content_light_nits > 0) {
+        // CTA-861.3: MaxCLL and MaxFALL, 16-bit big-endian nits.
+        const uint8_t bytes[4] { static_cast<uint8_t>(max_content_light_nits >> 8),
+                                 static_cast<uint8_t>(max_content_light_nits & 0xff),
+                                 static_cast<uint8_t>(max_content_light_nits >> 8),
+                                 static_cast<uint8_t>(max_content_light_nits & 0xff) };
+        CFDataRef data = CFDataCreate(kCFAllocatorDefault, bytes, sizeof(bytes));
+        CVBufferSetAttachment(buffer, kCVImageBufferContentLightLevelInfoKey, data,
+                              kCVAttachmentMode_ShouldPropagate);
+        CFRelease(data);
+    }
+    return buffer;
+}
+
+/// Encodes `kTenBitFrames` frames of one flat colour as HEVC Main10, no
+/// reordering. Empty when there is no encoder or it did not return every frame.
+std::unique_ptr<EncodedGop> EncodeTenBit(TenBitTagging tagging, const TenBitPicture& picture,
+                                         int max_content_light_nits) {
+    auto gop = std::make_unique<EncodedGop>();
+
+    VTCompressionSessionRef session = nullptr;
+    @autoreleasepool {
+        NSDictionary* specification = @{
+            (__bridge NSString*)kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder : @YES,
+        };
+        if (VTCompressionSessionCreate(kCFAllocatorDefault, kFrameWidth, kFrameHeight,
+                                       kCMVideoCodecType_HEVC,
+                                       (__bridge CFDictionaryRef)specification, nullptr,
+                                       kCFAllocatorDefault, nullptr, nullptr,
+                                       &session) != noErr ||
+            session == nullptr) {
+            return gop;
+        }
+    }
+    SetProperty(session, kVTCompressionPropertyKey_RealTime, kCFBooleanFalse);
+    SetProperty(session, kVTCompressionPropertyKey_AllowFrameReordering, kCFBooleanFalse);
+    SetProperty(session, kVTCompressionPropertyKey_ProfileLevel, kVTProfileLevel_HEVC_Main10_AutoLevel);
+    const bool bt709 = tagging == TenBitTagging::Bt709;
+    SetProperty(session, kVTCompressionPropertyKey_ColorPrimaries,
+                bt709 ? kCVImageBufferColorPrimaries_ITU_R_709_2 : kCVImageBufferColorPrimaries_ITU_R_2020);
+    SetProperty(session, kVTCompressionPropertyKey_YCbCrMatrix,
+                bt709 ? kCVImageBufferYCbCrMatrix_ITU_R_709_2 : kCVImageBufferYCbCrMatrix_ITU_R_2020);
+    CFStringRef transfer = kCVImageBufferTransferFunction_ITU_R_709_2;
+    if (tagging == TenBitTagging::Pq) transfer = kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ;
+    if (tagging == TenBitTagging::Hlg) transfer = kCVImageBufferTransferFunction_ITU_R_2100_HLG;
+    SetProperty(session, kVTCompressionPropertyKey_TransferFunction, transfer);
+    @autoreleasepool {
+        SetProperty(session, kVTCompressionPropertyKey_MaxKeyFrameInterval, (__bridge CFNumberRef)@(kTenBitFrames));
+        SetProperty(session, kVTCompressionPropertyKey_ExpectedFrameRate, (__bridge CFNumberRef)@(30));
+        SetProperty(session, kVTCompressionPropertyKey_AverageBitRate, (__bridge CFNumberRef)@(20000000));
+    }
+    if (VTCompressionSessionPrepareToEncodeFrames(session) != noErr) {
+        VTCompressionSessionInvalidate(session);
+        CFRelease(session);
+        return gop;
+    }
+
+    struct Collected {
+        std::mutex                     mutex;
+        bool                           failed { false };
+        std::vector<CMSampleBufferRef> samples;
+    } collected;
+    Collected* const shared = &collected;
+    bool             failed = false;
+    for (int index = 0; index < kTenBitFrames && !failed; ++index) {
+        @autoreleasepool {
+            CVPixelBufferRef source = MakeTenBitPicture(picture, tagging, max_content_light_nits);
+            if (source == nullptr) {
+                failed = true;
+                break;
+            }
+            const OSStatus status = VTCompressionSessionEncodeFrameWithOutputHandler(
+                session, source, CMTimeMake(static_cast<int64_t>(index) * kFrameTicks, kTimescale),
+                CMTimeMake(kFrameTicks, kTimescale), nullptr, nullptr,
+                ^(OSStatus result, VTEncodeInfoFlags, CMSampleBufferRef sample) {
+                    std::lock_guard lock(shared->mutex);
+                    if (result != noErr || sample == nullptr) {
+                        shared->failed = true;
+                        return;
+                    }
+                    CFRetain(sample);
+                    shared->samples.push_back(sample);
+                });
+            CFRelease(source);
+            if (status != noErr) failed = true;
+        }
+    }
+    if (!failed && VTCompressionSessionCompleteFrames(session, kCMTimeInvalid) != noErr) failed = true;
+    VTCompressionSessionInvalidate(session);
+    CFRelease(session);
+
+    std::lock_guard lock(collected.mutex);
+    std::vector<CMSampleBufferRef> samples = std::move(collected.samples);
+    if (failed || collected.failed || static_cast<int>(samples.size()) != kTenBitFrames) {
+        for (CMSampleBufferRef sample : samples) CFRelease(sample);
+        return gop;
+    }
+    gop->samples = std::move(samples);
+    gop->frames  = kTenBitFrames;
+    gop->format  = CMSampleBufferGetFormatDescription(gop->samples.front());
+    if (gop->format == nullptr) {
+        gop->samples.clear();
+        return gop;
+    }
+    CFRetain(gop->format);
+    for (CMSampleBufferRef sample : gop->samples) {
+        if (IsSyncSample(sample)) ++gop->keyframes;
+    }
+    return gop;
+}
+
 const EncodedGop& SharedGop() {
     static const std::unique_ptr<EncodedGop> gop = EncodeFrames(
         kGopFrames, kGopFrames,
@@ -341,6 +495,18 @@ bool WriteReorderedVideo(const std::filesystem::path& path, const std::string& s
     const EncodedGop& gop = SharedReorderedGop();
     if (gop.empty() || !gop.has_reordering) return false;
     return WriteMuxedVideo(gop, path, 1, salt, std::nullopt);
+}
+
+bool TenBitEncoderAvailable() {
+    static const bool available = !EncodeTenBit(TenBitTagging::Pq, TenBitPicture {}, 0)->empty();
+    return available;
+}
+
+bool WriteTenBitVideo(const std::filesystem::path& path, TenBitTagging tagging, TenBitPicture picture,
+                      const std::string& salt, int max_content_light_nits) {
+    const auto gop = EncodeTenBit(tagging, picture, max_content_light_nits);
+    if (gop->empty()) return false;
+    return WriteMuxedVideo(*gop, path, 1, salt, std::nullopt);
 }
 
 bool WriteLongGopVideo(const std::filesystem::path& path, const std::string& salt) {

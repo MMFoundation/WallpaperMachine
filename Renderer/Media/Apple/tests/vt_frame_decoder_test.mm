@@ -898,5 +898,97 @@ TEST_F(VtFrameDecoderTest, AVp9StreamFromWebMGetsASynthesizedRecordAndASession)
     EXPECT_EQ(why, std::string(kFormatNotSupported) + "4:4:4 chroma video");
 }
 
+
+// The 10-bit path end to end up to the GPU: a Main10 clip, read by the ISO-BMFF
+// reader, becomes a format description whose colour tags VideoToolbox puts on
+// every decoded frame as attachments, which is where the scene video import
+// reads the curve, the primaries and the matrix from.
+TEST_F(VtFrameDecoderTest, TenBitHevcClipsDecodeToTenBitFramesThatCarryTheirTags)
+{
+    if (! tm::TenBitEncoderAvailable()) GTEST_SKIP() << "no VideoToolbox HEVC Main10 encoder on this machine";
+    struct Case {
+        tm::TenBitTagging tagging;
+        CFStringRef       transfer;
+        CFStringRef       primaries;
+        CFStringRef       matrix;
+    };
+    const Case cases[] = {
+        { tm::TenBitTagging::Pq, kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ,
+          kCVImageBufferColorPrimaries_ITU_R_2020, kCVImageBufferYCbCrMatrix_ITU_R_2020 },
+        { tm::TenBitTagging::Hlg, kCVImageBufferTransferFunction_ITU_R_2100_HLG,
+          kCVImageBufferColorPrimaries_ITU_R_2020, kCVImageBufferYCbCrMatrix_ITU_R_2020 },
+        { tm::TenBitTagging::Bt709, kCVImageBufferTransferFunction_ITU_R_709_2,
+          kCVImageBufferColorPrimaries_ITU_R_709_2, kCVImageBufferYCbCrMatrix_ITU_R_709_2 },
+    };
+    const tm::TenBitPicture picture { 520, 450, 590 };
+    int                     index = 0;
+    for (const Case& test : cases) {
+        SCOPED_TRACE(index);
+        const auto path = directory / ("ten-" + std::to_string(index++) + ".mp4");
+        ASSERT_TRUE(tm::WriteTenBitVideo(path, test.tagging, picture, "ten-bit"));
+        auto reader = OpenReader(path);
+        ASSERT_NE(reader, nullptr);
+        EXPECT_EQ(reader->info().bitDepth, 10);
+        auto decoder = MakeDecoder(*reader);
+        ASSERT_NE(decoder, nullptr);
+        EXPECT_EQ(decoder->pixelFormat(), static_cast<std::uint32_t>(kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange));
+
+        const auto frames = Run(*reader, *decoder, 0, reader->samples().size(), true);
+        ASSERT_EQ(frames.size(), static_cast<std::size_t>(tm::kTenBitFrames));
+        for (const DecodedFrame& frame : frames) {
+            const auto buffer = static_cast<CVPixelBufferRef>(frame.pixels.get());
+            EXPECT_EQ(CVPixelBufferGetPixelFormatType(buffer), kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange);
+            EXPECT_TRUE(CVPixelBufferGetIOSurface(buffer) != nullptr);
+            const auto attachment = [&](CFStringRef key) {
+                return static_cast<CFStringRef>(CVBufferCopyAttachment(buffer, key, nullptr));
+            };
+            for (const auto& [key, expected] : { std::pair { kCVImageBufferTransferFunctionKey, test.transfer },
+                                                  std::pair { kCVImageBufferColorPrimariesKey, test.primaries },
+                                                  std::pair { kCVImageBufferYCbCrMatrixKey, test.matrix } }) {
+                CFStringRef value = attachment(key);
+                ASSERT_NE(value, nullptr) << [(__bridge NSString*)key UTF8String] << " is not attached";
+                EXPECT_TRUE(CFEqual(value, expected)) << [(__bridge NSString*)key UTF8String];
+                CFRelease(value);
+            }
+            // The codes survive: 10 bits in the top of each 16-bit word.
+            CVPixelBufferLockBaseAddress(buffer, kCVPixelBufferLock_ReadOnly);
+            const auto* luma = static_cast<const std::uint8_t*>(CVPixelBufferGetBaseAddressOfPlane(buffer, 0));
+            const int   y = reinterpret_cast<const std::uint16_t*>(
+                                luma + (tm::kFrameHeight / 2) * CVPixelBufferGetBytesPerRowOfPlane(buffer, 0))
+                                [tm::kFrameWidth / 2] >> 6;
+            CVPixelBufferUnlockBaseAddress(buffer, kCVPixelBufferLock_ReadOnly);
+            EXPECT_NEAR(y, picture.y, 3);
+        }
+    }
+}
+
+// What a stream states about its own peak reaches the decoded frame, because the
+// tone map starts from it. Reported rather than required: whether an encoder
+// writes the content light level, and whether the decoder returns it, is
+// VideoToolbox's, and the renderer falls back to 1000 nits without it.
+TEST_F(VtFrameDecoderTest, AStatedContentLightLevelIsReportedWhereTheDecoderCarriesIt)
+{
+    if (! tm::TenBitEncoderAvailable()) GTEST_SKIP() << "no VideoToolbox HEVC Main10 encoder on this machine";
+    const auto path = directory / "cll.mp4";
+    ASSERT_TRUE(tm::WriteTenBitVideo(path, tm::TenBitTagging::Pq, tm::TenBitPicture {}, "cll", 600));
+    auto reader = OpenReader(path);
+    ASSERT_NE(reader, nullptr);
+    auto decoder = MakeDecoder(*reader);
+    ASSERT_NE(decoder, nullptr);
+    const auto frames = Run(*reader, *decoder, 0, reader->samples().size(), true);
+    ASSERT_FALSE(frames.empty());
+    const auto buffer = static_cast<CVPixelBufferRef>(frames.front().pixels.get());
+    CFTypeRef  light  = CVBufferCopyAttachment(buffer, kCVImageBufferContentLightLevelInfoKey, nullptr);
+    if (light == nullptr) {
+        RecordProperty("content_light_level", "not carried");
+        return;
+    }
+    ASSERT_EQ(CFGetTypeID(light), CFDataGetTypeID());
+    ASSERT_GE(CFDataGetLength(static_cast<CFDataRef>(light)), 2);
+    const auto* bytes = CFDataGetBytePtr(static_cast<CFDataRef>(light));
+    EXPECT_EQ(bytes[0] << 8 | bytes[1], 600);
+    CFRelease(light);
+}
+
 } // namespace
 } // namespace wallpaper::media::apple

@@ -309,4 +309,144 @@ TEST_F(SyntheticVideo, TheLongClipIsOneGroupOfPicturesWhoseBarCrossesThePicture)
     }
 }
 
+
+// ---- 10-bit clips ---------------------------------------------------------------
+
+namespace
+{
+
+class SyntheticTenBitVideo : public ::testing::Test {
+protected:
+    void SetUp() override {
+        if (!TenBitEncoderAvailable()) GTEST_SKIP() << "no VideoToolbox HEVC Main10 encoder on this machine";
+        static std::atomic<uint64_t> serial { 0 };
+        directory = std::filesystem::temp_directory_path() /
+                    ("owe-synthetic-tenbit-" + std::to_string(::getpid()) + "-" +
+                     std::to_string(serial.fetch_add(1)));
+        std::filesystem::create_directories(directory);
+    }
+    void TearDown() override {
+        std::error_code ec;
+        std::filesystem::remove_all(directory, ec);
+    }
+    std::filesystem::path directory;
+};
+
+CFStringRef ExtensionString(AVAssetTrack* track, CFStringRef key) {
+    auto description = static_cast<CMFormatDescriptionRef>((__bridge void*)track.formatDescriptions.firstObject);
+    return static_cast<CFStringRef>(CMFormatDescriptionGetExtension(description, key));
+}
+
+} // namespace
+
+TEST_F(SyntheticTenBitVideo, EveryTaggingIsHevcMain10AndCarriesItsTagsInTheContainer)
+{
+    struct Case {
+        TenBitTagging tagging;
+        CFStringRef   primaries;
+        CFStringRef   transfer;
+        CFStringRef   matrix;
+    };
+    const Case cases[] = {
+        { TenBitTagging::Pq, kCMFormatDescriptionColorPrimaries_ITU_R_2020,
+          kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ, kCMFormatDescriptionYCbCrMatrix_ITU_R_2020 },
+        { TenBitTagging::Hlg, kCMFormatDescriptionColorPrimaries_ITU_R_2020,
+          kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG, kCMFormatDescriptionYCbCrMatrix_ITU_R_2020 },
+        { TenBitTagging::Bt709, kCMFormatDescriptionColorPrimaries_ITU_R_709_2,
+          kCMFormatDescriptionTransferFunction_ITU_R_709_2, kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2 },
+    };
+    int index = 0;
+    for (const Case& test : cases) {
+        const auto path = directory / ("tagged-" + std::to_string(index++) + ".mp4");
+        ASSERT_TRUE(WriteTenBitVideo(path, test.tagging, TenBitPicture {}, "tagged"));
+        AVURLAsset*   asset = OpenAsset(path);
+        AVAssetTrack* track = VideoTrack(asset);
+        ASSERT_NE(track, nil);
+        ASSERT_EQ(track.formatDescriptions.count, 1u);
+        auto description = static_cast<CMFormatDescriptionRef>((__bridge void*)track.formatDescriptions.firstObject);
+        EXPECT_EQ(CMFormatDescriptionGetMediaSubType(description), kCMVideoCodecType_HEVC);
+        const CMVideoDimensions size = CMVideoFormatDescriptionGetDimensions(description);
+        EXPECT_EQ(size.width, kFrameWidth);
+        EXPECT_EQ(size.height, kFrameHeight);
+        // Main10, and 10 bits in both planes, read from the hvcC record itself.
+        auto atoms = static_cast<CFDictionaryRef>(
+            CMFormatDescriptionGetExtension(description, kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms));
+        ASSERT_NE(atoms, nullptr);
+        auto hvcc = static_cast<CFDataRef>(CFDictionaryGetValue(atoms, CFSTR("hvcC")));
+        ASSERT_NE(hvcc, nullptr);
+        ASSERT_GE(CFDataGetLength(hvcc), 23);
+        const UInt8* record = CFDataGetBytePtr(hvcc);
+        EXPECT_EQ(record[1] & 0x1F, 2) << "general_profile_idc 2 is Main 10";
+        EXPECT_EQ(8 + (record[17] & 0x07), 10) << "luma bit depth";
+        EXPECT_EQ(8 + (record[18] & 0x07), 10) << "chroma bit depth";
+        EXPECT_TRUE(CFEqual(ExtensionString(track, kCMFormatDescriptionExtension_ColorPrimaries), test.primaries));
+        EXPECT_TRUE(CFEqual(ExtensionString(track, kCMFormatDescriptionExtension_TransferFunction), test.transfer));
+        EXPECT_TRUE(CFEqual(ExtensionString(track, kCMFormatDescriptionExtension_YCbCrMatrix), test.matrix));
+
+        const auto samples = ReadCompressedSamples(asset);
+        ASSERT_EQ(samples.size(), static_cast<size_t>(kTenBitFrames));
+        EXPECT_TRUE(samples.front().sync);
+        for (size_t i = 0; i < samples.size(); ++i) {
+            EXPECT_NEAR(samples[i].presentation, static_cast<double>(i) / 30.0, 1e-6) << i;
+        }
+    }
+}
+
+TEST_F(SyntheticTenBitVideo, TheDecodedTenBitPictureIsTheOneTheEncoderWasGiven)
+{
+    const TenBitPicture picture { 600, 440, 580 };
+    const auto          path = directory / "picture.mp4";
+    ASSERT_TRUE(WriteTenBitVideo(path, TenBitTagging::Pq, picture, "picture"));
+    AVURLAsset*   asset = OpenAsset(path);
+    AVAssetTrack* track = VideoTrack(asset);
+    ASSERT_NE(track, nil);
+    NSError*       error  = nil;
+    AVAssetReader* reader = [AVAssetReader assetReaderWithAsset:asset error:&error];
+    AVAssetReaderTrackOutput* output = [AVAssetReaderTrackOutput
+        assetReaderTrackOutputWithTrack:track
+                         outputSettings:@{ (__bridge NSString*)kCVPixelBufferPixelFormatTypeKey :
+                                               @(kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange) }];
+    ASSERT_TRUE(reader != nil && [reader canAddOutput:output]);
+    [reader addOutput:output];
+    ASSERT_TRUE([reader startReading]);
+    int decoded = 0;
+    while (true) {
+        @autoreleasepool {
+            CMSampleBufferRef sample = [output copyNextSampleBuffer];
+            if (sample == nullptr) break;
+            if (CMSampleBufferGetNumSamples(sample) == 0) {
+                CFRelease(sample);
+                continue;
+            }
+            CVPixelBufferRef frame = CMSampleBufferGetImageBuffer(sample);
+            ASSERT_NE(frame, nullptr);
+            CVPixelBufferLockBaseAddress(frame, kCVPixelBufferLock_ReadOnly);
+            const auto* luma   = static_cast<const uint8_t*>(CVPixelBufferGetBaseAddressOfPlane(frame, 0));
+            const auto* chroma = static_cast<const uint8_t*>(CVPixelBufferGetBaseAddressOfPlane(frame, 1));
+            const size_t y_row = CVPixelBufferGetBytesPerRowOfPlane(frame, 0);
+            const size_t c_row = CVPixelBufferGetBytesPerRowOfPlane(frame, 1);
+            const int y = reinterpret_cast<const uint16_t*>(luma + (kFrameHeight / 2) * y_row)[kFrameWidth / 2] >> 6;
+            const auto* c = reinterpret_cast<const uint16_t*>(chroma + (kFrameHeight / 4) * c_row);
+            const int cb  = c[(kFrameWidth / 4) * 2] >> 6;
+            const int cr  = c[(kFrameWidth / 4) * 2 + 1] >> 6;
+            CVPixelBufferUnlockBaseAddress(frame, kCVPixelBufferLock_ReadOnly);
+            // The encoder is lossy, and a flat picture is the case where it is
+            // closest to exact.
+            EXPECT_NEAR(y, picture.y, 3) << "frame " << decoded;
+            EXPECT_NEAR(cb, picture.cb, 3) << "frame " << decoded;
+            EXPECT_NEAR(cr, picture.cr, 3) << "frame " << decoded;
+            ++decoded;
+            CFRelease(sample);
+        }
+    }
+    EXPECT_EQ(decoded, kTenBitFrames);
+}
+
+TEST_F(SyntheticTenBitVideo, TheSaltMakesTwoOtherwiseEqualTenBitFilesDiffer)
+{
+    ASSERT_TRUE(WriteTenBitVideo(directory / "a.mp4", TenBitTagging::Hlg, TenBitPicture {}, "one"));
+    ASSERT_TRUE(WriteTenBitVideo(directory / "b.mp4", TenBitTagging::Hlg, TenBitPicture {}, "two"));
+    EXPECT_NE(ReadFile(directory / "a.mp4"), ReadFile(directory / "b.mp4"));
+}
+
 } // namespace wallpaper::video::testing_media

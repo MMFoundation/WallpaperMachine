@@ -94,5 +94,43 @@ bool WriteReorderedVideo(const std::filesystem::path& path, const std::string& s
 /// leave a seek no longer than any other.
 bool WriteLongGopVideo(const std::filesystem::path& path, const std::string& salt);
 
+/// What a 10-bit clip says its code values mean: colour primaries, transfer
+/// function and matrix, as a stream declares them.
+enum class TenBitTagging {
+    /// BT.2020 primaries and matrix, SMPTE ST 2084 (perceptual quantizer).
+    Pq,
+    /// BT.2020 primaries and matrix, BT.2100 hybrid log-gamma.
+    Hlg,
+    /// BT.709 primaries, transfer and matrix: display-referred 10-bit SDR.
+    Bt709,
+};
+
+/// The 10-bit code values of a clip's one flat colour, as the encoder is given
+/// them: studio range, so luma runs 64 to 940 and chroma 64 to 960 around 512.
+struct TenBitPicture {
+    uint16_t y { 64 };
+    uint16_t cb { 512 };
+    uint16_t cr { 512 };
+};
+
+/// Frames of a 10-bit clip.
+constexpr int kTenBitFrames = 12;
+
+/// Whether VideoToolbox can encode HEVC Main10 here. 10-bit tests assert this
+/// first, so a machine without that encoder says so instead of failing on a
+/// missing file. Tried on the first call and remembered.
+bool TenBitEncoderAvailable();
+
+/// Writes a decodable MP4 of `kTenBitFrames` frames of HEVC Main10, 640x360 at 30
+/// per second, every frame the flat colour `picture` and the first one a
+/// keyframe, with no B-frames. The tagging is written into both the bitstream
+/// and the container, so a reader that trusts either one sees it.
+///
+/// `max_content_light_nits`, when positive, is attached to the pictures as the
+/// content light level, which an encoder that carries it writes out as the
+/// stream's own statement of its peak.
+bool WriteTenBitVideo(const std::filesystem::path& path, TenBitTagging tagging, TenBitPicture picture,
+                      const std::string& salt, int max_content_light_nits = 0);
+
 } // namespace testing_media
 } // namespace wallpaper::video
