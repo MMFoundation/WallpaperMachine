@@ -30,6 +30,8 @@ use crate::nagair::{ResourceClass, classify, error_chain, resource_name};
 use crate::request::{RequestError, StageKind};
 use crate::response::StagePayload;
 
+pub mod depth;
+
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -86,6 +88,22 @@ fn naga_stage(kind: StageKind) -> naga::ShaderStage {
 
 /// Reads the legalized text of `kind` and translates it (R39 to R52).
 pub fn compile_glsl(kind: StageKind, glsl: &str) -> Result<CompiledStage, ShaderError> {
+    // The downstream compiler recurses over nesting; a text it could not read on a small stack
+    // is refused before it is handed over (R91).
+    let cost = depth::stack_cost(glsl);
+    if cost > depth::STACK_BUDGET {
+        return Err(failure(
+            kind,
+            Pass::GlslParse,
+            format!(
+                "the {} source nests brackets or chains operators too deeply to translate (depth measure {cost}, limit {})",
+                kind.name(),
+                depth::STACK_BUDGET
+            ),
+            None,
+            glsl,
+        ));
+    }
     let mut front = Frontend::default();
     let module = front.parse(&GlslOptions::from(naga_stage(kind)), glsl).map_err(|errors| {
         let first = errors.errors.first();

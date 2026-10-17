@@ -23,6 +23,8 @@ struct Sweep {
     /// Binding names a host that finds resources by name would refuse, with the programs.
     refused_names: BTreeMap<String, Vec<String>>,
     micros: Vec<u128>,
+    /// The largest stack measure (`backend::depth`) of any translated stage.
+    deepest: u32,
 }
 
 /// The names the host binds (spec D 2.4): the block, a material texture and its sampler, the
@@ -101,6 +103,7 @@ fn check_program(program: &CompiledProgram, label: &str, s: &mut Sweep) {
         assert!(stage.payload.msl_source.contains("#include <metal_stdlib>"), "{label}");
         assert!(!stage.payload.msl_source.contains('\0'), "{label}");
         assert_ne!(stage.payload.entry_point, "main", "{label}");
+        s.deepest = s.deepest.max(crate::backend::depth::stack_cost(&stage.glsl));
         for b in &stage.payload.bindings {
             if !in_vocabulary(&b.name) {
                 s.refused_names.entry(b.name.clone()).or_default().push(label.to_string());
@@ -121,6 +124,7 @@ fn report(title: &str, s: &Sweep) {
     if let (Some(median), Some(worst)) = (times.get(times.len() / 2), times.last()) {
         eprintln!("  compile time: median {median} us, worst {worst} us over {} programs", times.len());
     }
+    eprintln!("  deepest stage by the stack measure: {} of {}", s.deepest, crate::backend::depth::STACK_BUDGET);
     for (cause, labels) in &s.failures {
         eprintln!("  [{}] {cause}\n      e.g. {}", labels.len(), labels.iter().take(3).cloned().collect::<Vec<_>>().join(", "));
     }
@@ -148,6 +152,7 @@ fn shipped_programs_compile_end_to_end() {
         assert!(labels.iter().all(|l| l.starts_with("shadowcasterfoliage4 ")), "{labels:?}");
     }
     assert!(s.ok >= 158, "{} shipped programs compiled", s.ok);
+    assert!(s.deepest <= crate::backend::depth::STACK_BUDGET / 2, "a shipped stage is near the stack limit: {}", s.deepest);
     assert!(s.refused_names.is_empty(), "binding names the host would refuse: {:?}", s.refused_names.keys().collect::<Vec<_>>());
 }
 
@@ -187,6 +192,7 @@ fn workshop_programs_compile_end_to_end() {
         let s = sweep(&files, &includes, |_| false, &[]);
         total.ok += s.ok;
         total.micros.extend(s.micros);
+        total.deepest = total.deepest.max(s.deepest);
         let id = entry.file_name().to_string_lossy().to_string();
         for (cause, labels) in s.failures {
             total.failures.entry(cause).or_default().extend(labels.into_iter().map(|l| format!("{id}/{l}")));
@@ -197,4 +203,5 @@ fn workshop_programs_compile_end_to_end() {
     }
     report("workshop programs", &total);
     assert!(total.ok > 790, "{} workshop programs compiled", total.ok);
+    assert!(total.deepest <= crate::backend::depth::STACK_BUDGET / 2, "a workshop stage is near the stack limit: {}", total.deepest);
 }
