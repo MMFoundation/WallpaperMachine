@@ -13,7 +13,7 @@
 // costs the decoder.
 
 #include "Image.hpp"
-#include "Video/FfmpegVideoTextureSource.hpp"
+#include "Video/VideoMedia.hpp"
 #include "Video/VideoSeekPolicy.hpp"
 #include "Video/VideoTextureSource.hpp"
 #include "Scene/SceneWallpaper.hpp"

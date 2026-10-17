@@ -32,7 +32,7 @@
 
 #include "Audio/SoundManager.h"
 #include "Audio/FfmpegSoundStream.hpp"
-#include "Video/FfmpegVideoTextureSource.hpp"
+#include "Video/VideoMedia.hpp"
 #include "Video/VideoFramePacing.hpp"
 
 #include "RenderGraph/RenderGraph.hpp"

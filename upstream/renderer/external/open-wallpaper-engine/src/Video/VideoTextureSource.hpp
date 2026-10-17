@@ -13,8 +13,6 @@ struct Image;
 
 namespace video
 {
-struct VideoMetadata;
-
 struct VideoTextureFrame {
     uint32_t width { 0 };
     uint32_t height { 0 };
@@ -113,13 +111,6 @@ public:
 
 std::shared_ptr<VideoTextureSource> CreateVideoTextureSource(const Image& image,
                                                              std::string* error);
-bool ProbeVideoFileDimensions(std::string_view media_path,
-                              uint32_t*        width,
-                              uint32_t*        height,
-                              std::string*     error);
-bool ProbeVideoFileMetadata(std::string_view media_path,
-                            VideoMetadata*   out,
-                            std::string*     error);
 
 } // namespace video
 } // namespace wallpaper

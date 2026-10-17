@@ -2,7 +2,7 @@
 
 #include "FfmpegVideoTextureSource.hpp"
 #include "Image.hpp"
-#include "Platform/Apple/FfmpegVideoInterop.hpp"
+#include "Platform/Apple/VideoFrameInterop.hpp"
 
 #include <algorithm>
 #include <atomic>

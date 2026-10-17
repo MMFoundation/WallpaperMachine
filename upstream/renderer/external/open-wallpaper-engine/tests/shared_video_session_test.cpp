@@ -11,9 +11,10 @@
 // encodes for itself; nothing here stands in a fake source.
 
 #include "Image.hpp"
-#include "Platform/Apple/FfmpegVideoInterop.hpp"
+#include "Platform/Apple/VideoFrameInterop.hpp"
 #include "Video/FfmpegVideoTextureSource.hpp"
 #include "Video/SharedVideoSession.hpp"
+#include "Video/VideoMedia.hpp"
 #include "Video/VideoTextureSource.hpp"
 #include "synthetic_video.hpp"
 

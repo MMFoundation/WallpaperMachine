@@ -26,7 +26,7 @@
 #include "Runtime/RuntimeImageSource.hpp"
 #include "Scene/SceneWallpaper.hpp"
 #include "Scene/WPShaderValueUpdater.hpp"
-#include "Platform/Apple/FfmpegVideoInterop.hpp"
+#include "Platform/Apple/VideoFrameLease.hpp"
 #include "Platform/Apple/SceneWallpaperBindings.h"
 #include "Shader/RustShaderBridge.hpp"
 #include "Video/VideoColorConversion.hpp"

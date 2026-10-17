@@ -7,7 +7,7 @@
 #include "Core/RendererCounters.hpp"
 #include "Image.hpp"
 #include "Interface/IImageParser.h"
-#include "Platform/Apple/FfmpegVideoInterop.hpp"
+#include "Platform/Apple/VideoFrameInterop.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Scene/Scene.h"
 #include "Utils/Logging.h"

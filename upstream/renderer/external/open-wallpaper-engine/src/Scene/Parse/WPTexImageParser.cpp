@@ -3,7 +3,7 @@
 
 #include "Type.hpp"
 #include "Utils/Sha.hpp"
-#include "Video/VideoMetadata.hpp"
+#include "Video/VideoMedia.hpp"
 #include "Video/VideoTextureSource.hpp"
 #include "WPCommon.hpp"
 #include <cstdint>

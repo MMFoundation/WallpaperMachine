@@ -23,7 +23,10 @@ extern "C" {
 
 #include "Image.hpp"
 #include "Platform/Apple/FfmpegVideoInterop.hpp"
-#include "Video/FfmpegVideoTextureSource.hpp"
+#include "Platform/Apple/VideoFrameInterop.hpp"
+#include "Platform/Apple/VideoFrameLease.hpp"
+#include "Video/VideoMedia.hpp"
+#include "Video/VideoTextureSource.hpp"
 #include "synthetic_video.hpp"
 
 namespace {

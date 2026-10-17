@@ -51,6 +51,8 @@ set(PLATFORM_APPLE_SOURCES)
 if(APPLE)
   list(APPEND PLATFORM_APPLE_SOURCES
        Platform/Apple/FfmpegVideoInterop.mm
+       Platform/Apple/VideoFrameInterop.mm
+       Platform/Apple/VideoFrameLease.mm
        Platform/Apple/SceneWallpaperBindings.mm)
 endif()
 
@@ -105,6 +107,7 @@ add_library(
   Video/VideoConversionBudget.cpp
   Video/VideoDecodePump.cpp
   Video/VideoFramePacing.cpp
+  Video/VideoMedia.cpp
   Video/SharedVideoSession.cpp
   ${PLATFORM_APPLE_SOURCES}
   SceneSourceResolver.cpp

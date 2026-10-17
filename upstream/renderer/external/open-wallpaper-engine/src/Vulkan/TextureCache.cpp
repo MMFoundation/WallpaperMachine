@@ -6,7 +6,7 @@
 #include "Util.hpp"
 
 #include "Image.hpp"
-#include "Platform/Apple/FfmpegVideoInterop.hpp"
+#include "Platform/Apple/VideoFrameLease.hpp"
 #include "Video/SharedVideoSession.hpp"
 #include "Core/MapSet.hpp"
 #include "Core/ArrayHelper.hpp"
@@ -1749,11 +1749,11 @@ bool TextureCache::UpdateVideoFrame(std::string_view                 key,
             // threshold that never accounted for it.
             static_assert(video::kImportedVideoFramesPerSource ==
                               kMaxImportedVideoFramesPerVideoTex,
-                          "FfmpegVideoInterop mirrors TextureCache's per-video-texture imported "
+                          "VideoFrameLease mirrors TextureCache's per-video-texture imported "
                           "frame cap; the two must stay equal");
             static_assert(video::kPendingVideoImportSubmissions ==
                               kMaxPendingVideoImportSubmissions,
-                          "FfmpegVideoInterop mirrors TextureCache's pending import submission "
+                          "VideoFrameLease mirrors TextureCache's pending import submission "
                           "cap; the two must stay equal");
             m_video_destination_pool->SetInFlightSlotExpectation(videoInFlightSlotExpectation());
             // A shape nothing requests any more is not worth its bytes. The
