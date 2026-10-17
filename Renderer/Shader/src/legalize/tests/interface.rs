@@ -305,3 +305,53 @@ fn flat_is_carried_on_an_interface_declaration() {
     let t = &both.program.fragment.as_ref().unwrap().text;
     assert!(t.contains("flat in int v_I;") && t.contains("in vec2 v_U;") && !t.contains("highp vec2"), "{t}");
 }
+
+// ---- amendment c2 R90 and d R66: no cap on varying locations, a component budget instead ----
+
+fn many_varyings(n: usize, ty: &str) -> String {
+    (0..n).map(|i| format!("varying {ty} v_{i};\n")).collect()
+}
+
+fn sum_of(n: usize) -> String {
+    (0..n).map(|i| format!("v_{i}")).collect::<Vec<_>>().join(" + ")
+}
+
+#[test]
+fn a_varying_location_above_31_is_accepted_in_a_program_and_in_either_stage_alone() {
+    let decls = many_varyings(40, "vec2");
+    let writes: String = (0..40).map(|i| format!("v_{i} = vec2({i}.0);")).collect();
+    let v = format!("{decls}void main() {{ {writes} gl_Position = vec4(1.0); }}");
+    let f = format!("{decls}void main() {{ vec2 s = {}; gl_FragColor = vec4(s, 0.0, 1.0); }}", sum_of(40));
+    let both = compile_program(&v, &f);
+    assert_eq!(location_of(&both.program.fragment.as_ref().unwrap().text, "v_39"), 39);
+    assert_eq!(location_of(&both.program.vertex.as_ref().unwrap().text, "v_39"), 39);
+    // Alone, the stage numbers its own inputs and outputs from 0 and has no cap on a varying either.
+    let (alone, _) = crate::legalize::legalize_stage(StageKind::Fragment, &f).unwrap();
+    assert_eq!(location_of(&alone.text, "v_39"), 39);
+    let (alone, _) = crate::legalize::legalize_stage(StageKind::Vertex, &v).unwrap();
+    assert_eq!(location_of(&alone.text, "v_39"), 39);
+}
+
+#[test]
+fn the_budget_counts_the_fragment_inputs_and_names_the_varying_that_crossed_it() {
+    let ok = format!("{}void main() {{ gl_FragColor = {}; }}", many_varyings(31, "vec4"), sum_of(31));
+    assert!(crate::legalize::legalize_stage(StageKind::Fragment, &ok).is_ok());
+    let over = format!("{}varying float v_extra;\nvoid main() {{ gl_FragColor = {} + vec4(v_extra); }}", many_varyings(31, "vec4"), sum_of(31));
+    let e = crate::legalize::legalize_stage(StageKind::Fragment, &over).unwrap_err();
+    assert!(e.is_invalid_request(), "{e}");
+    let text = e.message();
+    assert!(text.contains("125") && text.contains("124") && text.contains("fragment") && text.contains("v_extra"), "{text}");
+    // A vertex stage alone never counts: its outputs are free until a fragment stage names them.
+    let many = format!("{}void main() {{ gl_Position = vec4(1.0); }}", many_varyings(60, "vec4"));
+    assert!(crate::legalize::legalize_stage(StageKind::Vertex, &many).is_ok());
+}
+
+#[test]
+fn the_cap_of_a_vertex_input_location_stays() {
+    // 33 attributes: the last would sit at location 32, above the model's limit of 31.
+    let attributes: String = (0..33).map(|i| format!("attribute vec4 a_{i};\n")).collect();
+    let sum: String = (0..33).map(|i| format!("a_{i}")).collect::<Vec<_>>().join(" + ");
+    let source = format!("{attributes}void main() {{ gl_Position = {sum}; }}");
+    let e = crate::legalize::legalize_stage(StageKind::Vertex, &source).unwrap_err();
+    assert!(e.message().contains("highest location 31") && e.message().contains("vertex"), "{e}");
+}

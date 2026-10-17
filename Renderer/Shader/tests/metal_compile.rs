@@ -417,6 +417,51 @@ fn the_msl_of_workshop_programs_compiles_with_the_system_metal_compiler() {
     assert!(failed.is_empty(), "{}", failed.iter().take(20).cloned().collect::<Vec<_>>().join("\n"));
 }
 
+/// Amendment d R66 and c1 R107 on the workshop effects they came from: `textoutline7x7` (a 49-element
+/// varying, locations to 49) and `frame_builder` (a suffix on a declared varying) build real render
+/// pipeline states. Skips with a message when the unpacked workshop shaders are absent.
+#[test]
+fn the_workshop_effects_the_amendments_name_build_a_render_pipeline_state() {
+    if !metal_available() {
+        return;
+    }
+    let (Some(stock), workshop) = (shaders_root(), PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/p5/workshop-shaders")) else {
+        eprintln!("skipped: the shipped shader folder is absent");
+        return;
+    };
+    if !workshop.is_dir() {
+        eprintln!("skipped: no unpacked workshop shaders under artifacts/p5/workshop-shaders");
+        return;
+    }
+    let mut ids: Vec<_> = std::fs::read_dir(&workshop).unwrap().filter_map(Result::ok).collect();
+    ids.sort_by_key(|e| e.file_name());
+    let dir = scratch("amendment_effects");
+    let mut built = Vec::new();
+    for entry in ids {
+        let own = entry.path().join("shaders");
+        let includes = |path: &str| -> Result<String, wm_shader::include::IncludeError> {
+            std::fs::read_to_string(own.join(path))
+                .or_else(|_| std::fs::read_to_string(stock.join(path)))
+                .map_err(|_| wm_shader::include::IncludeError { path: path.into(), kind: wm_shader::include::IncludeErrorKind::NotFound })
+        };
+        let mut names = Vec::new();
+        collect_fragments(&own, &mut names);
+        for frag in names.into_iter().filter(|f| f.file_stem().is_some_and(|n| n == "textoutline7x7" || n == "frame_builder")) {
+            let name = frag.file_stem().unwrap().to_string_lossy().to_string();
+            let (Ok(v), Ok(f)) = (std::fs::read_to_string(frag.with_extension("vert")), std::fs::read_to_string(&frag)) else { continue };
+            let textures = (0..13u8).map(texture).collect();
+            let program = compile(&request(&name, &v, &f, &[("TEX8FORMAT", "8"), ("BLENDROWCOUNT", "4")], textures), &includes).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let Some(result) = pipeline_state(&dir, &format!("{}-{name}", entry.file_name().to_string_lossy()), &program) else { return };
+            assert!(result.is_ok(), "{name}: the Metal device refused the pipeline: {}", result.unwrap_err());
+            built.push(name);
+        }
+    }
+    eprintln!("render pipeline states built for {built:?}");
+    if built.is_empty() {
+        eprintln!("skipped: neither effect is among the unpacked workshop shaders");
+    }
+}
+
 fn collect_fragments(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.filter_map(Result::ok) {
