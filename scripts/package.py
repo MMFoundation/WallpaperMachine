@@ -23,18 +23,16 @@ instead of it failing at launch; `--require-deployment-target` makes that an err
 import argparse
 import hashlib
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
 
 from lib import bundle_contract, dmg
+from lib.homebrew import KEG_LICENSE_FILE, keg_of
 from lib.glyphs import markers
 from lib.paths import RENDERER, ROOT, app_bundle
 
 MARK = markers()
-# Homebrew keeps the upstream tarball's license and notice files at the keg root.
-KEG_LICENSE_FILE = re.compile(r"^(LICENSE|LICENCE|COPYING|COPYRIGHT|NOTICE)", re.IGNORECASE)
 # Statically linked into the renderer; their notices travel with the app binary.
 RENDERER_THIRD_PARTY = RENDERER / "external/open-wallpaper-engine/third_party"
 # Packaging is one-way: it rewrites load commands and fills Contents/Frameworks, and
@@ -131,14 +129,6 @@ def raised_minimum(target, minimums):
     newer = {name: version for name, version in minimums.items() if version_key(version) > version_key(target)}
     floor = max([target, *newer.values()], key=version_key)
     return floor, newer
-
-
-def keg_of(source):
-    """The Homebrew keg (`Cellar/<formula>/<version>`) a resolved library belongs to."""
-    parts = source.parts
-    if "Cellar" in parts and len(parts) > parts.index("Cellar") + 3:
-        return Path(*parts[: parts.index("Cellar") + 3])
-    return None
 
 
 def keg_licenses(libraries):

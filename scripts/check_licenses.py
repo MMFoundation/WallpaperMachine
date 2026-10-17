@@ -36,8 +36,8 @@ import subprocess
 
 from build import cargo_environment
 from lib.glyphs import markers
+from lib.homebrew import keg_of
 from lib.paths import ARTIFACTS, RENDERER, ROOT, app_bundle
-from package import keg_of
 
 MARK = markers()
 LICENSE_ARTIFACTS = ARTIFACTS / "licenses"
@@ -578,7 +578,8 @@ def parse_cargo_tree(text):
 
 def crate_components(run, environment, output):
     completed = run(list(CARGO_TREE), cwd=RENDERER, env=environment)
-    (output / "cargo-tree.txt").write_text(completed.stdout or "")
+    if output is not None:
+        (output / "cargo-tree.txt").write_text(completed.stdout or "")
     if completed.returncode != 0:
         raise ToolError(f"cargo tree failed: {(completed.stderr or '').strip().splitlines()[-1:] or ['no output']}")
     components = parse_cargo_tree(completed.stdout)
@@ -670,27 +671,36 @@ def write_closure(output, sections, entries):
     (output / "closure.txt").write_text("\n".join(lines) + "\n")
 
 
-def run_checks(output, options, runner=run_command, environment=None, licensing_text=None):
-    """Collect the three inventories, print findings, write the report. Returns the exit status."""
-    output.mkdir(parents=True, exist_ok=True)
-    enforce = options.enforce
-    finding_mark = MARK.missing if enforce else MARK.warn
+@dataclass
+class Collected:
+    """What the three inventories found, and which of them could not run."""
+    components: list
+    sections: dict
+    incomplete: list
+    skipped_by_choice: list
+    app: Path | None
+    prefix: Path | None  # Homebrew prefix, when the dylib walk found it
+
+
+def collect_components(options, runner=run_command, environment=None, output=None, say=print):
+    """Run the three inventories. `output` receives `cargo-tree.txt`; `say` shows progress (packaging passes none)."""
     sections = {}
     components = []
     incomplete = []
     skipped_by_choice = []
+    prefix = None
 
     app = None if options.skip_app else options.app
     if options.skip_app:
         sections["dylibs"] = {"status": "skipped", "detail": "--skip-app"}
         skipped_by_choice.append("dylibs (--skip-app)")
-        print(f"{MARK.warn} Dylibs skipped (--skip-app)")
+        say(f"{MARK.warn} Dylibs skipped (--skip-app)")
     elif not app.is_dir():
         if options.app_given:
             raise ToolError(f"No application bundle at {display_path(app)}")
         sections["dylibs"] = {"status": "skipped", "detail": f"no built app at {display_path(app)}"}
         incomplete.append("dylibs")
-        print(f"{MARK.warn} Dylibs skipped: no built app at {display_path(app)} (build one or pass --app)")
+        say(f"{MARK.warn} Dylibs skipped: no built app at {display_path(app)} (build one or pass --app)")
     else:
         completed = runner(["brew", "--prefix"])
         prefix = Path(completed.stdout.strip()) if completed.returncode == 0 and completed.stdout.strip() else None
@@ -701,21 +711,32 @@ def run_checks(output, options, runner=run_command, environment=None, licensing_
                               "libraries": len(walk.libraries), "system": len(walk.system),
                               "system_libraries": sorted(walk.system),
                               "unresolved": [list(item) for item in walk.unresolved]}
-        print(f"{MARK.step} Dylibs: {len(walk.roots)} roots, {len(walk.libraries)} third-party libraries, "
-              f"{len(walk.system)} Apple system libraries ({display_path(app)})")
+        say(f"{MARK.step} Dylibs: {len(walk.roots)} roots, {len(walk.libraries)} third-party libraries, "
+            f"{len(walk.system)} Apple system libraries ({display_path(app)})")
         for dependency, referrer in walk.unresolved:
-            print(f"{MARK.warn} Dependency not found: {dependency} (from {referrer})")
+            say(f"{MARK.warn} Dependency not found: {dependency} (from {referrer})")
 
     inventory = inventory_components(options.engine, options.build_script)
     components += inventory
     sections["inventory"] = {"status": "checked", "entries": len(inventory), "build_script": display_path(options.build_script)}
-    print(f"{MARK.step} Compiled-in and statically linked: {len(inventory)} inventory entries")
+    say(f"{MARK.step} Compiled-in and statically linked: {len(inventory)} inventory entries")
 
     crates = crate_components(runner, environment, output)
     components += crates
     third_party = sum(1 for component in crates if component.kind == "crate")
     sections["crates"] = {"status": "checked", "third_party": third_party, "first_party": len(crates) - third_party}
-    print(f"{MARK.step} Rust crates: {third_party} third-party, {len(crates) - third_party} first-party")
+    say(f"{MARK.step} Rust crates: {third_party} third-party, {len(crates) - third_party} first-party")
+    return Collected(components, sections, incomplete, skipped_by_choice, app, prefix)
+
+
+def run_checks(output, options, runner=run_command, environment=None, licensing_text=None):
+    """Collect the three inventories, print findings, write the report. Returns the exit status."""
+    output.mkdir(parents=True, exist_ok=True)
+    enforce = options.enforce
+    finding_mark = MARK.missing if enforce else MARK.warn
+    collected = collect_components(options, runner, environment, output)
+    components, sections, incomplete = collected.components, collected.sections, collected.incomplete
+    skipped_by_choice, app = collected.skipped_by_choice, collected.app
 
     closure = merge(components)
     entries, lists, failing, unrecorded, counts = summarise(closure, licensing_text)
