@@ -5,6 +5,7 @@
 #include "Audio/PcmSoundStream.hpp"
 #include "Fs/IBinaryStream.h"
 #include "Sound/Apple/AppleDecoder.hpp"
+#include "Sound/Vorbis/VorbisDecoder.hpp"
 
 #include <cstring>
 
@@ -40,15 +41,14 @@ std::unique_ptr<SoundStream> CreateSceneSoundStream(std::shared_ptr<fs::IBinaryS
         SetError(error, "VFS audio stream must not be null");
         return nullptr;
     }
-    // Ogg Vorbis has no system decoder; until its own decoder lands it stays on FFmpeg.
-    if (IsOgg(*stream)) return CreateFfmpegSoundStream(std::move(stream), error, options);
-
-    auto source = MakeBinaryStreamByteSource(std::move(stream));
+    // Ogg Vorbis has no system decoder: the vendored stb_vorbis reads it.
+    const bool ogg    = IsOgg(*stream);
+    auto       source = MakeBinaryStreamByteSource(std::move(stream));
     if (source == nullptr) {
         SetError(error, "VFS audio stream does not report its size");
         return nullptr;
     }
-    auto decoder = sound::OpenAppleDecoder(std::move(source), error);
+    auto decoder = ogg ? sound::OpenVorbisDecoder(source, error) : sound::OpenAppleDecoder(std::move(source), error);
     if (decoder == nullptr) return nullptr;
     return std::make_unique<PcmSoundStream>(std::move(decoder), options, "VFS audio stream");
 }

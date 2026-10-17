@@ -109,8 +109,9 @@ Renderer/                          this project's own renderer code (not vendore
     Apple/                         wmMediaApple: the platform layer of the readers, ObjC++ over VideoToolbox with C++
                                    headers: codec format descriptions and a decompression session that returns frames in
                                    display order; its tests/ (vt_frame_decoder_test) are built by the engine's tests
-  Sound/                           wmSound: the scene-sound path (channel remix, resampler, loop pipeline, and the
-                                   AudioToolbox decoder), tests/ (see sound-decoding.md)
+  Sound/                           wmSound: the scene-sound path (channel remix, resampler, loop pipeline, the
+                                   AudioToolbox decoder and the Ogg Vorbis decoder over the vendored stb_vorbis),
+                                   tests/ (see sound-decoding.md)
   Testing/                         synthetic video for the renderer tests: a VideoToolbox H.264 encoder (with and without
                                    B-frames) and an AVAssetWriter passthrough writer behind a C++ header, its own test,
                                    and two small embedded clips (VP9 in WebM, H.264 with B-frames in Matroska)

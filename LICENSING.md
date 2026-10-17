@@ -482,7 +482,7 @@ prefix is `app.wallpapermachine`.
   left otherwise as it was. No code from FFmpeg, libav, libwebm, libmatroska, libvpx, mp4v2,
   Bento4, GPAC or any other implementation was copied into the new code. FFmpeg is still
   linked and still plays any container the native readers do not read, until it is removed.
-- The sound path in `Renderer/Sound` (channel remix, resampler, loop pipeline and the AudioToolbox decoder adapter) was written for this project from the documented behaviour of a conventional downmix, the mathematics of windowed-sinc resampling and Apple's AudioToolbox documentation. No code from FFmpeg, libswresample, libvorbis, opus or any other implementation was copied.
+- The sound path in `Renderer/Sound` (channel remix, resampler, loop pipeline and the AudioToolbox and Ogg Vorbis decoder adapters) was written for this project from the documented behaviour of a conventional downmix, the mathematics of windowed-sinc resampling and Apple's AudioToolbox documentation. No code from FFmpeg, libswresample, libvorbis, opus or any other implementation was copied; Ogg Vorbis decoding is the public-domain stb_vorbis, vendored unchanged.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
   at revision `73f14ab1568371e6e3c44063f21c34c5e2712c4d`, BSD-3-Clause, vendored
   under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes

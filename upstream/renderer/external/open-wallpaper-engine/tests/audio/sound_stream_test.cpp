@@ -313,15 +313,17 @@ TEST(SoundStreamTest, Mp3IsRemixedAndResampledToTheDevice)
 
 TEST(SoundStreamTest, OggVorbisDecodesToTheLengthOfItsLastGranule)
 {
+    // The last Ogg page says 11072 frames. (FFmpeg decoded all of the last block,
+    // 11264, which a loop would play as 192 frames of extra tail.)
     const auto decoded = Decode(Ogg(), { 2, 44'100 });
-    ASSERT_EQ(decoded.size(), 2u * 11'264u);
+    ASSERT_EQ(decoded.size(), 2u * 11'072u);
     ExpectMatchesGolden(decoded, fixtures::kOggGolden, std::size(fixtures::kOggGolden), 5e-4);
 }
 
 TEST(SoundStreamTest, OggVorbisIsResampledToTheDevice)
 {
     const auto decoded = Decode(Ogg(), { 2, 48'000 });
-    const double exact = 11'264.0 * 48'000.0 / 44'100.0;
+    const double exact = 11'072.0 * 48'000.0 / 44'100.0;
     EXPECT_GE(static_cast<double>(decoded.size() / 2), std::floor(exact));
     EXPECT_LE(static_cast<double>(decoded.size() / 2), std::ceil(exact));
 }

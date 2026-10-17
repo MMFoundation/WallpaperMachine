@@ -13,6 +13,7 @@ set(WM_SOUND_SOURCES
 if(APPLE)
     list(APPEND WM_SOUND_SOURCES Apple/AppleDecoder.cpp)
 endif()
+list(APPEND WM_SOUND_SOURCES Vorbis/VorbisDecoder.cpp)
 
 add_library(wmSound STATIC ${WM_SOUND_SOURCES})
 set_target_properties(wmSound PROPERTIES
@@ -23,6 +24,9 @@ set_target_properties(wmSound PROPERTIES
 # Includes are written as "Sound/<Header>.hpp", relative to Renderer/.
 target_include_directories(wmSound PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(wmSound PUBLIC wmMedia)
+# The Ogg Vorbis decoder: stb_vorbis, vendored unchanged under the scene engine's
+# third_party/ and defined there, so wmSound is only built with the engine.
+target_link_libraries(wmSound PRIVATE stb_vorbis)
 if(APPLE)
     target_link_libraries(wmSound PUBLIC "-framework AudioToolbox" "-framework CoreFoundation")
 endif()

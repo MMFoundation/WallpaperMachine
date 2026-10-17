@@ -41,6 +41,7 @@ and the log names the reason. A file cut short in its audio plays what is there.
 | Resampling | `Resampler` | A polyphase windowed-sinc filter (Kaiser window, beta 9, 32 taps per output frame when raising the rate and proportionally more when lowering it, up to an input rate of about 62 times the output's: `Resampler::Supports` and `PcmPipeline::Supports` say no beyond that, and the sound stays silent with a log line rather than build a filter table of gigabytes). The cutoff is 97 percent of the output Nyquist frequency or the input's, whichever is lower, so raising the rate keeps the whole input band. Positions are integers: ratios such as 44.1 to 48 kHz use exact filter phases and nothing drifts. A pass of `n` frames produces exactly `ceil(n * out / in)` frames, and the first output frame lines up with the first input frame |
 | Looping, end of sound | `PcmPipeline` | As above |
 | WAV, AIFF, CAF, MP3, FLAC, AAC and the rest of AudioFile's formats | `Apple/AppleDecoder` | `AudioFileOpenWithCallbacks` over the package's bytes (a `media::ByteSource`, read on demand), then `ExtAudioFile` with a 32-bit float client format at the file's own layout, so the system changes the sample format and nothing else. A file whose format is not recognised by sniffing is retried with each likely type named. With `audioOptional`, an MP4 or MOV with no audio track returns no decoder and no error (a silent video is not a failure); anything else AudioToolbox cannot read is an error |
+| Ogg Vorbis | `Vorbis/VorbisDecoder` | stb_vorbis 1.22 (public domain or MIT; vendored unchanged in the scene engine's `third_party/stb_vorbis`, with its README recording the pinned commit and hash), because the system has no Vorbis decoder. The file is read into memory and decoded with the pull API. The length is the last Ogg page's granule position, so a loop has no extra tail (stb_vorbis would decode up to a block past it, and FFmpeg did: 192 frames in the test file). Channel order is rearranged from Vorbis's (left, centre, right, ..., low frequency last) to WAV's for 3 and 5 to 8 channels. stb_vorbis trusts the lengths in the comment header (vendor string, comment count, each comment), so a file that states two billion comments would crash it; `OpenVorbisDecoder` walks the first Ogg pages itself and checks every length against the header's bytes before stb_vorbis sees the file, and refuses a sample rate above 768 kHz (the file states its own rate, and the resampler's filter grows with it). A file that is Ogg but not Vorbis (Opus or FLAC in Ogg), whose headers are cut off or lie about their lengths, is refused; a file cut off in its audio plays what is there |
 
 AudioToolbox's MP3 decoder is 16-bit and saturates at full scale; FFmpeg's float
 decode kept peaks above full scale. Of the 87 MP3 sounds in the local library, 25
@@ -69,11 +70,26 @@ whose tag FFmpeg ignored (AudioToolbox is 2160 frames shorter, as the tag says).
   refused and cut-short input, and the output worker on the null backend. The
   tiny MP3, Ogg Vorbis and FLAC files are in `sound_fixture_data.hpp`; their
   expectations were recorded from the FFmpeg decoder that served scene sounds
-  before.
+  before (the Ogg file's length is the granule's, which FFmpeg overshot). The Ogg
+  file is a 440 Hz tone in both channels because FFmpeg's experimental Vorbis
+  encoder writes streams that decoders disagree on once the channels differ; the
+  three real libvorbis files in the local library decode to within -101 dB of
+  FFmpeg's output with the same length.
 - `sound_core_tests` (`Renderer/Sound/tests`): the resampler (including which
   ratios are supported and a ratio that skips more input than one push brings),
   the remix and the pipeline over synthetic decoders, with no Apple framework or
   file.
+- `sound_vorbis_tests` (`Renderer/Sound/tests`): the Ogg Vorbis decoder over a tiny
+  generated file: layout and exact length, any chunk size, rewind, files cut off
+  inside the headers (refused) and inside the audio (played to the cut), refused
+  input, 600 damaged variants that must neither crash nor produce a non-finite
+  sample, 4000 more damaged in the identification and comment headers, comment
+  headers of every shape (empty, long, continued on a second page) that must still
+  open and ones that lie about their lengths (two billion comments, a vendor
+  string longer than the file) that must be refused, sample rates no format
+  uses, and the channel order. Run once under AddressSanitizer and UBSan: clean
+  apart from one float-to-int conversion on a damaged codebook inside stb_vorbis
+  itself, which is vendored unchanged.
 - `sound_apple_tests` (`Renderer/Sound/tests`): the AudioToolbox decoder over a
   generated WAV and two tiny MP4 files: the reported layout, frames in any chunk
   size, rewind, the audio track of a video, and what it says about input that is

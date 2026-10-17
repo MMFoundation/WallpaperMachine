@@ -20,3 +20,4 @@ wm_sound_test(sound_core_tests resampler_tests.cpp remix_tests.cpp pipeline_test
 if(APPLE)
     wm_sound_test(sound_apple_tests apple_decoder_tests.cpp)
 endif()
+wm_sound_test(sound_vorbis_tests vorbis_decoder_tests.cpp)
