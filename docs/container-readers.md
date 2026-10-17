@@ -18,6 +18,7 @@ own tests use. Where they sit in the build and the tree is in
 | `Error.hpp/.cpp` | `Error` (kind, message, byte offset) that every reader fills instead of throwing |
 | `Checked.hpp/.cpp` | overflow-checked add/sub/mul and an overflow-free rescale for sizes and times read from files |
 | `Rational.hpp/.cpp` | an exact fraction, so a frame period such as 1001/30000 s stays exact |
+| `ByteSource.hpp/.cpp` | where a reader gets its bytes: `size()`, `readAt()` and an optional zero-copy `view()`. `MakeMemoryByteSource` shares ownership of the bytes (a vector, or any buffer plus its owner, so a video payload embedded in a package needs no temp file); `OpenFileByteSource` reads through a 64 KiB window with `pread` and never maps the file, so a file truncated while open gives a short read, not a fault. Reads past the end are shortened, never faulted; both are safe to call from several threads |
 | `ByteReader.hpp` | a bounds-checked big-endian cursor over bytes in memory; a short read latches a failure and returns 0 |
 | `tests/` | googletest executables, defined with `wm_media_test()` in `tests/CMakeLists.txt` |
 

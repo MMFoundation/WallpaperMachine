@@ -18,6 +18,7 @@ set(WM_MEDIA_SANITIZE "" CACHE STRING
     "Standalone builds only: sanitizer list for -fsanitize= (for example address,undefined)")
 
 set(WM_MEDIA_SOURCES
+    ByteSource.cpp
     Checked.cpp
     Error.cpp
     Rational.cpp

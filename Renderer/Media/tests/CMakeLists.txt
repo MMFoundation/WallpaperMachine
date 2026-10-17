@@ -17,4 +17,4 @@ function(wm_media_test name)
     gtest_discover_tests(${name} PROPERTIES TIMEOUT 120 DISCOVERY_TIMEOUT 60)
 endfunction()
 
-wm_media_test(media_core_tests core_tests.cpp)
+wm_media_test(media_core_tests core_tests.cpp byte_source_tests.cpp)
