@@ -837,8 +837,8 @@ private enum LockScreenAssetPublisher {
           projectRevision: projectRevision, properties: properties, exchange: exchange, reused: &sources)
         assetsRevision = projectRevision
       }
-      let nativeVideoFile = type.lowercased() == "video"
-        ? nativeVideoMedia(in: source, metadata: metadata) : nil
+      let isVideo = type.lowercased() == "video"
+      let nativeVideoFile = isVideo ? nativeVideoMedia(in: source, metadata: metadata) : nil
       scenes.append(
         LockScreenScene(
           displayID: input.displayID, title: input.title,
@@ -849,7 +849,7 @@ private enum LockScreenAssetPublisher {
           // A web page fills its window, so it has no position and no scene renderer to carry.
           framing: isWeb ? nil : input.framing,
           sceneRenderer: isWeb ? nil : input.sceneRenderer,
-          nativeVideoFile: nativeVideoFile))
+          plainVideo: isVideo ? true : nil, nativeVideoFile: nativeVideoFile))
     }
     return Prepared(
       configuration: LockScreenConfiguration(scenes: scenes),
@@ -857,8 +857,8 @@ private enum LockScreenAssetPublisher {
   }
 
   /// The media file of a video project the extension may open natively: the project's `file`
-  /// when it names a regular file, not a link, inside the project folder. Anything else is
-  /// left to the scene engine, which reports the problem the way it always has.
+  /// when it names a regular file, not a link, inside the project folder. Anything else is nil,
+  /// and the extension holds that video and reports that the clip is missing.
   private static func nativeVideoMedia(in project: URL, metadata: [String: Any]) -> String? {
     guard let file = metadata["file"] as? String, !file.isEmpty, !file.hasPrefix("/") else {
       return nil

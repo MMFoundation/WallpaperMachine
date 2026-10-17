@@ -47,11 +47,6 @@ pub struct ActivationInputs<'a> {
     /// [`ActivationInputs::build_web`] instead of the scene engine; ids
     /// without a model are treated as engine-rendered.
     pub project_models: &'a BTreeMap<String, ProjectModel>,
-    /// Whether a plain video is also described as a scene. Never on the desktop: every plain local
-    /// video is played by the host's own player ([`ActivationInputs::build_native_video`]) and the
-    /// scene engine is not given it. Only the lock-screen export turns it on, because the extension
-    /// plays the clip itself and keeps the scene as the picture it draws when its player cannot.
-    pub videos_as_scenes: bool,
     /// Global frame-rate ceiling in force. `None` means no limit. Call sites
     /// pass `active_target_fps_cap()`, so it already includes the profile's
     /// cap while Reduced quality is selected and the Mac is on battery, and
@@ -242,15 +237,40 @@ impl ActivationInputs<'_> {
     /// Returns an error when an active wallpaper config cannot be converted
     /// into a scene.
     pub fn build_owned(&self) -> Result<Vec<(SceneDesc, String)>, BridgeError> {
+        self.build_described(false)
+    }
+
+    /// The lock-screen and screen-saver export: [`Self::build`] plus a description of every plain
+    /// video, which the extension plays with its own players. The descriptions only say which
+    /// display shows which clip and how; nothing renders them as a scene, and a clip the extension
+    /// cannot play is held and reported there, as on the desktop.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an active wallpaper config cannot be converted
+    /// into a description.
+    pub fn build_lock_screen(&self) -> Result<Vec<SceneDesc>, BridgeError> {
+        Ok(self
+            .build_described(true)?
+            .into_iter()
+            .map(|(scene, _)| scene)
+            .collect())
+    }
+
+    fn build_described(
+        &self,
+        include_videos: bool,
+    ) -> Result<Vec<(SceneDesc, String)>, BridgeError> {
         let (direct, mirrors) = self.slots();
         let mut scenes: Vec<(SceneDesc, String)> = Vec::new();
         for slot in direct {
             // A wallpaper played by a host-rendered backend must not also get a
             // scene: two renderers for one display would decode and present the
             // same content twice. A plain video has no other player, so it never
-            // gets one, whether or not its file can be found.
+            // gets one, whether or not its file can be found. Only the lock-screen
+            // export describes one, for the extension's own players.
             if self.is_web(slot.wallpaper_id)
-                || (self.is_native_video(slot.wallpaper_id) && !self.videos_as_scenes)
+                || (self.is_native_video(slot.wallpaper_id) && !include_videos)
             {
                 continue;
             }

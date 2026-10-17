@@ -126,6 +126,9 @@
     },
     "Native Metal can't draw this wallpaper: %@. The lock screen shows its last frame, or its preview picture when it has drawn nothing yet." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Native Metal can't draw this wallpaper: %@. The lock screen shows its last frame, or its preview picture when it has drawn nothing yet."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalではこの壁紙を描画できません：%@。ロック画面には最後のフレーム（まだ何も描画していない場合はプレビュー画像）が表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 无法绘制此壁纸：%@。锁屏会显示最后一帧（尚未绘制任何内容时则显示预览图）。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 無法繪製此桌布：%@。鎖定畫面會顯示最後一個影格（尚未繪製任何內容時則顯示預覽圖）。"}}}
+    },
+    "This video can't be played: %@. The lock screen keeps its last frame." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "This video can't be played: %@. The lock screen keeps its last frame."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "この動画は再生できません：%@。ロック画面には最後のフレームが保持されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "无法播放此视频：%@。锁屏会保留最后一帧。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "無法播放此影片：%@。鎖定畫面會保留最後一個影格。"}}}
     }
   },
   "version" : "1.0"

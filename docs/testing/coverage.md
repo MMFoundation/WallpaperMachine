@@ -668,22 +668,25 @@ or depend on a second physical monitor.
   from switching a mode off and on again; a scene or video publishes its display's position
   and a web page none, and moving the picture publishes a new revision that reuses the
   project while the same position publishes nothing.
-- `LockScreenVideoPlannerTests` — which path draws a plain video on the lock screen: the
-  native player only when the app asked for it and admission accepts the clip (the frame rate
-  it was given takes no part), the scene engine for every refusal (not playable, unreadable),
-  for a clip that is missing, for one the player already failed on and
-  for a path that leaves the project, and that a file AVFoundation cannot open (garbage bytes,
-  a missing file) fails the player's `prepare()`, which is what sends the surface back to the
-  scene engine; that a failure is held against its clip and a different or replaced one tries
-  the native player again; that the attempt's deadline expires on an injected clock without
-  waiting and is bounded below the surface's 30 seconds; and that a player failure that beats
-  the handler's assignment is delivered once when it is assigned. The surface wiring and the
-  order in which the scene renderer preference is applied live in the extension target, which
-  no unit test compiles, so they are checked by building it. `LockScreenWallpaperTests` also covers the configuration keys `sceneRenderer`
-  and `nativeVideoFile` (round trip with and without, the default, an unknown name, which
-  changes replace a renderer, and that a changed frame rate replaces neither a native player nor the scene engine),
-  and the service tests that the Scene renderer setting is published and a change republishes, and that a video project always
-  carries its media file. Not covered: a real lock screen, the player playing a clip there.
+- `LockScreenVideoPlannerTests` — which player plays a plain video on the lock screen: the
+  AVFoundation layer when admission accepts the clip (the frame rate it was given takes no
+  part), the WebM player for a file AVFoundation cannot open that the project's reader takes,
+  and `unplayable` with the reason for every refusal (not playable, unreadable), for a clip
+  that is missing, and for a path that leaves the project, never another renderer; that
+  nothing that is not a plain video takes a video player; that a file AVFoundation cannot open
+  (garbage bytes, a missing file) fails the player's `prepare()`, which is what makes the
+  surface hold the clip with the reason; that the attempt's deadline expires on an injected
+  clock without waiting and is bounded below the surface's 30 seconds; and that a player
+  failure that beats the handler's assignment is delivered once when it is assigned.
+  `LockScreenHeldFailureTests` covers the engine's stages and the `video` stage the extension
+  itself reports. The surface wiring and the order in which the scene renderer preference is
+  applied live in the extension target, which no unit test compiles, so they are checked by
+  building it. `LockScreenWallpaperTests` also covers the configuration keys `sceneRenderer`,
+  `plainVideo` and `nativeVideoFile` (round trip with and without, the default, an unknown
+  name, which changes replace a renderer, and that a changed frame rate replaces neither a
+  video player nor the scene engine), and the service tests that the Scene renderer setting is
+  published and a change republishes, and that a video project is always published as a video,
+  with its media file when the app finds it. Not covered: a real lock screen, the player playing a clip there.
 - `LockScreenExtensionRegistrationTests` use synthetic app bundles and an
   injected registry: current-copy selection, duplicate and removed-copy cleanup,
   symlink aliases, invalid inventory rejection, cancellation, command failures;

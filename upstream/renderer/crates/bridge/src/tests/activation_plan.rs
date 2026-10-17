@@ -57,7 +57,6 @@ fn activation_plan_marks_scenes_paused_when_global_playback_is_paused() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -107,7 +106,6 @@ fn activation_plan_leaves_display_empty_when_assigned_wallpaper_left_the_library
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -166,7 +164,6 @@ fn activation_plan_gives_primary_wallpaper_to_current_primary_display() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -188,7 +185,6 @@ fn activation_plan_gives_primary_wallpaper_to_current_primary_display() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -234,7 +230,6 @@ fn activation_plan_uses_primary_render_override_for_identity_primary_monitor() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -284,7 +279,6 @@ fn activation_plan_uses_identity_render_override_for_primary_monitor() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -376,7 +370,6 @@ fn mirror_scene_follows_source_wallpaper_with_monitor_overrides() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -485,7 +478,7 @@ fn a_plain_video_is_never_a_scene_and_is_always_a_native_descriptor_when_its_fil
     );
     let displays = vec![display_snapshot(1)];
     let suspended = BTreeSet::new();
-    let plan = |videos_as_scenes: bool| ActivationInputs {
+    let plan = || ActivationInputs {
         app_config: &config,
         wallpapers: &wallpapers,
         library: None,
@@ -495,34 +488,38 @@ fn a_plain_video_is_never_a_scene_and_is_always_a_native_descriptor_when_its_fil
         paths: &paths,
         force_shader_refresh: false,
         project_models: &project_models,
-        videos_as_scenes,
         frame_rate_cap: None,
         audio_suppressed: false,
         held: &NONE_HELD,
     };
     static NONE_HELD: BTreeSet<String> = BTreeSet::new();
 
-    assert_eq!(plan(false).build_native_video().unwrap().len(), 1);
-    assert!(plan(false).build().unwrap().is_empty(), "the engine is not given a video it has no part in");
-    assert_eq!(plan(false).render_backends().videos[0].problem, None);
+    assert_eq!(plan().build_native_video().unwrap().len(), 1);
+    assert!(plan().build().unwrap().is_empty(), "the engine is not given a video it has no part in");
+    assert_eq!(plan().render_backends().videos[0].problem, None);
     assert_eq!(
-        plan(true).build().unwrap().len(),
+        plan().build_lock_screen().unwrap().len(),
         1,
-        "the lock-screen export carries the video as a scene too"
+        "the lock-screen export describes the video for the extension's own players"
     );
     // The key is the file's identity: a replaced file is a different key, a frame-rate cap is not.
-    let key = plan(false).build_native_video().unwrap()[0].admission_key;
-    let capped = ActivationInputs { frame_rate_cap: Some(15), ..plan(false) };
+    let key = plan().build_native_video().unwrap()[0].admission_key;
+    let capped = ActivationInputs { frame_rate_cap: Some(15), ..plan() };
     assert_eq!(capped.build_native_video().unwrap()[0].admission_key, key);
     std::fs::write(project_dir.join("clip.mp4"), b"a longer clip than before").unwrap();
-    assert_ne!(plan(false).build_native_video().unwrap()[0].admission_key, key);
+    assert_ne!(plan().build_native_video().unwrap()[0].admission_key, key);
 
     // A video whose file is gone gets neither descriptor nor scene, and the report says why.
     std::fs::remove_file(project_dir.join("clip.mp4")).unwrap();
-    assert!(plan(false).build_native_video().unwrap().is_empty());
-    assert!(plan(false).build().unwrap().is_empty(), "no scene stands in for a file that cannot be found");
+    assert!(plan().build_native_video().unwrap().is_empty());
+    assert!(plan().build().unwrap().is_empty(), "no scene stands in for a file that cannot be found");
     assert_eq!(
-        plan(false).render_backends().videos[0].problem.as_deref(),
+        plan().build_lock_screen().unwrap().len(),
+        1,
+        "the lock screen still names the video, so its extension holds the missing clip with a reason"
+    );
+    assert_eq!(
+        plan().render_backends().videos[0].problem.as_deref(),
         Some("the project's video file could not be found")
     );
 }
@@ -598,7 +595,6 @@ impl HeldFixture {
             paths: &self.paths,
             force_shader_refresh: false,
             project_models: &self.models,
-            videos_as_scenes: false,
             frame_rate_cap: None,
             audio_suppressed: false,
             held,
@@ -674,7 +670,6 @@ fn build_owned_maps_each_display_to_its_wallpaper_including_mirrors() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &models,
-        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
         held,
@@ -782,7 +777,6 @@ fn a_saved_position_reaches_only_the_scene_built_for_its_display() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -845,7 +839,6 @@ fn a_saved_position_follows_the_display_across_the_ways_it_is_addressed() {
             paths: &paths,
             force_shader_refresh: false,
             project_models: &BTreeMap::new(),
-            videos_as_scenes: false,
             frame_rate_cap: None,
             audio_suppressed: false,
         }
@@ -905,7 +898,6 @@ fn a_mirror_is_centred_even_when_its_source_is_positioned() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }

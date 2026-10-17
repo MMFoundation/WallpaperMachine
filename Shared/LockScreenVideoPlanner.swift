@@ -1,29 +1,29 @@
 import Foundation
 import WallpaperMedia
 
-/// Which path draws a plain video wallpaper on the lock screen and as the screen saver.
+/// Which player draws a plain video wallpaper on the lock screen and as the screen saver.
 enum LockScreenVideoPath: Equatable {
-  /// The scene engine, which plays every video it is given. `reason` says why the native
-  /// player was not used, and is nil when the configuration never asked for it.
-  case sceneEngine(reason: String?)
   /// An AVFoundation layer with hardware decode.
   case avFoundation(URL)
   /// A WebM or Matroska file AVFoundation cannot open, opened with the app's own reader and played
   /// by `WebMPlayer` (`LockScreenWebMPlayer`).
   case webM(URL, WebMFile)
+  /// Neither of the app's own players can take the clip. There is no other renderer for a video:
+  /// the surface holds what it shows and reports `reason`, as the desktop does.
+  case unplayable(reason: String)
 
-  var isNative: Bool {
+  var isPlayable: Bool {
     switch self {
     case .avFoundation, .webM: return true
-    case .sceneEngine: return false
+    case .unplayable: return false
     }
   }
 
   static func == (lhs: Self, rhs: Self) -> Bool {
     switch (lhs, rhs) {
-    case let (.sceneEngine(a), .sceneEngine(b)): return a == b
     case let (.avFoundation(a), .avFoundation(b)): return a == b
     case let (.webM(a, fileA), .webM(b, fileB)): return a == b && fileA === fileB
+    case let (.unplayable(a), .unplayable(b)): return a == b
     default: return false
     }
   }
@@ -31,10 +31,11 @@ enum LockScreenVideoPath: Equatable {
 
 /// The decision, kept apart from the player so it can be exercised without a lock screen.
 ///
-/// It mirrors the app: the app publishes `nativeVideoFile` for every plain video, and the
-/// native players take the clip when `NativeVideoAdmission` accepts it, the same rule the desktop applies. The clip plays at
-/// its own frame rate. A clip AVFoundation cannot open is tried with the app's own WebM reader (a
-/// Matroska or WebM file it plays goes to `WebMPlayer`); anything else goes to the scene engine.
+/// It mirrors the app: the app publishes `plainVideo` for every plain video and `nativeVideoFile`
+/// when it found the clip, and the players take it when `NativeVideoAdmission` accepts it, the same
+/// rule the desktop applies. The clip plays at its own frame rate. A clip AVFoundation cannot open
+/// is tried with the app's own WebM reader (a Matroska or WebM file it plays goes to `WebMPlayer`);
+/// anything else is unplayable, and the surface holds it with the reason.
 enum LockScreenVideoPlanner {
   /// The scene's media file in the exchange directory, as a path relative to it. Nil when the
   /// scene is not a plain video the app published a file for, or names a file that cannot lie inside its
@@ -53,7 +54,7 @@ enum LockScreenVideoPlanner {
   /// `resolve` turns the relative path into a readable file and throws when it cannot (the
   /// extension's own sandboxed asset lookup); `admission` is the desktop's rule.
   static func decide(
-    scene: LockScreenScene, enabled: Bool = true,
+    scene: LockScreenScene,
     resolve: (String) throws -> URL,
     admission: (URL) async -> NativeVideoRefusal? = { url in
       await NativeVideoAdmission.evaluate(url: url)
@@ -63,42 +64,26 @@ enum LockScreenVideoPlanner {
       return nil
     }
   ) async -> LockScreenVideoPath {
-    guard scene.webEntryFile == nil, scene.nativeVideoFile != nil else {
-      return .sceneEngine(reason: nil)
+    guard scene.webEntryFile == nil, scene.plainVideo == true else {
+      return .unplayable(reason: "this wallpaper is not a plain video")
     }
-    guard enabled else { return .sceneEngine(reason: "the native player failed on this clip earlier") }
+    guard scene.nativeVideoFile != nil else {
+      return .unplayable(reason: "the project's video file could not be found")
+    }
     guard let path = mediaPath(of: scene) else {
-      return .sceneEngine(reason: "the clip's path is not inside its project")
+      return .unplayable(reason: "the clip's path is not inside its project")
     }
     let url: URL
     do { url = try resolve(path) } catch {
-      return .sceneEngine(reason: "the clip is unavailable: \(error.localizedDescription)")
+      return .unplayable(reason: "the clip is unavailable: \(error.localizedDescription)")
     }
     if let refusal = await admission(url) {
       // AVFoundation never opens Matroska or WebM; the app's reader may. Anything it does not play
       // keeps the refusal AVFoundation gave.
       if case .notPlayable = refusal, let file = openWebM(url) { return .webM(url, file) }
-      return .sceneEngine(reason: refusal.reason)
+      return .unplayable(reason: refusal.reason)
     }
     return .avFoundation(url)
-  }
-}
-
-/// The clip the native player failed on, so that failure is held against that file and not
-/// against the surface. The app publishes every revision of a wallpaper under its own folder, so
-/// a replaced or different video has a different identity and tries the native player again,
-/// while the same clip never retries it: its replacement draws it with the scene engine.
-struct LockScreenNativeVideoMemory: Equatable {
-  private(set) var failedClip: String?
-
-  /// Whether the native player may be tried for `scene`'s clip.
-  func allows(_ scene: LockScreenScene) -> Bool {
-    guard let clip = LockScreenVideoPlanner.mediaPath(of: scene) else { return true }
-    return clip != failedClip
-  }
-
-  mutating func recordFailure(of scene: LockScreenScene) {
-    failedClip = LockScreenVideoPlanner.mediaPath(of: scene)
   }
 }
 
@@ -109,9 +94,9 @@ enum LockScreenDeadline {
     var errorDescription: String? { "it did not finish within \(timeout)" }
   }
 
-  /// How long the native player has, from the decision to the first frame, before the surface
-  /// gives the clip to the scene engine. It is well inside the surface's 30 second first-frame
-  /// deadline, because the scene engine gets that whole deadline of its own after it.
+  /// How long a player has, from the decision to the first frame, before the surface holds the
+  /// clip as unplayable. It is well inside the surface's 30 second first-frame deadline, so the
+  /// failure is reported while the host is still waiting for a picture.
   static let nativeAttempt = Duration.seconds(10)
 
   /// `operation`'s result, or `Expired` once `sleep(timeout)` returns first. The loser is

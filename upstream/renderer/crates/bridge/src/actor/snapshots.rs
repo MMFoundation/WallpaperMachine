@@ -640,7 +640,6 @@ impl BridgeActorState {
             paths,
             force_shader_refresh: false,
             project_models: &self.project_models,
-            videos_as_scenes: false,
             frame_rate_cap: self.active_target_fps_cap(),
             audio_suppressed: self.audio_suppressed,
             held: &self.held_wallpapers,

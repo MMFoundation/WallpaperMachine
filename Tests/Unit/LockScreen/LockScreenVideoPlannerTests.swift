@@ -4,18 +4,18 @@ import WallpaperMedia
 
 @testable import WallpaperMachine
 
-/// Which path draws a plain video on the lock screen, and what happens when the native player
-/// cannot open the clip. No real lock screen and no decoding: the decision is a function of the
-/// configuration and of what admission says about the file.
+/// Which player plays a plain video on the lock screen, and what happens when neither of the
+/// extension's own players can open the clip. No real lock screen and no decoding: the decision is
+/// a function of the configuration and of what admission says about the file.
 final class LockScreenVideoPlannerTests: XCTestCase {
   private func scene(
     file: String? = "clip.mp4", fps: UInt32 = 30, web: String? = nil,
-    projectPath: String = "revisions/abc/project.json"
+    projectPath: String = "revisions/abc/project.json", video: Bool = true
   ) -> LockScreenScene {
     LockScreenScene(
       displayID: 1, title: "t", projectPath: projectPath, assetsPath: "revisions/abc",
       previewPath: nil, fps: fps, scalingMode: 3, scalingFactor: 1, propertiesJSON: nil,
-      paused: false, webEntryFile: web, nativeVideoFile: file)
+      paused: false, webEntryFile: web, plainVideo: video ? true : nil, nativeVideoFile: file)
   }
 
   private struct Missing: Error, LocalizedError {
@@ -23,13 +23,13 @@ final class LockScreenVideoPlannerTests: XCTestCase {
   }
 
   private func decide(
-    _ scene: LockScreenScene, enabled: Bool = true,
+    _ scene: LockScreenScene,
     admission: @escaping (URL) async -> NativeVideoRefusal? = { _ in nil },
     resolved: @escaping (String) throws -> URL = { URL(fileURLWithPath: "/exchange/" + $0) },
     openWebM: @escaping (URL) -> WebMFile? = { _ in nil }
   ) async -> LockScreenVideoPath {
     await LockScreenVideoPlanner.decide(
-      scene: scene, enabled: enabled, resolve: resolved, admission: admission, openWebM: openWebM)
+      scene: scene, resolve: resolved, admission: admission, openWebM: openWebM)
   }
 
   private func webMFile() throws -> WebMFile {
@@ -49,15 +49,15 @@ final class LockScreenVideoPlannerTests: XCTestCase {
         return file
       })
     XCTAssertEqual(path, .webM(URL(fileURLWithPath: "/exchange/revisions/abc/clip.webm"), file))
-    XCTAssertTrue(path.isNative)
+    XCTAssertTrue(path.isPlayable)
     XCTAssertEqual(opened, [URL(fileURLWithPath: "/exchange/revisions/abc/clip.webm")])
   }
 
-  func testAFileTheWebMReaderDoesNotTakeKeepsAVFoundationsRefusalAndGoesToTheSceneEngine() async {
+  func testAFileTheWebMReaderDoesNotTakeKeepsAVFoundationsRefusalAndIsUnplayable() async {
     let path = await decide(
       scene(file: "clip.webm"), admission: { _ in .notPlayable("asset reports itself unplayable") },
       openWebM: { _ in nil })
-    XCTAssertEqual(path, .sceneEngine(reason: "asset is not playable: asset reports itself unplayable"))
+    XCTAssertEqual(path, .unplayable(reason: "asset is not playable: asset reports itself unplayable"))
   }
 
   func testOnlyAnUnplayableAnswerIsPassedToTheWebMReader() async throws {
@@ -68,7 +68,7 @@ final class LockScreenVideoPlannerTests: XCTestCase {
         asked = true
         return file
       })
-      XCTAssertFalse(path.isNative, "\(refusal)")
+      XCTAssertFalse(path.isPlayable, "\(refusal)")
       XCTAssertFalse(asked, "a read that failed or a decoder that gave up says nothing about the container")
     }
   }
@@ -80,53 +80,49 @@ final class LockScreenVideoPlannerTests: XCTestCase {
       return nil
     })
     XCTAssertEqual(path, .avFoundation(URL(fileURLWithPath: "/exchange/revisions/abc/clip.mp4")))
-    XCTAssertTrue(path.isNative)
+    XCTAssertTrue(path.isPlayable)
     XCTAssertEqual(asked, [URL(fileURLWithPath: "/exchange/revisions/abc/clip.mp4")],
       "the rule is about the file: the frame rate the lock screen was given takes no part")
   }
 
-  func testAClipTheAppDidNotAskTheNativePlayerForStaysWithTheSceneEngine() async {
+  func testAVideoWhoseFileTheAppCouldNotFindIsUnplayableAndNothingIsOpened() async {
     var admissionAsked = false
     let path = await decide(scene(file: nil), admission: { _ in
       admissionAsked = true
       return nil
     })
-    XCTAssertEqual(path, .sceneEngine(reason: nil))
-    XCTAssertFalse(admissionAsked, "nothing is opened for a scene that never asked")
+    XCTAssertEqual(path, .unplayable(reason: "the project's video file could not be found"))
+    XCTAssertFalse(admissionAsked, "there is no file to open")
   }
 
-  func testAWebPageNeverTakesTheNativePlayer() async {
-    let path = await decide(scene(web: "index.html"))
-    XCTAssertEqual(path, .sceneEngine(reason: nil))
+  func testNothingThatIsNotAPlainVideoTakesAVideoPlayer() async {
+    for candidate in [scene(web: "index.html"), scene(file: nil, video: false), scene(video: false)] {
+      var admissionAsked = false
+      let path = await decide(candidate, admission: { _ in
+        admissionAsked = true
+        return nil
+      })
+      XCTAssertFalse(path.isPlayable)
+      XCTAssertFalse(admissionAsked)
+    }
   }
 
-  func testAClipAVFoundationCannotOpenFallsBackToTheSceneEngineWithTheReason() async {
+  func testAClipNeitherPlayerCanOpenIsUnplayableWithTheReasonAndNeverHandedToAnotherRenderer() async {
     for refusal in [
       NativeVideoRefusal.notPlayable("asset reports itself unplayable"),
       .preparationFailed("the file could not be read"),
       .playbackFailed("decoder error"),
     ] {
       let path = await decide(scene(), admission: { _ in refusal })
-      XCTAssertEqual(path, .sceneEngine(reason: refusal.reason), "\(refusal)")
-      XCTAssertFalse(path.isNative)
+      XCTAssertEqual(path, .unplayable(reason: refusal.reason), "\(refusal)")
+      XCTAssertFalse(path.isPlayable)
     }
   }
 
-  func testAClipThatIsNotThereFallsBackInsteadOfFailingTheSurface() async {
+  func testAClipThatIsNotThereIsUnplayableInsteadOfFailingTheSurface() async {
     let path = await decide(scene(), resolved: { _ in throw Missing() })
-    guard case .sceneEngine(let reason?) = path else { return XCTFail("\(path)") }
+    guard case .unplayable(let reason) = path else { return XCTFail("\(path)") }
     XCTAssertTrue(reason.contains("no such file"))
-  }
-
-  func testAClipThePlayerAlreadyFailedOnIsNotTriedAgain() async {
-    var admissionAsked = false
-    let path = await decide(scene(), enabled: false, admission: { _ in
-      admissionAsked = true
-      return nil
-    })
-    guard case .sceneEngine(let reason?) = path else { return XCTFail("\(path)") }
-    XCTAssertFalse(reason.isEmpty)
-    XCTAssertFalse(admissionAsked)
   }
 
   func testAFileOutsideTheProjectIsNeverResolved() async {
@@ -136,7 +132,7 @@ final class LockScreenVideoPlannerTests: XCTestCase {
         resolved = true
         return URL(fileURLWithPath: "/x")
       })
-      XCTAssertFalse(path.isNative, file)
+      XCTAssertFalse(path.isPlayable, file)
       XCTAssertFalse(resolved, file)
     }
   }
@@ -150,10 +146,10 @@ final class LockScreenVideoPlannerTests: XCTestCase {
 
   // MARK: The player's own failure
 
-  /// A file AVFoundation cannot play fails `prepare()`, which is what sends the surface to the
-  /// scene engine. Nothing is decoded: the open itself is refused.
+  /// A file AVFoundation cannot play fails `prepare()`, which is what makes the surface hold the
+  /// clip with the reason. Nothing is decoded: the open itself is refused.
   @MainActor
-  func testAFileThatIsNotAVideoFailsPrepareSoTheSurfaceFallsBack() async throws {
+  func testAFileThatIsNotAVideoFailsPrepareSoTheSurfaceHoldsIt() async throws {
     let directory = FileManager.default.temporaryDirectory
       .appendingPathComponent("lock-screen-video-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -188,31 +184,7 @@ final class LockScreenVideoPlannerTests: XCTestCase {
     }
   }
 
-  // MARK: A failure is held against the clip, not the surface
-
-  func testAFailureIsHeldAgainstTheClipItWasAboutAndNotAgainstALaterOne() {
-    var memory = LockScreenNativeVideoMemory()
-    let first = scene(file: "a.mp4")
-    XCTAssertTrue(memory.allows(first), "nothing has failed yet")
-    memory.recordFailure(of: first)
-    XCTAssertFalse(memory.allows(first), "the clip that failed does not retry in a loop")
-    XCTAssertFalse(memory.allows(scene(file: "a.mp4", fps: 60)), "a new frame rate is the same clip")
-    XCTAssertTrue(memory.allows(scene(file: "b.mp4")), "a different file tries the native player")
-    XCTAssertTrue(
-      memory.allows(scene(file: "a.mp4", projectPath: "revisions/def/project.json")),
-      "a replaced revision of the file tries the native player")
-    XCTAssertTrue(memory.allows(scene(file: nil)), "a scene that never asked is not held back")
-  }
-
-  func testTheMemoryFollowsTheLatestFailure() {
-    var memory = LockScreenNativeVideoMemory()
-    memory.recordFailure(of: scene(file: "a.mp4"))
-    memory.recordFailure(of: scene(file: "b.mp4"))
-    XCTAssertTrue(memory.allows(scene(file: "a.mp4")))
-    XCTAssertFalse(memory.allows(scene(file: "b.mp4")))
-  }
-
-  // MARK: The native attempt has its own deadline
+  // MARK: The attempt has its own deadline
 
   private struct Hung: Error {}
 

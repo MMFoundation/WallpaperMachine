@@ -669,8 +669,8 @@ the keys are ignored, and not written back. **In use now** lists the display and
 running video, and it names a problem only when the project's media file cannot be found. It reads `No video wallpaper is running.` when
 nothing is playing video. A video the player cannot play is not handed to anything else: its
 display is reported as failed with the reason (below) and keeps the picture it had. The lock screen
-and screen saver still draw a plain video with the scene engine when their own player cannot
-([lock screen](lock-screen.md#plain-video-wallpapers)).
+and screen saver do the same: a clip their own players cannot play is held on its last frame with the
+reason as a note ([lock screen](lock-screen.md#plain-video-wallpapers)).
 
 Applying a video checks that its entry is a readable, nonempty file. A file that is
 missing or empty fails with the usual error. It also checks that the format can be played,

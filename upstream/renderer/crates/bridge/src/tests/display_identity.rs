@@ -126,7 +126,6 @@ fn wallpaper_by_display(
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }

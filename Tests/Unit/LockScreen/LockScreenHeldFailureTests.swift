@@ -22,6 +22,16 @@ final class LockScreenHeldFailureTests: XCTestCase {
     }
   }
 
+  /// A video the extension's players could not play is held the same way, with the reason they gave. It is
+  /// never read from the engine's stages, which have no number for it.
+  func testAVideoTheExtensionCouldNotPlayIsHeldWithItsReason() {
+    let held = LockScreenHeldFailure(video: "the clip is unavailable")
+    XCTAssertEqual(held.stage, .video)
+    XCTAssertEqual(held.logDetail, "stage=video reason=the clip is unavailable")
+    XCTAssertFalse(
+      (1...5).contains { LockScreenHeldFailure(rawStage: Int32($0), reason: "")?.stage == .video })
+  }
+
   func testTheLogDetailNamesTheStageAndOnlyTheReasonTheEngineGave() {
     XCTAssertEqual(
       LockScreenHeldFailure(rawStage: 3, reason: "the shader did not link")?.logDetail,

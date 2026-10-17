@@ -1210,7 +1210,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             paths: &self.paths,
             force_shader_refresh: false,
             project_models: &self.state.project_models,
-            videos_as_scenes: false,
             frame_rate_cap: self.active_target_fps_cap(),
             audio_suppressed: self.state.audio_suppressed,
             held: &self.state.held_wallpapers,
@@ -1394,15 +1393,14 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         let no_suspended_displays = BTreeSet::new();
         let inputs = ActivationInputs {
             suspended_displays: &no_suspended_displays,
-            // The extension plays a plain video itself and keeps the scene as the picture it draws
-            // when its own player cannot, so the export carries videos as scenes.
-            videos_as_scenes: true,
             frame_rate_cap: self.active_target_fps_cap(),
             ..self.activation_inputs(&displays, self.state.playback_state == BridgePlaybackState::Paused)
         };
 
+        // Plain videos included: the extension plays each with its own players, and holds the
+        // clip with the failure when they cannot.
         let mut scenes = inputs
-            .build()?
+            .build_lock_screen()?
             .into_iter()
             .map(|mut scene| {
                 let wallpaper_id = std::path::Path::new(&scene.scene_path)
@@ -2206,7 +2204,6 @@ async fn reconcile_with<E: EngineFacade>(
             paths: &paths,
             force_shader_refresh,
             project_models: &project_models,
-            videos_as_scenes: false,
             frame_rate_cap: quality.target_fps_cap,
             audio_suppressed,
             held: &load_guard.held,
@@ -4920,7 +4917,6 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
                     paths: &self.paths,
                     force_shader_refresh: false,
                     project_models: &self.state.project_models,
-                    videos_as_scenes: false,
                     frame_rate_cap: self.active_target_fps_cap(),
                     audio_suppressed: self.state.audio_suppressed,
                     held: &self.state.held_wallpapers,

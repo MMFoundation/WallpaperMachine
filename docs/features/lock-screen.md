@@ -113,35 +113,37 @@ nothing answer with the extension's usual "frame is not ready" error.
 ### Plain video wallpapers
 
 A plain video plays on the lock screen and as the screen saver with the same players as the
-desktop. The app publishes the clip's file as an optional `nativeVideoFile` (a path inside the project, only for a video
-project, only for a regular file that lies in it; a scene, a web page, a missing file or a
-configuration an older app wrote has none and a copy of the extension that predates the key
-ignores it). The extension then plays the clip in an AVFoundation layer in its own layer
-tree, decoded in hardware, instead of through the scene engine. The configuration version is
-unchanged.
+desktop, and with nothing else: the scene engine is never given a video. The app publishes a
+video project as `plainVideo` and, when it finds the clip, its file as `nativeVideoFile` (a path
+inside the project, only for a regular file that lies in it; a scene, a web page, a missing file
+or a configuration an older app wrote has none, and a copy of the extension that predates the
+keys ignores them). The extension plays the clip in an AVFoundation layer in its own layer
+tree, decoded in hardware. The configuration version is unchanged.
 
-The native player takes a clip only where the desktop's does: it is judged by the same
+The players take a clip only where the desktop's do: it is judged by the same
 admission rule (`NativeVideoAdmission`, compiled into both targets), which is about the file
 alone. The clip plays at its own frame rate whatever rate the lock screen was given, because an
 AVFoundation layer cannot be capped. A clip AVFoundation cannot open is tried with the app's own
 Matroska reader: a WebM or Matroska file it plays (H.264, HEVC and VP9 in it, and AV1 with
 hardware decoding) is played by `LockScreenWebMPlayer`, the desktop's `WebMPlayer` without sound
 in the extension's layer tree (the extension logs `Backend display=… drew=WebM video`), with the
-same planner, deadline and failure memory as the AVFoundation layer. Anything the reader does not
-take (VP8, a damaged or unreadable file) goes to the scene engine, and the extension logs
-`Native video not used display=…: <reason>`. Whether the sandboxed extension can use VideoToolbox's
-supplemental VP9 decoder has not been checked on a lock screen; if it cannot, a VP9 clip fails its
-first frame and the scene engine takes it like any other failure. The same happens if the player fails after it
-started, or a resumed player does not advance within four seconds: the scene engine takes the
-scene behind the held frame (`Native video failed display=…`). The attempt, from the decision
-to the first frame, has its own 10-second deadline, well inside the 30-second first-frame
-deadline: a player that neither shows a frame nor fails is dropped and the scene engine then
-gets that whole deadline. A failure is held against the clip it was about (its path inside the
-published revision), not the surface: that clip is drawn by the scene engine from then on, while
-a different file or a replaced revision tries the native player again. A failure that arrives
-before the surface has taken its handler is held and delivered when it does. A change of the
-frame rate keeps a native player, since the clip does not follow it; a change of the file
-replaces it.
+same planner and deadline as the AVFoundation layer.
+
+A clip neither player takes (VP8, a damaged or unreadable file, a file the app could not find) is
+held, like the desktop's failed video: the surface keeps the frame it shows (nothing, when it
+never showed one), the host is told a picture exists so it does not wait out its deadline, and
+the extension logs `Held display=… stage=video reason=…` once and puts the same reason, in its
+own language, in the readiness the app reads, where it appears as the lock screen's note.
+Whether the sandboxed extension can use VideoToolbox's supplemental VP9 decoder has not been
+checked on a lock screen; if it cannot, a VP9 clip is held the same way. The same happens if a
+player fails after it started, or a resumed player does not advance within four seconds: the
+player is stopped and the last frame stays. The attempt, from the decision to the first frame,
+has its own 10-second deadline, well inside the 30-second first-frame deadline, so the failure is
+reported while the host is still waiting. A held clip is not retried while its scene is
+unchanged; a different file, a replaced revision or a new frame rate that replaces the renderer
+tries the players again. A failure that arrives before the surface has taken its handler is held
+and delivered when it does. A change of the frame rate keeps a player, since the clip does not
+follow it; a change of the file replaces it.
 
 The clip is never heard. The player (either one) is built from the video track alone, so no audio is decoded,
 no audio output or session is opened, it is muted as well, and it asks neither to keep the display
@@ -464,8 +466,8 @@ In `extension.log`:
   `Compatibility`, with ` fallback=<reason>` when the scene did not fit the native
   renderer). It changes nothing.
 - `Backend display=… drew=AVFoundation video`: the first frame of a plain video came from the
-  native player; `Native video not used display=…: <reason>` and `Native video failed
-  display=…: <reason>` say why the scene engine drew it instead.
+  AVFoundation player (`drew=WebM video` for the WebM player); `Held display=… stage=video
+  reason=…` says why a clip neither could play is held.
 
 In the app log (the [diagnostics report](diagnostics.md#diagnostics-report) includes it):
 `Native lock screen: first frame acknowledged after 4.2 s (waited from selection reload)`
@@ -562,9 +564,9 @@ time it builds a renderer) and the extension drawing with Native Metal rather th
 Compatibility (the `Backend display=…` line) still require an authorized desktop check. So do
 a plain video playing in the AVFoundation layer on a real lock screen and as the screen saver
 (that the sandboxed extension may open the clip, hardware decode, the picture hosted in the
-compositor's remote layer tree, resuming after sleep) and the fall back to the scene engine
-with a clip the player cannot open; only the decision, the layout, the failure of the open and
-the publication are covered offscreen.
+compositor's remote layer tree, resuming after sleep) and the held frame and note for a clip
+the players cannot open; only the decision, the layout, the failure of the open and the
+publication are covered offscreen.
 
 ### After sleep, wake, lock and unlock
 

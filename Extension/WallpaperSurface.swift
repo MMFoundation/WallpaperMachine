@@ -22,14 +22,11 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   /// AVFoundation cannot open), in place of `renderer`.
   private var video: LockScreenVideoPlaying?
   private var nativeStart: Task<Void, Never>?
-  /// The clip the native player failed on (after its first frame, or by not producing one in
-  /// time), so the replacement that follows draws that clip with the scene engine instead of
-  /// trying the same player again, while a different or replaced clip tries it afresh.
-  private var nativeFailures = LockScreenNativeVideoMemory()
   private var contentError: Error?
   /// Set once, when the engine reports it cannot draw the scene and Native Metal is the only renderer it
-  /// may use. The surface then keeps what it shows and says why; it is not a `contentError`, because the
-  /// surface is alive and showing a picture, and the same scene can reuse it.
+  /// may use, or when the extension's players cannot play a video. The surface then keeps what it shows
+  /// and says why; it is not a `contentError`, because the surface is alive and showing a picture, and
+  /// the same wallpaper can reuse it.
   private var heldFailure: LockScreenHeldFailure?
   /// The localized note about `heldFailure` the readiness file carries to the app.
   private(set) var heldNotice: String?
@@ -42,7 +39,9 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   private var latestSnapshot: IOSurface?
   private var stopped = false
   var isReusable: Bool { !stopped && contentError == nil }
-  var hasContent: Bool { renderer != nil || video != nil || (web != nil && contentError == nil) }
+  var hasContent: Bool {
+    renderer != nil || video != nil || heldFailure != nil || (web != nil && contentError == nil)
+  }
   private var rendererPaused = false
   /// When this surface started presenting, set once its first frame arrived.
   /// Kept apart from readiness so rendering one frame for a snapshot or a
@@ -106,8 +105,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       else {
         throw WallpaperRuntime.failure("Invalid lock-screen playback configuration.")
       }
-      if LockScreenVideoPlanner.mediaPath(of: scene) != nil {
-        startNativeVideo(project: project, assets: assets, completion: completion)
+      if scene.plainVideo == true {
+        startVideo(completion: completion)
         return
       }
       try startEngine(project: project, assets: assets, completion: completion)
@@ -274,6 +273,9 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     case .compile: stage = String(localized: "its shaders didn't compile for Metal")
     case .frame: stage = String(localized: "a frame failed in Native Metal")
     case .surface: stage = String(localized: "Native Metal couldn't take the new display")
+    case .video:
+      return String(
+        localized: "This video can't be played: \(held.reason). The lock screen keeps its last frame.")
     }
     let detail = held.reason.isEmpty ? stage : stage + " " + String(localized: "(reason: \(held.reason))")
     return String(
@@ -295,42 +297,36 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     }
   }
 
-  /// What the native attempt came to: the scene engine, or a player showing its first frame.
-  private enum NativeAttempt {
-    case engine(reason: String)
+  /// What the attempt to play the clip came to: a player showing its first frame, or the reason no
+  /// player of the app's own could take it.
+  private enum VideoAttempt {
+    case unplayable(reason: String)
     case ready(LockScreenVideoPlaying, CGImage)
   }
 
-  /// A plain video the app asked the native player for: decided against the same admission
-  /// rule the desktop uses, played through an AVFoundation layer, and drawn by the scene engine
-  /// instead whenever the native player cannot take it, before the first frame or after it.
-  /// The attempt, from the decision to the first frame, has its own deadline, so a player that
-  /// neither shows a frame nor fails leaves the scene engine its whole first-frame deadline.
-  private func startNativeVideo(
-    project: URL, assets: URL, completion: @escaping (Error?) -> Void
-  ) {
+  /// A plain video: decided against the same admission rule the desktop uses and played by the
+  /// extension's own players, an AVFoundation layer or the WebM player. There is no other renderer for
+  /// a video, so a clip they cannot take, before the first frame or after it, is held and reported.
+  /// The attempt, from the decision to the first frame, has its own deadline, so a player that neither
+  /// shows a frame nor fails is reported while the host is still waiting.
+  private func startVideo(completion: @escaping (Error?) -> Void) {
     firstFrameReply = completion
     armDeadline()
     let scene = scene
     nativeStart = Task { @MainActor [weak self] in
       guard let self else { return }
-      let enabled = self.nativeFailures.allows(scene)
-      let attempt: NativeAttempt
+      let attempt: VideoAttempt
       do {
         attempt = try await LockScreenDeadline.run(within: LockScreenDeadline.nativeAttempt) {
           [weak self] in
           guard let self else { throw CancellationError() }
-          return try await self.attemptNativeVideo(scene: scene, enabled: enabled)
+          return try await self.attemptVideo(scene: scene)
         }
       } catch {
         guard !Task.isCancelled, !self.stopped, self.firstFrameReply != nil else { return }
         self.video?.stop()
         self.video = nil
-        if error is LockScreenDeadline.Expired {
-          // Held against the clip, so a replacement does not wait for it again.
-          self.nativeFailures.recordFailure(of: scene)
-        }
-        self.fallBackToEngine(error.localizedDescription, project: project, assets: assets)
+        self.holdVideo(error.localizedDescription)
         return
       }
       guard !Task.isCancelled, !self.stopped, self.firstFrameReply != nil else {
@@ -338,8 +334,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
         return
       }
       switch attempt {
-      case .engine(let reason):
-        self.fallBackToEngine(reason, project: project, assets: assets)
+      case .unplayable(let reason):
+        self.holdVideo(reason)
       case .ready(let player, let first):
         guard self.video === player else { return }
         do {
@@ -349,24 +345,22 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
         } catch {
           player.stop()
           self.video = nil
-          self.fallBackToEngine(error.localizedDescription, project: project, assets: assets)
+          self.holdVideo(error.localizedDescription)
           return
         }
         self.contentFrameReady()
         self.finishSnapshots(error: nil)
         // Last, so a failure the player already held is heard once the surface is ready for it.
         player.onFailure = { [weak self] detail in
-          MainActor.assumeIsolated { self?.nativeVideoDidFail(detail) }
+          MainActor.assumeIsolated { self?.videoDidFail(detail) }
         }
       }
     }
   }
 
-  private func attemptNativeVideo(scene: LockScreenScene, enabled: Bool) async throws
-    -> NativeAttempt
-  {
+  private func attemptVideo(scene: LockScreenScene) async throws -> VideoAttempt {
     let path = await LockScreenVideoPlanner.decide(
-      scene: scene, enabled: enabled, resolve: { try WallpaperRuntime.asset($0) })
+      scene: scene, resolve: { try WallpaperRuntime.asset($0) })
     try Task.checkCancellation()
     let framing = scene.effectiveFraming
     let mode = NativeVideoScalingMode(rawValue: scene.scalingMode) ?? .fill
@@ -381,8 +375,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       player = LockScreenWebMPlayer(
         file: file, mode: mode, factor: scene.scalingFactor, pan: pan, viewport: size,
         backingScale: self.scale)
-    case .sceneEngine(let reason):
-      return .engine(reason: reason ?? "no native clip")
+    case .unplayable(let reason):
+      return .unplayable(reason: reason)
     }
     video = player
     player.attach(to: root)
@@ -399,38 +393,28 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       if error is CancellationError || (error as? LockScreenVideoPlayer.Failure) == .stopped {
         throw error
       }
-      return .engine(reason: error.localizedDescription)
+      return .unplayable(reason: error.localizedDescription)
     }
   }
 
-  private func fallBackToEngine(_ reason: String, project: URL, assets: URL) {
-    WallpaperRuntime.log(
-      "Native video not used display=\(scene.displayID): \(reason); drawing it with the scene engine")
-    guard let reply = firstFrameReply else { return }
-    firstFrameReply = nil
-    deadline?.cancel()
-    deadline = nil
+  /// The clip cannot be played and nothing else draws a video: the surface keeps the frame it shows
+  /// (nothing, when it never had one) and says why, in the log and in the readiness the app reads. The
+  /// host is told a picture exists even then, because it would otherwise wait out its whole deadline.
+  private func holdVideo(_ reason: String) {
     nativeStart = nil
-    do {
-      try startEngine(project: project, assets: assets, completion: reply)
-    } catch {
-      stop()
-      reply(error)
-    }
+    guard !stopped else { return }
+    settleHeld(
+      LockScreenHeldFailure(video: reason),
+      afterSignal: firstFrameReply != nil ? .firstFrame : .renderFailed)
   }
 
-  /// The native player stopped being able to play a clip it was playing. The scene engine
-  /// takes the same scene, behind the held frame.
-  private func nativeVideoDidFail(_ detail: String) {
+  /// The player stopped being able to play a clip it was playing. The frame it left on the surface
+  /// stays, and the failure is reported.
+  private func videoDidFail(_ detail: String) {
     guard !stopped, video != nil else { return }
-    nativeFailures.recordFailure(of: scene)
-    WallpaperRuntime.log(
-      "Native video failed display=\(scene.displayID): \(detail); replacing it with the scene engine")
-    replace(scene: scene, size: size, scale: scale) { [weak self] error in
-      guard let self else { return }
-      if let error { WallpaperRuntime.log("Replacement failed: \(error.localizedDescription)") }
-      WallpaperController.shared.acknowledge(surface: self, error: error)
-    }
+    video?.stop()
+    video = nil
+    holdVideo(detail)
   }
 
   private func check(_ result: Int32) throws {

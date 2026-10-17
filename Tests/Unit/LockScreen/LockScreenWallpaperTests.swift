@@ -1560,23 +1560,32 @@ final class LockScreenWallpaperTests: XCTestCase {
   func testTheNativeVideoFileTravelsInTheFileAndAnOlderFileKeepsTheOldShape() throws {
     let encoder = JSONEncoder()
     var scene = publishedScene()
+    scene.plainVideo = true
     scene.nativeVideoFile = "clip.mp4"
     let decoded = try JSONDecoder().decode(LockScreenScene.self, from: encoder.encode(scene))
     XCTAssertEqual(decoded.nativeVideoFile, "clip.mp4")
+    XCTAssertEqual(decoded.plainVideo, true)
     XCTAssertEqual(decoded, scene)
     let plain = try XCTUnwrap(
       try JSONSerialization.jsonObject(with: encoder.encode(publishedScene())) as? [String: Any])
     XCTAssertNil(plain["nativeVideoFile"], "without the choice no key is written")
+    XCTAssertNil(plain["plainVideo"], "a scene writes no video key")
     let json = Data(#"{"displayID":1,"title":"t","projectPath":"p","assetsPath":"a","fps":30,"scalingMode":3,"scalingFactor":1,"paused":false}"#.utf8)
-    XCTAssertNil(try JSONDecoder().decode(LockScreenScene.self, from: json).nativeVideoFile)
+    let older = try JSONDecoder().decode(LockScreenScene.self, from: json)
+    XCTAssertNil(older.nativeVideoFile)
+    XCTAssertNil(older.plainVideo)
   }
 
-  func testChoosingOrLeavingTheNativeVideoPlayerReplacesTheRenderer() {
+  func testBeingAVideoOrNotAndTheFileItPlaysReplaceTheRenderer() {
     let scene = publishedScene()
     var native = scene
+    native.plainVideo = true
     native.nativeVideoFile = "clip.mp4"
     XCTAssertFalse(scene.sharesRenderer(with: native))
     XCTAssertFalse(native.sharesRenderer(with: scene))
+    var missing = native
+    missing.nativeVideoFile = nil
+    XCTAssertFalse(native.sharesRenderer(with: missing), "a clip that appeared is played, not held")
     var other = native
     other.nativeVideoFile = "other.mp4"
     XCTAssertFalse(native.sharesRenderer(with: other))

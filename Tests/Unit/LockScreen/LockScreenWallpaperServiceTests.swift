@@ -2286,28 +2286,35 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     return published
   }
 
-  /// A plain video project always carries its media file for the extension, which plays it
-  /// itself. Scenes never carry it.
+  /// A plain video project always says it is a video and carries its media file for the extension,
+  /// which plays it itself. Scenes carry neither.
   @MainActor
   func testAVideoAlwaysCarriesItsMediaFile() async throws {
     let video = try await publishedVideoScene(type: "video")
+    XCTAssertEqual(video.plainVideo, true)
     XCTAssertEqual(video.nativeVideoFile, "clip.mp4")
     let scene = try await publishedVideoScene(type: "scene")
+    XCTAssertNil(scene.plainVideo, "a scene is not a plain video")
     XCTAssertNil(scene.nativeVideoFile, "a scene is not a plain video")
   }
 
+  /// A video whose file is not a regular file inside its project is still published as a video, with
+  /// no file: the extension holds it and says the clip is missing, and no scene engine takes it over.
   @MainActor
-  func testAMediaFileThatIsNotARegularFileInsideTheProjectIsLeftToTheSceneEngine() async throws {
+  func testAMediaFileThatIsNotARegularFileInsideTheProjectIsPublishedAsAVideoWithNoFile() async throws {
     let missing = try await publishedVideoScene(type: "video", makeFile: false)
+    XCTAssertEqual(missing.plainVideo, true)
     XCTAssertNil(missing.nativeVideoFile)
     let folder = project.appendingPathComponent("sub", isDirectory: true)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     try Data("x".utf8).write(to: folder.appendingPathComponent("a.txt"))
     let directory = try await publishedVideoScene(
       type: "video", file: "sub", makeFile: false)
+    XCTAssertEqual(directory.plainVideo, true)
     XCTAssertNil(directory.nativeVideoFile, "a folder is not a clip")
     let outside = try await publishedVideoScene(
       type: "video", file: "../escape.mp4", makeFile: false)
+    XCTAssertEqual(outside.plainVideo, true)
     XCTAssertNil(outside.nativeVideoFile)
   }
 }
