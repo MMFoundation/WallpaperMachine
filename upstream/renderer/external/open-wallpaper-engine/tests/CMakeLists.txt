@@ -197,7 +197,10 @@ if(TARGET wescene_rust_shader)
 else()
     message(FATAL_ERROR
         "unpack_shader_compile_smoke requires the Rust shader static library target. "
-        "Configure with -DRUST_SHADER_STATICLIB=<path-to-librust_shader.a>.")
+        "Configure with -DRUST_SHADER_STATICLIB=<path-to-libwm_shader.a>, the static library "
+        "of the wm-shader package: from Renderer/, run "
+        "`cargo build -p wm-shader --features ffi --release --locked`, which writes "
+        "Renderer/target/release/libwm_shader.a.")
 endif()
 gtest_discover_tests(
     unpack_shader_compile_smoke

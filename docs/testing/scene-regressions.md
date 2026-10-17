@@ -1559,15 +1559,16 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   plane (which reduces its lighting to ambient-only). Material overrides cannot
   change this scene-owned switch, and the shader request/cache key includes it.
   `PerformLighting_V1` itself is generated as Wallpaper Engine writes it, below.
-- **Scene lights (LightingV1)** — `cargo test -p shader --lib preprocess::lighting`
-  pins the generated block (arrays sized by the `LIGHTS_*` combos, nothing for an
-  unlit pass); `pipeline.rs`
-  `a_lit_pass_gets_wallpaper_engines_light_arrays_sized_by_the_scene_on_both_backends`
-  compiles it for the analysis and Metal targets, and
-  `every_asset_shader_that_requires_lighting_compiles_lit_and_fogged_on_both_backends`
-  does so, with both fogs, for Wallpaper Engine's own lit shaders when
-  `WALLPAPER_MACHINE_ASSETS_ROOT` names them (`fur4` is excluded: its instanced shells read the
-  dialect's `CASTF` cast macro, which the compiler does not supply, lit or unlit).
+- **Scene lights (LightingV1)** — from `Renderer/`, `cargo test --release --locked -p
+  wm-shader --features ffi --lib preprocess::lighting` pins the generated block (arrays
+  sized by the `LIGHTS_*` combos, nothing for an unlit pass), `pipeline::tests::globals`
+  (`each_light_member_has_exactly_the_count_of_its_combo`) the light members the
+  reflection reports, and `--test metal_compile`
+  (`the_msl_of_lit_programs_compiles_with_the_system_metal_compiler`) compiles a lit
+  program with the system Metal compiler. `--test corpus`
+  (`lit_shaders_expand_the_lighting_block`) expands the block in Wallpaper Engine's own lit
+  shaders when `WALLPAPER_MACHINE_ASSETS_ROOT` names them, and its `lit and fogged` combo set
+  preprocesses every shipped shader with both fogs on.
   `SceneSchema.LightsOfEachKindFillWallpaperEnginesLightingArrays` checks every
   kind's uniform layout, parenting and the legacy-only packing;
   `SceneSchema.LightsFollowTheirUserPropertyScriptAndIntensityTimeline` the
@@ -2069,9 +2070,14 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   and no media file is opened or closed; it fails when a resize asks for a rebuild
   (`WE_TEST_RESIZE_AS_REBUILD=1`). A scene whose text changed width every few draws
   (a perspective scene of seven puppets and 17 text layers, whose readouts are laid out again every few
-  draws) built the graph 41 times in 180 draws, 2.1 s of compile in all, which decoded and uploaded its
+  draws) built the graph 41 times in 180 draws, 2.2 s of compile in all (about 54 ms each), which decoded and uploaded its
   textures and copied a 54 MB and a 201 MB vertex buffer each time, and drew at 19 frames a second
-  at 44 ms of CPU a frame; it now resizes 40 times in 18 ms and draws at 60 frames a second at 4.5 ms. The
+  at 44 ms of CPU a frame; it now resizes 38 or 39 times in 30 to 32 ms (about 0.8 ms each; 42 render passes a
+  frame) and draws at 60 frames a second at 4.5 ms. The resize and rebuild times are the `N graph rebuild(s),
+  M target resize(s) ... ms wall in all` line of `metal_scene_draw_smoke` on scene 3589454154, `WE_TEST_METAL_FRAMES=180`,
+  `WE_TEST_SETTLE_TEXT=1`, `WE_TEST_RANDOM_SEED=1`, three runs each way (the rebuilds with `WE_TEST_RESIZE_AS_REBUILD=1`:
+  41 or 42 in 2.22, 2.23 and 2.28 s; the resizes 29.7, 31.6 and 32.0 ms); the other figures of this sentence are from the
+  run that found it and were not repeated. The
   `metal_scene_draw_smoke` local run prints both counts and what asked
   (`N graph rebuild(s), M target resize(s) ...`).
 - **A video stays open and on its frame when the render graph is built again under it** —

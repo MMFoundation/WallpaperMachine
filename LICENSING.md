@@ -262,7 +262,7 @@ which the app links (`-lwallpaper_bridge` in `project.yml`).
 Native Metal is the only scene renderer ([docs/features/scene-rendering.md](docs/features/scene-rendering.md#scene-renderer)).
 The Compatibility renderer (Vulkan through MoltenVK) and its SPIR-V shader target are
 deleted: the `spirv` crate (Apache-2.0) left the closure with naga's `spv-out` feature
-(`upstream/renderer/crates/shader/Cargo.toml` builds naga with `glsl-in` and `msl-out`),
+(`Renderer/Cargo.toml`'s workspace dependency builds naga with `glsl-in` and `msl-out`),
 and `codespan-reporting` left earlier through the vendored naga's optional dependency.
 
 A Release executable built 2026-10-16, before codespan-reporting and spirv left the

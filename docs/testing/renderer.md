@@ -354,8 +354,13 @@ cargo test --release -p wallpaper-core --lib
 cargo test --release -p wallpaper-core --test wallpaper_background
 cargo test --release -p wallpaper-bridge --lib
 cargo test --release -p wallpaper-core --lib audio
-cargo test -p shader --test pipeline -- --nocapture
 ```
+
+The shader layer (`wm-shader`) is its own workspace and runs from `Renderer/`, not from
+`upstream/renderer`, because rustup reads that tree's `rust-toolchain.toml` from the
+working directory: `cargo test --release --locked -p wm-shader --features ffi`, with
+`--test corpus -- --nocapture` appended for the shipped-shader sweep (a case that finds
+no assets prints `skipped: …` and is not a pass).
 
 - `wallpaper-core` audio coverage: capture ownership and failures,
   mono/multichannel conversion, resampling including sample-rate changes.
@@ -749,9 +754,10 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
   0.2 to 0.4 s on a 53 MB clip, 2 s on a 319 MB one, measured before the copy was dropped), which
   every open of one pays. A text card's buffers are resized in place, as Wallpaper Engine does:
   a card that changes size in texels asks the renderer to allocate its targets again under the graph
-  it has (`ConsumeRenderTargetResizeFlag`, `MetalRender::ResizeRenderTargets`, about 0.5 ms on a scene
-  of 72 passes) and never to build the graph again, which compiled every pass, decoded and uploaded
-  every image and copied every vertex buffer (50 ms on a scene with large models). The Wallpaper Engine frame this
+  it has (`ConsumeRenderTargetResizeFlag`, `MetalRender::ResizeRenderTargets`, about 0.8 ms on a scene
+  of 42 render passes a frame) and never to build the graph again, which compiled every pass, decoded and uploaded
+  every image and copied every vertex buffer (about 54 ms on that scene; the figures are measured on 3589454154 in
+  the entry on text cards that change size under scene-regressions). The Wallpaper Engine frame this
   was found against is a still one, so no frame of Wallpaper Engine's shows a video moving
   through a rebuild.
 - **An image layer's brightness is applied where its colour is, ahead of its effects.**
