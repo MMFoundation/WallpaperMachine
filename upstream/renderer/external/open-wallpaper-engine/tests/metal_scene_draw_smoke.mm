@@ -1242,7 +1242,7 @@ TEST_F(MetalSceneDraw, TranslatedAuthorShaderCompilesAndDrawsTheScene)
         // renderer whose graph has not been analysed must report
         // `UnknownInput`, because a caller must never be able to mistake "not
         // asked yet" for "nothing changes".
-        EXPECT_TRUE(before_compile & wallpaper::vulkan::DynamicReason::UnknownInput)
+        EXPECT_TRUE(before_compile & wallpaper::render::DynamicReason::UnknownInput)
             << "an unanalysed renderer reported " << before_compile
             << ", which a caller would read as a still scene";
         const uint32_t reasons = render.ShaderUpdateDemandReasons();
@@ -1600,10 +1600,10 @@ TEST_F(MetalSceneDraw, UnreferencedTargetsStayUnallocatedAcrossOptimizationChang
     std::string error;
     ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
     loaded.scene->renderTargets["_rt_unused"] = SceneRenderTarget { .width = 128, .height = 128 };
-    const bool optimization_was = wallpaper::vulkan::SceneOptimizationEnabled();
+    const bool optimization_was = wallpaper::render::SceneOptimizationEnabled();
     struct Restore {
         bool value;
-        ~Restore() { wallpaper::vulkan::SetSceneOptimizationEnabled(value); }
+        ~Restore() { wallpaper::render::SetSceneOptimizationEnabled(value); }
     } restore { optimization_was };
     @autoreleasepool {
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -1621,7 +1621,7 @@ TEST_F(MetalSceneDraw, UnreferencedTargetsStayUnallocatedAcrossOptimizationChang
         ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
         std::vector<uint8_t> reference;
         for (bool enabled : {true, false, true}) {
-            wallpaper::vulkan::SetSceneOptimizationEnabled(enabled);
+            wallpaper::render::SetSceneOptimizationEnabled(enabled);
             ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
             std::vector<uint8_t> pixels;
             uint32_t width = 0, height = 0;
@@ -1778,9 +1778,9 @@ TEST_F(MetalSceneDraw, ACopySkippedByTheOptimisationGetsItsImageWhenItIsTurnedOf
     ASSERT_NE(tile, nullptr);
     struct Restore {
         bool value;
-        ~Restore() { wallpaper::vulkan::SetSceneOptimizationEnabled(value); }
-    } restore { wallpaper::vulkan::SceneOptimizationEnabled() };
-    wallpaper::vulkan::SetSceneOptimizationEnabled(true);
+        ~Restore() { wallpaper::render::SetSceneOptimizationEnabled(value); }
+    } restore { wallpaper::render::SceneOptimizationEnabled() };
+    wallpaper::render::SetSceneOptimizationEnabled(true);
     @autoreleasepool {
         CAMetalLayer* layer = [CAMetalLayer layer];
         layer.device = MTLCreateSystemDefaultDevice();
@@ -1798,7 +1798,7 @@ TEST_F(MetalSceneDraw, ACopySkippedByTheOptimisationGetsItsImageWhenItIsTurnedOf
         ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, graph)) << render.lastError();
         for (bool enabled : { true, false, true }) {
             SCOPED_TRACE(enabled ? "optimised" : "every copy made");
-            wallpaper::vulkan::SetSceneOptimizationEnabled(enabled);
+            wallpaper::render::SetSceneOptimizationEnabled(enabled);
             ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
             // The saving is only real if the dead copy is not made while the
             // optimisation is on; with it off, the copy is the frame's one blit.
@@ -6110,10 +6110,10 @@ struct FrameCounters
 
 FrameCounters DrawOneFrame(MetalRender& render, Scene& scene)
 {
-    const auto before = wallpaper::vulkan::CurrentSceneOptimizationTotals();
+    const auto before = wallpaper::render::CurrentSceneOptimizationTotals();
     const bool ok     = render.drawFrame(scene);
     EXPECT_TRUE(ok) << render.lastError();
-    const auto after = wallpaper::vulkan::CurrentSceneOptimizationTotals();
+    const auto after = wallpaper::render::CurrentSceneOptimizationTotals();
     return FrameCounters { after.executed_passes - before.executed_passes,
                            after.skipped_passes - before.skipped_passes };
 }
@@ -6219,7 +6219,7 @@ TEST_F(MetalSceneDraw, TurningTheOptimisationOffDrawsEveryPassAgain)
         };
         ASSERT_TRUE(render.init(info)) << render.lastError();
 
-        wallpaper::vulkan::SetSceneOptimizationEnabled(false);
+        wallpaper::render::SetSceneOptimizationEnabled(false);
         auto graph = sceneToRenderGraph(*loaded.scene);
         ASSERT_NE(graph, nullptr);
         ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
@@ -6228,7 +6228,7 @@ TEST_F(MetalSceneDraw, TurningTheOptimisationOffDrawsEveryPassAgain)
         DrawOneFrame(render, *loaded.scene);
         const auto second = DrawOneFrame(render, *loaded.scene);
         EXPECT_EQ(second.skipped, 0u) << "pixels were reused with the setting switched off";
-        wallpaper::vulkan::SetSceneOptimizationEnabled(true);
+        wallpaper::render::SetSceneOptimizationEnabled(true);
 
         render.destroy();
     }
@@ -6316,11 +6316,11 @@ TEST_F(MetalSceneDraw, AFrameThatWouldRepeatThePictureTakesNoDrawableAndPresents
 
         // With the optimisation off every frame presents, and switching it back
         // on starts from a real present rather than from a stale record.
-        wallpaper::vulkan::SetSceneOptimizationEnabled(false);
+        wallpaper::render::SetSceneOptimizationEnabled(false);
         for (int frame = 0; frame < 3; ++frame) {
             EXPECT_TRUE(draw()) << "a frame was skipped with the setting switched off";
         }
-        wallpaper::vulkan::SetSceneOptimizationEnabled(true);
+        wallpaper::render::SetSceneOptimizationEnabled(true);
         EXPECT_TRUE(draw()) << "the first frame after turning reuse back on must present";
         EXPECT_FALSE(draw());
 
@@ -6558,7 +6558,7 @@ TEST_F(MetalSceneDraw, GeometryRebuiltEveryFrameIsUploadedAndDrawnFromItsOwnSlot
         // A mesh the runtime has not filled yet must keep the scene ticking
         // rather than be declared still, and must not be reusable.
         EXPECT_TRUE(render.ShaderUpdateDemandReasons() &
-                    wallpaper::vulkan::DynamicReason::DynamicMesh)
+                    wallpaper::render::DynamicReason::DynamicMesh)
             << "a mesh rebuilt per frame was not reported as advancing on its own";
 
         // Three empty frames: nothing to draw is not a failed frame.
@@ -6657,7 +6657,7 @@ TEST_F(MetalSceneDraw, ASpriteSheetAdvancesOnItsOwnClockAndRedrawsOnlyWhenTheFra
         // reuse cache decides, the clock has to keep running or the animation
         // never reaches its next frame.
         EXPECT_TRUE(render.ShaderUpdateDemandReasons() &
-                    wallpaper::vulkan::DynamicReason::AnimatedSprite)
+                    wallpaper::render::DynamicReason::AnimatedSprite)
             << "an animated sheet was not reported as advancing on its own";
 
         DrawOneFrame(render, *loaded.scene);
@@ -6733,7 +6733,7 @@ TEST_F(MetalSceneDraw, TurningTheOptimisationBackOnDoesNotReuseAFrameDrawnWhileI
             << "the recorded signature this test depends on was never taken";
 
         // Off: the layer moves and is drawn there. Nothing records that.
-        wallpaper::vulkan::SetSceneOptimizationEnabled(false);
+        wallpaper::render::SetSceneOptimizationEnabled(false);
         node->SetTranslate(linalg::Vector3f { home.x() + 96.0f, home.y(), home.z() });
         const auto moved = DrawOneFrame(render, *loaded.scene);
         EXPECT_EQ(moved.skipped, 0u) << "pixels were reused with the setting switched off";
@@ -6743,7 +6743,7 @@ TEST_F(MetalSceneDraw, TurningTheOptimisationBackOnDoesNotReuseAFrameDrawnWhileI
         // Back to where the recorded signature was taken, without drawing: the
         // target still holds the moved picture.
         node->SetTranslate(home);
-        wallpaper::vulkan::SetSceneOptimizationEnabled(true);
+        wallpaper::render::SetSceneOptimizationEnabled(true);
 
         const auto resumed = DrawOneFrame(render, *loaded.scene);
         EXPECT_EQ(resumed.skipped, 0u)
@@ -6767,7 +6767,7 @@ TEST_F(MetalSceneDraw, AGraphCompiledWithTheOptimisationOffStartsReusingWhenItIs
     // on did nothing until the wallpaper, the render scale or the app changed.
     // Nothing here recompiles the graph; the change is applied at a frame
     // boundary over the graph that is already running.
-    wallpaper::vulkan::SetSceneOptimizationEnabled(false);
+    wallpaper::render::SetSceneOptimizationEnabled(false);
     const auto  project = WriteFixture(root_ / "project");
     LoadedScene loaded;
     std::string error;
@@ -6804,7 +6804,7 @@ TEST_F(MetalSceneDraw, AGraphCompiledWithTheOptimisationOffStartsReusingWhenItIs
         const auto drawn = ReadOutput(render, *loaded.scene);
         ASSERT_FALSE(drawn.empty());
 
-        wallpaper::vulkan::SetSceneOptimizationEnabled(true);
+        wallpaper::render::SetSceneOptimizationEnabled(true);
         // The first frame after the change redraws: a table that has recorded
         // nothing cannot call anything unchanged, which is what stops stale
         // pixels being adopted.
@@ -9217,7 +9217,7 @@ TEST_F(MetalSceneDraw, ATextLayerIsParsedTranslatedAndDrawnByTheNativeBackend)
         // A layer whose picture the runtime replaces must keep the clock
         // running, or a text that changes would never be redrawn.
         EXPECT_TRUE(render.ShaderUpdateDemandReasons() &
-                    wallpaper::vulkan::DynamicReason::RuntimeImage)
+                    wallpaper::render::DynamicReason::RuntimeImage)
             << "a runtime-replaced image was not reported as a reason to keep drawing";
 
         render.destroy();
@@ -11379,9 +11379,9 @@ TEST_F(MetalSceneDraw, AStaticTextSceneRunsOutOfWorkToDo)
         // still true and the pixel-reuse cache depends on them. What changed is
         // that neither is read as a reason for the whole scene to keep drawing.
         const auto shader = render.ShaderUpdateDemandReasons();
-        EXPECT_TRUE(shader & wallpaper::vulkan::DynamicReason::EventMesh)
+        EXPECT_TRUE(shader & wallpaper::render::DynamicReason::EventMesh)
             << "the text card stopped being reported as geometry the runtime rewrites";
-        EXPECT_TRUE(shader & wallpaper::vulkan::DynamicReason::RuntimeImage)
+        EXPECT_TRUE(shader & wallpaper::render::DynamicReason::RuntimeImage)
             << "the text texture stopped being reported as an image the runtime replaces";
 
         render.destroy();
@@ -11685,8 +11685,8 @@ TEST_F(MetalSceneDraw, AnOptionalProgramTranslatedOnceIsRestoredFromDiskOnTheNex
 TEST_F(MetalSceneDraw, BackgroundChangesInvalidateCachedPixelsWithoutRecompilingTheGraph)
 {
     struct RestoreOptimization {
-        bool previous { vulkan::SceneOptimizationEnabled() };
-        ~RestoreOptimization() { vulkan::SetSceneOptimizationEnabled(previous); }
+        bool previous { render::SceneOptimizationEnabled() };
+        ~RestoreOptimization() { render::SetSceneOptimizationEnabled(previous); }
     } restore;
     LoadedScene loaded;
     std::string error;
@@ -11705,7 +11705,7 @@ TEST_F(MetalSceneDraw, BackgroundChangesInvalidateCachedPixelsWithoutRecompiling
         ASSERT_NE(graph, nullptr);
         ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
         for (const bool optimization : {false, true}) {
-            vulkan::SetSceneOptimizationEnabled(optimization);
+            render::SetSceneOptimizationEnabled(optimization);
             for (const auto color : {std::array<float, 3> {1, 0, 0}, std::array<float, 3> {0, 1, 0}}) {
                 loaded.scene->clearColor = color;
                 for (int frame = 0; frame < 2; ++frame) {
@@ -12200,7 +12200,7 @@ TEST_F(MetalSceneDraw, APuppetIsSkinnedByItsOwnShaderFromThePoseTheRuntimeProduc
         render.UpdateCameraFillMode(*loaded.scene, FillMode::ASPECTFIT);
 
         EXPECT_TRUE(render.ShaderUpdateDemandReasons() &
-                    wallpaper::vulkan::DynamicReason::BoneUniform)
+                    wallpaper::render::DynamicReason::BoneUniform)
             << "a skinned puppet was not reported as advancing on its own";
 
         const auto first = DrawOneFrame(render, *loaded.scene);
@@ -13318,9 +13318,9 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
     // compared with the same scene drawn every frame. Process-global, so it is
     // set once around the whole loop and put back: an unfiltered run must not
     // carry this choice into any later test.
-    const bool optimization_was = wallpaper::vulkan::SceneOptimizationEnabled();
+    const bool optimization_was = wallpaper::render::SceneOptimizationEnabled();
     if (const char* opt = std::getenv("WE_TEST_SCENE_OPTIMIZATION")) {
-        wallpaper::vulkan::SetSceneOptimizationEnabled(std::string_view(opt) != "0");
+        wallpaper::render::SetSceneOptimizationEnabled(std::string_view(opt) != "0");
     }
 
     std::size_t index = 0;
@@ -13629,7 +13629,7 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             render.destroy();
         }
     }
-    wallpaper::vulkan::SetSceneOptimizationEnabled(optimization_was);
+    wallpaper::render::SetSceneOptimizationEnabled(optimization_was);
 }
 
 TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
@@ -13880,10 +13880,10 @@ TEST_F(MetalSceneDraw, LayersSharingATargetShareOneRenderPassAndHiddenLayersCost
     // test ends.
     struct RestoreOptimization
     {
-        bool was { wallpaper::vulkan::SceneOptimizationEnabled() };
-        ~RestoreOptimization() { wallpaper::vulkan::SetSceneOptimizationEnabled(was); }
+        bool was { wallpaper::render::SceneOptimizationEnabled() };
+        ~RestoreOptimization() { wallpaper::render::SetSceneOptimizationEnabled(was); }
     } restore;
-    wallpaper::vulkan::SetSceneOptimizationEnabled(false);
+    wallpaper::render::SetSceneOptimizationEnabled(false);
 
     std::map<std::string, std::vector<uint8_t>> pixels;
     for (const auto& variant : variants) {
@@ -14238,15 +14238,15 @@ TEST_F(MetalSceneDraw, AFeedbackCopyTradesTexturesAndDrawsTheSamePicture)
     // texture each frame.
     struct RestoreOptimization
     {
-        bool was { wallpaper::vulkan::SceneOptimizationEnabled() };
-        ~RestoreOptimization() { wallpaper::vulkan::SetSceneOptimizationEnabled(was); }
+        bool was { wallpaper::render::SceneOptimizationEnabled() };
+        ~RestoreOptimization() { wallpaper::render::SetSceneOptimizationEnabled(was); }
     } restore;
 
     std::map<bool, std::vector<std::vector<uint8_t>>>         frames;
     std::map<bool, MetalRender::FrameEncodeCountsForTests> counts;
     for (const bool optimise : { false, true }) {
         SCOPED_TRACE(optimise ? "optimisation on" : "optimisation off");
-        wallpaper::vulkan::SetSceneOptimizationEnabled(optimise);
+        wallpaper::render::SetSceneOptimizationEnabled(optimise);
         const std::string name    = optimise ? "feedback-on" : "feedback-off";
         const auto        project = WriteFeedbackFixture(root_ / name);
         LoadedScene       loaded;
@@ -14528,8 +14528,8 @@ TEST_F(MetalSceneDraw, ALayerReadingThePreviousFrameSeesExactlyThePreviousFrame)
     // copies and the reuse table differently around the same loop.
     struct RestoreOptimization
     {
-        bool was { wallpaper::vulkan::SceneOptimizationEnabled() };
-        ~RestoreOptimization() { wallpaper::vulkan::SetSceneOptimizationEnabled(was); }
+        bool was { wallpaper::render::SceneOptimizationEnabled() };
+        ~RestoreOptimization() { wallpaper::render::SetSceneOptimizationEnabled(was); }
     } restore;
 
     // The tile's constant blue, 0.25, which nothing else in the fixture draws.
@@ -14544,7 +14544,7 @@ TEST_F(MetalSceneDraw, ALayerReadingThePreviousFrameSeesExactlyThePreviousFrame)
     std::map<bool, std::vector<std::vector<uint8_t>>> frames;
     for (const bool optimise : { false, true }) {
         SCOPED_TRACE(optimise ? "optimisation on" : "optimisation off");
-        wallpaper::vulkan::SetSceneOptimizationEnabled(optimise);
+        wallpaper::render::SetSceneOptimizationEnabled(optimise);
         const std::string name    = optimise ? "history-on" : "history-off";
         const auto        project = WriteHistoryFixture(root_ / name);
         LoadedScene       loaded;
@@ -14579,7 +14579,7 @@ TEST_F(MetalSceneDraw, ALayerReadingThePreviousFrameSeesExactlyThePreviousFrame)
             // Nothing in the fixture moves, so only the loop can keep it
             // changing; the clock must not be allowed to stop on it.
             EXPECT_TRUE(render.ShaderUpdateDemandReasons() &
-                        wallpaper::vulkan::DynamicReason::Feedback);
+                        wallpaper::render::DynamicReason::Feedback);
 
             for (int frame = 0; frame < 4; ++frame) {
                 AdvanceSceneFrame(render, *loaded.scene);
@@ -14621,10 +14621,10 @@ TEST_F(MetalSceneDraw, TargetsThatAreNeverAliveTogetherShareImagesAndDrawTheSame
     // the effects, whose static results it would otherwise pin.
     struct RestoreSwitches
     {
-        bool optimise { wallpaper::vulkan::SceneOptimizationEnabled() };
+        bool optimise { wallpaper::render::SceneOptimizationEnabled() };
         ~RestoreSwitches()
         {
-            wallpaper::vulkan::SetSceneOptimizationEnabled(optimise);
+            wallpaper::render::SetSceneOptimizationEnabled(optimise);
             MetalRender::SetTargetSharingForTests(true);
         }
     } restore;
@@ -14667,7 +14667,7 @@ TEST_F(MetalSceneDraw, TargetsThatAreNeverAliveTogetherShareImagesAndDrawTheSame
 
     for (const bool lenses : { true, false }) {
         SCOPED_TRACE(lenses ? "traded copies" : "effect buffers");
-        wallpaper::vulkan::SetSceneOptimizationEnabled(lenses);
+        wallpaper::render::SetSceneOptimizationEnabled(lenses);
         std::map<bool, std::vector<std::vector<uint8_t>>>    frames;
         std::map<bool, uint64_t>                              bytes;
         std::map<bool, MetalRender::FrameEncodeCountsForTests> counts;
@@ -14724,8 +14724,8 @@ TEST_F(MetalSceneDraw, InterleavedFeedbackCopiesPreserveEachReadersImage)
 {
     struct RestoreOptimization
     {
-        bool was { wallpaper::vulkan::SceneOptimizationEnabled() };
-        ~RestoreOptimization() { wallpaper::vulkan::SetSceneOptimizationEnabled(was); }
+        bool was { wallpaper::render::SceneOptimizationEnabled() };
+        ~RestoreOptimization() { wallpaper::render::SetSceneOptimizationEnabled(was); }
     } restore;
 
     const std::string a = std::string(SpecTex_Default);
@@ -14735,7 +14735,7 @@ TEST_F(MetalSceneDraw, InterleavedFeedbackCopiesPreserveEachReadersImage)
     std::array<std::vector<std::vector<uint8_t>>, 2> reference;
     for (const bool optimise : { false, true }) {
         SCOPED_TRACE(optimise ? "texture trades" : "copy blits");
-        wallpaper::vulkan::SetSceneOptimizationEnabled(optimise);
+        wallpaper::render::SetSceneOptimizationEnabled(optimise);
         const std::string name = optimise ? "interleaved-on" : "interleaved-off";
         const auto project = WriteFeedbackFixture(root_ / name);
         LoadedScene loaded;

@@ -31,7 +31,7 @@ struct Extent2D {
     uint32_t height { 0 };
 };
 
-namespace vulkan
+namespace render
 {
 
 inline constexpr i32 kMinRenderTargetDimension = 4;
@@ -432,5 +432,5 @@ inline uint64_t FoldPassCameras(uint64_t hash, const wallpaper::Scene& scene,
     return hash;
 }
 
-} // namespace vulkan
+} // namespace render
 } // namespace wallpaper

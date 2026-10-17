@@ -368,7 +368,7 @@ int main() {
                 // the app sends PROPERTY_FILLMODE, so a running wallpaper never
                 // reaches UpdateCameraFillMode either, and cropping comes only
                 // from the scaling layout below.
-                const auto source = ResolveSceneSourceExtent(*scene, Extent2D { px_w, px_h });
+                const auto source = render::ResolveSceneSourceExtent(*scene, Extent2D { px_w, px_h });
                 const auto layout = ComputeWallpaperScalingLayout(
                     mode, source.width, source.height,
                     static_cast<uint32_t>(std::lround(px_w / display_scale)),
@@ -492,15 +492,15 @@ int main() {
                       surface_extent.width > 0 && surface_extent.height > 0,
                   "WE_TEST_SURFACE must be <width>x<height>");
         }
-        const auto extents = ResolveScreenBoundRenderTargetSizes(*scene, surface_extent);
+        const auto extents = render::ResolveScreenBoundRenderTargetSizes(*scene, surface_extent);
         const auto extent = extents.raster;
         Check(extent.width <= 8192 && extent.height <= 8192, "probe raster extent exceeds 8192");
         for (auto& [name, rt] : scene->renderTargets) {
             if (rt.bind.enable && !rt.bind.screen) {
                 const auto* parent = scene->FindRenderTarget(rt.bind.name);
                 Check(parent != nullptr, "missing render target binding");
-                rt.width = ResolveScreenBoundRenderTargetDimension(parent->width, rt.bind.scale);
-                rt.height = ResolveScreenBoundRenderTargetDimension(parent->height, rt.bind.scale);
+                rt.width = render::ResolveScreenBoundRenderTargetDimension(parent->width, rt.bind.scale);
+                rt.height = render::ResolveScreenBoundRenderTargetDimension(parent->height, rt.bind.scale);
             }
             if (rt.has_mipmap) rt.mipmap_level = std::max(3u, static_cast<uint32_t>(std::floor(std::log2(std::min(rt.width, rt.height))))) - 2u;
         }
@@ -610,15 +610,15 @@ int main() {
         // golden comparison covers the reuse path rather than only the code it
         // shares with an unoptimised run. `WE_TEST_NO_SCENE_OPTIMIZATION`
         // forces the unoptimised path for a direct A/B.
-        StaticSubgraphCache static_cache;
-        std::vector<StaticPassSample> static_samples;
+        render::StaticSubgraphCache static_cache;
+        std::vector<render::StaticPassSample> static_samples;
         std::vector<uint8_t> static_skip;
         const bool scene_optimization = std::getenv("WE_TEST_NO_SCENE_OPTIMIZATION") == nullptr;
         if (scene_optimization) {
-            std::vector<StaticPassDesc> static_descs;
+            std::vector<render::StaticPassDesc> static_descs;
             static_descs.reserve(passes.size());
             for (auto* pass : passes) {
-                StaticPassDesc desc;
+                render::StaticPassDesc desc;
                 if (auto* custom = dynamic_cast<CustomShaderPass*>(pass)) {
                     desc = custom->staticPassDesc(*scene);
                     desc.target = scene->ResolveRenderTargetName(desc.target);
@@ -639,7 +639,7 @@ int main() {
                 if (bytes == 0 || ! device.tex_cache().PinRenderTarget(key)) continue;
                 static_cache.SetTargetPinned(i, true, bytes);
             }
-            static_samples.assign(passes.size(), StaticPassSample {});
+            static_samples.assign(passes.size(), render::StaticPassSample {});
             static_skip.assign(passes.size(), uint8_t { 0 });
         }
 
@@ -692,7 +692,7 @@ int main() {
                     auto* custom = dynamic_cast<CustomShaderPass*>(passes[i]);
                     static_samples[i] = custom != nullptr
                                             ? custom->frameSample(*scene)
-                                            : StaticPassSample { .hash = 0, .visible = true };
+                                            : render::StaticPassSample { .hash = 0, .visible = true };
                 }
                 static_cache.Plan(static_samples, static_skip);
                 frame_passes.clear();

@@ -24,7 +24,7 @@ public:
         /// stop the copy from executing; `Alias` additionally points the
         /// destination key at the source's allocation so its readers still see
         /// the pixels the copy would have produced.
-        CopyElision elision { CopyElision::None };
+        render::CopyElision elision { render::CopyElision::None };
 
         ImageParameters vk_src;
         ImageParameters vk_dst;
@@ -37,7 +37,7 @@ public:
     const Desc& desc() const { return m_desc; }
 
     /// Compile-time shape of this copy for the elision analysis.
-    ElisionPassDesc elisionDesc(const Scene&) const;
+    render::ElisionPassDesc elisionDesc(const Scene&) const;
 
     void prepare(Scene&, const Device&, RenderingResources&) override;
     VkResult execute(const Device&, RenderingResources&) override;

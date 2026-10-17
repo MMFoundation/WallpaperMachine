@@ -1377,7 +1377,7 @@ private:
             // timeline is reset; the copy plan, the targets it governs and the
             // reuse table are rebuilt from the graph that is already compiled.
             if (frame_ok && m_scene != nullptr && m_rg) {
-                const bool optimization = vulkan::SceneOptimizationEnabled();
+                const bool optimization = render::SceneOptimizationEnabled();
                 if (optimization !=
                     m_scene_optimization_applied.load(std::memory_order_relaxed)) {
                     if (m_render->ApplySceneOptimization(*m_scene, *m_rg)) {
@@ -1915,7 +1915,7 @@ public:
     /// previous value produced.
     [[nodiscard]] bool sceneOptimizationApplied() const {
         return m_scene_optimization_applied.load(std::memory_order_relaxed) ==
-               vulkan::SceneOptimizationEnabled();
+               render::SceneOptimizationEnabled();
     }
 
     /// Which renderer drew this scene. Published when the renderer is created,
@@ -2022,7 +2022,7 @@ private:
     /// it and the host reads it to tell a saved preference apart from one that
     /// is actually in force.
     std::atomic<bool>                        m_scene_optimization_applied {
-        vulkan::SceneOptimizationEnabled()
+        render::SceneOptimizationEnabled()
     };
     bool                                     m_horizontal_flip { false };
     bool                                     m_media_integration_enabled { false };

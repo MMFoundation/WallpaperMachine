@@ -465,7 +465,7 @@ std::string BuildMetalResourcePlan(const std::vector<SceneMetalStage>& stages,
                     static_cast<int>(binding.slot);
                 continue;
             }
-            const auto texture_slot = vulkan::detail::CustomShaderTextureSlot(binding.name);
+            const auto texture_slot = render::CustomShaderTextureSlot(binding.name);
             if (texture_slot.has_value()) {
                 if (! sampled(*texture_slot)) continue;
                 if (*texture_slot >= out.texture_slots.size()) {
@@ -484,7 +484,7 @@ std::string BuildMetalResourcePlan(const std::vector<SceneMetalStage>& stages,
                 }
                 continue;
             }
-            const auto sampler_slot = vulkan::detail::CustomShaderSamplerSlot(binding.name);
+            const auto sampler_slot = render::CustomShaderSamplerSlot(binding.name);
             if (sampler_slot.has_value()) {
                 if (! sampled(*sampler_slot)) continue;
                 if (*sampler_slot >= out.texture_slots.size()) {
@@ -1258,8 +1258,8 @@ struct MetalRender::Impl
     /// The last composition that actually reached the layer, and scratch for
     /// the frame being decided. A frame whose passes were all reused and whose
     /// composition inputs match takes no drawable and presents nothing.
-    vulkan::UnchangedPresentGate present_gate;
-    vulkan::PresentationKey      present_key;
+    render::UnchangedPresentGate present_gate;
+    render::PresentationKey      present_key;
 
     // ---- host configuration
     uint32_t             output_width { 0 };
@@ -1495,7 +1495,7 @@ struct MetalRender::Impl
     uint32_t                   uniform_ring_size { 0 };
     bool                       graph_ready { false };
     uint32_t                   demand_reasons {
-        static_cast<uint32_t>(vulkan::DynamicReason::UnknownInput)
+        static_cast<uint32_t>(render::DynamicReason::UnknownInput)
     };
 
     // ---- direct NV12 plane sampling
@@ -1547,12 +1547,12 @@ struct MetalRender::Impl
     /// own pass list. Reusing the class rather than reimplementing it is what
     /// keeps "which target may be reused" one rule with one set of tests; only
     /// the resources it governs are Metal's.
-    vulkan::StaticSubgraphCache           static_cache;
-    std::vector<vulkan::StaticPassSample> static_samples;
+    render::StaticSubgraphCache           static_cache;
+    std::vector<render::StaticPassSample> static_samples;
     std::vector<uint8_t>                  static_skip;
     /// One entry per description, in the same order. `None` for anything that
     /// is not a copy.
-    std::vector<vulkan::CopyElision>      copy_elision;
+    std::vector<render::CopyElision>      copy_elision;
     /// Render-target keys that share another key's texture after elision.
     std::unordered_map<std::string, std::string> target_aliases;
     uint64_t                              static_pinned_bytes { 0 };
@@ -1737,7 +1737,7 @@ struct MetalRender::Impl
     /// current setting, at a frame boundary. Clears for targets that regain an
     /// image of their own are encoded into `command`, so nothing waits.
     bool applySceneOptimizationSetting(Scene& scene, id<MTLCommandBuffer> command);
-    vulkan::StaticPassSample frameSample(Scene& scene, std::size_t index) const;
+    render::StaticPassSample frameSample(Scene& scene, std::size_t index) const;
     /// Fills `static_skip` for this frame. False means nothing may be skipped.
     bool planStaticSkips(Scene& scene);
     bool clearTargetsOnce();
@@ -1828,7 +1828,7 @@ struct MetalRender::Impl
 void MetalRender::Impl::releaseSceneOptimization()
 {
     if (static_pinned_bytes != 0) {
-        vulkan::AdjustSceneOptimizationPinnedBytes(-static_cast<int64_t>(static_pinned_bytes));
+        render::AdjustSceneOptimizationPinnedBytes(-static_cast<int64_t>(static_pinned_bytes));
         static_pinned_bytes = 0;
     }
     static_cache.Reset();
@@ -1879,7 +1879,7 @@ void MetalRender::Impl::releaseGraph()
     uniform_rings.clear();
     uniform_ring_size = 0;
     graph_ready       = false;
-    demand_reasons    = static_cast<uint32_t>(vulkan::DynamicReason::UnknownInput);
+    demand_reasons    = static_cast<uint32_t>(render::DynamicReason::UnknownInput);
 }
 
 void MetalRender::Impl::releasePresentation()
@@ -2346,11 +2346,11 @@ void MetalRender::Impl::resolveTargetSizes(Scene& scene)
 {
     const Extent2D fallback { std::max<uint32_t>(1, output_width),
                               std::max<uint32_t>(1, output_height) };
-    const auto extents      = vulkan::ResolveScreenBoundRenderTargetSizes(
+    const auto extents      = render::ResolveScreenBoundRenderTargetSizes(
         scene, fallback,
-        vulkan::SceneRasterSurface { .display_scale_factor = NormalizeScaleFactor(display_scale_factor),
+        render::SceneRasterSurface { .display_scale_factor = NormalizeScaleFactor(display_scale_factor),
                                      .max_dimension        = MaxTextureDimension(device) });
-    const auto render_scale = vulkan::ResolveSceneRenderScale(scene);
+    const auto render_scale = render::ResolveSceneRenderScale(scene);
     raster_width            = std::max(1u, extents.raster.width);
     raster_height           = std::max(1u, extents.raster.height);
 
@@ -2358,7 +2358,7 @@ void MetalRender::Impl::resolveTargetSizes(Scene& scene)
         if (name == SpecTex_Default) continue;
         if (target.bind.screen && target.bind.enable) continue;
         if (! target.bind.enable) {
-            vulkan::ResolveRenderScaledSize(target, render_scale);
+            render::ResolveRenderScaledSize(target, render_scale);
             continue;
         }
         const auto bound = scene.renderTargets.find(target.bind.name);
@@ -2774,7 +2774,7 @@ void MetalRender::Impl::planFeedbackSwaps()
     opening_copies.clear();
     // Part of the copy plan, and switched with it: with scene optimisation off,
     // every copy the graph asks for is made as a copy.
-    if (! vulkan::SceneOptimizationEnabled() || FeedbackCopiesForcedByEnvironment()) {
+    if (! render::SceneOptimizationEnabled() || FeedbackCopiesForcedByEnvironment()) {
         return;
     }
 
@@ -2804,7 +2804,7 @@ void MetalRender::Impl::planFeedbackSwaps()
     for (std::size_t i = 0; i < descriptions.size(); ++i) {
         const auto& copy = descriptions[i];
         if (copy.kind != MetalPassKind::Copy || copy.source_key == copy.target_key) continue;
-        if (i < copy_elision.size() && copy_elision[i] != vulkan::CopyElision::None) continue;
+        if (i < copy_elision.size() && copy_elision[i] != render::CopyElision::None) continue;
         id<MTLTexture> source      = exclusive(copy.source_key);
         id<MTLTexture> destination = exclusive(copy.target_key);
         if (source == nil || destination == nil) continue;
@@ -3786,20 +3786,20 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
                                                     desc.camera_override)
                     : frame_varying_uniform::kAll;
             if ((varying & (frame_varying_uniform::kTime | frame_varying_uniform::kDayTime)) != 0)
-                reasons |= vulkan::DynamicReason::TimeUniform;
+                reasons |= render::DynamicReason::TimeUniform;
             if ((varying & frame_varying_uniform::kAudio) != 0)
-                reasons |= vulkan::DynamicReason::AudioUniform;
+                reasons |= render::DynamicReason::AudioUniform;
             if ((varying & (frame_varying_uniform::kPointer | frame_varying_uniform::kParallax)) !=
                 0)
-                reasons |= vulkan::DynamicReason::PointerUniform;
+                reasons |= render::DynamicReason::PointerUniform;
             if ((varying & frame_varying_uniform::kBones) != 0)
-                reasons |= vulkan::DynamicReason::BoneUniform;
+                reasons |= render::DynamicReason::BoneUniform;
 
             if (runtime_images != nullptr) {
                 for (const auto& texture : desc.texture_keys) {
                     if (texture.empty()) continue;
                     if (runtime_images->IsRuntimeImage(texture)) {
-                        reasons |= vulkan::DynamicReason::RuntimeImage;
+                        reasons |= render::DynamicReason::RuntimeImage;
                         break;
                     }
                 }
@@ -3813,7 +3813,7 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
                 for (const auto& [slot, sprite] : prepared[index].sprites) {
                     (void)slot;
                     if (sprite.numFrames() > 1) {
-                        reasons |= vulkan::DynamicReason::AnimatedSprite;
+                        reasons |= render::DynamicReason::AnimatedSprite;
                         break;
                     }
                 }
@@ -3821,8 +3821,8 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
             if (desc.node != nullptr && desc.node->Mesh() != nullptr &&
                 desc.node->Mesh()->Dynamic()) {
                 reasons |= desc.node->Mesh()->UpdatesOnEvent()
-                               ? vulkan::DynamicReason::EventMesh
-                               : vulkan::DynamicReason::DynamicMesh;
+                               ? render::DynamicReason::EventMesh
+                               : render::DynamicReason::DynamicMesh;
             }
             break;
         }
@@ -3838,7 +3838,7 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
     // with nothing else changing, so the clock has to keep running for it.
     for (const auto& [name, target] : scene.renderTargets) {
         if (target.carriesPreviousFrame && targets.contains(name)) {
-            reasons |= vulkan::DynamicReason::Feedback;
+            reasons |= render::DynamicReason::Feedback;
             break;
         }
     }
@@ -3846,7 +3846,7 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
     // A compiled graph that yielded no shader pass is not a still scene; it is
     // a graph this analysis did not understand.
     if (! saw_shader_pass || ! understood_every_pass) {
-        reasons |= vulkan::DynamicReason::UnknownInput;
+        reasons |= render::DynamicReason::UnknownInput;
     }
     demand_reasons = reasons;
 }
@@ -3861,23 +3861,23 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
 /// a name is never what decides.
 void MetalRender::Impl::planCopyElision(Scene& scene)
 {
-    copy_elision.assign(descriptions.size(), vulkan::CopyElision::None);
+    copy_elision.assign(descriptions.size(), render::CopyElision::None);
     target_aliases.clear();
     elided_copies = 0;
-    if (! vulkan::SceneOptimizationEnabled()) return;
+    if (! render::SceneOptimizationEnabled()) return;
 
     const auto mip_levels = [&scene](const std::string& key) -> uint32_t {
         const auto* target = scene.FindRenderTarget(key);
         return target != nullptr ? std::max<uint32_t>(1, target->mipmap_level) : 1u;
     };
 
-    std::vector<vulkan::ElisionPassDesc> elision;
+    std::vector<render::ElisionPassDesc> elision;
     elision.reserve(descriptions.size() + 1);
     for (const auto& desc : descriptions) {
-        vulkan::ElisionPassDesc entry;
+        render::ElisionPassDesc entry;
         switch (desc.kind) {
         case MetalPassKind::Copy: {
-            entry.kind   = vulkan::ElisionPassDesc::Kind::Copy;
+            entry.kind   = render::ElisionPassDesc::Kind::Copy;
             entry.writes = desc.target_key;
             entry.reads  = { desc.source_key };
             const auto* source = scene.FindRenderTarget(desc.source_key);
@@ -3891,40 +3891,40 @@ void MetalRender::Impl::planCopyElision(Scene& scene)
             break;
         }
         case MetalPassKind::Clear:
-            entry.kind   = vulkan::ElisionPassDesc::Kind::Clear;
+            entry.kind   = render::ElisionPassDesc::Kind::Clear;
             entry.writes = desc.target_key;
             break;
         case MetalPassKind::CustomShader:
-            entry.kind   = vulkan::ElisionPassDesc::Kind::Custom;
+            entry.kind   = render::ElisionPassDesc::Kind::Custom;
             entry.writes = desc.target_key;
             for (const auto& key : desc.texture_keys) {
                 if (! key.empty()) entry.reads.push_back(key);
             }
             break;
         case MetalPassKind::Virtual:
-        case MetalPassKind::Unsupported: entry.kind = vulkan::ElisionPassDesc::Kind::Custom; break;
+        case MetalPassKind::Unsupported: entry.kind = render::ElisionPassDesc::Kind::Custom; break;
         }
         elision.push_back(std::move(entry));
     }
     // The composition draw, and the poster that re-composes from the same
     // image, both read the scene's output. Without this entry a scene whose
     // last step is a copy into the output would look like a copy nobody wants.
-    elision.push_back(vulkan::ElisionPassDesc {
-        .kind  = vulkan::ElisionPassDesc::Kind::Present,
+    elision.push_back(render::ElisionPassDesc {
+        .kind  = render::ElisionPassDesc::Kind::Present,
         .reads = { scene.ResolveRenderTargetName(SpecTex_Default) },
     });
 
-    const auto plan = vulkan::PlanCopyElision(elision);
+    const auto plan = render::PlanCopyElision(elision);
     for (std::size_t i = 0; i < descriptions.size() && i < plan.size(); ++i) {
         if (descriptions[i].kind != MetalPassKind::Copy) continue;
-        if (plan[i] == vulkan::CopyElision::None) continue;
+        if (plan[i] == render::CopyElision::None) continue;
         copy_elision[i] = plan[i];
         ++elided_copies;
-        if (plan[i] == vulkan::CopyElision::Alias) {
+        if (plan[i] == render::CopyElision::Alias) {
             target_aliases[descriptions[i].target_key] = descriptions[i].source_key;
         }
     }
-    vulkan::RecordElidedCopies(elided_copies);
+    render::RecordElidedCopies(elided_copies);
 }
 
 /// Builds the target table this backend reuses pixels from.
@@ -3951,7 +3951,7 @@ static std::string ResolveAliasRoot(const std::unordered_map<std::string, std::s
 
 bool MetalRender::Impl::applySceneOptimizationSetting(Scene& scene, id<MTLCommandBuffer> command)
 {
-    const bool enabled = vulkan::SceneOptimizationEnabled();
+    const bool enabled = render::SceneOptimizationEnabled();
     if (enabled == optimization_applied) return true;
     // Targets are reallocated and cleared in this frame's own command buffer,
     // so the frame after a change always composes and presents.
@@ -4030,28 +4030,28 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
     // changes, and a total that is only ever zeroed here would count the same
     // pixels into the process-wide budget once per change.
     if (static_pinned_bytes != 0) {
-        vulkan::AdjustSceneOptimizationPinnedBytes(-static_cast<int64_t>(static_pinned_bytes));
+        render::AdjustSceneOptimizationPinnedBytes(-static_cast<int64_t>(static_pinned_bytes));
         static_pinned_bytes = 0;
     }
     optimization_compiled = false;
-    if (! vulkan::SceneOptimizationEnabled()) return;
+    if (! render::SceneOptimizationEnabled()) return;
 
     const auto* updater = scene.shaderValueUpdater.get();
     const auto* runtime_images =
         dynamic_cast<const RuntimeImageSource*>(scene.imageParser.get());
 
-    std::vector<vulkan::StaticPassDesc> descs;
+    std::vector<render::StaticPassDesc> descs;
     descs.reserve(descriptions.size());
     for (std::size_t i = 0; i < descriptions.size(); ++i) {
         const auto& desc = descriptions[i];
-        vulkan::StaticPassDesc out;
+        render::StaticPassDesc out;
         switch (desc.kind) {
         case MetalPassKind::Copy:
             // An elided copy executes nothing, so it is neither a writer of its
             // destination nor a reason for it to be redrawn.
-            if (copy_elision[i] == vulkan::CopyElision::None) {
+            if (copy_elision[i] == render::CopyElision::None) {
                 out.target = desc.target_key;
-                out.inputs = { vulkan::ResolveCopyAliasKey(target_aliases, desc.source_key) };
+                out.inputs = { render::ResolveCopyAliasKey(target_aliases, desc.source_key) };
             }
             break;
         case MetalPassKind::Clear:
@@ -4067,7 +4067,7 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
                 // plan folded onto its source has no writer of its own, and a
                 // read of the bare name would look like a read of something
                 // nothing in this frame produces.
-                out.inputs.push_back(vulkan::ResolveCopyAliasKey(target_aliases, key));
+                out.inputs.push_back(render::ResolveCopyAliasKey(target_aliases, key));
             }
             uint32_t reasons = 0;
             const uint32_t varying =
@@ -4076,19 +4076,19 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
                                                     desc.camera_override)
                     : frame_varying_uniform::kAll;
             if ((varying & (frame_varying_uniform::kTime | frame_varying_uniform::kDayTime)) != 0)
-                reasons |= vulkan::DynamicReason::TimeUniform;
+                reasons |= render::DynamicReason::TimeUniform;
             if ((varying & frame_varying_uniform::kAudio) != 0)
-                reasons |= vulkan::DynamicReason::AudioUniform;
+                reasons |= render::DynamicReason::AudioUniform;
             if ((varying & (frame_varying_uniform::kPointer | frame_varying_uniform::kParallax)) !=
                 0)
-                reasons |= vulkan::DynamicReason::PointerUniform;
+                reasons |= render::DynamicReason::PointerUniform;
             if ((varying & frame_varying_uniform::kBones) != 0)
-                reasons |= vulkan::DynamicReason::BoneUniform;
+                reasons |= render::DynamicReason::BoneUniform;
             for (const auto& key : desc.texture_keys) {
                 if (key.empty()) continue;
-                if (video.owns(key)) reasons |= vulkan::DynamicReason::VideoInput;
+                if (video.owns(key)) reasons |= render::DynamicReason::VideoInput;
                 if (runtime_images != nullptr && runtime_images->IsRuntimeImage(key))
-                    reasons |= vulkan::DynamicReason::RuntimeImage;
+                    reasons |= render::DynamicReason::RuntimeImage;
             }
             // A mesh the runtime rewrites every frame -- a particle system --
             // is never reusable. Its geometry is uploaded per frame and the
@@ -4101,8 +4101,8 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
                 // one level up, where the scene decides whether to keep the
                 // clock.
                 reasons |= desc.node->Mesh()->UpdatesOnEvent()
-                               ? vulkan::DynamicReason::EventMesh
-                               : vulkan::DynamicReason::DynamicMesh;
+                               ? render::DynamicReason::EventMesh
+                               : render::DynamicReason::DynamicMesh;
             }
             // Sprite sheets are deliberately absent: the frame this pass draws
             // is folded into its per-frame sample below, taken after the sprite
@@ -4117,14 +4117,14 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
         case MetalPassKind::Unsupported:
             // Not reachable: an unsupported pass fails the graph rejection. If
             // it ever were, it must not be reusable.
-            out.dynamic_reasons = static_cast<uint32_t>(vulkan::DynamicReason::UnknownInput);
+            out.dynamic_reasons = static_cast<uint32_t>(render::DynamicReason::UnknownInput);
             break;
         }
         descs.push_back(std::move(out));
     }
 
     static_cache.Compile(descs);
-    static_samples.assign(descriptions.size(), vulkan::StaticPassSample {});
+    static_samples.assign(descriptions.size(), render::StaticPassSample {});
 
     pinned_target_keys.clear();
     std::unordered_map<const void*, uint32_t> keys_per_image;
@@ -4157,18 +4157,18 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
         pinned_target_keys.insert(key);
     }
     if (static_pinned_bytes != 0) {
-        vulkan::AdjustSceneOptimizationPinnedBytes(static_cast<int64_t>(static_pinned_bytes));
+        render::AdjustSceneOptimizationPinnedBytes(static_cast<int64_t>(static_pinned_bytes));
     }
     optimization_compiled = true;
 }
 
-vulkan::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_t index) const
+render::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_t index) const
 {
-    vulkan::StaticPassSample sample;
+    render::StaticPassSample sample;
     const auto&              desc = descriptions[index];
     if (desc.kind != MetalPassKind::CustomShader) {
         if (desc.uses_scene_clear_color) {
-            sample.hash = vulkan::StaticHashBytes(0xcbf29ce484222325ULL,
+            sample.hash = render::StaticHashBytes(0xcbf29ce484222325ULL,
                 desc.clear_color.data(), sizeof(float) * desc.clear_color.size());
         }
         return sample;
@@ -4180,40 +4180,40 @@ vulkan::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
 
     uint64_t hash = 0xcbf29ce484222325ULL;
     if (desc.uses_scene_clear_color) {
-        hash = vulkan::StaticHashBytes(hash, desc.clear_color.data(), sizeof(float) * desc.clear_color.size());
+        hash = render::StaticHashBytes(hash, desc.clear_color.data(), sizeof(float) * desc.clear_color.size());
     }
     if (desc.node != nullptr) {
         // Idempotent, and the transform has to be current before it is
         // compared: a parent moved by a script updates lazily.
         desc.node->UpdateTrans();
         const auto model = desc.node->ModelTrans();
-        hash = vulkan::StaticHashBytes(hash, model.data(), sizeof(double) * 16);
+        hash = render::StaticHashBytes(hash, model.data(), sizeof(double) * 16);
         // Where the node is drawn, when that is not where its world matrix puts it: a
         // layer a screen anchor shifts, or a final card drawn through an override that
         // carries the shift.
         if (desc.node->HasRenderTransformOverride() || ! desc.node->DrawOffset().isZero()) {
             const auto drawn = desc.node->RenderTrans();
-            hash = vulkan::StaticHashBytes(hash, drawn.data(), sizeof(double) * 16);
+            hash = render::StaticHashBytes(hash, drawn.data(), sizeof(double) * 16);
         }
         if (auto* mesh = desc.node->Mesh(); mesh != nullptr) {
-            hash = vulkan::StaticHashMix(hash, mesh->DirtyGeneration());
+            hash = render::StaticHashMix(hash, mesh->DirtyGeneration());
             if (const auto* material = mesh->MaterialForSlot(desc.material_slot);
                 material != nullptr) {
                 for (const auto& [name, value] : material->customShader.constValues) {
-                    hash = vulkan::StaticHashBytes(hash, name.data(), name.size());
-                    hash = vulkan::StaticHashBytes(hash, value.data(),
+                    hash = render::StaticHashBytes(hash, name.data(), name.size());
+                    hash = render::StaticHashBytes(hash, value.data(),
                                                    value.size() * sizeof(float));
                 }
             }
         }
         // Lights move, fade and switch without touching this node or material.
         if (const auto* updater = scene.shaderValueUpdater.get(); updater != nullptr) {
-            hash = vulkan::StaticHashMix(hash,
+            hash = render::StaticHashMix(hash,
                                          updater->LightStateHash(desc.node, desc.material_slot));
         }
     }
 
-    hash = vulkan::FoldPassCameras(hash, scene, desc.camera_override, desc.node);
+    hash = render::FoldPassCameras(hash, scene, desc.camera_override, desc.node);
 
     // What a replaceable image currently holds. Its geometry can be unchanged
     // while its pixels are not -- a clock redrawing the same number of glyphs,
@@ -4225,8 +4225,8 @@ vulkan::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
             if (key.empty()) continue;
             const auto ring = runtime_image_rings.find(key);
             if (ring == runtime_image_rings.end()) continue;
-            hash = vulkan::StaticHashBytes(hash, key.data(), key.size());
-            hash = vulkan::StaticHashMix(hash, ring->second.version);
+            hash = render::StaticHashBytes(hash, key.data(), key.size());
+            hash = render::StaticHashMix(hash, ring->second.version);
         }
     }
 
@@ -4234,18 +4234,18 @@ vulkan::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
     // frames of one sheet differ by their rectangle and axes, and that is
     // exactly what reaches the shader.
     for (const auto& [slot, sprite] : prepared[index].sprites) {
-        hash = vulkan::StaticHashMix(hash, static_cast<uint64_t>(slot));
+        hash = render::StaticHashMix(hash, static_cast<uint64_t>(slot));
         if (sprite.numFrames() == 0) continue;
         const auto& frame = sprite.GetCurFrame();
-        hash = vulkan::StaticHashMix(hash, static_cast<uint64_t>(frame.imageId));
+        hash = render::StaticHashMix(hash, static_cast<uint64_t>(frame.imageId));
         const std::array<float, 9> rect { frame.x,        frame.y,        frame.width,
                                           frame.height,   frame.rate,     frame.xAxis[0],
                                           frame.xAxis[1], frame.yAxis[0], frame.yAxis[1] };
-        hash = vulkan::StaticHashBytes(hash, rect.data(), rect.size() * sizeof(float));
+        hash = render::StaticHashBytes(hash, rect.data(), rect.size() * sizeof(float));
     }
 
-    hash = vulkan::StaticHashMix(hash, desc.target_width);
-    hash = vulkan::StaticHashMix(hash, desc.target_height);
+    hash = render::StaticHashMix(hash, desc.target_width);
+    hash = render::StaticHashMix(hash, desc.target_height);
     sample.hash = hash;
     return sample;
 }
@@ -4256,7 +4256,7 @@ bool MetalRender::Impl::planStaticSkips(Scene& scene)
         static_skip.assign(descriptions.size(), uint8_t { 0 });
     }
     std::fill(static_skip.begin(), static_skip.end(), uint8_t { 0 });
-    if (! optimization_compiled || ! vulkan::SceneOptimizationEnabled() ||
+    if (! optimization_compiled || ! render::SceneOptimizationEnabled() ||
         static_cache.TargetCount() == 0) {
         // Dropped, not merely unused. While reuse is off every target is
         // redrawn from whatever this frame's inputs are, and the table still
@@ -4278,17 +4278,17 @@ bool MetalRender::Impl::planStaticSkips(Scene& scene)
         for (const auto& desc : descriptions) {
             if (desc.kind != MetalPassKind::Virtual) ++executed;
         }
-        vulkan::RecordSceneOptimizationFrame(executed, 0);
+        render::RecordSceneOptimizationFrame(executed, 0);
         return false;
     }
     if (static_samples.size() != descriptions.size()) {
-        static_samples.assign(descriptions.size(), vulkan::StaticPassSample {});
+        static_samples.assign(descriptions.size(), render::StaticPassSample {});
     }
     // Only the writers of a cacheable target fold into a signature; the rest
     // execute whatever their sample would say.
     for (std::size_t i = 0; i < descriptions.size(); ++i) {
         static_samples[i] =
-            static_cache.PassSampled(i) ? frameSample(scene, i) : vulkan::StaticPassSample {};
+            static_cache.PassSampled(i) ? frameSample(scene, i) : render::StaticPassSample {};
     }
     static_cache.Plan(static_samples, static_skip);
 
@@ -4301,7 +4301,7 @@ bool MetalRender::Impl::planStaticSkips(Scene& scene)
         else
             ++executed;
     }
-    vulkan::RecordSceneOptimizationFrame(executed, skipped);
+    render::RecordSceneOptimizationFrame(executed, skipped);
     return skipped != 0;
 }
 
@@ -4345,7 +4345,7 @@ bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
         // runs, and the copy would then execute in a frame that must not stop
         // to compile anything.
         if (target == targets.end()) {
-            if (copy_elision[i] != vulkan::CopyElision::None) continue;
+            if (copy_elision[i] != render::CopyElision::None) continue;
             return fail("a copy step targets an image that does not exist");
         }
         if (! ensurePresentPipeline(target->second.pixelFormat)) return false;
@@ -4433,7 +4433,7 @@ bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
     planFeedbackSwaps();
     planPooledTrades(scene);
     refreshPassTargets(scene);
-    optimization_applied = vulkan::SceneOptimizationEnabled();
+    optimization_applied = render::SceneOptimizationEnabled();
     graph_ready = true;
     last_error.clear();
     return true;
@@ -4444,7 +4444,7 @@ WallpaperScalingLayout MetalRender::Impl::scalingLayout(const Scene& scene, uint
 {
     const double scale_factor = NormalizeScaleFactor(display_scale_factor);
     const auto   source_extent =
-        vulkan::ResolveSceneSourceExtent(scene, { std::max(1u, width), std::max(1u, height) });
+        render::ResolveSceneSourceExtent(scene, { std::max(1u, width), std::max(1u, height) });
     const uint32_t logical_width = std::max(
         1u, static_cast<uint32_t>(std::lround(static_cast<double>(width) / scale_factor)));
     const uint32_t logical_height = std::max(
@@ -4606,7 +4606,7 @@ bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double 
     // drags does not reparse the project. Acting on an unchanged value would turn
     // every plug and unplug into exactly that.
     if (! std::isfinite(scale) || scale <= 0.0) return true;
-    const double clamped = std::min(1.0, std::max(vulkan::kMinRenderScale, scale));
+    const double clamped = std::min(1.0, std::max(render::kMinRenderScale, scale));
     if (scene.render_scale == clamped && scene.resolution == resolution) return true;
 
     // A resolution that this scene has no canvas to apply to changes nothing
@@ -4614,7 +4614,7 @@ bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double 
     // compiled graph either.
     const bool resizes =
         scene.render_scale != clamped ||
-        (scene.resolution != resolution && vulkan::SceneResolutionAffectsRaster(scene));
+        (scene.resolution != resolution && render::SceneResolutionAffectsRaster(scene));
     scene.render_scale = clamped;
     scene.resolution   = resolution;
     if (! resizes) return true;
@@ -4626,7 +4626,7 @@ bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double 
 
 void MetalRender::UpdateCameraFillMode(Scene& scene, FillMode fillmode)
 {
-    vulkan::ApplyCameraFillMode(scene, fillmode, pImpl->output_width, pImpl->output_height);
+    render::ApplyCameraFillMode(scene, fillmode, pImpl->output_width, pImpl->output_height);
     // The camera moved: reuse signatures see it, but the gate must not let a
     // frame decided before that change stand in for one after it.
     pImpl->present_gate.Invalidate();
@@ -4685,7 +4685,7 @@ uint32_t MetalRender::ShaderUpdateDemandReasons() const
     // Asked now rather than latched at compile: pausing playback stops the
     // frames without rebuilding the graph, and a paused video must not keep
     // the clock running.
-    if (pImpl->video.advancesOnItsOwn()) reasons |= vulkan::DynamicReason::VideoInput;
+    if (pImpl->video.advancesOnItsOwn()) reasons |= render::DynamicReason::VideoInput;
     return reasons;
 }
 
@@ -4932,7 +4932,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 // has no consumer, or the destination now shares the source's
                 // texture and a byte-for-byte duplicate would change nothing.
                 if (i < impl.copy_elision.size() &&
-                    impl.copy_elision[i] != vulkan::CopyElision::None) {
+                    impl.copy_elision[i] != render::CopyElision::None) {
                     continue;
                 }
                 const auto source = impl.targets.find(desc.source_key);
@@ -5310,7 +5310,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                                      impl.frame_encodes.blit_passes == 0 &&
                                      impl.frame_swaps.empty() && impl.pooled_moves == 0 &&
                                      impl.video.empty();
-        if (vulkan::SceneOptimizationEnabled() && nothing_encoded &&
+        if (render::SceneOptimizationEnabled() && nothing_encoded &&
             impl.present_gate.Matches(impl.present_key, {})) {
             // The buffer holds nothing and is dropped uncommitted, so the slot
             // is released here and the uniform ring does not advance: the next
@@ -5363,7 +5363,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         impl.frame_drawn = true;
         // With scene optimisation off nothing is remembered, so turning it
         // back on starts from a real present.
-        if (vulkan::SceneOptimizationEnabled()) {
+        if (render::SceneOptimizationEnabled()) {
             impl.present_gate.Record(impl.present_key, {});
         } else {
             impl.present_gate.Invalidate();

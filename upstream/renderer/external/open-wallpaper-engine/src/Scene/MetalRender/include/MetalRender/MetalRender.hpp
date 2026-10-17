@@ -194,7 +194,7 @@ public:
     [[nodiscard]] VideoFramePath VideoPath() const;
 
     /// Scene-level demand bits for the graph currently compiled, in the same
-    /// `vulkan::DynamicReason` vocabulary the compatibility backend reports, so
+    /// `render::DynamicReason` vocabulary the compatibility backend reports, so
     /// the on-demand mapping has one vocabulary to consume.
     ///
     /// Reports `UnknownInput` before any graph has been analysed, and for any

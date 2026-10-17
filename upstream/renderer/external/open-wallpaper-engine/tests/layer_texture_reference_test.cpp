@@ -865,7 +865,7 @@ TEST(LayerTextureReference, AReferencedLayerIsItsCardWhereverTheSceneShowsIt) {
     const auto lowered = LowerDraw(*composite);
     ASSERT_NE(lowered, nullptr);
     EXPECT_FALSE(lowered->staticPassDesc(*parsed).dynamic_reasons &
-                 vulkan::DynamicReason::PointerUniform);
+                 render::DynamicReason::PointerUniform);
 }
 
 // A layer's composite is copied into its link texture while the graph is
@@ -2125,7 +2125,7 @@ TEST(CameraFraming, APerspectiveCameraKeepsItsLensAndFollowsEveryWayTheCanvasIsF
                                 Output { FillMode::ASPECTFIT, "fit tall", 100, 400 },
                                 Output { FillMode::ASPECTCROP, "crop wide", 400, 100 },
                                 Output { FillMode::ASPECTCROP, "crop tall", 100, 400 } }) {
-        vulkan::ApplyCameraFillMode(*parsed, output.mode, output.width, output.height);
+        render::ApplyCameraFillMode(*parsed, output.mode, output.width, output.height);
         expect_framed(output.name);
     }
     parsed->FrameCanvas(2.0, linalg::Vector2f(8.0f, 4.0f));

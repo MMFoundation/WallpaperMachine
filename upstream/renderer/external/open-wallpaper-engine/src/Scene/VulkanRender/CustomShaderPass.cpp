@@ -1060,8 +1060,8 @@ CustomPassBatchCandidate CustomShaderPass::batchCandidate() const {
     };
 }
 
-StaticPassDesc CustomShaderPass::staticPassDesc(const Scene& scene) const {
-    StaticPassDesc desc;
+wallpaper::render::StaticPassDesc CustomShaderPass::staticPassDesc(const Scene& scene) const {
+    render::StaticPassDesc desc;
     desc.target = m_desc.output;
     desc.inputs = m_desc.textures;
 
@@ -1073,22 +1073,22 @@ StaticPassDesc CustomShaderPass::staticPassDesc(const Scene& scene) const {
                                             m_desc.camera_override)
             : frame_varying_uniform::kAll;
     if ((varying & (frame_varying_uniform::kTime | frame_varying_uniform::kDayTime)) != 0)
-        reasons |= DynamicReason::TimeUniform;
-    if ((varying & frame_varying_uniform::kAudio) != 0) reasons |= DynamicReason::AudioUniform;
+        reasons |= render::DynamicReason::TimeUniform;
+    if ((varying & frame_varying_uniform::kAudio) != 0) reasons |= render::DynamicReason::AudioUniform;
     if ((varying & (frame_varying_uniform::kPointer | frame_varying_uniform::kParallax)) != 0)
-        reasons |= DynamicReason::PointerUniform;
-    if ((varying & frame_varying_uniform::kBones) != 0) reasons |= DynamicReason::BoneUniform;
+        reasons |= render::DynamicReason::PointerUniform;
+    if ((varying & frame_varying_uniform::kBones) != 0) reasons |= render::DynamicReason::BoneUniform;
 
     if (std::any_of(m_desc.video_textures.begin(), m_desc.video_textures.end(),
                     [](bool video) { return video; }))
-        reasons |= DynamicReason::VideoInput;
+        reasons |= render::DynamicReason::VideoInput;
     if (m_desc.dyn_vertex)
         reasons |=
-            m_desc.event_vertex ? DynamicReason::EventMesh : DynamicReason::DynamicMesh;
+            m_desc.event_vertex ? render::DynamicReason::EventMesh : render::DynamicReason::DynamicMesh;
     for (const auto& [index, sprite] : m_desc.sprites_map) {
         (void)index;
         if (sprite.FrameCount() > 1) {
-            reasons |= DynamicReason::AnimatedSprite;
+            reasons |= render::DynamicReason::AnimatedSprite;
             break;
         }
     }
@@ -1100,7 +1100,7 @@ StaticPassDesc CustomShaderPass::staticPassDesc(const Scene& scene) const {
         for (const auto& texture : m_desc.textures) {
             if (texture.empty()) continue;
             if (runtime_images->IsRuntimeImage(texture)) {
-                reasons |= DynamicReason::RuntimeImage;
+                reasons |= render::DynamicReason::RuntimeImage;
                 break;
             }
         }
@@ -1109,8 +1109,8 @@ StaticPassDesc CustomShaderPass::staticPassDesc(const Scene& scene) const {
     return desc;
 }
 
-StaticPassSample CustomShaderPass::frameSample(const Scene& scene) const {
-    StaticPassSample sample;
+wallpaper::render::StaticPassSample CustomShaderPass::frameSample(const Scene& scene) const {
+    render::StaticPassSample sample;
     sample.visible = m_desc.visibility_node == nullptr ||
                     m_desc.visibility_node->EffectiveVisible() ||
                     (m_desc.visibility_node->MustProduce() && ! m_desc.output.empty() &&
@@ -1118,7 +1118,7 @@ StaticPassSample CustomShaderPass::frameSample(const Scene& scene) const {
 
     uint64_t hash = 0xcbf29ce484222325ULL;
     if (m_desc.output == SpecTex_Default) {
-        hash = StaticHashBytes(hash, scene.clearColor.data(), sizeof(float) * 3);
+        hash = render::StaticHashBytes(hash, scene.clearColor.data(), sizeof(float) * 3);
     }
     auto* node = m_desc.node;
     if (node != nullptr) {
@@ -1126,29 +1126,29 @@ StaticPassSample CustomShaderPass::frameSample(const Scene& scene) const {
         // compared: a parent moved by a script updates lazily.
         node->UpdateTrans();
         const auto model = node->ModelTrans();
-        hash = StaticHashBytes(hash, model.data(), sizeof(double) * 16);
+        hash = render::StaticHashBytes(hash, model.data(), sizeof(double) * 16);
         if (node->Mesh() != nullptr) {
-            hash = StaticHashMix(hash, node->Mesh()->DirtyGeneration());
+            hash = render::StaticHashMix(hash, node->Mesh()->DirtyGeneration());
             const auto* material = node->Mesh()->MaterialForSlot(m_desc.material_slot);
             if (material != nullptr) {
                 for (const auto& [name, value] : material->customShader.constValues) {
-                    hash = StaticHashBytes(hash, name.data(), name.size());
-                    hash = StaticHashBytes(hash, value.data(), value.size() * sizeof(float));
+                    hash = render::StaticHashBytes(hash, name.data(), name.size());
+                    hash = render::StaticHashBytes(hash, value.data(), value.size() * sizeof(float));
                 }
             }
         }
         // Lights move, fade and switch without touching this node or material.
         if (const auto* updater = scene.shaderValueUpdater.get(); updater != nullptr) {
-            hash = StaticHashMix(hash, updater->LightStateHash(node, m_desc.material_slot));
+            hash = render::StaticHashMix(hash, updater->LightStateHash(node, m_desc.material_slot));
         }
     }
-    hash = FoldPassCameras(hash, scene, m_desc.camera_override, node);
+    hash = render::FoldPassCameras(hash, scene, m_desc.camera_override, node);
     for (const auto& [index, sprite] : m_desc.sprites_map) {
-        hash = StaticHashMix(hash, index);
-        hash = StaticHashMix(hash, static_cast<uint64_t>(sprite.GetCurFrame().imageId));
+        hash = render::StaticHashMix(hash, index);
+        hash = render::StaticHashMix(hash, static_cast<uint64_t>(sprite.GetCurFrame().imageId));
     }
-    hash = StaticHashMix(hash, m_desc.vk_output.extent.width);
-    hash = StaticHashMix(hash, m_desc.vk_output.extent.height);
+    hash = render::StaticHashMix(hash, m_desc.vk_output.extent.width);
+    hash = render::StaticHashMix(hash, m_desc.vk_output.extent.height);
     sample.hash = hash;
     return sample;
 }

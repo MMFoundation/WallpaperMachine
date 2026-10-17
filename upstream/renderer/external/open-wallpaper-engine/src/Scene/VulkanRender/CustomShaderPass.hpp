@@ -115,10 +115,10 @@ public:
 
     /// Compile-time shape of this pass for the static subgraph cache: the
     /// target it writes, the targets it reads and why it may be dynamic.
-    StaticPassDesc staticPassDesc(const Scene&) const;
+    render::StaticPassDesc staticPassDesc(const Scene&) const;
     /// Everything that can change this pass's output without changing the
     /// graph, folded into one value.
-    StaticPassSample frameSample(const Scene&) const;
+    render::StaticPassSample frameSample(const Scene&) const;
     /// Suppresses this frame's draw and its uniform update. The previous
     /// frame's pixels stay in the target, so the caller must have proved the
     /// target still owns them.
@@ -214,7 +214,7 @@ inline bool PlanCustomShaderDescriptors(
 
         if (uniform_binding != nullptr && name == reflection.blocks.front().name) continue;
 
-        if (const auto slot = CustomShaderTextureSlot(name); slot.has_value()) {
+        if (const auto slot = render::CustomShaderTextureSlot(name); slot.has_value()) {
             if (*slot >= texture_count) return false;
             if (binding.descriptorType != VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE &&
                 binding.descriptorType != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
@@ -223,7 +223,7 @@ inline bool PlanCustomShaderDescriptors(
             continue;
         }
 
-        if (const auto slot = CustomShaderSamplerSlot(name); slot.has_value()) {
+        if (const auto slot = render::CustomShaderSamplerSlot(name); slot.has_value()) {
             if (*slot >= texture_count) return false;
             if (binding.descriptorType != VK_DESCRIPTOR_TYPE_SAMPLER) return false;
             const auto image_iter = reflection.binding_map.find(WE_GLTEX_NAMES[*slot]);

@@ -8,7 +8,7 @@
 
 namespace wallpaper
 {
-namespace vulkan
+namespace render
 {
 
 /// What a copy pass may be reduced to once the whole pass list is known.
@@ -73,5 +73,5 @@ std::vector<CopyElision> PlanCopyElision(std::span<const ElisionPassDesc> passes
 std::string ResolveCopyAliasKey(const std::unordered_map<std::string, std::string>& aliases,
                                 const std::string&                                 key);
 
-} // namespace vulkan
+} // namespace render
 } // namespace wallpaper

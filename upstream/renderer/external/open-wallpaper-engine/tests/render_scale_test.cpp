@@ -20,7 +20,7 @@
 
 #include <gtest/gtest.h>
 
-namespace wallpaper::vulkan
+namespace wallpaper::render
 {
 namespace
 {
@@ -483,4 +483,4 @@ TEST(RasterResolution, TheResolutionOnlyMattersToASceneWithACanvasToRasterize) {
 }
 
 } // namespace
-} // namespace wallpaper::vulkan
+} // namespace wallpaper::render

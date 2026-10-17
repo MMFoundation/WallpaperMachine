@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-using namespace wallpaper::vulkan;
+using namespace wallpaper::render;
 
 namespace
 {
@@ -14,7 +14,7 @@ bool ReadsKey(const ElisionPassDesc& pass, const std::string& key)
 
 } // namespace
 
-std::vector<CopyElision> wallpaper::vulkan::PlanCopyElision(std::span<const ElisionPassDesc> passes)
+std::vector<CopyElision> wallpaper::render::PlanCopyElision(std::span<const ElisionPassDesc> passes)
 {
     std::vector<CopyElision> plan(passes.size(), CopyElision::None);
 
@@ -58,7 +58,7 @@ std::vector<CopyElision> wallpaper::vulkan::PlanCopyElision(std::span<const Elis
     return plan;
 }
 
-std::string wallpaper::vulkan::ResolveCopyAliasKey(
+std::string wallpaper::render::ResolveCopyAliasKey(
     const std::unordered_map<std::string, std::string>& aliases, const std::string& key)
 {
     if (aliases.empty() || key.empty()) return key;

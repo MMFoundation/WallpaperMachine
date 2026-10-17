@@ -4,7 +4,7 @@
 #include <atomic>
 #include <cstring>
 
-using namespace wallpaper::vulkan;
+using namespace wallpaper::render;
 
 namespace
 {
@@ -14,7 +14,7 @@ constexpr uint64_t kFnvPrime = 1099511628211ULL;
 
 } // namespace
 
-uint64_t wallpaper::vulkan::StaticHashMix(uint64_t seed, uint64_t value)
+uint64_t wallpaper::render::StaticHashMix(uint64_t seed, uint64_t value)
 {
     // The seed is folded byte by byte so that two different orderings of the
     // same values do not collide, which matters because a pass sample is the
@@ -26,7 +26,7 @@ uint64_t wallpaper::vulkan::StaticHashMix(uint64_t seed, uint64_t value)
     return seed;
 }
 
-uint64_t wallpaper::vulkan::StaticHashBytes(uint64_t seed, const void* data, std::size_t size)
+uint64_t wallpaper::render::StaticHashBytes(uint64_t seed, const void* data, std::size_t size)
 {
     const auto* bytes = static_cast<const unsigned char*>(data);
     for (std::size_t i = 0; i < size; ++i) {
@@ -249,34 +249,34 @@ std::atomic<int64_t>  g_pinned_bytes { 0 };
 
 } // namespace
 
-void wallpaper::vulkan::SetSceneOptimizationEnabled(bool enabled)
+void wallpaper::render::SetSceneOptimizationEnabled(bool enabled)
 {
     g_scene_optimization_enabled.store(enabled, std::memory_order_relaxed);
 }
 
-bool wallpaper::vulkan::SceneOptimizationEnabled()
+bool wallpaper::render::SceneOptimizationEnabled()
 {
     return g_scene_optimization_enabled.load(std::memory_order_relaxed);
 }
 
-void wallpaper::vulkan::RecordSceneOptimizationFrame(uint64_t executed_passes,
+void wallpaper::render::RecordSceneOptimizationFrame(uint64_t executed_passes,
                                                      uint64_t skipped_passes)
 {
     g_executed_passes.fetch_add(executed_passes, std::memory_order_relaxed);
     g_skipped_passes.fetch_add(skipped_passes, std::memory_order_relaxed);
 }
 
-void wallpaper::vulkan::RecordElidedCopies(uint64_t count)
+void wallpaper::render::RecordElidedCopies(uint64_t count)
 {
     g_elided_copies.fetch_add(count, std::memory_order_relaxed);
 }
 
-void wallpaper::vulkan::AdjustSceneOptimizationPinnedBytes(int64_t delta)
+void wallpaper::render::AdjustSceneOptimizationPinnedBytes(int64_t delta)
 {
     g_pinned_bytes.fetch_add(delta, std::memory_order_relaxed);
 }
 
-SceneOptimizationTotals wallpaper::vulkan::CurrentSceneOptimizationTotals()
+SceneOptimizationTotals wallpaper::render::CurrentSceneOptimizationTotals()
 {
     const auto pinned = g_pinned_bytes.load(std::memory_order_relaxed);
     return SceneOptimizationTotals {
@@ -287,7 +287,7 @@ SceneOptimizationTotals wallpaper::vulkan::CurrentSceneOptimizationTotals()
     };
 }
 
-void wallpaper::vulkan::ResetSceneOptimizationTotalsForTesting()
+void wallpaper::render::ResetSceneOptimizationTotalsForTesting()
 {
     g_executed_passes.store(0, std::memory_order_relaxed);
     g_skipped_passes.store(0, std::memory_order_relaxed);

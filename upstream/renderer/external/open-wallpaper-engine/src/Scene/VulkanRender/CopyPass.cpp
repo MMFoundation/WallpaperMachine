@@ -11,9 +11,9 @@ CopyPass::CopyPass(const Desc& desc): m_desc(desc) {}
 
 CopyPass::~CopyPass() {};
 
-ElisionPassDesc CopyPass::elisionDesc(const Scene& scene) const {
-    ElisionPassDesc desc;
-    desc.kind   = ElisionPassDesc::Kind::Copy;
+wallpaper::render::ElisionPassDesc CopyPass::elisionDesc(const Scene& scene) const {
+    render::ElisionPassDesc desc;
+    desc.kind   = render::ElisionPassDesc::Kind::Copy;
     desc.writes = scene.ResolveRenderTargetName(m_desc.dst);
     desc.reads  = { scene.ResolveRenderTargetName(m_desc.src) };
 
@@ -39,7 +39,7 @@ void CopyPass::prepare(Scene& scene, const Device& device, RenderingResources& r
         LOG_ERROR("%s not found", m_desc.src.c_str());
         return;
     }
-    if (m_desc.elision == CopyElision::Dead) {
+    if (m_desc.elision == render::CopyElision::Dead) {
         // Nothing reads the destination, so neither the copy nor an allocation
         // for its result is needed.
         for (auto& tex : releaseTexs()) device.tex_cache().MarkShareReady(tex);
@@ -52,7 +52,7 @@ void CopyPass::prepare(Scene& scene, const Device& device, RenderingResources& r
         scene.renderTargets[dst_name].allowReuse = true;
     }
 
-    if (m_desc.elision == CopyElision::Alias) {
+    if (m_desc.elision == render::CopyElision::Alias) {
         auto& src_rt = *scene.FindRenderTarget(src_name);
         auto  opt    = device.tex_cache().Query(src_name, ToTexKey(src_rt), true);
         if (! opt.has_value()) {
@@ -101,7 +101,7 @@ void CopyPass::prepare(Scene& scene, const Device& device, RenderingResources& r
     setPrepared();
 };
 VkResult CopyPass::execute(const Device& device, RenderingResources& rr) {
-    if (m_desc.elision != CopyElision::None) return VK_SUCCESS;
+    if (m_desc.elision != render::CopyElision::None) return VK_SUCCESS;
     auto& cmd = rr.command;
     auto& src = m_desc.vk_src;
     auto& dst = m_desc.vk_dst;

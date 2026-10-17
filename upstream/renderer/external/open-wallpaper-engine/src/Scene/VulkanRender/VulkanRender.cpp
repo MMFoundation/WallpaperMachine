@@ -184,7 +184,7 @@ struct VulkanRender::Impl {
     bool applyRenderScale(Scene&, rg::RenderGraph&, double scale, SceneResolution resolution);
     /// What the output means for a 2D scene's raster: the display's backing
     /// scale, and the largest image this device can create.
-    SceneRasterSurface rasterSurface() const;
+    render::SceneRasterSurface rasterSurface() const;
     bool preparePasses(Scene&);
     /// Decides copy elimination and which targets may retain their pixels.
     /// Runs once per compiled graph, never per frame.
@@ -285,14 +285,14 @@ struct VulkanRender::Impl {
     /// `m_prepass` and `m_finpass`.
     std::vector<VulkanPass*> m_passes;
     CustomPassExecutionScratch m_pass_scratch;
-    StaticSubgraphCache m_static_cache;
-    std::vector<StaticPassSample> m_static_samples;
+    render::StaticSubgraphCache m_static_cache;
+    std::vector<render::StaticPassSample> m_static_samples;
     std::vector<uint8_t> m_static_skip;
     /// Union of every pass's reflection-derived dynamic inputs for the compiled
     /// graph, plus its history loops. `UnknownInput` until a graph has been
     /// analysed, so a renderer that has not compiled anything never reports a
     /// scene as still.
-    uint32_t m_shader_dynamic_reasons { static_cast<uint32_t>(DynamicReason::UnknownInput) };
+    uint32_t m_shader_dynamic_reasons { static_cast<uint32_t>(render::DynamicReason::UnknownInput) };
     /// The pass list this frame actually records, with skipped clears and
     /// copies removed. Rebuilt in place so no allocation happens per frame.
     std::vector<VulkanPass*> m_frame_passes;
@@ -310,9 +310,9 @@ struct VulkanRender::Impl {
     RendererCounters* m_counters { nullptr };
     /// The last frame that actually reached the surface, and scratch for the
     /// frame being decided. Reused, so a repeated frame allocates nothing.
-    UnchangedPresentGate             m_present_gate;
-    PresentationKey                  m_present_key;
-    std::vector<PresentedVideoFrame> m_present_videos;
+    render::UnchangedPresentGate             m_present_gate;
+    render::PresentationKey                  m_present_key;
+    std::vector<render::PresentedVideoFrame> m_present_videos;
 };
 
 VulkanRender::VulkanRender(): pImpl(std::make_unique<Impl>()) {}
@@ -1061,7 +1061,7 @@ bool VulkanRender::Impl::drawFrameSwapchain() {
     // present leaves a record a later frame may repeat: a suboptimal surface
     // keeps presenting until it is rebuilt, and with scene optimisation off
     // nothing is remembered, so turning it back on starts from a real present.
-    if (SceneOptimizationEnabled() && acquire_result == VK_SUCCESS && present_result == VK_SUCCESS)
+    if (render::SceneOptimizationEnabled() && acquire_result == VK_SUCCESS && present_result == VK_SUCCESS)
         m_present_gate.Record(m_present_key, m_present_videos);
     else
         m_present_gate.Invalidate();
@@ -1150,8 +1150,8 @@ bool VulkanRender::Impl::drawFrameOffscreen() {
     return true;
 }
 
-SceneRasterSurface VulkanRender::Impl::rasterSurface() const {
-    return SceneRasterSurface {
+wallpaper::render::SceneRasterSurface VulkanRender::Impl::rasterSurface() const {
+    return render::SceneRasterSurface {
         .display_scale_factor = NormalizeScaleFactor(m_display_scale_factor),
         .max_dimension        = m_device != nullptr ? m_device->limits().maxImageDimension2D : 0u,
     };
@@ -1159,8 +1159,8 @@ SceneRasterSurface VulkanRender::Impl::rasterSurface() const {
 
 void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) {
     auto&      ext     = m_device->out_extent();
-    const auto extents = ResolveScreenBoundRenderTargetSizes(scene, FromVkExtent2D(ext), rasterSurface());
-    const auto render_scale = ResolveSceneRenderScale(scene);
+    const auto extents = render::ResolveScreenBoundRenderTargetSizes(scene, FromVkExtent2D(ext), rasterSurface());
+    const auto render_scale = render::ResolveSceneRenderScale(scene);
     for (auto& item : scene.renderTargets) {
         auto& rt = item.second;
         if (item.first == wallpaper::SpecTex_Default) continue;
@@ -1169,7 +1169,7 @@ void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) 
             // Targets the author sized directly: effect ping-pong buffers and
             // the engine's fixed-fraction scratch buffers. They are internal
             // raster, so they follow the render scale from their authored size.
-            ResolveRenderScaledSize(rt, render_scale);
+            render::ResolveRenderScaledSize(rt, render_scale);
             continue;
         }
         auto bind_rt = scene.renderTargets.find(rt.bind.name);
@@ -1207,7 +1207,7 @@ wallpaper::WallpaperScalingLayout
 VulkanRender::Impl::computeScalingLayout(const Scene& scene, uint32_t output_width,
                                          uint32_t output_height) const {
     const double scale_factor  = NormalizeScaleFactor(m_display_scale_factor);
-    const auto   source_extent = ResolveSceneSourceExtent(
+    const auto   source_extent = render::ResolveSceneSourceExtent(
         scene, { std::max(1u, output_width), std::max(1u, output_height) });
     const uint32_t logical_width = std::max(
         1u, static_cast<uint32_t>(std::lround(static_cast<double>(output_width) / scale_factor)));
@@ -1248,7 +1248,7 @@ wallpaper::WallpaperCursorMapping VulkanRender::Impl::CursorMapping(const Scene&
 
 void VulkanRender::Impl::UpdateCameraFillMode(wallpaper::Scene&   scene,
                                               wallpaper::FillMode fillmode) {
-    ApplyCameraFillMode(
+    render::ApplyCameraFillMode(
         scene, fillmode, m_device->out_extent().width, m_device->out_extent().height);
     // The camera moved; what the scene draws changes without any video frame
     // or layout value this renderer compares.
@@ -1433,7 +1433,7 @@ bool VulkanRender::Impl::applySceneOptimization(Scene& scene, rg::RenderGraph& r
     // reuse switch would make turning reuse off silently make every scene look
     // dynamic.
     computeShaderDynamicReasons(scene);
-    m_scene_optimization_applied = SceneOptimizationEnabled();
+    m_scene_optimization_applied = render::SceneOptimizationEnabled();
     if (! m_scene_optimization_applied) {
         // Copies the last plan removed have to come back, or switching the
         // setting off would leave their destinations holding whatever the
@@ -1442,8 +1442,8 @@ bool VulkanRender::Impl::applySceneOptimization(Scene& scene, rg::RenderGraph& r
         bool restored = false;
         for (auto* pass : m_passes) {
             auto* copy = dynamic_cast<CopyPass*>(pass);
-            if (copy == nullptr || copy->desc().elision == CopyElision::None) continue;
-            copy->desc().elision = CopyElision::None;
+            if (copy == nullptr || copy->desc().elision == render::CopyElision::None) continue;
+            copy->desc().elision = render::CopyElision::None;
             restored             = true;
         }
         if (restored) {
@@ -1459,48 +1459,48 @@ bool VulkanRender::Impl::applySceneOptimization(Scene& scene, rg::RenderGraph& r
             setRenderTargetSize(scene, rg);
             if (! preparePasses(scene)) return false;
         }
-        RecordElidedCopies(0);
+        render::RecordElidedCopies(0);
         return true;
     }
 
     // Copy elimination first: it changes which targets exist and who reads
     // them, so the reuse analysis must see the list the renderer will run.
-    std::vector<ElisionPassDesc> elision;
+    std::vector<render::ElisionPassDesc> elision;
     elision.reserve(m_passes.size());
     for (auto* pass : m_passes) {
-        ElisionPassDesc desc;
+        render::ElisionPassDesc desc;
         if (auto* copy = dynamic_cast<CopyPass*>(pass)) {
             desc = copy->elisionDesc(scene);
         } else if (auto* custom = dynamic_cast<CustomShaderPass*>(pass)) {
-            desc.kind   = ElisionPassDesc::Kind::Custom;
+            desc.kind   = render::ElisionPassDesc::Kind::Custom;
             desc.writes = scene.ResolveRenderTargetName(custom->desc().output);
             for (const auto& texture : custom->desc().textures) {
                 if (texture.empty()) continue;
                 desc.reads.push_back(scene.ResolveRenderTargetName(texture));
             }
         } else if (auto* pre = dynamic_cast<PrePass*>(pass)) {
-            desc.kind   = ElisionPassDesc::Kind::Clear;
+            desc.kind   = render::ElisionPassDesc::Kind::Clear;
             desc.writes = scene.ResolveRenderTargetName(pre->desc().result);
         } else {
             // The final blit consumes the scene's output. Recording its read
             // keeps that target from looking like a result nobody wants.
-            desc.kind  = ElisionPassDesc::Kind::Present;
+            desc.kind  = render::ElisionPassDesc::Kind::Present;
             desc.reads = { scene.ResolveRenderTargetName(SpecTex_Default) };
         }
         elision.push_back(std::move(desc));
     }
 
-    const auto plan = PlanCopyElision(elision);
+    const auto plan = render::PlanCopyElision(elision);
     uint64_t   elided = 0;
     bool       changed = false;
     std::unordered_map<std::string, std::string> aliases;
     for (std::size_t i = 0; i < m_passes.size(); ++i) {
         auto* copy = dynamic_cast<CopyPass*>(m_passes[i]);
-        if (copy == nullptr || plan[i] == CopyElision::None) continue;
+        if (copy == nullptr || plan[i] == render::CopyElision::None) continue;
         copy->desc().elision = plan[i];
         changed              = true;
         ++elided;
-        if (plan[i] == CopyElision::Alias) {
+        if (plan[i] == render::CopyElision::Alias) {
             aliases[scene.ResolveRenderTargetName(copy->desc().dst)] =
                 scene.ResolveRenderTargetName(copy->desc().src);
         }
@@ -1520,12 +1520,12 @@ bool VulkanRender::Impl::applySceneOptimization(Scene& scene, rg::RenderGraph& r
         setRenderTargetSize(scene, rg);
         if (! preparePasses(scene)) return false;
     }
-    RecordElidedCopies(elided);
+    render::RecordElidedCopies(elided);
 
-    std::vector<StaticPassDesc> descs;
+    std::vector<render::StaticPassDesc> descs;
     descs.reserve(m_passes.size());
     for (std::size_t i = 0; i < m_passes.size(); ++i) {
-        StaticPassDesc desc;
+        render::StaticPassDesc desc;
         if (auto* custom = dynamic_cast<CustomShaderPass*>(m_passes[i])) {
             desc = custom->staticPassDesc(scene);
             desc.target = scene.ResolveRenderTargetName(desc.target);
@@ -1535,14 +1535,14 @@ bool VulkanRender::Impl::applySceneOptimization(Scene& scene, rg::RenderGraph& r
             // and a reader whose real source is redrawn every frame would then
             // be called reusable.
             for (auto& input : desc.inputs) {
-                input = ResolveCopyAliasKey(aliases, scene.ResolveRenderTargetName(input));
+                input = render::ResolveCopyAliasKey(aliases, scene.ResolveRenderTargetName(input));
             }
         } else if (auto* copy = dynamic_cast<CopyPass*>(m_passes[i])) {
             // An elided copy produces nothing at execution time, so it neither
             // writes a target nor forces one to re-render.
-            if (copy->desc().elision == CopyElision::None) {
+            if (copy->desc().elision == render::CopyElision::None) {
                 desc.target = scene.ResolveRenderTargetName(copy->desc().dst);
-                desc.inputs = { ResolveCopyAliasKey(
+                desc.inputs = { render::ResolveCopyAliasKey(
                     aliases, scene.ResolveRenderTargetName(copy->desc().src)) };
             }
         } else if (auto* pre = dynamic_cast<PrePass*>(m_passes[i])) {
@@ -1553,7 +1553,7 @@ bool VulkanRender::Impl::applySceneOptimization(Scene& scene, rg::RenderGraph& r
         descs.push_back(std::move(desc));
     }
     m_static_cache.Compile(descs);
-    m_static_samples.assign(m_passes.size(), StaticPassSample {});
+    m_static_samples.assign(m_passes.size(), render::StaticPassSample {});
 
     for (std::size_t i = 0; i < m_static_cache.TargetCount(); ++i) {
         if (! m_static_cache.TargetCacheable(i)) continue;
@@ -1565,7 +1565,7 @@ bool VulkanRender::Impl::applySceneOptimization(Scene& scene, rg::RenderGraph& r
         m_static_cache.SetTargetPinned(i, true, bytes);
         m_static_pinned_bytes += bytes;
     }
-    AdjustSceneOptimizationPinnedBytes(static_cast<int64_t>(m_static_pinned_bytes));
+    render::AdjustSceneOptimizationPinnedBytes(static_cast<int64_t>(m_static_pinned_bytes));
     return true;
 }
 
@@ -1610,14 +1610,14 @@ void VulkanRender::Impl::computeShaderDynamicReasons(Scene& scene) {
         }
         understood_every_pass = false;
     }
-    if (reads_previous_frame) reasons |= DynamicReason::Feedback;
-    if (! understood_every_pass) reasons |= DynamicReason::UnknownInput;
+    if (reads_previous_frame) reasons |= render::DynamicReason::Feedback;
+    if (! understood_every_pass) reasons |= render::DynamicReason::UnknownInput;
     m_shader_dynamic_reasons = reasons;
 }
 
 void VulkanRender::Impl::releaseStaticCache() {
     if (m_static_pinned_bytes != 0) {
-        AdjustSceneOptimizationPinnedBytes(-static_cast<int64_t>(m_static_pinned_bytes));
+        render::AdjustSceneOptimizationPinnedBytes(-static_cast<int64_t>(m_static_pinned_bytes));
         m_static_pinned_bytes = 0;
     }
     for (auto* pass : m_passes) {
@@ -1628,7 +1628,7 @@ void VulkanRender::Impl::releaseStaticCache() {
 void VulkanRender::Impl::planStaticSkips(Scene& scene) {
     (void)scene;
     if (m_static_skip.size() != m_passes.size()) m_static_skip.assign(m_passes.size(), uint8_t { 0 });
-    if (! SceneOptimizationEnabled() || m_static_cache.TargetCount() == 0) {
+    if (! render::SceneOptimizationEnabled() || m_static_cache.TargetCount() == 0) {
         // Dropped, not merely unused. While reuse is off every target is
         // redrawn from whatever this frame's inputs are, and the table still
         // holds the signature that was current when it was switched off. If a
@@ -1659,11 +1659,11 @@ void VulkanRender::Impl::planStaticSkips(Scene& scene) {
         // reads as the full list; filling it with every pass would say the same
         // thing and allocate to do it.
         m_frame_passes.clear();
-        RecordSceneOptimizationFrame(static_cast<uint64_t>(m_passes.size()), 0);
+        render::RecordSceneOptimizationFrame(static_cast<uint64_t>(m_passes.size()), 0);
         return;
     }
     if (m_static_samples.size() != m_passes.size())
-        m_static_samples.assign(m_passes.size(), StaticPassSample {});
+        m_static_samples.assign(m_passes.size(), render::StaticPassSample {});
 
     for (std::size_t i = 0; i < m_passes.size(); ++i) {
         auto* custom = dynamic_cast<CustomShaderPass*>(m_passes[i]);
@@ -1672,19 +1672,19 @@ void VulkanRender::Impl::planStaticSkips(Scene& scene) {
         // contributes no varying state of its own either: it is skipped exactly
         // when the target it writes is.
         if (! m_static_cache.PassSampled(i)) {
-            m_static_samples[i] = StaticPassSample { .hash = 0, .visible = true };
+            m_static_samples[i] = render::StaticPassSample { .hash = 0, .visible = true };
             continue;
         }
         if (custom != nullptr) {
             m_static_samples[i] = custom->frameSample(scene);
         } else if (const auto* clear = dynamic_cast<PrePass*>(m_passes[i]);
                    clear != nullptr && ! clear->desc().transparent) {
-            m_static_samples[i] = StaticPassSample {
-                .hash = StaticHashBytes(0xcbf29ce484222325ULL, scene.clearColor.data(), sizeof(float) * 3),
+            m_static_samples[i] = render::StaticPassSample {
+                .hash = render::StaticHashBytes(0xcbf29ce484222325ULL, scene.clearColor.data(), sizeof(float) * 3),
                 .visible = true,
             };
         } else {
-            m_static_samples[i] = StaticPassSample {};
+            m_static_samples[i] = render::StaticPassSample {};
         }
     }
 
@@ -1711,7 +1711,7 @@ void VulkanRender::Impl::planStaticSkips(Scene& scene) {
         ++executed;
         m_frame_passes.push_back(m_passes[i]);
     }
-    RecordSceneOptimizationFrame(executed, skipped);
+    render::RecordSceneOptimizationFrame(executed, skipped);
 }
 
 bool VulkanRender::Impl::frameRecordsOnlyComposition() const {
@@ -1732,7 +1732,7 @@ bool VulkanRender::Impl::frameRecordsOnlyComposition() const {
         }
         // An eliminated copy produces nothing at execution time.
         if (const auto* copy = dynamic_cast<const CopyPass*>(pass);
-            copy != nullptr && copy->desc().elision != CopyElision::None) {
+            copy != nullptr && copy->desc().elision != render::CopyElision::None) {
             continue;
         }
         return false;
@@ -1771,13 +1771,13 @@ bool VulkanRender::Impl::frameRepeatsLastPresent(const Scene& scene) {
     m_present_pts.clear();
     m_device->tex_cache().ForEachCurrentVideoFrame(
         [this](const void* texture, const void* frame, uint64_t generation, double pts) {
-            m_present_videos.push_back(PresentedVideoFrame { texture, frame, generation });
+            m_present_videos.push_back(render::PresentedVideoFrame { texture, frame, generation });
             m_present_pts.push_back(pts);
         });
 
     // Render-result reuse at the scale of the surface, so it answers to the
     // same setting as the per-target reuse it extends.
-    if (! SceneOptimizationEnabled() || ! m_present_gate.Valid()) return false;
+    if (! render::SceneOptimizationEnabled() || ! m_present_gate.Valid()) return false;
     // A frame with new host data to upload has something new to draw.
     if (m_dyn_buf == nullptr || m_dyn_buf->hasPendingWrites()) return false;
     // The Vulkan path can export a poster only from inside a presented frame,
@@ -1857,7 +1857,7 @@ bool VulkanRender::Impl::preparePasses(Scene& scene) {
 bool VulkanRender::Impl::applyRenderScale(Scene& scene, rg::RenderGraph& rg, double scale,
                                           SceneResolution resolution) {
     if (! std::isfinite(scale) || scale <= 0.0) return true;
-    const double clamped = std::min(1.0, std::max(kMinRenderScale, scale));
+    const double clamped = std::min(1.0, std::max(render::kMinRenderScale, scale));
     if (scene.render_scale == clamped && scene.resolution == resolution) return true;
 
     // A plain-video scene keeps its media-sized target whatever the user
@@ -1867,7 +1867,7 @@ bool VulkanRender::Impl::applyRenderScale(Scene& scene, rg::RenderGraph& rg, dou
     // which keeps a change of it from rebuilding every perspective scene.
     const bool resizes =
         scene.render_scale != clamped ||
-        (scene.resolution != resolution && SceneResolutionAffectsRaster(scene));
+        (scene.resolution != resolution && render::SceneResolutionAffectsRaster(scene));
     scene.render_scale = clamped;
     scene.resolution   = resolution;
     if (scene.single_video_source || ! resizes) return true;

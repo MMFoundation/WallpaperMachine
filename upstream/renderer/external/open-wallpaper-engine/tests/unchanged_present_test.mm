@@ -481,7 +481,7 @@ protected:
 
     void TearDown() override
     {
-        vulkan::SetSceneOptimizationEnabled(true);
+        render::SetSceneOptimizationEnabled(true);
         SetSceneOnDemandEnabled(false);
         SetSceneRendererPreference(SceneRendererPreference::Compatibility);
         RendererCounters::SetEnabled(false);
@@ -496,16 +496,16 @@ protected:
 
 TEST_F(UnchangedPresent, PinnedTargetAccountingReturnsToBaselineWhenScenesClose)
 {
-    vulkan::SetSceneOptimizationEnabled(true);
-    const auto baseline = vulkan::CurrentSceneOptimizationTotals().pinned_bytes;
+    render::SetSceneOptimizationEnabled(true);
+    const auto baseline = render::CurrentSceneOptimizationTotals().pinned_bytes;
     const auto project = WriteStaticScene(root_ / "static");
     for (int load = 0; load < 2; ++load) {
         {
             RunningWallpaper running(project, root_ / ("load-" + std::to_string(load)));
             ASSERT_TRUE(running.WaitForFirstFrame());
-            EXPECT_GT(vulkan::CurrentSceneOptimizationTotals().pinned_bytes, baseline);
+            EXPECT_GT(render::CurrentSceneOptimizationTotals().pinned_bytes, baseline);
         }
-        EXPECT_EQ(vulkan::CurrentSceneOptimizationTotals().pinned_bytes, baseline);
+        EXPECT_EQ(render::CurrentSceneOptimizationTotals().pinned_bytes, baseline);
     }
 }
 
@@ -519,7 +519,7 @@ TEST_F(UnchangedPresent, APlainVideoPresentsEveryNewFrameAndNothingElse)
     Counters       baseline {};
     Counters       skipping {};
     for (const bool optimise : { false, true }) {
-        vulkan::SetSceneOptimizationEnabled(optimise);
+        render::SetSceneOptimizationEnabled(optimise);
         RunningWallpaper running(project, root_ / (optimise ? "on" : "off"));
         ASSERT_TRUE(running.WaitForFirstFrame()) << "the video never reached the surface";
         std::this_thread::sleep_for(500ms);
@@ -578,7 +578,7 @@ TEST_F(UnchangedPresent, TheSkipPresentsTheSameVideoFramesInTheSameOrder)
 
     std::array<std::vector<PresentedFrame>, 2> presented;
     for (const bool optimise : { false, true }) {
-        vulkan::SetSceneOptimizationEnabled(optimise);
+        render::SetSceneOptimizationEnabled(optimise);
         RunningWallpaper running(project, root_ / (optimise ? "on" : "off"));
         ASSERT_TRUE(running.WaitForFirstFrame()) << "the video never reached the surface";
         // Well inside the four-second clip, so no loop restarts the timeline.
@@ -630,7 +630,7 @@ TEST_F(UnchangedPresent, ARepeatedVideoFramePresentsAgainOnlyWhenSomethingChange
     ASSERT_TRUE(testing_media::EncoderAvailable())
         << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
     const auto project = WriteVideoProject(root_ / "video");
-    vulkan::SetSceneOptimizationEnabled(true);
+    render::SetSceneOptimizationEnabled(true);
     RunningWallpaper running(project, root_ / "run");
     ASSERT_TRUE(running.WaitForFirstFrame());
 
@@ -696,7 +696,7 @@ TEST_F(UnchangedPresent, AStaticSceneStopsPresentingOnceEveryPassIsReused)
 
     std::array<std::vector<uint8_t>, 2> pictures;
     for (const bool optimise : { false, true }) {
-        vulkan::SetSceneOptimizationEnabled(optimise);
+        render::SetSceneOptimizationEnabled(optimise);
         RunningWallpaper running(project, root_ / (optimise ? "on" : "off"));
         ASSERT_TRUE(running.WaitForFirstFrame()) << "the scene never reached the surface";
         std::this_thread::sleep_for(600ms);
@@ -784,7 +784,7 @@ TEST_F(UnchangedPresent, AHistoryLoopKeepsTheClockRunningWithoutATimeUniform)
                              Case { "still card, native", false, true, true },
                              Case { "history loop, native", true, true, true } }) {
         SCOPED_TRACE(run.name);
-        vulkan::SetSceneOptimizationEnabled(run.optimise);
+        render::SetSceneOptimizationEnabled(run.optimise);
         SetSceneRendererPreference(run.native ? SceneRendererPreference::NativeMetalPreferred
                                               : SceneRendererPreference::Compatibility);
         const auto scene = root_ / (std::string(run.name) + " scene");
@@ -892,7 +892,7 @@ TEST_F(UnchangedPresent, APropertyPreviewShowsOnAStillSceneAndWakesAnIdleOneForO
         ~RestoreOnDemand() { SetSceneOnDemandEnabled(was); }
     } restore;
     const auto project = WriteSliderScene(root_ / "slider");
-    vulkan::SetSceneOptimizationEnabled(true);
+    render::SetSceneOptimizationEnabled(true);
 
     for (const bool on_demand : { false, true }) {
         SCOPED_TRACE(on_demand ? "on-demand clock" : "fixed cadence");
@@ -953,7 +953,7 @@ TEST_F(UnchangedPresent, OutputChangesOnAHeldVideoFramePresentOnceEach)
     ASSERT_TRUE(testing_media::EncoderAvailable())
         << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
     const auto project = WriteVideoProject(root_ / "video");
-    vulkan::SetSceneOptimizationEnabled(true);
+    render::SetSceneOptimizationEnabled(true);
     RunningWallpaper running(project, root_ / "run");
     ASSERT_TRUE(running.WaitForFirstFrame());
 
@@ -1206,7 +1206,7 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
 
     // Production defaults: counting off, scene optimisation on.
     RendererCounters::SetEnabled(false);
-    vulkan::SetSceneOptimizationEnabled(true);
+    render::SetSceneOptimizationEnabled(true);
     SetSceneRendererPreference(native ? SceneRendererPreference::NativeMetalPreferred
                                       : SceneRendererPreference::Compatibility);
     SetSceneResolution(display ? SceneResolution::Display : SceneResolution::Canvas);

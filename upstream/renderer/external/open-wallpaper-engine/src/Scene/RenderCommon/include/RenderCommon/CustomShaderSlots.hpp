@@ -11,9 +11,7 @@
 
 namespace wallpaper
 {
-namespace vulkan
-{
-namespace detail
+namespace render
 {
 
 // Which `g_TextureN` slot a shader binding name stands for. Both render
@@ -41,6 +39,5 @@ inline std::optional<usize> CustomShaderSamplerSlot(std::string_view name) {
     return CustomShaderTextureSlot(name.substr(prefix.size()));
 }
 
-} // namespace detail
-} // namespace vulkan
+} // namespace render
 } // namespace wallpaper

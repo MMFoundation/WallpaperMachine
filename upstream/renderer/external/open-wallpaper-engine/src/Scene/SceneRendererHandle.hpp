@@ -289,7 +289,7 @@ public:
     /// a scene nothing has looked at yet.
     uint32_t ShaderUpdateDemandReasons() const {
         OWE_FORWARD(ShaderUpdateDemandReasons());
-        return static_cast<uint32_t>(vulkan::DynamicReason::UnknownInput);
+        return static_cast<uint32_t>(render::DynamicReason::UnknownInput);
     }
     void SetCounters(RendererCounters* counters) { OWE_FORWARD_VOID(SetCounters(counters)); }
     WallpaperCursorMapping CursorMapping(const Scene& scene) const {

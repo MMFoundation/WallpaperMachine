@@ -8,7 +8,7 @@
 
 namespace wallpaper
 {
-namespace vulkan
+namespace render
 {
 
 /// Why a render target's pixels cannot be reused from the previous frame.
@@ -214,5 +214,5 @@ void AdjustSceneOptimizationPinnedBytes(int64_t delta);
 SceneOptimizationTotals CurrentSceneOptimizationTotals();
 void ResetSceneOptimizationTotalsForTesting();
 
-} // namespace vulkan
+} // namespace render
 } // namespace wallpaper

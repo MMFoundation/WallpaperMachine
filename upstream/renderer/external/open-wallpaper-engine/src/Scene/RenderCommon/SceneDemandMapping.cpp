@@ -27,7 +27,7 @@ uint32_t SceneDemandReasonsFromShaderInputs(uint32_t shader_reasons)
     // Dropping a bit here is the one mistake this mapping must not make by
     // accident, so each omission is named above rather than left to the
     // absence of a line.
-    using vulkan::DynamicReason;
+    using render::DynamicReason;
     uint32_t reasons = 0;
     if (shader_reasons & DynamicReason::TimeUniform) reasons |= SceneDemandReason::TimeUniform;
     if (shader_reasons & DynamicReason::AudioUniform) reasons |= SceneDemandReason::AudioResponse;
@@ -42,7 +42,7 @@ uint32_t SceneDemandReasonsFromShaderInputs(uint32_t shader_reasons)
 
 bool SceneShaderInputsUsePointer(uint32_t shader_reasons)
 {
-    return shader_reasons & vulkan::DynamicReason::PointerUniform;
+    return shader_reasons & render::DynamicReason::PointerUniform;
 }
 
 } // namespace wallpaper

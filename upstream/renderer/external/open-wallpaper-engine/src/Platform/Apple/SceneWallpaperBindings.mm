@@ -958,12 +958,12 @@ extern "C" int owe_audio_spectrum_is_stereo(void)
 
 extern "C" void owe_set_scene_optimization_enabled(bool enabled)
 {
-    wallpaper::vulkan::SetSceneOptimizationEnabled(enabled);
+    wallpaper::render::SetSceneOptimizationEnabled(enabled);
 }
 
 extern "C" bool owe_scene_optimization_enabled(void)
 {
-    return wallpaper::vulkan::SceneOptimizationEnabled();
+    return wallpaper::render::SceneOptimizationEnabled();
 }
 
 extern "C" void owe_scene_optimization_stats(
@@ -972,7 +972,7 @@ extern "C" void owe_scene_optimization_stats(
     uint64_t* out_elided_copies,
     uint64_t* out_pinned_bytes)
 {
-    const auto totals = wallpaper::vulkan::CurrentSceneOptimizationTotals();
+    const auto totals = wallpaper::render::CurrentSceneOptimizationTotals();
     if (out_executed_passes != nullptr) *out_executed_passes = totals.executed_passes;
     if (out_skipped_passes != nullptr) *out_skipped_passes = totals.skipped_passes;
     if (out_elided_copies != nullptr) *out_elided_copies = totals.elided_copies;

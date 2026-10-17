@@ -9,7 +9,7 @@
 
 namespace wallpaper
 {
-namespace vulkan
+namespace render
 {
 
 /// One video texture's part in a presented frame: the texture, the imported
@@ -118,5 +118,5 @@ private:
     std::vector<PresentedVideoFrame> m_videos;
 };
 
-} // namespace vulkan
+} // namespace render
 } // namespace wallpaper
