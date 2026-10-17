@@ -5,7 +5,6 @@
 #include "Video/VideoDecodePump.hpp"
 #include "Video/VideoFramePacing.hpp"
 #include "Video/VideoMedia.hpp"
-#include "Video/VideoSeekPolicy.hpp"
 #include "Platform/Apple/FfmpegVideoInterop.hpp"
 #include "Platform/Apple/VideoFrameInterop.hpp"
 #include "Utils/Logging.h"
@@ -26,21 +25,15 @@ extern "C" {
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <cmath>
-#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <optional>
-#include <deque>
 #include <exception>
 #include <filesystem>
 #include <fstream>
-#include <limits>
-#include <mutex>
 #include <span>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <unistd.h>
@@ -49,9 +42,6 @@ namespace wallpaper::video
 {
 namespace
 {
-
-constexpr auto kPrimeTimeout = std::chrono::seconds(2);
-constexpr auto kDecodePoll = std::chrono::milliseconds(2);
 
 bool SetError(std::string* error, std::string message)
 {
@@ -64,22 +54,6 @@ std::string AvErrorString(int error_code)
     std::array<char, AV_ERROR_MAX_STRING_SIZE> buffer {};
     av_strerror(error_code, buffer.data(), buffer.size());
     return std::string(buffer.data());
-}
-
-double WrapSeconds(double seconds, double duration_seconds)
-{
-    if (!(duration_seconds > 0.0) || !std::isfinite(seconds)) return 0.0;
-    double wrapped = std::fmod(seconds, duration_seconds);
-    if (wrapped < 0.0) wrapped += duration_seconds;
-    if (wrapped >= duration_seconds) wrapped = 0.0;
-    return wrapped;
-}
-
-double CircularDistance(double left, double right, double duration_seconds)
-{
-    if (!(duration_seconds > 0.0)) return std::abs(left - right);
-    const double direct = std::abs(left - right);
-    return std::min(direct, duration_seconds - direct);
 }
 
 std::filesystem::path VideoCacheDirectory(std::string* error)
@@ -156,15 +130,6 @@ std::filesystem::path WriteVideoPayloadToTemp(std::string_view debug_label,
              std::string(debug_label).c_str(),
              media_path.string().c_str());
     return media_path;
-}
-
-/// Identity of a running decoder instance. Monotonic and never reused, so a
-/// report can de-duplicate one source's work across several consumers without
-/// ever merging two decoders that happen to read the same file.
-uint64_t NextVideoSourceInstanceId()
-{
-    static std::atomic<uint64_t> next { 1 };
-    return next.fetch_add(1, std::memory_order_relaxed);
 }
 
 double ProbeDurationSeconds(AVFormatContext* format_context, AVStream* stream)
@@ -317,13 +282,15 @@ double FramePtsSeconds(const AVFrame* frame, AVRational time_base, double fallba
     return fallback_seconds;
 }
 
-} // namespace
-
-class FfmpegVideoTextureSource::Impl {
+/// The libav side of a clocked video source: libavformat demuxes the media,
+/// libavcodec decodes it with VideoToolbox, and `VideoDecodePump` drives the
+/// send/receive protocol. The clock, the queues and the seek policy are the
+/// `ClockedVideoSource`'s.
+class FfmpegBackend final : public VideoFrameBackend {
 public:
     /// Opens the decoder on a media file directly. The path has already been
     /// resolved and validated by whoever opened the first decoder on it.
-    explicit Impl(std::string media_path)
+    explicit FfmpegBackend(std::string media_path)
         : m_debug_label(media_path), m_media_path(std::move(media_path))
     {
         if (m_media_path.empty()) {
@@ -331,7 +298,7 @@ public:
         }
     }
 
-    explicit Impl(std::shared_ptr<const Image> image)
+    explicit FfmpegBackend(std::shared_ptr<const Image> image)
         : m_debug_label(image != nullptr ? image->key : std::string())
     {
         if (image == nullptr) {
@@ -366,270 +333,92 @@ public:
         m_payload = std::move(image);
     }
 
-    ~Impl()
-    {
-        stop();
-        clearFrames();
-        closeDecoder();
-    }
+    ~FfmpegBackend() override { close(); }
 
-    bool prime(std::string* error)
+    bool open(std::string* error) override
     {
-        // Every consumer waits for the same complete attempt, including its
-        // failure. Decoder handles and the worker thread have one initializer.
-        std::call_once(m_prime_once, [this] {
-            try {
-                m_prime_succeeded = primeOnce(&m_prime_error);
-            } catch (const std::exception& exception) {
-                m_prime_error = std::string("failed to initialize FFmpeg video: ") + exception.what();
-            }
-            if (! m_prime_succeeded) {
-                stop();
-                clearFrames();
-                closeDecoder();
-            }
-        });
-        if (m_prime_succeeded) return true;
-        return SetError(error, m_prime_error);
-    }
-
-private:
-    bool primeOnce(std::string* error)
-    {
-        std::unique_lock lock(m_mutex);
-        if (m_primed) return true;
         if (!m_initial_error.empty()) return SetError(error, m_initial_error);
-        lock.unlock();
+        return openDecoder(error);
+    }
 
-        std::string local_error;
-        if (!openDecoder(&local_error)) {
-            return SetError(error, std::move(local_error));
+    [[nodiscard]] StreamInfo streamInfo() const override { return m_stream_info; }
+
+    Decode decodeNext(double fallback_pts_seconds, DecodedPosition* position, std::string* error) override
+    {
+        switch (m_pump.NextFrame(error)) {
+        case VideoDecodePump::Outcome::Cancelled:
+            return Decode::Cancelled;
+        case VideoDecodePump::Outcome::Failed:
+            return Decode::Failed;
+        case VideoDecodePump::Outcome::Frame:
+            break;
+        }
+        position->loop_index = m_pump.loopIndex();
+        position->pts_seconds =
+            FramePtsSeconds(m_frame, m_video_stream->time_base, fallback_pts_seconds);
+        return Decode::Frame;
+    }
+
+    bool takeFrame(VideoTextureFrame* out, std::string* error) override
+    {
+        VideoTextureFrame frame {};
+        if (!ExtractAppleVideoFrame(m_frame, &frame, error)) {
+            av_frame_unref(m_frame);
+            return false;
         }
 
-        {
-            std::lock_guard state_lock(m_mutex);
-            m_scene_absolute_seconds = 0.0;
-            m_clock_base_seconds = 0.0;
-            m_clock_initialized = true;
-            m_running = true;
-            m_stop_requested = false;
+        if (m_display_matrix) {
+            const auto transform = ResolveVideoDisplayTransform(*m_display_matrix, frame.width, frame.height);
+            if (! transform) {
+                ReleaseAppleVideoFrame(&frame);
+                av_frame_unref(m_frame);
+                return SetError(error, "video display transform is not a valid affine transform");
+            }
+            frame.display_transform = *transform;
         }
-
-        m_decode_thread = std::thread([this]() { decodeLoop(); });
-
-        lock.lock();
-        const auto ready = m_condition.wait_for(
-            lock,
-            kPrimeTimeout,
-            [this]() {
-                return m_display_frame_ready || !m_last_error.empty();
-            });
-        if (!ready) {
-            lock.unlock();
-            stop();
-            return SetError(error, "timed out waiting for the first FFmpeg video frame");
-        }
-        if (!m_last_error.empty()) {
-            const std::string failure = m_last_error;
-            lock.unlock();
-            stop();
-            return SetError(error, failure);
-        }
-
-        m_primed = true;
+        *out = frame;
+        av_frame_unref(m_frame);
         return true;
     }
 
-public:
-    bool syncPlayback(const VideoPlaybackState& state, std::string* error)
+    void discardFrame() override { av_frame_unref(m_frame); }
+
+    bool seek(double wrapped_seconds, uint64_t loop_index, std::string* error) override
     {
-        if (state.rate < 0.0f) return SetError(error, "negative video playback rates are not supported");
+        if (!seekToSeconds(wrapped_seconds, error)) return false;
 
-        std::lock_guard lock(m_mutex);
-        if (!m_last_error.empty()) return SetError(error, m_last_error);
-
-        const auto now = std::chrono::steady_clock::now();
-        const double requested_absolute_seconds = std::max(0.0, state.scene_elapsed_seconds);
-        m_scene_absolute_seconds = requested_absolute_seconds;
-        m_clock_base_seconds = WrapSeconds(requested_absolute_seconds, m_duration_seconds);
-        m_clock_base_time = now;
-        m_clock_initialized = true;
-        m_playback_state = state;
-        m_playback_state.rate = std::max(state.rate, 0.0f);
-        const double discontinuity_threshold = std::max(0.5, m_frame_duration_seconds * 8.0);
-        if (m_display_frame_ready &&
-            requested_absolute_seconds + discontinuity_threshold < m_display_frame.absolute_seconds) {
-            clearDisplayFrameLocked();
-            requestSeekLocked(requested_absolute_seconds);
-            // A seek, or a display slot that just went empty, is the only reason
-            // the decode thread has new work. An ordinary clock update does not.
-            m_condition.notify_all();
-        }
+        // The packet the pump may still be holding belongs to the position we
+        // just left, so the seek is what releases it.
+        m_pump.ResetForSeek();
+        m_pump.setLoopIndex(loop_index);
         return true;
     }
 
-    bool refreshFrame(std::string* error)
+    [[nodiscard]] uint64_t loopIndex() const override { return m_pump.loopIndex(); }
+
+    void cancel() override { m_cancel_requested.store(true, std::memory_order_relaxed); }
+
+    void close() override
     {
-        std::unique_lock lock(m_mutex);
-        if (!m_last_error.empty() && !m_display_frame_ready) {
-            return SetError(error, m_last_error);
-        }
-
-        const double desired_absolute_seconds = currentDesiredAbsoluteLocked();
-        const double backward_threshold = std::max(0.05, m_frame_duration_seconds * 2.0);
-        if (m_display_frame_ready &&
-            desired_absolute_seconds + backward_threshold < m_display_frame.absolute_seconds) {
-            clearDisplayFrameLocked();
-            requestSeekLocked(desired_absolute_seconds);
-        }
-
-        const double forward_resync_threshold = ForwardResyncSeconds(
-            m_frame_duration_seconds, static_cast<double>(kDecodedFrameQueueCapacity),
-            m_seek_landing_lag_seconds);
-        if (!seekInFlightCoversLocked(desired_absolute_seconds, backward_threshold,
-                                      forward_resync_threshold) &&
-            (!m_display_frame_ready ||
-             desired_absolute_seconds > latestBufferedAbsoluteLocked() + forward_resync_threshold)) {
-            requestSeekLocked(desired_absolute_seconds);
-        }
-        // A seek requested above, or a display frame just cleared, is work the
-        // decode thread cannot see until it is woken. Promoting a queued frame
-        // is the other one: it freed a slot the thread may be waiting on.
-        if (m_seek_requested) m_condition.notify_all();
-
-        bool promoted = false;
-        while (!m_pending_frames.empty() &&
-               (!m_display_frame_ready ||
-                m_pending_frames.front().absolute_seconds <=
-                    desired_absolute_seconds + presentationSlackSeconds())) {
-            promoted = promoteNextFrameLocked() || promoted;
-        }
-        if (m_display_frame_ready) {
-            // Promoting freed a queue slot. The display frame staying put did not.
-            if (promoted || m_seek_requested) m_condition.notify_all();
-            return true;
-        }
-
-        const auto deadline = std::chrono::steady_clock::now() + kPrimeTimeout;
-        while (true) {
-            while (!m_pending_frames.empty() &&
-                   (!m_display_frame_ready ||
-                    m_pending_frames.front().absolute_seconds <=
-                        desired_absolute_seconds + presentationSlackSeconds())) {
-                promoteNextFrameLocked();
-            }
-
-            if (m_display_frame_ready ||
-                displayFrameCoversDesiredLocked(desired_absolute_seconds)) {
-                return true;
-            }
-
-            if (!m_last_error.empty() && !m_display_frame_ready) {
-                return SetError(error, m_last_error);
-            }
-
-            if (std::chrono::steady_clock::now() >= deadline) {
-                if (m_display_frame_ready) {
-                    return true;
-                }
-                return SetError(error, "video frame is not ready");
-            }
-
-            // Still waiting on a frame this thread does not have. Wake the
-            // decoder only if a seek or an empty display slot is outstanding;
-            // the poll below is what notices a frame arriving either way.
-            if (m_seek_requested || !m_display_frame_ready) m_condition.notify_all();
-            m_condition.wait_for(lock, kDecodePoll, [this]() {
-                return m_stop_requested || !m_last_error.empty() || !m_pending_frames.empty();
-            });
-        }
-    }
-
-    [[nodiscard]] VideoTextureFrame currentFrame() const
-    {
-        std::lock_guard lock(m_mutex);
-        if (!m_display_frame_ready) return {};
-        return m_display_frame.frame;
-    }
-
-    [[nodiscard]] bool retainCurrentFrame(VideoTextureFrame* out) const
-    {
-        if (out == nullptr) return false;
-        // Retaining inside the lock is the whole point: promotion releases the
-        // previous display frame under this same lock, so a reader that has the
-        // lock cannot have its frame freed underneath it.
-        std::lock_guard lock(m_mutex);
-        if (!m_display_frame_ready) return false;
-        RetainAppleVideoFrame(m_display_frame.frame, out);
-        return true;
-    }
-
-    [[nodiscard]] double durationSeconds() const
-    {
-        std::lock_guard lock(m_mutex);
-        return m_duration_seconds;
-    }
-
-    [[nodiscard]] double playbackSeconds() const
-    {
-        std::lock_guard lock(m_mutex);
-        return currentDesiredSecondsLocked();
-    }
-
-    [[nodiscard]] uint64_t loopCount() const
-    {
-        std::lock_guard lock(m_mutex);
-        return m_loop_count;
-    }
-
-    [[nodiscard]] double frameDurationSeconds() const
-    {
-        std::lock_guard lock(m_mutex);
-        // Zero until enough real presentation timestamps have been seen, which
-        // the frame clock reads as "unknown" and answers with the fixed
-        // cadence. Declared rates alone never unlock pacing.
-        return m_primed ? m_pacing.PeriodSeconds() : 0.0;
-    }
-
-    [[nodiscard]] VideoSourceStats sourceStats() const
-    {
-        std::lock_guard lock(m_mutex);
-        return VideoSourceStats {
-            .instance_id = m_instance_id,
-            .decoded_frames = m_decoded_frame_count,
-            .seek_requests = m_seek_request_count,
-            .observed_period_seconds = m_pacing.ObservedPeriodSeconds(),
-            .observed_samples = m_pacing.SampleCount(),
-        };
+        if (m_packet != nullptr) av_packet_free(&m_packet);
+        if (m_frame != nullptr) av_frame_free(&m_frame);
+        if (m_codec_context != nullptr) avcodec_free_context(&m_codec_context);
+        if (m_format_context != nullptr) avformat_close_input(&m_format_context);
+        if (m_hw_device_context != nullptr) av_buffer_unref(&m_hw_device_context);
+        m_video_stream = nullptr;
+        m_video_stream_index = -1;
     }
 
 private:
-    static constexpr size_t kDecodedFrameQueueCapacity = 8;
     /// Packets of other streams consumed within one `ReadPacket` call before
     /// yielding, so a badly interleaved container cannot monopolize the step.
     static constexpr int kMaxForeignPacketsPerRead = 64;
 
-    struct DecodedFrameSlot {
-        VideoTextureFrame frame {};
-        double            pts_seconds { 0.0 };
-        double            absolute_seconds { 0.0 };
-        uint64_t          loop_index { 0 };
-        bool              ready { false };
-    };
-
-    enum class DecodeOutcome {
-        Frame,
-        /// `stop()` was requested. Not an error: no failure is recorded and the
-        /// thread exits without surfacing a message to the user.
-        Cancelled,
-        Failed,
-    };
-
     /// libavcodec-backed source for `VideoDecodePump`. It borrows the decoder
-    /// objects owned by `Impl` and is only ever touched by the decode thread.
+    /// objects owned by the backend and is only ever touched by the decode thread.
     class DecodeSource final : public VideoDecodeSource {
     public:
-        explicit DecodeSource(Impl& owner) : m_owner(owner) {}
+        explicit DecodeSource(FfmpegBackend& owner) : m_owner(owner) {}
 
         DecodeStatus ReadPacket(std::string* error) override
         {
@@ -698,15 +487,15 @@ private:
         }
 
     private:
-        Impl& m_owner;
+        FfmpegBackend& m_owner;
     };
 
     /// Aborts blocking libavformat I/O once cancellation is requested, so
     /// `stop()` does not wait on a stalled read before joining the thread.
     static int InterruptDecoder(void* opaque)
     {
-        const auto* impl = static_cast<const Impl*>(opaque);
-        return impl != nullptr && impl->m_cancel_requested.load(std::memory_order_relaxed) ? 1 : 0;
+        const auto* backend = static_cast<const FfmpegBackend*>(opaque);
+        return backend != nullptr && backend->m_cancel_requested.load(std::memory_order_relaxed) ? 1 : 0;
     }
 
     /// Makes the media openable by path.
@@ -746,7 +535,7 @@ private:
             return SetError(error, "failed to allocate FFmpeg format context");
         }
         // Installed before opening so a stalled open is cancellable too.
-        format_context->interrupt_callback.callback = &Impl::InterruptDecoder;
+        format_context->interrupt_callback.callback = &FfmpegBackend::InterruptDecoder;
         format_context->interrupt_callback.opaque = this;
         if (const int result = avformat_open_input(&format_context, m_media_path.c_str(), nullptr, nullptr);
             result < 0) {
@@ -848,177 +637,9 @@ private:
         m_video_stream_index = video_stream_index;
         m_packet = packet;
         m_frame = frame;
-        m_duration_seconds = ProbeDurationSeconds(format_context, video_stream);
-        m_frame_duration_seconds = ProbeFrameDurationSeconds(video_stream);
-        // The declared rates seed the estimator as an upper bound on the
-        // period; decoded timestamps are what actually unlock pacing.
-        m_pacing.Reset(ProbeShortestFrameDurationSeconds(video_stream));
-        return true;
-    }
-
-    void closeDecoder()
-    {
-        if (m_packet != nullptr) av_packet_free(&m_packet);
-        if (m_frame != nullptr) av_frame_free(&m_frame);
-        if (m_codec_context != nullptr) avcodec_free_context(&m_codec_context);
-        if (m_format_context != nullptr) avformat_close_input(&m_format_context);
-        if (m_hw_device_context != nullptr) av_buffer_unref(&m_hw_device_context);
-        m_video_stream = nullptr;
-        m_video_stream_index = -1;
-    }
-
-    void stop()
-    {
-        // Published before the lock so the decode thread's inner loops and the
-        // libavformat interrupt callback observe it without waiting on us.
-        m_cancel_requested.store(true, std::memory_order_relaxed);
-        {
-            std::lock_guard lock(m_mutex);
-            if (!m_running && !m_decode_thread.joinable()) return;
-            m_stop_requested = true;
-            m_running = false;
-            m_condition.notify_all();
-        }
-        if (m_decode_thread.joinable()) m_decode_thread.join();
-    }
-
-    void releaseFrameSlot(DecodedFrameSlot* slot)
-    {
-        if (slot == nullptr) return;
-        ReleaseAppleVideoFrame(&slot->frame);
-        slot->ready = false;
-        slot->pts_seconds = 0.0;
-        slot->absolute_seconds = 0.0;
-        slot->loop_index = 0;
-        slot->frame = {};
-    }
-
-    void clearPendingFramesLocked()
-    {
-        for (auto& slot : m_pending_frames) {
-            releaseFrameSlot(&slot);
-        }
-        m_pending_frames.clear();
-    }
-
-    void clearDisplayFrameLocked()
-    {
-        if (!m_display_frame_ready) return;
-        releaseFrameSlot(&m_display_frame);
-        m_display_frame_ready = false;
-    }
-
-    void clearFrames()
-    {
-        std::lock_guard lock(m_mutex);
-        clearPendingFramesLocked();
-        clearDisplayFrameLocked();
-    }
-
-    [[nodiscard]] double currentDesiredAbsoluteLocked() const
-    {
-        return std::max(0.0, m_scene_absolute_seconds);
-    }
-
-    [[nodiscard]] double currentDesiredSecondsLocked() const
-    {
-        if (!m_clock_initialized) return 0.0;
-        return WrapSeconds(currentDesiredAbsoluteLocked(), m_duration_seconds);
-    }
-
-    [[nodiscard]] double presentationSlackSeconds() const
-    {
-        return std::min(0.001, m_frame_duration_seconds * 0.1);
-    }
-
-    [[nodiscard]] double latestBufferedAbsoluteLocked() const
-    {
-        if (!m_pending_frames.empty()) return m_pending_frames.back().absolute_seconds;
-        if (m_display_frame_ready) return m_display_frame.absolute_seconds;
-        return -std::numeric_limits<double>::infinity();
-    }
-
-    void requestSeekLocked(double absolute_seconds)
-    {
-        m_requested_seek_absolute_seconds = std::max(0.0, absolute_seconds);
-        m_seek_requested = true;
-        m_seek_awaiting_frame = true;
-        m_seek_requested_at = std::chrono::steady_clock::now();
-        ++m_seek_ticket;
-        ++m_seek_request_count;
-        clearPendingFramesLocked();
-    }
-
-    [[nodiscard]] double secondsSinceSeekRequestedLocked() const
-    {
-        return std::chrono::duration<double>(std::chrono::steady_clock::now() - m_seek_requested_at).count();
-    }
-
-    /// Whether a seek that has been asked for and has not yet delivered a frame
-    /// is still fetching what the clock wants (`SeekOnItsWayCoversClock`).
-    ///
-    /// Asked for on every call of a draw, a seek that takes longer than the time
-    /// between two draws, as one of a large clip does, would never land, and the
-    /// display would stay on the frame it had.
-    [[nodiscard]] bool seekInFlightCoversLocked(double desired_absolute_seconds,
-                                                double backward_slack,
-                                                double forward_slack) const
-    {
-        if (!m_seek_awaiting_frame) return false;
-        return SeekOnItsWayCoversClock(m_requested_seek_absolute_seconds, desired_absolute_seconds,
-                                       secondsSinceSeekRequestedLocked(), m_playback_state.rate,
-                                       backward_slack, forward_slack);
-    }
-
-    [[nodiscard]] bool displayFrameCoversDesiredLocked(double desired_absolute_seconds) const
-    {
-        if (!m_display_frame_ready) return false;
-        if (desired_absolute_seconds + presentationSlackSeconds() < m_display_frame.absolute_seconds) {
-            return false;
-        }
-
-        double display_end_absolute_seconds =
-            m_display_frame.absolute_seconds + m_frame_duration_seconds;
-        if (!m_pending_frames.empty() &&
-            m_pending_frames.front().absolute_seconds > m_display_frame.absolute_seconds) {
-            display_end_absolute_seconds = m_pending_frames.front().absolute_seconds;
-        }
-
-        return desired_absolute_seconds <
-            display_end_absolute_seconds + presentationSlackSeconds();
-    }
-
-    bool promoteNextFrameLocked()
-    {
-        if (m_pending_frames.empty()) return false;
-
-        auto next_frame = std::move(m_pending_frames.front());
-        m_pending_frames.pop_front();
-        if (m_display_frame_ready) {
-            if (next_frame.loop_index > m_display_frame.loop_index) {
-                m_loop_count += next_frame.loop_index - m_display_frame.loop_index;
-            }
-            releaseFrameSlot(&m_display_frame);
-        }
-
-        m_display_frame = std::move(next_frame);
-        m_display_frame_ready = true;
-        return true;
-    }
-
-    bool seekDecoderToAbsolute(double absolute_seconds, std::string* error)
-    {
-        const double clamped_absolute_seconds = std::max(0.0, absolute_seconds);
-        const double wrapped_seconds = WrapSeconds(clamped_absolute_seconds, m_duration_seconds);
-        if (!seekToSeconds(wrapped_seconds, error)) return false;
-
-        // The packet the pump may still be holding belongs to the position we
-        // just left, so the seek is what releases it.
-        m_pump.ResetForSeek();
-        m_pump.setLoopIndex(
-            m_duration_seconds > 0.0
-                ? static_cast<uint64_t>(std::floor(clamped_absolute_seconds / m_duration_seconds))
-                : 0);
+        m_stream_info.duration_seconds = ProbeDurationSeconds(format_context, video_stream);
+        m_stream_info.frame_duration_seconds = ProbeFrameDurationSeconds(video_stream);
+        m_stream_info.shortest_declared_period_seconds = ProbeShortestFrameDurationSeconds(video_stream);
         return true;
     }
 
@@ -1047,170 +668,6 @@ private:
         return true;
     }
 
-    DecodeOutcome decodeNextFrame(double minimum_absolute_seconds,
-                                  DecodedFrameSlot* out,
-                                  std::string* error)
-    {
-        if (out == nullptr) {
-            SetError(error, "decoded frame output must not be null");
-            return DecodeOutcome::Failed;
-        }
-        bool enforce_minimum =
-            std::isfinite(minimum_absolute_seconds) && minimum_absolute_seconds > 0.0;
-        const uint64_t loop_index_at_entry = m_pump.loopIndex();
-
-        while (true) {
-            switch (m_pump.NextFrame(error)) {
-            case VideoDecodePump::Outcome::Cancelled:
-                return DecodeOutcome::Cancelled;
-            case VideoDecodePump::Outcome::Failed:
-                return DecodeOutcome::Failed;
-            case VideoDecodePump::Outcome::Frame:
-                break;
-            }
-
-            const uint64_t loop_index = m_pump.loopIndex();
-            const double frame_pts_seconds =
-                FramePtsSeconds(
-                    m_frame,
-                    m_video_stream->time_base,
-                    WrapSeconds(minimum_absolute_seconds, m_duration_seconds));
-            const double frame_absolute_seconds =
-                (m_duration_seconds > 0.0
-                     ? static_cast<double>(loop_index) * m_duration_seconds
-                     : 0.0) + frame_pts_seconds;
-            if (enforce_minimum &&
-                frame_absolute_seconds + m_frame_duration_seconds < minimum_absolute_seconds) {
-                av_frame_unref(m_frame);
-                // A requested position past everything this stream contains
-                // must not filter frames forever: once a full loop has been
-                // decoded without a match, take the next frame.
-                if (loop_index > loop_index_at_entry) enforce_minimum = false;
-                continue;
-            }
-
-            VideoTextureFrame frame {};
-            if (!ExtractAppleVideoFrame(m_frame, &frame, error)) {
-                av_frame_unref(m_frame);
-                return DecodeOutcome::Failed;
-            }
-
-            if (m_display_matrix) {
-                const auto transform = ResolveVideoDisplayTransform(*m_display_matrix, frame.width, frame.height);
-                if (! transform) {
-                    ReleaseAppleVideoFrame(&frame);
-                    av_frame_unref(m_frame);
-                    SetError(error, "video display transform is not a valid affine transform");
-                    return DecodeOutcome::Failed;
-                }
-                frame.display_transform = *transform;
-            }
-            frame.pts_seconds = frame_absolute_seconds;
-            out->frame = frame;
-            out->pts_seconds = frame_absolute_seconds;
-            out->absolute_seconds = frame_absolute_seconds;
-            out->loop_index = loop_index;
-            out->ready = true;
-            av_frame_unref(m_frame);
-            return DecodeOutcome::Frame;
-        }
-    }
-
-    void queueDecodedFrame(DecodedFrameSlot frame_slot, uint64_t seek_ticket)
-    {
-        std::lock_guard lock(m_mutex);
-        if (m_stop_requested || seek_ticket != m_seek_ticket) {
-            releaseFrameSlot(&frame_slot);
-            return;
-        }
-
-        if (m_seek_awaiting_frame) {
-            m_seek_awaiting_frame = false;
-            m_seek_landing_lag_seconds =
-                ClockRunOnSeconds(secondsSinceSeekRequestedLocked(), m_playback_state.rate);
-        }
-        frame_slot.frame.generation = m_next_generation++;
-        ++m_decoded_frame_count;
-        // Evidence for pacing comes from here, where a real decoded timestamp
-        // exists. Deltas across a loop seam or a seek describe the seam, not
-        // the content, so the run identity travels with the sample.
-        m_pacing.Observe(frame_slot.absolute_seconds, frame_slot.loop_index, seek_ticket);
-        m_pending_frames.push_back(std::move(frame_slot));
-        if (!m_display_frame_ready) {
-            promoteNextFrameLocked();
-        }
-        m_condition.notify_all();
-    }
-
-    void fail(std::string error)
-    {
-        // A decode thread that dies after the first frame is otherwise
-        // invisible: `refreshFrame` keeps answering with the frame already on
-        // screen, so the wallpaper freezes without a word anywhere. The
-        // message is recorded once, by the first failure to reach here.
-        std::string reported;
-        {
-            std::lock_guard lock(m_mutex);
-            if (m_last_error.empty()) {
-                m_last_error = std::move(error);
-                reported     = m_last_error;
-            }
-            m_running = false;
-            m_condition.notify_all();
-        }
-        if (reported.empty()) return;
-        LOG_ERROR("video decoding stopped for \"%s\": %s",
-                  m_debug_label.c_str(),
-                  reported.c_str());
-    }
-
-    void decodeLoop()
-    {
-        while (true) {
-            double minimum_absolute_seconds = -std::numeric_limits<double>::infinity();
-            bool   perform_seek = false;
-            double seek_absolute_seconds = 0.0;
-            uint64_t decode_seek_ticket = 0;
-
-            {
-                std::unique_lock lock(m_mutex);
-                m_condition.wait(lock, [this]() {
-                    return m_stop_requested ||
-                        m_seek_requested ||
-                        m_pending_frames.size() < kDecodedFrameQueueCapacity ||
-                        !m_display_frame_ready;
-                });
-                if (m_stop_requested) break;
-                decode_seek_ticket = m_seek_ticket;
-                if (m_seek_requested) {
-                    perform_seek = true;
-                    seek_absolute_seconds = m_requested_seek_absolute_seconds;
-                    m_seek_requested = false;
-                    minimum_absolute_seconds = seek_absolute_seconds;
-                }
-            }
-
-            if (perform_seek) {
-                std::string error;
-                if (!seekDecoderToAbsolute(seek_absolute_seconds, &error)) {
-                    fail(std::move(error));
-                    break;
-                }
-            }
-
-            DecodedFrameSlot frame_slot {};
-            std::string      error;
-            const DecodeOutcome outcome =
-                decodeNextFrame(minimum_absolute_seconds, &frame_slot, &error);
-            if (outcome == DecodeOutcome::Cancelled) break;
-            if (outcome == DecodeOutcome::Failed) {
-                fail(std::move(error));
-                break;
-            }
-            queueDecodedFrame(std::move(frame_slot), decode_seek_ticket);
-        }
-    }
-
 private:
     std::string                      m_debug_label;
     /// The image whose first mip holds an inline payload, shared with whoever
@@ -1219,49 +676,10 @@ private:
     std::shared_ptr<const Image>     m_payload;
     std::filesystem::path            m_media_path;
     std::string                      m_initial_error;
-    mutable std::mutex               m_mutex;
-    std::condition_variable          m_condition;
-    VideoPlaybackState               m_playback_state {};
-    double                           m_scene_absolute_seconds { 0.0 };
-    std::chrono::steady_clock::time_point m_clock_base_time {};
-    double                           m_clock_base_seconds { 0.0 };
-    bool                             m_clock_initialized { false };
-    double                           m_duration_seconds { 0.0 };
-    double                           m_frame_duration_seconds { 1.0 / 60.0 };
-    /// Pacing evidence: declared rates as an upper bound on the period plus the
-    /// shortest gap actually decoded. Reports unknown until it has enough
-    /// samples, which keeps an unproven stream on the fixed cadence.
-    /// Process-unique, so two decoders opened from the same file are two
-    /// identities. Never derived from the path or from content.
-    const uint64_t                   m_instance_id { NextVideoSourceInstanceId() };
-    VideoFramePacingEstimator        m_pacing;
-    uint64_t                         m_decoded_frame_count { 0 };
-    uint64_t                         m_seek_request_count { 0 };
-    uint64_t                         m_loop_count { 0 };
-    uint64_t                         m_next_generation { 1 };
-    std::deque<DecodedFrameSlot>     m_pending_frames;
-    DecodedFrameSlot                 m_display_frame {};
-    bool                             m_display_frame_ready { false };
-    bool                             m_seek_requested { false };
-    /// Set by a seek request and cleared by the first frame decoded for it.
-    bool                             m_seek_awaiting_frame { false };
-    std::chrono::steady_clock::time_point m_seek_requested_at {};
-    /// How far behind the clock the last seek that landed left its first frame:
-    /// the clip's time that passed while it was being fetched.
-    double                           m_seek_landing_lag_seconds { 0.0 };
-    double                           m_requested_seek_absolute_seconds { 0.0 };
-    uint64_t                         m_seek_ticket { 0 };
-    bool                             m_running { false };
-    bool                             m_stop_requested { false };
+    StreamInfo                       m_stream_info;
     /// Read by the decode thread's inner loops and by the libavformat
-    /// interrupt callback, so it cannot be guarded by `m_mutex`.
+    /// interrupt callback.
     std::atomic<bool>                m_cancel_requested { false };
-    bool                             m_primed { false };
-    std::once_flag                   m_prime_once;
-    bool                             m_prime_succeeded { false };
-    std::string                      m_prime_error;
-    std::thread                      m_decode_thread;
-    std::string                      m_last_error;
     AVFormatContext*                 m_format_context { nullptr };
     AVCodecContext*                  m_codec_context { nullptr };
     AVBufferRef*                     m_hw_device_context { nullptr };
@@ -1274,70 +692,23 @@ private:
     /// Declared last so the decoder handles above are initialized before the
     /// source that borrows them. Both are owned by the decode thread.
     DecodeSource                     m_decode_source { *this };
-    VideoDecodePump           m_pump { m_decode_source };
+    VideoDecodePump                  m_pump { m_decode_source };
 };
 
+} // namespace
+
 FfmpegVideoTextureSource::FfmpegVideoTextureSource(std::shared_ptr<const Image> image)
-    : m_impl(std::make_unique<Impl>(std::move(image)))
+    : ClockedVideoSource(std::make_unique<FfmpegBackend>(image),
+                         image != nullptr ? image->key : std::string())
 {
 }
 
 FfmpegVideoTextureSource::FfmpegVideoTextureSource(std::string media_path)
-    : m_impl(std::make_unique<Impl>(std::move(media_path)))
+    : ClockedVideoSource(std::make_unique<FfmpegBackend>(media_path), media_path)
 {
 }
 
 FfmpegVideoTextureSource::~FfmpegVideoTextureSource() = default;
-
-bool FfmpegVideoTextureSource::prime(std::string* error)
-{
-    return m_impl->prime(error);
-}
-
-bool FfmpegVideoTextureSource::syncPlayback(const VideoPlaybackState& state, std::string* error)
-{
-    return m_impl->syncPlayback(state, error);
-}
-
-bool FfmpegVideoTextureSource::refreshFrame(std::string* error)
-{
-    return m_impl->refreshFrame(error);
-}
-
-VideoTextureFrame FfmpegVideoTextureSource::currentFrame() const
-{
-    return m_impl->currentFrame();
-}
-
-bool FfmpegVideoTextureSource::retainCurrentFrame(VideoTextureFrame* out) const
-{
-    return m_impl->retainCurrentFrame(out);
-}
-
-double FfmpegVideoTextureSource::durationSeconds() const
-{
-    return m_impl->durationSeconds();
-}
-
-double FfmpegVideoTextureSource::playbackSeconds() const
-{
-    return m_impl->playbackSeconds();
-}
-
-uint64_t FfmpegVideoTextureSource::loopCount() const
-{
-    return m_impl->loopCount();
-}
-
-double FfmpegVideoTextureSource::frameDurationSeconds() const
-{
-    return m_impl->frameDurationSeconds();
-}
-
-VideoSourceStats FfmpegVideoTextureSource::sourceStats() const
-{
-    return m_impl->sourceStats();
-}
 
 std::shared_ptr<VideoTextureSource> CreateVideoTextureSource(std::shared_ptr<const Image> image,
                                                              std::string* error)

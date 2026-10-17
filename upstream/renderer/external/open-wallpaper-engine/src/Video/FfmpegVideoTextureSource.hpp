@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Video/VideoTextureSource.hpp"
+#include "Video/ClockedVideoSource.hpp"
 
 #include <memory>
 #include <string>
@@ -12,7 +12,9 @@ struct Image;
 namespace video
 {
 
-class FfmpegVideoTextureSource final : public VideoTextureSource {
+/// The clocked video source over the FFmpeg backend: libavformat and libavcodec
+/// with VideoToolbox decoding.
+class FfmpegVideoTextureSource final : public ClockedVideoSource {
 public:
     /// Shares `image` (see `CreateVideoTextureSource`); a payload is staged to
     /// a file for FFmpeg on the first `prime` and released afterwards.
@@ -24,21 +26,6 @@ public:
     /// the first one is gone.
     explicit FfmpegVideoTextureSource(std::string media_path);
     ~FfmpegVideoTextureSource() override;
-
-    bool prime(std::string* error) override;
-    bool syncPlayback(const VideoPlaybackState& state, std::string* error) override;
-    bool refreshFrame(std::string* error) override;
-    [[nodiscard]] VideoTextureFrame currentFrame() const override;
-    [[nodiscard]] bool retainCurrentFrame(VideoTextureFrame* out) const override;
-    [[nodiscard]] double durationSeconds() const override;
-    [[nodiscard]] double playbackSeconds() const override;
-    [[nodiscard]] uint64_t loopCount() const override;
-    [[nodiscard]] double frameDurationSeconds() const override;
-    [[nodiscard]] VideoSourceStats sourceStats() const override;
-
-private:
-    class Impl;
-    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace video

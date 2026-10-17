@@ -102,6 +102,7 @@ add_library(
   Project/ProjectManifest.cpp
   Project/ProjectProperties.cpp
   Runtime/VirtualAssetRegistry.cpp
+  Video/ClockedVideoSource.cpp
   Video/FfmpegVideoTextureSource.cpp
   Video/VideoColorConversion.cpp
   Video/VideoContainerProbe.cpp
