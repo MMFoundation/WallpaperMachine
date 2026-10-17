@@ -34,12 +34,12 @@ audio, a file whose headers are cut off) is not played: the layer stays silent
 and the log names the reason. A file cut short in its audio plays what is there.
 No scene sound reaches FFmpeg.
 
-The audio track of a plain video wallpaper that falls back to the scene engine
-(`CreateMediaSoundStream`) is the one remaining use of FFmpeg for sound
-(`src/Audio/FfmpegSoundStream`, with `AudioDecodePump`): it takes a path, not a
-stream, and handles WebM and the other containers AudioToolbox cannot open. It
-goes when WebM audio (Opus and Vorbis, through the project's own Matroska reader)
-lands.
+The audio track of a plain video wallpaper no longer comes through here on the desktop: the
+app's own players play it (AVFoundation for MP4 and MOV, and for WebM and Matroska the track
+decoded by `Matroska/MatroskaAudio`, below). The one remaining use of FFmpeg for sound is the
+scene engine's pure-video scene (`CreateMediaSoundStream`, `src/Audio/FfmpegSoundStream`, with
+`AudioDecodePump`), which only the lock screen's fallback can still build (a clip the extension's
+own player could not play); it goes with the scene engine's plain-video path.
 
 ## What is ours and what is the system's
 
