@@ -39,7 +39,6 @@ final class PanelEnergyRestartTests: PanelTestCase {
     case .frameRateCap: try await controller.setFrameRateCap(30)
     case .qualityPreset: try await controller.applyQualityPreset(.low)
     case .renderScale: try await controller.setRenderScale(0.75)
-    case .videoBackend: try await controller.setVideoBackend(.nativePreferred)
     case .contentPacing: try await controller.setContentPacing(true)
     case .sharedVideoDecode: try await controller.setSharedVideoDecode(true)
     case .sceneOptimization: try await controller.setSceneOptimization(false)
@@ -54,7 +53,7 @@ final class PanelEnergyRestartTests: PanelTestCase {
   }
 
   func testEveryRenderingSettingRestartsTheComparisonExactlyOnce() async throws {
-    XCTAssertEqual(RenderingSetting.allCases.count, 17)
+    XCTAssertEqual(RenderingSetting.allCases.count, 16)
     try await withRecordingPanel { panel, _ in
       let (controller, restarts) = makeCounting(panel)
       defer { controller.energyUsage.setActive(false) }
@@ -97,7 +96,7 @@ final class PanelEnergyRestartTests: PanelTestCase {
       // The engine answers nothing, as when it is gone: the change throws and no window restarts.
       bridge.bundleProvider = nil
       do {
-        try await controller.setVideoBackend(.nativePreferred)
+        try await controller.setContentPacing(true)
         XCTFail("The engine could not answer")
       } catch {}
       XCTAssertEqual(restarts(), 0)

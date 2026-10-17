@@ -2365,8 +2365,8 @@ async fn a_display_refresh_does_not_reload_a_scene_paused_by_a_lock_or_a_covered
 }
 
 /// A reconcile hands the engine every configured scene, and the engine reopens
-/// any scene whose descriptor differs from the one it runs. Switching the video
-/// backend reconciles the whole list without changing a scene wallpaper.
+/// any scene whose descriptor differs from the one it runs. Turning shared video decode on
+/// reconciles the whole list without changing a scene wallpaper.
 async fn assert_reconcile_keeps_the_scene(bridge: &WallpaperBridge, engine: &FakeEngineFacade) {
     let entry = engine.display_snapshot().remove(0);
     let Some(WallpaperAssignment::Direct(template)) = entry.assignment else {
@@ -2375,15 +2375,10 @@ async fn assert_reconcile_keeps_the_scene(bridge: &WallpaperBridge, engine: &Fak
     let running = template.for_display(entry.desc);
     let calls_before = engine.calls().len();
 
-    // Native video is the default, so the switch that changes anything is the
-    // one away from it.
-    bridge
-        .set_video_backend("compatibility".into())
-        .await
-        .unwrap();
+    bridge.set_shared_video_decode_enabled(true).await.unwrap();
 
     let calls = engine.calls();
-    assert_eq!(calls.len(), calls_before + 1, "a backend switch reconciles the scene list");
+    assert_eq!(calls.len(), calls_before + 1, "the switch reconciles the scene list");
     let handed = &calls[calls_before][0];
     assert!(
         running.same_wallpaper(handed) && running.display == handed.display,

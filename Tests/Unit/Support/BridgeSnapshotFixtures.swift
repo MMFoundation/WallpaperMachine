@@ -69,7 +69,6 @@ enum BridgeSnapshotFixtures {
   static func settings(
     displays: [BridgeDisplaySettingsRow] = [],
     batteryMode: BridgeBatteryMode = .keepRunning,
-    videoBackend: String = "compatibility",
     videoBackends: [BridgeVideoBackendReport] = [],
     contentPacingEnabled: Bool = false,
     sharedVideoDecodeEnabled: Bool = false,
@@ -105,7 +104,6 @@ enum BridgeSnapshotFixtures {
       coreVersion: "",
       shaderPipelineVersion: "",
       storage: storage(),
-      videoBackend: videoBackend,
       videoBackends: videoBackends,
       contentPacingEnabled: contentPacingEnabled,
       sharedVideoDecodeEnabled: sharedVideoDecodeEnabled,

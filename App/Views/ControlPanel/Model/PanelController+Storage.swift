@@ -103,7 +103,7 @@ extension PanelController {
     environment.append(
       """
       settings: scene renderer \(settings.sceneRenderer), scene resolution \(settings.sceneResolution), \
-      video backend \(settings.videoBackend), render scale \(settings.renderScale) (preferred \(settings.preferredRenderScale)), battery mode \
+      render scale \(settings.renderScale) (preferred \(settings.preferredRenderScale)), battery mode \
       \(settings.batteryMode), frame-rate cap \(settings.frameRateCap.map(String.init) ?? "none"), on battery \
       \(settings.onBatteryPower), reduced quality for \(throttle.isEmpty ? "nothing" : throttle), effective \
       frame-rate cap \(settings.effectiveFrameRateCap.map(String.init) ?? "none"), verbose logging \

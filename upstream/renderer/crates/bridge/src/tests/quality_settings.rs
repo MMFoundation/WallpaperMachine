@@ -275,20 +275,6 @@ async fn a_battery_frame_rate_does_not_change_what_the_video_report_says() {
 }
 
 #[tokio::test]
-async fn unknown_video_backend_mode_is_rejected() {
-    let temp = tempfile::tempdir().unwrap();
-    let engine = FakeEngineFacade::default();
-    let bridge = bridge_with(&engine, &temp);
-
-    let error = bridge
-        .set_video_backend("turbo".into())
-        .await
-        .expect_err("only the two declared modes exist");
-
-    assert_eq!(error.kind(), crate::BridgeErrorKind::InvalidInput);
-}
-
-#[tokio::test]
 async fn shared_video_decode_counts_come_from_the_renderer() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();

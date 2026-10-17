@@ -61,10 +61,10 @@ struct LockScreenScene: Codable, Equatable {
   /// `LockScreenSceneRenderer.default`, the app's own default, and a copy of the
   /// extension that predates the key ignores it.
   var sceneRenderer: LockScreenSceneRenderer? = nil
-  /// The media file of a plain video wallpaper, relative to its project folder, present only
-  /// when the app's Video backend setting selects the native player: the extension then plays
-  /// it through an AVFoundation layer when AVFoundation can open it, and otherwise, like every
-  /// scene that lacks the key, through the scene engine. Absent from a configuration an older
+  /// The media file of a plain video wallpaper, relative to its project folder, present for
+  /// every plain video the app can find the file of: the extension plays it through an
+  /// AVFoundation layer when AVFoundation can open it, through the WebM player for a WebM or
+  /// Matroska file, and otherwise, like every scene that lacks the key, through the scene engine. Absent from a configuration an older
   /// app wrote and for scenes and web pages; a copy of the extension that predates the key
   /// ignores it.
   var nativeVideoFile: String? = nil

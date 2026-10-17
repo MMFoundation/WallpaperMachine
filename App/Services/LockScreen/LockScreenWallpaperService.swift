@@ -70,8 +70,6 @@ final class LockScreenWallpaperService {
   @ObservationIgnored private let contentRevision: () -> UInt64
   /// The app's Scene renderer setting by the bridge's name; nil reads as the default.
   @ObservationIgnored private let sceneRendererSetting: () -> String?
-  /// The app's Video backend setting by the bridge's name; nil reads as Compatibility.
-  @ObservationIgnored private let videoBackendSetting: () -> String?
   @ObservationIgnored private var lastLockScreenRequested: Bool?
   @ObservationIgnored private var lastScreenSaverRequested = false
   @ObservationIgnored private var lastHasWebWallpapers = false
@@ -83,8 +81,7 @@ final class LockScreenWallpaperService {
 
   convenience init(
     bridge: WallpaperBridge, contentRevision: @escaping () -> UInt64 = { 0 },
-    sceneRendererSetting: @escaping () -> String? = { nil },
-    videoBackendSetting: @escaping () -> String? = { nil }
+    sceneRendererSetting: @escaping () -> String? = { nil }
   ) {
     let registration = LockScreenExtensionRegistration(processes: .live)
     self.init(
@@ -99,7 +96,7 @@ final class LockScreenWallpaperService {
       selection: LockScreenWallpaperSelection(
         folder: ClientPaths.supportURL.appendingPathComponent("LockScreen")),
       exchange: LockScreenConfiguration.exchangeDirectory, contentRevision: contentRevision,
-      sceneRendererSetting: sceneRendererSetting, videoBackendSetting: videoBackendSetting)
+      sceneRendererSetting: sceneRendererSetting)
   }
 
   init(
@@ -120,11 +117,9 @@ final class LockScreenWallpaperService {
     runningExtensionBundles: @escaping () -> [URL] = LockScreenExtensionDiagnostics.runningExtensionBundles,
     readinessTimeout: TimeInterval = 35,
     contentRevision: @escaping () -> UInt64 = { 0 },
-    sceneRendererSetting: @escaping () -> String? = { nil },
-    videoBackendSetting: @escaping () -> String? = { nil }
+    sceneRendererSetting: @escaping () -> String? = { nil }
   ) {
     self.sceneRendererSetting = sceneRendererSetting
-    self.videoBackendSetting = videoBackendSetting
     self.scenes = scenes
     self.selection = selection
     self.exchange = exchange
@@ -341,7 +336,6 @@ final class LockScreenWallpaperService {
       var inputs: [LockScreenPublishInput] = []
       let sceneRenderer = sceneRendererSetting().flatMap(LockScreenSceneRenderer.init(rawValue:))
         ?? .default
-      let nativeVideo = videoBackendSetting() == "native_preferred"
       for record in records {
         guard let uuid = displayUUID(record.displayId) else {
           // Keep the last complete mapping while Core Graphics settles during wake.
@@ -369,7 +363,7 @@ final class LockScreenWallpaperService {
           scalingMode: mode, scalingFactor: record.scalingFactor,
           framing: LockScreenFraming(panX: record.framing.panX, panY: record.framing.panY),
           propertiesJSON: record.propertiesJson, paused: record.paused,
-          sceneRenderer: sceneRenderer, nativeVideo: nativeVideo))
+          sceneRenderer: sceneRenderer))
       }
       inputs.sort { $0.displayID < $1.displayID }
       let currentContentRevision = contentRevision()
@@ -760,8 +754,6 @@ private struct LockScreenPublishInput: Equatable, Sendable {
   var paused: Bool
   /// Part of the input, so changing the Scene renderer setting republishes a revision.
   var sceneRenderer: LockScreenSceneRenderer
-  /// Part of the input, so changing the Video backend setting republishes a revision.
-  var nativeVideo: Bool
 }
 
 /// A source-tree metadata fingerprint reuses immutable snapshots without reading
@@ -845,7 +837,7 @@ private enum LockScreenAssetPublisher {
           projectRevision: projectRevision, properties: properties, exchange: exchange, reused: &sources)
         assetsRevision = projectRevision
       }
-      let nativeVideoFile = input.nativeVideo && type.lowercased() == "video"
+      let nativeVideoFile = type.lowercased() == "video"
         ? nativeVideoMedia(in: source, metadata: metadata) : nil
       scenes.append(
         LockScreenScene(

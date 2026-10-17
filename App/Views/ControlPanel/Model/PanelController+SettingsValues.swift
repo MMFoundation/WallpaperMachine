@@ -81,7 +81,6 @@ extension PanelController {
       slider: FrameRateCapSlider(displays: settings.displays),
       activePreset: QualityPreset.active(
         frameRateCap: settings.frameRateCap, preferredRenderScale: settings.preferredRenderScale),
-      videoBackend: VideoBackendMode(rawValue: settings.videoBackend) ?? .nativePreferred,
       videoBackends: settings.videoBackends.map(VideoBackendReport.init),
       contentPacing: settings.contentPacingEnabled,
       sharedVideoDecode: settings.sharedVideoDecodeEnabled,

@@ -31,14 +31,13 @@ enum LockScreenVideoPath: Equatable {
 
 /// The decision, kept apart from the player so it can be exercised without a lock screen.
 ///
-/// It mirrors the app: the native player takes a clip only when the Video backend setting
-/// selects it (the app publishes `nativeVideoFile` then and only then), and only when
-/// `NativeVideoAdmission` accepts the clip, the same rule the desktop applies. The clip plays at
+/// It mirrors the app: the app publishes `nativeVideoFile` for every plain video, and the
+/// native players take the clip when `NativeVideoAdmission` accepts it, the same rule the desktop applies. The clip plays at
 /// its own frame rate. A clip AVFoundation cannot open is tried with the app's own WebM reader (a
 /// Matroska or WebM file it plays goes to `WebMPlayer`); anything else goes to the scene engine.
 enum LockScreenVideoPlanner {
   /// The scene's media file in the exchange directory, as a path relative to it. Nil when the
-  /// scene does not ask for the native player, or names a file that cannot lie inside its
+  /// scene is not a plain video the app published a file for, or names a file that cannot lie inside its
   /// project folder.
   static func mediaPath(of scene: LockScreenScene) -> String? {
     guard scene.webEntryFile == nil, let file = scene.nativeVideoFile, !file.isEmpty,

@@ -10,7 +10,7 @@ pub mod writer;
 pub use app::{
     AppConfig, BatteryModeCfg, FilterCfg, GeneralCfg, MonitorCfg, MonitorSettingsCfg, PowerCfg,
     QualityCfg, QualityInForce, QualityProfileCfg, SceneRendererModeCfg, SceneResolutionCfg,
-    SerializedSelector, UiCfg, VideoBackendModeCfg, WindowGeom, clamp_render_scale,
+    SerializedSelector, UiCfg, WindowGeom, clamp_render_scale,
 };
 pub use store::{ConfigLoad, ConfigStore};
 pub use wallpaper::{AudioCfg, FramingCfg, MonitorRender, WallpaperConfig};

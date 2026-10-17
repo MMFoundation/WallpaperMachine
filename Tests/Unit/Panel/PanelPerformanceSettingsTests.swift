@@ -94,12 +94,9 @@ final class PanelPerformanceSettingsTests: PanelTestCase {
     XCTAssertEqual(DisplaySleepAction.allCases.map(\.rawValue), ["pause", "stop"])
   }
 
-  /// An unknown backend name is refused instead of falling back to Compatibility behind the user's
+  /// An unknown renderer name is refused instead of falling back to Compatibility behind the user's
   /// back: the typed choice has no way to name one.
-  func testVideoBackendAndSceneRendererOfferOnlyTheNamesTheEngineAccepts() async throws {
-    XCTAssertNil(VideoBackendMode(rawValue: "native"))
-    XCTAssertNil(VideoBackendMode(rawValue: ""))
-    XCTAssertEqual(VideoBackendMode.allCases.map(\.rawValue), ["compatibility", "native_preferred"])
+  func testSceneRendererOffersOnlyTheNamesTheEngineAccepts() async throws {
     for rejected in ["metal", "native_preferred", "NativeMetalPreferred", ""] {
       XCTAssertNil(SceneRendererMode(rawValue: rejected), rejected)
     }
@@ -108,10 +105,6 @@ final class PanelPerformanceSettingsTests: PanelTestCase {
       ["compatibility", "native_metal_preferred", "native_metal_only"])
 
     try await withRecordingPanel { panel, bridge in
-      try await panel.controller.setVideoBackend(.nativePreferred)
-      XCTAssertEqual(bridge.videoBackendCalls, ["native_preferred"])
-      XCTAssertEqual(panel.controller.performanceSettings.videoBackend, .nativePreferred)
-
       try await panel.controller.setSceneRenderer(.nativeMetalPreferred)
       XCTAssertEqual(bridge.sceneRendererCalls, ["native_metal_preferred"])
       XCTAssertEqual(panel.controller.performanceSettings.sceneRenderer, .nativeMetalPreferred)

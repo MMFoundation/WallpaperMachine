@@ -682,8 +682,8 @@ or depend on a second physical monitor.
   no unit test compiles, so they are checked by building it. `LockScreenWallpaperTests` also covers the configuration keys `sceneRenderer`
   and `nativeVideoFile` (round trip with and without, the default, an unknown name, which
   changes replace a renderer, and that a changed frame rate replaces neither a native player nor the scene engine),
-  and the service tests that the Scene renderer and Video backend settings are published and
-  a change republishes. Not covered: a real lock screen, the player playing a clip there.
+  and the service tests that the Scene renderer setting is published and a change republishes, and that a video project always
+  carries its media file. Not covered: a real lock screen, the player playing a clip there.
 - `LockScreenExtensionRegistrationTests` use synthetic app bundles and an
   injected registry: current-copy selection, duplicate and removed-copy cleanup,
   symlink aliases, invalid inventory rejection, cancellation, command failures;

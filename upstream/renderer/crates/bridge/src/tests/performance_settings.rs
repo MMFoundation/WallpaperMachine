@@ -450,10 +450,6 @@ async fn unsaved_frame_rate_follows_the_display_up_to_60_for_every_descriptor() 
 
     write_clip(&temp, "400");
     write_clip(&temp, "401");
-    bridge
-        .set_video_backend("native_preferred".into())
-        .await
-        .unwrap();
     commit(
         &bridge,
         "400",
@@ -511,7 +507,6 @@ async fn native_export_keeps_all_wallpaper_kinds_and_mirrors_with_playback_and_p
     let engine = FakeEngineFacade::default();
     engine.set_snapshot((7..=14).map(|id| display(id, None)).collect());
     let bridge = bridge_with(&engine, &temp);
-    bridge.set_video_backend("native_preferred".into()).await.unwrap();
     for (id, title, project, display_id) in [
         ("100", "Scene", r#"{"type":"scene","file":"scene.pkg","general":{"properties":{
             "speed":{"type":"slider","value":1,"min":0,"max":10}}}}"#, "7"),
@@ -585,7 +580,6 @@ async fn native_export_keeps_all_wallpaper_kinds_and_mirrors_with_playback_and_p
 
     bridge.set_presentation_unloaded(true).await.unwrap();
     assert_eq!(bridge.lock_screen_scenes().await.unwrap(), exported);
-    bridge.set_video_backend("compatibility".into()).await.unwrap();
     assert_eq!(bridge.lock_screen_scenes().await.unwrap(), exported);
     bridge.pause_all().await.unwrap();
     assert!(bridge.lock_screen_scenes().await.unwrap().iter().all(|row| row.paused));
@@ -625,10 +619,6 @@ async fn unload_closes_scenes_and_host_lists_and_reload_restores_them() {
         "8",
     )
     .await;
-    bridge
-        .set_video_backend("native_preferred".into())
-        .await
-        .unwrap();
     commit(
         &bridge,
         "400",

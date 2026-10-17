@@ -13,7 +13,7 @@ import UniformTypeIdentifiers
 /// choices, muting, the low-battery level, app rules, hiding after applying) are not here.
 enum RenderingSetting: String, CaseIterable, Sendable {
   case batteryMode, batteryRenderScale, batteryTargetFps, frameRateCap, qualityPreset, renderScale
-  case videoBackend, contentPacing, sharedVideoDecode, sceneOptimization, sceneOnDemand
+  case contentPacing, sharedVideoDecode, sceneOptimization, sceneOnDemand
   case sceneVideoPlaneSampling, sceneRenderer, sceneResolution
   case lowPowerModeAction, thermalAction, lowBatteryAction
 }
@@ -259,11 +259,6 @@ extension PanelController {
   private func clampedScale(_ scale: Double) throws -> Float {
     guard scale.isFinite else { throw InvalidControlValue() }
     return Float(min(max(scale, Self.renderScaleRange.lowerBound), Self.renderScaleRange.upperBound))
-  }
-
-  /// `videoBackend`.
-  func setVideoBackend(_ mode: VideoBackendMode) async throws {
-    try await change(.videoBackend) { try await store.setVideoBackendAsync(mode.rawValue) }
   }
 
   /// `contentPacing` (experimental).

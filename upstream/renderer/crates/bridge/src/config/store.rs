@@ -226,10 +226,7 @@ impl From<std::io::Error> for BridgeError {
 #[cfg(test)]
 mod tests {
     use super::ConfigStore;
-    use crate::config::{
-        AppConfig, MonitorSettingsCfg, SceneRendererModeCfg, SceneResolutionCfg,
-        VideoBackendModeCfg,
-    };
+    use crate::config::{AppConfig, MonitorSettingsCfg, SceneRendererModeCfg, SceneResolutionCfg};
 
     fn load_config(contents: &str) -> crate::config::AppConfig {
         let root = tempfile::tempdir().unwrap();
@@ -240,84 +237,44 @@ mod tests {
             .config
     }
 
+    /// Plain videos have no setting any more. A config an earlier build wrote may still hold the
+    /// keys it used (`video_backend`, its one-time marker, and the older
+    /// `experimental.native_video_backend` flag); it loads, the other settings in it are kept,
+    /// and the keys are not written back.
     #[test]
-    fn legacy_native_video_opt_in_becomes_native_preferred() {
-        let config = load_config("[experimental]\nnative_video_backend = true\n");
-
-        assert_eq!(config.video_backend, VideoBackendModeCfg::NativePreferred);
-    }
-
-    #[test]
-    fn config_without_the_legacy_opt_in_reads_the_native_default() {
-        let config = load_config("[experimental]\n");
-
-        assert_eq!(config.video_backend, VideoBackendModeCfg::NativePreferred);
-    }
-
-    /// A config saved before native video became the default stores the old
-    /// default, `compatibility`, whether or not anyone chose it. It moves to the
-    /// new default once, and the marker it is saved with keeps a later choice.
-    #[test]
-    fn a_config_from_before_the_native_video_default_moves_to_it_once() {
+    fn a_config_with_the_old_video_backend_keys_loads_and_does_not_write_them_back() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("config.toml");
-        std::fs::write(&path, "video_backend = \"compatibility\"\n").unwrap();
+        std::fs::write(
+            &path,
+            "video_backend = \"compatibility\"\nnative_video_default_applied = true\n\
+             native_metal_default_applied = true\nscene_renderer = \"compatibility\"\n\
+             [experimental]\nnative_video_backend = true\ncontent_pacing = true\n",
+        )
+        .unwrap();
         let store = ConfigStore::open(root.path().to_path_buf());
 
-        let mut config = store.load().expect("config load").config;
-        assert_eq!(config.video_backend, VideoBackendModeCfg::NativePreferred);
-        assert!(config.native_video_default_applied);
+        let config = store.load().expect("config load").config;
+        assert_eq!(config.scene_renderer, SceneRendererModeCfg::Compatibility);
+        assert!(config.experimental.content_pacing, "the rest of the file is read as before");
 
-        config.video_backend = VideoBackendModeCfg::Compatibility;
         store.save_app_config(&config).expect("config save");
         let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("native_video_default_applied = true"), "{written}");
-        let reloaded = store.load().expect("config load").config;
-        assert_eq!(
-            reloaded.video_backend,
-            VideoBackendModeCfg::Compatibility,
-            "a return to Compatibility after the move is a choice and stays"
-        );
-    }
-
-    /// The video move and the scene move are independent: a config that has been
-    /// through only the scene move still moves its video backend.
-    #[test]
-    fn the_native_video_move_is_independent_of_the_scene_renderer_move() {
-        let config = load_config(
-            "native_metal_default_applied = true\nscene_renderer = \"compatibility\"\n\
-             video_backend = \"compatibility\"\n",
-        );
-
-        assert_eq!(config.video_backend, VideoBackendModeCfg::NativePreferred);
-        assert_eq!(config.scene_renderer, SceneRendererModeCfg::Compatibility);
+        assert!(!written.contains("video_backend"), "{written}");
+        assert!(!written.contains("native_video"), "{written}");
+        assert!(written.contains("content_pacing = true"), "{written}");
     }
 
     #[test]
-    fn a_new_install_starts_with_native_video_and_the_marker_set() {
+    fn a_new_install_writes_no_video_backend_key() {
         let root = tempfile::tempdir().unwrap();
-        let config = ConfigStore::open(root.path().to_path_buf())
-            .load()
-            .expect("config load")
-            .config;
-
-        assert_eq!(config.video_backend, VideoBackendModeCfg::NativePreferred);
-        assert!(config.native_video_default_applied);
-    }
-
-    #[test]
-    fn migrated_config_no_longer_writes_the_legacy_key() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("config.toml");
-        std::fs::write(&path, "[experimental]\nnative_video_backend = true\n").unwrap();
         let store = ConfigStore::open(root.path().to_path_buf());
         let config = store.load().expect("config load").config;
 
         store.save_app_config(&config).expect("config save");
 
-        let written = std::fs::read_to_string(&path).unwrap();
-        assert!(!written.contains("native_video_backend"), "{written}");
-        assert!(written.contains("video_backend = \"native_preferred\""), "{written}");
+        let written = std::fs::read_to_string(root.path().join("config.toml")).unwrap();
+        assert!(!written.contains("video_backend"), "{written}");
     }
 
     #[test]
@@ -408,15 +365,14 @@ mod tests {
     }
 
     /// The scene renderer is decided by its own key and the one-time move to
-    /// the new default, never by the video backend choice.
+    /// the new default, whatever an old config says about videos.
     #[test]
-    fn the_scene_renderer_never_inherits_the_video_backend_choice() {
+    fn the_scene_renderer_ignores_an_old_video_backend_choice() {
         let config = load_config(
             "video_backend = \"native_preferred\"\nnative_metal_default_applied = true\n\
              scene_renderer = \"compatibility\"\n",
         );
 
-        assert_eq!(config.video_backend, VideoBackendModeCfg::NativePreferred);
         assert_eq!(config.scene_renderer, SceneRendererModeCfg::Compatibility);
     }
 

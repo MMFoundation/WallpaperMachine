@@ -12,7 +12,6 @@ final class SettingsRecordingBridge: LayoutSnapshotBridge {
     var targetFps: UInt32
   }
 
-  var videoBackendCalls: [String] = []
   var batteryProfileCalls: [Profile] = []
   var contentPacingCalls: [Bool] = []
   var sharedVideoDecodeCalls: [Bool] = []
@@ -34,10 +33,6 @@ final class SettingsRecordingBridge: LayoutSnapshotBridge {
     guard var bundle = bundleProvider?() else { throw CancellationError() }
     change(&bundle.settings)
     return bundle
-  }
-
-  override func setVideoBackend(mode: String) async throws -> BridgeSnapshotBundle {
-    try await record({ $0.videoBackendCalls.append(mode) }) { $0.videoBackend = mode }
   }
 
   override func setBatteryQualityProfile(renderScale: Float, targetFps: UInt32) async throws

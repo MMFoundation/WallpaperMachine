@@ -9,7 +9,6 @@ struct WallpaperCompatibilityContext: Hashable, Sendable {
   let supported: Bool
   let targetFPS: UInt32
   let targetAvailable: Bool
-  let videoBackend: String
   let sceneRenderer: String
   let libraryRevision: UInt64
   let assetsConfiguration: String

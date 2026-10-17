@@ -1027,11 +1027,6 @@ final class BridgeStore {
         apply(bundle)
     }
 
-    func setVideoBackendAsync(_ mode: String) async throws {
-        let bundle = try await bridge.setVideoBackend(mode: mode)
-        apply(bundle)
-    }
-
     func setRenderScaleAsync(_ scale: Float) async throws {
         let bundle = try await bridge.setRenderScale(scale: scale)
         apply(bundle)
@@ -1456,7 +1451,6 @@ final class BridgeStore {
                         activeFileSizeBytes: 0
                     )
                 ),
-                videoBackend: "native_preferred",
                 videoBackends: [],
                 contentPacingEnabled: false,
                 sharedVideoDecodeEnabled: false,

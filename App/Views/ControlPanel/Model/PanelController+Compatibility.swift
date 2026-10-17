@@ -133,7 +133,7 @@ extension PanelController {
     return WallpaperCompatibilityContext(
       wallpaperID: id, displayID: displayID, kind: kind, supported: entry.supported,
       targetFPS: fps, targetAvailable: available && options != nil && fps > 0,
-      videoBackend: settings.videoBackend, sceneRenderer: settings.sceneRenderer,
+      sceneRenderer: settings.sceneRenderer,
       libraryRevision: store.libraryRefreshRevision, assetsConfiguration: assetsConfiguration)
   }
 }

@@ -1,21 +1,5 @@
 import Foundation
 
-/// The video backend choice, by the names the engine accepts.
-///
-/// An unknown name is refused instead of falling back to Compatibility: a silent substitution would
-/// leave Settings reporting a choice that was never applied, and the Rust side refuses it too.
-enum VideoBackendMode: String, CaseIterable, Sendable {
-  case compatibility
-  case nativePreferred = "native_preferred"
-
-  @MainActor var title: String {
-    switch self {
-    case .compatibility: L("Compatibility")
-    case .nativePreferred: L("Native video preferred")
-    }
-  }
-}
-
 /// The scene renderer choice, by the names the engine accepts.
 ///
 /// Must stay identical to the Rust `set_scene_renderer` match arms: a name accepted here and refused

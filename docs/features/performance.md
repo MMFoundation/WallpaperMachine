@@ -54,14 +54,12 @@ kernel's resource-coalition accounting (`CoalitionEnergySource`,
   decoder, DRAM and the display panel: macOS charges none of them to any app.
   WindowServer's share follows the wallpaper's present rate; see
   [power benchmarking](../testing/power-benchmark.md#windowservers-share).
-- **Native video.** A video on the native player (**Native video preferred**) is
-  decoded by the media engine and drawn by WindowServer, so almost none of its cost
-  reaches the app. While the engine's **In use now** report lists a `native` video,
-  readings carry `nativeVideo`, the row reads **Native video not counted** with a
+- **Plain video.** A plain video is decoded by the media engine and drawn by WindowServer,
+  so almost none of its cost reaches the app. While the engine's **In use now** report lists a
+  video, readings carry `nativeVideo`, the row reads **Video not counted** with a
   note, and there is no grade, battery share or comparison; a comparison in
-  progress is dropped, since switching a video to the native player would
-  otherwise read as a near-total saving. A window that held a native-video sample
-  stays flagged until it has aged out.
+  progress is dropped, since starting a video would otherwise read as a near-total
+  saving. A window that held a video sample stays flagged until it has aged out.
 - **Loading.** The row's note says that right after a wallpaper is applied the
   figures include loading it (shader compilation can dominate for a few seconds;
   see [Metal compile across processes](../testing/renderer.md#metal-compile-across-processes)),
@@ -92,7 +90,7 @@ kernel's resource-coalition accounting (`CoalitionEnergySource`,
 - **Before and after.** A setting on Performance or Playback & Power that changes rendering work
   (`RenderingSetting` in `PanelController+Settings.swift`: presets, frame-rate limit, render scale,
   2D scene resolution, battery mode and quality, what to do in Low Power Mode, when the Mac is hot and when
-  the battery is low, video backend, scene renderer and the scene and
+  the battery is low, scene renderer and the scene and
   experimental switches) calls `EnergyUsageMonitor.settingChanged()` once the
   engine has accepted it. The window restarts, the row reads **Measuring…** with
   the last settled figure as **Before it**, and once four uncontended samples under
@@ -644,10 +642,10 @@ above, without disabling its system-audio response.
 ## Advanced
 
 Collapsed by default, with a **Renderers & experimental options** preview. Inside,
-three flat sections separate **Video backend**, **Scene wallpapers** and
+three flat sections separate **Video playback**, **Scene wallpapers** and
 **Experimental**; scene renderer selection comes before the optimisation and
-update-only-on-change switches. Each renderer section has a collapsed **Live
-diagnostics** disclosure: video shows the backend in use; scenes show the renderer
+update-only-on-change switches. The video section holds only its collapsed **Live
+diagnostics** disclosure (there is nothing to choose); the scene section has one too: video lists each running video by display and wallpaper; scenes show the renderer
 and video path, whether optimisation is in force, and what is keeping the scene
 updating. These reports continue to update from snapshots, and their open state
 survives setting changes. **Renderer compatibility** remains beside the scene
@@ -664,10 +662,11 @@ on its last picture and the reason shows under **Drawn by**
 Every plain video wallpaper is played by the app's own players: AVFoundation for the containers
 macOS opens (MP4, MOV and the like), and the WebM player below for WebM and Matroska. There is
 no other player. The scene engine is never given a plain video on the desktop; it used to be the
-fallback for any video the native player refused, and the **Video backend** setting chose between
-the two. The setting no longer decides anything (the panel's row for it goes in the next change),
-**In use now** lists the display and wallpaper of each running video, and it names a problem only
-when the project's media file cannot be found. It reads `No video wallpaper is running.` when
+fallback for any video the native player refused, and a **Video backend** setting chose between
+the two. The setting is gone from Settings and the config: `config.toml` files written by earlier
+builds that still hold `video_backend` (and the older `experimental.native_video_backend`) load and
+the keys are ignored, and not written back. **In use now** lists the display and wallpaper of each
+running video, and it names a problem only when the project's media file cannot be found. It reads `No video wallpaper is running.` when
 nothing is playing video. A video the player cannot play is not handed to anything else: its
 display is reported as failed with the reason (below) and keeps the picture it had. The lock screen
 and screen saver still draw a plain video with the scene engine when their own player cannot

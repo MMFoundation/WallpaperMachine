@@ -1321,7 +1321,7 @@ public protocol WallpaperBridgeProtocol : AnyObject {
      * native backend and nothing else: a scene it cannot draw is held on its
      * last frame (or its preview picture), the failure and its reason are
      * reported in `scene_renderers`, and no Vulkan renderer is created.
-     * Independent of the video backend: a scene is not a plain video. The
+     * A plain video is never a scene: the app's own video players always play it. The
      * snapshot's `scene_renderers` reports what each display actually got.
      *
      * # Errors
@@ -1400,24 +1400,6 @@ public protocol WallpaperBridgeProtocol : AnyObject {
      * Returns an error when the setting cannot be persisted.
      */
     func setVerboseLogging(enabled: Bool) async throws  -> BridgeSnapshotBundle
-    
-    /**
-     * Chooses which renderer plays plain local videos.
-     *
-     * `"compatibility"` keeps everything on the scene engine, which supports
-     * every wallpaper. `"native_preferred"` hands a video to the platform
-     * player where its project and options fall inside the supported subset;
-     * everything else, and anything the host refuses, stays on the scene
-     * engine. The snapshot's `video_backends` reports what each display
-     * actually got.
-     *
-     * # Errors
-     *
-     * Returns an error when `mode` is not one of the two names, or when the
-     * scene list cannot be rebuilt for the new routing, in which case the
-     * previous backend keeps running.
-     */
-    func setVideoBackend(mode: String) async throws  -> BridgeSnapshotBundle
     
     /**
      * # Errors
@@ -3318,7 +3300,7 @@ open func setSceneOptimizationEnabled(enabled: Bool)async throws  -> BridgeSnaps
      * native backend and nothing else: a scene it cannot draw is held on its
      * last frame (or its preview picture), the failure and its reason are
      * reported in `scene_renderers`, and no Vulkan renderer is created.
-     * Independent of the video backend: a scene is not a plain video. The
+     * A plain video is never a scene: the app's own video players always play it. The
      * snapshot's `scene_renderers` reports what each display actually got.
      *
      * # Errors
@@ -3478,39 +3460,6 @@ open func setVerboseLogging(enabled: Bool)async throws  -> BridgeSnapshotBundle 
                 uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_verbose_logging(
                     self.uniffiClonePointer(),
                     FfiConverterBool.lower(enabled)
-                )
-            },
-            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeBridgeSnapshotBundle.lift,
-            errorHandler: FfiConverterTypeBridgeError.lift
-        )
-}
-    
-    /**
-     * Chooses which renderer plays plain local videos.
-     *
-     * `"compatibility"` keeps everything on the scene engine, which supports
-     * every wallpaper. `"native_preferred"` hands a video to the platform
-     * player where its project and options fall inside the supported subset;
-     * everything else, and anything the host refuses, stays on the scene
-     * engine. The snapshot's `video_backends` reports what each display
-     * actually got.
-     *
-     * # Errors
-     *
-     * Returns an error when `mode` is not one of the two names, or when the
-     * scene list cannot be rebuilt for the new routing, in which case the
-     * previous backend keeps running.
-     */
-open func setVideoBackend(mode: String)async throws  -> BridgeSnapshotBundle {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_video_backend(
-                    self.uniffiClonePointer(),
-                    FfiConverterString.lower(mode)
                 )
             },
             pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
@@ -6661,11 +6610,6 @@ public struct BridgeSettingsSnapshot {
     public var coreVersion: String
     public var shaderPipelineVersion: String
     public var storage: BridgeStorageStatus
-    /**
-     * `"compatibility"` or `"native_preferred"`: the user's choice, which for
-     * a given display may or may not be what `video_backends` reports.
-     */
-    public var videoBackend: String
     public var videoBackends: [BridgeVideoBackendReport]
     /**
      * Read back from the renderer process, not from the saved preference.
@@ -6768,11 +6712,7 @@ public struct BridgeSettingsSnapshot {
          */launchAtLoginNeedsApproval: Bool, batteryMode: BridgeBatteryMode, 
         /**
          * Debug-level lines are recorded too; see `set_verbose_logging`.
-         */verboseLogging: Bool, gitSha: String, bridgeVersion: String, coreVersion: String, shaderPipelineVersion: String, storage: BridgeStorageStatus, 
-        /**
-         * `"compatibility"` or `"native_preferred"`: the user's choice, which for
-         * a given display may or may not be what `video_backends` reports.
-         */videoBackend: String, videoBackends: [BridgeVideoBackendReport], 
+         */verboseLogging: Bool, gitSha: String, bridgeVersion: String, coreVersion: String, shaderPipelineVersion: String, storage: BridgeStorageStatus, videoBackends: [BridgeVideoBackendReport], 
         /**
          * Read back from the renderer process, not from the saved preference.
          */contentPacingEnabled: Bool, sharedVideoDecodeEnabled: Bool, 
@@ -6853,7 +6793,6 @@ public struct BridgeSettingsSnapshot {
         self.coreVersion = coreVersion
         self.shaderPipelineVersion = shaderPipelineVersion
         self.storage = storage
-        self.videoBackend = videoBackend
         self.videoBackends = videoBackends
         self.contentPacingEnabled = contentPacingEnabled
         self.sharedVideoDecodeEnabled = sharedVideoDecodeEnabled
@@ -6914,9 +6853,6 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
             return false
         }
         if lhs.storage != rhs.storage {
-            return false
-        }
-        if lhs.videoBackend != rhs.videoBackend {
             return false
         }
         if lhs.videoBackends != rhs.videoBackends {
@@ -7000,7 +6936,6 @@ extension BridgeSettingsSnapshot: Equatable, Hashable {
         hasher.combine(coreVersion)
         hasher.combine(shaderPipelineVersion)
         hasher.combine(storage)
-        hasher.combine(videoBackend)
         hasher.combine(videoBackends)
         hasher.combine(contentPacingEnabled)
         hasher.combine(sharedVideoDecodeEnabled)
@@ -7045,7 +6980,6 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
                 coreVersion: FfiConverterString.read(from: &buf), 
                 shaderPipelineVersion: FfiConverterString.read(from: &buf), 
                 storage: FfiConverterTypeBridgeStorageStatus.read(from: &buf), 
-                videoBackend: FfiConverterString.read(from: &buf), 
                 videoBackends: FfiConverterSequenceTypeBridgeVideoBackendReport.read(from: &buf), 
                 contentPacingEnabled: FfiConverterBool.read(from: &buf), 
                 sharedVideoDecodeEnabled: FfiConverterBool.read(from: &buf), 
@@ -7083,7 +7017,6 @@ public struct FfiConverterTypeBridgeSettingsSnapshot: FfiConverterRustBuffer {
         FfiConverterString.write(value.coreVersion, into: &buf)
         FfiConverterString.write(value.shaderPipelineVersion, into: &buf)
         FfiConverterTypeBridgeStorageStatus.write(value.storage, into: &buf)
-        FfiConverterString.write(value.videoBackend, into: &buf)
         FfiConverterSequenceTypeBridgeVideoBackendReport.write(value.videoBackends, into: &buf)
         FfiConverterBool.write(value.contentPacingEnabled, into: &buf)
         FfiConverterBool.write(value.sharedVideoDecodeEnabled, into: &buf)
@@ -10472,7 +10405,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_optimization_enabled() != 6485) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_renderer() != 12730) {
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_renderer() != 8940) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_resolution() != 15138) {
@@ -10488,9 +10421,6 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_verbose_logging() != 22895) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_video_backend() != 4355) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_volume() != 1489) {

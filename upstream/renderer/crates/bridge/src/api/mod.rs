@@ -86,12 +86,12 @@ use crate::{
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
             SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneRenderer,
             SetSceneResolution, SetSceneVideoPlaneSamplingEnabled, SetSharedVideoDecodeEnabled,
-            SetTargetFps, SetVideoBackend, SetVolume,
+            SetTargetFps, SetVolume,
             SetWebAudioSubscribed, Shutdown,
         },
         state::BridgeActorState,
     },
-    config::{ConfigStore, SceneRendererModeCfg, SceneResolutionCfg, VideoBackendModeCfg},
+    config::{ConfigStore, SceneRendererModeCfg, SceneResolutionCfg},
     engine::{EngineFacade, LoadJournal, RealEngineFacade},
     login::LaunchAtLoginController,
     media::SystemMediaStore,
@@ -245,12 +245,11 @@ impl<E: EngineFacade> BridgeBuilder<E> {
             // What the renderer was asked to do, so a report says which
             // preferences were in force when a wallpaper misbehaved.
             log::info!(
-                "configuration: scene renderer {:?}, video backend {:?}, render scale {}, \
+                "configuration: scene renderer {:?}, render scale {}, \
                  battery mode {:?} ({} fps, scale {}), frame-rate cap {}, scene optimization \
                  {}, on-demand {}, scene resolution {:?}, content pacing {}, shared video \
                  decode {}, video plane sampling {}",
                 config.scene_renderer,
-                config.video_backend,
                 config.quality.render_scale,
                 config.power.on_battery,
                 config.quality.battery.target_fps,
@@ -1855,36 +1854,6 @@ impl WallpaperBridge {
             .collect())
     }
 
-    /// Chooses which renderer plays plain local videos.
-    ///
-    /// `"compatibility"` keeps everything on the scene engine, which supports
-    /// every wallpaper. `"native_preferred"` hands a video to the platform
-    /// player where its project and options fall inside the supported subset;
-    /// everything else, and anything the host refuses, stays on the scene
-    /// engine. The snapshot's `video_backends` reports what each display
-    /// actually got.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when `mode` is not one of the two names, or when the
-    /// scene list cannot be rebuilt for the new routing, in which case the
-    /// previous backend keeps running.
-    pub async fn set_video_backend(
-        &self,
-        mode: String,
-    ) -> Result<BridgeSnapshotBundle, BridgeError> {
-        let mode = match mode.as_str() {
-            "compatibility" => VideoBackendModeCfg::Compatibility,
-            "native_preferred" => VideoBackendModeCfg::NativePreferred,
-            other => {
-                return Err(BridgeError::invalid_input(format!(
-                    "unknown video backend mode {other}"
-                )));
-            }
-        };
-        self.actor.ask(SetVideoBackend { mode }).await
-    }
-
     /// Sets the internal rasterization scale the user prefers.
     ///
     /// Clamped to the range the renderer honours. This is a preference: while
@@ -2029,7 +1998,7 @@ impl WallpaperBridge {
     /// native backend and nothing else: a scene it cannot draw is held on its
     /// last frame (or its preview picture), the failure and its reason are
     /// reported in `scene_renderers`, and no Vulkan renderer is created.
-    /// Independent of the video backend: a scene is not a plain video. The
+    /// A plain video is never a scene: the app's own video players always play it. The
     /// snapshot's `scene_renderers` reports what each display actually got.
     ///
     /// # Errors

@@ -36,7 +36,6 @@ final class PanelCompatibilityTests: PanelTestCase {
   func testTheBackendNamedIsTheOneRunningThisWallpaperOnTheTargetDisplayNotAPreference() async throws {
     try await withFixture { panel in
       let store = panel.store
-      store.settingsSnapshot.videoBackend = "native_preferred"
       store.settingsSnapshot.videoBackends = [
         .init(
           displayId: 7, displayName: "Display", wallpaperId: "one", wallpaperTitle: "One", backend: "legacy",

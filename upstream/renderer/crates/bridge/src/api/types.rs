@@ -554,9 +554,6 @@ pub struct BridgeSettingsSnapshot {
     pub core_version: String,
     pub shader_pipeline_version: String,
     pub storage: BridgeStorageStatus,
-    /// `"compatibility"` or `"native_preferred"`: the user's choice, which for
-    /// a given display may or may not be what `video_backends` reports.
-    pub video_backend: String,
     pub video_backends: Vec<BridgeVideoBackendReport>,
     /// Read back from the renderer process, not from the saved preference.
     pub content_pacing_enabled: bool,

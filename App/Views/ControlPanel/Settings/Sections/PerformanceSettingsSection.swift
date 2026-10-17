@@ -5,7 +5,7 @@ import SwiftUI
 struct PerformanceSettingsSection: View {
   private static let energy = SettingsItem.Group("energy", title: "Energy use")
   private static let quality = SettingsItem.Group("quality", title: "Quality")
-  private static let video = SettingsItem.Group("video", title: "Video backend")
+  private static let video = SettingsItem.Group("video", title: "Video playback")
   private static let scene = SettingsItem.Group("scene", title: "Scene wallpapers")
   private static let experimental = SettingsItem.Group("experimental", title: "Experimental")
 
@@ -16,7 +16,7 @@ struct PerformanceSettingsSection: View {
     note:
       "Right after you apply a wallpaper, these figures include loading it, which can take several watts for a few seconds.",
     keywords: [
-      "Unavailable on this Mac", "Measuring…", "Native video not counted",
+      "Unavailable on this Mac", "Measuring…", "Video not counted",
       "GPU shared with other apps", "Low energy use", "Medium energy use", "High energy use",
     ])
   static let energyMethod = SettingsItem(
@@ -58,11 +58,6 @@ struct PerformanceSettingsSection: View {
     id: "performance.advanced", section: .performance, title: "Advanced",
     note: "Renderers & experimental options")
 
-  static let videoBackend = SettingsItem(
-    id: "performance.video-backend", section: .performance, group: video, inside: advanced,
-    title: "Video playback",
-    note: "Native plays supported videos through macOS and uses Compatibility for the rest.",
-    keywords: ["Compatibility", "Native video preferred"])
   static let videoDiagnostics = SettingsItem(
     id: "performance.video-diagnostics", section: .performance, group: video, inside: advanced,
     title: "Live diagnostics")
@@ -129,7 +124,7 @@ struct PerformanceSettingsSection: View {
 
   static let items = [
     energyUse, energyMethod, preset, frameRateLimit, renderScale, renderScaleEffective,
-    sceneResolution, advanced, videoBackend, videoDiagnostics, videoInUse, sceneRenderer, sceneOptimization, sceneOnDemand,
+    sceneResolution, advanced, videoDiagnostics, videoInUse, sceneRenderer, sceneOptimization, sceneOnDemand,
     sceneDiagnostics, sceneDrawnBy, sceneInForce, sceneUpdating, sceneCompatibility,
     contentPacing, sharedVideoDecode, sharedDecodeInUse, videoPlaneSampling,
   ]
@@ -161,7 +156,7 @@ struct PerformanceSettingsSection: View {
           SettingsProse {
             Text("macOS shares GPU energy between apps by GPU time.")
             Text(
-              "Includes the control panel, the lock screen and the CPU side of video decoding. Screen compositing, the hardware video decoder, videos played with Native video, memory and the display itself are not included."
+              "Includes the control panel, the lock screen and the CPU side of video decoding. Screen compositing, the hardware video decoder, memory and the display itself are not included."
             )
             Text("Low: below 0.5 W. Medium: 0.5 W to below 2 W. High: 2 W or more.")
             Text("Change a quality setting below to compare energy use.")
@@ -220,14 +215,6 @@ struct PerformanceSettingsSection: View {
 
   private func videoGroup(_ performance: PerformanceSettings) -> some View {
     SettingsGroup(Self.video, in: .performance) {
-      SettingsRow(Self.videoBackend) {
-        SettingsMenuControl(
-          key: "videoBackend", saved: performance.videoBackend,
-          options: VideoBackendMode.allCases.map {
-            SettingsMenuOption(value: $0, title: $0.title)
-          }
-        ) { try await controller.setVideoBackend($0) }
-      }
       SettingsDisclosure(Self.videoDiagnostics) {
         SettingsRow(Self.videoInUse, stacked: true) {
           report(performance.videoBackends.map(\.line), empty: "No video wallpaper is running.")

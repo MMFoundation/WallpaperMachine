@@ -22,15 +22,10 @@ pub struct AppConfig {
     pub ui: UiCfg,
     #[serde(default)]
     pub experimental: ExperimentalCfg,
-    /// Which renderer plays a plain local video. Replaces the former
-    /// `experimental.native_video_backend` flag; see
-    /// [`AppConfig::migrate_legacy_keys`].
-    #[serde(default)]
-    pub video_backend: VideoBackendModeCfg,
-    /// Which renderer draws a scene wallpaper. Independent of
-    /// [`AppConfig::video_backend`]: a scene is not a plain video, and the two
-    /// choices route different wallpapers. New in this schema, so unlike
-    /// `video_backend` it has no predecessor key to migrate from.
+    /// Which renderer draws a scene wallpaper. A plain video has no such choice: the host's
+    /// own player plays every one. Config files written by an earlier build may still carry a
+    /// `video_backend` key (and the older `experimental.native_video_backend`); they are
+    /// read past and not written back.
     #[serde(default)]
     pub scene_renderer: SceneRendererModeCfg,
     /// Whether this config has been through the one-time move to Native Metal
@@ -40,13 +35,6 @@ pub struct AppConfig {
     /// builds ignore the key.
     #[serde(default)]
     pub native_metal_default_applied: bool,
-    /// Whether this config has been through the one-time move to native video
-    /// preferred as the default for plain videos. Absent (false) in a config
-    /// written before that change, where `video_backend` holds the old default
-    /// more often than a choice; see [`AppConfig::migrate_legacy_keys`]. Older
-    /// builds ignore the key.
-    #[serde(default)]
-    pub native_video_default_applied: bool,
     #[serde(default)]
     pub quality: QualityCfg,
     #[serde(default)]
@@ -65,10 +53,8 @@ impl Default for AppConfig {
             power: PowerCfg::default(),
             ui: UiCfg::default(),
             experimental: ExperimentalCfg::default(),
-            video_backend: VideoBackendModeCfg::default(),
             scene_renderer: SceneRendererModeCfg::default(),
             native_metal_default_applied: true,
-            native_video_default_applied: true,
             quality: QualityCfg::default(),
             monitors: Vec::new(),
             monitor_settings: Vec::new(),
@@ -80,20 +66,6 @@ impl Default for AppConfig {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GeneralCfg {
     pub last_selected_wallpaper: Option<String>,
-}
-
-/// Which renderer plays a plain local video wallpaper.
-///
-/// `NativePreferred`, the default, asks for the platform player where the
-/// wallpaper falls inside its declared subset and falls back to the scene
-/// engine otherwise, so the choice is a preference rather than a guarantee.
-/// `Compatibility` is the scene engine, which supports every wallpaper.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum VideoBackendModeCfg {
-    Compatibility,
-    #[default]
-    NativePreferred,
 }
 
 /// Which renderer draws a scene wallpaper.
@@ -214,12 +186,6 @@ impl Default for QualityCfg {
 /// expected to be reported as experimental wherever it is surfaced.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExperimentalCfg {
-    /// Where the video backend choice used to live. Read so an existing opt-in
-    /// survives the move to [`AppConfig::video_backend`], and never written
-    /// again: once a config has been saved by this build the key is gone, so
-    /// the migration cannot fire against a choice the user has since changed.
-    #[serde(default, rename = "native_video_backend", skip_serializing)]
-    pub legacy_native_video_backend: Option<bool>,
     /// Pace scene content production to the target rate instead of producing a
     /// frame per display refresh.
     #[serde(default)]
@@ -570,25 +536,12 @@ impl AppConfig {
     /// stores `compatibility` whether or not anyone chose it, so it moves to the
     /// new default once; the marker it gains keeps any later choice, including
     /// a return to Compatibility, from being moved again.
-    ///
-    /// Native video preferred became the default for plain videos the same way:
-    /// `video_backend` is always written, so a config saved before then holds
-    /// `compatibility` whether or not anyone chose it. It moves to native once,
-    /// and the marker it gains keeps a later return to Compatibility.
     pub fn migrate_legacy_keys(&mut self) {
         if !self.native_metal_default_applied {
             self.scene_renderer = SceneRendererModeCfg::NativeMetalPreferred;
             self.native_metal_default_applied = true;
         }
 
-        let legacy_native = self.experimental.legacy_native_video_backend.take();
-        if legacy_native == Some(true) && self.video_backend == VideoBackendModeCfg::Compatibility {
-            self.video_backend = VideoBackendModeCfg::NativePreferred;
-        }
-        if !self.native_video_default_applied {
-            self.video_backend = VideoBackendModeCfg::NativePreferred;
-            self.native_video_default_applied = true;
-        }
 
         let legacy_pause = self.power.legacy_pause_on_battery_power.take();
         let legacy_profile = self.quality.legacy_battery_profile_enabled.take();

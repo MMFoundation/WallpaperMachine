@@ -284,9 +284,6 @@ struct PlaybackSettingsSection: View {
         "A quality preset sets the frame-rate limit and render scale together. The frame-rate limit caps scenes and web wallpapers on every display without rewriting the frame rate saved for each wallpaper; a video plays at its own frame rate. Internal render scale sets how many pixels are rendered before the image is scaled to fit."
       )
       Text(
-        "Video playback picks a backend for each wallpaper. Native is used only for videos it supports; the rest play in Compatibility."
-      )
-      Text(
         "Scene render optimisation reuses work inside a scene and produces the same picture. It only affects scene wallpapers."
       )
       Text(

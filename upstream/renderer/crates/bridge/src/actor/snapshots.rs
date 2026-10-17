@@ -21,7 +21,7 @@ use crate::{
         BridgeStorageStatus, BridgeVideoBackendReport, BridgeWallpaperOptionsSnapshot,
         bridge_log_status,
     },
-    config::{SceneRendererModeCfg, SceneResolutionCfg, SerializedSelector, VideoBackendModeCfg},
+    config::{SceneRendererModeCfg, SceneResolutionCfg, SerializedSelector},
     engine::{ActivationInputs, RendererVideoPipelineState, SceneRuntimeReport},
     display::{DisplayLabelExt, DisplaySelectorExt, DisplaySnapshotExt},
     logging::{ApplicationLogger, LogStatus},
@@ -34,8 +34,6 @@ use crate::{
 const MIRROR_DISPLAY_MODE: &str = "mirror";
 const UNKNOWN_GIT_SHA: &str = "Unknown";
 const SHADER_PIPELINE_VERSION: &str = "0.1.0";
-const VIDEO_BACKEND_COMPATIBILITY: &str = "compatibility";
-const VIDEO_BACKEND_NATIVE_PREFERRED: &str = "native_preferred";
 const RUNNING_BACKEND_NATIVE: &str = "native";
 const SCENE_RENDERER_COMPATIBILITY: &str = "compatibility";
 const SCENE_RENDERER_NATIVE_METAL_PREFERRED: &str = "native_metal_preferred";
@@ -754,12 +752,6 @@ impl BridgeActorState {
                     },
                     bridge_log_status,
                 ),
-            },
-            video_backend: match self.app_config.video_backend {
-                VideoBackendModeCfg::Compatibility => VIDEO_BACKEND_COMPATIBILITY.to_string(),
-                VideoBackendModeCfg::NativePreferred => {
-                    VIDEO_BACKEND_NATIVE_PREFERRED.to_string()
-                }
             },
             video_backends,
             content_pacing_enabled: renderer.content_pacing_enabled,

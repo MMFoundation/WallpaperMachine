@@ -237,9 +237,8 @@ final class NativeVideoWallpaperHost {
     /// session), so a newer one replaces the settle in flight and the surfaces
     /// are asked once.
     ///
-    /// Nothing is started while no surface is open, which is every wake on the
-    /// default Compatibility backend: the observers are cheap, a timer for no
-    /// consumer is not. A surface that opens during the settle has just been
+    /// Nothing is started while no surface is open, which is every wake with no
+    /// video wallpaper: the observers are cheap, a timer for no consumer is not. A surface that opens during the settle has just been
     /// built and has no pipeline to have lost yet.
     private func systemWoke(reason: String) {
         guard !stopped, !surfaces.isEmpty else { return }

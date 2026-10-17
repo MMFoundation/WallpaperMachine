@@ -621,10 +621,6 @@ async fn shown_in_every_kind(engine: &FakeEngineFacade) -> (WallpaperBridge, tem
         .with_power_watching_enabled(false)
         .build()
         .unwrap();
-    bridge
-        .set_video_backend("native_preferred".into())
-        .await
-        .unwrap();
     for (id, title, project, display) in [
         (
             "100",

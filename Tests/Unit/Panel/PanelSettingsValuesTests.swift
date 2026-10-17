@@ -12,7 +12,6 @@ final class PanelSettingsValuesTests: PanelTestCase {
     try await withRecordingPanel { panel, _ in
       let settings = BridgeSnapshotFixtures.settings(
         displays: panel.store.settingsSnapshot.displays, batteryMode: .reducedQuality,
-        videoBackend: "native_preferred",
         videoBackends: [
           BridgeVideoBackendReport(
             displayId: 2, displayName: "Display 2", wallpaperId: "beach", wallpaperTitle: "Beach",
@@ -29,7 +28,6 @@ final class PanelSettingsValuesTests: PanelTestCase {
       playback.addRule(bundleIdentifier: "com.example.sample", name: "Sample")
 
       let performance = panel.controller.performanceSettings
-      XCTAssertEqual(performance.videoBackend, .nativePreferred)
       XCTAssertTrue(performance.contentPacing)
       XCTAssertTrue(performance.sharedVideoDecode)
       XCTAssertEqual(performance.sharedDecode, SharedDecodeReport(sessions: 1, consumers: 3))

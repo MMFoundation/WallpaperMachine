@@ -53,7 +53,7 @@ use crate::{
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
             SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneRenderer,
             SetSceneResolution, SetSceneVideoPlaneSamplingEnabled, SetSharedVideoDecodeEnabled,
-            SetTargetFps, SetVerboseLogging, SetVideoBackend, SetVolume, SetWebAudioSubscribed,
+            SetTargetFps, SetVerboseLogging, SetVolume, SetWebAudioSubscribed,
             Shutdown,
         },
         state::BridgeActorState,
@@ -3496,44 +3496,6 @@ impl<E: EngineFacade + Clone> Message<SetDisplayPresentationSuspended> for Bridg
             if msg.suspended { "suspended" } else { "resumed" }
         );
         Ok(())
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetVideoBackend> for BridgeActor<E> {
-    type Reply = messages::SetVideoBackendReply;
-
-    async fn handle(
-        &mut self,
-        msg: SetVideoBackend,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        if self.state.app_config.video_backend == msg.mode {
-            return Ok(self.all_snapshots());
-        }
-        let mut app_config = self.state.app_config.clone();
-        app_config.video_backend = msg.mode;
-        let generation = self.reserve_reconcile();
-        // A wallpaper that changes backend must stop being rendered by the old
-        // one in the same transition, so the scene list is rebuilt before the
-        // new setting is committed: a failure leaves the previous backend
-        // running rather than nothing at all.
-        let wallpaper_configs = self.state.wallpaper_configs.clone();
-        let result = self.reconcile_engine(app_config.clone(), wallpaper_configs).await
-            .and_then(|scenes| {
-                if let Some(store) = &self.config_store { store.save_app_config(&app_config)?; }
-                Ok(scenes)
-            });
-        let scenes = match result {
-            Ok(scenes) => scenes,
-            Err(error) => {
-                self.reconcile_failure(generation, BridgeError::engine(error.message().to_owned()), ctx.actor_ref().clone());
-                return Err(error);
-            }
-        };
-        self.state.app_config = app_config;
-        self.state.set_active_ids_from_scenes(&scenes);
-        self.finish_reconcile(generation, ctx.actor_ref().clone());
-        Ok(self.all_snapshots())
     }
 }
 

@@ -28,7 +28,6 @@ final class SettingsSectionsRenderTests: PanelTestCase {
     let name = long ? longName : "Studio Display"
     var settings = BridgeSnapshotFixtures.settings(
       displays: panel.store.settingsSnapshot.displays, batteryMode: .reducedQuality,
-      videoBackend: "native_preferred",
       videoBackends: [
         BridgeVideoBackendReport(
           displayId: 1, displayName: name, wallpaperId: "beach", wallpaperTitle: name,
@@ -243,7 +242,7 @@ final class SettingsSectionsRenderTests: PanelTestCase {
     native.nativeVideo = true
     let qualified = PerformanceEnergyReading(
       reading: EnergyReadout(reading: native, comparison: nil, batteryCapacityWattHours: 50)).summary
-    XCTAssertTrue(qualified.hasPrefix("Native video not counted"), "A qualified figure has no grade")
+    XCTAssertTrue(qualified.hasPrefix("Video not counted"), "A qualified figure has no grade")
     XCTAssertFalse(qualified.contains("High energy use"))
     XCTAssertEqual(PerformanceEnergyReading(reading: EnergyReadout(status: .unavailable)).summary, "Unavailable on this Mac")
     XCTAssertEqual(PerformanceEnergyReading(reading: .measuring).summary, "Measuring…")

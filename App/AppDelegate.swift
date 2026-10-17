@@ -184,8 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let lockScreen = LockScreenConfiguration.isSupportedBySystem
                 ? LockScreenWallpaperService(
                     bridge: store.bridge, contentRevision: { [weak store] in store?.wallpaperContentRevision ?? 0 },
-                    sceneRendererSetting: { [weak store] in store?.settingsSnapshot.sceneRenderer },
-                    videoBackendSetting: { [weak store] in store?.settingsSnapshot.videoBackend }) : nil
+                    sceneRendererSetting: { [weak store] in store?.settingsSnapshot.sceneRenderer }) : nil
             if let lockScreen {
                 store.lockScreenWallpaper = lockScreen
                 lockScreen.beforeActivation = { [weak self] in
@@ -287,9 +286,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 }
             }
             webHost.start()
-            // The experimental native video backend. The bridge returns nothing
-            // for it unless the user turned it on, so this host opens no window
-            // and starts no player by default.
+            // Plays every plain video. The bridge returns nothing for a library
+            // with no video wallpaper assigned, so this host opens no window and
+            // starts no player then.
             let nativeVideo = NativeVideoWallpaperHost(bridge: store.bridge, switchHold: hold)
             nativeVideoHost = nativeVideo
             nativeVideo.onStateChanged = { [weak store] state in store?.receiveHostState(state) }

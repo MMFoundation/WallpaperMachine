@@ -5258,23 +5258,14 @@
     "App rules pause, mute or stop wallpapers while a chosen app is running or in front. Your own Play and Pause are not changed." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "Appルールは、選択したAppが実行中または最前面にあるときに壁紙を一時停止、消音、または停止します。手動での再生と一時停止は変更されません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "应用规则会在所选应用正在运行或位于前台时暂停、静音或停止壁纸，不会改动你自己的播放和暂停。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "App 規則會在所選 App 執行中或位於前景時暫停、靜音或停止桌布，不會變更你自己的播放與暫停操作。"}}}
     },
-    "Video playback picks a backend for each wallpaper. Native is used only for videos it supports; the rest play in Compatibility." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ビデオ再生では、壁紙ごとにバックエンドを選択します。「ネイティブ」は対応しているビデオにのみ使用され、それ以外は互換モードで再生されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频播放会为每张壁纸选择后端。原生模式只用于它支持的视频，其余使用兼容模式。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片播放會為每張桌布選擇後端。「原生」只用於它支援的影片，其餘影片會以「相容模式」播放。"}}}
-    },
     "Scene render optimisation reuses work inside a scene and produces the same picture. It only affects scene wallpapers." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "シーンレンダリングの最適化は、シーン内の処理を再利用して同じ画像を生成します。影響するのはシーン壁紙のみです。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "场景渲染优化会复用场景内部的工作并得到同样的画面，只影响场景壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "場景渲染最佳化會重複使用場景內的運算結果，產生相同的畫面，且只影響場景桌布。"}}}
-    },
-    "Video backend" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ビデオバックエンド"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频后端"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片後端"}}}
     },
     "Video playback" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ビデオ再生"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频播放"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片播放"}}}
     },
     "Compatibility" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "互換モード"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "兼容模式"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "相容模式"}}}
-    },
-    "Native video preferred" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブビデオを優先"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "优先原生视频"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "優先使用原生影片"}}}
     },
     "Native Metal preferred" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalを優先"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "优先原生 Metal"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "優先使用原生 Metal"}}}
@@ -5320,9 +5311,6 @@
     },
     "Native Metal" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetal"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal"}}}
-    },
-    "Native plays supported videos through macOS and uses Compatibility for the rest." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "「ネイティブ」は対応しているビデオをmacOS経由で再生し、それ以外には互換モードを使用します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生模式通过 macOS 播放支持的视频，其余自动使用兼容模式。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "「原生」會透過 macOS 播放支援的影片，其餘影片則使用相容模式。"}}}
     },
     "In use now" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "現在使用中"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "当前使用"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "目前使用中"}}}
@@ -5408,8 +5396,8 @@
     "macOS shares GPU energy between apps by GPU time." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "macOSはGPUの使用時間に応じて、各AppにGPUのエネルギーを割り当てます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "macOS 按各应用占用 GPU 的时间分摊 GPU 能耗。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "macOS 依各 App 使用 GPU 的時間分攤 GPU 能源用量。"}}}
     },
-    "Includes the control panel, the lock screen and the CPU side of video decoding. Screen compositing, the hardware video decoder, videos played with Native video, memory and the display itself are not included." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "コントロールパネル、ロック画面、ビデオデコードのCPU処理を含みます。画面の合成処理、ハードウェアビデオデコーダ、ネイティブビデオで再生中のビデオ、メモリ、ディスプレイ本体は含まれません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "包含控制面板、锁屏以及视频解码的 CPU 部分，不包含屏幕合成、硬件视频解码器、以原生视频播放的视频、内存和显示屏本身的耗电。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "包含控制面板、鎖定畫面，以及影片解碼的 CPU 部分；不包含畫面合成、硬體影片解碼器、以原生影片播放的影片、記憶體及顯示器本身的耗電。"}}}
+    "Includes the control panel, the lock screen and the CPU side of video decoding. Screen compositing, the hardware video decoder, memory and the display itself are not included." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Includes the control panel, the lock screen and the CPU side of video decoding. Screen compositing, the hardware video decoder, memory and the display itself are not included."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "コントロールパネル、ロック画面、ビデオデコードのCPU処理を含みます。画面の合成処理、ハードウェアビデオデコーダ、メモリ、ディスプレイ本体は含まれません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "包含控制面板、锁屏以及视频解码的 CPU 部分，不包含屏幕合成、硬件视频解码器、内存和显示屏本身的耗电。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "包含控制面板、鎖定畫面，以及影片解碼的 CPU 部分；不包含畫面合成、硬體影片解碼器、記憶體及顯示器本身的耗電。"}}}
     },
     "Low: below 0.5 W. Medium: 0.5 W to below 2 W. High: 2 W or more." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "低：0.5 W未満。中：0.5 W以上、2 W未満。高：2 W以上。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "低：低于 0.5 W。中：0.5 W 至不足 2 W。高：2 W 及以上。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "低：低於 0.5 W。中：0.5 W 至低於 2 W。高：2 W 以上（含 2 W）。"}}}
@@ -5438,11 +5426,11 @@
     "GPU shared with other apps" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ほかのAppとGPUを共有中"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "GPU 正与其他应用共享"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "GPU 正與其他 App 共用"}}}
     },
-    "Native video not counted" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブビデオは計測対象外"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生视频未计入"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生影片未計入"}}}
+    "Video not counted" : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Video not counted"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ビデオは計測対象外"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频未计入"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片未計入"}}}
     },
-    "macOS decodes and draws videos played with Native video and charges none of that to this app, so these figures leave most of it out. The grade and any comparison are off while one plays." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブビデオで再生するビデオはmacOSがデコードと描画を行い、その分はこのAppに計上されないため、これらの値にはその大部分が含まれません。再生中は評価と比較を行いません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "以原生视频播放的视频由 macOS 解码和绘制，这部分耗电不会计入本应用，因此这些读数不包含其中的大部分。播放期间不给出等级和前后对比。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "以原生影片播放的影片由 macOS 解碼與繪製，這部分耗電不會計入此 App，因此這些數值不包含其中的大部分。播放期間不會顯示等級與前後比較。"}}}
+    "macOS decodes and draws videos and charges none of that to this app, so these figures leave most of it out. The grade and any comparison are off while one plays." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "macOS decodes and draws videos and charges none of that to this app, so these figures leave most of it out. The grade and any comparison are off while one plays."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ビデオのデコードと描画はmacOSが行い、その分はこのAppに計上されないため、これらの値にはその大部分が含まれません。再生中は評価と比較を行いません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频由 macOS 解码和绘制，这部分耗电不会计入本应用，因此这些读数不包含其中的大部分。播放期间不给出等级和前后对比。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片由 macOS 解碼與繪製，這部分耗電不會計入此 App，因此這些數值不包含其中的大部分。播放期間不會顯示等級與前後比較。"}}}
     },
     "Other apps are keeping the GPU busy, so the GPU figure reads higher than this app’s own share. The grade and any comparison wait until the GPU is free." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ほかのAppがGPUを使用しているため、GPUの値がこのApp自身の使用分より高く表示されています。GPUが空くまで、評価と比較は保留されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "其他应用正在大量占用 GPU，因此 GPU 读数会高于本应用实际的份额。等 GPU 空闲后再给出等级和前后对比。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "其他 App 正在大量使用 GPU，因此 GPU 數值會高於此 App 本身的份額。等級與前後比較會等到 GPU 空閒時才顯示。"}}}
