@@ -20,8 +20,12 @@ set(WM_MEDIA_SANITIZE "" CACHE STRING
 set(WM_MEDIA_SOURCES
     ByteSource.cpp
     Checked.cpp
+    CodecConfig.cpp
+    DisplayMatrix.cpp
     Error.cpp
+    IsoBmff/IsoBmffReader.cpp
     Rational.cpp
+    VideoTypes.cpp
 )
 
 add_library(wmMedia STATIC ${WM_MEDIA_SOURCES})

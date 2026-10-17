@@ -4,9 +4,13 @@
 # scripts/check_renderer.py runs them from.
 include(GoogleTest)
 
+# The repository root, so a test can read the bundled starter wallpaper.
+get_filename_component(WM_MEDIA_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+
 function(wm_media_test name)
     add_executable(${name} ${ARGN})
     target_link_libraries(${name} PRIVATE wmMedia GTest::gtest_main)
+    target_compile_definitions(${name} PRIVATE WM_MEDIA_REPO_ROOT="${WM_MEDIA_REPO_ROOT}")
     set_target_properties(${name} PROPERTIES
         CXX_STANDARD 17
         CXX_STANDARD_REQUIRED ON
@@ -18,3 +22,4 @@ function(wm_media_test name)
 endfunction()
 
 wm_media_test(media_core_tests core_tests.cpp byte_source_tests.cpp)
+wm_media_test(media_isobmff_tests isobmff_tests.cpp isobmff_corpus_tests.cpp)
