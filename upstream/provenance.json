@@ -29,6 +29,16 @@
     "modified": true,
     "note": "The published naga 29.0.3 crate (path_in_vcs naga), vendored so codespan-reporting (Apache-2.0) can be an optional dependency; upstream/renderer/Cargo.toml points the workspace at it with [patch.crates-io]. The only differences from the published crate are listed in upstream/naga/PATCHES.md (a non-default `codespan` feature gates the codespan-reporting text helpers); the shader crate does not enable it. LICENSE.MIT and LICENSE.APACHE are the crate's own; the project uses naga under the MIT option."
   },
+  "stb_vorbis": {
+    "repository": "https://github.com/nothings/stb",
+    "file": "stb_vorbis.c",
+    "version": "1.22 (2021-07-11)",
+    "revision": "1ee679ca2ef753a528db5ba6801e1067b40481b8",
+    "license": "Public domain (Unlicense) or MIT, licensee's choice",
+    "directory": "upstream/renderer/external/open-wallpaper-engine/third_party/stb_vorbis",
+    "modified": false,
+    "note": "One C source file, copied byte for byte (git blob 3e5c2504c08f76b9d04e4adfbce80818631e835e, 192790 bytes, SHA-256 4c7cb2ff1f7011e9d67950446b7eb9ca044f2e464d76bfbb0b84dd2e23e65636), with the repository's LICENSE at the same commit and a README recording the pin. Vendored 2026-10-17 as the Ogg Vorbis decoder behind scene sounds, because the system has no Vorbis decoder; built as the static library stb_vorbis with STB_VORBIS_NO_STDIO and STB_VORBIS_NO_PUSHDATA_API (memory and the pull API only). The file is not patched. stb_vorbis trusts the vendor-string length and the comment count and lengths in the Ogg comment header (a crafted file can crash it), so Renderer/Sound/Vorbis/VorbisDecoder.cpp, its only user, checks the identification and comment headers against their own bytes before calling it. scripts/package.py copies third_party/*/LICENSE* into the app's Licenses/renderer-third-party."
+  },
   "sceneMediaChanges": "2026-09-21: media delivery follows the effective consumer set (pause, power policy, presentation suspend, per-display suspend) while consent stays a separate question; cover updates replace one texture instead of rebuilding the render graph, and an unchanged cover is a true no-op. 2026-09-20: SceneScript video.isPlaying, vector.mix and MediaPlaybackEvent compatibility; native host media snapshots routed through the bridge and core actor to scene scripts, $mediaThumbnail and $mediaPreviousThumbnail. Effect shaders receive owner layer and screen projection matrices; empty scenes initialize their camera pointer. Shader pipeline revision 6 reserves array varying locations, narrows unambiguous vector function arguments, and shares compatible custom uniform vector prefixes across stages. Synthetic media events/artwork and asset inspection options added to the offscreen probe. Regression coverage in Swift, bridge, shader and C++ tests.",
   "project": "WallpaperMachine",
   "recorded": "2026-10-17",

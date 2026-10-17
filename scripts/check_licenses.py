@@ -227,6 +227,8 @@ COMPONENTS = {
     "effolkronium-random": Entry("MIT", "vendored header (random.hpp); its header states MIT"),
     "vog-sha1": Entry("LicenseRef-PublicDomain", "vendored header (sha1.hpp); its header states 100% public domain"),
     "stb_image": Entry("MIT OR Unlicense", "vendored header; public domain or MIT at the user's choice"),
+    "stb_vorbis": Entry("MIT OR Unlicense", "vendored source (stb_vorbis.c 1.22, unchanged), linked as the static archive "
+                        "stb_vorbis; public domain or MIT at the user's choice"),
     "vulkan-memory-allocator": Entry("MIT", "vendored header (vk_mem_alloc.h); its header states MIT"),
     "glad": Entry(None, "added to the CMake project but never linked; license not checked", "not-linked"),
     "quickjs-ng": Entry("MIT", "Homebrew dylib"),

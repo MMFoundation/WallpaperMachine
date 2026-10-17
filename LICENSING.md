@@ -214,6 +214,7 @@ see [Rust crates](#rust-crates) for how.
 | ungive/mediaremote-adapter | `upstream/mediaremote-adapter` | BSD-3-Clause | Compatible; embedded as an unlinked framework |
 | miniaudio | `upstream/renderer/external/open-wallpaper-engine/third_party/miniaudio` | Public domain or MIT-0 (choice) | Compatible |
 | stb_image | `upstream/renderer/external/open-wallpaper-engine/third_party/stb_image.h`, v2.26 | Public domain or MIT, licensee's choice (end of the header) | Compatible |
+| stb_vorbis | `upstream/renderer/external/open-wallpaper-engine/third_party/stb_vorbis`, v1.22 (nothings/stb commit `1ee679ca`), unchanged, linked statically (`stb_vorbis`) | Public domain (Unlicense) or MIT, licensee's choice (`LICENSE` there and the end of `stb_vorbis.c`) | Compatible |
 | Vulkan Memory Allocator | `upstream/renderer/external/open-wallpaper-engine/third_party/vk_mem_alloc.h` | MIT (stated in the header) | Compatible |
 | **spirv_reflect** | `upstream/renderer/external/open-wallpaper-engine/third_party/spirv_reflect`, linked statically (`spirv-reflect-static`) | Apache-2.0 | **Incompatible with GPLv2** (see below) |
 | nlohmann-json, argparse | Homebrew, header-only | MIT | Compatible |
@@ -441,7 +442,7 @@ report-only mode until the blockers below are cleared.
 - `Contents/Resources/Licenses/<formula>-<version>/`: every `LICENSE*`,
   `COPYING*`, `COPYRIGHT*` and `NOTICE*` file of each Homebrew keg in the link
   closure;
-- `Contents/Resources/Licenses/renderer-third-party/{miniaudio,spirv_reflect}/LICENSE`.
+- `Contents/Resources/Licenses/renderer-third-party/{miniaudio,spirv_reflect,stb_vorbis}/LICENSE`.
 
 Xcode separately bundles `Contents/Resources/LICENSE` (mediaremote-adapter's
 BSD-3-Clause notice) and the extension's `Phosphene-LICENSE.txt`.
