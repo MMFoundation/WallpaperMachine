@@ -130,8 +130,9 @@ automation schedulers, the web and native-video wallpaper hosts, system media).
 
 An explicitly opened preview window (`WallpaperPreviewWindowController`) is a regular window.
 `App/Services/Preview/` gives it one isolated surface through `WallpaperPreviewSession`: a
-separate WebKit page or a private Compatibility renderer attached to an ordinary `CAMetalLayer`
-view (`App/Bridge/WallpaperPreviewBridge.h` imports the scene C API), never an engine display
+separate WebKit page, a private scene renderer attached to an ordinary `CAMetalLayer`
+view (`App/Bridge/WallpaperPreviewBridge.h` imports the scene C API), or, for a plain video, the
+app's own players in a plain view (`VideoWallpaperPreviewSurface`), never an engine display
 assignment. The bridge's read-only preview export supplies the draft inputs, and preview
 shutdown precedes renderer shutdown. Playback limits are in
 [live preview](features/wallpaper-properties.md#live-preview).

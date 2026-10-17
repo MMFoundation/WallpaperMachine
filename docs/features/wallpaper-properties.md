@@ -44,9 +44,12 @@ superseded load cannot replace the newer preview. Load failures stay in the wind
 with their reason and a reload action; first-frame or page readiness has a
 30-second budget while visible.
 
-Scene and video previews use a private Compatibility renderer attached to the
-window, independently of the desktop's renderer preference, and scene hover,
-buttons and dragging are scoped to that view. Web previews reuse the wallpaper
+A scene preview uses a private renderer attached to the window, independently of the
+desktop's renderer preference, and scene hover, buttons and dragging are scoped to that
+view. A video preview plays with the app's own players in the same view (AVFoundation for
+the containers macOS opens, the WebM player for WebM and Matroska), never the scene engine;
+it follows the wallpaper's scaling mode but not its scale factor or position, and a clip
+neither player can play is a failed preview with the reason. Web previews reuse the wallpaper
 host protocol in a separate, nonpersistent website data store and support ordinary
 in-window interaction; preview storage is discarded on close and is not the
 desktop page's localStorage or signed-in session. File and directory properties

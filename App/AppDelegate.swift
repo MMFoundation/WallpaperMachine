@@ -2012,6 +2012,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 return try await loader.validate(request)
             }, makeSurface: { request, generation in
                 if request.kind == .web { return WebWallpaperPreviewSurface(request: request, generation: generation) }
+                if request.kind == .video { return VideoWallpaperPreviewSurface(request: request) }
                 return SceneWallpaperPreviewSurface(request: request)
             })
             let controller = WallpaperPreviewWindowController(session: session, displayAspect: { [weak store] displayID in
