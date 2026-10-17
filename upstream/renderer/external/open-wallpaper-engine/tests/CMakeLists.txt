@@ -107,6 +107,7 @@ add_executable(
     audio_tests
     audio/audio_response_mono_test.cpp
     audio/ffmpeg_sound_stream_test.cpp
+    audio/sound_stream_test.cpp
     audio/audio_decode_pump_test.cpp
     fs/limited_binary_stream_test.cpp
     audio/sample_math_test.cpp
