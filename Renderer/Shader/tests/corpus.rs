@@ -7,10 +7,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use wm_shader::facts::Facts;
 use wm_shader::include::{IncludeError, IncludeErrorKind};
+use wm_shader::items::{BraceMode, scan_items};
+use wm_shader::lexer::lex;
+use wm_shader::prepare::prepare_program;
 use wm_shader::preprocess::{Mode, preprocess_stage};
+use wm_shader::response::UniformValue;
 use wm_shader::source::IncludeSource;
-use wm_shader::{Combo, StageKind};
+use wm_shader::{Combo, ShaderRequest, Stage, StageKind, TextureRecord};
 
 /// The shipped shader folder: `WALLPAPER_MACHINE_ASSETS_ROOT` (the folder that holds `shaders/`)
 /// or the default application support location.
@@ -162,4 +167,238 @@ fn lit_shaders_expand_the_lighting_block() {
         }
     }
     assert!(checked > 0, "no stock stage requires the lighting block under the given combos");
+}
+
+/// Pairs `<name>.vert` with `<name>.frag`; a missing half is an empty `main`.
+fn pairs(files: &[(String, StageKind, String)]) -> Vec<(String, String, String)> {
+    let mut names: Vec<&str> = files.iter().map(|(n, _, _)| n.as_str()).collect();
+    names.dedup();
+    let find = |name: &str, kind: StageKind| {
+        files.iter().find(|(n, k, _)| n == name && *k == kind).map(|(_, _, t)| t.clone()).unwrap_or_else(|| "void main() { }\n".to_string())
+    };
+    names.into_iter().map(|n| (n.to_string(), find(n, StageKind::Vertex), find(n, StageKind::Fragment))).collect()
+}
+
+fn request(name: &str, vertex: &str, fragment: &str, combos: &[Combo], textures: Vec<TextureRecord>) -> wm_shader::ValidRequest {
+    ShaderRequest {
+        shader_name: name.to_string(),
+        stages: vec![
+            Stage { kind: StageKind::Vertex, source: vertex.to_string() },
+            Stage { kind: StageKind::Fragment, source: fragment.to_string() },
+        ],
+        combos: combos.to_vec(),
+        textures,
+        ..ShaderRequest::default()
+    }
+    .validate()
+    .unwrap()
+}
+
+fn present_textures() -> Vec<TextureRecord> {
+    (0..8u8).map(TextureRecord::new).map(|mut t| {
+        t.enabled = true;
+        t.components.compo1 = true;
+        t.components.compo2 = true;
+        t.components.compo3 = true;
+        t.components.compo4 = true;
+        t
+    }).collect()
+}
+
+#[test]
+fn every_shipped_stage_scans_in_both_shapes_and_yields_facts() {
+    let root = require_assets!();
+    let includes = DiskIncludes(root.clone());
+    let files = shader_files(&root);
+    let mut failures = Vec::new();
+    let mut tokens_total = 0usize;
+    let started = std::time::Instant::now();
+    for (set_name, combos) in combo_sets() {
+        for (name, kind, text) in &files {
+            let view = match preprocess_stage(*kind, text, &combos, &includes, Mode::MetadataPreserving) {
+                Ok(o) => o.text,
+                Err(e) => {
+                    failures.push(format!("{name} ({set_name}) view: {e}"));
+                    continue;
+                }
+            };
+            let tokens = lex(&view);
+            if let Err(e) = scan_items(&tokens, &view, BraceMode::Conditional) {
+                failures.push(format!("{name} ({set_name}) view scan: {e:?}"));
+            }
+            let evaluated = preprocess_stage(*kind, text, &combos, &includes, Mode::Evaluated).unwrap().text;
+            let tokens = lex(&evaluated);
+            tokens_total += tokens.len();
+            match scan_items(&tokens, &evaluated, BraceMode::Compiled) {
+                Ok(items) => {
+                    // Items cover the stream exactly once.
+                    let mut next = 0;
+                    for item in &items {
+                        assert_eq!(item.tokens.start, next, "{name}");
+                        next = item.tokens.end;
+                    }
+                    assert_eq!(next, tokens.len(), "{name}");
+                    let main = items.iter().filter_map(|i| i.function()).any(|f| f.name == "main" && f.return_type == "void");
+                    // The `HLSL/` folder holds Direct3D fallback programs in real HLSL: no GLSL-style `main`.
+                    if !main && !name.starts_with("HLSL/") {
+                        failures.push(format!("{name} ({set_name}): no `void main` found"));
+                    }
+                }
+                Err(e) => failures.push(format!("{name} ({set_name}) evaluated scan: {e:?}")),
+            }
+            let facts = Facts::analyze(&tokens);
+            assert!(facts.summaries().count() > 0 || tokens.is_empty());
+        }
+    }
+    eprintln!("lexed, scanned and analysed {tokens_total} tokens in {:?}", started.elapsed());
+    assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));
+}
+
+#[test]
+fn every_shipped_program_prepares_with_and_without_textures() {
+    let root = require_assets!();
+    let includes = DiskIncludes(root.clone());
+    let files = shader_files(&root);
+    let programs = pairs(&files);
+    assert!(programs.len() > 30);
+    let mut failures = Vec::new();
+    for (set_name, combos) in combo_sets() {
+        for textures in [vec![], present_textures()] {
+            for (name, vertex, fragment) in &programs {
+                let r = request(name, vertex, fragment, &combos, textures.clone());
+                if let Err(e) = prepare_program(&r, &includes) {
+                    failures.push(format!("{name} ({set_name}, {} textures): {e}", textures.len()));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));
+}
+
+fn program(root: &Path, name: &str, combos: &[Combo], textures: Vec<TextureRecord>) -> wm_shader::prepare::PreparedProgram {
+    let read = |ext: &str| fs::read_to_string(root.join(format!("{name}.{ext}"))).unwrap_or_else(|_| "void main() { }\n".to_string());
+    let r = request(name, &read("vert"), &read("frag"), combos, textures);
+    prepare_program(&r, &DiskIncludes(root.to_path_buf())).unwrap_or_else(|e| panic!("{name}: {e}"))
+}
+
+#[test]
+fn annotations_of_stock_shaders_are_reported() {
+    let root = require_assets!();
+    let p = program(&root, "genericimage4", &[], vec![]);
+    let fog = p.metadata.combos.iter().find(|c| c.name == "FOG").expect("FOG is reported");
+    assert_eq!(fog.value, "1");
+    let atlas = p.metadata.default_textures.iter().find(|t| t.slot == 6).expect("the shadow atlas default");
+    assert_eq!(atlas.path, "_rt_shadowAtlas");
+    // The request wins and the compiled text carries the default of the others.
+    let p = program(&root, "genericimage4", &[combo("FOG", "0")], vec![]);
+    assert!(p.compile_combos.iter().any(|c| c.name == "FOG" && c.value == "0"));
+    let p = program(&root, "genericimage4", &[], vec![]);
+    assert!(p.stages[1].evaluated.contains("#define FOG 1\n"), "the FOG default becomes a macro");
+
+    let p = program(&root, "generic3", &[], vec![]);
+    assert!(p.metadata.aliases.iter().any(|a| a.material == "brightness" && a.uniform == "g_Brightness"));
+    let brightness = p.metadata.default_uniforms.iter().find(|d| d.name == "g_Brightness");
+    assert!(matches!(brightness.map(|d| &d.value), Some(UniformValue::Number(_))));
+
+    let p = program(&root, "foliage4", &[], vec![]);
+    for name in ["LIGHTING", "FOG", "REFLECTION"] {
+        assert!(p.metadata.combos.iter().any(|c| c.name == name), "{name}");
+    }
+    assert!(p.metadata.combos.iter().any(|c| c.name == "LIGHTING" && c.value == "1"));
+
+    // An include below shader level carries an annotated uniform.
+    for name in ["genericparticle", "genericropeparticle"] {
+        let p = program(&root, name, &[], vec![]);
+        let refract = p.metadata.default_uniforms.iter().find(|d| d.name == "g_RefractAmount").unwrap_or_else(|| panic!("{name}"));
+        let UniformValue::Number(v) = refract.value else { panic!("{name}") };
+        assert!((v - 0.05).abs() < 1e-6, "{name}");
+        assert!(p.metadata.aliases.iter().any(|a| a.uniform == "g_RefractAmount"), "{name}");
+    }
+}
+
+#[test]
+fn stock_combo_defaults_follow_the_branches_that_are_active() {
+    let root = require_assets!();
+    // With the lighting default on (foliage4), the compiled text has the lighting block when the pass is lit.
+    let combos = [combo("LIGHTS_POINT", "1")];
+    let p = program(&root, "foliage4", &combos, vec![]);
+    assert!(p.compile_combos.iter().any(|c| c.name == "LIGHTING"));
+    assert!(p.stages[1].evaluated.contains("PerformLighting_V1(vec3 worldPos"));
+    assert!(p.stages[1].evaluated.contains("uniform vec4 g_LPoint_Color[1];"));
+}
+
+#[test]
+fn texture_derived_combos_of_a_stock_program_follow_the_texture_facts() {
+    let root = require_assets!();
+    let with = program(&root, "genericimage4", &[], present_textures());
+    let without = program(&root, "genericimage4", &[], vec![]);
+    let value = |p: &wm_shader::prepare::PreparedProgram, name: &str| p.metadata.combos.iter().find(|c| c.name == name).map(|c| c.value.clone());
+    // `g_Texture1` carries a mask switch in the stock image shader.
+    let masked = |p| value(p, "MASK");
+    assert_eq!(masked(&without).as_deref().unwrap_or("0"), "0");
+    if let Some(v) = masked(&with) {
+        assert_eq!(v, "1");
+    }
+}
+
+fn workshop_root() -> Option<PathBuf> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/p5/workshop-shaders");
+    root.is_dir().then_some(root)
+}
+
+/// Includes of a workshop shader: the wallpaper's own `shaders/` folder first, then the stock assets.
+struct LayeredIncludes {
+    own: PathBuf,
+    stock: PathBuf,
+}
+
+impl IncludeSource for LayeredIncludes {
+    fn read(&self, path: &str) -> Result<String, IncludeError> {
+        let err = |kind| IncludeError { path: path.to_string(), kind };
+        for dir in [&self.own, &self.stock] {
+            if let Ok(bytes) = fs::read(dir.join(path)) {
+                return String::from_utf8(bytes).map_err(|_| err(IncludeErrorKind::NotUtf8));
+            }
+        }
+        Err(err(IncludeErrorKind::NotFound))
+    }
+}
+
+#[test]
+fn workshop_shaders_from_the_local_library_prepare_or_fail_cleanly() {
+    let Some(stock) = shaders_root() else {
+        eprintln!("skipped: the shipped shader folder is absent");
+        return;
+    };
+    let Some(workshop) = workshop_root() else {
+        eprintln!("skipped: no unpacked workshop shaders under artifacts/p5/workshop-shaders (unpack scene.pkg copies there)");
+        return;
+    };
+    let mut ok = 0;
+    let mut failures = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for entry in fs::read_dir(&workshop).unwrap().filter_map(Result::ok) {
+        let own = entry.path().join("shaders");
+        let files = shader_files(&own);
+        let includes = LayeredIncludes { own: own.clone(), stock: stock.clone() };
+        for (name, vertex, fragment) in pairs(&files) {
+            // The same effect shipped by many wallpapers is checked once per distinct text.
+            if !seen.insert((name.clone(), vertex.clone(), fragment.clone())) {
+                continue;
+            }
+            for combos in [vec![], vec![combo("LIGHTING", "1"), combo("LIGHTS_POINT", "2"), combo("FOG", "1")]] {
+                let r = request(&name, &vertex, &fragment, &combos, present_textures());
+                match prepare_program(&r, &includes) {
+                    Ok(_) => ok += 1,
+                    Err(e) => failures.push(format!("{}/{name}: {e}", entry.file_name().to_string_lossy())),
+                }
+            }
+        }
+    }
+    eprintln!("workshop programs prepared: {ok}, failed: {}", failures.len());
+    // Failures are reported as plain-text errors, never crashes. Print them for review.
+    for f in &failures {
+        eprintln!("workshop failure: {}", f.lines().next().unwrap_or(""));
+    }
+    assert!(ok > 0);
 }

@@ -276,15 +276,15 @@ fn is_directive_line(raw: &str) -> bool {
 }
 
 /// A parsed directive line.
-struct Directive {
-    keyword: String,
+pub(crate) struct Directive {
+    pub(crate) keyword: String,
     /// Continuations joined, trailing comment removed, trimmed (R13, R14).
-    body: String,
+    pub(crate) body: String,
     /// `#` and then the directive text, trimmed (R15); line breaks of a continuation stay.
-    normalised: String,
+    pub(crate) normalised: String,
 }
 
-fn parse_directive(logical: &str) -> Directive {
+pub(crate) fn parse_directive(logical: &str) -> Directive {
     let after_hash = logical.trim_start_matches(|c: char| c.is_ascii_whitespace() || c == '\u{b}');
     let after_hash = &after_hash[1..];
     let normalised = format!("#{}", after_hash.trim_matches(|c: char| c.is_whitespace()));
@@ -319,15 +319,15 @@ fn strip_directive_comment(body: &str) -> &str {
     body
 }
 
-struct DefineParts {
-    name: String,
-    function_like: bool,
+pub(crate) struct DefineParts {
+    pub(crate) name: String,
+    pub(crate) function_like: bool,
     /// Empty for a bare `#define NAME`.
-    replacement: String,
+    pub(crate) replacement: String,
 }
 
 /// R18. `None` is the "expects a macro name" error.
-fn parse_define(body: &str) -> Option<DefineParts> {
+pub(crate) fn parse_define(body: &str) -> Option<DefineParts> {
     let bytes = body.as_bytes();
     if !bytes.first().is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_') {
         return None;
@@ -365,7 +365,7 @@ fn parse_define(body: &str) -> Option<DefineParts> {
 }
 
 /// `"path"` or `<path>` (R20). `None` is the "expects a quoted include path" error.
-fn parse_include_path(body: &str) -> Option<&str> {
+pub(crate) fn parse_include_path(body: &str) -> Option<&str> {
     if let Some(inner) = body.strip_prefix('"') {
         let close = inner.find('"')?;
         return (close + 1 == inner.len()).then_some(&inner[..close]);

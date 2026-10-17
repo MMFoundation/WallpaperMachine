@@ -690,7 +690,7 @@ impl TokenStream {
 /// Lexes `text`. Total: every byte is covered by a token, whitespace or a
 /// dropped comment (R39).
 pub fn lex(text: &str) -> TokenStream {
-    Lexer { text, bytes: text.as_bytes(), pos: 0, tokens: Vec::new() }.run()
+    Lexer { text, bytes: text.as_bytes(), pos: 0, tokens: Vec::new(), block_close_missing: false }.run()
 }
 
 struct Lexer<'a> {
@@ -698,6 +698,8 @@ struct Lexer<'a> {
     bytes: &'a [u8],
     pos: usize,
     tokens: Vec<Token>,
+    /// Set once a `/*` found no `*/`: no later one can find a closer either.
+    block_close_missing: bool,
 }
 
 fn is_ident_start(b: u8) -> bool {
@@ -777,9 +779,11 @@ impl Lexer<'_> {
 
     fn block_comment(&mut self) {
         let start = self.pos;
-        match self.text[start + 2..].find("*/") {
+        let close = if self.block_close_missing { None } else { self.text[start + 2..].find("*/") };
+        match close {
             Some(p) => self.pos = start + 2 + p + 2,
             None => {
+                self.block_close_missing = true;
                 // Not a comment: `/` and `*` lex as operators.
                 self.push(TokenKind::Operator(Operator::Div), start, start + 1);
                 self.pos = start + 1;

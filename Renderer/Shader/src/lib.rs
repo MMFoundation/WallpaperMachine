@@ -8,15 +8,20 @@
 #![deny(warnings)]
 #![cfg_attr(not(feature = "ffi"), forbid(unsafe_code))]
 
+pub mod annotation;
 pub mod binding;
 pub mod cache_key;
 pub mod diagnostic;
 pub mod error;
+pub mod facts;
 pub mod identity;
 pub mod include;
+pub mod items;
 pub mod json;
 pub mod lexer;
+pub mod metadata;
 pub mod names;
+pub mod prepare;
 pub mod preprocess;
 pub mod reflection;
 pub mod request;
