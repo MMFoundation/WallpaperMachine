@@ -458,11 +458,15 @@ use the release workflow for the shared lock. The script's docstring and
 ### Test (`test.yml`)
 
 The test gate on hosted runners, run by hand from **Actions -> Test -> Run
-workflow** for any `ref` (default `main`). It does not tag, build the Release app or
-publish, and no release waits for it ([why](#build-buildyml)). Its three jobs run in
-parallel on `macos-26` runners, each after `prepare-build` and `python3 scripts/build.py
---renderer-only` for the renderer and the generated bridge, so a run takes about as long
-as the native tests (about 25 minutes for 1.5) rather than the sum (over 40):
+workflow** on the branch or tag chosen under "Use workflow from" (`--ref` below). It
+does not tag, build the Release app or publish, and no release waits for it
+([why](#build-buildyml)). It has no input naming another ref to test: its jobs save
+caches under the ref the run starts from, and a run started from `main` that built
+another ref's code would let that code write the caches every release restores. Its
+three jobs run in parallel on `macos-26` runners, each after `prepare-build` and
+`python3 scripts/build.py --renderer-only` for the renderer and the generated bridge,
+so a run takes about as long as the native tests (about 25 minutes for 1.5) rather
+than the sum (over 40):
 
 - `rust` runs `python3 scripts/check_rust.py`;
 - `renderer` runs `python3 scripts/check_renderer.py --allow-missing-gpu
@@ -477,8 +481,8 @@ as the native tests (about 25 minutes for 1.5) rather than the sum (over 40):
   [Parallel execution](testing/README.md#parallel-execution) for why.
 
 ```sh
-gh workflow run test.yml --ref main -f ref=main
-gh workflow run test.yml --ref main -f ref=main -f skip_renderer=true -f only="SettingsWindowRenderTests WorkshopBrowserRenderTests"
+gh workflow run test.yml --ref main
+gh workflow run test.yml --ref <branch> -f skip_renderer=true -f only="SettingsWindowRenderTests WorkshopBrowserRenderTests"
 ```
 
 `only` passes each space-separated name to `scripts/test.py --only`, and
