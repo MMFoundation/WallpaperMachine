@@ -27,11 +27,11 @@ fn main() {
         "wpBrandNew",
         "wmMediaApple",
         "wmMedia",
-        "spirv-reflect-static",
+        "stb_vorbis",
     ] {
         println!("cargo:rustc-link-lib=static={lib}");
     }
-    for lib in ["c++", "vulkan", "glslang", "SPIRV"] {
+    for lib in ["c++", "lz4", "freetype"] {
         println!("cargo:rustc-link-lib=dylib={lib}");
     }
     for framework in ["Metal", "AppKit"] {
@@ -255,42 +255,43 @@ class AppWalkTests(unittest.TestCase):
     def opt(self, formula, library):
         return str(self.prefix / "opt" / formula / "lib" / library)
 
-    def walk(self, tools, seeds=(), prefix=True):
-        return check_licenses.walk_app(self.app, tools, self.prefix if prefix else None, seeds)
+    def walk(self, tools, prefix=True):
+        return check_licenses.walk_app(self.app, tools, self.prefix if prefix else None)
 
     def test_homebrew_dependencies_resolve_to_their_kegs_transitively_and_cycles_end(self):
-        self.keg("glslang", "16.6.0", "libglslang.16.dylib", "libSPIRV.16.dylib")
-        self.keg("spirv-tools", "1.4.357.0", "libSPIRV-Tools.dylib", "libSPIRV-Tools-opt.dylib")
+        self.keg("sample-lib", "16.6.0", "libsample.16.dylib", "libsampleio.16.dylib")
+        self.keg("sample-tools", "1.4.357.0", "libsample-tools.dylib", "libsample-tools-opt.dylib")
         tools = FakeTools(otool={
             "Main": ["/usr/lib/libc++.1.dylib", "/System/Library/Frameworks/Metal.framework/Versions/A/Metal",
-                     self.opt("glslang", "libglslang.16.dylib"), "@rpath/libswiftCore.dylib"],
-            "Ext": [self.opt("glslang", "libSPIRV.16.dylib"), "/usr/lib/libSystem.B.dylib"],
-            "libglslang.16.dylib": [self.opt("spirv-tools", "libSPIRV-Tools-opt.dylib")],
-            "libSPIRV.16.dylib": [],
-            "libSPIRV-Tools-opt.dylib": [self.opt("spirv-tools", "libSPIRV-Tools.dylib")],
+                     self.opt("sample-lib", "libsample.16.dylib"), "@rpath/libswiftCore.dylib"],
+            "Ext": [self.opt("sample-lib", "libsampleio.16.dylib"), "/usr/lib/libSystem.B.dylib"],
+            "libsample.16.dylib": [self.opt("sample-tools", "libsample-tools-opt.dylib")],
+            "libsampleio.16.dylib": [],
+            "libsample-tools-opt.dylib": [self.opt("sample-tools", "libsample-tools.dylib")],
             # A cycle back to the first library must not loop.
-            "libSPIRV-Tools.dylib": [self.opt("glslang", "libglslang.16.dylib")],
+            "libsample-tools.dylib": [self.opt("sample-lib", "libsample.16.dylib")],
         })
         walk = self.walk(tools)
         self.assertEqual(len(walk.roots), 2)
         self.assertEqual({path.name for path in walk.libraries},
-                         {"libglslang.16.dylib", "libSPIRV.16.dylib", "libSPIRV-Tools-opt.dylib", "libSPIRV-Tools.dylib"})
+                         {"libsample.16.dylib", "libsampleio.16.dylib", "libsample-tools-opt.dylib", "libsample-tools.dylib"})
         self.assertEqual(walk.unresolved, [])
         self.assertEqual(walk.system, {"/usr/lib/libc++.1.dylib", "/System/Library/Frameworks/Metal.framework/Versions/A/Metal",
                                        "@rpath/libswiftCore.dylib", "/usr/lib/libSystem.B.dylib"})
         analysed = [command[2] for command in tools.commands if command[0] == "otool"]
         self.assertEqual(len(analysed), len(set(analysed)), "every file is read once")
 
-        licenses = {"glslang": "BSD-3-Clause AND GPL-3.0-or-later AND MIT AND Apache-2.0", "spirv-tools": "Apache-2.0"}
+        # Fictional kegs, so the classes below come from the license strings Homebrew reports.
+        licenses = {"sample-lib": "BSD-3-Clause AND GPL-3.0-or-later AND MIT AND Apache-2.0", "sample-tools": "Apache-2.0"}
         components = check_licenses.dylib_components(walk, self.prefix, self.app,
                                                      FakeTools(brew_licenses=licenses))
         by_name = {c.name: c for c in components}
-        self.assertEqual(sorted(by_name), ["glslang", "spirv-tools"])
-        self.assertEqual(by_name["glslang"].version, "16.6.0")
-        self.assertEqual(by_name["glslang"].source, "brew")
-        self.assertEqual(by_name["glslang"].files, ("libSPIRV.16.dylib", "libglslang.16.dylib"))
-        self.assertEqual(check_licenses.assess(by_name["glslang"])[1], ("gpl3", "apache"))
-        self.assertEqual(check_licenses.assess(by_name["spirv-tools"])[0], "apache")
+        self.assertEqual(sorted(by_name), ["sample-lib", "sample-tools"])
+        self.assertEqual(by_name["sample-lib"].version, "16.6.0")
+        self.assertEqual(by_name["sample-lib"].source, "brew")
+        self.assertEqual(by_name["sample-lib"].files, ("libsample.16.dylib", "libsampleio.16.dylib"))
+        self.assertEqual(check_licenses.assess(by_name["sample-lib"])[1], ("gpl3", "apache"))
+        self.assertEqual(check_licenses.assess(by_name["sample-tools"])[0], "apache")
 
     def test_without_homebrew_the_table_supplies_the_license_and_says_so(self):
         self.keg("lz4", "1.10.0", "liblz4.1.dylib")
@@ -308,26 +309,26 @@ class AppWalkTests(unittest.TestCase):
 
     def test_a_packaged_app_resolves_rpath_into_its_frameworks(self):
         frameworks = self.app / "Contents/Frameworks"
-        for name in ("libglslang.16.dylib", "libSPIRV-Tools.dylib", "libmystery.1.dylib"):
+        for name in ("liblz4.1.dylib", "libdav1d.7.dylib", "libmystery.1.dylib"):
             self.touch(frameworks / name)
         self.touch(frameworks / "MediaRemoteAdapter.framework/Versions/A/MediaRemoteAdapter")
         (frameworks / "MediaRemoteAdapter.framework/MediaRemoteAdapter").symlink_to("Versions/A/MediaRemoteAdapter")
         tools = FakeTools(otool={
-            "Main": ["@rpath/libglslang.16.dylib", "@rpath/libswiftCore.dylib"],
-            "Ext": ["@rpath/libglslang.16.dylib"],
-            "libglslang.16.dylib": ["@rpath/libSPIRV-Tools.dylib"],
-            "libSPIRV-Tools.dylib": [],
+            "Main": ["@rpath/liblz4.1.dylib", "@rpath/libswiftCore.dylib"],
+            "Ext": ["@rpath/liblz4.1.dylib"],
+            "liblz4.1.dylib": ["@rpath/libdav1d.7.dylib"],
+            "libdav1d.7.dylib": [],
             "libmystery.1.dylib": [],
             "MediaRemoteAdapter": [],
         })
         walk = self.walk(tools, prefix=False)
         self.assertEqual({path.name for path in walk.libraries},
-                         {"libglslang.16.dylib", "libSPIRV-Tools.dylib", "libmystery.1.dylib", "MediaRemoteAdapter"})
+                         {"liblz4.1.dylib", "libdav1d.7.dylib", "libmystery.1.dylib", "MediaRemoteAdapter"})
         components = {c.name: c for c in check_licenses.dylib_components(walk, None, self.app, FakeTools())}
-        self.assertEqual(sorted(components), ["glslang", "libmystery.1.dylib", "mediaremote-adapter", "spirv-tools"])
+        self.assertEqual(sorted(components), ["dav1d", "libmystery.1.dylib", "lz4", "mediaremote-adapter"])
         self.assertEqual(check_licenses.assess(components["libmystery.1.dylib"])[0], "unknown")
         self.assertEqual(check_licenses.assess(components["mediaremote-adapter"])[0], "ok")
-        self.assertEqual(check_licenses.assess(components["spirv-tools"])[0], "apache")
+        self.assertEqual(check_licenses.assess(components["dav1d"])[0], "ok")
 
     def test_an_unresolvable_dependency_is_reported_not_dropped(self):
         tools = FakeTools(otool={"Main": ["@rpath/libgone.dylib", "/opt/homebrew/opt/nothing/lib/libnothing.dylib"], "Ext": []})
@@ -337,14 +338,6 @@ class AppWalkTests(unittest.TestCase):
         components = check_licenses.dylib_components(walk, None, self.app, FakeTools())
         self.assertEqual({check_licenses.assess(c)[0] for c in components}, {"unknown"})
         self.assertTrue(all("not found" in c.note for c in components))
-
-    def test_seeds_are_walked_even_though_nothing_links_them(self):
-        keg = self.keg("molten-vk", "1.4.2", "libMoltenVK.dylib")
-        tools = FakeTools(otool={"Main": [], "Ext": [], "libMoltenVK.dylib": ["/usr/lib/libc++.1.dylib"]})
-        walk = self.walk(tools, seeds=[keg / "libMoltenVK.dylib"])
-        components = check_licenses.dylib_components(walk, self.prefix, self.app, FakeTools(brew_licenses={"molten-vk": "Apache-2.0"}))
-        self.assertEqual([c.name for c in components], ["molten-vk"])
-        self.assertIn("/usr/lib/libc++.1.dylib", walk.system)
 
     def test_an_app_without_executables_is_an_error(self):
         empty = self.tmp / "Empty.app"
@@ -366,14 +359,13 @@ class InventoryTests(unittest.TestCase):
         self.build_rs = self.tmp / "build.rs"
         self.build_rs.write_text(BUILD_RS)
         (self.engine / "src/Audio").mkdir(parents=True)
-        (self.engine / "third_party/spirv_reflect").mkdir(parents=True)
+        (self.engine / "third_party").mkdir(parents=True)
         (self.engine / "third_party/glad").mkdir()
         (self.engine / "third_party/miniaudio").mkdir()
         (self.engine / "third_party/mystery_lib").mkdir()
         (self.engine / "third_party/stb_image.h").write_text("")
         (self.engine / "third_party/CMakeLists.txt").write_text(
-            "find_package(PkgConfig REQUIRED)\nfind_package(nlohmann_json CONFIG REQUIRED)\n# find_package(Commented REQUIRED)\n"
-            "find_package(glslang CONFIG REQUIRED)\n")
+            "find_package(PkgConfig REQUIRED)\nfind_package(nlohmann_json CONFIG REQUIRED)\n# find_package(Commented REQUIRED)\n")
         (self.engine / "src/CMakeLists.txt").write_text(
             "find_package(Threads REQUIRED)\npkg_check_modules(LZ4 REQUIRED IMPORTED_TARGET liblz4)\n"
             "pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec)\n")
@@ -386,8 +378,8 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(check_licenses.link_lists(self.build_rs),
                          [("static", "wescene-renderer"), ("static", "wpAudio"), ("static", "wmBrandNew"),
                           ("static", "wpBrandNew"), ("static", "wmMediaApple"), ("static", "wmMedia"),
-                          ("static", "spirv-reflect-static"), ("dylib", "c++"), ("dylib", "vulkan"),
-                          ("dylib", "glslang"), ("dylib", "SPIRV"), ("framework", "Metal"), ("framework", "AppKit")])
+                          ("static", "stb_vorbis"), ("dylib", "c++"), ("dylib", "lz4"),
+                          ("dylib", "freetype"), ("framework", "Metal"), ("framework", "AppKit")])
 
     def test_first_party_archives_pass_and_third_party_ones_carry_their_license(self):
         components = self.components()
@@ -395,11 +387,11 @@ class InventoryTests(unittest.TestCase):
         for name in ("wescene-renderer", "wpAudio", "wmBrandNew", "wpBrandNew", "wmMediaApple", "wmMedia"):
             self.assertEqual(components[name].kind, "first-party")
             self.assertEqual(check_licenses.assess(components[name])[0], "first-party")
-        self.assertEqual(components["spirv_reflect"].license, "Apache-2.0")
-        self.assertEqual(check_licenses.assess(components["spirv_reflect"])[1], ("apache",))
-        # The link-lib list and find_package name the same component once.
-        self.assertEqual(sum(1 for name in components if name == "glslang"), 1)
-        self.assertEqual(components["glslang"].reached_from, ("CMake third_party/CMakeLists.txt", "build.rs dylib"))
+        self.assertEqual(components["stb_vorbis"].license, "MIT OR Unlicense")
+        self.assertEqual(check_licenses.assess(components["stb_vorbis"])[0], "ok")
+        # The link-lib list and pkg_check_modules name the same component once.
+        self.assertEqual(sum(1 for name in components if name == "lz4"), 1)
+        self.assertEqual(components["lz4"].reached_from, ("CMake src/CMakeLists.txt", "build.rs dylib"))
 
     def test_entries_missing_from_the_table_are_unknown(self):
         components = self.components()

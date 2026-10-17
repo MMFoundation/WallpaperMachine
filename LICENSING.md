@@ -1,10 +1,12 @@
 # Licensing, Supporter model and distribution status
 
-Recorded: 2026-10-16 (first recorded 2026-09-14).
+Recorded: 2026-10-17 (first recorded 2026-09-14).
 Status: source policy decided (GPL-2.0-only); Supporter model decided (a free
 signed download, and a one-time Supporter purchase for a sponsor place and
-priority support); **binary distribution still blocked** by the Apache-2.0
-dependencies listed under [Remaining blockers](#remaining-blockers).
+priority support); **binary distribution is not cleared**: the Apache-2.0
+and GPL-3.0-family components that blocked it were removed from the link closure on
+2026-10-17, but the items under [Before any distribution](#before-any-distribution)
+are open (see [Remaining blockers](#remaining-blockers)).
 
 This document is the project's own record of what it has checked and decided.
 It is not legal advice and it does not claim clearance that has not been
@@ -17,7 +19,7 @@ source is linked.
 |---|---|
 | Under which license is this repository's source offered? | GNU GPL version 2 only, the text in the root [`LICENSE`](LICENSE). See [Source license](#source-license-gpl-20-only). |
 | Is anything sold? | Only the Supporter purchase: a one-time payment for a sponsor place and priority support. The signed download is free and no copy of the software is sold. See [Supporter model](#supporter-model-free-signed-download-paid-sponsorship-and-support). |
-| Can it be distributed today? | No. Homebrew's GPLv3 FFmpeg was replaced, but Apache-2.0 components, both Khronos/Vulkan libraries and a Rust crate (`spirv`), remain in the link closure of every build. See [Remaining blockers](#remaining-blockers). |
+| Can it be distributed today? | Not cleared. Homebrew's GPLv3 FFmpeg was replaced, and the Apache-2.0 components (the Khronos/Vulkan libraries, MoltenVK, glslang's Apache-2.0 and GPL-3.0 parts, `spirv_reflect` and the `spirv` Rust crate) were removed from the link closure on 2026-10-17; this record has not been reviewed by counsel and the items under [Before any distribution](#before-any-distribution) are open. See [Remaining blockers](#remaining-blockers). |
 | Is a Developer ID signed, notarized build available? | No. `scripts/package.py` signs ad hoc, or with a self-signed project certificate for releases. Signing is a platform mechanism, not a license grant. See [Signing and notarization](#signing-and-notarization). |
 | Can it be listed on the Mac App Store? | Not as the app is built today, and not without first settling the GPLv2 question. See [Mac App Store](#mac-app-store). |
 | Does publishing this source resolve the blockers? | No. Distribution of the combined program is what the licenses govern; posting the repository changes nothing about it. |
@@ -160,7 +162,7 @@ Supporter purchase sells no software and does not change that.
 ### Mac App Store
 
 The website shows a Mac App Store listing as coming soon. That channel has two
-open questions of its own, independent of the Apache-2.0 blockers:
+open questions of its own, independent of the license-compatibility items:
 
 - **License.** In 2010 the FSF found that the App Store Terms of Service's
   Usage Rules restrict how recipients may use and distribute a program, which
@@ -215,8 +217,6 @@ see [Rust crates](#rust-crates) for how.
 | miniaudio | `upstream/renderer/external/open-wallpaper-engine/third_party/miniaudio` | Public domain or MIT-0 (choice) | Compatible |
 | stb_image | `upstream/renderer/external/open-wallpaper-engine/third_party/stb_image.h`, v2.26 | Public domain or MIT, licensee's choice (end of the header) | Compatible |
 | stb_vorbis | `upstream/renderer/external/open-wallpaper-engine/third_party/stb_vorbis`, v1.22 (nothings/stb commit `1ee679ca`), unchanged, linked statically (`stb_vorbis`) | Public domain (Unlicense) or MIT, licensee's choice (`LICENSE` there and the end of `stb_vorbis.c`) | Compatible |
-| Vulkan Memory Allocator | `upstream/renderer/external/open-wallpaper-engine/third_party/vk_mem_alloc.h` | MIT (stated in the header) | Compatible |
-| **spirv_reflect** | `upstream/renderer/external/open-wallpaper-engine/third_party/spirv_reflect`, linked statically (`spirv-reflect-static`) | Apache-2.0 | **Incompatible with GPLv2** (see below) |
 | nlohmann-json, argparse | Homebrew, header-only | MIT | Compatible |
 | quickjs-ng | Homebrew `quickjs-ng` 0.16.2, `libqjs` in the verified Debug dependency closure | MIT | Compatible |
 | lz4 | Homebrew `lz4` 1.10.0 | BSD-2-Clause | Compatible |
@@ -224,14 +224,7 @@ see [Rust crates](#rust-crates) for how.
 | libpng | Homebrew `libpng` 1.6.58 (FreeType dependency) | libpng-2.0 | Compatible |
 | FFmpeg | `Formula/mwe-ffmpeg.rb`, FFmpeg 8.1.2 | LGPL-2.1-or-later as configured | Compatible; see [FFmpeg](#ffmpeg) |
 | dav1d | Homebrew `dav1d` 1.5.4 (FFmpeg dependency) | BSD-2-Clause | Compatible |
-| **glslang** (`libglslang`, `libSPIRV`, `libglslang-default-resource-limits`) | Homebrew `glslang` 16.6.0 | BSD-3-Clause, BSD-2-Clause, MIT **and Apache-2.0** for parts of glslang proper; GPL-3.0-or-later with the Bison exception for the parser skeleton; an NVIDIA notice for the preprocessor (`LICENSE.txt` in the keg) | **Blocked** by the Apache-2.0 portion until the files under it are identified and either cleared or removed |
-| **SPIRV-Tools** (`libSPIRV-Tools`, `libSPIRV-Tools-opt`, loaded by `libSPIRV`) | Homebrew `spirv-tools` 1.4.357.0 | Apache-2.0 | **Incompatible with GPLv2** |
-| **Vulkan loader** (`libvulkan`) | Homebrew `vulkan-loader` 1.4.357.0 | Apache-2.0 | **Incompatible with GPLv2** |
-| **MoltenVK** (`libMoltenVK`, loaded as the Vulkan ICD) | Homebrew `molten-vk` 1.4.2 | Apache-2.0 | **Incompatible with GPLv2** |
-| vulkan-headers, spirv-headers | Homebrew, build-time headers | Apache-2.0 / MIT | Build-time only; whether header inclusion alone creates a covered combination is part of the open review |
-| shaderc | Homebrew `shaderc`, in `build_environment()` | Apache-2.0 | Not present in the app's dynamic link closure; its role is limited to the build environment list and is to be confirmed |
-| naga 29.0.3 | Rust crate, a patched copy vendored in `upstream/naga` (`upstream/naga/PATCHES.md`): the shader translator and validator the `shader` crate uses for every shader | MIT OR Apache-2.0, used under MIT | Compatible under the MIT terms; the patch makes Apache-2.0 `codespan-reporting` an optional dependency the `shader` crate does not enable, so it is no longer linked |
-| **spirv** 0.4.0 | Rust crate, from naga's `spv-out` feature (the Compatibility path's SPIR-V output) | Apache-2.0 | **Incompatible with GPLv2** |
+| naga 29.0.3 | Rust crate, a patched copy vendored in `upstream/naga` (`upstream/naga/PATCHES.md`): the shader translator and validator the `shader` crate uses for every shader; built with `glsl-in` and `msl-out` only | MIT OR Apache-2.0, used under MIT | Compatible under the MIT terms; the patch makes Apache-2.0 `codespan-reporting` an optional dependency the `shader` crate does not enable, so it is no longer linked, and dropping `spv-out` removed the Apache-2.0 `spirv` crate |
 | uniffi 0.28.3 (`uniffi`, `uniffi_core`, `uniffi_bindgen`, `uniffi_meta`, `uniffi_udl`, `uniffi_testing`), option-ext 0.2.0 | Rust crates: the Swift bridge, and `dirs` | MPL-2.0 | Compatible through MPL-2.0 section 3.3, which names GPL-2.0 as a Secondary License; none of their source files carries the "Incompatible With Secondary Licenses" notice |
 | ffmpeg-next, ffmpeg-sys-next 8.1.0 | Rust crates, the FFmpeg bindings in `wallpaper-core` | WTFPL | Compatible |
 | The other 143 linked Rust crates | `upstream/renderer/Cargo.lock` | 139 offer MIT, alone or as a choice; the rest are Zlib (foldhash), BSD-3-Clause (pp-rs) or BSD-3-Clause OR Apache-2.0 (moxcms, pxfm) | Compatible under the MIT, Zlib or BSD-3-Clause terms |
@@ -241,30 +234,41 @@ see [Rust crates](#rust-crates) for how.
 license list (https://www.gnu.org/licenses/license-list.html) or the license's
 own text; it is not an audit of every file.
 
+Removed on 2026-10-17, each from the source tree, the build and the link closure (the
+commits are in this repository's history, and `upstream/provenance.json` records them):
+
+| Component | License | Removed by |
+|---|---|---|
+| `spirv_reflect` (vendored, `spirv-reflect-static`) | Apache-2.0 | `19aeb2e8` |
+| Vulkan Memory Allocator (`vk_mem_alloc.h`, vendored) | MIT | `19aeb2e8` |
+| The Vulkan renderer, its wrapper and swapchain code, the SPIR-V shader target | project code | `19aeb2e8` |
+| `spirv` 0.4.0, Rust crate (naga's `spv-out` feature) | Apache-2.0 | `19aeb2e8` |
+| glslang (`libglslang`, `libSPIRV`, `libglslang-default-resource-limits`) | BSD-3-Clause, BSD-2-Clause, MIT, Apache-2.0 for parts, GPL-3.0-or-later with the Bison exception for the parser skeleton | `19aeb2e8` (linking), `a289d5e9` (Homebrew dependency) |
+| SPIRV-Tools (`libSPIRV-Tools`, `libSPIRV-Tools-opt`) | Apache-2.0 | `19aeb2e8` (linking), `a289d5e9` (Homebrew dependency) |
+| Vulkan loader (`libvulkan`) | Apache-2.0 | `19aeb2e8` (linking), `a289d5e9` (Homebrew dependency) |
+| MoltenVK (`libMoltenVK`, the Vulkan ICD) and `MoltenVK_icd.json` | Apache-2.0 | `19aeb2e8` (use), `a289d5e9` (bundling) |
+| vulkan-headers, spirv-headers, shaderc (Homebrew, build-time) | Apache-2.0 / MIT | `a289d5e9` |
+
 ### Rust crates
 
 Checked 2026-10-17 against `upstream/renderer/Cargo.lock` with `cargo tree
 --offline --workspace -e normal,no-proc-macro --target aarch64-apple-darwin`.
 That resolves features the way `scripts/build.py`'s `cargo build --workspace
 --release` does. Each crate's license is the one its manifest declares; no
-crate was reviewed file by file. The result is 154 third-party crates (naga counted among them, as the
+crate was reviewed file by file. The result is 153 third-party crates (naga counted among them, as the
 vendored copy in `upstream/naga`), all compiled into `libwallpaper_bridge.a`,
 which the app links (`-lwallpaper_bridge` in `project.yml`).
 
-The table below says which renderer path needs each blocked crate. Native Metal is
-the only scene renderer ([docs/features/scene-rendering.md](docs/features/scene-rendering.md#scene-renderer)).
-The Compatibility renderer (Vulkan through MoltenVK) is never created by the engine any
-more, but its source and libraries stay in the build until their deletion:
+Native Metal is the only scene renderer ([docs/features/scene-rendering.md](docs/features/scene-rendering.md#scene-renderer)).
+The Compatibility renderer (Vulkan through MoltenVK) and its SPIR-V shader target are
+deleted: the `spirv` crate (Apache-2.0) left the closure with naga's `spv-out` feature
+(`upstream/renderer/crates/shader/Cargo.toml` builds naga with `glsl-in` and `msl-out`),
+and `codespan-reporting` left earlier through the vendored naga's optional dependency.
 
-| Crate | Pulled in by | Needed by |
-|---|---|---|
-| spirv | naga's `spv-out` feature, enabled in `upstream/renderer/crates/shader/Cargo.toml` | Only Compatibility's SPIR-V output (`ShaderTarget::VulkanSpirv`) |
-
-A Release executable built 2026-10-16, before codespan-reporting left the
-closure, contains code from codespan-reporting and spirv, among others (by
-their names in its symbol table). That describes one build and clears nothing; the
-crates stay in the dependency closure and are counted as blockers until they
-are removed or reviewed.
+A Release executable built 2026-10-16, before codespan-reporting and spirv left the
+closure, contained code from both, among others (by their names in its symbol table). That
+describes one build and clears nothing by itself; the closure check below is what
+reports the current state.
 
 uniffi's `cli` feature is enabled in `wallpaper-bridge`'s normal dependencies
 because the package's `uniffi-bindgen` binary needs it. As a result
@@ -316,35 +320,40 @@ separate from copyright, and is recorded here rather than resolved.
 
 The FSF's position is that the Apache License 2.0 is not compatible with GPL
 version 2 because of its patent-termination and indemnification terms
-(https://www.gnu.org/licenses/license-list.html#apache2). These parts of every
-current build are under Apache-2.0, in whole or in part, and are loaded into,
-or compiled into, the same process as the GPL-2.0-only renderer:
+(https://www.gnu.org/licenses/license-list.html#apache2), and this project's policy
+table rejects the GPL-3.0 family for the same GPL-2.0-only combination.
 
-- `libvulkan` (Vulkan loader) and `libMoltenVK` (the ICD the loader opens);
-- `libSPIRV-Tools` / `libSPIRV-Tools-opt`, loaded by glslang's `libSPIRV`;
-- the Apache-2.0 portion of glslang proper;
-- `spirv_reflect`, vendored and statically linked into the scene engine;
-- the Rust crate `spirv` (Apache-2.0), compiled into `libwallpaper_bridge.a`
-  ([Rust crates](#rust-crates)).
+**State on 2026-10-17.** `python3 scripts/check_licenses.py`, run on the tree after the
+Vulkan deletion and on a Release app built from it, reports 181 components (3 Mach-O
+roots, 13 third-party libraries walked from them, 25 compiled-in or statically linked
+inventory entries and 153 third-party Rust crates) with 0 Apache-2.0, 0 GPL-3.0 family, 0
+unknown and 0 not named in this file; with `--skip-app` it reports 178 with the same
+zeros. The Apache-2.0 and GPL-3.0 parts that
+used to be loaded into, or compiled into, the same process as the GPL-2.0-only renderer
+are gone (see the table of removed components above): `libvulkan` and `libMoltenVK`,
+`libSPIRV-Tools` and `libSPIRV-Tools-opt`, glslang (its Apache-2.0 portion and its
+GPL-3.0-or-later parser skeleton), the vendored `spirv_reflect` and the Rust crate
+`spirv`. Neither the app nor the lock-screen extension executable of that build links or
+loads Vulkan, glslang, SPIRV or MoltenVK libraries (`otool -L`), and the bundle carries no
+`MoltenVK_icd.json`.
 
-The Compatibility (Vulkan) path is already unreachable: the engine never creates it and the
-Scene renderer setting that chose it is gone. Its code and these libraries are still built
-and linked, so nothing above is cleared yet. Deleting that code does not clear the Rust
-crate on its own: `spirv` leaves only if naga's `spv-out` feature is dropped as well.
-`codespan-reporting` no longer blocks: the vendored naga (`upstream/naga`)
-makes it optional and the `shader` crate does not enable it.
+What this does not establish: it counts declared licenses, not files (the Rust crates
+were audited by declared license only, and the vendored sources by their notices); it is
+not a legal opinion, and none has been obtained; FFmpeg is still linked under
+LGPL-2.1-or-later, which the table above records as compatible, until the planned
+replacement of FFmpeg lands. No grant or permission from any copyright holder was
+requested or received, and none is described as existing.
 
-Until each of these is resolved, no binary of this program may be distributed,
-sold or given away. Resolution means one of:
+Should a component under Apache-2.0 or the GPL-3.0 family enter the closure again,
+the check reports it and no binary may be distributed, sold or given away until it is
+resolved. Resolution means one of:
 
 1. **Replace** the component with one under a GPLv2-compatible license or with
    code written for this project, and remove the Apache-2.0 code from the link
-   closure. For the Vulkan path this is a deletion: the renderer's native Metal backend
-   is the only scene renderer, so the Vulkan code and its libraries only need to
-   leave the build. For a Rust
-   crate it means dropping the feature or dependency that pulls it in, or
-   replacing or patching the crate that needs it: the vendored naga builds
-   without `codespan-reporting`.
+   closure. For a Rust crate it means dropping the feature or dependency that
+   pulls it in, or replacing or patching the crate that needs it: the vendored
+   naga builds without `codespan-reporting`, and without `spv-out`, so without
+   `spirv`.
 2. **Obtain compatible license grants** covering the Apache-2.0 code, or obtain
    a sufficient linking exception or GPLv3-compatible relicense from the
    copyright holders of the GPLv2-only code. A generic endorsement is not enough.
@@ -352,8 +361,6 @@ sold or given away. Resolution means one of:
    every contributor whose code is in the combined work, not only the current
    repository maintainer; for the Khronos projects that means their
    contributors, not a downstream packager - and has to be kept in writing.
-   This project has not requested or received any such permission and will not
-   describe one as existing until it does.
 3. **A qualified legal opinion** that a particular boundary (for example the
    loader/ICD interface) is an aggregation rather than a combined work. The
    FSF's guidance is that this depends on how the pieces communicate, not on
@@ -368,9 +375,8 @@ publishing one does not make its combination with incompatible code lawful to
 distribute. Private use and private builds are unaffected
 (https://www.gnu.org/licenses/gpl-faq.html#WhatDoesCompatMean).
 
-Also still open, independent of the Apache-2.0 question: the exact set of
-glslang files under each of its licenses; and the Rust crates beyond their
-declared licenses, including build-dependencies and proc-macros.
+Also still open: the Rust crates beyond their declared licenses, including
+build-dependencies and proc-macros.
 
 ## Rights outside software licenses
 
@@ -411,13 +417,12 @@ As implemented by `scripts/package.py` and `.github/workflows/build.yml`
   preflight.
 - `.github/workflows/build.yml` used to fail at its first step, citing this
   file. The maintainer removed that step for 1.0.0 (2026-09-26), so CI now
-  publishes release disk images while the blockers below are still open.
+  publishes release disk images while the items under [Before any distribution](#before-any-distribution) are open.
 - Local disk images produced by `scripts/package.py` are labelled as not cleared
   for distribution.
 - `python3 scripts/check_licenses.py` lists the license of every Mach-O
   dependency of the built app (`otool -L`, walked recursively from the main
-  executable, the extension and `Contents/Frameworks`, with the MoltenVK ICD
-  seeded), of the third-party code compiled or statically linked into the
+  executable, the extension and `Contents/Frameworks`), of the third-party code compiled or statically linked into the
   renderer (a source inventory: `crates/core/build.rs`, the scene engine's CMake
   `find_package` targets and `third_party/`, against a hand-kept license table
   in the script) and of every linked Rust crate (`cargo tree`, the same set as
@@ -429,10 +434,10 @@ As implemented by `scripts/package.py` and `.github/workflows/build.yml`
   this file does not name. It is report-only by default; `--enforce` exits 1.
   It needs a built app, Homebrew and Cargo, so the routine gate does not run it.
 
-The packaging checks catch the GPLv3 FFmpeg mistake and a missing notice. The
-Apache-2.0 problem is a matter of what is linked, not of a string in one
+The packaging checks catch the GPLv3 FFmpeg mistake and a missing notice. An
+Apache-2.0 component is a matter of what is linked, not of a string in one
 library; `scripts/check_licenses.py` reports it from the link closure, in
-report-only mode until the blockers below are cleared.
+report-only mode unless `--enforce` is given.
 
 ### Notice payload
 
@@ -445,7 +450,7 @@ report-only mode until the blockers below are cleared.
 - `Contents/Resources/Licenses/<formula>-<version>/`: every `LICENSE*`,
   `COPYING*`, `COPYRIGHT*` and `NOTICE*` file of each Homebrew keg in the link
   closure;
-- `Contents/Resources/Licenses/renderer-third-party/{miniaudio,spirv_reflect,stb_vorbis}/LICENSE`.
+- `Contents/Resources/Licenses/renderer-third-party/{miniaudio,stb_vorbis}/LICENSE`.
 
 Xcode separately bundles `Contents/Resources/LICENSE` (mediaremote-adapter's
 BSD-3-Clause notice) and the extension's `Phosphene-LICENSE.txt`.
@@ -485,7 +490,7 @@ prefix is `app.wallpapermachine`.
   left otherwise as it was. No code from FFmpeg, libav, libwebm, libmatroska, libvpx, mp4v2,
   Bento4, GPAC or any other implementation was copied into the new code. FFmpeg is still
   linked and still plays any container the native readers do not read, until it is removed.
-- The sound path in `Renderer/Sound` (channel remix, resampler, loop pipeline the AudioToolbox and Ogg Vorbis decoder adapters, and `Renderer/Sound/Matroska`, which decodes the audio of a WebM or Matroska file: Opus, AAC and MP3 packets through an AudioToolbox AudioConverter, Vorbis packets re-framed as an in-memory Ogg stream for stb_vorbis, written from the Matroska, RFC 6716, RFC 7845 and RFC 3533 specifications and Apple's documentation) was written for this project from the documented behaviour of a conventional downmix, the mathematics of windowed-sinc resampling and Apple's AudioToolbox documentation. No code from FFmpeg, libswresample, libvorbis, opus or any other implementation was copied; Ogg Vorbis decoding is the public-domain stb_vorbis, vendored unchanged. FFmpeg no longer decodes scene sounds, and no longer decodes the audio of a plain video wallpaper on the desktop, where the app's own players play it (AVFoundation, or the WebM player over the sound decoders above); it decodes a plain video's audio only in the scene engine's pure-video scene, which only the lock screen's fallback can still build, and which plays no sound there.
+- The sound path in `Renderer/Sound` (channel remix, resampler, loop pipeline the AudioToolbox and Ogg Vorbis decoder adapters, and `Renderer/Sound/Matroska`, which decodes the audio of a WebM or Matroska file: Opus, AAC and MP3 packets through an AudioToolbox AudioConverter, Vorbis packets re-framed as an in-memory Ogg stream for stb_vorbis, written from the Matroska, RFC 6716, RFC 7845 and RFC 3533 specifications and Apple's documentation) was written for this project from the documented behaviour of a conventional downmix, the mathematics of windowed-sinc resampling and Apple's AudioToolbox documentation. No code from FFmpeg, libswresample, libvorbis, opus or any other implementation was copied; Ogg Vorbis decoding is the public-domain stb_vorbis, vendored unchanged. FFmpeg no longer decodes scene sounds, and no longer decodes the audio of a plain video wallpaper on the desktop, where the app's own players play it (AVFoundation, or the WebM player over the sound decoders above); the scene engine no longer builds a plain-video scene at all (removed 2026-10-17), so it decodes no plain video's audio anywhere.
 - The still preview in `Renderer/Surface` (`wmSurface`: the rule that picks a project's preview file inside the project's own folder, and an ImageIO decoder that lays the picture over a surface's layer as a Core Animation sublayer) was written for this project from Apple's ImageIO and Core Animation documentation. No code from any other implementation was copied. It is linked into the app and, through the scene engine, into the lock-screen extension, and it adds no third-party dependency.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
   at revision `73f14ab1568371e6e3c44063f21c34c5e2712c4d`, BSD-3-Clause, vendored
@@ -504,15 +509,15 @@ prefix is `app.wallpapermachine`.
 
 ## Before any distribution
 
-- Resolve every entry under [Remaining blockers](#remaining-blockers) by
-  replacement or by written permission from the actual copyright holders, and
-  record the outcome here with the evidence.
-- Complete the file-level review of glslang, and review the Rust
-  crates beyond their declared licenses.
+- Run `python3 scripts/check_licenses.py --enforce` on the Release app that would
+  be distributed and record the outcome here with the evidence; resolve anything
+  it reports by replacement or by written permission from the actual copyright
+  holders.
+- Review the Rust crates beyond their declared licenses.
 - Bundle the notices of the Rust crates the app links.
 - Implement Developer ID signing and notarization in the release pipeline, and
   remove the unconditional failure from `.github/workflows/build.yml` only
-  after the blockers are recorded as resolved.
+  after the review above is recorded as done.
 - Add the FFmpeg/LGPL attribution to Settings -> About.
 - Mirror the corresponding source (repository at the tag, FFmpeg tarball) at
   the place the signed download is offered.

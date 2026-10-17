@@ -5,8 +5,7 @@ Three inventories, each with its license and where it comes from:
 
 1. every Mach-O dependency of the built app: `otool -L` from the main executable, the
    extension executables and every library or framework in `Contents/Frameworks`,
-   followed recursively, plus the MoltenVK ICD that is loaded by `dlopen` and so never
-   appears in `otool`. Homebrew paths resolve through `realpath` to their Cellar keg; an
+   followed recursively. Homebrew paths resolve through `realpath` to their Cellar keg; an
    already packaged app (`@rpath` into `Contents/Frameworks`) is walked the same way.
    Apple system libraries pass as system;
 2. third-party code compiled or statically linked into the renderer, from a source-level
@@ -220,7 +219,6 @@ class Entry:
 
 
 COMPONENTS = {
-    "spirv_reflect": Entry("Apache-2.0", "vendored, linked as the static archive spirv-reflect-static"),
     "nlohmann-json": Entry("MIT", "header-only"),
     "argparse": Entry("MIT", "header-only"),
     "miniaudio": Entry("Unlicense OR MIT-0", "vendored header; public domain or MIT-0 at the user's choice"),
@@ -229,17 +227,11 @@ COMPONENTS = {
     "stb_image": Entry("MIT OR Unlicense", "vendored header; public domain or MIT at the user's choice"),
     "stb_vorbis": Entry("MIT OR Unlicense", "vendored source (stb_vorbis.c 1.22, unchanged), linked as the static archive "
                         "stb_vorbis; public domain or MIT at the user's choice"),
-    "vulkan-memory-allocator": Entry("MIT", "vendored header (vk_mem_alloc.h); its header states MIT"),
     "glad": Entry(None, "added to the CMake project but never linked; license not checked", "not-linked"),
     "quickjs-ng": Entry("MIT", "Homebrew dylib"),
     "lz4": Entry("BSD-2-Clause", "Homebrew dylib"),
     "freetype": Entry("FTL OR GPL-2.0-or-later", "Homebrew dylib; the keg's LICENSE.TXT offers either"),
     "libpng": Entry("libpng-2.0", "Homebrew dylib, a FreeType dependency"),
-    "glslang": Entry("BSD-3-Clause AND GPL-3.0-or-later AND MIT AND Apache-2.0",
-                     "Homebrew dylib; the string is Homebrew's, LICENSING.md decides what each part covers"),
-    "spirv-tools": Entry("Apache-2.0", "Homebrew dylib, loaded by libSPIRV"),
-    "vulkan-loader": Entry("Apache-2.0", "Homebrew dylib"),
-    "molten-vk": Entry("Apache-2.0", "Homebrew dylib, loaded as the Vulkan ICD"),
     "mwe-ffmpeg": Entry("LGPL-2.1-or-later", "the project's own LGPL-only FFmpeg build (Formula/mwe-ffmpeg.rb)"),
     "dav1d": Entry("BSD-2-Clause", "Homebrew dylib, an FFmpeg dependency"),
     "mediaremote-adapter": Entry("BSD-3-Clause", "upstream/mediaremote-adapter, embedded framework"),
@@ -254,21 +246,19 @@ OVERRIDES = {
 }
 # Names the inventories find -> the COMPONENTS entry (lowercase keys).
 ALIASES = {
-    # cargo:rustc-link-lib=static
-    "spirv-reflect-static": "spirv_reflect",
     # cargo:rustc-link-lib=dylib (c++ is Apple's libc++)
-    "c++": "(apple system)", "vulkan": "vulkan-loader", "lz4": "lz4", "freetype": "freetype",
+    "c++": "(apple system)", "lz4": "lz4", "freetype": "freetype",
     "avformat": "mwe-ffmpeg", "avcodec": "mwe-ffmpeg", "avutil": "mwe-ffmpeg", "swresample": "mwe-ffmpeg",
     "avfilter": "mwe-ffmpeg", "avdevice": "mwe-ffmpeg", "swscale": "mwe-ffmpeg", "postproc": "mwe-ffmpeg",
-    "qjs": "quickjs-ng", "glslang": "glslang", "spirv": "glslang", "glslang-default-resource-limits": "glslang",
+    "qjs": "quickjs-ng",
     # find_package / pkg_check_modules
-    "nlohmann_json": "nlohmann-json", "argparse": "argparse", "vulkan-loader": "vulkan-loader",
+    "nlohmann_json": "nlohmann-json", "argparse": "argparse",
     "opengl": "(apple system)", "threads": "(apple system)", "pkgconfig": "(build tool)",
     "liblz4": "lz4", "libavformat": "mwe-ffmpeg", "libavcodec": "mwe-ffmpeg", "libavutil": "mwe-ffmpeg",
     "libswresample": "mwe-ffmpeg",
     # third_party/
     "effolkronium": "effolkronium-random", "glad": "glad", "miniaudio": "miniaudio",
-    "vog": "vog-sha1", "stb_image": "stb_image", "vk_mem_alloc": "vulkan-memory-allocator",
+    "vog": "vog-sha1", "stb_image": "stb_image",
 }
 # The scene engine's own archives (src/ of open-wallpaper-engine, `wp*`) and this project's own
 # renderer libraries (top-level Renderer/, `wm*`: wmMedia, wmSound) are first party.
@@ -276,9 +266,7 @@ FIRST_PARTY_ARCHIVE = re.compile(r"^((wp|wm)[A-Z]\w*|wescene-renderer)$")
 # A library file's stem -> its component, for libraries whose Homebrew keg cannot be found
 # (an already packaged app, or a machine without Homebrew).
 LIBRARY_STEMS = {
-    "libglslang": "glslang", "libSPIRV": "glslang", "libglslang-default-resource-limits": "glslang",
-    "libSPIRV-Tools": "spirv-tools", "libSPIRV-Tools-opt": "spirv-tools", "libvulkan": "vulkan-loader",
-    "libMoltenVK": "molten-vk", "liblz4": "lz4", "libfreetype": "freetype", "libpng16": "libpng",
+    "liblz4": "lz4", "libfreetype": "freetype", "libpng16": "libpng",
     "libdav1d": "dav1d", "libqjs": "quickjs-ng", "MediaRemoteAdapter": "mediaremote-adapter",
     **{f"lib{name}": "mwe-ffmpeg" for name in ("avformat", "avcodec", "avutil", "swresample", "avfilter",
                                                 "avdevice", "swscale", "postproc")},
@@ -376,7 +364,7 @@ class Walk:
     unresolved: list  # (dependency, referrer)
 
 
-def walk_app(app, run, prefix, seeds=()):
+def walk_app(app, run, prefix):
     """Every non-system Mach-O file the app loads, directly or transitively; each file once, so cycles end."""
     roots = app_roots(app)
     if not roots:
@@ -387,11 +375,6 @@ def walk_app(app, run, prefix, seeds=()):
     for file, directory in roots:
         seen[file.resolve()] = ""
         queue.append((file.resolve(), directory))
-    for seed in seeds:
-        if seed.resolve() not in seen:
-            seen[seed.resolve()] = "(MoltenVK ICD, loaded with dlopen)"
-            walk.libraries[seed.resolve()] = seen[seed.resolve()]
-            queue.append((seed.resolve(), roots[0][1]))
     while queue:
         file, directory = queue.popleft()
         completed = run(["otool", "-L", file])
@@ -718,10 +701,7 @@ def run_checks(output, options, runner=run_command, environment=None, licensing_
     else:
         completed = runner(["brew", "--prefix"])
         prefix = Path(completed.stdout.strip()) if completed.returncode == 0 and completed.stdout.strip() else None
-        molten = prefix / "opt/molten-vk/lib/libMoltenVK.dylib" if prefix is not None else None
-        bundled = (app / "Contents/Frameworks/libMoltenVK.dylib").is_file()
-        seeds = [molten] if molten is not None and molten.is_file() and not bundled else []
-        walk = walk_app(app, runner, prefix, seeds)
+        walk = walk_app(app, runner, prefix)
         found = dylib_components(walk, prefix, app, runner)
         components += found
         sections["dylibs"] = {"status": "checked", "roots": [display_path(file) for file in walk.roots],
@@ -730,8 +710,6 @@ def run_checks(output, options, runner=run_command, environment=None, licensing_
                               "unresolved": [list(item) for item in walk.unresolved]}
         print(f"{MARK.step} Dylibs: {len(walk.roots)} roots, {len(walk.libraries)} third-party libraries, "
               f"{len(walk.system)} Apple system libraries ({display_path(app)})")
-        if not seeds and not bundled:
-            print(f"{MARK.warn} MoltenVK is not seeded: no Homebrew libMoltenVK.dylib and none bundled")
         for dependency, referrer in walk.unresolved:
             print(f"{MARK.warn} Dependency not found: {dependency} (from {referrer})")
 

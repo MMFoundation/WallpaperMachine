@@ -306,12 +306,12 @@ derived from it; upstream code keeps its own copyright and license notices,
 recorded in [upstream/provenance.json](upstream/provenance.json). Every recipient
 keeps every right the GPL grants, whether or not they are a Supporter.
 
-**No binary is cleared for distribution yet.** Apache-2.0 components (MoltenVK,
-the Vulkan loader, SPIRV-Tools, parts of glslang, the vendored spirv_reflect, and
-the spirv Rust crate the renderer links)
-are in every build's link closure and are not compatible with GPLv2.
+**No binary is cleared for distribution yet.** The Apache-2.0 and GPL-3.0 components the
+build used to link (MoltenVK, the Vulkan loader, SPIRV-Tools, glslang, the vendored
+spirv_reflect, and the spirv Rust crate) were removed on 2026-10-17, and the license check
+now reports none in the closure; that is a count of declared licenses, not a clearance.
 [LICENSING.md](LICENSING.md) records the policy, the Supporter model, each
-component's license, the open blockers and what would resolve them. Workshop
+component's license, what was removed, and what is still open before any distribution. Workshop
 wallpapers belong to their creators, and scene resources come from a Wallpaper
 Engine you own; the app bundles neither.
 
