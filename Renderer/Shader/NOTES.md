@@ -37,9 +37,19 @@ and `stage` (assembly, R6 and R8). `legalize::legalize` takes both stages of a p
 stage, which gets the standalone numbering of R31 and R41) and returns the GLSL text of each stage
 plus `ProgramLayout`, the facts reflection needs (block members and binding, textures with their
 two bindings, planes, vertex inputs under their author names, varyings, kept samplers).
-`binding::assign_metal_slots` is R88 (dense sampler slots). `src/legalize/tests/` holds the tests of
-section 8 and the corpus sweeps; `tests/gpu_probe.rs` gained the NV12 conversion probe and the
-float remainder probe.
+`src/legalize/tests/` holds the tests of section 8 and the corpus sweeps; `tests/gpu_probe.rs` gained
+the NV12 conversion probe and the float remainder probe. (`binding::assign_metal_slots`, the dense
+sampler ranks of C2 R88, is gone: part D R46 ranks every namespace of a stage, see Step 5.)
+
+Step 5 (part D of the spec) is three modules and a pipeline. `backend` reads one legalized stage with
+naga's GLSL front end, builds the Metal binding map, validates, and runs the Metal writer
+(`StageCompiler`, `NagaBackend`, `compile_glsl`, `translate_module`). `reflect` describes the module
+that was translated (`StageReflector`, `NagaReflector`, `reflect_module`, `reflect_untranslated`).
+`nagair` holds what both need to know about the globals of a naga module. `pipeline` drives a request
+through `prepare`, `legalize`, the compiler and the reflector, merges the stage reflections, and
+computes the key (`Pipeline`, `compile`, `CompiledProgram`). The compiler and the reflector are the two
+replaceable steps of R6: the pipeline tests replace both. `ShaderError::category()` gives the classes
+of section 5 (`ErrorCategory`).
 
 `tests/dialect_robustness.rs` is the hostile-input test of this part (run on a 2 MiB stack),
 `tests/gpu_probe.rs` the opt-in Metal probes (a Swift runner dispatches one compute thread; no window,
@@ -53,10 +63,8 @@ variable they print why they did nothing.
 ## Dependencies
 
 - `naga` 29.0.3 by path (`../upstream/naga` from `Renderer/`), features
-  `glsl-in` and `msl-out` only (MIT OR Apache-2.0). Not used by step 1 code yet
-  (it is the compiler the pipeline will call); it is declared now so the
-  workspace resolves and builds with it. `identity::NAGA_VERSION` is checked
-  against the vendored manifest by a test.
+  `glsl-in` and `msl-out` only (MIT OR Apache-2.0). It is the compiler the backend calls (front end,
+  validator, Metal writer). `identity::NAGA_VERSION` is checked against the vendored manifest by a test.
 - Nothing else. The request reader and the response writer use the crate's own
   small JSON module (`json.rs`; strict RFC 8259, depth limited to 128), cache
   keys use an own SHA-256 (`sha256.rs`, FIPS 180-4, test vectors), errors
@@ -108,9 +116,9 @@ the file; the crate uses no nightly feature and builds, tests and passes clippy
    annotations live in comments the preprocessor drops, yet the metadata depends
    on them (R84 "shader source text").
 10. **Digest.** SHA-256 truncated to 128 bits, 32 lower-case hex digits.
-11. **Compiler identity.** `wm<revision>-naga-<naga version>-msl<language
-    version>-<options>`, currently `wm1-naga-29.0.3-msl2.0-untransformed`
-    (letters, digits, `.` and `-` only: safe in a file name, and different from
+11. **Compiler identity.** `<revision>:naga-<naga version>-msl<language
+    version>-<options>`, currently `1:naga-29.0.3-msl2.0-untransformed` (Step 5 changed the
+    first spelling `wm1-naga-...` to the `<integer>:<text>` form D R37 asks for; it differs from
     the stored upstream identity). `cache_key.rs` carries an append-only golden
     table of program keys per identity (R88): a change to what a key covers
     fails the row of the current identity and forces a deliberate bump and a new row.
@@ -398,8 +406,11 @@ How it is built:
     trailing comment) hold because the use site sees the replacement. R39 and R18 both use the macro
     table *at the declaration*: R18 says a uniform bound uses the table at the end of the stage, so
     a bound macro redefined after the uniform declaration reads the value at the declaration here
-    (no shipped shader redefines one). A bare `#define N` used as a bound is empty, not 1 (R39's
-    implicit value is not reproduced).
+    (no shipped shader redefines one). A bare `#define N` used alone as an array bound is 1 as C2 R39
+    and D R15 say: the expander (Step 5) writes `1` for an empty object-like macro that stands alone
+    between `[` and `]` (it applies to any array bound, a uniform's or a local's too; elsewhere an
+    empty macro is still empty). The first version of Step 4 left it empty; that was a deviation
+    from the spec and is fixed.
 68. **R12 position-redirect output is not special-cased.** A `#define gl_Position p` with an
     `out vec4 p;` expands before this part sees it, so `p` is an ordinary vertex output that no
     fragment input matches (a vertex-only varying with a location). That is harmless on naga and
@@ -464,7 +475,7 @@ Spec conflicts and the choice made:
 80. **Not done in this step**: R79's optional early failure for a program the engine would refuse
     (a texture with another name, a kept sampler); the cache key and pipeline revision (nothing of
     this part reaches a compiled program until the pipeline calls it); the reflection document and
-    the MSL writer call (the next step); the engine-side binding of non-`g_Texture<N>` resources.
+    the MSL writer call (done in Step 5); the engine-side binding of non-`g_Texture<N>` resources.
 
 Results of the corpus sweeps (`cargo test --lib legalize::tests::corpus -- --nocapture`), three combo
 sets, both stages together, every stage compiled through naga to Metal:
@@ -483,25 +494,127 @@ sets, both stages together, every stage compiled through naga to Metal:
 - Stage by stage (the dialect sweep through the standalone entry point): 317 of 318 shipped stages;
   the 27 workshop failures are the ones above plus a varying width only the program can reconcile.
 
+## Step 5 choices (pipeline, Metal backend, reflection)
+
+Conflicts between the parts, and what was chosen (part D is the later and more specific spec for
+anything that reaches the engine, so it wins unless noted):
+
+81. **Metal slots (D R46 against C2 R88 and A R35).** Every record of a stage gets as its `slot` the
+    rank of its binding among the stage's resources of the same kind, counted from 0 (ties in
+    declaration order), for buffers, textures and samplers alike. `binding::assign_stage_slots` does
+    it; C2's program-wide sampler ranking and its `assign_metal_slots` are removed, and the one
+    legalizer test that used them now asks the per-stage function. A binding record per resource
+    global of the module in declaration order, used or not (R45), named by the declared GLSL
+    identifier (the type's name for an instance-less block, so `GlobalUniforms`).
+82. **Order of the backend checks.** The binding map (R45 to R47, R46) comes before validation, so a
+    resource the Metal target cannot take is reported as such even when the module would also fail
+    validation under the default capabilities (an acceleration structure, push constants). A rank
+    beyond the namespace limit is `BindingError::SlotLimit`, category `Reflection`, produced before
+    any MSL is written; the other map failures are `MslWrite` diagnostics.
+83. **Failure classes.** `ErrorCategory` has `InvalidRequest`, `SourceRead`, `Preprocess`,
+    `Legalization`, `Compile`, `Reflection`, `Internal`; the class of a source failure follows the
+    pass of its first diagnostic (`Preprocess`; `Parse`, `Legalize`, `Codegen` are legalization;
+    `GlslParse`, `Validate`, `MslWrite` are compile; `Binding`, `Reflection` are reflection). A stage
+    whose module has no entry point of its kind is `ShaderError::NoEntryPoint` (compile); naga's own
+    front end already says "Missing entry point" for a text with no `main`. Two stages that reflect
+    one block differently are an invalid request (R33), not a reflection error. A cross-stage
+    failure carries the origin `cross-stage interface check`; other legalizer diagnostics carry
+    `preprocessed <stage> source`, and the stage text is attached so the line shows (R10, R13).
+84. **Validation.** `Validator::new(ValidationFlags::all(), Capabilities::default())`, so no
+    early-depth-test, clip distance or subgroup capability (a shader asking for one fails at the
+    `Validate` pass). The earlier sweeps validated with all capabilities; the corpus numbers did not
+    change. Reflection reuses the usage information of that validation (R53 allows it);
+    `reflect_untranslated` validates with every capability for a module built without GLSL.
+85. **Vertex input types with no format (R59).** naga's validator refuses matrix, bool and 64-bit or
+    16-bit location arguments (`NotIOShareableType`) before reflection can see them, so through the
+    pipeline they are compile errors; the reflection error exists and is tested on the input reader
+    directly (`inputs_of`). A struct-typed entry argument is flattened to its location members.
+86. **Limits (D R61 against A R36).** Vertex location at most 30, descriptor set at most 3, binding
+    index at most 31, texture slot at most 31; `g_Texture32` to `g_Texture255` say `model limits`,
+    256 and up say the slot suffix is invalid. The legalizer's own check of the highest binding
+    (C2 R30) stays for `legalize()` but the pipeline switches it off (`unlimited_bindings`): the
+    texture `g_Texture32` has the encoded binding 32, and D wants that to be a reflection error only
+    when the stage uses the texture. The interface location limit of the legalizer (31) is unchanged.
+87. **Reflection details.** Descriptor kinds sort by their labels (`combined_image_sampler`,
+    `sampled_image`, `sampler`, `uniform_buffer`), vertex inputs merge by location (first stage wins),
+    a block is named by the instance name when the GLSL gives one and by the type name otherwise, a
+    used uniform global that is not a struct or has no binding is an error while an unused one is
+    absent, a used storage buffer or storage texture is an error naming resource, set and binding.
+    Vertex inputs go under the author's name through `InputNames` (the legalizer's `_we_in_<name>`
+    copies are mapped back, R58).
+88. **Compiler identity (D R37 against A R77).** `<revision>:naga-<version>-msl<version>-<options>`
+    (`1:naga-29.0.3-msl2.0-untransformed`), so it has the `<integer>:<text>` form and mentions no
+    SPIR-V. Revision 1 was never shipped, so the golden key row was replaced, not appended.
+89. **Cache key.** The plane marker is hashed for every texture record that is flagged, also for a slot
+    the program never declares (A R82, a conservative reading of D R35, which says "compiled as
+    planes"): such a flag changes the key but nothing else. Combos stay hashed in sorted order.
+90. **Combo order (D R2 against B).** B's order is kept: request combos, texture-derived ones, then the
+    annotation defaults; any fixed order is allowed by B. D's test 3 "added defaults appear as macros in
+    the legalized text" is tested by effect (the branch they select is present), because Step 3 expands
+    macros and the legalized text carries no `#define`.
+91. **Array bounds (D R15, R23).** `3u`, `0x4`, `2.0`, zero and negative numbers are refused; the
+    lexer reads `0x4` as `0` then `x4` (B pins that), so the parser keeps the tokens of a bound it
+    cannot place as one opaque expression, written as in the source. The message quotes the bound
+    as written in the stage text and, when macros changed it, what it was read as. An uninterpretable
+    uniform array suffix names the suffix, the member and the stage (`vertex stage (Vertex)`).
+92. **Pass-through samplers** (`samplerCube`, `sampler3D` kept as written, integer samplers) pass the
+    legalizer and reserve their index, but naga reads no combined sampler, so a program with one fails
+    at the `GlslParse` pass (compile); that is "such a program does not draw natively" (D section 10
+    item 12).
+93. **Not supported types of the block** stay as Step 4 decided (NOTES 74): two-row matrices (`mat2`,
+    `mat3x2`, `mat4x2`) and arrays of booleans are refused naming the member. D test 24 asks for
+    parity of every *supported* type, which the layout test checks for 22 single types and 19 array
+    types, alone and in mixed blocks, by parsing the MSL struct. Supporting the refused types would
+    need a widened form for them in the legalizer; none of the shipped or workshop shaders uses one.
+94. **MSL text facts measured** (naga 29.0.3): the first line is `// language: metal2.0`, the entry
+    function of `main` is `main_`, a global whose name ends in a digit is written with a trailing
+    underscore (the records keep the GLSL name), an array varying becomes one stage-in/out member per
+    element with consecutive `[[user(locN)]]`, arrays in the block are wrapped in a struct `{ T inner[N]; }`,
+    float literals are written with the shortest decimal that reads back (checked bit for bit over
+    600 random values and the edges). The writer appends `center_perspective` after `[[user(locN)]]`.
+95. **The system Metal compiler check** (`tests/metal_compile.rs`, opt-in with
+    `WM_SHADER_METAL_COMPILE=1`) uses the compiler service the host uses
+    (`makeLibrary(source:options:nil)` through `tests/probes/compile_msl.swift`), because `xcrun metal`
+    needs the Metal Toolchain component, which is not installed here, and installing it is not ours
+    to do. With `WM_SHADER_METAL_COMPILE_CORPUS=1` it compiles the shipped and workshop corpus too.
+
+Results (`cargo test --release --lib pipeline::tests::corpus -- --nocapture`; a pair with a missing
+file is not a program the engine compiles, so such pairs are left out; `HLSL/` and `volumetricsfront`
+as in the earlier sweeps; three combo sets: none, lit and fogged, skinned and reflective):
+
+- Shipped shaders, whole pipeline to MSL and reflection: **158 of 159 programs**. The failure is
+  `shadowcasterfoliage4` under the skinned set: its vertex stage reads `g_Texture1Texel`, which no
+  shipped file declares (`Unknown variable: g_Texture1Texel` from naga's front end). The sweep names it
+  and fails on any other cause. No binding record carries a name outside the host's vocabulary
+  (`GlobalUniforms`, `g_Texture<N>`, `_we_Sampler_g_Texture<N>`, the chroma pair).
+- The same with slot 0 flagged as NV12 planes: 155 of 159; besides the foliage shader, `fur4` (3
+  programs) is refused with the R63 message because it samples slot 0 with an explicit level.
+- Workshop shaders (distinct pairs of the local library): **798 of 813 programs**. The 15 failures are
+  the ones Step 4 explained and none is new: `frame_builder` has text that is not GLSL (`varying vec4
+  v_Size . xy ;`; 6), `phantomtransitionfx` reads an undeclared varying (3), `textoutline7x7` has a
+  49-element varying above the interface limit of 31 locations (3), `lens_distorsion` has a `#if`
+  expression the preprocessor refuses (3).
+- The system Metal compiler (default options, as the host) accepted all 316 stages of the 158 shipped
+  programs and all 430 stages of the 215 distinct workshop pairs it was given (plain combos): zero
+  refused.
+- Time (release): per program median 0.4 ms and worst 5.2 ms for the shipped ones, median 1.0 ms and
+  worst 3.5 ms for the workshop ones, preprocessing and reflection included.
+
 ## What a later step takes from this one
 
-The interface and resource part (C2) is done (Step 4, above); it consumes `Converted::module`. The
-pipeline step takes `legalize::legalize` (or `legalize_stage`), compiles each `LegalStage::text`
-with naga (`glsl-in`, then the validator, then the Metal writer with the binding map built from
-`ProgramLayout` and `binding::assign_metal_slots`) and builds reflection from the layout facts
-and from naga's module. `src/dialect/tests/layout.rs` (the old stand-in) is deleted: the dialect
-tests use the real legalizer.
+The C ABI (`ffi` feature): `pipeline::compile` returns a `CompiledProgram` with everything the
+response documents hold (`StagePayload::to_json`, `Reflection::to_json`, `Metadata::to_json`,
+`diagnostics_json`, `cache_key`, `compiler_identity`); failures are `ShaderError` with `Display` as
+the last-error text. The include provider of the C ABI implements `IncludeSource`.
 
 ## Not yet done (planned for later steps)
 
-The C ABI and last-error buffer (R1 to R9, R70 buffer, R89 to R93), the engine-backed include
-provider (callback, free callback; the in-memory and closure providers exist), the naga calls, the
-MSL writer and the reflection document in the pipeline, the request-level NV12 plumbing (the
-legalizer takes the flagged slots; the pipeline passes them), and the end-to-end checks of test
-items 58 (compile half) and 66. The cache identity is not bumped: nothing this step adds reaches a
-compiled program until the pipeline uses it. `src/dialect/tests/boundary.rs` pins a
-digest of the converter's output per `PIPELINE_REVISION`, so the first change of converted
-output after that revision forces a deliberate bump.
+The C ABI and last-error buffer (R1 to R9, R70 buffer, R89 to R93) and the engine-backed include
+provider (callback, free callback; the in-memory and closure providers exist), and the engine-side
+checks of test 34 (draw tests). R79's optional early failure for a program the engine would refuse.
+`src/dialect/tests/boundary.rs` pins a digest of the converter's output per `PIPELINE_REVISION`, so the
+first change of converted output after that revision forces a deliberate bump. Two-row matrices and
+arrays of booleans in the block (NOTES 93).
 
 ## Measurements (step 3)
 

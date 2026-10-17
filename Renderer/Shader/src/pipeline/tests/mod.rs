@@ -6,4 +6,9 @@
 pub(crate) mod support;
 
 mod corpus;
+mod globals;
+mod inputs;
+mod merge;
+mod orchestration;
+mod resources;
 mod varyings;

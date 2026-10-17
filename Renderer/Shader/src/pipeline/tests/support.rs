@@ -5,7 +5,7 @@
 
 use crate::error::ShaderError;
 use crate::pipeline::{CompiledProgram, compile};
-use crate::request::{Combo, ShaderRequest, Stage, StageKind, TextureRecord, ValidRequest};
+use crate::request::{CachePolicy, Combo, Property, ShaderRequest, Stage, StageKind, TextureRecord, ValidRequest};
 use crate::source::{MemorySource, NoIncludes};
 
 pub const PASS_VERTEX: &str = "\
@@ -28,6 +28,8 @@ pub struct Req {
     pub fragment: String,
     pub combos: Vec<(String, String)>,
     pub textures: Vec<TextureRecord>,
+    pub properties: Vec<Property>,
+    pub cache: Option<CachePolicy>,
     pub fragment_first: bool,
 }
 
@@ -43,6 +45,16 @@ impl Req {
 
     pub fn texture(mut self, record: TextureRecord) -> Req {
         self.textures.push(record);
+        self
+    }
+
+    pub fn property(mut self, property: Property) -> Req {
+        self.properties.push(property);
+        self
+    }
+
+    pub fn cache(mut self, policy: CachePolicy) -> Req {
+        self.cache = Some(policy);
         self
     }
 
@@ -64,6 +76,8 @@ impl Req {
             stages,
             combos: self.combos.iter().map(|(n, v)| Combo { name: n.clone(), value: v.clone() }).collect(),
             textures: self.textures.clone(),
+            properties: self.properties.clone(),
+            cache_policy: self.cache.clone().unwrap_or_default(),
             ..ShaderRequest::default()
         }
         .validate()
@@ -165,4 +179,45 @@ pub fn vertex_with(declarations: &str, body: &str) -> String {
 /// A fragment stage that declares the given varying lines and runs `body`.
 pub fn fragment_with(declarations: &str, body: &str) -> String {
     format!("{declarations}\nvoid main() {{\n  vec4 c = vec4(0.0);\n{body}\n  gl_FragColor = c;\n}}\n")
+}
+
+/// `(name, binding)` of every resource declaration of a legalized text, in text order.
+pub fn glsl_bindings(glsl: &str) -> Vec<(String, u32)> {
+    let mut out = Vec::new();
+    for line in glsl.lines() {
+        let Some(rest) = line.strip_prefix("layout(") else { continue };
+        let Some((inside, after)) = rest.split_once(')') else { continue };
+        let Some(b) = inside.split(',').find_map(|p| p.trim().strip_prefix("binding = ")) else { continue };
+        let name = after.trim().trim_end_matches(';').trim_end_matches('{').split_whitespace().last().unwrap().to_string();
+        out.push((name, b.parse().unwrap()));
+    }
+    out
+}
+
+pub fn glsl_binding(glsl: &str, name: &str) -> Option<u32> {
+    glsl_bindings(glsl).into_iter().find(|(n, _)| n == name).map(|(_, b)| b)
+}
+
+/// The legalized text of one stage of a program.
+pub fn glsl_of(p: &CompiledProgram, kind: StageKind) -> String {
+    p.stage(kind).unwrap().glsl.clone()
+}
+
+/// Checks that, for every stage, the legalized text, the Metal binding records and the
+/// reflection agree on the binding index of every resource (spec D R32).
+pub fn assert_bindings_agree(p: &CompiledProgram) {
+    for stage in &p.stages {
+        for (name, binding) in glsl_bindings(&stage.glsl) {
+            let record = stage.payload.bindings.iter().find(|b| b.name == name).unwrap_or_else(|| panic!("no record for {name}"));
+            assert_eq!(record.binding, binding, "{name} in the {} stage", stage.kind.name());
+        }
+    }
+    for d in &p.reflection.descriptor_bindings {
+        for stage in &p.stages {
+            if d.stages.contains(stage.kind) {
+                let record = stage.payload.bindings.iter().find(|b| b.name == d.name).unwrap_or_else(|| panic!("no record for {}", d.name));
+                assert_eq!(record.binding, d.binding, "{}", d.name);
+            }
+        }
+    }
 }
