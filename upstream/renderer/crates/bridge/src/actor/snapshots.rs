@@ -40,6 +40,7 @@ const RUNNING_BACKEND_NATIVE: &str = "native";
 const RUNNING_BACKEND_LEGACY: &str = "legacy";
 const SCENE_RENDERER_COMPATIBILITY: &str = "compatibility";
 const SCENE_RENDERER_NATIVE_METAL_PREFERRED: &str = "native_metal_preferred";
+const SCENE_RENDERER_NATIVE_METAL_ONLY: &str = "native_metal_only";
 const SCENE_RESOLUTION_CANVAS: &str = "canvas";
 const SCENE_RESOLUTION_DISPLAY: &str = "display";
 const SCENE_BACKEND_LEGACY_VULKAN: &str = "legacy_vulkan";
@@ -721,6 +722,8 @@ impl BridgeActorState {
                     }
                     .to_string(),
                     fallback_reason: report.fallback_reason.clone(),
+                    failure_stage: report.failure.as_ref().map(|failure| failure.stage.as_str().to_string()),
+                    failure_reason: report.failure.as_ref().map(|failure| failure.reason.clone()),
                     video_path: report.video_path.name().to_string(),
                     optimization_applied: report.optimization_applied,
                 }
@@ -780,6 +783,9 @@ impl BridgeActorState {
                 SceneRendererModeCfg::Compatibility => SCENE_RENDERER_COMPATIBILITY.to_string(),
                 SceneRendererModeCfg::NativeMetalPreferred => {
                     SCENE_RENDERER_NATIVE_METAL_PREFERRED.to_string()
+                }
+                SceneRendererModeCfg::NativeMetalOnly => {
+                    SCENE_RENDERER_NATIVE_METAL_ONLY.to_string()
                 }
             },
             scene_resolution: match self.app_config.quality.scene_resolution {

@@ -214,9 +214,11 @@ impl SceneBackend {
 
 /// Which renderer the user asked for.
 ///
-/// A preference, not an outcome: a scene the Metal backend cannot draw falls
-/// back, and the fallback is reported rather than silently satisfying the
-/// preference.
+/// A preference, not an outcome: under `NativeMetalPreferred` a scene the Metal
+/// backend cannot draw falls back, and the fallback is reported rather than
+/// silently satisfying the preference. Under `NativeMetalOnly` there is nothing
+/// to fall back to: such a scene is held on its last frame (or its preview
+/// picture) and the failure is reported as a [`SceneFailure`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum SceneRendererPreference {
     /// Always use the Vulkan/MoltenVK backend.
@@ -224,6 +226,9 @@ pub enum SceneRendererPreference {
     Compatibility,
     /// Use the native Metal backend for scenes it fully supports.
     NativeMetalPreferred,
+    /// Use the native Metal backend and nothing else: a scene it cannot draw is
+    /// not drawn, and no Vulkan renderer is ever created for it.
+    NativeMetalOnly,
 }
 
 impl SceneRendererPreference {
@@ -233,6 +238,7 @@ impl SceneRendererPreference {
         match self {
             Self::Compatibility => 0,
             Self::NativeMetalPreferred => 1,
+            Self::NativeMetalOnly => 2,
         }
     }
 
@@ -242,6 +248,7 @@ impl SceneRendererPreference {
         match self {
             Self::Compatibility => "compatibility",
             Self::NativeMetalPreferred => "native_metal_preferred",
+            Self::NativeMetalOnly => "native_metal_only",
         }
     }
 }
@@ -305,6 +312,10 @@ pub struct SceneRuntimeReport {
     pub backend: Option<SceneBackend>,
     /// Why the active backend is not the preferred one, when it is not.
     pub fallback_reason: Option<String>,
+    /// Why the scene is held and not drawn, when the preference leaves no other
+    /// backend (`SceneRendererPreference::NativeMetalOnly`). `backend` is
+    /// `None` while this is set: nothing is drawing the scene.
+    pub failure: Option<SceneFailure>,
     /// How this scene's video textures reached the shaders sampling them on the
     /// last frame it drew.
     pub video_path: SceneVideoPath,
@@ -315,6 +326,62 @@ pub struct SceneRuntimeReport {
     /// failure. `None` when the renderer returned no reading, which is not the
     /// same as a healthy surface.
     pub surface: Option<SurfaceHealth>,
+}
+
+/// What stopped a scene from being drawn natively when nothing else may draw it.
+///
+/// Mirrors `owe_scene_failure_stage`: a category the host words for the user in
+/// their language, shown beside the renderer's own explanation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SceneFailureStage {
+    /// The scene uses something the native backend does not support: a refused
+    /// admission, found before any renderer was created.
+    Unsupported,
+    /// The native renderer could not be created on the surface.
+    Prepare,
+    /// The scene's shaders or pipelines did not compile for Metal.
+    Compile,
+    /// A frame failed after the scene was set up.
+    Frame,
+    /// The surface could not be re-established after a display change.
+    Surface,
+}
+
+impl SceneFailureStage {
+    /// Maps a raw `owe_scene_failure_stage`. Zero is no failure, and a value
+    /// this build does not name yields `None` as well: the renderer is linked
+    /// from the same header as this crate.
+    #[must_use]
+    pub const fn from_raw(raw: i32) -> Option<Self> {
+        match raw {
+            1 => Some(Self::Unsupported),
+            2 => Some(Self::Prepare),
+            3 => Some(Self::Compile),
+            4 => Some(Self::Frame),
+            5 => Some(Self::Surface),
+            _ => None,
+        }
+    }
+
+    /// Stable lowercase name used by the bridge and logs.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unsupported => "unsupported",
+            Self::Prepare => "prepare",
+            Self::Compile => "compile",
+            Self::Frame => "frame",
+            Self::Surface => "surface",
+        }
+    }
+}
+
+/// Why a scene is held instead of drawn: the stage, and the renderer's own
+/// English explanation for diagnostics.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SceneFailure {
+    pub stage: SceneFailureStage,
+    pub reason: String,
 }
 
 /// Why a scene surface stopped drawing although nobody asked it to.

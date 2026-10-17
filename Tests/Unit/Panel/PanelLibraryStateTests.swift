@@ -306,11 +306,11 @@ final class PanelLibraryStateTests: PanelTestCase {
       panel.store.settingsSnapshot.sceneRenderers = [
         BridgeSceneBackendReport(
           displayId: 1, displayName: "Main", wallpaperId: "ghost", wallpaperTitle: "Ghost",
-          backend: "legacy_vulkan", fallbackReason: "lit particles", videoPath: "none",
+          backend: "legacy_vulkan", fallbackReason: "lit particles", failureStage: nil, failureReason: nil, videoPath: "none",
           optimizationApplied: nil),
         BridgeSceneBackendReport(
           displayId: 2, displayName: "Side", wallpaperId: "ghost", wallpaperTitle: "Ghost",
-          backend: "legacy_vulkan", fallbackReason: "lit particles", videoPath: "none",
+          backend: "legacy_vulkan", fallbackReason: "lit particles", failureStage: nil, failureReason: nil, videoPath: "none",
           optimizationApplied: nil),
       ]
       func body(_ url: URL?) throws -> String {
@@ -334,6 +334,18 @@ final class PanelLibraryStateTests: PanelTestCase {
       XCTAssertTrue(workshop.contains("**Workshop item:** https://steamcommunity.com/sharedfiles/filedetails/?id=123456"), workshop)
       XCTAssertFalse(workshop.contains("**Renderer:**"), "nothing reported for it, nothing claimed")
       XCTAssertNil(panel.controller.issueReportURL(for: "not-installed"))
+
+      // A scene held by Native Metal only has no backend to name: the report says it was not drawn.
+      panel.store.settingsSnapshot.sceneRenderers = [
+        BridgeSceneBackendReport(
+          displayId: 1, displayName: "Main", wallpaperId: "ghost", wallpaperTitle: "Ghost",
+          backend: "unknown", fallbackReason: nil, failureStage: "unsupported",
+          failureReason: "the scene uses a puppet", videoPath: "none", optimizationApplied: nil)
+      ]
+      let held = try body(panel.controller.issueReportURL(for: "ghost"))
+      XCTAssertTrue(
+        held.contains("**Renderer:** not drawn (unsupported: the scene uses a puppet)"), held)
+      XCTAssertFalse(held.contains("unknown"), "a backend nobody named is not a renderer: \(held)")
     }
   }
 }

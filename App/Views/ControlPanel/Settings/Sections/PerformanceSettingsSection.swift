@@ -74,8 +74,8 @@ struct PerformanceSettingsSection: View {
   static let sceneRenderer = SettingsItem(
     id: "performance.scene-renderer", section: .performance, group: scene, inside: advanced,
     title: "Scene renderer",
-    note: "Unsupported scenes use Compatibility. The lock screen and screen saver follow this setting too.",
-    keywords: ["Compatibility", "Native Metal preferred"])
+    note: "Unsupported scenes use Compatibility, or with Native Metal only are not drawn and keep their last picture. The lock screen and screen saver follow this setting too.",
+    keywords: ["Compatibility", "Native Metal preferred", "Native Metal only"])
   static let sceneOptimization = SettingsItem(
     id: "performance.scene-optimization", section: .performance, group: scene, inside: advanced,
     title: "Scene render optimisation",
@@ -265,6 +265,9 @@ struct PerformanceSettingsSection: View {
         SettingsProse {
           Text(
             "Native Metal draws a scene only if it supports everything in it: image layers, sprite-sheet animation, 2D puppets with their own skinning shader, 2D sprite, sprite-trail, rope and rope-trail particles, 3D models, perspective cameras, scene lights, standard effect chains and post-processing, effects that read the previous frame, layer links, and BGRA, 8-bit NV12 or 10-bit video textures (HDR video is tone mapped to SDR). Scenes with anything else use Compatibility. This applies to the lock screen and screen saver too."
+          )
+          Text(
+            "With Native Metal only, a scene it can't draw is not drawn at all: it keeps its last picture, or its preview when it has drawn nothing yet, and the reason appears under “Drawn by”."
           )
         }
       }

@@ -654,7 +654,10 @@ survives setting changes. **Renderer compatibility** remains beside the scene
 diagnostics. **What these settings change** belongs to Playback & Power, not Advanced.
 What the three scene controls do (**Scene renderer**, **Scene render optimisation**
 and **Update only when the scene changes**) is described in
-[scene rendering](scene-rendering.md#scene-wallpapers).
+[scene rendering](scene-rendering.md#scene-wallpapers). **Native Metal only**, the third
+**Scene renderer** value, draws nothing with Compatibility: a scene it cannot draw is held
+on its last picture and the reason shows under **Drawn by**
+([scene rendering](scene-rendering.md#when-native-metal-cannot-draw-a-scene)).
 
 ## Video backend
 

@@ -49,8 +49,9 @@ pub use engine::{
 pub use error::EngineError;
 pub use owe::backend::AudioSpectrum128;
 pub use owe::scene_demand::{
-    SceneBackend, SceneDemandReasons, SceneRendererPreference, SceneResolution, SceneRuntimeReport,
-    SceneUpdateMode, SceneVideoPath, SurfaceHealth, SurfaceStopReason,
+    SceneBackend, SceneDemandReasons, SceneFailure, SceneFailureStage, SceneRendererPreference,
+    SceneResolution, SceneRuntimeReport, SceneUpdateMode, SceneVideoPath, SurfaceHealth,
+    SurfaceStopReason,
 };
 pub use owe::scene_registry::SceneRegistry;
 pub use window::{PlaceholderStyle, WallpaperWindow, WallpaperWindowBuilder};

@@ -3645,6 +3645,7 @@ fn scene_renderer_preference(mode: SceneRendererModeCfg) -> SceneRendererPrefere
     match mode {
         SceneRendererModeCfg::Compatibility => SceneRendererPreference::Compatibility,
         SceneRendererModeCfg::NativeMetalPreferred => SceneRendererPreference::NativeMetalPreferred,
+        SceneRendererModeCfg::NativeMetalOnly => SceneRendererPreference::NativeMetalOnly,
     }
 }
 

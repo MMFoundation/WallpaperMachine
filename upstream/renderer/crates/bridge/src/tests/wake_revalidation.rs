@@ -49,6 +49,7 @@ fn report(handle: u64, display_id: u32, frames: u64) -> SceneRuntimeReport {
         demand_reasons: SceneDemandReasons::default(),
         backend: Some(SceneBackend::LegacyVulkan),
         fallback_reason: None,
+        failure: None,
         video_path: SceneVideoPath::None,
         optimization_applied: Some(true),
         surface: Some(SurfaceHealth::from_raw(frames, frames, 0, 16, 0)),

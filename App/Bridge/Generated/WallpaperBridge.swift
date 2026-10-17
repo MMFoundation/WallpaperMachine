@@ -1344,13 +1344,16 @@ public protocol WallpaperBridgeProtocol : AnyObject {
      * `"compatibility"` keeps every scene on the established Vulkan/MoltenVK
      * path. `"native_metal_preferred"` asks for the native Metal backend
      * where the whole scene falls inside the subset it can draw, and falls
-     * back as a whole scene otherwise. Independent of the video backend: a
-     * scene is not a plain video. The snapshot's `scene_renderers` reports
-     * what each display actually got.
+     * back as a whole scene otherwise. `"native_metal_only"` asks for the
+     * native backend and nothing else: a scene it cannot draw is held on its
+     * last frame (or its preview picture), the failure and its reason are
+     * reported in `scene_renderers`, and no Vulkan renderer is created.
+     * Independent of the video backend: a scene is not a plain video. The
+     * snapshot's `scene_renderers` reports what each display actually got.
      *
      * # Errors
      *
-     * Returns an error when `mode` is not one of the two names, or when the
+     * Returns an error when `mode` is not one of the three names, or when the
      * scene list cannot be rebuilt for the new routing, in which case the
      * previous renderer keeps running.
      */
@@ -3395,13 +3398,16 @@ open func setSceneOptimizationEnabled(enabled: Bool)async throws  -> BridgeSnaps
      * `"compatibility"` keeps every scene on the established Vulkan/MoltenVK
      * path. `"native_metal_preferred"` asks for the native Metal backend
      * where the whole scene falls inside the subset it can draw, and falls
-     * back as a whole scene otherwise. Independent of the video backend: a
-     * scene is not a plain video. The snapshot's `scene_renderers` reports
-     * what each display actually got.
+     * back as a whole scene otherwise. `"native_metal_only"` asks for the
+     * native backend and nothing else: a scene it cannot draw is held on its
+     * last frame (or its preview picture), the failure and its reason are
+     * reported in `scene_renderers`, and no Vulkan renderer is created.
+     * Independent of the video backend: a scene is not a plain video. The
+     * snapshot's `scene_renderers` reports what each display actually got.
      *
      * # Errors
      *
-     * Returns an error when `mode` is not one of the two names, or when the
+     * Returns an error when `mode` is not one of the three names, or when the
      * scene list cannot be rebuilt for the new routing, in which case the
      * previous renderer keeps running.
      */
@@ -6440,6 +6446,18 @@ public struct BridgeSceneBackendReport {
     public var backend: String
     public var fallbackReason: String?
     /**
+     * Why the scene is held and not drawn, when the preference is
+     * `native_metal_only` and the native backend could not draw it: the
+     * stage (`"unsupported"`, `"prepare"`, `"compile"`, `"frame"` or
+     * `"surface"`), a category the host words for the user, and the renderer's
+     * own English explanation for diagnostics. Both are `None` for a scene
+     * that is drawing, and `backend` is `"unknown"` while they are set:
+     * nothing is drawing the scene, and the display shows its last frame or
+     * the project's preview picture. Mutually exclusive with `fallback_reason`.
+     */
+    public var failureStage: String?
+    public var failureReason: String?
+    /**
      * How this scene's video textures reached the shaders that sample them on
      * the last frame it drew: `"none"`, `"bgra"`, `"nv12_direct"`,
      * `"nv12_converted"`, `"nv12_mixed"`, `"nv12_converted_preparing"` or
@@ -6460,6 +6478,16 @@ public struct BridgeSceneBackendReport {
     // declare one manually.
     public init(displayId: UInt32, displayName: String, wallpaperId: String, wallpaperTitle: String, backend: String, fallbackReason: String?, 
         /**
+         * Why the scene is held and not drawn, when the preference is
+         * `native_metal_only` and the native backend could not draw it: the
+         * stage (`"unsupported"`, `"prepare"`, `"compile"`, `"frame"` or
+         * `"surface"`), a category the host words for the user, and the renderer's
+         * own English explanation for diagnostics. Both are `None` for a scene
+         * that is drawing, and `backend` is `"unknown"` while they are set:
+         * nothing is drawing the scene, and the display shows its last frame or
+         * the project's preview picture. Mutually exclusive with `fallback_reason`.
+         */failureStage: String?, failureReason: String?, 
+        /**
          * How this scene's video textures reached the shaders that sample them on
          * the last frame it drew: `"none"`, `"bgra"`, `"nv12_direct"`,
          * `"nv12_converted"`, `"nv12_mixed"`, `"nv12_converted_preparing"` or
@@ -6479,6 +6507,8 @@ public struct BridgeSceneBackendReport {
         self.wallpaperTitle = wallpaperTitle
         self.backend = backend
         self.fallbackReason = fallbackReason
+        self.failureStage = failureStage
+        self.failureReason = failureReason
         self.videoPath = videoPath
         self.optimizationApplied = optimizationApplied
     }
@@ -6506,6 +6536,12 @@ extension BridgeSceneBackendReport: Equatable, Hashable {
         if lhs.fallbackReason != rhs.fallbackReason {
             return false
         }
+        if lhs.failureStage != rhs.failureStage {
+            return false
+        }
+        if lhs.failureReason != rhs.failureReason {
+            return false
+        }
         if lhs.videoPath != rhs.videoPath {
             return false
         }
@@ -6522,6 +6558,8 @@ extension BridgeSceneBackendReport: Equatable, Hashable {
         hasher.combine(wallpaperTitle)
         hasher.combine(backend)
         hasher.combine(fallbackReason)
+        hasher.combine(failureStage)
+        hasher.combine(failureReason)
         hasher.combine(videoPath)
         hasher.combine(optimizationApplied)
     }
@@ -6541,6 +6579,8 @@ public struct FfiConverterTypeBridgeSceneBackendReport: FfiConverterRustBuffer {
                 wallpaperTitle: FfiConverterString.read(from: &buf), 
                 backend: FfiConverterString.read(from: &buf), 
                 fallbackReason: FfiConverterOptionString.read(from: &buf), 
+                failureStage: FfiConverterOptionString.read(from: &buf), 
+                failureReason: FfiConverterOptionString.read(from: &buf), 
                 videoPath: FfiConverterString.read(from: &buf), 
                 optimizationApplied: FfiConverterOptionBool.read(from: &buf)
         )
@@ -6553,6 +6593,8 @@ public struct FfiConverterTypeBridgeSceneBackendReport: FfiConverterRustBuffer {
         FfiConverterString.write(value.wallpaperTitle, into: &buf)
         FfiConverterString.write(value.backend, into: &buf)
         FfiConverterOptionString.write(value.fallbackReason, into: &buf)
+        FfiConverterOptionString.write(value.failureStage, into: &buf)
+        FfiConverterOptionString.write(value.failureReason, into: &buf)
         FfiConverterString.write(value.videoPath, into: &buf)
         FfiConverterOptionBool.write(value.optimizationApplied, into: &buf)
     }
@@ -6745,7 +6787,7 @@ public struct BridgeSettingsSnapshot {
      */
     public var sceneVideoPlaneSamplingEnabled: Bool
     /**
-     * `"compatibility"` or `"native_metal_preferred"`: the user's choice,
+     * `"compatibility"`, `"native_metal_preferred"` or `"native_metal_only"`: the user's choice,
      * which for a given scene may or may not be what `scene_renderers`
      * reports. A saved preference, not a read-back.
      */
@@ -6844,7 +6886,7 @@ public struct BridgeSettingsSnapshot {
          * happened.
          */sceneVideoPlaneSamplingEnabled: Bool, 
         /**
-         * `"compatibility"` or `"native_metal_preferred"`: the user's choice,
+         * `"compatibility"`, `"native_metal_preferred"` or `"native_metal_only"`: the user's choice,
          * which for a given scene may or may not be what `scene_renderers`
          * reports. A saved preference, not a read-back.
          */sceneRenderer: String, 
@@ -10524,7 +10566,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_optimization_enabled() != 6485) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_renderer() != 23711) {
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_renderer() != 12730) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_scene_resolution() != 15138) {

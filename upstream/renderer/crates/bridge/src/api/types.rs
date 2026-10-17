@@ -513,6 +513,16 @@ pub struct BridgeSceneBackendReport {
     pub wallpaper_title: String,
     pub backend: String,
     pub fallback_reason: Option<String>,
+    /// Why the scene is held and not drawn, when the preference is
+    /// `native_metal_only` and the native backend could not draw it: the
+    /// stage (`"unsupported"`, `"prepare"`, `"compile"`, `"frame"` or
+    /// `"surface"`), a category the host words for the user, and the renderer's
+    /// own English explanation for diagnostics. Both are `None` for a scene
+    /// that is drawing, and `backend` is `"unknown"` while they are set:
+    /// nothing is drawing the scene, and the display shows its last frame or
+    /// the project's preview picture. Mutually exclusive with `fallback_reason`.
+    pub failure_stage: Option<String>,
+    pub failure_reason: Option<String>,
     /// How this scene's video textures reached the shaders that sample them on
     /// the last frame it drew: `"none"`, `"bgra"`, `"nv12_direct"`,
     /// `"nv12_converted"`, `"nv12_mixed"`, `"nv12_converted_preparing"` or
@@ -569,7 +579,7 @@ pub struct BridgeSettingsSnapshot {
     /// the `video_path` of each `scene_renderers` row is what actually
     /// happened.
     pub scene_video_plane_sampling_enabled: bool,
-    /// `"compatibility"` or `"native_metal_preferred"`: the user's choice,
+    /// `"compatibility"`, `"native_metal_preferred"` or `"native_metal_only"`: the user's choice,
     /// which for a given scene may or may not be what `scene_renderers`
     /// reports. A saved preference, not a read-back.
     pub scene_renderer: String,

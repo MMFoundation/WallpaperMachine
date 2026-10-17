@@ -16,6 +16,9 @@ struct CompatibilityState: Equatable {
   /// absence of a report is never read as Compatibility.
   let backend: String?
   let fallbackReason: String?
+  /// Why the wallpaper is held and not drawn when Native Metal is the only renderer and could not
+  /// draw it. Then `backend` is the engine's "unknown": nothing is drawing it.
+  var failure: SceneFailureReport? = nil
   /// Checking is possible: the target is an enabled independent display with the wallpaper's
   /// options loaded and a frame rate to certify.
   let canCheck: Bool
@@ -54,6 +57,7 @@ extension PanelController {
     let physicalID = ResolvedDisplayTitles.liveDisplayID(
       context.displayID, title: display?.title ?? "")
     var report: (backend: String, reason: String?)?
+    var failure: SceneFailureReport?
     if let video = settings.videoBackends.first(where: {
       $0.wallpaperId == context.wallpaperID && $0.displayId == physicalID
     }) {
@@ -62,11 +66,15 @@ extension PanelController {
       $0.wallpaperId == context.wallpaperID && $0.displayId == physicalID
     }) {
       report = (scene.backend, scene.fallbackReason)
+      failure = scene.failureStage.map {
+        SceneFailureReport(stage: SceneFailureStage(name: $0), reason: scene.failureReason)
+      }
     }
     return CompatibilityState(
       wallpaperID: context.wallpaperID, displayID: context.displayID, kind: context.kind,
       isChecking: current && compatibility.checking, checks: current ? compatibility.checks : [],
-      backend: report?.backend, fallbackReason: report?.reason, canCheck: context.targetAvailable)
+      backend: report?.backend, fallbackReason: report?.reason, failure: failure,
+      canCheck: context.targetAvailable)
   }
 
   /// `compatibilityCheck`: reads the wallpaper's files again and re-runs the checks. Leaves the banner

@@ -102,13 +102,18 @@ pub enum VideoBackendModeCfg {
 /// the whole scene falls inside the subset it can draw, and falls back to
 /// Compatibility as a whole scene otherwise, so the choice is a preference
 /// rather than a guarantee. `Compatibility` is the Vulkan/MoltenVK path, which
-/// supports every scene, for every scene.
+/// supports every scene, for every scene. `NativeMetalOnly` asks for the native
+/// backend and nothing else: a scene it cannot draw is held on its last frame
+/// (or its preview picture) and reported as a failure, and no Compatibility
+/// renderer is ever created for it. It is never the default, and it is chosen
+/// only by naming it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SceneRendererModeCfg {
     Compatibility,
     #[default]
     NativeMetalPreferred,
+    NativeMetalOnly,
 }
 
 /// How many pixels a 2D scene is rasterized with, before the internal render

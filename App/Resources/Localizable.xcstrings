@@ -5279,11 +5279,44 @@
     "Native Metal preferred" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalを優先"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "优先原生 Metal"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "優先使用原生 Metal"}}}
     },
+    "Native Metal only" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalのみ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "仅原生 Metal"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "僅使用原生 Metal"}}}
+    },
+    "With Native Metal only, a scene it can't draw is not drawn at all: it keeps its last picture, or its preview when it has drawn nothing yet, and the reason appears under “Drawn by”." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "「ネイティブMetalのみ」では、ネイティブMetalで描画できないシーンはまったく描画されません。最後の画像（まだ何も描画していない場合はプレビュー）が保持され、理由は「描画バックエンド」の下に表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "选择“仅原生 Metal”时，原生 Metal 无法绘制的场景完全不会绘制：它会保留最后的画面（尚未绘制任何内容时则显示预览），原因会显示在“绘制方”下方。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "選擇「僅使用原生 Metal」時，原生 Metal 無法繪製的場景完全不會繪製：它會保留最後的畫面（尚未繪製任何內容時則顯示預覽），原因會顯示在「繪製者」下方。"}}}
+    },
+    "it uses something Native Metal can't draw" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalで描画できない要素が含まれています"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "其中包含原生 Metal 无法绘制的内容"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "其中包含原生 Metal 無法繪製的內容"}}}
+    },
+    "Native Metal couldn't start" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalを開始できませんでした"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 无法启动"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 無法啟動"}}}
+    },
+    "its shaders didn't compile for Metal" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "シェーダがMetal用にコンパイルされませんでした"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "其着色器无法编译为 Metal"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "其著色器無法編譯為 Metal"}}}
+    },
+    "a frame failed in Native Metal" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalでフレームの描画に失敗しました"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 绘制某一帧失败"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 繪製某個影格失敗"}}}
+    },
+    "Native Metal couldn't take the new display" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalが新しいディスプレイを引き継げませんでした"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 无法接管新的显示器"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 無法接手新的顯示器"}}}
+    },
+    "it stopped (%@)" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "停止しました（%@）"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已停止（%@）"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已停止（%@）"}}}
+    },
+    "not drawn — %@" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "描画されていません — %@"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "未绘制 — %@"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "未繪製 — %@"}}}
+    },
+    "(reason: %@)" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "（理由：%@）"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "（原因：%@）"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "（原因：%@）"}}}
+    },
+    "Showing its last picture." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "最後の画像を表示しています。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "正在显示最后的画面。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "正在顯示最後的畫面。"}}}
+    },
     "Renderer compatibility" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "レンダラの互換性"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "渲染器兼容性"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "渲染器相容性"}}}
     },
-    "Unsupported scenes use Compatibility. The lock screen and screen saver follow this setting too." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "対応していないシーンには互換モードが使用されます。ロック画面とスクリーンセーバーもこの設定に従います。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "不支持的场景会使用兼容模式。锁屏和屏幕保护程序也遵循此设置。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "不支援的場景會使用相容模式。鎖定畫面和螢幕保護程式也會遵循此設定。"}}}
+    "Unsupported scenes use Compatibility, or with Native Metal only are not drawn and keep their last picture. The lock screen and screen saver follow this setting too." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "対応していないシーンには互換モードが使用されます。「ネイティブMetalのみ」では描画されず、最後の画像が保持されます。ロック画面とスクリーンセーバーもこの設定に従います。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "不支持的场景会使用兼容模式；选择“仅原生 Metal”时则不会绘制，并保留最后一帧画面。锁屏和屏幕保护程序也遵循此设置。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "不支援的場景會使用相容模式；選擇「僅使用原生 Metal」時則不會繪製，並保留最後一個畫面。鎖定畫面和螢幕保護程式也會遵循此設定。"}}}
     },
     "Native Metal" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetal"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal"}}}

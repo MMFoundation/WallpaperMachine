@@ -355,6 +355,28 @@ mod tests {
         assert!(reloaded.quality.scene_on_demand_enabled);
     }
 
+    /// The no-fallback renderer mode is written under the same key, by name, and the
+    /// one-time move to the default never touches a choice that is not Compatibility.
+    #[test]
+    fn native_metal_only_is_stored_by_name_and_survives_the_default_move() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        let store = ConfigStore::open(root.path().to_path_buf());
+        let mut config = crate::config::AppConfig::default();
+        config.scene_renderer = SceneRendererModeCfg::NativeMetalOnly;
+        store.save_app_config(&config).expect("config save");
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("scene_renderer = \"native_metal_only\""), "{written}");
+        let reloaded = store.load().expect("config load").config;
+        assert_eq!(reloaded.scene_renderer, SceneRendererModeCfg::NativeMetalOnly);
+        assert_eq!(
+            SceneRendererModeCfg::default(),
+            SceneRendererModeCfg::NativeMetalPreferred,
+            "the no-fallback mode is never the default until the Vulkan path is deleted"
+        );
+    }
+
     /// A config written before the choice existed has no key for it, and the
     /// shipped default applies: a 2D scene is rasterized for the display.
     #[test]

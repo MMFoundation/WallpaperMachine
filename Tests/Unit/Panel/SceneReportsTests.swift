@@ -14,13 +14,15 @@ final class SceneReportsTests: PanelTestCase {
   }
 
   private func renderer(
-    _ id: UInt32, backend: String, fallback: String? = nil, videoPath: String = "none",
-    applied: Bool? = true, display: String = "Display 1", title: String = "Forest"
+    _ id: UInt32, backend: String, fallback: String? = nil, failureStage: String? = nil,
+    failureReason: String? = nil, videoPath: String = "none", applied: Bool? = true,
+    display: String = "Display 1", title: String = "Forest"
   ) -> SceneRendererReport {
     SceneRendererReport(
       BridgeSceneBackendReport(
         displayId: id, displayName: display, wallpaperId: "w\(id)", wallpaperTitle: title,
-        backend: backend, fallbackReason: fallback, videoPath: videoPath, optimizationApplied: applied))
+        backend: backend, fallbackReason: fallback, failureStage: failureStage,
+        failureReason: failureReason, videoPath: videoPath, optimizationApplied: applied))
   }
 
   /// A scene that failed before its first frame is stopped, not starting; the reasons are moot once
@@ -128,6 +130,39 @@ final class SceneReportsTests: PanelTestCase {
       "A name this build does not know still drew the scene, so it is named as given")
   }
 
+  /// With Native Metal as the only renderer, a scene it cannot draw is held, not running on any backend.
+  /// Its row says so in words the user can read, in a stage of its own and with the renderer's reason,
+  /// instead of "preparing" for ever or the name of a backend that is not drawing.
+  func testAHeldSceneIsWordedAsNotDrawnWithItsStageAndTheRenderersOwnReason() throws {
+    try pinPanelLanguageToEnglish()
+    let held = renderer(
+      1, backend: "unknown", failureStage: "unsupported", failureReason: "the scene uses a puppet")
+    XCTAssertEqual(held.failureStage, .unsupported)
+    XCTAssertEqual(held.backend, .preparing, "nothing is drawing it, and the bridge says so")
+    XCTAssertEqual(
+      held.line(preferred: .nativeMetalOnly),
+      "Display 1 — Forest: not drawn — it uses something Native Metal can't draw "
+        + "(reason: the scene uses a puppet). Showing its last picture.")
+    XCTAssertNotEqual(
+      held.line(preferred: .nativeMetalOnly),
+      renderer(1, backend: "unknown").line(preferred: .nativeMetalOnly),
+      "a held scene is not one that is still preparing")
+
+    let words = ["unsupported", "prepare", "compile", "frame", "surface"].map {
+      SceneFailureStage(name: $0).title
+    }
+    XCTAssertEqual(Set(words).count, words.count, "no two stages share words")
+    XCTAssertEqual(SceneFailureStage(name: "future").title, "it stopped (future)")
+    XCTAssertEqual(
+      renderer(2, backend: "unknown", failureStage: "frame").line(preferred: .nativeMetalOnly),
+      "Display 1 — Forest: not drawn — a frame failed in Native Metal. Showing its last picture.",
+      "an engine that gave no reason does not acquire an invented one")
+
+    let running = [held, renderer(3, backend: "native_metal")]
+    let status = SceneOptimizationStatus(reports: running, saved: true)
+    XCTAssertEqual(status.total, 1, "a held scene has no backend to confirm a setting")
+  }
+
   func testTheVideoPathIsNamedOnlyWhenTheRendererObservedOne() throws {
     try pinPanelLanguageToEnglish()
     let paths: [(String, String?)] = [
@@ -227,7 +262,7 @@ final class SceneReportsTests: PanelTestCase {
         sceneRenderers: [
           BridgeSceneBackendReport(
             displayId: 1, displayName: "Display 1", wallpaperId: "forest", wallpaperTitle: "Forest",
-            backend: "native_metal", fallbackReason: nil, videoPath: "none", optimizationApplied: true)
+            backend: "native_metal", fallbackReason: nil, failureStage: nil, failureReason: nil, videoPath: "none", optimizationApplied: true)
         ])
       let performance = panel.controller.performanceSettings
       XCTAssertEqual(performance.sceneRenderer, .nativeMetalPreferred)

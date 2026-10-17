@@ -23,11 +23,15 @@ enum VideoBackendMode: String, CaseIterable, Sendable {
 enum SceneRendererMode: String, CaseIterable, Sendable {
   case compatibility
   case nativeMetalPreferred = "native_metal_preferred"
+  /// Native Metal and nothing else: a scene it cannot draw is not drawn, keeps its last picture (or its
+  /// preview) and reports why, and no Compatibility renderer is created for it.
+  case nativeMetalOnly = "native_metal_only"
 
   @MainActor var title: String {
     switch self {
     case .compatibility: L("Compatibility")
     case .nativeMetalPreferred: L("Native Metal preferred")
+    case .nativeMetalOnly: L("Native Metal only")
     }
   }
 }
@@ -141,6 +145,52 @@ enum SceneBackend: Equatable, Sendable {
     case .other(let name): name
     }
   }
+}
+
+/// Why a scene is held and not drawn when Native Metal is the only renderer, by the bridge's names. A
+/// category worded here in the user's language; the renderer's own explanation is shown beside it.
+enum SceneFailureStage: Equatable, Sendable {
+  case unsupported, prepare, compile, frame, surface
+  /// A stage this build does not know. The scene is still not drawn, so it is named as given.
+  case other(String)
+
+  init(name: String) {
+    switch name {
+    case "unsupported": self = .unsupported
+    case "prepare": self = .prepare
+    case "compile": self = .compile
+    case "frame": self = .frame
+    case "surface": self = .surface
+    default: self = .other(name)
+    }
+  }
+
+  @MainActor var title: String {
+    switch self {
+    case .unsupported: L("it uses something Native Metal can't draw")
+    case .prepare: L("Native Metal couldn't start")
+    case .compile: L("its shaders didn't compile for Metal")
+    case .frame: L("a frame failed in Native Metal")
+    case .surface: L("Native Metal couldn't take the new display")
+    case .other(let name): L("it stopped (\(name))")
+    }
+  }
+
+  /// "not drawn — it uses something Native Metal can't draw (reason: …). Showing its last picture."
+  ///
+  /// The renderer's reason is English diagnostics and is shown only when it gave one. The closing sentence
+  /// is the policy itself: nothing else draws the scene, and the surface keeps what it was showing.
+  @MainActor func sentence(reason: String?) -> String {
+    var text = L("not drawn — \(title)")
+    if let reason, !reason.isEmpty { text += " " + L("(reason: \(reason))") }
+    return text + ". " + L("Showing its last picture.")
+  }
+}
+
+/// A scene held by Native Metal only: why, in the bridge's category and the renderer's own words.
+struct SceneFailureReport: Equatable, Sendable {
+  var stage: SceneFailureStage
+  var reason: String?
 }
 
 /// How a scene's video textures reached the shaders sampling them. A scene with no video reports
@@ -311,6 +361,10 @@ struct SceneRendererReport: Equatable, Identifiable, Sendable {
   var backend: SceneBackend
   /// The renderer's own reason for drawing with Compatibility, never one made up here.
   var fallbackReason: String?
+  /// Set when Native Metal is the only renderer and it could not draw the scene: the scene is held, not
+  /// running on any backend. Never set together with `fallbackReason`.
+  var failureStage: SceneFailureStage?
+  var failureReason: String?
   var videoPath: SceneVideoPath?
   /// Whether the scene optimisation setting has reached this scene: true, false (not yet, on its
   /// next frame) or nil (the renderer could not answer, which is not "applied").
@@ -325,6 +379,8 @@ struct SceneRendererReport: Equatable, Identifiable, Sendable {
     wallpaperTitle = report.wallpaperTitle
     backend = SceneBackend(name: report.backend)
     fallbackReason = report.fallbackReason
+    failureStage = report.failureStage.map(SceneFailureStage.init(name:))
+    failureReason = report.failureReason
     videoPath = SceneVideoPath(rawValue: report.videoPath)
     optimizationApplied = report.optimizationApplied
   }
@@ -340,6 +396,8 @@ struct SceneRendererReport: Equatable, Identifiable, Sendable {
       display: display, id: displayID,
       wallpaper: wallpaperTitle.isEmpty
         ? (wallpaperID.isEmpty ? L("wallpaper") : wallpaperID) : wallpaperTitle)
+    // First: a held scene has no backend, and "preparing" for ever is the lie this report exists to end.
+    if let failureStage { return "\(subject): \(failureStage.sentence(reason: failureReason))" }
     guard let backendTitle = backend.title else {
       return "\(subject): \(L("preparing — no backend chosen yet"))"
     }

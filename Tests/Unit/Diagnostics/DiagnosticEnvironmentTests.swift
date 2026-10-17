@@ -11,7 +11,7 @@ final class DiagnosticEnvironmentTests: XCTestCase {
   ) -> BridgeSceneBackendReport {
     BridgeSceneBackendReport(
       displayId: displayId, displayName: "Studio Display", wallpaperId: "rain-1",
-      wallpaperTitle: "Rain", backend: backend, fallbackReason: fallbackReason, videoPath: "none",
+      wallpaperTitle: "Rain", backend: backend, fallbackReason: fallbackReason, failureStage: nil, failureReason: nil, videoPath: "none",
       optimizationApplied: true)
   }
 
@@ -39,6 +39,21 @@ final class DiagnosticEnvironmentTests: XCTestCase {
     ] {
       XCTAssertTrue(line.contains(part), "\"\(part)\" is missing from: \(line)")
     }
+  }
+
+  /// A scene Native Metal could not draw, with nothing allowed to draw it instead, is in the report as
+  /// not drawn with the stage and the renderer's reason: a bug report has to say it was held.
+  func testRunningSceneLineSaysWhenASceneIsHeldAndWhy() {
+    let held = BridgeSceneBackendReport(
+      displayId: 3, displayName: "Studio Display", wallpaperId: "rain-1", wallpaperTitle: "Rain",
+      backend: "unknown", fallbackReason: nil, failureStage: "compile",
+      failureReason: "the shader did not link", videoPath: "none", optimizationApplied: nil)
+    let line = DiagnosticEnvironment.runningSceneLine(held, mode: "stopped_after_failure")
+
+    XCTAssertTrue(
+      line.contains("not drawn, compile: the shader did not link; holding the last picture"), line)
+    XCTAssertFalse(line.contains("fell back"), "a held scene did not fall back: \(line)")
+    XCTAssertTrue(line.contains("mode stopped_after_failure"), line)
   }
 
   func testRunningSceneLineWithoutAReadingSaysNothingAboutTheMode() {

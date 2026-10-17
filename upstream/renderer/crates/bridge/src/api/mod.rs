@@ -2043,13 +2043,16 @@ impl WallpaperBridge {
     /// `"compatibility"` keeps every scene on the established Vulkan/MoltenVK
     /// path. `"native_metal_preferred"` asks for the native Metal backend
     /// where the whole scene falls inside the subset it can draw, and falls
-    /// back as a whole scene otherwise. Independent of the video backend: a
-    /// scene is not a plain video. The snapshot's `scene_renderers` reports
-    /// what each display actually got.
+    /// back as a whole scene otherwise. `"native_metal_only"` asks for the
+    /// native backend and nothing else: a scene it cannot draw is held on its
+    /// last frame (or its preview picture), the failure and its reason are
+    /// reported in `scene_renderers`, and no Vulkan renderer is created.
+    /// Independent of the video backend: a scene is not a plain video. The
+    /// snapshot's `scene_renderers` reports what each display actually got.
     ///
     /// # Errors
     ///
-    /// Returns an error when `mode` is not one of the two names, or when the
+    /// Returns an error when `mode` is not one of the three names, or when the
     /// scene list cannot be rebuilt for the new routing, in which case the
     /// previous renderer keeps running.
     pub async fn set_scene_renderer(
@@ -2059,6 +2062,7 @@ impl WallpaperBridge {
         let mode = match mode.as_str() {
             "compatibility" => SceneRendererModeCfg::Compatibility,
             "native_metal_preferred" => SceneRendererModeCfg::NativeMetalPreferred,
+            "native_metal_only" => SceneRendererModeCfg::NativeMetalOnly,
             other => {
                 return Err(BridgeError::invalid_input(format!(
                     "unknown scene renderer mode {other}"

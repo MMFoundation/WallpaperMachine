@@ -12,7 +12,7 @@
 
 use wallpaper_core::{
     DisplayDesc, DisplayIdentity, DisplaySnapshotEntry, SceneBackend, SceneDemandReasons,
-    SceneRendererPreference, SceneResolution, SceneRuntimeReport, SceneUpdateMode, SceneVideoPath,
+    SceneFailure, SceneFailureStage, SceneRendererPreference, SceneResolution, SceneRuntimeReport, SceneUpdateMode, SceneVideoPath,
     SurfaceHealth, SurfaceStopReason, project::SceneHandle,
 };
 
@@ -30,6 +30,7 @@ fn report(display_id: u32, handle: u64) -> SceneRuntimeReport {
         demand_reasons: SceneDemandReasons::default(),
         backend: Some(SceneBackend::LegacyVulkan),
         fallback_reason: None,
+        failure: None,
         video_path: SceneVideoPath::None,
         optimization_applied: Some(true),
         surface: None,
@@ -165,7 +166,7 @@ async fn an_unknown_scene_renderer_name_is_refused_and_changes_nothing() {
     let error = bridge
         .set_scene_renderer("metal".into())
         .await
-        .expect_err("only the two declared names exist");
+        .expect_err("only the declared names exist");
 
     assert_eq!(error.kind(), crate::BridgeErrorKind::InvalidInput);
     assert!(
@@ -177,6 +178,93 @@ async fn an_unknown_scene_renderer_name_is_refused_and_changes_nothing() {
         "native_metal_preferred",
         "the saved preference must be untouched by a rejected call"
     );
+}
+
+/// `native_metal_only` is the engine's no-fallback mode. It is chosen only by
+/// naming it, is saved and pushed back in like the other two, and is never what
+/// a configuration that never chose it means.
+#[tokio::test]
+async fn native_metal_only_is_chosen_by_name_saved_and_pushed_to_the_engine() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = ConfigStore::open(temp.path().to_path_buf());
+    let engine = FakeEngineFacade::default();
+    let bridge = BridgeBuilder::new(engine.clone())
+        .with_config_store(store.clone())
+        .build()
+        .unwrap();
+    assert_ne!(
+        bridge.settings_snapshot().await.unwrap().scene_renderer,
+        "native_metal_only",
+        "the default stays the preferred mode, with its fallback, until the Vulkan path is deleted"
+    );
+
+    let snapshot = bridge
+        .set_scene_renderer("native_metal_only".into())
+        .await
+        .unwrap()
+        .settings;
+    assert_eq!(snapshot.scene_renderer, "native_metal_only");
+    assert_eq!(
+        engine.scene_renderer_calls().last().copied(),
+        Some(SceneRendererPreference::NativeMetalOnly),
+        "the engine must be told, or the setting would only be a label"
+    );
+
+    drop(bridge);
+    let restarted_engine = FakeEngineFacade::default();
+    let restarted = BridgeBuilder::new(restarted_engine.clone())
+        .with_config_store(store)
+        .build()
+        .unwrap();
+    restarted.bootstrap().await.unwrap();
+    assert_eq!(
+        restarted.settings_snapshot().await.unwrap().scene_renderer,
+        "native_metal_only",
+        "a saved choice is not moved to the default again"
+    );
+    assert_eq!(
+        restarted_engine.scene_renderer_calls().last().copied(),
+        Some(SceneRendererPreference::NativeMetalOnly)
+    );
+}
+
+/// A scene held by the failure policy is not running anywhere: its row carries the
+/// stage and the renderer's own reason, no backend and no fallback, and a surface
+/// that stopped is reported as stopped, never as ticking.
+#[tokio::test]
+async fn a_held_scene_reports_its_failure_and_no_backend_or_fallback() {
+    let engine = FakeEngineFacade::default();
+    engine.set_scene_runtime_reports(vec![
+        SceneRuntimeReport {
+            backend: None,
+            failure: Some(SceneFailure {
+                stage: SceneFailureStage::Unsupported,
+                reason: "the scene uses a puppet the native backend cannot draw".into(),
+            }),
+            surface: Some(stopped_surface(SurfaceStopReason::GraphFailed)),
+            ..report(7, 1)
+        },
+        SceneRuntimeReport {
+            backend: Some(SceneBackend::NativeMetal),
+            ..report(8, 2)
+        },
+    ]);
+    let bridge = bridge(&engine);
+
+    let settings = bridge.settings_snapshot().await.unwrap();
+    let renderers = &settings.scene_renderers;
+
+    assert_eq!(renderers[0].failure_stage.as_deref(), Some("unsupported"));
+    assert_eq!(
+        renderers[0].failure_reason.as_deref(),
+        Some("the scene uses a puppet the native backend cannot draw"),
+        "the renderer's own reason is what the panel shows beside the stage"
+    );
+    assert_eq!(renderers[0].backend, "unknown", "nothing is drawing a held scene");
+    assert_eq!(renderers[0].fallback_reason, None, "a held scene did not fall back");
+    assert_eq!(settings.scene_update_modes[0].mode, "stopped_after_failure");
+    assert_eq!(renderers[1].failure_stage, None);
+    assert_eq!(renderers[1].failure_reason, None);
 }
 
 fn display_with_scene(display_id: u32, handle: u64) -> DisplaySnapshotEntry {

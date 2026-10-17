@@ -104,7 +104,8 @@ final class PanelPerformanceSettingsTests: PanelTestCase {
       XCTAssertNil(SceneRendererMode(rawValue: rejected), rejected)
     }
     XCTAssertEqual(
-      SceneRendererMode.allCases.map(\.rawValue), ["compatibility", "native_metal_preferred"])
+      SceneRendererMode.allCases.map(\.rawValue),
+      ["compatibility", "native_metal_preferred", "native_metal_only"])
 
     try await withRecordingPanel { panel, bridge in
       try await panel.controller.setVideoBackend(.nativePreferred)
@@ -114,6 +115,10 @@ final class PanelPerformanceSettingsTests: PanelTestCase {
       try await panel.controller.setSceneRenderer(.nativeMetalPreferred)
       XCTAssertEqual(bridge.sceneRendererCalls, ["native_metal_preferred"])
       XCTAssertEqual(panel.controller.performanceSettings.sceneRenderer, .nativeMetalPreferred)
+
+      try await panel.controller.setSceneRenderer(.nativeMetalOnly)
+      XCTAssertEqual(bridge.sceneRendererCalls.last, "native_metal_only")
+      XCTAssertEqual(panel.controller.performanceSettings.sceneRenderer, .nativeMetalOnly)
     }
   }
 
