@@ -1121,9 +1121,11 @@ TEST(TextObjectRuntime, RuntimeTextEffectTargetsResizeWithTextRasterSize) {
     EXPECT_FLOAT_EQ(resolved_uv_bounds.max_u, 1.0f);
     EXPECT_FLOAT_EQ(resolved_uv_bounds.min_v, 0.0f);
     EXPECT_FLOAT_EQ(resolved_uv_bounds.max_v, 1.0f);
-    // The buffers are another size, so the graph that owns them is built again: once.
-    EXPECT_TRUE(scene->runtime->ConsumeSceneGraphMutationFlag());
+    // The buffers are another size and the graph is as it was: the renderer resizes them
+    // under it, once.
     EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
+    EXPECT_TRUE(scene->runtime->ConsumeRenderTargetResizeFlag());
+    EXPECT_FALSE(scene->runtime->ConsumeRenderTargetResizeFlag());
 }
 
 TEST(TextObjectRuntime, ParserTextEffectFinalUvsAreTheWholeCutOffBuffer) {
@@ -1298,17 +1300,21 @@ TEST(TextObjectRuntime, EffectTargetIsTheCardNotACapacity) {
     }
 }
 
-// A card that changes size in texels is built again, once for the text change that did it
-// and not again while it stays that size. A card that changes by less than a texel, or only
-// moves, costs the graph nothing: `ACardThatGrowsWithinATexelKeepsItsBuffers` and
+// A card that changes size in texels has the renderer resize the buffers under the graph it
+// has, once for the text change that did it and not again while it stays that size. It never
+// asks for the graph to be built again: that drops every uploaded image and vertex buffer of
+// the scene, and a text that changes width as it runs (proportional digits, a readout) did it
+// every few frames. A card that changes by less than a texel, or only moves, costs nothing:
+// `ACardThatGrowsWithinATexelKeepsItsBuffers` and
 // `AnEffectChainFollowsTheCardWhenTheAlignmentMovesIt`.
-TEST(TextObjectRuntime, ACardThatChangesInTexelsRebuildsTheGraphOncePerTextChange) {
+TEST(TextObjectRuntime, ACardThatChangesInTexelsResizesTheBuffersOncePerTextChangeAndRebuildsNothing) {
     TextEffectScene fixture;
     ASSERT_TRUE(fixture.Load("text-effect-card-grows",
                              R"("text":"a","padding":0,"horizontalalign":"right")", true));
     auto& runtime = *fixture.scene->runtime;
     ASSERT_NE(sceneToRenderGraph(*fixture.scene), nullptr);
     (void)runtime.ConsumeSceneGraphMutationFlag();
+    (void)runtime.ConsumeRenderTargetResizeFlag();
     const int before_width = fixture.FirstTarget()->width;
 
     ASSERT_TRUE(runtime.SetNodeText("caption", "a much longer caption for effects"));
@@ -1337,17 +1343,19 @@ TEST(TextObjectRuntime, ACardThatChangesInTexelsRebuildsTheGraphOncePerTextChang
     EXPECT_FLOAT_EQ(uv.min_u, 0.0f);
     EXPECT_FLOAT_EQ(uv.max_u, 1.0f);
 
-    // The graph the renderers rebuild is asked for once...
-    EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag());
+    // The renderers are asked to resize their targets once, and never to rebuild...
+    EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag());
+    EXPECT_TRUE(runtime.ConsumeRenderTargetResizeFlag());
     // ...and the frames that follow, with nothing changed, ask for nothing.
     for (int frame = 0; frame < 30; ++frame) {
         runtime.Tick(1.0 / 60.0);
         runtime.PumpTextLayerCache();
         ASSERT_FALSE(runtime.ConsumeSceneGraphMutationFlag()) << "frame " << frame;
+        ASSERT_FALSE(runtime.ConsumeRenderTargetResizeFlag()) << "frame " << frame;
     }
 
-    // A card that gets smaller is built again at its new size the same way: the buffers do
-    // not stay as large as the longest text the layer has shown.
+    // A card that gets smaller has its buffers resized the same way: they do not stay as
+    // large as the longest text the layer has shown.
     ASSERT_TRUE(runtime.SetNodeText("caption", "a"));
     PumpTextUntilClean(runtime);
     const auto shrunk = runtime.NodeTextLayout("caption");
@@ -1358,11 +1366,13 @@ TEST(TextObjectRuntime, ACardThatChangesInTexelsRebuildsTheGraphOncePerTextChang
     EXPECT_EQ(static_cast<int>(fixture.camera->Width()), fixture.FirstTarget()->width);
     EXPECT_NEAR(MeshSize(fixture.effect_layer->FinalMesh()).x(),
                 static_cast<float>(fixture.FirstTarget()->width), 1.0e-3f);
-    EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag());
+    EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag());
+    EXPECT_TRUE(runtime.ConsumeRenderTargetResizeFlag());
     for (int frame = 0; frame < 30; ++frame) {
         runtime.Tick(1.0 / 60.0);
         runtime.PumpTextLayerCache();
         ASSERT_FALSE(runtime.ConsumeSceneGraphMutationFlag()) << "frame " << frame;
+        ASSERT_FALSE(runtime.ConsumeRenderTargetResizeFlag()) << "frame " << frame;
     }
 }
 
@@ -1587,8 +1597,9 @@ TEST(TextObjectRuntime, SceneScriptTextEffectMutationKeepsFinalUvsOnTheWholeBuff
     auto* pingpong = scene->FindRenderTarget(effect_layer->FirstTarget());
     ASSERT_NE(pingpong, nullptr);
     EXPECT_EQ(pingpong->width, static_cast<int>(layout->card.x()));
-    EXPECT_TRUE(scene->runtime->ConsumeSceneGraphMutationFlag());
     EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
+    EXPECT_TRUE(scene->runtime->ConsumeRenderTargetResizeFlag());
+    EXPECT_FALSE(scene->runtime->ConsumeRenderTargetResizeFlag());
     EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
 }
 
@@ -1746,9 +1757,11 @@ TEST(TextObjectRuntime, AlignedTextEffectTracksMeasuredRenderFrameWhenRasterExpa
     EXPECT_NEAR(resolved_final_mesh_center.x(), render_frame.center.x(), 1.0e-4f);
     EXPECT_NEAR(resolved_final_mesh_center.y(), render_frame.center.y(), 1.0e-4f);
 
-    EXPECT_TRUE(scene->runtime->ConsumeSceneGraphMutationFlag());
+    EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
+    EXPECT_TRUE(scene->runtime->ConsumeRenderTargetResizeFlag());
     PumpTextUntilClean(*scene->runtime);
     EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
+    EXPECT_FALSE(scene->runtime->ConsumeRenderTargetResizeFlag());
 }
 
 TEST(TextObjectRuntime, AlignedTextEffectCoversMeasuredRasterWithoutScaling) {

@@ -1398,8 +1398,10 @@ TEST(LayerTextureReference, ASampledTextLayerIsItsCardInItsOwnComposite) {
                 ASSERT_TRUE(runtime.SetNodeText("title", "Wind over the river"));
                 ASSERT_TRUE(PumpTextLayout(runtime, "title"))
                     << "a hidden text layer another samples was never laid out again";
-                EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag())
-                    << "the composite outgrew its target and nothing asked for a new graph";
+                EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag())
+                    << "a wider card rebuilt a graph that only needs its target resized";
+                EXPECT_TRUE(runtime.ConsumeRenderTargetResizeFlag())
+                    << "the composite outgrew its target and nothing asked for it to be resized";
                 graph = sceneToRenderGraph(*parsed);
                 ASSERT_NE(graph, nullptr);
                 const auto after = find_composite(*graph);

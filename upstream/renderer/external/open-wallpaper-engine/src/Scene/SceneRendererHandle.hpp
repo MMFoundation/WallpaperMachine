@@ -138,6 +138,12 @@ public:
         OWE_FORWARD(compileRenderGraph(scene, graph));
         return false;
     }
+    /// The first half of what a rebuild does, for a change that only resized render targets:
+    /// the targets are allocated again and the compiled graph keeps the rest.
+    bool ResizeRenderTargets(Scene& scene) {
+        OWE_FORWARD(ResizeRenderTargets(scene));
+        return false;
+    }
     bool ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double scale,
                           SceneResolution resolution) {
         OWE_FORWARD(ApplyRenderScale(scene, graph, scale, resolution));

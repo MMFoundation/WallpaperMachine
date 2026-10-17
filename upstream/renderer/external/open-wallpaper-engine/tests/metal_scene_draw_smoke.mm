@@ -56,6 +56,7 @@
 #include "hdr_reference.hpp"
 #include "synthetic_video.hpp"
 #include "scene_probe_controls.hpp"
+#include "scene_graph_changes.hpp"
 
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -356,6 +357,13 @@ struct RebuildWatch
     std::function<bool(const RendererPicture&)> shown;
     int look_from { 0 };
     int accepted_at { -1 };
+    /// A change that only resized render targets builds the graph again, as every build did
+    /// before the resize path (the same as `WE_TEST_RESIZE_AS_REBUILD`, for this run alone).
+    bool resize_as_rebuild { false };
+    /// How the run handled what the runtime asked for: graphs built again (this counts every
+    /// one, `rebuilt_at` only the first) and render target resizes.
+    int rebuilds { 0 };
+    int resizes { 0 };
 };
 
 /// Draws `scene` with Native Metal on a layer no
@@ -454,8 +462,23 @@ RendererPicture DrawWithRenderer(Scene& scene, uint32_t width, uint32_t height,
             if (scene.runtime != nullptr) {
                 scene.runtime->Tick(step);
                 scene.runtime->PumpTextLayerCache();
+                tests::SettleTextLayout(scene);
                 const bool asked_for = scene.runtime->ConsumeSceneGraphMutationFlag();
-                if (asked_for || (watch != nullptr && frame == watch->force_at)) {
+                const bool resized   = scene.runtime->ConsumeRenderTargetResizeFlag();
+                const bool resize_as_rebuild =
+                    tests::ResizeAsRebuild() || (watch != nullptr && watch->resize_as_rebuild);
+                if (resized && ! asked_for && ! resize_as_rebuild &&
+                    ! (watch != nullptr && frame == watch->force_at)) {
+                    // What only resized render targets gets, as the host gives it.
+                    if (! render.ResizeRenderTargets(scene)) {
+                        picture.error = "could not resize: " + render.lastError();
+                        break;
+                    }
+                    if (watch != nullptr) ++watch->resizes;
+                }
+                if (asked_for || (resized && resize_as_rebuild) ||
+                    (watch != nullptr && frame == watch->force_at)) {
+                    if (watch != nullptr) ++watch->rebuilds;
                     // Cleared before the old graph is released: the renderer
                     // still refers to its passes until then. The same scene's graph
                     // again, as the host builds it, so its videos stay open.
@@ -8491,22 +8514,25 @@ int OpenMediaFiles()
 } // namespace
 
 TEST_F(MetalSceneDraw,
-       AVideoStaysOpenAndOnItsFrameWhenATextCardResizesTheGraphUnderIt)
+       AVideoStaysOpenAndOnItsFrameWhenTheGraphIsBuiltAgainUnderIt)
 {
-    // A text layer whose card is another size in texels has the host build the render graph
-    // again, and a graph built again used to close the scene's videos and open them again:
-    // the clip came back at its head and showed it until a seek to the scene's clock had
-    // landed. Wallpaper Engine resizes the card's buffers in place and touches nothing else,
-    // so its video neither stops nor goes back. Here the decoder is kept across the rebuild
-    // and the video carries on.
+    // The host builds the render graph again whenever something the graph is made of changes
+    // (a script shows or creates a layer, an effect is switched on), and a graph built again
+    // used to close the scene's videos and open them again: the clip came back at its head
+    // and showed it until a seek to the scene's clock had landed. Wallpaper Engine touches
+    // nothing else when a scene changes, so its video neither stops nor goes back. Here the
+    // decoder is kept across the rebuild and the video carries on. A text card that changes
+    // size no longer builds the graph again (`ATextCardThatChangesSizeNeitherRebuildsTheGraph
+    // NorTouchesAVideo`), so the rebuild is asked for by the harness, with the caption also
+    // changing size in the same tick as it did when that was what asked for it.
     //
     // The clip is twenty seconds in one group of pictures, so a seek to a late frame decodes
     // every frame before it, which takes 0.4 s to 12 s into the clip and 0.6 s to 19 s on a
     // quiet machine, many times a draw, and its frames are told apart by the column of a bar.
     // The clock is set to 12 s at the third draw and the scene is drawn at the pace of that
     // clock, every draw looked at, until the picture shows the clock's frame, however long a
-    // loaded machine takes to get there; then the caption becomes a longer text, and the
-    // picture is the draw that follows the rebuild. A video opened again would be on the head
+    // loaded machine takes to get there; then the caption becomes a longer text and the graph is
+    // built again, and the picture is the draw that follows the rebuild. A video opened again would be on the head
     // of the clip there (frame 0, the bar at the left edge) with the clock at frame 360 and
     // more; and it would be another decoder, which the work counters tell by its identity.
     constexpr double kStep      = 1.0 / 60.0;
@@ -8574,6 +8600,7 @@ TEST_F(MetalSceneDraw,
                 instance_before = counters.Get(OWE_RC_VIDEO_SOURCE_INSTANCE);
                 card_before     = runtime.NodeTextLayout("caption")->card.x();
                 watch.from      = frame;
+                watch.force_at  = frame;
                 ASSERT_TRUE(runtime.SetNodeText("caption", "WOVEN 99"));
                 settle_text();
                 card_after = runtime.NodeTextLayout("caption")->card.x();
@@ -8585,7 +8612,7 @@ TEST_F(MetalSceneDraw,
             << " draws: the picture was on frame " << last_looked_at << " of the clip with the "
             << "video clock at " << last_clock << " s";
         ASSERT_GE(std::floor(card_after) - std::floor(card_before), 1.0f)
-            << "the caption's card did not change size, so no graph was rebuilt";
+            << "the caption's card did not change size";
         ASSERT_EQ(watch.rebuilt_at, watch.accepted_at + 1) << "no graph was rebuilt for it";
 
         // Not opened again: the decoder that played before the rebuild is the one playing after.
@@ -8606,12 +8633,158 @@ TEST_F(MetalSceneDraw,
     }
 }
 
+TEST_F(MetalSceneDraw, ATextCardThatChangesSizeResizesTheTargetsAndDrawsWhatARebuildDraws)
+{
+    // The buffers an effect on a text layer draws into follow the card's size in texels, and the
+    // host used to build the whole graph again for every change of it: with a scene of heavy
+    // models and images, about 50 ms each, and a readout whose width changes every few draws
+    // did it every few draws. The renderer now resizes the targets under the graph it has
+    // (`ResizeRenderTargets`) and the picture must be the one a rebuild gives, byte for byte:
+    // the effect reads the size of its input (`g_Texture0Resolution`), through two passes,
+    // so a size that was not followed would show in every texel.
+    if (tests::ResizeAsRebuild()) GTEST_SKIP() << "WE_TEST_RESIZE_AS_REBUILD forces the other path";
+    const auto project = WriteTextFixture(root_ / "text-resize", "1", true);
+    std::ofstream(root_ / "text-resize" / "effects" / "probe.json")
+        << R"({"name":"probe copy","passes":[{"material":"materials/copy.json"},)"
+           R"({"material":"materials/copy.json"}]})";
+    std::ofstream(root_ / "text-resize" / "shaders" / "probe_copy.frag")
+        << "uniform sampler2D g_Texture0;\n"
+           "uniform vec4 g_Texture0Resolution;\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() {\n"
+           "  vec2 step = vec2(2.0) / g_Texture0Resolution.xy;\n"
+           "  vec4 a = texture(g_Texture0, v_TexCoord);\n"
+           "  vec4 b = texture(g_Texture0, v_TexCoord + vec2(step.x, 0.0));\n"
+           "  vec4 c = texture(g_Texture0, v_TexCoord - vec2(0.0, step.y));\n"
+           "  gl_FragColor = (a + b + c) / 3.0;\n"
+           "}\n";
+
+    // Longer, shorter, longer again and back: every change is another size in texels.
+    const std::vector<std::pair<int, std::string>> edits {
+        { 3, "WOVEN 99" }, { 6, "a much longer caption" }, { 9, "12" }, { 12, "WOVEN 99 again" },
+    };
+    constexpr int kFrames = 16;
+    const auto draw = [&](const std::string& name, bool as_rebuild, RebuildWatch& watch,
+                          RendererPicture& picture) {
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        ASSERT_NE(loaded.scene->runtime, nullptr);
+        ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
+        auto& runtime = *loaded.scene->runtime;
+        // The scene's own start-up (its first layout) is not what is counted.
+        watch.resize_as_rebuild = as_rebuild;
+        picture                 = DrawWithRenderer(
+            *loaded.scene, 384, 256, kFrames, 1.0 / 60.0,
+            [&](int frame) {
+                // The text is laid out on a thread of its own; waiting for it puts each layout
+                // on the frame that asked for it in both runs.
+                const auto settle = [&runtime] {
+                    for (int attempt = 0; attempt < 500 && runtime.NodeTextDirty("caption");
+                         ++attempt) {
+                        runtime.PumpTextLayerCache();
+                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                    }
+                };
+                if (frame == 0) settle();
+                for (const auto& [at, text] : edits) {
+                    if (frame != at) continue;
+                    ASSERT_TRUE(runtime.SetNodeText("caption", text));
+                    settle();
+                }
+            },
+            1.0, nullptr, nullptr, &watch);
+    };
+    RebuildWatch    resized, rebuilt;
+    RendererPicture by_resize, by_rebuild;
+    ASSERT_NO_FATAL_FAILURE(draw("text-resize-a", false, resized, by_resize));
+    ASSERT_NO_FATAL_FAILURE(draw("text-resize-b", true, rebuilt, by_rebuild));
+    ASSERT_TRUE(by_resize.error.empty()) << by_resize.error;
+    ASSERT_TRUE(by_rebuild.error.empty()) << by_rebuild.error;
+
+    // A graph built for the first layout is the scene's start-up; after that every edit
+    // is a resize, and the reference run builds one graph again for each.
+    EXPECT_EQ(resized.rebuilds, rebuilt.rebuilds - resized.resizes)
+        << "a text card that changed size built the graph again";
+    EXPECT_GE(resized.resizes, 4) << "each edit was another size in texels";
+    EXPECT_EQ(rebuilt.resizes, 0);
+
+    ASSERT_EQ(by_resize.width, by_rebuild.width);
+    ASSERT_EQ(by_resize.height, by_rebuild.height);
+    ASSERT_FALSE(by_resize.rgb.empty());
+    EXPECT_GT(std::count_if(by_resize.rgb.begin(), by_resize.rgb.end(),
+                            [](uint8_t value) { return value != 0; }),
+              100)
+        << "the caption was not drawn";
+    EXPECT_EQ(by_resize.rgb, by_rebuild.rgb)
+        << "resizing the targets under the graph drew another picture than building it again";
+}
+
+TEST_F(MetalSceneDraw, ATextCardThatChangesSizeNeitherRebuildsTheGraphNorTouchesAVideo)
+{
+    // A caption that changes width has the renderer resize the buffers of its effect under
+    // the graph it has. The scene's video is not part of that: its decoder is the one that was
+    // playing, no file is opened or closed, and no graph is built again.
+    constexpr double kStep      = 1.0 / 60.0;
+    constexpr int    kTextFrame = 4;
+    constexpr int    kFrames    = kTextFrame + 4;
+    const CountersOn counting;
+    const std::string name    = "video-caption-resize";
+    const auto        project = WriteVideoCaptionFixture(root_ / name);
+    if (project.empty()) {
+        GTEST_SKIP() << "no hardware H.264 encoder here, so no decodable media to parse";
+    }
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+    ASSERT_NE(loaded.scene->runtime, nullptr);
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
+    auto& runtime = *loaded.scene->runtime;
+    const auto settle_text = [&runtime] {
+        for (int attempt = 0; attempt < 200 && runtime.NodeTextDirty("caption"); ++attempt) {
+            runtime.PumpTextLayerCache();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    };
+    RendererCounters counters;
+    RebuildWatch     watch;
+    // The scene's own start-up may rebuild; only what the caption does counts.
+    watch.from           = std::numeric_limits<int>::max();
+    uint64_t instance_before = 0;
+    int      files_before = -1, files_after = -1;
+    float    card_before = 0.0f, card_after = 0.0f;
+    const auto picture = DrawWithRenderer(
+        *loaded.scene, kVideoWidth, kVideoHeight, kFrames, kStep,
+        [&](int frame) {
+            if (frame == 0) settle_text();
+            // Read while the renderer is still there: it closes its videos when it goes.
+            if (frame == kFrames - 1) files_after = OpenMediaFiles();
+            if (frame != kTextFrame) return;
+            watch.from      = frame;
+            instance_before = counters.Get(OWE_RC_VIDEO_SOURCE_INSTANCE);
+            files_before    = OpenMediaFiles();
+            card_before     = runtime.NodeTextLayout("caption")->card.x();
+            ASSERT_TRUE(runtime.SetNodeText("caption", "WOVEN 99 WOVEN 99"));
+            settle_text();
+            card_after = runtime.NodeTextLayout("caption")->card.x();
+        },
+        1.0, nullptr, &counters, &watch);
+    ASSERT_TRUE(picture.error.empty()) << picture.error;
+    ASSERT_GE(std::floor(card_after) - std::floor(card_before), 1.0f)
+        << "the caption's card did not change size";
+    EXPECT_EQ(watch.rebuilt_at, -1) << "a text card that changed size built the graph again";
+    ASSERT_NE(instance_before, 0u) << "no video was open";
+    EXPECT_EQ(counters.Get(OWE_RC_VIDEO_SOURCE_INSTANCE), instance_before)
+        << "the video was opened again";
+    EXPECT_EQ(files_after, files_before) << "a media file was opened or closed";
+}
+
 TEST_F(MetalSceneDraw, AVideoTheRebuiltGraphLeavesOutIsClosed)
 {
-    // The video layer is hidden by a property and the caption changes size in the same tick,
-    // so the graph that is built again leaves the layer out and nothing in it binds the video
-    // that was playing. That decoder was kept for the new graph to take back and nothing took
-    // it back: it is closed with the compile, and its file is no longer open.
+    // The video layer is hidden by a property and the graph is built again in the same tick,
+    // so the new graph leaves the layer out and nothing in it binds the video that was
+    // playing. That decoder was kept for the new graph to take back and nothing took it back:
+    // it is closed with the compile, and its file is no longer open.
     constexpr double kStep         = 1.0 / 60.0;
     constexpr int    kRebuildFrame = 4;
     constexpr int    kFrames       = kRebuildFrame + 3;
@@ -8652,6 +8825,7 @@ TEST_F(MetalSceneDraw, AVideoTheRebuiltGraphLeavesOutIsClosed)
         };
         const int  files_before_scene = OpenMediaFiles();
         RebuildWatch watch;
+        watch.force_at = kRebuildFrame;
         int        files_playing = -1, files_after = -1;
         const auto picture = DrawWithRenderer(
             *loaded.scene, kVideoWidth, kVideoHeight, kFrames, kStep,
@@ -13101,6 +13275,7 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
             }
             (void)loaded.scene->runtime->ConsumeSceneGraphMutationFlag();
+            (void)loaded.scene->runtime->ConsumeRenderTargetResizeFlag();
         }
 
         // A real surface is the size of the display it is on, and screen-space
@@ -13196,6 +13371,9 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
             MetalRender::FrameEncodeCountsForTests encodes;
             double                                  draw_cpu_ms = 0.0;
             int                                     measured    = 0;
+            int                                     rebuilds    = 0;
+            int                                     resizes     = 0;
+            double                                  rebuild_ms  = 0.0;
             for (int frame = 0; frame < frame_count; ++frame) {
                 if (audio_hz != nullptr) {
                     // Synthetic PCM only, analysed by the same service the
@@ -13225,12 +13403,18 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                 if (loaded.scene->runtime != nullptr) {
                     loaded.scene->runtime->Tick(frame_step);
                     loaded.scene->runtime->PumpTextLayerCache();
-                    if (loaded.scene->runtime->ConsumeSceneGraphMutationFlag()) {
-                        ASSERT_TRUE(render.clearLastRenderGraph()) << render.lastError();
-                        graph = sceneToRenderGraph(*loaded.scene);
-                        ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph))
-                            << render.lastError();
+                    tests::SettleTextLayout(*loaded.scene);
+                    std::string change_error;
+                    const auto  change_started = std::chrono::steady_clock::now();
+                    const auto  applied = tests::ApplyRuntimeSceneChanges(
+                        render, *loaded.scene, graph, false, &change_error);
+                    if (applied != tests::SceneChangeApplied::None) {
+                        (applied == tests::SceneChangeApplied::Rebuilt ? rebuilds : resizes)++;
+                        rebuild_ms += std::chrono::duration<double, std::milli>(
+                                          std::chrono::steady_clock::now() - change_started)
+                                          .count();
                     }
+                    ASSERT_TRUE(change_error.empty()) << change_error;
                 }
                 if (loaded.scene->shaderValueUpdater != nullptr) {
                     loaded.scene->shaderValueUpdater->FrameBegin();
@@ -13267,6 +13451,31 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                           double(encodes.scene_output_passes) / measured,
                           double(encodes.blit_passes) / measured, draw_cpu_ms / measured);
             std::cout << "[ LOCAL    ] " << paths.scene_id << ": " << encode_line << std::endl;
+            // How often the host would have built the render graph again, and which kind of
+            // change asked for it: a scene that rebuilds every few draws repeats its texture
+            // decodes and uploads each time.
+            {
+                std::string reasons;
+                if (loaded.scene->runtime != nullptr) {
+                    for (const auto& [reason, count] :
+                         loaded.scene->runtime->SceneGraphMutationReasonsForTests()) {
+                        reasons += (reasons.empty() ? " (" : ", ") + reason + " " +
+                                   std::to_string(count);
+                    }
+                    for (const auto& [reason, count] :
+                         loaded.scene->runtime->RenderTargetResizeReasonsForTests()) {
+                        reasons += (reasons.empty() ? " (" : ", ") + reason + " " +
+                                   std::to_string(count);
+                    }
+                    if (! reasons.empty()) reasons += ")";
+                }
+                char change_line[128];
+                std::snprintf(change_line, sizeof(change_line),
+                              "%d graph rebuild(s), %d target resize(s) in %d draws, %.1f ms wall in all",
+                              rebuilds, resizes, frame_count, rebuild_ms);
+                std::cout << "[ LOCAL    ] " << paths.scene_id << ": " << change_line << reasons
+                          << std::endl;
+            }
             // The target figure is this scene's own; the device figure is
             // process-wide and includes the layer's drawables, so it varies
             // between runs of the same scene.
@@ -13499,6 +13708,7 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 }
                 (void)scene.runtime->ConsumeSceneGraphMutationFlag();
+                (void)scene.runtime->ConsumeRenderTargetResizeFlag();
             }
 
             tests::SceneProbeControls input;
@@ -13784,14 +13994,11 @@ bool AdvanceLikeTheWallpaper(MetalRender& render, Scene& scene,
 {
     scene.runtime->Tick(1.0 / 60.0);
     scene.runtime->PumpTextLayerCache();
-    bool rebuilt = false;
-    if (scene.runtime->ConsumeSceneGraphMutationFlag()) {
-        EXPECT_TRUE(render.clearLastRenderGraph()) << render.lastError();
-        graph = sceneToRenderGraph(scene);
-        EXPECT_NE(graph, nullptr);
-        EXPECT_TRUE(render.compileRenderGraph(scene, *graph)) << render.lastError();
-        rebuilt = true;
-    }
+    std::string error;
+    const bool  rebuilt =
+        tests::ApplyRuntimeSceneChanges(render, scene, graph, false, &error) ==
+        tests::SceneChangeApplied::Rebuilt;
+    EXPECT_TRUE(error.empty()) << error;
     EXPECT_TRUE(render.drawFrame(scene)) << render.lastError();
     scene.PassFrameTime(1.0 / 60.0);
     return rebuilt;

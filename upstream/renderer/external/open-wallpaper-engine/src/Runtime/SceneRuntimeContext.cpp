@@ -984,6 +984,16 @@ void SceneRuntimeContext::EnqueueTextLayerPreparation(std::string name, const Te
     m_text_worker_cv.notify_one();
 }
 
+void SceneRuntimeContext::WaitForTextLayoutForTests() const {
+    while (true) {
+        {
+            std::lock_guard lock { m_text_worker_mutex };
+            if (m_pending_text_jobs.empty() && m_text_jobs_running == 0) return;
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+    }
+}
+
 bool SceneRuntimeContext::TextLayoutInFlight() const {
     // Asked once per frame by the demand analysis, so a scene with no text at
     // all answers without touching the worker's lock.
@@ -1028,6 +1038,7 @@ void SceneRuntimeContext::TextWorkerLoop() {
             if (m_stop_text_worker) return;
             job = std::move(m_pending_text_jobs.front());
             m_pending_text_jobs.pop_front();
+            ++m_text_jobs_running;
         }
 
         auto prepared =
@@ -1037,6 +1048,7 @@ void SceneRuntimeContext::TextWorkerLoop() {
         {
             std::lock_guard lock { m_text_worker_mutex };
             if (m_stop_text_worker) return;
+            --m_text_jobs_running;
             m_prepared_text_layers.erase(
                 std::remove_if(m_prepared_text_layers.begin(),
                                m_prepared_text_layers.end(),
@@ -1098,7 +1110,7 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
             if (! SizeNearlyEqual(drawn.size, raster_size, 1.0f) ||
                 ! SizeNearlyEqual(drawn.centre, prepared.layout.centre, 1.0e-3f)) {
                 ResizeCardMesh(*mesh, TextLayerRenderBoundsForLayout(prepared.state, prepared.layout));
-                if (! mesh->Dynamic()) m_scene_graph_mutated = true;
+                if (! mesh->Dynamic()) MarkSceneGraphMutated("text-card-mesh");
             }
         }
     }
@@ -1139,7 +1151,7 @@ bool SceneRuntimeContext::ApplyPreparedTextLayer(const RuntimePreparedTextLayerI
                     target.height = target.authored_height =
                         std::max(4, static_cast<int32_t>(std::lround(frame.size.y() * scale)));
                 }
-                m_scene_graph_mutated = true;
+                MarkRenderTargetsResized("text-resized-buffers");
             }
             ResizeCardMesh(binding.layer->FinalMesh(), frame.bounds);
             if (auto* resolved = binding.layer->ResolvedFinalRenderNode();
@@ -1198,7 +1210,7 @@ void SceneRuntimeContext::FitTextLayerComposite(SceneNode& node,
     if (current_width == width && current_height == height) return;
     target.width = target.authored_width = width;
     target.height = target.authored_height = height;
-    m_scene_graph_mutated = true;
+    MarkRenderTargetsResized("text-card-texels");
 }
 
 DynamicValue* SceneRuntimeContext::FindPropertyValue(std::string_view name) const {
@@ -1570,7 +1582,7 @@ void SceneRuntimeContext::RegisterEffectVisibility(std::shared_ptr<SceneImageEff
         const bool visible = current.getBool();
         if (effect->visible == visible) return;
         effect->visible       = visible;
-        m_scene_graph_mutated = true;
+        MarkSceneGraphMutated("effect-visibility");
         // A text layer counts its visible effects: the switch may pad it or take its padding
         // away, and decides whether its glyphs are composited.
         for (const auto& [name, gate] : m_text_effect_gates) {
@@ -2438,7 +2450,7 @@ std::string SceneRuntimeContext::CreateLayerFromTemplate(std::string_view reques
             m_material_constants.push_back(std::move(cloned_binding));
         }
     }
-    m_scene_graph_mutated = true;
+    MarkSceneGraphMutated("clone-layer");
     return generated_name;
 }
 
@@ -2492,7 +2504,7 @@ bool SceneRuntimeContext::DestroyLayer(std::string_view name, std::vector<std::s
     if (entry == siblings.end()) return true;
     m_retired_layers.push_back(*entry);
     siblings.erase(entry);
-    m_scene_graph_mutated = true;
+    MarkSceneGraphMutated("destroy-layer");
     return true;
 }
 
@@ -2569,7 +2581,7 @@ bool SceneRuntimeContext::SortNode(std::string_view name, int index) {
         if (m_scene == nullptr || m_scene->sceneGraph == nullptr) return false;
         sorted = SortNodeInList(m_scene->sceneGraph->GetChildren(), node, index);
     }
-    if (sorted) m_scene_graph_mutated = true;
+    if (sorted) MarkSceneGraphMutated("sort-node");
     return sorted;
 }
 
@@ -2640,7 +2652,7 @@ void SceneRuntimeContext::RequestGraphForShownLayers() {
     for (const auto& excluded : m_scene->render_excluded_nodes) {
         const auto node = excluded.lock();
         if (node != nullptr && node->EffectiveVisible()) {
-            m_scene_graph_mutated = true;
+            MarkSceneGraphMutated("shown-layer");
             return;
         }
     }
@@ -3688,6 +3700,22 @@ bool SceneRuntimeContext::AudioResponseActive() const {
     return AudioResponseEnabled() && SceneRequiresAudioResponse();
 }
 
+void SceneRuntimeContext::MarkSceneGraphMutated(const char* reason) {
+    m_scene_graph_mutated = true;
+    ++m_scene_graph_mutation_reasons[reason];
+}
+
+void SceneRuntimeContext::MarkRenderTargetsResized(const char* reason) {
+    m_render_targets_resized = true;
+    ++m_render_target_resize_reasons[reason];
+}
+
+bool SceneRuntimeContext::ConsumeRenderTargetResizeFlag() {
+    const bool resized       = m_render_targets_resized;
+    m_render_targets_resized = false;
+    return resized;
+}
+
 bool SceneRuntimeContext::ConsumeSceneGraphMutationFlag() {
     const bool mutated    = m_scene_graph_mutated;
     m_scene_graph_mutated = false;
@@ -3814,7 +3842,7 @@ bool SceneRuntimeContext::SortLayer(std::string_view name, int index) {
         desired = index_without_node(later);
     }
     if (desired >= 0 && SortNodeInList(siblings, node, desired)) {
-        m_scene_graph_mutated = true;
+        MarkSceneGraphMutated("sort-layer-relative");
         changed               = true;
     }
     return changed;
@@ -4009,7 +4037,7 @@ std::string SceneRuntimeContext::CreateTextLayer(std::string_view config_json,
         m_scene->sceneGraph->AppendChild(node);
     }
     m_script_created_layers.insert(name);
-    m_scene_graph_mutated = true;
+    MarkSceneGraphMutated("create-layer");
     return name;
 }
 
@@ -4055,7 +4083,7 @@ bool SceneRuntimeContext::SetNodeParent(std::string_view name, std::string_view 
     auto owned = *entry;
     siblings.erase(entry);
     new_parent->AppendChild(std::move(owned));
-    m_scene_graph_mutated = true;
+    MarkSceneGraphMutated("reparent");
     return true;
 }
 
@@ -4101,7 +4129,7 @@ bool SceneRuntimeContext::SetNodeSize(std::string_view name, const linalg::Vecto
     replacement.AddVertexArray(std::move(stretched));
     mesh->ChangeMeshDataFrom(replacement);
     mesh->SetDirty();
-    if (! mesh->Dynamic()) m_scene_graph_mutated = true;
+    if (! mesh->Dynamic()) MarkSceneGraphMutated("stretch-mesh");
     RegisterNodeSize(key, size);
     return true;
 }
@@ -4126,7 +4154,7 @@ bool SceneRuntimeContext::SetNodeParallaxDepth(std::string_view name,
     // A graph built while the layer stood still has it as a pass that never
     // changes; one that starts following the cursor (or stops) needs a new one.
     if (m_scene->shaderValueUpdater->SetNodeParallaxDepth(found->second, depth.x(), depth.y())) {
-        m_scene_graph_mutated = true;
+        MarkSceneGraphMutated("parallax-depth");
     }
     return true;
 }

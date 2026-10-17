@@ -19,6 +19,7 @@
 #include "WPSceneParser.hpp"
 #include "SceneSourceResolver.hpp"
 #include "scene_probe_controls.hpp"
+#include "scene_graph_changes.hpp"
 #include "MetalRender/MetalBackendRouter.hpp"
 #include "MetalRender/MetalRender.hpp"
 #include "RenderCommon/SceneRaster.hpp"
@@ -487,11 +488,10 @@ int main() {
                 // by the pump, which the host calls every frame. Without this a
                 // label whose layout landed after preparation is never rasterized.
                 scene->runtime->PumpTextLayerCache();
-                if (scene->runtime->ConsumeSceneGraphMutationFlag()) {
-                    Check(render.clearLastRenderGraphForRebuild(), render.lastError().c_str());
-                    graph = sceneToRenderGraph(*scene);
-                    Check(graph != nullptr && render.compileRenderGraph(*scene, *graph),
-                          render.lastError().c_str());
+                {
+                    std::string change_error;
+                    tests::ApplyRuntimeSceneChanges(render, *scene, graph, true, &change_error);
+                    Check(change_error.empty(), change_error.c_str());
                 }
                 scene->shaderValueUpdater->FrameBegin();
                 Check(render.drawFrame(*scene),

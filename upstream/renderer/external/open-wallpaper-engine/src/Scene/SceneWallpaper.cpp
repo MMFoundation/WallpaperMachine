@@ -877,6 +877,7 @@ private:
         }
         if (m_scene->runtime != nullptr) {
             m_scene->runtime->ConsumeSceneGraphMutationFlag();
+            m_scene->runtime->ConsumeRenderTargetResizeFlag();
         }
         clearRenderBlock();
         return true;
@@ -1031,7 +1032,22 @@ private:
                 for (const auto& [name, value] : m_scene->runtime->TakeUserShortcutRequests()) {
                     main_handler.sendUserShortcut(name, value);
                 }
-                if (m_scene->runtime->ConsumeSceneGraphMutationFlag()) {
+                // A rebuild has the sizes already, so the flag for a resize alone is read
+                // either way and a resize is only made when nothing rebuilds.
+                bool       graph_changed   = m_scene->runtime->ConsumeSceneGraphMutationFlag();
+                const bool targets_resized = m_scene->runtime->ConsumeRenderTargetResizeFlag();
+#ifdef WESCENE_BUILD_TESTS
+                // The way every build before the resize path handled it, for a measurement of
+                // what the resize saves in one binary: `WE_TEST_RESIZE_AS_REBUILD`.
+                if (const char* value = std::getenv("WE_TEST_RESIZE_AS_REBUILD");
+                    value != nullptr && *value != '\0' && std::string_view(value) != "0") {
+                    graph_changed = graph_changed || targets_resized;
+                }
+#endif
+                if (graph_changed) {
+                    frame_ok = rebuildRenderGraph();
+                } else if (targets_resized && m_rg && ! m_render->ResizeRenderTargets(*m_scene)) {
+                    LOG_ERROR("render target resize failed, rebuilding render graph");
                     frame_ok = rebuildRenderGraph();
                 }
             }

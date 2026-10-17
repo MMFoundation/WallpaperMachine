@@ -123,7 +123,7 @@ Inputs and outputs:
 | --- | --- | --- |
 | `WE_TEST_PROJECT` | `offscreen_scene_probe`, `text_object_runtime_test` | Path to a scene `project.json` |
 | `WE_TEST_PROJECTS` | `scene_reload_cycle_probe` | `;`-separated project list |
-| `WE_TEST_METAL_PROJECTS` | `metal_scene_draw_smoke` | Colon-separated `project.json` paths run through the production parser into the native backend offscreen. A fallback is printed with its reason and is not a failure; an accepted scene must prepare and draw every requested frame. Frames after initialization are summarised as render passes per frame (how many rendered into the scene's own image), blits per frame and thread CPU milliseconds per `drawFrame`. A scene whose graph has layer link textures read before the frame fills them (a layer sampling its own or a later layer's last composite) also prints one `[ LOCAL    ] <id>: N layer link texture(s) read before the frame fills them` line: its picture depends on the frame before, so compare it across builds with `WE_TEST_COMPARE_PROJECTS`. With `WE_TEST_OUTPUT` set, the last frame is written there. Unset, the test skips. Read any `metal translation of '…' failed` line as a failed effect, not a clean native run |
+| `WE_TEST_METAL_PROJECTS` | `metal_scene_draw_smoke` | Colon-separated `project.json` paths run through the production parser into the native backend offscreen. A fallback is printed with its reason and is not a failure; an accepted scene must prepare and draw every requested frame. Frames after initialization are summarised as render passes per frame (how many rendered into the scene's own image), blits per frame and thread CPU milliseconds per `drawFrame`, and one `N graph rebuild(s), M target resize(s) in F draws, X ms wall in all` line says how often the host would have built the graph again or resized its targets, how long that took and what asked for each (`text-resized-buffers`, `effect-visibility`, ...): a scene that rebuilds every few draws decodes and uploads its images each time. A scene whose graph has layer link textures read before the frame fills them (a layer sampling its own or a later layer's last composite) also prints one `[ LOCAL    ] <id>: N layer link texture(s) read before the frame fills them` line: its picture depends on the frame before, so compare it across builds with `WE_TEST_COMPARE_PROJECTS`. With `WE_TEST_OUTPUT` set, the last frame is written there. Unset, the test skips. Read any `metal translation of '…' failed` line as a failed effect, not a clean native run |
 | `WE_TEST_ASSETS` | probes | Shared `SceneAssets` directory |
 | `WE_TEST_OUTPUT` | probes | Output/cache directory (disposable) |
 | `WE_TEST_CACHE` | `text_object_runtime_test` | Disposable shader cache directory |
@@ -147,8 +147,10 @@ Frames, time and surfaces:
 | `WE_TEST_COMPARE_RESOLUTION` | the same test | `display` rasterizes a 2D scene at the size it is presented at on the layer; `canvas`, the default, at the size it was authored at. Perspective scenes and videos ignore it |
 | `WE_TEST_COMPARE_SCALE_FACTOR` | the same test | The layer's backing scale, `1`–`4` (default `1`); with `WE_TEST_COMPARE_SURFACE` it makes a laptop-panel-sized layer |
 | `WE_TEST_COMPARE_REALTIME` | the same test | Set (any value) to pace the frames in real time, so a script that reads the wall clock (`Date.now()`) sees as much time pass as the scene does on a desktop; unset, the frames run as fast as they draw |
-| `WE_TEST_COMPARE_STOP_AFTER_REBUILD` | the same test | `<n>`: the run ends `n` draws after the first time the host would build the graph again (a clock under an effect does when its digits change size), `WE_TEST_METAL_FRAMES` bounding the wait, and prints the draw the rebuild came before, so a run without one can be drawn to the same scene time. A scene's own scripts cause rebuilds as it starts; `WE_TEST_COMPARE_REBUILD_FROM=<m>` leaves out those before draw `m` |
+| `WE_TEST_COMPARE_STOP_AFTER_REBUILD` | the same test | `<n>`: the run ends `n` draws after the first time the host would build the graph again (a script that shows a layer the graph left out does), `WE_TEST_METAL_FRAMES` bounding the wait, and prints the draw the rebuild came before, so a run without one can be drawn to the same scene time. A scene's own scripts cause rebuilds as it starts; `WE_TEST_COMPARE_REBUILD_FROM=<m>` leaves out those before draw `m` |
 | `WE_TEST_COMPARE_REBUILD_AT` | the same test | `<k>`: builds the graph again before draw `k` whether or not the scene asked, as the host does for any change of the graph, so what a rebuild leaves behind (a video's frame, the draw's length) is looked at on a scene that would not rebuild by itself at a draw of your choosing |
+| `WE_TEST_RESIZE_AS_REBUILD` | `metal_scene_draw_smoke`, `offscreen_scene_probe` | Set (not `0`): a change that only resized render targets (a text card that changed size in texels) builds the whole graph again, as every build did before `ResizeRenderTargets`. The way to draw one scene both ways in one binary, for a picture or cost comparison; the targeted tests that assert the resize path skip under it |
+| `WE_TEST_SETTLE_TEXT` | `metal_scene_draw_smoke` | Set (not `0`): every text layout a tick asked for lands in that frame (`WaitForTextLayoutForTests`), instead of whenever the text worker is done. Two runs of a scene whose text changes as it runs then lay out on the same frames; a scene whose scripts read the wall clock or a random source still differs between runs |
 | `WE_TEST_SURFACE` | `offscreen_scene_probe` | `<width>x<height>` physical output extent; defaults to `1920x1080`. Perspective scenes use it as their full-scale raster; authored 2D canvases keep their size |
 | `WE_TEST_TEXTURE_SURFACE` | `offscreen_scene_probe` | `<width>x<height>` opts into the production display-sized texture mip policy (a leading mip is dropped only while the next is still at least as long as the surface's longest side, so the level kept covers the surface) without changing raster extent; unset retains all source levels for before/after image and allocation comparisons. Native Metal uses its surface size automatically |
 | `WE_TEST_METAL_SURFACE` | `metal_scene_draw_smoke` | `<width>x<height>` for the surface the native backend rasterizes; defaults to `960x540`. Screen-space shader inputs follow it, so comparing this backend's output with another's is only meaningful when both rasterize the same extent |
@@ -732,7 +734,7 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
   the head. A render graph built again under a playing video is not such an open: the renderer
   keeps the scene's decoders for the compile that follows (`clearLastRenderGraphForRebuild`,
   `MetalVideoTextures::hold`, `TextureCache::ClearForRebuild`), as Wallpaper Engine's video is
-  untouched by a text card that changes size, so a text card, a property that shows or hides a
+  untouched by what a scene changes, so a property that shows or hides a
   layer or a render-scale change on Native Metal neither shows the head of a kept video's clip
   nor reads,
   copies and hashes a packaged video again. What is still opened with the clock some way into
@@ -745,9 +747,11 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
   packaged in a scene reads, hashes and writes the whole file (`WriteVideoPayloadToTemp`, staged
   from the parser's buffer, which the source shares rather than copies; about 7 ms a megabyte:
   0.2 to 0.4 s on a 53 MB clip, 2 s on a 319 MB one, measured before the copy was dropped), which
-  every open of one pays. Not done: resizing a text card's buffers in place, as Wallpaper Engine does, so a card
-  that changes size in texels still builds the graph again (about 0.5 ms of lowering and the
-  compile of every pass, 39 to 45 ms on a scene of 72 passes). The Wallpaper Engine frame this
+  every open of one pays. A text card's buffers are resized in place, as Wallpaper Engine does:
+  a card that changes size in texels asks the renderer to allocate its targets again under the graph
+  it has (`ConsumeRenderTargetResizeFlag`, `MetalRender::ResizeRenderTargets`, about 0.5 ms on a scene
+  of 72 passes) and never to build the graph again, which compiled every pass, decoded and uploaded
+  every image and copied every vertex buffer (50 ms on a scene with large models). The Wallpaper Engine frame this
   was found against is a still one, so no frame of Wallpaper Engine's shows a video moving
   through a rebuild.
 - **An image layer's brightness is applied where its colour is, ahead of its effects.**

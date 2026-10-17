@@ -1681,6 +1681,12 @@ struct MetalRender::Impl
     bool encodeScaledCopy(id<MTLCommandBuffer> command, id<MTLTexture> source,
                           id<MTLTexture> destination);
     bool compile(Scene& scene, rg::RenderGraph& graph);
+    /// Gives the compiled graph the render target sizes the scene holds now, keeping
+    /// everything else of it: the prepared passes, their pipelines and vertex buffers, the
+    /// uploaded images, the videos and the uniform storage. The targets, the copy plan,
+    /// the reuse table and the texture trades are made again exactly as `compile` makes
+    /// them, so the frame after it draws what a full compile would have drawn.
+    bool resizeTargets(Scene& scene);
     void resolveTargetSizes(Scene& scene);
     bool prepareTargets(Scene& scene);
     /// One scene target's image, labelled with its key; nil if Metal refuses it.
@@ -1733,6 +1739,11 @@ struct MetalRender::Impl
     /// Fills `static_skip` for this frame. False means nothing may be skipped.
     bool planStaticSkips(Scene& scene);
     bool clearTargetsOnce();
+    /// Targets a resize made, to be cleared by the next frame's own command buffer
+    /// ahead of every pass in it: nothing waits on the GPU for a resize.
+    std::vector<id<MTLTexture>> pending_target_clears;
+    /// Set while `resizeTargets` allocates, so `prepareTargets` leaves the clear to the frame.
+    bool defer_target_clears { false };
     bool prepareDraw(Scene& scene, std::size_t index, PreparedPass& out);
     /// Collects finished optional builds and starts the ones now wanted.
     ///
@@ -1841,6 +1852,7 @@ void MetalRender::Impl::releaseGraph()
     present_gate.Invalidate();
     descriptions.clear();
     prepared.clear();
+    pending_target_clears.clear();
     targets.clear();
     depth_targets.clear();
     pass_targets.clear();
@@ -2893,6 +2905,7 @@ id<MTLDepthStencilState> MetalRender::Impl::depthStencilFor(bool test, bool writ
 /// memory, which is neither black nor the same twice.
 bool MetalRender::Impl::clearTargetsOnce()
 {
+    if (defer_target_clears) return true;
     id<MTLCommandBuffer> command = [queue commandBuffer];
     if (command == nil) return fail("a Metal command buffer could not be created");
     std::unordered_set<const void*> cleared;
@@ -4428,6 +4441,87 @@ bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
     return true;
 }
 
+bool MetalRender::Impl::resizeTargets(Scene& scene)
+{
+    if (! inited || ! graph_ready) return fail("there is no compiled graph to resize");
+
+    // What belongs to the targets, as `releaseGraph` drops it. Nothing that the passes own
+    // goes: those are the cost a rebuild repeats.
+    poster.invalidate();
+    releaseSceneOptimization();
+    frame_drawn = false;
+    present_gate.Invalidate();
+    pending_target_clears.clear();
+    targets.clear();
+    owned_targets.clear();
+    depth_targets.clear();
+    pass_targets.clear();
+    pass_depths.clear();
+    pass_reads_own_target.clear();
+    scene_output_target = nil;
+    scene_output_key.clear();
+    feedback_swaps.clear();
+    frame_swaps.clear();
+    opening_copies.clear();
+    pooled_trades.clear();
+    pooled_copy_at.clear();
+    pooled_release_at.clear();
+    pooled_snapshot.clear();
+
+    resolveTargetSizes(scene);
+
+    // The only sizes a lowered step holds: the extents of the images it reads and writes.
+    const auto extent = [&scene](const std::string& key, uint32_t& width, uint32_t& height) {
+        const auto* target = scene.FindRenderTarget(key);
+        if (target == nullptr || target->width <= 0 || target->height <= 0) return;
+        width  = static_cast<uint32_t>(target->width);
+        height = static_cast<uint32_t>(target->height);
+    };
+    for (auto& desc : descriptions) {
+        if (! desc.target_key.empty()) extent(desc.target_key, desc.target_width, desc.target_height);
+        if (desc.kind == MetalPassKind::Copy && ! desc.source_key.empty()) {
+            extent(desc.source_key, desc.source_width, desc.source_height);
+        }
+    }
+
+    planCopyElision(scene);
+    defer_target_clears = true;
+    const bool allocated = prepareTargets(scene) && prepareDepthTargets();
+    defer_target_clears = false;
+    if (! allocated) return false;
+
+    for (std::size_t i = 0; i < descriptions.size(); ++i) {
+        if (descriptions[i].kind != MetalPassKind::Copy) continue;
+        const auto target = targets.find(descriptions[i].target_key);
+        if (target == targets.end()) {
+            if (copy_elision[i] != render::CopyElision::None) continue;
+            return fail("a copy step targets an image that does not exist");
+        }
+        if (! ensurePresentPipeline(target->second.pixelFormat)) return false;
+    }
+    refreshPassTargets(scene);
+
+    compileStaticCache(scene);
+    shareTargetImages(scene);
+    refreshPassTargets(scene);
+    planFeedbackSwaps();
+    planPooledTrades(scene);
+    refreshPassTargets(scene);
+
+    // Every image the frame will touch starts from a defined state, as a compile leaves
+    // it: cleared in the next frame's command buffer, ahead of its passes.
+    std::unordered_set<const void*> seen;
+    for (const auto& [name, texture] : targets) {
+        (void)name;
+        if (texture != nil && seen.insert((__bridge const void*)texture).second) {
+            pending_target_clears.push_back(texture);
+        }
+    }
+    optimization_applied = render::SceneOptimizationEnabled();
+    last_error.clear();
+    return true;
+}
+
 WallpaperScalingLayout MetalRender::Impl::scalingLayout(const Scene& scene, uint32_t width,
                                                         uint32_t height) const
 {
@@ -4583,6 +4677,13 @@ bool MetalRender::compileRenderGraph(Scene& scene, rg::RenderGraph& graph)
     }
 }
 
+bool MetalRender::ResizeRenderTargets(Scene& scene)
+{
+    @autoreleasepool {
+        return pImpl->resizeTargets(scene);
+    }
+}
+
 bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double scale,
                                    SceneResolution resolution)
 {
@@ -4722,6 +4823,23 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         if (! impl.applySceneOptimizationSetting(scene, command)) {
             dispatch_semaphore_signal(impl.inflight);
             return false;
+        }
+
+        // Targets a resize allocated since the last frame, cleared ahead of every pass in
+        // this buffer: the queue runs them in order, so no pass reads one first.
+        for (id<MTLTexture> texture : impl.pending_target_clears) {
+            MTLRenderPassDescriptor* descriptor = [MTLRenderPassDescriptor renderPassDescriptor];
+            descriptor.colorAttachments[0].texture     = texture;
+            descriptor.colorAttachments[0].loadAction  = MTLLoadActionClear;
+            descriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
+            descriptor.colorAttachments[0].clearColor  = MTLClearColorMake(0.0, 0.0, 0.0, 0.0);
+            id<MTLRenderCommandEncoder> encoder =
+                [command renderCommandEncoderWithDescriptor:descriptor];
+            if (encoder == nil) {
+                dispatch_semaphore_signal(impl.inflight);
+                return impl.fail("a resized render target could not be cleared");
+            }
+            [encoder endEncoding];
         }
 
         // Before any pass samples one, and before the reuse plan reads their
@@ -5289,7 +5407,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         const bool nothing_encoded = impl.frame_encodes.render_passes == 0 &&
                                      impl.frame_encodes.blit_passes == 0 &&
                                      impl.frame_swaps.empty() && impl.pooled_moves == 0 &&
-                                     impl.video.empty();
+                                     impl.video.empty() && impl.pending_target_clears.empty();
         if (render::SceneOptimizationEnabled() && nothing_encoded &&
             impl.present_gate.Matches(impl.present_key, {})) {
             // The buffer holds nothing and is dropped uncommitted, so the slot
@@ -5314,6 +5432,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
               dispatch_semaphore_signal(semaphore);
             }];
             [command commit];
+            impl.pending_target_clears.clear();
             impl.frame_slot  = (impl.frame_slot + 1) % kFramesInFlight;
             impl.frame_drawn = true;
             return true;
@@ -5338,6 +5457,8 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         }];
         [command presentDrawable:drawable];
         [command commit];
+        // Committed, so the clears of a resize have run ahead of everything else in it.
+        impl.pending_target_clears.clear();
 
         impl.frame_slot = (impl.frame_slot + 1) % kFramesInFlight;
         impl.frame_drawn = true;

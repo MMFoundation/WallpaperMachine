@@ -123,6 +123,15 @@ public:
     /// again. Only for a compile of the scene that was drawing, which must follow.
     bool clearLastRenderGraphForRebuild();
     bool compileRenderGraph(Scene& scene, rg::RenderGraph& graph);
+    /// Gives an already compiled graph the render target sizes the scene holds now, for a
+    /// change that only resized targets (the buffers an effect chain draws into follow the
+    /// size of the text it is applied to). The prepared passes, their pipelines and vertex
+    /// buffers, the uploaded images and the videos are kept, which is what a rebuild repeats
+    /// and a scene with heavy models and textures pays for dearly; the targets, the copy plan
+    /// and the reuse table are made again as a compile makes them, so the next frame draws
+    /// what a compile would have drawn. The targets are cleared in that frame's own command
+    /// buffer and nothing waits on the GPU. False leaves the graph unusable: build it again.
+    bool ResizeRenderTargets(Scene& scene);
     /// Applies a new internal rasterization scale, and the resolution the scene
     /// is rasterized at, to an already compiled graph. Render targets and the
     /// pipelines attached to them are rebuilt, and only when one of the two

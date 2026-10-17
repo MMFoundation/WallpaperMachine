@@ -435,10 +435,12 @@ established (the one frame that covers it shows the text script's value). Effect
 video output of Native Metal has not been compared against real wallpapers.
 
 A video texture plays against the clock of the layer that shows it, the scene's until a script
-moves it. A render graph built again under a playing video (a text layer
-whose card changes size in texels, a property that shows or hides a layer, a change of the
-render scale on Native Metal) does not close the videos the new graph still shows. Wallpaper Engine resizes a text
-card's buffers in place and touches nothing else a scene holds, so its video neither goes back
+moves it. A render graph built again under a playing video (a property that shows or hides a layer, a
+script that creates one, a change of the render scale on Native Metal) does not close the videos
+the new graph still shows. A text layer whose card changes size in texels builds no graph: the
+renderer resizes the targets of its effect under the graph it has (`ResizeRenderTargets`), and
+the scene's videos, images and models are not touched. Wallpaper Engine touches nothing else a
+scene holds either, so its video neither goes back
 to the head of its clip nor stops. Here the host asks the renderer to clear the graph *for a
 rebuild* (`clearLastRenderGraphForRebuild`), which sets every open video aside (`MetalVideoTextures::hold`); the compile that
 follows takes back the ones the new graph binds, by texture, and closes the rest when it ends,
@@ -644,14 +646,15 @@ hangs.
 Every buffer of a card, an effect's or the composite another layer
 samples, is built at the card's width and height with the fraction cut off, at least 4
 texels, whatever the size of the scene or of the editor's box, as the scene loads and
-again whenever a change of the text gives the card another size in texels (one rebuild
-of the render graph for that change; none while the card only moves, as when its
-alignment flips, or grows by less than a texel; a rebuild is about 0.5 ms of lowering and
-the compile of every pass, 0.6 to 0.9 ms in all on a scene of one layer and 39 to 45 ms on
-a scene of 72 passes, and it drops every uploaded image; a video playing in the scene stays open
-through it, as described under video textures above; a text with a visible effect whose
-card changes in texels every second, proportional digits or a typewriter, makes a heavy
-scene hitch for a few frames once per change). An effect on the text therefore sees
+again whenever a change of the text gives the card another size in texels (the renderer
+allocates the targets again under the render graph it has, once for that change, in about
+0.5 ms on a scene of 72 passes; none while the card only moves, as when its alignment
+flips, or grows by less than a texel). The graph is not built again for it: that compiled
+every pass, decoded and uploaded every image and copied every vertex buffer of the scene,
+39 to 50 ms and more on a scene of large models, and a text with a visible effect whose
+card changes in texels every few frames (proportional digits, a readout, a typewriter) did
+it each time, which held a scene of seven models and 17 text layers to 19 frames a second.
+Nothing the scene loaded is touched, so a video playing in the scene is not either. An effect on the text therefore sees
 the card as its whole picture: `v_TexCoord` runs 0 to 1 across it and
 `g_Texture0Resolution` is its size, so an offset, skew or scroll given as a fraction of
 the picture moves by that fraction of the card, as in Wallpaper Engine. A card past

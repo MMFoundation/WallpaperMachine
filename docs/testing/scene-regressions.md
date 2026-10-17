@@ -2027,9 +2027,10 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   where the alignment hangs the card, with texture coordinates exactly 0 to 1 on the
   final card and on the node the graph resolves it onto. None of them is a capacity, as
   they were (twice the canvas or four times the authored `size`, at most 4096).
-  `.ACardThatChangesInTexelsRebuildsTheGraphOncePerTextChange` makes a text longer and
-  requires every buffer sized from the first to follow, the graph to be asked for once and
-  never again over thirty frames that change nothing, then makes it short again and
+  `.ACardThatChangesInTexelsResizesTheBuffersOncePerTextChangeAndRebuildsNothing` makes a text
+  longer and requires every buffer sized from the first to follow, the targets to be asked to
+  resize once (`ConsumeRenderTargetResizeFlag`) and the graph never (`ConsumeSceneGraphMutationFlag`),
+  and neither again over thirty frames that change nothing, then makes it short again and
   requires the same of the smaller card; a card under 4 texels (no text) gets 4 by 4
   buffers and a final card that is exactly them (the `empty` variant above);
   `.ACardThatGrowsWithinATexelKeepsItsBuffers` and
@@ -2053,8 +2054,28 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   Wallpaper Engine moves the text by that much). A real clock (a
   left-aligned, padded layer through a skew effect) that stood 22 pixels right of
   Wallpaper Engine's, in a 3456-pixel frame, is within one.
+- **A text card that changes size resizes the targets and builds no graph** —
+  `MetalSceneDraw.ATextCardThatChangesSizeResizesTheTargetsAndDrawsWhatARebuildDraws` in
+  `metal_scene_draw_smoke`. A caption through a two-pass effect that reads its input's size
+  (`g_Texture0Resolution`, so a size that was not followed shows in every texel) is made longer,
+  shorter, longer and back, each edit another size in texels, and drawn twice: once as the host does
+  (`ResizeRenderTargets` under the graph it has) and once building the graph again for each change
+  (`RebuildWatch::resize_as_rebuild`, the same as `WE_TEST_RESIZE_AS_REBUILD`). The two final pictures
+  must be byte for byte the same, the first run must rebuild only what the second rebuilt beyond its
+  resizes, and it must have resized at least once per edit. With the target sizes of the
+  lowered passes not refreshed (the loop over `descriptions` in `resizeTargets` left out) the pictures differ.
+  `.ATextCardThatChangesSizeNeitherRebuildsTheGraphNorTouchesAVideo` is what that is for: a caption beside
+  a playing video changes width and the graph is not built again, the decoder is the one that was playing
+  and no media file is opened or closed; it fails when a resize asks for a rebuild
+  (`WE_TEST_RESIZE_AS_REBUILD=1`). A scene whose text changed width every few draws
+  (a perspective scene of seven puppets and 17 text layers, whose readouts are laid out again every few
+  draws) built the graph 41 times in 180 draws, 2.1 s of compile in all, which decoded and uploaded its
+  textures and copied a 54 MB and a 201 MB vertex buffer each time, and drew at 19 frames a second
+  at 44 ms of CPU a frame; it now resizes 40 times in 18 ms and draws at 60 frames a second at 4.5 ms. The
+  `metal_scene_draw_smoke` local run prints both counts and what asked
+  (`N graph rebuild(s), M target resize(s) ...`).
 - **A video stays open and on its frame when the render graph is built again under it** —
-  `MetalSceneDraw.AVideoStaysOpenAndOnItsFrameWhenATextCardResizesTheGraphUnderIt`
+  `MetalSceneDraw.AVideoStaysOpenAndOnItsFrameWhenTheGraphIsBuiltAgainUnderIt`
   in `metal_scene_draw_smoke`. A 20 second 640 by 360 clip in one group of
   pictures (the long clip of `synthetic_video.hpp`: one keyframe, and a bar that crosses the
   picture once, so the column of the bar tells the frame) plays under a caption that draws
@@ -2063,15 +2084,15 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   every draw captured as a poster, until the picture shows the clock's frame (within two frames
   of thirty a second). The wait is for the picture and not for a number of draws, so a machine
   that is slow to seek only takes longer, and a run that never gets there (900 draws) fails
-  naming the frame it was on. Then the caption becomes a longer text, which makes the card
-  another size in texels and the host build the graph again. The picture is the draw that
+  naming the frame it was on. Then the caption becomes a longer text and the graph is built
+  again at that draw (`RebuildWatch::force_at`: a text card no longer asks for it). The picture is the draw that
   follows the rebuild and must show the clip's frame for the clock (within four frames), and the
   renderer's work counters must name the same decoder before and after
   (`OWE_RC_VIDEO_SOURCE_INSTANCE`, with one source open). With the keeping switched off for the
   run it fails: the picture is the clip's frame 0 with the clock at frame 365,
   and the decoder is another one (3 then 4 on Native Metal).
   `.AVideoTheRebuiltGraphLeavesOutIsClosed` is the other half: a property hides
-  the video layer in the tick that resizes the caption, so the graph built again leaves the layer
+  the video layer in the tick the graph is built again in, so it leaves the layer
   out (a layer hidden by a property nothing else writes is left out; one that `SetNodeVisible`
   hides keeps its passes) and nothing in it binds the video that was playing. The decoder was
   kept for the new graph and not taken back, so it must be closed with the compile: the number

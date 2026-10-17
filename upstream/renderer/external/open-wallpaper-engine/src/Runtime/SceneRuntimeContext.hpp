@@ -393,6 +393,10 @@ public:
     /// Covers both halves: a job this thread has queued but the worker has not
     /// finished, and a result the worker has finished but no frame has applied.
     [[nodiscard]] bool TextLayoutInFlight() const;
+    /// Blocks until the text worker has no job queued or running, so that the next
+    /// `PumpTextLayerCache` applies every layout a tick asked for. A test that compares two
+    /// runs of one scene needs the layouts to land on the same frames in both.
+    void WaitForTextLayoutForTests() const;
 
     /// Called when work that finished off the render thread has produced
     /// something a frame would show.
@@ -621,6 +625,23 @@ public:
     bool                         AudioResponseEnabled() const;
     bool                         AudioResponseActive() const;
     bool                         ConsumeSceneGraphMutationFlag();
+    /// Whether a change gave render targets another size and asked for nothing else: the
+    /// buffers an effect chain draws into follow a text card's size in texels. The graph is
+    /// as it was, so the renderer resizes its targets under it
+    /// (`MetalRender::ResizeRenderTargets`) instead of building the graph again, which drops
+    /// every uploaded image and every vertex buffer. A host that built the graph again for
+    /// `ConsumeSceneGraphMutationFlag` in the same frame has the new sizes already; it
+    /// consumes this flag first or after and does not resize a second time.
+    bool                         ConsumeRenderTargetResizeFlag();
+    /// How many times each kind of change asked for a new render graph, for a test or a
+    /// probe that wants to know what made a scene rebuild.
+    const std::map<std::string, int>& SceneGraphMutationReasonsForTests() const {
+        return m_scene_graph_mutation_reasons;
+    }
+    /// The same for the changes that only resized render targets.
+    const std::map<std::string, int>& RenderTargetResizeReasonsForTests() const {
+        return m_render_target_resize_reasons;
+    }
     audio::AudioSpectrumSnapshot CurrentAudioSpectrumSnapshot() const;
     /// Runs `destroy()` in every script that started, once, while everything
     /// the scripts could reach still exists. `Scene` calls it first thing in its
@@ -971,6 +992,8 @@ private:
     std::vector<SceneScriptBinding>                                m_scene_scripts;
     std::vector<std::string>                                       m_script_errors;
     mutable std::mutex                                             m_text_worker_mutex;
+    /// Jobs the worker has taken off the queue and not yet published. Guarded by the mutex.
+    int                                                            m_text_jobs_running { 0 };
     std::condition_variable                                        m_text_worker_cv;
     std::thread                                                    m_text_worker;
     std::deque<RuntimePendingTextLayerJob>                         m_pending_text_jobs;
@@ -1009,7 +1032,12 @@ private:
     bool m_media_idle_pending { true };
     bool m_media_playback_told { false };
     bool m_media_properties_told { false };
+    void MarkSceneGraphMutated(const char* reason);
+    void MarkRenderTargetsResized(const char* reason);
     bool m_scene_graph_mutated { false };
+    std::map<std::string, int> m_scene_graph_mutation_reasons;
+    bool m_render_targets_resized { false };
+    std::map<std::string, int> m_render_target_resize_reasons;
     /// The display's size or the language changed since the scripts were told.
     bool m_screen_resize_pending { false };
     bool m_general_settings_pending { false };
