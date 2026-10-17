@@ -18,7 +18,8 @@ pub struct BlockMemberPlan {
     pub ty: UniformType,
     pub array: Option<u32>,
     /// The type as the block declares it: narrow array elements are widened to four
-    /// components (R20, R87) and booleans are stored as unsigned integers.
+    /// components (R20, R87), two-row matrices to four rows and booleans are stored as
+    /// unsigned integers.
     pub declared_type: String,
     /// One of the generated video-plane constants (4.8).
     pub video: bool,
@@ -37,6 +38,10 @@ pub(crate) struct ReadInfo {
     pub author_element: String,
     /// A boolean stored as unsigned integers: the number of components (1 for a scalar).
     pub as_bool: Option<u8>,
+    /// A matrix with two rows stored with four (std140 gives its columns 16 bytes, and the
+    /// compiler's own two-row matrix has 8): the author's matrix type, which a read restores
+    /// by taking the upper-left submatrix of the stored one.
+    pub narrow_matrix: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -69,20 +74,19 @@ fn select_for(width: u8) -> &'static str {
     }
 }
 
-/// The declared type and read restoration of one member (R20, R83, R87).
+/// The declared type and read restoration of one member (R20, R83, R87, R99). A two-row matrix
+/// is declared with four rows and read back through the constructor of the author's type.
 fn declare(name: &str, ty: UniformType, array: Option<u32>) -> Result<(String, ReadInfo), LegalizeError> {
-    if let UniformType::Matrix { rows: 2, .. } = ty {
-        return Err(LegalizeError::request(format!(
-            "GlobalUniforms member `{name}` of type `{}` cannot be laid out: the shader compiler does not read a two-row matrix in a std140 block (declare a three- or four-row matrix)",
-            ty.glsl_name()
-        )));
-    }
     let plain = || (ty.glsl_name(), ReadInfo { array, ..ReadInfo::default() });
     match (ty, array) {
         (UniformType::Scalar(Scalar::Bool) | UniformType::Vector(Scalar::Bool, _), Some(_)) => Err(LegalizeError::request(format!(
             "GlobalUniforms member `{name}` is an array of `{}`: boolean arrays cannot be laid out (declare integers)",
             ty.glsl_name()
         ))),
+        (UniformType::Matrix { columns, rows: 2 }, _) => Ok((
+            format!("mat{columns}x4"),
+            ReadInfo { array, author_element: ty.glsl_name(), narrow_matrix: Some(ty.glsl_name()), ..ReadInfo::default() },
+        )),
         (UniformType::Scalar(Scalar::Bool), None) => {
             Ok(("uint".to_string(), ReadInfo { as_bool: Some(1), ..ReadInfo::default() }))
         }
@@ -107,6 +111,7 @@ fn declare(name: &str, ty: UniformType, array: Option<u32>) -> Result<(String, R
                     scalar_element: width == 1,
                     author_element: ty.glsl_name(),
                     as_bool: None,
+                    narrow_matrix: None,
                 },
             ))
         }

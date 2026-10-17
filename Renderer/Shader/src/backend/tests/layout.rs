@@ -130,14 +130,14 @@ fn block_of(members: &[(&str, &str)]) -> String {
     text
 }
 
-const SINGLE: [&str; 22] = [
+const SINGLE: [&str; 26] = [
     "bool", "int", "uint", "float", "vec2", "vec3", "vec4", "ivec2", "ivec3", "ivec4", "uvec2", "uvec3", "uvec4", "bvec2", "bvec3",
-    "bvec4", "mat3", "mat4", "mat2x3", "mat2x4", "mat3x4", "mat4x3",
+    "bvec4", "mat3", "mat4", "mat2x3", "mat2x4", "mat3x4", "mat4x3", "mat2", "mat2x2", "mat3x2", "mat4x2",
 ];
 
-const ARRAYS: [&str; 19] = [
+const ARRAYS: [&str; 23] = [
     "int", "uint", "float", "vec2", "vec3", "vec4", "ivec2", "ivec3", "ivec4", "uvec2", "uvec3", "uvec4", "mat3", "mat4", "mat2x3", "mat2x4",
-    "mat3x4", "mat4x3", "float",
+    "mat3x4", "mat4x3", "float", "mat2", "mat2x2", "mat3x2", "mat4x2",
 ];
 
 #[test]
@@ -172,6 +172,8 @@ fn the_cases_the_spec_names() {
     assert_parity("mat4x3 array", &block_of(&[("float", "pre"), ("mat4x3", "bones[4]"), ("float", "post")]));
     assert_parity("int and ivec3 arrays", &block_of(&[("float", "pre"), ("int", "i[7]"), ("ivec3", "v[3]"), ("float", "post")]));
     assert_parity("mat2x3", &block_of(&[("float", "pre"), ("mat2x3", "m"), ("mat2x3", "ms[2]"), ("float", "post")]));
+    assert_parity("mat2", &block_of(&[("float", "pre"), ("mat2", "m"), ("mat2", "ms[2]"), ("float", "post")]));
+    assert_parity("mat2 then float", &block_of(&[("float", "pre"), ("mat2", "m"), ("float", "post")]));
 }
 
 #[test]
@@ -202,10 +204,10 @@ fn a_block_that_mixes_everything() {
 }
 
 #[test]
-fn types_the_block_cannot_hold_are_refused_naming_the_member() {
-    // Two-row matrices cannot be read in a std140 block by the pinned compiler, and arrays of
-    // booleans have no widened form: both are refused up front (spec C2 R87, NOTES).
-    for (ty, name) in [("mat2", "m"), ("mat3x2", "m"), ("mat4x2", "m"), ("bool", "flags[4]"), ("bvec2", "flags[2]"), ("mat2", "ms[2]")] {
+fn arrays_of_booleans_are_refused_naming_the_member() {
+    // Arrays of booleans have no widened form: they are refused up front (spec C2 R87 allows
+    // it, NOTES). Two-row matrices are laid out, see `every_member_type_alone_between_floats`.
+    for (ty, name) in [("bool", "flags[4]"), ("bvec2", "flags[2]")] {
         let fragment = format!("uniform {ty} {name};\nvoid main() {{ gl_FragColor = vec4(0.0); }}");
         let e = Req::new(PASS_VERTEX, &fragment).err();
         assert_eq!(e.category(), ErrorCategory::InvalidRequest, "{ty}: {e}");

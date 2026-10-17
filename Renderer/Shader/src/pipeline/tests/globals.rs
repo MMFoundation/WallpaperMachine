@@ -182,3 +182,26 @@ fn a_change_of_counts_changes_the_sizes_in_the_reflection_and_in_the_msl_block()
     assert!(msl(&few).contains("metal::float4 inner[1];"), "{}", msl(&few));
     assert!(many.reflection.uniform_blocks[0].size > few.reflection.uniform_blocks[0].size);
 }
+
+#[test]
+fn a_two_row_matrix_reflects_with_the_authors_component_count_and_the_std140_footprint() {
+    let fragment = "uniform mat2 g_A; uniform mat3x2 g_B; uniform mat4x2 g_C[2]; uniform mat2x2 g_D; uniform float g_After;\n\
+                    void main() { gl_FragColor = vec4(g_A[0] + g_B[1] + g_C[1][2] + g_D[1], g_After, 1.0); }";
+    let p = ok("attribute vec3 a_Position;\nvoid main() { gl_Position = vec4(a_Position, 1.0); }", fragment);
+    let block = &p.reflection.uniform_blocks[0];
+    let got: Vec<(&str, u32, u32, u32, u32, u32)> = block
+        .members
+        .iter()
+        .map(|m| (m.name.as_str(), m.offset, m.size, m.element_count, m.array_count, m.array_stride))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("g_A", 0, 32, 4, 0, 0),
+            ("g_B", 32, 48, 6, 0, 0),
+            ("g_C", 80, 128, 8, 2, 64),
+            ("g_D", 208, 32, 4, 0, 0),
+            ("g_After", 240, 4, 1, 0, 0),
+        ]
+    );
+}

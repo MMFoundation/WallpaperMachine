@@ -19,13 +19,14 @@ use crate::backend::{NagaBackend, StageCompiler};
 use crate::cache_key::{ProgramKeyInput, StageKeyInput, program_key};
 use crate::diagnostic::Diagnostic;
 use crate::error::{FailedDiagnostic, ShaderError};
-use crate::legalize::{LegalizeError, LegalProgram, ProgramInput, legalize};
+use crate::legalize::{BlockPlan, LegalizeError, LegalProgram, ProgramInput, legalize};
 use crate::prepare::{PreparedProgram, prepare_program};
 use crate::reflect::{InputNames, NagaReflector, StageReflector};
 use crate::reflection::{Reflection, ReflectionError};
 use crate::request::{Combo, RequestError, StageKind, ValidRequest};
 use crate::response::{Metadata, StagePayload};
 use crate::source::IncludeSource;
+use crate::uniforms::UniformType;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -104,7 +105,10 @@ impl Pipeline<'_> {
             let kind = requested.kind;
             let legal_stage = legal.stage(kind).expect("both stages are legalized");
             let compiled = self.compiler.compile(kind, legal_stage).map_err(|e| e.named(name))?;
-            let reflection = self.reflector.reflect(kind, &compiled, &names).map_err(|e| e.named(name))?;
+            let mut reflection = self.reflector.reflect(kind, &compiled, &names).map_err(|e| e.named(name))?;
+            if let Some(plan) = &legal.layout.block {
+                restore_author_element_counts(&mut reflection, plan);
+            }
             diagnostics.extend(legal_stage.diagnostics.iter().cloned());
             diagnostics.extend(compiled.diagnostics.iter().cloned());
             let prepared_stage = prepared.stages.iter().find(|s| s.kind == kind).expect("both stages are prepared");
@@ -140,6 +144,20 @@ impl Pipeline<'_> {
             reflection,
             diagnostics,
         })
+    }
+}
+
+/// A two-row matrix is stored with four rows (the block's std140 columns are 16 bytes wide), so
+/// the module reports eight components for a `mat2`; reflection reports the author's four (R99).
+fn restore_author_element_counts(reflection: &mut Reflection, plan: &BlockPlan) {
+    for block in reflection.uniform_blocks.iter_mut().filter(|b| b.name == crate::names::GLOBAL_UNIFORMS) {
+        for member in &mut block.members {
+            if let Some(p) = plan.members.iter().find(|p| p.name == member.name)
+                && matches!(p.ty, UniformType::Matrix { rows: 2, .. })
+            {
+                member.element_count = p.ty.element_count();
+            }
+        }
     }
 }
 

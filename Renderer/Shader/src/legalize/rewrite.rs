@@ -282,6 +282,16 @@ impl<'a> Rewriter<'a> {
     fn try_array_read(&mut self, e: &mut Expr) -> bool {
         match &mut e.kind {
             ExprKind::Index(base, idx) => {
+                // An element of a two-row matrix array: the author's matrix from the stored one.
+                if let Some(m) = self.global_member(base)
+                    && m.read.array.is_some()
+                    && let Some(ty) = m.read.narrow_matrix.clone() {
+                        self.expr(idx);
+                        let span = e.span.clone();
+                        let inner = std::mem::replace(e, Expr::number("0", 0..0));
+                        *e = Expr::new(ExprKind::Call(Callee::Type(TypeRef::named(&ty)), vec![inner]), span).paren();
+                        return true;
+                    }
                 if let Some(m) = self.global_member(base)
                     && m.read.array.is_some()
                     && let Some(sel) = m.read.select {
@@ -347,6 +357,27 @@ impl<'a> Rewriter<'a> {
             return;
         }
         let Some(m) = self.cx.members.get(n) else { return };
+        if let Some(ty) = &m.read.narrow_matrix {
+            let author = |inner: Expr, span: &Span| {
+                Expr::new(ExprKind::Call(Callee::Type(TypeRef::named(ty)), vec![inner]), span.clone())
+            };
+            let Some(count) = m.read.array else {
+                *e = author(ident(n, &span), &span).paren();
+                return;
+            };
+            if count > MAX_WHOLE_ARRAY {
+                self.found.errors.push(LegalizeError::stage_local(
+                    self.cx.kind,
+                    Some(span.clone()),
+                    format!("uniform array `{n}` has {count} elements and is read as a whole: a whole read of a widened array is limited to {MAX_WHOLE_ARRAY} elements"),
+                ));
+                return;
+            }
+            let elements: Vec<Expr> = (0..count).map(|i| author(index(ident(n, &span), i), &span)).collect();
+            let array_ty = TypeRef { name: ty.clone(), dims: vec![Some(Expr::number(&count.to_string(), span.clone()))] };
+            *e = Expr::new(ExprKind::Call(Callee::Type(array_ty), elements), span);
+            return;
+        }
         if let (Some(count), Some(sel)) = (m.read.array, m.read.select) {
             if count > MAX_WHOLE_ARRAY {
                 self.found.errors.push(LegalizeError::stage_local(

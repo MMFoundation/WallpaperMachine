@@ -451,13 +451,20 @@ Spec conflicts and the choice made:
     Sampling calls with `textureGrad`, `textureOffset`, `textureProj`, `textureProjLod`,
     `textureLodOffset`, `textureGather` and `textureQueryLod` are paired with the sampler as well;
     `texelFetch`, `textureSize` and `textureQueryLevels` take the separated texture object.
-74. **Block member types naga cannot hold.** naga validates no `bool` in a uniform block and reads no
-    matrix with two rows (`mat2`, `mat3x2`, `mat4x2`) in std140. A `bool` or `bvecN` member is
-    declared `uint` or `uvecN` (the same four bytes per component) and read back as a comparison
-    with zero; an array of booleans and every two-row matrix are refused with an "invalid
-    request" message naming the member (R87 and section 10 item 9 allow the refusal). Integer
-    arrays are widened to `ivec4` or `uvec4` (R87); the test `a_narrow_uint_array_stays_tight_on_metal_without_the_widening`
-    shows that naga writes a plain `uint[3]` with a four-byte stride, so the widening is needed.
+74. **Block member types naga cannot hold.** naga validates no `bool` in a uniform block and its
+    Metal output gives a two-row matrix (`mat2`, `mat2x2`, `mat3x2`, `mat4x2`) 8-byte columns where
+    std140 has 16. A `bool` or `bvecN` member is declared `uint` or `uvecN` (the same four bytes per
+    component) and read back as a comparison with zero. A two-row matrix, alone or in an array, is
+    declared with four rows (`mat2` as `mat2x4`, 32 bytes, array stride 32, as std140 has it) and
+    every read of it is the author's matrix constructed from the stored one (`mat2(g_Q)`, which takes
+    the upper-left submatrix, and `mat2(g_Q[i])` for an element); a column or an element is then read
+    from that value, and `.length()` is unchanged. Reflection reports the author's component count
+    (`mat2` 4) and the real offset, size and stride; naga would say 8 components, so the pipeline
+    restores the count from the block plan after reflecting (D R99, D test 24). Arrays of booleans
+    have no widened form and are refused with an "invalid request" message naming the member (R87
+    allows the refusal). Integer arrays are widened to `ivec4` or `uvec4` (R87); the test
+    `a_narrow_uint_array_stays_tight_on_metal_without_the_widening` shows that naga writes a plain
+    `uint[3]` with a four-byte stride, so the widening is needed.
 75. **Whole-array reads of a widened array** (`float bins[16] = g_Audio;`, an argument passed on)
     are an array constructor of the author's element type reading each element with its selector
     (R58 asks for the declaration to be erased and the uses replaced; the copy is the same work as
@@ -570,11 +577,10 @@ anything that reaches the engine, so it wins unless noted):
     legalizer and reserve their index, but naga reads no combined sampler, so a program with one fails
     at the `GlslParse` pass (compile); that is "such a program does not draw natively" (D section 10
     item 12).
-93. **Not supported types of the block** stay as Step 4 decided (NOTES 74): two-row matrices (`mat2`,
-    `mat3x2`, `mat4x2`) and arrays of booleans are refused naming the member. D test 24 asks for
-    parity of every *supported* type, which the layout test checks for 22 single types and 19 array
-    types, alone and in mixed blocks, by parsing the MSL struct. Supporting the refused types would
-    need a widened form for them in the legalizer; none of the shipped or workshop shaders uses one.
+93. **Block types and parity.** Superseded for two-row matrices by NOTES 74: they are widened and
+    the layout test checks them with every other type (26 single types and 23 array types, alone and
+    in mixed blocks, by parsing the MSL struct). Arrays of booleans stay refused naming the member;
+    none of the shipped or workshop shaders uses one.
 94. **MSL text facts measured** (naga 29.0.3): the first line is `// language: metal2.0`, the entry
     function of `main` is `main_`, a global whose name ends in a digit is written with a trailing
     underscore (the records keep the GLSL name), an array varying becomes one stage-in/out member per
@@ -622,8 +628,8 @@ The engine-side checks of test 34 (draw tests) and the engine-side items of spec
 request builder, the merge contract, R107's refusal, the golden check of R88 against the engine's own
 documents). R79's optional early failure for a program the engine would refuse.
 `src/dialect/tests/boundary.rs` pins a digest of the converter's output per `PIPELINE_REVISION`, so the
-first change of converted output after that revision forces a deliberate bump. Two-row matrices and
-arrays of booleans in the block (NOTES 93).
+first change of converted output after that revision forces a deliberate bump. Arrays of booleans in
+the block (NOTES 93).
 
 ## Step 6 choices (the C ABI)
 

@@ -248,10 +248,31 @@ fn booleans_are_stored_as_unsigned_integers_and_read_back_as_booleans() {
 }
 
 #[test]
-fn a_two_row_matrix_is_refused_naming_the_member() {
-    let e = stage_err(StageKind::Fragment, "uniform mat2 g_Rot;\nvoid main() { gl_FragColor = vec4(g_Rot[0], 0.0, 1.0); }");
-    assert!(e.message().contains("g_Rot") && e.message().contains("mat2"), "{e}");
-    assert!(e.is_invalid_request());
+fn a_two_row_matrix_is_stored_with_four_rows_and_read_back_as_the_authors_matrix() {
+    let src = "uniform mat2 g_Rot;\nuniform mat3x2 g_Aff;\nuniform mat4x2 g_Many[3];\nuniform mat2x2 g_Pair[2];\nuniform float g_After;\n\
+               void main() {\n\
+                 mat2 r = g_Rot;\n\
+                 vec2 c = g_Rot[1];\n\
+                 float e = g_Rot[1][0];\n\
+                 vec2 p = g_Aff * vec3(1.0);\n\
+                 mat4x2 m = g_Many[1];\n\
+                 vec2 d = g_Many[2][3];\n\
+                 mat2 q = g_Pair[1] * g_Pair[0];\n\
+                 mat2 all[2] = g_Pair;\n\
+                 int n = g_Many.length();\n\
+                 gl_FragColor = vec4(r[0] + c + p + m[1] + d + q[0] + all[1][1], e + g_After, float(n));\n\
+               }";
+    let both = compile_program(PASS_V, src);
+    let text = &both.program.fragment.as_ref().unwrap().text;
+    let lines = block_lines(text);
+    assert_eq!(
+        lines,
+        ["mat2x4 g_Rot;", "mat3x4 g_Aff;", "mat4x4 g_Many[3];", "mat2x4 g_Pair[2];", "float g_After;"]
+    );
+    assert!(text.contains("mat2(g_Rot)") && text.contains("mat4x2(g_Many[1])") && text.contains("mat2[2]("), "{text}");
+    // Metal agrees with the std140 offsets of the model: 32, 48, 192 and 64 bytes before g_After.
+    let offsets = naga_offsets(&both.fragment);
+    assert_eq!(offsets.last().map(|(n, o)| (n.as_str(), *o)), Some(("g_After", 32 + 48 + 192 + 64)));
 }
 
 // ----- descriptor bindings -----
