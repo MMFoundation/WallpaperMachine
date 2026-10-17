@@ -110,7 +110,10 @@ add_library(
   Video/VideoDecodePump.cpp
   Video/VideoFramePacing.cpp
   Video/VideoMedia.cpp
+  Video/NativeVideoBackend.cpp
   Video/SharedVideoSession.cpp
+  Video/VideoBackendSelection.cpp
+  Video/VideoTextureSourceFactory.cpp
   ${PLATFORM_APPLE_SOURCES}
   SceneSourceResolver.cpp
   Scene/SceneWallpaper.cpp)
@@ -144,6 +147,14 @@ if(NOT TARGET wmMedia)
                       "configure it from a full WallpaperMachine checkout")
 endif()
 set(WESCENE_MEDIA_LIBS wmMedia)
+if(APPLE)
+  # The VideoToolbox layer of the same readers: format descriptions and a
+  # decoder the native video backend plays through.
+  if(NOT TARGET wmMediaApple)
+    message(FATAL_ERROR "wescene-renderer needs Renderer/Media/Apple (target wmMediaApple)")
+  endif()
+  list(APPEND WESCENE_MEDIA_LIBS wmMediaApple)
+endif()
 
 target_link_libraries(
   ${PROJECT_NAME}

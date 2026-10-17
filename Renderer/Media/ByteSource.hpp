@@ -65,6 +65,17 @@ std::shared_ptr<ByteSource> MakeMemoryByteSource(std::shared_ptr<const void> own
 /// A memory source that takes ownership of `bytes`.
 std::shared_ptr<ByteSource> MakeMemoryByteSource(std::vector<std::uint8_t> bytes);
 
+/// A source over a copy of `data` kept in an anonymous file: created in the
+/// temporary directory, unlinked before the first byte is written, and read back
+/// with `pread` through the same small window as a file. Nothing is visible on
+/// disk, nothing is left behind when the process dies, and the copy costs the
+/// process no memory (the pages are the system's file cache, which it can take
+/// back), so a large payload that is only read a frame at a time does not stay
+/// resident. Returns null and fills `error` (kind `Io`) when the file cannot be
+/// created or written whole.
+std::shared_ptr<ByteSource> MakeSpilledByteSource(const std::uint8_t* data, std::size_t size, Error* error,
+                                                  std::size_t windowBytes = 64 * 1024);
+
 /// A read-only file read through a small buffered window (64 KiB by default), so
 /// a parser's many short header reads cost one system call each window instead
 /// of one each. Reads at least a window long bypass the buffer. The file is

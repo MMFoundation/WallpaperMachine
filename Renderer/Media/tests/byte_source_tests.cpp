@@ -304,5 +304,61 @@ TEST_F(FileByteSourceTest, ReadVectorOverAFileReportsTruncation)
     EXPECT_EQ(error.kind, ErrorKind::Truncated);
 }
 
+TEST(SpilledByteSource, ReadsBackWhatItWasGivenAndLeavesNoFile)
+{
+    const auto directory = std::filesystem::temp_directory_path() / ("wm-spill-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(directory);
+    std::filesystem::create_directories(directory);
+    const char* previous = std::getenv("TMPDIR");
+    const std::string saved = previous != nullptr ? previous : "";
+    ASSERT_EQ(setenv("TMPDIR", directory.c_str(), 1), 0);
+
+    const auto bytes = Pattern(300000);
+    Error      error;
+    auto       source = MakeSpilledByteSource(bytes.data(), bytes.size(), &error);
+    ASSERT_NE(source, nullptr) << Describe(error);
+    EXPECT_EQ(source->size(), bytes.size());
+    // Unlinked at once: nothing is visible while it is open.
+    EXPECT_TRUE(std::filesystem::is_empty(directory));
+    EXPECT_EQ(source->view(0, 10), nullptr);
+
+    std::vector<std::uint8_t> out(bytes.size());
+    ASSERT_EQ(source->readAt(0, out.data(), out.size()), out.size());
+    EXPECT_EQ(out, bytes);
+    std::vector<std::uint8_t> part(1000);
+    ASSERT_EQ(source->readAt(123456, part.data(), part.size()), part.size());
+    EXPECT_TRUE(std::equal(part.begin(), part.end(), bytes.begin() + 123456));
+    EXPECT_EQ(source->readAt(bytes.size() - 4, part.data(), part.size()), 4u);
+    EXPECT_EQ(source->readAt(bytes.size(), part.data(), part.size()), 0u);
+
+    // The copy is independent of the buffer it came from.
+    auto mutated = bytes;
+    std::fill(mutated.begin(), mutated.end(), 0);
+    ASSERT_EQ(source->readAt(0, out.data(), 16), 16u);
+    EXPECT_TRUE(std::equal(out.begin(), out.begin() + 16, bytes.begin()));
+
+    if (previous != nullptr) setenv("TMPDIR", saved.c_str(), 1);
+    else unsetenv("TMPDIR");
+    source.reset();
+    std::filesystem::remove_all(directory);
+}
+
+TEST(SpilledByteSource, AnEmptyPayloadIsAnEmptySourceAndAnUnwritableDirectoryIsAnError)
+{
+    Error error;
+    auto  empty = MakeSpilledByteSource(nullptr, 0, &error);
+    ASSERT_NE(empty, nullptr) << Describe(error);
+    EXPECT_EQ(empty->size(), 0u);
+
+    const char* previous = std::getenv("TMPDIR");
+    const std::string saved = previous != nullptr ? previous : "";
+    ASSERT_EQ(setenv("TMPDIR", "/nonexistent-directory-for-wallpaper-machine-tests", 1), 0);
+    const auto bytes = Pattern(10);
+    EXPECT_EQ(MakeSpilledByteSource(bytes.data(), bytes.size(), &error), nullptr);
+    EXPECT_EQ(error.kind, ErrorKind::Io);
+    if (previous != nullptr) setenv("TMPDIR", saved.c_str(), 1);
+    else unsetenv("TMPDIR");
+}
+
 } // namespace
 } // namespace wallpaper::media

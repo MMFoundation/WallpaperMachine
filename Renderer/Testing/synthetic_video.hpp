@@ -79,6 +79,16 @@ int LongGopKeyframes();
 bool WriteSyntheticVideo(const std::filesystem::path& path, int repeats, const std::string& salt,
                          std::optional<std::array<int32_t, 9>> display_matrix = std::nullopt);
 
+/// Frames of the reordered clip: two groups of 30 pictures with B-frames.
+constexpr int kReorderedFrames = 60;
+
+/// Writes the reordered clip: 640x360 at 30 per second, `kReorderedFrames`
+/// frames, a keyframe at 0 and at 30, frame `i` carrying the luma
+/// `FrameLuma(i, x, y)` and shown at `i / 30` seconds, but with B-frames, so the
+/// order the samples are stored in is not the order they are shown in. False
+/// when there is no encoder, or it produced no reordering at all.
+bool WriteReorderedVideo(const std::filesystem::path& path, const std::string& salt);
+
 /// Writes the long clip: twenty seconds, one keyframe. False when there is no
 /// encoder, and when the encoder cut the group of pictures short, which would
 /// leave a seek no longer than any other.

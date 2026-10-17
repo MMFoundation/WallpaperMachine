@@ -37,6 +37,8 @@ struct EncodedGop {
     /// Samples the encoder did not mark as dependent on an earlier one: a clip
     /// is seeked from the nearest one before the frame asked for.
     int                            keyframes { 0 };
+    /// Whether any sample is decoded before one that is shown earlier.
+    bool                           has_reordering { false };
 
     EncodedGop() = default;
     EncodedGop(const EncodedGop&) = delete;
@@ -95,11 +97,12 @@ void SetProperty(VTCompressionSessionRef session, CFStringRef key, CFTypeRef val
 }
 
 /// Encodes `frames` frames of 640x360 at 30 per second, with a keyframe every
-/// `gop_size` of them at most and no frame reordering, so that decode order is
-/// display order. `luma(index, x, y)` is the plane the encoder is given. Empty
+/// `gop_size` of them at most and, unless `reordering` asks for B-frames, no
+/// frame reordering, so that decode order is display order. `luma(index, x, y)` is the plane the encoder is given. Empty
 /// when no encoder is available or it did not return every frame.
 template <typename Luma>
-std::unique_ptr<EncodedGop> EncodeFrames(int frames, int gop_size, int64_t bit_rate, Luma&& luma) {
+std::unique_ptr<EncodedGop> EncodeFrames(int frames, int gop_size, int64_t bit_rate, Luma&& luma,
+                                         bool reordering = false) {
     auto gop = std::make_unique<EncodedGop>();
 
     VTCompressionSessionRef session = nullptr;
@@ -117,7 +120,8 @@ std::unique_ptr<EncodedGop> EncodeFrames(int frames, int gop_size, int64_t bit_r
         }
     }
     SetProperty(session, kVTCompressionPropertyKey_RealTime, kCFBooleanFalse);
-    SetProperty(session, kVTCompressionPropertyKey_AllowFrameReordering, kCFBooleanFalse);
+    SetProperty(session, kVTCompressionPropertyKey_AllowFrameReordering,
+                reordering ? kCFBooleanTrue : kCFBooleanFalse);
     SetProperty(session, kVTCompressionPropertyKey_ProfileLevel,
                 kVTProfileLevel_H264_Main_AutoLevel);
     @autoreleasepool {
@@ -184,8 +188,12 @@ std::unique_ptr<EncodedGop> EncodeFrames(int frames, int gop_size, int64_t bit_r
         return gop;
     }
     CFRetain(gop->format);
+    CMTime last_pts = kCMTimeNegativeInfinity;
     for (CMSampleBufferRef sample : gop->samples) {
         if (IsSyncSample(sample)) ++gop->keyframes;
+        const CMTime pts = CMSampleBufferGetPresentationTimeStamp(sample);
+        if (CMTimeCompare(pts, last_pts) < 0) gop->has_reordering = true;
+        last_pts = pts;
     }
     return gop;
 }
@@ -208,6 +216,15 @@ const EncodedGop& SharedLongGop() {
             const int left = LongGopBarColumn(index);
             return static_cast<uint8_t>(x >= left && x < left + kBarWidth ? 235 : 70);
         });
+    return *gop;
+}
+
+/// Two groups of pictures with B-frames, so decode order differs from display
+/// order. Noise like the shared group, at a rate that leaves the frames apart.
+const EncodedGop& SharedReorderedGop() {
+    static const std::unique_ptr<EncodedGop> gop = EncodeFrames(
+        kReorderedFrames, kReorderedFrames / 2, 30000000,
+        [](int index, int x, int y) { return FrameLuma(index, x, y); }, true);
     return *gop;
 }
 
@@ -318,6 +335,12 @@ int LongGopKeyframes() { return SharedLongGop().keyframes; }
 bool WriteSyntheticVideo(const std::filesystem::path& path, int repeats, const std::string& salt,
                          std::optional<std::array<int32_t, 9>> display_matrix) {
     return WriteMuxedVideo(SharedGop(), path, repeats, salt, display_matrix);
+}
+
+bool WriteReorderedVideo(const std::filesystem::path& path, const std::string& salt) {
+    const EncodedGop& gop = SharedReorderedGop();
+    if (gop.empty() || !gop.has_reordering) return false;
+    return WriteMuxedVideo(gop, path, 1, salt, std::nullopt);
 }
 
 bool WriteLongGopVideo(const std::filesystem::path& path, const std::string& salt) {

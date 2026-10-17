@@ -486,6 +486,28 @@ if(APPLE)
         DISCOVERY_TIMEOUT 60)
 endif()
 
+# The Apple adapter of the container readers (Renderer/Media/Apple), on real
+# VideoToolbox decoding of the synthetic clips. Project-owned test, outside
+# upstream/, registered here because the fixture library is built here.
+if(APPLE)
+    get_filename_component(WESCENE_MEDIA_APPLE_TESTS_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Renderer/Media/Apple/tests" ABSOLUTE)
+    add_executable(vt_frame_decoder_test
+        ${WESCENE_MEDIA_APPLE_TESTS_DIR}/vt_frame_decoder_test.mm)
+    target_link_libraries(vt_frame_decoder_test PRIVATE
+        wmMediaApple wmMedia wescene_testing_media GTest::gtest_main)
+    target_include_directories(vt_frame_decoder_test PRIVATE .)
+    target_compile_features(vt_frame_decoder_test PRIVATE cxx_std_20)
+    set_target_properties(vt_frame_decoder_test PROPERTIES
+        OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+    target_compile_options(vt_frame_decoder_test PRIVATE
+        $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+    gtest_discover_tests(vt_frame_decoder_test
+        TEST_PREFIX vt_frame_decoder_test.
+        PROPERTIES TIMEOUT 120
+        DISCOVERY_TIMEOUT 60)
+endif()
+
 # A pure-video wallpaper's media is decode input, not a payload. The test drives
 # the real construction path against media the fixture encodes, so it links the
 # renderer rather than standing in a fake source. Only the software-frame suite
@@ -520,7 +542,7 @@ endif()
 
 add_executable(video_source_input_test video_source_input_test.cpp)
 target_link_libraries(video_source_input_test PRIVATE ${PROJECT_NAME}
-    wescene_testing_media GTest::gtest_main)
+    wmMedia wescene_testing_media GTest::gtest_main)
 target_include_directories(video_source_input_test PRIVATE
     . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/include)
 target_compile_features(video_source_input_test PRIVATE cxx_std_20)

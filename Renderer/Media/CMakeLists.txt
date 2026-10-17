@@ -18,6 +18,7 @@ set(WM_MEDIA_SANITIZE "" CACHE STRING
     "Standalone builds only: sanitizer list for -fsanitize= (for example address,undefined)")
 
 set(WM_MEDIA_SOURCES
+    Av1/Av1SequenceHeader.cpp
     ByteSource.cpp
     Checked.cpp
     CodecConfig.cpp
@@ -27,6 +28,7 @@ set(WM_MEDIA_SOURCES
     Matroska/MatroskaReader.cpp
     Matroska/Vp9Header.cpp
     Rational.cpp
+    SampleOrder.cpp
     VideoTypes.cpp
 )
 

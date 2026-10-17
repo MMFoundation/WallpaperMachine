@@ -12,8 +12,8 @@
 
 #include "Image.hpp"
 #include "Platform/Apple/VideoFrameInterop.hpp"
-#include "Video/FfmpegVideoTextureSource.hpp"
 #include "Video/SharedVideoSession.hpp"
+#include "Video/VideoBackendSelection.hpp"
 #include "Video/VideoMedia.hpp"
 #include "Video/VideoTextureSource.hpp"
 #include "synthetic_video.hpp"
@@ -61,9 +61,13 @@ bool AdvanceUntilFrameChanges(const std::shared_ptr<VideoTextureSource>& source,
     return false;
 }
 
-class SharedVideoSessionTest : public ::testing::Test {
+/// Every case runs once per decoder: sharing is a property of the registry, and
+/// the decoder under it must keep the frame ownership and lifetime it relies on.
+class SharedVideoSessionTest : public ::testing::TestWithParam<VideoBackendPreference> {
 protected:
     void SetUp() override {
+        previous_backend = CurrentVideoBackendPreference();
+        SetVideoBackendPreference(GetParam());
         ASSERT_TRUE(testing_media::EncoderAvailable())
             << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
         static std::atomic<uint64_t> serial { 0 };
@@ -75,6 +79,7 @@ protected:
     }
 
     void TearDown() override {
+        SetVideoBackendPreference(previous_backend);
         SetSharedVideoDecodeEnabled(false);
         ReleaseIdleVideoSessions();
         std::error_code ec;
@@ -90,10 +95,11 @@ protected:
         return CreateVideoProjectImage(dir, name, &error);
     }
 
-    std::filesystem::path dir;
+    std::filesystem::path  dir;
+    VideoBackendPreference previous_backend { VideoBackendPreference::Auto };
 };
 
-TEST_F(SharedVideoSessionTest, EquivalentConsumersShareOneDecoder) {
+TEST_P(SharedVideoSessionTest, EquivalentConsumersShareOneDecoder) {
     auto image = MakeFileImage("media.mp4", "shared");
     ASSERT_NE(image, nullptr);
 
@@ -113,7 +119,7 @@ TEST_F(SharedVideoSessionTest, EquivalentConsumersShareOneDecoder) {
     EXPECT_EQ(first->sourceStats().instance_id, second->sourceStats().instance_id);
 }
 
-TEST_F(SharedVideoSessionTest, ConcurrentConsumersReceiveTheSameInitializedFrame) {
+TEST_P(SharedVideoSessionTest, ConcurrentConsumersReceiveTheSameInitializedFrame) {
     auto image = MakeFileImage("concurrent.mp4", "concurrent-prime");
     ASSERT_NE(image, nullptr);
     constexpr size_t count = 4;
@@ -143,8 +149,10 @@ TEST_F(SharedVideoSessionTest, ConcurrentConsumersReceiveTheSameInitializedFrame
     EXPECT_EQ(SharedVideoDecodeSessionCount(), 1u);
 }
 
-TEST_F(SharedVideoSessionTest, FailedInitializationIsReportedConsistentlyToEveryCaller) {
-    auto source = std::make_shared<FfmpegVideoTextureSource>((dir / "not-present.mp4").string());
+TEST_P(SharedVideoSessionTest, FailedInitializationIsReportedConsistentlyToEveryCaller) {
+    std::string creation_error;
+    auto source = CreateVideoTextureSourceForFile((dir / "not-present.mp4").string(), &creation_error);
+    ASSERT_NE(source, nullptr) << creation_error;
     std::array<std::string, 2> errors;
     std::thread first([&] { EXPECT_FALSE(source->prime(&errors[0])); });
     std::thread second([&] { EXPECT_FALSE(source->prime(&errors[1])); });
@@ -155,7 +163,7 @@ TEST_F(SharedVideoSessionTest, FailedInitializationIsReportedConsistentlyToEvery
     EXPECT_FALSE(source->currentFrame().valid());
 }
 
-TEST_F(SharedVideoSessionTest, SameFileNameInDifferentProjectsIsNotShared) {
+TEST_P(SharedVideoSessionTest, SameFileNameInDifferentProjectsIsNotShared) {
     // The project-relative name is identical; the files are not. Sharing on the
     // name alone would show one wallpaper's video on the other's display.
     auto first_image = MakeFileImage("video.mp4", "first");
@@ -182,7 +190,7 @@ TEST_F(SharedVideoSessionTest, SameFileNameInDifferentProjectsIsNotShared) {
     EXPECT_NE(first->sourceStats().instance_id, second->sourceStats().instance_id);
 }
 
-TEST_F(SharedVideoSessionTest, PausingOneSurfaceLeavesTheOtherPlaying) {
+TEST_P(SharedVideoSessionTest, PausingOneSurfaceLeavesTheOtherPlaying) {
     auto image = MakeFileImage("media.mp4", "pause");
     ASSERT_NE(image, nullptr);
 
@@ -217,7 +225,7 @@ TEST_F(SharedVideoSessionTest, PausingOneSurfaceLeavesTheOtherPlaying) {
     EXPECT_EQ(paused->currentFrame().pixel_buffer, held_while_playing.pixel_buffer);
 }
 
-TEST_F(SharedVideoSessionTest, AFrameStaysValidAfterTheDecoderMovesOn) {
+TEST_P(SharedVideoSessionTest, AFrameStaysValidAfterTheDecoderMovesOn) {
     auto image = MakeFileImage("media.mp4", "retain");
     ASSERT_NE(image, nullptr);
 
@@ -256,7 +264,7 @@ TEST_F(SharedVideoSessionTest, AFrameStaysValidAfterTheDecoderMovesOn) {
     ReleaseAppleVideoFrame(&retained);
 }
 
-TEST_F(SharedVideoSessionTest, AnIncompatibleRateSplitsOntoItsOwnDecoder) {
+TEST_P(SharedVideoSessionTest, AnIncompatibleRateSplitsOntoItsOwnDecoder) {
     auto image = MakeFileImage("media.mp4", "rate");
     ASSERT_NE(image, nullptr);
 
@@ -279,7 +287,7 @@ TEST_F(SharedVideoSessionTest, AnIncompatibleRateSplitsOntoItsOwnDecoder) {
     EXPECT_NE(normal->sourceStats().instance_id, faster->sourceStats().instance_id);
 }
 
-TEST_F(SharedVideoSessionTest, TheDecoderOutlivesOneConsumerAndNotBoth) {
+TEST_P(SharedVideoSessionTest, TheDecoderOutlivesOneConsumerAndNotBoth) {
     auto image = MakeFileImage("media.mp4", "lifetime");
     ASSERT_NE(image, nullptr);
 
@@ -306,7 +314,7 @@ TEST_F(SharedVideoSessionTest, TheDecoderOutlivesOneConsumerAndNotBoth) {
     EXPECT_EQ(SharedVideoDecodeConsumerCount(), 0u);
 }
 
-TEST_F(SharedVideoSessionTest, SharingOffGivesEveryConsumerItsOwnDecoder) {
+TEST_P(SharedVideoSessionTest, SharingOffGivesEveryConsumerItsOwnDecoder) {
     SetSharedVideoDecodeEnabled(false);
     auto image = MakeFileImage("media.mp4", "disabled");
     ASSERT_NE(image, nullptr);
@@ -325,7 +333,7 @@ TEST_F(SharedVideoSessionTest, SharingOffGivesEveryConsumerItsOwnDecoder) {
     EXPECT_EQ(SharedVideoDecodeSessionCount(), 0u);
 }
 
-TEST_F(SharedVideoSessionTest, InPackageMediaIsNeverShared) {
+TEST_P(SharedVideoSessionTest, InPackageMediaIsNeverShared) {
     // An in-memory payload has no path to identify it and could not be reopened
     // for a later split, so it stays private whatever the setting says.
     auto image                    = std::make_shared<Image>();
@@ -339,6 +347,12 @@ TEST_F(SharedVideoSessionTest, InPackageMediaIsNeverShared) {
     ASSERT_NE(source, nullptr) << error;
     EXPECT_EQ(SharedVideoDecodeSessionCount(), 0u);
 }
+
+INSTANTIATE_TEST_SUITE_P(Decoders, SharedVideoSessionTest,
+                         ::testing::Values(VideoBackendPreference::Ffmpeg, VideoBackendPreference::Native),
+                         [](const ::testing::TestParamInfo<VideoBackendPreference>& info) {
+                             return std::string(VideoBackendPreferenceName(info.param));
+                         });
 
 } // namespace
 } // namespace wallpaper::video

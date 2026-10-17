@@ -28,5 +28,10 @@ public:
     ~FfmpegVideoTextureSource() override;
 };
 
+/// The FFmpeg decoder alone, for a source that chooses its backend (see
+/// `CreateVideoTextureSource`).
+std::unique_ptr<VideoFrameBackend> MakeFfmpegVideoBackend(std::shared_ptr<const Image> image);
+std::unique_ptr<VideoFrameBackend> MakeFfmpegVideoBackend(std::string media_path);
+
 } // namespace video
 } // namespace wallpaper

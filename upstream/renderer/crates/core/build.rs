@@ -108,7 +108,9 @@ fn emit_static_link_flags(build_dir: &Path) {
         "wpParticle",
         "wpTimer",
         "wpUtils",
-        // The project's own container readers (Renderer/Media).
+        // The project's own container readers (Renderer/Media) and their VideoToolbox
+        // layer; the layer depends on the readers, so it comes first.
+        "wmMediaApple",
         "wmMedia",
         "spirv-reflect-static",
     ] {
@@ -165,6 +167,7 @@ fn static_link_search_paths(build_dir: &Path) -> Vec<PathBuf> {
         build_dir.join("src/Vulkan"),
         build_dir.join("third_party/spirv_reflect"),
         build_dir.join("Renderer/Media"),
+        build_dir.join("Renderer/Media/Apple"),
     ]
 }
 

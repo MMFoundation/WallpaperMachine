@@ -1,6 +1,5 @@
 #include "SharedVideoSession.hpp"
 
-#include "FfmpegVideoTextureSource.hpp"
 #include "Image.hpp"
 #include "Platform/Apple/VideoFrameInterop.hpp"
 
@@ -351,10 +350,9 @@ public:
     /// keeps the shared one, because a wrong rate is better than no video.
     std::shared_ptr<SharedVideoSession> detach(const std::shared_ptr<SharedVideoSession>& from,
                                                std::uint64_t consumer_id) {
-        auto source =
-            std::make_shared<FfmpegVideoTextureSource>(from->identity().canonical_path);
         std::string error;
-        if (! source->prime(&error)) return {};
+        auto source = CreateVideoTextureSourceForFile(from->identity().canonical_path, &error);
+        if (! source || ! source->prime(&error)) return {};
 
         auto session = std::make_shared<SharedVideoSession>(from->identity(), std::move(source));
         session->addConsumer(consumer_id);

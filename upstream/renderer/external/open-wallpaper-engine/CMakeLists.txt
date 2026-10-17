@@ -59,6 +59,10 @@ get_filename_component(
     WESCENE_MEDIA_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../Renderer/Media" ABSOLUTE)
 if(EXISTS "${WESCENE_MEDIA_DIR}/CMakeLists.txt")
     add_subdirectory("${WESCENE_MEDIA_DIR}" "${CMAKE_BINARY_DIR}/Renderer/Media")
+    # Its Apple platform layer (ObjC++ over VideoToolbox) is a library of its own.
+    if(APPLE AND EXISTS "${WESCENE_MEDIA_DIR}/Apple/CMakeLists.txt")
+        add_subdirectory("${WESCENE_MEDIA_DIR}/Apple" "${CMAKE_BINARY_DIR}/Renderer/Media/Apple")
+    endif()
 endif()
 
 include_directories(SYSTEM third_party)

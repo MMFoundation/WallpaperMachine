@@ -7,12 +7,14 @@ the same sources can be compiled into the app, the sandboxed lock-screen
 extension and the test binaries. They only locate and describe samples; decoding
 is another layer's job.
 
-`wmMedia` is a static library the scene engine links. Today the scene texture
-parser uses the ISO-BMFF reader to learn the size and length of an MP4 or
-QuickTime video from memory (`Video/VideoContainerProbe.cpp`), where it used to
-write the payload to a temporary file for FFmpeg; any other payload, and one the
-reader refuses, is still probed by FFmpeg. Where the readers sit in the build and
-the tree is in [repository-layout.md](repository-layout.md).
+`wmMedia` is a static library the scene engine links, with `wmMediaApple` (the
+VideoToolbox layer, below) beside it. The scene texture parser uses the ISO-BMFF
+reader to learn the size and length of an MP4 or QuickTime video from memory
+(`Video/VideoContainerProbe.cpp`), where it used to write the payload to a
+temporary file for FFmpeg; any other payload, and one the reader refuses, is still
+probed by FFmpeg. The native video backend (see "Playing video" below) plays video
+textures from both readers. Where the readers sit in the build and the tree is in
+[repository-layout.md](repository-layout.md).
 
 ## Layout
 
@@ -21,7 +23,8 @@ the tree is in [repository-layout.md](repository-layout.md).
 | `Error.hpp/.cpp` | `Error` (kind, message, byte offset) that every reader fills instead of throwing |
 | `Checked.hpp/.cpp` | overflow-checked add/sub/mul and an overflow-free rescale for sizes and times read from files |
 | `Rational.hpp/.cpp` | an exact fraction, so a frame period such as 1001/30000 s stays exact |
-| `ByteSource.hpp/.cpp` | where a reader gets its bytes: `size()`, `readAt()` and an optional zero-copy `view()`. `MakeMemoryByteSource` shares ownership of the bytes (a vector, or any buffer plus its owner, so a video payload embedded in a package needs no temp file); `OpenFileByteSource` reads through a 64 KiB window with `pread` and never maps the file, so a file truncated while open gives a short read, not a fault. Reads past the end are shortened, never faulted; both are safe to call from several threads |
+| `ByteSource.hpp/.cpp` | where a reader gets its bytes: `size()`, `readAt()` and an optional zero-copy `view()`. `MakeMemoryByteSource` shares ownership of the bytes (a vector, or any buffer plus its owner, so a video payload embedded in a package needs no temp file); `OpenFileByteSource` reads through a 64 KiB window with `pread` and never maps the file, so a file truncated while open gives a short read, not a fault; `MakeSpilledByteSource` copies a buffer into an anonymous file (created and unlinked at once, so nothing is visible or left behind) and reads it back like a file, which lets a large payload leave the process's memory. Reads past the end are shortened, never faulted; all are safe to call from several threads |
+| `SampleOrder.hpp/.cpp` | `ReorderDepth`: how many frames a decoder that outputs in decode order must hold to emit display order, measured on the sample table |
 | `DisplayMatrix.hpp/.cpp` | the `tkhd` 3x3 matrix as stored, and `ClassifyDisplayMatrix` for the eight quarter-turn/mirror orientations |
 | `VideoTypes.hpp/.cpp` | what every reader reports: `VideoStreamInfo` (codec fourcc and raw config record, coded and display size, matrix, colour, bit depth, timescale, duration, exact frame periods) and the per-frame `Sample` |
 | `CodecConfig.hpp/.cpp` | bit depth (and VP9 colour) read out of an `avcC`, `hvcC`, `av1C` or `vpcC` record; a record too short for its type is refused |
@@ -30,6 +33,7 @@ the tree is in [repository-layout.md](repository-layout.md).
 | `Matroska/Ebml.hpp` | EBML ids, sizes, integers, floats and strings (RFC 8794) |
 | `Matroska/MatroskaReader.hpp/.cpp` | the Matroska/WebM reader, below |
 | `Matroska/Vp9Header.hpp/.cpp` | the VP9 uncompressed header: profile, bit depth, colour space, subsampling and size of a key frame |
+| `Av1/Av1SequenceHeader.hpp/.cpp` | the AV1 sequence header OBU's colour configuration (bit depth, colour codes, sample range), read from an `av1C` record's configOBUs or a temporal unit; `av1C` itself does not state the range |
 | `ByteReader.hpp` | a bounds-checked big-endian cursor over bytes in memory; a short read latches a failure and returns 0 |
 | `tests/` | googletest executables, defined with `wm_media_test()` in `tests/CMakeLists.txt` |
 
@@ -134,12 +138,69 @@ and works when Cues are missing, wrong or after the media.
   frames, 60 s of scanning, 256 MiB per `readSample`. `MatroskaOptions::buildIndex
   = false` reads the headers only, to probe tracks without scanning the file.
 
+## Apple layer (`Renderer/Media/Apple`, `wmMediaApple`)
+
+ObjC++ over Core Media, Core Video and VideoToolbox with plain C++ headers; only
+the engine's CMake adds it (the readers' standalone build stays pure C++).
+
+- `FormatDescription.hpp/.mm`: `MakeStreamFormat` turns a reader's `VideoStreamInfo`
+  into a `CMVideoFormatDescription` (the `avcC`, `hvcC`, `av1C` or `vpcC` record as a
+  sample-description atom plus the colour description, a `vpcC` synthesized from the
+  first key frame of a WebM VP9 stream, parameter sets scanned from the first key
+  frame for `avc3`/`hev1`) and picks the decoded pixel format: biplanar 4:2:0, NV12
+  video range for 8-bit, full range when the container says so or, with no colour
+  description, when the stream does (the VUI `video_full_range_flag` of H.264 and HEVC,
+  read by Core Media from the parameter sets; the sequence header of AV1; VP9's colour
+  config), `x420` for 10-bit. Asking for video range on a full-range stream would have
+  VideoToolbox squeeze 0-255 into 16-235.
+  It refuses, with a message that starts "format not supported: ", VP8, AV1 without
+  hardware decoding, 4:2:2 and 4:4:4 chroma, bit depths other than 8 and 10 and
+  unknown codecs; a damaged record is a different message. VP9 registers
+  VideoToolbox's supplemental decoder once.
+- `VtFrameDecoder.hpp/.mm`: a `VTDecompressionSession` that takes compressed samples and
+  returns IOSurface-backed, Metal-compatible pixel buffers in display order. It
+  decodes asynchronously and, instead of trusting the decoder's own reordering, holds
+  `ReorderDepth + 1` frames and releases the earliest-shown (everything at the end of
+  the stream), so order does not depend on the codec or the decoder; that depth comes
+  from an untrusted sample table, so a stream asking for more than 16 (the most an
+  H.264 or HEVC decoder may hold, and the bound the FFmpeg path had) is refused with a
+  message about the table, which the engine's auto mode hands to FFmpeg. `reset()` starts
+  a new epoch for a seek or a loop and drops what the decoder still delivers from the
+  old one; in-flight and waiting frames are bounded, so a slow consumer stops the
+  decoder; a frame that fails to decode is skipped (a leading picture after a seek can
+  reference what was never decoded) and only a decoder that keeps failing (90 frames in
+  a row) fails the stream; `cancel()` wakes every wait.
+
+## Playing video (engine side)
+
+`Video/NativeVideoBackend.cpp` plays a video texture with these pieces: the ISO-BMFF
+or Matroska reader over a `ByteSource`, `MakeStreamFormat`, `VtFrameDecoder`, and the
+engine's `VideoDecodePump` driving them. It is one `VideoFrameBackend` under
+`ClockedVideoSource`, the clock, queue, seek and loop machinery FFmpeg's backend uses
+too. A seek restarts decoding at the sync sample at or before the target; a loop
+restarts at the first sync sample; frames before the start of the edit list and
+leading pictures of a random access point are decoded and never shown.
+
+An embedded payload is read in place from memory when it is at most 8 MiB. A larger one is
+copied into an anonymous file once the stream is known to play and the image's buffer is
+let go, so a long video does not stay resident for as long as it plays.
+`WALLPAPER_MACHINE_VIDEO_SPILL_BYTES` changes the 8 MiB.
+
+`WALLPAPER_MACHINE_VIDEO_BACKEND` (`auto`, `ffmpeg`, `native`) chooses the decoder, and
+`Video/VideoBackendSelection.hpp` sets it from code (the tests run both). `native` plays
+only what the readers and VideoToolbox play and fails with the reason otherwise. `auto`
+plays with the native backend and hands the media to FFmpeg only when the native one says
+it is the only reason it does not play (a container its readers do not read, an MP4
+feature they refuse such as fragmentation, a decoder session VideoToolbox would not
+make); a format nobody here plays fails with the native message that names it.
+
 ## Tests
 
 | Binary | Covers |
 |---|---|
 | `media_core_tests` | error, checked arithmetic, fractions, byte cursor, memory and file byte sources |
 | `media_isobmff_tests` | the ISO-BMFF reader on files built in memory by `tests/mp4_builder.hpp`: tables and layouts, every codec entry, composition offsets, edit lists, all eight orientations, seeking, fragmented/unsupported/oversized/truncated/junk input and a deterministic random-mutation loop; plus corpus A/B checks: the bundled starter wallpaper against recorded expectations, and the local library against `ffprobe` |
+| `vt_frame_decoder_test` (engine tests, source in `Renderer/Media/Apple/tests`) | the Apple layer on real VideoToolbox decoding of the synthetic clips: display order on a clip with B-frames (and on H.264 in Matroska), a VP9 clip from WebM, seek epochs, draining, bounds, prompt cancellation, format description building (in-band parameter sets, colour range, 10-bit) and every refusal |
 | `media_matroska_tests` | the Matroska reader on files built in memory by `tests/mkv_builder.hpp`: the index, SimpleBlock and BlockGroup, lacing, unknown-size Segment and Clusters, Cues present or absent, EBML header checks, codecs and encodings, limits, truncation at every length, malformed elements and a deterministic random-mutation loop; the VP9 header parser on the first frames of real libvpx clips; plus a corpus A/B check of `.webm`/`.mkv` files against `ffprobe` |
 
 The corpus checks read the local wallpaper library, or the folder in

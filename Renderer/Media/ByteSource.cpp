@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <utility>
@@ -197,6 +198,36 @@ std::shared_ptr<ByteSource> OpenFileByteSource(const std::string& path, Error* e
     // A window under one page would make every read a system call.
     const std::size_t window = std::max<std::size_t>(windowBytes, 4096);
     return std::make_shared<FileByteSource>(descriptor, static_cast<std::uint64_t>(info.st_size), window);
+}
+
+std::shared_ptr<ByteSource> MakeSpilledByteSource(const std::uint8_t* data, std::size_t size, Error* error,
+                                                  std::size_t windowBytes)
+{
+    const char*       base = std::getenv("TMPDIR");
+    std::string       path = (base != nullptr && *base != '\0') ? base : "/tmp";
+    if (path.back() != '/') path += '/';
+    path += "wallpaper-machine-video-XXXXXX";
+    const int descriptor = ::mkstemp(path.data());
+    if (descriptor < 0) {
+        Fail(error, ErrorKind::Io, "cannot create a temporary file: " + std::string(std::strerror(errno)));
+        return nullptr;
+    }
+    // The name is only needed until the file exists; from here on the file is reachable by descriptor alone.
+    ::unlink(path.c_str());
+    ::fcntl(descriptor, F_SETFD, FD_CLOEXEC);
+    std::size_t written = 0;
+    while (written < size) {
+        const ssize_t put = ::write(descriptor, data + written, std::min<std::size_t>(size - written, 8U << 20));
+        if (put < 0) {
+            if (errno == EINTR) continue;
+            Fail(error, ErrorKind::Io, "cannot write the temporary file: " + std::string(std::strerror(errno)));
+            ::close(descriptor);
+            return nullptr;
+        }
+        written += static_cast<std::size_t>(put);
+    }
+    const std::size_t window = std::max<std::size_t>(windowBytes, 4096);
+    return std::make_shared<FileByteSource>(descriptor, static_cast<std::uint64_t>(size), window);
 }
 
 } // namespace wallpaper::media

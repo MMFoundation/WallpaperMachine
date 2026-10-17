@@ -470,9 +470,17 @@ prefix is `app.wallpapermachine`.
 - The Workshop browser and downloader were independently implemented for this
   client.
 - The container readers in `Renderer/Media` were written for this project from the public
-  ISO/IEC 14496-12/-15, Matroska element and RFC 8794 EBML specifications and the VP9
-  bitstream specification. No code from FFmpeg, libav, libwebm, libmatroska, mp4v2, Bento4,
-  GPAC or any other implementation was copied.
+  ISO/IEC 14496-12/-15, Matroska element and RFC 8794 EBML specifications and the VP9 and
+  AV1 bitstream specifications. Their Apple layer (`Renderer/Media/Apple`, the codec format
+  descriptions and the VideoToolbox decoder wrapper) and the scene engine's native video
+  backend (`Video/NativeVideoBackend.cpp`, `Video/VideoBackendSelection.cpp` and
+  `Video/VideoTextureSourceFactory.cpp`) were written from Apple's public VideoToolbox, Core
+  Media and Core Video headers and documentation. `Video/ClockedVideoSource.cpp` is not new
+  code: it is the clock, queue, seek and promotion logic of the engine's existing
+  open-wallpaper-engine `FfmpegVideoTextureSource.cpp` (GPL-2.0), moved into its own file and
+  left otherwise as it was. No code from FFmpeg, libav, libwebm, libmatroska, libvpx, mp4v2,
+  Bento4, GPAC or any other implementation was copied into the new code. FFmpeg is still
+  linked and still plays any container the native readers do not read, until it is removed.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
   at revision `73f14ab1568371e6e3c44063f21c34c5e2712c4d`, BSD-3-Clause, vendored
   under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes

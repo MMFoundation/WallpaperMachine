@@ -24,6 +24,8 @@ fn main() {
         // Dependents come first.
         "wpAudio",
         "wpBrandNew",
+        "wmMediaApple",
+        "wmMedia",
         "spirv-reflect-static",
     ] {
         println!("cargo:rustc-link-lib=static={lib}");
@@ -382,12 +384,12 @@ class InventoryTests(unittest.TestCase):
     def test_link_lists_come_from_the_build_script_comments_ignored(self):
         self.assertEqual(check_licenses.link_lists(self.build_rs),
                          [("static", "wescene-renderer"), ("static", "wpAudio"), ("static", "wpBrandNew"),
-                          ("static", "spirv-reflect-static"), ("dylib", "c++"), ("dylib", "vulkan"),
+                          ("static", "wmMediaApple"), ("static", "wmMedia"), ("static", "spirv-reflect-static"), ("dylib", "c++"), ("dylib", "vulkan"),
                           ("dylib", "glslang"), ("dylib", "SPIRV"), ("framework", "Metal"), ("framework", "AppKit")])
 
     def test_first_party_archives_pass_and_third_party_ones_carry_their_license(self):
         components = self.components()
-        for name in ("wescene-renderer", "wpAudio", "wpBrandNew"):
+        for name in ("wescene-renderer", "wpAudio", "wpBrandNew", "wmMediaApple", "wmMedia"):
             self.assertEqual(components[name].kind, "first-party")
             self.assertEqual(check_licenses.assess(components[name])[0], "first-party")
         self.assertEqual(components["spirv_reflect"].license, "Apache-2.0")

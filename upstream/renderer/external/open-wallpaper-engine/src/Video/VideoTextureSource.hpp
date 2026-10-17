@@ -120,5 +120,10 @@ public:
 std::shared_ptr<VideoTextureSource> CreateVideoTextureSource(std::shared_ptr<const Image> image,
                                                              std::string* error);
 
+/// Opens a source directly on a media file, without an `Image`. Needed when a
+/// consumer is split off a shared session: by then the `Image` that started the
+/// first decoder is gone.
+std::shared_ptr<VideoTextureSource> CreateVideoTextureSourceForFile(std::string media_path, std::string* error);
+
 } // namespace video
 } // namespace wallpaper

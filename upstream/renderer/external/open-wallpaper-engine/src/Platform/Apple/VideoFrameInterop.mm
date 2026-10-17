@@ -138,6 +138,31 @@ void ReportInferredColor(const YuvColorDescription& description)
              YuvRangeName(description.range));
 }
 
+bool AdoptPixelBufferAsVideoFrame(void* retained_pixel_buffer, VideoTextureFrame* out, std::string* error)
+{
+    if (retained_pixel_buffer == nullptr) {
+        if (error != nullptr) *error = "the decoder returned a frame without a pixel buffer";
+        return false;
+    }
+    if (out == nullptr) {
+        CFRelease(retained_pixel_buffer);
+        if (error != nullptr) *error = "video texture frame output must not be null";
+        return false;
+    }
+    auto pixel_buffer = reinterpret_cast<CVPixelBufferRef>(retained_pixel_buffer);
+    IOSurfaceRef io_surface = CVPixelBufferGetIOSurface(pixel_buffer);
+    if (io_surface != nullptr) CFRetain(io_surface);
+    out->width = static_cast<uint32_t>(CVPixelBufferGetWidth(pixel_buffer));
+    out->height = static_cast<uint32_t>(CVPixelBufferGetHeight(pixel_buffer));
+    out->pixel_buffer = pixel_buffer;
+    out->io_surface = io_surface;
+    out->pixel_format = static_cast<uint32_t>(CVPixelBufferGetPixelFormatType(pixel_buffer));
+    out->plane_count = CVPixelBufferIsPlanar(pixel_buffer)
+        ? static_cast<uint32_t>(CVPixelBufferGetPlaneCount(pixel_buffer))
+        : 1u;
+    return true;
+}
+
 void ReleaseAppleVideoFrame(VideoTextureFrame* frame)
 {
     if (frame == nullptr) return;

@@ -8,6 +8,13 @@
 namespace wallpaper::video
 {
 
+/// Turns a decoded Core Video pixel buffer into a frame. `retained_pixel_buffer`
+/// is a CVPixelBufferRef the caller owns one reference to; that reference passes
+/// to `out` (released by `ReleaseAppleVideoFrame`), and the IOSurface behind the
+/// buffer, when it has one, is retained beside it. Fails, releasing the buffer,
+/// when it is null.
+bool AdoptPixelBufferAsVideoFrame(void* retained_pixel_buffer, VideoTextureFrame* out, std::string* error);
+
 void ReleaseAppleVideoFrame(VideoTextureFrame* frame);
 /// Copies `frame` into `out`, taking an independent reference on the platform
 /// objects it points at. The copy stays valid after the producer releases its

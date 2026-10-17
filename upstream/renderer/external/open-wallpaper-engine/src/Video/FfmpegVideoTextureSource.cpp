@@ -710,19 +710,14 @@ FfmpegVideoTextureSource::FfmpegVideoTextureSource(std::string media_path)
 
 FfmpegVideoTextureSource::~FfmpegVideoTextureSource() = default;
 
-std::shared_ptr<VideoTextureSource> CreateVideoTextureSource(std::shared_ptr<const Image> image,
-                                                             std::string* error)
+std::unique_ptr<VideoFrameBackend> MakeFfmpegVideoBackend(std::shared_ptr<const Image> image)
 {
-    if (image == nullptr) {
-        SetError(error, "video texture has no image");
-        return nullptr;
-    }
-    if (!image->header.isVideo) {
-        SetError(error, "image is not marked as a video texture");
-        return nullptr;
-    }
+    return std::make_unique<FfmpegBackend>(std::move(image));
+}
 
-    return std::make_shared<FfmpegVideoTextureSource>(std::move(image));
+std::unique_ptr<VideoFrameBackend> MakeFfmpegVideoBackend(std::string media_path)
+{
+    return std::make_unique<FfmpegBackend>(std::move(media_path));
 }
 
 bool ProbeVideoFileDimensions(std::string_view media_path,

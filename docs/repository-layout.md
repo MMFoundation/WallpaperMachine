@@ -106,8 +106,12 @@ Renderer/                          this project's own renderer code (not vendore
   Media/                           wmMedia: the container readers (ISO-BMFF/MP4, Matroska/WebM), pure C++ with no Apple or
                                    third-party dependency, their shared byte source, error and cursor types, and tests/
                                    (see container-readers.md)
-  Testing/                         synthetic video for the renderer tests: a VideoToolbox H.264 encoder and an
-                                   AVAssetWriter passthrough writer behind a C++ header, and its own test
+    Apple/                         wmMediaApple: the platform layer of the readers, ObjC++ over VideoToolbox with C++
+                                   headers: codec format descriptions and a decompression session that returns frames in
+                                   display order; its tests/ (vt_frame_decoder_test) are built by the engine's tests
+  Testing/                         synthetic video for the renderer tests: a VideoToolbox H.264 encoder (with and without
+                                   B-frames) and an AVAssetWriter passthrough writer behind a C++ header, its own test,
+                                   and two small embedded clips (VP9 in WebM, H.264 with B-frames in Matroska)
 upstream/                          vendored third-party code only
   provenance.json                  repositories, pinned revisions, modification status
   renderer/                        Rust workspace (crates/), C++ scene engine (external/), cargo target/;

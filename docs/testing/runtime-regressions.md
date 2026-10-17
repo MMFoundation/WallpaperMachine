@@ -224,8 +224,8 @@ device.
   buffer keeps its coded dimensions, while output dimensions and sampling use the
   affine display transform. `VideoDisplayTransform.*` in
   `video_color_conversion_test` checks all eight orthogonal orientations plus
-  scale and shear, and `VideoSourceInput.DisplayMatrixSurvivesMetadataProbeAndFrameExtraction`
-  reads ordinary synthetic MP4 metadata. Private-texture Vulkan and Metal checks
+  scale and shear, and `Decoders/VideoSourceInput.DisplayMatrixSurvivesMetadataProbeAndFrameExtraction/*`
+  (once per decoder) reads ordinary synthetic MP4 metadata. Private-texture Vulkan and Metal checks
   draw four distinct corner colors through BGRA, converted NV12 and direct NV12
   sampling and compare orientation, logical size and transparent uncovered
   corners for shear; converted and direct output may differ by at most two
@@ -242,6 +242,34 @@ device.
   Core Video texture wrapper and the pixel buffer for as long as the frame can be
   sampled, not just the vended `MTLTexture`. `playback_gpu_test` exercises pool
   reuse, generation dedup, cache eviction and recording-discard recovery.
+- **The native decode path** (project readers plus VideoToolbox; the default for MP4/QuickTime
+  and WebM/Matroska payloads) — `vt_frame_decoder_test`, `video_probe_test` and the native
+  cases of `video_source_input_test` (`NativePayloads.*`, `Decoders/VideoSourceInput.*/native`).
+  Display order is the picture shown, not the decode order: a 60-frame clip with B-frames
+  (reorder depth 2) and an H.264-in-Matroska clip with B-frames come out with strictly rising
+  times and the right noise frame at every position (`FramesComeOutInDisplayOrderOnAClipWithBFrames`,
+  `AnH264ClipWithBFramesFromMatroskaComesOutInDisplayOrder`, `AMatroskaPayloadWithBFramesPlaysInDisplayOrder`).
+  Destroying a source mid-decode returns within two seconds
+  (`DestroyingADecoderMidDecodeIsPrompt`, `Decoders/VideoSourceInput.DestroyingASourceMidDecodeCancelsPromptly/native`): a
+  wait that ignores cancellation, or a pump whose no-progress budget runs out in microseconds
+  while the decoder is merely busy, shows here first. A stream that breaks part way stops
+  playing and keeps its last picture, and a run of undecodable samples fails the stream instead
+  of spinning (`AStreamThatBreaksPartWayStopsPlayingAndKeepsItsLastPicture`,
+  `SamplesThatAreNotVideoAreSkippedAndAStreamOfThemFails`). An embedded payload plays from memory
+  or an anonymous file and never writes a visible one, and one above the spill threshold leaves
+  the process's memory once the stream is known to play
+  (`InPackagePayloadIsDecodedFromMemoryAndWritesNoFile`,
+  `ReleasingThePayloadBufferKeepsAnOpenSourcePlaying`; the payload leaving is asserted through
+  ownership, because a freed block stays counted in `phys_footprint`). Full range stated only in
+  the stream (an H.264 or HEVC VUI, an AV1 sequence header; no `colr` box) is decoded as full
+  range, never squeezed into 16-235 (`FullRangeStatedOnlyByTheParameterSetsDecodesAsFullRange`,
+  `HevcAndAv1RecordsThatStateFullRangeAskForTheFullRangeFormat`, the `Av1SequenceHeader.*`
+  vectors in `media_core_tests`). The reorder depth comes from the file's sample table, so a table
+  that reorders more than 16 frames is refused rather than holding decoded pictures without
+  bound (`AStreamThatReordersMoreThanADecoderMayHoldIsRefused`), and auto mode hands the file to
+  FFmpeg. A payload the native backend refuses and FFmpeg plays (a fragmented MP4) still plays
+  when the source is the image's only owner, as on the Vulkan path
+  (`AutoHandsARefusedPayloadToFfmpegWhenTheSourceIsTheImagesOnlyOwner`).
 - **Decoded frames carry real timestamps** — `video_source_input_test` and
   `shared_video_session_test` against media the tests encode. A frame whose
   timestamp is always zero looks like playback for as long as frames keep
@@ -250,7 +278,9 @@ device.
   `src/Video/FfmpegAbi.hpp` exists because the layout mismatch that produces it
   compiles cleanly. `video_source_input_test` owns a private `TMPDIR` and only
   removes its own media cache; never clear the app's decode cache to make a test
-  pass.
+  pass. Both suites run every shared case once per decoder (the instantiation
+  `Decoders`, so a case is `Decoders/<Suite>.<Case>/ffmpeg` or `/native`; a filter
+  written without the `Decoders/` prefix or the `/*` suffix runs nothing).
 - **A decoder survives a rebuild of the graph** -
   `MetalVideoTexture.AVideoSetAsideByARebuildIsTakenBackAsItIsAndNotReadAgain`,
   `.AVideoTheNewGraphDoesNotUseIsClosedWithItsCompile`,
@@ -280,7 +310,7 @@ device.
   `CustomShaderPass::prepare` the pass test alone fails. The scenes that show it end to end are in
   [scene regressions](scene-regressions.md#text-fonts-and-clocks).
 - **A reopened source is sought once and left to land, and a jump of the clock is one seek** —
-  `VideoSourceClock.*` and `VideoSeekPolicy.*` in `video_source_input_test`, against media the
+  `Decoders/VideoSourceClock.*` (both decoders) and `VideoSeekPolicy.*` in `video_source_input_test`, against media the
   tests encode (a 10 second clip of 30 frames a second whose frames have their own pts). A source
   that is opened while the clip is playing (a scene that falls back to the other renderer, a
   surface split off a shared decoder) opens at the head, and gives it the clock by the first
@@ -309,8 +339,8 @@ device.
   the one second of slack fixed, a seek on its way was asked for again each second, and the
   600 frame clip did not land at 5 s in six seconds (six requests) and took three requests and
   3.2 to 3.7 s from 9.9 s on.
-- **One clock per shared decoder** — `SharedVideoSessionTest.AFrameStaysValidAfterTheDecoderMovesOn`
-  and `.PausingOneSurfaceLeavesTheOtherPlaying`: exactly one elected consumer
+- **One clock per shared decoder** — `Decoders/SharedVideoSessionTest.AFrameStaysValidAfterTheDecoderMovesOn/*`
+  and `.PausingOneSurfaceLeavesTheOtherPlaying/*`: exactly one elected consumer
   moves a shared session's clock, so a test that advances the non-driving
   consumer observes nothing. Make the advancing consumer the driver rather than
   loosening the election.
@@ -650,7 +680,7 @@ device.
   covered; see [audio response](../features/audio-response.md#output-device-changes).
 - **Audio capture follows what the scene reads** — `SceneSchema.AudioRequirementComesOnlyFromContentThatReadsAudio`
   and `.AudioRequirementIsReportedOncePerSceneAndResetByReplacement` in
-  `scene_schema_tests`, `VideoSourceInput.PlainVideoProjectNeverReportsAnAudioRequirement`
+  `scene_schema_tests`, `Decoders/VideoSourceInput.PlainVideoProjectNeverReportsAnAudioRequirement/*`
   in `video_source_input_test`, and the bridge tests
   `display_presentation::audio_response_alone_does_not_open_the_tap_for_a_scene_that_reads_no_audio`,
   `::replacing_an_audio_scene_with_one_that_reads_nothing_closes_the_tap` and
