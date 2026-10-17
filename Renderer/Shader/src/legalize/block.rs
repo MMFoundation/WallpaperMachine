@@ -142,6 +142,7 @@ pub(crate) fn plan_block(
                 super::collect::Bound::Bad(text) => {
                     return Err(LegalizeError::Uniform(UniformError::UnresolvedArraySuffix {
                         suffix: format!("[{text}]"),
+                        member: u.name.clone(),
                         stage: stage.kind,
                     }));
                 }

@@ -167,7 +167,7 @@ pub struct BlockLayout {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UniformError {
     UnsupportedType { ty: String },
-    UnresolvedArraySuffix { suffix: String, stage: StageKind },
+    UnresolvedArraySuffix { suffix: String, member: String, stage: StageKind },
     ConflictingDeclarations { name: String, first: String, second: String },
     InvalidArrayCount { name: String, count: u32 },
     BlockTooLarge { name: String },
@@ -179,10 +179,12 @@ impl fmt::Display for UniformError {
             UniformError::UnsupportedType { ty } => {
                 format!("unsupported GlobalUniforms member type {}", quote(ty))
             }
-            UniformError::UnresolvedArraySuffix { suffix, stage } => format!(
-                "unresolved GlobalUniforms member array suffix {} in the {} stage (the bound must be a decimal integer, or a macro or combo with a decimal integer value)",
+            UniformError::UnresolvedArraySuffix { suffix, member, stage } => format!(
+                "unresolved GlobalUniforms member array suffix {} of member {} in the {} stage ({}) (the bound must be a decimal integer, or a macro or combo with a decimal integer value)",
                 quote(suffix),
-                stage.name()
+                quote(member),
+                stage.name(),
+                stage.label()
             ),
             UniformError::ConflictingDeclarations { name, first, second } => format!(
                 "conflicting GlobalUniforms member declarations for {}: {} against {}",
@@ -453,8 +455,8 @@ mod tests {
     fn error_text_uses_the_contract_wording() {
         let t = UniformError::UnsupportedType { ty: "Light".into() }.to_string();
         assert_eq!(t, "unsupported GlobalUniforms member type `Light`");
-        let t = UniformError::UnresolvedArraySuffix { suffix: "N + 1".into(), stage: StageKind::Fragment }.to_string();
-        assert!(t.starts_with("unresolved GlobalUniforms member array suffix `N + 1`") && t.contains("fragment"), "{t}");
+        let t = UniformError::UnresolvedArraySuffix { suffix: "N + 1".into(), member: "u_Arr".into(), stage: StageKind::Fragment }.to_string();
+        assert!(t.starts_with("unresolved GlobalUniforms member array suffix `N + 1`") && t.contains("fragment") && t.contains("Fragment") && t.contains("`u_Arr`"), "{t}");
         let t = UniformError::ConflictingDeclarations { name: "u_X".into(), first: "vec2".into(), second: "vec4[2]".into() }
             .to_string();
         assert!(t.starts_with("conflicting GlobalUniforms member declarations"), "{t}");

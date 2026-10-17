@@ -22,8 +22,8 @@ use crate::error::{FailedDiagnostic, ShaderError};
 use crate::legalize::{LegalizeError, LegalProgram, ProgramInput, legalize};
 use crate::prepare::{PreparedProgram, prepare_program};
 use crate::reflect::{InputNames, NagaReflector, StageReflector};
-use crate::reflection::Reflection;
-use crate::request::{Combo, StageKind, ValidRequest};
+use crate::reflection::{Reflection, ReflectionError};
+use crate::request::{Combo, RequestError, StageKind, ValidRequest};
 use crate::response::{Metadata, StagePayload};
 use crate::source::IncludeSource;
 
@@ -113,7 +113,12 @@ impl Pipeline<'_> {
             stages.push(ProgramStage { kind, payload: compiled.payload, glsl: legal_stage.text.clone() });
         }
 
-        let reflection = Reflection::merge(&reflections)?;
+        // Two stages that disagree about a block they share are a request the layer cannot
+        // describe (D R33); the other merge failures are reflection errors.
+        let reflection = Reflection::merge(&reflections).map_err(|e| match e {
+            ReflectionError::ConflictingBlock { .. } => ShaderError::Request(RequestError::Program(e.to_string())),
+            other => ShaderError::Reflection(other),
+        })?;
         let mut metadata = prepared.metadata.clone();
         metadata.active_texture_slots = reflection.active_texture_slots.clone();
 
@@ -148,6 +153,9 @@ fn legalize_program(request: &ValidRequest, prepared: &PreparedProgram, name: &s
         vertex: Some(text_of(StageKind::Vertex)),
         fragment: Some(text_of(StageKind::Fragment)),
         planar_slots: &planar,
+        // The model's highest binding is reflection's to enforce (D R60, R61): a texture the
+        // stage uses above it is a reflection error, one it only declares is no error.
+        unlimited_bindings: true,
     };
     legalize(&input).map_err(|e| legalize_failure(e, name, text_of))
 }

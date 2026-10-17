@@ -50,11 +50,14 @@ pub(crate) struct Bindings {
 #[derive(Default)]
 struct Table {
     used: BTreeMap<u32, Res>,
+    /// Set when the model's highest binding is not enforced here (the pipeline leaves it to
+    /// reflection, which reports a resource the stage uses as outside the model limits).
+    unlimited: bool,
 }
 
 impl Table {
     fn reserve(&mut self, binding: u32, res: Res) -> Result<(), LegalizeError> {
-        if binding > MAX_BINDING {
+        if binding > MAX_BINDING && !self.unlimited {
             return Err(LegalizeError::request(format!(
                 "descriptor binding {binding} of {} is above the highest binding {MAX_BINDING}",
                 res.describe()
@@ -152,8 +155,9 @@ pub(crate) fn allocate_program(
     has_block: bool,
     has_author_uniforms: bool,
     plane_slots: &[u8],
+    unlimited: bool,
 ) -> Result<Bindings, LegalizeError> {
-    let mut table = Table::default();
+    let mut table = Table { unlimited, ..Table::default() };
     let mut out = Bindings::default();
     reserve_known(&mut table, stages)?;
     let explicit = explicit_block(stages)?;

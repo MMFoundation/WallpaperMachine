@@ -50,15 +50,25 @@ pub struct ProgramInput<'a> {
     pub fragment: Option<&'a str>,
     /// Material slots flagged for the NV12 plane variant (R45).
     pub planar_slots: &'a [u8],
+    /// Leave the model's highest binding index (R30) to the reflection step, which reports a
+    /// resource the stage uses above it, instead of refusing the layout here.
+    pub unlimited_bindings: bool,
 }
 
 impl<'a> ProgramInput<'a> {
     pub fn program(vertex: &'a str, fragment: &'a str) -> ProgramInput<'a> {
-        ProgramInput { vertex: Some(vertex), fragment: Some(fragment), planar_slots: &[] }
+        ProgramInput { vertex: Some(vertex), fragment: Some(fragment), planar_slots: &[], unlimited_bindings: false }
     }
 
     pub fn with_planes(mut self, slots: &'a [u8]) -> ProgramInput<'a> {
         self.planar_slots = slots;
+        self
+    }
+
+    /// The layout is not refused for a binding above the model's highest; see
+    /// [`ProgramInput::unlimited_bindings`].
+    pub fn without_binding_limit(mut self) -> ProgramInput<'a> {
+        self.unlimited_bindings = true;
         self
     }
 }
@@ -208,7 +218,7 @@ pub fn legalize(input: &ProgramInput<'_>) -> Result<LegalProgram, LegalizeError>
     let bindings: Bindings = if standalone {
         allocate_standalone(stage_decls[0], !members.is_empty(), has_author, &plane_slots)?
     } else {
-        allocate_program(&stage_decls, !members.is_empty(), has_author, &plane_slots)?
+        allocate_program(&stage_decls, !members.is_empty(), has_author, &plane_slots, input.unlimited_bindings)?
     };
 
     // The interface.
@@ -317,8 +327,8 @@ fn program_textures(v: Option<&StageDecls>, f: Option<&StageDecls>, bindings: &B
 /// Legalizes one stage alone with the numbering of R31 and R41.
 pub fn legalize_stage(kind: StageKind, text: &str) -> Result<(LegalStage, ProgramLayout), LegalizeError> {
     let input = match kind {
-        StageKind::Vertex => ProgramInput { vertex: Some(text), fragment: None, planar_slots: &[] },
-        StageKind::Fragment => ProgramInput { vertex: None, fragment: Some(text), planar_slots: &[] },
+        StageKind::Vertex => ProgramInput { vertex: Some(text), fragment: None, planar_slots: &[], unlimited_bindings: false },
+        StageKind::Fragment => ProgramInput { vertex: None, fragment: Some(text), planar_slots: &[], unlimited_bindings: false },
     };
     let program = legalize(&input)?;
     let stage = match kind {
