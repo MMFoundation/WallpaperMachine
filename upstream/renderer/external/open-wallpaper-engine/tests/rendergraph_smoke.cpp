@@ -2,10 +2,10 @@
 #include "Scene/Scene.h"
 #include "WPSceneParser.hpp"
 #include "SpecTexs.hpp"
-#include "VulkanRender/CopyPass.hpp"
+#include "RenderCommon/ScenePass.hpp"
+#include "RenderCommon/SceneToRenderGraph.hpp"
 #include "VulkanRender/CustomShaderPass.hpp"
 #include "VulkanRender/PassCommon.hpp"
-#include "VulkanRender/SceneToRenderGraph.hpp"
 
 #include <algorithm>
 #include <gtest/gtest.h>
@@ -37,8 +37,8 @@ using wallpaper::SceneMesh;
 using wallpaper::SceneNode;
 using wallpaper::SceneRenderTarget;
 using wallpaper::SpecTex_Default;
-using wallpaper::vulkan::CopyPass;
-using wallpaper::vulkan::CustomShaderPass;
+using wallpaper::rg::CopyPass;
+using wallpaper::rg::DrawPass;
 
 class MemoryFs final : public wallpaper::fs::Fs {
 public:
@@ -226,7 +226,7 @@ std::string BasicSceneJson(std::string_view image, std::string_view extra_fields
 
 struct GraphPassView {
     std::string             name;
-    const CustomShaderPass* custom {};
+    const DrawPass* custom {};
     const CopyPass*         copy {};
 };
 
@@ -257,14 +257,14 @@ std::vector<GraphPassView> graphPasses(const wallpaper::rg::RenderGraph& graph) 
         REQUIRE(pass != nullptr);
         passes.push_back(GraphPassView {
             .name   = std::string(pass_node->name()),
-            .custom = dynamic_cast<const CustomShaderPass*>(pass),
+            .custom = dynamic_cast<const DrawPass*>(pass),
             .copy   = dynamic_cast<const CopyPass*>(pass),
         });
     }
     return passes;
 }
 
-const CustomShaderPass* findCustomPass(
+const DrawPass* findCustomPass(
     const std::vector<GraphPassView>& passes,
     const std::string& name) {
     const auto it = std::find_if(passes.begin(), passes.end(), [&name](const auto& pass) {
@@ -274,7 +274,7 @@ const CustomShaderPass* findCustomPass(
     return it->custom;
 }
 
-const CustomShaderPass* findCustomPassByNodeName(
+const DrawPass* findCustomPassByNodeName(
     const std::vector<GraphPassView>& passes,
     const std::string& name) {
     const auto it = std::find_if(passes.begin(), passes.end(), [&name](const auto& pass) {
@@ -1263,7 +1263,7 @@ TEST(RenderGraph, renderTargetSampleCountPropagatesToCustomPassDesc) {
 
     const auto* pass = findCustomPass(passes, "msaa_scaffold_writer");
     REQUIRE(pass->desc().output == "_rt_msaa_scaffold");
-    REQUIRE(pass->desc().sample_count == VK_SAMPLE_COUNT_4_BIT);
+    REQUIRE(pass->desc().samples == 4);
 }
 
 TEST(RenderGraph, copyWrittenMsaaTargetsPreserveWithSingleSamplePasses) {
@@ -1295,7 +1295,7 @@ TEST(RenderGraph, copyWrittenMsaaTargetsPreserveWithSingleSamplePasses) {
     const auto* pass = findCustomPass(passes, "msaa_after_copy_writer");
     REQUIRE(pass->desc().output == "_rt_msaa_after_copy");
     REQUIRE(pass->desc().preserve_target_contents);
-    REQUIRE(pass->desc().sample_count == VK_SAMPLE_COUNT_1_BIT);
+    REQUIRE(pass->desc().samples == 1);
 }
 
 TEST(RenderGraph, separateMsaaRenderTargetWritersPreserveWithMsaaSampleCount) {
@@ -1342,12 +1342,12 @@ TEST(RenderGraph, separateMsaaRenderTargetWritersPreserveWithMsaaSampleCount) {
     REQUIRE(first_pass->desc().output == "_rt_msaa_multi_writer");
     REQUIRE(first_pass->desc().clear_on_first_use);
     REQUIRE(!first_pass->desc().preserve_target_contents);
-    REQUIRE(first_pass->desc().sample_count == VK_SAMPLE_COUNT_4_BIT);
+    REQUIRE(first_pass->desc().samples == 4);
 
     REQUIRE(second_pass->desc().output == "_rt_msaa_multi_writer");
     REQUIRE(!second_pass->desc().clear_on_first_use);
     REQUIRE(second_pass->desc().preserve_target_contents);
-    REQUIRE(second_pass->desc().sample_count == VK_SAMPLE_COUNT_4_BIT);
+    REQUIRE(second_pass->desc().samples == 4);
 }
 
 TEST(RenderGraph, videoTextureSamplingIsPreservedInMsaaScenePass) {
@@ -1384,7 +1384,7 @@ TEST(RenderGraph, videoTextureSamplingIsPreservedInMsaaScenePass) {
     REQUIRE(pass->desc().output == "_rt_msaa_video");
     REQUIRE(pass->desc().textures.size() == 1);
     REQUIRE(pass->desc().textures[0] == "video://clip");
-    REQUIRE(pass->desc().sample_count == VK_SAMPLE_COUNT_4_BIT);
+    REQUIRE(pass->desc().samples == 4);
 }
 
 TEST(RenderGraph, defaultOutputUsesSceneClearEnabledWhileNonDefaultWritesAlpha) {

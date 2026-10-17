@@ -3,9 +3,8 @@
 #include "Scene/Scene.h"
 #include "Scene/SceneNode.h"
 #include "SpecTexs.hpp"
-#include "VulkanRender/PrePass.hpp"
-#include "VulkanRender/CustomShaderPass.hpp"
-#include "VulkanRender/SceneToRenderGraph.hpp"
+#include "RenderCommon/ScenePass.hpp"
+#include "RenderCommon/SceneToRenderGraph.hpp"
 #include "VulkanRender/PassCommon.hpp"
 #include <gtest/gtest.h>
 
@@ -89,11 +88,11 @@ TEST(RenderTargetLifetime, NoBackgroundEffectGetsRealTransparentWriterBeforeSamp
     auto graph = sceneToRenderGraph(scene);
     const auto order = graph->topologicalOrder();
     ASSERT_EQ(order.size(), 2u);
-    auto* clear = dynamic_cast<vulkan::PrePass*>(graph->getPass(order[0]));
+    auto* clear = dynamic_cast<rg::ClearPass*>(graph->getPass(order[0]));
     ASSERT_NE(clear, nullptr);
     EXPECT_EQ(clear->desc().result, input);
     EXPECT_TRUE(clear->desc().transparent);
-    auto* draw = dynamic_cast<vulkan::CustomShaderPass*>(graph->getPass(order[1]));
+    auto* draw = dynamic_cast<rg::DrawPass*>(graph->getPass(order[1]));
     ASSERT_NE(draw, nullptr);
     EXPECT_EQ(draw->desc().textures[0], input);
     EXPECT_EQ(graph->getLastReadTexs(order)[1][0]->key(), input);
@@ -223,12 +222,12 @@ TEST(RenderTargetLifetime, NestedCompositesClearBeforeChildrenWithoutErasingThem
                 std::map<std::string, std::size_t> index;
                 int clears = 0;
                 for (std::size_t i = 0; i < order.size(); ++i) {
-                    if (auto* clear = dynamic_cast<vulkan::PrePass*>(graph->getPass(order[i]))) {
+                    if (auto* clear = dynamic_cast<rg::ClearPass*>(graph->getPass(order[i]))) {
                         ++clears;
                         EXPECT_TRUE(clear->desc().transparent);
                         index[clear->desc().result] = i;
                     }
-                    if (auto* draw = dynamic_cast<vulkan::CustomShaderPass*>(graph->getPass(order[i]))) {
+                    if (auto* draw = dynamic_cast<rg::DrawPass*>(graph->getPass(order[i]))) {
                         index[draw->desc().node->Name()] = i;
                         const auto& name = draw->desc().node->Name();
                         // The first draw into a composite cleared to transparent
@@ -245,7 +244,7 @@ TEST(RenderTargetLifetime, NestedCompositesClearBeforeChildrenWithoutErasingThem
                         }
                         if (! copy_background &&
                             (name == "child" || name == "sibling" || name == "inner result")) {
-                            EXPECT_EQ(draw->desc().sample_count, VK_SAMPLE_COUNT_1_BIT) << name;
+                            EXPECT_EQ(draw->desc().samples, 1u) << name;
                         }
                     }
                 }

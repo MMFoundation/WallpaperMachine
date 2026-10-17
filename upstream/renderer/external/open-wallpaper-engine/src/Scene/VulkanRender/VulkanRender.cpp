@@ -25,6 +25,7 @@
 #include "RenderCommon/CopyElision.hpp"
 #include "PrePass.hpp"
 #include "FinPass.hpp"
+#include "PassLowering.hpp"
 #include "Resource.hpp"
 #include "TexturePrefetch.hpp"
 #include "Interface/IImageParser.h"
@@ -275,6 +276,13 @@ struct VulkanRender::Impl {
     // -1 means no frame has been exported yet. Ownership: the taker.
     std::atomic<int> m_last_sync_fd { -1 };
 
+    /// The graph's steps lowered into this backend's passes, owned here and
+    /// rebuilt by every compile; the graph itself stays the scene's own
+    /// description and is never changed by this backend.
+    std::vector<std::unique_ptr<VulkanPass>> m_pass_store;
+    /// Every pass the frame records, in order: the frame clear, the lowered
+    /// steps and the final composition. Points into `m_pass_store` and at
+    /// `m_prepass` and `m_finpass`.
     std::vector<VulkanPass*> m_passes;
     CustomPassExecutionScratch m_pass_scratch;
     StaticSubgraphCache m_static_cache;
@@ -659,6 +667,7 @@ bool VulkanRender::Impl::releasePresentation() {
             if (pass != nullptr) pass->destory(*m_device, m_rendering_resources);
         }
         m_passes.clear();
+        m_pass_store.clear();
         m_pass_scratch.passes.clear();
         m_pass_scratch.candidates.clear();
         m_pass_scratch.plan.entries.clear();
@@ -745,6 +754,7 @@ void VulkanRender::Impl::destroy() {
         }
     }
     m_passes.clear();
+    m_pass_store.clear();
     m_pass_scratch.passes.clear();
     m_pass_scratch.candidates.clear();
     m_pass_scratch.plan.entries.clear();
@@ -1291,6 +1301,7 @@ bool VulkanRender::Impl::clearLastRenderGraph(bool hold_videos) {
         if (pass != nullptr) pass->destory(*m_device, m_rendering_resources);
     }
     m_passes.clear();
+    m_pass_store.clear();
     m_pass_scratch.passes.clear();
     m_pass_scratch.candidates.clear();
     m_pass_scratch.plan.entries.clear();
@@ -1333,23 +1344,26 @@ bool VulkanRender::Impl::compileRenderGraph(Scene& scene, rg::RenderGraph& rg) {
     auto node_release_texs = rg.getLastReadTexs(nodes);
 
     m_passes.clear();
-    m_passes.resize(nodes.size());
-
-    std::transform(nodes.begin(),
-                   nodes.end(),
-                   node_release_texs.begin(),
-                   m_passes.begin(),
-                   [&rg](auto& id, auto& texs) {
-                       auto* pass = rg.getPass(id);
-                       assert(pass != nullptr);
-                       VulkanPass* vpass = static_cast<VulkanPass*>(pass);
-                       // LOG_INFO("----release tex");
-                       std::vector<std::string_view> release_keys;
-                       release_keys.reserve(texs.size());
-                       for (auto* tex : texs) release_keys.push_back(tex->key());
-                       vpass->setReleaseTexs(release_keys);
-                       return vpass;
-                   });
+    m_pass_store.clear();
+    m_passes.reserve(nodes.size() + 2);
+    m_pass_store.reserve(nodes.size());
+    for (std::size_t index = 0; index < nodes.size(); ++index) {
+        const auto* step = rg.getPass(nodes[index]);
+        auto lowered = step != nullptr ? LowerGraphPass(*step) : nullptr;
+        if (lowered == nullptr) {
+            LOG_ERROR("render graph step %zu is not a clear, copy or draw this renderer can run",
+                      index);
+            m_passes.clear();
+            m_pass_store.clear();
+            return false;
+        }
+        std::vector<std::string_view> release_keys;
+        release_keys.reserve(node_release_texs[index].size());
+        for (auto* tex : node_release_texs[index]) release_keys.push_back(tex->key());
+        lowered->setReleaseTexs(release_keys);
+        m_passes.push_back(lowered.get());
+        m_pass_store.push_back(std::move(lowered));
+    }
 
     for (auto* pass : m_passes) {
         if (auto* custom = dynamic_cast<CustomShaderPass*>(pass)) {

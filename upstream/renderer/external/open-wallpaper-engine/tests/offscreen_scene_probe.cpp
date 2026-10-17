@@ -30,7 +30,8 @@
 #include "Presentation/WallpaperScaling.hpp"
 #include "TexturePrefetch.hpp"
 #include "VulkanRender/Resource.hpp"
-#include "VulkanRender/SceneToRenderGraph.hpp"
+#include "VulkanRender/PassLowering.hpp"
+#include "RenderCommon/SceneToRenderGraph.hpp"
 #include "RenderGraph/RenderGraph.hpp"
 #include "Interface/IImageParser.h"
 #include <cstdlib>
@@ -533,15 +534,23 @@ int main() {
         std::ofstream trace(out / "passes.txt");
         // Decodes ahead of the passes the way VulkanRender::preparePasses
         // does, so the startup timing below is the production one.
+        // The graph describes each step in backend-neutral terms; this probe
+        // lowers every one into the executable pass, as VulkanRender does when
+        // it compiles the graph.
+        std::vector<std::unique_ptr<VulkanPass>> lowered;
         std::vector<VulkanPass*> graph_passes;
+        lowered.reserve(nodes.size());
         graph_passes.reserve(nodes.size());
         for (const auto& node : nodes) {
-            graph_passes.push_back(static_cast<VulkanPass*>(graph->getPass(node)));
+            auto step = LowerGraphPass(*graph->getPass(node));
+            Check(step != nullptr, "lower a graph step");
+            graph_passes.push_back(step.get());
+            lowered.push_back(std::move(step));
         }
         auto prefetch = TexturePrefetch::ForPasses(*scene, device.tex_cache(), graph_passes);
         rr.texture_prefetch = prefetch.get();
         for (std::size_t i = 0; i < nodes.size(); ++i) {
-            auto* pass = static_cast<VulkanPass*>(graph->getPass(nodes[i]));
+            auto* pass = graph_passes[i];
             std::vector<std::string_view> release_keys;
             if (!std::getenv("WE_TEST_NO_REUSE")) {
                 for (auto* tex : releases[i]) release_keys.push_back(tex->key());

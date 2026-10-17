@@ -1,6 +1,6 @@
 #include "MetalRender/ScenePassDescription.hpp"
 
-#include "RenderCommon/ScenePassInfo.hpp"
+#include "RenderCommon/ScenePass.hpp"
 #include "RenderGraph/Pass.hpp"
 #include "RenderGraph/RenderGraph.hpp"
 #include "Scene/Scene.h"
@@ -38,7 +38,7 @@ bool TargetExtent(const Scene& scene, const std::string& key, uint32_t& width, u
 
 /// Declares a copy's destination when the graph invented the name.
 ///
-/// The same rule `vulkan::CopyPass::prepare` applies: the destination inherits
+/// The same rule the compatibility renderer's copy pass applies: the destination inherits
 /// the source's shape and becomes reusable. Inventing a different shape here
 /// would size the link texture or the feedback-break copy differently in the
 /// two backends, and every effect that samples it would then sample at a
@@ -179,15 +179,15 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             return set_error("the render graph contains a step the native renderer does not "
                              "recognise");
         case MetalPassKind::Clear: {
-            const auto* info = dynamic_cast<const ScenePassInfo*>(pass);
-            const auto  pre  = info != nullptr ? info->clearInfo() : std::nullopt;
-            if (! pre) return set_error("a clear step has an unexpected shape");
+            const auto* clear = dynamic_cast<const rg::ClearPass*>(pass);
+            if (clear == nullptr) return set_error("a clear step has an unexpected shape");
+            const auto& pre = clear->desc();
             ScenePassDescription desc;
             desc.kind        = MetalPassKind::Clear;
             desc.name        = std::string(pass_node->name());
-            desc.target_key  = scene.ResolveRenderTargetName(pre->result);
+            desc.target_key  = scene.ResolveRenderTargetName(pre.result);
             desc.load_action = MetalLoadAction::Clear;
-            if (pre->transparent) {
+            if (pre.transparent) {
                 desc.clear_color = { 0.0f, 0.0f, 0.0f, 0.0f };
             } else {
                 desc.uses_scene_clear_color = true;
@@ -201,14 +201,14 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             continue;
         }
         case MetalPassKind::Copy: {
-            const auto* info = dynamic_cast<const ScenePassInfo*>(pass);
-            const auto  copy = info != nullptr ? info->copyInfo() : std::nullopt;
-            if (! copy) return set_error("a copy step has an unexpected shape");
+            const auto* step = dynamic_cast<const rg::CopyPass*>(pass);
+            if (step == nullptr) return set_error("a copy step has an unexpected shape");
+            const auto& copy = step->desc();
             ScenePassDescription desc;
             desc.kind        = MetalPassKind::Copy;
             desc.name        = std::string(pass_node->name());
-            desc.source_key  = scene.ResolveRenderTargetName(copy->src);
-            desc.target_key  = scene.ResolveRenderTargetName(copy->dst);
+            desc.source_key  = scene.ResolveRenderTargetName(copy.src);
+            desc.target_key  = scene.ResolveRenderTargetName(copy.dst);
             desc.load_action = MetalLoadAction::DontCare;
             if (! TargetExtent(scene, desc.source_key, desc.source_width, desc.source_height)) {
                 return set_error("a copy step reads an image with no size");
@@ -221,10 +221,9 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             continue;
         }
         case MetalPassKind::CustomShader: {
-            const auto* info   = dynamic_cast<const ScenePassInfo*>(pass);
-            const auto  custom = info != nullptr ? info->drawInfo() : std::nullopt;
-            if (! custom) return set_error("a draw step has an unexpected shape");
-            const auto& src = *custom;
+            const auto* custom = dynamic_cast<const rg::DrawPass*>(pass);
+            if (custom == nullptr) return set_error("a draw step has an unexpected shape");
+            const auto& src = custom->desc();
             if (src.node == nullptr || src.node->Mesh() == nullptr) {
                 return set_error("a draw step has no mesh");
             }

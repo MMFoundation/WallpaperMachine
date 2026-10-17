@@ -5,8 +5,8 @@ STATIC
 CopyPass.cpp
 CustomShaderPass.cpp
 FinPass.cpp
+PassLowering.cpp
 PrePass.cpp
-SceneToRenderGraph.cpp
 TexturePrefetch.cpp
 VulkanRender.cpp
 WallpaperViewport.cpp

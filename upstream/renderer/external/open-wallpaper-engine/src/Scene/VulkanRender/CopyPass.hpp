@@ -6,14 +6,15 @@
 #include "Vulkan/Device.hpp"
 #include "Scene/Scene.h"
 #include "RenderCommon/CopyElision.hpp"
-#include "RenderCommon/ScenePassInfo.hpp"
 
 namespace wallpaper
 {
 namespace vulkan
 {
 
-class CopyPass : public VulkanPass, public ScenePassInfo {
+/// Copies one target into another. `src` and `dst` are what the scene's step
+/// (`rg::CopyPass`) says; `PassLowering` copies them here.
+class CopyPass : public VulkanPass {
 public:
     struct Desc {
         std::string src;
@@ -34,10 +35,6 @@ public:
 
     Desc&       desc() { return m_desc; }
     const Desc& desc() const { return m_desc; }
-
-    std::optional<CopyPassInfo> copyInfo() const override {
-        return CopyPassInfo { m_desc.src, m_desc.dst };
-    }
 
     /// Compile-time shape of this copy for the elision analysis.
     ElisionPassDesc elisionDesc(const Scene&) const;

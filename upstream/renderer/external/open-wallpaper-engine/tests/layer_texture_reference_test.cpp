@@ -13,10 +13,11 @@
 #include "Scene/SceneLayerReference.hpp"
 #include "SpecTexs.hpp"
 #include "WPSceneParser.hpp"
-#include "VulkanRender/CopyPass.hpp"
+#include "RenderCommon/ScenePass.hpp"
 #include "VulkanRender/CustomShaderPass.hpp"
+#include "VulkanRender/PassLowering.hpp"
 #include "RenderGraph/RenderGraph.hpp"
-#include "VulkanRender/SceneToRenderGraph.hpp"
+#include "RenderCommon/SceneToRenderGraph.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -110,10 +111,20 @@ std::shared_ptr<Scene> ParseScene(fs::VFS& vfs, std::string_view objects,
         SceneJson(objects), vfs, sound);
 }
 
-const vulkan::CustomShaderPass* FindPassByNode(
+/// The compatibility renderer's executable form of a draw step, for the tests
+/// that ask what its static-result cache would see.
+std::unique_ptr<vulkan::CustomShaderPass> LowerDraw(const rg::DrawPass& step) {
+    auto lowered = vulkan::LowerGraphPass(step);
+    auto* draw   = dynamic_cast<vulkan::CustomShaderPass*>(lowered.get());
+    if (draw == nullptr) return nullptr;
+    lowered.release();
+    return std::unique_ptr<vulkan::CustomShaderPass>(draw);
+}
+
+const rg::DrawPass* FindPassByNode(
     const rg::RenderGraph& graph, std::string_view name) {
     for (const auto id : graph.topologicalOrder()) {
-        auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
+        auto* pass = dynamic_cast<const rg::DrawPass*>(graph.getPass(id));
         if (pass != nullptr && pass->desc().node != nullptr &&
             pass->desc().node->Name() == name) {
             return pass;
@@ -125,7 +136,7 @@ const vulkan::CustomShaderPass* FindPassByNode(
 size_t PassIndexByNode(const rg::RenderGraph& graph, std::string_view name) {
     size_t index = 0;
     for (const auto id : graph.topologicalOrder()) {
-        auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
+        auto* pass = dynamic_cast<const rg::DrawPass*>(graph.getPass(id));
         if (pass != nullptr && pass->desc().node != nullptr &&
             pass->desc().node->Name() == name) {
             return index;
@@ -135,19 +146,19 @@ size_t PassIndexByNode(const rg::RenderGraph& graph, std::string_view name) {
     return static_cast<size_t>(-1);
 }
 
-const vulkan::CopyPass* FindLinkCopy(const rg::RenderGraph& graph, std::string_view dst) {
+const rg::CopyPass* FindLinkCopy(const rg::RenderGraph& graph, std::string_view dst) {
     for (const auto id : graph.topologicalOrder()) {
-        auto* pass = dynamic_cast<const vulkan::CopyPass*>(graph.getPass(id));
+        auto* pass = dynamic_cast<const rg::CopyPass*>(graph.getPass(id));
         if (pass != nullptr && pass->desc().dst == dst) return pass;
     }
     return nullptr;
 }
 
-const vulkan::CustomShaderPass* FindPassByOutput(const rg::RenderGraph& graph,
+const rg::DrawPass* FindPassByOutput(const rg::RenderGraph& graph,
                                                  std::string_view output) {
-    const vulkan::CustomShaderPass* found = nullptr;
+    const rg::DrawPass* found = nullptr;
     for (const auto id : graph.topologicalOrder()) {
-        auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
+        auto* pass = dynamic_cast<const rg::DrawPass*>(graph.getPass(id));
         if (pass != nullptr && pass->desc().output == output) found = pass;
     }
     return found;
@@ -186,7 +197,7 @@ void AddScreenTarget(Scene& scene) {
 /// Asks the value updater, as a backend does before drawing `pass`, for the
 /// uniforms named in `wanted`, through the camera the pass draws with.
 std::map<std::string, ShaderValue, std::less<>> PassUniforms(
-    Scene& scene, const vulkan::CustomShaderPass& pass, std::vector<std::string_view> wanted) {
+    Scene& scene, const rg::DrawPass& pass, std::vector<std::string_view> wanted) {
     auto*          node = pass.desc().node;
     const uint32_t slot = pass.desc().material_slot;
     auto&          updater = *scene.shaderValueUpdater;
@@ -205,7 +216,7 @@ std::map<std::string, ShaderValue, std::less<>> PassUniforms(
 }
 
 /// Where `pass` puts a corner of its card, in normalised device coordinates.
-linalg::Vector2d CardCornerNdc(Scene& scene, const vulkan::CustomShaderPass& pass,
+linalg::Vector2d CardCornerNdc(Scene& scene, const rg::DrawPass& pass,
                               linalg::Vector2d corner) {
     const auto uniforms = PassUniforms(scene, pass, { "g_ModelViewProjectionMatrix" });
     const auto found    = uniforms.find("g_ModelViewProjectionMatrix");
@@ -218,7 +229,7 @@ linalg::Vector2d CardCornerNdc(Scene& scene, const vulkan::CustomShaderPass& pas
     return { clip.x() / clip.w(), clip.y() / clip.w() };
 }
 
-void ExpectCardFillsItsTarget(Scene& scene, const vulkan::CustomShaderPass& pass,
+void ExpectCardFillsItsTarget(Scene& scene, const rg::DrawPass& pass,
                               linalg::Vector2d lower_left_corner, linalg::Vector2d upper_right_corner) {
     const auto lower_left  = CardCornerNdc(scene, pass, lower_left_corner);
     const auto upper_right = CardCornerNdc(scene, pass, upper_right_corner);
@@ -228,7 +239,7 @@ void ExpectCardFillsItsTarget(Scene& scene, const vulkan::CustomShaderPass& pass
     EXPECT_NEAR(upper_right.y(), 1.0, 1e-4);
 }
 
-void ExpectCardFillsItsTarget(Scene& scene, const vulkan::CustomShaderPass& pass,
+void ExpectCardFillsItsTarget(Scene& scene, const rg::DrawPass& pass,
                               linalg::Vector2d half_extent) {
     ExpectCardFillsItsTarget(scene, pass, -half_extent, half_extent);
 }
@@ -851,7 +862,9 @@ TEST(LayerTextureReference, AReferencedLayerIsItsCardWhereverTheSceneShowsIt) {
     ASSERT_NE(composite, nullptr);
     ExpectCardFillsItsTarget(*parsed, *composite, { 32.0, 16.0 });
     // Nor does the cursor: the composite is not kept out of reuse for parallax.
-    EXPECT_FALSE(composite->staticPassDesc(*parsed).dynamic_reasons &
+    const auto lowered = LowerDraw(*composite);
+    ASSERT_NE(lowered, nullptr);
+    EXPECT_FALSE(lowered->staticPassDesc(*parsed).dynamic_reasons &
                  vulkan::DynamicReason::PointerUniform);
 }
 
@@ -1159,7 +1172,7 @@ TEST(LayerTextureReference, ABareComposeLayerAnotherSamplesIsDrawnOnlyIntoItsCom
 
     std::vector<std::string> behind_outputs;
     for (const auto id : graph->topologicalOrder()) {
-        auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph->getPass(id));
+        auto* pass = dynamic_cast<const rg::DrawPass*>(graph->getPass(id));
         if (pass != nullptr && pass->desc().node != nullptr &&
             pass->desc().node->Name() == "behind") {
             behind_outputs.push_back(pass->desc().output);
@@ -1249,9 +1262,9 @@ void main() {
 
         const auto graph = sceneToRenderGraph(*parsed);
         ASSERT_NE(graph, nullptr);
-        const vulkan::CustomShaderPass* tint = nullptr;
+        const rg::DrawPass* tint = nullptr;
         for (const auto id : graph->topologicalOrder()) {
-            auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph->getPass(id));
+            auto* pass = dynamic_cast<const rg::DrawPass*>(graph->getPass(id));
             if (pass == nullptr) continue;
             const auto& textures = pass->desc().textures;
             if (std::find(textures.begin(), textures.end(), GenLinkTex(2)) != textures.end())
@@ -1265,9 +1278,9 @@ void main() {
         // The palette is its own card in its composite, and still part of the
         // compose layer's picture wherever it shows.
         std::vector<std::string> outputs;
-        const vulkan::CustomShaderPass* composite = nullptr;
+        const rg::DrawPass* composite = nullptr;
         for (const auto id : graph->topologicalOrder()) {
-            auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph->getPass(id));
+            auto* pass = dynamic_cast<const rg::DrawPass*>(graph->getPass(id));
             if (pass == nullptr || pass->desc().node == nullptr ||
                 pass->desc().node->Name() != "palette")
                 continue;
@@ -1334,7 +1347,7 @@ TEST(LayerTextureReference, ASampledTextLayerIsItsCardInItsOwnComposite) {
                 // The pass that draws the title into its composite, and the card it
                 // draws there.
                 struct Composite {
-                    const vulkan::CustomShaderPass* pass { nullptr };
+                    const rg::DrawPass* pass { nullptr };
                     linalg::Vector2d                 lower, upper;
                 };
                 const auto find_composite = [&](const rg::RenderGraph& graph) {
@@ -1487,9 +1500,9 @@ void main() {
             const auto graph = sceneToRenderGraph(*parsed);
             ASSERT_NE(graph, nullptr);
             const auto passes_of = [&](const SceneNode* node) {
-                std::vector<const vulkan::CustomShaderPass*> found;
+                std::vector<const rg::DrawPass*> found;
                 for (const auto id : graph->topologicalOrder()) {
-                    auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph->getPass(id));
+                    auto* pass = dynamic_cast<const rg::DrawPass*>(graph->getPass(id));
                     if (pass != nullptr && pass->desc().node == node) found.push_back(pass);
                 }
                 return found;
@@ -1620,7 +1633,7 @@ TEST(HiddenLayers, ALayerItsPropertiesHideStaysOutOfTheGraphUntilSomethingShowsI
     const auto passes_of = [](const rg::RenderGraph& graph, std::string_view name) {
         std::size_t count = 0;
         for (const auto id : graph.topologicalOrder()) {
-            auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
+            auto* pass = dynamic_cast<const rg::DrawPass*>(graph.getPass(id));
             if (pass == nullptr) continue;
             const auto* owner = pass->desc().visibility_node != nullptr
                                     ? pass->desc().visibility_node
@@ -1728,7 +1741,7 @@ TEST(HiddenLayers, APropertyPreviewRevealsALayerWithOneGraphRebuildAndAGraphBuil
     const auto passes_of = [](const rg::RenderGraph& graph, std::string_view name) {
         std::size_t count = 0;
         for (const auto id : graph.topologicalOrder()) {
-            auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
+            auto* pass = dynamic_cast<const rg::DrawPass*>(graph.getPass(id));
             if (pass == nullptr) continue;
             const auto* owner = pass->desc().visibility_node != nullptr
                                     ? pass->desc().visibility_node
@@ -2137,9 +2150,11 @@ TEST(CameraFraming, MovingTheCameraChangesTheStaticSampleOfAPassItDraws) {
     const auto* backdrop = FindPassByNode(*graph, "backdrop");
     ASSERT_NE(backdrop, nullptr);
 
-    const auto still = backdrop->frameSample(*parsed).hash;
-    EXPECT_EQ(backdrop->frameSample(*parsed).hash, still) << "an unchanged pass must be reusable";
+    const auto lowered = LowerDraw(*backdrop);
+    ASSERT_NE(lowered, nullptr);
+    const auto still = lowered->frameSample(*parsed).hash;
+    EXPECT_EQ(lowered->frameSample(*parsed).hash, still) << "an unchanged pass must be reusable";
     parsed->FrameCanvas(2.0, linalg::Vector2f(8.0f, 4.0f));
-    EXPECT_NE(backdrop->frameSample(*parsed).hash, still)
+    EXPECT_NE(lowered->frameSample(*parsed).hash, still)
         << "the view moved and the pass would still be reused";
 }

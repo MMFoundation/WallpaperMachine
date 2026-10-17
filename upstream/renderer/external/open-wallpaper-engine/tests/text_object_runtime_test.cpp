@@ -11,7 +11,9 @@
 #include <chrono>
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "VulkanRender/CustomShaderPass.hpp"
-#include "VulkanRender/SceneToRenderGraph.hpp"
+#include "VulkanRender/PassLowering.hpp"
+#include "RenderCommon/ScenePass.hpp"
+#include "RenderCommon/SceneToRenderGraph.hpp"
 #include "WPShaderValueUpdater.hpp"
 #include "Scene/Scene.h"
 #include "Scene/SceneNode.h"
@@ -445,10 +447,10 @@ int VisibleAlphaPixels(const Image& image) {
     return visible_pixels;
 }
 
-const vulkan::CustomShaderPass* FindCustomPassForNode(const rg::RenderGraph& graph,
-                                                      const SceneNode*       node) {
+const rg::DrawPass* FindCustomPassForNode(const rg::RenderGraph& graph,
+                                          const SceneNode*       node) {
     for (const auto id : graph.topologicalOrder()) {
-        auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
+        auto* pass = dynamic_cast<const rg::DrawPass*>(graph.getPass(id));
         if (pass != nullptr && pass->desc().node == node) return pass;
     }
     return nullptr;
@@ -3695,7 +3697,11 @@ TEST(TextObjectRuntime, Workshop3409533530FullSceneKeepsClockRenderPassAndTextur
     EXPECT_EQ(clock_pass->desc().textures.front(), TextTextureName("Clock"));
     EXPECT_EQ(clock_pass->desc().visibility_node, clock);
     EXPECT_EQ(clock_pass->desc().output, SpecTex_Default);
-    EXPECT_NE(clock_pass->desc().uploaded_mesh_dirty_generation, clock->Mesh()->DirtyGeneration());
+    // What the compatibility renderer makes of the step still has the mesh upload pending.
+    const auto lowered = vulkan::LowerGraphPass(*clock_pass);
+    const auto* clock_draw = dynamic_cast<const vulkan::CustomShaderPass*>(lowered.get());
+    ASSERT_NE(clock_draw, nullptr);
+    EXPECT_NE(clock_draw->desc().uploaded_mesh_dirty_generation, clock->Mesh()->DirtyGeneration());
 
     runtime->ClearNodeTextDirty("Clock");
     ResetTextLayerMeasurementCountForTests();
@@ -5167,17 +5173,17 @@ void main() {
     };
 }
 
-std::vector<const vulkan::CustomShaderPass*> CustomPasses(const rg::RenderGraph& graph) {
-    std::vector<const vulkan::CustomShaderPass*> passes;
+std::vector<const rg::DrawPass*> CustomPasses(const rg::RenderGraph& graph) {
+    std::vector<const rg::DrawPass*> passes;
     for (const auto id : graph.topologicalOrder()) {
-        if (const auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id))) {
+        if (const auto* pass = dynamic_cast<const rg::DrawPass*>(graph.getPass(id))) {
             passes.push_back(pass);
         }
     }
     return passes;
 }
 
-bool SamplesScreen(const vulkan::CustomShaderPass& pass) {
+bool SamplesScreen(const rg::DrawPass& pass) {
     const auto& textures = pass.desc().textures;
     return std::any_of(textures.begin(), textures.end(), [](const std::string& texture) {
         return texture.starts_with(SpecTex_Default);

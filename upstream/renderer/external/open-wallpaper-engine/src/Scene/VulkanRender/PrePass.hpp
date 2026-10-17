@@ -5,7 +5,6 @@
 
 #include "Vulkan/Device.hpp"
 
-#include "RenderCommon/ScenePassInfo.hpp"
 #include "SpecTexs.hpp"
 
 namespace wallpaper
@@ -13,7 +12,9 @@ namespace wallpaper
 namespace vulkan
 {
 
-class PrePass : public VulkanPass, public ScenePassInfo {
+/// Clears one target. `result` and `transparent` are what the scene's step
+/// (`rg::ClearPass`) says; `PassLowering` copies them here.
+class PrePass : public VulkanPass {
 public:
     struct Desc {
         // in
@@ -31,10 +32,6 @@ public:
     virtual ~PrePass();
 
     // void setClearValue(vk::ClearValue);
-
-    std::optional<ClearPassInfo> clearInfo() const override {
-        return ClearPassInfo { m_desc.result, m_desc.transparent };
-    }
 
     void prepare(Scene&, const Device&, RenderingResources&) override;
     bool updateFrame(const Device&, RenderingResources&) override;

@@ -44,8 +44,8 @@
 #include "WPShaderValueUpdater.hpp"
 #include "RenderGraph/RenderGraph.hpp"
 #include "VulkanRender/CopyPass.hpp"
-#include "VulkanRender/CustomShaderPass.hpp"
-#include "VulkanRender/SceneToRenderGraph.hpp"
+#include "RenderCommon/ScenePass.hpp"
+#include "RenderCommon/SceneToRenderGraph.hpp"
 #include "RenderCommon/StaticSubgraphCache.hpp"
 #include "Shader/SceneMetalVariants.hpp"
 #include "Scene/Parse/WPShaderParser.hpp"
@@ -558,10 +558,10 @@ rg::TexNode::Desc TexDesc(const std::string& key)
 void AddDraw(rg::RenderGraph& graph, SceneNode* node, const std::string& output,
              const std::vector<std::string>& inputs, bool clear = true)
 {
-    const auto* pass = graph.addPass<vulkan::CustomShaderPass>(
+    const auto* pass = graph.addPass<rg::DrawPass>(
         "draw", rg::PassNode::Type::CustomShader,
         [node, &output, &inputs](rg::RenderGraphBuilder&          builder,
-                                 vulkan::CustomShaderPass::Desc& desc) {
+                                 rg::DrawPass::Desc& desc) {
             desc.node             = node;
             desc.visibility_node  = node;
             desc.output           = output;
@@ -574,7 +574,7 @@ void AddDraw(rg::RenderGraph& graph, SceneNode* node, const std::string& output,
             builder.write(builder.createTexNode(TexDesc(output), true));
         });
     // These actions are finalized after construction, as in sceneToRenderGraph.
-    auto& desc = static_cast<vulkan::CustomShaderPass*>(graph.getPass(pass->ID()))->desc();
+    auto& desc = static_cast<rg::DrawPass*>(graph.getPass(pass->ID()))->desc();
     desc.write_alpha = output != SpecTex_Default;
     desc.clear_on_first_use = clear;
     desc.preserve_target_contents = ! clear;
@@ -582,9 +582,9 @@ void AddDraw(rg::RenderGraph& graph, SceneNode* node, const std::string& output,
 
 void AddCopy(rg::RenderGraph& graph, const std::string& source, const std::string& destination)
 {
-    graph.addPass<vulkan::CopyPass>(
+    graph.addPass<rg::CopyPass>(
         "copy", rg::PassNode::Type::Copy,
-        [&source, &destination](rg::RenderGraphBuilder& builder, vulkan::CopyPass::Desc& desc) {
+        [&source, &destination](rg::RenderGraphBuilder& builder, rg::CopyPass::Desc& desc) {
             auto* in  = builder.createTexNode(TexDesc(source));
             auto* out = builder.createTexNode(TexDesc(destination), true);
             builder.read(in);

@@ -10,7 +10,7 @@
 #include "Vulkan/GraphicsPipeline.hpp"
 #include "Vulkan/Shader.hpp"
 #include "RenderCommon/CustomShaderSlots.hpp"
-#include "RenderCommon/ScenePassInfo.hpp"
+#include "RenderCommon/ScenePass.hpp"
 #include "VulkanRender/PassBatch.hpp"
 #include "RenderCommon/StaticSubgraphCache.hpp"
 #include "SpecTexs.hpp"
@@ -29,9 +29,13 @@ namespace wallpaper
 namespace vulkan
 {
 
-class CustomShaderPass : public VulkanPass, public ScenePassInfo {
+/// Draws one submesh with one material. What is drawn, where and how the target
+/// loads are the scene's own description (`rg::DrawPass::Desc`); the sample
+/// count this backend resolved, the presentation setup and everything prepared
+/// are this backend's.
+class CustomShaderPass : public VulkanPass {
 public:
-    struct Desc {
+    struct Desc : rg::DrawPass::Desc {
         struct TextureBinding {
             i32              image_binding { -1 };
             VkDescriptorType image_descriptor_type { VK_DESCRIPTOR_TYPE_MAX_ENUM };
@@ -39,17 +43,9 @@ public:
         };
 
         // in
-        SceneNode*               node { nullptr };
-        SceneNode*               visibility_node { nullptr };
-        std::vector<std::string> textures;
-        std::string              output;
-        std::string              camera_override;
-        std::size_t              submesh_index { 0 };
-        uint32_t                 material_slot { 0 };
-        bool                     clear_on_first_use { false };
-        bool                     preserve_target_contents { false };
-        bool                     write_alpha { true };
         bool                     alpha_to_coverage { false };
+        /// The Vulkan sample count of `samples`, narrowed to what the device
+        /// supports when the pass is prepared.
         VkSampleCountFlagBits    sample_count { VK_SAMPLE_COUNT_1_BIT };
         VkFormat                 presentation_format { VK_FORMAT_UNDEFINED };
         /// Set only for a pass that is, by how its scene is built, the final
@@ -60,7 +56,6 @@ public:
         /// -- exactly what the final composition does with the copy -- instead
         /// of only when output, target and viewport coincide.
         bool                     presents_through_final_viewport { false };
-        sprite_map_t             sprites_map;
 
         // -----prepared
         // vulkan texs
@@ -104,24 +99,8 @@ public:
     CustomShaderPass(const Desc&);
     virtual ~CustomShaderPass();
 
-    void        setDescTex(u32 index, std::string_view tex_key);
     Desc&       desc() { return m_desc; }
     const Desc& desc() const { return m_desc; }
-
-    std::optional<DrawPassInfo> drawInfo() const override {
-        return DrawPassInfo {
-            .node                     = m_desc.node,
-            .visibility_node          = m_desc.visibility_node,
-            .textures                 = m_desc.textures,
-            .output                   = m_desc.output,
-            .camera_override          = m_desc.camera_override,
-            .submesh_index            = m_desc.submesh_index,
-            .material_slot            = m_desc.material_slot,
-            .clear_on_first_use       = m_desc.clear_on_first_use,
-            .preserve_target_contents = m_desc.preserve_target_contents,
-            .write_alpha              = m_desc.write_alpha,
-        };
-    }
 
     void prepare(Scene&, const Device&, RenderingResources&) override;
     bool updateFrame(const Device&, RenderingResources&) override;

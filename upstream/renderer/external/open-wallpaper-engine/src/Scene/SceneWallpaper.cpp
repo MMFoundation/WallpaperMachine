@@ -43,7 +43,7 @@
 #include "Presentation/WallpaperScaling.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Runtime/RuntimeImageSource.hpp"
-#include "VulkanRender/SceneToRenderGraph.hpp"
+#include "RenderCommon/SceneToRenderGraph.hpp"
 #include "RenderCommon/StaticSubgraphCache.hpp"
 #include "VulkanRender/VulkanRender.hpp"
 #include "Runtime/VirtualAssetRegistry.hpp"

@@ -20,8 +20,7 @@
 #include "SpriteAnimation.hpp"
 #include "SpecTexs.hpp"
 #include "Utils/Linalg.hpp"
-#include "VulkanRender/CopyPass.hpp"
-#include "VulkanRender/CustomShaderPass.hpp"
+#include "RenderCommon/ScenePass.hpp"
 
 #include <gtest/gtest.h>
 
@@ -265,9 +264,9 @@ rg::TexNode::Desc TexDesc(const std::string& key)
 void AddDraw(rg::RenderGraph& graph, const std::string& output,
              const std::vector<std::string>& inputs)
 {
-    graph.addPass<vulkan::CustomShaderPass>(
+    graph.addPass<rg::DrawPass>(
         "draw", rg::PassNode::Type::CustomShader,
-        [&output, &inputs](rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& desc) {
+        [&output, &inputs](rg::RenderGraphBuilder& builder, rg::DrawPass::Desc& desc) {
             desc.output = output;
             for (const auto& input : inputs) {
                 auto* node = builder.createTexNode(TexDesc(input));
@@ -281,9 +280,9 @@ void AddDraw(rg::RenderGraph& graph, const std::string& output,
 
 void AddCopy(rg::RenderGraph& graph, const std::string& source, const std::string& destination)
 {
-    graph.addPass<vulkan::CopyPass>(
+    graph.addPass<rg::CopyPass>(
         "copy", rg::PassNode::Type::Copy,
-        [&source, &destination](rg::RenderGraphBuilder& builder, vulkan::CopyPass::Desc& desc) {
+        [&source, &destination](rg::RenderGraphBuilder& builder, rg::CopyPass::Desc& desc) {
             auto* in  = builder.createTexNode(TexDesc(source));
             auto* out = builder.createTexNode(TexDesc(destination), true);
             builder.read(in);

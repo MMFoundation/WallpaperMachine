@@ -133,17 +133,12 @@ bool ReflectCustomShader(const SceneShader& shader, std::vector<Uni_ShaderSpv>& 
 } // namespace wallpaper::vulkan
 
 CustomShaderPass::CustomShaderPass(const Desc& desc) {
-    m_desc.node            = desc.node;
-    m_desc.visibility_node = desc.visibility_node;
-    m_desc.textures        = desc.textures;
-    m_desc.output          = desc.output;
-    m_desc.camera_override = desc.camera_override;
-    m_desc.submesh_index   = desc.submesh_index;
-    m_desc.material_slot   = desc.material_slot;
+    // The scene's whole description of the draw, then the few backend fields a
+    // caller may set ahead of preparing; everything prepared starts empty.
+    static_cast<rg::DrawPass::Desc&>(m_desc) = desc;
     m_desc.sample_count    = desc.sample_count;
     m_desc.presentation_format = desc.presentation_format;
     m_desc.presents_through_final_viewport = desc.presents_through_final_viewport;
-    m_desc.sprites_map     = desc.sprites_map;
     m_desc.video_textures  = desc.video_textures;
 };
 
@@ -1558,12 +1553,6 @@ void CustomShaderPass::destory(const Device&, RenderingResources& rr) {
     m_desc.alpha_to_coverage = false;
     m_desc.uploaded_mesh_dirty_generation = std::numeric_limits<uint64_t>::max();
     ResetPipelineParameters(m_desc.pipeline);
-}
-
-void CustomShaderPass::setDescTex(u32 index, std::string_view tex_key) {
-    assert(index < m_desc.textures.size());
-    if (index >= m_desc.textures.size()) return;
-    m_desc.textures[index] = tex_key;
 }
 
 bool wallpaper::vulkan::UpdatePreparedPasses(const Device& device, RenderingResources& rr,

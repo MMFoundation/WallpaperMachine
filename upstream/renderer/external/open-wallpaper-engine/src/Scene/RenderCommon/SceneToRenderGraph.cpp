@@ -1,14 +1,11 @@
-#include "SceneToRenderGraph.hpp"
+#include "RenderCommon/SceneToRenderGraph.hpp"
 
 #include "Scene/Scene.h"
+#include "RenderCommon/ScenePass.hpp"
 #include "RenderGraph/RenderGraph.hpp"
 #include "SpecTexs.hpp"
 #include "Utils/Logging.h"
 #include "Core/MapSet.hpp"
-
-#include "Vulkan/SampleCount.hpp"
-#include "VulkanRender/AllPasses.hpp"
-#include "PrePass.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -20,7 +17,7 @@ using namespace wallpaper;
 namespace wallpaper::rg
 {
 
-void doCopy(RenderGraphBuilder& builder, vulkan::CopyPass::Desc& desc, TexNode* in, TexNode* out) {
+void doCopy(RenderGraphBuilder& builder, rg::CopyPass::Desc& desc, TexNode* in, TexNode* out) {
     builder.read(in);
     builder.write(out);
 
@@ -28,19 +25,19 @@ void doCopy(RenderGraphBuilder& builder, vulkan::CopyPass::Desc& desc, TexNode* 
     desc.dst = out->key();
 }
 void addCopyPass(RenderGraph& rgraph, TexNode* in, TexNode* out) {
-    rgraph.addPass<vulkan::CopyPass>(
+    rgraph.addPass<rg::CopyPass>(
         "copy",
         PassNode::Type::Copy,
-        [&in, &out](RenderGraphBuilder& builder, vulkan::CopyPass::Desc& desc) {
+        [&in, &out](RenderGraphBuilder& builder, rg::CopyPass::Desc& desc) {
             doCopy(builder, desc, in, out);
         });
 }
 
 void addCopyPass(RenderGraph& rgraph, const TexNode::Desc& in, const TexNode::Desc& out) {
-    rgraph.addPass<vulkan::CopyPass>(
+    rgraph.addPass<rg::CopyPass>(
         "copy",
         PassNode::Type::Copy,
-        [&in, &out](RenderGraphBuilder& builder, vulkan::CopyPass::Desc& desc) {
+        [&in, &out](RenderGraphBuilder& builder, rg::CopyPass::Desc& desc) {
             auto* in_node  = builder.createTexNode(in);
             auto* out_node = builder.createTexNode(out, true);
             doCopy(builder, desc, in_node, out_node);
@@ -49,10 +46,10 @@ void addCopyPass(RenderGraph& rgraph, const TexNode::Desc& in, const TexNode::De
 
 TexNode* addCopyPass(RenderGraph& rgraph, TexNode* in, TexNode::Desc* out_desc = nullptr) {
     TexNode* copy { nullptr };
-    rgraph.addPass<vulkan::CopyPass>(
+    rgraph.addPass<rg::CopyPass>(
         "copy",
         PassNode::Type::Copy,
-        [&copy, in, out_desc](RenderGraphBuilder& builder, vulkan::CopyPass::Desc& pdesc) {
+        [&copy, in, out_desc](RenderGraphBuilder& builder, rg::CopyPass::Desc& pdesc) {
             auto desc = out_desc == nullptr ? in->genDesc() : *out_desc;
             if (out_desc == nullptr) {
                 desc.key += "_" + std::to_string(in->version()) + "_copy";
@@ -188,7 +185,7 @@ static void TraverseNode(
     }
 }
 
-static void CheckAndSetSprite(Scene& scene, vulkan::CustomShaderPass::Desc& desc,
+static void CheckAndSetSprite(Scene& scene, rg::DrawPass::Desc& desc,
                               std::span<const std::string> texs) {
     for (usize i = 0; i < texs.size(); i++) {
         auto& tex = texs[i];
@@ -264,7 +261,7 @@ static void AddCustomShaderGraphPass(
     uint32_t material_slot,
     bool register_base_link_output = false,
     bool capture_as_layer_link = false) {
-    rgraph.addPass<vulkan::CustomShaderPass>(
+    rgraph.addPass<rg::DrawPass>(
         material.name,
         rg::PassNode::Type::CustomShader,
         [&material,
@@ -281,7 +278,7 @@ static void AddCustomShaderGraphPass(
          material_slot,
          register_base_link_output,
          capture_as_layer_link](
-            rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& pdesc) {
+            rg::RenderGraphBuilder& builder, rg::DrawPass::Desc& pdesc) {
             const auto& pass = builder.workPassNode();
             const auto  pass_output = output_override.empty()
                 ? std::string(output)
@@ -419,8 +416,8 @@ static void ToGraphPass(
         // Aliases and concrete names must denote one graph resource. Otherwise
         // the clear can be scheduled after a reader of the concrete target.
         const auto target = scene.ResolveRenderTargetName(imgeff->FirstTarget());
-        rgraph.addPass<vulkan::PrePass>("clear effect input", rg::PassNode::Type::Clear,
-            [target](rg::RenderGraphBuilder& builder, vulkan::PrePass::Desc& desc) {
+        rgraph.addPass<rg::ClearPass>("clear effect input", rg::PassNode::Type::Clear,
+            [target](rg::RenderGraphBuilder& builder, rg::ClearPass::Desc& desc) {
                 desc.result = target;
                 desc.transparent = true;
                 builder.write(builder.createTexNode(rg::createTexDesc(target), true));
@@ -691,7 +688,7 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
         }
         rgraph->afterBuild(
             info.id, [&rgraph, &extra, &info](rg::RenderGraphBuilder& builder, rg::Pass& rgpass) {
-                auto& pass = static_cast<vulkan::CustomShaderPass&>(rgpass);
+                auto& pass = static_cast<rg::DrawPass&>(rgpass);
 
                 auto* link_tex_node = extra.id_link_map.at(info.link_id);
                 auto  copy_desc     = link_tex_node->genDesc();
@@ -731,7 +728,7 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
     const auto declare_link_history = [&scene, &rgraph](const std::string& key) {
         if (! IsSpecLinkTex(key)) return;
         for (const auto node_id : rgraph->topologicalOrder()) {
-            const auto* copy = dynamic_cast<vulkan::CopyPass*>(rgraph->getPass(node_id));
+            const auto* copy = dynamic_cast<rg::CopyPass*>(rgraph->getPass(node_id));
             if (copy == nullptr || scene.ResolveRenderTargetName(copy->desc().dst) != key) continue;
             const auto* source =
                 scene.FindRenderTarget(scene.ResolveRenderTargetName(copy->desc().src));
@@ -757,7 +754,7 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
     // Targets whose latest write is a transparent clear and nothing else yet.
     Set<std::string> transparent_cleared_targets {};
     for (const auto node_id : rgraph->topologicalOrder()) {
-        if (auto* copy_pass = dynamic_cast<vulkan::CopyPass*>(rgraph->getPass(node_id));
+        if (auto* copy_pass = dynamic_cast<rg::CopyPass*>(rgraph->getPass(node_id));
             copy_pass != nullptr) {
             const auto copy_dst = scene.ResolveRenderTargetName(copy_pass->desc().dst);
             if (!copy_dst.empty()) {
@@ -768,7 +765,7 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
             continue;
         }
 
-        if (auto* clear = dynamic_cast<vulkan::PrePass*>(rgraph->getPass(node_id))) {
+        if (auto* clear = dynamic_cast<rg::ClearPass*>(rgraph->getPass(node_id))) {
             written_targets.insert(clear->desc().result);
             transfer_written_targets.insert(clear->desc().result);
             if (clear->desc().transparent)
@@ -777,7 +774,7 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
                 transparent_cleared_targets.erase(clear->desc().result);
             continue;
         }
-        auto* custom_pass = dynamic_cast<vulkan::CustomShaderPass*>(rgraph->getPass(node_id));
+        auto* custom_pass = dynamic_cast<rg::DrawPass*>(rgraph->getPass(node_id));
         if (custom_pass == nullptr) continue;
 
         auto& desc = custom_pass->desc();
@@ -785,9 +782,9 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
         const auto render_target = scene.FindRenderTarget(desc.output);
         const bool force_clear =
             desc.output != SpecTex_Default && render_target != nullptr && render_target->forceClear;
-        desc.sample_count = render_target != nullptr
-                                ? vulkan::SampleCountFromValue(render_target->sample_count)
-                                : VK_SAMPLE_COUNT_1_BIT;
+        desc.samples = render_target != nullptr
+                           ? rg::NormalizeSampleCount(render_target->sample_count)
+                           : 1;
 
         const bool first_writer =
             !desc.output.empty() && written_targets.insert(desc.output).second;
@@ -803,7 +800,7 @@ std::unique_ptr<rg::RenderGraph> wallpaper::sceneToRenderGraph(Scene& scene) {
             // Written by a transfer before: stays single-sample, exactly as
             // when it loaded, and so does every draw after it.
             if (transfer_written_targets.find(desc.output) != transfer_written_targets.end()) {
-                desc.sample_count = VK_SAMPLE_COUNT_1_BIT;
+                desc.samples = 1;
             }
             desc.clear_on_first_use = opens_cleared_target;
             desc.preserve_target_contents = !opens_cleared_target;

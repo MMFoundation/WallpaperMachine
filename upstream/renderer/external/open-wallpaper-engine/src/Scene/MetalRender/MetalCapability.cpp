@@ -4,7 +4,7 @@
 #include "MetalRender/MetalVideoSupport.hpp"
 #include "MetalRender/SceneMetalProgram.hpp"
 
-#include "RenderCommon/ScenePassInfo.hpp"
+#include "RenderCommon/ScenePass.hpp"
 #include "RenderGraph/Pass.hpp"
 #include "RenderGraph/PassNode.hpp"
 #include "RenderGraph/RenderGraph.hpp"
@@ -366,31 +366,28 @@ std::string MetalGraphRejection(const Scene& scene, const rg::RenderGraph& graph
         auto*       pass      = graph.getPass(node_id);
         if (pass_node == nullptr || pass == nullptr) return std::string(kUnrecognised);
 
-        // Read through the backend-neutral description, so this check names no
-        // backend's pass classes.
-        const auto* info = dynamic_cast<const ScenePassInfo*>(pass);
         GraphStep step;
         switch (ClassifyMetalPassKind(static_cast<int>(pass_node->type()))) {
         case MetalPassKind::Virtual: continue;
         case MetalPassKind::Unsupported: return std::string(kUnrecognised);
         case MetalPassKind::Clear: {
-            const auto clear = info != nullptr ? info->clearInfo() : std::nullopt;
-            if (! clear) return std::string(kUnrecognised);
-            step.writes = scene.ResolveRenderTargetName(clear->result);
+            const auto* clear = dynamic_cast<const rg::ClearPass*>(pass);
+            if (clear == nullptr) return std::string(kUnrecognised);
+            step.writes = scene.ResolveRenderTargetName(clear->desc().result);
             break;
         }
         case MetalPassKind::Copy: {
-            const auto copy = info != nullptr ? info->copyInfo() : std::nullopt;
-            if (! copy) return std::string(kUnrecognised);
-            step.writes = scene.ResolveRenderTargetName(copy->dst);
-            step.reads.push_back(scene.ResolveRenderTargetName(copy->src));
+            const auto* copy = dynamic_cast<const rg::CopyPass*>(pass);
+            if (copy == nullptr) return std::string(kUnrecognised);
+            step.writes = scene.ResolveRenderTargetName(copy->desc().dst);
+            step.reads.push_back(scene.ResolveRenderTargetName(copy->desc().src));
             break;
         }
         case MetalPassKind::CustomShader: {
-            const auto custom = info != nullptr ? info->drawInfo() : std::nullopt;
-            if (! custom) return std::string(kUnrecognised);
-            step.writes = scene.ResolveRenderTargetName(custom->output);
-            for (const auto& texture : custom->textures) {
+            const auto* custom = dynamic_cast<const rg::DrawPass*>(pass);
+            if (custom == nullptr) return std::string(kUnrecognised);
+            step.writes = scene.ResolveRenderTargetName(custom->desc().output);
+            for (const auto& texture : custom->desc().textures) {
                 if (texture.empty()) continue;
                 step.reads.push_back(scene.ResolveRenderTargetName(texture));
             }
