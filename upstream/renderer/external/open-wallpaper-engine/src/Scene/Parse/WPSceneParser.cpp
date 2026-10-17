@@ -6675,12 +6675,29 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
                 }
                 ParseContext lazy = MakeLazyParseContext(scene, vfs, *inputs);
                 LazyShaderParseScope scope(inputs->index);
+                const auto runtime_name = LayerRuntimeName(lazy, image);
+                const auto before =
+                    scene->runtime != nullptr ? scene->runtime->CaptureNodeRegistration(runtime_name)
+                                              : nullptr;
                 ParseImageObj(lazy, image);
                 FlushPendingMetalTranslations(*scene);
                 // RegisterLayerTemplate owns the hidden source. Only its clones
                 // enter the scene graph, so unused templates cost no draw.
-                return lazy.layer_nodes.contains(image.id) &&
-                       lazy.layer_nodes.at(image.id)->Mesh() != nullptr;
+                const bool usable = lazy.layer_nodes.contains(image.id) &&
+                                    lazy.layer_nodes.at(image.id)->Mesh() != nullptr;
+                // A model that draws nothing of its own (a passthrough or a
+                // compose layer) leaves ParseImageObj early with its runtime
+                // bindings already committed, and nothing but `lazy` owns its
+                // node, which ends with this call. Without taking the bindings
+                // back, the runtime would tick, show and hide a freed node.
+                if (! usable && scene->runtime != nullptr) {
+                    if (const auto found = lazy.layer_nodes.find(image.id);
+                        found != lazy.layer_nodes.end()) {
+                        scene->runtime->RollbackNodeRegistration(runtime_name, found->second.get(),
+                                                                 before);
+                    }
+                }
+                return usable;
             });
 
         // Scene scripts run `init` as they are registered, so they start last:

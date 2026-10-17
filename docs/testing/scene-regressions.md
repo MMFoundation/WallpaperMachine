@@ -638,7 +638,15 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   and it replaces that registration
   (`ScriptRuntimeCompat.CreateLayerBuildsTheModelsOwnLayerWhenTheLayerUsingItCannotBeCopied`;
   a model that loads into such a shape fails once and is not reloaded,
-  `.CreateLayerDoesNotReloadAModelThatLoadsIntoALayerItCannotCopy`).
+  `.CreateLayerDoesNotReloadAModelThatLoadsIntoALayerItCannotCopy`). A model
+  that is a passthrough or compose layer parses only as far as its early return,
+  which leaves the template node owned by the lazy parse alone, so the loader
+  takes that registration back when it reports the model unusable; otherwise the
+  runtime kept ticking and showing a freed node
+  (`SceneSchema.CreateLayerFromAPassthroughModelLeavesNothingBoundToTheFreedTemplate`;
+  AddressSanitizer reported it as a heap-use-after-free in `SceneRuntimeContext::Tick`,
+  and on a real device it crashed the process in the Metal completion queue about
+  once in three runs of one local scene).
   Refusing it threw `Unable to create layer` from `init` and logged
   `createLayer unsupported template shape`.
   `thisScene.destroyLayer` (a layer or its name) removes a layer a script

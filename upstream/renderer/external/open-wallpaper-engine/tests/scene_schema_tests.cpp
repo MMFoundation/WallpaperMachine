@@ -8831,6 +8831,59 @@ TEST(SceneSchema, ALayerCreatedFromAWorkshopModelIsSizedByItsPictureAndShows) {
     EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
 }
 
+// A model that is a passthrough layer draws nothing of its own, so parsing it
+// stops early with the layer's bindings already registered, and the parse that
+// loaded it is the only owner of its node. createLayer cannot copy such a
+// template; what it must not do is leave the runtime holding that node, which
+// the next tick would then show, hide and move after it was freed.
+TEST(SceneSchema, CreateLayerFromAPassthroughModelLeavesNothingBoundToTheFreedTemplate) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    ASSERT_TRUE(vfs.Mount(
+        "/assets",
+        std::make_unique<MemoryFs>(std::map<std::string, std::string> {
+            { "/models/pass.json",
+              R"({"width":64,"height":32,"passthrough":true,"material":"mat.json"})" },
+        })));
+    const nlohmann::json source {
+        { "camera", { { "center", { 0, 0, -1 } }, { "eye", { 0, 0, 0 } }, { "up", { 0, 1, 0 } } } },
+        { "general",
+          { { "ambientcolor", { 0, 0, 0 } },
+            { "skylightcolor", { 0, 0, 0 } },
+            { "clearcolor", { 0, 0, 0 } },
+            { "cameraparallax", false },
+            { "orthogonalprojection", { { "width", 640 }, { "height", 360 } } } } },
+        { "objects",
+          nlohmann::json::array({
+              { { "id", 2 }, { "name", "owner" }, { "image", "image.json" },
+                { "origin", { 320, 180, 0 } },
+                { "visible",
+                  { { "value", true },
+                    { "script",
+                      "export function init() { thisScene.createLayer('models/pass.json'); }\n"
+                      "export function update(value) { return value; }\n" } } } },
+          }) },
+    };
+
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    auto scene = parser.Parse(SceneParseRequest {
+        .scene_id = "passthrough-created-layer", .project_properties = &properties,
+    }, source.dump(), vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    scene->runtime->Tick(1.0 / 60.0);
+    scene->runtime->Tick(1.0 / 60.0);
+
+    EXPECT_FALSE(scene->runtime->HasNodeNamed("__template:models/pass.json"))
+        << "the runtime still holds the node of a template that could not be kept";
+    for (const auto& child : scene->sceneGraph->GetChildren()) {
+        EXPECT_FALSE(child->Name().starts_with("__generated_layer_"))
+            << "a passthrough model cannot be copied into a layer";
+    }
+}
+
 // ---------------------------------------------------------------------------
 // SceneScript API parity: what needs the parser's own state.
 // ---------------------------------------------------------------------------
