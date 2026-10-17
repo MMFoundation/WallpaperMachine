@@ -126,10 +126,6 @@ fn emit_static_link_flags(build_dir: &Path) {
         "c++",
         "lz4",
         "freetype",
-        "avformat",
-        "avcodec",
-        "avutil",
-        "swresample",
         "qjs",
     ] {
         println!("cargo:rustc-link-lib=dylib={lib}");

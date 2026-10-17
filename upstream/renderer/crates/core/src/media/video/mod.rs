@@ -1,7 +1,5 @@
-mod decoder;
 mod frame;
 
-pub use decoder::VideoDecoder;
 pub use frame::{VideoFrame, VideoFrameUploadFormat};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
