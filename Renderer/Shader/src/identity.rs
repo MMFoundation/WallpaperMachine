@@ -1,0 +1,91 @@
+// This project's own code, written from the clean-room specification (no upstream code consulted).
+//
+//! The compiler identity (R76 to R78): the string the engine folds into its
+//! program cache key and the file name of its pipeline binary archive.
+//!
+//! It must change whenever the layer could answer a request it answered
+//! before with a different response: any change to translation output, to
+//! reflection, to metadata, to binding allocation, to the compiler
+//! dependency, to the MSL language version or to the compile options. That
+//! is a deliberate act: bump [`PIPELINE_REVISION`] in the same change, and
+//! add the new row to the golden table in `cache_key.rs`, whose tests fail
+//! when a stored program changes without a bump (R88).
+//!
+//! Nothing here varies per build or per launch: no timestamp, path or
+//! process id (R78).
+
+use std::sync::OnceLock;
+
+/// Counts behavioural revisions of this layer. The first release of the
+/// rewrite is 1; stored programs of the earlier implementation are stale.
+pub const PIPELINE_REVISION: u32 = 1;
+
+/// Version of the vendored compiler library, checked against its manifest by a test.
+pub const NAGA_VERSION: &str = "29.0.3";
+
+/// The Metal Shading Language version the translated source targets (R25).
+pub const MSL_LANGUAGE_VERSION: &str = "2.0";
+
+/// The set of compile options in force: the source is left untransformed
+/// (all three conventions of R26 are false).
+pub const COMPILE_OPTIONS: &str = "untransformed";
+
+/// Builds an identity from its parts. Only ASCII letters, digits, `.` and `-`.
+pub fn build_identity(revision: u32, compiler_version: &str, msl_version: &str, options: &str) -> String {
+    format!("wm{revision}-naga-{compiler_version}-msl{msl_version}-{options}")
+}
+
+/// The identity of this build; computed once, valid for the process lifetime.
+pub fn compiler_identity() -> &'static str {
+    static IDENTITY: OnceLock<String> = OnceLock::new();
+    IDENTITY.get_or_init(|| build_identity(PIPELINE_REVISION, NAGA_VERSION, MSL_LANGUAGE_VERSION, COMPILE_OPTIONS))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity_is_non_empty_and_stable() {
+        let a = compiler_identity();
+        assert!(!a.is_empty());
+        assert_eq!(a, compiler_identity());
+        assert!(std::ptr::eq(a, compiler_identity()), "one process-lifetime string");
+    }
+
+    #[test]
+    fn identity_differs_from_the_stored_upstream_value() {
+        assert_ne!(compiler_identity(), "17:naga-29.0.3-spv-no-coordinate-space-adjustment");
+    }
+
+    #[test]
+    fn identity_has_no_per_build_or_per_launch_data() {
+        let id = compiler_identity();
+        assert!(id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-'), "{id}");
+        assert!(!id.contains('/'), "no path");
+    }
+
+    #[test]
+    fn identity_is_a_pure_function_of_its_parts_and_each_part_matters() {
+        let base = build_identity(1, "29.0.3", "2.0", "untransformed");
+        assert_eq!(base, build_identity(1, "29.0.3", "2.0", "untransformed"));
+        assert_ne!(base, build_identity(2, "29.0.3", "2.0", "untransformed"), "revision");
+        assert_ne!(base, build_identity(1, "29.0.4", "2.0", "untransformed"), "compiler dependency");
+        assert_ne!(base, build_identity(1, "29.0.3", "2.1", "untransformed"), "language version");
+        assert_ne!(base, build_identity(1, "29.0.3", "2.0", "flip-y"), "options");
+        assert_eq!(compiler_identity(), build_identity(PIPELINE_REVISION, NAGA_VERSION, MSL_LANGUAGE_VERSION, COMPILE_OPTIONS));
+    }
+
+    #[test]
+    fn the_recorded_compiler_version_matches_the_vendored_manifest() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../upstream/naga/Cargo.toml");
+        let text = std::fs::read_to_string(&manifest).expect("the vendored naga manifest is in the checkout");
+        let version = text
+            .lines()
+            .skip_while(|l| l.trim() != "[package]")
+            .find_map(|l| l.strip_prefix("version = "))
+            .map(|v| v.trim().trim_matches('"').to_string())
+            .expect("the manifest has a package version");
+        assert_eq!(version, NAGA_VERSION, "update NAGA_VERSION and bump PIPELINE_REVISION together");
+    }
+}
