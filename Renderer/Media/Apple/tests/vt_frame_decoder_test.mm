@@ -21,6 +21,7 @@
 
 #include <gtest/gtest.h>
 
+#include <mach/mach.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -502,6 +503,70 @@ TEST_F(VtFrameDecoderTest, SamplesThatAreNotVideoAreSkippedAndAStreamOfThemFails
     EXPECT_TRUE(failed) << "a stream of undecodable samples never failed";
     EXPECT_FALSE(error.empty());
     EXPECT_GE(decoder->skippedFrames(), 1u);
+}
+
+std::uint64_t PhysicalFootprintBytes()
+{
+    task_vm_info_data_t    info {};
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS) return 0;
+    return info.phys_footprint;
+}
+
+// A measurement, not a check: how fast the decoder runs through a real clip and how much memory it
+// holds while it does. `WALLPAPER_MACHINE_VIDEO_FILE` names an MP4 (any local one; the library's 4K
+// 60 fps clips are the demanding case), `WE_TEST_VT_IN_FLIGHT` and `WE_TEST_VT_EXTRA_BUFFERED`
+// override the decoder's bounds so a setting can be compared with another. Without a file it skips.
+TEST_F(VtFrameDecoderTest, ALocalClipDecodesWholeAtSpeedWithinItsMemoryBounds)
+{
+    const char* file = std::getenv("WALLPAPER_MACHINE_VIDEO_FILE");
+    if (file == nullptr || *file == '\0') GTEST_SKIP() << "WALLPAPER_MACHINE_VIDEO_FILE names no clip";
+    auto reader = OpenReader(file);
+    ASSERT_NE(reader, nullptr);
+    DecoderOptions options;
+    if (const char* value = std::getenv("WE_TEST_VT_IN_FLIGHT")) options.maxInFlight = static_cast<std::size_t>(std::atoi(value));
+    if (const char* value = std::getenv("WE_TEST_VT_EXTRA_BUFFERED")) options.extraBuffered = static_cast<std::size_t>(std::atoi(value));
+    auto decoder = MakeDecoder(*reader, options);
+    ASSERT_NE(decoder, nullptr);
+
+    const std::uint64_t base  = PhysicalFootprintBytes();
+    std::uint64_t       peak  = base;
+    std::size_t         count = 0;
+    std::vector<std::uint8_t> bytes;
+    std::string               error;
+    std::size_t               next = 0;
+    bool                      drained = false;
+    const auto                started = std::chrono::steady_clock::now();
+    while (true) {
+        while (next < reader->samples().size()) {
+            ASSERT_TRUE(reader->readSample(next, &bytes, nullptr));
+            const Sample& sample = reader->samples()[next];
+            const auto    result = decoder->submit(bytes.data(), bytes.size(), { sample.pts, sample.dts, sample.duration }, sample.sync, &error);
+            ASSERT_NE(result, VtFrameDecoder::SubmitResult::Failed) << error;
+            if (result == VtFrameDecoder::SubmitResult::Full) break;
+            ++next;
+        }
+        if (next >= reader->samples().size() && ! drained) {
+            ASSERT_TRUE(decoder->drain(&error)) << error;
+            drained = true;
+        }
+        DecodedFrame frame;
+        const auto   received = decoder->receive(&frame, std::chrono::milliseconds(20), &error);
+        if (received == VtFrameDecoder::ReceiveResult::Frame) {
+            ++count;
+            if (count % 16 == 0) peak = std::max(peak, PhysicalFootprintBytes());
+        } else if (received == VtFrameDecoder::ReceiveResult::EndOfStream) {
+            break;
+        } else {
+            ASSERT_NE(received, VtFrameDecoder::ReceiveResult::Failed) << error;
+        }
+    }
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    std::printf("[ vt ] %zu frames in %.2f s = %.0f frames/s; in flight %zu, extra %zu; footprint peak +%.0f MB; hardware %d; out of order %llu\n",
+                count, seconds, static_cast<double>(count) / seconds, options.maxInFlight, options.extraBuffered,
+                static_cast<double>(peak - base) / 1048576.0, decoder->usingHardware(),
+                static_cast<unsigned long long>(decoder->outOfOrderCompletions()));
+    EXPECT_EQ(count, reader->samples().size());
 }
 
 TEST_F(VtFrameDecoderTest, ParameterSetsInTheFirstKeyFrameStandInForAnEmptyRecord)

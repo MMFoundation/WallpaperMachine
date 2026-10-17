@@ -68,11 +68,14 @@ struct SampleTiming {
 };
 
 struct DecoderOptions {
-    /// Samples submitted and not yet decoded. Enough to keep the decoder busy.
-    std::size_t maxInFlight { 8 };
+    /// Samples submitted and not yet decoded. Two keep the decoder's hardware
+    /// busy: a 4K 60 fps clip decodes at the same speed with two in flight as with
+    /// eight, and about a quarter slower with one. Every one more is another
+    /// decoded picture allocated before anything wants it.
+    std::size_t maxInFlight { 2 };
     /// Decoded frames held for the consumer, beyond what display-order delivery
     /// itself needs (`ReorderDepth + 1`).
-    std::size_t extraBuffered { 3 };
+    std::size_t extraBuffered { 1 };
 };
 
 /// The deepest reordering a stream may need. H.264 and HEVC allow at most 16
