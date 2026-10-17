@@ -139,7 +139,7 @@ protected:
             std::string error;
             auto image = CreateVideoProjectImage(root, media.filename().string(), &error);
             ASSERT_NE(image, nullptr) << error;
-            auto source = CreateVideoTextureSource(*image, &error);
+            auto source = CreateVideoTextureSource(image, &error);
             ASSERT_NE(source, nullptr) << error;
             ASSERT_TRUE(source->prime(&error)) << error;
             const auto frame = source->currentFrame();
@@ -222,7 +222,7 @@ TEST_F(VideoDecoderSelection, ASoftwareOnlyCodecIsStillRejected) {
     std::string error;
     auto image = CreateVideoProjectImage(root, media.filename().string(), &error);
     ASSERT_NE(image, nullptr) << error;
-    auto source = CreateVideoTextureSource(*image, &error);
+    auto source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     EXPECT_FALSE(source->prime(&error));
     EXPECT_FALSE(error.empty());
@@ -240,7 +240,7 @@ TEST(AppleVideoFrame, LocalVideoImportsVisiblePixels) {
         std::string error;
         auto image = CreateVideoProjectImage(media.parent_path(), media.filename().string(), &error);
         ASSERT_NE(image, nullptr) << error;
-        auto source = CreateVideoTextureSource(*image, &error);
+        auto source = CreateVideoTextureSource(image, &error);
         ASSERT_NE(source, nullptr) << error;
         ASSERT_TRUE(source->prime(&error)) << error;
         const auto frame = source->currentFrame();

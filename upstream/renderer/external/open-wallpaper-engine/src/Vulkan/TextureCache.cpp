@@ -8,6 +8,7 @@
 #include "Image.hpp"
 #include "Platform/Apple/VideoFrameLease.hpp"
 #include "Video/SharedVideoSession.hpp"
+#include "Video/VideoMedia.hpp"
 #include "Core/MapSet.hpp"
 #include "Core/ArrayHelper.hpp"
 #include "Utils/AutoDeletor.hpp"
@@ -815,7 +816,7 @@ ImageSlotsRef TextureCache::CreateTex(Image& image, TextureUploadSynchronization
         // this returns a consumer handle onto that running decoder instead of
         // starting a second one. With sharing off it is a private source, as
         // before.
-        auto source = video::AcquireVideoTextureSource(image, &error);
+        auto source = video::AcquireVideoTextureSource(video::SnapshotVideoImage(image), &error);
         if (! source) {
             LOG_ERROR("failed to create FFmpeg video texture source for \"%s\": %s",
                       image.key.c_str(),

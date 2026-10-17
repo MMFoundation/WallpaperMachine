@@ -172,7 +172,7 @@ TEST_F(VideoSourceInput, DisplayMatrixSurvivesMetadataProbeAndFrameExtraction) {
         std::string error;
         auto image = CreateVideoProjectImage(project_dir, name, &error);
         ASSERT_NE(image, nullptr) << error;
-        auto source = CreateVideoTextureSource(*image, &error);
+        auto source = CreateVideoTextureSource(image, &error);
         ASSERT_NE(source, nullptr) << error;
         ASSERT_TRUE(source->prime(&error)) << error;
         const auto frame = source->currentFrame();
@@ -205,7 +205,7 @@ TEST_F(VideoSourceInput, PlainLocalFileIsDecodedWhereItLies) {
     EXPECT_EQ(image->header.width, kFrameWidth);
     EXPECT_EQ(image->header.height, kFrameHeight);
 
-    auto source = CreateVideoTextureSource(*image, &error);
+    auto source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     ASSERT_TRUE(source->prime(&error)) << error;
     EXPECT_TRUE(source->currentFrame().valid());
@@ -229,7 +229,7 @@ TEST_F(VideoSourceInput, LargeLocalFileIsNeverResident) {
     std::string error;
     auto        image = CreateVideoProjectImage(project_dir, "large.mp4", &error);
     ASSERT_NE(image, nullptr) << error;
-    auto source = CreateVideoTextureSource(*image, &error);
+    auto source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     ASSERT_TRUE(source->prime(&error)) << error;
     ASSERT_TRUE(source->currentFrame().valid());
@@ -257,7 +257,7 @@ TEST_F(VideoSourceInput, ConcurrentOpensOfOneFileEachGetTheirOwnDecoder) {
         threads.emplace_back([&, index]() {
             auto image = CreateVideoProjectImage(project_dir, "shared.mp4", &errors[index]);
             if (image == nullptr) return;
-            auto source = CreateVideoTextureSource(*image, &errors[index]);
+            auto source = CreateVideoTextureSource(image, &errors[index]);
             if (source == nullptr) return;
             if (!source->prime(&errors[index])) return;
             instance_ids[index] = source->sourceStats().instance_id;
@@ -291,7 +291,7 @@ TEST_F(VideoSourceInput, MissingMediaIsReportedAndNotOpened) {
     auto image = CreateVideoProjectImage(project_dir, "vanishing.mp4", &error);
     ASSERT_NE(image, nullptr) << error;
     std::filesystem::remove(media);
-    auto source = CreateVideoTextureSource(*image, &error);
+    auto source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     error.clear();
     EXPECT_FALSE(source->prime(&error));
@@ -326,7 +326,7 @@ TEST_F(VideoSourceInput, CorruptMediaFailsWithoutTouchingTheCache) {
     // an unchecked decode.
     auto image  = MakeInlinePayloadImage("corrupt-inline", ReadWholeFile(media));
     error.clear();
-    auto source = CreateVideoTextureSource(*image, &error);
+    auto source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     error.clear();
     EXPECT_FALSE(source->prime(&error));
@@ -383,7 +383,7 @@ TEST_F(VideoSourceInput, InPackagePayloadIsPublishedWhole) {
 
     auto        image = MakeInlinePayloadImage("packaged.mp4", payload);
     std::string error;
-    auto        source = CreateVideoTextureSource(*image, &error);
+    auto        source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     ASSERT_TRUE(source->prime(&error)) << error;
     EXPECT_TRUE(source->currentFrame().valid());
@@ -409,7 +409,7 @@ TEST_F(VideoSourceInput, ConcurrentPackagedOpensPublishExactlyOneFile) {
     for (int index = 0; index < kOpeners; ++index) {
         threads.emplace_back([&, index]() {
             auto image  = MakeInlinePayloadImage("packaged-race.mp4", payload);
-            auto source = CreateVideoTextureSource(*image, &errors[index]);
+            auto source = CreateVideoTextureSource(image, &errors[index]);
             if (source == nullptr) return;
             if (!source->prime(&errors[index])) return;
             if (!source->currentFrame().valid()) return;
@@ -434,7 +434,7 @@ TEST_F(VideoSourceInput, EvictingTheCacheDoesNotDisturbAnOpenSource) {
 
     auto        image = MakeInlinePayloadImage("evicted.mp4", payload);
     std::string error;
-    auto        source = CreateVideoTextureSource(*image, &error);
+    auto        source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     ASSERT_TRUE(source->prime(&error)) << error;
 
@@ -457,11 +457,84 @@ TEST_F(VideoSourceInput, EvictingTheCacheDoesNotDisturbAnOpenSource) {
     // the hole left by the eviction.
     auto second_image  = MakeInlinePayloadImage("evicted.mp4", payload);
     error.clear();
-    auto second_source = CreateVideoTextureSource(*second_image, &error);
+    auto second_source = CreateVideoTextureSource(second_image, &error);
     ASSERT_NE(second_source, nullptr) << error;
     ASSERT_TRUE(second_source->prime(&error)) << error;
     ASSERT_TRUE(std::filesystem::exists(published));
     EXPECT_EQ(std::filesystem::file_size(published), payload.size());
+}
+
+TEST_F(VideoSourceInput, ASourceSharesAnInlinePayloadInsteadOfCopyingIt) {
+    const auto media = project_dir / "shared-payload.mp4";
+    ASSERT_TRUE(WriteSyntheticVideo(media, 96, "shared-payload"));
+    const auto payload = ReadWholeFile(media);
+    ASSERT_GT(payload.size(), 32u * 1024u * 1024u);
+    // The image is built before the footprint is read, so what is measured is
+    // what making a source adds to a payload that is already resident.
+    auto image = MakeInlinePayloadImage("shared-payload.mp4", payload);
+
+    const uint64_t before = PhysicalFootprintBytes();
+    std::string    error;
+    auto           source = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(source, nullptr) << error;
+    const uint64_t after  = PhysicalFootprintBytes();
+    const uint64_t growth = after > before ? after - before : 0;
+    EXPECT_LT(growth, 16u * 1024u * 1024u)
+        << "a source on a " << payload.size() << " byte payload grew the footprint by " << growth
+        << " bytes";
+}
+
+TEST_F(VideoSourceInput, ASourceKeepsItsPayloadWhenTheSceneLetsGoOfTheImage) {
+    const auto media = project_dir / "dropped.mp4";
+    ASSERT_TRUE(WriteSyntheticVideo(media, 2, "dropped-" + std::to_string(::getpid())));
+    const auto payload = ReadWholeFile(media);
+    ASSERT_FALSE(payload.empty());
+
+    auto                  image = MakeInlinePayloadImage("dropped.mp4", payload);
+    std::weak_ptr<Image>  watcher = image;
+    std::string           error;
+    auto                  source = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(source, nullptr) << error;
+
+    // A source that a rebuild of the render graph holds is not opened until the
+    // next graph asks for it, and the scene's own image is long gone by then.
+    image.reset();
+    EXPECT_FALSE(watcher.expired()) << "the source dropped bytes it has not used yet";
+    ASSERT_TRUE(source->prime(&error)) << error;
+    EXPECT_TRUE(source->currentFrame().valid());
+
+    // Once the payload is staged for the decoder nothing needs it, and a source
+    // that kept the image alive would hold a whole second copy of the video for
+    // as long as it plays.
+    EXPECT_TRUE(watcher.expired()) << "the source kept the payload after staging it";
+    VideoPlaybackState state;
+    state.scene_elapsed_seconds = 0.5;
+    error.clear();
+    EXPECT_TRUE(source->syncPlayback(state, &error)) << error;
+    error.clear();
+    EXPECT_TRUE(source->refreshFrame(&error)) << error;
+    EXPECT_TRUE(source->currentFrame().valid());
+}
+
+TEST_F(VideoSourceInput, TwoSourcesOnOnePayloadPlayIndependently) {
+    const auto media = project_dir / "twice.mp4";
+    ASSERT_TRUE(WriteSyntheticVideo(media, 2, "twice-" + std::to_string(::getpid())));
+    const auto payload = ReadWholeFile(media);
+    ASSERT_FALSE(payload.empty());
+
+    auto        image = MakeInlinePayloadImage("twice.mp4", payload);
+    std::string error;
+    auto        first  = CreateVideoTextureSource(image, &error);
+    auto        second = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(first, nullptr) << error;
+    ASSERT_NE(second, nullptr) << error;
+    image.reset();
+
+    ASSERT_TRUE(first->prime(&error)) << error;
+    first.reset();
+    // The first source's staging and teardown left the shared bytes alone.
+    ASSERT_TRUE(second->prime(&error)) << error;
+    EXPECT_TRUE(second->currentFrame().valid());
 }
 
 TEST_F(VideoSourceInput, DestroyingASourceMidDecodeCancelsPromptly) {
@@ -472,7 +545,7 @@ TEST_F(VideoSourceInput, DestroyingASourceMidDecodeCancelsPromptly) {
     std::string error;
     auto        image = CreateVideoProjectImage(project_dir, "cancelled.mp4", &error);
     ASSERT_NE(image, nullptr) << error;
-    auto source = CreateVideoTextureSource(*image, &error);
+    auto source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     ASSERT_TRUE(source->prime(&error)) << error;
 
@@ -486,7 +559,7 @@ TEST_F(VideoSourceInput, DestroyingASourceMidDecodeCancelsPromptly) {
     // A source that is dropped before it is ever primed opens nothing at all.
     auto unprimed_image  = CreateVideoProjectImage(project_dir, "cancelled.mp4", &error);
     ASSERT_NE(unprimed_image, nullptr) << error;
-    auto unprimed_source = CreateVideoTextureSource(*unprimed_image, &error);
+    auto unprimed_source = CreateVideoTextureSource(unprimed_image, &error);
     ASSERT_NE(unprimed_source, nullptr) << error;
     unprimed_source.reset();
 
@@ -502,7 +575,7 @@ protected:
         auto        image = CreateVideoProjectImage(project_dir, name, &error);
         EXPECT_NE(image, nullptr) << error;
         if (image == nullptr) return nullptr;
-        auto source = CreateVideoTextureSource(*image, &error);
+        auto source = CreateVideoTextureSource(image, &error);
         EXPECT_NE(source, nullptr) << error;
         return source;
     }

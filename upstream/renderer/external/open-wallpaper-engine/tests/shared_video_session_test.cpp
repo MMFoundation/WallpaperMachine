@@ -98,9 +98,9 @@ TEST_F(SharedVideoSessionTest, EquivalentConsumersShareOneDecoder) {
     ASSERT_NE(image, nullptr);
 
     std::string error;
-    auto        first = AcquireVideoTextureSource(*image, &error);
+    auto        first = AcquireVideoTextureSource(image, &error);
     ASSERT_NE(first, nullptr) << error;
-    auto second = AcquireVideoTextureSource(*image, &error);
+    auto second = AcquireVideoTextureSource(image, &error);
     ASSERT_NE(second, nullptr) << error;
 
     EXPECT_EQ(SharedVideoDecodeSessionCount(), 1u);
@@ -121,7 +121,7 @@ TEST_F(SharedVideoSessionTest, ConcurrentConsumersReceiveTheSameInitializedFrame
     std::array<std::string, count> errors;
     std::array<bool, count> ready {};
     for (size_t i = 0; i < count; ++i) {
-        sources[i] = AcquireVideoTextureSource(*image, &errors[i]);
+        sources[i] = AcquireVideoTextureSource(image, &errors[i]);
         ASSERT_NE(sources[i], nullptr) << errors[i];
     }
     std::barrier start(static_cast<ptrdiff_t>(count));
@@ -171,9 +171,9 @@ TEST_F(SharedVideoSessionTest, SameFileNameInDifferentProjectsIsNotShared) {
     EXPECT_EQ(first_image->key, second_image->key);
     EXPECT_NE(first_image->videoFilePath, second_image->videoFilePath);
 
-    auto first = AcquireVideoTextureSource(*first_image, &error);
+    auto first = AcquireVideoTextureSource(first_image, &error);
     ASSERT_NE(first, nullptr) << error;
-    auto second = AcquireVideoTextureSource(*second_image, &error);
+    auto second = AcquireVideoTextureSource(second_image, &error);
     ASSERT_NE(second, nullptr) << error;
 
     EXPECT_EQ(SharedVideoDecodeSessionCount(), 2u);
@@ -187,9 +187,9 @@ TEST_F(SharedVideoSessionTest, PausingOneSurfaceLeavesTheOtherPlaying) {
     ASSERT_NE(image, nullptr);
 
     std::string error;
-    auto        playing = AcquireVideoTextureSource(*image, &error);
+    auto        playing = AcquireVideoTextureSource(image, &error);
     ASSERT_NE(playing, nullptr) << error;
-    auto paused = AcquireVideoTextureSource(*image, &error);
+    auto paused = AcquireVideoTextureSource(image, &error);
     ASSERT_NE(paused, nullptr) << error;
     ASSERT_TRUE(playing->prime(&error)) << error;
 
@@ -222,9 +222,9 @@ TEST_F(SharedVideoSessionTest, AFrameStaysValidAfterTheDecoderMovesOn) {
     ASSERT_NE(image, nullptr);
 
     std::string error;
-    auto        holder = AcquireVideoTextureSource(*image, &error);
+    auto        holder = AcquireVideoTextureSource(image, &error);
     ASSERT_NE(holder, nullptr) << error;
-    auto driver = AcquireVideoTextureSource(*image, &error);
+    auto driver = AcquireVideoTextureSource(image, &error);
     ASSERT_NE(driver, nullptr) << error;
     ASSERT_TRUE(holder->prime(&error)) << error;
 
@@ -261,9 +261,9 @@ TEST_F(SharedVideoSessionTest, AnIncompatibleRateSplitsOntoItsOwnDecoder) {
     ASSERT_NE(image, nullptr);
 
     std::string error;
-    auto        normal = AcquireVideoTextureSource(*image, &error);
+    auto        normal = AcquireVideoTextureSource(image, &error);
     ASSERT_NE(normal, nullptr) << error;
-    auto faster = AcquireVideoTextureSource(*image, &error);
+    auto faster = AcquireVideoTextureSource(image, &error);
     ASSERT_NE(faster, nullptr) << error;
     ASSERT_TRUE(normal->prime(&error)) << error;
 
@@ -284,9 +284,9 @@ TEST_F(SharedVideoSessionTest, TheDecoderOutlivesOneConsumerAndNotBoth) {
     ASSERT_NE(image, nullptr);
 
     std::string error;
-    auto        first = AcquireVideoTextureSource(*image, &error);
+    auto        first = AcquireVideoTextureSource(image, &error);
     ASSERT_NE(first, nullptr) << error;
-    auto second = AcquireVideoTextureSource(*image, &error);
+    auto second = AcquireVideoTextureSource(image, &error);
     ASSERT_NE(second, nullptr) << error;
     ASSERT_TRUE(first->prime(&error)) << error;
     const auto instance = first->sourceStats().instance_id;
@@ -312,9 +312,9 @@ TEST_F(SharedVideoSessionTest, SharingOffGivesEveryConsumerItsOwnDecoder) {
     ASSERT_NE(image, nullptr);
 
     std::string error;
-    auto        first = AcquireVideoTextureSource(*image, &error);
+    auto        first = AcquireVideoTextureSource(image, &error);
     ASSERT_NE(first, nullptr) << error;
-    auto second = AcquireVideoTextureSource(*image, &error);
+    auto second = AcquireVideoTextureSource(image, &error);
     ASSERT_NE(second, nullptr) << error;
     ASSERT_TRUE(first->prime(&error)) << error;
     ASSERT_TRUE(second->prime(&error)) << error;
@@ -335,7 +335,7 @@ TEST_F(SharedVideoSessionTest, InPackageMediaIsNeverShared) {
     image->header.height          = 64;
 
     std::string error;
-    auto        source = AcquireVideoTextureSource(*image, &error);
+    auto        source = AcquireVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     EXPECT_EQ(SharedVideoDecodeSessionCount(), 0u);
 }

@@ -102,7 +102,7 @@ std::filesystem::path VideoCacheDirectory(std::string* error)
 /// nothing or sees the finished file - never a half-written one. Losing the
 /// rename race is success: the winner's file holds the same bytes.
 std::filesystem::path WriteVideoPayloadToTemp(std::string_view debug_label,
-                                              const std::vector<char>& payload,
+                                              std::span<const char> payload,
                                               std::string* error)
 {
     if (payload.empty()) {
@@ -114,7 +114,7 @@ std::filesystem::path WriteVideoPayloadToTemp(std::string_view debug_label,
     if (temp_dir.empty()) return {};
 
     std::error_code ec;
-    const std::string digest = utils::genSha1(std::span(payload.data(), payload.size()));
+    const std::string digest = utils::genSha1(payload);
     const std::filesystem::path media_path = temp_dir / (digest + ".mp4");
     const auto payload_size = static_cast<uintmax_t>(payload.size());
     if (std::filesystem::exists(media_path, ec) &&
@@ -331,33 +331,39 @@ public:
         }
     }
 
-    explicit Impl(const Image& image)
-        : m_debug_label(image.key)
+    explicit Impl(std::shared_ptr<const Image> image)
+        : m_debug_label(image != nullptr ? image->key : std::string())
     {
-        if (!image.header.isVideo) {
+        if (image == nullptr) {
+            m_initial_error = "video texture has no image";
+            return;
+        }
+        if (!image->header.isVideo) {
             m_initial_error = "image is not marked as a video texture";
             return;
         }
-        if (!image.videoFilePath.empty()) {
+        if (!image->videoFilePath.empty()) {
             // The media already is a file: the decoder opens it where it lies,
             // so this source never holds the video's bytes at all.
-            m_media_path = image.videoFilePath;
+            m_media_path = image->videoFilePath;
             return;
         }
-        if (image.slots.empty() || image.slots.front().mipmaps.empty()) {
+        if (image->slots.empty() || image->slots.front().mipmaps.empty()) {
             m_initial_error = "video texture has no mip payload";
             return;
         }
 
-        const auto& mip = image.slots.front().mipmaps.front();
+        const auto& mip = image->slots.front().mipmaps.front();
         if (mip.data == nullptr || mip.size <= 0) {
             m_initial_error = "video texture payload is empty";
             return;
         }
 
-        m_payload.assign(
-            reinterpret_cast<const char*>(mip.data.get()),
-            reinterpret_cast<const char*>(mip.data.get()) + static_cast<size_t>(mip.size));
+        // The bytes stay where the parser put them; this source shares the
+        // image they are in. That is what lets a source outlive the scene's own
+        // reference, which a source held across a rebuild of the render graph
+        // does before anything has opened it.
+        m_payload = std::move(image);
     }
 
     ~Impl()
@@ -706,16 +712,25 @@ private:
     /// Makes the media openable by path.
     ///
     /// A file-backed source already has its path and keeps it. An inline
-    /// payload is extracted once and then released, so the decoder does not go
-    /// on holding a whole second copy of the video for the rest of playback.
+    /// payload is extracted once and then let go, so the decoder does not go
+    /// on holding the video's bytes, and keeping the image alive, for the rest
+    /// of playback.
     bool resolveMediaPath(std::string* error)
     {
         if (!m_media_path.empty()) return true;
+        if (m_payload == nullptr) {
+            SetError(error, "video texture payload is empty");
+            return false;
+        }
 
-        m_media_path = WriteVideoPayloadToTemp(m_debug_label, m_payload, error);
+        // The constructor checked that the first mip exists and is not empty.
+        const auto& mip = m_payload->slots.front().mipmaps.front();
+        m_media_path = WriteVideoPayloadToTemp(
+            m_debug_label,
+            std::span(reinterpret_cast<const char*>(mip.data.get()), static_cast<size_t>(mip.size)),
+            error);
         if (m_media_path.empty()) return false;
-        m_payload.clear();
-        m_payload.shrink_to_fit();
+        m_payload.reset();
         return true;
     }
 
@@ -1198,7 +1213,10 @@ private:
 
 private:
     std::string                      m_debug_label;
-    std::vector<char>                m_payload;
+    /// The image whose first mip holds an inline payload, shared with whoever
+    /// parsed it, until the payload has been staged for FFmpeg. Null for a
+    /// file-backed source and once the file exists.
+    std::shared_ptr<const Image>     m_payload;
     std::filesystem::path            m_media_path;
     std::string                      m_initial_error;
     mutable std::mutex               m_mutex;
@@ -1259,8 +1277,8 @@ private:
     VideoDecodePump           m_pump { m_decode_source };
 };
 
-FfmpegVideoTextureSource::FfmpegVideoTextureSource(const Image& image)
-    : m_impl(std::make_unique<Impl>(image))
+FfmpegVideoTextureSource::FfmpegVideoTextureSource(std::shared_ptr<const Image> image)
+    : m_impl(std::make_unique<Impl>(std::move(image)))
 {
 }
 
@@ -1321,15 +1339,19 @@ VideoSourceStats FfmpegVideoTextureSource::sourceStats() const
     return m_impl->sourceStats();
 }
 
-std::shared_ptr<VideoTextureSource> CreateVideoTextureSource(const Image& image,
+std::shared_ptr<VideoTextureSource> CreateVideoTextureSource(std::shared_ptr<const Image> image,
                                                              std::string* error)
 {
-    if (!image.header.isVideo) {
+    if (image == nullptr) {
+        SetError(error, "video texture has no image");
+        return nullptr;
+    }
+    if (!image->header.isVideo) {
         SetError(error, "image is not marked as a video texture");
         return nullptr;
     }
 
-    return std::make_shared<FfmpegVideoTextureSource>(image);
+    return std::make_shared<FfmpegVideoTextureSource>(std::move(image));
 }
 
 bool ProbeVideoFileDimensions(std::string_view media_path,

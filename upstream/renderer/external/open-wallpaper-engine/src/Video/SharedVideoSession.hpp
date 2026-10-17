@@ -45,7 +45,7 @@ std::uint32_t SharedVideoDecodeConsumerCount();
 /// The returned handle is always owned by exactly one consumer: releasing it
 /// releases that consumer's claim, and the underlying decoder is destroyed once
 /// the last claim goes away.
-std::shared_ptr<VideoTextureSource> AcquireVideoTextureSource(const Image& image,
+std::shared_ptr<VideoTextureSource> AcquireVideoTextureSource(std::shared_ptr<const Image> image,
                                                               std::string* error);
 
 /// Drops every session with no remaining consumers. Called when a renderer

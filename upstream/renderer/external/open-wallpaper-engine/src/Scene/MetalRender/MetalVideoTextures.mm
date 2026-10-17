@@ -432,7 +432,7 @@ bool MetalVideoTextures::prepare(Scene&                          scene,
             // Through the registry, exactly as the compatibility backend's texture
             // cache does: with shared decode off this is a private source per
             // call, and with it on an equivalent running decoder is reused.
-            auto source = video::AcquireVideoTextureSource(*image, &source_error);
+            auto source = video::AcquireVideoTextureSource(image, &source_error);
             if (! source) {
                 return SetError(error,
                                 "failed to open video texture \"" + key + "\": " + source_error);

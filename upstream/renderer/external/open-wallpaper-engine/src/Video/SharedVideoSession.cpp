@@ -313,13 +313,18 @@ public:
         return instance;
     }
 
-    std::shared_ptr<VideoTextureSource> acquire(const Image& image, std::string* error) {
+    std::shared_ptr<VideoTextureSource> acquire(std::shared_ptr<const Image> image,
+                                                std::string* error) {
+        if (! image) {
+            if (error != nullptr) *error = "video texture has no image";
+            return {};
+        }
         // Sharing needs a file on disk: an in-memory payload cannot be reopened
         // for a later split, and its identity is not a path. Those stay private,
         // which is the behaviour that existed before this registry.
-        auto identity = IdentifyMedia(image.videoFilePath);
+        auto identity = IdentifyMedia(image->videoFilePath);
         if (! SharedVideoDecodeEnabled() || ! identity.has_value()) {
-            return CreateVideoTextureSource(image, error);
+            return CreateVideoTextureSource(std::move(image), error);
         }
 
         const auto    key         = identity->key();
@@ -331,7 +336,7 @@ public:
             return std::make_shared<SharedVideoSourceHandle>(existing->second, consumer_id);
         }
 
-        auto source = CreateVideoTextureSource(image, error);
+        auto source = CreateVideoTextureSource(std::move(image), error);
         if (! source) return {};
         auto session = std::make_shared<SharedVideoSession>(*identity, std::move(source));
         session->addConsumer(consumer_id);
@@ -481,9 +486,9 @@ std::uint32_t SharedVideoDecodeConsumerCount() {
     return SharedVideoRegistry::Instance().consumerCount();
 }
 
-std::shared_ptr<VideoTextureSource> AcquireVideoTextureSource(const Image& image,
+std::shared_ptr<VideoTextureSource> AcquireVideoTextureSource(std::shared_ptr<const Image> image,
                                                               std::string* error) {
-    return SharedVideoRegistry::Instance().acquire(image, error);
+    return SharedVideoRegistry::Instance().acquire(std::move(image), error);
 }
 
 void ReleaseIdleVideoSessions() { SharedVideoRegistry::Instance().releaseIdle(); }

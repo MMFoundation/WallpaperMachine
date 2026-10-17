@@ -109,7 +109,15 @@ public:
     [[nodiscard]] virtual VideoSourceStats sourceStats() const { return {}; }
 };
 
-std::shared_ptr<VideoTextureSource> CreateVideoTextureSource(const Image& image,
+/// Opens a source on the media `image` describes: the file it names, or the
+/// payload in its first mip.
+///
+/// A payload is shared, not copied: the source holds a reference on `image`
+/// for as long as it still needs the bytes, so the caller may drop its own
+/// reference, and a source that is held across a rebuild of the render graph
+/// before anything has opened it still has what it was given. `image` must not
+/// be modified while a source shares it.
+std::shared_ptr<VideoTextureSource> CreateVideoTextureSource(std::shared_ptr<const Image> image,
                                                              std::string* error);
 
 } // namespace video

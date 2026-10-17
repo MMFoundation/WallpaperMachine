@@ -758,9 +758,10 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
   frames are drawn; the head of the clip is on screen while the seek and the catching up to the
   clock take, 0.35 to 1.5 s on the clips with a keyframe every 250 frames and up to 4.2 s on the
   one with every 600 ([video clock](../features/scene-rendering.md)). The open of a video
-  packaged in a scene reads, copies and hashes the whole file (`WriteVideoPayloadToTemp`, about
-  7 ms a megabyte: 0.2 to 0.4 s on a 53 MB clip, 2 s on a 319 MB one), which every open of one
-  pays. Not done: resizing a text card's buffers in place, as Wallpaper Engine does, so a card
+  packaged in a scene reads, hashes and writes the whole file (`WriteVideoPayloadToTemp`, staged
+  from the parser's buffer, which the source shares rather than copies; about 7 ms a megabyte:
+  0.2 to 0.4 s on a 53 MB clip, 2 s on a 319 MB one, measured before the copy was dropped), which
+  every open of one pays. Not done: resizing a text card's buffers in place, as Wallpaper Engine does, so a card
   that changes size in texels still builds the graph again (about 0.5 ms of lowering and the
   compile of every pass, 39 to 45 ms on a scene of 72 passes). The Wallpaper Engine frame this
   was found against is a still one, so no frame of Wallpaper Engine's shows a video moving
