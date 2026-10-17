@@ -681,13 +681,24 @@ the block (NOTES 93).
     aborted the process). The layer cannot start a thread (R89) and cannot patch naga, so
     `backend::depth::stack_cost` measures the legalized text before it is handed over: each open
     bracket adds a weight (block 4, parenthesis or index 3), each operator or member access in an
-    expression still being read adds 1, each `else` of a chain adds 3, and the largest running total is
-    the measure. Over `STACK_BUDGET` (128) the stage fails at the `GlslParse` pass with a message that
-    gives the measure and the limit. Calibration (release build, naga 29.0.3): one unit costs at most
+    expression still being read adds 1, each statement head (`if`, `for`, `while`, `switch`, `do`) and
+    each `else` link adds 3 until its body ends (the `;` or the closing `}` of the body, unless an
+    `else` follows; a `do` until its `while`), and the largest running total is the measure. Without
+    that last rule `if (c) if (c) ... x = 1.0;` (300 deep, no bracket), an unbraced `else if` chain
+    (280 links), and the same with `for`, `while` and `do` overflowed the stack; a review found them
+    after the first version, which only counted braced bodies. Over `STACK_BUDGET` (128) the stage
+    fails at the `GlslParse` pass with a message that gives the measure and the limit.
+    Nesting of types is the one recursion with no bracket at all: a chain of structures each
+    containing the previous overflowed at about 1,900 levels. `depth::struct_depth` reads the longest
+    containment chain from the text (members name structures declared before them, so one pass) and
+    a stage over `STRUCT_DEPTH_LIMIT` (64; real shaders nest two or three) fails the same way. The
+    ABI tests run both families of hostile text, and a calibration test takes the deepest accepted
+    nesting of ten shapes (statements, blocks, parentheses, sums, structures) and compiles it on the
+    small stack; a braced `if` costs 7 a level, so about 17 nested braced `if`s pass. Calibration (release build, naga 29.0.3): one unit costs at most
     about a kilobyte in the worst shape; a random mix of nested statements and expressions at a
     measure of 128 (2,200 accepted inputs over five seeds, all compiled) needs between 96 and 128 KiB, so
     the budget has a margin of four on 512 KiB. The deepest shipped stage measures 47, the deepest
-    workshop stage 35 (the corpus tests print it and fail above 64). An unoptimised build needs far
+    workshop stage 37 (the corpus tests print it and fail above 64). An unoptimised build needs far
     more stack (a mixed input at 128 overflowed 2 MiB), so the ABI test runs on 16 MiB in a debug
     build and on 512 KiB in release, with `WM_SHADER_TEST_STACK_KIB` to probe; the release bound is
     the one that is specified. The hostile ABI test passes in release down to 256 KiB (128 KiB

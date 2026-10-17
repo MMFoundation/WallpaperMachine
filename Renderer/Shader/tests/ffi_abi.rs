@@ -934,10 +934,37 @@ fn hostile_nesting_fails_on_a_small_stack_without_crashing() {
         .spawn(|| {
             let parens = format!("float x = {}1.0{};", "(".repeat(1000), ")".repeat(1000));
             let deep_if = format!("{}{}", "#if 1\n".repeat(200), "#endif\n".repeat(200));
+            // Nesting with no bracket to count: statements inside statements, and structures
+            // inside structures (R91).
+            let unbraced = |head: &str, n: usize| {
+                format!("void main() {{ float x = 0.0; {}x = 1.0; gl_FragColor = vec4(x); }}", format!("{head} ").repeat(n))
+            };
+            let else_chain = format!(
+                "void main() {{ float x = 0.0; if (x < 0.0) x = 1.0; {}gl_FragColor = vec4(x); }}",
+                "else if (x < 5.0) x = 2.0; ".repeat(2000)
+            );
+            let do_nest = format!(
+                "void main() {{ float x = 0.0; {}x = 1.0; {}gl_FragColor = vec4(x); }}",
+                "do ".repeat(2000),
+                "while (x < 1.0); ".repeat(2000)
+            );
+            let struct_chain = {
+                let mut text = String::from("struct S0 { float a; };\n");
+                for i in 1..3000 {
+                    text.push_str(&format!("struct S{i} {{ S{} a; }};\n", i - 1));
+                }
+                text + "void main() { gl_FragColor = vec4(1.0); }"
+            };
             let fragments = [
                 format!("{parens}\nvoid main() {{ gl_FragColor = vec4(x); }}"),
                 format!("{deep_if}void main() {{ gl_FragColor = vec4(1.0); }}"),
                 format!("void main() {{ gl_FragColor = vec4({}1.0{}); }}", "(".repeat(5000), ")".repeat(5000)),
+                unbraced("if (x < 5.0)", 2000),
+                unbraced("for (;;)", 2000),
+                unbraced("while (x < 1.0)", 2000),
+                else_chain,
+                do_nest,
+                struct_chain,
             ];
             for fragment in &fragments {
                 // The outcome (success or a failure text) does not matter; surviving does.
@@ -964,6 +991,61 @@ fn hostile_nesting_fails_on_a_small_stack_without_crashing() {
         })
         .unwrap();
     handle.join().expect("no crash on a 512 KiB stack");
+}
+
+#[test]
+fn the_deepest_nesting_the_guard_accepts_still_compiles_on_a_small_stack() {
+    // The guard's budget is calibrated against the compiler's stack use: for each shape, the
+    // largest nesting the measure lets through must be translated, not overflow (R91).
+    let kib: usize = std::env::var("WM_SHADER_TEST_STACK_KIB")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(if cfg!(debug_assertions) { 16 * 1024 } else { 512 });
+    let handle = thread::Builder::new()
+        .stack_size(kib * 1024)
+        .spawn(|| {
+            use wm_shader::backend::depth::{STACK_BUDGET, STRUCT_DEPTH_LIMIT, stack_cost};
+            let body = |inner: String| format!("void main() {{ float x = 0.0; {inner} gl_FragColor = vec4(x); }}");
+            type Shape = (&'static str, Box<dyn Fn(usize) -> String>);
+            let shapes: Vec<Shape> = vec![
+                ("if", Box::new(move |n| body(format!("{}x = 1.0;", "if (x < 5.0) ".repeat(n))))),
+                ("for", Box::new(move |n| body(format!("{}x = 1.0;", "for (int i = 0; i < 1; i++) ".repeat(n))))),
+                ("while", Box::new(move |n| body(format!("{}x = 1.0;", "while (x < 0.0) ".repeat(n))))),
+                ("do", Box::new(move |n| body(format!("{}x = 1.0; {}", "do ".repeat(n), "while (x < 0.0); ".repeat(n))))),
+                ("else if", Box::new(move |n| body(format!("if (x < 0.0) x = 1.0; {}", "else if (x < 5.0) x = 2.0; ".repeat(n))))),
+                ("blocks", Box::new(move |n| body(format!("{}x = 1.0;{}", "{ ".repeat(n), " }".repeat(n))))),
+                ("braced if", Box::new(move |n| body(format!("{}x = 1.0;{}", "if (x < 5.0) { ".repeat(n), " }".repeat(n))))),
+                ("parentheses", Box::new(move |n| body(format!("x = {}1.0{};", "(".repeat(n), ")".repeat(n))))),
+                ("sum", Box::new(move |n| body(format!("x = {};", vec!["x"; n].join(" + "))))),
+                (
+                    "structs",
+                    Box::new(move |n| {
+                        let mut text = String::from("struct S0 { float a; };\n");
+                        for i in 1..n {
+                            text.push_str(&format!("struct S{i} {{ S{} a; }};\n", i - 1));
+                        }
+                        text + "void main() { gl_FragColor = vec4(1.0); }"
+                    }),
+                ),
+            ];
+            for (name, make) in &shapes {
+                let accepted = |n: usize| {
+                    let text = make(n);
+                    stack_cost(&text) <= STACK_BUDGET && wm_shader::backend::depth::struct_depth(&text) <= STRUCT_DEPTH_LIMIT
+                };
+                let (mut low, mut high) = (1usize, 4000usize);
+                assert!(accepted(low), "{name}");
+                while low + 1 < high {
+                    let mid = (low + high) / 2;
+                    if accepted(mid) { low = mid } else { high = mid }
+                }
+                let c = compile_plain(&request(MINIMAL_VERTEX, &make(low)));
+                // naga may still refuse a legal depth of its own (a status of error); surviving is the point.
+                println!("{name}: accepted down to {low}, status {}", c.status);
+            }
+        })
+        .unwrap();
+    handle.join().expect("the deepest accepted nesting must not crash a small stack");
 }
 
 #[test]

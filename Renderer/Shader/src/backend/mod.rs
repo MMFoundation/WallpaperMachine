@@ -104,6 +104,20 @@ pub fn compile_glsl(kind: StageKind, glsl: &str) -> Result<CompiledStage, Shader
             glsl,
         ));
     }
+    let nesting = depth::struct_depth(glsl);
+    if nesting > depth::STRUCT_DEPTH_LIMIT {
+        return Err(failure(
+            kind,
+            Pass::GlslParse,
+            format!(
+                "the {} source nests structure types too deeply to translate (depth {nesting}, limit {})",
+                kind.name(),
+                depth::STRUCT_DEPTH_LIMIT
+            ),
+            None,
+            glsl,
+        ));
+    }
     let mut front = Frontend::default();
     let module = front.parse(&GlslOptions::from(naga_stage(kind)), glsl).map_err(|errors| {
         let first = errors.errors.first();
