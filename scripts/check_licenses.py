@@ -558,8 +558,28 @@ def inventory_components(engine, build_script):
 CRATE_LINE = re.compile(r"^(?P<name>\S+) v(?P<version>\S+)(?: \((?P<where>[^)]*)\))?\|(?P<license>.*?)(?: \(\*\))?$")
 
 
+def is_vendored_crate(where):
+    """True for a path crate vendored under `upstream/` outside the renderer workspace (naga).
+
+    `cargo tree` prints every path crate with its directory, so a vendored third-party copy looks
+    like a workspace member; it is the directory that tells them apart.
+    """
+    path = Path(where)
+    try:
+        parts = path.relative_to(ROOT).parts
+    except ValueError:
+        parts = path.parts
+    if "upstream" not in parts:
+        return False
+    inside = parts[parts.index("upstream") + 1:]
+    return bool(inside) and inside[0] != RENDERER.name
+
+
 def parse_cargo_tree(text):
-    """Components from `cargo tree --prefix none -f "{p}|{l}"`: duplicates (`(*)`) folded, workspace crates first party."""
+    """Components from `cargo tree --prefix none -f "{p}|{l}"`: duplicates (`(*)`) folded, workspace crates first party.
+
+    A vendored path crate (`is_vendored_crate`) is third party and keeps the license its Cargo.toml declares.
+    """
     seen = {}
     for line in text.splitlines():
         match = CRATE_LINE.match(line.strip())
@@ -569,7 +589,7 @@ def parse_cargo_tree(text):
         key = (name, version)
         if key in seen:
             continue
-        first_party = where is not None and where.startswith("/")
+        first_party = where is not None and where.startswith("/") and not is_vendored_crate(where)
         license = match["license"].strip() or None
         resolved, source = with_license(name, declared=license)
         seen[key] = Component(name, "first-party" if first_party else "crate", "crates", version, resolved,

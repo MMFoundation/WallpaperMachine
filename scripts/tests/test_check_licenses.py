@@ -185,6 +185,40 @@ class CargoTreeTests(unittest.TestCase):
         self.assertEqual(check_licenses.assess(by_name["rustc-demangle"])[0], "ok")
         self.assertEqual(check_licenses.assess(by_name["shadow-rs"])[1], ("apache",))
 
+    def test_a_vendored_path_crate_is_third_party_with_the_license_its_manifest_declares(self):
+        text = (
+            "wallpaper-core v0.2.0 (/work/upstream/renderer/crates/core)|GPL-2.0-only\n"
+            "naga v29.0.3 (/work/upstream/naga)|MIT OR Apache-2.0\n"
+            "naga v29.0.3 (/work/upstream/naga)|MIT OR Apache-2.0 (*)\n"
+            "cfg-if v1.0.4|MIT OR Apache-2.0\n"
+        )
+        components = {c.name: c for c in check_licenses.parse_cargo_tree(text)}
+        self.assertEqual(components["wallpaper-core"].kind, "first-party")
+        naga = components["naga"]
+        self.assertEqual((naga.kind, naga.license, naga.source), ("crate", "MIT OR Apache-2.0", "cargo"))
+        self.assertEqual(check_licenses.assess(naga)[0], "ok")
+        self.assertEqual(sum(1 for c in check_licenses.parse_cargo_tree(text) if c.name == "naga"), 1)
+
+    def test_vendored_crates_are_told_apart_by_directory_under_the_repository_root(self):
+        root = check_licenses.ROOT
+        for path, vendored in (
+            (root / "upstream/naga", True),
+            (root / "upstream/naga/crate", True),
+            (root / "upstream/renderer/crates/shader", False),
+            (root / "tools/helper", False),
+            (Path("/elsewhere/upstream/naga"), True),
+            (Path("/elsewhere/upstream/renderer/crates/core"), False),
+            (Path("/work/crates/core"), False),
+        ):
+            with self.subTest(path=str(path)):
+                self.assertEqual(check_licenses.is_vendored_crate(str(path)), vendored)
+
+    def test_a_vendored_crate_with_a_rejected_license_is_flagged(self):
+        text = "naga v29.0.3 (/work/upstream/naga)|Apache-2.0\n"
+        (naga,) = check_licenses.parse_cargo_tree(text)
+        self.assertEqual(naga.kind, "crate")
+        self.assertNotEqual(check_licenses.assess(naga)[0], "ok")
+
     def test_a_table_entry_supplies_a_license_cargo_does_not(self):
         with mock.patch.dict(check_licenses.COMPONENTS, {"mystery": check_licenses.Entry("MIT", "checked by hand")}):
             component = next(c for c in check_licenses.parse_cargo_tree(CARGO_TREE_OUTPUT) if c.name == "mystery")

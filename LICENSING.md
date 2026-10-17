@@ -417,7 +417,9 @@ As implemented by `scripts/package.py` and `.github/workflows/build.yml`
   renderer (a source inventory: `crates/core/build.rs`, the scene engine's CMake
   `find_package` targets and `third_party/`, against a hand-kept license table
   in the script) and of every linked Rust crate (`cargo tree`, the same set as
-  [Rust crates](#rust-crates)). It classifies SPDX expressions against one
+  [Rust crates](#rust-crates); a vendored path crate under `upstream/` outside
+  the renderer workspace, naga, counts as third party with the license its
+  `Cargo.toml` declares). It classifies SPDX expressions against one
   policy table (today GPL-2.0-only: Apache-2.0, the GPL-3.0 family and unknown
   licenses fail), prints the Apache-2.0 components and any failing component
   this file does not name. It is report-only by default; `--enforce` exits 1.
