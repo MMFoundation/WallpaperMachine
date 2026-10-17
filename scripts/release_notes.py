@@ -220,9 +220,9 @@ fill only one. Do not list the changes again.
 less work. Never call anything fully supported or fully compatible. Keep \
 "optional", "experimental" or "off by default" on opt-in features such as content \
 pacing and on-demand scene idle, and on the animated lock screen. Native Metal is \
-the default scene renderer, not an option, and native video playback is the default \
-way a video wallpaper plays (a format macOS cannot play still plays through \
-Compatibility where the scene engine reads it), not an option either. The Chinese \
+the only scene renderer, not an option, and the app's own video players are the \
+only way a video wallpaper plays (a format they cannot play is refused with its \
+format named), not an option either. The Chinese \
 keeps the same qualifier.
 
 Reply with only a JSON object, no prose and no code fence, with exactly these keys:

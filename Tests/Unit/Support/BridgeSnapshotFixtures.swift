@@ -62,7 +62,7 @@ enum BridgeSnapshotFixtures {
       assetSourcePath: nil)
   }
 
-  /// A settings snapshot carrying shipped defaults: compatibility backend, full
+  /// A settings snapshot carrying shipped defaults: full
   /// render scale, keep-running on battery, no frame-rate cap, both experiments
   /// off, scene optimisation on and 2D scenes drawn at the display's resolution. Tests that care about one of those pass it
   /// explicitly.

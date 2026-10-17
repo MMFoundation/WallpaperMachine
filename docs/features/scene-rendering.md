@@ -196,7 +196,7 @@ this app's own windows is not a click on the wallpaper, so neither scripts
 dragged onto the desktop before the button is let go. A press the wallpaper did get is
 always released, wherever the pointer ends up.
 
-Both scene renderers share one video decoder. A video texture in a scene is read by the
+Scenes have one video decoder. A video texture in a scene is read by the
 project's own MP4/QuickTime and WebM/Matroska readers and decoded by VideoToolbox (H.264,
 HEVC, VP9 through its supplemental decoder, and AV1 on a Mac with an AV1 hardware decoder);
 the payload is read where it lies instead of being written out for a demuxer. There is no other
