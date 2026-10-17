@@ -362,7 +362,12 @@ artifact.
    temporary keychain ([build.md](build.md#release-signing)), then runs
    `python3 scripts/package.py --configuration Release --require-deployment-target
    --sign-identity "WallpaperMachine Code Signing"`, which fails if a bundled
-   library needs a newer macOS than the deployment target. Packaging proves the
+   library needs a newer macOS than the deployment target. It also generates
+   `THIRD-PARTY-NOTICES.txt` into the bundle; a component whose license text
+   cannot be found is named in the log and marked in the file, and
+   `--require-notices` (not yet passed here: see
+   [../LICENSING.md](../LICENSING.md#notice-payload)) would fail on it.
+   Packaging proves the
    disk image, not the build tree: it mounts the image read-only and requires
    `app.wallpapermachine` at the bundle's version, a passing
    `codesign --verify --deep --strict`, the signed entitlements and Info.plist

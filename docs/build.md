@@ -167,6 +167,15 @@ bundle is absent.
      `COPYRIGHT*`/`NOTICE*` file in every Homebrew keg the link closure
      reaches. Otherwise `MISSING Missing license payload:` lists what is
      absent.
+   - `THIRD-PARTY-NOTICES.txt` must be generated: `python3 scripts/notices.py`'s
+     generator runs against the bundle's license closure (Homebrew libraries,
+     compiled-in code, every linked Rust crate; needs Homebrew, Cargo and a
+     populated cargo registry) and a tool failure or an empty closure stops
+     packaging (`Third-party notices could not be generated`). A component whose
+     license text cannot be found does not stop it by default: the output names
+     it (`MISSING LICENSE TEXT NOT FOUND for N of M components: …`) and the file
+     marks it. `--require-notices` makes that an error too; it is the gate for a
+     build that is distributed.
    - The disk image's inputs must be usable: `Packaging/dmg/background.png`, its
      `@2x` twin at exactly twice its pixel size, and the bundle's
      `Resources/AppIcon.icns`. Otherwise `Missing disk image input:` or
@@ -194,9 +203,13 @@ bundle is absent.
    `WallpaperMachine-LICENSE.txt`, `LICENSING.md` as `LICENSING.md`,
    `upstream/renderer/LICENSE` as `Renderer-LICENSE.txt`,
    `upstream/provenance.json` as `provenance.json`, each bundled keg's notices
-   under `Licenses/<formula>-<version>/`, and the notices of the third-party
+   under `Licenses/<formula>-<version>/`, the notices of the third-party
    code statically linked into the renderer under
-   `Licenses/renderer-third-party/`. `Licenses/` is rebuilt on every run.
+   `Licenses/renderer-third-party/`, and the generated
+   `THIRD-PARTY-NOTICES.txt` (the license text of every third-party component
+   in the closure, including each linked Rust crate; the disk image carries only
+   the bundle, so the file travels inside the app). `Licenses/` is rebuilt on
+   every run.
 3. **Signing.** Each bundled dylib, then each extension
    (`--preserve-metadata=entitlements`), then the app are signed with
    `--sign-identity` (default `-`, ad hoc), and the result is checked with
@@ -324,6 +337,8 @@ whole tree, which is how tests stay isolated from your real library.
 | `Unbundled dependency:` or `Missing bundled dependency:` during packaging | A new native dependency is reachable from a binary but was not copied into `Contents/Frameworks` — usually loaded through an `@rpath` name with no Homebrew `lib/<name>` counterpart | Add the library to the Homebrew package list so the relocation walk can find it, then repackage. Never ship the bundle with the audit bypassed. |
 | `Packaging requires fresh, unrelocated build output` | The bundle in `build/` was packaged before; incremental builds keep `Contents/Frameworks` and the rewritten load commands, and packaging never undoes them | Clean and rebuild as the [preflight](#packaging-and-installing) describes: `--all` deletes the delivered Release app, so preview with `--dry-run` and keep a copy first. |
 | `Missing license payload:` during packaging | A repository notice file, an Xcode-bundled notice, or a keg `LICENSE*`/`COPYING*` file is absent | Restore the listed file; the payload list is in [Packaging and installing](#packaging-and-installing). |
+| `Third-party notices could not be generated` during the preflight | `cargo tree --offline` failed (a missing lockfile or an unpopulated cargo registry) or no `--app` closure could be read | Run a build once so the registry is populated, then rerun; `python3 scripts/notices.py` shows the same failure on its own. |
+| `LICENSE TEXT NOT FOUND for N of M components` during packaging | A crate's published source carries no license file (several `objc2` crates and the `uniffi` crates today), or a keg ships none | Not an error unless `--require-notices` is set. Add the upstream project's license files under `Packaging/notices/<crate>/` (`LICENSE*`), recording where they were copied from, and rerun; `python3 scripts/notices.py` lists the gaps. |
 | `An installation already exists: …` | `--install` will not replace `~/Applications/WallpaperMachine.app` | Quit and remove the installed copy, then rerun. |
 | `CodeSign` fails with `resource fork, Finder information, or similar detritus not allowed in object file` | The built `.app`/`.appex` **directory** in `build/` picked up `com.apple.FinderInfo` or File Provider xattrs (`com.apple.fileprovider.fpfs#P`). It comes from the file provider syncing the checkout's parent directory, not from anything committed: source files carry only `com.apple.provenance`, which codesign accepts | `xattr -cr build/Build/Products/<configuration>` and rerun the same command. It recurs on synced checkouts; clearing the products directory is the fix, not a rebuild |
 | `codesign --verify --deep --strict` fails | A dylib or the extension was modified after signing | Rerun packaging on a fresh build rather than re-signing pieces by hand. |
