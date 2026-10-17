@@ -30,7 +30,13 @@ known about calls by name), `convert` (the typed rewrite: `expr`, `coerce`, `cal
 R7). `dialect::convert_stage` is the entry point; its result carries the text *and* the
 rewritten tree, so the interface and resource parts can work on the tree.
 `tests/dialect_robustness.rs` is the hostile-input test of this part (run on a 2 MiB stack),
-`tests/gpu_probe.rs` the opt-in Metal probes.
+`tests/gpu_probe.rs` the opt-in Metal probes (a Swift runner dispatches one compute thread; no window,
+no display): the smoothstep and `fmod` probe, and kernels written in the dialect that are converted,
+written as Metal through naga and evaluated, whose values are compared with HLSL's (matrix inverse of
+all sizes, remainder, truncation, bool and number conversions, `!`/`&&`, `mul` with `mat4x3`,
+`CAST3X3`, array-parameter specialisation, moved global initializers, float subscripts and loop
+bounds). Run them with `WM_SHADER_GPU_PROBES=1 cargo test -p wm-shader --test gpu_probe`; without the
+variable they print why they did nothing.
 
 ## Dependencies
 
