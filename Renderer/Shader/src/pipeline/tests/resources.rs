@@ -319,8 +319,12 @@ fn the_plane_constants_make_a_block_when_the_author_declared_no_uniform() {
     assert_eq!(p.reflection.uniform_blocks[0].members.len(), 4);
     let ft = glsl_of(&p, StageKind::Fragment);
     assert_eq!((glsl_binding(&ft, "g_Texture0"), glsl_binding(&ft, "_we_Sampler_g_Texture0")), (Some(0), Some(1)));
-    assert_eq!(glsl_binding(&ft, "GlobalUniforms"), Some(2));
-    assert_eq!(glsl_binding(&ft, "_we_VideoChroma0"), Some(3));
+    // The block takes any binding that collides with nothing (amendment D6): only uniqueness and the
+    // chroma resources lying above the author's are required, not the order of the block among them.
+    let all: Vec<u32> = glsl_bindings(&ft).into_iter().map(|(_, b)| b).collect();
+    assert_eq!(all.len(), all.iter().collect::<std::collections::HashSet<_>>().len(), "{all:?}");
+    assert!(glsl_binding(&ft, "GlobalUniforms").is_some());
+    assert!(glsl_binding(&ft, "_we_VideoChroma0").unwrap() > 1 && glsl_binding(&ft, "_we_Sampler__we_VideoChroma0").unwrap() > 1);
 }
 
 #[test]

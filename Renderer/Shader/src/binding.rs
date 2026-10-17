@@ -27,8 +27,9 @@ impl SlotKind {
         }
     }
 
-    /// The highest slot of this namespace the layer hands out (R35). Buffers
-    /// stop at 30 so the uniform block cannot collide with vertex streams.
+    /// The highest slot of this namespace the layer hands out (R35). The limit applies to the dense
+    /// slot of d R46, not to the binding. The block is buffer slot 0 whenever it is the stage's only
+    /// buffer (every generated program), so it cannot meet the host's vertex streams.
     pub fn max_slot(self) -> u32 {
         match self {
             SlotKind::Buffer => 30,

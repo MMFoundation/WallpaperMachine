@@ -137,11 +137,16 @@ fn a_program_without_author_uniforms_still_has_the_block_for_the_plane_constants
     let block = p.layout.block.as_ref().expect("a block with only generated members");
     assert_eq!(block.members.len(), 4);
     assert!(block.members.iter().all(|m| m.video));
-    // allocated after the author resources: texture 0, its sampler 1, then the block, then chroma
+    // The author's texture and sampler keep their numbers; the block takes any binding that collides
+    // with nothing and the chroma resources lie above the author's (amendment D6): the order of the
+    // block among them is not pinned.
     let ft = &p.fragment.as_ref().unwrap().text;
     assert_eq!((binding_of(ft, "g_Texture0"), binding_of(ft, "_we_Sampler_g_Texture0")), (Some(0), Some(1)));
-    assert_eq!(block.binding, 2);
-    assert_eq!(binding_of(ft, "_we_VideoChroma0"), Some(3));
+    let chroma = binding_of(ft, "_we_VideoChroma0").unwrap();
+    let chroma_sampler = binding_of(ft, "_we_Sampler__we_VideoChroma0").unwrap();
+    assert!(chroma > 1 && chroma_sampler > 1);
+    let all = [0, 1, block.binding, chroma, chroma_sampler];
+    assert_eq!(all.iter().collect::<std::collections::HashSet<_>>().len(), all.len(), "{all:?}");
 }
 
 #[test]

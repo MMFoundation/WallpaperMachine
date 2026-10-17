@@ -12,6 +12,7 @@ mod globals;
 mod inputs;
 mod merge;
 mod pins;
+mod slots;
 mod orchestration;
 mod resources;
 mod varyings;
