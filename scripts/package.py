@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bundle Homebrew dylibs, configure MoltenVK, collect license notices, sign the local application, and wrap it in a disk image.
+"""Bundle Homebrew dylibs, collect license notices, sign the local application, and wrap it in a disk image.
 
 Nothing in the bundle is touched until the preflight passes: the FFmpeg libraries
 the binaries actually link must be an LGPL build (Formula/mwe-ffmpeg.rb), never a
@@ -23,7 +23,6 @@ instead of it failing at launch; `--require-deployment-target` makes that an err
 """
 import argparse
 import hashlib
-import json
 from pathlib import Path
 import re
 import shutil
@@ -225,10 +224,6 @@ def write_licenses(resources, licenses):
     shutil.copy2(ROOT / "upstream/provenance.json", resources / "provenance.json")
 
 
-def icd(depth):
-    return json.dumps({"file_format_version": "1.0.0", "ICD": {"library_path": f"{depth}/Frameworks/libMoltenVK.dylib", "api_version": "1.3.0", "is_portability_driver": True}}, indent=2)
-
-
 def relocate(file, prefix, rpath):
     for dependency in dependencies(file):
         if dependency.startswith(str(prefix)):
@@ -256,13 +251,12 @@ def package(args):
     frameworks = app / "Contents/Frameworks"
     resources = app / "Contents/Resources"
     prefix = Path(output(["brew", "--prefix"]).strip())
-    molten = prefix / "opt/molten-vk/lib/libMoltenVK.dylib"
     bundled = sorted(frameworks.glob("*.dylib"))
     if bundled:
         findings = [finding for file in bundled if FFMPEG_LIBRARY.match(file.name) and (finding := ffmpeg_finding(file.name, file))]
         gpl = "\nIt also carries FFmpeg libraries that are not an LGPL build (see LICENSING.md):\n  " + "\n  ".join(findings) if findings else ""
         raise PackagingError(f"{FRESH_BUILD}; Contents/Frameworks already holds: {', '.join(file.name for file in bundled)}{gpl}")
-    libraries = resolve_libraries([binary, *extension_binaries], [molten], prefix)
+    libraries = resolve_libraries([binary, *extension_binaries], [], prefix)
     # Notices Xcode already bundles from project.yml; packaging never rewrites them.
     notices = {resources / "LICENSE": ROOT / "upstream/mediaremote-adapter/LICENSE"}
     for extension in extensions:
@@ -296,11 +290,6 @@ def package(args):
     for file in extension_binaries:
         relocate(file, prefix, "@executable_path/../../../../Frameworks")
 
-    (resources / "MoltenVK_icd.json").write_text(icd(".."))
-    for extension in extensions:
-        extension_resources = extension / "Contents/Resources"
-        extension_resources.mkdir(exist_ok=True)
-        (extension_resources / "MoltenVK_icd.json").write_text(icd("../../../.."))
     write_licenses(resources, licenses)
     if floor != target:
         run(["/usr/libexec/PlistBuddy", "-c", f"Set :LSMinimumSystemVersion {floor}", info])

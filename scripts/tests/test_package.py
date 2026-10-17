@@ -25,9 +25,9 @@ class RaisedMinimumTests(unittest.TestCase):
         self.assertEqual(newer, {"libqjs.0.dylib": "26.0", "libavcodec.62.dylib": "27.0"})
 
     def test_versions_compare_numerically(self):
-        floor, newer = package.raised_minimum("15.0", {"libvulkan.1.dylib": "15.10"})
+        floor, newer = package.raised_minimum("15.0", {"libfreetype.6.dylib": "15.10"})
         self.assertEqual(floor, "15.10")
-        self.assertEqual(list(newer), ["libvulkan.1.dylib"])
+        self.assertEqual(list(newer), ["libfreetype.6.dylib"])
 
 
 class ReportTests(unittest.TestCase):

@@ -31,9 +31,8 @@ runs:
       # formula, so its version can key the FFmpeg cache before FFmpeg is looked at.
       run: |
         set -euo pipefail
-        brew install --quiet xcodegen cmake quickjs-ng glslang freetype lz4 \
-          vulkan-loader vulkan-headers molten-vk nlohmann-json argparse shaderc \
-          spirv-tools dav1d ccache
+        brew install --quiet xcodegen cmake quickjs-ng freetype lz4 \
+          nlohmann-json argparse dav1d ccache
         echo "dav1d=$(brew list --versions dav1d | tr ' ' '-')" >> "$GITHUB_OUTPUT"
         # Bottles, FFmpeg and compiled objects differ per macOS release, so every
         # cache key carries the runner's (macos-15, macos-26).

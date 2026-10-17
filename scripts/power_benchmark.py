@@ -274,7 +274,7 @@ def system_identity():
 def renderer_libraries():
     """Current host Homebrew versions; these do not identify a running process."""
     versions = {}
-    for formula in ("mwe-ffmpeg", "quickjs-ng", "glslang", "molten-vk", "freetype", "lz4"):
+    for formula in ("mwe-ffmpeg", "quickjs-ng", "freetype", "lz4"):
         target = command_output(["readlink", f"/opt/homebrew/opt/{formula}"])
         if target:
             versions[formula] = target.rsplit("/", 1)[-1]

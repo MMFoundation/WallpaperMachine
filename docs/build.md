@@ -20,8 +20,7 @@ Homebrew packages the renderer links against, exactly as listed in
 `build_environment()` in `scripts/build.py`:
 
 ```sh
-brew install quickjs-ng glslang freetype lz4 vulkan-loader \
-  vulkan-headers molten-vk nlohmann-json argparse shaderc spirv-tools
+brew install quickjs-ng freetype lz4 nlohmann-json argparse
 python3 scripts/install_ffmpeg.py
 ```
 
@@ -67,7 +66,7 @@ command produces the same build from a terminal, an editor, or CI.
 
 | Variable | Value | Why |
 |---|---|---|
-| `PATH` | `$(brew --prefix)/bin` prepended | Finds Homebrew `cmake`, `ninja`, `glslangValidator` and friends ahead of anything else. |
+| `PATH` | `$(brew --prefix)/bin` prepended | Finds Homebrew `cmake`, `ninja` and friends ahead of anything else. |
 | `CMAKE_PREFIX_PATH` | `;`-joined `opt/<package>` roots plus the Homebrew prefix | CMake resolves each dependency from its own keg, including keg-only ones like `mwe-ffmpeg`, instead of guessing. |
 | `PKG_CONFIG_PATH` | `:`-joined `opt/<package>/lib/pkgconfig` | `pkg-config` consumers (FFmpeg, freetype, lz4) find the matching `.pc` files. |
 | `OWE_NIX_LIBRARY_PATH` | `:`-joined `opt/<package>/lib` plus `<prefix>/lib` | The vendored scene engine's build scripts use this to locate native libraries to link. |
@@ -206,8 +205,7 @@ bundle is absent.
      `LSMinimumSystemVersion` to that release, so macOS declines to open the app
      instead of it failing to load a library. `--require-deployment-target`,
      which the release workflow passes, exits 1 instead.
-1. **Dylib relocation.** Starting from `libMoltenVK.dylib` and the app and
-   extension binaries, it walks `otool -L` transitively. Every dependency under
+1. **Dylib relocation.** Starting from the app and extension binaries, it walks `otool -L` transitively. Every dependency under
    the Homebrew prefix is copied into `Contents/Frameworks`, given an
    `@rpath/<name>` install name, and rewritten in its dependents with
    `install_name_tool -change`. Absolute `LC_RPATH` entries pointing into the
@@ -217,18 +215,14 @@ bundle is absent.
    `python3 scripts/check_licenses.py` walks the same `otool -L` closure
    (read-only, on an unpackaged or a packaged app) and adds the compiled-in
    and Rust-crate inventories; see [testing](testing/README.md).
-2. **MoltenVK ICD.** A `MoltenVK_icd.json` is written into the app's `Resources`
-   and into each extension's `Resources`, each pointing at the bundled
-   `libMoltenVK.dylib` with the correct relative depth, so Vulkan resolves the
-   portability driver inside the bundle.
-3. **License payload.** The root `LICENSE` is copied in as
+2. **License payload.** The root `LICENSE` is copied in as
    `WallpaperMachine-LICENSE.txt`, `LICENSING.md` as `LICENSING.md`,
    `upstream/renderer/LICENSE` as `Renderer-LICENSE.txt`,
    `upstream/provenance.json` as `provenance.json`, each bundled keg's notices
    under `Licenses/<formula>-<version>/`, and the notices of the third-party
    code statically linked into the renderer under
    `Licenses/renderer-third-party/`. `Licenses/` is rebuilt on every run.
-4. **Signing.** Each bundled dylib, then each extension
+3. **Signing.** Each bundled dylib, then each extension
    (`--preserve-metadata=entitlements`), then the app are signed with
    `--sign-identity` (default `-`, ad hoc), and the result is checked with
    `codesign --verify --deep --strict`. Release builds use the project
@@ -236,11 +230,11 @@ bundle is absent.
    see [../LICENSING.md](../LICENSING.md#signing-and-notarization).
    A valid signature does not say what it signs, so the bundle is then read back
    against its [contract](#bundle-contract).
-5. **Dependency audit.** Every binary is re-scanned. A remaining Homebrew-prefixed
+4. **Dependency audit.** Every binary is re-scanned. A remaining Homebrew-prefixed
    load command fails with `Unbundled dependency: …`; an `@rpath` dependency with
    no matching file in `Contents/Frameworks` fails with `Missing bundled
    dependency: …` (Swift runtime libraries are exempt).
-6. **Disk image.** The version is read from the bundle's
+5. **Disk image.** The version is read from the bundle's
    `CFBundleShortVersionString`, and [`scripts/lib/dmg.py`](../scripts/lib/dmg.py)
    writes `WallpaperMachine-<version>-arm64.dmg`: an HFS+ volume named
    `WallpaperMachine <version>` holding the bundle (copied with `ditto`, so its
@@ -253,7 +247,7 @@ bundle is absent.
    `.DS_Store` records and the background are documented in `dmg.py`; the
    background is `Packaging/dmg/background.png` and its `@2x` twin, and the
    volume icon is the app's `AppIcon.icns`.
-7. **Verification and checksum.** The image is mounted read-only and out of
+6. **Verification and checksum.** The image is mounted read-only and out of
    sight: the bundle in it must be `app.wallpapermachine` at the version the name
    claims, pass `codesign --verify --deep --strict` and meet the same
    [contract](#bundle-contract) as the build, and the `Applications`
@@ -262,7 +256,7 @@ bundle is absent.
    `shasum -a 256 -c` reads. The in-app updater depends on the image name; see
    [release.md](release.md). The script labels the image not cleared for
    distribution; [../LICENSING.md](../LICENSING.md) records why.
-8. **`--install`.** Copies the bundle to `~/Applications/WallpaperMachine.app`.
+7. **`--install`.** Copies the bundle to `~/Applications/WallpaperMachine.app`.
    It refuses to overwrite an existing installation: quit and remove the old copy
    first.
 
@@ -277,8 +271,8 @@ bundle; no test can run Finder.
 ### Bundle contract
 
 [`scripts/lib/bundle_contract.py`](../scripts/lib/bundle_contract.py) reads the
-signed facts back from the artifact itself, after signing (step 4) and again on
-the app inside the mounted image (step 7), because re-signing or copying can drop
+signed facts back from the artifact itself, after signing (step 3) and again on
+the app inside the mounted image (step 6), because re-signing or copying can drop
 an entitlement or an Info.plist key without breaking the signature. The lock
 screen would then just never start on the user's Mac. Any of these exits 1 with
 `MISSING … does not match its signing and Info.plist contract:` and one line per
