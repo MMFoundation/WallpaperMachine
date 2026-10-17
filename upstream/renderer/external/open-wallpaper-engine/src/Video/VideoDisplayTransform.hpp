@@ -21,7 +21,7 @@ struct VideoDisplayTransform {
     }
 };
 
-// FFmpeg's affine display matrix uses 16.16 coefficients and a 2.30
+// A track's affine display matrix uses 16.16 coefficients and a 2.30
 // homogeneous scale. Translation disappears when the transformed image is
 // normalized to its bounding rectangle; rotation, scale and reflection remain.
 inline std::optional<VideoDisplayTransform> ResolveVideoDisplayTransform(

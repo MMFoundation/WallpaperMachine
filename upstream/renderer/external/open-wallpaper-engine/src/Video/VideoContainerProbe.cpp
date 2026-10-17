@@ -33,15 +33,24 @@ bool DisplaySizeOf(const media::VideoStreamInfo& info, uint32_t* width, uint32_t
 std::optional<VideoMetadata> ProbeVideoMetadataFromMemory(std::span<const char> payload,
                                                           std::string*          why_not)
 {
+    if (payload.empty()) {
+        if (why_not != nullptr) *why_not = "empty payload";
+        return std::nullopt;
+    }
+    // The payload outlives this call and nothing keeps the source, so it owns nothing.
+    const auto source = media::MakeMemoryByteSource(
+        std::shared_ptr<const void>(), reinterpret_cast<const std::uint8_t*>(payload.data()), payload.size());
+    return ProbeVideoMetadataFromSource(source, why_not);
+}
+
+std::optional<VideoMetadata> ProbeVideoMetadataFromSource(const std::shared_ptr<media::ByteSource>& source,
+                                                          std::string*                              why_not)
+{
     const auto decline = [&](std::string reason) -> std::optional<VideoMetadata> {
         if (why_not != nullptr) *why_not = std::move(reason);
         return std::nullopt;
     };
-    if (payload.empty()) return decline("empty payload");
-
-    // The payload outlives this call and nothing keeps the source, so it owns nothing.
-    const auto source = media::MakeMemoryByteSource(
-        std::shared_ptr<const void>(), reinterpret_cast<const std::uint8_t*>(payload.data()), payload.size());
+    if (source == nullptr) return decline("no source");
 
     media::VideoStreamInfo info;
     media::Error           error;
@@ -53,7 +62,7 @@ std::optional<VideoMetadata> ProbeVideoMetadataFromMemory(std::span<const char> 
                media::ReadExact(*source, 0, header, sizeof(header)) && header[0] == 0x1A && header[1] == 0x45 &&
                header[2] == 0xDF && header[3] == 0xA3) {
         // WebM and Matroska: the headers alone give the size and the length the file
-        // states, which is what FFmpeg reports. Only a file that states no length is
+        // states. Only a file that states no length is
         // indexed whole to find where its last frame ends.
         media::MatroskaOptions options;
         options.buildIndex = false;

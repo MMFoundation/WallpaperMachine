@@ -9,7 +9,8 @@
 // probed, never read.
 
 #include "Image.hpp"
-#include "Video/VideoMedia.hpp"
+#include "Media/ByteSource.hpp"
+#include "Video/VideoContainerProbe.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -74,11 +75,22 @@ inline std::shared_ptr<Image> CreateVideoProjectImage(const std::filesystem::pat
         return nullptr;
     }
 
-    uint32_t source_width  = 0;
-    uint32_t source_height = 0;
-    if (!ProbeVideoFileDimensions(resolved_media.string(), &source_width, &source_height, error)) {
+    // The project's own readers give the picture size from the file's headers; the
+    // file is read through a small window, never whole.
+    media::Error media_error;
+    const auto   source = media::OpenFileByteSource(resolved_media.string(), &media_error);
+    if (source == nullptr) {
+        SetProjectImageError(error, "failed to open video file: " + media::Describe(media_error));
         return nullptr;
     }
+    std::string why_not;
+    const auto  metadata = ProbeVideoMetadataFromSource(source, &why_not);
+    if (!metadata) {
+        SetProjectImageError(error, "failed to probe video file: " + why_not);
+        return nullptr;
+    }
+    const uint32_t source_width  = metadata->width;
+    const uint32_t source_height = metadata->height;
 
     auto image = std::make_shared<Image>();
     image->key = std::string(file_name);

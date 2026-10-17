@@ -363,7 +363,7 @@ target_include_directories(rendergraph_smoke PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(rendergraph_smoke PRIVATE cxx_std_20)
 add_test(NAME rendergraph_smoke COMMAND rendergraph_smoke)
 # The decode pump is codec-agnostic on purpose, so its state machine is tested
-# without linking FFmpeg or opening a real stream.
+# without linking a codec or opening a real stream.
 add_executable(video_decode_pump_test
     video_decode_pump_test.cpp
     ${CMAKE_SOURCE_DIR}/src/Video/VideoDecodePump.cpp)
@@ -393,7 +393,7 @@ gtest_discover_tests(
 )
 
 # Frame pacing decides how often the clock has to wake for video content. The
-# arithmetic and its evidence rules are independent of FFmpeg and the GPU, so
+# arithmetic and its evidence rules are independent of any decoder and the GPU, so
 # the counter-examples run headless.
 add_executable(video_frame_pacing_test
     video_frame_pacing_test.cpp
@@ -488,9 +488,9 @@ if(APPLE)
         DISCOVERY_TIMEOUT 60)
 endif()
 
-# Reading a video's size and length from memory with the project's own MP4
-# reader, against the FFmpeg probe it replaces: the fixtures and, when there is
-# a local wallpaper library, the video payloads inside its `.tex` files.
+# Reading a video's size and length from memory with the project's own container
+# readers: the fixtures and, when there is a local wallpaper library, the video
+# payloads inside its `.tex` files.
 if(APPLE)
     pkg_check_modules(TEST_LZ4_PROBE REQUIRED IMPORTED_TARGET liblz4)
     add_executable(video_probe_test video_probe_test.cpp)

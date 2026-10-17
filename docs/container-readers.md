@@ -1,7 +1,7 @@
 # Container readers
 
 `Renderer/Media/` holds the project's own readers for video containers. They are
-pure C++17 with no Apple, FFmpeg or other third-party dependency, written from
+pure C++17 with no Apple or other third-party dependency, written from
 the public ISO/IEC 14496-12/-15 and Matroska/EBML (RFC 8794) specifications, so
 the same sources can be compiled into the app, the sandboxed lock-screen
 extension and the test binaries. They only locate and describe samples; decoding
@@ -10,10 +10,10 @@ is another layer's job.
 `wmMedia` is a static library the scene engine links, with `wmMediaApple` (the
 VideoToolbox layer, below) beside it. The scene texture parser uses the readers
 to learn the size and length of an MP4, QuickTime, WebM or Matroska video from
-memory (`Video/VideoContainerProbe.cpp`), where it used to write the payload to
-a temporary file for FFmpeg; any other payload, and one a reader refuses, is still
-probed by FFmpeg. The native video backend (see "Playing video" below), which is
-the default decoder for video textures, plays them from both readers. The sound
+memory (`Video/VideoContainerProbe.cpp`), without writing a file. A payload they
+refuse (fragmented MP4, a VP8 track, another container) gives no size and the
+log says why; nothing else probes it. The native video backend (see "Playing
+video" below), the only decoder for video textures, plays them from both readers. The sound
 decoders (`wmSound`) read their files through its `ByteSource`
 ([sound-decoding.md](sound-decoding.md)). Where the
 readers sit in the build and the tree is in
@@ -120,7 +120,7 @@ and works when Cues are missing, wrong or after the media.
   so the first key frame's header is parsed (`vp9KeyFrame()`) for the profile, bit
   depth, colour space and size. Colour comes from the `Colour` element, the
   display matrix from a `ProjectionPoseRoll` of whole quarter turns (the sign
-  matches what FFmpeg writes and reads), the pixel aspect ratio from
+  matches what the common muxers write), the pixel aspect ratio from
   `DisplayWidth`/`DisplayHeight`.
 - **Times:** nanoseconds. Matroska stores only presentation times, so `dts` of a
   video sample is derived: the sorted presentation times, moved earlier by the
@@ -172,8 +172,7 @@ the engine's CMake adds it (the readers' standalone build stays pure C++).
   `ReorderDepth + 1` frames and releases the earliest-shown (everything at the end of
   the stream), so order does not depend on the codec or the decoder; that depth comes
   from an untrusted sample table, so a stream asking for more than 16 (the most an
-  H.264 or HEVC decoder may hold, and the bound the FFmpeg path had) is refused with a
-  message about the table, which the engine's auto mode hands to FFmpeg. `reset()` starts
+  H.264 or HEVC decoder may hold) is refused with a message about the table. `reset()` starts
   a new epoch for a seek or a loop and drops what the decoder still delivers from the
   old one; in-flight and waiting frames are bounded, so a slow consumer stops the
   decoder; a frame that fails to decode is skipped (a leading picture after a seek can
@@ -216,9 +215,8 @@ and Swift imports it as the Clang module `WallpaperMedia` (`WallpaperMedia.modul
 
 `Video/NativeVideoBackend.cpp` plays a video texture with these pieces: the ISO-BMFF
 or Matroska reader over a `ByteSource`, `MakeStreamFormat`, `VtFrameDecoder`, and the
-engine's `VideoDecodePump` driving them. It is one `VideoFrameBackend` under
-`ClockedVideoSource`, the clock, queue, seek and loop machinery FFmpeg's backend uses
-too. A seek restarts decoding at the sync sample at or before the target; a loop
+engine's `VideoDecodePump` driving them. It is the one `VideoFrameBackend` under
+`ClockedVideoSource`, the clock, queue, seek and loop machinery. A seek restarts decoding at the sync sample at or before the target; a loop
 restarts at the first sync sample; frames before the start of the edit list and
 leading pictures of a random access point are decoded and never shown.
 
@@ -227,13 +225,11 @@ copied into an anonymous file once the stream is known to play and the image's b
 let go, so a long video does not stay resident for as long as it plays.
 `WALLPAPER_MACHINE_VIDEO_SPILL_BYTES` changes the 8 MiB.
 
-`WALLPAPER_MACHINE_VIDEO_BACKEND` (`auto`, the default, `ffmpeg`, `native`) chooses the decoder, and
-`Video/VideoBackendSelection.hpp` sets it from code (the tests run both). `native` plays
-only what the readers and VideoToolbox play and fails with the reason otherwise. `auto`
-plays with the native backend and hands the media to FFmpeg only when the native one says
-it is the only reason it does not play (a container its readers do not read, an MP4
-feature they refuse such as fragmentation, a decoder session VideoToolbox would not
-make); a format nobody here plays fails with the native message that names it.
+It is the only video decoder: there is no selection switch and no fallback. Media it cannot
+play (a container other than MP4, QuickTime, WebM and Matroska, a fragmented MP4, VP8, AV1
+without hardware decode, 4:2:2, a decoder session VideoToolbox would not make) fails with the
+reason, which starts "format not supported: " when the format is the cause, and the scene or
+player keeps its last picture. FFmpeg decoded the videos these refuse until 2026-10-17.
 
 ## Tests
 
@@ -246,8 +242,8 @@ make); a format nobody here plays fails with the native message that names it.
 | `media_matroska_tests` | the Matroska reader on files built in memory by `tests/mkv_builder.hpp`: the index, SimpleBlock and BlockGroup, lacing, unknown-size Segment and Clusters, Cues present or absent, EBML header checks, codecs and encodings, limits, truncation at every length, malformed elements and a deterministic random-mutation loop; the VP9 header parser on the first frames of real libvpx clips; plus a corpus A/B check of `.webm`/`.mkv` files against `ffprobe` |
 
 The corpus checks read the local wallpaper library, or the folder in
-`WALLPAPER_MACHINE_VIDEO_ROOT`, and compare with `ffprobe` when it is installed
-(`WALLPAPER_MACHINE_FFPROBE` overrides its path). With no file they skip with a
+`WALLPAPER_MACHINE_VIDEO_ROOT`, and compare with `ffprobe` when a developer has it installed
+(`WALLPAPER_MACHINE_FFPROBE` overrides its path; the tool is never linked, bundled or needed). With no file they skip with a
 printed reason; a skip is not a pass. Nothing is written, and only the file's
 base name is printed.
 

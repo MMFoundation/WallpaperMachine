@@ -6,8 +6,8 @@
 namespace wallpaper::video
 {
 
-/// A container's declared frame rate, as a rational, exactly as libavformat
-/// reports it. `23.976` and `29.97` are `24000/1001` and `30000/1001`; keeping
+/// A container's declared frame rate, as a rational, exactly as it is stored.
+/// `23.976` and `29.97` are `24000/1001` and `30000/1001`; keeping
 /// the ratio avoids rounding a rate that was never a terminating decimal.
 struct FrameRateRatio {
     std::int64_t num { 0 };

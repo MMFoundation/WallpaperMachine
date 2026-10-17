@@ -2,9 +2,7 @@
 #include "ImageOrientation.hpp"
 
 #include "Type.hpp"
-#include "Utils/Sha.hpp"
 #include "Video/VideoContainerProbe.hpp"
-#include "Video/VideoMedia.hpp"
 #include "Video/VideoTextureSource.hpp"
 #include "WPCommon.hpp"
 #include <cstdint>
@@ -371,61 +369,21 @@ std::optional<std::vector<char>> LoadLooseAssetPayload(fs::VFS& vfs,
     return std::vector<char>(payload.begin(), payload.end());
 }
 
-std::filesystem::path WriteVideoPayloadToTemp(
-    std::string_view         debug_label,
-    std::string_view         extension,
-    std::span<const char>    payload)
-{
-    if (payload.empty()) return {};
-
-    std::error_code ec;
-    const auto temp_dir = std::filesystem::temp_directory_path(ec) / "wallpaper-engine-video";
-    if (ec) return {};
-    std::filesystem::create_directories(temp_dir, ec);
-    if (ec) return {};
-
-    const std::string ext = extension.empty() ? ".mp4" : std::string(extension);
-    const auto temp_path =
-        temp_dir / (utils::genSha1(payload) + ext);
-    if (std::filesystem::exists(temp_path, ec) &&
-        !ec &&
-        std::filesystem::file_size(temp_path, ec) == static_cast<uintmax_t>(payload.size())) {
-        return temp_path;
-    }
-
-    std::ofstream output(temp_path, std::ios::binary | std::ios::trunc);
-    if (!output.good()) return {};
-    output.write(payload.data(), static_cast<std::streamsize>(payload.size()));
-    output.close();
-    if (!output.good()) return {};
-
-    LOG_INFO("prepared FFmpeg video payload cache for \"%s\": %s",
-             std::string(debug_label).c_str(),
-             temp_path.string().c_str());
-    return temp_path;
-}
-
+/// The size and length of an embedded or loose video, read where the payload lies
+/// by the project's own container readers (MP4, QuickTime, WebM, Matroska). A
+/// payload they refuse (fragmented MP4, VP8, another container) gives no metadata
+/// and the reason is logged: nothing else probes it, and the player says the same
+/// when it is asked to play it.
 std::optional<video::VideoMetadata> ProbeVideoMetadataFromPayload(
     std::string_view      debug_label,
-    std::string_view      extension,
     std::span<const char> payload)
 {
-    // An MP4 or QuickTime payload is read where it lies. Only a payload the
-    // project's own readers do not understand is staged for FFmpeg.
-    if (auto metadata = video::ProbeVideoMetadataFromMemory(payload)) return metadata;
-
-    const auto temp_path = WriteVideoPayloadToTemp(debug_label, extension, payload);
-    if (temp_path.empty()) return std::nullopt;
-
-    video::VideoMetadata metadata;
-    std::string          error;
-    if (!video::ProbeVideoFileMetadata(temp_path.string(), &metadata, &error)) {
-        LOG_ERROR("failed to probe video metadata for \"%s\": %s",
-                  std::string(debug_label).c_str(),
-                  error.c_str());
-        return std::nullopt;
-    }
-    return metadata;
+    std::string why_not;
+    if (auto metadata = video::ProbeVideoMetadataFromMemory(payload, &why_not)) return metadata;
+    LOG_ERROR("failed to probe video metadata for \"%s\": %s",
+              std::string(debug_label).c_str(),
+              why_not.c_str());
+    return std::nullopt;
 }
 
 std::optional<std::vector<char>> LoadHeaderVideoPayload(
@@ -623,7 +581,6 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 if (img.header.isVideo && i_image == 0 && i_mipmap == 0) {
                     const auto metadata = ProbeVideoMetadataFromPayload(
                         name,
-                        ".mp4",
                         std::span(result, static_cast<std::size_t>(src_size)));
                     if (metadata.has_value()) {
                         img.header.durationSeconds = metadata->duration_seconds;
@@ -773,7 +730,6 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
                     if (video_payload.has_value()) {
                         const auto metadata = ProbeVideoMetadataFromPayload(
                             name,
-                            ".mp4",
                             std::span(video_payload->data(), video_payload->size()));
                         if (metadata.has_value()) {
                             header.durationSeconds = metadata->duration_seconds;
@@ -804,7 +760,7 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
                                                             static_cast<std::size_t>(decompressed_size));
                     }
                 }
-                const auto metadata = ProbeVideoMetadataFromPayload(name, ".mp4", video_bytes);
+                const auto metadata = ProbeVideoMetadataFromPayload(name, video_bytes);
                 if (metadata.has_value()) {
                     header.durationSeconds = metadata->duration_seconds;
                 }
@@ -828,7 +784,6 @@ std::shared_ptr<Image> WPTexImageParser::ParseLooseAsset(const std::string& name
     if (candidate->isVideo) {
         const auto metadata = ProbeVideoMetadataFromPayload(
             name,
-            std::filesystem::path(candidate->path).extension().string(),
             std::span(payload->data(), payload->size()));
         if (!metadata.has_value()) return nullptr;
 
@@ -906,7 +861,6 @@ ImageHeader WPTexImageParser::ParseLooseAssetHeader(const std::string& name)
     if (candidate->isVideo) {
         const auto metadata = ProbeVideoMetadataFromPayload(
             name,
-            std::filesystem::path(candidate->path).extension().string(),
             std::span(payload->data(), payload->size()));
         if (!metadata.has_value()) return {};
         return BuildLooseAssetHeader(

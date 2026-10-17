@@ -194,8 +194,8 @@ device.
 
 ## Video decode, color and import
 
-- **Decode state machine** — `video_decode_pump_test` pins the libavcodec
-  send/receive contract and includes reproductions of the two orders to avoid:
+- **Decode state machine** — `video_decode_pump_test` pins the send/receive
+  contract and includes reproductions of the two orders to avoid:
   feeding input before draining output loses a packet the decoder rejected with
   `EAGAIN`, and seeking at end of input instead of draining loses the reordered
   tail of every loop. It also covers cancellation during a drain, a bounded
@@ -270,20 +270,16 @@ device.
   `HevcAndAv1RecordsThatStateFullRangeAskForTheFullRangeFormat`, the `Av1SequenceHeader.*`
   vectors in `media_core_tests`). The reorder depth comes from the file's sample table, so a table
   that reorders more than 16 frames is refused rather than holding decoded pictures without
-  bound (`AStreamThatReordersMoreThanADecoderMayHoldIsRefused`), and auto mode hands the file to
-  FFmpeg. A payload the native backend refuses and FFmpeg plays (a fragmented MP4) still plays
-  when the source is the image's only owner
-  (`AutoHandsARefusedPayloadToFfmpegWhenTheSourceIsTheImagesOnlyOwner`).
+  bound (`AStreamThatReordersMoreThanADecoderMayHoldIsRefused`). A payload the native backend
+  refuses (a fragmented MP4, a container it does not read) fails with its reason, holds no decoder
+  and stages no file; nothing else is tried (`AFragmentedMp4IsRefusedWithItsReason`,
+  `AContainerTheReadersDoNotKnowIsRefusedByName`).
 - **Decoded frames carry real timestamps** — `video_source_input_test` against media the tests encode. A frame whose
   timestamp is always zero looks like playback for as long as frames keep
   arriving and then freezes, so a video regression here reads as "the picture
-  stopped" rather than as a decode failure; the FFmpeg header/library check in
-  `src/Video/FfmpegAbi.hpp` exists because the layout mismatch that produces it
-  compiles cleanly. `video_source_input_test` owns a private `TMPDIR` and only
-  removes its own media cache; never clear the app's decode cache to make a test
-  pass. Both suites run every shared case once per decoder (the instantiation
-  `Decoders`, so a case is `Decoders/<Suite>.<Case>/ffmpeg` or `/native`; a filter
-  written without the `Decoders/` prefix or the `/*` suffix runs nothing).
+  stopped" rather than as a decode failure. `video_source_input_test` owns a private
+  `TMPDIR` and asserts that nothing is written to it; never clear the app's decode cache to make
+  a test pass.
 - **A decoder survives a rebuild of the graph** -
   `MetalVideoTexture.AVideoSetAsideByARebuildIsTakenBackAsItIsAndNotReadAgain`,
   `.AVideoTheNewGraphDoesNotUseIsClosedWithItsCompile`,

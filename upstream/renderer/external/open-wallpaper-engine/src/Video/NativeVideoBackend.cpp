@@ -133,17 +133,12 @@ public:
 
         media::apple::StreamFormat format;
         if (!media::apple::MakeStreamFormat(info, m_vp9 ? &*m_vp9 : nullptr, first.data(), first.size(), &format, &why)) {
-            // A format this Mac cannot decode (the message says which) is final. A
-            // record that could not be used is a stream another decoder may read.
-            m_another_backend_may_play = why.rfind(media::apple::kFormatNotSupported, 0) != 0;
+            // A format this Mac cannot decode says which in the reason.
             return SetError(error, why);
         }
         const std::size_t reorder = media::ReorderDepth(samples);
         auto decoder = media::apple::VtFrameDecoder::Create(std::move(format), info.timescale, reorder, {}, &why);
-        if (decoder == nullptr) {
-            m_another_backend_may_play = true;
-            return SetError(error, why);
-        }
+        if (decoder == nullptr) return SetError(error, why);
         m_decoder_raw.store(decoder.get());
         m_decoder = std::move(decoder);
         if (m_cancelled.load()) return SetError(error, "video decoding was cancelled");
@@ -244,8 +239,6 @@ public:
         m_source.reset();
         m_image.reset();
     }
-
-    [[nodiscard]] bool anotherBackendMayPlay() const { return m_another_backend_may_play; }
 
 private:
     /// The pump's view of the decoder: samples in, frames out, restart at the head.
@@ -406,8 +399,6 @@ private:
         if (media::LooksLikeIsoBmff(*m_source)) {
             m_iso = media::IsoBmffReader::Open(m_source, &error);
             if (m_iso == nullptr) {
-                m_another_backend_may_play = error.kind == media::ErrorKind::Unsupported ||
-                                             error.kind == media::ErrorKind::NotThisFormat;
                 return SetError(why, "failed to read the MP4 file: " + media::Describe(error));
             }
             m_info    = &m_iso->info();
@@ -417,8 +408,6 @@ private:
         if (StartsWithEbml(*m_source)) {
             m_mkv = media::MatroskaReader::Open(m_source, &error);
             if (m_mkv == nullptr) {
-                m_another_backend_may_play = error.kind == media::ErrorKind::Unsupported ||
-                                             error.kind == media::ErrorKind::NotThisFormat;
                 // A codec this project does not play (VP8) says so in the reader's own words.
                 std::string reason = media::Describe(error);
                 if (error.kind == media::ErrorKind::Unsupported) {
@@ -431,8 +420,8 @@ private:
             if (m_mkv->vp9KeyFrame()) m_vp9 = *m_mkv->vp9KeyFrame();
             return true;
         }
-        m_another_backend_may_play = true;
-        return SetError(why, "the container is not MP4 or WebM");
+        return SetError(why, std::string(media::apple::kFormatNotSupported) +
+                                 "the container is not MP4, QuickTime, WebM or Matroska");
     }
 
     bool readSample(std::size_t index, std::vector<std::uint8_t>* out, media::Error* error) const
@@ -457,7 +446,6 @@ private:
     /// For `cancel`, which any thread may call while the decoder is being set up.
     std::atomic<media::apple::VtFrameDecoder*> m_decoder_raw { nullptr };
     std::atomic<bool>                    m_cancelled { false };
-    bool                                 m_another_backend_may_play { false };
 
     // Decode-thread state.
     std::size_t                          m_cursor { 0 };
@@ -511,7 +499,5 @@ uint64_t NativeVideoBackend::loopIndex() const { return m_impl->loopIndex(); }
 void NativeVideoBackend::cancel() { m_impl->cancel(); }
 
 void NativeVideoBackend::close() { m_impl->close(); }
-
-bool NativeVideoBackend::anotherBackendMayPlay() const { return m_impl->anotherBackendMayPlay(); }
 
 } // namespace wallpaper::video

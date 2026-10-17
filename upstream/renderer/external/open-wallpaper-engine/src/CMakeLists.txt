@@ -2,10 +2,6 @@ find_package(OpenGL REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Freetype REQUIRED)
 pkg_check_modules(LZ4 REQUIRED IMPORTED_TARGET liblz4)
-pkg_check_modules(AVFORMAT REQUIRED IMPORTED_TARGET libavformat)
-pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
-pkg_check_modules(AVUTIL REQUIRED IMPORTED_TARGET libavutil)
-pkg_check_modules(SWRESAMPLE REQUIRED IMPORTED_TARGET libswresample)
 
 include(TestBigEndian)
 test_big_endian(ENDIAN)
@@ -44,7 +40,6 @@ include_directories(.)
 set(PLATFORM_APPLE_SOURCES)
 if(APPLE)
   list(APPEND PLATFORM_APPLE_SOURCES
-       Platform/Apple/FfmpegVideoInterop.mm
        Platform/Apple/VideoFrameInterop.mm
        Platform/Apple/SceneWallpaperBindings.mm)
 endif()
@@ -94,14 +89,12 @@ add_library(
   Project/ProjectProperties.cpp
   Runtime/VirtualAssetRegistry.cpp
   Video/ClockedVideoSource.cpp
-  Video/FfmpegVideoTextureSource.cpp
   Video/VideoColorConversion.cpp
   Video/VideoContainerProbe.cpp
   Video/VideoDecodePump.cpp
   Video/VideoFramePacing.cpp
   Video/VideoMedia.cpp
   Video/NativeVideoBackend.cpp
-  Video/VideoBackendSelection.cpp
   Video/VideoTextureSourceFactory.cpp
   ${PLATFORM_APPLE_SOURCES}
   SceneSourceResolver.cpp
@@ -154,10 +147,6 @@ target_link_libraries(
   PUBLIC wpUtils
   PRIVATE ${InteralLib} ${WESCENE_MEDIA_LIBS} wmSurface nlohmann_json::nlohmann_json quickjs::quickjs PkgConfig::LZ4
           Freetype::Freetype
-          PkgConfig::AVFORMAT
-          PkgConfig::AVCODEC
-          PkgConfig::AVUTIL
-          PkgConfig::SWRESAMPLE
           ${CMAKE_THREAD_LIBS_INIT} ${CMAKE_DL_LIBS})
 
 if(APPLE)
@@ -178,7 +167,6 @@ if(APPLE)
 endif()
 
 target_include_directories(${PROJECT_NAME} PUBLIC .)
-wescene_prefer_ffmpeg_headers(${PROJECT_NAME} "")
 set_target_properties(${PROJECT_NAME} PROPERTIES
   OBJCXX_STANDARD 20
   OBJCXX_STANDARD_REQUIRED YES)

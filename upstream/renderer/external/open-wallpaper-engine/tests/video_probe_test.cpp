@@ -1,16 +1,16 @@
-// Reading a video's size and length from memory, with the project's own MP4
-// reader instead of writing the payload to a file for FFmpeg.
-//
-// The old probe is still in the tree (`ProbeVideoFileMetadata`), which is what
-// makes an A/B possible: every fixture, and the video payloads of the local
-// wallpaper library when there is one, must read the same through both.
+// Reading a video's size and length from memory with the project's own readers
+// (MP4, QuickTime, WebM, Matroska): nothing is written to a file, and a payload
+// the readers refuse is declined with its reason instead of being left to another
+// probe. The fixtures are checked against the numbers they were made with, and the
+// video payloads of the local wallpaper library, when there is one, against the
+// rule that every one is either read or declined with a reason.
 
 #include "Fs/Fs.h"
 #include "Fs/PhysicalFs.h"
 #include "Fs/VFS.h"
 #include "Image.hpp"
 #include "Video/VideoContainerProbe.hpp"
-#include "Video/VideoMedia.hpp"
+#include "Video/VideoTextureSource.hpp"
 #include "WPPkgFs.hpp"
 #include "WPTexImageParser.hpp"
 #include "embedded_clips.hpp"
@@ -64,24 +64,6 @@ std::set<stdfs::path> DirectoryEntries(const stdfs::path& directory)
     return entries;
 }
 
-/// The old probe, on a copy of `payload` in a private directory.
-std::optional<VideoMetadata> FfmpegProbe(const stdfs::path& scratch, const std::vector<char>& payload,
-                                         std::string* error)
-{
-    static std::atomic<uint64_t> serial { 0 };
-    const auto path = scratch / ("ffmpeg-probe-" + std::to_string(serial.fetch_add(1)) + ".mp4");
-    {
-        std::ofstream output(path, std::ios::binary);
-        output.write(payload.data(), static_cast<std::streamsize>(payload.size()));
-    }
-    VideoMetadata metadata;
-    const bool    ok = ProbeVideoFileMetadata(path.string(), &metadata, error);
-    std::error_code ec;
-    stdfs::remove(path, ec);
-    if (! ok) return std::nullopt;
-    return metadata;
-}
-
 class VideoProbe : public ::testing::Test {
 protected:
     void SetUp() override
@@ -112,7 +94,7 @@ protected:
     bool                       tmpdir_overridden { false };
 };
 
-TEST_F(VideoProbe, SizeAndLengthMatchTheFfmpegProbeOnEveryOrientation)
+TEST_F(VideoProbe, SizeAndLengthAreTheClipsOwnOnEveryOrientation)
 {
     for (const auto& orientation : testing_media::kOrientations) {
         SCOPED_TRACE(orientation.name);
@@ -124,19 +106,14 @@ TEST_F(VideoProbe, SizeAndLengthMatchTheFfmpegProbeOnEveryOrientation)
         std::string why;
         const auto  native = ProbeVideoMetadataFromMemory({ payload.data(), payload.size() }, &why);
         ASSERT_TRUE(native.has_value()) << why;
-        std::string error;
-        const auto  ffmpeg = FfmpegProbe(root, payload, &error);
-        ASSERT_TRUE(ffmpeg.has_value()) << error;
 
-        EXPECT_EQ(native->width, ffmpeg->width);
-        EXPECT_EQ(native->height, ffmpeg->height);
         EXPECT_EQ(native->width, orientation.swaps_axes ? testing_media::kFrameHeight : testing_media::kFrameWidth);
-        EXPECT_NEAR(native->duration_seconds, ffmpeg->duration_seconds, 0.001);
+        EXPECT_EQ(native->height, orientation.swaps_axes ? testing_media::kFrameWidth : testing_media::kFrameHeight);
         EXPECT_NEAR(native->duration_seconds, 2.0 * testing_media::kGopFrames / 30.0, 0.05);
     }
 }
 
-TEST_F(VideoProbe, LengthMatchesTheFfmpegProbeForSeveralClipLengths)
+TEST_F(VideoProbe, LengthIsTheClipsOwnForSeveralClipLengths)
 {
     for (const int repeats : { 1, 2, 5, 10 }) {
         SCOPED_TRACE(repeats);
@@ -146,12 +123,9 @@ TEST_F(VideoProbe, LengthMatchesTheFfmpegProbeForSeveralClipLengths)
         std::string why;
         const auto  native = ProbeVideoMetadataFromMemory({ payload.data(), payload.size() }, &why);
         ASSERT_TRUE(native.has_value()) << why;
-        std::string error;
-        const auto  ffmpeg = FfmpegProbe(root, payload, &error);
-        ASSERT_TRUE(ffmpeg.has_value()) << error;
-        EXPECT_EQ(native->width, ffmpeg->width);
-        EXPECT_EQ(native->height, ffmpeg->height);
-        EXPECT_NEAR(native->duration_seconds, ffmpeg->duration_seconds, 0.001);
+        EXPECT_EQ(native->width, static_cast<uint32_t>(testing_media::kFrameWidth));
+        EXPECT_EQ(native->height, static_cast<uint32_t>(testing_media::kFrameHeight));
+        EXPECT_NEAR(native->duration_seconds, repeats * testing_media::kGopFrames / 30.0, 0.05);
     }
 }
 
@@ -167,7 +141,7 @@ TEST_F(VideoProbe, ProbingFromMemoryWritesNoFile)
     ASSERT_TRUE(ProbeVideoMetadataFromMemory({ payload.data(), payload.size() }, &why).has_value()) << why;
 
     EXPECT_EQ(DirectoryEntries(stdfs::temp_directory_path()), before);
-    EXPECT_FALSE(stdfs::exists(cache)) << "the probe staged the payload for FFmpeg";
+    EXPECT_FALSE(stdfs::exists(cache)) << "the probe staged the payload in a file";
 }
 
 TEST_F(VideoProbe, ThroughTheTextureParserAnMp4PayloadWritesNoFile)
@@ -191,7 +165,7 @@ TEST_F(VideoProbe, ThroughTheTextureParserAnMp4PayloadWritesNoFile)
     EXPECT_EQ(header.height, testing_media::kFrameHeight);
     EXPECT_NEAR(header.durationSeconds, 2.0, 0.05);
     EXPECT_FALSE(stdfs::exists(stdfs::temp_directory_path() / "wallpaper-engine-video"))
-        << "an mp4 payload was staged for FFmpeg";
+        << "an mp4 payload was staged in a file";
 
     const auto image = parser.Parse("loose");
     ASSERT_NE(image, nullptr);
@@ -201,7 +175,7 @@ TEST_F(VideoProbe, ThroughTheTextureParserAnMp4PayloadWritesNoFile)
     EXPECT_FALSE(stdfs::exists(stdfs::temp_directory_path() / "wallpaper-engine-video"));
 }
 
-TEST_F(VideoProbe, AWebmAndAMatroskaPayloadReadTheSameAsTheFfmpegProbe)
+TEST_F(VideoProbe, AWebmAndAMatroskaPayloadAreReadFromTheirHeaders)
 {
     struct Clip {
         const char*          name;
@@ -219,13 +193,8 @@ TEST_F(VideoProbe, AWebmAndAMatroskaPayloadReadTheSameAsTheFfmpegProbe)
         std::string why;
         const auto  native = ProbeVideoMetadataFromMemory({ payload.data(), payload.size() }, &why);
         ASSERT_TRUE(native.has_value()) << why;
-        std::string error;
-        const auto  ffmpeg = FfmpegProbe(root, payload, &error);
-        ASSERT_TRUE(ffmpeg.has_value()) << error;
         EXPECT_EQ(native->width, static_cast<uint32_t>(clip.width));
-        EXPECT_EQ(native->width, ffmpeg->width);
-        EXPECT_EQ(native->height, ffmpeg->height);
-        EXPECT_NEAR(native->duration_seconds, ffmpeg->duration_seconds, 0.001);
+        EXPECT_EQ(native->height, static_cast<uint32_t>(clip.height));
         EXPECT_GT(native->duration_seconds, 0.9);
     }
 }
@@ -250,14 +219,13 @@ TEST_F(VideoProbe, ThroughTheParserAWebmPayloadWritesNoFileEither)
     EXPECT_EQ(header.height, testing_media::kVp9WebmHeight);
     EXPECT_NEAR(header.durationSeconds, 1.0, 0.05);
     EXPECT_FALSE(stdfs::exists(stdfs::temp_directory_path() / "wallpaper-engine-video"))
-        << "a webm payload was staged for FFmpeg";
+        << "a webm payload was staged in a file";
 }
 
-TEST_F(VideoProbe, AVideoTheReadersRefuseIsLeftToFfmpegsProbe)
+TEST_F(VideoProbe, AVideoTheReadersRefuseIsDeclinedWithItsReason)
 {
-    // VP8 in a Matroska file: the reader names it unsupported, so the memory probe
-    // declines, and FFmpeg's probe (a file, as before) still gives the size, which is
-    // what lets such a file be imported and refused when it is applied.
+    // VP8 in a Matroska file: the reader names it unsupported, so the probe declines
+    // with that reason, and nothing else probes it.
     std::vector<char> payload(reinterpret_cast<const char*>(testing_media::kVp9Webm),
                               reinterpret_cast<const char*>(testing_media::kVp9Webm) + sizeof(testing_media::kVp9Webm));
     const char id[] = { 'V', '_', 'V', 'P', '9' };
@@ -306,8 +274,8 @@ TEST_F(VideoProbe, ATruncatedMp4IsDeclinedAtEveryLength)
 }
 
 // ---------------------------------------------------------------------------
-// Corpus A/B: the mp4 payloads inside the local wallpaper library's `.tex`
-// files, read through the texture parser, against the old probe.
+// Corpus: the video payloads inside the local wallpaper library's `.tex` files,
+// read through the texture parser.
 // ---------------------------------------------------------------------------
 
 std::optional<stdfs::path> LibraryRoot()
@@ -352,12 +320,12 @@ std::vector<std::string> TextureNamesInPackage(const stdfs::path& package)
     return names;
 }
 
-TEST_F(VideoProbe, LocalLibraryTexPayloadsReadTheSameAsTheFfmpegProbe)
+TEST_F(VideoProbe, EveryLocalLibraryTexPayloadIsReadOrDeclinedWithAReasonAndPlayed)
 {
     const auto library = LibraryRoot();
     if (! library) GTEST_SKIP() << "no local wallpaper library (WALLPAPER_MACHINE_VIDEO_ROOT)";
 
-    int  payloads = 0, matches = 0, declined = 0, mismatches = 0;
+    int payloads = 0, read = 0, declined = 0, played = 0, refused = 0;
     for (const auto& entry : stdfs::directory_iterator(*library)) {
         const auto package = entry.path() / "scene.pkg";
         std::error_code ec;
@@ -376,44 +344,39 @@ TEST_F(VideoProbe, LocalLibraryTexPayloadsReadTheSameAsTheFfmpegProbe)
             if (mip.data == nullptr || mip.size <= 0) continue;
             ++payloads;
 
-            const std::vector<char> payload(reinterpret_cast<const char*>(mip.data.get()),
-                                            reinterpret_cast<const char*>(mip.data.get()) + mip.size);
-            std::string why;
-            const auto  native = ProbeVideoMetadataFromMemory({ payload.data(), payload.size() }, &why);
-            std::string error;
-            const auto  ffmpeg = FfmpegProbe(root, payload, &error);
             const std::string label = entry.path().filename().string() + "/" + name;
-            if (! native) {
+            std::string       why;
+            const auto        metadata = ProbeVideoMetadataFromMemory(
+                { reinterpret_cast<const char*>(mip.data.get()), static_cast<size_t>(mip.size) }, &why);
+            if (! metadata) {
                 ++declined;
-                std::printf("[ab] %s: native probe declined (%s); ffmpeg %s\n", label.c_str(), why.c_str(),
-                            ffmpeg ? "read it" : "also failed");
+                EXPECT_FALSE(why.empty()) << label << ": declined without a reason";
+                std::printf("[corpus] %s: declined (%s)\n", label.c_str(), why.c_str());
                 continue;
             }
-            if (! ffmpeg) {
-                ++mismatches;
-                ADD_FAILURE() << label << ": native read it, FFmpeg did not (" << error << ")";
-                continue;
-            }
-            const bool same = native->width == ffmpeg->width && native->height == ffmpeg->height &&
-                              std::abs(native->duration_seconds - ffmpeg->duration_seconds) <= 0.001;
-            // The parser's own header, now fed by the native probe, must agree too.
-            const bool header_same = image->header.width == static_cast<int32_t>(ffmpeg->width) ||
-                                     image->header.mapWidth == static_cast<int32_t>(ffmpeg->width);
-            (void) header_same;
-            if (same) {
-                ++matches;
-                std::printf("[ab] %s: %ux%u %.4f s (match)\n", label.c_str(), native->width, native->height,
-                            native->duration_seconds);
+            ++read;
+            EXPECT_GT(metadata->width, 0u) << label;
+            EXPECT_GT(metadata->height, 0u) << label;
+            // The parser's own header is fed by the same probe, so the two must agree.
+            EXPECT_NEAR(header.durationSeconds, metadata->duration_seconds, 0.001) << label;
+            std::printf("[corpus] %s: %ux%u %.4f s\n", label.c_str(), metadata->width, metadata->height,
+                        metadata->duration_seconds);
+
+            // The native backend is the only decoder: the payload either opens, or fails
+            // with a reason that is reported here (it is not a failure of the probe).
+            std::string error;
+            auto        source = CreateVideoTextureSource(image, &error);
+            if (source != nullptr && source->prime(&error) && source->currentFrame().valid()) {
+                ++played;
             } else {
-                ++mismatches;
-                ADD_FAILURE() << label << ": native " << native->width << "x" << native->height << " "
-                              << native->duration_seconds << " s, FFmpeg " << ffmpeg->width << "x"
-                              << ffmpeg->height << " " << ffmpeg->duration_seconds << " s";
+                ++refused;
+                EXPECT_FALSE(error.empty()) << label << ": refused without a reason";
+                std::printf("[corpus] %s: not played (%s)\n", label.c_str(), error.c_str());
             }
         }
     }
-    std::printf("[ab] library video payloads: %d, match %d, native declined %d, mismatch %d\n", payloads, matches,
-                declined, mismatches);
+    std::printf("[corpus] library video payloads: %d, read %d, declined %d, played %d, refused %d\n", payloads, read,
+                declined, played, refused);
     if (payloads == 0) GTEST_SKIP() << "the local library has no video texture payloads";
 }
 

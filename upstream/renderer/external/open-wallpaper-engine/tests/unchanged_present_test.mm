@@ -13,7 +13,6 @@
 #include "Scene/SceneWallpaper.hpp"
 #include "Scene/SceneWallpaperSurface.hpp"
 #include "RenderCommon/StaticSubgraphCache.hpp"
-#include "Video/VideoBackendSelection.hpp"
 
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -945,8 +944,6 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
     std::cout << "ENERGY {\"renderer\":\"native\",\"resolution\":\""
               << (display ? "display" : "canvas") << "\",\"backend\":\""
               << (selection.failed() ? "held" : "native")
-              << "\",\"video_decoder\":\""
-              << video::VideoBackendPreferenceName(video::CurrentVideoBackendPreference())
               << "\",\"seconds\":" << seconds
               << ",\"cpu_seconds\":" << (after.cpu_seconds - before.cpu_seconds)
               << ",\"cpu_mj\":" << double(after.cpu_energy_nj - before.cpu_energy_nj) / 1e6

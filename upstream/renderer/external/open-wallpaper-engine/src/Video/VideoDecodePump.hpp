@@ -6,8 +6,9 @@
 namespace wallpaper::video
 {
 
-/// Result of one decoder operation, in the send/receive vocabulary libavcodec
-/// uses: `Again` is `AVERROR(EAGAIN)`, `EndOfStream` is `AVERROR_EOF`.
+/// Result of one decoder operation, in the send/receive vocabulary of a codec
+/// API: `Again` means the decoder is full or empty and the other side must be
+/// serviced first, `EndOfStream` that nothing more will come.
 enum class DecodeStatus {
     Ok,
     Again,
@@ -15,8 +16,8 @@ enum class DecodeStatus {
     Error,
 };
 
-/// The decoder operations the pump drives. Implemented over libavcodec by
-/// `FfmpegVideoTextureSource`; implemented by fakes in the tests so the state
+/// The decoder operations the pump drives. Implemented over VideoToolbox by
+/// `NativeVideoBackend`; implemented by fakes in the tests so the state
 /// machine can be exercised without a codec.
 ///
 /// Ownership rule: a packet read by `ReadPacket` stays owned by the source
@@ -51,15 +52,15 @@ public:
 
 /// Receive-first decode pump.
 ///
-/// libavcodec requires that output be drained before more input is accepted,
-/// that a rejected input packet be resubmitted rather than dropped, and that
+/// A send/receive decoder requires that output be drained before more input is
+/// accepted, that a rejected input packet be resubmitted rather than dropped, and that
 /// end of input be followed by a drain request so delayed frames (reordered
 /// B-frames in particular) are produced before the stream restarts. Pumping
 /// input first and discarding rejected packets loses frames at exactly those
 /// two boundaries, which is what this class exists to prevent.
 ///
 /// Every loop is bounded: cancellation is polled between steps and a
-///    60|/// no-progress budget turns a source that neither accepts input nor produces
+/// no-progress budget turns a source that neither accepts input nor produces
 /// output into a reported failure instead of a spinning thread.
 class VideoDecodePump {
 public:

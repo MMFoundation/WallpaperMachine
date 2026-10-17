@@ -13,8 +13,8 @@ namespace video
 {
 
 /// Plays MP4/QuickTime and WebM/Matroska video with the project's own container
-/// readers (Renderer/Media) and VideoToolbox: no FFmpeg, and an embedded payload
-/// is read where it lies instead of being written out for a demuxer.
+/// readers (Renderer/Media) and VideoToolbox. An embedded payload is read where
+/// it lies instead of being written out for a demuxer.
 ///
 /// The decoder is a `VTDecompressionSession` driven by `VideoDecodePump`; frames
 /// arrive in display order as IOSurface-backed NV12 (or 'x420' for 10-bit)
@@ -40,13 +40,6 @@ public:
     [[nodiscard]] uint64_t loopIndex() const override;
     void cancel() override;
     void close() override;
-
-    /// After a failed `open`: whether the reason is one only this backend has (a
-    /// container its readers do not read, a feature they refuse, a decoder session
-    /// VideoToolbox would not make), so another decoder may still play the media.
-    /// False for damaged or missing media and for a format no backend here plays
-    /// (VP8, AV1 without hardware decode, 4:2:2): those say so and stop.
-    [[nodiscard]] bool anotherBackendMayPlay() const;
 
 private:
     class Impl;

@@ -199,9 +199,9 @@ always released, wherever the pointer ends up.
 Both scene renderers share one video decoder. A video texture in a scene is read by the
 project's own MP4/QuickTime and WebM/Matroska readers and decoded by VideoToolbox (H.264,
 HEVC, VP9 through its supplemental decoder, and AV1 on a Mac with an AV1 hardware decoder);
-the payload is read where it lies instead of being written out for a demuxer. FFmpeg decodes
-only what those readers do not read (another container, or an MP4 feature they refuse such as
-fragmentation). A codec with no hardware or VideoToolbox decoder (VP8, AV1 on an M1 or M2) is
+the payload is read where it lies instead of being written out for a demuxer. There is no other
+decoder: media those readers do not read (another container, or an MP4 feature they refuse such
+as fragmentation) fails with its reason and the scene keeps its last picture. A codec with no hardware or VideoToolbox decoder (VP8, AV1 on an M1 or M2) is
 refused with a "format not supported" reason that names it, and the first frame must still
 decode successfully. This does not enable software-only decoders.
 [container-readers.md](../container-readers.md) has the details.
