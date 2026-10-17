@@ -309,26 +309,35 @@ class AppWalkTests(unittest.TestCase):
 
     def test_a_packaged_app_resolves_rpath_into_its_frameworks(self):
         frameworks = self.app / "Contents/Frameworks"
-        for name in ("liblz4.1.dylib", "libdav1d.7.dylib", "libmystery.1.dylib"):
+        for name in ("liblz4.1.dylib", "libpng16.16.dylib", "libmystery.1.dylib"):
             self.touch(frameworks / name)
         self.touch(frameworks / "MediaRemoteAdapter.framework/Versions/A/MediaRemoteAdapter")
         (frameworks / "MediaRemoteAdapter.framework/MediaRemoteAdapter").symlink_to("Versions/A/MediaRemoteAdapter")
         tools = FakeTools(otool={
             "Main": ["@rpath/liblz4.1.dylib", "@rpath/libswiftCore.dylib"],
             "Ext": ["@rpath/liblz4.1.dylib"],
-            "liblz4.1.dylib": ["@rpath/libdav1d.7.dylib"],
-            "libdav1d.7.dylib": [],
+            "liblz4.1.dylib": ["@rpath/libpng16.16.dylib"],
+            "libpng16.16.dylib": [],
             "libmystery.1.dylib": [],
             "MediaRemoteAdapter": [],
         })
         walk = self.walk(tools, prefix=False)
         self.assertEqual({path.name for path in walk.libraries},
-                         {"liblz4.1.dylib", "libdav1d.7.dylib", "libmystery.1.dylib", "MediaRemoteAdapter"})
+                         {"liblz4.1.dylib", "libpng16.16.dylib", "libmystery.1.dylib", "MediaRemoteAdapter"})
         components = {c.name: c for c in check_licenses.dylib_components(walk, None, self.app, FakeTools())}
-        self.assertEqual(sorted(components), ["dav1d", "libmystery.1.dylib", "lz4", "mediaremote-adapter"])
+        self.assertEqual(sorted(components), ["libmystery.1.dylib", "libpng", "lz4", "mediaremote-adapter"])
         self.assertEqual(check_licenses.assess(components["libmystery.1.dylib"])[0], "unknown")
         self.assertEqual(check_licenses.assess(components["mediaremote-adapter"])[0], "ok")
-        self.assertEqual(check_licenses.assess(components["dav1d"])[0], "ok")
+        self.assertEqual(check_licenses.assess(components["libpng"])[0], "ok")
+
+    def test_an_ffmpeg_library_that_returns_to_the_bundle_is_unknown(self):
+        # FFmpeg is no longer used and has no table entry, so a libav* dylib in a
+        # packaged app fails the policy instead of passing as a known component.
+        self.touch(self.app / "Contents/Frameworks/libavcodec.62.dylib")
+        tools = FakeTools(otool={"Main": ["@rpath/libavcodec.62.dylib"], "Ext": [], "libavcodec.62.dylib": []})
+        components = check_licenses.dylib_components(self.walk(tools, prefix=False), None, self.app, FakeTools())
+        self.assertEqual([c.name for c in components], ["libavcodec.62.dylib"])
+        self.assertEqual(check_licenses.assess(components[0])[0], "unknown")
 
     def test_an_unresolvable_dependency_is_reported_not_dropped(self):
         tools = FakeTools(otool={"Main": ["@rpath/libgone.dylib", "/opt/homebrew/opt/nothing/lib/libnothing.dylib"], "Ext": []})
@@ -408,7 +417,11 @@ class InventoryTests(unittest.TestCase):
         self.assertNotIn("commented", {name.lower() for name in components})
         self.assertEqual(components["stb_image"].license, "MIT OR Unlicense")
         self.assertEqual(check_licenses.assess(components["lz4"])[0], "ok")
-        self.assertEqual(check_licenses.assess(components["mwe-ffmpeg"])[0], "ok")
+        # FFmpeg is no longer used: a libav* library or CMake package that comes back is
+        # reported as unknown rather than waved through by a table entry.
+        self.assertEqual(check_licenses.assess(components["libavcodec"])[0], "unknown")
+        self.assertIsNone(components["libavcodec"].license)
+        self.assertNotIn("mwe-ffmpeg", components)
 
     def test_an_unrecognised_build_script_is_an_error_not_an_empty_list(self):
         self.build_rs.write_text("fn main() {}\n")

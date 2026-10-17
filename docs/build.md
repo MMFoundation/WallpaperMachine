@@ -21,7 +21,6 @@ Homebrew packages the renderer links against, exactly as listed in
 
 ```sh
 brew install quickjs-ng freetype lz4 nlohmann-json argparse
-python3 scripts/install_ffmpeg.py
 ```
 
 Plus the build tooling those packages are compiled and consumed with:
@@ -34,29 +33,12 @@ Steam Workshop downloads additionally need SteamCMD, which the app installs and
 manages itself at run time; it is not a build dependency. See
 [features/workshop-downloads.md](features/workshop-downloads.md#steamcmd-setup).
 
-FFmpeg is not Homebrew's `ffmpeg` formula but the repository's own
-`Formula/mwe-ffmpeg.rb`: an LGPL-2.1-or-later library set (`--disable-gpl
---disable-version3 --disable-nonfree --disable-autodetect`; native decoders and
-encoders, libdav1d, and VideoToolbox/AudioToolbox; no network or device
-support), because Homebrew's build is GPLv3 and links OpenSSL, neither of which
-the GPL-2.0-only application may bundle ([../LICENSING.md](../LICENSING.md)).
-`scripts/install_ffmpeg.py` publishes the formula into a local git-less tap
-(`WallpaperMachine/local`), installs it, and reinstalls it when the formula
-file or the installed receipt differs from it; `--check` only reports.
-`scripts/package.py` refuses to bundle FFmpeg libraries that are not an LGPL
-build (see [Packaging and installing](#packaging-and-installing)).
-
-`mwe-ffmpeg` is keg-only and reached through `pkg-config`, but Homebrew links
-any FFmpeg formula that is not keg-only into the shared `/opt/homebrew/include`,
-and several other dependencies put that prefix on the include path. Different
-majors' `AVFrame` and `AVCodecContext` differ by removed members, so compiling
-against one and linking the other is accepted by the compiler and then reads
-frame metadata at the wrong offsets at runtime. The renderer's CMake therefore
-pins the resolved FFmpeg prefix ahead of every other include directory
-(`wescene_prefer_ffmpeg_headers`), and the decode and probe entry points refuse
-to run when the loaded libav* majors are not the compiled ones. If you see that
-refusal, an include path is reaching a second FFmpeg before the one
-`pkg-config` chose.
+FFmpeg is not used any more: video plays with the app's own container readers and
+VideoToolbox, sounds with AudioToolbox and a vendored public-domain Ogg Vorbis
+decoder, and nothing links or bundles a `libav*` library (checkpoint C3 in
+[../LICENSING.md](../LICENSING.md)). The Homebrew `ffmpeg` formulas, `mwe-ffmpeg` and
+`dav1d` that an earlier checkout installed are not needed and can be uninstalled;
+nothing in the build looks at them.
 
 ## The build environment
 
@@ -67,8 +49,8 @@ command produces the same build from a terminal, an editor, or CI.
 | Variable | Value | Why |
 |---|---|---|
 | `PATH` | `$(brew --prefix)/bin` prepended | Finds Homebrew `cmake`, `ninja` and friends ahead of anything else. |
-| `CMAKE_PREFIX_PATH` | `;`-joined `opt/<package>` roots plus the Homebrew prefix | CMake resolves each dependency from its own keg, including keg-only ones like `mwe-ffmpeg`, instead of guessing. |
-| `PKG_CONFIG_PATH` | `:`-joined `opt/<package>/lib/pkgconfig` | `pkg-config` consumers (FFmpeg, freetype, lz4) find the matching `.pc` files. |
+| `CMAKE_PREFIX_PATH` | `;`-joined `opt/<package>` roots plus the Homebrew prefix | CMake resolves each dependency from its own keg, including keg-only ones like `quickjs-ng`, instead of guessing. |
+| `PKG_CONFIG_PATH` | `:`-joined `opt/<package>/lib/pkgconfig` | `pkg-config` consumers (freetype, lz4) find the matching `.pc` files. |
 | `OWE_NIX_LIBRARY_PATH` | `:`-joined `opt/<package>/lib` plus `<prefix>/lib` | The vendored scene engine's build scripts use this to locate native libraries to link. |
 | `LIBCLANG_PATH` | `$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib` | Rust `bindgen`/`uniffi` need `libclang` from the selected Xcode toolchain. |
 | `SDKROOT` | `xcrun --sdk macosx --show-sdk-path` | Pins C/C++/Rust compilation to the selected macOS SDK. |
@@ -177,14 +159,6 @@ bundle is absent.
      `build/Build/Products/Release/WallpaperMachine.app`, the locally delivered
      app.** Preview with `--dry-run`, keep a copy of any app you still need,
      and only then clean and rebuild; nothing cleans automatically.
-   - Every FFmpeg library the app links (`libav*`, `libsw*`, `libpostproc`) is
-     inspected at the resolved Homebrew file it would copy: the license string
-     FFmpeg's configure embeds must be exactly `LGPL version 2.1 or later` and
-     the embedded configure line must not contain `--enable-gpl`,
-     `--enable-version3` or `--enable-nonfree`. Otherwise it exits 1 with
-     `MISSING Refusing to bundle FFmpeg libraries that are not an LGPL build
-     (install the project's with python3 scripts/install_ffmpeg.py; see
-     LICENSING.md):` and one line per offending library.
    - The notice payload must exist: repository `LICENSE`, `LICENSING.md`,
      `upstream/renderer/LICENSE`, `upstream/provenance.json`, the
      Xcode-bundled `Resources/LICENSE` (mediaremote-adapter, BSD-3-Clause) and
@@ -341,13 +315,12 @@ whole tree, which is how tests stay isolated from your real library.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `cargo`/CMake stops with a missing header, library or `.pc` file | One of the Homebrew packages above is not installed, so its `opt/<package>` root contributed nothing to `CMAKE_PREFIX_PATH`/`PKG_CONFIG_PATH` | Install the package list, then rebuild. |
-| `cargo`/CMake configure fails once, immediately after the environment changed, and an unmodified retry succeeds | The renderer's CMake configure step is not robust to a changed `CMAKE_PREFIX_PATH`/`PKG_CONFIG_PATH` on its first run in a directory | Retry the same command once before investigating. Do not hand-set `LIBRARY_PATH=/opt/homebrew/lib` to work around it: that puts the non-keg-only FFmpeg back on the link line and reproduces the ABI mismatch above. Running `cargo` with a bare shell environment fails outright for the same reason |
+| `cargo`/CMake configure fails once, immediately after the environment changed, and an unmodified retry succeeds | The renderer's CMake configure step is not robust to a changed `CMAKE_PREFIX_PATH`/`PKG_CONFIG_PATH` on its first run in a directory | Retry the same command once before investigating. Running `cargo` with a bare shell environment fails outright for the same reason |
 | `brew: command not found` or `xcode-select` failure during startup | `build_environment()` shells out to `brew --prefix`, `xcode-select -p` and `xcrun` before any stage runs | Install Homebrew; select a full Xcode with `sudo xcode-select -s /Applications/Xcode.app`. |
 | Linker reports `library 'wallpaper_bridge' not found`, or Swift cannot find the generated bridge module | `--swift-only` was used without an earlier full build, so `upstream/renderer/target/release` and `App/Bridge/Generated` are empty | Run `python3 scripts/build.py` once without `--swift-only`. |
 | `xcodegen: command not found` | XcodeGen missing; both `scripts/build.py` and `scripts/test.py` regenerate the project | `brew install xcodegen`. |
 | Renderer changes have no effect on the app | The run used `--swift-only` | Rebuild without the flag. |
 | `Unbundled dependency:` or `Missing bundled dependency:` during packaging | A new native dependency is reachable from a binary but was not copied into `Contents/Frameworks` — usually loaded through an `@rpath` name with no Homebrew `lib/<name>` counterpart | Add the library to the Homebrew package list so the relocation walk can find it, then repackage. Never ship the bundle with the audit bypassed. |
-| `Refusing to bundle FFmpeg libraries that are not an LGPL build` during packaging | The app was linked against Homebrew's GPLv3 `ffmpeg@8` (or another non-LGPL build) instead of `mwe-ffmpeg` | `python3 scripts/install_ffmpeg.py`, then a fresh `python3 scripts/build.py` so the link resolves to the project's build. Never bypass the check; see [../LICENSING.md](../LICENSING.md). |
 | `Packaging requires fresh, unrelocated build output` | The bundle in `build/` was packaged before; incremental builds keep `Contents/Frameworks` and the rewritten load commands, and packaging never undoes them | Clean and rebuild as the [preflight](#packaging-and-installing) describes: `--all` deletes the delivered Release app, so preview with `--dry-run` and keep a copy first. |
 | `Missing license payload:` during packaging | A repository notice file, an Xcode-bundled notice, or a keg `LICENSE*`/`COPYING*` file is absent | Restore the listed file; the payload list is in [Packaging and installing](#packaging-and-installing). |
 | `An installation already exists: …` | `--install` will not replace `~/Applications/WallpaperMachine.app` | Quit and remove the installed copy, then rerun. |

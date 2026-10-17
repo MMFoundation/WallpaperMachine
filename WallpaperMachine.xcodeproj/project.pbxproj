@@ -4795,13 +4795,11 @@
 				LD_RUNPATH_SEARCH_PATHS = (
 					"@executable_path/../Frameworks",
 					"@executable_path/../../../../Frameworks",
-					"/opt/homebrew/opt/mwe-ffmpeg/lib",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
 				LIBRARY_SEARCH_PATHS = (
 					"$(SRCROOT)/upstream/renderer/target/release",
-					"/opt/homebrew/opt/mwe-ffmpeg/lib",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
@@ -4811,13 +4809,6 @@
 					"-lc++",
 					"-llz4",
 					"-lfreetype",
-					"-lavformat",
-					"-lavcodec",
-					"-lavutil",
-					"-lswresample",
-					"-lavfilter",
-					"-lavdevice",
-					"-lswscale",
 					"-lqjs",
 					"-liconv",
 					"-framework Accelerate",
@@ -4960,13 +4951,11 @@
 				INFOPLIST_FILE = App/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"@executable_path/../Frameworks",
-					"/opt/homebrew/opt/mwe-ffmpeg/lib",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
 				LIBRARY_SEARCH_PATHS = (
 					"$(SRCROOT)/upstream/renderer/target/release",
-					"/opt/homebrew/opt/mwe-ffmpeg/lib",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
@@ -4976,13 +4965,6 @@
 					"-lc++",
 					"-llz4",
 					"-lfreetype",
-					"-lavformat",
-					"-lavcodec",
-					"-lavutil",
-					"-lswresample",
-					"-lavfilter",
-					"-lavdevice",
-					"-lswscale",
 					"-lqjs",
 					"-liconv",
 					"-framework Accelerate",
@@ -5026,13 +5008,11 @@
 				INFOPLIST_FILE = App/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"@executable_path/../Frameworks",
-					"/opt/homebrew/opt/mwe-ffmpeg/lib",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
 				LIBRARY_SEARCH_PATHS = (
 					"$(SRCROOT)/upstream/renderer/target/release",
-					"/opt/homebrew/opt/mwe-ffmpeg/lib",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
@@ -5042,13 +5022,6 @@
 					"-lc++",
 					"-llz4",
 					"-lfreetype",
-					"-lavformat",
-					"-lavcodec",
-					"-lavutil",
-					"-lswresample",
-					"-lavfilter",
-					"-lavdevice",
-					"-lswscale",
 					"-lqjs",
 					"-liconv",
 					"-framework Accelerate",
@@ -5093,13 +5066,11 @@
 				LD_RUNPATH_SEARCH_PATHS = (
 					"@executable_path/../Frameworks",
 					"@executable_path/../../../../Frameworks",
-					"/opt/homebrew/opt/mwe-ffmpeg/lib",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
 				LIBRARY_SEARCH_PATHS = (
 					"$(SRCROOT)/upstream/renderer/target/release",
-					"/opt/homebrew/opt/mwe-ffmpeg/lib",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
@@ -5109,13 +5080,6 @@
 					"-lc++",
 					"-llz4",
 					"-lfreetype",
-					"-lavformat",
-					"-lavcodec",
-					"-lavutil",
-					"-lswresample",
-					"-lavfilter",
-					"-lavdevice",
-					"-lswscale",
 					"-lqjs",
 					"-liconv",
 					"-framework Accelerate",

@@ -413,14 +413,13 @@ summary.
 
 **`prepare-build` and the caches.** The composite action selects the newest
 non-beta `/Applications/Xcode_26*.app`, `brew install --quiet`s the
-XcodeGen/CMake/renderer package set with `dav1d` and `ccache`, and restores three
+XcodeGen/CMake/renderer package set with `ccache`, and restores two
 `actions/cache` entries. Every key carries the runner's macOS (`<os>` below is
-`macos-15` or `macos-26`), because bottles, the FFmpeg keg and compiled objects
+`macos-15` or `macos-26`), because bottles and compiled objects
 differ between releases; `build` and `test` therefore keep separate entries.
 
 | Cache | Path | Key | What a hit saves |
 |---|---|---|---|
-| LGPL FFmpeg | `/opt/homebrew/Cellar/mwe-ffmpeg` | `mwe-ffmpeg-<os>-<dav1d version>-<hash of Formula/mwe-ffmpeg.rb>` | the FFmpeg source build; the action restores the keg's `opt` link and `scripts/install_ffmpeg.py` finds the keg current |
 | C++ objects | `~/.ccache` | `ccache-<os>-<run>`, restored by the `ccache-<os>-` prefix | recompiling the scene engine. A checkout gives every file a new mtime, so CMake rebuilds the whole engine even from a restored build tree; ccache hashes content and returns the previous objects |
 | Renderer | `~/.cargo/registry`, `~/.cargo/git`, `upstream/renderer/target` | `renderer-ccache-<os>-<hash of Cargo.lock, rust-toolchain.toml, provenance.json>`, restored by prefix | crate downloads, and Rust compilation while the nightly toolchain is unchanged |
 
@@ -504,7 +503,7 @@ analyzed without a build on Linux. Swift runs on `macos-26`: `prepare-build` and
 `scripts/build.py --swift-only` with the `--xcode-setting` overrides CodeQL's own
 Swift autobuild uses (no signing, no compilation cache, no integrated driver), so
 the extractor sees every Swift compile. C/C++ (only vendored third-party code is
-visible to it) and Ruby (only the FFmpeg formula) are deliberately not analyzed.
+visible to it) is deliberately not analyzed, and the repository has no Ruby.
 Default setup must stay off under **Settings -> Code security -> CodeQL
 analysis**; while it is on, GitHub rejects this workflow's results.
 

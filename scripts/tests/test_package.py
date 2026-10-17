@@ -20,9 +20,9 @@ class RaisedMinimumTests(unittest.TestCase):
         self.assertEqual(newer, {})
 
     def test_the_newest_library_sets_the_floor(self):
-        floor, newer = package.raised_minimum("15.0", {"libqjs.0.dylib": "26.0", "libavcodec.62.dylib": "27.0", "liblz4.1.dylib": "14.0"})
+        floor, newer = package.raised_minimum("15.0", {"libqjs.0.dylib": "26.0", "libfreetype.6.dylib": "27.0", "liblz4.1.dylib": "14.0"})
         self.assertEqual(floor, "27.0")
-        self.assertEqual(newer, {"libqjs.0.dylib": "26.0", "libavcodec.62.dylib": "27.0"})
+        self.assertEqual(newer, {"libqjs.0.dylib": "26.0", "libfreetype.6.dylib": "27.0"})
 
     def test_versions_compare_numerically(self):
         floor, newer = package.raised_minimum("15.0", {"libfreetype.6.dylib": "15.10"})

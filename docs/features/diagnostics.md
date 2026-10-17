@@ -156,7 +156,7 @@ frames. The handler is chained, so one installed earlier still runs, and it writ
 exception's name (not the reason, which may hold paths) to the ledger.
 
 What the ledger does not do: it installs no handlers for crash signals (those could clash
-with the ones FFmpeg installs, or alter the crash report; SIGTERM and SIGHUP are
+with the ones other libraries install, or alter the crash report; SIGTERM and SIGHUP are
 a separate matter, see [signals](crash-recovery.md#signals)), writes no
 heartbeat, and is not part of the diagnostics report: the line in the log is.
 A normal session writes the file three times, at launch, at the start of a quit and

@@ -232,8 +232,6 @@ COMPONENTS = {
     "lz4": Entry("BSD-2-Clause", "Homebrew dylib"),
     "freetype": Entry("FTL OR GPL-2.0-or-later", "Homebrew dylib; the keg's LICENSE.TXT offers either"),
     "libpng": Entry("libpng-2.0", "Homebrew dylib, a FreeType dependency"),
-    "mwe-ffmpeg": Entry("LGPL-2.1-or-later", "the project's own LGPL-only FFmpeg build (Formula/mwe-ffmpeg.rb)"),
-    "dav1d": Entry("BSD-2-Clause", "Homebrew dylib, an FFmpeg dependency"),
     "mediaremote-adapter": Entry("BSD-3-Clause", "upstream/mediaremote-adapter, embedded framework"),
     "(apple system)": Entry(None, "Apple system library or framework", "system"),
     "(build tool)": Entry(None, "build-time tool, not part of the product", "tool"),
@@ -248,14 +246,11 @@ OVERRIDES = {
 ALIASES = {
     # cargo:rustc-link-lib=dylib (c++ is Apple's libc++)
     "c++": "(apple system)", "lz4": "lz4", "freetype": "freetype",
-    "avformat": "mwe-ffmpeg", "avcodec": "mwe-ffmpeg", "avutil": "mwe-ffmpeg", "swresample": "mwe-ffmpeg",
-    "avfilter": "mwe-ffmpeg", "avdevice": "mwe-ffmpeg", "swscale": "mwe-ffmpeg", "postproc": "mwe-ffmpeg",
     "qjs": "quickjs-ng",
     # find_package / pkg_check_modules
     "nlohmann_json": "nlohmann-json", "argparse": "argparse",
     "opengl": "(apple system)", "threads": "(apple system)", "pkgconfig": "(build tool)",
-    "liblz4": "lz4", "libavformat": "mwe-ffmpeg", "libavcodec": "mwe-ffmpeg", "libavutil": "mwe-ffmpeg",
-    "libswresample": "mwe-ffmpeg",
+    "liblz4": "lz4",
     # third_party/
     "effolkronium": "effolkronium-random", "glad": "glad", "miniaudio": "miniaudio",
     "vog": "vog-sha1", "stb_image": "stb_image",
@@ -267,9 +262,7 @@ FIRST_PARTY_ARCHIVE = re.compile(r"^((wp|wm)[A-Z]\w*|wescene-renderer)$")
 # (an already packaged app, or a machine without Homebrew).
 LIBRARY_STEMS = {
     "liblz4": "lz4", "libfreetype": "freetype", "libpng16": "libpng",
-    "libdav1d": "dav1d", "libqjs": "quickjs-ng", "MediaRemoteAdapter": "mediaremote-adapter",
-    **{f"lib{name}": "mwe-ffmpeg" for name in ("avformat", "avcodec", "avutil", "swresample", "avfilter",
-                                                "avdevice", "swscale", "postproc")},
+    "libqjs": "quickjs-ng", "MediaRemoteAdapter": "mediaremote-adapter",
 }
 
 

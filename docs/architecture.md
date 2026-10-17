@@ -23,7 +23,7 @@ flowchart TD
   BridgeLib --> Core["wallpaper-core (windows, media, display)"]
   Core --> Shader["shader crate (naga)"]
   Core --> OWE["Open Wallpaper Engine (C++ wescene-renderer)"]
-  Core --> Brew["Homebrew: mwe-ffmpeg (Formula/), quickjs-ng, freetype, lz4"]
+  Core --> Brew["Homebrew: quickjs-ng, freetype, lz4"]
   Services -->|"LockScreenExchange/configuration.json + Darwin notification"| Ext["WallpaperMachineExtension (sandboxed)"]
   Ext --> BridgeLib
   Cargo["scripts/build.py: cargo + uniffi-bindgen"] --> Generated
@@ -728,10 +728,10 @@ CMake-builds `wescene-renderer`), `uniffi-bindgen generate` into `App/Bridge/Gen
 
 Both the app and the extension link the same renderer flag set (`project.yml` anchors
 `rendererLibraryPaths` and `rendererLinkerFlags`): `-lwallpaper_bridge`, the C++ runtime,
-`-llz4`, `-lfreetype`, the FFmpeg libraries, `-lqjs` (quickjs-ng), `-liconv` and the system
+`-llz4`, `-lfreetype`, `-lqjs` (quickjs-ng), `-liconv` and the system
 frameworks. Library search paths point at
-`upstream/renderer/target/release` and the Homebrew prefixes. The FFmpeg libraries come from
-`Formula/mwe-ffmpeg.rb`, not Homebrew's GPLv3 `ffmpeg@8`. What still keeps the bundle from being
+`upstream/renderer/target/release` and the Homebrew prefixes. No FFmpeg library is linked:
+video and sound decode with the system frameworks and the project's own readers. What still keeps the bundle from being
 distributable is recorded in [../LICENSING.md](../LICENSING.md#remaining-blockers). A freshly built
 app still depends on Homebrew until `scripts/package.py` bundles its libraries
 ([build.md](build.md#packaging-and-installing)).

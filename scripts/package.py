@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Bundle Homebrew dylibs, collect license notices, sign the local application, and wrap it in a disk image.
 
-Nothing in the bundle is touched until the preflight passes: the FFmpeg libraries
-the binaries actually link must be an LGPL build (Formula/mwe-ffmpeg.rb), never a
-`--enable-gpl` / `--enable-version3` / `--enable-nonfree` one, and every bundled
-Homebrew keg must carry license files to ship. The signed bundle then goes into
+Nothing in the bundle is touched until the preflight passes: every bundled
+Homebrew keg must carry license files to ship, and every notice the build places in
+the bundle must match its repository original. The signed bundle then goes into
 `WallpaperMachine-<version>-arm64.dmg`, the drag-to-install image laid out by
 scripts/lib/dmg.py, which is mounted and verified before its `.sha256` sidecar is
 written. The image is for local use; LICENSING.md records why it is not cleared for
@@ -34,11 +33,6 @@ from lib.glyphs import markers
 from lib.paths import RENDERER, ROOT, app_bundle
 
 MARK = markers()
-FFMPEG_LIBRARY = re.compile(r"^lib(avutil|avcodec|avformat|avfilter|avdevice|swscale|swresample|postproc)\.")
-# Written by FFmpeg's configure from exactly the gpl/version3/nonfree switches (`avutil_license()`).
-FFMPEG_LICENSE = re.compile(rb"lib[a-z]+ license: ([^\x00]+)")
-FFMPEG_FORBIDDEN = re.compile(rb"--enable-(?:gpl|version3|nonfree)\b")
-FFMPEG_ACCEPTED_LICENSE = "LGPL version 2.1 or later"
 # Homebrew keeps the upstream tarball's license and notice files at the keg root.
 KEG_LICENSE_FILE = re.compile(r"^(LICENSE|LICENCE|COPYING|COPYRIGHT|NOTICE)", re.IGNORECASE)
 # Statically linked into the renderer; their notices travel with the app binary.
@@ -139,28 +133,6 @@ def raised_minimum(target, minimums):
     return floor, newer
 
 
-def ffmpeg_configuration(data):
-    """The NUL-terminated configure command line embedded in an FFmpeg library, or b""."""
-    index = data.find(b"--prefix=")
-    if index < 0:
-        return b""
-    return data[data.rfind(b"\x00", 0, index) + 1:data.find(b"\x00", index)]
-
-
-def ffmpeg_finding(name, source):
-    """Why a linked FFmpeg library may not be bundled, or None when it is an LGPL build."""
-    data = source.read_bytes()
-    license_match = FFMPEG_LICENSE.search(data)
-    if license_match is None:
-        return f"{name} ({source}): no embedded license string; cannot verify its configuration"
-    license = license_match.group(1).decode(errors="replace")
-    forbidden = sorted(set(FFMPEG_FORBIDDEN.findall(ffmpeg_configuration(data))))
-    if license == FFMPEG_ACCEPTED_LICENSE and not forbidden:
-        return None
-    detail = f"configured {' '.join(flag.decode() for flag in forbidden)}" if forbidden else "configuration string not found"
-    return f"{name} ({source}): {license}; {detail}"
-
-
 def keg_of(source):
     """The Homebrew keg (`Cellar/<formula>/<version>`) a resolved library belongs to."""
     parts = source.parts
@@ -188,14 +160,11 @@ def keg_licenses(libraries):
 
 
 def preflight(notices, libraries):
-    """Fail before mutation when the bundle links a GPL FFmpeg or could not carry every notice.
+    """Fail before mutation when the bundle could not carry every notice.
 
     `notices` maps each license file Xcode already placed in the build to the
     repository file it must match.
     """
-    findings = [finding for name, source in sorted(libraries.items()) if FFMPEG_LIBRARY.match(name) and (finding := ffmpeg_finding(name, source))]
-    if findings:
-        raise PackagingError("Refusing to bundle FFmpeg libraries that are not an LGPL build (install the project's with python3 scripts/install_ffmpeg.py; see LICENSING.md):\n  " + "\n  ".join(findings))
     licenses = keg_licenses(libraries)
     sources = [ROOT / "LICENSE", ROOT / "LICENSING.md", RENDERER / "LICENSE", ROOT / "upstream/provenance.json", *notices.values()]
     missing = [f"{file} is missing from the repository" for file in sources if not file.is_file()]
@@ -253,9 +222,7 @@ def package(args):
     prefix = Path(output(["brew", "--prefix"]).strip())
     bundled = sorted(frameworks.glob("*.dylib"))
     if bundled:
-        findings = [finding for file in bundled if FFMPEG_LIBRARY.match(file.name) and (finding := ffmpeg_finding(file.name, file))]
-        gpl = "\nIt also carries FFmpeg libraries that are not an LGPL build (see LICENSING.md):\n  " + "\n  ".join(findings) if findings else ""
-        raise PackagingError(f"{FRESH_BUILD}; Contents/Frameworks already holds: {', '.join(file.name for file in bundled)}{gpl}")
+        raise PackagingError(f"{FRESH_BUILD}; Contents/Frameworks already holds: {', '.join(file.name for file in bundled)}")
     libraries = resolve_libraries([binary, *extension_binaries], [], prefix)
     # Notices Xcode already bundles from project.yml; packaging never rewrites them.
     notices = {resources / "LICENSE": ROOT / "upstream/mediaremote-adapter/LICENSE"}

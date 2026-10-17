@@ -187,7 +187,6 @@ WallpaperMachine 支持场景、视频和网页渲染。兼容性因壁纸而异
 完整源代码就在这里。构建需要搭载 Apple 芯片的 Mac、Xcode 26（macOS 15.6 或更高版本）、用 `xcode-select` 选定的完整 Xcode，以及[先决条件](docs/build.md#prerequisites)中列出的 Homebrew 软件包；渲染器和场景引擎内置在[`upstream/`](upstream) 中，而不是以子模块引入。
 
 ```sh
-python3 scripts/install_ffmpeg.py                  # 本项目的 LGPL FFmpeg 构建
 python3 scripts/build.py --configuration Release   # 渲染器、绑定、Xcode 项目和应用
 ```
 

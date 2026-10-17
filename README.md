@@ -254,7 +254,6 @@ full Xcode selected with `xcode-select` and the Homebrew packages listed under
 vendored under [`upstream/`](upstream), not pulled in as submodules.
 
 ```sh
-python3 scripts/install_ffmpeg.py                  # the project's LGPL FFmpeg build
 python3 scripts/build.py --configuration Release   # renderer, bindings, Xcode project, app
 ```
 
