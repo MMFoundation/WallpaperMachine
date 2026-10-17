@@ -180,6 +180,38 @@ the engine's CMake adds it (the readers' standalone build stays pure C++).
   reference what was never decoded) and only a decoder that keeps failing (90 frames in
   a row) fails the stream; `cancel()` wakes every wait.
 
+## WebM and Matroska for Swift (`WebMReader`)
+
+`WebMReader.h/.mm` in `Renderer/Media/Apple` is the Objective-C face of the Matroska reader, the
+Apple adapter and the Matroska audio decoders (`Renderer/Sound/Matroska`, see
+[sound-decoding.md](sound-decoding.md)). The desktop's WebM player and the lock-screen extension
+read their files through it; both link it in `libwallpaper_bridge.a` with the rest of the renderer,
+and Swift imports it as the Clang module `WallpaperMedia` (`WallpaperMedia.modulemap`, named by
+`-Xcc -fmodule-map-file=` in the app, extension and test targets of `project.yml`).
+`Shared/WebMOpening.swift` wraps the open in a `Result` with a Swift failure type.
+
+- **`WebMFile`** is opened once and is immutable: `openAtURL:` and `openWithData:` run the
+  reader's index pass (headers only), build the `CMVideoFormatDescription` with `MakeStreamFormat`
+  (the `vpcC` a WebM does not have, colour, VP9's supplemental decoder, the AV1 hardware gate) and
+  report the container (`WebM` or `Matroska`), codec, coded and presentation size, orientation (as
+  the file's own matrix and as a layer transform for a y-up layer), bit depth, first time, length,
+  frame count and rate. A failure is an `NSError` in `WMWebMErrorDomain`: not Matroska, unsupported
+  (the codec's name in `WMWebMFormatNameKey`: VP8, AV1 without hardware decode, 4:4:4), damaged, or
+  unreadable.
+- **`WebMVideoReader`** is a cursor over the video track. `copyNextSampleBuffer` returns
+  compressed `CMSampleBuffer`s in decode order with the file's times in nanoseconds plus
+  `timeOffset` (a looping player raises it by the file's duration at every wrap so time keeps
+  increasing), the decode time the reader derived, the not-sync attachment on frames that are not
+  key frames and do-not-display on frames the container marks invisible. `seekToTime:` positions at
+  the key frame at or before a time.
+- **`WebMAudioReader`** decodes the audio track to 32-bit float PCM buffers of about a tenth of a
+  second on the same timeline (`rewindWithTimeOffset:limit:` restarts it for a loop and cuts it at
+  the picture's length). Opus, Vorbis, AAC and MP3 are decoded; Opus with more than two channels and
+  audio with more than two channels in the other codecs are reported by `audioUnavailableReason`
+  and left out (the video plays without sound).
+- **`copyPosterImageAtTime:`** decodes the key frame at or before a time with `VtFrameDecoder` and
+  returns it upright and at the shown size, for a desktop poster or the lock screen's first frame.
+
 ## Playing video (engine side)
 
 `Video/NativeVideoBackend.cpp` plays a video texture with these pieces: the ISO-BMFF
@@ -210,6 +242,7 @@ make); a format nobody here plays fails with the native message that names it.
 | `media_core_tests` | error, checked arithmetic, fractions, byte cursor, memory and file byte sources |
 | `media_isobmff_tests` | the ISO-BMFF reader on files built in memory by `tests/mp4_builder.hpp`: tables and layouts, every codec entry, composition offsets, edit lists, all eight orientations, seeking, fragmented/unsupported/oversized/truncated/junk input and a deterministic random-mutation loop; plus corpus A/B checks: the bundled starter wallpaper against recorded expectations, and the local library against `ffprobe` |
 | `vt_frame_decoder_test` (engine tests, source in `Renderer/Media/Apple/tests`) | the Apple layer on real VideoToolbox decoding of the synthetic clips: display order on a clip with B-frames (and on H.264 in Matroska), a VP9 clip from WebM, seek epochs, draining, bounds, prompt cancellation, format description building (in-band parameter sets, colour range, 10-bit), Main 10 clips (PQ, HLG, BT.709) that decode to `x420` frames carrying their curve, primaries and matrix, and every refusal |
+| `webm_reader_test` (engine tests, source in `Renderer/Media/Apple/tests`) | `WebMReader` on the embedded VP9 WebM, H.264 Matroska and Opus WebM clips: the properties, the sample buffers (timing, key frames, the time offset, seeking) decoded by a VideoToolbox session, the audio buffers and their limit and offset, the refusals and the quarter-turn maths, and the poster |
 | `media_matroska_tests` | the Matroska reader on files built in memory by `tests/mkv_builder.hpp`: the index, SimpleBlock and BlockGroup, lacing, unknown-size Segment and Clusters, Cues present or absent, EBML header checks, codecs and encodings, limits, truncation at every length, malformed elements and a deterministic random-mutation loop; the VP9 header parser on the first frames of real libvpx clips; plus a corpus A/B check of `.webm`/`.mkv` files against `ffprobe` |
 
 The corpus checks read the local wallpaper library, or the folder in

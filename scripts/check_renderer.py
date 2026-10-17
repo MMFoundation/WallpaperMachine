@@ -23,7 +23,7 @@ REGRESSION_BINARIES = {
     "render_target_lifetime_test": False, "text_object_runtime_test": False,
     "shader_cache_metadata_test": False, "video_decode_pump_test": False,
     "video_color_conversion_test": False, "video_frame_pacing_test": False,
-    "video_conversion_budget_test": False, "video_source_input_test": False, "video_probe_test": False, "vt_frame_decoder_test": False,
+    "video_conversion_budget_test": False, "video_source_input_test": False, "video_probe_test": False, "vt_frame_decoder_test": False, "webm_reader_test": False,
     "shared_video_session_test": False, "synthetic_video_test": False,
     "render_scale_test": False,
     "static_subgraph_cache_test": False, "texture_prefetch_test": False,
@@ -48,6 +48,7 @@ REGRESSION_BINARIES = {
     "media_core_tests": False, "media_isobmff_tests": False, "media_matroska_tests": False,
     # Renderer/Sound/tests: the project's own remix, resample and loop path, pure C++ and headless.
     "sound_core_tests": False, "sound_apple_tests": False, "sound_vorbis_tests": False,
+    "sound_matroska_tests": False,
     # Renderer/Surface/tests: the still a wallpaper that cannot be drawn shows, headless (a plain CALayer).
     "surface_path_tests": False, "surface_still_tests": False,
 }

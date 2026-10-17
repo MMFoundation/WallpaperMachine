@@ -108,10 +108,13 @@ Renderer/                          this project's own renderer code (not vendore
                                    (see container-readers.md)
     Apple/                         wmMediaApple: the platform layer of the readers, ObjC++ over VideoToolbox with C++
                                    headers: codec format descriptions and a decompression session that returns frames in
-                                   display order; its tests/ (vt_frame_decoder_test) are built by the engine's tests
+                                   display order; WebMReader.h/.mm, the Objective-C face of the Matroska reader that
+                                   Swift imports (`import WallpaperMedia`, WallpaperMedia.modulemap); its tests/
+                                   (vt_frame_decoder_test, webm_reader_test) are built by the engine's tests
   Sound/                           wmSound: the scene-sound path (channel remix, resampler, loop pipeline, the
                                    AudioToolbox decoder and the Ogg Vorbis decoder over the vendored stb_vorbis),
-                                   tests/ (see sound-decoding.md)
+                                   Matroska/ (the audio track of a WebM or Matroska file as PCM), tests/
+                                   (see sound-decoding.md)
   Surface/                         wmSurface: the still preview a wallpaper that cannot be drawn shows instead of an empty
                                    layer (ImageIO and Core Animation, ObjC++ with a C++ header) and the pure rule that
                                    keeps the picture inside the project's folder; tests/ (see scene-rendering.md)

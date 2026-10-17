@@ -509,6 +509,26 @@ if(APPLE)
         DISCOVERY_TIMEOUT 60)
 endif()
 
+# WebMReader (Renderer/Media/Apple), the Objective-C face of the Matroska reader
+# that the desktop player and the lock-screen extension play WebM through, on the
+# embedded WebM and Matroska clips and the audio fixtures of Renderer/Sound/tests.
+if(APPLE)
+    add_executable(webm_reader_test
+        ${WESCENE_MEDIA_APPLE_TESTS_DIR}/webm_reader_test.mm)
+    target_link_libraries(webm_reader_test PRIVATE
+        wmMediaApple wmMedia wmSound wescene_testing_media GTest::gtest_main)
+    target_include_directories(webm_reader_test PRIVATE . ${WESCENE_MEDIA_APPLE_TESTS_DIR}/..)
+    target_compile_features(webm_reader_test PRIVATE cxx_std_20)
+    set_target_properties(webm_reader_test PROPERTIES
+        OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+    target_compile_options(webm_reader_test PRIVATE
+        $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+    gtest_discover_tests(webm_reader_test
+        TEST_PREFIX webm_reader_test.
+        PROPERTIES TIMEOUT 120
+        DISCOVERY_TIMEOUT 60)
+endif()
+
 # A pure-video wallpaper's media is decode input, not a payload. The test drives
 # the real construction path against media the fixture encodes, so it links the
 # renderer rather than standing in a fake source. Only the software-frame suite

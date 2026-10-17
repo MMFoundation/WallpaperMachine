@@ -13,7 +13,7 @@ set(WM_SOUND_SOURCES
 if(APPLE)
     list(APPEND WM_SOUND_SOURCES Apple/AppleDecoder.cpp)
 endif()
-list(APPEND WM_SOUND_SOURCES Vorbis/VorbisDecoder.cpp)
+list(APPEND WM_SOUND_SOURCES Matroska/MatroskaAudio.cpp Matroska/OggVorbisFraming.cpp Vorbis/VorbisDecoder.cpp)
 
 add_library(wmSound STATIC ${WM_SOUND_SOURCES})
 set_target_properties(wmSound PROPERTIES

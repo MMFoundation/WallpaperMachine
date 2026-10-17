@@ -51,6 +51,31 @@ lands.
 | WAV, AIFF, CAF, MP3, FLAC, AAC and the rest of AudioFile's formats | `Apple/AppleDecoder` | `AudioFileOpenWithCallbacks` over the package's bytes (a `media::ByteSource`, read on demand), then `ExtAudioFile` with a 32-bit float client format at the file's own layout, so the system changes the sample format and nothing else. A file whose format is not recognised by sniffing is retried with each likely type named. With `audioOptional`, an MP4 or MOV with no audio track returns no decoder and no error (a silent video is not a failure); anything else AudioToolbox cannot read is an error |
 | Ogg Vorbis | `Vorbis/VorbisDecoder` | stb_vorbis 1.22 (public domain or MIT; vendored unchanged in the scene engine's `third_party/stb_vorbis`, with its README recording the pinned commit and hash), because the system has no Vorbis decoder. The file is read into memory and decoded with the pull API. The length is the last Ogg page's granule position, so a loop has no extra tail (stb_vorbis would decode up to a block past it, and FFmpeg did: 192 frames in the test file). Channel order is rearranged from Vorbis's (left, centre, right, ..., low frequency last) to WAV's for 3 and 5 to 8 channels. stb_vorbis trusts the lengths in the comment header (vendor string, comment count, each comment), so a file that states two billion comments would crash it; `OpenVorbisDecoder` walks the first Ogg pages itself and checks every length against the header's bytes before stb_vorbis sees the file, and refuses a sample rate above 768 kHz (the file states its own rate, and the resampler's filter grows with it). A file that is Ogg but not Vorbis (Opus or FLAC in Ogg), whose headers are cut off or lie about their lengths, is refused; a file cut off in its audio plays what is there |
 
+## The audio track of a WebM or Matroska video
+
+`Matroska/MatroskaAudio` opens one audio track of a `MatroskaReader` as a `PcmDecoder`, so the
+desktop's WebM player reads a video's sound through the same interface as a scene sound. It takes
+packets from the reader's index and never opens an audio device.
+
+- **Opus, AAC and MP3** go through an AudioToolbox `AudioConverter`, one packet at a time. Opus
+  needs the packet's frame count for the converter, read from its table-of-contents byte
+  (`OpusPacketFrames`, RFC 6716). The pre-skip in the `OpusHead` record is dropped from the start
+  (less what the system's decoder has already trimmed from the first packet, measured on that
+  packet so it does not depend on a constant), a block's DiscardPadding from its end, and the
+  header's output gain applied. Opus above stereo (a channel mapping family other than 0) and more
+  than two channels in the other codecs are refused, and the video plays silently with the reason
+  logged. AAC takes its AudioSpecificConfig wrapped in the elementary-stream descriptor Core Audio
+  expects as a magic cookie. A rewind makes a fresh converter, because a reset one does not trim the
+  first packet again. AAC and MP3 decoder delay is not trimmed (a few tens of milliseconds).
+- **Vorbis** has no system decoder. Matroska stores the three header packets laced in CodecPrivate
+  and bare packets in the blocks, and stb_vorbis reads Ogg pages, so `OggVorbisFraming` writes an
+  in-memory Ogg stream (RFC 3533: the identification packet alone on the first page, comment and
+  setup after it, one page per audio packet, a correct page checksum) and the ordinary
+  `OpenVorbisDecoder` reads that. Only the last page carries a granule position, the end of the
+  last packet by its time, which is what makes the length exact; earlier pages state none, so
+  stb_vorbis trims nothing from the start. The packets are held in memory while the track plays, so
+  a track of more than 64 MiB is not decoded.
+
 AudioToolbox's MP3 decoder is 16-bit and saturates at full scale; FFmpeg's float
 decode kept peaks above full scale. Of the 87 MP3 sounds in the local library, 25
 decode above 1.0 in FFmpeg (by up to 3 dB), and AudioToolbox clips those peaks at
@@ -98,6 +123,12 @@ whose tag FFmpeg ignored (AudioToolbox is 2160 frames shorter, as the tag says).
   uses, and the channel order. Run once under AddressSanitizer and UBSan: clean
   apart from one float-to-int conversion on a damaged codebook inside stb_vorbis
   itself, which is vendored unchanged.
+- `sound_matroska_tests` (`Renderer/Sound/tests`): the Matroska audio decoders on real encoder
+  output embedded as bytes (Opus, AAC and MP3 in a short clip each, Vorbis in WebM): format, length,
+  a 440 Hz tone measured by zero crossings, a rewind that repeats the sound, Opus trimming by an exact
+  frame count, Opus with an unsupported channel mapping refused, Vorbis packets in Matroska decoding
+  sample for sample like the Ogg file they were cut from, and the Ogg framing (CodecPrivate
+  splitting, page numbers, flags, checksums, a packet longer than a page).
 - `sound_apple_tests` (`Renderer/Sound/tests`): the AudioToolbox decoder over a
   generated WAV and two tiny MP4 files: the reported layout, frames in any chunk
   size, rewind, the audio track of a video, and what it says about input that is
