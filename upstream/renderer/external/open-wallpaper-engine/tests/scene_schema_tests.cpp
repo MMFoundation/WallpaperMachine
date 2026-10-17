@@ -6268,7 +6268,7 @@ TEST(SceneSchema, ParserAppliesPuppetMaterialInfoBeforeLoadingSlotMaterials) {
         const auto* material = node->Mesh()->MaterialForSlot(slot);
         ASSERT_NE(material, nullptr);
         ASSERT_NE(material->customShader.shader, nullptr);
-        EXPECT_GT(material->customShader.shader->codes[0].size(), 0u);
+        EXPECT_TRUE(material->customShader.shader->rust_reflection_json.has_value());
     }
     EXPECT_FLOAT_EQ(node->Mesh()->MaterialForSlot(0)->customShader.constValues.at("g_Alpha")[0],
                     0.6f);

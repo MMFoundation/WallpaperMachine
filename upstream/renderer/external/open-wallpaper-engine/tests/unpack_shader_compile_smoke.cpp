@@ -58,7 +58,6 @@ const std::filesystem::path& CommonAssets() {
     return root;
 }
 
-constexpr unsigned int kSpirvMagicWord = 0x07230203;
 constexpr std::size_t kMaxWorkshopSceneDirs = 4096;
 
 struct ShaderFailure {
@@ -965,10 +964,6 @@ std::string ShaderStageName(std::size_t index) {
     }
 }
 
-bool LooksLikeSpirv(const ShaderCode& code) {
-    return ! code.empty() && code.front() == kSpirvMagicWord;
-}
-
 std::array<WPShaderUnit, 2> LoadShaderUnits(fs::VFS& vfs, const DirectShaderCompileJob& job) {
     const auto shader_path = "/assets/" + job.shader_path;
     return {
@@ -983,44 +978,6 @@ std::array<WPShaderUnit, 2> LoadShaderUnits(fs::VFS& vfs, const DirectShaderComp
             .preprocess_info = {},
         },
     };
-}
-
-void CheckCompiledSpirv(const std::vector<ShaderCode>& codes, const DirectShaderCompileJob& job,
-                        std::string_view workshop_id, const std::filesystem::path& scene_json,
-                        bool mounted_common_assets, std::vector<ShaderFailure>& failures) {
-    if (codes.size() < 2) {
-        failures.push_back(
-            { std::string(workshop_id),
-              scene_json,
-              mounted_common_assets,
-              job.source_path,
-              job.context,
-              job.shader_name,
-              job.shader_path,
-              codes.empty() ? std::string("vertex") : std::string("fragment"),
-              {},
-              "direct Rust shader compile output",
-              "compiled shader is missing required vertex/fragment SPIR-V stages" });
-    }
-
-    for (std::size_t i = 0; i < codes.size(); ++i) {
-        if (LooksLikeSpirv(codes[i])) continue;
-        const auto message = codes[i].empty()
-                                 ? "compiled " + ShaderStageName(i) + " SPIR-V stage is empty"
-                                 : "compiled " + ShaderStageName(i) +
-                                       " stage does not start with SPIR-V magic word 0x07230203";
-        failures.push_back({ std::string(workshop_id),
-                             scene_json,
-                             mounted_common_assets,
-                             job.source_path,
-                             job.context,
-                             job.shader_name,
-                             job.shader_path,
-                             ShaderStageName(i),
-                             {},
-                             "direct Rust shader compile output[" + std::to_string(i) + "]",
-                             message });
-    }
 }
 
 void CompileDirectShaderJob(fs::VFS& vfs, const DirectShaderCompileJob& job,
@@ -1046,25 +1003,22 @@ void CompileDirectShaderJob(fs::VFS& vfs, const DirectShaderCompileJob& job,
     WPShaderInfo shader_info;
     shader_info.combos = job.combos;
     auto                    textures = job.base_textures;
-    std::vector<ShaderCode> codes;
     std::string             reflection_json;
     constexpr std::size_t   kMaxDefaultTextureCompilePasses = 8;
     for (std::size_t pass = 0; pass < kMaxDefaultTextureCompilePasses; ++pass) {
-        codes.clear();
         reflection_json.clear();
         for (auto& unit : units) {
             unit.preprocess_info = {};
         }
 
         const auto tex_infos = BuildConservativeTextureInfos(textures);
-        if (! WPShaderParser::CompileToSpvRust("unpack-shader-compile-smoke",
-                                               job.shader_name,
-                                               units,
-                                               codes,
-                                               vfs,
-                                               &shader_info,
-                                               tex_infos,
-                                               &reflection_json)) {
+        if (! WPShaderParser::AnalyzeRust("unpack-shader-compile-smoke",
+                                          job.shader_name,
+                                          units,
+                                          vfs,
+                                          &shader_info,
+                                          tex_infos,
+                                          &reflection_json)) {
             failures.push_back({ std::string(workshop_id),
                                  scene_json,
                                  mounted_common_assets,
@@ -1103,8 +1057,6 @@ void CompileDirectShaderJob(fs::VFS& vfs, const DirectShaderCompileJob& job,
         }
         textures = std::move(next_textures);
     }
-
-    CheckCompiledSpirv(codes, job, workshop_id, scene_json, mounted_common_assets, failures);
 }
 
 std::string ShaderFailureReport(const std::vector<ShaderFailure>& failures) {
@@ -1357,7 +1309,7 @@ TEST(UnpackShaderCompileSmoke, CompilesAnEffectUnderTheCombosTheSceneSetsOnIt) {
 // Compiling every shader of a whole corpus takes minutes (about six for 60
 // scenes), so the sweep runs only on request:
 // --gtest_also_run_disabled_tests --gtest_filter='*ParsesCorpus*'.
-TEST(UnpackShaderCompileSmoke, DISABLED_ParsesCorpusAndProducesShaderSpirv) {
+TEST(UnpackShaderCompileSmoke, DISABLED_ParsesCorpusAndAnalysesEveryShader) {
     const auto      corpus_root = CorpusRoot();
     std::error_code ec;
     if (! std::filesystem::exists(std::filesystem::symlink_status(corpus_root, ec))) {

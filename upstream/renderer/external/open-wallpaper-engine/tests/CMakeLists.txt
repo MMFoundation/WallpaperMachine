@@ -134,17 +134,6 @@ if(APPLE)
     target_compile_features(stb_image_regression_test PRIVATE cxx_std_20)
     set_target_properties(stb_image_regression_test PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
     gtest_discover_tests(stb_image_regression_test PROPERTIES TIMEOUT 30 DISCOVERY_TIMEOUT 60)
-    add_executable(playback_gpu_test playback_gpu_test.mm)
-    target_link_libraries(playback_gpu_test PRIVATE
-        ${PROJECT_NAME} wpScene wpVulkan wpVulkanRender wpRGraph
-        nlohmann_json::nlohmann_json GTest::gtest_main)
-    target_include_directories(playback_gpu_test PRIVATE
-        . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender)
-    target_compile_features(playback_gpu_test PRIVATE cxx_std_20)
-    set_target_properties(playback_gpu_test PROPERTIES
-        OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
-    target_compile_options(playback_gpu_test PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
-    gtest_discover_tests(playback_gpu_test PROPERTIES TIMEOUT 60 DISCOVERY_TIMEOUT 60)
     add_test(
         NAME audio_coreaudio_backend_config
         COMMAND
@@ -153,7 +142,7 @@ if(APPLE)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/audio/coreaudio_backend_config.cmake)
 endif()
 add_executable(shader_cache_metadata_test shader_cache_metadata_test.cpp)
-target_link_libraries(shader_cache_metadata_test PRIVATE ${PROJECT_NAME} wpFs wpScene wpVulkan GTest::gtest_main)
+target_link_libraries(shader_cache_metadata_test PRIVATE ${PROJECT_NAME} wpFs wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(shader_cache_metadata_test PRIVATE .)
 target_compile_features(shader_cache_metadata_test PRIVATE cxx_std_20)
 gtest_discover_tests(
@@ -163,7 +152,7 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 add_executable(shader_preprocessor_compat_test shader_preprocessor_compat_test.cpp)
-target_link_libraries(shader_preprocessor_compat_test PRIVATE ${PROJECT_NAME} wpFs wpScene wpVulkan GTest::gtest_main)
+target_link_libraries(shader_preprocessor_compat_test PRIVATE ${PROJECT_NAME} wpFs wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(shader_preprocessor_compat_test PRIVATE .)
 target_compile_features(shader_preprocessor_compat_test PRIVATE cxx_std_20)
 gtest_discover_tests(
@@ -176,8 +165,8 @@ gtest_discover_tests(
 add_executable(rust_shader_bridge_test rust_shader_bridge_test.cpp)
 target_link_libraries(
     rust_shader_bridge_test
-    PRIVATE ${PROJECT_NAME} wpFs wpScene wpVulkan wpVulkanRender wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)
-target_include_directories(rust_shader_bridge_test PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender)
+    PRIVATE ${PROJECT_NAME} wpFs wpScene wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(rust_shader_bridge_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(rust_shader_bridge_test PRIVATE cxx_std_20)
 if(DEFINED RUST_SHADER_STATICLIB AND NOT "${RUST_SHADER_STATICLIB}" STREQUAL "")
     target_link_libraries(rust_shader_bridge_test PRIVATE wescene_rust_shader)
@@ -198,7 +187,7 @@ get_filename_component(UNPACK_SHADER_COMPILE_SMOKE_DEFAULT_CORPUS_ROOT
     "${CMAKE_CURRENT_SOURCE_DIR}/../../../unpack" ABSOLUTE)
 target_link_libraries(
     unpack_shader_compile_smoke
-    PRIVATE ${PROJECT_NAME} wpFs wpScene wpVulkan nlohmann_json::nlohmann_json GTest::gtest_main)
+    PRIVATE ${PROJECT_NAME} wpFs wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(unpack_shader_compile_smoke PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(unpack_shader_compile_smoke PRIVATE cxx_std_20)
 target_compile_definitions(
@@ -246,11 +235,10 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 add_executable(video_texture_submission_smoke video_texture_submission_smoke.cpp)
-target_link_libraries(video_texture_submission_smoke PRIVATE wpVulkan GTest::gtest_main)
+target_link_libraries(video_texture_submission_smoke PRIVATE GTest::gtest_main)
 target_include_directories(video_texture_submission_smoke PRIVATE
     .
     ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/Vulkan/include
     ${CMAKE_SOURCE_DIR}/src/Utils/include
     ${CMAKE_SOURCE_DIR}/src/Scene/include
 )
@@ -261,7 +249,7 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 add_executable(script_runtime_compat_test script_runtime_compat_test.cpp)
-target_link_libraries(script_runtime_compat_test PRIVATE ${PROJECT_NAME} wpScene wpFs wpVulkan nlohmann_json::nlohmann_json GTest::gtest_main)
+target_link_libraries(script_runtime_compat_test PRIVATE ${PROJECT_NAME} wpScene wpFs nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(script_runtime_compat_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(script_runtime_compat_test PRIVATE cxx_std_20)
 gtest_discover_tests(
@@ -271,27 +259,36 @@ gtest_discover_tests(
 )
 # Explicit CLI diagnostic, not registered with ctest. Never creates a surface.
 add_executable(render_target_lifetime_test render_target_lifetime_test.cpp)
-target_link_libraries(render_target_lifetime_test PRIVATE ${PROJECT_NAME} wpScene wpVulkanRender wpVulkan wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)
-target_include_directories(render_target_lifetime_test PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender)
+target_link_libraries(render_target_lifetime_test PRIVATE ${PROJECT_NAME} wpScene wpRenderCommon wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(render_target_lifetime_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 gtest_discover_tests(render_target_lifetime_test PROPERTIES TIMEOUT 30)
 
-add_executable(offscreen_scene_probe offscreen_scene_probe.cpp)
-target_link_libraries(offscreen_scene_probe PRIVATE ${PROJECT_NAME} wpAudio wpScene wpParticle wpFs wpVulkan wpVulkanRender wpRGraph nlohmann_json::nlohmann_json)
-target_include_directories(offscreen_scene_probe PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender)
-target_compile_features(offscreen_scene_probe PRIVATE cxx_std_20)
+if(APPLE)
+  # Explicit CLI diagnostic, not registered with ctest. Draws one imported scene with Native
+  # Metal into private images and an offscreen layer: no window, no drawable shown.
+  add_executable(offscreen_scene_probe offscreen_scene_probe.mm)
+  target_link_libraries(offscreen_scene_probe PRIVATE ${PROJECT_NAME} wpMetalRender wpAudio wpScene wpParticle wpFs wpRGraph wpRenderCommon nlohmann_json::nlohmann_json)
+  target_include_directories(offscreen_scene_probe PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/MetalRender/include)
+  target_compile_features(offscreen_scene_probe PRIVATE cxx_std_20)
+  set_target_properties(offscreen_scene_probe PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+  target_compile_options(offscreen_scene_probe PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+  if(TARGET wescene_rust_shader)
+    target_link_libraries(offscreen_scene_probe PRIVATE wescene_rust_shader)
+  endif()
+endif()
 
 # Explicit CLI diagnostic for cross-load state leaks, not registered with ctest.
 add_executable(scene_reload_cycle_probe scene_reload_cycle_probe.cpp)
-target_link_libraries(scene_reload_cycle_probe PRIVATE ${PROJECT_NAME} wpAudio wpScene wpParticle wpFs wpVulkan wpVulkanRender wpRGraph nlohmann_json::nlohmann_json)
-target_include_directories(scene_reload_cycle_probe PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender)
+target_link_libraries(scene_reload_cycle_probe PRIVATE ${PROJECT_NAME} wpAudio wpScene wpParticle wpFs wpRGraph nlohmann_json::nlohmann_json)
+target_include_directories(scene_reload_cycle_probe PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(scene_reload_cycle_probe PRIVATE cxx_std_20)
 
 # The text tests measure a font with FreeType itself, as the reference for the
 # size the layout requests.
 find_package(Freetype REQUIRED)
 add_executable(text_object_runtime_test text_object_runtime_test.cpp)
-target_link_libraries(text_object_runtime_test PRIVATE ${PROJECT_NAME} wpAudio wpScene wpFs wpVulkan wpVulkanRender wpRGraph Freetype::Freetype nlohmann_json::nlohmann_json GTest::gtest_main)
-target_include_directories(text_object_runtime_test PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender)
+target_link_libraries(text_object_runtime_test PRIVATE ${PROJECT_NAME} wpAudio wpScene wpFs wpRenderCommon wpRGraph Freetype::Freetype nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(text_object_runtime_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(text_object_runtime_test PRIVATE cxx_std_20)
 gtest_discover_tests(
     text_object_runtime_test
@@ -300,7 +297,7 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 add_executable(mouse_input_test mouse_input_test.cpp)
-target_link_libraries(mouse_input_test PRIVATE ${PROJECT_NAME} wpScene wpVulkan GTest::gtest_main)
+target_link_libraries(mouse_input_test PRIVATE ${PROJECT_NAME} wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(mouse_input_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(mouse_input_test PRIVATE cxx_std_20)
 gtest_discover_tests(
@@ -309,7 +306,7 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 add_executable(wallpaper_scaling_test wallpaper_scaling_test.cpp)
-target_link_libraries(wallpaper_scaling_test PRIVATE ${PROJECT_NAME} wpScene wpVulkan wpVulkanRender GTest::gtest_main)
+target_link_libraries(wallpaper_scaling_test PRIVATE ${PROJECT_NAME} wpScene GTest::gtest_main)
 target_include_directories(wallpaper_scaling_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(wallpaper_scaling_test PRIVATE cxx_std_20)
 gtest_discover_tests(
@@ -345,8 +342,8 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 add_executable(layer_texture_reference_test layer_texture_reference_test.cpp)
-target_link_libraries(layer_texture_reference_test PRIVATE ${PROJECT_NAME} wpVulkanRender wpVulkan wpRGraph wpScene wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest_main)
-target_include_directories(layer_texture_reference_test PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender ${CMAKE_SOURCE_DIR}/src/Scene/RenderGraph/include)
+target_link_libraries(layer_texture_reference_test PRIVATE ${PROJECT_NAME} wpRenderCommon wpRGraph wpScene wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(layer_texture_reference_test PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/RenderGraph/include)
 target_compile_features(layer_texture_reference_test PRIVATE cxx_std_20)
 gtest_discover_tests(
     layer_texture_reference_test
@@ -354,37 +351,17 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 add_executable(project_property_preview_test project_property_preview_test.cpp)
-target_link_libraries(project_property_preview_test PRIVATE ${PROJECT_NAME} wpVulkanRender wpVulkan wpRGraph wpScene wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest_main)
-target_include_directories(project_property_preview_test PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender ${CMAKE_SOURCE_DIR}/src/Scene/RenderGraph/include)
+target_link_libraries(project_property_preview_test PRIVATE ${PROJECT_NAME} wpRGraph wpScene wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(project_property_preview_test PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/RenderGraph/include)
 target_compile_features(project_property_preview_test PRIVATE cxx_std_20)
 gtest_discover_tests(
     project_property_preview_test
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )
-add_executable(vulkan_render_batch_planner_smoke vulkan_render_batch_planner_smoke.cpp)
-target_link_libraries(vulkan_render_batch_planner_smoke PRIVATE wpVulkanRender wpVulkan)
-target_include_directories(vulkan_render_batch_planner_smoke PRIVATE .)
-target_compile_features(vulkan_render_batch_planner_smoke PRIVATE cxx_std_20)
-target_compile_options(vulkan_render_batch_planner_smoke PRIVATE -UNDEBUG)
-add_test(NAME vulkan_render_batch_planner_smoke COMMAND vulkan_render_batch_planner_smoke)
-add_executable(vulkan_sample_count_smoke vulkan_sample_count_smoke.cpp)
-target_link_libraries(vulkan_sample_count_smoke PRIVATE ${PROJECT_NAME} wpVulkanRender wpVulkan wpScene wpRGraph GTest::gtest_main)
-target_include_directories(vulkan_sample_count_smoke PRIVATE
-    .
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/Vulkan/include
-    ${CMAKE_SOURCE_DIR}/src/Scene/RenderGraph/include
-    ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender
-    ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender/include
-    ${CMAKE_SOURCE_DIR}/src/Utils/include
-    ${CMAKE_SOURCE_DIR}/src/Scene/include
-)
-target_compile_features(vulkan_sample_count_smoke PRIVATE cxx_std_20)
-add_test(NAME vulkan_sample_count_smoke COMMAND vulkan_sample_count_smoke)
 add_executable(rendergraph_smoke rendergraph_smoke.cpp)
-target_link_libraries(rendergraph_smoke PRIVATE ${PROJECT_NAME} wpVulkanRender wpVulkan wpRGraph wpScene wpAudio wpFs GTest::gtest_main)
-target_include_directories(rendergraph_smoke PRIVATE . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender)
+target_link_libraries(rendergraph_smoke PRIVATE ${PROJECT_NAME} wpRenderCommon wpRGraph wpScene wpAudio wpFs GTest::gtest_main)
+target_include_directories(rendergraph_smoke PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(rendergraph_smoke PRIVATE cxx_std_20)
 add_test(NAME rendergraph_smoke COMMAND rendergraph_smoke)
 # The decode pump is codec-agnostic on purpose, so its state machine is tested
@@ -443,22 +420,6 @@ target_compile_features(surface_health_test PRIVATE cxx_std_20)
 gtest_discover_tests(
     surface_health_test
     TEST_PREFIX surface_health_test.
-    PROPERTIES TIMEOUT 30
-    DISCOVERY_TIMEOUT 60
-)
-
-# Conversion-destination budgeting is slot arithmetic, admission and an
-# exhaustion policy over opaque handles, so its counter-examples need neither a
-# Metal device nor a decoder.
-add_executable(video_conversion_budget_test
-    video_conversion_budget_test.cpp
-    ${CMAKE_SOURCE_DIR}/src/Video/VideoConversionBudget.cpp)
-target_link_libraries(video_conversion_budget_test PRIVATE GTest::gtest_main)
-target_include_directories(video_conversion_budget_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
-target_compile_features(video_conversion_budget_test PRIVATE cxx_std_20)
-gtest_discover_tests(
-    video_conversion_budget_test
-    TEST_PREFIX video_conversion_budget_test.
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )
@@ -529,19 +490,6 @@ if(APPLE)
         DISCOVERY_TIMEOUT 60)
 endif()
 
-# A pure-video wallpaper's media is decode input, not a payload. The test drives
-# the real construction path against media the fixture encodes, so it links the
-# renderer rather than standing in a fake source. Only the software-frame suite
-# of apple_video_frame_test.mm still builds libav frames of its own.
-pkg_check_modules(TEST_AVFORMAT REQUIRED IMPORTED_TARGET libavformat)
-pkg_check_modules(TEST_AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
-pkg_check_modules(TEST_AVUTIL REQUIRED IMPORTED_TARGET libavutil)
-if(APPLE)
-    target_sources(playback_gpu_test PRIVATE apple_video_frame_test.mm)
-    target_link_libraries(playback_gpu_test PRIVATE wescene_testing_media
-        PkgConfig::TEST_AVFORMAT PkgConfig::TEST_AVCODEC PkgConfig::TEST_AVUTIL)
-    wescene_prefer_ffmpeg_headers(playback_gpu_test "TEST_")
-endif()
 # Reading a video's size and length from memory with the project's own MP4
 # reader, against the FFmpeg probe it replaces: the fixtures and, when there is
 # a local wallpaper library, the video payloads inside its `.tex` files.
@@ -580,7 +528,7 @@ gtest_discover_tests(
 if(APPLE)
     add_executable(unchanged_present_test unchanged_present_test.mm)
     target_link_libraries(unchanged_present_test PRIVATE ${PROJECT_NAME}
-        wpScene wpRenderCommon wpVulkan wpVulkanRender wpRGraph
+        wpScene wpRenderCommon wpRGraph
         wescene_testing_media GTest::gtest_main)
     target_include_directories(unchanged_present_test PRIVATE
         . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/include
@@ -594,12 +542,12 @@ if(APPLE)
 endif()
 
 # What a scene does when the native backend cannot draw it and nothing else may:
-# held on its last frame or its preview and reported, never drawn by the
-# compatibility backend. The failures are forced where real ones strike.
+# held on its last frame or its preview and reported, never drawn by anything
+# else. The failures are forced where real ones strike.
 if(APPLE)
     add_executable(scene_failure_policy_test scene_failure_policy_test.mm)
     target_link_libraries(scene_failure_policy_test PRIVATE ${PROJECT_NAME}
-        wpScene wpRenderCommon wpVulkan wpVulkanRender wpRGraph GTest::gtest_main)
+        wpScene wpRenderCommon wpRGraph GTest::gtest_main)
     target_include_directories(scene_failure_policy_test PRIVATE
         . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/include
         ${CMAKE_SOURCE_DIR}/src/Scene/RenderCommon/include)
@@ -613,9 +561,9 @@ endif()
 
 # Render-target sizing only: no device, no surface, no GPU.
 add_executable(render_scale_test render_scale_test.cpp)
-target_link_libraries(render_scale_test PRIVATE ${PROJECT_NAME} wpScene wpVulkanRender wpVulkan wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)
+target_link_libraries(render_scale_test PRIVATE ${PROJECT_NAME} wpScene wpRenderCommon wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(render_scale_test PRIVATE
-    . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender)
+    . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(render_scale_test PRIVATE cxx_std_20)
 gtest_discover_tests(
     render_scale_test
@@ -633,19 +581,6 @@ target_compile_features(static_subgraph_cache_test PRIVATE cxx_std_20)
 gtest_discover_tests(
     static_subgraph_cache_test
     TEST_PREFIX static_subgraph_cache_test.
-    PROPERTIES TIMEOUT 60
-    DISCOVERY_TIMEOUT 60
-)
-
-# Threads and a fake parser only: no device, no surface, no GPU.
-add_executable(texture_prefetch_test texture_prefetch_test.cpp)
-target_link_libraries(texture_prefetch_test PRIVATE ${PROJECT_NAME} wpVulkanRender wpVulkan wpRGraph wpScene wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest_main)
-target_include_directories(texture_prefetch_test PRIVATE
-    . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender)
-target_compile_features(texture_prefetch_test PRIVATE cxx_std_20)
-gtest_discover_tests(
-    texture_prefetch_test
-    TEST_PREFIX texture_prefetch_test.
     PROPERTIES TIMEOUT 60
     DISCOVERY_TIMEOUT 60
 )
@@ -670,7 +605,7 @@ gtest_discover_tests(
 # device-backed check skips visibly when no Metal device is present.
 add_executable(metal_backend_test metal_backend_test.cpp)
 target_link_libraries(metal_backend_test PRIVATE
-    ${PROJECT_NAME} wpMetalRender wpVulkanRender wpVulkan wpScene wpRGraph wpParticle
+    ${PROJECT_NAME} wpMetalRender wpScene wpRGraph wpParticle
     nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(metal_backend_test PRIVATE
     . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/MetalRender/include)
@@ -688,14 +623,13 @@ if(APPLE)
   # encoder. Creates only private textures and an offscreen layer.
   add_executable(metal_scene_draw_smoke metal_scene_draw_smoke.mm)
   target_link_libraries(metal_scene_draw_smoke PRIVATE
-      ${PROJECT_NAME} wpMetalRender wpVulkanRender wpVulkan wpScene wpRGraph
+      ${PROJECT_NAME} wpMetalRender wpScene wpRGraph
       wpParticle wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest_main
       # The video-layer case needs a real decodable file, which the fixture
       # encodes rather than shipping one.
       wescene_testing_media)
   target_include_directories(metal_scene_draw_smoke PRIVATE
-      . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/MetalRender/include
-      ${CMAKE_SOURCE_DIR}/src/Scene/VulkanRender)
+      . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/MetalRender/include)
   target_compile_features(metal_scene_draw_smoke PRIVATE cxx_std_20)
   set_target_properties(metal_scene_draw_smoke PROPERTIES
       OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
@@ -716,7 +650,7 @@ if(APPLE)
   foreach(metal_module_test metal_poster_capture_test metal_video_texture_test)
     add_executable(${metal_module_test} ${metal_module_test}.mm)
     target_link_libraries(${metal_module_test} PRIVATE
-        ${PROJECT_NAME} wpMetalRender wpVulkanRender wpVulkan wpScene wpRGraph
+        ${PROJECT_NAME} wpMetalRender wpScene wpRGraph
         wpParticle wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest_main
         ${METAL_FRAMEWORK} ${CORE_VIDEO_FRAMEWORK} ${IOSURFACE_FRAMEWORK}
         ${FOUNDATION_FRAMEWORK})

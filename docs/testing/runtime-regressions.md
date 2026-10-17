@@ -42,7 +42,7 @@ device.
   first frame and the frame before on every later one, byte-identical with
   scene optimisation off and on, and the loop is reported as `Feedback` demand
   so updating only on change cannot stop a trail mid-fade.
-- **An input nothing produces** — `MetalSceneDraw.AStepSamplingAnImageNothingProducesIsSkippedLikeOnCompatibility`:
+- **An input nothing produces** — `MetalSceneDraw.AStepSamplingAnImageNothingProducesIsSkipped`:
   a step whose sampled slot the graph left without a name (a layer texture
   whose layer draws no composite) neither draws nor clears, as on
   Compatibility, instead of refusing the scene. An image that has a name and
@@ -55,7 +55,7 @@ device.
   depth-attached target takes its material's cull mode with counter-clockwise
   front faces, as Compatibility does; every other pass culls nothing. Native
   Metal culled nothing, so a planet's ring drew its unlit back over its front.
-- **A screen read before any draw** — `MetalSceneDraw.AScreenReadBeforeAnyDrawSeesTheBackgroundEveryFrameOnBothRenderers`:
+- **A screen read before any draw** — `MetalSceneDraw.AScreenReadBeforeAnyDrawSeesTheBackgroundEveryFrame`:
   the only layer blends with the screen, so the first thing each frame does to
   the scene's image is copy it for that layer. Compatibility clears the image
   to the background at the start of every frame; Native Metal clears it in the
@@ -79,20 +79,19 @@ device.
   [scene regressions](scene-regressions.md)).
   Projection is the scene camera's own FOV/aspect/near/far, not an orthographic
   scale; a rotated card must foreshorten.
-- **Depth writes** — `MetalSceneDraw.ADepthWritingDrawHidesLaterDrawsAsOnCompatibility`:
+- **Depth writes** — `MetalSceneDraw.ADepthWritingDrawHidesLaterDraws`:
   a half-transparent card, then an opaque card behind it, authored with
   translucent, additive and normal blending, with and without `depthtest` and
-  `depthwrite`, and with and without a depth attachment, each drawn by both
-  renderers through `SceneRendererHandle` (`DrawWithRenderer`); the pictures must
-  be byte-identical, and the nearer card must hide the overlap exactly when it
-  depth-tests and writes into a depth-attached target. Both renderers take their
-  depth state from `ResolveSceneDepthState` (`SceneMaterial.h`). Native Metal used
-  to drop depth writes for translucent and additive materials, and depth-tested
-  into targets with no depth attachment, where Compatibility draws in painter's
-  order. A layer drawn through effects takes the same state from the layer, not
+  `depthwrite`, and with and without a depth attachment, each drawn through
+  `SceneRendererHandle` (`DrawWithRenderer`); the nearer card must hide the
+  overlap exactly when it depth-tests and writes into a depth-attached target.
+  The depth state comes from `ResolveSceneDepthState` (`SceneMaterial.h`). Native
+  Metal used to drop depth writes for translucent and additive materials, and
+  depth-tested into targets with no depth attachment, where Wallpaper Engine draws in
+  painter's order. A layer drawn through effects takes the same state from the layer, not
   its effect pass, except that a layer Wallpaper Engine sorts (blending `translucent` or
   `additive`) in a scene that sorts takes no write from it
-  (`MetalSceneDraw.ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWriteOnBothRenderers`,
+  (`MetalSceneDraw.ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWrite`,
   [scene regressions](scene-regressions.md#layers-textures-and-compositing)).
 - **Render passes** — `MetalSceneDraw.LayersSharingATargetShareOneRenderPassAndHiddenLayersCostNone`:
   consecutive passes into one image share one render pass, a hidden layer starts
@@ -202,22 +201,13 @@ device.
   tail of every loop. It also covers cancellation during a drain, a bounded
   no-progress budget, and releasing a held packet exactly once on seek, stop or
   failure.
-- **Decoder eligibility and first-frame import** — `VideoDecoderSelection.*` in
-  `playback_gpu_test` writes an original embedded 64×64 red AV1 clip, primes the
-  real source, requires an IOSurface-backed NV12 frame, and reads known red Metal
-  pixels after releasing the decoder. This catches a software-only default
-  hiding another decoder's VideoToolbox capability. The AV1 case explicitly skips
-  machines without AV1 hardware decode; a failed decode on capable hardware is a
-  failure, not a skip. The suite also imports generated H.264 through an already
-  eligible default and verifies that a valid software-only PPM stream remains
-  rejected instead of broadening software decode admission.
 - **Color range** — `video_color_conversion_test` pins known pixels for
   BT.601/709/2020 in both ranges, studio black and white with clamping, 75%
   color bars round-tripped from their RGB primaries, matrix separation,
   resolution-based inference for unspecified metadata, and bit-depth scaling.
   Limited-range chroma has its own 224 code-value excursion; reading it as
   `sample - 0.5` desaturates every studio-swing frame, and that has a case of its
-  own. `PlaybackGPU.MetalConversionMatchesTheCpuColorReference` compares the
+  own. `MetalVideoTexture.ConvertedNv12MatchesTheCpuColorReference` compares the
   Metal `nv12_to_bgra` kernel against the same CPU reference so the two paths
   cannot drift apart.
 - **10-bit and HDR scene video** — `MetalVideoTexture.P010ConvertedMatchesCpuReference`
@@ -251,23 +241,11 @@ device.
   affine display transform. `VideoDisplayTransform.*` in
   `video_color_conversion_test` checks all eight orthogonal orientations plus
   scale and shear, and `Decoders/VideoSourceInput.DisplayMatrixSurvivesMetadataProbeAndFrameExtraction/*`
-  (once per decoder) reads ordinary synthetic MP4 metadata. Private-texture Vulkan and Metal checks
+  (once per decoder) reads ordinary synthetic MP4 metadata. Private-texture Metal checks
   draw four distinct corner colors through BGRA, converted NV12 and direct NV12
   sampling and compare orientation, logical size and transparent uncovered
   corners for shear; converted and direct output may differ by at most two
   channel levels.
-- **Software-decoded frames** allocate the BGRA output buffer with IOSurface
-  backing and Metal compatibility: a CPU-only Core Video buffer decodes correctly
-  but cannot be imported as a GPU texture, leaving the video black. Import adds
-  no second pixel copy, conversion destination or GPU wait.
-  `DecodedFormats/SoftwareVideoFrame.*` in `playback_gpu_test` covers BGRA, NV12,
-  YUV420P and YUVJ420P with generated strided color/alpha patterns, checks exact
-  imported pixels after releasing the decoder buffers, and asserts direct-import
-  work. `WE_TEST_VIDEO` optionally exercises an installed clip without editing it.
-- **Import leases** — video frame imports are owned by a lease that retains the
-  Core Video texture wrapper and the pixel buffer for as long as the frame can be
-  sampled, not just the vended `MTLTexture`. `playback_gpu_test` exercises pool
-  reuse, generation dedup, cache eviction and recording-discard recovery.
 - **The native decode path** (project readers plus VideoToolbox; the default for MP4/QuickTime
   and WebM/Matroska payloads) — `vt_frame_decoder_test`, `video_probe_test` and the native
   cases of `video_source_input_test` (`NativePayloads.*`, `Decoders/VideoSourceInput.*/native`).
@@ -294,7 +272,7 @@ device.
   that reorders more than 16 frames is refused rather than holding decoded pictures without
   bound (`AStreamThatReordersMoreThanADecoderMayHoldIsRefused`), and auto mode hands the file to
   FFmpeg. A payload the native backend refuses and FFmpeg plays (a fragmented MP4) still plays
-  when the source is the image's only owner, as on the Vulkan path
+  when the source is the image's only owner
   (`AutoHandsARefusedPayloadToFfmpegWhenTheSourceIsTheImagesOnlyOwner`).
 - **Decoded frames carry real timestamps** — `video_source_input_test` against media the tests encode. A frame whose
   timestamp is always zero looks like playback for as long as frames keep
@@ -311,28 +289,17 @@ device.
   `.AVideoTheNewGraphDoesNotUseIsClosedWithItsCompile`,
   `.VideosSetAsideAreClosedByClosingThemAndByTheObjectGoingAway` and
   `.AVideoSetAsideThatFailedWhileItWaitedIsOpenedAgainLikeAnyOther` in `metal_video_texture_test`
-  (`MetalVideoTextures::hold`, `closeHeld`, `prepare`), and
-  `PlaybackGPU.AVideoSetAsideByARebuildIsGivenBackToThePassThatBindsItNotOpenedAgain`,
-  `.AVideoTheRebuiltGraphDoesNotBindIsClosedWithItsCompile`,
-  `.AClearThatIsNotARebuildClosesEveryVideoAndSetAsideOnesToo`,
-  `.AVideoSetAsideThatFailsWhenAskedForItsFrameIsLeftToBeOpenedAgain` and
-  `.APassBindingAVideoSetAsideByARebuildIsGivenItAndTheSceneIsNotReadForIt` in `playback_gpu_test`
-  (`TextureCache::ClearForRebuild`, `FindVideoTex`, `CloseHeldVideos`; the last runs a real
-  `CustomShaderPass::prepare`, from two passes that bind one video, on a scene whose parser counts
-  and refuses, and requires no read for either: the others hold whichever way a pass goes about
-  asking the cache). A graph built again for the scene that is drawing it sets its videos aside
-  instead of closing them. The compile takes back the ones its textures name without asking the
-  scene's parser for them (the Metal test hands `prepare` a parser that counts and refuses, and
-  requires no call: reading a packaged video copies and hashes the whole file), gives them the
-  scene's clock (the source's last `syncPlayback` carries the 4 s of the Metal test's scene, the
-  9 s of the Vulkan test's) and goes on with the frames the same decoder delivers. A video it does
-  not name is closed when the compile ends (the weak pointer to the source expires then and not
-  before). A plain release or clear closes what was set aside too, and a decoder that fails when
-  it is given the clock is dropped and opened as any other (the Metal test sees the parser asked
-  once, the Vulkan one the cache report nothing found). With the keeping switched off for the run,
-  three of the four Metal tests and four of the five Compatibility ones fail and the failing
-  decoder passes by construction; with the cache asked after the scene's parser in
-  `CustomShaderPass::prepare` the pass test alone fails. The scenes that show it end to end are in
+  (`MetalVideoTextures::hold`, `closeHeld`, `prepare`). A graph built again for the scene that is
+  drawing it sets its videos aside instead of closing them. The compile takes back the ones its
+  textures name without asking the scene's parser for them (the test hands `prepare` a parser that
+  counts and refuses, and requires no call: reading a packaged video copies and hashes the whole
+  file), gives them the scene's clock (the source's last `syncPlayback` carries the 4 s of the
+  test's scene) and goes on with the frames the same decoder delivers. A video it does not name is
+  closed when the compile ends (the weak pointer to the source expires then and not before). A
+  plain release or clear closes what was set aside too, and a decoder that fails when it is given
+  the clock is dropped and opened as any other (the test sees the parser asked once). With the
+  keeping switched off for the run, three of the four tests fail and the failing decoder passes by
+  construction. The scenes that show it end to end are in
   [scene regressions](scene-regressions.md#text-fonts-and-clocks).
 - **A reopened source is sought once and left to land, and a jump of the clock is one seek** —
   `Decoders/VideoSourceClock.*` (both decoders) and `VideoSeekPolicy.*` in `video_source_input_test`, against media the
@@ -389,70 +356,14 @@ device.
 
 ## Continuous-playback work contracts
 
-- **Playback GPU harness** — `playback_gpu_test` uses real private images for
-  producer/consumer and overwrite synchronization, every generated mip, and
-  recording/pipeline/framebuffer failures. The executor returns the first
-  `VkResult` failure; failed recordings are reset and abandoned rather than
-  submitted or waited on. Shader-read barriers are outside render passes and
-  include vertex consumers.
-- **Pass teardown** — destroying a pass leaves it unprepared with no image
-  handles. Render-scale and copy-elision rebuilds destroy every pass, drop the
-  render targets and prepare only unprepared passes, so a pass that stays
-  prepared records against freed images (a `CopyPass` that did crashed MoltenVK
-  at launch with render scale below 1).
-  `PlaybackGPU.CopyPreparesAgainAfterRenderTargetsAreDroppedAndResized` covers it.
-- **Clears** — a prepared `PrePass` is skipped only when a same-image, same-view,
-  single-mip, single-sample clear with bit-identical color is reached before any
-  reader or non-custom pass; visibility and actual active descriptors are
-  reconsidered each frame, and the standalone pass loop remains the reference
-  path. `PlaybackGPU.FirstDrawAfterATransparentClearOpensWithItByteForByte`: the
-  first draw into a target cleared to transparent opens with that clear, leaves
-  the bytes the clear plus a loading draw left, and the transfer clear is
-  dropped; `RenderTargetLifetime.NestedCompositesClearBeforeChildrenWithoutErasingThem`
-  keeps every later draw loading and single-sample. A hidden layer's batched
-  first-use clear (`ClearImage`) is recorded only when something can observe its
-  target (`HiddenClearIsObservable`, over the whole graph, including passes left
-  out of the frame by reuse): a later drawing reader, sampler, copy, final
-  composition or loading draw, any earlier reader (it samples the previous
-  frame's clear), or the scene output.
-  `PlaybackGPU.HiddenClearsAreRecordedOnlyWhereSomethingReadsThem` covers each
-  reader and the transition of a hidden reader to drawing; the executor and the
-  unchanged-present check apply the same rule.
-- **Direct presentation** requires exactly one graph shader pass writing the
-  default target, a first clear, no depth/mip/MSAA or feedback, UNORM RGBA/BGRA,
-  and identical graphics/present queue families. Each frame also requires the
-  exact full-target viewport/scissor, matching extent, ready descriptors and no
-  flip. Other frames render the normal intermediate plus `FinPass`. Both pipelines are prepared once, and all
-  paths retain frame/presentation waits. Private-target tests compare complete
-  same-format bytes over poisoned target rotation, graph resize, transparency,
-  fallback and error recovery; they never transition private images to
-  `PRESENT_SRC_KHR`.
-- **Posters** — the Compatibility swapchain is `COLOR_ATTACHMENT` only, so
-  MoltenVK makes the layer framebuffer-only. A requested poster is composed a
-  second time by the pass that composed the drawable (`FinPass::recordComposition`
-  or `CustomShaderPass::recordPresentation`) into a one-frame image of its own,
-  refused above the poster limit by its real allocation, and copied from there.
-  The same test requires every poster to equal the bytes the target received.
-- **NV12 on Compatibility** makes one submission per new frame: the conversion is
-  committed, without a CPU wait, on MoltenVK's own graphics `MTLCommandQueue`
-  (exported with `vkExportMetalObjectsEXT`) and is ordered ahead of the frame by
-  commit order and hazard tracking. That relies on MoltenVK's defaults
-  (`MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=1`, no prefill) and on the conversion
-  running in the update op before `rr.command.Begin`. A first-use layout
-  transition is recorded into the frame (`TextureCache::RecordVideoFirstUseTransitions`,
-  right after `Begin`; harnesses that record frames call it too).
-  `PlaybackGPU.NewVideoFramesNeitherWaitOnTheCpuNorSubmitOutsideTheFrame` guards
-  one submit per frame, no CPU wait and image creations bounded by pooled
-  destinations; `.ADroppedFrameDestinationIsNotReusedBeforeItsConversionRuns`
-  guards the parking of a destination whose conversion is still in flight.
+- **Clears** — `RenderTargetLifetime.NestedCompositesClearBeforeChildrenWithoutErasingThem`
+  keeps every later draw loading and single-sample.
 - **Per-frame uniform writes** resolve reflected members through a per-pass memo
   instead of string-keyed maps; every value is still written every frame and the
   upload stays memcmp-gated. The memo relies on two invariants: after parsing, a
   material's `customShader.constValues` only gains keys or is updated in place (a
   runtime erase would have to invalidate the memo), and `RuntimeImageSource`
   never removes a name (`NamesGeneration()` moves when one is added).
-  `PlaybackGPU.RuntimeImagePublishedAfterPrepareReachesTheNextFrame` and
-  `.RuntimeImageNamePublishedAfterPrepareReachesTheNextFrame` cover them.
 - **Puppet copies** reuse a result buffer in their existing shared playback state
   for the exact same finite time until a control mutation; fresh layers sharing an
   asset have independent results and attachments still apply each frame. Audio
@@ -463,12 +374,12 @@ device.
   renderer-instance replacement, serialized observer replay/publication, retained
   held-button levels and discarded inactive taps, level-only native
   reconciliation, single-turn samples and exact-success input deduplication.
-  Native capability and button tests initialize loopers only, not Vulkan,
+  Native capability and button tests initialize loopers only, not a renderer,
   playback or audio hardware.
 - **Performance probes** stay disposable, with fixed simulation time, full output
   checks outside timing, raw samples and per-block median/p95. C++ `new` counters
   do not measure QuickJS `malloc`, worker-thread allocations or whole-process
-  memory. Pixel equality and Vulkan command traces are not synchronization-layer
+  memory. Pixel equality and command traces are not synchronization-layer
   validation, desktop equivalence, GPU residency or power measurements; GPU
   elapsed times vary run to run, so treat them as samples, never as proof of a
   GPU-time change and never as power or battery measurements.
@@ -482,11 +393,8 @@ device.
   presents exactly once and then repeats again. A previewed property presents once and an
   on-demand scene wakes for exactly that frame. Counters are compared within one draw at the
   window edges, never exactly. A change the comparison cannot see must invalidate the gate; do
-  not widen the skip by comparing fewer inputs. The video cases this test once ran on the
-  Compatibility renderer (a plain video presenting exactly its newly selected frames, the same
-  sequence of generations with the skip on and off, a held frame presenting once per flip,
-  position change, poster, resume, crop, render-scale, resize or fill-mode change) are retired
-  with that renderer: the engine is never given a plain video. `unchanged_present_test` counts
+  not widen the skip by comparing fewer inputs. The engine is never given a plain video, so
+  there are no plain-video cases. `unchanged_present_test` counts
   frames in wall-clock windows, so run it without concurrent builds or benchmarks and keep a
   failing baseline visible rather than excluding the test.
 
@@ -530,8 +438,7 @@ device.
   still produces frames.
 - **Renderer work counters** — `OWE_RC_*` counters are incremented by the
   production paths that perform the work: the frame clock's tick, the draw
-  handler, the Vulkan submit, the present request, the frame fence and the
-  texture cache's video update. They are off by default and read by pulling
+  handler, the present request and the frame's completion. They are off by default and read by pulling
   `owe_scene_wallpaper_counters`; nothing is pushed or logged per frame.
   `timer_tests` asserts that a tick which found a draw still in flight is counted
   as a suppressed tick rather than a request, that nothing is counted while the
@@ -544,12 +451,6 @@ device.
   the picture still moves. `present_requests` counts requests; this backend has
   no presentation-feedback source, so the frames a compositor actually displayed
   are reported as unavailable and never approximated by the request count.
-- **Counter baseline** — `PlaybackGPU.TurningCountersOnDoesNotReportWorkAlreadyDone`.
-  A (retired) Compatibility video update that ran while counting was off did not read the
-  decoder at all; the next counted update only records the decoder's totals and
-  the frame on screen. Decode outputs, seeks, selected and skipped frames are then
-  only what later counted updates observed, including after counting was turned
-  off and on again.
 - **A scene with nothing left to do** — `MetalSceneDraw.AStaticTextSceneRunsOutOfWorkToDo`,
   `.AStaticTextLayerUnderAnEffectChainAlsoRunsOutOfWork` and
   `.TextBoundToAUserPropertyIsEventDrivenRatherThanContinuous`: a static caption
@@ -572,8 +473,8 @@ device.
   (it counts draws in a half-second wait, so it is named in `REALTIME_TESTS`):
   a layer sampling a target the graph fills only after it has drawn (the fixture
   uses `_rt_MipMappedFrameBuffer`; a motion-blur trail or an accumulation is the
-  same shape) keeps changing the picture with no time uniform. Both backends
-  report `Feedback` for a `carriesPreviousFrame` target their compiled graph
+  same shape) keeps changing the picture with no time uniform. The renderer
+  reports `Feedback` for a `carriesPreviousFrame` target their compiled graph
   reads or writes, so the clock keeps running (with pixel reuse off and on), while the
   same card without the loop goes idle.
 - **Geometry rewritten on an event** — `SceneDemandMapping.GeometryRewrittenOnAnEventIsNotAReasonToKeepDrawing`
@@ -591,7 +492,7 @@ device.
   `tests::scene_settings` pins the precedence (the user's pause and a suspended
   display outrank a stop, an unread surface is `unknown` and never `stopped`).
   A genuine presentation failure cannot be produced without a desktop, so the latch
-  is covered through its setter, not through MoltenVK.
+  is covered through its setter.
 - **A scene that fails after drawing is healed within a budget, once and visibly** —
   `wallpaper-core` `engine::surface_recovery::tests` pin the ladder with injected
   instants (an in-place surface rebuild after 0.5 s, then two renderer rebuilds after 2 s
@@ -864,20 +765,9 @@ engine to redo, and when.
   lock-screen scene must stay unpaused unless the user or power policy paused
   playback.
 
-## Startup and staging buffers
+## Startup
 
-- **Deferred backend selection** — `SceneSurface.DeferredBackendRetainsTheLayerUntilTheSceneIsDeleted`
-  in `playback_gpu_test` checks that deferred backend selection keeps its
-  `CAMetalLayer` alive after the host releases it, then releases it with the
-  scene. It uses no window or GPU backend and flushes Core Animation's implicit
-  transaction so that transaction cannot mask missing scene ownership.
-- **Staging buffers grow geometrically.** Extending by a fixed size zeroes a
-  temporary CPU vector and copies the entire previous allocation twice per
-  extension, which is quadratic for a large scene and caused an Apply timeout.
-  Geometric blocks plus direct replacement-buffer copying preserve existing
-  offsets and data without that work. The check is the cold/warm startup timings
-  of `offscreen_scene_probe` on a large scene.
-- **First-frame wait.** A cold MoltenVK pipeline compile for a large scene can
+- **First-frame wait.** A cold shader and pipeline compile for a large scene can
   take longer than 20 seconds, and a warm shader cache or driver pipeline cache
   does not remove the wait. The apply wait is 90 seconds, with rollback after
   it. It waits only on displays where the engine opens or replaces a scene,
@@ -910,18 +800,3 @@ engine to redo, and when.
   (`WallpaperActivationRecoveryTests`). A real
   engine crash is not reproducible headlessly; see
   [crash recovery](../features/crash-recovery.md#verification).
-- **Texture decode at preparation** — `texture_prefetch_test` (CPU, in the gate):
-  images handed over once under their own name, decoding plus untaken images held
-  within the byte budget (an image larger than the budget alone), preparation
-  never waiting on an image not yet admitted, a prefetch whose threads failed to
-  start answering at once, a failed decode reported rather than retried, a
-  throwing decoder left to the caller, and teardown joining running decodes and
-  freeing every image. `CustomShaderPass::prepare` asks `TextureCache::FindTex`
-  before decoding, so an image bound by several passes is decoded once.
-  `TexturePrefetch` decodes the images unprepared passes will parse on up to six
-  threads, ahead of the pass that binds them, with decoding and untaken images
-  held under a 256 MiB budget estimated from each header and admitted in request
-  order. Startup timing and byte-identical output on a real scene come from
-  `offscreen_scene_probe`, which prepares through the same prefetch. Startup cost
-  feeds lock-screen admission latency: the extension answers WallpaperAgent only
-  after a first frame (see [lock screen](../features/lock-screen.md)).

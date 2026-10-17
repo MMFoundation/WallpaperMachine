@@ -359,8 +359,8 @@ impl EngineFacade for RealEngineFacade {
                 audio_capture.retain_scenes().await.map_err(EngineError::Platform)?;
                 results?
             };
-            // A cold MoltenVK pipeline compile for a large 3D or puppet scene
-            // runs past 20s. The driver's cache makes the next launch short;
+            // A cold shader and pipeline compile for a large 3D or puppet scene
+            // can run past 20s. The driver's cache makes the next launch short;
             // the first one still has to be allowed to finish.
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
             loop {

@@ -5,13 +5,8 @@ use shader::{
     syntax::ShaderModule,
 };
 
-const SPIRV_MAGIC: u32 = 0x0723_0203;
-const SPIRV_OP_FNEGATE: u16 = 127;
-const SPIRV_OP_VECTOR_TIMES_MATRIX: u16 = 144;
-const SPIRV_OP_MATRIX_TIMES_VECTOR: u16 = 145;
-
 #[test]
-fn compiles_legalized_vertex_shader_to_spirv() {
+fn analyses_legalized_vertex_shader() {
     let source_text = r"#version 450
 layout(location = 0) in vec2 a_position;
 void main() {
@@ -21,15 +16,13 @@ void main() {
     let source = legalized_source(ShaderStageKind::Vertex, source_text);
 
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &source)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Vertex, &source)
         .expect("legalized vertex shader should compile");
 
     assert_eq!(artifact.kind(), ShaderStageKind::Vertex);
     assert_eq!(artifact.stage().kind(), ShaderStageKind::Vertex);
-    assert_eq!(
-        artifact.stage().spirv().and_then(<[u32]>::first),
-        Some(&SPIRV_MAGIC)
-    );
+    assert_eq!(artifact.stage().target(), ShaderTarget::Analysis);
+    assert!(artifact.stage().metal().is_none());
     assert_eq!(artifact.stage().legalized_source(), Some(source_text));
     assert_eq!(artifact.module().entry_points.len(), 1);
     assert!(artifact.diagnostics().is_empty());
@@ -37,27 +30,7 @@ void main() {
 }
 
 #[test]
-fn vertex_spirv_does_not_inject_coordinate_space_y_flip() {
-    let source_text = r"#version 450
-layout(location = 0) in vec2 a_position;
-void main() {
-    gl_Position = vec4(a_position, 0.0, 1.0);
-}
-";
-    let source = legalized_source(ShaderStageKind::Vertex, source_text);
-
-    let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &source)
-        .expect("legalized vertex shader should compile");
-
-    assert!(
-        !spirv_contains_opcode(spirv(&artifact), SPIRV_OP_FNEGATE),
-        "vertex SPIR-V must not contain Naga's BuiltIn::Position coordinate-space Y flip"
-    );
-}
-
-#[test]
-fn hlsl_mul_mvp_transform_emits_matrix_times_vector_spirv() {
+fn hlsl_mul_mvp_transform_is_legalized_to_matrix_times_vector() {
     let source_text = r"attribute vec3 a_Position;
 uniform mat4 g_ModelViewProjectionMatrix;
 void main() {
@@ -77,18 +50,9 @@ void main() {
         source.source()
     );
 
-    let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &source)
+    NagaCompiler
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Vertex, &source)
         .expect("legalized HLSL mul vertex shader should compile");
-
-    assert!(
-        spirv_contains_opcode(spirv(&artifact), SPIRV_OP_MATRIX_TIMES_VECTOR),
-        "MVP transform should match known-good shader-cache/proper SPIR-V OpMatrixTimesVector"
-    );
-    assert!(
-        !spirv_contains_opcode(spirv(&artifact), SPIRV_OP_VECTOR_TIMES_MATRIX),
-        "MVP transform must not regress to OpVectorTimesMatrix"
-    );
 }
 
 #[test]
@@ -117,7 +81,7 @@ void main() {
     );
 
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &source)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Vertex, &source)
         .expect("legalized bloom vertex shader with array varying should compile");
 
     assert_eq!(artifact.kind(), ShaderStageKind::Vertex);
@@ -125,7 +89,7 @@ void main() {
 }
 
 #[test]
-fn compiles_legalized_fragment_shader_to_spirv() {
+fn analyses_legalized_fragment_shader() {
     let source_text = r"#version 450
 layout(location = 0) out vec4 frag_color;
 void main() {
@@ -135,15 +99,13 @@ void main() {
     let source = legalized_source(ShaderStageKind::Fragment, source_text);
 
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &source)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &source)
         .expect("legalized fragment shader should compile");
 
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
     assert_eq!(artifact.stage().kind(), ShaderStageKind::Fragment);
-    assert_eq!(
-        artifact.stage().spirv().and_then(<[u32]>::first),
-        Some(&SPIRV_MAGIC)
-    );
+    assert_eq!(artifact.stage().target(), ShaderTarget::Analysis);
+    assert!(artifact.stage().metal().is_none());
     assert_eq!(artifact.stage().legalized_source(), Some(source_text));
     assert_eq!(artifact.module().entry_points.len(), 1);
     assert!(artifact.diagnostics().is_empty());
@@ -174,7 +136,7 @@ void main() {
     );
 
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &source)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &source)
         .expect("scalar expression vector max shader should compile");
 
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
@@ -192,7 +154,7 @@ void main() {
     let source = legalized_source(ShaderStageKind::Fragment, source_text);
 
     let err = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &source)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &source)
         .expect_err("unknown GLSL symbol should fail compilation");
 
     let ShaderError::Compile { diagnostics } = err else {
@@ -289,7 +251,7 @@ fn validation_failure_without_a_source_range_still_reports_its_causes() {
 fn compile_error(source_text: &str) -> Box<[shader::ShaderDiagnostic]> {
     let source = legalized_source(ShaderStageKind::Fragment, source_text);
     let error = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &source)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &source)
         .expect_err("the shader is invalid");
     let ShaderError::Compile { diagnostics } = error else {
         panic!("expected compile diagnostics");
@@ -310,7 +272,7 @@ fn global_const_initialized_from_a_uniform_is_evaluated_before_main_reads_it() {
         "void main() { gl_FragColor = vec4(edge(0.25)); }\n",
     );
 
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let artifact = compile_fragment(target, source_text);
         assert_eq!(
             runtime_global_stores(artifact.module(), &["FEATHER", "SPAN"]),
@@ -330,7 +292,7 @@ fn global_variable_initialized_from_a_uniform_keeps_its_value() {
         "void main() { gl_FragColor = vec4(texel, 0.0, 1.0); }\n",
     );
 
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let artifact = compile_fragment(target, source_text);
         assert_eq!(
             runtime_global_stores(artifact.module(), &["texel"]),
@@ -359,7 +321,7 @@ fn constant_global_initializers_stay_constant_expressions() {
 
     assert!(legalized.source().contains("const int COUNT = 2 * 2;"));
     assert!(legalized.source().contains("const float HALF = 1.0 / 2.0;"));
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let _artifact = NagaCompiler
             .compile_stage(target, ShaderStageKind::Fragment, &legalized)
             .expect("constant globals should compile unchanged");
@@ -425,26 +387,3 @@ fn legalized_source(stage: ShaderStageKind, source: &str) -> CodegenStageSource 
     CodegenStageSource::new(stage, source.to_owned(), Box::from([]))
 }
 
-fn spirv<M>(artifact: &CompiledStageArtifact<M>) -> &[u32] {
-    artifact
-        .stage()
-        .spirv()
-        .expect("vulkan_spirv target should produce SPIR-V words")
-}
-
-fn spirv_contains_opcode(words: &[u32], opcode: u16) -> bool {
-    let mut index = 5;
-    while index < words.len() {
-        let instruction = words[index];
-        let word_count = (instruction >> 16) as usize;
-        let instruction_opcode = (instruction & 0xffff) as u16;
-        if instruction_opcode == opcode {
-            return true;
-        }
-        if word_count == 0 {
-            return false;
-        }
-        index += word_count;
-    }
-    false
-}

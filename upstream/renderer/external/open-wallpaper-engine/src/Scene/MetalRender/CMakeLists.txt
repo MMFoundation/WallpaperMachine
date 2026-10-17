@@ -23,12 +23,10 @@ endif()
 add_library(${LIB_NAME} STATIC ${METAL_RENDER_SOURCES})
 
 # Depends on wpScene and on the shared render graph, never the other way
-# round: wpScene must stay free of any renderer. The logic both backends share
-# -- the `DynamicReason` vocabulary, static reuse, copy elision, the presentation
+# round: wpScene must stay free of any renderer. The scene-side logic -- the
+# `DynamicReason` vocabulary, static reuse, copy elision, the presentation
 # layout, and the read-only description of a graph step -- lives in
-# wpRenderCommon, so this library links no Vulkan code and includes no Vulkan
-# header; a second copy of that logic would be a second definition that can
-# drift.
+# wpRenderCommon, plain C++ that builds without Metal.
 target_link_libraries(${LIB_NAME}
 PUBLIC
     wpUtils

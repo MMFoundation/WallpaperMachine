@@ -72,7 +72,7 @@ namespace
 /// One material's shader, captured with everything a Metal translation needs.
 ///
 /// Metal Shading Language can only be produced here. It needs the final combo
-/// set, the preprocessed units and the texture info the SPIR-V compile settled
+/// set, the preprocessed units and the texture info the analysis compile settled
 /// on, and none of those outlive `LoadMaterial`. The translation itself is
 /// deferred to the end of the parse so a scene that has already disqualified
 /// itself structurally -- a particle emitter, a puppet, a video texture --
@@ -678,7 +678,7 @@ int32_t ResolveTextEffectRenderTargetDimension(float base_dimension, uint32_t /*
 // values, such as a fluid simulation's velocity and pressure, which an 8-bit
 // target would clamp at zero; the back-buffer formats follow the scene. A
 // single- or two-channel float buffer takes the four-channel float target, the
-// narrowest float format both renderers allocate.
+// narrowest float format the renderer allocates.
 TextureFormat EffectFboFormat(std::string_view format, bool hdr) {
     if (format == "r16f" || format == "rg1616f" || format == "rgba16161616f" ||
         format == "r32f" || format == "rg3232f" || format == "rgba32323232f") {
@@ -1521,7 +1521,6 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
     auto        textures = BuildMaterialTextureList(base_textures, pWPShaderInfo->defTexs);
     constexpr usize kMaxDefaultTextureCompilePasses = 8;
     for (usize pass = 0; pass < kMaxDefaultTextureCompilePasses; ++pass) {
-        shader->codes.clear();
         reflection_json.clear();
         for (auto& unit : sd_units) {
             unit.preprocess_info = {};
@@ -1558,7 +1557,7 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
             if (! author_bound && ! textures[slot].empty()) texinfos[slot].present = false;
         }
         // Captured before the compile that consumes them, so the record holds
-        // the exact input the SPIR-V compile saw rather than the state it left
+        // the exact input the analysis compile saw rather than the state it left
         // behind. Overwritten on every iteration, so the last one to run is the
         // one that stabilised.
         {
@@ -1578,8 +1577,8 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
                 g_pending_metal_translations.push_back(std::move(pending));
             }
         }
-        if (! WPShaderParser::CompileToSpvRust(
-                pScene->scene_id, wpmat.shader, sd_units, shader->codes, vfs, pWPShaderInfo, texinfos, &reflection_json)) {
+        if (! WPShaderParser::AnalyzeRust(
+                pScene->scene_id, wpmat.shader, sd_units, vfs, pWPShaderInfo, texinfos, &reflection_json)) {
             return false;
         }
         DeduplicateDefaultTextures(pWPShaderInfo->defTexs);
@@ -1847,11 +1846,11 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
     auto shader              = std::make_shared<SceneShader>();
     shader->name             = shader_name;
     std::string reflection_json;
-    // Captured before the SPIR-V compile consumes the units and merges its
+    // Captured before the analysis compile consumes the units and merges its
     // results into `shader_info`, exactly as a material's translation is. A
-    // text layer is an ordinary scene layer to both backends, so it needs the
-    // same second translation; without it the native backend has no program for
-    // the card and the whole scene falls back.
+    // text layer is an ordinary scene layer to the renderer, so it needs the
+    // same translation; without it the renderer has no program for
+    // the card and the whole scene is held.
     {
         PendingMetalTranslation pending;
         pending.shader      = shader;
@@ -1865,8 +1864,8 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
         pending.vfs          = &vfs;
         g_pending_metal_translations.push_back(std::move(pending));
     }
-    if (! WPShaderParser::CompileToSpvRust(
-            scene_id, shader_name, units, shader->codes, vfs, &shader_info, tex_infos, &reflection_json)) {
+    if (! WPShaderParser::AnalyzeRust(
+            scene_id, shader_name, units, vfs, &shader_info, tex_infos, &reflection_json)) {
         return nullptr;
     }
     shader->rust_reflection_json = std::move(reflection_json);
@@ -6225,12 +6224,12 @@ struct LazyShaderParseScope {
     const LayerObjectIndex* previous;
     explicit LazyShaderParseScope(const LayerObjectIndex& index) : previous(g_parse_layer_index) {
         g_parse_layer_index = &index;
-        WPShaderParser::InitGlslang();
+        WPShaderParser::BeginShaderSession();
     }
     ~LazyShaderParseScope() {
         g_pending_metal_translations.clear();
         g_parse_layer_index = previous;
-        WPShaderParser::FinalGlslang();
+        WPShaderParser::EndShaderSession();
     }
 };
 } // namespace
@@ -6461,7 +6460,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
 
     context.scene->scene_id = request.scene_id;
 
-    WPShaderParser::InitGlslang();
+    WPShaderParser::BeginShaderSession();
 
     for (WPObjectVar& obj : wp_objs) {
         std::visit(visitor::overload {
@@ -6555,7 +6554,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
     // place: the structural check it consults needs the finished scene.
     FlushPendingMetalTranslations(*context.scene);
 
-    WPShaderParser::FinalGlslang();
+    WPShaderParser::EndShaderSession();
     g_parse_layer_index = nullptr;
     if (context.scene->runtime != nullptr) {
         auto& runtime = *context.scene->runtime;

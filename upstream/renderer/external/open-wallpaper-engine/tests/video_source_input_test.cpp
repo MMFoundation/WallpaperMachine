@@ -1052,8 +1052,8 @@ TEST_F(NativePayloads, AFragmentedMp4IsRefusedWithItsReasonAndAutoHandsItToFfmpe
 }
 
 TEST_F(NativePayloads, AutoHandsARefusedPayloadToFfmpegWhenTheSourceIsTheImagesOnlyOwner) {
-    // The Vulkan compatibility path creates the source from a temporary image, so the
-    // native backend is the payload's only owner. The hand-over must take hold of the
+    // A source created from a temporary image leaves the
+    // native backend as the payload's only owner. The hand-over must take hold of the
     // bytes before the native backend lets go of them.
     const auto media = project_dir / "fragmented_sole.mp4";
     ASSERT_TRUE(WriteSyntheticVideo(media, 2, "fragmented_sole"));

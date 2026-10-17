@@ -737,16 +737,14 @@ impl SceneRuntime {
         })?;
 
         // Swap the CAMetalLayer BEFORE creating the new OWE scene so that
-        // each SceneWallpaper's VkSurface references its own CAMetalLayer.
-        // If we reused the old layer via `update_display`, the new VkSurface
-        // would be created on the same CAMetalLayer that the old VkSurface
-        // still references (it's destroyed only in `old_renderer.close()`
-        // below), violating the VK_EXT_metal_surface invariant that only
-        // one VkSurfaceKHR can be associated with a CAMetalLayer at a time.
+        // each scene's renderer drives its own CAMetalLayer. If we reused the
+        // old layer via `update_display`, the new renderer would draw into the
+        // same CAMetalLayer the old renderer still presents to (it stops only
+        // in `old_renderer.close()` below), and two renderers would contend for
+        // its drawables.
         //
-        // The old CAMetalLayer remains alive via MoltenVK's retain through
-        // the old VkSurface, and is deallocated when `old_renderer.close()`
-        // destroys that surface.
+        // The old CAMetalLayer remains alive through the old renderer's
+        // retain, and is released when `old_renderer.close()` returns.
         //
         // The swap is a transaction. The window keeps the old layer until the
         // new renderer exists, because a replacement that fails leaves the old
@@ -854,8 +852,8 @@ impl SceneRuntime {
     }
 
     /// Fast-path display reconfiguration. Preserves scene, shaders, render
-    /// graph, audio, and runtime state; only the Vulkan surface, swapchain,
-    /// and presentation passes are rebuilt.
+    /// graph, audio, and runtime state; only the renderer's layer binding and
+    /// presentation passes are rebuilt.
     ///
     /// On any failure, returns `Err`; the caller should fall back to
     /// `rebuild_for_desc`.
@@ -884,7 +882,7 @@ impl SceneRuntime {
             .render_resolution
             .unwrap_or((display.width, display.height));
 
-        // 4. Rebuild the Vulkan surface + swapchain + presentation passes from the new
+        // 4. Rebuild the layer binding + presentation passes from the new
         //    layer, and resume rendering.
         self.renderer.finish_surface_reconfigure(
             metal_layer,

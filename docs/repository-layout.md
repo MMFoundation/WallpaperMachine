@@ -22,7 +22,7 @@ WallpaperMachine.xcodeproj/        generated from project.yml by xcodegen; commi
 App/                               WallpaperMachine application target sources only
   WallpaperEngineApp.swift         @main AppKit entry point; no scene/UI logic
   AppDelegate.swift                lifecycle, menu bar, window and shutdown ordering
-  Bridge/                          BridgeEnvironment.swift (Vulkan ICD), WallpaperPreviewBridge.h (scene C API for previews)
+  Bridge/                          WallpaperPreviewBridge.h (scene C API for previews)
                                    and Generated/ (uniffi output; not hand-edited)
   Logging/                         AppLog.swift (the only Swift logging entry point) and its router
   Services/<Domain>/               domain logic and stores, one folder per domain:

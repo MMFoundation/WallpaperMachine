@@ -5,10 +5,11 @@
 namespace wallpaper::metal
 {
 
-/// A Vulkan viewport, with the sign convention Vulkan allows: `height` may be
-/// negative, which is how the compatibility backend gets Vulkan to agree with
-/// the coordinate system the authored shaders were written for.
-struct VulkanViewportBox
+/// A viewport written with the sign convention that lets `height` be negative.
+/// That is how the presentation layout names the region the picture covers, and
+/// the convention the authored shaders' clip space was written for: `y` is the
+/// row the box ends on and a negative `height` runs it back up.
+struct FlippedViewportBox
 {
     double x { 0.0 };
     double y { 0.0 };
@@ -26,13 +27,13 @@ struct MetalViewportBox
     double height { 0.0 };
 };
 
-/// Clip space to window pixels under Vulkan's viewport transform:
+/// Clip space to window pixels under the flipped viewport transform:
 ///   x_w = x_ndc * (w/2) + (x + w/2)
 ///   y_w = y_ndc * (h/2) + (y + h/2)
 /// With a negative `h` the second line reduces to y_w = y + h*(1 - y_ndc)/2,
 /// which puts clip y = +1 at the top of the box.
-[[nodiscard]] linalg::Vector2d ClipToWindowVulkan(const linalg::Vector4d& clip,
-                                                 const VulkanViewportBox& viewport);
+[[nodiscard]] linalg::Vector2d ClipToWindowFlipped(const linalg::Vector4d& clip,
+                                                 const FlippedViewportBox& viewport);
 
 /// Clip space to window pixels under Metal's viewport transform. Metal's
 /// normalized device coordinates have +Y up (its lower-left corner is (-1,-1))
@@ -43,16 +44,15 @@ struct MetalViewportBox
                                                 const MetalViewportBox& viewport);
 
 /// The matrix the Metal backend folds into every view-projection it uploads,
-/// so an authored vertex shader's clip-space output lands on the same window
-/// pixel it lands on under the compatibility backend.
+/// so an authored vertex shader's clip-space output lands on the window pixel
+/// the flipped viewport above says it lands on.
 ///
 /// The answer is the identity, and that is a result rather than an omission.
-/// Vulkan's NDC has +Y down against a +Y-down framebuffer; the compatibility
-/// backend's negative-height viewport is what makes Vulkan behave the way the
-/// authored GL-style shaders expect. Metal already behaves that way, because
-/// its NDC has +Y up against a top-left-origin target -- the same window
-/// mapping, reached without a negative height. Adding a flip here would invert
-/// every scene and every render-to-target sample.
+/// The flipped viewport is what makes an API with +Y-down NDC behave the way
+/// the authored GL-style shaders expect. Metal already behaves that way,
+/// because its NDC has +Y up against a top-left-origin target -- the same
+/// window mapping, reached without a negative height. Adding a flip here would
+/// invert every scene and every render-to-target sample.
 ///
 /// It is computed from the two transforms above rather than written down, so
 /// this stays a derivation a test can falsify: `MetalClipSpaceFold` changes if
@@ -60,13 +60,12 @@ struct MetalViewportBox
 /// inserts a flip or deletes the derivation.
 [[nodiscard]] linalg::Matrix4d MetalClipSpaceFold();
 
-/// The view-projection to upload to a Metal shader, given the one the
-/// compatibility backend would upload for the same camera.
-[[nodiscard]] linalg::Matrix4d MetalViewProjection(const linalg::Matrix4d& compatibility_vp);
+/// The view-projection to upload to a Metal shader, given the camera's own.
+[[nodiscard]] linalg::Matrix4d MetalViewProjection(const linalg::Matrix4d& camera_vp);
 
-/// The Metal viewport that covers the same window region as a Vulkan viewport,
+/// The Metal viewport that covers the same window region as a flipped viewport,
 /// including one written with a negative height.
-[[nodiscard]] MetalViewportBox ToMetalViewport(const VulkanViewportBox& viewport);
+[[nodiscard]] MetalViewportBox ToMetalViewport(const FlippedViewportBox& viewport);
 
 /// Both APIs clip depth to [0, 1], and the engine's `Ortho` already maps z into
 /// that range, so no depth remap is folded in either. Asserted rather than

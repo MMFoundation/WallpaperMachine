@@ -24,9 +24,7 @@ namespace rg
 /// loads its target. Each class holds one description and nothing else, so a
 /// backend that executes the graph reads the steps here and keeps its own
 /// per-step state next to its own code. `sceneToRenderGraph` builds the graph
-/// out of these; the compatibility renderer lowers each step into its own pass
-/// object when it compiles the graph, and the native renderer reads them as
-/// they are.
+/// out of these, and the renderer reads them as they are.
 ///
 /// The classes are defined out of line (ScenePass.cpp) so that each one's
 /// vtable and typeinfo are emitted by one translation unit: a renderer finds a

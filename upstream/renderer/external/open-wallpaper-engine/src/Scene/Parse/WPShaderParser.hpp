@@ -103,20 +103,27 @@ class WPShaderParser {
 public:
     static constexpr uint32_t kShaderPipelineRevision = 2;
 
-    static void InitGlslang();
-    static void FinalGlslang();
+    /// Opens and closes the shader work of one parse: the per-thread program
+    /// cache and the startup counters are reset at the start, and the counters
+    /// are reported at the end.
+    static void BeginShaderSession();
+    static void EndShaderSession();
 
     static void                 ResetStartupMetrics();
     static ShaderStartupMetrics GetStartupMetrics();
     static void ClearProgramCache();
 
-    static bool CompileToSpvRust(std::string_view scene_id, std::string_view shader_name,
-                                  std::span<WPShaderUnit>, std::vector<ShaderCode>& spvs,
-                                  fs::VFS&, WPShaderInfo*, std::span<const WPShaderTexInfo>,
-                                  std::string* reflection_json = nullptr);
+    // Parses, validates and reflects one program without generating code. The
+    // parse runs this until a material's default textures stop changing, which
+    // is what settles its combos, uniforms, aliases and active texture slots;
+    // the Metal translation of the settled program is made afterwards.
+    static bool AnalyzeRust(std::string_view scene_id, std::string_view shader_name,
+                            std::span<WPShaderUnit>, fs::VFS&, WPShaderInfo*,
+                            std::span<const WPShaderTexInfo>,
+                            std::string* reflection_json = nullptr);
 
     // Compiles the same units through the same include/combo/cache path as
-    // `CompileToSpvRust`, but emits Metal Shading Language instead of SPIR-V.
+    // `AnalyzeRust`, but emits Metal Shading Language.
     // `reflection_json` carries the identical reflection payload either way.
     //
     // `nv12_plane_slot`, when given, asks for the variant of the same author

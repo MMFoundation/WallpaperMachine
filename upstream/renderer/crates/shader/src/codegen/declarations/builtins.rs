@@ -1,13 +1,13 @@
 //! Builtin variables a stage reads without declaring them.
 
-/// OpenGL builtin variables mapped to the Vulkan spelling Naga's GLSL
+/// OpenGL builtin variables mapped to the spelling Naga's GLSL
 /// frontend reads.
 ///
 /// Wallpaper Engine's shaders use the OpenGL names (`gl_VertexID`,
 /// `gl_InstanceID`) as `uint`. Naga types its own `gl_VertexIndex` and
 /// `gl_InstanceIndex` as `uint` too, so a use such as `gl_VertexID + offset`
 /// or `CASTF(gl_InstanceID)` needs no conversion of its own.
-pub(crate) const VULKAN_SPELLING: [(&str, &str); 2] = [
+pub(crate) const NAGA_SPELLING: [(&str, &str); 2] = [
     ("gl_VertexID", "gl_VertexIndex"),
     ("gl_InstanceID", "gl_InstanceIndex"),
 ];
@@ -44,7 +44,7 @@ const PROVIDED: [&str; 11] = [
 /// them, `uint`: the backend's builtin is `uint`, so a declaration of another
 /// type is the author's own variable and stays.
 pub(crate) fn is_restated(name: &str, ty: &str) -> bool {
-    if VULKAN_SPELLING.iter().any(|(opengl, _vulkan)| *opengl == name) {
+    if NAGA_SPELLING.iter().any(|(opengl, _naga)| *opengl == name) {
         return ty == "uint";
     }
     PROVIDED.contains(&name)

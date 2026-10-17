@@ -60,8 +60,7 @@ struct VideoFramePlanes
 /// This is not the plain-video backend and does not replace it: it exists so a
 /// scene whose author samples a video the way it samples any other texture can
 /// stay on the native Metal renderer. Each texture keeps its own decoder and
-/// its own playback semantics, exactly as the compatibility backend's texture
-/// cache gives it.
+/// its own playback semantics.
 ///
 /// One frame is imported per generation, no matter how many passes sample it,
 /// and every object that frame's texture depends on — the pixel buffer, the
@@ -79,8 +78,8 @@ public:
     /// Graph compile time. One source per key; keys that are not video
     /// textures are ignored. A key whose source `hold` set aside is not opened
     /// again, nor is its media read again: the source is given the scene's clock
-    /// as it is and carries on. False with an error means the whole scene falls
-    /// back to the compatibility backend.
+    /// as it is and carries on. False with an error means the whole scene is not drawn
+    /// and holds with that reason.
     bool prepare(Scene& scene, const std::vector<std::string>& texture_keys, std::string* error);
 
     /// Drops the open sources and the textures. Frames a command buffer may still

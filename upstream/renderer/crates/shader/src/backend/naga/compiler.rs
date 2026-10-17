@@ -1,9 +1,8 @@
-//! Naga-backed GLSL to SPIR-V and Metal Shading Language compilation.
+//! Naga-backed GLSL analysis and Metal Shading Language compilation.
 
 use naga::{
-    back::spv,
     front::glsl,
-    valid::{Capabilities, ModuleInfo, ValidationFlags, Validator},
+    valid::{Capabilities, ValidationFlags, Validator},
 };
 
 use super::{
@@ -95,13 +94,7 @@ impl ShaderCompiler for NagaCompiler {
         })?;
 
         let code = match target {
-            ShaderTarget::VulkanSpirv => CompiledStageCode::VulkanSpirv(write_spirv(
-                stage,
-                &module,
-                &module_info,
-                source_text,
-                source_path,
-            )?),
+            ShaderTarget::Analysis => CompiledStageCode::Analysis,
             ShaderTarget::MetalMsl => CompiledStageCode::MetalMsl(
                 MetalEmitter {
                     stage,
@@ -127,42 +120,6 @@ impl ShaderCompiler for NagaCompiler {
             Box::from([]),
         ))
     }
-}
-
-/// Emits SPIR-V words for one validated Naga module.
-fn write_spirv(
-    stage: ShaderStageKind,
-    module: &naga::Module,
-    module_info: &ModuleInfo,
-    source_text: &str,
-    source_path: &'static str,
-) -> ShaderResult<Box<[u32]>> {
-    let pipeline_options = spv::PipelineOptions {
-        shader_stage: stage.into_naga(),
-        entry_point: "main".to_owned(),
-    };
-    let mut spv_options = spv::Options::default();
-    spv_options
-        .flags
-        .remove(spv::WriterFlags::ADJUST_COORDINATE_SPACE);
-
-    let spirv = spv::write_vec(module, module_info, &spv_options, Some(&pipeline_options)).map_err(
-        |err| {
-            let diagnostic = DiagnosticBuilder::new(stage, "naga spv write", source_path)
-                .with_message(format!(
-                    "{err}\n{source_path}\n{}",
-                    source_text.lines().next().unwrap_or_default()
-                ))
-                .with_source(source_text)
-                .build();
-
-            ShaderError::Compile {
-                diagnostics: Box::from([diagnostic]),
-            }
-        },
-    )?;
-
-    Ok(spirv.into_boxed_slice())
 }
 
 impl ShaderStageKind {

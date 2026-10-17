@@ -97,7 +97,6 @@ targets:
           - /opt/homebrew/opt/mwe-ffmpeg/lib
           - /opt/homebrew/lib
           - /opt/homebrew/opt/quickjs-ng/lib
-          - /opt/homebrew/opt/glslang/lib
         OTHER_SWIFT_FLAGS: "-Xcc -fmodule-map-file=$(SRCROOT)/App/Bridge/Generated/WallpaperBridgeFFI.modulemap -Xcc -fmodule-map-file=$(SRCROOT)/Renderer/Media/Apple/WallpaperMedia.modulemap"
         LD_RUNPATH_SEARCH_PATHS:
           - "@executable_path/../Frameworks"
@@ -107,7 +106,6 @@ targets:
         OTHER_LDFLAGS: &rendererLinkerFlags
           - -lwallpaper_bridge
           - -lc++
-          - -lvulkan
           - -llz4
           - -lfreetype
           - -lavformat
@@ -118,9 +116,6 @@ targets:
           - -lavdevice
           - -lswscale
           - -lqjs
-          - -lglslang
-          - -lSPIRV
-          - -lglslang-default-resource-limits
           - -liconv
           - -framework Accelerate
           - -framework AppKit

@@ -1,5 +1,4 @@
 #include "Presentation/WallpaperScaling.hpp"
-#include "VulkanRender/WallpaperViewport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -228,26 +227,21 @@ TEST(WallpaperScaling, AnAxisWithoutSlackIsUnmovedByPan) {
     EXPECT_EQ(centred.viewport_px.y, 0);
 }
 
-// The viewport is built with a negative height so the image is not flipped;
-// its top edge, y + height, is what lands on the window row viewport_px.y says.
+// `viewport_px.y` is the window row the picture's top edge lands on.
 TEST(WallpaperScaling, TopPanTouchesTheTopOfTheWindow) {
     const auto top = ComputeWallpaperScalingLayout(WallpaperScalingMode::FIT, 1920, 1080, 1000,
                                                    1000, 1.0, 1.0, 0.5, 0.0);
-    const auto top_viewport = MakeWallpaperViewport(top);
-    EXPECT_LT(top_viewport.height, 0.0f);
-    EXPECT_FLOAT_EQ(top_viewport.y + top_viewport.height, 0.0f);
-    EXPECT_FLOAT_EQ(top_viewport.y, static_cast<float>(top.viewport_px.height));
+    EXPECT_EQ(top.viewport_px.y, 0);
 
     const auto bottom = ComputeWallpaperScalingLayout(WallpaperScalingMode::FIT, 1920, 1080, 1000,
                                                       1000, 1.0, 1.0, 0.5, 1.0);
-    const auto bottom_viewport = MakeWallpaperViewport(bottom);
-    const auto scissor         = MakeWallpaperScissor(bottom);
     // Only the bottom edge reaches the window's last row (rounding of the
     // half-pixel slack may overshoot it by one).
-    EXPECT_NEAR(bottom_viewport.y, static_cast<float>(scissor.extent.height), 1.0f);
+    EXPECT_NEAR(bottom.viewport_px.y + bottom.viewport_px.height,
+                bottom.scissor_px.height, 1);
     // Panning never changes the clip: the window stays the window.
-    EXPECT_EQ(scissor.extent.width, MakeWallpaperScissor(top).extent.width);
-    EXPECT_EQ(scissor.extent.height, MakeWallpaperScissor(top).extent.height);
+    EXPECT_EQ(bottom.scissor_px.width, top.scissor_px.width);
+    EXPECT_EQ(bottom.scissor_px.height, top.scissor_px.height);
 }
 
 TEST(WallpaperScaling, NonFinitePanFallsBackToCentreAndOutOfRangeIsClamped) {

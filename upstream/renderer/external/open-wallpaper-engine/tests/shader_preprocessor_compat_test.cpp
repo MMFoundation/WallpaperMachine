@@ -89,14 +89,12 @@ void main() {
         },
     };
 
-    std::vector<ShaderCode> codes;
-    return WPShaderParser::CompileToSpvRust("compat-fragment",
-                                            "tests/compat-fragment",
-                                            units,
-                                            codes,
-                                            vfs,
-                                            &info,
-                                            textures);
+    return WPShaderParser::AnalyzeRust("compat-fragment",
+                                       "tests/compat-fragment",
+                                       units,
+                                       vfs,
+                                       &info,
+                                       textures);
 #endif
 }
 
@@ -243,9 +241,8 @@ void main() {
         },
     };
 
-    std::vector<ShaderCode> codes;
-    EXPECT_TRUE(WPShaderParser::CompileToSpvRust(
-        "compat-include", "tests/compat-include", units, codes, vfs, &info, textures))
+    EXPECT_TRUE(WPShaderParser::AnalyzeRust(
+        "compat-include", "tests/compat-include", units, vfs, &info, textures))
         << shader::LastRustShaderError();
 #endif
 }
@@ -410,9 +407,8 @@ void main() {
         },
     };
 
-    std::vector<ShaderCode> codes;
-    EXPECT_TRUE(WPShaderParser::CompileToSpvRust(
-        "compat-macro-sv-position", "tests/macro-sv-position", units, codes, vfs, &info, textures))
+    EXPECT_TRUE(WPShaderParser::AnalyzeRust(
+        "compat-macro-sv-position", "tests/macro-sv-position", units, vfs, &info, textures))
         << shader::LastRustShaderError();
 #endif
 }
@@ -462,9 +458,8 @@ void main() {
         },
     };
 
-    std::vector<ShaderCode> codes;
-    EXPECT_TRUE(WPShaderParser::CompileToSpvRust(
-        "compat-geometry", "tests/genericropeparticle", units, codes, vfs, &info, textures))
+    EXPECT_TRUE(WPShaderParser::AnalyzeRust(
+        "compat-geometry", "tests/genericropeparticle", units, vfs, &info, textures))
         << shader::LastRustShaderError();
 #endif
 }

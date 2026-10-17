@@ -304,8 +304,8 @@ surface falsifies the change regardless of what a CPU graph shows.
 ### What the platform cannot report
 
 `present_requests` counts requests to present. Whether the compositor ever put
-a frame on a display is a different measurement, and this backend — MoltenVK
-over a `CAMetalLayer` swapchain — has no presentation-feedback source for it.
+a frame on a display is a different measurement, and this renderer, drawing into a
+`CAMetalLayer`, has no presentation-feedback source for it.
 The report says `presented_frames=unavailable`; the request count is never
 relabelled as displayed frames, and no frame-rate claim may be derived from it.
 

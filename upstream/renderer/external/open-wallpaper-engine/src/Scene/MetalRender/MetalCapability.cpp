@@ -263,7 +263,7 @@ std::string SceneMetalStructuralRejection(const Scene& scene)
     // which the dynamic upload path writes whatever its vertex layout.
     // Lights are not refused. Wallpaper Engine lighting is the author's own
     // shader reading `g_LightsPosition` and `g_LightsColorPremultiplied`, which
-    // the shared value updater writes for either backend through reflection.
+    // the shared value updater writes through reflection.
     for (const auto& [name, texture] : scene.textures) {
         // A sprite sheet is one uploaded image whose frame rectangle arrives as
         // a uniform, so it is not refused any more. A sheet that is also a

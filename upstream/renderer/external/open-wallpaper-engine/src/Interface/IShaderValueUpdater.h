@@ -59,7 +59,7 @@ public:
 
     /// Which self-advancing uniforms this node's material actually binds, drawn
     /// through `camera_override` when the pass sets one and through the node's
-    /// own camera when it is empty, as the backends draw it.
+    /// own camera when it is empty, as the renderer draws it.
     ///
     /// The default reports all of them, so an updater that does not track
     /// reflection can never make a pass look reusable by omission.

@@ -1,11 +1,12 @@
 #include "Shader/RustShaderBridge.hpp"
 
 #include "Fs/VFS.h"
-#include "Scene/VulkanRender/CustomShaderPass.hpp"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <set>
 #include <stdexcept>
 
 using wallpaper::ShaderType;
@@ -16,7 +17,16 @@ using wallpaper::shader::RustShaderTextureInfo;
 namespace
 {
 
-constexpr uint32_t SPIRV_MAGIC = 0x07230203u;
+/// The names of the descriptors the reflection payload of a compile reports.
+std::set<std::string> DescriptorNames(const wallpaper::shader::RustShaderOutput& output)
+{
+    std::set<std::string> names;
+    const auto reflection = nlohmann::json::parse(output.reflection_json);
+    for (const auto& descriptor : reflection.value("descriptor_bindings", nlohmann::json::array())) {
+        names.insert(descriptor.value("name", std::string {}));
+    }
+    return names;
+}
 
 RustShaderRequest TinyRequest()
 {
@@ -89,7 +99,7 @@ TEST(RustShaderBridge, BuildsSerdeTaggedRequestJsonWithEnabledCachePolicy)
     const auto json = wallpaper::shader::BuildRustShaderRequestJson(TinyRequest());
 
     ASSERT_EQ(json.at("shader_name"), "bridge/tiny");
-    ASSERT_EQ(json.at("target"), "vulkan_spirv");
+    ASSERT_EQ(json.at("target"), "analysis");
     ASSERT_EQ(json.at("cache_policy"), (nlohmann::json {
                                              { "mode", "enabled" },
                                              { "scene_id", "3611439897" },
@@ -110,7 +120,7 @@ TEST(RustShaderBridge, BuildsSerdeTaggedRequestJsonWithEnabledCachePolicy)
     ASSERT_TRUE(json.at("properties").is_array());
 }
 
-TEST(RustShaderBridge, ParsesMetadataAndReflectionIntoCompatTypes)
+TEST(RustShaderBridge, ParsesMetadataAndTheActiveSlotsOfAReflection)
 {
     wallpaper::shader::RustShaderOutput output;
 
@@ -172,237 +182,10 @@ TEST(RustShaderBridge, ParsesMetadataAndReflectionIntoCompatTypes)
     ASSERT_EQ(output.shader_info.defTexs.at(0).second, "materials/default.png");
     ASSERT_TRUE(output.fragment_preprocessor_info.active_tex_slots.contains(2));
 
-    ASSERT_EQ(output.reflection.binding_map.at("GlobalUniforms").binding, 0u);
-    ASSERT_EQ(output.reflection.binding_map.at("g_Texture0").binding, 1u);
-    ASSERT_EQ(output.reflection.binding_map.at("g_Texture0").descriptorType,
-              VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
-    ASSERT_EQ(output.reflection.binding_map.at("_we_Sampler_g_Texture0").binding, 2u);
-    ASSERT_EQ(output.reflection.binding_map.at("_we_Sampler_g_Texture0").descriptorType,
-              VK_DESCRIPTOR_TYPE_SAMPLER);
-    ASSERT_EQ(output.reflection.blocks.at(0).member_map.at("g_ModelViewProjectionMatrix").size, 64u);
-    ASSERT_EQ(output.reflection.input_location_map.at("a_Position").location, 0u);
+    ASSERT_TRUE(output.fragment_preprocessor_info.active_tex_slots.contains(0));
 }
 
-TEST(RustShaderBridge, CustomShaderTextureBindingPlanPreservesDescriptorTypesAndSamplers)
-{
-    wallpaper::vulkan::ShaderReflected reflected;
-    reflected.binding_map["g_Texture0"] = VkDescriptorSetLayoutBinding {
-        .binding         = 1,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .descriptorCount = 1,
-        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-    reflected.binding_map["_we_Sampler_g_Texture0"] = VkDescriptorSetLayoutBinding {
-        .binding         = 2,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER,
-        .descriptorCount = 1,
-        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-    reflected.binding_map["g_Texture1"] = VkDescriptorSetLayoutBinding {
-        .binding         = 3,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = 1,
-        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-
-    const auto split =
-        wallpaper::vulkan::detail::ReflectedTextureBinding(reflected, "g_Texture0");
-    EXPECT_EQ(split.image_binding, 1);
-    EXPECT_EQ(split.image_descriptor_type, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
-    EXPECT_EQ(split.sampler_binding, 2);
-
-    const auto combined =
-        wallpaper::vulkan::detail::ReflectedTextureBinding(reflected, "g_Texture1");
-    EXPECT_EQ(combined.image_binding, 3);
-    EXPECT_EQ(combined.image_descriptor_type, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-    EXPECT_EQ(combined.sampler_binding, -1);
-}
-
-TEST(RustShaderBridge, CustomShaderDescriptorLayoutOnlyKeepsWritableBindings)
-{
-    wallpaper::vulkan::ShaderReflected reflected;
-    reflected.blocks.push_back(wallpaper::vulkan::ShaderReflected::Block {
-        .index      = 0,
-        .size       = 64,
-        .binding    = 0,
-        .name       = "GlobalUniforms",
-        .member_map = {},
-    });
-    reflected.binding_map["GlobalUniforms"] = VkDescriptorSetLayoutBinding {
-        .binding         = 0,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .descriptorCount = 1,
-        .stageFlags      = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-    reflected.binding_map["g_Texture0"] = VkDescriptorSetLayoutBinding {
-        .binding         = 1,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .descriptorCount = 1,
-        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-    reflected.binding_map["_we_Sampler_g_Texture0"] = VkDescriptorSetLayoutBinding {
-        .binding         = 2,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER,
-        .descriptorCount = 1,
-        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-    reflected.binding_map["g_Texture1"] = VkDescriptorSetLayoutBinding {
-        .binding         = 3,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = 1,
-        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-
-    std::vector<wallpaper::vulkan::CustomShaderPass::Desc::TextureBinding> texture_bindings;
-    std::vector<VkDescriptorSetLayoutBinding> layout_bindings;
-    ASSERT_TRUE(wallpaper::vulkan::detail::PlanCustomShaderDescriptors(
-        reflected, 2, texture_bindings, layout_bindings));
-
-    ASSERT_EQ(layout_bindings.size(), 4u);
-    EXPECT_EQ(layout_bindings.at(0).descriptorType, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-    EXPECT_EQ(layout_bindings.at(1).descriptorType, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
-    EXPECT_EQ(layout_bindings.at(2).descriptorType, VK_DESCRIPTOR_TYPE_SAMPLER);
-    EXPECT_EQ(layout_bindings.at(3).descriptorType, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-
-    ASSERT_EQ(texture_bindings.size(), 2u);
-    EXPECT_EQ(texture_bindings.at(0).image_descriptor_type, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
-    EXPECT_EQ(texture_bindings.at(0).sampler_binding, 2);
-    EXPECT_EQ(texture_bindings.at(1).image_descriptor_type,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-    EXPECT_EQ(texture_bindings.at(1).sampler_binding, -1);
-}
-
-TEST(RustShaderBridge, CustomShaderDescriptorLayoutRejectsUnsupportedReflectedBindings)
-{
-    auto accepts = [](wallpaper::vulkan::ShaderReflected reflected) {
-        std::vector<wallpaper::vulkan::CustomShaderPass::Desc::TextureBinding> texture_bindings;
-        std::vector<VkDescriptorSetLayoutBinding> layout_bindings;
-        return wallpaper::vulkan::detail::PlanCustomShaderDescriptors(
-            reflected, 1, texture_bindings, layout_bindings);
-    };
-
-    wallpaper::vulkan::ShaderReflected counted_texture;
-    counted_texture.binding_map["g_Texture0"] = VkDescriptorSetLayoutBinding {
-        .binding         = 0,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .descriptorCount = 2,
-        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-    EXPECT_FALSE(accepts(counted_texture));
-
-    wallpaper::vulkan::ShaderReflected non_slot_texture;
-    non_slot_texture.binding_map["maskSampler"] = VkDescriptorSetLayoutBinding {
-        .binding         = 4,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .descriptorCount = 1,
-        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-    EXPECT_FALSE(accepts(non_slot_texture));
-
-    wallpaper::vulkan::ShaderReflected orphan_sampler;
-    orphan_sampler.binding_map["_we_Sampler_maskSampler"] = VkDescriptorSetLayoutBinding {
-        .binding         = 5,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER,
-        .descriptorCount = 1,
-        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-    EXPECT_FALSE(accepts(orphan_sampler));
-}
-
-TEST(RustShaderBridge, CustomShaderDescriptorLayoutRejectsActiveTextureOutsideMaterialSlots)
-{
-    wallpaper::vulkan::ShaderReflected reflected;
-    reflected.binding_map["g_Texture2"] = VkDescriptorSetLayoutBinding {
-        .binding         = 4,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .descriptorCount = 1,
-        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-    reflected.binding_map["_we_Sampler_g_Texture2"] = VkDescriptorSetLayoutBinding {
-        .binding         = 5,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLER,
-        .descriptorCount = 1,
-        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-
-    std::vector<wallpaper::vulkan::CustomShaderPass::Desc::TextureBinding> texture_bindings;
-    std::vector<VkDescriptorSetLayoutBinding> layout_bindings;
-    EXPECT_FALSE(wallpaper::vulkan::detail::PlanCustomShaderDescriptors(
-        reflected, 2, texture_bindings, layout_bindings));
-
-    EXPECT_TRUE(wallpaper::vulkan::detail::PlanCustomShaderDescriptors(
-        reflected, wallpaper::WE_GLTEX_NAMES.size(), texture_bindings, layout_bindings));
-    EXPECT_FALSE(wallpaper::vulkan::detail::PlanCustomShaderDescriptors(
-        reflected, wallpaper::WE_GLTEX_NAMES.size() + 1, texture_bindings, layout_bindings));
-}
-
-TEST(RustShaderBridge, RustReflectionRejectsUnsupportedDescriptorSetsAndCounts)
-{
-    wallpaper::shader::RustShaderOutput output;
-
-    EXPECT_THROW(wallpaper::shader::ApplyRustShaderReflectionJson(
-                     R"({
-                        "descriptor_bindings":[{
-                            "name":"g_Texture0",
-                            "set":1,
-                            "binding":0,
-                            "descriptor":"sampled_image",
-                            "stages":["fragment"],
-                            "count":1
-                        }]
-                    })",
-                     output),
-                 std::runtime_error);
-
-    EXPECT_THROW(wallpaper::shader::ApplyRustShaderReflectionJson(
-                     R"({
-                        "descriptor_bindings":[{
-                            "name":"g_Texture0",
-                            "set":0,
-                            "binding":0,
-                            "descriptor":"sampled_image",
-                            "stages":["fragment"],
-                            "count":2
-                        }]
-                    })",
-                     output),
-                 std::runtime_error);
-}
-
-TEST(RustShaderBridge, CustomShaderUniformBlockRequiresMatchingDescriptorBinding)
-{
-    wallpaper::vulkan::ShaderReflected reflected;
-    reflected.blocks.push_back(wallpaper::vulkan::ShaderReflected::Block {
-        .index      = 0,
-        .size       = 64,
-        .binding    = 1,
-        .name       = "GlobalUniforms",
-        .member_map = {},
-    });
-
-    EXPECT_EQ(wallpaper::vulkan::detail::ReflectedUniformBlockBinding(reflected), nullptr);
-
-    reflected.binding_map["GlobalUniforms"] = VkDescriptorSetLayoutBinding {
-        .binding         = 1,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .descriptorCount = 1,
-        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-    EXPECT_EQ(wallpaper::vulkan::detail::ReflectedUniformBlockBinding(reflected), nullptr);
-
-    reflected.binding_map["GlobalUniforms"] = VkDescriptorSetLayoutBinding {
-        .binding         = 1,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .descriptorCount = 1,
-        .stageFlags      = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-    };
-    const auto* binding = wallpaper::vulkan::detail::ReflectedUniformBlockBinding(reflected);
-    ASSERT_NE(binding, nullptr);
-    EXPECT_EQ(binding->binding, 1u);
-    EXPECT_EQ(binding->descriptorType, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-}
-
-TEST(RustShaderBridge, CompilesTinyProgramAndExtractsSpirv)
+TEST(RustShaderBridge, AnalysesATinyProgramWithoutGeneratingCode)
 {
 #ifndef WESCENE_HAS_RUST_SHADER_FFI
     GTEST_SKIP() << "Rust shader staticlib was not linked";
@@ -410,11 +193,7 @@ TEST(RustShaderBridge, CompilesTinyProgramAndExtractsSpirv)
     wallpaper::shader::RustShaderOutput output;
 
     ASSERT_TRUE(wallpaper::shader::CompileRustShaderProgram(TinyRequest(), output));
-    ASSERT_EQ(output.codes.size(), 2u);
-    ASSERT_FALSE(output.codes.at(0).empty());
-    ASSERT_FALSE(output.codes.at(1).empty());
-    ASSERT_EQ(output.codes.at(0).front(), SPIRV_MAGIC);
-    ASSERT_EQ(output.codes.at(1).front(), SPIRV_MAGIC);
+    ASSERT_TRUE(output.metal_stages.empty());
     ASSERT_FALSE(output.metadata_json.empty());
     ASSERT_FALSE(output.reflection_json.empty());
 #endif
@@ -431,8 +210,11 @@ TEST(RustShaderBridge, CompilesWithRegisteredLegalizerPolicies)
         << wallpaper::shader::LastRustShaderError();
 
     ASSERT_FALSE(output.reflection_json.empty());
-    ASSERT_EQ(output.codes.size(), 2u);
-    ASSERT_TRUE(output.reflection.input_location_map.contains("a_Position"));
+    const auto reflection = nlohmann::json::parse(output.reflection_json);
+    const auto inputs     = reflection.value("vertex_inputs", nlohmann::json::array());
+    ASSERT_TRUE(std::any_of(inputs.begin(), inputs.end(), [](const nlohmann::json& input) {
+        return input.value("name", std::string {}) == "a_Position";
+    }));
 #endif
 }
 
@@ -461,10 +243,11 @@ TEST(RustShaderBridge, RuntimeReflectionOmitsInactiveTextureDescriptors)
     ASSERT_TRUE(wallpaper::shader::CompileRustShaderProgram(request, output))
         << wallpaper::shader::LastRustShaderError();
 
-    ASSERT_TRUE(output.reflection.binding_map.contains("g_Texture0"));
-    ASSERT_TRUE(output.reflection.binding_map.contains("_we_Sampler_g_Texture0"));
-    ASSERT_FALSE(output.reflection.binding_map.contains("g_Texture1"));
-    ASSERT_FALSE(output.reflection.binding_map.contains("_we_Sampler_g_Texture1"));
+    const auto names = DescriptorNames(output);
+    ASSERT_TRUE(names.contains("g_Texture0"));
+    ASSERT_TRUE(names.contains("_we_Sampler_g_Texture0"));
+    ASSERT_FALSE(names.contains("g_Texture1"));
+    ASSERT_FALSE(names.contains("_we_Sampler_g_Texture1"));
 #endif
 }
 
@@ -508,9 +291,10 @@ TEST(RustShaderBridge, AbsentTextureSlotDoesNotEnableAnnotationCombo)
     ASSERT_EQ(output.shader_info.combos.at("NORMALMAP"), "0")
         << "request: " << request_json.dump()
         << "\nmetadata: " << output.metadata_json;
-    ASSERT_TRUE(output.reflection.binding_map.contains("g_Texture0"));
-    ASSERT_FALSE(output.reflection.binding_map.contains("g_Texture1"));
-    ASSERT_FALSE(output.reflection.binding_map.contains("_we_Sampler_g_Texture1"));
+    const auto names = DescriptorNames(output);
+    ASSERT_TRUE(names.contains("g_Texture0"));
+    ASSERT_FALSE(names.contains("g_Texture1"));
+    ASSERT_FALSE(names.contains("_we_Sampler_g_Texture1"));
 #endif
 }
 
@@ -531,7 +315,7 @@ TEST(RustShaderBridge, CompilesWithEmptyIncludeCallbackPayload)
         }));
 
     ASSERT_TRUE(include_requested);
-    ASSERT_EQ(output.codes.size(), 2u);
+    ASSERT_FALSE(output.metadata_json.empty());
 #endif
 }
 
@@ -542,26 +326,24 @@ TEST(RustShaderBridge, FailedCompileClearsPreviousOutput)
 #else
     wallpaper::shader::RustShaderOutput output;
     ASSERT_TRUE(wallpaper::shader::CompileRustShaderProgram(TinyRequest(), output));
-    ASSERT_FALSE(output.codes.empty());
+    ASSERT_FALSE(output.metadata_json.empty());
 
     auto invalid = wallpaper::shader::BuildRustShaderRequestJson(TinyRequest());
     invalid["stages"] = nlohmann::json::array();
 
     ASSERT_FALSE(wallpaper::shader::CompileRustShaderProgramWithBridgeJson(invalid, output));
-    ASSERT_TRUE(output.codes.empty());
     ASSERT_TRUE(output.metadata_json.empty());
     ASSERT_TRUE(output.reflection_json.empty());
 #endif
 }
 
-TEST(RustShaderBridge, WPShaderParserCompileToSpvRustPopulatesMetadataReflectionAndPreprocessInfo)
+TEST(RustShaderBridge, WPShaderParserAnalyzeRustPopulatesMetadataReflectionAndPreprocessInfo)
 {
 #ifndef WESCENE_HAS_RUST_SHADER_FFI
     GTEST_SKIP() << "Rust shader staticlib was not linked";
 #else
     wallpaper::fs::VFS                 vfs;
     wallpaper::WPShaderInfo            shader_info;
-    std::vector<wallpaper::ShaderCode> spvs;
     std::string                        reflection_json;
     std::vector<wallpaper::WPShaderTexInfo> textures {
         wallpaper::WPShaderTexInfo {
@@ -572,22 +354,15 @@ TEST(RustShaderBridge, WPShaderParserCompileToSpvRustPopulatesMetadataReflection
     };
     auto units = ParserBridgeUnits();
 
-    ASSERT_TRUE(wallpaper::WPShaderParser::CompileToSpvRust(
+    ASSERT_TRUE(wallpaper::WPShaderParser::AnalyzeRust(
         "parser-bridge-scene",
         "tests/parser-bridge",
         units,
-        spvs,
         vfs,
         &shader_info,
         textures,
         &reflection_json))
         << wallpaper::shader::LastRustShaderError();
-
-    ASSERT_EQ(spvs.size(), 2u);
-    ASSERT_FALSE(spvs.at(0).empty());
-    ASSERT_FALSE(spvs.at(1).empty());
-    EXPECT_EQ(spvs.at(0).front(), SPIRV_MAGIC);
-    EXPECT_EQ(spvs.at(1).front(), SPIRV_MAGIC);
 
     ASSERT_FALSE(reflection_json.empty());
     const auto reflection = nlohmann::json::parse(reflection_json);
@@ -620,14 +395,13 @@ TEST(RustShaderBridge, WPShaderParserCompileToSpvRustPopulatesMetadataReflection
 #endif
 }
 
-TEST(RustShaderBridge, WPShaderParserCompileToSpvRustReportsGeneratedFragmentPath)
+TEST(RustShaderBridge, WPShaderParserAnalyzeRustReportsGeneratedFragmentPath)
 {
 #ifndef WESCENE_HAS_RUST_SHADER_FFI
     GTEST_SKIP() << "Rust shader staticlib was not linked";
 #else
     wallpaper::fs::VFS                 vfs;
     wallpaper::WPShaderInfo            shader_info;
-    std::vector<wallpaper::ShaderCode> spvs;
     std::string                        reflection_json;
     std::vector<wallpaper::WPShaderTexInfo> textures {
         wallpaper::WPShaderTexInfo {
@@ -642,11 +416,10 @@ TEST(RustShaderBridge, WPShaderParserCompileToSpvRustReportsGeneratedFragmentPat
         "  gl_FragColor = missing_value;\n"
         "}\n";
 
-    ASSERT_FALSE(wallpaper::WPShaderParser::CompileToSpvRust(
+    ASSERT_FALSE(wallpaper::WPShaderParser::AnalyzeRust(
         "parser-bridge-scene",
         "tests/parser-bridge-invalid",
         units,
-        spvs,
         vfs,
         &shader_info,
         textures,
@@ -722,7 +495,7 @@ TEST(RustShaderBridge, WPShaderParserCompileToMslRustReturnsSourceBindingsAndRef
     ASSERT_NE(texture_binding, fragment_bindings.end());
     EXPECT_EQ(texture_binding->set, 0u);
     EXPECT_EQ(texture_binding->slot_kind, wallpaper::shader::RustShaderMetalSlotKind::Texture);
-    // The mapping the Metal backend reproduces: metal slot == SPIR-V binding.
+    // The mapping the Metal backend reproduces: metal slot == GLSL binding.
     EXPECT_EQ(texture_binding->slot, texture_binding->binding);
 
     const auto sampler_binding =
@@ -736,8 +509,7 @@ TEST(RustShaderBridge, WPShaderParserCompileToMslRustReturnsSourceBindingsAndRef
     EXPECT_EQ(sampler_binding->slot, sampler_binding->binding);
     EXPECT_NE(texture_binding->binding, sampler_binding->binding);
 
-    // The Metal target must return the same reflection payload the SPIR-V
-    // target does; the Metal backend reads uniform layout and texture slot
+    // The Metal target must return the reflection payload; the Metal backend reads uniform layout and texture slot
     // names from it.
     ASSERT_FALSE(reflection_json.empty());
     const auto reflection  = nlohmann::json::parse(reflection_json);
@@ -749,12 +521,12 @@ TEST(RustShaderBridge, WPShaderParserCompileToMslRustReturnsSourceBindingsAndRef
 #endif
 }
 
-TEST(RustShaderBridge, MetalAndSpirvTargetsUseDifferentProgramCacheKeys)
+TEST(RustShaderBridge, MetalAndAnalysisTargetsUseDifferentProgramCacheKeys)
 {
-    auto spirv_request   = TinyRequest();
-    auto metal_request   = TinyRequest();
-    metal_request.target = wallpaper::shader::RustShaderTarget::MetalMsl;
+    auto analysis_request = TinyRequest();
+    auto metal_request    = TinyRequest();
+    metal_request.target  = wallpaper::shader::RustShaderTarget::MetalMsl;
 
-    EXPECT_NE(wallpaper::shader::BuildRustShaderRequestJson(spirv_request).dump(),
+    EXPECT_NE(wallpaper::shader::BuildRustShaderRequestJson(analysis_request).dump(),
               wallpaper::shader::BuildRustShaderRequestJson(metal_request).dump());
 }

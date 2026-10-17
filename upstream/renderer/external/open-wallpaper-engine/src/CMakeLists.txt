@@ -7,12 +7,6 @@ pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
 pkg_check_modules(AVUTIL REQUIRED IMPORTED_TARGET libavutil)
 pkg_check_modules(SWRESAMPLE REQUIRED IMPORTED_TARGET libswresample)
 
-option(ENABLE_RENDERDOC "Build with renderdoc api" OFF)
-
-if(ENABLE_RENDERDOC)
-  add_compile_definitions(ENABLE_RENDERDOC_API=1)
-endif()
-
 include(TestBigEndian)
 test_big_endian(ENDIAN)
 if(ENDIAN)
@@ -52,7 +46,6 @@ if(APPLE)
   list(APPEND PLATFORM_APPLE_SOURCES
        Platform/Apple/FfmpegVideoInterop.mm
        Platform/Apple/VideoFrameInterop.mm
-       Platform/Apple/VideoFrameLease.mm
        Platform/Apple/SceneWallpaperBindings.mm)
 endif()
 
@@ -61,10 +54,8 @@ add_subdirectory(Utils)
 add_subdirectory(Audio)
 add_subdirectory(Scene)
 add_subdirectory(Looper)
-add_subdirectory(Vulkan)
 add_subdirectory(Scene/Timer)
 add_subdirectory(Scene/Particle)
-add_subdirectory(Scene/VulkanRender)
 add_subdirectory(Scene/RenderGraph)
 add_subdirectory(Scene/RenderCommon)
 add_subdirectory(Scene/MetalRender)
@@ -106,7 +97,6 @@ add_library(
   Video/FfmpegVideoTextureSource.cpp
   Video/VideoColorConversion.cpp
   Video/VideoContainerProbe.cpp
-  Video/VideoConversionBudget.cpp
   Video/VideoDecodePump.cpp
   Video/VideoFramePacing.cpp
   Video/VideoMedia.cpp
@@ -131,10 +121,8 @@ set(InteralLib
     wpLooper
     wpMetalRender
     wpRenderCommon
-    wpVulkanRender
     wpFs
     wpScene
-    wpVulkan
     wpRGraph
     wpParticle
     wpTimer)
@@ -189,7 +177,7 @@ if(APPLE)
       ${VIDEOTOOLBOX_FRAMEWORK})
 endif()
 
-target_include_directories(${PROJECT_NAME} PUBLIC . Swapchain)
+target_include_directories(${PROJECT_NAME} PUBLIC .)
 wescene_prefer_ffmpeg_headers(${PROJECT_NAME} "")
 set_target_properties(${PROJECT_NAME} PROPERTIES
   OBJCXX_STANDARD 20

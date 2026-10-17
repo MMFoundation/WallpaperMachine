@@ -81,8 +81,6 @@ private:
 using ShaderValues   = Map<std::string, ShaderValue>;
 using ShaderValueMap = ShaderValues;
 
-using ShaderCode = std::vector<unsigned int>;
-
 struct ShaderAttribute {
 public:
     std::string name;
@@ -106,13 +104,11 @@ public:
     std::string fragmentCode;
     */
 
-    std::vector<ShaderCode> codes;
-
     std::vector<ShaderAttribute> attrs;
     ShaderValues                 default_uniforms;
     std::optional<std::string>   rust_reflection_json;
-    /// Null means translation was never attempted, which is the normal state
-    /// whenever the compatibility renderer is selected. A non-null program
+    /// Null means translation was never attempted, which is the state until the
+    /// parse's pending translations are flushed. A non-null program
     /// that reports an error means it was attempted and failed. The two must
     /// stay distinguishable: only the second is a fault in the shader.
     std::shared_ptr<const SceneMetalProgram> metal_program;

@@ -45,9 +45,11 @@ impl ShaderStageSource {
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ShaderTarget {
-    /// Vulkan-compatible SPIR-V output.
+    /// Parse, validate and reflect only: no code is emitted. The engine compiles
+    /// every program this way first to settle its combos, default textures and
+    /// metadata, and asks for Metal Shading Language afterwards.
     #[default]
-    VulkanSpirv,
+    Analysis,
     /// Metal Shading Language source output.
     MetalMsl,
 }
@@ -60,7 +62,7 @@ impl ShaderTarget {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::VulkanSpirv => "vulkan_spirv",
+            Self::Analysis => "analysis",
             Self::MetalMsl => "metal_msl",
         }
     }

@@ -14,8 +14,7 @@ namespace
 {
 
 /// The host PNG-encodes the poster on its own thread, so the bytes are copied
-/// once more before they are consumed. The compatibility backend refuses the
-/// same size, for the same reason: a display this large is not worth the
+/// once more before they are consumed. A display this large is refused: it is not worth the
 /// transient allocation a still image costs.
 constexpr std::size_t kMaxPosterBytes = 128u * 1024u * 1024u;
 

@@ -75,7 +75,7 @@ WallpaperScalingLayout ComputeWallpaperScalingLayout(
     // the wallpaper overflows it, so one expression places both a letterboxed
     // and a cropped wallpaper. `viewport_px.y` is measured from the window top,
     // so a pan of 0 puts the wallpaper's top edge on the display's top. A
-    // mirrored wallpaper is flipped inside this rectangle by the backends, so
+    // mirrored wallpaper is flipped inside this rectangle by the renderer, so
     // the position places the rectangle, not the mirrored picture.
     const WallpaperFraming framing = NormalizeWallpaperFraming({ pan_x, pan_y });
     const double logical_x = (layout.display_logical_width - logical_width) * framing.pan_x;

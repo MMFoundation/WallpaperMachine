@@ -13,7 +13,7 @@ fn legalize(stage: ShaderStageKind, source: &str) -> CodegenStageSource {
 /// Compiles legalized fragment source for both renderers, which share the
 /// strict frontend a legacy expression has to get past.
 fn compile_for_both_targets(legalized: &CodegenStageSource, expectation: &str) {
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         if let Err(error) =
             NagaCompiler.compile_stage(target, ShaderStageKind::Fragment, legalized)
         {
@@ -208,7 +208,7 @@ fn workshop_shine_downsample2_renames_local_sample_keyword_before_naga() {
     );
     assert!(!source.contains("vec4 sample ="));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("effects/shine_downsample2 local `sample` should compile after codegen");
 }
 
@@ -234,7 +234,7 @@ fn workshop_2798696916_macro_body_tex_sample_2d_is_legalized_before_naga() {
     );
     assert!(!source.contains("texSample2D("));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("workshop/2798696916/effects/sharpen_filter texSample2D macro should compile");
 }
 
@@ -281,7 +281,7 @@ fn genericropeparticle_macro_body_cast3x3_is_legalized_before_naga() {
     );
     assert!(!source.contains("CAST3X3("));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("genericropeparticle CAST3X3 macro should compile");
 }
 
@@ -306,7 +306,7 @@ fn genericropeparticle_header_cast3x3_define_and_use_are_legalized_before_naga()
     );
     assert!(!source.contains("vec3 transformed = CAST3X3("));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Vertex, &legalized)
         .expect("genericropeparticle header CAST3X3 use should compile");
 }
 
@@ -333,7 +333,7 @@ fn genericropeparticle_nested_mul_rewrite_preserves_cast3x3_codegen_before_naga(
     );
     assert!(!source.contains("CAST3X3("));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Vertex, &legalized)
         .expect("genericropeparticle nested CAST3X3/mul expression should compile");
 }
 
@@ -361,7 +361,7 @@ fn hlsl_mul_rewrite_preserves_nested_texture_sampling_codegen() {
     );
     assert!(!source.contains("texSample2D("));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("nested texture sampling inside HLSL mul should compile");
 }
 
@@ -383,7 +383,7 @@ fn hlsl_mul_rewrite_preserves_nested_reserved_identifier_codegen() {
     assert!(source.contains("vec4 color = ((sample_local) * (g_ColorTransform));"));
     assert!(!source.contains("vec4 color = ((sample) * (g_ColorTransform));"));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("nested reserved identifier use inside HLSL mul should compile");
 }
 
@@ -406,7 +406,7 @@ fn hlsl_mul_rewrite_preserves_nested_type_coercion_codegen() {
     );
     assert!(!source.contains("max(0.25, vec4(1.0))"));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("nested type coercion inside HLSL mul should compile");
 }
 
@@ -430,7 +430,7 @@ fn fmod_rewrite_preserves_nested_texture_sampling_codegen() {
     ));
     assert!(!source.contains("texSample2D("));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("nested texture sampling inside fmod rewrite should compile");
 }
 
@@ -467,7 +467,7 @@ fn expression_replacements_preserve_deep_cross_strategy_nesting() {
     assert!(!source.contains("mul("));
     assert!(!source.contains("texSample2D("));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("deep nested fmod/mul/texture expression should compile");
 }
 
@@ -521,7 +521,7 @@ fn strategy_owned_texture_sampling_fixup_compiles_through_naga() {
             .contains("vec4 color = texture(sampler2D(g_Texture0, _we_Sampler_g_Texture0), v_Uv);")
     );
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("texture sampling strategy-owned fixup should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -545,7 +545,7 @@ fn log10_rewrite_preserves_nested_cast_codegen() {
     );
     assert!(!source.contains("CAST3X3("));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("nested CAST3X3 inside log10 rewrite should compile");
 }
 
@@ -564,7 +564,7 @@ fn source_defined_log10_is_not_rewritten_as_a_builtin() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("source-defined log10 declarations and calls should compile");
 }
 
@@ -584,7 +584,7 @@ fn compound_vector_assignments_narrow_wider_expression_results() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("compound vector assignment RHS should narrow to the target width");
 }
 
@@ -602,7 +602,7 @@ fn integer_initializers_cast_nested_float_builtin_results() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("nested float-valued builtins should convert to declared integer storage");
 }
 
@@ -619,7 +619,7 @@ fn vector_initializers_broadcast_scalar_expressions_and_preserve_nested_rewrites
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("scalar expressions should broadcast without losing nested builtin rewrites");
 }
 
@@ -640,7 +640,7 @@ fn ddy_rewrite_preserves_nested_reserved_identifier_codegen() {
     assert!(source.contains("float derivative = dFdy(-(sample_local));"));
     assert!(!source.contains("float derivative = dFdy(-(sample));"));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("nested reserved identifier use inside ddy rewrite should compile");
 }
 
@@ -666,7 +666,7 @@ fn genericimage4_vertex_skinning_uniform_array_dynamic_index_compiles_through_na
         "genericimage4 skinning bone array should be preserved in generated uniforms:\n{source}"
     );
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Vertex, &legalized)
         .expect("genericimage4 dynamic bone indexing should compile");
 }
 
@@ -689,7 +689,7 @@ fn genericimage4_vertex_skinning_weighted_bone_sum_compiles_through_naga() {
 
     let legalized = legalize(ShaderStageKind::Vertex, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Vertex, &legalized)
         .expect("genericimage4 weighted bone sum should compile");
 }
 
@@ -741,7 +741,7 @@ fn shake_vertex_audio_response_helper_compiles_through_naga() {
         "shake audio helper call should drop the specialized array arguments:\n{source}"
     );
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Vertex, &legalized)
         .expect("shake audio response helper should compile");
 }
 
@@ -779,7 +779,7 @@ fn mixed_array_and_scalar_parameter_helper_compiles_through_naga() {
          arguments:\n{source}"
     );
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Vertex, &legalized)
         .expect("mixed array/scalar helper should compile");
 }
 
@@ -825,7 +825,7 @@ fn array_parameter_specialization_preserves_same_arity_scalar_overload() {
         "array helper body should use the matched global array:\n{source}"
     );
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("same-arity scalar overload should compile after array specialization");
 }
 
@@ -872,7 +872,7 @@ fn array_parameter_specialization_preserves_different_arity_overload() {
         "array helper body should use the matched global array:\n{source}"
     );
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("different-arity overload should compile after array specialization");
 }
 
@@ -1251,7 +1251,7 @@ fn renames_user_defined_two_arg_mod_calls_with_scalar_variables() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("scalar user call and swizzled vector builtin call must both compile");
 }
 
@@ -1293,7 +1293,7 @@ fn user_mod_classification_uses_nearest_scalar_or_vector_binding() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("inner vector bindings must select a vector modulo result");
 }
 
@@ -1315,7 +1315,7 @@ fn user_mod_classification_ignores_function_prototype_parameters() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("prototype parameter names must not change global vector overloads");
 }
 
@@ -1422,7 +1422,7 @@ fn user_mod_classification_keeps_float_alias_vector_builtin_calls() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("float2 aliases must preserve the vector builtin result");
 }
 
@@ -1586,7 +1586,7 @@ fn user_mod_classification_lets_inner_locals_shadow_function_parameters() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("local vectors must shadow scalar parameters when selecting modulo");
 }
 
@@ -2008,7 +2008,7 @@ fn workshop_3611439897_sharpen_style_vec4_rhs_is_reduced_before_scalar_assignmen
     assert!(source.contains("float sharpen_alpha = sharpen.x;"));
     assert!(!source.contains("float sharpen_alpha = sharpen;"));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("Sharpen-style scalar assignment reduction should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -2032,7 +2032,7 @@ fn workshop_3611439897_sharpen_style_numeric_condition_is_made_boolean() {
     assert!(source.contains("if (sharpen_amount != 0.0) {"));
     assert!(!source.contains("if (sharpen_amount) {"));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("Sharpen-style numeric condition reduction should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -2058,7 +2058,7 @@ fn workshop_3611439897_sharpen_style_numeric_ternary_condition_is_made_boolean()
     assert!(source.contains("mask = INVERT != 0 ? 1 - mask : mask;"));
     assert!(!source.contains("mask = INVERT ? 1 - mask : mask;"));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("Sharpen-style numeric ternary condition should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -2105,7 +2105,7 @@ fn control_flow_coercion_strategy_preserves_boolean_comparison_ternary_condition
     assert!(source.contains("return mode == 30 ? mix(base, tint, mask) : base;"));
     assert!(!source.contains("mode == 30 != 0"));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("boolean comparison ternary condition should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -2144,7 +2144,7 @@ fn legalized_texture_sampling_compiles_with_naga() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("legalized fragment texture sampling should compile through Naga");
 
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
@@ -2513,7 +2513,7 @@ fn legalizes_hlsl_mul_vertex_transform_for_naga() {
             .contains("gl_Position = ((g_ModelViewProjectionMatrix) * (vec4(a_Position, 1.0)));")
     );
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Vertex, &legalized)
         .expect("legalized vertex HLSL mul should compile through Naga");
 
     assert_eq!(artifact.kind(), ShaderStageKind::Vertex);
@@ -2538,7 +2538,7 @@ fn legalizes_nested_hlsl_mul_vertex_transform_for_naga() {
          (vec4(a_Position, 1.0)))));"
     ));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Vertex, &legalized)
         .expect("legalized nested vertex HLSL mul should compile through Naga");
 
     assert_eq!(artifact.kind(), ShaderStageKind::Vertex);
@@ -2562,7 +2562,7 @@ fn explicit_hlsl_mul_rewrite_does_not_emit_compatibility_macro() {
     );
     assert!(!source.contains("#define mul"));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Vertex, &legalized)
         .expect("syntax-rewritten HLSL mul should compile through Naga");
 
     assert_eq!(artifact.kind(), ShaderStageKind::Vertex);
@@ -2590,7 +2590,7 @@ fn strategies_support_legacy_texture_lod_and_clip_without_macro_prelude() {
     assert!(source.contains("void clip(float value)"));
     assert!(source.contains("_we_FragColor = vec4(fract(alpha));"));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("legacy textureLod and clip helpers should compile through Naga");
 
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
@@ -2711,7 +2711,7 @@ fn perform_lighting_compatibility_function_is_available_to_vertex_stage() {
     assert!(source.contains("vec3 PerformLighting_V1("));
     assert!(!source.contains("void clip("));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Vertex, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Vertex, &legalized)
         .expect("legacy vertex PerformLighting_V1 helper should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Vertex);
 }
@@ -2830,7 +2830,7 @@ fn type_coercion_strategy_broadcasts_scalar_expression_in_vector_max() {
     assert!(source.contains("color += max(vec3(luma(color) - 1.0), vec3(0.0));"));
     assert!(!source.contains("color += max(luma(color) - 1.0, vec3(0.0));"));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("vector max with scalar expression operand should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -2855,7 +2855,7 @@ fn workshop_3212731906_hue_shift_mix_narrows_wide_peer_for_naga() {
         "workshop 3212731906 hue_shift mix should narrow albedo to vec3; source:\n{source}"
     );
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("workshop 3212731906 hue_shift mixed-width mix should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -2887,7 +2887,7 @@ fn type_coercion_strategy_narrows_vector_mix_mask_and_step_edge_arguments() {
         "vector step arguments, including vector edge, should narrow to vec3; source:\n{source}"
     );
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("mixed-width vector mix/step calls should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -2942,7 +2942,7 @@ fn type_coercion_strategy_does_not_apply_lhs_context_to_swizzled_call_result() {
         "lhs vec3 context must not leave .gba on a narrowed vec3 call result; source:\n{source}"
     );
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("swizzled vec4 mix result should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -2969,7 +2969,7 @@ fn type_coercion_strategy_uses_declaration_width_before_shadowed_outer_binding()
     );
     assert!(!source.contains("vec3 color = mix(wide_a, wide_b, wide_mask);"));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("shadowed declaration-width mix should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -2998,7 +2998,7 @@ fn type_coercion_strategy_uses_special_vector_arguments_as_fallback_width() {
         "vector step edge should provide fallback width for scalar value; source:\n{source}"
     );
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("special vector mix/step arguments should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -3024,7 +3024,7 @@ fn type_coercion_strategy_uses_special_vector_arguments_without_context_width() 
          source:\n{source}"
     );
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("special vector mix/step arguments without context should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -3050,7 +3050,7 @@ fn type_coercion_strategy_reduces_vector_step_call_for_scalar_initializer() {
     );
     assert!(!source.contains("float r = step(1.0, albedo);"));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("scalar initializer from vector step result should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -3075,7 +3075,7 @@ fn type_coercion_strategy_uses_special_vector_width_with_primary_width_without_c
          assignment context; source:\n{source}"
     );
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect(
             "mixed primary/special vector arguments without context should compile through Naga",
         );
@@ -3106,7 +3106,7 @@ fn type_coercion_strategy_does_not_infer_swizzle_width_for_struct_field_lvalues(
     );
     assert!(!source.contains("surface.rgb = mix(a.xyz, b.xyz, mask"));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("struct field lvalue assignment should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -3139,7 +3139,7 @@ fn type_coercion_strategy_blocks_outer_vector_base_with_shadowed_struct_lvalue()
         "outer vec4 surface binding must not cause RHS narrowing; source:\n{source}"
     );
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("shadowed struct lvalue assignment should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -3174,7 +3174,7 @@ fn type_coercion_strategy_does_not_infer_chained_member_width_from_unrelated_fie
         "unrelated payload vector binding must not cause RHS narrowing; source:\n{source}"
     );
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("chained member lvalue assignment should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -3233,7 +3233,7 @@ fn type_coercion_strategy_uses_nearest_binding_for_narrow_vector_identifier_init
     let legalized = legalize(ShaderStageKind::Fragment, source);
 
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("inner scalar binding should broadcast while the outer vector retains its width");
 }
 
@@ -3291,7 +3291,7 @@ fn control_flow_coercion_strategy_lowers_float_modulo_assignments() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3313,14 +3313,14 @@ fn control_flow_coercion_strategy_lowers_float_modulo_assignment_without_builtin
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
     assert!(source.contains("fragLV = ((fragLV) - (2) * trunc((fragLV) / (2)));"));
     assert!(!source.contains("_we_Fmod("));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered float modulo assignment should compile without fmod helper");
 }
 
@@ -3338,7 +3338,7 @@ fn control_flow_coercion_strategy_modulo_assignment_preserves_nested_texture_sam
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3368,7 +3368,7 @@ fn control_flow_coercion_strategy_does_not_lower_unknown_or_integer_member_modul
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3395,7 +3395,7 @@ fn control_flow_coercion_strategy_respects_integer_vector_shadowing_for_member_m
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3422,7 +3422,7 @@ fn control_flow_coercion_strategy_keeps_for_initializer_blocker_through_if_else_
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3475,7 +3475,7 @@ fn control_flow_coercion_strategy_respects_struct_shadowing_for_member_modulo_as
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3500,7 +3500,7 @@ fn control_flow_coercion_strategy_respects_struct_parameter_shadowing_for_member
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3522,7 +3522,7 @@ fn control_flow_coercion_strategy_lowers_modulo_in_comma_declarators_independent
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3545,7 +3545,7 @@ fn control_flow_coercion_strategy_lowers_modulo_operands_without_swallowing_neig
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3569,7 +3569,7 @@ fn control_flow_coercion_strategy_lowers_chained_modulo_left_associatively() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3594,7 +3594,7 @@ fn control_flow_coercion_strategy_lowers_parenthesized_argument_and_nested_modul
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3619,7 +3619,7 @@ fn control_flow_coercion_strategy_lowers_modulo_with_signed_rhs_operands() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3643,7 +3643,7 @@ fn control_flow_coercion_strategy_preserves_integer_modulo_in_integer_operands()
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3666,7 +3666,7 @@ fn control_flow_coercion_strategy_preserves_uint_constructor_integer_modulo() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3687,7 +3687,7 @@ fn control_flow_coercion_strategy_lowers_uint_constructor_float_modulo() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3710,7 +3710,7 @@ fn control_flow_coercion_strategy_composes_assignment_rhs_and_constructor_modulo
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3732,7 +3732,7 @@ fn control_flow_coercion_strategy_lowers_uint_declaration_constructor_float_modu
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3753,7 +3753,7 @@ fn control_flow_coercion_strategy_lowers_int_declaration_constructor_float_modul
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3774,7 +3774,7 @@ fn control_flow_coercion_strategy_preserves_uint_declaration_constructor_integer
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3795,7 +3795,7 @@ fn control_flow_coercion_strategy_preserves_uint_constructor_compound_int_modulo
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3816,7 +3816,7 @@ fn control_flow_coercion_strategy_preserves_uint_constructor_compound_uint_modul
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3840,7 +3840,7 @@ fn control_flow_coercion_strategy_preserves_audio_bar_unsigned_modulo_forms() {
 
     let legalized = legalize(ShaderStageKind::Fragment, source);
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("lowered remainder expression must compile");
     let source = legalized.source();
 
@@ -3876,7 +3876,7 @@ fn control_flow_coercion_strategy_lowers_audio_bar_float_modulo_uint_initializer
     assert!(source.contains("uint barFreq2 = (barFreq1 + 1u) % 16u;"));
     assert!(!source.contains("uint barFreq1 = frequency % RESOLUTION;"));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("audio bar float modulo uint initializer should compile through Naga");
 }
 
@@ -4028,7 +4028,7 @@ fn control_flow_coercion_strategy_repairs_int_float_initializers() {
     assert!(source.contains("int index = int(floor(v_TexCoord.x * 32));"));
     assert!(!source.contains("int index = floor"));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("int initializer from floor should compile after repair");
 }
 
@@ -4048,7 +4048,7 @@ fn control_flow_coercion_strategy_repairs_int_float_initializers_in_later_comma_
     assert!(source.contains("int keep = 1, index = int(ceil(mixFactor));"));
     assert!(!source.contains("index = ceil(mixFactor);"));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("split int initializer from ceil should compile after repair");
 }
 
@@ -4071,7 +4071,7 @@ fn control_flow_coercion_strategy_repairs_int_float_swizzle_initializer() {
     );
     assert!(!source.contains("int index = v_TexCoord.x;"));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("int initializer from vector swizzle should compile after repair");
 }
 
@@ -4096,7 +4096,7 @@ fn control_flow_coercion_strategy_repairs_int_texture_component_initializer() {
     );
     assert!(!source.contains("int index = texture"));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("int initializer from texture component should compile after repair");
 }
 
@@ -4118,7 +4118,7 @@ fn control_flow_coercion_strategy_repairs_float_array_subscript_indices() {
     assert!(source.contains("g_AudioSpectrum32Left[int(i)]"), "{source}");
     assert!(!source.contains("g_AudioSpectrum32Left[i]"));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("float array subscript index should compile after repair");
 }
 
@@ -4239,7 +4239,7 @@ fn control_flow_coercion_strategy_float_times_bool_preserves_nested_reserved_ide
     );
     assert!(!source.contains("f *= (sample ? 1.0 : 0.0);"));
     let _artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("float-times-bool coercion should preserve reserved identifier fixup");
 }
 
@@ -4539,7 +4539,7 @@ fn alpha_to_coverage_derivative_idiom_reuses_pre_derivative_color_alpha() {
     assert!(source.contains("_we_FragColor.a = clamp(color.a, 0.0, 1.0);"));
     assert!(!source.contains("fwidth(_we_FragColor.a)"));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect("alpha-to-coverage derivative idiom should compile through Naga");
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
 }
@@ -4583,7 +4583,7 @@ fn alpha_to_coverage_derivative_idiom_preserves_nested_reserved_source_identifie
     assert!(!source.contains("_we_FragColor.a = clamp(sample.a"));
     assert!(!source.contains("fwidth(_we_FragColor.a)"));
     let artifact = NagaCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
         .expect(
             "alpha-to-coverage derivative idiom should preserve nested source identifier fixups",
         );
@@ -4813,7 +4813,7 @@ fn compile_stage_for_both_targets(
     legalized: &CodegenStageSource,
     expectation: &str,
 ) {
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         if let Err(error) = NagaCompiler.compile_stage(target, stage, legalized) {
             panic!(
                 "{expectation} ({target:?}): {}\n{}",

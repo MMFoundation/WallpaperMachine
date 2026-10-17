@@ -98,12 +98,12 @@ performance checks, so run the gate without concurrent builds or benchmarks.
 ## Probes
 
 All probes are explicitly invoked executables, not ctest cases or UI tests.
-`offscreen_scene_probe` creates a surface-free Vulkan device and private render
-targets, uses the production shader passes and batching plan, and writes PPM
-images under `WE_TEST_OUTPUT`. Use a disposable output/cache directory. The
-device requests the same extension set as the wallpaper renderer, including
-`VK_EXT_metal_objects` on Apple, so a scene whose textures are video streams
-imports its frames instead of rendering empty texture slots.
+`offscreen_scene_probe` draws one imported scene with Native Metal through a
+`CAMetalLayer` no window owns, into private render targets, and writes the scene's
+own output target as PPM images (`frame-<n>.ppm`) under `WE_TEST_OUTPUT`. Use a
+disposable output/cache directory. It parses the project as the app does and drives
+`MetalRender` directly (without `SceneWallpaper`), so a probe result describes the same
+renderer wallpapers use.
 
 ```sh
 WE_TEST_PROJECT="$HOME/Library/Application Support/WallpaperMachine/Library/<id>/project.json" \
@@ -112,8 +112,8 @@ WE_TEST_OUTPUT="$PWD/artifacts/renderer/scratch" \
 artifacts/renderer/bin/tests/offscreen_scene_probe
 ```
 
-`metal_scene_draw_smoke` is the equivalent harness for the native Metal backend;
-"both scene probes" below means these two.
+`metal_scene_draw_smoke` is the harness that drives the renderer the way the host does
+(through `SceneRendererHandle`); "both scene probes" below means these two.
 
 ### Probe environment variables
 
@@ -123,13 +123,13 @@ Inputs and outputs:
 | --- | --- | --- |
 | `WE_TEST_PROJECT` | `offscreen_scene_probe`, `text_object_runtime_test` | Path to a scene `project.json` |
 | `WE_TEST_PROJECTS` | `scene_reload_cycle_probe` | `;`-separated project list |
-| `WE_TEST_METAL_PROJECTS` | `metal_scene_draw_smoke` | Colon-separated `project.json` paths run through the production parser into the native backend offscreen. A fallback is printed with its reason and is not a failure; an accepted scene must prepare and draw every requested frame. Frames after initialization are summarised as render passes per frame (how many rendered into the scene's own image), blits per frame and thread CPU milliseconds per `drawFrame`. A scene whose graph has layer link textures read before the frame fills them (a layer sampling its own or a later layer's last composite) also prints one `[ LOCAL    ] <id>: N layer link texture(s) read before the frame fills them` line: its picture depends on the frame before, so compare it across renderers with `WE_TEST_COMPARE_PROJECTS`. With `WE_TEST_OUTPUT` set, the last frame is written there. Unset, the test skips. Read any `metal translation of '…' failed` line as a failed effect, not a clean native run |
+| `WE_TEST_METAL_PROJECTS` | `metal_scene_draw_smoke` | Colon-separated `project.json` paths run through the production parser into the native backend offscreen. A fallback is printed with its reason and is not a failure; an accepted scene must prepare and draw every requested frame. Frames after initialization are summarised as render passes per frame (how many rendered into the scene's own image), blits per frame and thread CPU milliseconds per `drawFrame`. A scene whose graph has layer link textures read before the frame fills them (a layer sampling its own or a later layer's last composite) also prints one `[ LOCAL    ] <id>: N layer link texture(s) read before the frame fills them` line: its picture depends on the frame before, so compare it across builds with `WE_TEST_COMPARE_PROJECTS`. With `WE_TEST_OUTPUT` set, the last frame is written there. Unset, the test skips. Read any `metal translation of '…' failed` line as a failed effect, not a clean native run |
 | `WE_TEST_ASSETS` | probes | Shared `SceneAssets` directory |
 | `WE_TEST_OUTPUT` | probes | Output/cache directory (disposable) |
 | `WE_TEST_CACHE` | `text_object_runtime_test` | Disposable shader cache directory |
 | `WE_TEST_CYCLES` | `scene_reload_cycle_probe` | Reload cycles per project |
-| `WE_TEST_PROPERTIES` | `offscreen_scene_probe`, `metal_scene_draw_smoke` | Flat JSON property overrides, in memory only. A layer gated on a saved property draws nothing without this, so both backends have to be driven with the same overrides to compare one |
-| `WE_TEST_RANDOM_SEED` | both scene probes | Seeds the particle random source before the scene is parsed, so the same project simulates the same particles on both renderers. The Vulkan probe only steps the particle simulation when `WE_TEST_AUDIO_HZ` is set, and only advances time when `WE_TEST_FRAME_STEP` is |
+| `WE_TEST_PROPERTIES` | `offscreen_scene_probe`, `metal_scene_draw_smoke` | Flat JSON property overrides, in memory only. A layer gated on a saved property draws nothing without this, so both harnesses have to be driven with the same overrides to compare one |
+| `WE_TEST_RANDOM_SEED` | both scene probes | Seeds the particle random source before the scene is parsed, so the same project simulates the same particles in both harnesses and across builds |
 
 Frames, time and surfaces:
 
@@ -142,9 +142,8 @@ Frames, time and surfaces:
 | `WE_TEST_METAL_FRAMES` | `metal_scene_draw_smoke` | Frames the local-project Metal test draws, 1/60 s apart: 120 by default, 2–3600 accepted. Its own knob, so the probe's `WE_TEST_FRAMES` in the same environment cannot move the Metal frame's scene time. The last frame is the output; the test also prints the bytes of this scene's render targets and, separately, the device-wide Metal allocation, which includes the layer's drawables and varies between runs |
 | `WE_TEST_METAL_FRAME_STEP` | `metal_scene_draw_smoke` | Simulation delta in seconds; default `1/60`. Use `1/120` and twice as many frames for a matched-duration 120 FPS scenario |
 | `WE_TEST_METAL_WARMUP_TICKS` | `metal_scene_draw_smoke` | Runtime ticks of 1/60 s before the graph is built, as `offscreen_scene_probe` takes 40; `0..3600`. Unset, none. The scene clock is not advanced by them, here or there |
-| `WE_TEST_COMPARE_PROJECTS` | `metal_scene_draw_smoke --gtest_filter='*DrawTheSamePictureOnBothRenderers*'` | Colon-separated `project.json` paths drawn by both renderers in one harness (see below). Unset, the test skips |
-| `WE_TEST_COMPARE_SURFACE` | the same test | `<width>x<height>` of the layer both renderers draw into; default `960x540` |
-| `WE_TEST_COMPARE_NATIVE_ONLY` | the same test | Set (any value) to draw only the Native Metal picture of each project and compare nothing: only `<scene>-native.ppm` is written, for a comparison with a reference from outside the harness such as Wallpaper Engine's own frames |
+| `WE_TEST_COMPARE_PROJECTS` | `metal_scene_draw_smoke --gtest_filter='*LocalProjectsDrawAPosterPicture*'` | Colon-separated `project.json` paths drawn through `SceneRendererHandle` on a layer no window owns, the last frame's final composition written as `<scene id>.ppm` under `WE_TEST_OUTPUT` (see below). Unset, the test skips |
+| `WE_TEST_COMPARE_SURFACE` | the same test | `<width>x<height>` of the layer drawn into; default `960x540` |
 | `WE_TEST_COMPARE_RESOLUTION` | the same test | `display` rasterizes a 2D scene at the size it is presented at on the layer; `canvas`, the default, at the size it was authored at. Perspective scenes and videos ignore it |
 | `WE_TEST_COMPARE_SCALE_FACTOR` | the same test | The layer's backing scale, `1`–`4` (default `1`); with `WE_TEST_COMPARE_SURFACE` it makes a laptop-panel-sized layer |
 | `WE_TEST_COMPARE_REALTIME` | the same test | Set (any value) to pace the frames in real time, so a script that reads the wall clock (`Date.now()`) sees as much time pass as the scene does on a desktop; unset, the frames run as fast as they draw |
@@ -159,18 +158,16 @@ Allocation, optimisation and dumps:
 
 | Variable | Used by | Meaning |
 | --- | --- | --- |
-| `WE_TEST_NO_REUSE=1` | `offscreen_scene_probe` | Isolated texture allocation (no pooling) |
-| `WE_TEST_NO_SCENE_OPTIMIZATION` | `offscreen_scene_probe` | Any value forces the unoptimised path (no static-result reuse) for a direct A/B; the probe otherwise prints how many passes were reused |
+| `WE_TEST_NO_REUSE=1` | `offscreen_scene_probe` | Isolated target allocation: sets `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` before the renderer exists, so no two targets share an image, and turns static-result reuse off. `check_renderer.py` draws every generated fixture pooled and isolated and requires equal pixels |
+| `WE_TEST_NO_SCENE_OPTIMIZATION` | `offscreen_scene_probe` | Any value forces the unoptimised path (no static-result reuse) for a direct A/B; the probe reports whether scene optimization was on |
 | `WE_TEST_SCENE_OPTIMIZATION=0` | `metal_scene_draw_smoke` | Turns static-result reuse off around the local-project loop, to compare a scene that looks wrong under it with the same scene drawn every frame. Process-global, restored afterwards |
 | `WE_TEST_DUMP_SOURCE=1` | `offscreen_scene_probe` | Write the packaged scene JSON beneath `WE_TEST_OUTPUT`; `nodes.txt` also records per-node visibility, translate and scale, which diffs layer placement between builds without comparing pixels |
 | `WE_TEST_ASSET_PATH` | `offscreen_scene_probe` | Copy one asset from the mounted package to `asset.txt` under `WE_TEST_OUTPUT` for shader diagnosis; keep private asset output uncommitted |
-| `WE_TEST_DUMP_PASSES` | `offscreen_scene_probe` | Dump per-pass detail for the last sampled frame only: one image per custom pass (the image is the whole pooled allocation, which can be larger than the target), plus that pass's material slot, live visibility and full `constValues` appended to `passes.txt`. The prepare-time listing at the top of that file is a snapshot; only the `frame N` lines show what a sampled frame actually drew |
-| `WE_TEST_DUMP_TARGETS` | `offscreen_scene_probe` | Colon-separated render target names, or `*` for every target the scene declares; the last frame of each is written as `target-<name>.ppm` |
+| `WE_TEST_DUMP_TARGETS` | `offscreen_scene_probe` | Render target names, or `*` for every target the scene declares; the last frame of each is written as `target-<name>.ppm`. Names carry a per-run suffix, so `*` is the only way to name one across two processes |
 | `WE_TEST_METAL_DUMP_TARGETS` | `metal_scene_draw_smoke` | Same selection as above. Each target is reported with its size and mean luma and, with `WE_TEST_OUTPUT` set, written as a PPM. Target names carry a per-run suffix, so `*` is the only way to name one across two processes |
 | `WE_TEST_DUMP_ALPHA=1` | both scene probes | Writes each dumped target's alpha channel separately as grey. Effects that weight by coverage (the bokeh downsample divides by the sum of its taps' alpha) make different color from the same RGB when alpha differs |
 | `WE_TEST_DUMP_POSES=1` | `wpdump` | Dump sampled bone transforms |
 | `WE_TEST_EXPECT_WARM=1` | `text_object_runtime_test` | Assert zero shader compilations on a second run |
-| `WE_TEST_VIDEO` | `playback_gpu_test --gtest_filter=AppleVideoFrame.LocalVideoImportsVisiblePixels` | Absolute local video path, opened read-only. Imports the first decoded frame into a private Metal texture and checks for visible pixels after releasing the decoder; select a clip with a non-black first frame. Unset skips this corpus diagnostic. No audio, window or desktop capture |
 
 Synthetic input, media and audio (none reads the desktop, a media player or an
 audio device):
@@ -181,9 +178,9 @@ audio device):
 | `WE_TEST_CLICK_COUNT` | `offscreen_scene_probe` | `1..10` synthetic clicks |
 | `WE_TEST_CLICK_OFFSET` | `offscreen_scene_probe` | World-space `"dx dy"` added to the click layer's origin, to hit a covered or transparent texel instead of the centre |
 | `WE_TEST_CLICK_VIEWPORT` | `offscreen_scene_probe` | `"<px_w>x<px_h>@<scale>:<fill\|fit\|stretch\|none>"`; maps the click the way a desktop does — the presented viewport is published and the cursor arrives window-normalized — instead of handing the runtime a world position, so hit testing is exercised against a real display's geometry |
-| `WE_TEST_INPUT_JSON` | both scene probes and the renderer comparison (`*DrawTheSamePictureOnBothRenderers*`) | Ordered synthetic pointer events: `[{"frame":600,"layer":42,"inside":true,"buttons":1},{"frame":601,"buttons":0}]`. `layer` follows that parsed node's projected centre; `x`/`y` supply normalized coordinates instead. An exit uses `inside:false` |
+| `WE_TEST_INPUT_JSON` | both scene probes and the poster harness (`*LocalProjectsDrawAPosterPicture*`) | Ordered synthetic pointer events: `[{"frame":600,"layer":42,"inside":true,"buttons":1},{"frame":601,"buttons":0}]`. `layer` follows that parsed node's projected centre; `x`/`y` supply normalized coordinates instead. An exit uses `inside:false` |
 | `WE_TEST_MEDIA_EVENTS` | both scene probes | JSON array of SceneScript media event objects, dispatched in order after the warm-up ticks. Enables media integration for the run, so a wallpaper that only draws its player while something is playing can be rendered without a system media source or Automation permission. Without events a scene is still told on its first tick that nothing plays, as in the app, so a widget that hides itself on `PLAYBACK_STOPPED` is hidden |
-| `WE_TEST_MEDIA_ARTWORK` | both scene probes | `<width>x<height>:<rrggbb>`; publishes one opaque cover through the same path the app uses, so `$mediaThumbnail` and `$mediaPreviousThumbnail` carry a color that is legible in the rendered frame. Without it a background drawn from the current cover renders flat grey on both backends and a comparison says nothing |
+| `WE_TEST_MEDIA_ARTWORK` | both scene probes | `<width>x<height>:<rrggbb>`; publishes one opaque cover through the same path the app uses, so `$mediaThumbnail` and `$mediaPreviousThumbnail` carry a color that is legible in the rendered frame. Without it a background drawn from the current cover renders flat grey and a comparison says nothing |
 | `WE_TEST_MEDIA_JSON` | `offscreen_scene_probe` | A JSON array of media events dispatched right after the parse, before the warm-up ticks |
 | `WE_TEST_AUDIO_HZ` | both scene probes | Synthetic PCM at `0..24000` Hz; `0` means silence. Each frame submits one analysis window (1,600 frames at 48 kHz) through the same service the desktop tap feeds, and the Metal gate enables audio response for the run. The 64 bands follow Wallpaper Engine's layout: one ~23 Hz bin each up to about 400 Hz (band 0 ≈ 23 Hz, band 3 ≈ 95 Hz), then widening to ~15 kHz, so a shader reading only the lowest bands needs a bass tone, not 440 Hz |
 | `WE_TEST_AUDIO_FILE` | both scene probes | Raw float32 mono PCM at 48 kHz played instead of the synthetic tone, continuing across frames and looping; `WE_TEST_AUDIO_HZ` must still be set to enable audio. A music-like signal is the only way to judge a visualizer's look: a tone lights one band and white noise lights all of them |
@@ -193,9 +190,8 @@ audio device):
 Audio is submitted after GPU setup so shader compilation cannot expire its
 live-input timeout. These options never initialize audio hardware. Keep all
 probe output outside Git. If IDE ignore rules block reads under the repository's
-ignored directories, write to a system temporary directory instead. Per-pass
-Vulkan dumps split submissions and are not proof of depth-preserving batched
-output: compare the ordinary unsplit final frame for perspective scenes.
+ignored directories, write to a system temporary directory instead. Judge
+perspective scenes by the ordinary final frame, not by a single dumped target.
 
 ### Probe behavior
 
@@ -204,10 +200,8 @@ timings. Use a fresh `WE_TEST_OUTPUT` for a cold shader-cache run and repeat the
 same directory for a warm run. It resolves each project's entry/package version
 and render dimensions and discovers text nodes instead of using fixed layer IDs.
 It tests scene rendering only — not video or web projects, and not AppKit
-presentation. It builds its render graph once, after its warm-up ticks, so it
-draws layers a script creates during `init` but not ones created later, nor a
-layer its properties hide that a script shows later;
-`metal_scene_draw_smoke` rebuilds on every graph mutation, as production does.
+presentation. Like production it builds the render graph again on every graph
+mutation (a layer a script creates or shows later).
 Local-asset probe sound managers use the null backend: not calling `Play()` alone
 does not prevent `MountStream()` from initializing a system audio device.
 
@@ -220,56 +214,40 @@ advances `step` after each frame, so frame N draws at `N * step`.
 `metal_scene_draw_smoke` ticks and advances both clocks by 1/60 s for
 `WE_TEST_METAL_FRAMES` frames (120 by default) and writes the last one at
 (frames − 1)/60 s on both, 119/60 s by default. Comparing the two harnesses, or
-one render with a crop of another, therefore needs matched scene time: the Vulkan
+one render with a crop of another, therefore needs matched scene time: the probe
 run with `WE_TEST_FRAMES=4` and `WE_TEST_FRAME_STEP=0.6611111` (119/180) draws
 frame 3 at the default Metal frame's scene time. A puppet posed at a different
-scene time reads as a camera or backend fault. Seed both with the same
+scene time reads as a camera fault. Seed both with the same
 `WE_TEST_RANDOM_SEED`.
 
-The fair renderer comparison is `MetalSceneDraw.LocalProjectsDrawTheSamePictureOnBothRenderers`
-with `WE_TEST_COMPARE_PROJECTS`: each project is parsed twice exactly as a
-wallpaper loads it, seeded and clocked identically (`WE_TEST_METAL_FRAMES`,
-`WE_TEST_METAL_FRAME_STEP`, `WE_TEST_METAL_WARMUP_TICKS`, `WE_TEST_RANDOM_SEED`),
-given the scaling the host pushes to every renderer, and drawn through
-`SceneRendererHandle` on a layer no window owns, once per renderer. The last
-frame's final composition returns through the poster path both renderers share,
-so the two pictures differ only by what the renderers did; it prints the mean
-absolute difference and writes both under `WE_TEST_OUTPUT`. A difference found by
-comparing `offscreen_scene_probe` with the local-project run is not yet a renderer
-difference: the two harnesses differ in the ways below, and the probe also never
-rebuilds its graph for a layer a script shows after the warm-up.
+The poster harness is `MetalSceneDraw.LocalProjectsDrawAPosterPicture` with
+`WE_TEST_COMPARE_PROJECTS`: each project is parsed exactly as a wallpaper loads it,
+seeded and clocked as asked (`WE_TEST_METAL_FRAMES`, `WE_TEST_METAL_FRAME_STEP`,
+`WE_TEST_METAL_WARMUP_TICKS`, `WE_TEST_RANDOM_SEED`), given the scaling the host
+pushes to the renderer, and drawn through `SceneRendererHandle` on a layer no
+window owns. The last frame's final composition returns through the poster path
+and is written as `<scene id>.ppm` under `WE_TEST_OUTPUT`. It asserts nothing about
+the picture: it is a diagnostic for comparing two builds (two runs with the same
+seed, clock and properties give byte-identical pictures, so a difference is what
+the build changed) or a build with a reference from outside the harness, such as
+Wallpaper Engine's own frames. A difference found by comparing
+`offscreen_scene_probe` with the poster harness is not yet a renderer
+difference: the two harnesses differ in the ways below.
 
-To put both clocks on the same second, give the Metal run
+To put both clocks on the same second, give the poster harness
 `WE_TEST_METAL_WARMUP_TICKS=40` and both runs the same frame count and step
 (`WE_TEST_FRAMES` with `WE_TEST_FRAME_STEP`, `WE_TEST_METAL_FRAMES` with
-`WE_TEST_METAL_FRAME_STEP`). Three more things differ between the harnesses
-unless set: the Vulkan probe steps particles only with `WE_TEST_AUDIO_HZ` (use
-`0` on both); it keeps every source mip unless `WE_TEST_TEXTURE_SURFACE` names
-the surface the Metal run rasterises (`WE_TEST_METAL_SURFACE`), which otherwise
-reads as Metal being blurrier; and a canvas that is not 16:9 is cropped by the
-Metal harness's fill mode on its default 960x540 surface, which reads as a
-zoom, so give both a surface of the canvas's own aspect. A scene still inside
-its camera fade at the sampled time is black on both and compares equal.
+`WE_TEST_METAL_FRAME_STEP`). The probe's default surface is 1920x1080 and the poster
+harness's 960x540, and a canvas that is not 16:9 is cropped by the fill mode, which
+reads as a zoom, so give both a surface of the canvas's own aspect
+(`WE_TEST_SURFACE`, `WE_TEST_COMPARE_SURFACE`). A scene still inside its camera fade
+at the sampled time is black in both and compares equal.
 
 `scene_reload_cycle_probe` parses every selected project twice in one process,
 each parse on a fresh thread with fresh VFS mounts, the way a wallpaper switch
 builds a new `SceneWallpaper`. It catches per-process state that survives a
 scene teardown and stalls the next load; a stall is reported as a probe timeout.
 It covers scene parsing and script compilation only, not presentation.
-
-`playback_gpu_test` is Apple-only and requires real Metal/MoltenVK
-capabilities. It uses private images and synthetic IOSurface-backed inputs and
-creates no window, surface, swapchain, audio device, or screenshot. Missing
-required GPU capabilities fail explicitly rather than skipping. Run the built
-executable directly from the renderer check build directory.
-
-`offscreen_scene_probe` is Vulkan-only, and it drives the Vulkan renderer directly,
-without `SceneWallpaper`: the engine never creates a Vulkan renderer (an offscreen surface
-with no Metal layer is a prepare failure), so a probe result describes a renderer wallpapers
-no longer use. It stays as the reference the comparison tests measure Native Metal against,
-until the Vulkan code is deleted. Check the backend first — `metal_scene_draw_smoke` with
-`WE_TEST_METAL_PROJECTS` prints the decision per project — and repeat any comparison there
-before calling a difference backend-independent.
 
 ### Metal compile across processes
 
@@ -306,9 +284,7 @@ What a later launch compiles again:
 | Compiled source missing only | Metal source |
 | Compiled pipelines missing only | Pipelines (the smaller share) |
 
-MoltenVK's pipeline cache stores the Metal source it generated, not compiled
-code, and no `MVK_CONFIG_*` setting adds a binary archive. A binary archive, on
-either backend, would hold only the pipeline row's share. Measured energy for
+A Metal binary archive would hold only the pipeline row's share. Measured energy for
 these conditions is in [performance](../features/performance.md).
 
 ## Regression areas that must stay covered
@@ -442,8 +418,8 @@ cargo test -p shader --test pipeline -- --nocapture
   change), playback is never touched, and asking again after a refused renderer update re-applies it.
   A native clip stays with the native player and a refused one stays with the scene engine through
   every change of the ceiling (a throttle, the cap, the rate or mode of the battery profile, the
-  power source): a refusal describes the file, never the frame rate. The engine is the fake one, so a live Metal or
-  Vulkan scene following the change and any power effect are desktop checks.
+  power source): a refusal describes the file, never the frame rate. The engine is the fake one, so a live Metal
+  scene following the change and any power effect are desktop checks.
 - `wallpaper-core` and `wallpaper-bridge` drag previews (`cargo test --release -p
   wallpaper-core --lib framing`; `cargo test --release -p wallpaper-bridge --lib
   display_position`): `WallpaperEngine::preview_framing` refuses an invalid position
@@ -566,8 +542,7 @@ SceneScript, input and the media protocol (`script_runtime_compat_test`,
 `mouse_input_test`, `scenescript_sound_layer_smoke`,
 `scenescript_media_event_smoke`, `media_thumbnail_texture_smoke`), the shader
 preprocessor (`shader_preprocessor_compat_test`, `unpack_shader_compile_smoke`),
-Compatibility pass batching (`vulkan_render_batch_planner_smoke`, plain asserts
-kept live in Release with `-UNDEBUG`), video playback-state merging
+video playback-state merging
 (`video_texture_submission_smoke`), and the texture/cache/lifetime, audio, video,
 graph, particle, timer and Metal checks; a non-zero exit from any registered
 binary fails the check. A test binary that is not registered fails unnoticed, so a
@@ -615,12 +590,12 @@ cmake --build artifacts/renderer/bin --target scene_schema_tests
 artifacts/renderer/bin/tests/scene_schema_tests --gtest_filter='SceneSchema.*CameraZoom*'
 ```
 
-The video suites (`video_source_input_test`, `unchanged_present_test`, `metal_scene_draw_smoke`, `playback_gpu_test`'s `apple_video_frame_test.mm`) decode H.264 clips written by `Renderer/Testing/synthetic_video.mm`, which is this project's own code and uses Apple frameworks only: a `VTCompressionSession` encodes one group of pictures per binary (640x360, 30 fps, no B-frames, a 200 Mbit/s noise group and a 600-frame single-keyframe bar clip), and an `AVAssetWriter` passthrough input re-times the compressed samples for as many repeats as a test needs, with the salt as iTunes comment metadata and the display matrix as the input transform. The clips carry no colour tags, so the decoders infer the matrix from the picture size and the absolute colours the tests expect depend on that. `EncoderAvailable()` is the guard (a machine with no VideoToolbox H.264 encoder reports it instead of failing on a missing file). `synthetic_video_test` (CPU only, no decoder under test) reads the files back with AVFoundation: frame times, one keyframe per repeat, the eight orientations, no colour extensions and the luma the encoder was given. The same file also writes 10-bit clips (`WriteTenBitVideo`, guarded by `TenBitEncoderAvailable()`): `kTenBitFrames` flat 640x360 frames of HEVC Main10 from `VTCompressionSession`, one keyframe, no B-frames, tagged PQ, HLG or BT.709 in both the bitstream and the container (and optionally a content light level). `synthetic_video_test` checks them with AVFoundation alone (the `hvcC` record says Main 10 and 10 bits, each tag, frame times, the decoded codes), and `vt_frame_decoder_test` requires that the project's reader plus VideoToolbox decode them to `x420` IOSurface frames carrying the curve, primaries and matrix as attachments, which is where the scene import reads them. `Renderer/Testing/hdr_reference.hpp` is the header-only, double-precision CPU reference for the 10-bit kernel (BT.2100, ST 2084, BT.2390, primaries derived from chromaticities), shared by `metal_video_texture_test` and `metal_scene_draw_smoke`. `video_source_input_test` runs every shared case once per decoder (`Decoders/<Suite>.<Case>/ffmpeg` and `/native`); the cases about how an embedded payload reaches a decoder are per decoder (`FfmpegPayloadStaging`: FFmpeg stages it in a named file; `NativePayloads`: memory or an anonymous file, never a visible one, a stream that breaks part way, a fragmented MP4 handed to FFmpeg in auto mode (also when the source is the image's only owner), a VP9 WebM and an H.264 Matroska with B-frames, the VP8 refusal). `Renderer/Testing` also writes a 60-frame clip with B-frames (`WriteReorderedVideo`) and embeds small clips made once offline (`embedded_clips.hpp`: VP9 128x96 in WebM, since VideoToolbox's VP9 decoder refuses 64x48, H.264 64x48 with B-frames in Matroska, and full-range H.264 and HEVC 64x48 ramps in MP4 with no colr box). `WALLPAPER_MACHINE_VIDEO_BACKEND=ffmpeg|native|auto` selects the decoder for an A/B run. By default scenes decode natively. The tests that used to count open .mp4 descriptors count `OpenVideoDecoderCount()`, which holds for either decoder.
+The video suites (`video_source_input_test`, `unchanged_present_test`, `metal_scene_draw_smoke`) decode H.264 clips written by `Renderer/Testing/synthetic_video.mm`, which is this project's own code and uses Apple frameworks only: a `VTCompressionSession` encodes one group of pictures per binary (640x360, 30 fps, no B-frames, a 200 Mbit/s noise group and a 600-frame single-keyframe bar clip), and an `AVAssetWriter` passthrough input re-times the compressed samples for as many repeats as a test needs, with the salt as iTunes comment metadata and the display matrix as the input transform. The clips carry no colour tags, so the decoders infer the matrix from the picture size and the absolute colours the tests expect depend on that. `EncoderAvailable()` is the guard (a machine with no VideoToolbox H.264 encoder reports it instead of failing on a missing file). `synthetic_video_test` (CPU only, no decoder under test) reads the files back with AVFoundation: frame times, one keyframe per repeat, the eight orientations, no colour extensions and the luma the encoder was given. The same file also writes 10-bit clips (`WriteTenBitVideo`, guarded by `TenBitEncoderAvailable()`): `kTenBitFrames` flat 640x360 frames of HEVC Main10 from `VTCompressionSession`, one keyframe, no B-frames, tagged PQ, HLG or BT.709 in both the bitstream and the container (and optionally a content light level). `synthetic_video_test` checks them with AVFoundation alone (the `hvcC` record says Main 10 and 10 bits, each tag, frame times, the decoded codes), and `vt_frame_decoder_test` requires that the project's reader plus VideoToolbox decode them to `x420` IOSurface frames carrying the curve, primaries and matrix as attachments, which is where the scene import reads them. `Renderer/Testing/hdr_reference.hpp` is the header-only, double-precision CPU reference for the 10-bit kernel (BT.2100, ST 2084, BT.2390, primaries derived from chromaticities), shared by `metal_video_texture_test` and `metal_scene_draw_smoke`. `video_source_input_test` runs every shared case once per decoder (`Decoders/<Suite>.<Case>/ffmpeg` and `/native`); the cases about how an embedded payload reaches a decoder are per decoder (`FfmpegPayloadStaging`: FFmpeg stages it in a named file; `NativePayloads`: memory or an anonymous file, never a visible one, a stream that breaks part way, a fragmented MP4 handed to FFmpeg in auto mode (also when the source is the image's only owner), a VP9 WebM and an H.264 Matroska with B-frames, the VP8 refusal). `Renderer/Testing` also writes a 60-frame clip with B-frames (`WriteReorderedVideo`) and embeds small clips made once offline (`embedded_clips.hpp`: VP9 128x96 in WebM, since VideoToolbox's VP9 decoder refuses 64x48, H.264 64x48 with B-frames in Matroska, and full-range H.264 and HEVC 64x48 ramps in MP4 with no colr box). `WALLPAPER_MACHINE_VIDEO_BACKEND=ffmpeg|native|auto` selects the decoder for an A/B run. By default scenes decode natively. The tests that used to count open .mp4 descriptors count `OpenVideoDecoderCount()`, which holds for either decoder.
 
 `scene_schema_tests` also compiles `tests/utils_known_answer_tests.cpp`, which pins the `Random` draws that `WE_TEST_RANDOM_SEED` replays and the `genSha1` digests that name video caches and key the shader and script caches, so replacing either implementation cannot change them silently. It also compiles `tests/linalg_tests.cpp`, which pins `Utils/Linalg.hpp`, the engine's own linear algebra, bit for bit against `tests/linalg_golden.inc` (results captured once from the library it replaced; the cases that call libm trigonometry are checked only where the host's libm still rounds like the capture host's, and are reported skipped otherwise) and checks the behaviour the engine's call sites rely on. The 4 x 4 inverse and determinant are held to a tolerance there, and a singular matrix with rounding noise may invert differently from the replaced library (see `sceneEngine.linalgChanges` in `upstream/provenance.json`). The rest of the engine's tests use `Utils/Linalg.hpp` types directly, so every other test binary also exercises the library through the engine.
 
 `tex_schema_tests` links `PkgConfig::TEST_LZ4` itself
-(`tests/CMakeLists.txt`), the way `playback_gpu_test` re-resolves FFmpeg for its software-frame suite: the
+(`tests/CMakeLists.txt`): the
 renderer links LZ4 `PRIVATE`, so the include directory does not propagate to a
 test that builds its own compressed `.tex` fixtures. Run it when touching
 `WPTexImageParser`. Other useful filters:
@@ -630,7 +605,7 @@ audio_tests --gtest_filter='AudioResponseMonoTest.*'
 script_runtime_compat_test --gtest_filter='AudioResponseCompat.*'
 ```
 
-`rendergraph_smoke` and `vulkan_sample_count_smoke` use always-active GTest
+`rendergraph_smoke` uses always-active GTest
 checks in Release builds. `sprite_animation_test` checks elapsed time across
 cadences and long loops. `stb_image_regression_test` decodes ordinary generated
 JPEG/PNG/BMP images, checks cleanup under controlled allocator refusal, and
@@ -673,9 +648,8 @@ once and that an on-demand scene wakes for exactly one frame. See
 `unchanged_present_test` exercises the frames Native Metal leaves out because they
 would repeat the picture, through the real frame clock and drawable loop on a
 `CAMetalLayer` no window owns (the counters it reads are draws executed, presents
-requested and presents skipped). The video tests that exercised the Compatibility
-renderer's skip for a plain video are retired with it: the engine is never given a
-plain video, and Native Metal's own repeat-frame behaviour for a scene's video layer
+requested and presents skipped). The engine is never given a
+plain video, and Native Metal's repeat-frame behaviour for a scene's video layer
 is pinned in `metal_scene_draw_smoke`
 (`AFrameThatWouldRepeatThePictureTakesNoDrawableAndPresentsNothing` and its
 neighbours). In
@@ -760,9 +734,7 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
   layer or a render-scale change on Native Metal neither shows the head of a kept video's clip
   nor reads,
   copies and hashes a packaged video again. What is still opened with the clock some way into
-  the clip is a scene that falls back to the other renderer, a Compatibility surface that is
-  released and set up again (a display change: `TextureCache::Clear` goes with the surface;
-  Native Metal keeps its graph and its videos through one), a decoder that failed while it was kept, and the video
+  the clip is a decoder that failed while it was kept, and the video
   layer that a property shows again (the rebuild that hid it left the video out of the graph and
   closed it). The seek is made once, by the first call that has the clock, and lands however often
   frames are drawn; the head of the clip is on screen while the seek and the catching up to the
@@ -816,7 +788,7 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
   `lightconfig` count, the first ones in scene order are lit, where Wallpaper Engine
   sorts them first.
 - **A vertex input the mesh does not provide is bound to the position, silently.**
-  Both renderers look each reflected vertex input up in the mesh's attributes by
+  The renderer looks each reflected vertex input up in the mesh's attributes by
   name and, for a name that is not there, read the first buffer at offset 0 (the
   native renderer refuses only a puppet's bone indices and weights). That is
   right for an input a shader declares and never reads, and it hid a shader that
@@ -981,10 +953,10 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
 - **File textures are sampled trilinearly.** Wallpaper Engine's sampler for a file
   texture is anisotropic (8x), which only shows on a surface seen at an angle (the
   local scene with 3D models), and it samples a shadow atlas through a comparison
-  sampler for the shadow pass that does not exist here; neither backend does either.
+  sampler for the shadow pass that does not exist here; this renderer does not either.
   The anisotropy would cost fetches on every tilted surface, so it wants a
   measurement before it lands. The exception is a texture whose header asks for
-  point sampling: both backends sample it with the mip level picked by point, as the
+  point sampling: it is sampled with the mip level picked by point, as the
   reference's sampler for that flag does.
 - **Text details not matched.** Wallpaper Engine shapes text with HarfBuzz (OpenType
   kerning, ligatures, complex scripts) and draws colour glyphs from an RGBA atlas; the
@@ -1155,9 +1127,8 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
   its isolated twin by a few levels everywhere (no clock, label or single layer),
   in a pooled run only, so allocation reuse is not ruled out. Re-run it, and
   investigate if it repeats.
-- **A target a parallax layer draws into is never reused.** Neither backend's
-  static pass sample (`CustomShaderPass::frameSample`,
-  `MetalRender::Impl::frameSample`) includes the parallax offset
+- **A target a parallax layer draws into is never reused.** The
+  static pass sample (`MetalRender::Impl::frameSample`) does not include the parallax offset
   `WPShaderValueUpdater::UpdateUniforms` adds to a layer's model matrix (a plain
   text layer's too: it follows the cursor like an image layer of its depth, and so
   is the first pass of a compose layer with effects, which reads the screen where

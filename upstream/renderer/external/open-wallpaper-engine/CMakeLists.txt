@@ -11,7 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Restrict to Clang. The renderer + tests rely on Clang-specific behaviour
 # (clang-format style, sanitizer flags wired in src/CMakeLists.txt, and
-# observed glslang/FetchContent quirks) and we have no CI matrix for GCC.
+# observed FetchContent quirks) and we have no CI matrix for GCC.
 # Override with -DWAYWALLEN_ALLOW_NONCLANG=ON if you know what you're doing.
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT WAYWALLEN_ALLOW_NONCLANG)
     message(FATAL_ERROR

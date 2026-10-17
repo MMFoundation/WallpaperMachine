@@ -4020,7 +4020,7 @@ impl<E: EngineFacade + Clone> Message<RendererCounters> for BridgeActor<E> {
                 RendererSharedCounterKind::AudioAcceptedFrames,
             ),
             audio_active_consumers: self.audio_consumer_count(),
-            // MoltenVK over a CAMetalLayer swapchain exposes no presentation
+            // The renderer presents through a CAMetalLayer and exposes no presentation
             // feedback here. Present requests are reported as requests; the
             // frames the compositor actually showed are not observable, and are
             // never approximated by the request count.

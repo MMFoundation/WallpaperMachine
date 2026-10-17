@@ -2,7 +2,6 @@
 
 #include "Scene/Parse/WPShaderParser.hpp"
 #include "Shader/RustShaderIdentity.hpp"
-#include "Vulkan/Shader.hpp"
 
 #include <array>
 #include <cstdint>
@@ -18,8 +17,12 @@ namespace wallpaper::shader
 {
 
 // Shader compilation target requested from the Rust shader pipeline.
+//
+// `Analysis` parses, validates and reflects a program and generates no code: it
+// settles a material's combos, default textures and metadata. `MetalMsl` is the
+// translation the renderer draws with.
 enum class RustShaderTarget {
-    VulkanSpirv,
+    Analysis,
     MetalMsl,
 };
 
@@ -68,7 +71,7 @@ struct RustShaderProperty {
 struct RustShaderRequest {
     std::string                         shader_name;
     std::string                         scene_id;
-    RustShaderTarget                    target { RustShaderTarget::VulkanSpirv };
+    RustShaderTarget                    target { RustShaderTarget::Analysis };
     bool                                cache_enabled { false };
     std::vector<RustShaderStageSource>  stages;
     Combos                              combos;
@@ -111,17 +114,15 @@ struct RustShaderMetalStage {
 };
 
 struct RustShaderOutput {
-    std::vector<ShaderCode> codes;
-    WPShaderInfo           shader_info;
-    WPPreprocessorInfo     vertex_preprocessor_info;
-    WPPreprocessorInfo     fragment_preprocessor_info;
-    vulkan::ShaderReflected reflection;
-    std::string             metadata_json;
-    std::string             reflection_json;
-    std::string             diagnostics_json;
-    std::string             cache_key;
+    WPShaderInfo       shader_info;
+    WPPreprocessorInfo vertex_preprocessor_info;
+    WPPreprocessorInfo fragment_preprocessor_info;
+    std::string        metadata_json;
+    std::string        reflection_json;
+    std::string        diagnostics_json;
+    std::string        cache_key;
     // Populated only for RustShaderTarget::MetalMsl, one entry per stage in
-    // the same order as `codes` would carry for the SPIR-V target.
+    // request order.
     std::vector<RustShaderMetalStage> metal_stages;
 };
 

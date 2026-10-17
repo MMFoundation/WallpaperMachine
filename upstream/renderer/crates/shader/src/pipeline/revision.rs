@@ -1,4 +1,8 @@
-/// Stable identity for compiler options that affect generated SPIR-V.
+/// Stable identity for compiler options that affect generated code.
+///
+/// The text is part of every cache key. It names the cache generation, and it is
+/// kept as it was when SPIR-V output was removed so that program caches already
+/// on disk stay valid.
 pub(super) const COMPILER_OPTIONS_CACHE_SALT: &str =
     "naga-29.0.3-spv-no-coordinate-space-adjustment";
 

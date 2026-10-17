@@ -14,17 +14,17 @@ linalg::Vector2d Ndc(const linalg::Vector4d& clip)
 }
 
 /// Recovers the diagonal scale that makes the Metal mapping agree with the
-/// Vulkan one, by probing both transforms with the same viewport rather than
+/// flipped one, by probing both transforms with the same viewport rather than
 /// asserting a known answer. A test can then disagree with it.
 linalg::Vector4d DeriveFold()
 {
     // An asymmetric box, so a sign error cannot cancel against a symmetric one.
-    const VulkanViewportBox vulkan { .x = 17.0, .y = 11.0 + 73.0, .width = 29.0, .height = -73.0 };
-    const auto              metal = ToMetalViewport(vulkan);
+    const FlippedViewportBox flipped { .x = 17.0, .y = 11.0 + 73.0, .width = 29.0, .height = -73.0 };
+    const auto              metal = ToMetalViewport(flipped);
 
     const auto probe = [&](double ndc_x, double ndc_y) {
         const linalg::Vector4d clip { ndc_x, ndc_y, 0.5, 1.0 };
-        const auto            want = ClipToWindowVulkan(clip, vulkan);
+        const auto            want = ClipToWindowFlipped(clip, flipped);
         const auto            got  = ClipToWindowMetal(clip, metal);
         return linalg::Vector2d { want.x() - got.x(), want.y() - got.y() };
     };
@@ -43,7 +43,7 @@ linalg::Vector4d DeriveFold()
 
 } // namespace
 
-linalg::Vector2d ClipToWindowVulkan(const linalg::Vector4d& clip, const VulkanViewportBox& viewport)
+linalg::Vector2d ClipToWindowFlipped(const linalg::Vector4d& clip, const FlippedViewportBox& viewport)
 {
     const auto ndc = Ndc(clip);
     return linalg::Vector2d {
@@ -75,12 +75,12 @@ linalg::Matrix4d MetalClipSpaceFold()
     return fold;
 }
 
-linalg::Matrix4d MetalViewProjection(const linalg::Matrix4d& compatibility_vp)
+linalg::Matrix4d MetalViewProjection(const linalg::Matrix4d& camera_vp)
 {
-    return MetalClipSpaceFold() * compatibility_vp;
+    return MetalClipSpaceFold() * camera_vp;
 }
 
-MetalViewportBox ToMetalViewport(const VulkanViewportBox& viewport)
+MetalViewportBox ToMetalViewport(const FlippedViewportBox& viewport)
 {
     // A negative height names the same window rows as the positive one that
     // starts where it ends. Metal cannot express the sign, only the region.

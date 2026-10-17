@@ -44,23 +44,20 @@ enum class MetalCullMode : uint32_t
 };
 
 /// The cull mode a scene pass is drawn with when its target has no depth
-/// attachment: none, as the compatibility backend rasterizes such passes with
-/// `VK_CULL_MODE_NONE`. A pass into a depth-attached target -- a model, a
-/// skybox -- takes its material's cull mode instead, on either backend
+/// attachment: none. A pass into a depth-attached target -- a model, a
+/// skybox -- takes its material's cull mode instead
 /// (`SceneMetalCullMode`). Named here rather than written at the call site so
 /// the invariant can be asserted.
 inline constexpr MetalCullMode kSceneCullMode = MetalCullMode::None;
 
 /// Whether the front face of a culled pass is the counter-clockwise one.
 ///
-/// The compatibility backend culls with `VK_FRONT_FACE_COUNTER_CLOCKWISE`
-/// behind a negative viewport height; this is the same faces on Metal's
-/// unflipped viewport. Any clip-space transform folded into the projection
+/// Counter-clockwise faces are the front ones on Metal's unflipped viewport,
+/// which is the winding authors' meshes are written in. Any clip-space transform folded into the projection
 /// that mirrors an axis would reverse it, which is why it is named.
 inline constexpr bool kSceneFrontFaceCounterClockwise = true;
 
-/// The cull mode a material asks for, applied where the compatibility backend
-/// applies it: only to a pass whose target has a depth attachment.
+/// The cull mode a material asks for, applied only to a pass whose target has a depth attachment.
 [[nodiscard]] constexpr MetalCullMode SceneMetalCullMode(CullMode material_cull_mode,
                                                          bool     target_has_depth)
 {
@@ -90,8 +87,8 @@ struct MetalBlendState
     friend bool operator==(const MetalBlendState&, const MetalBlendState&) = default;
 };
 
-/// Translates an authored blend mode to Metal state, matching
-/// `vulkan::SetBlend` factor for factor.
+/// Translates an authored blend mode to Metal state, factor for factor as
+/// Wallpaper Engine blends.
 ///
 /// `BlendMode::Normal` is ONE / ZERO, an opaque replace. It is not Porter-Duff
 /// source-over despite the name, and turning it into source-over would change

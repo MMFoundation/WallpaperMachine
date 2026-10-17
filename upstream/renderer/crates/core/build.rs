@@ -101,14 +101,12 @@ fn emit_static_link_flags(build_dir: &Path) {
         // The Ogg Vorbis decoder wmSound calls (vendored stb_vorbis).
         "stb_vorbis",
         "wpLooper",
-        // Both renderers come before wpRenderCommon: the scene logic they
-        // share (static reuse, copy elision, presentation layout, the step
-        // description) lives there, so it has to be resolved after them.
+        // The renderer comes before wpRenderCommon: the scene logic it shares with
+        // the host (static reuse, copy elision, presentation layout, the step
+        // description) lives there, so it has to be resolved after it.
         "wpMetalRender",
-        "wpVulkanRender",
         "wpRenderCommon",
         "wpScene",
-        "wpVulkan",
         "wpRGraph",
         "wpParticle",
         "wpTimer",
@@ -120,14 +118,12 @@ fn emit_static_link_flags(build_dir: &Path) {
         // The still preview a wallpaper that cannot be drawn shows (Renderer/Surface);
         // the scene engine calls it, and it needs nothing else of ours.
         "wmSurface",
-        "spirv-reflect-static",
     ] {
         println!("cargo:rustc-link-lib=static={lib}");
     }
 
     for lib in [
         "c++",
-        "vulkan",
         "lz4",
         "freetype",
         "avformat",
@@ -135,9 +131,6 @@ fn emit_static_link_flags(build_dir: &Path) {
         "avutil",
         "swresample",
         "qjs",
-        "glslang",
-        "SPIRV",
-        "glslang-default-resource-limits",
     ] {
         println!("cargo:rustc-link-lib=dylib={lib}");
     }
@@ -171,10 +164,7 @@ fn static_link_search_paths(build_dir: &Path) -> Vec<PathBuf> {
         build_dir.join("src/Scene/RenderGraph"),
         build_dir.join("src/Scene/Timer"),
         build_dir.join("src/Scene/MetalRender"),
-        build_dir.join("src/Scene/VulkanRender"),
         build_dir.join("src/Utils"),
-        build_dir.join("src/Vulkan"),
-        build_dir.join("third_party/spirv_reflect"),
         build_dir.join("third_party"),
         build_dir.join("Renderer/Sound"),
         build_dir.join("Renderer/Media"),

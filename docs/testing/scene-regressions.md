@@ -67,8 +67,7 @@ Playback, backend, host and startup areas are in
     (`LayerCompositeCameraKey`) that ignores placement, view and parallax, compose
     cameras are not layer-local (children draw through them at their place inside
     the layer), and the static-result cache folds each pass's camera and the
-    active camera into its sample (`vulkan::FoldPassCameras`, shared by both
-    backends).
+    active camera into its sample (`FoldPassCameras` in `RenderCommon/SceneRaster.hpp`).
 - **Camera-object zoom in 2D scenes** — `SceneSchema.CameraObjectZoomTightensTheOrthographicFrustum`
   and `.CameraObjectZoomThatIsNotPositiveFramesTheWholeCanvas` in
   `scene_schema_tests`, `MouseInput.HitTestingFollowsACameraObjectZoomAcrossAResize`
@@ -90,7 +89,7 @@ Playback, backend, host and startup areas are in
   moves the eye, not the field of view); in `layer_texture_reference_test`:
   `CameraFraming.APerspectiveCameraKeepsItsLensAndFollowsEveryWayTheCanvasIsFramed`
   (every fill mode, `FrameCanvas`); in `metal_scene_draw_smoke`:
-  `MetalSceneDraw.APerspectiveLayerIsSeenFromTheEyeDistanceOfTheScenesFieldOfViewOnBothRenderers`
+  `MetalSceneDraw.APerspectiveLayerIsSeenFromTheEyeDistanceOfTheScenesFieldOfView`
   (a card 500, 1100 and 1400 units out is the width the eye distance gives on both
   renderers). The eye sat at 1000 units with a field of view derived from it, so a
   particle 500 units out was twice its size and one past 1000 units was cut; the
@@ -125,8 +124,8 @@ Playback, backend, host and startup areas are in
   `SceneSchema.ParserCopiesImageParallaxDepthToPuppetMaterialSlots` in
   `scene_schema_tests`; `TextObjectRuntime.CameraParallaxMovesAPlainTextLayerByItsDepth`
   and `.ATextLayerUnderAGroupRidesTheGroupsParallax` in `text_object_runtime_test`;
-  `MetalSceneDraw.CameraParallaxMovesATextLayerAsItMovesAnImageOnBothRenderers` and
-  `.AComposeLayerHoldsWhatIsBehindWhereParallaxDrawsItOnBothRenderers` in
+  `MetalSceneDraw.CameraParallaxMovesATextLayerAsItMovesAnImage` and
+  `.AComposeLayerHoldsWhatIsBehindWhereParallaxDrawsIt` in
   `metal_scene_draw_smoke`.
   - In a 2D scene, as in Wallpaper Engine, parallax moves each layer tree by its
     outermost layer's distance from the eased cursor point, times that layer's
@@ -154,7 +153,7 @@ Playback, backend, host and startup areas are in
     read the model matrix of the text pass at rest and with the cursor at the edge,
     its `kParallax` report, and a text under a group riding the group's depth and
     anchor; the Metal test draws a text and a 64 pixel square at the same distance
-    from the centre on both renderers and measures how far their ink moves against
+    from the centre and measures how far their ink moves against
     the same scene at depth 0, with the cursor centred and away from the centre, and
     for a text drawn through a copy effect (moved once, not twice).
   - A compose layer with effects holds the screen behind the place its card is
@@ -183,10 +182,10 @@ Playback, backend, host and startup areas are in
     centre and again after a script writes a depth; the Metal test puts a compose
     layer, alone and over a child, through an effect that inverts red in a depth-2
     group over an asymmetric backdrop and requires the backdrop with red inverted
-    where the layer is drawn and nothing changed outside it, on both renderers.
+    where the layer is drawn and nothing changed outside it.
   - `cameraparallaxdelay` of zero means no easing. Dividing by it makes the eased
     cursor NaN, which reaches every parallax layer's model matrix and leaves only
-    the clear color on both backends.
+    the clear color.
   - `ShaderValueUpdaterCompat.ParallaxEasesAsWallpaperEngineWhileShadersSeeTheCursor`:
     parallax closes `(1 - delay / 3) * 10 * frametime` of the way to the cursor
     (clamped to the window) each frame, while `g_PointerPosition` is the cursor
@@ -226,10 +225,10 @@ Playback, backend, host and startup areas are in
     `.AGroupStillDecidesWhetherAFullscreenLayerShows` (a group bound to a property
     hides and shows the layer, which covers the screen whenever it shows) in
     `layer_texture_reference_test`;
-    `MetalSceneDraw.AFullscreenLayerCoversTheScreenWhereverItsGroupSitsOnBothRenderers`
+    `MetalSceneDraw.AFullscreenLayerCoversTheScreenWhereverItsGroupSits`
     draws a four-quadrant backdrop through a pass-through fullscreen layer alone and
     under a moved, scaled and turned group, and requires every picture to equal the
-    backdrop alone on both renderers.
+    backdrop alone.
   - The layers below a fullscreen layer are placed from its saved transform
     (`SceneNode::SetChildFrame`, set by `ParseImageObj` from the origin, scale and angles
     the scene saved, which default to none; `SceneNode::ChildTrans` is what children
@@ -250,16 +249,16 @@ Playback, backend, host and startup areas are in
     `CameraFraming.TheChildrenOfAFullscreenLayerAreSavedAgainstItsSavedTransform`
     (no origin, an origin, a scale, under a moved group; the layer still fills its target)
     in `layer_texture_reference_test`;
-    `MetalSceneDraw.TheChildrenOfAFullscreenLayerAreSavedAgainstItsOwnTransformOnBothRenderers`
+    `MetalSceneDraw.TheChildrenOfAFullscreenLayerAreSavedAgainstItsOwnTransform`
     saves one backdrop against seven shapes of tree (no origin, with an effect, an origin,
     a scale and a turn, nested, under a moved group, under a scaled and turned group) and
     requires each to equal the backdrop alone, and
-    `.TheEffectsOfAFullscreenLayerReachItsChildrenOnBothRenderers` requires an effect that
-    keeps only red to leave no green or blue of a child, on both renderers.
-    `.TheChildrenOfAFullscreenLayerFollowTheSceneCameraOnBothRenderers` draws a 64 x 64
+    `.TheEffectsOfAFullscreenLayerReachItsChildren` requires an effect that
+    keeps only red to leave no green or blue of a child.
+    `.TheChildrenOfAFullscreenLayerFollowTheSceneCamera` draws a 64 x 64
     card under a fullscreen layer with and without an effect, zoomed 2x, shaking, and
     both, and requires each to equal the card drawn plain under the same camera.
-    `.ParallaxMovesTheChildrenOfAFullscreenLayerWithTheirTreeOnBothRenderers` (amount 0.5,
+    `.ParallaxMovesTheChildrenOfAFullscreenLayerWithTheirTree` (amount 0.5,
     cursor centred) requires a picture under group -> fullscreen layer (with and without
     an effect) and under a top-level fullscreen layer saved where the group is (children
     inheriting its depth 2) to equal the picture under the group alone.
@@ -335,7 +334,7 @@ Playback, backend, host and startup areas are in
 - **`engine.screenResolution`** has its own setter:
   `SceneWallpaper::publishScreenResolution` reports the display's pixels on scene
   attach and whenever the surface is replaced. `RenderInitInfo::width`/`height`
-  already are those pixels (both backends divide by `display_scale_factor` for
+  already are those pixels (the renderer divides by `display_scale_factor` for
   logical points), so scaling them again doubles the resolution on Retina panels.
   It is neither the world region the cursor mapping publishes nor the
   rasterization size: a quality setting must not move a script's layout.
@@ -434,8 +433,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   frame and runs only when the property changes. A layer whose placeholder a
   runtime image replaces drops a bound colour as it drops an authored one.
 - **Image layer brightness** — `SceneSchema.AnImageLayersBrightnessTintsItsMaterialsOnlyInAnHdrSceneAndFollowsItsBindings`,
-  `MetalSceneDraw.AnImageLayersBrightnessTintsItOnlyWhereTheSceneRendersHdrOnBothRenderers`
-  and `.AnImageLayersBoundBrightnessFollowsItsPropertyAndScriptOnBothRenderers`.
+  `MetalSceneDraw.AnImageLayersBrightnessTintsItOnlyWhereTheSceneRendersHdr`
+  and `.AnImageLayersBoundBrightnessFollowsItsPropertyAndScript`.
   Wallpaper Engine's layer draw (`FUN_140208670`, and the effect layer's final composite
   `FUN_140207740`) sets `g_Color4` to the layer's colour times its brightness only
   when the 0x2000 back-buffer bit is set, the HDR pipeline (`scene.hdr`, so `hdr` with
@@ -453,7 +452,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   bound `glow` property while the scene runs and drives the brightness from a script.
   A text layer's brightness is separate (text-spec T6).
 - **Scripted image colour** — `SceneSchema.ScriptedImageColourIsTheScriptsValueOnEveryLayerMaterial`
-  and `MetalSceneDraw.AnImageLayersColourScriptDecidesItsColourOnBothRenderers`.
+  and `MetalSceneDraw.AnImageLayersColourScriptDecidesItsColour`.
   An image layer's `color` that carries a script is that script's value every frame,
   over the scene file's `value`, as on a text layer: `ParseImageObj` resolves it
   like a bound colour and `BindMaterialColor` feeds the layer's own material, every
@@ -468,13 +467,13 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   bound value would otherwise put the old colour back over the write on the same tick
   (this was the reason a scripted `color` used to be left unbound). The Metal test
   covers a returned colour, a write, nothing returned, a plain colour, the idle
-  widget and a cover on both renderers, equal to each other; the schema test reads
+  widget and a cover, equal to each other; the schema test reads
   every material of a layer with an effect, a written colour over three ticks, a
   colour script made of `scene.on` handlers (queued as a scene script on its layer,
   and its write reaches the effect pass), a script whose next `update(value)` is given
   the colour it just wrote, a cover that arrives after them, and the scene's
   `Script` demand reason. The Metal test also has a cover that arrives after
-  frames were drawn black, on both renderers. In an HDR
+  frames were drawn black. In an HDR
   scene the layer's brightness multiplies the script's colour into `g_Color4` like any
   other colour: `SceneSchema.AnImageLayersBrightnessTintsItsMaterialsOnlyInAnHdrSceneAndFollowsItsBindings`
   keeps the product through a colour a script returns and one it writes with
@@ -562,19 +561,19 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   the layer's own pass, the sheet the chain starts from, takes it too, and a write puts
   every material where an authored alpha puts it: a puppet with bones under effects
   applies its alpha twice, [a known limitation](renderer.md#known-limitations)),
-  `MetalSceneDraw.AScriptsLayerAlphaReachesTheLayerWhateverItsEffectsDoOnBothRenderers`
+  `MetalSceneDraw.AScriptsLayerAlphaReachesTheLayerWhateverItsEffectsDo`
   (a script fading a layer to nothing and to half at 0.5 s leaves it opaque before,
   and clear or half transparent after, with no effects, a copying effect, an effect
   with an alpha of its own at 1 and at 0.8, two of them, every effect switched off, and
-  a colour blend mode, the two renderers equal; a fade that left the layer's own pass at
+  a colour blend mode; a fade that left the layer's own pass at
   its authored alpha kept a faded widget on screen, and one that wrote the Opacity pass
   too drew a quarter where it should draw a half),
-  `.AnAuthoredBoundOrScriptedAlphaIsAppliedOnceUnderEffectsOnBothRenderers` (the same
+  `.AnAuthoredBoundOrScriptedAlphaIsAppliedOnceUnderEffects` (the same
   shapes at an alpha of a half, authored, bound to a property and owned by a script:
   a half once, where an effect's own alpha or the fallback passthrough of a chain whose
   effects a script switched off drew a quarter),
-  `.ALayerColourIsAppliedOnceWhenEveryEffectIsSwitchedOffOnBothRenderers` (the same for
-  the layer's colour) and `.AComposeLayersAlphaFollowsWhatDrivesItOnBothRenderers` that
+  `.ALayerColourIsAppliedOnceWhenEveryEffectIsSwitchedOff` (the same for
+  the layer's colour) and `.AComposeLayersAlphaFollowsWhatDrivesIt` that
   a compose layer's alpha, which lands in its passthrough because its own pass reads no
   `g_Color4`, follows a property and a script as the authored one does.
 - **Property and name bindings** — `ScriptRuntimeCompat.AuthoredColorPropertiesStayVectorsAcrossTicksAndPropertyChanges`:
@@ -601,10 +600,10 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   dropped), `.ARealStateTheSceneHeardBeforeItsFirstTickIsNotRepeatedAsIdle`,
   `.TheIdleStateFillsInOnlyWhatNoRealEventSaid` (per event type) and
   `.ARealEventAfterTheIdleStateIsDeliveredLikeAnyOther`; in `metal_scene_draw_smoke`
-  on both renderers `MetalSceneDraw.AMediaWidgetIsHiddenWhileNothingPlaysOnBothRenderers`
+  `MetalSceneDraw.AMediaWidgetIsHiddenWhileNothingPlays`
   (a group hiding itself on `PLAYBACK_STOPPED` takes its parented card with it, after
-  an `init` that shows it), `.AMediaWidgetShowsWhileSomethingPlaysOnBothRenderers` and
-  `.ANoMusicPlaceholderShowsWhileNothingPlaysOnBothRenderers` (a hidden group that
+  an `init` that shows it), `.AMediaWidgetShowsWhileSomethingPlays` and
+  `.ANoMusicPlaceholderShowsWhileNothingPlays` (a hidden group that
   shows itself on `PLAYBACK_STOPPED` is brought into the graph). Without the idle
   state the media widget's cover and mascot stayed on screen for every user with media
   integration off.
@@ -1041,11 +1040,10 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 - **Effect buffers and swaps** — `SceneSchema.EffectBuffersTakeWallpaperEnginesSizesFormatsAndSwaps`
   pins `fit`/`width`/`height` sizing, the float and 8-bit formats and how a `swap`
   lowers to one copy or a three-copy exchange;
-  `MetalSceneDraw.AnEffectsSwappedBuffersAccumulateAndItsFloatBuffersKeepTheirSignOnBothRenderers`
-  draws an accumulating, signed effect through both renderers. Wallpaper Engine's
+  `MetalSceneDraw.AnEffectsSwappedBuffersAccumulateAndItsFloatBuffersKeepTheirSign`
+  draws an accumulating, signed effect. Wallpaper Engine's
   fluid simulation (`effects/fluidsimulation`) needs both: without the swap its
-  history buffers were never written, and the two renderers then disagreed on a
-  local scene that runs it (mean difference 16 before, 0 after).
+  history buffers were never written, and a local scene that runs it drew wrongly.
 - **3D model materials and skinning** — `SceneSchema.ModelMaterialDefaultsAreOpaqueDepthTestedAndExplicitStateWins`
   and `.ModelBonesReachEveryMaterialIncludingTheBindPose` in `scene_schema_tests`.
   Model materials default to normal blending, back-face culling and enabled
@@ -1069,9 +1067,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   triples rejects the mesh or draws scrambled triangles), and the vertex cap is
   4 million. `g_NormalModelMatrix` is a std140 `mat3` (48 bytes) and uniform
   writes are clamped to the reflected member size, so an oversized write cannot
-  spill into `g_ViewProjectionMatrix`. Culled model passes keep Vulkan's
-  counter-clockwise front face (clockwise culls skyboxes on MoltenVK even though
-  `recordDraw` uses a negative viewport height). A perspective far plane is
+  spill into `g_ViewProjectionMatrix`. Culled model passes keep the
+  counter-clockwise front face (`kSceneFrontFaceCounterClockwise`; clockwise culls skyboxes). A perspective far plane is
   padded by a tenth of a percent so a skybox scaled to exactly `far` is not
   clipped off-centre. An image layer's `alpha` `update` script or user property
   is applied to `g_Alpha`, not only an animation timeline. Perspective particle
@@ -1083,7 +1080,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   model shaders (`generic`, `generic2`, `generic3`, `generic4`, `genericimage3`,
   `genericimage4`, `chroma4`, `foliage4`, `fur4`) read the signed tangent of a
   normal-mapped model from `attribute vec4 a_Tangent4` (the two `genericimage`
-  shaders for a skinned puppet layer), and both renderers hand a vertex input the
+  shaders for a skinned puppet layer), and the renderer hands a vertex input the
   mesh attribute of the same name. The model parser named it `a_Tangent`, so the
   input found no attribute and read the first vertex buffer from offset 0: the
   position and, in a model without bones, the normal's x. The tangent frame of a
@@ -1096,13 +1093,13 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   never read it. Tests: `MdlSchema.VersionedSurfaceMeshesPreserveAllVertexAttributes`
   and `.GenMeshIncludesNormals` in `mdl_schema_tests` (the names the generated mesh
   carries) and
-  `MetalSceneDraw.AModelsTangentReachesTheShaderThatDeclaresItOnBothRenderers` (a
+  `MetalSceneDraw.AModelsTangentReachesTheShaderThatDeclaresIt` (a
   quad built by the model parser from a tangent that is no axis, with handedness
   -1, drawn through a probe vertex shader that builds the tangent and bitangent as
   `generic4` does (`BuildTangentSpace`, without the model transform; Wallpaper
   Engine's own shaders are not in the repository); the fragment shader shows the
   tangent, the bitangent and a perturbed normal, each a flat colour equal to the
-  mesh's own values on both renderers, where before the change every pixel was the
+  mesh's own values, where before the change every pixel was the
   position-derived read).
 - **Layer textures tiled across models** — `LayerTextureReference.CompositeAddressingFollowsTheSourceLayersClampUvs`
   in `layer_texture_reference_test`. `_rt_imageLayerComposite_<id>` repeats when
@@ -1112,7 +1109,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 - **Layer targets: point sampling and wrap** — `LayerTextureReference.LayerTargetsFollowNointerpolationClampuvsAndTheTextureHeader`
   and `.ACompositeFollowsItsLayersTextureHeaderWhateverIsParsedFirst` in
   `layer_texture_reference_test` and
-  `MetalSceneDraw.AnImageLayersTargetsArePointSampledWhenItAsksOnBothRenderers`.
+  `MetalSceneDraw.AnImageLayersTargetsArePointSampledWhenItAsks`.
   The ping-pong pair an image layer's effects run through, and the composite
   another layer reads, are point-sampled when the layer sets `nointerpolation` or
   its primary texture's header does, wrapped when `clampuvs` is off, clamped and
@@ -1124,27 +1121,26 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   agree with the composite), and a texture with no flag or one that cannot be read
   stays linear. The Metal test shows a 16 by 12 target 16 times larger on both
   renderers: a smooth gradient by default and flat squares with `nointerpolation`.
-- **Mip level of point-sampled file textures** — `MetalSceneDraw.ATexturePointSampledByItsHeaderPicksItsMipLevelByPointOnBothRenderers`.
+- **Mip level of point-sampled file textures** — `MetalSceneDraw.ATexturePointSampledByItsHeaderPicksItsMipLevelByPoint`.
   The reference builds the sampler of a file texture from a flags word that is the
   texture's own (its two low bits are the `.tex` header's `noInterpolation` and
   `clampUVs`): with `noInterpolation` the min, mag and mip filters are all point. `TextureSample::mipFilter` carries that, set by the `.tex`
-  parser from the flag and read by the Metal sampler and the Vulkan sampler (and the
-  Vulkan sampler cache's hash); every other sample, render targets and the
+  parser from the flag and read by the Metal sampler; every other sample, render targets and the
   default-constructed `TextureSample {}` fallbacks among them, keeps the linear mip
   filter. The test draws a seven-level chain, white then black, at 1.68 texels to the
-  pixel on both renderers: a header with the flag gives the black second level, one
+  pixel: a header with the flag gives the black second level, one
   without it the blend of the two. A render target has a single level, so its filter
   has no mip to choose. No local scene shows the difference: its point-sampled
   textures have one mip level or are magnified.
 - **Shape objects** — `LayerTextureReference.AShapeDrawsItsLastEffectAdditivelyOntoTheScene`
-  (CPU, in the gate) and `MetalSceneDraw.AShapeIsAddedOntoTheSceneOnBothRenderers`. A
+  (CPU, in the gate) and `MetalSceneDraw.AShapeIsAddedOntoTheScene`. A
   `shape` is the group node `ParseLayerNodes` makes for it with a mesh and a material
   added by `ParseShapeObj`: the quad of `point0` to `point3` (corner `(p.x, 1 - p.y)`
   of a canvas-high square about the layer, texture coordinate `p`) or the whole
   square, the last visible effect's material with `DIRECTDRAW` forced on, drawn
   additively onto the scene. The effect shader of both tests only compiles when
   `DIRECTDRAW` is on, so the test fails if the parser stops forcing it. The Metal
-  test draws half-transparent red over green on both renderers and requires
+  test draws half-transparent red over green and requires
   identical pictures, red-added inside the quad and untouched outside it. The
   shipped light-shaft effect, parsed with the editor's own assets, compiles through
   the shape path in both its linear and its radial modes; drawn once offscreen on
@@ -1157,7 +1153,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   the scene saved. `solidlayer` is read and unused, and `autosize` alone still takes
   the saved size.
 - **Depth state of a layer drawn through effects** —
-  `MetalSceneDraw.ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWriteOnBothRenderers`.
+  `MetalSceneDraw.ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWrite`.
   The last pass of an image layer's effects is drawn with the layer's authored
   `depthtest` and `depthwrite`, not the state its effect pass authored
   (`SceneImageEffectLayer::SetFinalDepth`, applied beside the layer's blending in
@@ -1182,7 +1178,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   Engine's sort would add and this engine's scene order does not. A layer authoring
   neither is the reference that proves the geometry. A `normal` or `alphatocoverage`
   layer is not one Wallpaper Engine sorts: it keeps its write, and the far card is
-  hidden behind it. Each case except the geometry references fails on both renderers
+  hidden behind it. Each case except the geometry references fails
   when the rule it guards is broken: with no final depth state the effect cases draw the layer over the nearer card
   and a layer authoring neither is hidden; with the write kept for a layer that blends
   the sorted cases of such a layer draw nothing over the far card (it is cut out); with
@@ -1224,7 +1220,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `MetalSceneDraw.ALayerItsPropertiesHideHoldsNoImagesUntilAScriptShowsIt` in
   `metal_scene_draw_smoke`. A layer hidden by a visibility only a reload changes
   (authored, or bound to one of the wallpaper's properties, on the layer or an
-  ancestor) has no passes in the graph: on both backends it holds no effect
+  ancestor) has no passes in the graph: it holds no effect
   images, loads no textures and costs what a dropped layer costs. A
   script-driven visibility stays in the graph, and so does a hidden layer another
   layer samples, with its ancestors; a layer named only in its own
@@ -1292,10 +1288,10 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     (`ALayersOwnEffectReadsItsBufferANotItsComposite`, image and text layers,
     with and without another consumer; pixels on the native backend in
     `MetalSceneDraw.ALayersOwnEffectReadsItsBufferANotItsComposite`). Read as the
-    composite, the effect sampled a link the frame filled only after it: the
-    compatibility renderer logged `slot 0 (_rt_link_<id>) has no image` and the
-    layer drew nothing (a clock whose outline effect names its own text), and
-    native Metal refused the scene as history feedback. Built-in blur, shine and
+    composite, the effect sampled a link the frame filled only after it: native
+    Metal refused the scene as history feedback (the retired Compatibility renderer
+    logged `slot 0 (_rt_link_<id>) has no image` and drew nothing for a clock whose
+    outline effect names its own text). Built-in blur, shine and
     godrays carry the same names, `_a` and `_b` alternating along the chain, in
     the slot their effect binds to `previous`; that binding wins.
   - A self `_b` in the layer's own effects is that same input, not last-frame
@@ -1310,18 +1306,17 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     `unique` buffers filled by a `copy` command (motion blur), not in these.
     Taken as history, the name made native Metal refuse the scene, and an
     effect naming `_b` in its first slot without a `bind` (a wave after an
-    audio-bar effect) logged `slot 0 (_rt_link_<id>) has no image` on the
-    compatibility renderer.
+    audio-bar effect) had no image for the slot.
   - A layer's own `_a` or `_b` outside its effects is its composite as the frame
     before left it. The shared graph copies each composite into the layer's
     `_rt_link_<id>` after the layer draws, so a read of it ahead of that copy is
     history, and `sceneToRenderGraph` declares the link as a target that carries
     its previous frame, shaped like the composite it is copied from. Without the
-    declaration the compatibility renderer had no image for the link on its first
+    declaration there was no image for the link on its first
     draw (the `slot 0 (_rt_link_<id>) has no image` line above) and drew the layer
     from nothing every frame, while native Metal kept the picture, so the two
     differed; with it they are byte-identical after 1 and 4 frames
-    (`MetalSceneDraw.ALayerReadingItsOwnCompositeSeesTheFrameBeforeOnBothRenderers`,
+    (`MetalSceneDraw.ALayerReadingItsOwnCompositeSeesTheFrameBefore`,
     with the material naming `_a` or `_b` and with the layer's object also naming
     `_b`, which no parser reads). Native Metal no longer refuses a scene for such a
     name (`ALayersOwnCompositeOutsideItsEffectsIsNotARefusal`).
@@ -1361,10 +1356,10 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `MountSceneSource` mounts the project folder under the package: packaged files
   still win, and the probes mount the same way. With only the package mounted
   those layers draw black and native Metal falls back.
-- **Cover slots keep their authored art** — `MetalSceneDraw.ACoverSlotShowsItsAuthoredTextureUntilACoverArrivesOnBothRenderers`
+- **Cover slots keep their authored art** — `MetalSceneDraw.ACoverSlotShowsItsAuthoredTextureUntilACoverArrives`
   (idle, cover before start, cover while running, cover then clear, plain RGBA and
-  block-compressed art, a slot with nothing authored; both renderers),
-  `.ACoverIsSampledClampedWhateverItsAuthoredPictureAskedForOnBothRenderers` and
+  block-compressed art, a slot with nothing authored),
+  `.ACoverIsSampledClampedWhateverItsAuthoredPictureAskedFor` and
   `.AnIdleCoverSlotUploadsItsPictureOnceAndACoverChangeCostsOneUploadPerFrameInFlight`
   in `metal_scene_draw_smoke`; `CoverSlot.*` in `media_thumbnail_texture_smoke`. A
   `usertextures` cover slot (`$mediaThumbnail`, `$mediaPreviousThumbnail`) is the
@@ -1372,7 +1367,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   after the explicit clear; the previous-cover slot stays on its authored picture
   until a track has a predecessor. Wallpaper Engine's own frame of a cover layer with
   nothing playing shows that art, and a transparent texel there draws nothing. The
-  slot is one runtime image to both renderers (`BindCoverSlot`), so it costs the
+  slot is one runtime image to the renderer (`BindCoverSlot`), so it costs the
   version check a cover already had: no graph rebuild, an idle layer uploads its art
   once per frame in flight and a cover change once per frame in flight again. The
   picture is decoded when a renderer first asks, once, so the texture budget set after
@@ -1383,7 +1378,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   transforms on asymmetric RGBA pixels, both TIFF byte orders, truncated
   JPEG/EXIF data, invalid IFD offsets.
 - **Texture mip budget** — `TexSchema.SurfaceBudget*` in `tex_schema_tests` and
-  `MetalSceneDraw.ATextureWhoseNextLevelFallsShortOfTheSurfaceKeepsItsFullSizeLevelOnBothRenderers`
+  `MetalSceneDraw.ATextureWhoseNextLevelFallsShortOfTheSurfaceKeepsItsFullSizeLevel`
   in `metal_scene_draw_smoke`. A 2D scene's packaged chain loses a leading level only
   while the next one is still at least as long as the surface's longest side
   (`IImageParser::SetTextureSurfaceSize`), so the level kept covers the surface and a
@@ -1402,7 +1397,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   levels of a TEXB0003 container measured by their headers
   (`.SurfaceBudgetFollowsTheHeaderSizesOfAnEncodedChain`), and the draw test, a 528×352
   chain with a white first level and black others across a 384×256 surface, which
-  both renderers draw from the first level blended with the second (black without
+  is drawn from the first level blended with the second (black without
   the change). Not covered: a layer drawn larger than the display
   ([Known limitations](renderer.md#known-limitations)).
 - **Render scale** — `RenderScale.*` in `render_scale_test`: physical surface
@@ -1427,14 +1422,14 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `MetalSceneDraw.A2DSceneIsRasterizedAtTheSizeItIsPresentedAtWhenTheHostAsksForTheDisplay`
   pins the native glue by reading the scene's image back: the size follows the
   choice and the render scale live through `ApplyRenderScale`, and a surface
-  that moves to another display re-sizes it at the next graph. `MetalSceneDraw.ASceneRasterizedForTheDisplayIsTheSamePictureOnBothRenderers`
+  that moves to another display re-sizes it at the next graph. `MetalSceneDraw.ASceneRasterizedForTheDisplayIsTheSamePicture`
   makes the scene's own shader report the raster (the texel size the renderer
-  hands it times the canvas) and requires both renderers to paint the same
-  picture, so a backend that kept the canvas or sized the display differently
+  hands it times the canvas) and requires the picture to be the one colour that
+  proves the raster size, so a renderer that kept the canvas or sized the display differently
   shows as another colour; `UnchangedPresent.ARunningSceneTakesTheResolutionTheHostChoosesOnBothRenderers`
   does the same through a running `SceneWallpaper`, setting the process-wide
   choice and re-sending the render scale as the host does, and reads the posters
-  of both renderers across Canvas, Display and a half render scale. The bridge's
+  across Canvas, Display and a half render scale. The bridge's
   `tests::scene_settings` and `config::store::tests` pin the saved choice (it
   ships on the display, survives a restart under its own `[quality]` key, a name
   that is neither is refused, the renderer is told at start-up and once per
@@ -1554,15 +1549,12 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 - **Matrix packing and live uniform updates** — `ShaderValuePacking.*` and
   `ShaderValueUpdaterCompat.*` in `script_runtime_compat_test` cover column-major
   values, row-major/strided inputs, inline/dynamic/empty ownership and current
-  camera/effect/material-slot values. `PlaybackGPU.FrameUpdatesAreVisibleBeforeUpload`
-  checks updated color/geometry and hidden output on the real GPU.
-  `PlaybackGPU.LiveTexelSizeOverridesParseDefaultsWhileMaterialValuesStayLive`
-  checks actual output pixels and changing user material constants: Compatibility
-  and Native Metal write live engine uniforms after parser defaults.
+  camera/effect/material-slot values. Native Metal writes live engine uniforms after parser defaults (checked on
+  output pixels in `metal_scene_draw_smoke`).
 - **Lighting projection** — `MetalSceneDraw.LightingViewDirectionFollowsTheAuthoredSceneThroughEffects`
   checks lit and unlit pixels for both projections, directly and through
   effects. Material compilation sets `SCENE_ORTHO` from the authored scene
-  projection on both backends, effect passes included, so a 2D layer uses the
+  projection, effect passes included, so a 2D layer uses the
   shader's fixed view direction rather than a perspective eye on the layer's
   plane (which reduces its lighting to ambient-only). Material overrides cannot
   change this scene-owned switch, and the shader request/cache key includes it.
@@ -1571,7 +1563,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   pins the generated block (arrays sized by the `LIGHTS_*` combos, nothing for an
   unlit pass); `pipeline.rs`
   `a_lit_pass_gets_wallpaper_engines_light_arrays_sized_by_the_scene_on_both_backends`
-  compiles it for SPIR-V and Metal, and
+  compiles it for the analysis and Metal targets, and
   `every_asset_shader_that_requires_lighting_compiles_lit_and_fogged_on_both_backends`
   does so, with both fogs, for Wallpaper Engine's own lit shaders when
   `WALLPAPER_MACHINE_ASSETS_ROOT` names them (`fur4` is excluded: its instanced shells read the
@@ -1581,27 +1573,27 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `SceneSchema.LightsFollowTheirUserPropertyScriptAndIntensityTimeline` the
   bindings and the light-state hash the static cache folds in;
   `SceneSchema.TheNormalMatrixIsTheDrawsRotationWithoutItsScale` the per-draw
-  normal matrix; `MetalSceneDraw.ALayerLitByScenePointAndDirectionalLightsIsTheSameOnBothRenderers`
-  the lit pixels on both renderers.
+  normal matrix; `MetalSceneDraw.ALayerLitByScenePointAndDirectionalLightsIsTheSame`
+  the lit pixels.
   `SceneSchema.FogIsCompiledIntoPassesWhoseFogComboIsOnWithWallpaperEnginesParameters`
   checks that scene fog reaches a pass whose `FOG` combo is on (and only such a
   pass) with Wallpaper Engine's parameter layout,
-  `MetalSceneDraw.AnEffectLayerIsFoggedWhereItSitsAsAPlainLayerIsOnBothRenderers`
+  `MetalSceneDraw.AnEffectLayerIsFoggedWhereItSitsAsAPlainLayerIs`
   that a layer under a copy effect is fogged where it sits, as the same layer
   without the effect is (the centre, sides and corners of its card within two
-  levels, for distance fog and for height fog, the two renderers equal; fogging the
+  levels, for distance fog and for height fog; fogging the
   layer's own card dimmed it toward the edge),
-  `.AnEffectLayersColourAndAlphaAreAppliedOnceWhenItIsFoggedWhereItSitsOnBothRenderers`
+  `.AnEffectLayersColourAndAlphaAreAppliedOnceWhenItIsFoggedWhereItSits`
   that the layer's colour and alpha come through that pass once, not twice (the
   fogging pass draws with a white colour),
-  `.AnEffectLayerWhoseEffectsAScriptSwitchesIsFoggedWhereItSitsOnBothRenderers` that
+  `.AnEffectLayerWhoseEffectsAScriptSwitchesIsFoggedWhereItSits` that
   it holds with the chain's only effect switched off and on by a script,
-  `.AnEffectLayerThatMakesItsOwnPictureIsFoggedWhereItSitsOnBothRenderers` that it
+  `.AnEffectLayerThatMakesItsOwnPictureIsFoggedWhereItSits` that it
   holds for a layer whose own pass is not drawn (`copybackground` off): an effect
   that paints red where its input is empty makes a red card, fogged as the plain
   layer is, where the same effect over a layer that draws its own pass makes a black
   one, and
-  `.AnEffectLayerWhoseMaterialTakesNoFogIsNotFoggedOnBothRenderers` that a layer
+  `.AnEffectLayerWhoseMaterialTakesNoFogIsNotFogged` that a layer
   whose material turns `FOG` off stays unfogged under an effect, and
   `SceneSchema.ATextureSlotsTexelIsTheStepOfTheTextureItSamples` that
   `g_Texture<N>Texel` is (1 / width, 1 / height, width, height) of the sampled
@@ -1609,7 +1601,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `target/release/libshader.a` (`cargo build -p shader --features ffi --release`)
   before the CMake test binaries, or they link the old compiler.
 - **HDR, bloom and emissive masks** — an authored `hdr` scene with bloom on uses
-  RGBA16F color intermediates on both backends
+  RGBA16F color intermediates
   (`SceneSchema.AnHdrSceneWithoutBloomRendersAsAnOrdinaryOne`: with bloom off it is
   8-bit, as in Wallpaper Engine); masks and source media keep their formats and
   SDR scenes keep RGBA8. HDR shader combos are enabled before compilation, not
@@ -1633,8 +1625,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `.ParsedHdrRadianceSurvivesEffectsLayerLinksAndBloom` uses an
   original bit23 emissive texture through the real parser, effect chain and layer
   references. `MetalSceneDraw.OverbrightRadianceReachesBloomWithoutChangingLdrColor`
-  and `PlaybackGPU.OverbrightTargetsFeedBloomAndPreserveSdrColor` read pixels and
-  unclamped radiance on the native and Compatibility backends, and
+  reads pixels and unclamped radiance on the native backend, and
   `SceneSchema.HdrBloomRejectsMissingHdrMaterialsRatherThanFallingBackToLdr`
   guards the parser.
 - **Render targets and texture allocation**
@@ -1661,13 +1652,12 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     not leak old pixels and that children actually render.
   - A target the frame reads before anything writes it, and writes later, carries
     the previous frame's pixels (a motion-blur history buffer). The render graph
-    flags it (`carriesPreviousFrame`), and the Vulkan renderer and the offscreen
-    probe reserve it an image of its own before preparing passes, so it is never
+    flags it (`carriesPreviousFrame`), and the renderer reserves it an image of
+    its own before preparing passes, so it is never
     pooled; pooled, it would take an image another target redraws every frame and
     a trail would blend in a faint copy of some other layer. The scene output is
     exempt (the frame's prepass clears it first). `RenderTargetLifetime.OnlyTargetsReadBeforeTheFrameWritesThemKeepTheirOwnImage`
-    and `.CarriedOverKeysAreTheOnesReadBeforeTheirFirstWrite` cover the graph,
-    `PlaybackGPU.CarriedTargetsShareTheirImageWithNoOtherTarget` the reservation.
+    and `.CarriedOverKeysAreTheOnesReadBeforeTheirFirstWrite` cover the graph.
     It costs exactly those buffers' memory. Native Metal keeps every carried-over
     target in an image of its own for the life of the graph, so it draws these too
     (`MetalSceneDraw.ALayerReadingThePreviousFrameSeesExactlyThePreviousFrame`:
@@ -1676,22 +1666,16 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     a reason to keep the clock running.
 - **Render-target reuse correctness** — `static_subgraph_cache_test` (reuse
   verdicts, copy elision, alias resolution, and `OnlyWritersOfCacheableTargetsAreSampled`:
-  both backends sample only the passes `Plan` reads, and an unsampled pass cannot
+  only the passes `Plan` reads are sampled, and an unsampled pass cannot
   change a verdict) and, on the native backend,
   `MetalSceneDraw.AnUnchangedTargetIsReusedAndProducesTheSamePixels` and
   `.TurningTheOptimisationOffDrawsEveryPassAgain` in `metal_scene_draw_smoke`.
   Reuse must be provable by readback, not by a counter alone: a skipped pass has
-  to leave byte-identical pixels, and a changed input has to redraw. On
-  Compatibility, `PlaybackGPU.APooledImageAnotherTargetStillDrawsIntoIsNeverPinned`
-  in `playback_gpu_test`: a target whose pooled image it took from a key that
-  released it is never pinned, because that key's prepared passes still draw into
-  the image every frame; pinning it lets a skipped layer read another layer's
-  picture from the second frame on, which the pooled/isolated comparison in
-  `check_renderer.py` shows as a divergence.
-- **Direct presentation and reuse** — a frame that drew straight into the
-  drawable leaves the scene's output target unwritten, so the reuse record for it
-  is dropped (`VulkanRender::drawFrameSwapchain`); reusing it through the final
-  blit would compose an image nobody drew.
+  to leave byte-identical pixels, and a changed input has to redraw. A pooled
+  image another target still draws into is never pinned, because that key's prepared
+  passes still draw into the image every frame; pinning it lets a skipped layer read
+  another layer's picture from the second frame on, which the pooled/isolated
+  comparison in `check_renderer.py` shows as a divergence.
 - **Sprite-sheet stepping and reuse** — `MetalSceneDraw.ASpriteSheetAdvancesOnItsOwnClockAndRedrawsOnlyWhenTheFrameChanges`.
   A sheet between frame changes may be reused, but its clock must keep running or
   the animation never reaches the next frame. `sprite_animation_test` checks
@@ -1713,13 +1697,12 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   squared, as Wallpaper Engine's glyph pass does, because that is where its text lands at
   alpha cubed; the rule above is the blend state of every other draw and is not touched
   (see the text composite entry under Text, fonts and clocks).
-- **Alpha-to-coverage passes** — `MetalBlend.*` in `metal_backend_test`; the
-  Compatibility backend sets the same state in `SetBlend`. On multisampled
+- **Alpha-to-coverage passes** — `MetalBlend.*` in `metal_backend_test`. On multisampled
   attachments coverage decides what an `alphatocoverage` pass keeps and kept
   samples are written unblended, as in Direct3D (blending as well multiplies
   partially covered texels by alpha a second time and dims thin lines). On
-  single-sample targets both backends disable coverage and use source-over
-  blending, otherwise transparent or partially covered pixels become opaque.
+  single-sample targets coverage is disabled and source-over
+  blending is used, otherwise transparent or partially covered pixels become opaque.
   Scenes stay single-sampled, so edges are thresholded rather than antialiased.
   `generated-alpha-single-sample` verifies composed coverage on Compatibility
   (128/191/255), `MetalSceneDraw.SingleSampleAlphaCoveragePreservesTransparentAndPartialPixels`
@@ -1925,24 +1908,22 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   layer a script makes is placed like a scene's own. The cursor is over the card where
   it hangs: `MouseInput.ATextLayersHitBoxIsItsCardWhereItIsDrawn` (a left- and
   top-aligned, scaled and turned card, on each side of the origin) and
-  `.ACoverageMaskIsReadAcrossTheCardWhereItHangs`. On both renderers,
-  `MetalSceneDraw.AnAlignedTextLayersBlockEdgeSitsOnItsOriginOnBothRenderers` draws an H
+  `.ACoverageMaskIsReadAcrossTheCardWhereItHangs`. `MetalSceneDraw.AnAlignedTextLayersBlockEdgeSitsOnItsOrigin` draws an H
   for each of the nine alignments, plain and with an effect, and requires the ink's
   right edge on the origin (within three pixels, because the probe frames put it up to
   three units inside) and the baseline where the reference line puts it;
-  `.AnAlignedTextLayerIsTheSamePictureOnBothRenderers` that the native and the
-  compatibility renderer draw one picture, and
-  `.EnablingAnEffectDoesNotMoveAnAlignedTextLayerOnBothRenderers` that padding moves
+  and
+  `.EnablingAnEffectDoesNotMoveAnAlignedTextLayer` that padding moves
   nothing.
 - **Opaque background** — `opaquebackground` fills the card's rectangle, and not the room a style
   needs around it, with `backgroundcolor` times `backgroundbrightness` at the layer's alpha, the
   brightness only in the HDR pipeline.
-  `MetalSceneDraw.AnOpaqueBackgroundFillsTheCardAtTheLayersAlphaOnBothRenderers` draws a caption
+  `MetalSceneDraw.AnOpaqueBackgroundFillsTheCardAtTheLayersAlpha` draws a caption
   in each quadrant of a four-coloured backdrop and requires the quadrant's colour mixed towards the
   plate by the alpha at every corner of the card and the backdrop untouched just outside it, with
   the stem of the glyph over the fill when the card is drawn directly and blended into the cleared
   composite when it goes through an effect (the expectations come from the blend equations and
-  `kTextCompositeAlphaExponent`); `.AnOpaqueBackgroundFillsTheCardAndNotTheRoomAStyleNeedsAroundItOnBothRenderers`
+  `kTextCompositeAlphaExponent`); `.AnOpaqueBackgroundFillsTheCardAndNotTheRoomAStyleNeedsAroundIt`
   gives the text an outline and a shadow and requires the fill to stop at the card; both fail with
   the fill off. `TextObjectRuntime.AnOpaqueBackgroundsColourBrightnessAndInsetReachTheCardsMaterial`
   requires the colour, the brightness in each pipeline (and a bound one following its property), no
@@ -1987,23 +1968,22 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   margin, the composite nor the fallback (`EffectCountsForText`: one predicate for the
   load-time padding, the composite's start and the runtime's count). `text_object_runtime_test`
   and `metal_scene_draw_smoke`:
-  `MetalSceneDraw.AnEffectsTextIsComposedOverTheSceneBehindItAsWallpaperEngineDoesOnBothRenderers`
+  `MetalSceneDraw.AnEffectsTextIsComposedOverTheSceneBehindItAsWallpaperEngineDoes`
   draws black captions of alpha 1, 0.65 and 0.5, with and without an effect, over a backdrop of
-  four flat colours and requires `1 - a` and `1 - TextCompositeReach(a)` of each colour on
-  both renderers (so the seed is the scene behind the card, the right way up and the right
-  way round); `.ATurnedAndScaledEffectsTextIsComposedOverTheSceneBehindItOnBothRenderers`
+  four flat colours and requires `1 - a` and `1 - TextCompositeReach(a)` of each colour (so the seed is the scene behind the card, the right way up and the right
+  way round); `.ATurnedAndScaledEffectsTextIsComposedOverTheSceneBehindIt`
   does it for a stem turned and scaled about the point the four colours meet and requires no
   quadrant's colour in the channels another's lacks;
-  `.AnEffectsTextIsComposedOverTheSceneInTheHdrPipelineOnBothRenderers` repeats the first in
-  the 16-bit HDR pipeline; `.ATextLayerWhoseEffectsAreAllOffKeepsItsSingleAlphaOnBothRenderers`
+  `.AnEffectsTextIsComposedOverTheSceneInTheHdrPipeline` repeats the first in
+  the 16-bit HDR pipeline; `.ATextLayerWhoseEffectsAreAllOffKeepsItsSingleAlpha`
   requires the picture of a layer whose only effect is off to be that of one with none;
-  `.ATextLayersCompositeFollowsItsScriptedEffectsOnBothRenderers` switches the one effect on
+  `.ATextLayersCompositeFollowsItsScriptedEffects` switches the one effect on
   from 0.5 s to 1 s and requires single alpha, composed alpha, single alpha, with the ink in
   the same place in all three (the margin comes and goes with the effect, the ink does not
   move), through a passthrough stand-in that multiplies by `g_Color4` as `genericimage3` does,
-  so a layer that binds none is caught; `.AnAddLayersTextIsAddedWhileItsScriptedEffectsAreOffAndComposedWhileOneIsOnOnBothRenderers`
+  so a layer that binds none is caught; `.AnAddLayersTextIsAddedWhileItsScriptedEffectsAreOffAndComposedWhileOneIsOn`
   is the same for mode 31 (green over red adds to (255, 128, 0), then mixes);
-  `.ATextLayerThroughShippedEffectsIsDrawnWhetherItsScriptHasThemOnOrOffOnBothRenderers` is the
+  `.ATextLayerThroughShippedEffectsIsDrawnWhetherItsScriptHasThemOnOrOff` is the
   scripted case with Wallpaper Engine's own `opacity` effect and `effectpassthrough` and skips
   without the shipped assets; `.AnEffectsTextIsTheSamePictureOnBothRenderers` that the
   renderers agree to 2 levels. `TextObjectRuntime.ACardKeepsItsPaddingOnlyWhileAnEffectPassIsVisible`
@@ -2016,7 +1996,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   does none of it and leaves no layout to redo as the scene loads; and
   `.OnlyATextThroughVisibleEffectsReadsTheSceneForItsCompositeAndOnlyOnce` that the seed is
   one pass and only for a layer that has a visible effect. The drawn checks are
-  `metal_scene_draw_smoke` cases on both renderers, not a `check_renderer.py` case. Two tests
+  `metal_scene_draw_smoke` cases, not a `check_renderer.py` case. Two tests
   encoded the single alpha and were migrated:
   `MetalSceneDraw.TextStylingChangesPixelsWithoutRerasterizingGlyphs` expects the composed
   alpha (32 of 255 at alpha 0.5) from the layer that draws through an effect, and
@@ -2028,7 +2008,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   and `pulse`) has its strongest pixels 0.41 of the way from the background to white in
   Wallpaper Engine's frame, and the black one over it (alpha 0.63, `skew`) 0.40: `a` squared
   (0.42 and 0.40), where this composite gives 0.28, `a` cubed, and the single alpha it
-  replaced 0.68; both renderers draw the same minified, turned card, so the ratio is the
+  replaced 0.68; the card is minified and turned the same way in every frame, so the ratio is the
   exponent. A model that fits every measurement made so far is a glyph pass that keeps the
   single alpha (`kTextCompositeAlphaExponent` 1, `a` squared for any chain) and an `opacity`
   effect that takes the layer's alpha for its own `alpha` whatever its constant says (the
@@ -2060,8 +2040,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `.AlignedTextEffect...` tests follow the same rule through the parser, a relayout, a
   script and the alignment. `.OversizedTextEffectClipsFinalMeshToBoundedTarget` keeps the
   one clamp that is left: a card past 4096 texels on a side, which Wallpaper Engine has no
-  limit for, is drawn into buffers cut to 4096. On both renderers
-  `MetalSceneDraw.AnEffectsUvOffsetIsAFractionOfTheCardOnBothRenderers` puts a layer
+  limit for, is drawn into buffers cut to 4096. `MetalSceneDraw.AnEffectsUvOffsetIsAFractionOfTheCard` puts a layer
   through an effect that reads its input 0.25 along, across and down, and requires the text
   to move by a quarter of the card's width, and up by a quarter of its height (`v` runs
   from the top), within 1.5 pixels; with buffers sized from the canvas the
@@ -2074,8 +2053,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   left-aligned, padded layer through a skew effect) that stood 22 pixels right of
   Wallpaper Engine's, in a 3456-pixel frame, is within one.
 - **A video stays open and on its frame when the render graph is built again under it** —
-  `MetalSceneDraw.AVideoStaysOpenAndOnItsFrameWhenATextCardResizesTheGraphUnderItOnBothRenderers`
-  in `metal_scene_draw_smoke`, on both renderers. A 20 second 640 by 360 clip in one group of
+  `MetalSceneDraw.AVideoStaysOpenAndOnItsFrameWhenATextCardResizesTheGraphUnderIt`
+  in `metal_scene_draw_smoke`. A 20 second 640 by 360 clip in one group of
   pictures (the long clip of `synthetic_video.hpp`: one keyframe, and a bar that crosses the
   picture once, so the column of the bar tells the frame) plays under a caption that draws
   through an effect. A seek to 12 s decodes 360 frames, which takes 0.4 s and many draws. The
@@ -2088,16 +2067,15 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   follows the rebuild and must show the clip's frame for the clock (within four frames), and the
   renderer's work counters must name the same decoder before and after
   (`OWE_RC_VIDEO_SOURCE_INSTANCE`, with one source open). With the keeping switched off for the
-  run it fails on both renderers: the picture is the clip's frame 0 with the clock at frame 365,
-  and the decoder is another one (1 then 2 on Compatibility, 3 then 4 on Native Metal), which is
-  the build the test was written against.
-  `.AVideoTheRebuiltGraphLeavesOutIsClosedOnBothRenderers` is the other half: a property hides
+  run it fails: the picture is the clip's frame 0 with the clock at frame 365,
+  and the decoder is another one (3 then 4 on Native Metal).
+  `.AVideoTheRebuiltGraphLeavesOutIsClosed` is the other half: a property hides
   the video layer in the tick that resizes the caption, so the graph built again leaves the layer
   out (a layer hidden by a property nothing else writes is left out; one that `SetNodeVisible`
   hides keeps its passes) and nothing in it binds the video that was playing. The decoder was
   kept for the new graph and not taken back, so it must be closed with the compile: the number
   of `.mp4` files the process holds open (a decoder holds its file for as long as it lives) is
-  back to what it was before the scene on both renderers, and fails with the closing of what was
+  back to what it was before the scene, and fails with the closing of what was
   kept taken out of either compile. It passes with the keeping switched off, being the other
   side of the one above.
   `.AVideoStaysOpenWhenARenderScaleChangeCompilesTheGraphAgainOnNativeMetal` applies a render
@@ -2108,12 +2086,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   releases the surface of a renderer that has drawn the video, clears its graph for a rebuild
   and has the compile refused (a renderer with no surface compiles nothing): the `.mp4` files
   the process holds open must be back to what they were before the scene, which fails with the
-  close in the refused compile taken out. The Compatibility renderer closes what a rebuild set
-  aside on its own refused compile (`m_device_lost`, `m_frame_faulted`) and on a clear that fails
-  after setting it aside; neither can be brought about without losing the device or faulting a
-  frame, so they have no scene test, and `CloseHeldVideos` they call is the one the cache tests
-  in [runtime regressions](runtime-regressions.md) close videos with.
-  Real wallpaper 3326873240 (Native Metal, 3456 by 2024 display size, real time, five packaged
+  close in the refused compile taken out.   Real wallpaper 3326873240 (Native Metal, 3456 by 2024 display size, real time, five packaged
   4K videos, a clock under an effect;
   `WE_TEST_COMPARE_REBUILD_AT=200 WE_TEST_COMPARE_STOP_AFTER_REBUILD=3`): the rebuild opens no
   video and takes 0.05 s, where with the videos closed as before it opens all five and takes 1.4
@@ -2139,16 +2112,16 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   plain scene, one with `hdr` and no `bloom`, and one with both (brightness 0, 2.39, a
   user-bound one that follows its property), and
   `.ABrightnessScriptStillRunsWhereBrightnessDoesNothing` keeps a brightness script
-  running where it draws nothing. `MetalSceneDraw.ATextLayersBrightnessDoesNothingOutsideTheHdrPipelineOnBothRenderers`
+  running where it draws nothing. `MetalSceneDraw.ATextLayersBrightnessDoesNothingOutsideTheHdrPipeline`
   draws white text at brightness 0, 2.39 and 1, and with every effect off, and gets the
-  same picture on both renderers, and
-  `.ATextLayersBrightnessReachesTheHdrPipelineOnBothRenderers` draws nothing at
+  same picture, and
+  `.ATextLayersBrightnessReachesTheHdrPipeline` draws nothing at
   brightness 0 in an HDR scene.
 - **Text colour blend and screen anchor** —
   `TextObjectRuntime.ColorBlendModeMixesTextWithTheScreenThroughThePassthroughPass`
   and `.AddColorBlendTextIsDrawnAdditivelyOntoTheSceneUnlessItGoesThroughEffects` (CPU, in the gate) and
-  `MetalSceneDraw.ATextLayersColourBlendModeAppliesItsColourAndAlphaOnceOnBothRenderers`,
-  which draws white text at half alpha over green on both renderers: mode 2 mixes
+  `MetalSceneDraw.ATextLayersColourBlendModeAppliesItsColourAndAlphaOnce`,
+  which draws white text at half alpha over green: mode 2 mixes
   half of white once (128, 159, 128), mode 31 adds half of it (128, 191, 128), and
   the pictures are identical. `.ScreenAnchorOffsetsPinTheLayerToTheEdgeItNames`
   tabulates the nine anchors against the presented margins, and
@@ -2168,8 +2141,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   pins the node rule (an override is not moved by it),
   `MouseInput.ACursorHitFollowsAScreenAnchoredCard` the cursor over the card where it is
   drawn, `MetalProjection.TheLayerPlaneIsWhereTheLayerIsDrawn` the perspective hit
-  plane, and `MetalSceneDraw.AScreenAnchoredTextLayerIsDrawnWhereItsAnchorPutsItOnBothRenderers`
-  the picture on both renderers, with and without an effect chain: 40 columns in
+  plane, and `MetalSceneDraw.AScreenAnchoredTextLayerIsDrawnWhereItsAnchorPutsIt`
+  the picture, with and without an effect chain: 40 columns in
   for a display that shows 344 of 384.
 - **Outline, blur and drop shadow** — `TextObjectRuntime.OutlineGrowsTheGlyphByItsThicknessInPixels`,
   `.OutlineThicknessIsCappedWithTheGlyphAtlasAndNeverBelowOnePixel`,
@@ -2180,12 +2153,12 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `.StyledTextCardCoversTheStyleWhenTheLayerIsParsed` and
   `.StyleColoursFollowTheirPropertiesAndTheBakedKeysAreReadOnceAndHeld`, and
   `MetalSceneDraw.StyledTextIsDrawnWithItsOutlineAndShadowByTheNativeBackend` and
-  `.StyledTextWithoutAnOutlineKeepsTheLayersColourAtItsEdgesOnBothRenderers`.
+  `.StyledTextWithoutAnOutlineKeepsTheLayersColourAtItsEdges`.
   The raster of a styled layer holds three coverage masks (red the glyph, green the
   glyph and its outline, blue the shadow with its opacity), so the glyph takes the
   layer's colour and the outline and shadow keep theirs; the first Metal test requires
   green outline and magenta shadow pixels around white glyphs (Native Metal only), and
-  the second, on both renderers, draws red text blurred, and shadowed in red, over
+  the second, draws red text blurred, and shadowed in red, over
   white: every pixel is red mixed with white, so its red channel must stay full,
   which it does not when an outline colour the layer never asked for is mixed in at
   the partly covered pixels (the shader takes the outline colour into the glyph only
@@ -2198,7 +2171,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 - **Text edges take the glyph's colour** —
   `TextObjectRuntime.EveryTexelOfRasterizedTextCarriesTheTextsColourWhateverItsCoverage`,
   `.StyledTextLeavesEveryTexelOutsideItsMasksClear` and
-  `MetalSceneDraw.AMagnifiedTextsEdgesFadeToItsColourNotToBlackOnBothRenderers`.
+  `MetalSceneDraw.AMagnifiedTextsEdgesFadeToItsColourNotToBlack`.
   The card's texture is straight alpha sampled linearly, so a layer scaled up past
   its raster (a small pixel font enlarged) reads edges between a glyph texel and a clear
   one; the clear texels hold the text's colour (white in the runtime's neutral cache),
@@ -2216,8 +2189,8 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   dark. A text with a colour blend writes the card without blending, and the passthrough's
   Darker Color (5) and Lighter Color (10) take the min and max of the screen and the card's
   colour with no alpha, so the colour in the clear texels reaches the screen there:
-  `MetalSceneDraw.ATextLayersColourBlendModesDrawItsTextAndNoBoxOnBothRenderers` draws
-  orange text on navy through modes 10, 5, 2, 0 and 6 on both renderers, with the fixture's
+  `MetalSceneDraw.ATextLayersColourBlendModesDrawItsTextAndNoBox` draws
+  orange text on navy through modes 10, 5, 2, 0 and 6, with the fixture's
   passthrough written as `ApplyBlending` is for 5 and 10, and
   `.ATextLayersColourBlendModesDrawItsTextAndNoBoxThroughTheShippedPassthrough` does the
   same through Wallpaper Engine's own `effectpassthrough` (skipped without the shipped
@@ -2233,7 +2206,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `text_object_runtime_test` and `shader_cache_metadata_test` cover clock/text
   corruption, persistent shader-cache metadata, cache invalidation after include
   edits, corrupt-cache recovery, parent-aware compose-background sampling, and
-  SceneScript AM/PM sprite-frame selection. They create no window and no Vulkan
+  SceneScript AM/PM sprite-frame selection. They create no window and no GPU
   device.
 - **Clocks** — `ShaderValueUpdaterCompat.DayTimeUniformFollowsLocalClockAndWrapsAtMidnight`
   injects a wall clock and checks `g_Daytime` and the compatible `g_DayTime`
@@ -2324,19 +2297,19 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   is neither multiplied twice nor baked into the separate cut-out pieces.
   Unskinned layers, effect-free puppets and unlit materials keep their lighting
   paths.
-- **Colour blend modes** — `MetalSceneDraw.AColorBlendLayersColourAndAlphaApplyOnceOnBothRenderers`
+- **Colour blend modes** — `MetalSceneDraw.AColorBlendLayersColourAndAlphaApplyOnce`
   draws a tinted, half-transparent layer through a stand-in passthrough over a
   coloured background: the tint and alpha are taken once, by the layer's own
-  pass. `MetalSceneDraw.AnAddColorBlendLayerIsAddedOntoTheSceneOnBothRenderers`
+  pass. `MetalSceneDraw.AnAddColorBlendLayerIsAddedOntoTheScene`
   requires mode 31 to add the layer at its alpha, and
   `RenderGraph.addColorBlendLayersAddOntoTheSceneWithoutSamplingIt` that a mode 31
   layer, with and without an effect, draws additively onto the scene with no
   passthrough, no screen copy and no pass sampling the screen.
-- **Scripted effect visibility** — `MetalSceneDraw.AnEffectAScriptSwitchesIsFollowedWhileTheSceneRunsOnBothRenderers`
+- **Scripted effect visibility** — `MetalSceneDraw.AnEffectAScriptSwitchesIsFollowedWhileTheSceneRuns`
   switches an effect on and off again with a script, ahead of an effect that is
   always on: the picture must follow each switch, and the later effect must read
   the buffer the effect before it wrote, so the chain is resolved again from its
-  placeholders. `MetalSceneDraw.ALayerWhoseEffectsAScriptHasAllSwitchedOffIsStillDrawnOnBothRenderers`
+  placeholders. `MetalSceneDraw.ALayerWhoseEffectsAScriptHasAllSwitchedOffIsStillDrawn`
   switches a layer's only effect off: the passthrough at the end of the chain
   must still draw the layer, inside its bounds.
 - **Particle emitter origin** — `SceneSchema.AnEmitterOriginScalesWithItsLayerUnlessTheFileIsWorldspace`
@@ -2398,12 +2371,12 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   `worldspace`, whatever an event child's own flag says. A static child whose own
   file is `worldspace` is the one combination no reference settles, and the test
   holds it at the world offset it had before.
-- **Text with every effect off** — `MetalSceneDraw.ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainTextOnBothRenderers`
+- **Text with every effect off** — `MetalSceneDraw.ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainText`
   draws a caption whose only effect is off and requires the same lit pixels as the
   caption without effects; it used to draw nothing.
-- **Hidden layers scripts reach** — `MetalSceneDraw.AHiddenLayersScriptsStillRunOnBothRenderers`
+- **Hidden layers scripts reach** — `MetalSceneDraw.AHiddenLayersScriptsStillRun`
   drives an effect from a value a hidden layer's script writes to `shared`, and
-  `MetalSceneDraw.AScriptCanShowAHiddenLayerItNamesOnBothRenderers` shows a hidden
+  `MetalSceneDraw.AScriptCanShowAHiddenLayerItNames` shows a hidden
   layer another layer's script names: both layers must be built, hidden, though
   nothing draws them at first.
 - **`colorBlendMode` on puppets** — `RenderGraph.puppetColorBlendModeSamplesTheScreenOnlyWhereItDrawsOnScreen`
@@ -2460,9 +2433,9 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   user property and timeline on one colour: a binding is the only writer and registers
   no clock, the timeline plays where there is none, and the HDR brightness multiplies
   whichever applies on the layer's material and its effect pass), and in pixels on both
-  renderers `MetalSceneDraw.AnAnimatedScaleAndAnglesTimelineMoveALayerOnBothRenderers`
+  renderers `MetalSceneDraw.AnAnimatedScaleAndAnglesTimelineMoveALayer`
   (the card's edge before, during and after a growth and a quarter turn of pi/2 radians, the unit of angles) and
-  `.AnAnimatedLayerColourTintsTheLayerOnBothRenderers` (the colour drawn at the
+  `.AnAnimatedLayerColourTintsTheLayer` (the colour drawn at the
   playhead's frame, direct and through an effect chain). The origin, scale and
   angles of one layer go through `RegisterNodeTransformSettings`; one
   `NodeVec3Animation` (three curves on one playback) serves all four properties, and a
@@ -2519,8 +2492,8 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   such block was skipped. The first pass of each compositing effect
   (`effectcomposebackground`, and the `COPYBG` and `TEX` paths of the god rays,
   shine and clipping mask effects) turns `v_ScreenCoord.y` over only there, so a
-  layer composed over the screen sampled it mirrored vertically on both renderers
-  (`MetalSceneDraw.ACompositingEffectSeesTheScreenUprightOnBothRenderers` reads
+  layer composed over the screen sampled it mirrored vertically
+  (`MetalSceneDraw.ACompositingEffectSeesTheScreenUpright` reads
   a red-over-blue screen back through such an effect). Taking those blocks put
   the others in play, each handled by a rule that is not tied to a shader:
   - A stage-qualified declaration of a builtin variable the backend provides
@@ -2548,7 +2521,7 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
     stands, on both targets.
   Pipeline revision 15 recompiles programs built while the macro was 0. Across
   the 1,269 (scene, shader, combos) programs of the local scene library, compiled
-  for SPIR-V and MSL (2,538 compilations), every program that compiled still
+  for SPIR-V and MSL (2,538 compilations, when both targets existed), every program that compiled still
   compiles and none that failed was fixed; 2,126 outputs are unchanged and the
   other 412 differ only in those blocks (author `inverse` 224, light falloff 164,
   bokeh kernel 20, screen coordinate 8, four of them in two). With the dialect's
@@ -2564,8 +2537,7 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   `every_spelling_of_the_hlsl_test_takes_the_direct3d_branch`), `legalize`
   (`a_redeclared_vertex_builtin_makes_no_attribute_and_its_uses_reach_the_builtin`
   and the macro, qualifier and brace-list cases beside it), `naga_metal` (the
-  vertex and instance index as `[[vertex_id]]`/`[[instance_id]]` and SPIR-V
-  builtins; the author's `inverse` on both targets) and `pipeline` (the screen
+  vertex and instance index as `[[vertex_id]]`/`[[instance_id]]`; the author's `inverse`) and `pipeline` (the screen
   coordinate, the kernel, the falloff, the vertex inputs, and the shipped
   `effectcomposebackground` and `generic4` stages when the assets are present).
 - **A vertex input the shader writes keeps its mesh binding** — Wallpaper Engine's
@@ -2573,14 +2545,14 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   workshop Shadow effect, whose default `AT=1` combo makes the factor 1). The
   legalizer reads such an input through a local copy: it declares `_we_in_<name>`
   and keeps `<name>` as the local, and Naga names the entry-point argument after
-  the declaration, so reflection reported `_we_in_a_TexCoord`. Both renderers bind
+  the declaration, so reflection reported `_we_in_a_TexCoord`. The renderer binds
   a vertex attribute to the mesh by its reflected name and give a name the mesh
   does not provide the first buffer at offset 0 (the position), so a layer under
   such an effect read its texture coordinate from the vertex position: a text card
   sampled empty texels and vanished, an image layer sampled at the wrong place, and
   a solid layer hid it by being one colour. Reflection now reports the source name
   (`StageInterface::source_name`); nothing else about the compiled stage changes,
-  so SPIR-V and MSL stay byte-identical and there is no extra pass, buffer or
+  so the MSL stays byte-identical and there is no extra pass, buffer or
   per-frame work. Pipeline revision 16 recompiles stored programs, whose cached
   reflection carries the old name. A read-only input was never renamed.
   A local scene that put text layers under the Shadow effect's default combo
@@ -2588,7 +2560,7 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   (`a_vertex_input_the_shader_writes_keeps_the_attribute_name_the_mesh_provides`:
   both targets, a written position, a written texture coordinate and a read-only
   colour keep their names and locations) and
-  `MetalSceneDraw.AVertexShaderThatWritesItsInputsStillReadsTheMeshOnBothRenderers`
+  `MetalSceneDraw.AVertexShaderThatWritesItsInputsStillReadsTheMesh`
   (a card showing its texture coordinates, alone and behind a single-pass effect,
   drawn with a shader that writes `a_Position` and `a_TexCoord` unchanged and one
   that does not: byte-equal pictures on each renderer).
@@ -2623,9 +2595,9 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   (`control_flow_coercion_strategy_lowers_bool_stored_into_step_repaired_int`, the
   per-declarator, composition, scope and stereo-centre-path cases beside it, each
   compiled for both targets),
-  `MetalSceneDraw.ABooleanMultipliedIntoAStepMaskClipsItOnBothRenderers` (a card
+  `MetalSceneDraw.ABooleanMultipliedIntoAStepMaskClipsIt` (a card
   masked white above and below a black band by `int` step masks cut apart by
-  booleans: the same picture on both renderers) and
+  booleans: the same picture) and
   `UnpackShaderCompileSmoke.CompilesAnEffectUnderTheCombosTheSceneSetsOnIt`; the
   first two fail without the change.
 - **Source-defined multiplication helpers** —
@@ -2699,8 +2671,8 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   location. `pipeline_resolves_macro_array_bounds_at_each_declaration` and
   `pipeline_rejects_unresolved_interface_array_bounds_before_layout` cover both
   backends; `pipeline_compiles_macro_sized_varyings_without_overlapping_locations`
-  and `pipeline_legalizes_nested_legacy_calls_in_macro_replacements` compile both
-  SPIR-V and MSL and cover annotation defaults, explicit counts, consecutive
+  and `pipeline_legalizes_nested_legacy_calls_in_macro_replacements` compile the
+  analysis and MSL targets and cover annotation defaults, explicit counts, consecutive
   arrays and nested object/function macros. Legacy builtin calls in `#define`
   replacements are rewritten inside function bodies too. These are compile-time
   repairs for rejected shaders, not brightness adjustments: restoring a dropped
@@ -2719,18 +2691,18 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
 - **Matrix `inverse` reaches Metal through a generated helper** — Naga's MSL
   writer has no `inverse()`, so a stage that inverted a matrix failed native
   translation (`metal translation of '<shader>' failed`), which dropped the
-  effect or sent the whole wallpaper to the compatibility renderer: the stock
+  effect or held the whole wallpaper: the stock
   `perspective` and `lightshafts` effects with any combos, and `reflection`,
   `clouds` and `waterwaves` with `PERSPECTIVE=1`, which undo `squareToQuad` in
   the vertex stage. The `compatibility_functions` strategy renames builtin
   `inverse` calls to `_we_Inverse` and emits mat2/mat3/mat4
   adjugate-over-determinant overloads behind `#ifdef _WE_POLYFILL_INVERSE`,
   else `#define _we_Inverse inverse`.
-  `NagaCompiler` defines the macro only for MSL, so SPIR-V keeps `GLSL.std.450`
-  `MatrixInverse` and stays byte-identical, and no pipeline revision bump was
+  `NagaCompiler` defines the macro for MSL only (the SPIR-V target that once kept
+  `GLSL.std.450` `MatrixInverse` has since been removed), and no pipeline revision bump was
   needed. A shader that declares its own `inverse` keeps it.
-  `matrix_inverse_of_every_square_size_compiles_to_metal_and_stays_native_in_spirv`
-  (`naga_metal`) covers translation and the unchanged SPIR-V;
+  `matrix_inverse_of_every_square_size_compiles_to_metal`
+  (`naga_metal`) covers the translation;
   `MetalSceneDraw.MatrixInversesOfEverySizeAreTranslatedAndDrawnExactly` draws
   each size's round-trip residual on the native backend, where one wrong
   cofactor sign turns its channel black.
@@ -2752,6 +2724,4 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   reduction; an active mask keeps its texture and sampling cost.
   `conditional_texture_annotations_enable_the_sampled_mask_on_both_backends`
   covers includes, cross-stage switches, absent/default-only textures and explicit
-  overrides for SPIR-V and MSL, and `PlaybackGPU.AConditionalMaskKeepsPulsesOutOfTheMaskedRegion`
-  reads six alternating-brightness frames: masked pixels stay fixed while the
-  unmasked region continues to pulse.
+  overrides for the analysis and MSL targets.

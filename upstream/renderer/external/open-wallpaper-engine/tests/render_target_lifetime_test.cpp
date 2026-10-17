@@ -5,7 +5,6 @@
 #include "SpecTexs.hpp"
 #include "RenderCommon/ScenePass.hpp"
 #include "RenderCommon/SceneToRenderGraph.hpp"
-#include "VulkanRender/PassCommon.hpp"
 #include <gtest/gtest.h>
 
 namespace wallpaper {
@@ -14,18 +13,6 @@ struct TestPass : rg::Pass {
     struct Desc {};
     TestPass(const Desc&) {}
 };
-
-TEST(RenderTargetLifetime, AlphaCoverageUsesBlendingOnlyWithoutMultisampling) {
-    VkPipelineColorBlendAttachmentState state {};
-    vulkan::SetBlend(BlendMode::AlphaToCoverage, state, VK_SAMPLE_COUNT_1_BIT);
-    EXPECT_TRUE(state.blendEnable);
-    EXPECT_EQ(state.srcColorBlendFactor, VK_BLEND_FACTOR_SRC_ALPHA);
-    EXPECT_EQ(state.dstColorBlendFactor, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
-    EXPECT_EQ(state.srcAlphaBlendFactor, VK_BLEND_FACTOR_ONE);
-    EXPECT_EQ(state.dstAlphaBlendFactor, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
-    vulkan::SetBlend(BlendMode::AlphaToCoverage, state, VK_SAMPLE_COUNT_4_BIT);
-    EXPECT_FALSE(state.blendEnable);
-}
 
 TEST(RenderTargetLifetime, ReleasesOnceAfterAllVersionsAndBlendOnlyWrites) {
     rg::RenderGraph graph;

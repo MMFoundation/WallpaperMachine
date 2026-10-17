@@ -6,16 +6,14 @@ use std::{
 };
 
 use super::{
-    RS_SHADER_TARGET_METAL_MSL, RS_SHADER_TARGET_VULKAN_SPIRV, RsShaderOwnedBytes,
+    RS_SHADER_TARGET_ANALYSIS, RS_SHADER_TARGET_METAL_MSL, RsShaderOwnedBytes,
     rs_shader_compile_program, rs_shader_last_error, rs_shader_program_cache_key,
     rs_shader_program_diagnostics_json, rs_shader_program_free, rs_shader_program_metadata_json,
     rs_shader_program_reflection_json, rs_shader_program_stage_count,
     rs_shader_program_stage_kind, rs_shader_program_stage_metal_json,
-    rs_shader_program_stage_msl_source, rs_shader_program_stage_spv_word_count,
-    rs_shader_program_stage_spv_words, rs_shader_program_stage_target,
+    rs_shader_program_stage_msl_source, rs_shader_program_stage_target,
 };
 
-const SPIRV_MAGIC: u32 = 0x0723_0203;
 const VERTEX_SOURCE: &str =
     "attribute vec2 a_Position;\nvoid main() { gl_Position = vec4(a_Position, 0.0, 1.0); }\n";
 const FRAGMENT_SOURCE: &str = "void main() { gl_FragColor = vec4(1.0); }\n";
@@ -127,7 +125,7 @@ fn include_callback_free_reclaims_owned_bytes() {
 }
 
 #[test]
-fn program_handle_retains_stage_words_and_json_until_free() {
+fn program_handle_retains_stage_kinds_and_json_until_free() {
     let request = CString::new(ShaderRequestFixture::basic().json())
         .expect("request json should not contain nul");
     let mut program = ptr::null_mut();
@@ -144,18 +142,6 @@ fn program_handle_retains_stage_words_and_json_until_free() {
     assert_eq!(unsafe { rs_shader_program_stage_kind(program, 0) }, 0);
     // SAFETY: Program is a live handle returned by `rs_shader_compile_program`.
     assert_eq!(unsafe { rs_shader_program_stage_kind(program, 1) }, 1);
-
-    // SAFETY: Program is a live handle returned by `rs_shader_compile_program`.
-    let words = unsafe { rs_shader_program_stage_spv_words(program, 0) };
-    // SAFETY: Program is a live handle returned by `rs_shader_compile_program`.
-    let count = unsafe { rs_shader_program_stage_spv_word_count(program, 0) };
-    assert!(!words.is_null());
-    assert!(count > 0);
-
-    // SAFETY: The returned pointer/count pair is borrowed from a live program
-    // handle.
-    let spirv = unsafe { slice::from_raw_parts(words, count) };
-    assert_eq!(spirv.first(), Some(&SPIRV_MAGIC));
 
     // SAFETY: Program is a live handle returned by `rs_shader_compile_program`.
     let metadata = c_str(unsafe { rs_shader_program_metadata_json(program) });
@@ -177,8 +163,8 @@ fn program_handle_retains_stage_words_and_json_until_free() {
 }
 
 #[test]
-fn unknown_target_string_is_rejected_instead_of_falling_back_to_spirv() {
-    let request = CString::new(ShaderRequestFixture::basic().json_with_target("vulkan_msl"))
+fn a_removed_or_unknown_target_string_is_rejected_instead_of_falling_back_to_analysis() {
+    let request = CString::new(ShaderRequestFixture::basic().json_with_target("vulkan_spirv"))
         .expect("request json should not contain nul");
     let mut program = ptr::null_mut();
 
@@ -191,7 +177,7 @@ fn unknown_target_string_is_rejected_instead_of_falling_back_to_spirv() {
     assert!(program.is_null());
     let error = last_error();
     assert!(error.contains("json request parse failed"), "{error}");
-    assert!(error.contains("vulkan_msl"), "{error}");
+    assert!(error.contains("vulkan_spirv"), "{error}");
 }
 
 #[test]
@@ -212,14 +198,6 @@ fn metal_target_returns_msl_source_binding_map_and_reflection() {
             unsafe { rs_shader_program_stage_target(program, stage_index) },
             RS_SHADER_TARGET_METAL_MSL
         );
-        // SAFETY: Program is a live handle returned by `rs_shader_compile_program`.
-        assert!(unsafe { rs_shader_program_stage_spv_words(program, stage_index) }.is_null());
-        // SAFETY: Program is a live handle returned by `rs_shader_compile_program`.
-        assert_eq!(
-            unsafe { rs_shader_program_stage_spv_word_count(program, stage_index) },
-            0
-        );
-
         // SAFETY: Program is a live handle returned by `rs_shader_compile_program`.
         let source = c_str(unsafe { rs_shader_program_stage_msl_source(program, stage_index) });
         assert!(source.contains("#include <metal_stdlib>"), "{source}");
@@ -246,7 +224,7 @@ fn metal_target_returns_msl_source_binding_map_and_reflection() {
     let reflection = c_str(unsafe { rs_shader_program_reflection_json(program) });
     assert!(
         reflection.contains("\"descriptor_bindings\""),
-        "the metal target must return the same reflection payload as the spirv target"
+        "the metal target must return the same reflection payload as the analysis target"
     );
     // SAFETY: Program is a live handle returned by `rs_shader_compile_program`.
     let metadata = c_str(unsafe { rs_shader_program_metadata_json(program) });
@@ -258,7 +236,7 @@ fn metal_target_returns_msl_source_binding_map_and_reflection() {
 }
 
 #[test]
-fn spirv_target_exposes_no_metal_payload() {
+fn analysis_target_exposes_no_metal_payload() {
     let request = CString::new(ShaderRequestFixture::basic().json())
         .expect("request json should not contain nul");
     let mut program = ptr::null_mut();
@@ -272,7 +250,7 @@ fn spirv_target_exposes_no_metal_payload() {
     // SAFETY: Program is a live handle returned by `rs_shader_compile_program`.
     assert_eq!(
         unsafe { rs_shader_program_stage_target(program, 0) },
-        RS_SHADER_TARGET_VULKAN_SPIRV
+        RS_SHADER_TARGET_ANALYSIS
     );
     // SAFETY: Program is a live handle returned by `rs_shader_compile_program`.
     assert_eq!(c_str(unsafe { rs_shader_program_stage_msl_source(program, 0) }), "");
@@ -292,7 +270,7 @@ fn bridge_json_present_false_marks_texture_slot_absent() {
     let request = CString::new(
         serde_json::json!({
             "shader_name": "ffi/texture-presence",
-            "target": "vulkan_spirv",
+            "target": "analysis",
             "cache_strategy": {"mode": "disabled"},
             "stages": [
                 {
@@ -353,7 +331,7 @@ fn bridge_json_accepts_enabled_cache_strategy_scene_id() {
     let request = CString::new(
         serde_json::json!({
             "shader_name": "ffi/enabled-cache",
-            "target": "vulkan_spirv",
+            "target": "analysis",
             "cache_strategy": {"mode": "enabled", "scene_id": "3611439897"},
             "stages": [
                 {
@@ -394,7 +372,7 @@ fn bridge_json_accepts_enabled_cache_policy_scene_id() {
     let cache_policy_request = CString::new(
         serde_json::json!({
             "shader_name": "ffi/basic",
-            "target": "vulkan_spirv",
+            "target": "analysis",
             "cache_policy": {"mode": "enabled", "scene_id": "3647154673"},
             "stages": [
                 {
@@ -460,7 +438,7 @@ fn metadata_json_exports_typed_vector_and_matrix_defaults() {
     let request = CString::new(
         serde_json::json!({
             "shader_name": "ffi/metadata-defaults",
-            "target": "vulkan_spirv",
+            "target": "analysis",
             "cache_strategy": {"mode": "disabled"},
             "stages": [
                 {
@@ -530,7 +508,7 @@ fn bridge_json_accepts_typed_vector_and_matrix_property_values() {
     let request = CString::new(
         serde_json::json!({
             "shader_name": "ffi/property-values",
-            "target": "vulkan_spirv",
+            "target": "analysis",
             "cache_strategy": {"mode": "disabled"},
             "stages": [
                 {
@@ -649,7 +627,7 @@ impl ShaderRequestFixture {
     }
 
     fn json(self) -> String {
-        self.json_with_target("vulkan_spirv")
+        self.json_with_target("analysis")
     }
 
     fn json_with_target(self, target: &str) -> String {

@@ -14,8 +14,7 @@
 #include "SpecTexs.hpp"
 #include "WPSceneParser.hpp"
 #include "RenderCommon/ScenePass.hpp"
-#include "VulkanRender/CustomShaderPass.hpp"
-#include "VulkanRender/PassLowering.hpp"
+#include "RenderCommon/SceneRaster.hpp"
 #include "RenderGraph/RenderGraph.hpp"
 #include "RenderCommon/SceneToRenderGraph.hpp"
 
@@ -109,16 +108,6 @@ std::shared_ptr<Scene> ParseScene(fs::VFS& vfs, std::string_view objects,
     return parser.Parse(
         SceneParseRequest { .scene_id = "layer-texture", .project_properties = properties },
         SceneJson(objects), vfs, sound);
-}
-
-/// The compatibility renderer's executable form of a draw step, for the tests
-/// that ask what its static-result cache would see.
-std::unique_ptr<vulkan::CustomShaderPass> LowerDraw(const rg::DrawPass& step) {
-    auto lowered = vulkan::LowerGraphPass(step);
-    auto* draw   = dynamic_cast<vulkan::CustomShaderPass*>(lowered.get());
-    if (draw == nullptr) return nullptr;
-    lowered.release();
-    return std::unique_ptr<vulkan::CustomShaderPass>(draw);
 }
 
 const rg::DrawPass* FindPassByNode(
@@ -862,10 +851,9 @@ TEST(LayerTextureReference, AReferencedLayerIsItsCardWhereverTheSceneShowsIt) {
     ASSERT_NE(composite, nullptr);
     ExpectCardFillsItsTarget(*parsed, *composite, { 32.0, 16.0 });
     // Nor does the cursor: the composite is not kept out of reuse for parallax.
-    const auto lowered = LowerDraw(*composite);
-    ASSERT_NE(lowered, nullptr);
-    EXPECT_FALSE(lowered->staticPassDesc(*parsed).dynamic_reasons &
-                 render::DynamicReason::PointerUniform);
+    const auto varying = parsed->shaderValueUpdater->FrameVaryingUniforms(
+        composite->desc().node, composite->desc().material_slot, composite->desc().camera_override);
+    EXPECT_EQ(varying & (frame_varying_uniform::kPointer | frame_varying_uniform::kParallax), 0u);
 }
 
 // A layer's composite is copied into its link texture while the graph is
@@ -914,12 +902,11 @@ TEST(LayerTextureReference, AReferencedCompositeIsSampledAtItsRealSize) {
     parsed->renderTargets[GenLinkTex(159)] =
         parsed->renderTargets.at(LayerCompositeTargetKey(159));
     const auto live = PassUniforms(*parsed, *consumer, { "g_Texture0Resolution" });
-    // The backends upload in opposite orders: Metal writes the material's
-    // constants and then the value updater's live values, Vulkan the live
-    // values and then the constants. Whichever lands last, the shader must
-    // read the composite's real size.
+    // Metal writes the material's constants and then the value updater's live
+    // values; the other order is checked too, so the shader reads the composite's
+    // real size whichever lands last.
     for (const bool constants_last : { false, true }) {
-        SCOPED_TRACE(constants_last ? "constants uploaded last, as Vulkan does"
+        SCOPED_TRACE(constants_last ? "constants uploaded last"
                                     : "live values uploaded last, as Metal does");
         std::map<std::string, ShaderValue, std::less<>> uploaded;
         const auto upload = [&uploaded](const auto& values) {
@@ -1207,7 +1194,7 @@ TEST(LayerTextureReference, ABareComposeLayerAnotherSamplesIsDrawnOnlyIntoItsCom
 // solid card a script tints, kept as a palette -- while that child is also
 // part of what the compose layer shows. Inside a compose layer the child was
 // drawn only into the compose target, never into a composite of its own, so
-// the effect found nothing to sample and was skipped on both backends.
+// the effect found nothing to sample and was skipped.
 TEST(LayerTextureReference, AComposeLayersEffectCanSampleItsOwnChild) {
     constexpr std::string_view kTintFrag = R"(uniform sampler2D g_Texture0;
 uniform sampler2D g_Texture1;
@@ -2150,11 +2137,13 @@ TEST(CameraFraming, MovingTheCameraChangesTheStaticSampleOfAPassItDraws) {
     const auto* backdrop = FindPassByNode(*graph, "backdrop");
     ASSERT_NE(backdrop, nullptr);
 
-    const auto lowered = LowerDraw(*backdrop);
-    ASSERT_NE(lowered, nullptr);
-    const auto still = lowered->frameSample(*parsed).hash;
-    EXPECT_EQ(lowered->frameSample(*parsed).hash, still) << "an unchanged pass must be reusable";
+    // The camera fold both the sample of a pass and the reuse cache are built on.
+    const auto sample = [&] {
+        return render::FoldPassCameras(0xcbf29ce484222325ULL, *parsed,
+                                       backdrop->desc().camera_override, backdrop->desc().node);
+    };
+    const auto still = sample();
+    EXPECT_EQ(sample(), still) << "an unchanged pass must be reusable";
     parsed->FrameCanvas(2.0, linalg::Vector2f(8.0f, 4.0f));
-    EXPECT_NE(lowered->frameSample(*parsed).hash, still)
-        << "the view moved and the pass would still be reused";
+    EXPECT_NE(sample(), still) << "the view moved and the pass would still be reused";
 }

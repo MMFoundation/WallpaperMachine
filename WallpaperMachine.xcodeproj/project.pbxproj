@@ -723,7 +723,6 @@
 		C6DAD8DFF44D2ACB8CBE2DE6 /* SettingsSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BF28DA9258CFE73FD2B8C18 /* SettingsSearchTests.swift */; };
 		C6DE547D8FA05323DD769E8E /* LibraryFilterCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A36659FEB79232A4E81EE55 /* LibraryFilterCatalog.swift */; };
 		C729B029BB493BFCF1D91A07 /* WallpaperEngineApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBAAE671C3152A0D30DFF2B /* WallpaperEngineApp.swift */; };
-		C74DEA958C9969707920BA50 /* BridgeEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = C58616B3A5FA3F5FFC690749 /* BridgeEnvironment.swift */; };
 		C74FA5B8E700B4DC0DA44933 /* GlobalHotKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE09959F484237BC54310087 /* GlobalHotKeys.swift */; };
 		C7A8CE26A2A58BEF3A782C7B /* WallpaperDisplayTransferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA1B631539B5696ED9692C0 /* WallpaperDisplayTransferTests.swift */; };
 		C7DF4E797AEA61C623743BEB /* WhatsNewStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AE09563583769CDB4BCF70D /* WhatsNewStore.swift */; };
@@ -1728,7 +1727,6 @@
 		C3E7111F62435C9949A6A37B /* PanelImageViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelImageViewTests.swift; sourceTree = "<group>"; };
 		C4A1840149382539B67F311D /* WallpaperAutomationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperAutomationStore.swift; sourceTree = "<group>"; };
 		C4CF1CA055FFC736CE115398 /* NowPlayingBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingBar.swift; sourceTree = "<group>"; };
-		C58616B3A5FA3F5FFC690749 /* BridgeEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeEnvironment.swift; sourceTree = "<group>"; };
 		C58622B2F13FAACF24E98D19 /* WallpaperImportStagingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperImportStagingTests.swift; sourceTree = "<group>"; };
 		C58AECA841E79F5D889DA715 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		C5C6658A86CB853C5DE8C630 /* AppThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppThemeTests.swift; sourceTree = "<group>"; };
@@ -2559,7 +2557,6 @@
 		6F69EBE4956048734F7D711A /* Bridge */ = {
 			isa = PBXGroup;
 			children = (
-				C58616B3A5FA3F5FFC690749 /* BridgeEnvironment.swift */,
 				163AE00196E41427036F6640 /* WallpaperPreviewBridge.h */,
 				8C02434072172327F494ABBE /* Generated */,
 			);
@@ -4202,7 +4199,6 @@
 				FFBECB1C76BA66FA125EF7E1 /* AutomationRuleEdit.swift in Sources */,
 				ED8051C59968769773ECA8D0 /* AutomationState.swift in Sources */,
 				3803111AE75508A3FDE66800 /* BatteryCapacity.swift in Sources */,
-				C74DEA958C9969707920BA50 /* BridgeEnvironment.swift in Sources */,
 				C801BDFAAEE1FC69E659B97E /* BridgeStore.swift in Sources */,
 				8C96FD99318EBBA41565C1C1 /* BridgeStoreDisplayLayouts.swift in Sources */,
 				1E32A70EF2A27FA6F8DD65E1 /* CapsuleBadge.swift in Sources */,
@@ -4808,13 +4804,11 @@
 					"/opt/homebrew/opt/mwe-ffmpeg/lib",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
-					/opt/homebrew/opt/glslang/lib,
 				);
 				MARKETING_VERSION = 1.5.0;
 				OTHER_LDFLAGS = (
 					"-lwallpaper_bridge",
 					"-lc++",
-					"-lvulkan",
 					"-llz4",
 					"-lfreetype",
 					"-lavformat",
@@ -4825,9 +4819,6 @@
 					"-lavdevice",
 					"-lswscale",
 					"-lqjs",
-					"-lglslang",
-					"-lSPIRV",
-					"-lglslang-default-resource-limits",
 					"-liconv",
 					"-framework Accelerate",
 					"-framework AppKit",
@@ -4978,13 +4969,11 @@
 					"/opt/homebrew/opt/mwe-ffmpeg/lib",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
-					/opt/homebrew/opt/glslang/lib,
 				);
 				MARKETING_VERSION = 1.5.0;
 				OTHER_LDFLAGS = (
 					"-lwallpaper_bridge",
 					"-lc++",
-					"-lvulkan",
 					"-llz4",
 					"-lfreetype",
 					"-lavformat",
@@ -4995,9 +4984,6 @@
 					"-lavdevice",
 					"-lswscale",
 					"-lqjs",
-					"-lglslang",
-					"-lSPIRV",
-					"-lglslang-default-resource-limits",
 					"-liconv",
 					"-framework Accelerate",
 					"-framework AppKit",
@@ -5049,13 +5035,11 @@
 					"/opt/homebrew/opt/mwe-ffmpeg/lib",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
-					/opt/homebrew/opt/glslang/lib,
 				);
 				MARKETING_VERSION = 1.5.0;
 				OTHER_LDFLAGS = (
 					"-lwallpaper_bridge",
 					"-lc++",
-					"-lvulkan",
 					"-llz4",
 					"-lfreetype",
 					"-lavformat",
@@ -5066,9 +5050,6 @@
 					"-lavdevice",
 					"-lswscale",
 					"-lqjs",
-					"-lglslang",
-					"-lSPIRV",
-					"-lglslang-default-resource-limits",
 					"-liconv",
 					"-framework Accelerate",
 					"-framework AppKit",
@@ -5121,13 +5102,11 @@
 					"/opt/homebrew/opt/mwe-ffmpeg/lib",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
-					/opt/homebrew/opt/glslang/lib,
 				);
 				MARKETING_VERSION = 1.5.0;
 				OTHER_LDFLAGS = (
 					"-lwallpaper_bridge",
 					"-lc++",
-					"-lvulkan",
 					"-llz4",
 					"-lfreetype",
 					"-lavformat",
@@ -5138,9 +5117,6 @@
 					"-lavdevice",
 					"-lswscale",
 					"-lqjs",
-					"-lglslang",
-					"-lSPIRV",
-					"-lglslang-default-resource-limits",
 					"-liconv",
 					"-framework Accelerate",
 					"-framework AppKit",

@@ -23,7 +23,7 @@ flowchart TD
   BridgeLib --> Core["wallpaper-core (windows, media, display)"]
   Core --> Shader["shader crate (naga)"]
   Core --> OWE["Open Wallpaper Engine (C++ wescene-renderer)"]
-  Core --> Brew["Homebrew: mwe-ffmpeg (Formula/), MoltenVK, quickjs-ng, glslang, freetype, lz4"]
+  Core --> Brew["Homebrew: mwe-ffmpeg (Formula/), quickjs-ng, freetype, lz4"]
   Services -->|"LockScreenExchange/configuration.json + Darwin notification"| Ext["WallpaperMachineExtension (sandboxed)"]
   Ext --> BridgeLib
   Cargo["scripts/build.py: cargo + uniffi-bindgen"] --> Generated
@@ -43,9 +43,7 @@ flowchart TD
 and applies a pending backup restore (`WallpaperBackupService.applyPendingRestore`); then it
 installs `AppDelegate` and runs the loop.
 
-`App/AppDelegate.swift` owns process lifecycle. It configures the Vulkan ICD
-(`App/Bridge/BridgeEnvironment.swift` points `VK_ICD_FILENAMES` at the bundled
-`MoltenVK_icd.json` when the variable is unset), prepares the app-support tree
+`App/AppDelegate.swift` owns process lifecycle. It prepares the app-support tree
 (`ClientPaths.prepare()`), constructs `BridgeStore`, installs the status item, the application
 menu and the screen-parameters observer, opens the control-panel window, and starts the
 long-lived services (lock screen, desktop poster sync, presentation policy, playlist and
@@ -314,8 +312,8 @@ so hiding the app (Cmd-H, or the panel hiding itself after an activation) hides 
 with AppKit's default the wallpaper windows left the screen too and occlusion suspended every
 display.
 
-Replacing the scene a Rust window shows is a transaction on its `CAMetalLayer`. Each Vulkan
-surface needs a layer of its own, so `SceneRuntime::rebuild_for_desc` installs a fresh layer
+Replacing the scene a Rust window shows is a transaction on its `CAMetalLayer`. Each renderer
+needs a layer of its own to drive, so `SceneRuntime::rebuild_for_desc` installs a fresh layer
 before the new renderer exists, and `WallpaperWindow::begin_layer_swap` keeps the previous one
 (in a `LayerSwap`) until the replacement is built and its settings are applied. If either step
 fails, the runtime closes what it built and `revert_layer_swap` puts the previous layer back
@@ -729,14 +727,13 @@ CMake-builds `wescene-renderer`), `uniffi-bindgen generate` into `App/Bridge/Gen
 `--renderer-only`), outputs and packaging are owned by [build.md](build.md).
 
 Both the app and the extension link the same renderer flag set (`project.yml` anchors
-`rendererLibraryPaths` and `rendererLinkerFlags`): `-lwallpaper_bridge`, the C++ runtime, Vulkan
-(`-lvulkan`), `-llz4`, `-lfreetype`, the FFmpeg libraries, `-lqjs` (quickjs-ng), the glslang and
-SPIRV libraries, `-liconv` and the system frameworks. Library search paths point at
+`rendererLibraryPaths` and `rendererLinkerFlags`): `-lwallpaper_bridge`, the C++ runtime,
+`-llz4`, `-lfreetype`, the FFmpeg libraries, `-lqjs` (quickjs-ng), `-liconv` and the system
+frameworks. Library search paths point at
 `upstream/renderer/target/release` and the Homebrew prefixes. The FFmpeg libraries come from
-`Formula/mwe-ffmpeg.rb`, not Homebrew's GPLv3 `ffmpeg@8`; `libSPIRV` loads Apache-2.0
-SPIRV-Tools and `libvulkan` opens the Apache-2.0 MoltenVK ICD, which keeps the bundle from being
-distributable ([../LICENSING.md](../LICENSING.md#remaining-blockers)). A freshly built app
-therefore still depends on Homebrew until `scripts/package.py` bundles those libraries
+`Formula/mwe-ffmpeg.rb`, not Homebrew's GPLv3 `ffmpeg@8`. What still keeps the bundle from being
+distributable is recorded in [../LICENSING.md](../LICENSING.md#remaining-blockers). A freshly built
+app still depends on Homebrew until `scripts/package.py` bundles its libraries
 ([build.md](build.md#packaging-and-installing)).
 
 ## Ours versus vendored
@@ -747,7 +744,7 @@ therefore still depends on Homebrew until `scripts/package.py` bundles those lib
 | `Renderer/` | This project's own renderer code, GPL-2.0-only, outside `upstream/`; C++17 with no third-party dependency, and no Apple dependency except `Renderer/Media/Apple`, the decoder in `Renderer/Sound/Apple` and `Renderer/Surface`. `Renderer/Media` (`wmMedia`) holds the MP4 and Matroska/WebM container readers and `Renderer/Media/Apple` (`wmMediaApple`, ObjC++ with C++ headers) their VideoToolbox layer (codec format descriptions, a decoder session that delivers frames in display order); both are static libraries the scene engine links, and the engine's native video backend plays video textures with them ([container-readers.md](container-readers.md)); `WebMReader` (`Renderer/Media/Apple`, the `WallpaperMedia` module) is the Objective-C face of the Matroska reader that the app's and the lock-screen extension's WebM player use. `Renderer/Sound` (`wmSound`) is the scene-sound path: channel remix, a windowed-sinc resampler, the loop pipeline and an AudioToolbox decoder and an Ogg Vorbis decoder over the vendored stb_vorbis, `Renderer/Sound/Matroska` (the audio of a WebM or Matroska file for the WebM player: Opus, AAC and MP3 through an `AudioConverter`, Vorbis re-framed as an in-memory Ogg stream for stb_vorbis), all reading through `wmMedia`'s `ByteSource`; its pure parts need no Apple framework ([sound-decoding.md](sound-decoding.md)). `Renderer/Surface` (`wmSurface`, ObjC++ over ImageIO and Core Animation with a C++ header) holds the still preview a scene that cannot be drawn shows on a layer that has drawn nothing, and the rule that keeps that picture inside the project's own folder; the engine's failure policy under the Native Metal only renderer preference uses it ([scene rendering](features/scene-rendering.md#when-native-metal-cannot-draw-a-scene)) |
 | `App/Bridge/Generated/` | Build output of the vendored bridge crate |
 | `upstream/renderer/` | Fork of `bigsaltyfishes/wallpaper-engine-for-macos`, GPL-2.0-only, modified |
-| `upstream/renderer/external/open-wallpaper-engine/` | Fork of `bigsaltyfishes/open-wallpaper-engine`, modified; vendors Apache-2.0 `spirv_reflect`, public-domain/MIT-0 `miniaudio` and public-domain/MIT `stb_vorbis` under `third_party/` |
+| `upstream/renderer/external/open-wallpaper-engine/` | Fork of `bigsaltyfishes/open-wallpaper-engine`, modified; vendors public-domain/MIT-0 `miniaudio` and public-domain/MIT `stb_vorbis` under `third_party/` |
 | `upstream/mediaremote-adapter/` | `ungive/mediaremote-adapter`, BSD-3-Clause, modified (see `upstream/provenance.json`) |
 | `upstream/naga/` | The published `naga` 29.0.3 crate (MIT OR Apache-2.0, used under MIT), patched so `codespan-reporting` is an optional dependency (`upstream/naga/PATCHES.md`); `upstream/renderer/Cargo.toml` points the workspace at it with `[patch.crates-io]` |
 

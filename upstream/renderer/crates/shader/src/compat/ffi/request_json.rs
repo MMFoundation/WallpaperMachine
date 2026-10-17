@@ -61,9 +61,9 @@ impl RequestDto {
 #[derive(Clone, Copy, Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum TargetDto {
-    /// Vulkan SPIR-V target.
+    /// Analysis only: no code is generated.
     #[default]
-    VulkanSpirv,
+    Analysis,
     /// Metal Shading Language target.
     MetalMsl,
 }
@@ -71,7 +71,7 @@ enum TargetDto {
 impl From<TargetDto> for ShaderTarget {
     fn from(target: TargetDto) -> Self {
         match target {
-            TargetDto::VulkanSpirv => Self::VulkanSpirv,
+            TargetDto::Analysis => Self::Analysis,
             TargetDto::MetalMsl => Self::MetalMsl,
         }
     }

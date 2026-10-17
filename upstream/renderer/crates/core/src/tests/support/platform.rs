@@ -1,4 +1,4 @@
-//! Shared platform-test helpers used by display and Vulkan surface tests.
+//! Shared platform-test helpers used by display and surface tests.
 //!
 //! These helpers check system-level preconditions that can't be simulated in
 //! a unit test (primary display availability, main-thread access, opt-in

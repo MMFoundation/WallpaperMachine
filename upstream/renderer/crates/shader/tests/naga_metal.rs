@@ -115,7 +115,7 @@ fn uniform_block_and_texture_get_distinct_deterministic_slots() {
             ),
             ("u_Globals".to_owned(), 2, MetalSlotKind::Buffer, 2),
         ],
-        "every metal slot must equal the resource's SPIR-V binding index"
+        "every metal slot must equal the resource's GLSL binding index"
     );
 
     let mut slots = first
@@ -205,26 +205,25 @@ fn metal_output_does_not_adjust_clip_space_or_texture_origin() {
 }
 
 #[test]
-fn metal_and_spirv_targets_produce_mutually_exclusive_code_for_one_source() {
+fn metal_and_analysis_targets_produce_mutually_exclusive_code_for_one_source() {
     let source = legalized_source(ShaderStageKind::Fragment, TEXTURED_QUAD_FRAGMENT);
 
-    let spirv = NagaCompiler
+    let analysis = NagaCompiler
         .compile_stage(
-            ShaderTarget::VulkanSpirv,
+            ShaderTarget::Analysis,
             ShaderStageKind::Fragment,
             &source,
         )
-        .expect("fragment shader should compile to SPIR-V");
+        .expect("fragment shader should analyse");
     let metal = NagaCompiler
         .compile_stage(ShaderTarget::MetalMsl, ShaderStageKind::Fragment, &source)
         .expect("fragment shader should compile to MSL");
 
-    assert_eq!(spirv.stage().target(), ShaderTarget::VulkanSpirv);
+    assert_eq!(analysis.stage().target(), ShaderTarget::Analysis);
     assert_eq!(metal.stage().target(), ShaderTarget::MetalMsl);
-    assert!(spirv.stage().metal().is_none());
-    assert!(metal.stage().spirv().is_none());
+    assert!(analysis.stage().metal().is_none());
     assert_eq!(
-        spirv.stage().legalized_source(),
+        analysis.stage().legalized_source(),
         metal.stage().legalized_source(),
         "both targets must be generated from the same legalized source"
     );
@@ -365,15 +364,12 @@ void main() {
 }
 ";
 
-/// `GLSL.std.450` extended instruction number of `MatrixInverse`.
-const GLSL_STD_450_MATRIX_INVERSE: u32 = 34;
-
 #[test]
-fn matrix_inverse_of_every_square_size_compiles_to_metal_and_stays_native_in_spirv() {
+fn matrix_inverse_of_every_square_size_compiles_to_metal() {
     // Naga's MSL writer has no `inverse`, so any stage that inverts a matrix
     // failed to translate and the native Metal renderer dropped the whole
     // effect (the stock perspective, lightshafts, reflection, clouds and
-    // waterwaves effects among them), while the same stage drew under Vulkan.
+    // waterwaves effects among them).
     let module =
         shader::syntax::ShaderModule::parse(ShaderStageKind::Vertex, AUTHOR_MATRIX_INVERSE)
             .expect("author source parses");
@@ -395,68 +391,6 @@ fn matrix_inverse_of_every_square_size_compiles_to_metal_and_stays_native_in_spi
         "no builtin inverse may reach the metal source:\n{}",
         metal(&metal_artifact).source()
     );
-
-    // SPIR-V keeps the driver's own MatrixInverse for each call and gains no
-    // generated function over the same program without the inversions:
-    // Vulkan output is what it was before the repair.
-    let words = vertex_spirv(AUTHOR_MATRIX_INVERSE);
-    let uninverted = vertex_spirv(&AUTHOR_MATRIX_INVERSE.replace("inverse(", "("));
-    assert_eq!(
-        spirv_instructions(&words, SPIRV_OP_FUNCTION).count(),
-        spirv_instructions(&uninverted, SPIRV_OP_FUNCTION).count(),
-        "no generated function may reach SPIR-V"
-    );
-    assert_eq!(
-        spirv_instructions(&words, SPIRV_OP_EXT_INST)
-            .filter(|operands| operands.get(3) == Some(&GLSL_STD_450_MATRIX_INVERSE))
-            .count(),
-        3
-    );
-}
-
-/// Legalizes an author vertex stage and compiles it to SPIR-V words.
-fn vertex_spirv(source: &str) -> Vec<u32> {
-    let module = shader::syntax::ShaderModule::parse(ShaderStageKind::Vertex, source)
-        .expect("author source parses");
-    let legalized = shader::legalize::Codegen
-        .legalize(&module)
-        .expect("author source legalizes");
-    NagaCompiler
-        .compile_stage(
-            ShaderTarget::VulkanSpirv,
-            ShaderStageKind::Vertex,
-            &legalized,
-        )
-        .expect("the stage compiles to SPIR-V")
-        .stage()
-        .spirv()
-        .expect("vulkan_spirv target should produce SPIR-V words")
-        .to_vec()
-}
-
-/// SPIR-V `OpFunction` opcode.
-const SPIRV_OP_FUNCTION: u16 = 54;
-/// SPIR-V `OpExtInst` opcode.
-const SPIRV_OP_EXT_INST: u16 = 12;
-
-/// Yields the operand words of every instruction with `opcode`.
-fn spirv_instructions(words: &[u32], opcode: u16) -> impl Iterator<Item = &[u32]> {
-    let mut index = 5;
-    std::iter::from_fn(move || {
-        while index < words.len() {
-            let word_count = (words[index] >> 16) as usize;
-            let instruction_opcode = (words[index] & 0xffff) as u16;
-            if word_count == 0 || index + word_count > words.len() {
-                return None;
-            }
-            let operands = &words[index + 1..index + word_count];
-            index += word_count;
-            if instruction_opcode == opcode {
-                return Some(operands);
-            }
-        }
-        None
-    })
 }
 
 /// The `mat3 inverse(mat3)` Wallpaper Engine's `common_perspective.h` declares
@@ -477,11 +411,10 @@ mat3 inverse(mat3 m) {
 ";
 
 #[test]
-fn a_stage_declaring_its_own_matrix_inverse_compiles_on_both_targets_and_calls_it() {
+fn a_stage_declaring_its_own_matrix_inverse_compiles_to_metal_and_calls_it() {
     // `#if HLSL` is true now, so the polyfill is part of the source. A function
-    // with a builtin's name and parameters is the author's own: both targets
-    // call it, Metal needs no generated helper, and SPIR-V keeps no
-    // `MatrixInverse` of its own.
+    // with a builtin's name and parameters is the author's own: the stage calls
+    // it, and Metal needs no generated helper.
     let source = format!(
         "uniform vec2 g_Point0;\n\
          uniform vec2 g_Point1;\n\
@@ -513,12 +446,6 @@ fn a_stage_declaring_its_own_matrix_inverse_compiles_on_both_targets_and_calls_i
         legalized.source()
     );
     assert!(!metal(&metal_artifact).source().is_empty());
-    assert_eq!(
-        spirv_instructions(&vertex_spirv(&source), SPIRV_OP_EXT_INST)
-            .filter(|operands| operands.get(3) == Some(&GLSL_STD_450_MATRIX_INVERSE))
-            .count(),
-        0
-    );
 }
 
 #[test]
@@ -561,28 +488,4 @@ fn a_redeclared_vertex_and_instance_index_reach_metal_as_builtins_not_attributes
         !msl.contains("[[attribute(1)]]"),
         "no second vertex attribute may stand in for a builtin:\n{msl}"
     );
-
-    let spirv = vertex_spirv(source);
-    assert_eq!(
-        spirv_instructions(&spirv, SPIRV_OP_DECORATE)
-            .filter(|operands| {
-                operands.get(1) == Some(&SPIRV_DECORATION_BUILTIN)
-                    && matches!(
-                        operands.get(2),
-                        Some(&SPIRV_BUILTIN_VERTEX_INDEX | &SPIRV_BUILTIN_INSTANCE_INDEX)
-                    )
-            })
-            .count(),
-        2,
-        "SPIR-V takes the vertex and instance index from the builtins"
-    );
 }
-
-/// SPIR-V `OpDecorate` opcode.
-const SPIRV_OP_DECORATE: u16 = 71;
-/// SPIR-V `Decoration::BuiltIn`.
-const SPIRV_DECORATION_BUILTIN: u32 = 11;
-/// SPIR-V `BuiltIn::VertexIndex`.
-const SPIRV_BUILTIN_VERTEX_INDEX: u32 = 42;
-/// SPIR-V `BuiltIn::InstanceIndex`.
-const SPIRV_BUILTIN_INSTANCE_INDEX: u32 = 43;

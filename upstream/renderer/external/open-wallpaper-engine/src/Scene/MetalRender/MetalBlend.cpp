@@ -18,15 +18,14 @@ MetalBlendState ToMetalBlendState(BlendMode mode, std::uint32_t sample_count)
         break;
     case BlendMode::Normal:
         // An opaque replace, not source-over. The authored name is misleading
-        // and the compatibility backend writes exactly these factors.
+        // and Wallpaper Engine writes exactly these factors.
         state.source_rgb        = MetalBlendFactor::One;
         state.destination_rgb   = MetalBlendFactor::Zero;
         state.source_alpha      = MetalBlendFactor::One;
         state.destination_alpha = MetalBlendFactor::Zero;
         break;
     case BlendMode::AlphaToCoverage:
-        // Coverage decides what is kept; kept samples are written unblended,
-        // as the compatibility backend does.
+        // Coverage decides what is kept; kept samples are written unblended.
         state.blending_enabled  = false;
         state.alpha_to_coverage = true;
         break;

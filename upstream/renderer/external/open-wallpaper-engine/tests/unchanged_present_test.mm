@@ -367,10 +367,6 @@ private:
             poster->requested = false;
             return wanted;
         };
-        info.poster_pending = [poster] {
-            std::scoped_lock lock(poster->mutex);
-            return poster->requested;
-        };
         info.poster_ready = [poster](std::span<const uint8_t> pixels, uint32_t, uint32_t, bool) {
             std::scoped_lock lock(poster->mutex);
             poster->pixels.assign(pixels.begin(), pixels.end());
@@ -756,8 +752,7 @@ namespace
 {
 
 /// GPU time of every Metal command buffer this process commits, whichever
-/// renderer made it: Compatibility's come from MoltenVK and the native
-/// backend's from itself, but both are command buffers of the one device.
+/// code made it: they are all command buffers of the one device.
 /// Counted from each buffer's own GPU start and end, so other processes'
 /// work on the GPU is not in it.
 std::atomic<uint64_t> g_command_buffer_gpu_ns { 0 };

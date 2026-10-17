@@ -112,9 +112,9 @@ player.
 
 **Covers.** A new cover is pixels, not a new scene: `PublishSystemMediaArtwork`
 replaces the image behind `$mediaThumbnail` and moves the outgoing one to
-`$mediaPreviousThumbnail`, which is what a wallpaper cross-fades from. Each
-renderer notices the version move and swaps the texture on its next frame (Vulkan
-from the pass's per-frame update, Metal from `refreshRuntimeImages`) without
+`$mediaPreviousThumbnail`, which is what a wallpaper cross-fades from. The
+renderer notices the version move and swaps the texture on its next frame (Metal
+from `refreshRuntimeImages`) without
 rebuilding the render graph, so a track change does not idle the GPU or reopen
 videos. Both names are 1×1 transparent before any track, so a layer that binds
 either always has an image. A slot whose author also left a texture in it (a cover

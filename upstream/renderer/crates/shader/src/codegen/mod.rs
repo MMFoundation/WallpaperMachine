@@ -186,7 +186,7 @@ mod tests {
         assert!(!source.contains("float user_wrapped = mod(x, y);"));
         assert!(!source.contains("float builtin_wrapped = x % y;"));
         use crate::{ShaderCompiler, ShaderTarget, compile::NagaCompiler};
-        let _artifact = NagaCompiler.compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &legalized)
+        let _artifact = NagaCompiler.compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &legalized)
             .expect("overlapping rewrites must also reach the backend");
     }
 

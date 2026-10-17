@@ -30,8 +30,7 @@ inline constexpr uint64_t kMaxUInt16VertexIndex = 65535;
 /// 16 384 quads use vertices 0..65535. One more quad needs a 32-bit index.
 inline constexpr uint64_t kMaxPackedUInt16Quads = (kMaxUInt16VertexIndex + 1) / 4;
 /// Vertex+index payload for one particle mesh. Larger than the old 16-bit
-/// single-mesh cap, shared by both backends; exceeding it is unsupported on
-/// both, not a reason to switch renderer.
+/// single-mesh cap; exceeding it is unsupported.
 inline constexpr uint64_t kMaxParticleGeometryBytes = 1ull << 30;
 
 struct ParticleIndexLayout {

@@ -38,10 +38,10 @@ bool TargetExtent(const Scene& scene, const std::string& key, uint32_t& width, u
 
 /// Declares a copy's destination when the graph invented the name.
 ///
-/// The same rule the compatibility renderer's copy pass applies: the destination inherits
+/// The destination inherits
 /// the source's shape and becomes reusable. Inventing a different shape here
-/// would size the link texture or the feedback-break copy differently in the
-/// two backends, and every effect that samples it would then sample at a
+/// would size the link texture or the feedback-break copy differently from
+/// the authored one, and every effect that samples it would then sample at a
 /// different texel step.
 void EnsureCopyDestination(Scene& scene, const std::string& source, const std::string& destination)
 {
@@ -69,13 +69,11 @@ void ForEachRead(const ScenePassDescription& desc, const std::function<void(cons
 /// Clears the scene's own image before a pass that reads it ahead of anything
 /// drawing into it this frame.
 ///
-/// The compatibility backend clears that image to the background at the start
-/// of every frame; this one clears it in the first pass that draws into it. A
+/// The image is cleared to the background in the first pass that draws into it. A
 /// pass that samples or copies it before then -- a layer blending with the
 /// screen, or reading the frame buffer, ahead of any other layer -- would read
 /// whatever the image held: nothing on the first frame, and the previous
-/// frame's picture after it, where the compatibility backend reads the
-/// background.
+/// frame's picture after it, where the background belongs.
 void ClearSceneBeforeAnEarlyRead(Scene& scene, std::vector<ScenePassDescription>& out)
 {
     const auto scene_key = scene.ResolveRenderTargetName(std::string(SpecTex_Default));

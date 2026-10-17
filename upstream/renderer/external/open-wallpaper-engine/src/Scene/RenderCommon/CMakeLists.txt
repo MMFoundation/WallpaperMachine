@@ -1,12 +1,12 @@
 set(LIB_NAME wpRenderCommon)
 
-# The scene-side logic both render backends share: the dynamic-reason
-# vocabulary and static-subgraph reuse, copy elision, the unchanged-present
-# gate, the scene-to-demand mapping, the presentation layout, the description of
-# each render-graph step (ScenePass) and the builder that turns a scene into
-# that graph (SceneToRenderGraph). Plain C++ with no GPU API in it, so it builds
-# into one archive that each backend links, and its process-wide counters are
-# defined exactly once.
+# The scene-side logic the renderer draws from: the dynamic-reason vocabulary
+# and static-subgraph reuse, copy elision, the unchanged-present gate, the
+# scene-to-demand mapping, the presentation layout, the description of each
+# render-graph step (ScenePass) and the builder that turns a scene into that
+# graph (SceneToRenderGraph). Plain C++ with no GPU API in it, so it builds and
+# is tested without Metal, and its process-wide counters are defined exactly
+# once.
 add_library(${LIB_NAME}
 STATIC
 CopyElision.cpp
@@ -14,8 +14,7 @@ SceneDemandMapping.cpp
 ScenePass.cpp
 SceneToRenderGraph.cpp
 StaticSubgraphCache.cpp
-# Presentation layout and cursor mapping: plain arithmetic both backends call.
-# Its Vulkan viewport conversions live with the Vulkan renderer.
+# Presentation layout and cursor mapping: plain arithmetic.
 ../../Presentation/WallpaperScaling.cpp
 )
 

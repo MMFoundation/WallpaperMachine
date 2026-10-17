@@ -93,7 +93,7 @@ typedef enum owe_renderer_counter {
      * The ledger covers the converted BGRA8 destination textures alone —
      * cached for reuse, checked out to an import, or referenced by a live
      * imported frame. Decode pixel buffers, Core Video plane wrappers, the
-     * Vulkan images that alias these textures and the swapchain are all
+     * drawables the layer hands out are all
      * outside it. It is an allocation total, not a residency measurement, and
      * not a process footprint.
      */

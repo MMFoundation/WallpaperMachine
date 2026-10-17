@@ -24,7 +24,7 @@ make a scene fit. The lock screen and the screen saver work the same way (see [l
 screen](lock-screen.md#scene-renderer)).
 
 The Compatibility renderer (Vulkan through MoltenVK) and the **Scene renderer** setting
-that chose it are gone. Native Metal replaced it once it drew every scene of the local
+that chose it are gone, and the Vulkan source with them. Native Metal replaced it once it drew every scene of the local
 test library the way Compatibility did (drawn by both renderers in one harness, the
 pictures were the same) and cost less to run: over 12 of those scenes at 3840×2160 and
 60 FPS it took about 21% less process CPU time and 14% less GPU time in its own command
@@ -32,9 +32,9 @@ buffers (one per frame instead of three), about 3% less memory footprint, and he
 FPS where Compatibility dropped frames. The commands are in the [verification
 log](../testing/verification-log.md). A saved `scene_renderer` of any value
 (`compatibility`, `native_metal_preferred` or `native_metal_only`) is read past and not
-written back, and means this behaviour. Some Vulkan source stays in the tree for now,
-used only by the tests that draw a scene with it as the reference to compare Native
-Metal against; no shipped code path creates it.
+written back, and means this behaviour. No Vulkan, MoltenVK, glslang or SPIR-V code or
+library remains in the tree or the build; the shader compiler writes Metal Shading Language
+only, and the parse asks it for an analysis (parse, validate, reflect) that produces no code.
 
 No GPU renderer is created until the scene has been parsed and found drawable, so the
 **Drawn by** row reports one of three states per scene: **preparing** (no renderer yet),
@@ -334,7 +334,7 @@ material takes no fog keep what they drew.
 Shadow maps, spot cookies and
 volumetric light shafts are not drawn: a light that casts a shadow lights as if
 nothing did, which is also what Wallpaper Engine shows when nothing in the scene
-casts one. Both renderers apply a material's depth state and cull mode the same way: a
+casts one. Native Metal applies a material's depth state and cull mode so: a
 pass into a depth-attached target (a model, a skybox, a scene with a perspective
 camera) takes its material's depth test, depth write and cull mode, against the same
 front faces, and every other pass draws in painter's order and culls nothing. A pass
@@ -421,8 +421,7 @@ its authored offset unscaled, and so does a static child whose own file is
 model parser cannot read is drawn in its bind pose on both, with a log line when it
 loads. A text layer is an ordinary layer: it takes its place in the layer order and
 carries its transform, opacity, blend, effect chain, camera and the final
-composition, appears in desktop posters, and uses the engine's one text system on
-both renderers. Text whose content has not changed is not laid out, rasterised or
+composition, appears in desktop posters, and uses the engine's one text system. Text whose content has not changed is not laid out, rasterised or
 uploaded again; a script that produces it still runs on its own schedule every
 frame. A text script that writes `thisLayer.text` from `update()` and returns nothing
 keeps what it wrote, as in Wallpaper Engine (a clock that writes the time once a
@@ -1144,8 +1143,8 @@ still redraws.
 
 A scene with an authored canvas is rasterized at the size it is presented at on the
 display by default (**Display resolution**), or at the canvas's own size (**Canvas
-size**), and the internal render scale divides whichever is chosen. Both renderers
-size their render targets from one shared function
+size**), and the internal render scale divides whichever is chosen. The renderer
+sizes its render targets from one shared function
 (`ResolveScreenBoundRenderTargetSizes`): the default target and every target that
 follows the screen come from the raster, a target the author sized keeps scaling
 with the render scale alone, and the canvas stays the source extent of layout,
@@ -1228,7 +1227,7 @@ of that: it stays outstanding until a draw consumes it, so a tick dropped becaus
 draw was still in flight loses the tick and not the update, and the end of that draw
 re-arms the clock — one wake at that edge, not a retry per frame period.
 
-Both renderers implement this. The status line reports what each running scene is
+The status line reports what each running scene is
 doing right now — updating continuously and why, waiting for events, paused by you,
 suspended by the system, stopped after a rendering failure, or that the state could
 not be read. A scene that is running but cannot be read says so; it is never shown as
@@ -1335,7 +1334,7 @@ rebuilt (attempt 2/3); waiting for it to draw", and then either "renderer recove
 renderer rebuild (attempt 2/3)" once it has presented a frame, or "renderer rebuilt
 (attempt 2/3) stopped before it drew" followed by the next rung.
 
-A real MoltenVK or Metal presentation failure has not been reproduced on a desktop. The
+A real Metal presentation failure has not been reproduced on a desktop. The
 tests inject the failure into the renderer's own failure routine and exercise everything
 after it there, the ladder with injected instants, and the relay that carries the report
 to the engine. The engine's reaction to a report on a live scene needs a real window and
@@ -1379,12 +1378,7 @@ scene on its mirror have not been checked on a desktop.
 
 ## Renderer memory
 
-The Vulkan source that remains in the tree for the comparison tests grows its allocator
-in 8 MiB preferred blocks rather than the library's 256 MiB default. No shipped path
-creates it. The offscreen probe prints allocator reserved and used bytes separately from
-process memory.
-
-For scenes with an authored 2D canvas, both backends load packaged mip chains to
+For scenes with an authored 2D canvas, Native Metal loads packaged mip chains to
 match the physical display: a leading mip is skipped only while the next one is still
 at least as long as the display's longest edge, so the level kept always covers the
 display (a 3024×1964 display uses the authored 4K mip of an 8K source, and a 4240 px
@@ -1424,7 +1418,7 @@ rate and render scale ([Quality](performance.md#quality)). The HDR bloom's level
 sampling and weights are Wallpaper Engine's ([scene
 regressions](../testing/scene-regressions.md)).
 
-On both backends, a layer hidden by its authored visibility or by one of the
+A layer hidden by its authored visibility or by one of the
 wallpaper's own properties, itself or through a parent, is left out of the render
 graph. Applying a property change reloads the scene, so until then only a script,
 or a property edit shown on the running scene ([live property
@@ -1460,7 +1454,7 @@ same filter applies when a toggle reallocates targets.
 This applies to every scene Native Metal draws.
 
 Native Metal also lets targets that are never alive at the same time share one
-image, as Compatibility's cache pools them. A target qualifies when its first touch
+image, as the retired Compatibility renderer's cache pooled them. A target qualifies when its first touch
 in every frame is a clear that really happens, nothing copies into or out of it,
 and it is not carried into the next frame, pinned for reuse, mip-mapped,
 depth-attached or the scene output; targets of one shape whose spans of passes do

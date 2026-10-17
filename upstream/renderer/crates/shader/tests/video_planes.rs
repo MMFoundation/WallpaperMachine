@@ -110,7 +110,7 @@ fn plain_variant_is_unchanged_by_the_option_existing() {
 
 #[test]
 fn plane_variant_without_authored_uniforms_has_reflected_color_constants() {
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let request = ShaderProgramRequest::builder(ShaderName::new("video_generated_uniforms").unwrap())
             .target(target)
             .stage(ShaderStageSource::new(ShaderStageKind::Vertex,

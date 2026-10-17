@@ -119,8 +119,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 }
             }
         AppLog.info("startup: didFinishLaunching start")
-        BridgeEnvironment.configureVulkanICDIfNeeded()
-        AppLog.info("startup: vulkan icd configured")
         do {
             try ClientPaths.prepare()
             let created = try BridgeStore()

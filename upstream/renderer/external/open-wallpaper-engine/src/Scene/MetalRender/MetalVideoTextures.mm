@@ -16,7 +16,7 @@
 #include "Video/VideoFramePacing.hpp"
 // For `ResolveEffectiveVideoPlaybackState`: the global/per-layer combination is
 // part of what playback means, and a second copy of it here would be a second
-// definition that can drift from the compatibility backend's.
+// definition that can drift from the playback code's.
 #include "Video/VideoTextureSource.hpp"
 
 #include <algorithm>
@@ -288,8 +288,7 @@ struct MetalVideoTextures::State {
     }
 
     /// The 10-bit conversion pipeline, compiled on first need. False with `error`
-    /// set when Metal refuses the kernel, which fails the scene's compile and sends
-    /// it to the compatibility backend like any other unsupported video.
+    /// set when Metal refuses the kernel, which fails the scene's compile like any other unsupported video.
     bool ensureTenBitPipeline(std::string* error)
     {
         if (ten_bit_pipeline != nil) return true;

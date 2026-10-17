@@ -150,10 +150,6 @@ void configure_desktop_poster(wallpaper::RenderInitInfo& info, void* metal_layer
             ! state.handed_out.empty() && state.handed_out.back().first == state.requested;
         return ! (retry && now < state.next_attempt);
     };
-    info.poster_pending = [mailbox, due] {
-        std::scoped_lock lock(mailbox->guard);
-        return due(*mailbox, std::chrono::steady_clock::now());
-    };
     info.wants_poster = [mailbox, due] {
         std::scoped_lock lock(mailbox->guard);
         const auto now = std::chrono::steady_clock::now();

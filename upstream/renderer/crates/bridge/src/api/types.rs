@@ -693,7 +693,7 @@ pub struct BridgeRendererSurfaceCounters {
     /// cache is keeping alive, and the most it ever kept alive. Gauges, not
     /// running totals, and an allocation ledger over those destination
     /// textures alone: decode pixel buffers, Core Video plane wrappers, the
-    /// Vulkan images aliasing them and the swapchain are all outside it, so
+    /// the drawables the layer hands out are all outside it, so
     /// neither figure is a residency or process-footprint measurement.
     pub video_conversion_live_bytes: u64,
     pub video_conversion_peak_live_bytes: u64,

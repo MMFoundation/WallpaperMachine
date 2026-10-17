@@ -14,9 +14,9 @@ namespace wallpaper
 namespace render
 {
 
-// Which `g_TextureN` slot a shader binding name stands for. Both render
-// backends read the shader's own reflected names this way, so the slot a
-// sampler or texture binds to cannot depend on which backend compiled it.
+// Which `g_TextureN` slot a shader binding name stands for. Everything
+// reads the shader's own reflected names this way, so the slot a
+// sampler or texture binds to has one definition.
 inline std::optional<usize> CustomShaderTextureSlot(std::string_view name) {
     constexpr std::string_view prefix { "g_Texture" };
     if (! wallpaper::sstart_with(name, prefix)) return std::nullopt;

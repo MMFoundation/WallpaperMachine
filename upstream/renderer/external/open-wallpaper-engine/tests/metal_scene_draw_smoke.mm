@@ -43,8 +43,6 @@
 #include "SpecTexs.hpp"
 #include "WPShaderValueUpdater.hpp"
 #include "RenderGraph/RenderGraph.hpp"
-#include "VulkanRender/CopyPass.hpp"
-#include "VulkanRender/VulkanRender.hpp"
 #include "RenderCommon/ScenePass.hpp"
 #include "RenderCommon/SceneToRenderGraph.hpp"
 #include "RenderCommon/StaticSubgraphCache.hpp"
@@ -62,8 +60,6 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_metal.h>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -362,99 +358,12 @@ struct RebuildWatch
     int accepted_at { -1 };
 };
 
-/// The two renderers behind one set of calls, for the tests that draw a scene with both and
-/// compare the pictures.
-///
-/// Native Metal is the product's only renderer and goes through `SceneRendererHandle`, as
-/// the host drives it. The Vulkan one no longer exists in the shipped engine; it is created
-/// here, by the test alone, as the reference those comparisons measure Metal against, for as
-/// long as the Vulkan code stays in the tree. Retired with it.
-class DrawRenderer {
-public:
-    explicit DrawRenderer(bool native) : m_native(native) {}
-
-    bool create(const RenderInitInfo& info, std::string& error)
-    {
-        if (m_native) return m_metal.createMetal(info, error);
-        m_vulkan = std::make_unique<vulkan::VulkanRender>();
-        if (m_vulkan->init(info)) return true;
-        m_vulkan.reset();
-        return false;
-    }
-    void destroy()
-    {
-        if (m_native) {
-            m_metal.destroy();
-        } else if (m_vulkan != nullptr) {
-            m_vulkan->destroy();
-            m_vulkan.reset();
-        }
-    }
-    void SetCounters(RendererCounters* counters)
-    {
-        if (m_native) m_metal.SetCounters(counters);
-        else if (m_vulkan != nullptr) m_vulkan->SetCounters(counters);
-    }
-    bool compileRenderGraph(Scene& scene, rg::RenderGraph& graph)
-    {
-        if (m_native) return m_metal.compileRenderGraph(scene, graph);
-        return m_vulkan != nullptr && m_vulkan->compileRenderGraph(scene, graph);
-    }
-    bool clearLastRenderGraphForRebuild()
-    {
-        if (m_native) return m_metal.clearLastRenderGraphForRebuild();
-        return m_vulkan != nullptr && m_vulkan->clearLastRenderGraphForRebuild();
-    }
-    bool drawFrame(Scene& scene)
-    {
-        if (m_native) return m_metal.drawFrame(scene);
-        return m_vulkan != nullptr && m_vulkan->drawFrame(scene);
-    }
-    std::string lastError() const { return m_native ? m_metal.lastError() : std::string {}; }
-    void SetWallpaperScalingMode(WallpaperScalingMode mode)
-    {
-        if (m_native) m_metal.SetWallpaperScalingMode(mode);
-        else if (m_vulkan != nullptr) m_vulkan->SetWallpaperScalingMode(mode);
-    }
-    void SetWallpaperScalingFactor(double value)
-    {
-        if (m_native) m_metal.SetWallpaperScalingFactor(value);
-        else if (m_vulkan != nullptr) m_vulkan->SetWallpaperScalingFactor(value);
-    }
-    void SetWallpaperFraming(const WallpaperFraming& value)
-    {
-        if (m_native) m_metal.SetWallpaperFraming(value);
-        else if (m_vulkan != nullptr) m_vulkan->SetWallpaperFraming(value);
-    }
-    void SetWallpaperHorizontalFlip(bool value)
-    {
-        if (m_native) m_metal.SetWallpaperHorizontalFlip(value);
-        else if (m_vulkan != nullptr) m_vulkan->SetWallpaperHorizontalFlip(value);
-    }
-    WallpaperCursorMapping CursorMapping(const Scene& scene) const
-    {
-        if (m_native) return m_metal.CursorMapping(scene);
-        return m_vulkan != nullptr ? m_vulkan->CursorMapping(scene) : WallpaperCursorMapping {};
-    }
-    /// Only Native Metal can serve a poster without a frame; the Vulkan reference polls
-    /// `wants_poster` inside its own frame.
-    metal::PosterServiceResult ServicePosterRequest(Scene& scene)
-    {
-        return m_native ? m_metal.ServicePosterRequest(scene) : metal::PosterServiceResult::NotRequested;
-    }
-
-private:
-    bool                                  m_native;
-    SceneRendererHandle                   m_metal;
-    std::unique_ptr<vulkan::VulkanRender> m_vulkan;
-};
-
-/// Draws `scene` with one renderer on a layer no
-/// window owns, as the host drives it -- the scaling it pushes to every
-/// renderer it creates, its per-frame `FrameBegin`, a graph rebuilt on every
-/// mutation -- and returns the last frame through the poster path both
-/// renderers share. Two calls on two parses of one scene, seeded and clocked
-/// alike, differ only by what the renderers did. `before_frame` runs ahead of
+/// Draws `scene` with Native Metal on a layer no
+/// window owns, as the host drives it -- through `SceneRendererHandle`, the scaling
+/// it pushes to every renderer it creates, its per-frame `FrameBegin`, a graph
+/// rebuilt on every mutation -- and returns the last frame through the poster
+/// path. Two calls on two parses of one scene, seeded and clocked alike, differ
+/// only by what the renderer did. `before_frame` runs ahead of
 /// each frame with its index, for a scene the world changes while it runs;
 /// `input`, when given, feeds its synthetic pointer events
 /// (`WE_TEST_INPUT_JSON`) through the renderer's cursor mapping as the host does.
@@ -462,7 +371,7 @@ private:
 /// graph is compiled (counting has to be switched on by the caller). `watch`, when
 /// given, is told where the first rebuild came and can end the run a few draws
 /// after it, for a picture of what a rebuild leaves behind whenever it comes.
-RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint32_t height,
+RendererPicture DrawWithRenderer(Scene& scene, uint32_t width, uint32_t height,
                                  int frames, double step,
                                  const std::function<void(int)>& before_frame = {},
                                  double display_scale_factor = 1.0,
@@ -493,22 +402,7 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
         info.render_width  = static_cast<uint16_t>(width);
         info.render_height = static_cast<uint16_t>(height);
         info.display_scale_factor = display_scale_factor;
-        info.surface_info.instanceExts = { VK_KHR_SURFACE_EXTENSION_NAME,
-                                           VK_EXT_METAL_SURFACE_EXTENSION_NAME };
-        info.surface_info.createSurfaceOp = [handle](VkInstance instance, VkSurfaceKHR* surface) {
-            auto* create = reinterpret_cast<PFN_vkCreateMetalSurfaceEXT>(
-                vkGetInstanceProcAddr(instance, "vkCreateMetalSurfaceEXT"));
-            if (create == nullptr) return VK_ERROR_EXTENSION_NOT_PRESENT;
-            const VkMetalSurfaceCreateInfoEXT create_info {
-                .sType  = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
-                .pNext  = nullptr,
-                .flags  = 0,
-                .pLayer = (__bridge CAMetalLayer*)handle,
-            };
-            return create(instance, &create_info, nullptr, surface);
-        };
         info.wants_poster   = [&wanted] { return wanted.exchange(false); };
-        info.poster_pending = [&wanted] { return wanted.load(); };
         info.poster_ready   = [&](std::span<const uint8_t> bytes, uint32_t w, uint32_t h,
                                   bool bgra) {
             std::lock_guard lock(poster_mutex);
@@ -524,9 +418,9 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
             poster_arrived.notify_all();
         };
 
-        DrawRenderer render(native);
-        std::string  error;
-        if (! render.create(info, error)) {
+        SceneRendererHandle render;
+        std::string         error;
+        if (! render.createMetal(info, error)) {
             picture.error = "could not start: " + error;
             return picture;
         }
@@ -625,7 +519,7 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
                 picture.rgb.clear();
             }
         }
-        if (picture.rgb.empty() && picture.error.empty() && native) {
+        if (picture.rgb.empty() && picture.error.empty()) {
             (void)render.ServicePosterRequest(scene);
         }
         render.destroy();
@@ -1444,9 +1338,8 @@ TEST_F(MetalSceneDraw, ASourceDefinedMulDrawsItsOwnResultWhileTheOtherStageUsesT
     // A source-defined helper is not the HLSL compatibility builtin. Its
     // arithmetic deliberately differs from matrix multiplication, so compiling
     // without preserving its calls cannot accidentally pass the pixel check.
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
-        const std::string suffix = native ? "native" : "compatibility";
+    {
+        const std::string suffix = "native";
         const auto directory = root_ / ("user-mul-" + suffix);
         const auto project = WriteFixture(directory);
         std::ofstream(directory / "shaders/metal_probe.vert") << R"(
@@ -1474,11 +1367,10 @@ void main() {
             << error;
         ASSERT_NE(FirstMaterial(loaded.scene->sceneGraph.get()), nullptr)
             << "the authored material was dropped instead of compiling its helper";
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
-        const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+        const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 2, 1.0 / 60.0);
         ASSERT_TRUE(picture.error.empty()) << picture.error;
         ASSERT_EQ(picture.width, 384u);
         ASSERT_EQ(picture.height, 256u);
@@ -1520,8 +1412,8 @@ TEST_F(MetalSceneDraw, ParsedParticleBillboardsKeepTheirAuthoredScaleThroughPare
         { "child", false, true, false },
     };
     for (const auto& c : cases) {
-        for (const bool native : { false, true }) {
-            const std::string label = std::string(c.name) + (native ? "-native" : "-compatibility");
+        {
+            const std::string label = std::string(c.name);
             SCOPED_TRACE(label);
             const auto directory = root_ / ("particle-scale-" + label);
             const auto project = WriteFixture(directory);
@@ -1594,11 +1486,10 @@ void main() { gl_FragColor = v_Color; }
             ASSERT_TRUE(LoadScene(project, root_ / ("particle-scale-cache-" + label), loaded, error))
                 << error;
             ASSERT_NE(FirstMaterial(loaded.scene->sceneGraph.get()), nullptr);
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 2, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
             std::array<uint32_t, 3> left { 384, 384, 384 }, right {}, top { 256, 256, 256 }, bottom {};
@@ -1810,40 +1701,36 @@ TEST_F(MetalSceneDraw, A2DSceneIsRasterizedAtTheSizeItIsPresentedAtWhenTheHostAs
     }
 }
 
-TEST_F(MetalSceneDraw, ASceneRasterizedForTheDisplayIsTheSamePictureOnBothRenderers)
+TEST_F(MetalSceneDraw, ASceneIsRasterizedAtTheSizeItsResolutionAsksFor)
 {
-    // The raster is measured by the scene's own shader, so what is compared is
-    // what each renderer rasterized, not what it was asked for: the canvas at
+    // The raster is measured by the scene's own shader, so what is checked is
+    // what the renderer rasterized, not what it was asked for: the canvas at
     // 384 x 256 reads back as 1 on both axes, the display at 768 x 512 as one
-    // half. A backend that kept the canvas, or sized the display differently,
+    // half. A renderer that kept the canvas, or sized the display differently,
     // paints another colour.
     for (const auto resolution : { SceneResolution::Canvas, SceneResolution::Display }) {
         const bool display = resolution == SceneResolution::Display;
         SCOPED_TRACE(display ? "display resolution" : "canvas resolution");
-        std::map<bool, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
-            const std::string name = std::string(display ? "display" : "canvas") +
-                                     (native ? "-native" : "-compat");
+        RendererPicture picture;
+        {
+            const std::string name = std::string(display ? "display" : "canvas");
             const auto  project = WriteRasterProbeFixture(root_ / ("raster-" + name));
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
             loaded.scene->resolution = resolution;
-            pictures[native] =
-                DrawWithRenderer(*loaded.scene, native, 768, 512, 1, 1.0 / 60.0, {}, 2.0);
-            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+            picture =
+                DrawWithRenderer(*loaded.scene, 768, 512, 1, 1.0 / 60.0, {}, 2.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
         }
-        const auto& rgb = pictures[true].rgb;
+        const auto& rgb = picture.rgb;
         ASSERT_EQ(rgb.size(), 768u * 512u * 3u);
         const std::size_t centre = (256u * 768u + 384u) * 3u;
         EXPECT_NEAR(rgb[centre + 0], display ? 128 : 255, 1);
         EXPECT_NEAR(rgb[centre + 1], display ? 128 : 255, 1);
-        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
-            << "the two renderers rasterized the scene at different sizes";
     }
 }
 
@@ -2173,7 +2060,7 @@ TEST_F(MetalSceneDraw, AnAnimatedCurtainRevealsTheWholeCanvasAndStaysOpen)
     }
 }
 
-TEST_F(MetalSceneDraw, AnAnimatedScaleAndAnglesTimelineMoveALayerOnBothRenderers)
+TEST_F(MetalSceneDraw, AnAnimatedScaleAndAnglesTimelineMoveALayer)
 {
     // A black 192x256 card centred on a 384x256 canvas over a blue-grey clear
     // colour. Its scale grows to twice its width over half a second; its
@@ -2199,12 +2086,12 @@ TEST_F(MetalSceneDraw, AnAnimatedScaleAndAnglesTimelineMoveALayerOnBothRenderers
           { { 1, { false, true } }, { 60, { true, false } } } },
     };
     for (const auto& item : cases) {
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(std::string(item.property) + (native ? " native" : " compatibility"));
+        {
+            SCOPED_TRACE(std::string(item.property));
             for (const auto& step : item.steps) {
                 SCOPED_TRACE(step.frames);
                 const std::string name = std::string("animated-") + item.property +
-                                         (native ? "-native-" : "-compat-") +
+                                         "-native-" +
                                          std::to_string(step.frames);
                 const auto directory = root_ / name;
                 const auto project = WriteFixture(directory);
@@ -2230,7 +2117,7 @@ TEST_F(MetalSceneDraw, AnAnimatedScaleAndAnglesTimelineMoveALayerOnBothRenderers
                 std::string error;
                 ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
                 const auto picture =
-                    DrawWithRenderer(*loaded.scene, native, 384, 256, step.frames, 1.0 / 60.0);
+                    DrawWithRenderer(*loaded.scene, 384, 256, step.frames, 1.0 / 60.0);
                 ASSERT_TRUE(picture.error.empty()) << picture.error;
                 ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
                 for (std::size_t index = 0; index < item.probes.size(); ++index) {
@@ -2248,20 +2135,19 @@ TEST_F(MetalSceneDraw, AnAnimatedScaleAndAnglesTimelineMoveALayerOnBothRenderers
     }
 }
 
-TEST_F(MetalSceneDraw, AnAnimatedLayerColourTintsTheLayerOnBothRenderers)
+TEST_F(MetalSceneDraw, AnAnimatedLayerColourTintsTheLayer)
 {
     // The card draws its layer colour (`g_Color4`). A colour keyed from
     // (0.2, 0.4, 0.6) to (1, 0, 0.6) over half a second is the colour drawn
     // at the frame the playhead is on, with and without an effect chain.
     for (const bool effect : { false, true }) {
-        for (const bool native : { false, true }) {
+        {
             SCOPED_TRACE(std::string(effect ? "effect chain" : "direct layer") +
-                         (native ? " native" : " compatibility"));
+                         " native");
             for (const int frames : { 1, 15, 60 }) {
                 SCOPED_TRACE(frames);
                 const std::string name = std::string("animated-colour-") +
                                          (effect ? "effect-" : "direct-") +
-                                         (native ? "native-" : "compat-") +
                                          std::to_string(frames);
                 const auto directory = root_ / name;
                 const auto project = WriteFixture(directory);
@@ -2298,7 +2184,7 @@ TEST_F(MetalSceneDraw, AnAnimatedLayerColourTintsTheLayerOnBothRenderers)
                 std::string error;
                 ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
                 const auto picture =
-                    DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+                    DrawWithRenderer(*loaded.scene, 384, 256, frames, 1.0 / 60.0);
                 ASSERT_TRUE(picture.error.empty()) << picture.error;
                 ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
                 const double progress = std::min(frames / 30.0, 1.0);
@@ -2572,7 +2458,7 @@ std::filesystem::path WriteDeepCardFixture(const std::filesystem::path& root, in
     return project;
 }
 
-TEST_F(MetalSceneDraw, APerspectiveLayerIsSeenFromTheEyeDistanceOfTheScenesFieldOfViewOnBothRenderers)
+TEST_F(MetalSceneDraw, APerspectiveLayerIsSeenFromTheEyeDistanceOfTheScenesFieldOfView)
 {
     // Wallpaper Engine seats the camera that perspective layers of a 2D scene
     // draw through (canvas height / 2) / tan(fov / 2) from the canvas, with the
@@ -2585,9 +2471,8 @@ TEST_F(MetalSceneDraw, APerspectiveLayerIsSeenFromTheEyeDistanceOfTheScenesField
     for (const int z : { 500, 1100, 1400 }) {
         SCOPED_TRACE("z " + std::to_string(z));
         const double expected = 60.0 * kPixelsPerUnit * kDistance / (kDistance - z);
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(native ? "native" : "compatibility");
-            const std::string name = std::to_string(z) + (native ? "-native" : "-compat");
+        {
+            const std::string name = std::to_string(z);
             const auto project = WriteDeepCardFixture(root_ / ("deep-card-" + name), z);
             LoadedScene loaded;
             std::string error;
@@ -2596,10 +2481,9 @@ TEST_F(MetalSceneDraw, APerspectiveLayerIsSeenFromTheEyeDistanceOfTheScenesField
             auto* node = FirstDrawableNode(loaded.scene->sceneGraph.get());
             ASSERT_NE(node, nullptr);
             node->SetCamera("global_perspective");
-            if (native) {
-                ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
-            }
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 480, 270, 1, 1.0 / 60.0);
+            ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
+
+            const auto picture = DrawWithRenderer(*loaded.scene, 480, 270, 1, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             ASSERT_EQ(picture.width, 480u);
             ASSERT_EQ(picture.height, 270u);
@@ -2682,16 +2566,15 @@ std::filesystem::path WriteDepthWriteFixture(const std::filesystem::path& root,
     return root / "project.json";
 }
 
-TEST_F(MetalSceneDraw, ADepthWritingDrawHidesLaterDrawsAsOnCompatibility)
+TEST_F(MetalSceneDraw, ADepthWritingDrawHidesLaterDraws)
 {
     // Wallpaper Engine applies a material's `depthwrite` whatever its blending
     // -- its own depth-tested font materials are translucent and write depth --
     // so a translucent or additive layer that asks to write depth hides what
     // is drawn behind it afterwards, its transparent texels included. As in
-    // Direct3D, OpenGL and Vulkan, a draw that does not depth-test writes no
-    // depth, and only a target with a depth attachment has any. Each case is
-    // drawn by both renderers and must come out the same; the cases also have
-    // to differ from each other, or the comparison proves nothing.
+    // Direct3D and OpenGL, a draw that does not depth-test writes no depth, and
+    // only a target with a depth attachment has any. The cases also have to
+    // differ from each other, or the check proves nothing.
     struct Case
     {
         const char* name;
@@ -2716,9 +2599,9 @@ TEST_F(MetalSceneDraw, ADepthWritingDrawHidesLaterDrawsAsOnCompatibility)
     constexpr std::size_t kHalfShown = kFarCard / 2;
     for (const auto& c : cases) {
         SCOPED_TRACE(c.name);
-        std::map<bool, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
-            const std::string name = std::string(c.name) + (native ? "-native" : "-compat");
+        RendererPicture picture;
+        {
+            const std::string name = std::string(c.name);
             const auto        project = WriteDepthWriteFixture(root_ / ("depth-write-" + name),
                                                                c.blending, c.depthtest,
                                                                c.depthwrite);
@@ -2727,19 +2610,18 @@ TEST_F(MetalSceneDraw, ADepthWritingDrawHidesLaterDrawsAsOnCompatibility)
             ASSERT_TRUE(LoadScene(project, root_ / ("depth-write-cache-" + name), loaded, error))
                 << error;
             loaded.scene->FindRenderTarget(std::string(SpecTex_Default))->withDepth = c.depth;
-            if (native) {
-                ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
-            }
-            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
-            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+            ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
+
+            picture = DrawWithRenderer(*loaded.scene, 384, 256, 1, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
         }
-        for (const bool native : { false, true }) {
-            const auto& rgb  = pictures[native].rgb;
+        {
+            const auto& rgb  = picture.rgb;
             std::size_t blue = 0;
             for (std::size_t i = 0; i + 2 < rgb.size(); i += 3) {
                 if (rgb[i] < 32 && rgb[i + 1] < 32 && rgb[i + 2] > 224) ++blue;
             }
-            const char* renderer = native ? "native" : "compatibility";
+            const char* renderer = "native";
             if (c.hides) {
                 EXPECT_GT(blue, kHalfShown * 9 / 10) << renderer << " hid more than the overlap";
                 EXPECT_LT(blue, kHalfShown * 11 / 10)
@@ -2749,8 +2631,6 @@ TEST_F(MetalSceneDraw, ADepthWritingDrawHidesLaterDrawsAsOnCompatibility)
                                            << "that writes no depth";
             }
         }
-        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
-            << "the native renderer wrote other depth than the compatibility renderer";
     }
 }
 
@@ -2954,7 +2834,7 @@ std::filesystem::path WriteEffectDepthFixture(const std::filesystem::path& root,
     return root / "project.json";
 }
 
-TEST_F(MetalSceneDraw, ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWriteOnBothRenderers)
+TEST_F(MetalSceneDraw, ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWrite)
 {
     // Wallpaper Engine draws the last pass of an image layer's effects with
     // the layer's own blending, depth test and depth write rather than the
@@ -2975,7 +2855,7 @@ TEST_F(MetalSceneDraw, ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWriteOnBo
     // card shows through the layer's transparent texels. A layer whose
     // material is `normal` or `alphatocoverage` is not sorted: it stays in the
     // scene-order set drawn first, and its write hides the farther card there
-    // as in any scene. Each case is drawn by both renderers and checked at two
+    // as in any scene. Each case is checked at two
     // points: over the nearer card (x 150) and over the one behind (x 230).
     enum class Colour { Green, Red, Blue };
     struct Case
@@ -3055,8 +2935,8 @@ TEST_F(MetalSceneDraw, ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWriteOnBo
     };
     for (const auto& c : cases) {
         SCOPED_TRACE(c.name);
-        for (const bool native : { false, true }) {
-            const std::string name = std::string(c.name) + (native ? "-native" : "-compat");
+        {
+            const std::string name = std::string(c.name);
             const auto        project = WriteEffectDepthFixture(root_ / ("effect-depth-" + name),
                                                                 c.layer_test, c.layer_write,
                                                                 c.effect_test, c.effect_write,
@@ -3067,13 +2947,12 @@ TEST_F(MetalSceneDraw, ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWriteOnBo
             ASSERT_TRUE(LoadScene(project, root_ / ("effect-depth-cache-" + name), loaded, error))
                 << error;
             loaded.scene->FindRenderTarget(std::string(SpecTex_Default))->withDepth = true;
-            if (native) {
-                ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
-            }
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+            ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
+
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 1, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
-            const char* renderer = native ? "native" : "compatibility";
+            const char* renderer = "native";
             const auto  at       = [&picture](std::size_t x) {
                 const std::size_t i = (128u * 384u + x) * 3u;
                 return std::array<int, 3> { picture.rgb[i], picture.rgb[i + 1], picture.rgb[i + 2] };
@@ -3104,14 +2983,13 @@ TEST_F(MetalSceneDraw, ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWriteOnBo
     }
 }
 
-TEST_F(MetalSceneDraw, ADepthTestedDrawCullsTheSameFacesAsCompatibility)
+TEST_F(MetalSceneDraw, ADepthTestedDrawCullsTheFacesItsMaterialAsksFor)
 {
-    // The compatibility backend honours a material's `cullmode` for every
-    // pass into a depth-attached target -- models, skyboxes, a planet's ring --
-    // with counter-clockwise front faces, and culls nothing elsewhere. Drawing
-    // both faces of a ring here put its unlit back over its lit front. Each
-    // case is drawn by both renderers and must come out the same; the cases
-    // also have to differ from each other, or the comparison proves nothing.
+    // A material's `cullmode` is honoured for every pass into a depth-attached
+    // target -- models, skyboxes, a planet's ring -- with counter-clockwise
+    // front faces, and nothing is culled elsewhere. Drawing both faces of a
+    // ring put its unlit back over its lit front. The cases also have to differ
+    // from each other, or the check proves nothing.
     struct Case
     {
         const char* name;
@@ -3131,9 +3009,9 @@ TEST_F(MetalSceneDraw, ADepthTestedDrawCullsTheSameFacesAsCompatibility)
     std::map<std::string, std::size_t> card_pixels;
     for (const auto& c : cases) {
         SCOPED_TRACE(c.name);
-        std::map<bool, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
-            const std::string name = std::string(c.name) + (native ? "-native" : "-compat");
+        RendererPicture picture;
+        {
+            const std::string name = std::string(c.name);
             const auto  project = WriteFixture(root_ / ("cull-" + name), "0.30");
             LoadedScene loaded;
             std::string error;
@@ -3147,18 +3025,15 @@ TEST_F(MetalSceneDraw, ADepthTestedDrawCullsTheSameFacesAsCompatibility)
             material->depth_write = true;
             material->cull_mode   = c.cull;
             loaded.scene->FindRenderTarget(std::string(SpecTex_Default))->withDepth = c.depth;
-            if (native) {
-                ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
-            }
-            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
-            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+            ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
+
+            picture = DrawWithRenderer(*loaded.scene, 384, 256, 1, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
         }
-        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
-            << "the native renderer culled other faces than the compatibility renderer";
         // The card's constant blue, 0.30.
         std::size_t card = 0;
-        for (std::size_t i = 0; i + 2 < pictures[true].rgb.size(); i += 3) {
-            if (pictures[true].rgb[i + 2] >= 65 && pictures[true].rgb[i + 2] <= 90) ++card;
+        for (std::size_t i = 0; i + 2 < picture.rgb.size(); i += 3) {
+            if (picture.rgb[i + 2] >= 65 && picture.rgb[i + 2] <= 90) ++card;
         }
         card_pixels[c.name] = card;
     }
@@ -3170,16 +3045,16 @@ TEST_F(MetalSceneDraw, ADepthTestedDrawCullsTheSameFacesAsCompatibility)
     EXPECT_GT(card_pixels["away-back-no-depth"], 1000u);
 }
 
-TEST_F(MetalSceneDraw, ALayerLitByScenePointAndDirectionalLightsIsTheSameOnBothRenderers)
+TEST_F(MetalSceneDraw, ALayerIsLitByScenePointAndDirectionalLights)
 {
     // A lit layer asks for `#require LightingV1` and is handed the scene's lights
     // by kind. Here a red point light sits over the left of the card and a dim
     // blue directional light shines straight at it: the left is red, the right
-    // only blue, and both renderers draw the same picture. The radiance helper
+    // only blue. The radiance helper
     // is the fixture's own, in the shape of Wallpaper Engine's `common_pbr_2.h`.
-    std::map<bool, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
-        const std::string name = native ? "lit-native" : "lit-compat";
+    RendererPicture picture;
+    {
+        const std::string name = "lit";
         const auto project = WriteFixture(root_ / name);
         std::ofstream(root_ / name / "shaders/metal_probe.vert")
             << "uniform mat4 g_ModelViewProjectionMatrix;\n"
@@ -3238,14 +3113,13 @@ TEST_F(MetalSceneDraw, ALayerLitByScenePointAndDirectionalLightsIsTheSameOnBothR
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         ASSERT_EQ(loaded.scene->lights.size(), 2u);
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
-        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
-        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+        picture = DrawWithRenderer(*loaded.scene, 384, 256, 1, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
     }
-    const auto& rgb = pictures[true].rgb;
+    const auto& rgb = picture.rgb;
     ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
     const auto at = [&rgb](std::size_t x, std::size_t y) {
         const std::size_t i = (y * 384 + x) * 3;
@@ -3259,8 +3133,6 @@ TEST_F(MetalSceneDraw, ALayerLitByScenePointAndDirectionalLightsIsTheSameOnBothR
     const auto right = at(280, 128);
     EXPECT_LT(right[0], 5) << "the point light lit beyond its radius";
     EXPECT_NEAR(right[2], 128, 3) << "the directional light did not reach the layer";
-    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
-        << "the native renderer lit the layer differently from the compatibility renderer";
 }
 
 /// The fixture's card in constant red times its `g_Color4`, over a scene
@@ -3379,7 +3251,7 @@ std::filesystem::path WriteScriptedEffectFixture(const std::filesystem::path& ro
     return project;
 }
 
-TEST_F(MetalSceneDraw, AnEffectAScriptSwitchesIsFollowedWhileTheSceneRunsOnBothRenderers)
+TEST_F(MetalSceneDraw, AnEffectAScriptSwitchesIsFollowedWhileTheSceneRuns)
 {
     // Wallpaper Engine keeps every effect of a layer and runs those its effect
     // object says are visible, frame by frame; a script deciding `visible` is
@@ -3391,20 +3263,18 @@ TEST_F(MetalSceneDraw, AnEffectAScriptSwitchesIsFollowedWhileTheSceneRunsOnBothR
         R"([{"file":"effects/swap/effect.json","id":2,"visible":{"value":false,)"
         R"("script":"export function update() { return engine.runtime >= 0.5 && engine.runtime < 1.0; }"}},)"
         R"({"file":"effects/half/effect.json","id":3,"visible":true}])";
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         for (const auto& [frames, expected] :
              { std::pair<int, std::array<int, 3>> { 10, { 128, 0, 128 } },
                { 45, { 0, 128, 128 } },
                { 90, { 128, 0, 128 } } }) {
             SCOPED_TRACE(frames);
-            const std::string name = std::string("scripted-effect-") +
-                                     (native ? "native-" : "compat-") + std::to_string(frames);
+            const std::string name = std::string("scripted-effect-") + std::to_string(frames);
             const auto  project = WriteScriptedEffectFixture(root_ / name, effects);
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, frames, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
             const std::size_t centre = (128u * 384u + 192u) * 3u;
@@ -3415,7 +3285,7 @@ TEST_F(MetalSceneDraw, AnEffectAScriptSwitchesIsFollowedWhileTheSceneRunsOnBothR
     }
 }
 
-TEST_F(MetalSceneDraw, ALayerWhoseEffectsAScriptHasAllSwitchedOffIsStillDrawnOnBothRenderers)
+TEST_F(MetalSceneDraw, ALayerWhoseEffectsAScriptHasAllSwitchedOffIsStillDrawn)
 {
     // With its only effect switched off, Wallpaper Engine draws the layer as a
     // layer without effects. The chain cannot be left empty: its last pass is
@@ -3423,18 +3293,16 @@ TEST_F(MetalSceneDraw, ALayerWhoseEffectsAScriptHasAllSwitchedOffIsStillDrawnOnB
     const std::string effects =
         R"([{"file":"effects/swap/effect.json","id":2,"visible":{"value":true,)"
         R"("script":"export function update() { return engine.runtime >= 0.5; }"}}])";
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         for (const auto& [frames, expected] :
              { std::pair<int, std::array<int, 3>> { 10, { 255, 0, 0 } }, { 45, { 0, 255, 0 } } }) {
             SCOPED_TRACE(frames);
-            const std::string name = std::string("scripted-off-") +
-                                     (native ? "native-" : "compat-") + std::to_string(frames);
+            const std::string name = std::string("scripted-off-") + std::to_string(frames);
             const auto  project = WriteScriptedEffectFixture(root_ / name, effects);
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, frames, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
             const std::size_t centre = (128u * 384u + 192u) * 3u;
@@ -3447,7 +3315,7 @@ TEST_F(MetalSceneDraw, ALayerWhoseEffectsAScriptHasAllSwitchedOffIsStillDrawnOnB
     }
 }
 
-TEST_F(MetalSceneDraw, AHiddenLayersScriptsStillRunOnBothRenderers)
+TEST_F(MetalSceneDraw, AHiddenLayersScriptsStillRun)
 {
     // Wallpaper Engine builds every layer, hidden ones too, and runs their
     // scripts: a hidden controller layer often works out what the others show
@@ -3459,18 +3327,16 @@ TEST_F(MetalSceneDraw, AHiddenLayersScriptsStillRunOnBothRenderers)
         R"({"id":5,"name":"controller","image":"models/tile.json",)"
         R"("origin":[192,128,0],"scale":[1,1,1],"angles":[0,0,0],"visible":false,)"
         R"("alpha":{"value":1,"script":"export function update(value) { shared.on = engine.runtime >= 0.5; return value; }"})";
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         for (const auto& [frames, expected] :
              { std::pair<int, std::array<int, 3>> { 10, { 255, 0, 0 } }, { 45, { 0, 255, 0 } } }) {
             SCOPED_TRACE(frames);
-            const std::string name = std::string("hidden-controller-") +
-                                     (native ? "native-" : "compat-") + std::to_string(frames);
+            const std::string name = std::string("hidden-controller-") + std::to_string(frames);
             const auto  project = WriteScriptedEffectFixture(root_ / name, effects);
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, frames, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
             const std::size_t centre = (128u * 384u + 192u) * 3u;
@@ -3481,16 +3347,15 @@ TEST_F(MetalSceneDraw, AHiddenLayersScriptsStillRunOnBothRenderers)
     }
 }
 
-TEST_F(MetalSceneDraw, AScriptCanShowAHiddenLayerItNamesOnBothRenderers)
+TEST_F(MetalSceneDraw, AScriptCanShowAHiddenLayerItNames)
 {
     // A hidden layer a script finds by name has to exist to be shown: the
     // driver's script turns the hidden red card on at 0.5 s.
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         for (const auto& [frames, expected] :
              { std::pair<int, std::array<int, 3>> { 10, { 0, 0, 0 } }, { 45, { 255, 0, 0 } } }) {
             SCOPED_TRACE(frames);
-            const std::string name = std::string("named-hidden-") + (native ? "native-" : "compat-") +
+            const std::string name = std::string("named-hidden-") +
                                      std::to_string(frames);
             const auto project = WriteScriptedEffectFixture(root_ / name, "[]");
             std::ofstream(root_ / name / "layout.json")
@@ -3506,7 +3371,7 @@ TEST_F(MetalSceneDraw, AScriptCanShowAHiddenLayerItNamesOnBothRenderers)
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, frames, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
             const std::size_t centre = (128u * 384u + 192u) * 3u;
@@ -3566,73 +3431,66 @@ std::array<int, 3> RgbAt(const RendererPicture& picture, std::size_t x, std::siz
     return { picture.rgb[i], picture.rgb[i + 1], picture.rgb[i + 2] };
 }
 
-TEST_F(MetalSceneDraw, AMediaWidgetIsHiddenWhileNothingPlaysOnBothRenderers)
+TEST_F(MetalSceneDraw, AMediaWidgetIsHiddenWhileNothingPlays)
 {
     // Wallpaper Engine tells a scene when nothing plays, and a widget that
     // hides itself on `PLAYBACK_STOPPED` is gone from the first frame, the
     // cards parented to it with it. This scene has no player and the setting
     // off, which is how the app starts every wallpaper: it is still a scene
     // with nothing playing, not one that has not been told.
-    std::map<bool, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
-        const std::string name    = native ? "media-idle-native" : "media-idle-compat";
+    RendererPicture picture;
+    {
+        const std::string name    = "media-idle";
         const auto        project = WriteMediaWidgetFixture(root_ / name, kHideWhenStoppedVisible);
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
-        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
-        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-        ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+        picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
+        ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
         EXPECT_EQ(loaded.scene->runtime->scriptErrorCount(), 0u);
     }
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
-        const auto& picture = pictures[native];
+    {
         EXPECT_EQ(RgbAt(picture, 192, 128), (std::array<int, 3> { 0, 0, 0 }))
             << "the widget's card stayed on screen though nothing plays";
         EXPECT_NE(RgbAt(picture, 30, 128), (std::array<int, 3> { 0, 0, 0 }))
             << "the scene drew nothing at all, so the check above says nothing";
     }
-    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
 }
 
-TEST_F(MetalSceneDraw, AMediaWidgetShowsWhileSomethingPlaysOnBothRenderers)
+TEST_F(MetalSceneDraw, AMediaWidgetShowsWhileSomethingPlays)
 {
     // The counterpart: with a player that is playing, the same widget is on
     // screen, so the idle state is a default and not a rule. The event comes
     // before the first frame, as a replay to a scene that has just attached.
-    std::map<bool, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
-        const std::string name    = native ? "media-playing-native" : "media-playing-compat";
+    RendererPicture picture;
+    {
+        const std::string name    = "media-playing";
         const auto        project = WriteMediaWidgetFixture(root_ / name, kHideWhenStoppedVisible);
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
         loaded.scene->runtime->SetMediaIntegrationEnabled(true);
         loaded.scene->runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":1})");
-        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
-        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-        ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+        picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
+        ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
     }
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
-        const auto centre = RgbAt(pictures[native], 192, 128);
+    {
+        const auto centre = RgbAt(picture, 192, 128);
         EXPECT_NEAR(centre[0], 128, 3) << "the widget's card is missing while something plays";
         EXPECT_NEAR(centre[1], 128, 3);
         EXPECT_NEAR(centre[2], 64, 3);
     }
-    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
 }
 
-TEST_F(MetalSceneDraw, ANoMusicPlaceholderShowsWhileNothingPlaysOnBothRenderers)
+TEST_F(MetalSceneDraw, ANoMusicPlaceholderShowsWhileNothingPlays)
 {
     // The other way round: a group that starts hidden and shows itself on
     // `PLAYBACK_STOPPED` is a "nothing playing" placeholder. It has to appear
@@ -3641,29 +3499,26 @@ TEST_F(MetalSceneDraw, ANoMusicPlaceholderShowsWhileNothingPlaysOnBothRenderers)
     const std::string placeholder =
         R"({"value":false,"script":"export function mediaPlaybackChanged(event) { )"
         R"(thisLayer.visible = event.state === MediaPlaybackEvent.PLAYBACK_STOPPED; }"})";
-    std::map<bool, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
-        const std::string name    = native ? "media-placeholder-native" : "media-placeholder-compat";
+    RendererPicture picture;
+    {
+        const std::string name    = "media-placeholder";
         const auto        project = WriteMediaWidgetFixture(root_ / name, placeholder);
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
-        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
-        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-        ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+        picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
+        ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
     }
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
-        const auto centre = RgbAt(pictures[native], 192, 128);
+    {
+        const auto centre = RgbAt(picture, 192, 128);
         EXPECT_NEAR(centre[0], 128, 3) << "the placeholder never appeared though nothing plays";
         EXPECT_NEAR(centre[1], 128, 3);
         EXPECT_NEAR(centre[2], 64, 3);
     }
-    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
 }
 
 /// The fixture's card painted in its layer colour alone -- `g_Color4`, opaque --
@@ -3702,7 +3557,7 @@ std::filesystem::path WriteLayerColourFixture(const std::filesystem::path& root,
     return project;
 }
 
-TEST_F(MetalSceneDraw, AnImageLayersColourScriptDecidesItsColourOnBothRenderers)
+TEST_F(MetalSceneDraw, AnImageLayersColourScriptDecidesItsColour)
 {
     // Wallpaper Engine runs the script of an image layer's `color` every frame
     // and draws the layer in what it returns, over the scene file's `value`:
@@ -3741,18 +3596,16 @@ TEST_F(MetalSceneDraw, AnImageLayersColourScriptDecidesItsColourOnBothRenderers)
         R"({"type":"mediaThumbnailChanged","hasThumbnail":true,"primaryColor":[0.25,0.5,0.75],)"
         R"("secondaryColor":[0,0,0],"tertiaryColor":[0,0,0],"textColor":[1,1,1],"highContrastColor":[0,0,0]})";
     for (const auto& variant : variants) {
-        std::map<bool, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
-            const std::string name    = std::string("layer-colour-") + variant.name +
-                                        (native ? "-native" : "-compat");
+        RendererPicture picture;
+        {
+            const std::string name    = std::string("layer-colour-") + variant.name;
             const auto        project = WriteLayerColourFixture(root_ / name, variant.color_json);
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
             if (variant.with_cover || variant.cover_frame >= 0) {
                 loaded.scene->runtime->SetMediaIntegrationEnabled(true);
             }
@@ -3762,22 +3615,21 @@ TEST_F(MetalSceneDraw, AnImageLayersColourScriptDecidesItsColourOnBothRenderers)
                     loaded.scene->runtime->DispatchMediaEventJson(cover_event);
                 }
             };
-            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 6, 1.0 / 60.0, arrive);
-            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-            ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+            picture = DrawWithRenderer(*loaded.scene, 384, 256, 6, 1.0 / 60.0, arrive);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
             EXPECT_EQ(loaded.scene->runtime->scriptErrorCount(), 0u);
         }
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(std::string(variant.name) + (native ? " native" : " compatibility"));
-            const auto centre = RgbAt(pictures[native], 192, 128);
+        {
+            SCOPED_TRACE(std::string(variant.name) + " native");
+            const auto centre = RgbAt(picture, 192, 128);
             for (std::size_t channel = 0; channel < 3; ++channel) {
                 EXPECT_NEAR(centre[channel], variant.expected[channel], 2)
                     << "the layer is not drawn in the colour its script decides";
             }
-            EXPECT_EQ(RgbAt(pictures[native], 30, 128), (std::array<int, 3> { 255, 255, 255 }))
+            EXPECT_EQ(RgbAt(picture, 30, 128), (std::array<int, 3> { 255, 255, 255 }))
                 << "the scene drew nothing at all, so the check above says nothing";
         }
-        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb) << variant.name;
     }
 }
 
@@ -3853,25 +3705,22 @@ std::filesystem::path WriteLayerAlphaFixture(const std::filesystem::path& root,
     return project;
 }
 
-/// `frames` frames of the layer-alpha fixture from one renderer, 384 x 256. A
-/// picture with an `error` is none: the scene did not load, or the native
-/// renderer would not take it.
+/// `frames` frames of the layer-alpha fixture, 384 x 256. A picture with an
+/// `error` is none: the scene did not load, or the renderer would not take it.
 RendererPicture DrawLayerAlpha(const std::filesystem::path& root, const std::string& name,
                                std::string_view object_fields, std::string_view effects_json,
-                               bool native, int frames)
+                               int frames)
 {
     RendererPicture picture;
     const auto project = WriteLayerAlphaFixture(root / name, object_fields, effects_json);
     LoadedScene loaded;
     if (! LoadScene(project, root / (name + "-cache"), loaded, picture.error)) return picture;
-    if (native) {
-        const auto selection = SelectSceneBackend(*loaded.scene);
-        if (selection.failed()) {
-            picture.error = selection.failure_reason;
-            return picture;
-        }
+    const auto selection = SelectSceneBackend(*loaded.scene);
+    if (selection.failed()) {
+        picture.error = selection.failure_reason;
+        return picture;
     }
-    picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+    picture = DrawWithRenderer(*loaded.scene, 384, 256, frames, 1.0 / 60.0);
     if (picture.error.empty() && picture.rgb.size() != 384u * 256u * 3u) {
         picture.error = "the picture is not 384 x 256";
     }
@@ -3929,7 +3778,7 @@ std::vector<LayerAlphaShape> LayerAlphaShapes()
     };
 }
 
-TEST_F(MetalSceneDraw, AScriptsLayerAlphaReachesTheLayerWhateverItsEffectsDoOnBothRenderers)
+TEST_F(MetalSceneDraw, AScriptsLayerAlphaReachesTheLayerWhateverItsEffectsDo)
 {
     // `thisLayer.alpha = x` is how a widget fades itself in and out. The write has
     // to reach the layer's own pass, not the last one built: under an effect chain
@@ -3951,32 +3800,29 @@ TEST_F(MetalSceneDraw, AScriptsLayerAlphaReachesTheLayerWhateverItsEffectsDoOnBo
                 (shape.fields_json.empty() ? "" : "," + shape.fields_json);
             for (const bool faded : { false, true }) {
                 SCOPED_TRACE(faded ? "after the switch" : "before the switch");
-                std::map<bool, RendererPicture> pictures;
-                for (const bool native : { false, true }) {
+                RendererPicture picture;
+                {
                     const std::string name = std::string("script-alpha-") +
                                              std::to_string(&shape - shapes.data()) +
                                              (half ? "-half" : "-zero") +
-                                             (faded ? "-late" : "-early") +
-                                             (native ? "-native" : "-compat");
-                    pictures[native] = DrawLayerAlpha(root_, name, fields, shape.effects_json,
-                                                      native, faded ? 45 : 10);
-                    ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-                    const auto centre = RgbAt(pictures[native], 192, 128);
+                                             (faded ? "-late" : "-early");
+                    picture = DrawLayerAlpha(root_, name, fields, shape.effects_json,
+                                                      faded ? 45 : 10);
+                    ASSERT_TRUE(picture.error.empty()) << picture.error;
+                    const auto centre = RgbAt(picture, 192, 128);
                     const std::array<int, 3> expected =
                         ! faded ? shape.opaque : half ? shape.half : std::array<int, 3> { 0, 64, 0 };
                     for (std::size_t channel = 0; channel < 3; ++channel) {
                         EXPECT_NEAR(centre[channel], expected[channel], 2)
-                            << (native ? "native" : "compatibility") << ", channel " << channel;
+                            << "channel " << channel;
                     }
                 }
-                EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
-                    << "the renderers drew the faded layer differently";
             }
         }
     }
 }
 
-TEST_F(MetalSceneDraw, AnAuthoredBoundOrScriptedAlphaIsAppliedOnceUnderEffectsOnBothRenderers)
+TEST_F(MetalSceneDraw, AnAuthoredBoundOrScriptedAlphaIsAppliedOnceUnderEffects)
 {
     // The layer's alpha is applied once, however it is set: as authored, as the
     // value of a property, or as what its own script returns. Under effects it is
@@ -3998,11 +3844,10 @@ TEST_F(MetalSceneDraw, AnAuthoredBoundOrScriptedAlphaIsAppliedOnceUnderEffectsOn
         SCOPED_TRACE(shape.name);
         for (const auto& owner : owners) {
             SCOPED_TRACE(owner.name);
-            std::map<bool, RendererPicture> pictures;
-            for (const bool native : { false, true }) {
+            RendererPicture picture;
+            {
                 const std::string name = std::string("owned-alpha-") +
-                                         std::to_string(&shape - shapes.data()) + "-" + owner.name +
-                                         (native ? "-native" : "-compat");
+                                         std::to_string(&shape - shapes.data()) + "-" + owner.name;
                 const auto project = WriteLayerAlphaFixture(
                     root_ / name,
                     std::string(owner.fields_json) +
@@ -4014,26 +3859,24 @@ TEST_F(MetalSceneDraw, AnAuthoredBoundOrScriptedAlphaIsAppliedOnceUnderEffectsOn
                 LoadedScene loaded;
                 std::string error;
                 ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-                if (native) {
-                    const auto selection = SelectSceneBackend(*loaded.scene);
-                    ASSERT_FALSE(selection.failed())
-                        << selection.failure_reason;
-                }
-                pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
-                ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-                const auto centre = RgbAt(pictures[native], 192, 128);
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_FALSE(selection.failed())
+                    << selection.failure_reason;
+
+                picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
+                ASSERT_TRUE(picture.error.empty()) << picture.error;
+                const auto centre = RgbAt(picture, 192, 128);
                 for (std::size_t channel = 0; channel < 3; ++channel) {
                     EXPECT_NEAR(centre[channel], shape.half[channel], 2)
-                        << (native ? "native" : "compatibility") << ", channel " << channel
+                        << "channel " << channel
                         << ": the layer is not half transparent, once";
                 }
             }
-            EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
         }
     }
 }
 
-TEST_F(MetalSceneDraw, ALayerColourIsAppliedOnceWhenEveryEffectIsSwitchedOffOnBothRenderers)
+TEST_F(MetalSceneDraw, ALayerColourIsAppliedOnceWhenEveryEffectIsSwitchedOff)
 {
     // The layer's colour is in what its own pass draws. The passthrough a chain
     // falls back on when a script has switched all its effects off draws that
@@ -4053,19 +3896,17 @@ TEST_F(MetalSceneDraw, ALayerColourIsAppliedOnceWhenEveryEffectIsSwitchedOffOnBo
         SCOPED_TRACE(shape.name);
         const std::string fields = R"("color":"0.5 0.5 0.5")" +
                                    (shape.fields_json.empty() ? "" : "," + shape.fields_json);
-        std::map<bool, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
-            const std::string name = std::string("colour-once-") + std::to_string(checked) +
-                                     (native ? "-native" : "-compat");
-            pictures[native] = DrawLayerAlpha(root_, name, fields, shape.effects_json, native, 3);
-            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-            const auto centre = RgbAt(pictures[native], 192, 128);
+        RendererPicture picture;
+        {
+            const std::string name = std::string("colour-once-") + std::to_string(checked);
+            picture = DrawLayerAlpha(root_, name, fields, shape.effects_json, 3);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            const auto centre = RgbAt(picture, 192, 128);
             for (std::size_t channel = 0; channel < 3; ++channel) {
                 EXPECT_NEAR(centre[channel], want->second[channel], 2)
-                    << (native ? "native" : "compatibility") << ", channel " << channel;
+                    << "channel " << channel;
             }
         }
-        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
     }
     EXPECT_EQ(checked, expected.size());
 }
@@ -4110,7 +3951,7 @@ std::filesystem::path WriteComposeAlphaFixture(const std::filesystem::path& root
     return project;
 }
 
-TEST_F(MetalSceneDraw, AComposeLayersAlphaFollowsWhatDrivesItOnBothRenderers)
+TEST_F(MetalSceneDraw, AComposeLayersAlphaFollowsWhatDrivesIt)
 {
     // A compose layer's own pass copies what is behind it and takes no alpha; the
     // pass behind it carries the layer's. A script that writes the alpha, or a
@@ -4133,32 +3974,29 @@ TEST_F(MetalSceneDraw, AComposeLayersAlphaFollowsWhatDrivesItOnBothRenderers)
     };
     for (const auto& variant : variants) {
         SCOPED_TRACE(variant.name);
-        std::map<bool, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
-            std::string name = std::string("compose-alpha-") + variant.name +
-                               (native ? "-native" : "-compat");
+        RendererPicture picture;
+        {
+            std::string name = std::string("compose-alpha-") + variant.name;
             std::replace(name.begin(), name.end(), ' ', '-');
             const auto project = WriteComposeAlphaFixture(root_ / name, variant.fields_json);
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
-            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
-            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-            const auto centre = RgbAt(pictures[native], 192, 128);
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+            picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            const auto centre = RgbAt(picture, 192, 128);
             for (std::size_t channel = 0; channel < 3; ++channel) {
                 EXPECT_NEAR(centre[channel], variant.expected[channel], 2)
-                    << (native ? "native" : "compatibility") << ", channel " << channel;
+                    << "channel " << channel;
             }
         }
-        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
     }
 }
 
-TEST_F(MetalSceneDraw, ACompositingEffectSeesTheScreenUprightOnBothRenderers)
+TEST_F(MetalSceneDraw, ACompositingEffectSeesTheScreenUpright)
 {
     // An effect that composes a layer over the screen (Wallpaper Engine's
     // `effectcomposebackground`, the first pass of refraction and the like)
@@ -4166,9 +4004,9 @@ TEST_F(MetalSceneDraw, ACompositingEffectSeesTheScreenUprightOnBothRenderers)
     // convention this renderer shares. Over a background red at the top and
     // blue below, a transparent layer carrying such an effect must show the
     // same red top and blue bottom inside its bounds as around them.
-    std::map<bool, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
-        const std::string name    = native ? "compose-upright-native" : "compose-upright-compat";
+    RendererPicture picture;
+    {
+        const std::string name    = "compose-upright";
         const auto        project = WriteFixture(root_ / name);
         const auto        file    = [&](const std::string& path, const std::string& text) {
             std::filesystem::create_directories((root_ / name / path).parent_path());
@@ -4227,12 +4065,11 @@ TEST_F(MetalSceneDraw, ACompositingEffectSeesTheScreenUprightOnBothRenderers)
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
-        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        picture = DrawWithRenderer(*loaded.scene, 384, 256, 1, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
     }
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
-        const auto& rgb = pictures[native].rgb;
+    {
+        const auto& rgb = picture.rgb;
         ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
         const auto at = [&rgb](int x, int y) {
             const std::size_t i = (static_cast<std::size_t>(y) * 384u + static_cast<std::size_t>(x)) * 3u;
@@ -4245,7 +4082,7 @@ TEST_F(MetalSceneDraw, ACompositingEffectSeesTheScreenUprightOnBothRenderers)
     }
 }
 
-TEST_F(MetalSceneDraw, AFullscreenLayerCoversTheScreenWhereverItsGroupSitsOnBothRenderers)
+TEST_F(MetalSceneDraw, AFullscreenLayerCoversTheScreenWhereverItsGroupSits)
 {
     // Wallpaper Engine lays a fullscreen layer over the whole screen and takes
     // only its visibility from the group it sits in. Over a backdrop of four
@@ -4264,12 +4101,12 @@ TEST_F(MetalSceneDraw, AFullscreenLayerCoversTheScreenWhereverItsGroupSitsOnBoth
         { "moved, scaled and turned", R"("origin":[100,60,0],"scale":[1.5,1.5,1],"angles":[0,0,0.3],)" },
     } };
     std::map<std::string, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
+    {
         // The same backdrop without the fullscreen layer: the picture to keep.
         for (std::size_t variant = 0; variant <= placements.size(); ++variant) {
             const bool        plain = variant == placements.size();
             const std::string label = plain ? "plain" : placements[variant].name;
-            const std::string name  = std::string("fullscreen-group-") + (native ? "native-" : "compat-") +
+            const std::string name  = std::string("fullscreen-group-") +
                                      std::to_string(variant);
             const auto project = WriteFixture(root_ / name);
             const auto file    = [&](const std::string& path, const std::string& text) {
@@ -4329,19 +4166,18 @@ TEST_F(MetalSceneDraw, AFullscreenLayerCoversTheScreenWhereverItsGroupSitsOnBoth
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
             // Several frames, so the runtime has ticked as it does in the app.
-            auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << label << ": " << picture.error;
             ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
-            pictures[(native ? "native " : "compat ") + label] = std::move(picture);
+            pictures["native " + label] = std::move(picture);
         }
     }
-    for (const bool native : { false, true }) {
-        const std::string prefix = native ? "native " : "compat ";
+    {
+        const std::string prefix = "native ";
         const auto&       plain  = pictures.at(prefix + "plain").rgb;
         // The backdrop has four colours at four places, so a copy of one corner
         // over another cannot match it by chance.
@@ -4359,17 +4195,14 @@ TEST_F(MetalSceneDraw, AFullscreenLayerCoversTheScreenWhereverItsGroupSitsOnBoth
                 if (std::abs(int(rgb[i]) - int(plain[i])) > 2) ++different;
             }
             EXPECT_EQ(different, 0u)
-                << (native ? "native" : "compatibility") << " renderer, layer " << placement.name
+                << "layer " << placement.name
                 << ": " << different << " of " << rgb.size()
                 << " channel values differ from the scene without the fullscreen layer";
         }
     }
-    EXPECT_EQ(pictures.at("native moved, scaled and turned").rgb,
-              pictures.at("compat moved, scaled and turned").rgb)
-        << "the renderers draw the fullscreen layer differently";
 }
 
-TEST_F(MetalSceneDraw, TheChildrenOfAFullscreenLayerAreSavedAgainstItsOwnTransformOnBothRenderers)
+TEST_F(MetalSceneDraw, TheChildrenOfAFullscreenLayerAreSavedAgainstItsOwnTransform)
 {
     // A fullscreen layer is drawn over the whole screen whatever its own origin,
     // but the layers below it are placed from the transform the scene saved for
@@ -4416,11 +4249,11 @@ TEST_F(MetalSceneDraw, TheChildrenOfAFullscreenLayerAreSavedAgainstItsOwnTransfo
           R"({"id":9,"name":"group","origin":[192,128,0],"scale":[1.5,1.5,1],"angles":[0,0,0.3],"visible":true},)" },
     } };
     std::map<std::string, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
+    {
         for (std::size_t variant = 0; variant <= trees.size(); ++variant) {
             const bool        plain = variant == trees.size();
             const std::string label = plain ? "plain" : trees[variant].name;
-            const std::string name  = std::string("fullscreen-children-") + (native ? "native-" : "compat-") +
+            const std::string name  = std::string("fullscreen-children-") +
                                      std::to_string(variant);
             const auto project = WriteFixture(root_ / name);
             const auto file    = [&](const std::string& path, const std::string& text) {
@@ -4481,18 +4314,17 @@ TEST_F(MetalSceneDraw, TheChildrenOfAFullscreenLayerAreSavedAgainstItsOwnTransfo
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << label << ": " << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
-            auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+            auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << label << ": " << picture.error;
             ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
-            pictures[(native ? "native " : "compat ") + label] = std::move(picture);
+            pictures["native " + label] = std::move(picture);
         }
     }
-    for (const bool native : { false, true }) {
-        const std::string prefix = native ? "native " : "compat ";
+    {
+        const std::string prefix = "native ";
         const auto&       plain  = pictures.at(prefix + "plain").rgb;
         // Four colours at four places: a quarter of the picture, or the picture
         // a canvas away, cannot match by chance.
@@ -4510,22 +4342,22 @@ TEST_F(MetalSceneDraw, TheChildrenOfAFullscreenLayerAreSavedAgainstItsOwnTransfo
                 if (std::abs(int(rgb[i]) - int(plain[i])) > 3) ++different;
             }
             EXPECT_EQ(different, 0u)
-                << (native ? "native" : "compatibility") << " renderer, children saved " << tree.name
+                << "children saved " << tree.name
                 << ": " << different << " of " << rgb.size()
                 << " channel values differ from the backdrop drawn alone";
         }
     }
 }
 
-TEST_F(MetalSceneDraw, TheEffectsOfAFullscreenLayerReachItsChildrenOnBothRenderers)
+TEST_F(MetalSceneDraw, TheEffectsOfAFullscreenLayerReachItsChildren)
 {
     // A post-processing layer holds the layers saved below it in its own picture
     // and runs its effects over all of it, so an effect that keeps only the red
     // of the picture leaves no green or blue of a child. Drawn after the layer,
     // the child kept its own colours.
-    std::map<bool, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
-        const std::string name    = native ? "fullscreen-effects-native" : "fullscreen-effects-compat";
+    RendererPicture picture;
+    {
+        const std::string name    = "fullscreen-effects";
         const auto        project = WriteFixture(root_ / name);
         const auto        file    = [&](const std::string& path, const std::string& text) {
             std::filesystem::create_directories((root_ / name / path).parent_path());
@@ -4572,22 +4404,20 @@ TEST_F(MetalSceneDraw, TheEffectsOfAFullscreenLayerReachItsChildrenOnBothRendere
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
-        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
-        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-        const auto& rgb = pictures[native].rgb;
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+        picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
+        const auto& rgb = picture.rgb;
         ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
         // The picture's four quadrants, through the layer's effect: only red.
         for (const auto& [x, y] : std::array<std::pair<int, int>, 4> { { { 60, 60 }, { 330, 60 }, { 60, 200 }, { 330, 200 } } }) {
             const std::size_t i = (static_cast<std::size_t>(y) * 384u + static_cast<std::size_t>(x)) * 3u;
-            EXPECT_EQ(rgb[i + 1], 0) << (native ? "native" : "compatibility") << " green at " << x << "," << y;
-            EXPECT_EQ(rgb[i + 2], 0) << (native ? "native" : "compatibility") << " blue at " << x << "," << y;
+            EXPECT_EQ(rgb[i + 1], 0) << "green at " << x << "," << y;
+            EXPECT_EQ(rgb[i + 2], 0) << "blue at " << x << "," << y;
         }
     }
-    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
 }
 
 namespace
@@ -4654,7 +4484,7 @@ std::size_t ChannelsApart(const std::vector<uint8_t>& rgb, const std::vector<uin
 }
 } // namespace
 
-TEST_F(MetalSceneDraw, TheChildrenOfAFullscreenLayerFollowTheSceneCameraOnBothRenderers)
+TEST_F(MetalSceneDraw, TheChildrenOfAFullscreenLayerFollowTheSceneCamera)
 {
     // Wallpaper Engine frames a composition layer's children with a camera of
     // the layer's own, but a fullscreen layer keeps the scene camera: the layers
@@ -4691,21 +4521,19 @@ TEST_F(MetalSceneDraw, TheChildrenOfAFullscreenLayerFollowTheSceneCameraOnBothRe
         { "under a fullscreen layer", post(false) + card + R"(,"parent":2})" },
         { "under a fullscreen layer with an effect", post(true) + card + R"(,"parent":2})" },
     } };
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         const auto draw = [&](const std::string& general, const Tree& tree, int frames,
                               const std::string& key) {
-            const std::string name = std::string("fullscreen-camera-") + (native ? "native-" : "compat-") + key;
+            const std::string name = std::string("fullscreen-camera-") + key;
             const auto project = WriteFullscreenTreeFixture(root_ / name, general, tree.objects);
             LoadedScene loaded;
             std::string error;
             EXPECT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             if (loaded.scene == nullptr) return RendererPicture {};
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                EXPECT_FALSE(selection.failed()) << selection.failure_reason;
-            }
-            auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            EXPECT_FALSE(selection.failed()) << selection.failure_reason;
+
+            auto picture = DrawWithRenderer(*loaded.scene, 384, 256, frames, 1.0 / 60.0);
             EXPECT_TRUE(picture.error.empty()) << tree.name << ": " << picture.error;
             EXPECT_EQ(picture.rgb.size(), 384u * 256u * 3u);
             return picture;
@@ -4731,7 +4559,7 @@ TEST_F(MetalSceneDraw, TheChildrenOfAFullscreenLayerFollowTheSceneCameraOnBothRe
     }
 }
 
-TEST_F(MetalSceneDraw, ParallaxMovesTheChildrenOfAFullscreenLayerWithTheirTreeOnBothRenderers)
+TEST_F(MetalSceneDraw, ParallaxMovesTheChildrenOfAFullscreenLayerWithTheirTree)
 {
     // Camera parallax moves a whole tree by its outermost layer's distance from
     // the middle of the view. A fullscreen layer is drawn over the screen
@@ -4767,22 +4595,20 @@ TEST_F(MetalSceneDraw, ParallaxMovesTheChildrenOfAFullscreenLayerWithTheirTreeOn
         { "a fullscreen layer with an effect saved where the group is",
           post(R"("origin":[212,138,0],)", true) + picture + R"("parent":2})" },
     } };
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         std::vector<RendererPicture> pictures;
         for (std::size_t t = 0; t < trees.size(); ++t) {
             const std::string name =
-                std::string("fullscreen-parallax-") + (native ? "native-" : "compat-") + std::to_string(t);
+                std::string("fullscreen-parallax-") + std::to_string(t);
             const auto project = WriteFullscreenTreeFixture(root_ / name, general, trees[t].objects);
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << trees[t].name << ": " << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
             loaded.scene->shaderValueUpdater->MouseInput(0.5, 0.5);
-            auto drawn = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            auto drawn = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
             ASSERT_TRUE(drawn.error.empty()) << trees[t].name << ": " << drawn.error;
             ASSERT_EQ(drawn.rgb.size(), 384u * 256u * 3u);
             pictures.push_back(std::move(drawn));
@@ -4804,21 +4630,21 @@ TEST_F(MetalSceneDraw, ParallaxMovesTheChildrenOfAFullscreenLayerWithTheirTreeOn
     }
 }
 
-TEST_F(MetalSceneDraw, AVertexShaderThatWritesItsInputsStillReadsTheMeshOnBothRenderers)
+TEST_F(MetalSceneDraw, AVertexShaderThatWritesItsInputsStillReadsTheMesh)
 {
     // Wallpaper Engine's HLSL lets a vertex shader assign to its inputs (a
     // shadow effect's `a_TexCoord *= atFactor`). The legalizer reads such an
-    // input through a local copy; both renderers find the mesh attribute for
+    // input through a local copy; the renderer finds the mesh attribute for
     // each vertex input by its reflected name, and under the copy's name they
     // found none and read the position instead. The fixture's card shows its
     // texture coordinates, drawn on its own and again through a single-pass
     // effect that reads the layer back at its own: writing the inputs without
     // changing them must leave the picture as it is.
     std::map<std::string, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
+    {
         for (const bool through_effect : { false, true }) {
             for (const bool writes : { false, true }) {
-                const std::string name = std::string(native ? "written-input-native" : "written-input-compat") +
+                const std::string name = std::string("written-input") +
                                          (through_effect ? "-effect" : "-card") +
                                          (writes ? "-written" : "-plain");
                 const auto project = WriteFixture(root_ / name);
@@ -4855,20 +4681,19 @@ TEST_F(MetalSceneDraw, AVertexShaderThatWritesItsInputsStillReadsTheMeshOnBothRe
                 LoadedScene loaded;
                 std::string error;
                 ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-                if (native) {
-                    const auto selection = SelectSceneBackend(*loaded.scene);
-                    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-                }
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
                 auto& picture = pictures[name];
-                picture       = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+                picture       = DrawWithRenderer(*loaded.scene, 384, 256, 1, 1.0 / 60.0);
                 ASSERT_TRUE(picture.error.empty()) << name << ": " << picture.error;
                 ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u) << name;
             }
         }
     }
-    for (const bool native : { false, true }) {
+    {
         for (const bool through_effect : { false, true }) {
-            const std::string prefix = std::string(native ? "written-input-native" : "written-input-compat") +
+            const std::string prefix = std::string("written-input") +
                                        (through_effect ? "-effect" : "-card");
             SCOPED_TRACE(prefix);
             const auto& plain = pictures[prefix + "-plain"].rgb;
@@ -4915,11 +4740,11 @@ std::shared_ptr<SceneMesh> MakeMdlQuadMesh(std::shared_ptr<SceneMaterial> materi
 
 } // namespace
 
-TEST_F(MetalSceneDraw, AModelsTangentReachesTheShaderThatDeclaresItOnBothRenderers)
+TEST_F(MetalSceneDraw, AModelsTangentReachesTheShaderThatDeclaresIt)
 {
     // Wallpaper Engine's model shaders (generic4 and the family around it) read
     // the signed tangent of a normal-mapped model from `attribute vec4
-    // a_Tangent4`, and both renderers hand a vertex input the mesh attribute of
+    // a_Tangent4`, and the renderer hands a vertex input the mesh attribute of
     // the same name. The model parser named its tangent `a_Tangent`, so the
     // input found none and read the first buffer from offset zero: the vertex
     // position and, in a model without bones, the normal's x. The tangent frame
@@ -4964,9 +4789,9 @@ TEST_F(MetalSceneDraw, AModelsTangentReachesTheShaderThatDeclaresItOnBothRendere
                 "v_Tangent * 0.6 + v_Bitangent * 0.48 + v_Normal * 0.64", perturbed },
     };
 
-    for (const bool native : { false, true }) {
+    {
         for (const auto& part : shown) {
-            const std::string name = std::string("mdl-tangent-") + (native ? "native-" : "compat-") +
+            const std::string name = std::string("mdl-tangent-") +
                                      part.name;
             SCOPED_TRACE(name);
             const auto project = WriteFixture(root_ / name);
@@ -5008,11 +4833,10 @@ TEST_F(MetalSceneDraw, AModelsTangentReachesTheShaderThatDeclaresItOnBothRendere
             auto material = source_mesh->MaterialSlotPtr(0);
             ASSERT_NE(material, nullptr);
             node->AddMesh(MakeMdlQuadMesh(material));
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 1, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
             // Four corners and the middle of the card, which covers x 64..320
@@ -5031,7 +4855,7 @@ TEST_F(MetalSceneDraw, AModelsTangentReachesTheShaderThatDeclaresItOnBothRendere
     }
 }
 
-TEST_F(MetalSceneDraw, ABooleanMultipliedIntoAStepMaskClipsItOnBothRenderers)
+TEST_F(MetalSceneDraw, ABooleanMultipliedIntoAStepMaskClipsIt)
 {
     // HLSL promotes a bool to a number, so an author masks with `int bar =
     // step(..); bar *= isLeft;`. The legalizer retypes the `int` to float
@@ -5042,8 +4866,8 @@ TEST_F(MetalSceneDraw, ABooleanMultipliedIntoAStepMaskClipsItOnBothRenderers)
     // booleans cut them apart, so the card is white above and below a black
     // band and nowhere else.
     std::map<std::string, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
-        const std::string name = native ? "step-bool-native" : "step-bool-compat";
+    {
+        const std::string name = "step-bool";
         const auto project     = WriteFixture(root_ / name);
         const auto file        = [&](const std::string& path, const std::string& text) {
             std::filesystem::create_directories((root_ / name / path).parent_path());
@@ -5079,12 +4903,11 @@ TEST_F(MetalSceneDraw, ABooleanMultipliedIntoAStepMaskClipsItOnBothRenderers)
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
         auto& picture = pictures[name];
-        picture       = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
+        picture       = DrawWithRenderer(*loaded.scene, 384, 256, 1, 1.0 / 60.0);
         ASSERT_TRUE(picture.error.empty()) << name << ": " << picture.error;
         ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u) << name;
     }
@@ -5103,21 +4926,19 @@ TEST_F(MetalSceneDraw, ABooleanMultipliedIntoAStepMaskClipsItOnBothRenderers)
         }
         EXPECT_LT(grey(20, 70)[0], 16) << "the clear colour outside the card";
     }
-    EXPECT_EQ(pictures.at("step-bool-native").rgb, pictures.at("step-bool-compat").rgb)
-        << "the renderers draw the masked bars differently";
 }
 
-TEST_F(MetalSceneDraw, AScreenReadBeforeAnyDrawSeesTheBackgroundEveryFrameOnBothRenderers)
+TEST_F(MetalSceneDraw, AScreenReadBeforeAnyDrawSeesTheBackgroundEveryFrame)
 {
     // The only layer blends with the screen, so the first thing each frame
-    // does to the scene's image is copy it for that layer to read. The
-    // compatibility backend has cleared it to the background by then; here the
-    // blend adds a quarter of red to what it reads. Reading an image nothing
+    // does to the scene's image is copy it for that layer to read. The image
+    // has been cleared to the background by then; here the blend adds a
+    // quarter of red to what it reads. Reading an image nothing
     // cleared gives no background and no alpha, and reading the previous
     // frame's picture adds the red up frame after frame.
-    std::map<bool, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
-        const std::string name    = native ? "early-read-native" : "early-read-compat";
+    RendererPicture picture;
+    {
+        const std::string name    = "early-read";
         const auto        project = WriteColorBlendFixture(root_ / name, R"("colorBlendMode":2)");
         std::ofstream(root_ / name / "shaders/blend_probe.frag")
             << "uniform sampler2D g_Texture0;\n"
@@ -5137,81 +4958,72 @@ TEST_F(MetalSceneDraw, AScreenReadBeforeAnyDrawSeesTheBackgroundEveryFrameOnBoth
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
-        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
-        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+        picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
     }
-    const auto& rgb = pictures[true].rgb;
+    const auto& rgb = picture.rgb;
     ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
     const std::size_t centre = (128u * 384u + 192u) * 3u;
     EXPECT_NEAR(rgb[centre + 0], 64, 2) << "the blend read something other than the background";
     EXPECT_NEAR(rgb[centre + 1], 64, 2) << "the blend did not read the background";
-    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
-        << "the native renderer read another screen than the compatibility renderer";
 }
 
-TEST_F(MetalSceneDraw, AnAddColorBlendLayerIsAddedOntoTheSceneOnBothRenderers)
+TEST_F(MetalSceneDraw, AnAddColorBlendLayerIsAddedOntoTheScene)
 {
     // Wallpaper Engine draws a layer whose colour blend mode is 31 ("add") with
     // additive blending straight onto the scene, not through its blend shader:
     // half-transparent red over green 0.25 adds half its red. Drawn through the
     // passthrough it would instead be mixed over the green by its alpha.
-    std::map<bool, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
-        const std::string name    = native ? "add-blend-native" : "add-blend-compat";
+    RendererPicture picture;
+    {
+        const std::string name    = "add-blend";
         const auto        project = WriteColorBlendFixture(root_ / name,
                                                           R"("colorBlendMode":31,"alpha":0.5)");
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
-        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
-        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+        picture = DrawWithRenderer(*loaded.scene, 384, 256, 1, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
     }
-    const auto& rgb = pictures[true].rgb;
+    const auto& rgb = picture.rgb;
     ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
     const std::size_t centre = (128u * 384u + 192u) * 3u;
     EXPECT_NEAR(rgb[centre + 0], 128, 2) << "the layer's red was not added at its alpha";
     EXPECT_NEAR(rgb[centre + 1], 64, 2) << "the layer covered the scene instead of adding to it";
-    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
-        << "the native renderer added the layer differently from the compatibility renderer";
 }
 
-TEST_F(MetalSceneDraw, AColorBlendLayersColourAndAlphaApplyOnceOnBothRenderers)
+TEST_F(MetalSceneDraw, AColorBlendLayersColourAndAlphaApplyOnce)
 {
     // A layer with a colour blend mode is drawn with its colour and alpha, then
     // blended onto the screen by Wallpaper Engine's passthrough, which it hands
     // a white `g_Color4`. Red tinted to half and at half alpha mixes a quarter
     // red over green 0.25 at half; taking the tint and alpha a second time in
     // the passthrough would leave a sixteenth of red at a quarter.
-    std::map<bool, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
-        const std::string name    = native ? "color-blend-native" : "color-blend-compat";
+    RendererPicture picture;
+    {
+        const std::string name    = "color-blend";
         const auto        project = WriteColorBlendFixture(
             root_ / name, R"("colorBlendMode":2,"alpha":0.5,"color":"0.5 1 1")");
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
-        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
-        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+        picture = DrawWithRenderer(*loaded.scene, 384, 256, 1, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
     }
-    const auto& rgb = pictures[true].rgb;
+    const auto& rgb = picture.rgb;
     ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
     const std::size_t centre = (128u * 384u + 192u) * 3u;
     EXPECT_NEAR(rgb[centre + 0], 64, 2) << "the layer's tint or alpha was not taken once";
     EXPECT_NEAR(rgb[centre + 1], 32, 2) << "the layer's alpha was not taken once";
-    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
-        << "the native renderer blended the layer differently from the compatibility renderer";
 }
 
 namespace
@@ -5279,7 +5091,7 @@ std::array<int, 3> CentreOf(const RendererPicture& picture)
 }
 } // namespace
 
-TEST_F(MetalSceneDraw, AnImageLayersBrightnessTintsItOnlyWhereTheSceneRendersHdrOnBothRenderers)
+TEST_F(MetalSceneDraw, AnImageLayersBrightnessTintsItOnlyWhereTheSceneRendersHdr)
 {
     // Wallpaper Engine multiplies a layer's colour by its brightness into the
     // `g_Color4` it draws the layer with, and only in a scene that renders HDR:
@@ -5299,9 +5111,9 @@ TEST_F(MetalSceneDraw, AnImageLayersBrightnessTintsItOnlyWhereTheSceneRendersHdr
             for (const bool with_effect : { false, true }) {
                 SCOPED_TRACE(std::string(mode.hdr ? "hdr" : "ldr") + (mode.bloom ? " bloom" : " no bloom") +
                              (declares_brightness ? " g_Brightness" : "") + (with_effect ? " effect" : ""));
-                std::map<bool, RendererPicture> pictures;
-                for (const bool native : { false, true }) {
-                    const std::string name = std::string("brightness-") + (native ? "native-" : "compat-") +
+                RendererPicture picture;
+                {
+                    const std::string name = std::string("brightness-") +
                                              (mode.hdr ? "h" : "l") + (mode.bloom ? "b" : "n") +
                                              (declares_brightness ? "g" : "c") + (with_effect ? "e" : "p");
                     const auto project = WriteLayerBrightnessFixture(
@@ -5310,26 +5122,23 @@ TEST_F(MetalSceneDraw, AnImageLayersBrightnessTintsItOnlyWhereTheSceneRendersHdr
                     LoadedScene loaded;
                     std::string error;
                     ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-                    if (native) {
-                        const auto selection = SelectSceneBackend(*loaded.scene);
-                        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-                    }
-                    pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
-                    ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-                    const auto centre = CentreOf(pictures[native]);
+                    const auto selection = SelectSceneBackend(*loaded.scene);
+                    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+                    picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
+                    ASSERT_TRUE(picture.error.empty()) << picture.error;
+                    const auto centre = CentreOf(picture);
                     for (std::size_t c = 0; c < 3; ++c) {
                         EXPECT_NEAR(centre[c], mode.expected[c], 2)
-                            << (native ? "native" : "compatibility") << " channel " << c;
+                            << "channel " << c;
                     }
                 }
-                EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
-                    << "the native renderer tinted the layer differently from the compatibility renderer";
             }
         }
     }
 }
 
-TEST_F(MetalSceneDraw, AnImageLayersBoundBrightnessFollowsItsPropertyAndScriptOnBothRenderers)
+TEST_F(MetalSceneDraw, AnImageLayersBoundBrightnessFollowsItsPropertyAndScript)
 {
     // A brightness a user property or a script drives is live, as the colour and
     // the alpha are: the property's value replaces the scene file's, and a change
@@ -5352,8 +5161,8 @@ TEST_F(MetalSceneDraw, AnImageLayersBoundBrightnessFollowsItsPropertyAndScriptOn
                            Case { scripted, false, std::nullopt, { 204, 204, 204 } } }) {
         for (const bool with_effect : { false, true }) {
             SCOPED_TRACE(std::string(c.fields) + (c.hdr ? " hdr" : " ldr") + (with_effect ? " effect" : ""));
-            std::map<bool, RendererPicture> pictures;
-            for (const bool native : { false, true }) {
+            RendererPicture picture;
+            {
                 const std::string name = "bound-brightness-" + std::to_string(index++);
                 const auto project = WriteLayerBrightnessFixture(root_ / name, c.hdr, true, false,
                                                                  with_effect, c.fields);
@@ -5361,23 +5170,21 @@ TEST_F(MetalSceneDraw, AnImageLayersBoundBrightnessFollowsItsPropertyAndScriptOn
                 std::string error;
                 ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
                 Scene& scene = *loaded.scene;
-                pictures[native] = DrawWithRenderer(
-                    scene, native, 384, 256, 4, 1.0 / 60.0, [&](int frame) {
+                picture = DrawWithRenderer(
+                    scene, 384, 256, 4, 1.0 / 60.0, [&](int frame) {
                         if (frame == 1 && c.glow_at_frame_one.has_value()) {
                             scene.runtime->ApplyProjectPropertyOverride(
                                 { { "glow", RuntimeScalarValue::Float(*c.glow_at_frame_one) } });
                         }
                     });
-                ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-                const auto centre = CentreOf(pictures[native]);
+                ASSERT_TRUE(picture.error.empty()) << picture.error;
+                const auto centre = CentreOf(picture);
                 for (std::size_t channel = 0; channel < 3; ++channel) {
                     EXPECT_NEAR(centre[channel], c.expected[channel], 2)
-                        << (native ? "native" : "compatibility") << " channel " << channel;
+                        << "channel " << channel;
                 }
                 EXPECT_EQ(scene.runtime->scriptErrorCount(), 0u);
             }
-            EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
-                << "the native renderer tinted the layer differently from the compatibility renderer";
         }
     }
 }
@@ -5534,12 +5341,11 @@ constexpr FoggedScene kFoggedScenes[] = {
                 R"("fogheightenddensity":1)" },
 };
 
-/// `frames` frames of the fogged-layer fixture from one renderer, 384 x 256. A
-/// picture with an `error` is none: the scene did not load, or the native
-/// renderer would not take it.
+/// `frames` frames of the fogged-layer fixture, 384 x 256. A picture with an
+/// `error` is none: the scene did not load, or the renderer would not take it.
 RendererPicture DrawFoggedLayer(const std::filesystem::path& root, const std::string& name,
                                 std::string_view fog_json, std::string_view effects_json,
-                                bool material_takes_fog, bool native,
+                                bool material_takes_fog,
                                 std::string_view layer_keys_json = {}, int frames = 1)
 {
     RendererPicture picture;
@@ -5548,14 +5354,12 @@ RendererPicture DrawFoggedLayer(const std::filesystem::path& root, const std::st
                                 layer_keys_json);
     LoadedScene loaded;
     if (! LoadScene(project, root / (name + "-cache"), loaded, picture.error)) return picture;
-    if (native) {
-        const auto selection = SelectSceneBackend(*loaded.scene);
-        if (selection.failed()) {
-            picture.error = selection.failure_reason;
-            return picture;
-        }
+    const auto selection = SelectSceneBackend(*loaded.scene);
+    if (selection.failed()) {
+        picture.error = selection.failure_reason;
+        return picture;
     }
-    picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+    picture = DrawWithRenderer(*loaded.scene, 384, 256, frames, 1.0 / 60.0);
     if (picture.error.empty() && picture.rgb.size() != 384u * 256u * 3u) {
         picture.error = "the picture is not 384 x 256";
     }
@@ -5621,7 +5425,7 @@ void ExpectFoggedLikeThePlainLayer(const RendererPicture& plain, const RendererP
     }
 }
 
-TEST_F(MetalSceneDraw, AnEffectLayerIsFoggedWhereItSitsAsAPlainLayerIsOnBothRenderers)
+TEST_F(MetalSceneDraw, AnEffectLayerIsFoggedWhereItSitsAsAPlainLayerIs)
 {
     // Fog is the distance, or height, of a point of the layer from the eye. An
     // effect layer is first drawn into a texture of its own, in the layer's
@@ -5634,22 +5438,19 @@ TEST_F(MetalSceneDraw, AnEffectLayerIsFoggedWhereItSitsAsAPlainLayerIsOnBothRend
     for (const auto& fog : kFoggedScenes) {
         SCOPED_TRACE(fog.name);
         std::map<std::string, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
+        {
             for (const bool effect : { false, true }) {
                 const std::string name = std::string("fogged-") + fog.name +
-                                         (effect ? "-effect" : "-plain") +
-                                         (native ? "-native" : "-compat");
+                                         (effect ? "-effect" : "-plain");
                 auto& picture = pictures[name];
                 picture = DrawFoggedLayer(root_, name, fog.json, effect ? kFoggedCopyEffect : "[]",
-                                          true, native);
+                                          true);
                 ASSERT_TRUE(picture.error.empty()) << picture.error;
             }
         }
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(native ? "native" : "compatibility");
-            const auto suffix = std::string(native ? "-native" : "-compat");
-            const auto& plain  = pictures.at(std::string("fogged-") + fog.name + "-plain" + suffix);
-            const auto& effect = pictures.at(std::string("fogged-") + fog.name + "-effect" + suffix);
+        {
+            const auto& plain  = pictures.at(std::string("fogged-") + fog.name + "-plain");
+            const auto& effect = pictures.at(std::string("fogged-") + fog.name + "-effect");
             const auto card = FindFoggedCard(plain);
             ASSERT_LT(card.left, card.right) << "the plain layer drew nothing";
             ASSERT_LT(card.top, card.bottom) << "the plain layer drew nothing";
@@ -5660,13 +5461,10 @@ TEST_F(MetalSceneDraw, AnEffectLayerIsFoggedWhereItSitsAsAPlainLayerIsOnBothRend
                 << "the plain layer is not fogged";
             ExpectFoggedLikeThePlainLayer(plain, effect);
         }
-        EXPECT_EQ(pictures.at(std::string("fogged-") + fog.name + "-effect-native").rgb,
-                  pictures.at(std::string("fogged-") + fog.name + "-effect-compat").rgb)
-            << "the renderers fogged the effect layer differently";
     }
 }
 
-TEST_F(MetalSceneDraw, AnEffectLayersColourAndAlphaAreAppliedOnceWhenItIsFoggedWhereItSitsOnBothRenderers)
+TEST_F(MetalSceneDraw, AnEffectLayersColourAndAlphaAreAppliedOnceWhenItIsFoggedWhereItSits)
 {
     // The layer's first pass already carries its colour and alpha, so the pass
     // that fogs it where it sits draws with a white colour: with the layer's own
@@ -5674,22 +5472,19 @@ TEST_F(MetalSceneDraw, AnEffectLayersColourAndAlphaAreAppliedOnceWhenItIsFoggedW
     for (const auto& fog : kFoggedScenes) {
         SCOPED_TRACE(fog.name);
         std::map<std::string, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
+        {
             for (const bool effect : { false, true }) {
                 const std::string name = std::string("tinted-") + fog.name +
-                                         (effect ? "-effect" : "-plain") +
-                                         (native ? "-native" : "-compat");
+                                         (effect ? "-effect" : "-plain");
                 auto& picture = pictures[name];
                 picture = DrawFoggedLayer(root_, name, fog.json, effect ? kFoggedCopyEffect : "[]",
-                                          true, native, kFoggedLayerTint);
+                                          true, kFoggedLayerTint);
                 ASSERT_TRUE(picture.error.empty()) << picture.error;
             }
         }
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(native ? "native" : "compatibility");
-            const auto suffix = std::string(native ? "-native" : "-compat");
-            const auto& plain  = pictures.at(std::string("tinted-") + fog.name + "-plain" + suffix);
-            const auto& effect = pictures.at(std::string("tinted-") + fog.name + "-effect" + suffix);
+        {
+            const auto& plain  = pictures.at(std::string("tinted-") + fog.name + "-plain");
+            const auto& effect = pictures.at(std::string("tinted-") + fog.name + "-effect");
             const auto card = FindFoggedCard(plain);
             ASSERT_LT(card.left, card.right) << "the plain layer drew nothing";
             const int cx = card.left + card.width() / 2;
@@ -5701,30 +5496,25 @@ TEST_F(MetalSceneDraw, AnEffectLayersColourAndAlphaAreAppliedOnceWhenItIsFoggedW
                 << "the plain layer is not tinted";
             ExpectFoggedLikeThePlainLayer(plain, effect);
         }
-        EXPECT_EQ(pictures.at(std::string("tinted-") + fog.name + "-effect-native").rgb,
-                  pictures.at(std::string("tinted-") + fog.name + "-effect-compat").rgb)
-            << "the renderers drew the tinted effect layer differently";
     }
 }
 
-TEST_F(MetalSceneDraw, AnEffectLayerWhoseEffectsAScriptSwitchesIsFoggedWhereItSitsOnBothRenderers)
+TEST_F(MetalSceneDraw, AnEffectLayerWhoseEffectsAScriptSwitchesIsFoggedWhereItSits)
 {
     // The pass that fogs the layer is part of the chain whichever effects a
     // script has on: with the only effect off the layer is still drawn through
     // it, fogged where it sits, and with the effect on it is the same layer.
     for (const auto& fog : kFoggedScenes) {
         SCOPED_TRACE(fog.name);
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(native ? "native" : "compatibility");
-            const std::string suffix = std::string("-") + fog.name + (native ? "-native" : "-compat");
-            const auto plain = DrawFoggedLayer(root_, "scripted-plain" + suffix, fog.json, "[]", true,
-                                               native);
+        {
+            const std::string suffix = std::string("-") + fog.name;
+            const auto plain = DrawFoggedLayer(root_, "scripted-plain" + suffix, fog.json, "[]", true);
             ASSERT_TRUE(plain.error.empty()) << plain.error;
             for (const int frames : { 10, 45 }) {
                 SCOPED_TRACE(frames);
                 const auto effect = DrawFoggedLayer(
                     root_, "scripted-effect-" + std::to_string(frames) + suffix, fog.json,
-                    kFoggedScriptedCopyEffect, true, native, {}, frames);
+                    kFoggedScriptedCopyEffect, true, {}, frames);
                 ASSERT_TRUE(effect.error.empty()) << effect.error;
                 ExpectFoggedLikeThePlainLayer(plain, effect);
             }
@@ -5732,7 +5522,7 @@ TEST_F(MetalSceneDraw, AnEffectLayerWhoseEffectsAScriptSwitchesIsFoggedWhereItSi
     }
 }
 
-TEST_F(MetalSceneDraw, AnEffectLayerThatMakesItsOwnPictureIsFoggedWhereItSitsOnBothRenderers)
+TEST_F(MetalSceneDraw, AnEffectLayerThatMakesItsOwnPictureIsFoggedWhereItSits)
 {
     // A layer with `copybackground` off does not draw its own pass: its effect is
     // given an empty picture and makes the card itself. The layer's material still
@@ -5743,19 +5533,17 @@ TEST_F(MetalSceneDraw, AnEffectLayerThatMakesItsOwnPictureIsFoggedWhereItSitsOnB
     // a black card), and its red must be the plain layer's, fogged where it sits.
     for (const auto& fog : kFoggedScenes) {
         SCOPED_TRACE(fog.name);
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(native ? "native" : "compatibility");
-            const std::string suffix = std::string("-") + fog.name + (native ? "-native" : "-compat");
-            const auto plain = DrawFoggedLayer(root_, "generated-plain" + suffix, fog.json, "[]", true,
-                                               native);
+        {
+            const std::string suffix = std::string("-") + fog.name;
+            const auto plain = DrawFoggedLayer(root_, "generated-plain" + suffix, fog.json, "[]", true);
             ASSERT_TRUE(plain.error.empty()) << plain.error;
             const auto generated = DrawFoggedLayer(root_, "generated-effect" + suffix, fog.json,
-                                                   kFoggedUnseenEffect, true, native,
+                                                   kFoggedUnseenEffect, true,
                                                    R"("copybackground":false,)");
             ASSERT_TRUE(generated.error.empty()) << generated.error;
             // The same effect over a layer that draws its own pass: black.
             const auto drawn = DrawFoggedLayer(root_, "generated-drawn" + suffix, fog.json,
-                                               kFoggedUnseenEffect, true, native);
+                                               kFoggedUnseenEffect, true);
             ASSERT_TRUE(drawn.error.empty()) << drawn.error;
 
             const auto card = FindFoggedCard(plain);
@@ -5777,28 +5565,24 @@ TEST_F(MetalSceneDraw, AnEffectLayerThatMakesItsOwnPictureIsFoggedWhereItSitsOnB
     }
 }
 
-TEST_F(MetalSceneDraw, AnEffectLayerWhoseMaterialTakesNoFogIsNotFoggedOnBothRenderers)
+TEST_F(MetalSceneDraw, AnEffectLayerWhoseMaterialTakesNoFogIsNotFogged)
 {
     // The pass that fogs an effect layer where it sits stands in for the fog its
     // own material would have taken. A material that turns the shader's `FOG`
     // combo off is not fogged as a plain layer, and its effects must not fog it.
     const std::string fog = kFoggedScenes[0].json;
     std::map<std::string, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
+    {
         for (const bool effect : { false, true }) {
-            const std::string name = std::string("unfogged-") + (effect ? "effect" : "plain") +
-                                     (native ? "-native" : "-compat");
+            const std::string name = std::string("unfogged-") + (effect ? "effect" : "plain");
             auto& picture = pictures[name];
-            picture = DrawFoggedLayer(root_, name, fog, effect ? kFoggedCopyEffect : "[]", false,
-                                      native);
+            picture = DrawFoggedLayer(root_, name, fog, effect ? kFoggedCopyEffect : "[]", false);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
         }
     }
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
-        const auto suffix = std::string(native ? "-native" : "-compat");
-        const auto& plain  = pictures.at("unfogged-plain" + suffix);
-        const auto& effect = pictures.at("unfogged-effect" + suffix);
+    {
+        const auto& plain  = pictures.at("unfogged-plain");
+        const auto& effect = pictures.at("unfogged-effect");
         const auto card = FindFoggedCard(plain);
         ASSERT_LT(card.left, card.right) << "the plain layer drew nothing";
         ASSERT_LT(card.top, card.bottom) << "the plain layer drew nothing";
@@ -5811,11 +5595,9 @@ TEST_F(MetalSceneDraw, AnEffectLayerWhoseMaterialTakesNoFogIsNotFoggedOnBothRend
                 << y;
         }
     }
-    EXPECT_EQ(pictures.at("unfogged-effect-native").rgb, pictures.at("unfogged-effect-compat").rgb)
-        << "the renderers drew the effect layer differently";
 }
 
-TEST_F(MetalSceneDraw, AnEffectsSwappedBuffersAccumulateAndItsFloatBuffersKeepTheirSignOnBothRenderers)
+TEST_F(MetalSceneDraw, AnEffectsSwappedBuffersAccumulateAndItsFloatBuffersKeepTheirSign)
 {
     // Wallpaper Engine's fluid simulation keeps its state in buffers it swaps
     // after every frame, sized by `fit` and in float formats. Here one pass adds
@@ -5823,9 +5605,9 @@ TEST_F(MetalSceneDraw, AnEffectsSwappedBuffersAccumulateAndItsFloatBuffersKeepTh
     // negative value into a two-channel float buffer, and the last shows both:
     // after three frames the sum is three quarters (one quarter if the swap were
     // lost) and the negative value survives (zero in an 8-bit buffer).
-    std::map<bool, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
-        const std::string name = native ? "swap-native" : "swap-compat";
+    RendererPicture picture;
+    {
+        const std::string name = "swap";
         const auto project = WriteFixture(root_ / name);
         const std::string vertex =
             "uniform mat4 g_ModelViewProjectionMatrix;\n"
@@ -5880,20 +5662,17 @@ TEST_F(MetalSceneDraw, AnEffectsSwappedBuffersAccumulateAndItsFloatBuffersKeepTh
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
-        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
-        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+        picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
     }
-    const auto& rgb = pictures[true].rgb;
+    const auto& rgb = picture.rgb;
     ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
     const std::size_t centre = (128u * 384u + 192u) * 3u;
     EXPECT_NEAR(rgb[centre + 0], 191, 3) << "the swapped buffer did not carry last frame's sum";
     EXPECT_NEAR(rgb[centre + 1], 128, 3) << "the float buffer lost its sign";
-    EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
-        << "the native renderer ran the effect's buffers differently from the compatibility renderer";
 }
 
 TEST_F(MetalSceneDraw, AnIntermediateTargetIsDrawnCopiedAndResampledInOneFrame)
@@ -7677,7 +7456,7 @@ void AdvanceSceneFrame(MetalRender& render, Scene& scene)
 
 } // namespace
 
-TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainTextOnBothRenderers)
+TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainText)
 {
     // An effect that is off builds nothing, so a text layer whose every effect
     // is off has no chain to put it on screen: Wallpaper Engine draws it as plain
@@ -7689,11 +7468,10 @@ TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainTextOnBothRe
         }
         return count;
     };
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         std::map<bool, std::size_t> pixels;
         for (const bool hidden_effect : { false, true }) {
-            const std::string name = std::string("text-effects-off-") + (native ? "native-" : "compat-") +
+            const std::string name = std::string("text-effects-off-") +
                                      (hidden_effect ? "hidden" : "plain");
             const auto project = WriteTextFixture(
                 root_ / name, "CLOCK", false, {},
@@ -7702,7 +7480,7 @@ TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffIsDrawnAsPlainTextOnBothRe
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             pixels[hidden_effect] = lit(picture);
         }
@@ -7942,7 +7720,7 @@ constexpr const char* kCopyEffect = R"([{"file":"effects/probe.json","visible":t
 
 } // namespace
 
-TEST_F(MetalSceneDraw, AnEffectsTextIsComposedOverTheSceneBehindItAsWallpaperEngineDoesOnBothRenderers)
+TEST_F(MetalSceneDraw, AnEffectsTextIsComposedOverTheSceneBehindItAsWallpaperEngineDoes)
 {
     // Wallpaper Engine draws a text layer that has a visible effect through a composite
     // of its own: the card starts as the scene behind it with no alpha, the glyphs are
@@ -7956,13 +7734,12 @@ TEST_F(MetalSceneDraw, AnEffectsTextIsComposedOverTheSceneBehindItAsWallpaperEng
     // the model for a chain that leaves alpha alone; whether a skew chain follows it is open,
     // docs/testing/renderer.md.) The backdrop's four colours show the card is seeded with
     // the scene behind it the right way up.
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         for (const double alpha : { 1.0, 0.65, 0.5 }) {
             for (const bool through_effect : { false, true }) {
                 SCOPED_TRACE(std::string("alpha ") + std::to_string(alpha) +
                              (through_effect ? " through an effect" : " plain"));
-                const std::string name = std::string("text-composite-") + (native ? "native-" : "compat-") +
+                const std::string name = std::string("text-composite-") +
                                          std::to_string(static_cast<int>(alpha * 100.0)) +
                                          (through_effect ? "-fx" : "-plain");
                 const auto project = WriteTextOverBackdropFixture(
@@ -7970,7 +7747,7 @@ TEST_F(MetalSceneDraw, AnEffectsTextIsComposedOverTheSceneBehindItAsWallpaperEng
                 LoadedScene loaded;
                 std::string error;
                 ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-                const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
                 ASSERT_TRUE(picture.error.empty()) << picture.error;
                 ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
                 // How far a covered pixel is from the background towards the text's black.
@@ -7988,7 +7765,7 @@ TEST_F(MetalSceneDraw, AnEffectsTextIsComposedOverTheSceneBehindItAsWallpaperEng
     }
 }
 
-TEST_F(MetalSceneDraw, ATurnedAndScaledEffectsTextIsComposedOverTheSceneBehindItOnBothRenderers)
+TEST_F(MetalSceneDraw, ATurnedAndScaledEffectsTextIsComposedOverTheSceneBehindIt)
 {
     // The scene behind the card is found where the card lies in the scene, whatever the layer's
     // transform: a stem turned through 0.6 radians and scaled by 1.5 about the point where the
@@ -7996,15 +7773,14 @@ TEST_F(MetalSceneDraw, ATurnedAndScaledEffectsTextIsComposedOverTheSceneBehindIt
     // quadrant's colour alone. A seed read where the card would lie unturned shows another
     // quadrant's colour in the channels the backdrop has none.
     constexpr double kAlpha = 0.5;
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
-        const std::string name = std::string("text-composite-turned-") + (native ? "native" : "compat");
+    {
+        const std::string name = std::string("text-composite-turned-");
         const auto project = WriteTextOverBackdropFixture(root_ / name, kAlpha, kCopyEffect,
                                                           BackdropOptions { .turned = true });
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
         ASSERT_TRUE(picture.error.empty()) << picture.error;
         ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
         for (const auto& quadrant : kQuadrants) {
@@ -8099,7 +7875,7 @@ BackdropOptions OpaqueCaption(nlohmann::json extra = nlohmann::json::object())
 
 } // namespace
 
-TEST_F(MetalSceneDraw, AnOpaqueBackgroundFillsTheCardAtTheLayersAlphaOnBothRenderers)
+TEST_F(MetalSceneDraw, AnOpaqueBackgroundFillsTheCardAtTheLayersAlpha)
 {
     // Wallpaper Engine fills the card with the background colour at the layer's alpha before the
     // glyphs, or, for a card that goes through effects, clears the composite to that colour and
@@ -8109,11 +7885,10 @@ TEST_F(MetalSceneDraw, AnOpaqueBackgroundFillsTheCardAtTheLayersAlphaOnBothRende
     // the glyph leaves, which the two ways of drawing it differ in (the glyph over the fill, or the
     // glyph blended into the cleared composite).
     constexpr double kAlpha = 0.5;
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         for (const bool through_effect : { false, true }) {
             SCOPED_TRACE(through_effect ? "through an effect" : "drawn directly");
-            const std::string name = std::string("text-plate-") + (native ? "native-" : "compat-") +
+            const std::string name = std::string("text-plate-") +
                                      (through_effect ? "fx" : "plain");
             const auto project = WriteTextOverBackdropFixture(
                 root_ / name, kAlpha, through_effect ? std::string_view(kCopyEffect) : std::string_view(),
@@ -8121,7 +7896,7 @@ TEST_F(MetalSceneDraw, AnOpaqueBackgroundFillsTheCardAtTheLayersAlphaOnBothRende
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
             for (const auto& quadrant : kQuadrants) {
@@ -8176,7 +7951,7 @@ TEST_F(MetalSceneDraw, AnOpaqueBackgroundFillsTheCardAtTheLayersAlphaOnBothRende
     }
 }
 
-TEST_F(MetalSceneDraw, AnOpaqueBackgroundFillsTheCardAndNotTheRoomAStyleNeedsAroundItOnBothRenderers)
+TEST_F(MetalSceneDraw, AnOpaqueBackgroundFillsTheCardAndNotTheRoomAStyleNeedsAroundIt)
 {
     // The raster of a styled text is larger than its card by the room the outline, blur and shadow
     // reach into, and the fill is the card's rectangle: Wallpaper Engine's quad is the card, and a
@@ -8185,14 +7960,13 @@ TEST_F(MetalSceneDraw, AnOpaqueBackgroundFillsTheCardAndNotTheRoomAStyleNeedsAro
     BackdropOptions options = OpaqueCaption({ { "padding", "6 6" }, { "outline", true }, { "outlinethickness", 4 },
                                               { "dropshadow", true }, { "dropshadowsize", 6 } });
     constexpr double kAlpha = 1.0;
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
-        const std::string name = std::string("text-plate-style-") + (native ? "native" : "compat");
+    {
+        const std::string name = std::string("text-plate-style-");
         const auto project = WriteTextOverBackdropFixture(root_ / name, kAlpha, {}, options);
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
         ASSERT_TRUE(picture.error.empty()) << picture.error;
         for (const auto& quadrant : kQuadrants) {
             SCOPED_TRACE(quadrant.name);
@@ -8215,15 +7989,14 @@ TEST_F(MetalSceneDraw, AnOpaqueBackgroundFillsTheCardAndNotTheRoomAStyleNeedsAro
     }
 }
 
-TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffKeepsItsSingleAlphaOnBothRenderers)
+TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffKeepsItsSingleAlpha)
 {
     // With every effect off there is no composite: the glyphs go straight onto the scene
     // by their alpha, as for a layer with no effects at all.
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         std::map<bool, RendererPicture> pictures;
         for (const bool hidden_effect : { false, true }) {
-            const std::string name = std::string("text-composite-off-") + (native ? "native-" : "compat-") +
+            const std::string name = std::string("text-composite-off-") +
                                      (hidden_effect ? "hidden" : "plain");
             const auto project = WriteTextOverBackdropFixture(
                 root_ / name, 0.5,
@@ -8231,7 +8004,7 @@ TEST_F(MetalSceneDraw, ATextLayerWhoseEffectsAreAllOffKeepsItsSingleAlphaOnBothR
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            pictures[hidden_effect] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            pictures[hidden_effect] = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
             ASSERT_TRUE(pictures[hidden_effect].error.empty()) << pictures[hidden_effect].error;
         }
         EXPECT_EQ(pictures[true].rgb, pictures[false].rgb);
@@ -8256,7 +8029,7 @@ constexpr std::array<std::pair<int, bool>, 3> kScriptedFrames { {
 
 } // namespace
 
-TEST_F(MetalSceneDraw, ATextLayersCompositeFollowsItsScriptedEffectsOnBothRenderers)
+TEST_F(MetalSceneDraw, ATextLayersCompositeFollowsItsScriptedEffects)
 {
     // A script that switches the only effect on from 0.5 s to 1 s: Wallpaper Engine counts
     // the visible effects as it draws, so the layer is a composite (`TextCompositeReach`)
@@ -8264,18 +8037,16 @@ TEST_F(MetalSceneDraw, ATextLayersCompositeFollowsItsScriptedEffectsOnBothRender
     // effect is off the chain ends in the shipped passthrough, which draws the card times the
     // layer's `g_Color4`: the text must still be there, and where it was.
     constexpr float kAlpha = 0.5f;
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         std::map<int, RendererPicture> pictures;
         for (const auto& [frames, composite] : kScriptedFrames) {
             SCOPED_TRACE(frames);
-            const std::string name = std::string("text-composite-scripted-") +
-                                     (native ? "native-" : "compat-") + std::to_string(frames);
+            const std::string name = std::string("text-composite-scripted-") + std::to_string(frames);
             const auto project = WriteTextOverBackdropFixture(root_ / name, kAlpha, kScriptedCopyEffect);
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            pictures[frames] = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            pictures[frames] = DrawWithRenderer(*loaded.scene, 384, 256, frames, 1.0 / 60.0);
             ASSERT_TRUE(pictures[frames].error.empty()) << pictures[frames].error;
             for (const auto& quadrant : kQuadrants) {
                 SCOPED_TRACE(quadrant.name);
@@ -8305,7 +8076,7 @@ TEST_F(MetalSceneDraw, ATextLayersCompositeFollowsItsScriptedEffectsOnBothRender
     }
 }
 
-TEST_F(MetalSceneDraw, AnAddLayersTextIsAddedWhileItsScriptedEffectsAreOffAndComposedWhileOneIsOnOnBothRenderers)
+TEST_F(MetalSceneDraw, AnAddLayersTextIsAddedWhileItsScriptedEffectsAreOffAndComposedWhileOneIsOn)
 {
     // Colour blend mode 31 ("add") draws a text layer without effects additively onto the
     // scene, and Wallpaper Engine forces the last pass of a chain translucent: so the layer
@@ -8315,17 +8086,16 @@ TEST_F(MetalSceneDraw, AnAddLayersTextIsAddedWhileItsScriptedEffectsAreOffAndCom
     constexpr float kAlpha = 0.5f;
     BackdropOptions options;
     options.caption = { { "color", "0 1 0" }, { "colorBlendMode", 31 } };
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         for (const auto& [frames, composite] : kScriptedFrames) {
             SCOPED_TRACE(frames);
-            const std::string name = std::string("text-composite-add-") + (native ? "native-" : "compat-") +
+            const std::string name = std::string("text-composite-add-") +
                                      std::to_string(frames);
             const auto project = WriteTextOverBackdropFixture(root_ / name, kAlpha, kScriptedCopyEffect, options);
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, frames, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             const auto green = StrongestInQuadrant(picture, kQuadrants[0], 1);
             const double reach = composite ? TextCompositeReach(kAlpha) : kAlpha;
@@ -8337,7 +8107,7 @@ TEST_F(MetalSceneDraw, AnAddLayersTextIsAddedWhileItsScriptedEffectsAreOffAndCom
     }
 }
 
-TEST_F(MetalSceneDraw, AnEffectsTextIsComposedOverTheSceneInTheHdrPipelineOnBothRenderers)
+TEST_F(MetalSceneDraw, AnEffectsTextIsComposedOverTheSceneInTheHdrPipeline)
 {
     // The composite's seed is read from the scene's own target, which is a 16-bit one in the
     // HDR pipeline, and the card it writes goes into 16-bit buffers there. The picture is the
@@ -8345,15 +8115,14 @@ TEST_F(MetalSceneDraw, AnEffectsTextIsComposedOverTheSceneInTheHdrPipelineOnBoth
     constexpr float kAlpha = 0.65f;
     BackdropOptions options;
     options.hdr = true;
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
-        const std::string name = std::string("text-composite-hdr-") + (native ? "native" : "compat");
+    {
+        const std::string name = std::string("text-composite-hdr-");
         const auto project = WriteTextOverBackdropFixture(root_ / name, kAlpha, kCopyEffect, options);
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         ASSERT_TRUE(loaded.scene->hdr);
-        const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
         ASSERT_TRUE(picture.error.empty()) << picture.error;
         ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
         for (const auto& quadrant : kQuadrants) {
@@ -8365,26 +8134,6 @@ TEST_F(MetalSceneDraw, AnEffectsTextIsComposedOverTheSceneInTheHdrPipelineOnBoth
             }
         }
     }
-}
-
-TEST_F(MetalSceneDraw, AnEffectsTextIsTheSamePictureOnBothRenderers)
-{
-    std::map<bool, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
-        const std::string name = std::string("text-composite-same-") + (native ? "native" : "compat");
-        const auto project = WriteTextOverBackdropFixture(root_ / name, 0.65, kCopyEffect);
-        LoadedScene loaded;
-        std::string error;
-        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
-        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-    }
-    ASSERT_EQ(pictures[true].rgb.size(), pictures[false].rgb.size());
-    int worst = 0;
-    for (std::size_t i = 0; i < pictures[true].rgb.size(); ++i) {
-        worst = std::max(worst, std::abs(int(pictures[true].rgb[i]) - int(pictures[false].rgb[i])));
-    }
-    EXPECT_LE(worst, 2) << "the renderers draw a composited text card differently";
 }
 
 namespace
@@ -8411,7 +8160,7 @@ void MakeSceneHdr(const std::filesystem::path& root)
 }
 } // namespace
 
-TEST_F(MetalSceneDraw, ATextLayersBrightnessDoesNothingOutsideTheHdrPipelineOnBothRenderers)
+TEST_F(MetalSceneDraw, ATextLayersBrightnessDoesNothingOutsideTheHdrPipeline)
 {
     // Wallpaper Engine multiplies a text layer's colour by its brightness only in
     // its HDR pipeline. Anywhere else the layer is drawn in its own colour whatever
@@ -8429,17 +8178,16 @@ TEST_F(MetalSceneDraw, ATextLayersBrightnessDoesNothingOutsideTheHdrPipelineOnBo
         // The shape of a layer whose effects are all off in a scene's file.
         { "dark-hidden-effect", R"(,"brightness":0,)" + hidden_effect },
     };
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         std::map<std::string, RendererPicture> pictures;
         for (const auto& variant : variants) {
-            const std::string name = std::string("text-brightness-ldr-") + (native ? "native-" : "compat-") + variant.name;
+            const std::string name = std::string("text-brightness-ldr-") + variant.name;
             const auto project = WriteTextFixture(root_ / name, "CLOCK", false, {}, variant.fields);
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             ASSERT_FALSE(loaded.scene->hdr);
-            pictures[variant.name] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            pictures[variant.name] = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
             ASSERT_TRUE(pictures[variant.name].error.empty()) << pictures[variant.name].error;
         }
         const auto peak = [](const RendererPicture& picture) {
@@ -8453,7 +8201,7 @@ TEST_F(MetalSceneDraw, ATextLayersBrightnessDoesNothingOutsideTheHdrPipelineOnBo
     }
 }
 
-TEST_F(MetalSceneDraw, ATextLayersBrightnessReachesTheHdrPipelineOnBothRenderers)
+TEST_F(MetalSceneDraw, ATextLayersBrightnessReachesTheHdrPipeline)
 {
     // In the HDR pipeline (the scene asks for HDR and has bloom on) the colour is
     // multiplied by the brightness: the same white text at brightness 0 draws
@@ -8465,11 +8213,10 @@ TEST_F(MetalSceneDraw, ATextLayersBrightnessReachesTheHdrPipelineOnBothRenderers
         }
         return count;
     };
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         std::map<std::string, std::size_t> pixels;
         for (const std::string_view brightness : { "0", "1" }) {
-            const std::string name = std::string("text-brightness-hdr-") + (native ? "native-" : "compat-") +
+            const std::string name = std::string("text-brightness-hdr-") +
                                      std::string(brightness);
             const auto project = WriteTextFixture(root_ / name, "CLOCK", false, {},
                                                   R"(,"brightness":)" + std::string(brightness));
@@ -8478,7 +8225,7 @@ TEST_F(MetalSceneDraw, ATextLayersBrightnessReachesTheHdrPipelineOnBothRenderers
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             ASSERT_TRUE(loaded.scene->hdr);
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             pixels[std::string(brightness)] = lit(picture);
         }
@@ -8516,7 +8263,7 @@ LitBox LitBoxOf(const RendererPicture& picture)
 }
 } // namespace
 
-TEST_F(MetalSceneDraw, AnAlignedTextLayersBlockEdgeSitsOnItsOriginOnBothRenderers)
+TEST_F(MetalSceneDraw, AnAlignedTextLayersBlockEdgeSitsOnItsOrigin)
 {
     // The fixture's layer is at (192, 128) of a 384 by 256 scene drawn 1:1, so its origin
     // is pixel column 192 and, from the top, pixel row 128. Wallpaper Engine puts the
@@ -8527,13 +8274,12 @@ TEST_F(MetalSceneDraw, AnAlignedTextLayersBlockEdgeSitsOnItsOriginOnBothRenderer
     constexpr int kOriginColumn = 192;
     constexpr int kOriginRow    = 128;
     constexpr int kTolerance    = 3;
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         for (const char* horizontal : { "left", "center", "right" }) {
             for (const char* vertical : { "top", "center", "bottom" }) {
                 for (const bool with_effect : { false, true }) {
                     if (with_effect && std::string_view(horizontal) == "center") continue;
-                    const std::string name = std::string("text-align-") + (native ? "native-" : "compat-") +
+                    const std::string name = std::string("text-align-") +
                                              horizontal + "-" + vertical + (with_effect ? "-fx" : "");
                     SCOPED_TRACE(name);
                     const auto project = WriteTextFixture(
@@ -8546,7 +8292,7 @@ TEST_F(MetalSceneDraw, AnAlignedTextLayersBlockEdgeSitsOnItsOriginOnBothRenderer
                     ASSERT_NE(loaded.scene->runtime, nullptr);
                     const auto layout = loaded.scene->runtime->NodeTextLayout("caption");
                     ASSERT_TRUE(layout.has_value());
-                    const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                    const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
                     ASSERT_TRUE(picture.error.empty()) << picture.error;
                     const auto box = LitBoxOf(picture);
                     ASSERT_TRUE(box.any());
@@ -8574,16 +8320,15 @@ TEST_F(MetalSceneDraw, AnAlignedTextLayersBlockEdgeSitsOnItsOriginOnBothRenderer
     }
 }
 
-TEST_F(MetalSceneDraw, EnablingAnEffectDoesNotMoveAnAlignedTextLayerOnBothRenderers)
+TEST_F(MetalSceneDraw, EnablingAnEffectDoesNotMoveAnAlignedTextLayer)
 {
     // Padding is room around the block on the outside of the aligned edges, so a layer
     // that gains an effect (and with it a padded card) has its text where it was: the
     // pictures with and without the effect have the same box of text.
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         std::map<bool, LitBox> boxes;
         for (const bool with_effect : { false, true }) {
-            const std::string name = std::string("text-padding-") + (native ? "native-" : "compat-") +
+            const std::string name = std::string("text-padding-") +
                                      (with_effect ? "fx" : "plain");
             const auto project = WriteTextFixture(
                 root_ / name, "CLOCK", with_effect, {},
@@ -8591,7 +8336,7 @@ TEST_F(MetalSceneDraw, EnablingAnEffectDoesNotMoveAnAlignedTextLayerOnBothRender
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             boxes[with_effect] = LitBoxOf(picture);
             ASSERT_TRUE(boxes[with_effect].any());
@@ -8603,7 +8348,7 @@ TEST_F(MetalSceneDraw, EnablingAnEffectDoesNotMoveAnAlignedTextLayerOnBothRender
     }
 }
 
-TEST_F(MetalSceneDraw, AnEffectsUvOffsetIsAFractionOfTheCardOnBothRenderers)
+TEST_F(MetalSceneDraw, AnEffectsUvOffsetIsAFractionOfTheCard)
 {
     // The chain of a text layer draws into buffers that are its card, and `v_TexCoord` runs
     // 0 to 1 across that card, as in Wallpaper Engine: an effect that reads its input a quarter
@@ -8618,14 +8363,12 @@ TEST_F(MetalSceneDraw, AnEffectsUvOffsetIsAFractionOfTheCardOnBothRenderers)
                         "void main() {\n"
                         "  gl_FragColor = texture(g_Texture0, v_TexCoord + vec2(") +
             (vertical ? "0.0, 0.25" : "0.25, 0.0") + "));\n}\n";
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(std::string(vertical ? "vertical, " : "horizontal, ") +
-                         (native ? "native" : "compatibility"));
+        {
+            SCOPED_TRACE(std::string(vertical ? "vertical, " : "horizontal, "));
             std::map<bool, LitBox> boxes;
             float                  card_width = 0.0f, card_height = 0.0f;
             for (const bool offset : { false, true }) {
-                const std::string name = std::string("text-uv-offset-") + (vertical ? "v-" : "h-") +
-                                         (native ? "native-" : "compat-") + (offset ? "shifted" : "plain");
+                const std::string name = std::string("text-uv-offset-") + (vertical ? "v-" : "h-") + (offset ? "shifted" : "plain");
                 // Padding wider than the shift, so that the shifted copy is not cut off at the
                 // card's edge.
                 const auto project = WriteTextFixture(
@@ -8640,7 +8383,7 @@ TEST_F(MetalSceneDraw, AnEffectsUvOffsetIsAFractionOfTheCardOnBothRenderers)
                 ASSERT_TRUE(layout.has_value());
                 card_width  = layout->card.x();
                 card_height = layout->card.y();
-                const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
                 ASSERT_TRUE(picture.error.empty()) << picture.error;
                 boxes[offset] = LitBoxOf(picture);
                 ASSERT_TRUE(boxes[offset].any());
@@ -8748,14 +8491,14 @@ int OpenMediaFiles()
 } // namespace
 
 TEST_F(MetalSceneDraw,
-       AVideoStaysOpenAndOnItsFrameWhenATextCardResizesTheGraphUnderItOnBothRenderers)
+       AVideoStaysOpenAndOnItsFrameWhenATextCardResizesTheGraphUnderIt)
 {
     // A text layer whose card is another size in texels has the host build the render graph
     // again, and a graph built again used to close the scene's videos and open them again:
     // the clip came back at its head and showed it until a seek to the scene's clock had
     // landed. Wallpaper Engine resizes the card's buffers in place and touches nothing else,
-    // so its video neither stops nor goes back. Here the decoder is kept across the rebuild,
-    // on both renderers, and the video carries on.
+    // so its video neither stops nor goes back. Here the decoder is kept across the rebuild
+    // and the video carries on.
     //
     // The clip is twenty seconds in one group of pictures, so a seek to a late frame decodes
     // every frame before it, which takes 0.4 s to 12 s into the clip and 0.6 s to 19 s on a
@@ -8776,10 +8519,9 @@ TEST_F(MetalSceneDraw,
     // and this close after the rebuild, one draw later.
     constexpr int kSettled = 2, kWanted = 4;
     const CountersOn counting;
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         const std::string name =
-            std::string("video-long-caption-") + (native ? "native" : "compat");
+            std::string("video-long-caption-");
         const auto project = WriteVideoCaptionFixture(root_ / name, true);
         if (project.empty()) {
             GTEST_SKIP() << "no hardware H.264 encoder here, or it cut the long clip's group of "
@@ -8789,10 +8531,9 @@ TEST_F(MetalSceneDraw,
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         ASSERT_NE(loaded.scene->runtime, nullptr);
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
         auto& runtime = *loaded.scene->runtime;
 
         const auto settle_text = [&runtime] {
@@ -8820,7 +8561,7 @@ TEST_F(MetalSceneDraw,
                        kSettled;
         };
         const auto picture = DrawWithRenderer(
-            *loaded.scene, native, kVideoWidth, kVideoHeight, kMostFrames, kStep,
+            *loaded.scene, kVideoWidth, kVideoHeight, kMostFrames, kStep,
             [&](int frame) {
                 // Drawn at the pace of the clock, as the app draws, so that the decoder
                 // on its thread is as far along as it would be there.
@@ -8865,7 +8606,7 @@ TEST_F(MetalSceneDraw,
     }
 }
 
-TEST_F(MetalSceneDraw, AVideoTheRebuiltGraphLeavesOutIsClosedOnBothRenderers)
+TEST_F(MetalSceneDraw, AVideoTheRebuiltGraphLeavesOutIsClosed)
 {
     // The video layer is hidden by a property and the caption changes size in the same tick,
     // so the graph that is built again leaves the layer out and nothing in it binds the video
@@ -8874,9 +8615,8 @@ TEST_F(MetalSceneDraw, AVideoTheRebuiltGraphLeavesOutIsClosedOnBothRenderers)
     constexpr double kStep         = 1.0 / 60.0;
     constexpr int    kRebuildFrame = 4;
     constexpr int    kFrames       = kRebuildFrame + 3;
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
-        const std::string name = std::string("video-left-out-") + (native ? "native" : "compat");
+    {
+        const std::string name = std::string("video-left-out-");
         const auto project = WriteVideoCaptionFixture(root_ / name);
         if (project.empty()) {
             GTEST_SKIP() << "no hardware H.264 encoder here, so no decodable media to parse";
@@ -8899,10 +8639,9 @@ TEST_F(MetalSceneDraw, AVideoTheRebuiltGraphLeavesOutIsClosedOnBothRenderers)
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         ASSERT_NE(loaded.scene->runtime, nullptr);
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
         auto& runtime = *loaded.scene->runtime;
 
         const auto settle_text = [&runtime] {
@@ -8915,7 +8654,7 @@ TEST_F(MetalSceneDraw, AVideoTheRebuiltGraphLeavesOutIsClosedOnBothRenderers)
         RebuildWatch watch;
         int        files_playing = -1, files_after = -1;
         const auto picture = DrawWithRenderer(
-            *loaded.scene, native, kVideoWidth, kVideoHeight, kFrames, kStep,
+            *loaded.scene, kVideoWidth, kVideoHeight, kFrames, kStep,
             [&](int frame) {
                 if (frame == 0) settle_text();
                 if (frame == kFrames - 1) files_after = OpenMediaFiles();
@@ -9053,42 +8792,18 @@ TEST_F(MetalSceneDraw, AVideoSetAsideForACompileThatIsRefusedIsClosedOnNativeMet
     }
 }
 
-TEST_F(MetalSceneDraw, AnAlignedTextLayerIsTheSamePictureOnBothRenderers)
-{
-    for (const char* horizontal : { "left", "right" }) {
-        for (const char* vertical : { "top", "bottom" }) {
-            std::map<bool, RendererPicture> pictures;
-            for (const bool native : { false, true }) {
-                const std::string name = std::string("text-align-same-") + (native ? "native-" : "compat-") +
-                                         horizontal + "-" + vertical;
-                const auto project = WriteTextFixture(
-                    root_ / name, "CLOCK", false, {},
-                    std::string(R"(,"pointsize":10,"horizontalalign":")") + horizontal +
-                        R"(","verticalalign":")" + vertical + R"(")");
-                LoadedScene loaded;
-                std::string error;
-                ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-                pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
-                ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-            }
-            EXPECT_EQ(pictures[true].rgb, pictures[false].rgb) << horizontal << " " << vertical;
-        }
-    }
-}
-
-TEST_F(MetalSceneDraw, AScreenAnchoredTextLayerIsDrawnWhereItsAnchorPutsItOnBothRenderers)
+TEST_F(MetalSceneDraw, AScreenAnchoredTextLayerIsDrawnWhereItsAnchorPutsIt)
 {
     // `anchor` pins a text layer to an edge of the area the display shows. The display
     // here shows 344 of the scene's 384 columns, so a layer anchored to the right edge is
     // drawn 40 columns in from where its origin puts it -- whether it is drawn from its own
     // card or, with an effect on it, from the final card of the chain -- and nothing else
     // about the picture changes.
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         for (const bool with_effect : { false, true }) {
             std::map<bool, LitBox> boxes;
             for (const bool presented : { false, true }) {
-                const std::string name = std::string("text-anchor-") + (native ? "native-" : "compat-") +
+                const std::string name = std::string("text-anchor-") +
                                          (with_effect ? "fx-" : "plain-") + (presented ? "shown" : "whole");
                 const auto project = WriteTextFixture(
                     root_ / name, "H", with_effect, {},
@@ -9102,7 +8817,7 @@ TEST_F(MetalSceneDraw, AScreenAnchoredTextLayerIsDrawnWhereItsAnchorPutsItOnBoth
                         .origin = { 0.0f, 0.0f }, .size = { 344.0f, 256.0f },
                         .content_origin = { 0.0f, 0.0f }, .content_size = { 344.0f, 256.0f } });
                 }
-                const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
                 ASSERT_TRUE(picture.error.empty()) << picture.error;
                 boxes[presented] = LitBoxOf(picture);
                 ASSERT_TRUE(boxes[presented].any());
@@ -9321,7 +9036,7 @@ std::size_t PixelsNear(const std::vector<uint8_t>& rgb, std::array<int, 3> expec
 }
 } // namespace
 
-TEST_F(MetalSceneDraw, ATextLayersColourBlendModeAppliesItsColourAndAlphaOnceOnBothRenderers)
+TEST_F(MetalSceneDraw, ATextLayersColourBlendModeAppliesItsColourAndAlphaOnce)
 {
     // A text layer shares an image layer's colour blend: the text card is drawn
     // with its colour and alpha, then the passthrough mixes it with the screen and
@@ -9335,28 +9050,25 @@ TEST_F(MetalSceneDraw, ATextLayersColourBlendModeAppliesItsColourAndAlphaOnceOnB
     for (const auto& mode : { Mode { R"("colorBlendMode":2,"alpha":0.5)", { 128, 159, 128 } },
                               Mode { R"("colorBlendMode":31,"alpha":0.5)", { 128, 191, 128 } } }) {
         SCOPED_TRACE(mode.fields);
-        std::map<bool, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
-            const std::string name = std::string(native ? "text-blend-native-" : "text-blend-compat-") +
+        RendererPicture picture;
+        {
+            const std::string name = std::string("text-blend-native-") +
                                      std::to_string(mode.expected[1]);
             const auto project = WriteTextColorBlendFixture(root_ / name, mode.fields);
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
-            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
-            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+            picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
         }
-        const auto& rgb = pictures[true].rgb;
+        const auto& rgb = picture.rgb;
         ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
         // The stem of the "I", well inside the glyph, takes the blended colour.
         EXPECT_GT(PixelsNear(rgb, mode.expected, 3), 200u)
             << "the text was not blended once with the screen behind it";
-        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
-            << "the native renderer blended the text differently from the compatibility renderer";
     }
 }
 
@@ -9364,7 +9076,7 @@ namespace
 {
 std::filesystem::path LocalSceneAssetsRoot();
 
-/// Draws orange text on navy through each colour blend mode on both renderers, with the
+/// Draws orange text on navy through each colour blend mode, with the
 /// passthrough of `WriteColorBlendFixture`, or, given `shipped_assets`, Wallpaper Engine's own
 /// `effectpassthrough` material and `common_blending.h` from that directory.
 void ExpectTextColourBlendModesDrawTheirTextAndNoBox(const std::filesystem::path& root,
@@ -9427,12 +9139,11 @@ void ExpectTextColourBlendModesDrawTheirTextAndNoBox(const std::filesystem::path
         return loaded.scene != nullptr;
     };
     std::map<int, std::size_t> changed; // pixels that are not the scene, per mode
-    std::map<int, std::map<bool, RendererPicture>> pictures;
+    std::map<int, RendererPicture> pictures;
     for (const auto& mode : modes) {
         SCOPED_TRACE("colorBlendMode " + std::to_string(mode.mode));
-        for (const bool native : { false, true }) {
-            const std::string name = std::string("text-blend-box-") + (shipped ? "shipped-" : "") + std::to_string(mode.mode) +
-                                     (native ? "-native" : "-compat");
+        {
+            const std::string name = std::string("text-blend-box-") + (shipped ? "shipped-" : "") + std::to_string(mode.mode);
             const auto project = WriteTextColorBlendFixture(
                 root / name,
                 R"("color":"1 0.5 0","colorBlendMode":)" + std::to_string(mode.mode),
@@ -9440,16 +9151,15 @@ void ExpectTextColourBlendModesDrawTheirTextAndNoBox(const std::filesystem::path
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(load(project, root / (name + "-cache"), loaded, error)) << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
-            pictures[mode.mode][native] =
-                DrawWithRenderer(*loaded.scene, native, kWidth, kHeight, 3, 1.0 / 60.0);
-            ASSERT_TRUE(pictures[mode.mode][native].error.empty()) << pictures[mode.mode][native].error;
-            ASSERT_EQ(pictures[mode.mode][native].rgb.size(), std::size_t { kWidth } * kHeight * 3u);
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+            pictures[mode.mode] =
+                DrawWithRenderer(*loaded.scene, kWidth, kHeight, 3, 1.0 / 60.0);
+            ASSERT_TRUE(pictures[mode.mode].error.empty()) << pictures[mode.mode].error;
+            ASSERT_EQ(pictures[mode.mode].rgb.size(), std::size_t { kWidth } * kHeight * 3u);
         }
-        const auto& rgb = pictures[mode.mode][true].rgb;
+        const auto& rgb = pictures[mode.mode].rgb;
         ASSERT_EQ(rgb.size(), std::size_t { kWidth } * kHeight * 3u);
         EXPECT_NEAR(rgb[0], navy[0], 1) << "the scene's corner is not the clear colour";
         EXPECT_GT(PixelsNear(rgb, stem_of(mode), 3), 100u) << "the glyphs are not drawn in the blended colour";
@@ -9459,8 +9169,6 @@ void ExpectTextColourBlendModesDrawTheirTextAndNoBox(const std::filesystem::path
                 ++changed[mode.mode];
             }
         }
-        EXPECT_EQ(pictures[mode.mode][true].rgb, pictures[mode.mode][false].rgb)
-            << "the native renderer drew the text differently from the compatibility renderer";
     }
     // The text over the scene without a blend marks the pixels the text can reach. No blend
     // mode draws over many more than that; a box over the card is several times larger.
@@ -9476,9 +9184,8 @@ void ExpectTextColourBlendModesDrawTheirTextAndNoBox(const std::filesystem::path
     // text or the scene: the min and the max of a ramp stay between the two.
     for (const auto& mode : { modes[0], modes[1] }) {
         SCOPED_TRACE("enlarged, colorBlendMode " + std::to_string(mode.mode));
-        for (const bool native : { false, true }) {
-            const std::string name = std::string("text-blend-ramp-") + (shipped ? "shipped-" : "") + std::to_string(mode.mode) +
-                                     (native ? "-native" : "-compat");
+        {
+            const std::string name = std::string("text-blend-ramp-") + (shipped ? "shipped-" : "") + std::to_string(mode.mode);
             const auto project = WriteTextColorBlendFixture(
                 root / name,
                 R"("color":"1 0.5 0","scale":[3,3,1],"colorBlendMode":)" + std::to_string(mode.mode),
@@ -9486,11 +9193,10 @@ void ExpectTextColourBlendModesDrawTheirTextAndNoBox(const std::filesystem::path
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(load(project, root / (name + "-cache"), loaded, error)) << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
-            const auto picture = DrawWithRenderer(*loaded.scene, native, kWidth, kHeight, 3, 1.0 / 60.0);
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+            const auto picture = DrawWithRenderer(*loaded.scene, kWidth, kHeight, 3, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             ASSERT_EQ(picture.rgb.size(), std::size_t { kWidth } * kHeight * 3u);
             // How far each pixel is along the way from the scene to the glyph's blended colour.
@@ -9516,7 +9222,7 @@ void ExpectTextColourBlendModesDrawTheirTextAndNoBox(const std::filesystem::path
 }
 } // namespace
 
-TEST_F(MetalSceneDraw, ATextLayersColourBlendModesDrawItsTextAndNoBoxOnBothRenderers)
+TEST_F(MetalSceneDraw, ATextLayersColourBlendModesDrawItsTextAndNoBox)
 {
     ExpectTextColourBlendModesDrawTheirTextAndNoBox(root_, {});
 }
@@ -9595,7 +9301,7 @@ InkCentre InkCentreOf(const RendererPicture& picture, bool text)
 }
 } // namespace
 
-TEST_F(MetalSceneDraw, CameraParallaxMovesATextLayerAsItMovesAnImageOnBothRenderers)
+TEST_F(MetalSceneDraw, CameraParallaxMovesATextLayerAsItMovesAnImage)
 {
     // Wallpaper Engine moves a text layer by the camera parallax as it moves an image
     // layer: by its distance from the point the cursor eases to, times its depth and
@@ -9617,27 +9323,24 @@ TEST_F(MetalSceneDraw, CameraParallaxMovesATextLayerAsItMovesAnImageOnBothRender
                                  Variant { "plain, cursor right", false, 0.75, -8.0 },
                                  Variant { "effect chain, cursor centred", true, 0.5, 40.0 } }) {
         SCOPED_TRACE(variant.name);
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(native ? "native" : "compatibility");
+        {
             std::map<std::string, RendererPicture> pictures;
             for (const std::string depth : { "[0,0]", "[0.5,0.5]" }) {
                 const std::string name = std::string("text-parallax-") +
                                          (variant.effect ? "effect-" : "plain-") +
-                                         (native ? "native-" : "compat-") +
                                          (depth == "[0,0]" ? "rest-" : "depth-") +
                                          std::to_string(int(variant.cursor * 100));
                 const auto project = WriteTextParallaxFixture(root_ / name, variant.effect, depth);
                 LoadedScene loaded;
                 std::string error;
                 ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-                if (native) {
-                    const auto selection = SelectSceneBackend(*loaded.scene);
-                    ASSERT_FALSE(selection.failed())
-                        << selection.failure_reason;
-                }
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_FALSE(selection.failed())
+                    << selection.failure_reason;
+
                 loaded.scene->shaderValueUpdater->MouseInput(variant.cursor, 0.5);
                 pictures[depth] =
-                    DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                    DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
                 ASSERT_TRUE(pictures[depth].error.empty()) << pictures[depth].error;
                 ASSERT_EQ(pictures[depth].rgb.size(), 384u * 256u * 3u);
             }
@@ -9767,7 +9470,7 @@ std::filesystem::path WriteComposeParallaxFixture(const std::filesystem::path& r
 }
 } // namespace
 
-TEST_F(MetalSceneDraw, AComposeLayerHoldsWhatIsBehindWhereParallaxDrawsItOnBothRenderers)
+TEST_F(MetalSceneDraw, AComposeLayerHoldsWhatIsBehindWhereParallaxDrawsIt)
 {
     // A compose layer holds the scene behind the place it is drawn, here with red
     // inverted. Camera parallax moves the layer: with the cursor centred its group is
@@ -9795,24 +9498,21 @@ TEST_F(MetalSceneDraw, AComposeLayerHoldsWhatIsBehindWhereParallaxDrawsItOnBothR
     for (const auto& variant : { Variant { "cursor centred", 0.5, 40, 20 },
                                  Variant { "cursor right", 0.5625, -8, 20 } }) {
         SCOPED_TRACE(variant.name);
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(native ? "native" : "compatibility");
+        {
             const auto draw = [&](const char* kind, ComposeParallaxLayer layer,
                                   RendererPicture& picture) {
-                const std::string name = std::string("compose-parallax-") +
-                                         (native ? "native-" : "compat-") + kind + "-" +
+                const std::string name = std::string("compose-parallax-") + kind + "-" +
                                          std::to_string(int(variant.cursor * 10000));
                 const auto project = WriteComposeParallaxFixture(root_ / name, layer);
                 LoadedScene loaded;
                 std::string error;
                 ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-                if (native) {
-                    const auto selection = SelectSceneBackend(*loaded.scene);
-                    ASSERT_FALSE(selection.failed())
-                        << selection.failure_reason;
-                }
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_FALSE(selection.failed())
+                    << selection.failure_reason;
+
                 loaded.scene->shaderValueUpdater->MouseInput(variant.cursor, 0.5);
-                picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+                picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
                 ASSERT_TRUE(picture.error.empty()) << picture.error;
                 ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
             };
@@ -9931,44 +9631,34 @@ double IdenticalNeighbourShare(const std::vector<uint8_t>& rgb, uint32_t width, 
 }
 } // namespace
 
-TEST_F(MetalSceneDraw, AnImageLayersTargetsArePointSampledWhenItAsksOnBothRenderers)
+TEST_F(MetalSceneDraw, AnImageLayersTargetsArePointSampledWhenItAsks)
 {
     // The layer's effect chain draws into a 16 by 12 target that the layer then
     // shows 16 times larger. By default the target is read with linear filtering
     // and the gradient it holds comes out smooth; with `nointerpolation`, as
     // Wallpaper Engine reads it, every texel is a flat square.
-    std::map<std::pair<bool, bool>, RendererPicture> pictures;
+    std::map<bool, RendererPicture> pictures;
     for (const bool point : { false, true }) {
-        for (const bool native : { false, true }) {
-            const std::string name = std::string(point ? "point-" : "linear-") +
-                                     (native ? "native" : "compat");
+        {
+            const std::string name = std::string(point ? "point-" : "linear-");
             const auto project = WriteMagnifiedEffectLayerFixture(
                 root_ / name, point ? R"(,"nointerpolation":true)" : "");
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
-            auto& picture = pictures[std::make_pair(point, native)];
-            picture       = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+            auto& picture = pictures[point];
+            picture       = DrawWithRenderer(*loaded.scene, 384, 256, 2, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
         }
     }
-    const auto pixels = [&](bool point, bool native) -> const std::vector<uint8_t>& {
-        return pictures[std::make_pair(point, native)].rgb;
-    };
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
-        EXPECT_LT(IdenticalNeighbourShare(pixels(false, native), 384, 256), 0.4)
-            << "the default target should be sampled linearly";
-        EXPECT_GT(IdenticalNeighbourShare(pixels(true, native), 384, 256), 0.8)
-            << "a nointerpolation layer's target should be point-sampled";
-    }
-    EXPECT_EQ(pixels(true, true), pixels(true, false))
-        << "the renderers disagree about a point-sampled layer";
+    EXPECT_LT(IdenticalNeighbourShare(pictures[false].rgb, 384, 256), 0.4)
+        << "the default target should be sampled linearly";
+    EXPECT_GT(IdenticalNeighbourShare(pictures[true].rgb, 384, 256), 0.8)
+        << "a nointerpolation layer's target should be point-sampled";
 }
 
 namespace
@@ -10024,17 +9714,16 @@ std::filesystem::path WriteShapeFixture(const std::filesystem::path& root, std::
 }
 } // namespace
 
-TEST_F(MetalSceneDraw, AShapeIsAddedOntoTheSceneOnBothRenderers)
+TEST_F(MetalSceneDraw, AShapeIsAddedOntoTheScene)
 {
     // A shape is a quad as tall as the canvas on both axes. Its effect, half-transparent
     // red, is drawn additively straight onto the scene: half of the red over green 0.25.
     // Given four corners it covers the quad they make and nothing else.
     for (const bool corners : { false, true }) {
         SCOPED_TRACE(corners ? "four corners" : "whole square");
-        std::map<bool, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
-            const std::string name = std::string(corners ? "shape-corners-" : "shape-square-") +
-                                     (native ? "native" : "compat");
+        RendererPicture picture;
+        {
+            const std::string name = std::string(corners ? "shape-corners-" : "shape-square-");
             const auto project = WriteShapeFixture(
                 root_ / name,
                 corners ? R"(,"passes":[{"constantshadervalues":{"point0":"0.25 0.25",)"
@@ -10043,14 +9732,13 @@ TEST_F(MetalSceneDraw, AShapeIsAddedOntoTheSceneOnBothRenderers)
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
-            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
-            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+            picture = DrawWithRenderer(*loaded.scene, 384, 256, 2, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
         }
-        const auto& rgb = pictures[true].rgb;
+        const auto& rgb = picture.rgb;
         ASSERT_EQ(rgb.size(), 384u * 256u * 3u);
         const auto pixel = [&](uint32_t x, uint32_t y) {
             const std::size_t at = (static_cast<std::size_t>(y) * 384u + x) * 3u;
@@ -10069,8 +9757,6 @@ TEST_F(MetalSceneDraw, AShapeIsAddedOntoTheSceneOnBothRenderers)
             EXPECT_EQ(pixel(192 + 100, 128), added);
             EXPECT_EQ(pixel(10, 128), bare) << "outside the square, left of it";
         }
-        EXPECT_EQ(pictures[true].rgb, pictures[false].rgb)
-            << "the native renderer drew the shape differently from the compatibility renderer";
     }
 }
 
@@ -10133,7 +9819,7 @@ TEST_F(MetalSceneDraw, StyledTextIsDrawnWithItsOutlineAndShadowByTheNativeBacken
     }
 }
 
-TEST_F(MetalSceneDraw, StyledTextWithoutAnOutlineKeepsTheLayersColourAtItsEdgesOnBothRenderers)
+TEST_F(MetalSceneDraw, StyledTextWithoutAnOutlineKeepsTheLayersColourAtItsEdges)
 {
     // The font shader mixes the outline's colour into the glyph only when the layer
     // has an outline. Red text, blurred or shadowed in red, over white: every pixel
@@ -10150,26 +9836,23 @@ TEST_F(MetalSceneDraw, StyledTextWithoutAnOutlineKeepsTheLayersColourAtItsEdgesO
                                R"("dropshadowopacity":1,"dropshadowoffset":"5 5",)"
                                R"("dropshadowcolor":"1 0 0")" } }) {
         SCOPED_TRACE(variant.name);
-        std::map<bool, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
-            const std::string name = std::string("styled-edge-") + variant.name +
-                                     (native ? "-native" : "-compat");
+        RendererPicture picture;
+        {
+            const std::string name = std::string("styled-edge-") + variant.name;
             const auto project = WriteTextFixture(root_ / name, "HI", false, {}, variant.style,
                                                   "1.0,1.0,1.0");
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
-            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
-            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-            ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+            picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
         }
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(native ? "native" : "compatibility");
-            const auto& rgb = pictures[native].rgb;
+        {
+            const auto& rgb = picture.rgb;
             std::size_t solid = 0, partial = 0, dark_red = 0;
             for (std::size_t i = 0; i + 2 < rgb.size(); i += 3) {
                 if (rgb[i] < 250) ++dark_red;
@@ -10183,7 +9866,7 @@ TEST_F(MetalSceneDraw, StyledTextWithoutAnOutlineKeepsTheLayersColourAtItsEdgesO
     }
 }
 
-TEST_F(MetalSceneDraw, AMagnifiedTextsEdgesFadeToItsColourNotToBlackOnBothRenderers)
+TEST_F(MetalSceneDraw, AMagnifiedTextsEdgesFadeToItsColourNotToBlack)
 {
     // A card's texture holds the glyphs' colour at their coverage and nothing in the texels
     // between. Magnified past its raster and sampled with linear filtering, an edge is a mix of
@@ -10200,10 +9883,9 @@ TEST_F(MetalSceneDraw, AMagnifiedTextsEdgesFadeToItsColourNotToBlackOnBothRender
     };
     for (const auto& variant : { Variant { "plain", false }, Variant { "effect", true } }) {
         SCOPED_TRACE(variant.name);
-        std::map<bool, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
-            const std::string name = std::string("text-fringe-") + variant.name +
-                                     (native ? "-native" : "-compat");
+        RendererPicture picture;
+        {
+            const std::string name = std::string("text-fringe-") + variant.name;
             // Each raster texel is three pixels of the scene.
             const auto project = WriteTextFixture(
                 root_ / name, "HI", variant.effect, {},
@@ -10211,17 +9893,15 @@ TEST_F(MetalSceneDraw, AMagnifiedTextsEdgesFadeToItsColourNotToBlackOnBothRender
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
-            pictures[native] = DrawWithRenderer(*loaded.scene, native, kWidth, kHeight, 3, 1.0 / 60.0);
-            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-            ASSERT_EQ(pictures[native].rgb.size(), std::size_t { kWidth } * kHeight * 3u);
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+            picture = DrawWithRenderer(*loaded.scene, kWidth, kHeight, 3, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), std::size_t { kWidth } * kHeight * 3u);
         }
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(native ? "native" : "compatibility");
-            const auto& rgb = pictures[native].rgb;
+        {
+            const auto& rgb = picture.rgb;
             std::size_t solid = 0, partial = 0, dark_red = 0, longest_ramp = 0;
             // The widest run of partly covered pixels along a row that goes from the scene to the
             // glyph or back. A run with the glyph on both sides, along the edge of a crossbar,
@@ -10305,7 +9985,7 @@ std::filesystem::path WriteMinifiedMipFixture(const std::filesystem::path& root,
 }
 } // namespace
 
-TEST_F(MetalSceneDraw, ATexturePointSampledByItsHeaderPicksItsMipLevelByPointOnBothRenderers)
+TEST_F(MetalSceneDraw, ATexturePointSampledByItsHeaderPicksItsMipLevelByPoint)
 {
     // The reference builds the sampler of a file texture from the flags in its
     // header; with `noInterpolation` the min, mag and mip filters are all point. The
@@ -10315,25 +9995,22 @@ TEST_F(MetalSceneDraw, ATexturePointSampledByItsHeaderPicksItsMipLevelByPointOnB
     // blend, the renderers' filtering until now.
     for (const bool point : { false, true }) {
         SCOPED_TRACE(point ? "noInterpolation" : "ordinary");
-        std::map<bool, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
-            const std::string name = std::string("mip-") + (point ? "point" : "linear") +
-                                     (native ? "-native" : "-compat");
+        RendererPicture picture;
+        {
+            const std::string name = std::string("mip-") + (point ? "point" : "linear");
             const auto project = WriteMinifiedMipFixture(root_ / name, point ? 1u : 0u);
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
-            pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
-            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-            ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+            picture = DrawWithRenderer(*loaded.scene, 384, 256, 2, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
         }
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(native ? "native" : "compatibility");
-            const auto& rgb = pictures[native].rgb;
+        {
+            const auto& rgb = picture.rgb;
             const std::size_t at = (std::size_t(128) * 384 + 192) * 3;
             const int level = rgb[at];
             if (point) {
@@ -10405,7 +10082,7 @@ std::filesystem::path WriteCanvasCardMipFixture(const std::filesystem::path& roo
 }
 } // namespace
 
-TEST_F(MetalSceneDraw, ATextureWhoseNextLevelFallsShortOfTheSurfaceKeepsItsFullSizeLevelOnBothRenderers)
+TEST_F(MetalSceneDraw, ATextureWhoseNextLevelFallsShortOfTheSurfaceKeepsItsFullSizeLevel)
 {
     // A 528 by 352 chain on a 384 pixel surface: the power-of-two ceiling of the
     // surface, 512, is below the texture's width, but the next level (264) is
@@ -10413,25 +10090,23 @@ TEST_F(MetalSceneDraw, ATextureWhoseNextLevelFallsShortOfTheSurfaceKeepsItsFullS
     // picture from a level a third smaller than the screen, magnified; kept, it
     // is drawn from the full-size white level blended with the next, black, one
     // (1.375 texels to the pixel).
-    std::map<bool, RendererPicture> pictures;
-    for (const bool native : { false, true }) {
-        const std::string name = std::string("mip-budget-") + (native ? "native" : "compat");
+    RendererPicture picture;
+    {
+        const std::string name = std::string("mip-budget-");
         const auto project = WriteCanvasCardMipFixture(root_ / name, 528, 352);
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        if (native) {
-            const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-        }
-        pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
-        ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-        ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+        const auto selection = SelectSceneBackend(*loaded.scene);
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
+        picture = DrawWithRenderer(*loaded.scene, 384, 256, 2, 1.0 / 60.0);
+        ASSERT_TRUE(picture.error.empty()) << picture.error;
+        ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
     }
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         const std::size_t at = (std::size_t(128) * 384 + 192) * 3;
-        EXPECT_GE(pictures[native].rgb[at], 100)
+        EXPECT_GE(picture.rgb[at], 100)
             << "the full-size level was dropped and a smaller one magnified";
     }
 }
@@ -10519,7 +10194,7 @@ std::filesystem::path WriteCoverSlotFixture(const std::filesystem::path& root,
 }
 } // namespace
 
-TEST_F(MetalSceneDraw, ACoverSlotShowsItsAuthoredTextureUntilACoverArrivesOnBothRenderers)
+TEST_F(MetalSceneDraw, ACoverSlotShowsItsAuthoredTextureUntilACoverArrives)
 {
     // A cover layer ships its own art in the slot `$mediaThumbnail` is bound to.
     // Wallpaper Engine shows that art while nothing plays, then the track's cover,
@@ -10565,24 +10240,23 @@ TEST_F(MetalSceneDraw, ACoverSlotShowsItsAuthoredTextureUntilACoverArrivesOnBoth
 
     for (const auto& c : cases) {
         SCOPED_TRACE(c.name);
-        std::map<bool, RendererPicture> pictures;
-        for (const bool native : { false, true }) {
-            const std::string name = std::string("cover-slot-") + c.name + (native ? "-n" : "-c");
+        RendererPicture picture;
+        {
+            const std::string name = std::string("cover-slot-") + c.name + "-n";
             const auto        project = WriteCoverSlotFixture(root_ / name, c.authored);
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
-            }
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
+
             auto* images = dynamic_cast<RuntimeImageSource*>(loaded.scene->imageParser.get());
             ASSERT_NE(images, nullptr);
             if (c.cover_first) {
                 ASSERT_TRUE(PublishSystemMediaArtwork(*images, 4, 4, green.data(), green.size()));
             }
-            pictures[native] = DrawWithRenderer(
-                *loaded.scene, native, 384, 256, c.frames, 1.0 / 60.0, [&](int frame) {
+            picture = DrawWithRenderer(
+                *loaded.scene, 384, 256, c.frames, 1.0 / 60.0, [&](int frame) {
                     for (const auto& [at, publish] : c.live) {
                         if (at != frame) continue;
                         if (publish) {
@@ -10592,12 +10266,11 @@ TEST_F(MetalSceneDraw, ACoverSlotShowsItsAuthoredTextureUntilACoverArrivesOnBoth
                         }
                     }
                 });
-            ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
-            ASSERT_EQ(pictures[native].rgb.size(), 384u * 256u * 3u);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
         }
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(native ? "native" : "compatibility");
-            const auto&       rgb = pictures[native].rgb;
+        {
+            const auto&       rgb = picture.rgb;
             const std::size_t at  = (std::size_t(128) * 384 + 192) * 3;
             for (std::size_t channel = 0; channel < 3; ++channel) {
                 EXPECT_NEAR(int(rgb[at + channel]), c.expected[channel], 8)
@@ -10607,7 +10280,7 @@ TEST_F(MetalSceneDraw, ACoverSlotShowsItsAuthoredTextureUntilACoverArrivesOnBoth
     }
 }
 
-TEST_F(MetalSceneDraw, ACoverIsSampledClampedWhateverItsAuthoredPictureAskedForOnBothRenderers)
+TEST_F(MetalSceneDraw, ACoverIsSampledClampedWhateverItsAuthoredPictureAskedFor)
 {
     // The art a cover slot shows while nothing plays is sampled as its file says
     // (a texture that does not set `clampuvs` repeats), but a track's cover is
@@ -10626,9 +10299,8 @@ TEST_F(MetalSceneDraw, ACoverIsSampledClampedWhateverItsAuthoredPictureAskedForO
         }
         return rgba;
     }();
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
-        const std::string name    = std::string("cover-sampler") + (native ? "-n" : "-c");
+    {
+        const std::string name    = std::string("cover-sampler") + "-n";
         const auto        project = WriteCoverSlotFixture(root_ / name, "red");
         LoadedScene loaded;
         std::string error;
@@ -10636,7 +10308,7 @@ TEST_F(MetalSceneDraw, ACoverIsSampledClampedWhateverItsAuthoredPictureAskedForO
         auto* images = dynamic_cast<RuntimeImageSource*>(loaded.scene->imageParser.get());
         ASSERT_NE(images, nullptr);
         ASSERT_TRUE(PublishSystemMediaArtwork(*images, 4, 4, cover.data(), cover.size()));
-        const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
+        const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, 3, 1.0 / 60.0);
         ASSERT_TRUE(picture.error.empty()) << picture.error;
         ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
         // The layer spans x 64..320; two pixels in is under half a cover texel.
@@ -11114,14 +10786,12 @@ std::filesystem::path WriteSelfHistoryFixture(const std::filesystem::path& root,
 } // namespace
 
 // A layer whose own material samples its `_a` or `_b` composite reads the picture the layer
-// drew the frame before. The graph both renderers share copies each composite into the
-// layer's link after the layer draws, so the link read ahead of that copy is history: the
-// compatibility backend had no image for it on its first draw and drew the layer from
-// nothing every frame, while the native one kept the picture. The layer's link is now
-// declared as a target that carries its previous frame, and the two draw the same thing.
-// The native backend also refused the whole scene when the layout merely named the
-// layer's own `_b` outside its effects, which the parser reads as nothing.
-TEST_F(MetalSceneDraw, ALayerReadingItsOwnCompositeSeesTheFrameBeforeOnBothRenderers)
+// drew the frame before. The graph copies each composite into the layer's link after the
+// layer draws, so the link read ahead of that copy is history: the layer's link is declared
+// as a target that carries its previous frame, so the layer reads the picture it drew the
+// frame before and not nothing. The renderer also refused the whole scene when the layout
+// merely named the layer's own `_b` outside its effects, which the parser reads as nothing.
+TEST_F(MetalSceneDraw, ALayerReadingItsOwnCompositeSeesTheFrameBefore)
 {
     struct Variant
     {
@@ -11135,43 +10805,38 @@ TEST_F(MetalSceneDraw, ALayerReadingItsOwnCompositeSeesTheFrameBeforeOnBothRende
                              Variant { "named-b-in-the-object", "_rt_imageLayerComposite_1_a",
                                        "_rt_imageLayerComposite_1_b" } }) {
         SCOPED_TRACE(v.name);
-        std::map<int, std::map<bool, RendererPicture>> pictures;
+        std::map<int, RendererPicture> pictures;
         for (const int frames : { 1, 4 }) {
-            for (const bool native : { false, true }) {
+            {
                 const std::string name = std::string("self-history-") + v.name + "-" +
-                                         std::to_string(frames) + (native ? "-native" : "-compat");
+                                         std::to_string(frames);
                 const auto  project = WriteSelfHistoryFixture(root_ / name, v.material, v.object);
                 LoadedScene loaded;
                 std::string error;
                 ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
                 EXPECT_TRUE(loaded.scene->layer_texture_error.empty())
                     << loaded.scene->layer_texture_error;
-                if (native) {
-                    const auto selection = SelectSceneBackend(*loaded.scene);
-                    ASSERT_FALSE(selection.failed())
-                        << selection.failure_reason;
-                }
-                auto& picture = pictures[frames][native] =
-                    DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_FALSE(selection.failed())
+                    << selection.failure_reason;
+
+                auto& picture = pictures[frames] =
+                    DrawWithRenderer(*loaded.scene, 384, 256, frames, 1.0 / 60.0);
                 ASSERT_TRUE(picture.error.empty()) << picture.error;
                 ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
             }
-            EXPECT_EQ(pictures[frames][true].rgb, pictures[frames][false].rgb)
-                << "the renderers draw a layer's own previous composite differently after "
-                << frames << " frames";
         }
-        const auto red = [&](int frames, bool native) {
-            return int(pictures[frames][native].rgb[(128 * 384 + 192) * 3]);
+        const auto red = [&](int frames) {
+            return int(pictures[frames].rgb[(128 * 384 + 192) * 3]);
         };
-        for (const bool native : { false, true }) {
-            SCOPED_TRACE(native ? "native" : "compatibility");
+        {
             // A twentieth of red on top of what the layer read, every frame: three more
             // frames show three twentieths more, and a layer that read nothing would show
             // the same red after four as after one.
-            EXPECT_GT(red(1, native), 0);
-            EXPECT_GE(red(4, native), red(1, native) + 3 * 255 * 0.05 - 8)
+            EXPECT_GT(red(1), 0);
+            EXPECT_GE(red(4), red(1) + 3 * 255 * 0.05 - 8)
                 << "the layer did not see the frame before";
-            const auto* centre = pictures[4][native].rgb.data() + (128 * 384 + 192) * 3;
+            const auto* centre = pictures[4].rgb.data() + (128 * 384 + 192) * 3;
             EXPECT_NEAR(centre[1], 128, 3);
             EXPECT_NEAR(centre[2], 64, 3);
         }
@@ -12628,7 +12293,7 @@ std::size_t DifferingBytes(const std::vector<uint8_t>& a, const std::vector<uint
 
 } // namespace
 
-TEST_F(MetalSceneDraw, ATextLayerThroughShippedEffectsIsDrawnWhetherItsScriptHasThemOnOrOffOnBothRenderers)
+TEST_F(MetalSceneDraw, ATextLayerThroughShippedEffectsIsDrawnWhetherItsScriptHasThemOnOrOff)
 {
     // The same scripted text as above, with Wallpaper Engine's own `opacity` effect and its own
     // `effectpassthrough` material (the `genericimage3` shader), which the chain ends in while
@@ -12645,12 +12310,10 @@ TEST_F(MetalSceneDraw, ATextLayerThroughShippedEffectsIsDrawnWhetherItsScriptHas
         R"([{"file":"effects/opacity/effect.json","visible":{"value":false,)"
         R"("script":"export function update() { return engine.runtime >= 0.5 && engine.runtime < 1.0; }"}}])";
     constexpr float kAlpha = 0.5f;
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native" : "compatibility");
+    {
         for (const auto& [frames, composite] : kScriptedFrames) {
             SCOPED_TRACE(frames);
-            const std::string name = std::string("text-composite-shipped-") +
-                                     (native ? "native-" : "compat-") + std::to_string(frames);
+            const std::string name = std::string("text-composite-shipped-") + std::to_string(frames);
             BackdropOptions options;
             options.shipped_assets = true;
             const auto project     = WriteTextOverBackdropFixture(root_ / name, kAlpha, effect, options);
@@ -12680,7 +12343,7 @@ TEST_F(MetalSceneDraw, ATextLayerThroughShippedEffectsIsDrawnWhetherItsScriptHas
                                         },
                                         source->ReadAllStr(), loaded.vfs, loaded.sound);
             ASSERT_NE(loaded.scene, nullptr);
-            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
+            const auto picture = DrawWithRenderer(*loaded.scene, 384, 256, frames, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
             const double reach = composite ? TextCompositeReach(kAlpha) : kAlpha;
             for (const auto& quadrant : kQuadrants) {
@@ -12701,7 +12364,7 @@ TEST_F(MetalSceneDraw, TheShippedRopeAndTrailPreviewScenesAreParsedTranslatedAnd
     // the real project file, the real particle definition, the author's own
     // `genericparticle` / `genericropeparticle` shaders through the structured
     // translation, the shared simulation, and this backend's dynamic upload.
-    // What it proves is that each renderer is accepted and that simulated
+    // What it proves is that the renderer accepts the scene and that simulated
     // geometry reaches the target. It does not judge how the result looks.
     const auto assets = LocalSceneAssetsRoot();
     const auto previews = assets / "scenes/particleelementpreviews";
@@ -13344,8 +13007,8 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                         "drawn natively";
     }
     // Its own knob, not the probe's `WE_TEST_FRAMES`: that one counts samples a
-    // `WE_TEST_FRAME_STEP` apart, and the matched-time recipe sets it for the
-    // Vulkan run alone. Sharing it would silently move this frame's scene time.
+    // `WE_TEST_FRAME_STEP` apart, and a matched-time recipe sets it for another
+    // run alone. Sharing it would silently move this frame's scene time.
     // Two frames at least, because frame 0 is excluded from the averages.
     int frame_count = 120;
     if (const char* value = std::getenv("WE_TEST_METAL_FRAMES")) {
@@ -13420,7 +13083,7 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
         InjectSystemMediaForMetal(*loaded.scene);
         const auto selection = SelectSceneBackend(*loaded.scene);
         if (selection.failed()) {
-            std::cout << "[ LOCAL    ] " << paths.scene_id << ": Compatibility -- "
+            std::cout << "[ LOCAL    ] " << paths.scene_id << ": held -- "
                       << selection.failure_reason << std::endl;
             continue;
         }
@@ -13499,10 +13162,10 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
                           << " layer link texture(s) read before the frame fills them" << std::endl;
             }
             if (! render.compileRenderGraph(*loaded.scene, *graph)) {
-                // The production router treats this as a fallback too, with
-                // this text as the reason.
+                // The engine holds the scene on this failure too, with this text
+                // as the reason.
                 std::cout << "[ LOCAL    ] " << paths.scene_id
-                          << ": Compatibility after prepare -- " << render.lastError() << std::endl;
+                          << ": held after prepare -- " << render.lastError() << std::endl;
                 render.destroy();
                 continue;
             }
@@ -13690,30 +13353,26 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
     wallpaper::render::SetSceneOptimizationEnabled(optimization_was);
 }
 
-TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
+TEST_F(MetalSceneDraw, LocalProjectsDrawAPosterPicture)
 {
-    // The two renderers in one harness: each project is parsed twice exactly
-    // as a wallpaper loads it, seeded and clocked identically, and drawn
-    // through `SceneRendererHandle` on a layer no window owns -- once by the
-    // compatibility backend, once by the native one. The final composition of
-    // the last frame comes back through the poster path both backends share,
-    // so the two pictures differ only by what the renderers did. Prints the
-    // mean absolute difference per channel and the share of pixels off by more
-    // than 48, and writes both pictures under `WE_TEST_OUTPUT`. A diagnostic,
-    // not a verdict: nothing is asserted about the size of a difference.
+    // Each project is parsed exactly as a wallpaper loads it, seeded and clocked
+    // as asked, and drawn through `SceneRendererHandle` on a layer no window
+    // owns. The final composition of the last frame comes back through the
+    // poster path and is written as `<scene id>.ppm` under `WE_TEST_OUTPUT`: a
+    // picture to compare with another build's, or with a reference from outside
+    // this harness (Wallpaper Engine's own frames). A diagnostic, not a verdict:
+    // nothing is asserted about the picture. Two runs with the same seed, clock
+    // and properties give byte-identical pictures, so a difference between two
+    // builds is what the build changed.
     // `WE_TEST_COMPARE_PROJECTS` is a colon-separated list of `project.json`
     // paths; `WE_TEST_METAL_FRAMES`, `WE_TEST_METAL_FRAME_STEP`,
     // `WE_TEST_METAL_WARMUP_TICKS`, `WE_TEST_RANDOM_SEED` and
     // `WE_TEST_PROPERTIES` mean what they mean for the local-project run, and
     // `WE_TEST_COMPARE_SURFACE` is the layer's `<width>x<height>` (960x540).
-    // `WE_TEST_COMPARE_NATIVE_ONLY` draws the native picture alone, for a
-    // comparison with a reference from outside this harness (Wallpaper Engine's
-    // own frames): nothing is compared and only `-native.ppm` is written.
     // `WE_TEST_COMPARE_RESOLUTION=display` rasterizes a 2D scene at the size it
     // is presented at (`canvas`, the default, at the size it was authored at) and
     // `WE_TEST_COMPARE_SCALE_FACTOR` is the layer's backing scale (1), so a
-    // display-resolution picture can be compared across renderers and with the
-    // canvas one. `WE_TEST_INPUT_JSON` feeds synthetic pointer events (the
+    // display-resolution picture can be compared with the canvas one. `WE_TEST_INPUT_JSON` feeds synthetic pointer events (the
     // cursor at the centre of the screen is `[{"frame":0,"x":0.5,"y":0.5}]`),
     // and `WE_TEST_COMPARE_REALTIME` paces the frames in real time, so a
     // script reading the wall clock (`Date.now()`) sees the scene's time pass as
@@ -13728,7 +13387,6 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
     // behind, whenever it comes, and the draw it came before is printed so a run
     // that did not rebuild can be drawn to the same time.
     const char* listed = std::getenv("WE_TEST_COMPARE_PROJECTS");
-    const bool  native_only = std::getenv("WE_TEST_COMPARE_NATIVE_ONLY") != nullptr;
     const auto  assets = LocalSceneAssetsRoot();
     if (listed == nullptr || *listed == '\0' || assets.empty() ||
         ! std::filesystem::is_directory(assets)) {
@@ -13789,10 +13447,9 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
     for (const auto& project : projects) {
         SCOPED_TRACE(project);
         const std::string label = "compare-" + std::to_string(index++);
-        std::map<bool, RendererPicture> pictures;
-        std::string             scene_id;
-        for (const bool native : { false, true }) {
-            if (native_only && ! native) continue;
+        RendererPicture drawn;
+        std::string     scene_id;
+        {
             if (const char* seed = std::getenv("WE_TEST_RANDOM_SEED")) {
                 Random::seed(static_cast<uint32_t>(std::strtoul(seed, nullptr, 10)));
             }
@@ -13805,7 +13462,7 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
             ASSERT_TRUE(MountSceneSource(loaded.vfs, paths, &error)) << error;
             ASSERT_TRUE(loaded.vfs.Mount(
                 "/cache",
-                fs::CreatePhysicalFs((root_ / (label + (native ? "-native" : "-compat"))).string(), true),
+                fs::CreatePhysicalFs((root_ / (label)).string(), true),
                 "cache"));
             InstallVirtualAssets(loaded.vfs);
             ASSERT_TRUE(ParseProjectProperties(project, &loaded.properties, &error)) << error;
@@ -13826,14 +13483,13 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
                                         source->ReadAllStr(), loaded.vfs, loaded.sound);
             ASSERT_NE(loaded.scene, nullptr);
             InjectSystemMediaForMetal(*loaded.scene);
-            if (native) {
-                const auto selection = SelectSceneBackend(*loaded.scene);
-                if (selection.failed()) {
-                    std::cout << "[ COMPARE  ] " << scene_id << ": native refused -- "
-                              << selection.failure_reason << std::endl;
-                    break;
-                }
+            const auto selection = SelectSceneBackend(*loaded.scene);
+            if (selection.failed()) {
+                std::cout << "[ COMPARE  ] " << scene_id << ": Native Metal refused -- "
+                          << selection.failure_reason << std::endl;
+                continue;
             }
+
             auto& scene = *loaded.scene;
             scene.resolution = resolution;
             if (scene.runtime != nullptr) {
@@ -13857,57 +13513,31 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
             watch.stop_after = stop_after_rebuild;
             watch.from       = rebuild_from;
             watch.force_at   = rebuild_at;
-            auto picture = DrawWithRenderer(scene, native, width, height, frame_count, frame_step,
+            auto picture = DrawWithRenderer(scene, width, height, frame_count, frame_step,
                                             pace, scale_factor, &input, nullptr, &watch);
             if (stop_after_rebuild >= 0) {
                 const std::string rebuilt =
                     watch.rebuilt_at < 0
                         ? "not rebuilt"
                         : "rebuilt before draw " + std::to_string(watch.rebuilt_at);
-                std::printf("[ COMPARE  ] %s: %s graph %s, picture at draw %d of %d\n",
-                            scene_id.c_str(), native ? "native" : "compatibility", rebuilt.c_str(),
+                std::printf("[ COMPARE  ] %s: graph %s, picture at draw %d of %d\n",
+                            scene_id.c_str(), rebuilt.c_str(),
                             watch.last_draw, frame_count);
             }
             if (! picture.error.empty()) {
-                std::cout << "[ COMPARE  ] " << scene_id << ": "
-                          << (native ? "native" : "compatibility") << " -- " << picture.error
-                          << std::endl;
-                break;
+                std::cout << "[ COMPARE  ] " << scene_id << ": " << picture.error << std::endl;
+                continue;
             }
-            pictures[native] = std::move(picture);
+            drawn = std::move(picture);
         }
-        if (pictures.size() != (native_only ? 1u : 2u)) continue;
-        if (! native_only) {
-            const auto& a = pictures[false];
-            const auto& b = pictures[true];
-            ASSERT_EQ(a.width, b.width);
-            ASSERT_EQ(a.height, b.height);
-            double      total = 0.0;
-            std::size_t off   = 0;
-            for (std::size_t i = 0; i < a.rgb.size(); i += 3) {
-                int worst = 0;
-                for (std::size_t c = 0; c < 3; ++c) {
-                    const int d = std::abs(int(a.rgb[i + c]) - int(b.rgb[i + c]));
-                    total += d;
-                    worst = std::max(worst, d);
-                }
-                if (worst > 48) ++off;
-            }
-            std::printf(
-                "[ COMPARE  ] %s: mean abs difference %.3f, %.4f of pixels off by more than 48\n",
-                scene_id.c_str(), total / double(a.rgb.size()),
-                double(off) / double(a.rgb.size() / 3));
-        }
+        if (drawn.rgb.empty()) continue;
         if (output != nullptr && *output != '\0') {
             std::filesystem::create_directories(output);
-            for (const auto& [native, picture] : pictures) {
-                std::ofstream image(std::filesystem::path(output) /
-                                        (scene_id + (native ? "-native.ppm" : "-compat.ppm")),
-                                    std::ios::binary);
-                image << "P6\n" << picture.width << " " << picture.height << "\n255\n";
-                image.write(reinterpret_cast<const char*>(picture.rgb.data()),
-                            std::streamsize(picture.rgb.size()));
-            }
+            std::ofstream image(std::filesystem::path(output) / (scene_id + ".ppm"),
+                                std::ios::binary);
+            image << "P6\n" << drawn.width << " " << drawn.height << "\n255\n";
+            image.write(reinterpret_cast<const char*>(drawn.rgb.data()),
+                        std::streamsize(drawn.rgb.size()));
         }
     }
 }
@@ -14422,14 +14052,13 @@ TEST_F(MetalSceneDraw, ASceneLightReachesTheAuthorsLightingUniforms)
     }
 }
 
-TEST_F(MetalSceneDraw, AStepSamplingAnImageNothingProducesIsSkippedLikeOnCompatibility)
+TEST_F(MetalSceneDraw, AStepSamplingAnImageNothingProducesIsSkipped)
 {
     // The overlay samples the composite of an object that is a layer by id
     // but never draws one -- a light here, a hidden text layer in the wild.
     // The graph finds no producer and leaves the slot without a name. The
-    // compatibility backend then neither draws nor clears that step, every
-    // frame; refusing the whole scene for it would send a wallpaper to a
-    // renderer that draws exactly the same picture.
+    // step then neither draws nor clears, every frame; refusing the whole scene
+    // for it would hold a wallpaper that draws fine without it.
     const auto project = WriteFixture(root_ / "unproduced");
     std::ofstream(root_ / "unproduced/models/overlay.json")
         << R"({"width":128,"height":96,"material":"materials/overlay.json"})";
@@ -14513,8 +14142,8 @@ TEST_F(MetalSceneDraw, TheParallaxEasingStepsOnceForEachFrameTheHostDraws)
     // shows the eased parallax x as red. With a 1 s delay Wallpaper Engine's
     // first 1/60 s frame moves it (1 - 1/3) x 10 / 60 of the way from the
     // centre to the cursor at the right edge; a backend that stepped it again
-    // inside its own frame would draw it nearer the cursor than the
-    // compatibility backend does.
+    // inside its own frame would draw it nearer the cursor than the host's one
+    // step per frame puts it.
     const auto project = WriteFixture(root_ / "pointer");
     std::ofstream(root_ / "pointer/shaders/metal_probe.frag")
         << "uniform vec2 g_ParallaxPosition;\n"

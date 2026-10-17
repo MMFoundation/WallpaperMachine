@@ -285,8 +285,7 @@ impl<'de> serde::Deserialize<'de> for ShaderSymbolName {
 
 /// Vertex input/output location index.
 ///
-/// Valid locations are `0..=31`, matching the conservative vertex interface
-/// limit used by the current renderer path and Vulkan minimum guarantees.
+/// Valid locations are `0..=31`, a conservative vertex interface limit.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[repr(transparent)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -332,8 +331,8 @@ impl<'de> serde::Deserialize<'de> for LocationIndex {
 /// Descriptor binding set.
 ///
 /// Valid binding sets are `0..=3`. Task 1 only uses set 0, but reserving four
-/// sets keeps the core model compatible with Vulkan's minimum descriptor set
-/// limit without accepting unbounded renderer-facing values.
+/// sets keeps the core model within a conservative descriptor set limit without
+/// accepting unbounded renderer-facing values.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[repr(transparent)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]

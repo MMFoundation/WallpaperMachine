@@ -49,9 +49,9 @@ impl MetalSlotKind {
 pub struct MetalResourceBinding {
     /// Shader-visible name of the global this binding belongs to.
     name: ShaderSymbolName,
-    /// SPIR-V descriptor set the global was declared in.
+    /// GLSL descriptor set the global was declared in.
     set: u32,
-    /// SPIR-V binding index the global was declared with.
+    /// GLSL binding index the global was declared with.
     binding: u32,
     /// Metal argument-table namespace the slot belongs to.
     slot_kind: MetalSlotKind,
@@ -84,13 +84,13 @@ impl MetalResourceBinding {
         &self.name
     }
 
-    /// Returns the SPIR-V descriptor set.
+    /// Returns the GLSL descriptor set.
     #[must_use]
     pub const fn set(&self) -> u32 {
         self.set
     }
 
-    /// Returns the SPIR-V binding index.
+    /// Returns the GLSL binding index.
     #[must_use]
     pub const fn binding(&self) -> u32 {
         self.binding
@@ -129,8 +129,7 @@ impl MetalCoordinateConventions {
     /// Returns the conventions used when no transform is injected at all.
     ///
     /// Clip-space position and texture coordinates are then emitted exactly as
-    /// the shader IR expresses them, which is what the SPIR-V target already
-    /// does after `ADJUST_COORDINATE_SPACE` is removed.
+    /// the shader IR expresses them, after `ADJUST_COORDINATE_SPACE` is removed.
     #[must_use]
     pub const fn unmodified() -> Self {
         Self {

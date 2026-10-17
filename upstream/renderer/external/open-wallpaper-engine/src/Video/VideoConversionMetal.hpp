@@ -2,8 +2,8 @@
 
 namespace wallpaper::video
 {
-// Shared by both renderers: geometry and color conversion must agree before
-// either backend samples an imported video as an ordinary texture.
+// Geometry and color conversion must agree before the renderer samples an
+// imported video as an ordinary texture.
 inline constexpr const char* kVideoConversionMetalSource = R"(
 #include <metal_stdlib>
 using namespace metal;
@@ -55,8 +55,8 @@ kernel void bgra_transform(texture2d<float, access::sample> source [[texture(0)]
 
 // The 10-bit kernel and what it needs, as a second piece of Metal source that
 // is compiled together with the one above, and only by a scene whose video is
-// 10-bit. An 8-bit scene, and the compatibility backend's lease, which compile
-// `kVideoConversionMetalSource` alone, neither pay for it nor see it.
+// 10-bit. An 8-bit scene, which compiles
+// `kVideoConversionMetalSource` alone, neither pays for it nor sees it.
 inline constexpr const char* kVideoTenBitConversionMetalSource = R"(
 // ---- 10-bit biplanar (P010 / 'x420') -------------------------------------
 // The decoder's 10-bit samples sit in the top ten bits of each 16-bit word, so

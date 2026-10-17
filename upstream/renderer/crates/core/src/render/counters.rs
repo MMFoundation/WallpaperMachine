@@ -48,8 +48,8 @@ pub enum RendererCounterKind {
     /// Bytes of converted video destination textures one surface's texture
     /// cache is keeping alive, and the most it ever kept alive. Gauges, not
     /// running totals. The ledger covers those destination textures alone:
-    /// decode pixel buffers, Core Video plane wrappers, the Vulkan images
-    /// aliasing them and the swapchain are outside it, so this is an
+    /// decode pixel buffers, Core Video plane wrappers and the drawables
+    /// the layer hands out are outside it, so this is an
     /// allocation figure and never a residency or footprint measurement.
     VideoConversionLiveBytes,
     VideoConversionPeakLiveBytes,

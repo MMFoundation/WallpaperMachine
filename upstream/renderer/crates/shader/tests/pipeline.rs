@@ -10,11 +10,10 @@ use shader::{
     pipeline::{DefaultShaderPipeline, ShaderPipeline, ShaderPipelineRevision},
 };
 
-const SPIRV_MAGIC: u32 = 0x0723_0203;
 
 #[test]
 fn redefined_array_bound_uses_the_current_macro_in_reflection_and_backend() {
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let request = ShaderProgramRequest::builder(ShaderName::new("redefined_array_bound").unwrap())
             .target(target)
             .stage(ShaderStageSource::new(ShaderStageKind::Vertex,
@@ -34,7 +33,7 @@ fn redefined_array_bound_uses_the_current_macro_in_reflection_and_backend() {
 
 #[test]
 fn float_remainder_reaches_both_backends_without_repeating_operands() {
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let request = ShaderProgramRequest::builder(ShaderName::new("float_remainder").unwrap())
             .target(target)
             .stage(ShaderStageSource::new(ShaderStageKind::Vertex, concat!(
@@ -53,7 +52,7 @@ fn float_remainder_reaches_both_backends_without_repeating_operands() {
             )))
             .build().unwrap();
         let program = pipeline().compile(&request)
-            .expect("float remainder is legal on SPIR-V and Metal backends");
+            .expect("float remainder is legal for the Metal backend");
         let fragment = program.stages().iter()
             .find(|stage| stage.kind() == ShaderStageKind::Fragment).unwrap()
             .legalized_source().unwrap();
@@ -126,7 +125,7 @@ fn compiles_program_and_merges_metadata_reflection_and_diagnostics() {
         program
             .stages()
             .iter()
-            .all(|stage| stage.spirv().and_then(<[u32]>::first) == Some(&SPIRV_MAGIC))
+            .all(|stage| stage.target() == ShaderTarget::Analysis)
     );
     assert!(program.stages().iter().any(|stage| {
         stage.kind() == ShaderStageKind::Vertex
@@ -223,21 +222,21 @@ fn cache_key_tracks_sources_combos_revision_and_legalized_output() {
 }
 
 #[test]
-fn cache_key_separates_spirv_and_metal_targets_for_identical_sources() {
+fn cache_key_separates_analysis_and_metal_targets_for_identical_sources() {
     let pipeline = pipeline();
-    let spirv = pipeline
-        .compile(&request_with_target("1.0", "1", ShaderTarget::VulkanSpirv))
-        .expect("vulkan_spirv request should compile");
+    let analysis = pipeline
+        .compile(&request_with_target("1.0", "1", ShaderTarget::Analysis))
+        .expect("analysis request should compile");
     let metal = pipeline
         .compile(&request_with_target("1.0", "1", ShaderTarget::MetalMsl))
         .expect("metal_msl request should compile");
 
-    assert_eq!(spirv.stages().len(), metal.stages().len());
+    assert_eq!(analysis.stages().len(), metal.stages().len());
     assert!(
-        spirv
+        analysis
             .stages()
             .iter()
-            .all(|stage| stage.target() == ShaderTarget::VulkanSpirv)
+            .all(|stage| stage.target() == ShaderTarget::Analysis)
     );
     assert!(
         metal
@@ -246,9 +245,9 @@ fn cache_key_separates_spirv_and_metal_targets_for_identical_sources() {
             .all(|stage| stage.target() == ShaderTarget::MetalMsl)
     );
     assert_ne!(
-        spirv.cache_key(),
+        analysis.cache_key(),
         metal.cache_key(),
-        "a spirv cache entry must never be served for a metal request or the reverse"
+        "an analysis cache entry must never be served for a metal request or the reverse"
     );
 }
 
@@ -1720,7 +1719,7 @@ fn pipeline_uses_annotation_combo_defaults_as_compile_macros() {
 fn conditional_texture_annotations_enable_the_sampled_mask_on_both_backends() {
     // The switch is declared inside the branch it enables, including through
     // an include. Discovering it after condition stripping loses the mask.
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         for (present, override_value, expected) in [
             (true, None, true),
             (false, None, false),
@@ -2715,7 +2714,7 @@ fn lit_layer_pipeline() -> DefaultShaderPipeline<InMemoryShaderSourceProvider> {
 
 #[test]
 fn a_lit_pass_gets_wallpaper_engines_light_arrays_sized_by_the_scene_on_both_backends() {
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let request = lit_layer_request(target, &[
             ("LIGHTING", "1"),
             ("LIGHTS_POINT", "3"),
@@ -2743,7 +2742,7 @@ fn a_lit_pass_gets_wallpaper_engines_light_arrays_sized_by_the_scene_on_both_bac
 
 #[test]
 fn an_unlit_pass_declares_no_light_arrays() {
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let request = lit_layer_request(target, &[("LIGHTS_POINT", "3")]);
         let program = lit_layer_pipeline().compile(&request)
             .unwrap_or_else(|error| panic!("unlit pass should compile for {target:?}: {error}"));
@@ -2773,7 +2772,7 @@ fn every_asset_shader_that_requires_lighting_compiles_lit_and_fogged_on_both_bac
         ) else {
             continue;
         };
-        for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+        for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
             let mut builder = ShaderProgramRequest::builder(ShaderName::new(shader).unwrap())
                 .target(target)
                 .stage(ShaderStageSource::new(ShaderStageKind::Vertex, vertex.clone()))
@@ -2840,7 +2839,7 @@ fn asset_vertex_stages_with_if_hlsl_blocks_compile_on_both_backends() {
         let Some(vertex) = corpus_source_or_skip(&root.join(format!("{shader}.vert")), test) else {
             continue;
         };
-        for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+        for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
             let mut builder = ShaderProgramRequest::builder(ShaderName::new(shader).unwrap())
                 .target(target)
                 .stage(ShaderStageSource::new(ShaderStageKind::Vertex, format!("{prelude}{vertex}")))
@@ -3307,7 +3306,7 @@ fn pipeline_compiles_array_varyings_followed_by_scalar_varyings() {
 
 #[test]
 fn pipeline_compiles_macro_sized_varyings_without_overlapping_locations() {
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         for count in [None, Some(2), Some(4), Some(8)] {
             let mut request = ShaderProgramRequest::builder(
                 ShaderName::new("effects/macro_array_interface").unwrap(),
@@ -3345,7 +3344,7 @@ fn pipeline_compiles_macro_sized_varyings_without_overlapping_locations() {
 
 #[test]
 fn pipeline_resolves_macro_array_bounds_at_each_declaration() {
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         for change in [
             "#undef COUNT\n#define COUNT 4\n",
             "float helper() {\n#undef COUNT\n#define COUNT 4\nreturn 0.0;\n}\n",
@@ -3382,7 +3381,7 @@ fn pipeline_resolves_macro_array_bounds_at_each_declaration() {
 
 #[test]
 fn pipeline_rejects_unresolved_interface_array_bounds_before_layout() {
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         for (prefix, suffix, late) in [
             ("#define COUNT 4+1\n", "COUNT", ""),
             ("#define COUNT (2+1)\n", "COUNT", ""),
@@ -3415,7 +3414,7 @@ fn pipeline_rejects_unresolved_interface_array_bounds_before_layout() {
 
 #[test]
 fn pipeline_legalizes_nested_legacy_calls_in_macro_replacements() {
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let request = ShaderProgramRequest::builder(
             ShaderName::new("effects/macro_builtins").unwrap(),
         )
@@ -3522,7 +3521,7 @@ fn a_compositing_effect_turns_the_screen_coordinate_over_under_if_hlsl() {
         "    gl_FragColor = texSample2D(g_Texture0, v_TexCoord) + texSample2D(g_Texture1, screen);\n",
         "}\n",
     );
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let program = compile_program("compose_background", target, vertex, fragment);
         let source = legalized_stage(&program, ShaderStageKind::Vertex);
         assert!(source.contains("v_ScreenCoord.y = -v_ScreenCoord.y;"), "{target:?}: {source}");
@@ -3557,7 +3556,7 @@ fn a_bokeh_style_kernel_compiles_from_its_if_hlsl_brace_list_on_both_backends() 
         "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n",
         "void main() { gl_Position = vec4(a_Position, 1.0); v_TexCoord = a_TexCoord; }\n",
     );
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let program = compile_program("bokeh_kernel", target, vertex, fragment);
         let source = legalized_stage(&program, ShaderStageKind::Fragment);
         assert!(source.contains("= {KERNEL};"), "{target:?}: {source}");
@@ -3596,7 +3595,7 @@ fn the_direct3d_light_falloff_is_defined_for_zero_and_stays_finite_on_both_backe
         "    gl_FragColor = vec4(Radiance(g_LightColor, v_Distance, g_Radius, g_Exponent), 1.0);\n",
         "}\n",
     );
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let program = compile_program("light_falloff", target, vertex, fragment);
         let source = legalized_stage(&program, ShaderStageKind::Fragment);
         assert!(source.contains("pow(falloff + 1.17549435e-38, exponent)"), "{target:?}: {source}");
@@ -3638,7 +3637,7 @@ fn a_redeclared_vertex_index_is_no_vertex_input_of_the_compiled_program() {
         "}\n",
     );
     let fragment = "varying float v_Offset;\nvoid main() { gl_FragColor = vec4(v_Offset); }\n";
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let program = compile_program("morph_offset", target, vertex, fragment);
         let names: Vec<_> = program
             .reflection()
@@ -3681,7 +3680,7 @@ fn a_vertex_input_the_shader_writes_keeps_the_attribute_name_the_mesh_provides()
         "    gl_FragColor = v_Color * v_TexCoord.x;\n",
         "}\n",
     );
-    for target in [ShaderTarget::VulkanSpirv, ShaderTarget::MetalMsl] {
+    for target in [ShaderTarget::Analysis, ShaderTarget::MetalMsl] {
         let program = compile_program("written_inputs", target, vertex, fragment);
         assert!(
             legalized_stage(&program, ShaderStageKind::Fragment)
@@ -3744,7 +3743,7 @@ impl ShaderCompiler for SourceCaptureCompiler {
     ) -> ShaderResult<CompiledStageArtifact<Self::Module>> {
         let compiled_stage = CompiledShaderStage::new(
             stage,
-            CompiledStageCode::VulkanSpirv(Box::from([SPIRV_MAGIC])),
+            CompiledStageCode::Analysis,
             Some(source.source().to_owned()),
             Box::from([]),
         );

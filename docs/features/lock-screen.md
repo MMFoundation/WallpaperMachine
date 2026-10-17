@@ -182,7 +182,7 @@ the original deadline (35 seconds), and only a confirmed activation saves the se
 for the next launch. The extension answers macOS only once that frame exists, and
 WallpaperAgent abandons an extension that has not answered after about 31 seconds
 (observed on macOS 27.2), so a scene must reach its first frame well inside that; see
-[startup costs](../testing/runtime-regressions.md#startup-and-staging-buffers).
+[startup costs](../testing/runtime-regressions.md#startup).
 
 ## Use wallpaper as screen saver
 

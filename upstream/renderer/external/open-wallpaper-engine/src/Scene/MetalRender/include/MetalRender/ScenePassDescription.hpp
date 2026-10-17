@@ -136,8 +136,8 @@ struct MetalPipelineKeyHash
     std::size_t operator()(const MetalPipelineKey& key) const noexcept;
 };
 
-/// Lowers the render graph the compatibility backend consumes into the pass
-/// list this backend executes. One graph, two backends: the ordering, the
+/// Lowers the render graph into the pass
+/// list this backend executes. The ordering, the
 /// load/store decisions and the per-target clear behaviour are the graph's, not
 /// this function's.
 ///
@@ -147,10 +147,9 @@ struct MetalPipelineKeyHash
 ///
 /// `scene` is mutable because a copy's destination may be a graph-internal
 /// target the parser never declared -- the link textures and the copies that
-/// break a read-while-write are named by the graph builder. The compatibility
-/// backend registers those in `Scene::renderTargets` from their source when it
-/// prepares the copy; this does the same, so both backends allocate the same
-/// set of images at the same sizes.
+/// break a read-while-write are named by the graph builder. They are
+/// registered in `Scene::renderTargets` from their source when the copy is
+/// described, so every pass finds its images at the sizes the graph implies.
 bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
                                 std::vector<ScenePassDescription>& out, std::string* error);
 

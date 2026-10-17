@@ -118,8 +118,8 @@ namespace
 constexpr NSUInteger kFramesInFlight = 2;
 
 /// Vertex buffers are bound from the top of Metal's buffer argument table
-/// downwards, because the translated shader's own resources are placed at their
-/// SPIR-V binding indices, which start at zero. A collision is detected at
+/// downwards, because the translated shader's own resources are placed at the
+/// binding indices their GLSL declarations carry, which start at zero. A collision is detected at
 /// prepare time rather than assumed away.
 constexpr NSUInteger kVertexBufferTopIndex = 30;
 
@@ -140,9 +140,7 @@ MTLPixelFormat SceneTargetFormat(TextureFormat format)
 }
 
 /// Ceiling on the pixels this backend keeps alive only so they can be reused.
-/// The same number the compatibility backend uses, so the two report one
-/// budget and one `pinned_bytes` total rather than two that happen to be added
-/// together.
+/// One budget and one `pinned_bytes` total for the whole scene.
 constexpr uint64_t kStaticCacheBudgetBytes = 192ULL * 1024ULL * 1024ULL;
 
 constexpr std::string_view kPresentShaderSource = R"(
@@ -189,9 +187,7 @@ struct PresentVertex
 
 /// A triangle strip covering the target, with the texture's top row at the top
 /// of the image. Metal's normalized device coordinates put -1 at the bottom and
-/// its textures put v = 0 at the top, so v = 1 belongs with y = -1. These are
-/// the same four vertices the compatibility backend's final blit uses, which is
-/// what makes the two backends present the same orientation.
+/// its textures put v = 0 at the top, so v = 1 belongs with y = -1. 
 constexpr PresentVertex kPresentVertices[4] = {
     { { -1.0f, -1.0f }, { 0.0f, 1.0f } },
     { { -1.0f, 1.0f }, { 0.0f, 0.0f } },
@@ -262,7 +258,7 @@ MTLSamplerMinMagFilter ToMetalFilter(TextureFilter filter)
 
 /// Uncompressed formats only. Block-compressed source images are rejected
 /// rather than decoded here: silently expanding them would change memory use
-/// and filtering behaviour relative to the compatibility backend.
+/// and filtering behaviour.
 /// `block_bytes` is non-zero for a block-compressed format, where a row is
 /// counted in 4x4 blocks rather than pixels and `bytes_per_pixel` means nothing.
 bool ToMetalImageFormat(TextureFormat format, bool block_compression, MTLPixelFormat& out,
@@ -286,8 +282,7 @@ bool ToMetalImageFormat(TextureFormat format, bool block_compression, MTLPixelFo
         out             = MTLPixelFormatR8Unorm;
         bytes_per_pixel = 1;
         return true;
-    // The same three formats the compatibility backend hands to the same GPU
-    // through MoltenVK, uploaded as the blocks the file already holds. A device
+    // The three block-compressed formats, uploaded as the blocks the file already holds. A device
     // without them refuses the image, and with it the scene, rather than
     // decoding on the CPU into a texture four to eight times the size.
     case TextureFormat::BC1:
@@ -410,8 +405,8 @@ std::string BuildMetalResourcePlan(const std::vector<SceneMetalStage>& stages,
 {
     out.texture_slots.assign(texture_count, MetalRenderTextureSlotBinding {});
     // A slot the shader declares but never samples needs no texture behind it:
-    // the GLSL preprocessor already dropped it from SPIR-V, Vulkan skips an
-    // empty material name, and Metal leaves an unused argument unbound. Naga's
+    // the GLSL preprocessor already dropped it and Metal leaves an
+    // unused argument unbound. Naga's
     // MSL writer may still name that argument. One the shader does sample, with
     // nothing in the material to bind, is a genuine failure and stays one.
     const auto sampled = [&active_texture_slots](std::size_t slot) {
@@ -424,9 +419,9 @@ std::string BuildMetalResourcePlan(const std::vector<SceneMetalStage>& stages,
             if (binding.set != 0) {
                 return "a shader binds a resource outside descriptor set 0";
             }
-            // SPIR-V drops an unused uniform block; Naga's MSL writer may still
-            // name `GlobalUniforms` as a buffer argument. Vulkan has nothing to
-            // bind then. Match that: bind the block when reflection kept it,
+            // Analysis drops an unused uniform block; Naga's MSL writer may still
+            // name `GlobalUniforms` as a buffer argument. There is nothing to
+            // bind then: bind the block when reflection kept it,
             // otherwise leave the argument unbound.
             if (binding.name == "GlobalUniforms" ||
                 (uniform_block != nullptr && binding.name == uniform_block->name)) {
@@ -1392,8 +1387,7 @@ struct MetalRender::Impl
         uint32_t                           vertex_count { 0 };
         /// A texture slot the shader samples names nothing: the render graph
         /// found no producer for it (a layer texture whose layer draws no
-        /// composite). The compatibility backend then neither draws nor clears
-        /// the step, every frame, and neither does this one.
+        /// composite). The step is neither drawn nor cleared, every frame.
         bool                               unproduced_input { false };
 
         // ---- geometry the runtime rewrites every frame (particles)
@@ -1419,8 +1413,7 @@ struct MetalRender::Impl
         std::size_t                        dynamic_index_capacity { 0 };
         std::vector<std::vector<SceneVertexArray::SceneVertexAttribute>> dynamic_vertex_attributes;
         /// One entry per material texture slot that names a sprite sheet, copied
-        /// from the scene's texture table the way the compatibility backend's
-        /// graph builder copies it. The shared value updater advances these and
+        /// from the scene's texture table. The shared value updater advances these and
         /// writes the frame's rotation and translation uniforms; the sheet
         /// itself is one uploaded image (or one per `imageId`), never a
         /// per-frame upload.
@@ -1543,10 +1536,9 @@ struct MetalRender::Impl
     std::vector<uint8_t>       video_plane_active;
 
     // ---- scene optimisation
-    /// The same analysis the compatibility backend runs, over this backend's
-    /// own pass list. Reusing the class rather than reimplementing it is what
-    /// keeps "which target may be reused" one rule with one set of tests; only
-    /// the resources it governs are Metal's.
+    /// The static-reuse analysis, over this backend's own pass list. It is a
+    /// class of its own so "which target may be reused" is one rule with one
+    /// set of tests; only the resources it governs are Metal's.
     render::StaticSubgraphCache           static_cache;
     std::vector<render::StaticPassSample> static_samples;
     std::vector<uint8_t>                  static_skip;
@@ -1703,8 +1695,8 @@ struct MetalRender::Impl
     /// The uniform write, the geometry upload and the encoder all ask this one
     /// question, so they cannot disagree about a pass.
     bool passDraws(std::size_t index) const;
-    /// Whether the step's clear applies this frame. A step the compatibility
-    /// backend drops for an input nothing produces drops its clear with it.
+    /// Whether the step's clear applies this frame. A step dropped for an input
+    /// nothing produces drops its clear with it.
     bool passClears(std::size_t index) const;
     /// Decides which copies are replaced by a trade of textures. Called after
     /// the reuse table is built, because a reused image must keep its texture.
@@ -2027,7 +2019,7 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
 
     id<MTLRenderCommandEncoder> encoder = [command renderCommandEncoderWithDescriptor:present];
     if (encoder == nil) return false;
-    const VulkanViewportBox viewport {
+    const FlippedViewportBox viewport {
         .x      = (double)layout.viewport_px.x,
         .y      = (double)(layout.viewport_px.y + std::max(1, layout.viewport_px.height)),
         .width  = (double)std::max(1, layout.viewport_px.width),
@@ -2190,8 +2182,7 @@ void MetalRender::Impl::refreshRuntimeImages(Scene& scene)
             ring.levels          = levels;
         }
 
-        // The sampler follows the image the name shows now, as the compatibility
-        // backend's does: a cover slot shows its author's picture, sampled as the
+        // The sampler follows the image the name shows now: a cover slot shows its author's picture, sampled as the
         // file says, and then a track's cover, clamped and linear.
         ring.sample = parsed->header.sample;
 
@@ -2274,8 +2265,7 @@ id<MTLTexture> MetalRender::Impl::resolveTexture(Scene& scene, const std::string
 
     // Every slot for a sprite sheet, the first one for anything else. A sheet
     // whose frames are spread over several images names the one it wants
-    // through the frame's `imageId`, exactly as the compatibility backend's
-    // texture slots do, and importing only one would play the whole animation
+    // through the frame's `imageId`, and importing only one would play the whole animation
     // out of the first sheet. A texture that is not a sheet has no way to reach
     // a second slot, so uploading one would be memory nothing can sample.
     const auto  scene_texture = scene.textures.find(key);
@@ -2332,7 +2322,7 @@ void MetalRender::SetPipelineArchivePath(std::string_view path)
     pImpl->pipeline_archive_root = std::string(path);
 }
 
-/// Sizes every render target the way the compatibility backend does.
+/// Sizes every render target.
 ///
 /// The three sizings are different questions and must not be flattened into
 /// one. A screen-bound target follows the raster extent; a target the author
@@ -3007,7 +2997,7 @@ bool MetalRender::Impl::prepareDraw(Scene& scene, std::size_t index, PreparedPas
         if (desc.texture_keys[i].empty()) {
             if (! out.unproduced_input) {
                 LOG_INFO("metal render: %s samples slot %zu, which nothing in the scene produces; "
-                         "the step is skipped as on the compatibility renderer",
+                         "the step is skipped",
                          material->name.c_str(), i);
             }
             out.unproduced_input = true;
@@ -3105,8 +3095,7 @@ bool MetalRender::Impl::prepareDraw(Scene& scene, std::size_t index, PreparedPas
                         input.format);
         }
         // The buffer that actually carries this attribute, falling back to the
-        // first one exactly as the compatibility backend does when a shader
-        // declares an input the mesh does not provide.
+        // first one when a shader declares an input the mesh does not provide.
         std::size_t source   = 0;
         std::size_t offset   = 0;
         bool        provided = false;
@@ -3758,8 +3747,8 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
 {
     (void)graph;
     // Derived from this backend's OWN pass descriptions, not from the render
-    // graph's Vulkan pass objects. The Metal path never instantiates those, so
-    // walking the graph found nothing, concluded nothing was dynamic, and
+    // graph's pass objects, which this path never instantiates: walking the
+    // graph would find nothing, concluded nothing was dynamic, and
     // reported a provably-still scene — which would let on-demand updating stop
     // the clock on an animating wallpaper. An empty answer is the dangerous
     // answer here, so every path that cannot account for a pass adds
@@ -3851,8 +3840,8 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
     demand_reasons = reasons;
 }
 
-/// Decides which copies this backend can reduce, using the compatibility
-/// backend's rule rather than a second one.
+/// Decides which copies this backend can reduce, by the shared
+/// `CopyElision` rule rather than a second one.
 ///
 /// The rule is not relaxed for Metal: a copy that resamples, that generates the
 /// destination's mip chain, or whose destination anything else writes or reads
@@ -4597,8 +4586,7 @@ bool MetalRender::compileRenderGraph(Scene& scene, rg::RenderGraph& graph)
 bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double scale,
                                    SceneResolution resolution)
 {
-    // The same guard the compatibility backend has, and for a sharper reason
-    // here: `compile` starts by releasing the graph, which drops every uploaded
+    // A guard, for a sharp reason: `compile` starts by releasing the graph, which drops every uploaded
     // image and sets every video aside for the new graph to take back. The host
     // pushes this as a live property to every open scene whenever the value
     // *might* have moved — on scene creation, and on each power-source change
@@ -4772,8 +4760,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         id<MTLBuffer> uniforms = impl.uniform_rings[impl.frame_slot];
         auto*         uniform_base = static_cast<uint8_t*>(uniforms.contents);
 
-        // `FrameBegin` is the host's, once per frame before it draws, as for
-        // the compatibility backend: it steps the parallax cursor's smoothing
+        // `FrameBegin` is the host's, once per frame before it draws: it steps the parallax cursor's smoothing
         // by the frame time and places puppet attachments. Calling it here as
         // well stepped the smoothing twice per frame, so the parallax on this
         // backend chased the cursor twice as fast.
@@ -4781,8 +4768,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             auto&       pass = impl.prepared[i];
             const auto& desc = impl.descriptions[i];
             // A pass that draws nothing this frame needs no uniforms: nothing
-            // reads them, the way the compatibility backend skips the update
-            // of a hidden layer.
+            // reads them, as for a hidden layer.
             if (! impl.passDraws(i)) continue;
             const bool planes_active =
                 i < impl.video_plane_active.size() && impl.video_plane_active[i] != 0;
@@ -4868,8 +4854,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             ++impl.frame_encodes.blit_passes;
         };
 
-        // Consecutive passes that render into one image share one render pass,
-        // the rule the compatibility backend batches by. Every render pass
+        // Consecutive passes that render into one image share one render pass. Every render pass
         // stores its whole target and the next one loads it back, and at the
         // scene's size that memory traffic, not the draws, is what a frame of
         // many layers costs. A pass starts a new render pass when it renders
@@ -5073,9 +5058,9 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 open.clear_color      = desc.clear_color;
                 ++impl.frame_encodes.render_passes;
                 if (target == impl.scene_output_target) ++impl.frame_encodes.scene_output_passes;
-                // Culling follows the compatibility backend: none for a pass
+                // Culling: none for a pass
                 // without depth, the material's for one with it, against the
-                // same front faces. Each draw sets the mode it needs below.
+                // counter-clockwise front faces. Each draw sets the mode it needs below.
                 [open.encoder setCullMode:static_cast<MTLCullMode>(kSceneCullMode)];
                 [open.encoder setFrontFacingWinding:kSceneFrontFaceCounterClockwise
                                                         ? MTLWindingCounterClockwise

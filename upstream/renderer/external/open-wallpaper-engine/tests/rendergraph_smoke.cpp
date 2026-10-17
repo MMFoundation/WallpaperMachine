@@ -3,9 +3,8 @@
 #include "WPSceneParser.hpp"
 #include "SpecTexs.hpp"
 #include "RenderCommon/ScenePass.hpp"
+#include "RenderCommon/SceneRaster.hpp"
 #include "RenderCommon/SceneToRenderGraph.hpp"
-#include "VulkanRender/CustomShaderPass.hpp"
-#include "VulkanRender/PassCommon.hpp"
 
 #include <algorithm>
 #include <gtest/gtest.h>
@@ -2170,41 +2169,4 @@ TEST(RenderGraph, screenBoundSizingHonorsTinyAuthoredDefaultExtent) {
     REQUIRE(default_target.height == 90);
 }
 
-TEST(RenderGraph, textureDescriptorReadinessRejectsMissingImages) {
-    wallpaper::vulkan::CustomShaderPass::Desc desc {};
-    desc.textures = { "_rt_imageLayerComposite_159_a" };
-    desc.vk_textures.resize(1);
-    desc.vk_texture_bindings.push_back({
-        .image_binding = 1,
-        .image_descriptor_type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .sampler_binding = -1,
-    });
-
-    wallpaper::vulkan::CustomShaderPass pass(desc);
-    pass.desc().vk_textures = desc.vk_textures;
-    pass.desc().vk_texture_bindings = desc.vk_texture_bindings;
-    REQUIRE(! pass.textureDescriptorsReady());
-}
-
-TEST(RenderGraph, textureDescriptorReadinessRejectsMissingSeparateSampler) {
-    wallpaper::vulkan::CustomShaderPass::Desc desc {};
-    desc.textures = { "image.png" };
-    desc.vk_textures.resize(1);
-    wallpaper::vulkan::ImageParameters image {};
-    image.handle  = reinterpret_cast<VkImage>(1);
-    image.view    = reinterpret_cast<VkImageView>(1);
-    image.sampler = VK_NULL_HANDLE;
-    image.layout  = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    desc.vk_textures[0].slots.push_back(image);
-    desc.vk_texture_bindings.push_back({
-        .image_binding = 1,
-        .image_descriptor_type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .sampler_binding = 2,
-    });
-
-    wallpaper::vulkan::CustomShaderPass pass(desc);
-    pass.desc().vk_textures = desc.vk_textures;
-    pass.desc().vk_texture_bindings = desc.vk_texture_bindings;
-    REQUIRE(! pass.textureDescriptorsReady());
-}
 } // namespace

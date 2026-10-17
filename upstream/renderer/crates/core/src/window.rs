@@ -879,7 +879,7 @@ impl WallpaperWindow {
         Ok(())
     }
 
-    /// Returns the retained `CAMetalLayer` pointer used by Vulkan/MoltenVK.
+    /// Returns the retained `CAMetalLayer` pointer the renderer draws into.
     ///
     /// The pointer is null after close. Callers must not outlive the returned
     /// pointer beyond the `WallpaperWindow` that owns it.

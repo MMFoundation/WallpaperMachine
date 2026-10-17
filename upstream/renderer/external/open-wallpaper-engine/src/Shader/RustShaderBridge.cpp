@@ -10,9 +10,8 @@ namespace wallpaper::shader
 namespace
 {
 
-constexpr uint32_t SPIRV_MAGIC = 0x07230203u;
-constexpr int RS_SHADER_TARGET_VULKAN_SPIRV = 0;
-constexpr int RS_SHADER_TARGET_METAL_MSL    = 1;
+constexpr int RS_SHADER_TARGET_ANALYSIS  = 0;
+constexpr int RS_SHADER_TARGET_METAL_MSL = 1;
 
 struct RsShaderOwnedBytes {
     uint8_t* ptr;
@@ -35,10 +34,6 @@ int rs_shader_compile_program(
     RsShaderProgram** out_program);
 size_t rs_shader_program_stage_count(const RsShaderProgram* program);
 int rs_shader_program_stage_kind(const RsShaderProgram* program, size_t stage_index);
-const uint32_t* rs_shader_program_stage_spv_words(
-    const RsShaderProgram* program,
-    size_t stage_index);
-size_t rs_shader_program_stage_spv_word_count(const RsShaderProgram* program, size_t stage_index);
 int rs_shader_program_stage_target(const RsShaderProgram* program, size_t stage_index);
 const char* rs_shader_program_stage_msl_source(
     const RsShaderProgram* program,
@@ -90,7 +85,7 @@ ShaderType FromRustStageKind(int kind)
 const char* ToTargetName(RustShaderTarget target)
 {
     switch (target) {
-    case RustShaderTarget::VulkanSpirv: return "vulkan_spirv";
+    case RustShaderTarget::Analysis: return "analysis";
     case RustShaderTarget::MetalMsl: return "metal_msl";
     }
     throw std::runtime_error("unsupported Rust shader target");
@@ -99,7 +94,7 @@ const char* ToTargetName(RustShaderTarget target)
 int ToRustTarget(RustShaderTarget target)
 {
     switch (target) {
-    case RustShaderTarget::VulkanSpirv: return RS_SHADER_TARGET_VULKAN_SPIRV;
+    case RustShaderTarget::Analysis: return RS_SHADER_TARGET_ANALYSIS;
     case RustShaderTarget::MetalMsl: return RS_SHADER_TARGET_METAL_MSL;
     }
     throw std::runtime_error("unsupported Rust shader target");
@@ -117,78 +112,6 @@ RustShaderMetalSlotKind FromMetalSlotKind(std::string_view slot_kind)
         return RustShaderMetalSlotKind::Sampler;
     }
     throw std::runtime_error("Rust shader returned an unknown metal slot kind");
-}
-
-VkShaderStageFlags ToVkStageFlags(const nlohmann::json& stages)
-{
-    VkShaderStageFlags flags = 0;
-    for (const auto& stage : stages) {
-        const auto name = stage.get<std::string>();
-        if (name == "vertex") {
-            flags |= VK_SHADER_STAGE_VERTEX_BIT;
-        } else if (name == "fragment") {
-            flags |= VK_SHADER_STAGE_FRAGMENT_BIT;
-        }
-    }
-    return flags;
-}
-
-VkDescriptorType ToVkDescriptorType(std::string_view descriptor)
-{
-    if (descriptor == "uniform_buffer") {
-        return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    }
-    if (descriptor == "sampled_image") {
-        return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    }
-    if (descriptor == "combined_image_sampler") {
-        return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    }
-    if (descriptor == "sampler") {
-        return VK_DESCRIPTOR_TYPE_SAMPLER;
-    }
-    throw std::runtime_error("unsupported Rust descriptor kind");
-}
-
-VkFormat ToVkVertexFormat(std::string_view format)
-{
-    if (format == "r32_sfloat") {
-        return VK_FORMAT_R32_SFLOAT;
-    }
-    if (format == "r32g32_sfloat") {
-        return VK_FORMAT_R32G32_SFLOAT;
-    }
-    if (format == "r32g32b32_sfloat") {
-        return VK_FORMAT_R32G32B32_SFLOAT;
-    }
-    if (format == "r32g32b32a32_sfloat") {
-        return VK_FORMAT_R32G32B32A32_SFLOAT;
-    }
-    if (format == "r32_uint") {
-        return VK_FORMAT_R32_UINT;
-    }
-    if (format == "r32g32_uint") {
-        return VK_FORMAT_R32G32_UINT;
-    }
-    if (format == "r32g32b32_uint") {
-        return VK_FORMAT_R32G32B32_UINT;
-    }
-    if (format == "r32g32b32a32_uint") {
-        return VK_FORMAT_R32G32B32A32_UINT;
-    }
-    if (format == "r32_sint") {
-        return VK_FORMAT_R32_SINT;
-    }
-    if (format == "r32g32_sint") {
-        return VK_FORMAT_R32G32_SINT;
-    }
-    if (format == "r32g32b32_sint") {
-        return VK_FORMAT_R32G32B32_SINT;
-    }
-    if (format == "r32g32b32a32_sint") {
-        return VK_FORMAT_R32G32B32A32_SINT;
-    }
-    throw std::runtime_error("unsupported Rust vertex input format");
 }
 
 void FreeOwnedBytes(uint8_t* ptr, size_t, void*)
@@ -359,62 +282,10 @@ void ApplyRustShaderMetadataJson(std::string_view metadata_json, RustShaderOutpu
     ApplyActiveTextureSlots(metadata, output.fragment_preprocessor_info);
 }
 
+
 void ApplyRustShaderReflectionJson(std::string_view reflection_json, RustShaderOutput& output)
 {
     const auto reflection = nlohmann::json::parse(reflection_json);
-
-    output.reflection.binding_map.clear();
-    for (const auto& descriptor : reflection.value("descriptor_bindings", nlohmann::json::array())) {
-        if (descriptor.value("set", 0u) != 0u) {
-            throw std::runtime_error("Rust shader descriptors must use descriptor set 0");
-        }
-        if (descriptor.value("count", 1u) != 1u) {
-            throw std::runtime_error("Rust shader descriptor arrays are not supported");
-        }
-
-        VkDescriptorSetLayoutBinding binding {};
-        binding.binding         = descriptor.at("binding").get<uint32_t>();
-        binding.descriptorType  = ToVkDescriptorType(descriptor.at("descriptor").get<std::string>());
-        binding.descriptorCount = descriptor.value("count", 1u);
-        binding.stageFlags      = ToVkStageFlags(descriptor.value("stages", nlohmann::json::array()));
-        output.reflection.binding_map[descriptor.at("name").get<std::string>()] = binding;
-    }
-
-    output.reflection.blocks.clear();
-    int block_index = 0;
-    for (const auto& block_json : reflection.value("uniform_blocks", nlohmann::json::array())) {
-        vulkan::ShaderReflected::Block block {
-            .index      = block_index,
-            .size       = block_json.at("size").get<uint>(),
-            .binding    = block_json.value("binding", 0u),
-            .name       = block_json.at("name").get<std::string>(),
-            .member_map = {},
-        };
-
-        for (const auto& member : block_json.value("members", nlohmann::json::array())) {
-            block.member_map[member.at("name").get<std::string>()] =
-                vulkan::ShaderReflected::BlockedUniform {
-                    .block_index  = block_index,
-                    .offset       = member.at("offset").get<uint>(),
-                    .size         = member.at("size").get<size_t>(),
-                    .num          = member.value("element_count", 1u),
-                    .array_count  = member.value("array_count", 0u),
-                    .array_stride = member.value("array_stride", 0u),
-                };
-        }
-
-        output.reflection.blocks.push_back(std::move(block));
-        block_index++;
-    }
-
-    output.reflection.input_location_map.clear();
-    for (const auto& input : reflection.value("vertex_inputs", nlohmann::json::array())) {
-        output.reflection.input_location_map[input.at("name").get<std::string>()] =
-            vulkan::ShaderReflected::Input {
-                .location = input.at("location").get<uint>(),
-                .format   = ToVkVertexFormat(input.at("format").get<std::string>()),
-            };
-    }
 
     ApplyActiveTextureSlots(reflection, output.fragment_preprocessor_info);
 }
@@ -488,8 +359,6 @@ bool CompileRustShaderProgramJson(
     const size_t stage_count     = rs_shader_program_stage_count(program.ptr);
     if (target == RustShaderTarget::MetalMsl) {
         next_output.metal_stages.reserve(stage_count);
-    } else {
-        next_output.codes.reserve(stage_count);
     }
 
     for (size_t i = 0; i < stage_count; ++i) {
@@ -499,37 +368,26 @@ bool CompileRustShaderProgramJson(
             return false;
         }
 
-        if (target == RustShaderTarget::MetalMsl) {
-            const auto metal_json = BorrowedString(
-                rs_shader_program_stage_metal_json(program.ptr, i));
-            const auto msl_source = BorrowedString(
-                rs_shader_program_stage_msl_source(program.ptr, i));
-            if (msl_source.empty()) {
-                output = {};
-                return false;
-            }
-            RustShaderMetalStage metal_stage;
-            ApplyRustShaderMetalStageJson(metal_json, msl_source, kind, metal_stage);
-            next_output.metal_stages.push_back(std::move(metal_stage));
-            continue;
-        }
+        if (target != RustShaderTarget::MetalMsl) continue;
 
-        const auto* words = rs_shader_program_stage_spv_words(program.ptr, i);
-        const auto  count = rs_shader_program_stage_spv_word_count(program.ptr, i);
-        if (words == nullptr || count == 0 || words[0] != SPIRV_MAGIC) {
+        const auto metal_json = BorrowedString(
+            rs_shader_program_stage_metal_json(program.ptr, i));
+        const auto msl_source = BorrowedString(
+            rs_shader_program_stage_msl_source(program.ptr, i));
+        if (msl_source.empty()) {
             output = {};
             return false;
         }
-        next_output.codes.emplace_back(words, words + count);
+        RustShaderMetalStage metal_stage;
+        ApplyRustShaderMetalStageJson(metal_json, msl_source, kind, metal_stage);
+        next_output.metal_stages.push_back(std::move(metal_stage));
     }
 
     next_output.metadata_json    = BorrowedString(rs_shader_program_metadata_json(program.ptr));
     next_output.reflection_json  = BorrowedString(rs_shader_program_reflection_json(program.ptr));
     next_output.diagnostics_json = BorrowedString(rs_shader_program_diagnostics_json(program.ptr));
     next_output.cache_key        = BorrowedString(rs_shader_program_cache_key(program.ptr));
-    // Reflection is target-independent: the Metal path consumes exactly the
-    // same uniform-block layout, descriptor names and texture slots the Vulkan
-    // path does.
+    // Metadata and reflection are target-independent.
     ApplyRustShaderMetadataJson(next_output.metadata_json, next_output);
     ApplyRustShaderReflectionJson(next_output.reflection_json, next_output);
 
@@ -578,9 +436,9 @@ bool CompileRustShaderProgramWithBridgeJson(
 {
     return CompileRustShaderProgramJson(
         request_json.dump(),
-        request_json.value("target", std::string { "vulkan_spirv" }) == "metal_msl"
+        request_json.value("target", std::string { "analysis" }) == "metal_msl"
             ? RustShaderTarget::MetalMsl
-            : RustShaderTarget::VulkanSpirv,
+            : RustShaderTarget::Analysis,
         output,
         include_reader);
 }

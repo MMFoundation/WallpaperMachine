@@ -9,7 +9,7 @@ use crate::{
     ShaderResult,
     codegen::{
         Fixup,
-        declarations::builtins::{self, VULKAN_SPELLING},
+        declarations::builtins::{self, NAGA_SPELLING},
     },
     syntax::{PreprocessorDirective, SyntaxItem},
     tokenizer::{TokenCursor, TypedToken},
@@ -67,14 +67,14 @@ impl BuiltinVariablesStrategy {
     /// Pushes a rename for every OpenGL-spelled builtin in `tokens`.
     fn rename_in(context: &mut StrategyContext<'_, '_, '_>, tokens: TokenCursor<'_>, own: &[&str]) {
         for token in tokens.identifiers() {
-            if let Some((_, vulkan)) = VULKAN_SPELLING
+            if let Some((_, naga_name)) = NAGA_SPELLING
                 .iter()
                 .find(|(opengl, _)| *opengl == token.text() && !own.contains(opengl))
             {
                 context
                     .context()
                     .fixups
-                    .push(Fixup::replace(token.span(), *vulkan));
+                    .push(Fixup::replace(token.span(), *naga_name));
             }
         }
     }

@@ -139,8 +139,8 @@ impl<'de> serde::Deserialize<'de> for ShaderCacheKey {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum CompiledStageCode {
-    /// SPIR-V words generated for the Vulkan target.
-    VulkanSpirv(Box<[u32]>),
+    /// The program parsed and validated; no code was generated.
+    Analysis,
     /// Metal Shading Language source generated for the Metal target.
     MetalMsl(MetalStageCode),
 }
@@ -150,17 +150,8 @@ impl CompiledStageCode {
     #[must_use]
     pub const fn target(&self) -> ShaderTarget {
         match self {
-            Self::VulkanSpirv(_) => ShaderTarget::VulkanSpirv,
+            Self::Analysis => ShaderTarget::Analysis,
             Self::MetalMsl(_) => ShaderTarget::MetalMsl,
-        }
-    }
-
-    /// Returns the SPIR-V words when this code targets Vulkan.
-    #[must_use]
-    pub fn spirv(&self) -> Option<&[u32]> {
-        match self {
-            Self::VulkanSpirv(spirv) => Some(spirv),
-            Self::MetalMsl(_) => None,
         }
     }
 
@@ -168,7 +159,7 @@ impl CompiledStageCode {
     #[must_use]
     pub const fn metal(&self) -> Option<&MetalStageCode> {
         match self {
-            Self::VulkanSpirv(_) => None,
+            Self::Analysis => None,
             Self::MetalMsl(metal) => Some(metal),
         }
     }
@@ -221,12 +212,6 @@ impl CompiledShaderStage {
     #[must_use]
     pub const fn code(&self) -> &CompiledStageCode {
         &self.code
-    }
-
-    /// Returns the SPIR-V words when this stage targets Vulkan.
-    #[must_use]
-    pub fn spirv(&self) -> Option<&[u32]> {
-        self.code.spirv()
     }
 
     /// Returns the Metal stage output when this stage targets Metal.

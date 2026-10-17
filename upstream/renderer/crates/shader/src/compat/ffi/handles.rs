@@ -78,7 +78,7 @@ pub(super) struct MetalStageStrings {
 ///
 /// The result is either empty (no stage targets Metal) or index-aligned with
 /// `program.stages()`, so the FFI accessors can use the same stage index for
-/// SPIR-V and Metal payloads.
+/// every per-stage payload.
 #[allow(clippy::single_call_fn)]
 fn metal_stage_strings(
     program: &CompiledShaderProgram,

@@ -23,10 +23,10 @@ REGRESSION_BINARIES = {
     "render_target_lifetime_test": False, "text_object_runtime_test": False,
     "shader_cache_metadata_test": False, "video_decode_pump_test": False,
     "video_color_conversion_test": False, "video_frame_pacing_test": False,
-    "video_conversion_budget_test": False, "video_source_input_test": False, "video_probe_test": False, "vt_frame_decoder_test": False, "webm_reader_test": False,
+    "video_source_input_test": False, "video_probe_test": False, "vt_frame_decoder_test": False, "webm_reader_test": False,
     "synthetic_video_test": False,
     "render_scale_test": False,
-    "static_subgraph_cache_test": False, "texture_prefetch_test": False,
+    "static_subgraph_cache_test": False,
     "scene_mesh_tests": False, "particle_rope_geometry_test": False,
     "particle_mouse_controlpoint_test": False, "particle_parity_test": False,
     "layer_texture_reference_test": False,
@@ -34,15 +34,15 @@ REGRESSION_BINARIES = {
     "scenescript_media_event_smoke": False, "media_thumbnail_texture_smoke": False,
     "scene_schema_tests": False, "script_runtime_compat_test": False,
     "mouse_input_test": False, "mdl_schema_tests": False, "tex_schema_tests": False,
-    "timer_tests": False, "playback_gpu_test": True, "metal_backend_test": False,
+    "timer_tests": False, "metal_backend_test": False,
     "metal_scene_draw_smoke": True, "metal_poster_capture_test": True,
     "metal_video_texture_test": True, "unchanged_present_test": True, "scene_failure_policy_test": True,
     "audio_tests": False, "miniaudio_failure_paths_test": False, "sprite_animation_test": False,
-    "vulkan_sample_count_smoke": False, "rendergraph_smoke": False,
+    "rendergraph_smoke": False,
     "rust_shader_bridge_test": False, "stb_image_regression_test": False,
     "surface_health_test": False, "wallpaper_scaling_test": False,
     "shader_preprocessor_compat_test": False, "unpack_shader_compile_smoke": False,
-    "video_texture_submission_smoke": False, "vulkan_render_batch_planner_smoke": False,
+    "video_texture_submission_smoke": False,
     "version_tests": False,
     # Renderer/Media/tests: the project's own container readers, pure C++ and headless.
     "media_core_tests": False, "media_isobmff_tests": False, "media_matroska_tests": False,
@@ -537,7 +537,7 @@ def main(argv=None):
             report["skips"][name] = ["compiled Metal-device probe reported no device (exit 77)"]
         print("::warning::No Metal device; unverified GPU targets: " + ", ".join(skipped), flush=True)
     # video_decode_pump_test and video_color_conversion_test need no GPU at all;
-    # playback_gpu_test imports synthetic video frames into private textures.
+    # metal_video_texture_test imports synthetic video frames into private textures.
     for binary, needs_gpu in REGRESSION_BINARIES.items():
         if needs_gpu and not gpu_available:
             continue

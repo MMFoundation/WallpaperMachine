@@ -45,9 +45,9 @@ impl<'program> From<&'program MetalStageCode> for MetalStageJson<'program> {
 struct MetalResourceBindingJson<'program> {
     /// Shader-visible global name.
     name: &'program str,
-    /// SPIR-V descriptor set.
+    /// GLSL descriptor set.
     set: u32,
-    /// SPIR-V binding index.
+    /// GLSL binding index.
     binding: u32,
     /// Metal argument-table namespace.
     slot_kind: &'static str,

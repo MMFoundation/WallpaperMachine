@@ -7,7 +7,7 @@
 //! The mapping used here is deliberately trivial so the Metal backend can
 //! reproduce it without consulting the reported map: every resource stays in
 //! descriptor set `0`, and its Metal slot index within its own argument-table
-//! namespace is exactly its SPIR-V binding index. Because the shader pipeline
+//! namespace is exactly the binding index its GLSL declaration carries. Because the shader pipeline
 //! allocates one unique binding index per resource inside set `0`, the slots
 //! are unique across the whole stage as well.
 
@@ -74,9 +74,8 @@ impl<'module> MetalEmitter<'module> {
             self.metal_entry_point_name(&info)?,
             MSL_LANGUAGE_VERSION,
             bindings.into_boxed_slice(),
-            // Neither the SPIR-V nor the Metal path injects a clip-space or
-            // texture-origin transform, so both targets carry the shader
-            // author's conventions through unchanged.
+            // No clip-space or texture-origin transform is injected, so the
+            // shader author's conventions are carried through unchanged.
             MetalCoordinateConventions::unmodified(),
         ))
     }

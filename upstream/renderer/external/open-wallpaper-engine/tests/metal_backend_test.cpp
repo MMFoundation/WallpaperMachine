@@ -667,9 +667,9 @@ TEST(MetalBlend, EachModeProducesTheAuthoredFactors)
 
 TEST(MetalBlend, SceneDrawsAreRasterizedWithoutCulling)
 {
-    // The compatibility backend rasterizes with VK_CULL_MODE_NONE, and any
-    // clip-space fold reverses triangle winding. Culling here would either
-    // disagree with the other backend or silently eat half a scene.
+    // Wallpaper Engine rasterizes scene draws without culling, and any
+    // clip-space fold reverses triangle winding. Culling here would silently
+    // eat half a scene.
     EXPECT_EQ(kSceneCullMode, MetalCullMode::None);
 }
 
@@ -718,27 +718,27 @@ TEST(MetalPipelineKey, DistinguishesBlendModesAndTargetFormats)
 // ---------------------------------------------------------------------------
 // Clip space
 
-TEST(MetalProjection, LandsAuthorGeometryOnTheSameWindowPixelAsTheCompatibilityBackend)
+TEST(MetalProjection, LandsAuthorGeometryOnTheSameWindowPixelAsTheFlippedViewportConvention)
 {
-    // The presentation viewport the compatibility backend builds: a letterboxed
-    // region written with a negative height, which is how Vulkan is made to
-    // agree with the coordinate system the authored shaders use.
+    // The reference presentation viewport: a letterboxed region written with a
+    // negative height, the convention that agrees with the coordinate system
+    // the authored shaders use.
     const auto layout = ComputeWallpaperScalingLayout(WallpaperScalingMode::FIT, 1920, 1080, 1000,
                                                       1000, 1.0, 1.0);
-    const VulkanViewportBox vulkan_viewport {
+    const FlippedViewportBox flipped_viewport {
         .x      = static_cast<double>(layout.viewport_px.x),
         .y      = static_cast<double>(layout.viewport_px.y + layout.viewport_px.height),
         .width  = static_cast<double>(layout.viewport_px.width),
         .height = -static_cast<double>(layout.viewport_px.height),
     };
-    ASSERT_LT(vulkan_viewport.height, 0.0) << "the compatibility viewport must be the flipped one";
-    const auto metal_viewport = ToMetalViewport(vulkan_viewport);
+    ASSERT_LT(flipped_viewport.height, 0.0) << "the reference viewport must be the flipped one";
+    const auto metal_viewport = ToMetalViewport(flipped_viewport);
     EXPECT_GT(metal_viewport.height, 0.0) << "Metal has no negative-height viewport";
 
     // The scene's own camera, built the way the parser builds it.
     SceneCamera camera(1920, 1080, -1.0, 1.0);
-    const linalg::Matrix4d compatibility_vp = camera.GetViewProjectionMatrix();
-    const linalg::Matrix4d metal_vp         = MetalViewProjection(compatibility_vp);
+    const linalg::Matrix4d reference_vp = camera.GetViewProjectionMatrix();
+    const linalg::Matrix4d metal_vp         = MetalViewProjection(reference_vp);
 
     // The author's canvas corners plus its centre and an off-centre point, so a
     // sign error cannot cancel against symmetry.
@@ -749,10 +749,10 @@ TEST(MetalProjection, LandsAuthorGeometryOnTheSameWindowPixelAsTheCompatibilityB
     };
 
     for (const auto& point : author_points) {
-        const linalg::Vector4d compatibility_clip = compatibility_vp * point;
+        const linalg::Vector4d reference_clip = reference_vp * point;
         const linalg::Vector4d metal_clip         = metal_vp * point;
 
-        const auto want = ClipToWindowVulkan(compatibility_clip, vulkan_viewport);
+        const auto want = ClipToWindowFlipped(reference_clip, flipped_viewport);
         const auto got  = ClipToWindowMetal(metal_clip, metal_viewport);
         EXPECT_NEAR(want.x(), got.x(), 1e-9);
         EXPECT_NEAR(want.y(), got.y(), 1e-9);
@@ -776,7 +776,7 @@ TEST(MetalProjection, LandsAuthorGeometryOnTheSameWindowPixelAsTheCompatibilityB
 
 TEST(MetalProjection, NegativeHeightViewportsCoverTheSameWindowRows)
 {
-    const VulkanViewportBox negative { .x = 12.0, .y = 40.0 + 200.0, .width = 320.0,
+    const FlippedViewportBox negative { .x = 12.0, .y = 40.0 + 200.0, .width = 320.0,
                                        .height = -200.0 };
     const auto              metal = ToMetalViewport(negative);
     EXPECT_DOUBLE_EQ(metal.origin_x, 12.0);
@@ -938,7 +938,7 @@ TEST(MetalDevice, TranslatedShaderConventionsAreWhatTheBackendBindsAgainst)
     }
 
     // The two conventions the backend depends on and cannot re-derive: the
-    // entry point is renamed, and a resource's Metal slot is its SPIR-V
+    // entry point is renamed, and a resource's Metal slot is the GLSL
     // binding index within its own argument-table namespace.
     const auto program = TranslatedProgram();
     for (const auto& stage : program->stages) {

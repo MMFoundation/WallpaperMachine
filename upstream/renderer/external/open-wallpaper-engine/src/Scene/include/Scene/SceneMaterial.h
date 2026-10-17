@@ -70,7 +70,7 @@ struct SceneDepthState {
 /// authored, whatever its blending: its own depth-tested font materials are
 /// translucent and write depth. A translucent or additive draw that asks to
 /// write depth therefore hides what is drawn behind it afterwards, its
-/// transparent texels included. As in Direct3D, OpenGL and Vulkan, a draw that
+/// transparent texels included. As in Direct3D, OpenGL and Metal, a draw that
 /// does not depth-test writes no depth, and a target without a depth
 /// attachment draws in painter's order.
 [[nodiscard]] inline SceneDepthState ResolveSceneDepthState(const SceneMaterial& material,

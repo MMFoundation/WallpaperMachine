@@ -120,12 +120,6 @@ uint16_t ReadPkgVersionFromFile(const std::string& pkg_path) {
     return ParsePkgVersionStamp(stamp);
 }
 
-class ScopedGlslang final {
-public:
-    ScopedGlslang() { wallpaper::WPShaderParser::InitGlslang(); }
-    ~ScopedGlslang() { wallpaper::WPShaderParser::FinalGlslang(); }
-};
-
 struct SystemMediaArtworkPayload {
     uint32_t             width { 0 };
     uint32_t             height { 0 };
@@ -895,7 +889,7 @@ private:
     /// graph here on top of that idled the device, destroyed every pipeline
     /// and framebuffer, dropped every uploaded texture and reopened every
     /// video — once per track change, and once more per replay — to change one
-    /// thumbnail. Both backends also mark a pass that samples a runtime image
+    /// thumbnail. The renderer also marks a pass that samples a runtime image
     /// dynamic, so the new pixels are never held back by the static cache.
     ///
     /// Returns false only when there is nowhere to publish to yet, which is
@@ -950,7 +944,7 @@ private:
     /// Publishes the display's pixel resolution to the scene's scripts.
     ///
     /// `RenderInitInfo::width`/`height` are already physical pixels -- the host
-    /// fills them from `DisplayDesc`, and both backends divide by
+    /// fills them from `DisplayDesc`, and the renderer divides by
     /// `display_scale_factor` when they want logical points -- so they are
     /// published as they are. Not the render size: internal quality may halve
     /// that, and a quality setting must not move a script's layout.
@@ -1081,7 +1075,7 @@ private:
             // Tick, above, is what finalizes visibility for this frame,
             // including a script that shows a layer Emitt thought was hidden.
             // Rebuild only the meshes that skip left stale, from the
-            // simulation Emitt already advanced; neither backend draws yet.
+            // simulation Emitt already advanced; nothing has drawn yet.
             if (frame_ok && m_scene->paritileSys != nullptr) {
                 m_scene->paritileSys->RebuildVisibleMeshes();
             }

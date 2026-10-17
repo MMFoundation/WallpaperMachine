@@ -8,8 +8,6 @@
 #include "Utils/Sha.hpp"
 #include <unordered_map>
 
-#include "Vulkan/ShaderComp.hpp"
-
 #include <chrono>
 #include <cstdint>
 #include <unistd.h>
@@ -92,12 +90,6 @@ bool RestoreProgram(const nlohmann::json& cached, const std::string& request,
                     stage);
                 restored.metal_stages.push_back(std::move(stage));
             }
-        } else {
-            restored.codes = cached.at("codes").get<std::vector<ShaderCode>>();
-            if (restored.codes.size() != stage_count) return false;
-            for (const auto& code : restored.codes) {
-                if (code.size() < 5 || code[0] != 0x07230203u) return false;
-            }
         }
         restored.metadata_json = cached.at("metadata").get<std::string>();
         restored.reflection_json = cached.at("reflection").get<std::string>();
@@ -118,9 +110,6 @@ void RememberProgram(const std::string& key, const nlohmann::json& program) {
     g_program_cache[key] = program;
 }
 
-constexpr std::string_view kShaderCacheDirectory { "spvs01" };
-constexpr std::string_view kShaderCacheSuffix { "spvs" };
-
 double MeasureElapsedMs(const std::chrono::steady_clock::time_point started)
 {
     return std::chrono::duration<double, std::milli>(
@@ -138,58 +127,24 @@ std::string RustTextureFormat(TextureFormat format)
     }
 }
 
-std::string GetShaderCachePath(std::string_view scene_id, std::string_view cache_key)
-{
-    return std::string("/cache/") + std::string(scene_id) + "/" +
-           std::string(kShaderCacheDirectory) + "/" + std::string(cache_key) + "." +
-           std::string(kShaderCacheSuffix);
-}
-
 bool WriteBytes(fs::IBinaryStreamW& file, const void* data, usize size)
 {
     return size == 0 || file.Write(data, size) == 1;
 }
 
-bool WriteUint32LE(fs::IBinaryStreamW& file, uint32_t value)
-{
-    const unsigned char bytes[] {
-        static_cast<unsigned char>(value & 0xffu),
-        static_cast<unsigned char>((value >> 8u) & 0xffu),
-        static_cast<unsigned char>((value >> 16u) & 0xffu),
-        static_cast<unsigned char>((value >> 24u) & 0xffu),
-    };
-    return WriteBytes(file, bytes, sizeof(bytes));
-}
-
-bool SaveShaderCacheFile(std::span<const ShaderCode> codes, fs::IBinaryStreamW& file)
-{
-    char padding[256] {};
-
-    if (! WriteBytes(file, "SPVS0001", 9)) return false;
-    if (! WriteUint32LE(file, static_cast<uint32_t>(codes.size()))) return false;
-    for (const auto& code : codes) {
-        const auto size_bytes = static_cast<uint32_t>(code.size() * sizeof(uint32_t));
-        if (! WriteUint32LE(file, size_bytes)) return false;
-        if (! WriteBytes(file, code.data(), size_bytes)) return false;
-    }
-    return WriteBytes(file, padding, sizeof(padding));
-}
-
 } // namespace
 
-void WPShaderParser::InitGlslang() {
+void WPShaderParser::BeginShaderSession() {
     ClearProgramCache();
     ResetStartupMetrics();
-    glslang::InitializeProcess();
 }
-void WPShaderParser::FinalGlslang() {
+void WPShaderParser::EndShaderSession() {
     const auto metrics = GetStartupMetrics();
     LOG_INFO("scene shader cache: hits=%llu compiled=%llu compile_ms=%.1f cache_read_ms=%.1f",
              static_cast<unsigned long long>(metrics.cache_hits),
              static_cast<unsigned long long>(metrics.cache_misses),
              metrics.compile_ms, metrics.cache_read_ms);
     ClearProgramCache();
-    glslang::FinalizeProcess();
 }
 
 void WPShaderParser::ResetStartupMetrics() { g_shader_startup_metrics = {}; }
@@ -199,9 +154,9 @@ void WPShaderParser::ClearProgramCache() { g_program_cache.clear(); }
 namespace
 {
 
-// Shared Rust-pipeline compile path for every output target. Include
-// resolution, combo defaults, program caching and reflection are target
-// independent; only the compiled payload in `output` differs.
+// Shared Rust-pipeline compile path for both targets. Include resolution, combo
+// defaults, program caching and reflection are target independent; only the
+// compiled payload in `output` differs, and an analysis carries none.
 // Where one compile reads its includes from and what it is allowed to cache.
 //
 // A parse has the project mounted and caches to it. A variant compiled later
@@ -333,8 +288,6 @@ bool CompileProgramRust(std::string_view scene_id, std::string_view shader_name,
                     });
                 }
                 program["metal"] = std::move(metal);
-            } else {
-                program["codes"] = output.codes;
             }
             RememberProgram(program_key, program);
         }
@@ -368,16 +321,6 @@ bool CompileProgramRust(std::string_view scene_id, std::string_view shader_name,
                 WriteBytes(*file, bytes.data(), bytes.size());
             }
         }
-        // The `spvs01` container stores SPIR-V words; the Metal payload lives
-        // only in the program JSON above.
-        if (target == wallpaper::shader::RustShaderTarget::VulkanSpirv) {
-            if (auto cache_file = env.vfs->OpenW(GetShaderCachePath(scene_id, output.cache_key)); cache_file) {
-                if (! SaveShaderCacheFile(output.codes, *cache_file)) {
-                    LOG_ERROR("Rust shader cache write failed for '%s'",
-                              std::string(shader_name).c_str());
-                }
-            }
-        }
     }
     g_shader_startup_metrics.cache_write_ms += MeasureElapsedMs(cache_write_started);
 
@@ -403,22 +346,16 @@ bool CompileProgramRust(std::string_view scene_id, std::string_view shader_name,
 
 } // namespace
 
-bool WPShaderParser::CompileToSpvRust(std::string_view scene_id, std::string_view shader_name,
-                                      std::span<WPShaderUnit> units,
-                                      std::vector<ShaderCode>& codes, fs::VFS& vfs,
-                                      WPShaderInfo* shader_info,
-                                      std::span<const WPShaderTexInfo> texs,
-                                      std::string* reflection_json) {
+bool WPShaderParser::AnalyzeRust(std::string_view scene_id, std::string_view shader_name,
+                                 std::span<WPShaderUnit> units, fs::VFS& vfs,
+                                 WPShaderInfo* shader_info,
+                                 std::span<const WPShaderTexInfo> texs,
+                                 std::string* reflection_json) {
     wallpaper::shader::RustShaderOutput output;
     const RustCompileEnv env { .vfs = &vfs };
-    if (! CompileProgramRust(scene_id, shader_name, units,
-                             wallpaper::shader::RustShaderTarget::VulkanSpirv, output, env,
-                             shader_info, texs, reflection_json)) {
-        return false;
-    }
-
-    codes = std::move(output.codes);
-    return true;
+    return CompileProgramRust(scene_id, shader_name, units,
+                              wallpaper::shader::RustShaderTarget::Analysis, output, env,
+                              shader_info, texs, reflection_json);
 }
 
 bool WPShaderParser::CompileToMslRust(std::string_view scene_id, std::string_view shader_name,

@@ -159,7 +159,7 @@ fn builds_typed_shader_request_and_reads_include_source() {
         .combo(combo)
         .texture(texture)
         .property(property)
-        .target(ShaderTarget::VulkanSpirv)
+        .target(ShaderTarget::Analysis)
         .cache_strategy(ShaderCacheStrategy::Enabled {
             scene_id: "3611439897".to_owned(),
         })
@@ -171,7 +171,7 @@ fn builds_typed_shader_request_and_reads_include_source() {
     assert_eq!(request.combos().len(), 1);
     assert_eq!(request.textures().len(), 1);
     assert_eq!(request.properties().len(), 1);
-    assert_eq!(request.target(), ShaderTarget::VulkanSpirv);
+    assert_eq!(request.target(), ShaderTarget::Analysis);
     assert_eq!(
         request.cache_strategy(),
         &ShaderCacheStrategy::Enabled {
@@ -466,7 +466,7 @@ fn compiler_trait_returns_artifact_with_backend_module() {
         ) -> ShaderResult<CompiledStageArtifact<Self::Module>> {
             let compiled_stage = CompiledShaderStage::new(
                 stage,
-                CompiledStageCode::VulkanSpirv(Box::from([0x0723_0203])),
+                CompiledStageCode::Analysis,
                 None,
                 Box::from([]),
             );
@@ -484,11 +484,11 @@ fn compiler_trait_returns_artifact_with_backend_module() {
         Box::from([]),
     );
     let artifact = UnitCompiler
-        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &source)
+        .compile_stage(ShaderTarget::Analysis, ShaderStageKind::Fragment, &source)
         .expect("compiler should return an artifact");
 
     assert_eq!(artifact.kind(), ShaderStageKind::Fragment);
-    assert_eq!(artifact.stage().spirv(), Some(&[0x0723_0203][..]));
+    assert_eq!(artifact.stage().target(), ShaderTarget::Analysis);
     assert_eq!(artifact.module(), &"backend-module");
     assert_eq!(artifact.diagnostics()[0].message(), "compiled");
 }
@@ -584,7 +584,7 @@ mod serde_invariants {
                 Token::Str("target"),
                 Token::UnitVariant {
                     name: "ShaderTarget",
-                    variant: "VulkanSpirv",
+                    variant: "Analysis",
                 },
                 Token::Str("cache_strategy"),
                 Token::UnitVariant {
@@ -641,7 +641,7 @@ mod serde_invariants {
             PropertyName::new("opacity").expect("valid property name"),
             PropertyValue::Number(0.75),
         ))
-        .target(ShaderTarget::VulkanSpirv)
+        .target(ShaderTarget::Analysis)
         .cache_strategy(ShaderCacheStrategy::Disabled)
         .build()
         .expect("request should be valid");
@@ -737,7 +737,7 @@ mod serde_invariants {
                 Token::Str("target"),
                 Token::UnitVariant {
                     name: "ShaderTarget",
-                    variant: "VulkanSpirv",
+                    variant: "Analysis",
                 },
                 Token::Str("cache_strategy"),
                 Token::UnitVariant {

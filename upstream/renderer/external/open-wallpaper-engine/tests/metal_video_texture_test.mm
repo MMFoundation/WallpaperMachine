@@ -428,8 +428,8 @@ TEST_F(MetalVideoTexture, ImportsABgraFrameWithoutConverting)
 
 TEST_F(MetalVideoTexture, ConvertedNv12MatchesTheCpuColorReference)
 {
-    // The kernel is the compatibility backend's, field for field, so a wrong
-    // range or matrix here would be a wrong picture there too.
+    // The kernel is checked against the CPU reference field for field, so a wrong
+    // range or matrix would be a wrong picture.
     struct Case {
         OSType           format;
         video::YuvRange  range;

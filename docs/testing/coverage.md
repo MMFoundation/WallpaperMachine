@@ -920,7 +920,7 @@ need an authorized runtime check
   player suite places the live layer for a position (flush to each edge, gravity back at the
   middle, a position that is not a position held to the edge or the middle). To regenerate or extend the expected rectangles, compile
   `upstream/renderer/external/open-wallpaper-engine/src/Presentation/WallpaperScaling.cpp`
-  directly (it needs no Vulkan header), hand `ComputeWallpaperScalingLayout` the display as
+  directly (it needs no GPU header), hand `ComputeWallpaperScalingLayout` the display as
   `lround(devicePixels / scale)` logical points (as `MetalRender::Impl::scalingLayout`
   does), and print `viewport_px`.
 - `NativeVideoPosterOrientationTests` — which clips cannot take a poster from

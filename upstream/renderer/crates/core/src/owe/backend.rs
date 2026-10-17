@@ -81,7 +81,7 @@ impl OweBackend {
     ///
     /// `metal_layer` must be the `CAMetalLayer` owned by the paired
     /// `WallpaperWindow`. Render resolution is constructor-only because OWE
-    /// bakes it into the Vulkan surface setup.
+    /// bakes it into the layer setup.
     ///
     /// # Errors
     ///
@@ -519,7 +519,7 @@ impl OweScene {
         Ok(())
     }
 
-    /// Pauses rendering and releases the Vulkan surface + swapchain on the
+    /// Pauses rendering and releases the layer binding on the
     /// backend. Scene, shaders, textures, audio, and runtime state remain
     /// loaded. Synchronous — blocks until the render thread confirms the
     /// transaction's begin step.
@@ -535,7 +535,7 @@ impl OweScene {
         })
     }
 
-    /// Rebuilds the Vulkan surface + swapchain from a new Metal layer,
+    /// Rebuilds the layer binding from a new Metal layer,
     /// rebuilds the render graph, and resumes rendering. Dimensions replace
     /// those used during the last init or finish. Synchronous — blocks until
     /// the render thread confirms the new surface is presentable.

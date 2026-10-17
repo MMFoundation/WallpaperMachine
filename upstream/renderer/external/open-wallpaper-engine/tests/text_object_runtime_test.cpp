@@ -10,8 +10,6 @@
 #include <atomic>
 #include <chrono>
 #include "Runtime/SceneRuntimeContext.hpp"
-#include "VulkanRender/CustomShaderPass.hpp"
-#include "VulkanRender/PassLowering.hpp"
 #include "RenderCommon/ScenePass.hpp"
 #include "RenderCommon/SceneToRenderGraph.hpp"
 #include "WPShaderValueUpdater.hpp"
@@ -23,8 +21,6 @@
 #include "Shader/RustShaderBridge.hpp"
 #include "Text/SystemFontResolver.hpp"
 #include "Text/TextLayer.hpp"
-#include "Vulkan/Shader.hpp"
-#include "Vulkan/ShaderComp.hpp"
 #include "WPSceneParser.hpp"
 #include "WPPkgFs.hpp"
 
@@ -32,7 +28,6 @@
 #include FT_FREETYPE_H
 #include FT_ADVANCES_H
 #include <gtest/gtest.h>
-#include <spirv_reflect.h>
 
 #include <algorithm>
 #include <cmath>
@@ -53,17 +48,11 @@
 
 namespace wallpaper
 {
-namespace vulkan
-{
-bool ReflectCustomShader(const SceneShader& shader, std::vector<Uni_ShaderSpv>& spvs,
-                         ShaderReflected& ref);
-} // namespace vulkan
-
 namespace
 {
 
 // Opt-in local-asset diagnostic: parser, scripts and render graph only. No
-// Vulkan device, window, audio device or desktop state is created.
+// GPU device, window, audio device or desktop state is created.
 TEST(TextObjectRuntime, LonelyCatHeadlessRegression) {
     const auto* project = std::getenv("WE_TEST_PROJECT");
     const auto* assets = std::getenv("WE_TEST_ASSETS");
@@ -106,7 +95,6 @@ TEST(TextObjectRuntime, LonelyCatHeadlessRegression) {
     EXPECT_FALSE(scene->runtime->NodeText("__we_text_150").empty());
 }
 
-constexpr uint32_t kSpirvMagic = 0x07230203u;
 constexpr int32_t  kTexFormatR8 = 9;
 
 class MemoryFs final : public fs::Fs {
@@ -384,51 +372,34 @@ struct TextEffectScene {
     SceneRenderTarget* FirstTarget() { return scene->FindRenderTarget(effect_layer->FirstTarget()); }
 };
 
-bool ShaderUsesUniformMember(const ShaderCode& spirv, std::string_view member_name) {
-    spv_reflect::ShaderModule module(spirv, SPV_REFLECT_MODULE_FLAG_NO_COPY);
+/// The reflection payload of a shader's analysis, or null when there is none or it
+/// does not parse.
+nlohmann::json ReflectionOf(const SceneShader& shader) {
+    if (! shader.rust_reflection_json.has_value()) return nullptr;
+    auto reflection = nlohmann::json::parse(*shader.rust_reflection_json, nullptr, false);
+    return reflection.is_discarded() ? nlohmann::json(nullptr) : reflection;
+}
 
-    uint32_t binding_count = 0;
-    if (module.EnumerateDescriptorBindings(&binding_count, nullptr) != SPV_REFLECT_RESULT_SUCCESS) {
-        return false;
-    }
-
-    std::vector<SpvReflectDescriptorBinding*> bindings(binding_count);
-    if (module.EnumerateDescriptorBindings(&binding_count, bindings.data()) !=
-        SPV_REFLECT_RESULT_SUCCESS) {
-        return false;
-    }
-
-    for (const auto* binding : bindings) {
-        if (binding == nullptr || ! binding->accessed ||
-            binding->descriptor_type != SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-            continue;
-        }
-        const auto& block = binding->block;
-        for (uint32_t index = 0; index < block.member_count; ++index) {
-            const auto* name = block.members[index].name;
-            if (name != nullptr && member_name == name) return true;
+/// Whether the shader reads the named member of a uniform block.
+bool ShaderUsesUniformMember(const SceneShader& shader, std::string_view member_name) {
+    const auto reflection = ReflectionOf(shader);
+    if (! reflection.is_object()) return false;
+    for (const auto& block : reflection.value("uniform_blocks", nlohmann::json::array())) {
+        for (const auto& member : block.value("members", nlohmann::json::array())) {
+            if (member.value("name", std::string {}) == member_name) return true;
         }
     }
     return false;
 }
 
-bool ShaderUsesUniformMember(const SceneShader& shader, std::string_view member_name) {
-    if (shader.rust_reflection_json.has_value()) {
-        shader::RustShaderOutput output;
-        try {
-            shader::ApplyRustShaderReflectionJson(*shader.rust_reflection_json, output);
-            for (const auto& block : output.reflection.blocks) {
-                if (block.member_map.contains(std::string(member_name))) return true;
-            }
-            return false;
-        } catch (const std::exception&) {
-        }
+/// The descriptor binding the reflection reports for `name`, or null.
+nlohmann::json ShaderDescriptorBinding(const SceneShader& shader, std::string_view name) {
+    const auto reflection = ReflectionOf(shader);
+    if (! reflection.is_object()) return nullptr;
+    for (const auto& binding : reflection.value("descriptor_bindings", nlohmann::json::array())) {
+        if (binding.value("name", std::string {}) == name) return binding;
     }
-
-    for (const auto& code : shader.codes) {
-        if (ShaderUsesUniformMember(code, member_name)) return true;
-    }
-    return false;
+    return nullptr;
 }
 
 int VisibleAlphaPixels(const Image& image) {
@@ -466,119 +437,6 @@ void PumpTextUntilClean(SceneRuntimeContext& runtime, int max_attempts = 200) {
         if (! any_dirty) return;
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-}
-
-bool ReflectShaderDescriptors(const SceneShader& shader, vulkan::ShaderReflected& reflected) {
-    std::vector<vulkan::Uni_ShaderSpv> spvs;
-    return vulkan::ReflectCustomShader(shader, spvs, reflected);
-}
-
-SceneShader CompileTextShaderForSpirvReflection(fs::VFS& vfs) {
-    (void)vfs;
-    std::string vertex_src =
-        "#version 450\n"
-        "layout(location = 0) in vec3 a_Position;\n"
-        "layout(binding = 1) uniform GlobalUniforms {\n"
-        "  mat4 g_ModelViewProjectionMatrix;\n"
-        "};\n"
-        "void main() {\n"
-        "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
-        "}\n";
-    std::string fragment_src = "#version 450\n"
-                               "layout(binding = 0) uniform sampler2D g_Texture0;\n"
-                               "layout(location = 0) out vec4 glOutColor;\n"
-                               "void main() {\n"
-                               "  glOutColor = texture(g_Texture0, vec2(0.5));\n"
-                               "}\n";
-
-    std::vector<vulkan::ShaderCompUnit> units {
-        vulkan::ShaderCompUnit {
-            .stage = EShLangVertex,
-            .src   = std::move(vertex_src),
-        },
-        vulkan::ShaderCompUnit {
-            .stage = EShLangFragment,
-            .src   = std::move(fragment_src),
-        },
-    };
-
-    vulkan::ShaderCompOpt opt;
-    opt.client_ver             = glslang::EShTargetVulkan_1_1;
-    opt.auto_map_bindings      = true;
-    opt.auto_map_locations     = true;
-    opt.relaxed_errors_glsl    = true;
-    opt.relaxed_rules_vulkan   = true;
-    opt.suppress_warnings_glsl = true;
-
-    WPShaderParser::InitGlslang();
-    std::vector<vulkan::Uni_ShaderSpv> compiled;
-    const bool ok = vulkan::CompileAndLinkShaderUnits(units, opt, compiled);
-    WPShaderParser::FinalGlslang();
-    if (! ok || compiled.size() != 2u) return {};
-
-    SceneShader shader;
-    shader.name = "text";
-    shader.codes.reserve(compiled.size());
-    for (auto& spv : compiled) {
-        shader.codes.emplace_back(std::move(spv->spirv));
-    }
-    return shader;
-}
-
-std::optional<VkDescriptorSetLayoutBinding>
-ShaderDescriptorBinding(const std::vector<ShaderCode>& spirv, std::string_view name) {
-    std::vector<vulkan::Uni_ShaderSpv> spvs;
-    vulkan::ShaderReflected            reflected;
-    if (! vulkan::GenReflect(spirv, spvs, reflected)) return std::nullopt;
-
-    const auto iterator = reflected.binding_map.find(std::string(name));
-    if (iterator == reflected.binding_map.end()) return std::nullopt;
-
-    return iterator->second;
-}
-
-std::optional<VkDescriptorSetLayoutBinding>
-ShaderDescriptorBinding(const SceneShader& shader, std::string_view name) {
-    vulkan::ShaderReflected reflected;
-    if (! ReflectShaderDescriptors(shader, reflected)) {
-        return std::nullopt;
-    }
-
-    const auto iterator = reflected.binding_map.find(std::string(name));
-    if (iterator == reflected.binding_map.end()) return std::nullopt;
-
-    return iterator->second;
-}
-
-std::vector<VkDescriptorSetLayoutBinding>
-ShaderDescriptorBindings(const std::vector<ShaderCode>& spirv) {
-    std::vector<vulkan::Uni_ShaderSpv> spvs;
-    vulkan::ShaderReflected            reflected;
-    if (! vulkan::GenReflect(spirv, spvs, reflected)) return {};
-
-    std::vector<VkDescriptorSetLayoutBinding> bindings;
-    bindings.reserve(reflected.binding_map.size());
-    for (const auto& [name, binding] : reflected.binding_map) {
-        (void)name;
-        bindings.push_back(binding);
-    }
-    return bindings;
-}
-
-std::vector<VkDescriptorSetLayoutBinding>
-ShaderDescriptorBindings(const SceneShader& shader) {
-    vulkan::ShaderReflected reflected;
-    if (! ReflectShaderDescriptors(shader, reflected)) {
-        return {};
-    }
-
-    std::vector<VkDescriptorSetLayoutBinding> bindings;
-    bindings.reserve(reflected.binding_map.size());
-    for (const auto& [name, binding] : reflected.binding_map) {
-        (void)name;
-        bindings.push_back(binding);
-    }
-    return bindings;
 }
 
 } // namespace
@@ -793,32 +651,26 @@ TEST(TextObjectRuntime, ParserCreatesRenderableTextMaterialAndTexture) {
     EXPECT_TRUE(has_visible_alpha);
     EXPECT_TRUE(has_transparent_space_column);
     ASSERT_NE(material->customShader.shader, nullptr);
-    ASSERT_EQ(material->customShader.shader->codes.size(), 2u);
-    for (const auto& code : material->customShader.shader->codes) {
-        ASSERT_FALSE(code.empty());
-        EXPECT_EQ(code.front(), kSpirvMagic);
-    }
     EXPECT_TRUE(ShaderUsesUniformMember(*material->customShader.shader,
                                         "g_ModelViewProjectionMatrix"));
     const auto texture_binding =
         ShaderDescriptorBinding(*material->customShader.shader, "g_Texture0");
-    ASSERT_TRUE(texture_binding.has_value());
-    const bool has_rust_reflection = material->customShader.shader->rust_reflection_json.has_value();
-    EXPECT_EQ(texture_binding->descriptorType,
-              has_rust_reflection ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-                                  : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-    const auto descriptor_bindings = ShaderDescriptorBindings(*material->customShader.shader);
+    ASSERT_TRUE(texture_binding.is_object());
+    EXPECT_EQ(texture_binding.value("descriptor", std::string {}), "sampled_image");
+    const auto reflection = ReflectionOf(*material->customShader.shader);
+    const auto descriptor_bindings = reflection.value("descriptor_bindings", nlohmann::json::array());
     ASSERT_FALSE(descriptor_bindings.empty());
     bool has_uniform_buffer_descriptor = false;
-    bool has_sampler_descriptor        = ! has_rust_reflection;
+    bool has_sampler_descriptor        = false;
     for (const auto& binding : descriptor_bindings) {
-        if (binding.descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
+        const auto kind = binding.value("descriptor", std::string {});
+        if (kind == "uniform_buffer") {
             has_uniform_buffer_descriptor = true;
-            EXPECT_NE(binding.binding, texture_binding->binding);
+            EXPECT_NE(binding.value("binding", 0u), texture_binding.value("binding", 0u));
         }
-        if (binding.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER) {
+        if (kind == "sampler") {
             has_sampler_descriptor = true;
-            EXPECT_NE(binding.binding, texture_binding->binding);
+            EXPECT_NE(binding.value("binding", 0u), texture_binding.value("binding", 0u));
         }
     }
     EXPECT_TRUE(has_uniform_buffer_descriptor);
@@ -2123,19 +1975,6 @@ void main() {
                                          "g_StaleFirstPassMarker"));
 }
 
-TEST(TextObjectRuntime, MissingOrInvalidReflectionFailsWithoutLegacyFallback) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    SceneShader shader = CompileTextShaderForSpirvReflection(vfs);
-    ASSERT_FALSE(shader.codes.empty());
-    vulkan::ShaderReflected reflected;
-    EXPECT_FALSE(ReflectShaderDescriptors(shader, reflected));
-    shader.rust_reflection_json = "{ incomplete metadata";
-    EXPECT_FALSE(ReflectShaderDescriptors(shader, reflected));
-    shader.rust_reflection_json = "{}";
-    EXPECT_FALSE(ReflectShaderDescriptors(shader, reflected));
-}
-
 TEST(TextObjectRuntime, ResourceFreeShaderUsesItsValidEmptyRustReflection) {
     shader::RustShaderRequest request;
     request.shader_name = "empty-resource-reflection";
@@ -2147,13 +1986,12 @@ TEST(TextObjectRuntime, ResourceFreeShaderUsesItsValidEmptyRustReflection) {
     shader::RustShaderOutput compiled;
     ASSERT_TRUE(shader::CompileRustShaderProgram(request, compiled)) << shader::LastRustShaderError();
     SceneShader source;
-    source.codes = compiled.codes;
     source.rust_reflection_json = compiled.reflection_json;
-    vulkan::ShaderReflected reflected;
-    ASSERT_TRUE(ReflectShaderDescriptors(source, reflected));
-    EXPECT_TRUE(reflected.binding_map.empty());
-    EXPECT_TRUE(reflected.blocks.empty());
-    EXPECT_TRUE(reflected.input_location_map.empty());
+    const auto reflection = ReflectionOf(source);
+    ASSERT_TRUE(reflection.is_object());
+    EXPECT_TRUE(reflection.value("descriptor_bindings", nlohmann::json::array()).empty());
+    EXPECT_TRUE(reflection.value("uniform_blocks", nlohmann::json::array()).empty());
+    EXPECT_TRUE(reflection.value("vertex_inputs", nlohmann::json::array()).empty());
 }
 
 TEST(TextObjectRuntime, RasterizedTextUsesFontPixelSizeAndAntialiasesEdges) {
@@ -3697,27 +3535,10 @@ TEST(TextObjectRuntime, Workshop3409533530FullSceneKeepsClockRenderPassAndTextur
     EXPECT_EQ(clock_pass->desc().textures.front(), TextTextureName("Clock"));
     EXPECT_EQ(clock_pass->desc().visibility_node, clock);
     EXPECT_EQ(clock_pass->desc().output, SpecTex_Default);
-    // What the compatibility renderer makes of the step still has the mesh upload pending.
-    const auto lowered = vulkan::LowerGraphPass(*clock_pass);
-    const auto* clock_draw = dynamic_cast<const vulkan::CustomShaderPass*>(lowered.get());
-    ASSERT_NE(clock_draw, nullptr);
-    EXPECT_NE(clock_draw->desc().uploaded_mesh_dirty_generation, clock->Mesh()->DirtyGeneration());
-
     runtime->ClearNodeTextDirty("Clock");
     ResetTextLayerMeasurementCountForTests();
     runtime->Tick(1.0 / 60.0);
     EXPECT_EQ(TextLayerMeasurementCountForTests(), 0u);
-}
-
-TEST(TextObjectRuntime, DynamicTextPassStartsWithPendingInitialZeroGenerationUpload) {
-    SceneMesh mesh(MeshUpdate::OnEvent);
-    ASSERT_TRUE(mesh.Dynamic());
-    ASSERT_EQ(mesh.DirtyGeneration(), 0u);
-
-    vulkan::CustomShaderPass::Desc desc;
-    vulkan::CustomShaderPass       pass(desc);
-
-    EXPECT_NE(pass.desc().uploaded_mesh_dirty_generation, mesh.DirtyGeneration());
 }
 
 TEST(TextObjectRuntime, RuntimeTextMutationResizesRenderableMesh) {

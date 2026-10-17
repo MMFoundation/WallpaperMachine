@@ -92,8 +92,8 @@ public:
     /// a scene built some other way. What the surface reads to find the project's
     /// preview picture when the scene cannot be drawn.
     std::string project_path;
-    /// Shared layer-as-texture resolution. Both backends read this; an error
-    /// here is unsupported on both, not a Metal-only fallback.
+    /// Shared layer-as-texture resolution. An error
+    /// here leaves the scene undrawn.
     std::unordered_set<int32_t> layer_texture_sources;
     std::string                 layer_texture_error;
     /// Layers the current render graph leaves out, each the top of a subtree:

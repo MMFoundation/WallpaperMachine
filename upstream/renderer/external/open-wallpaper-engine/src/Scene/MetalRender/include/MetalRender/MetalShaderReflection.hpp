@@ -10,9 +10,8 @@ namespace wallpaper::metal
 {
 
 /// One member of a uniform block, in bytes, exactly as the shader compiler laid
-/// it out. Reproduced here rather than reusing the Vulkan reflection structs so
-/// this library keeps no dependency on a Vulkan type for data that is not
-/// Vulkan-specific.
+/// it out. Plain data, so
+/// this library keeps no dependency on the shader bridge's types.
 struct MetalUniformMember
 {
     uint32_t offset { 0 };
@@ -75,11 +74,11 @@ struct MetalShaderReflection
 };
 
 /// Parses the reflection document the shader compiler emits. The Metal target
-/// produces exactly the payload the SPIR-V target does, so this reads the same
-/// `descriptor_bindings` / `uniform_blocks` / `vertex_inputs` schema.
+/// produces a payload with the `descriptor_bindings` / `uniform_blocks` /
+/// `vertex_inputs` schema, which this reads.
 ///
 /// Returns false and fills `error` rather than throwing: a malformed or
-/// unexpected reflection document must fall back to the compatibility backend,
+/// unexpected reflection document must hold the scene with a reason,
 /// never take a wallpaper down.
 bool ParseMetalShaderReflection(std::string_view json, MetalShaderReflection& out,
                                 std::string* error);

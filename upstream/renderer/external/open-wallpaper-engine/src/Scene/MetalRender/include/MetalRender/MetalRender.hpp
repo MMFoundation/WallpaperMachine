@@ -28,8 +28,7 @@ namespace metal
 ///
 /// `metal_layer` is the `CAMetalLayer` the host created for this wallpaper
 /// window, never the `NSView`. The backend takes the layer over: it owns the
-/// drawable for as long as it is running, because a Vulkan swapchain and a
-/// Metal drawable loop cannot share one layer.
+/// drawable for as long as it is running, because two drawable loops cannot share one layer.
 struct MetalRenderInitInfo
 {
     void*                 metal_layer { nullptr };
@@ -86,16 +85,14 @@ struct MetalPipelineArchiveStatus
 
 /// Native Metal scene renderer.
 ///
-/// Mirrors the entry points `vulkan::VulkanRender` exposes so the scene's
-/// render handler can hold either behind one interface. It replaces the draw
-/// backend only: parsing, the scene graph, materials, shaders, animation,
+/// The scene's render handler holds it behind `SceneRendererHandle`. It is the
+/// draw backend only: parsing, the scene graph, materials, shaders, animation,
 /// scripts, resource resolution and pause policy are all unchanged and shared.
 ///
 /// There is no clock in here. The scene's existing `FrameTimer` remains the
 /// single clock; this acquires one drawable per `drawFrame` call and never
 /// starts a display link of its own, so the configured frame-rate ceiling and
-/// the on-demand idle path keep working exactly as they do for the
-/// compatibility backend.
+/// the on-demand idle path keep working.
 class MetalRender {
 public:
     MetalRender();
@@ -179,8 +176,7 @@ public:
     /// there.
     void SetPipelineArchivePath(std::string_view path);
     /// Forwarded to the video textures this scene binds, and remembered for
-    /// textures prepared later, so the host's pause policy has one shape for
-    /// both backends.
+    /// textures prepared later, so the host's pause policy has one shape.
     void SetVideoPlaybackPaused(bool paused);
     void SetVideoPlaybackRate(float rate);
 
@@ -190,7 +186,7 @@ public:
     [[nodiscard]] VideoFramePath VideoPath() const;
 
     /// Scene-level demand bits for the graph currently compiled, in the same
-    /// `render::DynamicReason` vocabulary the compatibility backend reports, so
+    /// `render::DynamicReason` vocabulary, so
     /// the on-demand mapping has one vocabulary to consume.
     ///
     /// Reports `UnknownInput` before any graph has been analysed, and for any

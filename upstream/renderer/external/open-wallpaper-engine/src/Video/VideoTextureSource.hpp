@@ -43,8 +43,8 @@ struct VideoPlaybackState {
 };
 
 /// What a source is asked to play: the layer's own clock and controls under
-/// the renderer's pause and rate. Both render backends call this one
-/// definition, so they cannot disagree about what a global pause means.
+/// the renderer's pause and rate. Every caller shares this one
+/// definition, so none can disagree about what a global pause means.
 inline VideoPlaybackState ResolveEffectiveVideoPlaybackState(const VideoPlaybackState& global_state,
                                                              const VideoPlaybackState& layer_state) {
     VideoPlaybackState effective_state = layer_state;

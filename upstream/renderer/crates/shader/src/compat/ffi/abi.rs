@@ -4,7 +4,6 @@ use std::{
     ffi::CStr,
     os::raw::{c_char, c_int, c_void},
     panic::{AssertUnwindSafe, catch_unwind},
-    ptr,
 };
 
 use serde::Deserialize as _;
@@ -15,8 +14,8 @@ use super::{
     request_json::RequestDto,
 };
 use crate::{
-    CompiledShaderStage, ShaderError, ShaderResult, ShaderStageKind, ShaderTarget,
-    compile::NagaCompiler, pipeline::DefaultShaderPipeline,
+    ShaderError, ShaderResult, ShaderStageKind, ShaderTarget, compile::NagaCompiler,
+    pipeline::DefaultShaderPipeline,
 };
 
 /// Successful FFI call status.
@@ -29,8 +28,8 @@ pub const RS_SHADER_STAGE_VERTEX: c_int = 0;
 pub const RS_SHADER_STAGE_FRAGMENT: c_int = 1;
 /// Unknown stage/index integer returned to C++.
 pub const RS_SHADER_STAGE_INVALID: c_int = -1;
-/// Vulkan SPIR-V target integer returned to C++.
-pub const RS_SHADER_TARGET_VULKAN_SPIRV: c_int = 0;
+/// Analysis-only target integer returned to C++: no code was generated.
+pub const RS_SHADER_TARGET_ANALYSIS: c_int = 0;
 /// Metal Shading Language target integer returned to C++.
 pub const RS_SHADER_TARGET_METAL_MSL: c_int = 1;
 /// Unknown target/index integer returned to C++.
@@ -165,52 +164,9 @@ pub unsafe extern "C" fn rs_shader_program_stage_kind(
     }
 }
 
-/// Returns a borrowed pointer to a compiled stage SPIR-V word buffer.
-///
-/// The pointer is valid until `program` is freed. Null program handles,
-/// invalid stage indices, and stages compiled for a non-SPIR-V target return
-/// null.
-///
-/// # Safety
-///
-/// `program` must be null or a valid pointer returned by
-/// `rs_shader_compile_program` that remains live for the duration of the call.
-/// The returned pointer is borrowed from `program` and must not be used after
-/// `rs_shader_program_free`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rs_shader_program_stage_spv_words(
-    program: *const super::RsShaderProgram,
-    stage_index: usize,
-) -> *const u32 {
-    program_ref(program)
-        .and_then(|program| program.program.stages().get(stage_index))
-        .and_then(CompiledShaderStage::spirv)
-        .map_or(ptr::null(), <[u32]>::as_ptr)
-}
-
-/// Returns the number of SPIR-V words for a compiled stage.
-///
-/// Null program handles, invalid stage indices, and stages compiled for a
-/// non-SPIR-V target return `0`.
-///
-/// # Safety
-///
-/// `program` must be null or a valid pointer returned by
-/// `rs_shader_compile_program` that remains live for the duration of the call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rs_shader_program_stage_spv_word_count(
-    program: *const super::RsShaderProgram,
-    stage_index: usize,
-) -> usize {
-    program_ref(program)
-        .and_then(|program| program.program.stages().get(stage_index))
-        .and_then(CompiledShaderStage::spirv)
-        .map_or(0, <[u32]>::len)
-}
-
 /// Returns the numeric compile target for `stage_index`.
 ///
-/// `0` is Vulkan SPIR-V, `1` is Metal Shading Language, and `-1` indicates a
+/// `0` is analysis only, `1` is Metal Shading Language, and `-1` indicates a
 /// null handle or invalid stage index.
 ///
 /// # Safety
@@ -225,7 +181,7 @@ pub unsafe extern "C" fn rs_shader_program_stage_target(
     program_ref(program)
         .and_then(|program| program.program.stages().get(stage_index))
         .map_or(RS_SHADER_TARGET_INVALID, |stage| match stage.target() {
-            ShaderTarget::VulkanSpirv => RS_SHADER_TARGET_VULKAN_SPIRV,
+            ShaderTarget::Analysis => RS_SHADER_TARGET_ANALYSIS,
             ShaderTarget::MetalMsl => RS_SHADER_TARGET_METAL_MSL,
         })
 }
@@ -383,8 +339,6 @@ pub fn ensure_linked() {
     let _ = std::hint::black_box(rs_shader_compile_program as *const ());
     let _ = std::hint::black_box(rs_shader_program_stage_count as *const ());
     let _ = std::hint::black_box(rs_shader_program_stage_kind as *const ());
-    let _ = std::hint::black_box(rs_shader_program_stage_spv_words as *const ());
-    let _ = std::hint::black_box(rs_shader_program_stage_spv_word_count as *const ());
     let _ = std::hint::black_box(rs_shader_program_stage_target as *const ());
     let _ = std::hint::black_box(rs_shader_program_stage_msl_source as *const ());
     let _ = std::hint::black_box(rs_shader_program_stage_metal_json as *const ());

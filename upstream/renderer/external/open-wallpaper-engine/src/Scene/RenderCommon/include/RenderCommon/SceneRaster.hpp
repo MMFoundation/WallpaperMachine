@@ -18,14 +18,14 @@
 
 // Scene-side raster arithmetic: how large each render target is for a given
 // output, render scale and display, and how the authored canvas is framed in
-// it. Nothing here touches a GPU API, so both render backends call these one
-// definitions; two copies would drift, and the drift would show as the two
-// backends sizing or framing the same wallpaper differently.
+// it. Nothing here touches a GPU API, so every caller shares these one
+// definitions; two copies would drift, and the drift would show as the same
+// wallpaper sized or framed differently.
 namespace wallpaper
 {
 
-/// A width and height in pixels. The neutral counterpart of `VkExtent2D`, so
-/// code that only sizes things carries no Vulkan header.
+/// A width and height in pixels. Plain pixels, so code that only sizes
+/// things carries no GPU header.
 struct Extent2D {
     uint32_t width { 0 };
     uint32_t height { 0 };
@@ -333,10 +333,9 @@ inline SceneRasterExtents ResolveScreenBoundRenderTargetSizes(Scene&            
 
 /// Fits the scene's authored canvas into an output of `width` x `height`.
 ///
-/// Purely scene-side camera arithmetic with nothing Vulkan in it, so both
-/// render backends call this one definition. Two copies of it would drift, and
-/// the drift would show as the two backends framing the same wallpaper
-/// differently.
+/// Purely scene-side camera arithmetic with nothing GPU-specific in it, so
+/// every caller shares this one definition. Two copies of it would drift, and
+/// the drift would show as the same wallpaper framed differently.
 inline void ApplyCameraFillMode(wallpaper::Scene& scene, wallpaper::FillMode fillmode,
                                 uint32_t width, uint32_t height) {
     using namespace wallpaper;
@@ -394,7 +393,7 @@ inline void ApplyCameraFillMode(wallpaper::Scene& scene, wallpaper::FillMode fil
 /// Neither is covered by the node transform, and both move without a graph
 /// rebuild: a fill-mode change, a camera layer's zoom or pan, a script. The
 /// view-projection matrix carries the camera's position and visible extent
-/// alike. Both backends call this one definition, so their caches invalidate on
+/// alike. Every caller shares this one definition, so caches invalidate on
 /// the same camera changes.
 inline uint64_t FoldPassCameras(uint64_t hash, const wallpaper::Scene& scene,
                                 const std::string& camera_override,
