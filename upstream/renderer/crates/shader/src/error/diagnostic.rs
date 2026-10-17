@@ -20,6 +20,13 @@ pub struct ShaderDiagnostic {
     /// Generated source text associated with the diagnostic.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing))]
     generated_source: Option<String>,
+    /// Labelled source ranges with their text, the first being the primary one. Only the
+    /// plain-text report shows them; `span` carries the primary range.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing))]
+    labels: Vec<(SourceSpan, String)>,
+    /// Further explanation lines, such as the causes behind the message.
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing))]
+    notes: Vec<String>,
 }
 
 impl ShaderDiagnostic {
@@ -33,6 +40,8 @@ impl ShaderDiagnostic {
             message: message.into(),
             generated_source_path: None,
             generated_source: None,
+            labels: Vec::new(),
+            notes: Vec::new(),
         }
     }
 
@@ -71,6 +80,20 @@ impl ShaderDiagnostic {
         self
     }
 
+    /// Adds a labelled source range; an empty `text` underlines the range without a caption.
+    #[must_use]
+    pub fn with_label(mut self, span: SourceSpan, text: impl Into<String>) -> Self {
+        self.labels.push((span, text.into()));
+        self
+    }
+
+    /// Adds an explanation line printed after the source excerpt.
+    #[must_use]
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.notes.push(note.into());
+        self
+    }
+
     /// Returns the shader stage context.
     #[must_use]
     pub const fn stage(&self) -> Option<ShaderStageKind> {
@@ -101,6 +124,18 @@ impl ShaderDiagnostic {
         self.generated_source_path.as_deref()
     }
 
+    /// Returns the labelled source ranges and their text.
+    #[must_use]
+    pub fn labels(&self) -> &[(SourceSpan, String)] {
+        &self.labels
+    }
+
+    /// Returns the explanation lines.
+    #[must_use]
+    pub fn notes(&self) -> &[String] {
+        &self.notes
+    }
+
     /// Renders this diagnostic as plain text using optional source text.
     #[must_use]
     pub fn render_report(&self, source: Option<&str>) -> String {
@@ -111,15 +146,25 @@ impl ShaderDiagnostic {
                 .to_owned(),
             text: text.to_owned(),
         });
-        let labels = self
-            .span()
-            .map(|span| ReportLabel {
-                start: span.start(),
-                len: span.end().saturating_sub(span.start()),
-                text: self.pass().map(ToOwned::to_owned),
-            })
-            .into_iter()
-            .collect();
+        let labels = if self.labels.is_empty() {
+            self.span()
+                .map(|span| ReportLabel {
+                    start: span.start(),
+                    len: span.end().saturating_sub(span.start()),
+                    text: self.pass().map(ToOwned::to_owned),
+                })
+                .into_iter()
+                .collect()
+        } else {
+            self.labels
+                .iter()
+                .map(|(span, text)| ReportLabel {
+                    start: span.start(),
+                    len: span.end().saturating_sub(span.start()),
+                    text: (!text.is_empty()).then(|| text.clone()),
+                })
+                .collect()
+        };
         let help_parts = [
             self.stage().map(|stage| format!("stage: {stage:?}")),
             self.pass().map(|pass| format!("pass: {pass}")),
@@ -137,6 +182,7 @@ impl ShaderDiagnostic {
             help: (!help.is_empty()).then_some(help),
             source,
             labels,
+            notes: self.notes.clone(),
         }
         .render()
     }

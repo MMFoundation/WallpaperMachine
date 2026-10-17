@@ -549,7 +549,7 @@ three members:
 |---|---|---|
 | `crates/bridge` (`wallpaper-bridge`, lib name `wallpaper_bridge`) | `staticlib` + `rlib`, plus the `uniffi-bindgen` binary | uniffi API surface (`api/`), kameo actor (`actor/`), engine facade (`engine/`), config store (`config/`), library scanner (`library/`), display rows (`display/`), user assets, logging, login item, power |
 | `crates/core` (`wallpaper-core`) | `rlib` | Runtime state machine (`engine/`): scene reconciliation, display discovery and watching, wallpaper windows, media decode (`media/video`, `media/audio` capture for audio response), render cache, and the `owe` FFI wrappers |
-| `crates/shader` (`shader`) | `rlib` + `staticlib` | GLSL parsing/translation via `naga`, exposed to C++ through the `ffi` feature |
+| `crates/shader` (`shader`) | `rlib` + `staticlib` | GLSL parsing/translation via `naga` (the patched copy in `upstream/naga`), exposed to C++ through the `ffi` feature; parse and validation errors are formatted by the crate's own `error/report.rs`, not by codespan-reporting |
 
 `crates/core/build.rs` drives the C++ layer: it runs `bindgen` over
 `upstream/renderer/external/open-wallpaper-engine/src/Platform/Apple/SceneWallpaperBindings.h`,

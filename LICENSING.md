@@ -17,7 +17,7 @@ source is linked.
 |---|---|
 | Under which license is this repository's source offered? | GNU GPL version 2 only, the text in the root [`LICENSE`](LICENSE). See [Source license](#source-license-gpl-20-only). |
 | Is anything sold? | Only the Supporter purchase: a one-time payment for a sponsor place and priority support. The signed download is free and no copy of the software is sold. See [Supporter model](#supporter-model-free-signed-download-paid-sponsorship-and-support). |
-| Can it be distributed today? | No. Homebrew's GPLv3 FFmpeg was replaced, but Apache-2.0 components, both Khronos/Vulkan libraries and Rust crates, remain in the link closure of every build. See [Remaining blockers](#remaining-blockers). |
+| Can it be distributed today? | No. Homebrew's GPLv3 FFmpeg was replaced, but Apache-2.0 components, both Khronos/Vulkan libraries and a Rust crate (`spirv`), remain in the link closure of every build. See [Remaining blockers](#remaining-blockers). |
 | Is a Developer ID signed, notarized build available? | No. `scripts/package.py` signs ad hoc, or with a self-signed project certificate for releases. Signing is a platform mechanism, not a license grant. See [Signing and notarization](#signing-and-notarization). |
 | Can it be listed on the Mac App Store? | Not as the app is built today, and not without first settling the GPLv2 question. See [Mac App Store](#mac-app-store). |
 | Does publishing this source resolve the blockers? | No. Distribution of the combined program is what the licenses govern; posting the repository changes nothing about it. |
@@ -229,11 +229,11 @@ see [Rust crates](#rust-crates) for how.
 | **MoltenVK** (`libMoltenVK`, loaded as the Vulkan ICD) | Homebrew `molten-vk` 1.4.2 | Apache-2.0 | **Incompatible with GPLv2** |
 | vulkan-headers, spirv-headers | Homebrew, build-time headers | Apache-2.0 / MIT | Build-time only; whether header inclusion alone creates a covered combination is part of the open review |
 | shaderc | Homebrew `shaderc`, in `build_environment()` | Apache-2.0 | Not present in the app's dynamic link closure; its role is limited to the build environment list and is to be confirmed |
-| **codespan-reporting** 0.13.1 | Rust crate, a required dependency of naga 29, which the `shader` crate uses for every shader | Apache-2.0 | **Incompatible with GPLv2** |
+| naga 29.0.3 | Rust crate, a patched copy vendored in `upstream/naga` (`upstream/naga/PATCHES.md`): the shader translator and validator the `shader` crate uses for every shader | MIT OR Apache-2.0, used under MIT | Compatible under the MIT terms; the patch makes Apache-2.0 `codespan-reporting` an optional dependency the `shader` crate does not enable, so it is no longer linked |
 | **spirv** 0.4.0 | Rust crate, from naga's `spv-out` feature (the Compatibility path's SPIR-V output) | Apache-2.0 | **Incompatible with GPLv2** |
 | uniffi 0.28.3 (`uniffi`, `uniffi_core`, `uniffi_bindgen`, `uniffi_meta`, `uniffi_udl`, `uniffi_testing`), option-ext 0.2.0 | Rust crates: the Swift bridge, and `dirs` | MPL-2.0 | Compatible through MPL-2.0 section 3.3, which names GPL-2.0 as a Secondary License; none of their source files carries the "Incompatible With Secondary Licenses" notice |
 | ffmpeg-next, ffmpeg-sys-next 8.1.0 | Rust crates, the FFmpeg bindings in `wallpaper-core` | WTFPL | Compatible |
-| The other 145 linked Rust crates | `upstream/renderer/Cargo.lock` | 141 offer MIT, alone or as a choice; the rest are Zlib (foldhash), BSD-3-Clause (pp-rs) or BSD-3-Clause OR Apache-2.0 (moxcms, pxfm) | Compatible under the MIT, Zlib or BSD-3-Clause terms |
+| The other 143 linked Rust crates | `upstream/renderer/Cargo.lock` | 139 offer MIT, alone or as a choice; the rest are Zlib (foldhash), BSD-3-Clause (pp-rs) or BSD-3-Clause OR Apache-2.0 (moxcms, pxfm) | Compatible under the MIT, Zlib or BSD-3-Clause terms |
 | Valve SteamCMD | installed at runtime into the app's support directory, never bundled | Valve's terms | Outside the GPL entirely; see [Rights outside software licenses](#rights-outside-software-licenses) |
 
 "Compatible" in this table means compatible with GPLv2 according to the FSF's
@@ -246,9 +246,9 @@ Checked 2026-10-17 against `upstream/renderer/Cargo.lock` with `cargo tree
 --offline --workspace -e normal,no-proc-macro --target aarch64-apple-darwin`.
 That resolves features the way `scripts/build.py`'s `cargo build --workspace
 --release` does. Each crate's license is the one its manifest declares; no
-crate was reviewed file by file. The result is 156 third-party crates, all
-compiled into `libwallpaper_bridge.a`, which the app links
-(`-lwallpaper_bridge` in `project.yml`).
+crate was reviewed file by file. The result is 154 third-party crates (naga counted among them, as the
+vendored copy in `upstream/naga`), all compiled into `libwallpaper_bridge.a`,
+which the app links (`-lwallpaper_bridge` in `project.yml`).
 
 The table below says which renderer path needs each blocked crate. "Native
 Metal" and "Compatibility" (Vulkan through MoltenVK) are the two scene
@@ -256,11 +256,11 @@ renderers described in [docs/features/scene-rendering.md](docs/features/scene-re
 
 | Crate | Pulled in by | Needed by |
 |---|---|---|
-| codespan-reporting | naga 29, as a dependency naga cannot be built without | Every shader compile, for Native Metal (MSL) and for Compatibility (SPIR-V) |
 | spirv | naga's `spv-out` feature, enabled in `upstream/renderer/crates/shader/Cargo.toml` | Only Compatibility's SPIR-V output (`ShaderTarget::VulkanSpirv`) |
 
-A Release executable built 2026-10-16 contains code from codespan-reporting
-and spirv, among others (by their names in its symbol table). That describes one build and clears nothing; the
+A Release executable built 2026-10-16, before codespan-reporting left the
+closure, contains code from codespan-reporting and spirv, among others (by
+their names in its symbol table). That describes one build and clears nothing; the
 crates stay in the dependency closure and are counted as blockers until they
 are removed or reviewed.
 
@@ -322,14 +322,13 @@ or compiled into, the same process as the GPL-2.0-only renderer:
 - `libSPIRV-Tools` / `libSPIRV-Tools-opt`, loaded by glslang's `libSPIRV`;
 - the Apache-2.0 portion of glslang proper;
 - `spirv_reflect`, vendored and statically linked into the scene engine;
-- the Rust crates `codespan-reporting` and `spirv` (Apache-2.0), both compiled
-  into `libwallpaper_bridge.a`
+- the Rust crate `spirv` (Apache-2.0), compiled into `libwallpaper_bridge.a`
   ([Rust crates](#rust-crates)).
 
-Retiring the Compatibility (Vulkan) path does not clear the Rust crates on its
-own. `spirv` leaves only if naga's `spv-out` feature is dropped as well.
-`codespan-reporting` stays, because naga requires it for every shader,
-Native Metal's included.
+Retiring the Compatibility (Vulkan) path does not clear the Rust crate on its
+own: `spirv` leaves only if naga's `spv-out` feature is dropped as well.
+`codespan-reporting` no longer blocks: the vendored naga (`upstream/naga`)
+makes it optional and the `shader` crate does not enable it.
 
 Until each of these is resolved, no binary of this program may be distributed,
 sold or given away. Resolution means one of:
@@ -340,8 +339,8 @@ sold or given away. Resolution means one of:
    renderer's native Metal backend exists but does not cover every scene; see
    [docs/features/performance.md](docs/features/performance.md)). For a Rust
    crate it means dropping the feature or dependency that pulls it in, or
-   replacing the crate that needs it: naga cannot be built without
-   `codespan-reporting`.
+   replacing or patching the crate that needs it: the vendored naga builds
+   without `codespan-reporting`.
 2. **Obtain compatible license grants** covering the Apache-2.0 code, or obtain
    a sufficient linking exception or GPLv3-compatible relicense from the
    copyright holders of the GPLv2-only code. A generic endorsement is not enough.
@@ -477,6 +476,10 @@ prefix is `app.wallpapermachine`.
   under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes
   recorded in `upstream/provenance.json`, and built as an embedded, unlinked
   framework.
+- The shader translator [naga](https://github.com/gfx-rs/wgpu) 29.0.3 is vendored
+  under `upstream/naga` (its `LICENSE.MIT` and `LICENSE.APACHE` ship with it; this
+  project uses it under the MIT option) with the patch listed in
+  `upstream/naga/PATCHES.md`, recorded in `upstream/provenance.json`.
 - The control panel's icons are SF Symbols, drawn by macOS at run time; no
   icon artwork is copied into the app or the repository, so no icon notice
   ships.

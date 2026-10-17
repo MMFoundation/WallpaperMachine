@@ -1,5 +1,7 @@
 //! Naga diagnostic conversion into crate-native diagnostics.
 
+use std::ops::Range;
+
 use crate::{ShaderDiagnostic, ShaderStageKind, SourceSpan};
 
 /// Builder for crate-native diagnostics emitted by Naga integration.
@@ -13,8 +15,10 @@ pub(super) struct DiagnosticBuilder {
     source_path: String,
     /// Human-readable diagnostic message.
     message: String,
-    /// Source location supplied by Naga, when available.
-    source_location: Option<naga::SourceLocation>,
+    /// Labelled byte ranges of the generated source supplied by Naga, primary first.
+    labels: Vec<(Range<usize>, String)>,
+    /// Explanation lines supplied by Naga.
+    notes: Vec<String>,
     /// Generated source text supplied by Naga integration.
     source: Option<String>,
 }
@@ -27,7 +31,8 @@ impl DiagnosticBuilder {
             pass,
             source_path: source_path.to_owned(),
             message: String::new(),
-            source_location: None,
+            labels: Vec::new(),
+            notes: Vec::new(),
             source: None,
         }
     }
@@ -38,12 +43,19 @@ impl DiagnosticBuilder {
         self
     }
 
-    /// Sets source location context.
-    pub(super) fn with_source_location(
+    /// Sets the labelled source ranges; the first is the primary one. Naga marks a range it
+    /// does not know as undefined, which has no `Range`, so callers skip it.
+    pub(super) fn with_labels(
         mut self,
-        source_location: Option<naga::SourceLocation>,
+        labels: impl IntoIterator<Item = (Range<usize>, String)>,
     ) -> Self {
-        self.source_location = source_location;
+        self.labels = labels.into_iter().collect();
+        self
+    }
+
+    /// Sets the explanation lines.
+    pub(super) fn with_notes(mut self, notes: Vec<String>) -> Self {
+        self.notes = notes;
         self
     }
 
@@ -65,22 +77,23 @@ impl DiagnosticBuilder {
             diagnostic
         };
 
-        if let Some(location) = self.source_location {
-            let span = usize::try_from(location.offset)
-                .ok()
-                .zip(usize::try_from(location.length).ok())
-                .and_then(|(start, length)| {
-                    start
-                        .checked_add(length)
-                        .and_then(|end| SourceSpan::new(start, end).ok())
-                });
-
-            match span {
-                Some(span) => diagnostic.with_span(span),
-                None => diagnostic,
-            }
-        } else {
-            diagnostic
-        }
+        let mut spans = self.labels.into_iter().filter_map(|(range, text)| {
+            SourceSpan::new(range.start, range.end).ok().map(|span| (span, text))
+        });
+        let diagnostic = match spans.next() {
+            Some((primary, text)) => spans.fold(
+                diagnostic.with_span(primary).with_label(primary, text),
+                |diagnostic, (span, text)| diagnostic.with_label(span, text),
+            ),
+            None => diagnostic,
+        };
+        self.notes.into_iter().fold(diagnostic, ShaderDiagnostic::with_note)
     }
+}
+
+/// Explanation lines for `error`: each underlying cause, outermost first.
+pub(super) fn cause_notes(error: &(dyn std::error::Error + 'static)) -> Vec<String> {
+    std::iter::successors(error.source(), |cause| cause.source())
+        .map(|cause| cause.to_string())
+        .collect()
 }

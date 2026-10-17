@@ -44,6 +44,8 @@ pub(super) struct Report {
     pub source: Option<ReportSource>,
     /// Labelled spans, the first being the primary one.
     pub labels: Vec<ReportLabel>,
+    /// Extra lines of explanation printed after the excerpt.
+    pub notes: Vec<String>,
 }
 
 impl Report {
@@ -52,6 +54,9 @@ impl Report {
         let mut output = format!("{CODE}\n\n  x {}\n", self.message);
         if let Some(source) = self.source.as_ref().filter(|_| !self.labels.is_empty()) {
             render_excerpt(&mut output, source, &self.labels);
+        }
+        for note in &self.notes {
+            let _ = writeln!(output, "  note: {note}");
         }
         if let Some(help) = &self.help {
             let _ = writeln!(output, "  help: {help}");
@@ -170,6 +175,7 @@ mod tests {
                 .iter()
                 .map(|&(start, len, text)| ReportLabel { start, len, text: text.map(Into::into) })
                 .collect(),
+            notes: Vec::new(),
         }
     }
 
@@ -179,6 +185,17 @@ mod tests {
         for expected in ["boom", "a.frag:2:5", "two bar", "^^^ pass", "stage: Fragment"] {
             assert!(output.contains(expected), "missing {expected:?} in\n{output}");
         }
+    }
+
+    #[test]
+    fn notes_follow_the_excerpt() {
+        let mut with_notes = report(Some("one\ntwo"), &[(4, 3, None)]);
+        with_notes.notes = vec!["caused by: first".into(), "caused by: second".into()];
+        let output = with_notes.render();
+        let excerpt = output.find("two").expect("excerpt");
+        let first = output.find("note: caused by: first").expect("first note");
+        let second = output.find("note: caused by: second").expect("second note");
+        assert!(excerpt < first && first < second, "{output}");
     }
 
     #[test]

@@ -209,9 +209,92 @@ void main() {
         Some("generated/fragment.glsl")
     );
     assert!(diagnostic.message().contains("missing_value"));
-    assert!(diagnostic.message().contains("generated/fragment.glsl"));
-    assert!(diagnostic.message().contains("frag_color = missing_value;"));
     assert!(diagnostic.span().is_some());
+
+    let report = diagnostic.render_report(None);
+    assert!(report.contains("generated/fragment.glsl"), "{report}");
+    assert!(report.contains("frag_color = missing_value;"), "{report}");
+}
+
+#[test]
+fn parse_failure_locates_the_offending_token() {
+    let source_text = "#version 450\nlayout(location = 0) out vec4 frag_color;\nvoid main() {\n    frag_color = missing_value;\n}\n";
+
+    let diagnostics = compile_error(source_text);
+
+    let diagnostic = diagnostics.first().expect("a parse error reports a diagnostic");
+    let span = diagnostic.span().expect("the unknown symbol has a source range");
+    assert_eq!(&source_text[span.start()..span.end()], "missing_value");
+    assert_eq!(diagnostic.labels().first().map(|(label, _)| *label), Some(span));
+    // Line 4, column 18: `frag_color = ` follows four spaces of indentation.
+    assert!(
+        diagnostic.render_report(None).contains("generated/fragment.glsl:4:18"),
+        "{}",
+        diagnostic.render_report(None)
+    );
+}
+
+#[test]
+fn validation_failure_reports_labelled_locations_and_causes() {
+    // The frontend accepts this constant out-of-range index; the validator rejects it.
+    let source_text = "#version 450\nlayout(location = 0) out vec4 c;\nvoid main() {\n    float a[2];\n    a[0] = 1.0;\n    c = vec4(a[5]);\n}\n";
+
+    let diagnostics = compile_error(source_text);
+
+    let diagnostic = diagnostics.first().expect("a validation error reports a diagnostic");
+    assert_eq!(diagnostic.pass(), Some("naga validate"));
+    assert!(!diagnostic.message().is_empty());
+    assert!(diagnostic.labels().len() >= 2, "{:?}", diagnostic.labels());
+    assert!(
+        diagnostic.labels().iter().all(|(_, text)| !text.is_empty()),
+        "every validation label carries its description: {:?}",
+        diagnostic.labels()
+    );
+    assert!(!diagnostic.notes().is_empty(), "the cause chain is kept as notes");
+
+    let lines_of_labels = diagnostic
+        .labels()
+        .iter()
+        .map(|(span, _)| source_text[..span.start()].matches('\n').count() + 1)
+        .collect::<Vec<_>>();
+    assert!(lines_of_labels.contains(&6), "a label sits on the failing line: {lines_of_labels:?}");
+
+    let report = diagnostic.render_report(None);
+    assert!(report.contains("generated/fragment.glsl:"), "{report}");
+    assert!(report.contains("c = vec4(a[5]);"), "{report}");
+    for (_, text) in diagnostic.labels() {
+        assert!(report.contains(text.as_str()), "label {text:?} missing from\n{report}");
+    }
+    for note in diagnostic.notes() {
+        assert!(report.contains(note.as_str()), "note {note:?} missing from\n{report}");
+    }
+}
+
+#[test]
+fn validation_failure_without_a_source_range_still_reports_its_causes() {
+    // Two outputs at one location: an entry point error that has no source range.
+    let source_text = "#version 450\nlayout(location = 0) out vec4 a;\nlayout(location = 0) out vec4 b;\nvoid main() {\n    a = vec4(1.0);\n    b = vec4(2.0);\n}\n";
+
+    let diagnostics = compile_error(source_text);
+
+    let diagnostic = diagnostics.first().expect("a validation error reports a diagnostic");
+    assert_eq!(diagnostic.pass(), Some("naga validate"));
+    assert!(diagnostic.span().is_none() && diagnostic.labels().is_empty());
+    assert!(!diagnostic.notes().is_empty());
+    let report = diagnostic.render_report(None);
+    assert!(report.contains(diagnostic.message()), "{report}");
+    assert!(report.contains(diagnostic.notes()[0].as_str()), "{report}");
+}
+
+fn compile_error(source_text: &str) -> Box<[shader::ShaderDiagnostic]> {
+    let source = legalized_source(ShaderStageKind::Fragment, source_text);
+    let error = NagaCompiler
+        .compile_stage(ShaderTarget::VulkanSpirv, ShaderStageKind::Fragment, &source)
+        .expect_err("the shader is invalid");
+    let ShaderError::Compile { diagnostics } = error else {
+        panic!("expected compile diagnostics");
+    };
+    diagnostics
 }
 
 #[test]

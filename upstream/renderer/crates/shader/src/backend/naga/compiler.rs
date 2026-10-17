@@ -6,7 +6,10 @@ use naga::{
     valid::{Capabilities, ModuleInfo, ValidationFlags, Validator},
 };
 
-use super::{diagnostic::DiagnosticBuilder, metal::MetalEmitter};
+use super::{
+    diagnostic::{DiagnosticBuilder, cause_notes},
+    metal::MetalEmitter,
+};
 use crate::{
     CompiledShaderStage, CompiledStageArtifact, CompiledStageCode, ShaderCompiler, ShaderError,
     ShaderResult, ShaderStageKind, ShaderTarget,
@@ -49,27 +52,41 @@ impl ShaderCompiler for NagaCompiler {
         }
         let mut frontend = glsl::Frontend::default();
         let module = frontend.parse(&options, source_text).map_err(|err| {
-            let diagnostic = DiagnosticBuilder::new(stage, "naga glsl parse", source_path)
-                .with_message(err.emit_to_string_with_path(source_text, source_path))
-                .with_source(source_text)
-                .with_source_location(
-                    err.errors
-                        .first()
-                        .and_then(|error| error.location(source_text)),
-                )
-                .build();
+            // One diagnostic per parse error, in the order Naga reports them.
+            let mut diagnostics = err
+                .errors
+                .iter()
+                .map(|error| {
+                    DiagnosticBuilder::new(stage, "naga glsl parse", source_path)
+                        .with_message(error.kind.to_string())
+                        .with_source(source_text)
+                        .with_labels(error.meta.to_range().map(|range| (range, String::new())))
+                        .build()
+                })
+                .collect::<Vec<_>>();
+            if diagnostics.is_empty() {
+                diagnostics.push(
+                    DiagnosticBuilder::new(stage, "naga glsl parse", source_path)
+                        .with_message("glsl parse failed without a diagnostic".to_owned())
+                        .with_source(source_text)
+                        .build(),
+                );
+            }
 
             ShaderError::Compile {
-                diagnostics: Box::from([diagnostic]),
+                diagnostics: diagnostics.into_boxed_slice(),
             }
         })?;
 
         let mut validator = Validator::new(ValidationFlags::default(), Capabilities::default());
         let module_info = validator.validate(&module).map_err(|err| {
             let diagnostic = DiagnosticBuilder::new(stage, "naga validate", source_path)
-                .with_message(err.emit_to_string_with_path(source_text, source_path))
+                .with_message(err.as_inner().to_string())
                 .with_source(source_text)
-                .with_source_location(err.location(source_text))
+                .with_labels(err.spans().filter_map(|(span, text)| {
+                    span.to_range().map(|range| (range, text.clone()))
+                }))
+                .with_notes(cause_notes(err.as_inner()))
                 .build();
 
             ShaderError::Compile {
