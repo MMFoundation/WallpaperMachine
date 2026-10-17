@@ -11,6 +11,7 @@ mod corpus;
 mod globals;
 mod inputs;
 mod merge;
+mod pins;
 mod orchestration;
 mod resources;
 mod varyings;
