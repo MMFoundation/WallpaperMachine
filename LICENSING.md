@@ -493,19 +493,17 @@ BSD-3-Clause notice) and the extension's `Phosphene-LICENSE.txt`.
 
 The generated file closes the gap that the [Rust crates](#rust-crates) had no notice
 in the bundle, although the MIT, ISC and BSD-3-Clause terms of the linked crates ask for
-their notices to go with binary copies. It is not complete yet: checked 2026-10-17
-against the Debug app on the development machine, it lists 156 components, 127 with
-their license text and 29 without. The 29 are crates whose published source carries
-no license file, or only a pointer to one: `block2`, `dispatch2`, `kameo`, `objc2`
-and 18 more `objc2-*` crates, `siphasher` and the `uniffi` crates (`uniffi`,
-`uniffi_bindgen`, `uniffi_core`, `uniffi_meta`, `uniffi_testing`, `uniffi_udl`).
-Their license terms are declared in their manifests (MIT, `Zlib OR Apache-2.0 OR MIT`,
-MIT/Apache-2.0, MPL-2.0) but the text is not in the registry copy, and the generator
-does not write a text from memory: the file marks each one. Closing them needs the
-upstream projects' license files, copied into `Packaging/notices/<crate>/` (the
-generator reads that directory for any component whose own source lacks a text) with
-the source recorded in the commit message. `package.py --require-notices` makes the
-remaining gaps an error; the release workflow does not pass it yet.
+their notices to go with binary copies. Checked 2026-10-17 (`scripts/notices.py
+--skip-app --enforce`): 155 components, every one with its license text. Twenty-nine
+crates publish no license file of their own (`block2`, `dispatch2`, `kameo`, `objc2`
+and 18 more `objc2-*` crates, `siphasher` and the six `uniffi` crates); their texts
+were copied unchanged on 2026-10-17 from the projects' own repositories
+(madsmtm/objc2 `LICENSE-MIT.txt`, mozilla/uniffi-rs `LICENSE`, tqwewe/kameo
+`LICENSE-MIT`, jedisct1/rust-siphash `LICENSE-MIT`) into `Packaging/notices/<crate>/`,
+which the generator reads for any component whose own source lacks a text; the crates
+offering several licenses carry the MIT text, the option this project uses.
+`package.py --require-notices` makes any future gap an error; the release workflow does
+not pass it yet.
 
 ## Implementation record
 
@@ -576,10 +574,9 @@ prefix is `app.wallpapermachine`.
   it reports by replacement or by written permission from the actual copyright
   holders.
 - Review the Rust crates beyond their declared licenses.
-- Supply the license text of the 29 crates `scripts/notices.py` reports without one
-  (see [Notice payload](#notice-payload)), then pass `--require-notices` to
-  `scripts/package.py` in the release workflow. The notices of the other linked
-  crates are bundled.
+- Pass `--require-notices` to `scripts/package.py` in the release workflow, so a new
+  dependency without a license text stops a release (every current component has one;
+  see [Notice payload](#notice-payload)).
 - Implement Developer ID signing and notarization in the release pipeline, and
   remove the unconditional failure from `.github/workflows/build.yml` only
   after the review above is recorded as done.
