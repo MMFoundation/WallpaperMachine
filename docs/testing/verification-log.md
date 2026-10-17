@@ -35,6 +35,18 @@ entry's recorded result is not allowed.
 - Not checked: the real lock screen and screen saver, a real HDR display or any HDR file from the library, container mdcv/clli boxes, Dolby Vision profile 5, the held-scene look on a desktop; a scene that fails to parse still waits 90 s and rolls back.
 - Not run: Release build, desktop or UI tests.
 
+## 2026-10-17 — Own WebM player, plain video native-only, Video backend setting removed
+
+Lane ext (phase 3b/3c) on a worktree of b7ac57c1: WebMReader and the WebM player (desktop and lock screen), plain video never reaches the scene engine, the Video backend setting is gone. Headless only: no desktop, lock screen or audio hardware.
+
+- `python3 scripts/check_rust.py` — exit 0 (bridge lib tests, core, integration, shader); asset and corpus tests skipped (no WE assets dir, no unpack corpus)
+- `python3 scripts/build.py --renderer-only` — passed after every Rust/C++ change; bindings regenerated and committed
+- `python3 scripts/check_renderer.py` — exit 0, no failed test in any evidence log; webm_reader_test, sound_matroska_tests, vt_frame_decoder_test, media_matroska_tests all pass
+- `python3 scripts/test.py --only <class>` for WebMOpening/WebMPlayer/WebMVideoWallpaperWindow/LockScreenWebMPlayer/LockScreenVideoPlanner/VideoFormatSupport/NativeVideo*/WallpaperActivationRecovery/WallpaperCompatibility/Panel*/Settings*/LockScreenWallpaperService — all passed; 38 opt-in NativeVideoPlayerMediaTests skipped
+- `python3 -m unittest discover -s tests` (scripts/) — 376 tests OK
+- Cost probe (temporary, removed): 1080p/30 fps VP9 WebM in WebMPlayer 1.52% of one core, H.264 MP4 in AVPlayerLayer 1.38%, idle host 0.19%, about 29-30 MiB each, headless layer, no audio. The old scene-engine path was not measured (needs a running desktop).
+- Not verified: WebM window on a real desktop, audio output and A/V sync, rotated clips on screen, HDR, the extension reaching the supplemental VP9 decoder, AV1 hardware decode, M1/M2, real libvorbis WebM, full test.py, Release build.
+
 ## 2026-10-17 — Native video default, native scene video textures, scene sounds without FFmpeg
 
 Integration of the plain-video, scene-video and scene-sound lanes on one branch (16 commits over 06c37925), after each lane passed its own gate.
@@ -112,12 +124,3 @@ The 70 Wallpaper Engine parity commits on main (5f3e5d58..98be08fa: scene, text,
 - Native Metal renders of 40 Workshop scene wallpapers compared with Wallpaper Engine 2.8.42's own frames (display resolution, pointer at the centre, real-time pacing, clock at the capture time): of 324 differences found before, 142 fixed, 13 improved, 18 unchanged, 0 worse; no wallpaper left with a major difference
 - gaps: web wallpapers were not recaptured (no change to the web host); volumetric lights, model MSAA and the other listed known limitations remain; one reference capture showed another wallpaper; the app was not run on the desktop
 - `python3 scripts/build.py --configuration Release` — OK; the app's bridge checksums match its bindings
-
-## 2026-10-16 — Text layout, placement, effect buffers and fonts: review follow-ups of the text steps
-
-Follow-ups to the reviews of the ported text steps (face cache, alignment words and brightness, card layout, placement, effect buffers, composite, fonts), checked in an isolated worktree with the renderer test binaries; the app gate (`scripts/test.py`), `scripts/check_renderer.py` and the Swift unit target were not run, and there was no desktop, app launch or audio.
-
-- every renderer test binary of the worktree (`run_suites.sh`, 30 binaries) — all passed, among them `text_object_runtime_test` 158, `metal_scene_draw_smoke` 130, `scene_schema_tests` 156, `script_runtime_compat_test` 171, `mouse_input_test` 30, `layer_texture_reference_test` 38
-- new tests fail without their change: a font file rewritten or deleted under a cached face, the rows set within the widest row's width (not the block's), the effect matrices of a screen-anchored text, CJK punctuation drawn by the symbol face
-- rebuild cost of a text card that changes in texels, six forced rebuilds on a real clock scene (72 passes, 1920 by 1080, native Metal) — 0.5 to 0.8 ms to lower and 39 to 45 ms to compile; 0.6 to 0.9 ms on a one-layer scene
-- gaps: no Wallpaper Engine frame was compared for the changes of this pass; the brightness probes (`probetextb1`, `probetextb2`) and the exponent probe for a chain other than opacity are uncaptured, so the HDR half of the text brightness rule and the composite exponent of non-opacity chains stay inferred; that Segoe UI Symbol lacks the CJK punctuation is inferred; the sandboxed lock-screen extension was not run with a face opened by path
