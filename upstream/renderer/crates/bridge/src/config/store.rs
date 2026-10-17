@@ -226,7 +226,7 @@ impl From<std::io::Error> for BridgeError {
 #[cfg(test)]
 mod tests {
     use super::ConfigStore;
-    use crate::config::{AppConfig, MonitorSettingsCfg, SceneRendererModeCfg, SceneResolutionCfg};
+    use crate::config::{AppConfig, MonitorSettingsCfg, SceneResolutionCfg};
 
     fn load_config(contents: &str) -> crate::config::AppConfig {
         let root = tempfile::tempdir().unwrap();
@@ -237,36 +237,49 @@ mod tests {
             .config
     }
 
-    /// Plain videos have no setting any more. A config an earlier build wrote may still hold the
-    /// keys it used (`video_backend`, its one-time marker, and the older
-    /// `experimental.native_video_backend` flag); it loads, the other settings in it are kept,
-    /// and the keys are not written back.
+    /// Neither plain videos nor scenes have a renderer setting any more. A config an earlier build
+    /// wrote may still hold the keys it used (`video_backend`, `scene_renderer`, their one-time
+    /// markers, and the older `experimental.native_video_backend` flag), whatever their values;
+    /// it loads, the other settings in it are kept, and the keys are not written back.
     #[test]
-    fn a_config_with_the_old_video_backend_keys_loads_and_does_not_write_them_back() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("config.toml");
-        std::fs::write(
-            &path,
-            "video_backend = \"compatibility\"\nnative_video_default_applied = true\n\
-             native_metal_default_applied = true\nscene_renderer = \"compatibility\"\n\
-             [experimental]\nnative_video_backend = true\ncontent_pacing = true\n",
-        )
-        .unwrap();
-        let store = ConfigStore::open(root.path().to_path_buf());
+    fn a_config_with_the_old_renderer_keys_loads_and_does_not_write_them_back() {
+        for scene_renderer in ["compatibility", "native_metal_preferred", "native_metal_only"] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("config.toml");
+            std::fs::write(
+                &path,
+                format!(
+                    "video_backend = \"compatibility\"\nnative_video_default_applied = true\n\
+                     native_metal_default_applied = true\nscene_renderer = \"{scene_renderer}\"\n\
+                     [experimental]\nnative_video_backend = true\ncontent_pacing = true\n"
+                ),
+            )
+            .unwrap();
+            let store = ConfigStore::open(root.path().to_path_buf());
 
-        let config = store.load().expect("config load").config;
-        assert_eq!(config.scene_renderer, SceneRendererModeCfg::Compatibility);
-        assert!(config.experimental.content_pacing, "the rest of the file is read as before");
+            let config = store.load().expect("config load").config;
+            assert!(config.experimental.content_pacing, "the rest of the file is read as before");
 
-        store.save_app_config(&config).expect("config save");
-        let written = std::fs::read_to_string(&path).unwrap();
-        assert!(!written.contains("video_backend"), "{written}");
-        assert!(!written.contains("native_video"), "{written}");
-        assert!(written.contains("content_pacing = true"), "{written}");
+            store.save_app_config(&config).expect("config save");
+            let written = std::fs::read_to_string(&path).unwrap();
+            for key in ["video_backend", "native_video", "scene_renderer", "native_metal"] {
+                assert!(!written.contains(key), "{scene_renderer}: {key} was written back: {written}");
+            }
+            assert!(written.contains("content_pacing = true"), "{written}");
+        }
+    }
+
+    /// A config from before the one-time move to Native Metal holds only the old default,
+    /// `compatibility`, and no marker. It loads the same way: there is nothing to move to.
+    #[test]
+    fn a_config_from_before_the_native_default_loads_without_a_marker() {
+        let config = load_config("scene_renderer = \"compatibility\"\n[quality]\nrender_scale = 0.75\n");
+
+        assert_eq!(config.quality.render_scale, 0.75, "the neighbouring setting is untouched");
     }
 
     #[test]
-    fn a_new_install_writes_no_video_backend_key() {
+    fn a_new_install_writes_no_renderer_keys() {
         let root = tempfile::tempdir().unwrap();
         let store = ConfigStore::open(root.path().to_path_buf());
         let config = store.load().expect("config load").config;
@@ -275,13 +288,14 @@ mod tests {
 
         let written = std::fs::read_to_string(root.path().join("config.toml")).unwrap();
         assert!(!written.contains("video_backend"), "{written}");
+        assert!(!written.contains("scene_renderer"), "{written}");
+        assert!(!written.contains("native_metal_default_applied"), "{written}");
     }
 
     #[test]
     fn a_config_that_never_heard_of_the_scene_settings_reads_the_shipped_defaults() {
         let config = load_config("[general]\n");
 
-        assert_eq!(config.scene_renderer, SceneRendererModeCfg::NativeMetalPreferred);
         assert!(
             !config.quality.scene_on_demand_enabled,
             "stopping a scene's tick is opted into; an older config must not arrive already on"
@@ -294,44 +308,14 @@ mod tests {
         let path = root.path().join("config.toml");
         let store = ConfigStore::open(root.path().to_path_buf());
         let mut config = crate::config::AppConfig::default();
-        config.scene_renderer = SceneRendererModeCfg::NativeMetalPreferred;
         config.quality.scene_on_demand_enabled = true;
 
         store.save_app_config(&config).expect("config save");
 
         let written = std::fs::read_to_string(&path).unwrap();
-        assert!(
-            written.contains("scene_renderer = \"native_metal_preferred\""),
-            "the renderer choice is stored under its own key, in snake_case: {written}"
-        );
+        assert!(written.contains("scene_on_demand_enabled = true"), "{written}");
         let reloaded = store.load().expect("config load").config;
-        assert_eq!(
-            reloaded.scene_renderer,
-            SceneRendererModeCfg::NativeMetalPreferred
-        );
         assert!(reloaded.quality.scene_on_demand_enabled);
-    }
-
-    /// The no-fallback renderer mode is written under the same key, by name, and the
-    /// one-time move to the default never touches a choice that is not Compatibility.
-    #[test]
-    fn native_metal_only_is_stored_by_name_and_survives_the_default_move() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("config.toml");
-        let store = ConfigStore::open(root.path().to_path_buf());
-        let mut config = crate::config::AppConfig::default();
-        config.scene_renderer = SceneRendererModeCfg::NativeMetalOnly;
-        store.save_app_config(&config).expect("config save");
-
-        let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("scene_renderer = \"native_metal_only\""), "{written}");
-        let reloaded = store.load().expect("config load").config;
-        assert_eq!(reloaded.scene_renderer, SceneRendererModeCfg::NativeMetalOnly);
-        assert_eq!(
-            SceneRendererModeCfg::default(),
-            SceneRendererModeCfg::NativeMetalPreferred,
-            "the no-fallback mode is never the default until the Vulkan path is deleted"
-        );
     }
 
     /// A config written before the choice existed has no key for it, and the
@@ -361,44 +345,6 @@ mod tests {
             reloaded.quality.scene_resolution,
             SceneResolutionCfg::Canvas,
             "a return to the canvas is not moved back to the default"
-        );
-    }
-
-    /// The scene renderer is decided by its own key and the one-time move to
-    /// the new default, whatever an old config says about videos.
-    #[test]
-    fn the_scene_renderer_ignores_an_old_video_backend_choice() {
-        let config = load_config(
-            "video_backend = \"native_preferred\"\nnative_metal_default_applied = true\n\
-             scene_renderer = \"compatibility\"\n",
-        );
-
-        assert_eq!(config.scene_renderer, SceneRendererModeCfg::Compatibility);
-    }
-
-    /// A config saved before Native Metal became the default stores the old
-    /// default, `compatibility`, whether or not anyone chose it. It moves to the
-    /// new default once, and the marker it is saved with keeps a later choice.
-    #[test]
-    fn a_config_from_before_the_native_default_moves_to_it_once() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("config.toml");
-        std::fs::write(&path, "scene_renderer = \"compatibility\"\n").unwrap();
-        let store = ConfigStore::open(root.path().to_path_buf());
-
-        let mut config = store.load().expect("config load").config;
-        assert_eq!(config.scene_renderer, SceneRendererModeCfg::NativeMetalPreferred);
-        assert!(config.native_metal_default_applied);
-
-        config.scene_renderer = SceneRendererModeCfg::Compatibility;
-        store.save_app_config(&config).expect("config save");
-        let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("native_metal_default_applied = true"), "{written}");
-        let reloaded = store.load().expect("config load").config;
-        assert_eq!(
-            reloaded.scene_renderer,
-            SceneRendererModeCfg::Compatibility,
-            "a choice made after the move is kept"
         );
     }
 

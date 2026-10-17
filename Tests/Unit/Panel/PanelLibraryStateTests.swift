@@ -306,11 +306,11 @@ final class PanelLibraryStateTests: PanelTestCase {
       panel.store.settingsSnapshot.sceneRenderers = [
         BridgeSceneBackendReport(
           displayId: 1, displayName: "Main", wallpaperId: "ghost", wallpaperTitle: "Ghost",
-          backend: "legacy_vulkan", fallbackReason: "lit particles", failureStage: nil, failureReason: nil, videoPath: "none",
+          backend: "native_metal", failureStage: nil, failureReason: nil, videoPath: "none",
           optimizationApplied: nil),
         BridgeSceneBackendReport(
           displayId: 2, displayName: "Side", wallpaperId: "ghost", wallpaperTitle: "Ghost",
-          backend: "legacy_vulkan", fallbackReason: "lit particles", failureStage: nil, failureReason: nil, videoPath: "none",
+          backend: "native_metal", failureStage: nil, failureReason: nil, videoPath: "none",
           optimizationApplied: nil),
       ]
       func body(_ url: URL?) throws -> String {
@@ -323,7 +323,7 @@ final class PanelLibraryStateTests: PanelTestCase {
 
       let plain = try body(panel.controller.issueReportURL(for: "ghost"))
       XCTAssertTrue(plain.contains("**App version:** \(version)"), plain)
-      XCTAssertTrue(plain.contains("**Renderer:** legacy_vulkan (fallback: lit particles)\n"), "each backend once: \(plain)")
+      XCTAssertTrue(plain.contains("**Renderer:** native_metal\n"), "each backend once: \(plain)")
       XCTAssertTrue(plain.contains("**Type:** Scene"))
       XCTAssertFalse(plain.contains("**Error:**"), plain)
 
@@ -335,11 +335,11 @@ final class PanelLibraryStateTests: PanelTestCase {
       XCTAssertFalse(workshop.contains("**Renderer:**"), "nothing reported for it, nothing claimed")
       XCTAssertNil(panel.controller.issueReportURL(for: "not-installed"))
 
-      // A scene held by Native Metal only has no backend to name: the report says it was not drawn.
+      // A scene held because Native Metal cannot draw it has no backend to name: the report says it was not drawn.
       panel.store.settingsSnapshot.sceneRenderers = [
         BridgeSceneBackendReport(
           displayId: 1, displayName: "Main", wallpaperId: "ghost", wallpaperTitle: "Ghost",
-          backend: "unknown", fallbackReason: nil, failureStage: "unsupported",
+          backend: "unknown", failureStage: "unsupported",
           failureReason: "the scene uses a puppet", videoPath: "none", optimizationApplied: nil)
       ]
       let held = try body(panel.controller.issueReportURL(for: "ghost"))

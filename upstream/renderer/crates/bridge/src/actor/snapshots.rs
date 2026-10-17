@@ -21,7 +21,7 @@ use crate::{
         BridgeStorageStatus, BridgeVideoBackendReport, BridgeWallpaperOptionsSnapshot,
         bridge_log_status,
     },
-    config::{SceneRendererModeCfg, SceneResolutionCfg, SerializedSelector},
+    config::{SceneResolutionCfg, SerializedSelector},
     engine::{ActivationInputs, RendererVideoPipelineState, SceneRuntimeReport},
     display::{DisplayLabelExt, DisplaySelectorExt, DisplaySnapshotExt},
     logging::{ApplicationLogger, LogStatus},
@@ -35,15 +35,11 @@ const MIRROR_DISPLAY_MODE: &str = "mirror";
 const UNKNOWN_GIT_SHA: &str = "Unknown";
 const SHADER_PIPELINE_VERSION: &str = "0.1.0";
 const RUNNING_BACKEND_NATIVE: &str = "native";
-const SCENE_RENDERER_COMPATIBILITY: &str = "compatibility";
-const SCENE_RENDERER_NATIVE_METAL_PREFERRED: &str = "native_metal_preferred";
-const SCENE_RENDERER_NATIVE_METAL_ONLY: &str = "native_metal_only";
 const SCENE_RESOLUTION_CANVAS: &str = "canvas";
 const SCENE_RESOLUTION_DISPLAY: &str = "display";
-const SCENE_BACKEND_LEGACY_VULKAN: &str = "legacy_vulkan";
 const SCENE_BACKEND_NATIVE_METAL: &str = "native_metal";
 /// A scene that is running and whose backend the renderer could not name.
-/// Distinct from both real backends on purpose.
+/// Distinct from the real backend on purpose.
 const SCENE_BACKEND_UNKNOWN: &str = "unknown";
 const SCENE_MODE_CONTINUOUS: &str = "continuous";
 const SCENE_MODE_WAITING_FOR_EVENT: &str = "waiting_for_event";
@@ -702,16 +698,14 @@ impl BridgeActorState {
                     display_name: labels.map(|l| l.display_name.clone()).unwrap_or_default(),
                     wallpaper_id: labels.map(|l| l.wallpaper_id.clone()).unwrap_or_default(),
                     wallpaper_title: labels.map(|l| l.wallpaper_title.clone()).unwrap_or_default(),
-                    // A backend the renderer could not name is reported as
-                    // unknown rather than as the preference, which would make
-                    // the preference look like evidence of what ran.
+                    // A backend the renderer could not name (a scene still
+                    // being read, or one held in a failure) is reported as
+                    // unknown rather than assumed to be drawing.
                     backend: match report.backend {
-                        Some(SceneBackend::LegacyVulkan) => SCENE_BACKEND_LEGACY_VULKAN,
                         Some(SceneBackend::NativeMetal) => SCENE_BACKEND_NATIVE_METAL,
                         None => SCENE_BACKEND_UNKNOWN,
                     }
                     .to_string(),
-                    fallback_reason: report.fallback_reason.clone(),
                     failure_stage: report.failure.as_ref().map(|failure| failure.stage.as_str().to_string()),
                     failure_reason: report.failure.as_ref().map(|failure| failure.reason.clone()),
                     video_path: report.video_path.name().to_string(),
@@ -763,15 +757,6 @@ impl BridgeActorState {
                 .app_config
                 .experimental
                 .scene_video_plane_sampling,
-            scene_renderer: match self.app_config.scene_renderer {
-                SceneRendererModeCfg::Compatibility => SCENE_RENDERER_COMPATIBILITY.to_string(),
-                SceneRendererModeCfg::NativeMetalPreferred => {
-                    SCENE_RENDERER_NATIVE_METAL_PREFERRED.to_string()
-                }
-                SceneRendererModeCfg::NativeMetalOnly => {
-                    SCENE_RENDERER_NATIVE_METAL_ONLY.to_string()
-                }
-            },
             scene_resolution: match self.app_config.quality.scene_resolution {
                 SceneResolutionCfg::Canvas => SCENE_RESOLUTION_CANVAS.to_string(),
                 SceneResolutionCfg::Display => SCENE_RESOLUTION_DISPLAY.to_string(),

@@ -18,7 +18,6 @@ final class SettingsRecordingBridge: LayoutSnapshotBridge {
   var sceneOptimizationCalls: [Bool] = []
   var sceneOnDemandCalls: [Bool] = []
   var sceneVideoPlaneSamplingCalls: [Bool] = []
-  var sceneRendererCalls: [String] = []
   var sceneResolutionCalls: [String] = []
   var verboseLoggingCalls: [Bool] = []
   /// Counted off the main actor: the store reads these synchronously.
@@ -70,10 +69,6 @@ final class SettingsRecordingBridge: LayoutSnapshotBridge {
     try await record({ $0.sceneVideoPlaneSamplingCalls.append(enabled) }) {
       $0.sceneVideoPlaneSamplingEnabled = enabled
     }
-  }
-
-  override func setSceneRenderer(mode: String) async throws -> BridgeSnapshotBundle {
-    try await record({ $0.sceneRendererCalls.append(mode) }) { $0.sceneRenderer = mode }
   }
 
   override func setSceneResolution(mode: String) async throws -> BridgeSnapshotBundle {

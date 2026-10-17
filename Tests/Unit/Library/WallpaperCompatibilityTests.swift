@@ -13,11 +13,10 @@ final class WallpaperCompatibilityTests: XCTestCase {
   override func tearDownWithError() throws { try FileManager.default.removeItem(at: root) }
 
   private func context(id: String = "one", kind: WallpaperCompatibilityContext.Kind = .video,
-                       fps: UInt32 = 60, sceneRenderer: String = "native_preferred", revision: UInt64 = 0)
+                       fps: UInt32 = 60, revision: UInt64 = 0)
     -> WallpaperCompatibilityContext {
     .init(wallpaperID: id, displayID: "7", kind: kind, supported: true, targetFPS: fps,
-          targetAvailable: true, sceneRenderer: sceneRenderer,
-          libraryRevision: revision, assetsConfiguration: "")
+          targetAvailable: true, libraryRevision: revision, assetsConfiguration: "")
   }
 
   @discardableResult private func install(type: String = "video", entry: String = "clip.mp4", bytes: Int = 10) throws -> URL {
@@ -64,9 +63,9 @@ final class WallpaperCompatibilityTests: XCTestCase {
     _ = await service.check(context())
     var count = await recorder.count
     XCTAssertEqual(count, 1, "Unchanged content/config reuses the metadata verdict")
-    _ = await service.check(context(sceneRenderer: "compatibility"))
+    _ = await service.check(context(fps: 30))
     count = await recorder.count
-    XCTAssertEqual(count, 2, "The card explains the new renderer preference instead of serving stale wording")
+    XCTAssertEqual(count, 2, "A new target frame rate is a new question, not a stale answer")
     try Data(repeating: 2, count: 20).write(to: folder.appendingPathComponent("clip.mp4"))
     _ = await service.check(context())
     count = await recorder.count

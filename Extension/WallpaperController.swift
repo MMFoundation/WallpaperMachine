@@ -66,9 +66,6 @@ final class WallpaperController {
       let next = try WallpaperRuntime.configuration()
       guard next != configuration else { return }
       configuration = next
-      // Before any surface starts or is replaced below: the engine reads the preference
-      // when a scene is parsed, so it has to be in force by then.
-      WallpaperRuntime.applySceneRenderer(next.sceneRenderer)
       for surface in Array(surfaces.values) {
         guard let scene = selectScene(displayID: surface.displayID) else {
           surface.clear()

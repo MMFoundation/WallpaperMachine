@@ -44,12 +44,11 @@ superseded load cannot replace the newer preview. Load failures stay in the wind
 with their reason and a reload action; first-frame or page readiness has a
 30-second budget while visible.
 
-A scene preview uses a private renderer attached to the window, independently of the
-desktop's renderer preference, and scene hover, buttons and dragging are scoped to that
-view. A video preview plays with the app's own players in the same view (AVFoundation for
-the containers macOS opens, the WebM player for WebM and Matroska), never the scene engine;
-it follows the wallpaper's scaling mode but not its scale factor or position, and a clip
-neither player can play is a failed preview with the reason. Web previews reuse the wallpaper
+A scene preview uses a private Native Metal renderer attached to the window, and scene
+hover, buttons and dragging are scoped to that view. A video preview plays with the app's own
+players in the same view (AVFoundation for the containers macOS opens, the WebM player for WebM
+and Matroska), never the scene engine; it follows the wallpaper's scaling mode but not its scale
+factor or position, and a clip neither player can play is a failed preview with the reason. Web previews reuse the wallpaper
 host protocol in a separate, nonpersistent website data store and support ordinary
 in-window interaction; preview storage is discarded on close and is not the
 desktop page's localStorage or signed-in session. File and directory properties
@@ -406,10 +405,9 @@ picture is taken again ([desktop picture](desktop-picture.md#when-a-poster-is-ta
 and the lock screen and screen saver draw the wallpaper at the same position
 ([lock screen](lock-screen.md#where-the-picture-sits)).
 
-Both scene renderers honour the position, and so does video playback: Compatibility
-draws a video as a one-texture scene, and the native video player places its layer by
-the same layout (`NativeVideoLayout`), so a clip that is larger than the display, or
-smaller, sits where the sliders put it whichever player draws it. A mirror is centred,
+A scene honours the position, and so does video playback: the native video players place
+their layer by the same layout (`NativeVideoLayout`), so a clip that is larger than the
+display, or smaller, sits where the sliders put it whichever player draws it. A mirror is centred,
 as it is for a scene. The native player has no per-step preview: while a slider is
 dragged the picture on a clip it draws stays where it was, and it moves once the
 drag settles on a value, which is what is saved. The Mission Control picture is
@@ -423,7 +421,8 @@ macOS can open the file, since a clip plays at its own frame rate. Checks are ex
 and version/configuration-bound.
 Unknown scene shader/graph or Web runtime behavior remains **unknown**; readable
 files and video metadata are not proof of a displayed frame. The same card shows
-the actual running backend and fallback reason when the runtime reports them.
+the actual running backend when the runtime reports it, and, for a scene Native Metal cannot draw,
+why it is held.
 When the installed project or its entry file is unavailable and the wallpaper is
 a Workshop item, the card also offers [Reinstall from Workshop…](workshop-downloads.md#reinstall-from-workshop).
 

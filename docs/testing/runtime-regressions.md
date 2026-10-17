@@ -494,27 +494,22 @@ device.
   elapsed times vary run to run, so treat them as samples, never as proof of a
   GPU-time change and never as power or battery measurements.
 - **Frames that would repeat the picture** — `unchanged_present_test`
-  (Compatibility, driven through `SceneWallpaper` on a `CAMetalLayer` no window
-  owns, against media it encodes) and
+  (Native Metal, driven through `SceneWallpaper` on a `CAMetalLayer` no window
+  owns) and
   `MetalSceneDraw.AFrameThatWouldRepeatThePictureTakesNoDrawableAndPresentsNothing`.
-  A plain video presents exactly its newly selected frames: submissions track
-  `video_frames_selected`, every other tick is `presents_skipped_unchanged`, and
-  `video_frames_skipped` and the selected rate match the run with scene
-  optimisation off. The distinct video generations presented, with their PTS, form
-  the same sequence with the skip on and off
-  (`TheSkipPresentsTheSameVideoFramesInTheSameOrder`, observed through
-  `RenderInitInfo::video_frame_presented`), and with the skip on no generation is
-  presented twice after the start. A held frame submits nothing until a flip, a
-  position change (`SceneWallpaper::setFraming`), a poster request, a resume, a
-  scaling-factor (crop), render-scale, surface-resize or fill-mode change, each of
-  which presents the held generation exactly once and then repeats again; a static scene submits nothing once every pass is reused,
-  and the poster it then exports is byte-identical to the baseline's. Counters
-  are compared within one draw at the window edges, never exactly. A change the
-  comparison cannot see must invalidate the gate; do not widen the skip by
-  comparing fewer inputs. `unchanged_present_test` measures real-time frame
-  cadence, including zero skipped baseline video frames, so run it without
-  concurrent builds or benchmarks and keep a failing baseline visible rather than
-  excluding the test.
+  A static scene presents nothing once every pass is reused
+  (`presents_skipped_unchanged` tracks the draws that ran, `present_requests` stays flat),
+  and the poster it then exports is byte-identical to the baseline's. A scaling change
+  presents exactly once and then repeats again. A previewed property presents once and an
+  on-demand scene wakes for exactly that frame. Counters are compared within one draw at the
+  window edges, never exactly. A change the comparison cannot see must invalidate the gate; do
+  not widen the skip by comparing fewer inputs. The video cases this test once ran on the
+  Compatibility renderer (a plain video presenting exactly its newly selected frames, the same
+  sequence of generations with the skip on and off, a held frame presenting once per flip,
+  position change, poster, resume, crop, render-scale, resize or fill-mode change) are retired
+  with that renderer: the engine is never given a plain video. `unchanged_present_test` counts
+  frames in wall-clock windows, so run it without concurrent builds or benchmarks and keep a
+  failing baseline visible rather than excluding the test.
 
 ## Frame timing, pacing and idle
 
@@ -578,7 +573,7 @@ device.
   no presentation-feedback source, so the frames a compositor actually displayed
   are reported as unavailable and never approximated by the request count.
 - **Counter baseline** — `PlaybackGPU.TurningCountersOnDoesNotReportWorkAlreadyDone`.
-  A Compatibility video update that runs while counting is off does not read the
+  A (retired) Compatibility video update that ran while counting was off did not read the
   decoder at all; the next counted update only records the decoder's totals and
   the frame on screen. Decode outputs, seeks, selected and skipped frames are then
   only what later counted updates observed, including after counting was turned
@@ -607,9 +602,8 @@ device.
   uses `_rt_MipMappedFrameBuffer`; a motion-blur trail or an accumulation is the
   same shape) keeps changing the picture with no time uniform. Both backends
   report `Feedback` for a `carriesPreviousFrame` target their compiled graph
-  reads or writes, so the clock keeps running (Compatibility with pixel reuse off
-  and on, Native Metal with it on), while the same card without the loop goes
-  idle on either.
+  reads or writes, so the clock keeps running (with pixel reuse off and on), while the
+  same card without the loop goes idle.
 - **Geometry rewritten on an event** — `SceneDemandMapping.GeometryRewrittenOnAnEventIsNotAReasonToKeepDrawing`
   in `static_subgraph_cache_test`: `EventMesh` and `DynamicMesh` must both cost a
   target its cacheability and must differ at the scene level. Collapsing them

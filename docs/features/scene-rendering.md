@@ -1,49 +1,45 @@
 # Scene rendering
 
-How scene wallpapers are drawn and kept cheap: which renderer draws them, the
+How scene wallpapers are drawn and kept cheap: the renderer that draws them, the
 optimisation and update-only-on-change behaviour, and the renderer-internal memory
-and repeated-work reductions. The settings that choose between them are on
+and repeated-work reductions. The settings that govern them are on
 **Settings → Performance → Advanced**, described in
 [Performance](performance.md#advanced).
 
 ## Scene wallpapers
 
-The three scene controls in **Advanced**:
+The two scene controls in **Advanced**:
 
 | Setting | Values | Default |
 | --- | --- | --- |
-| Scene renderer | Compatibility / Native Metal preferred / Native Metal only | Native Metal preferred |
 | Scene render optimisation | Off / On | **On** |
 | Update only when the scene changes | Off / On | Off |
 
 ### Scene renderer
 
-Which renderer scene wallpapers prefer. **Native Metal preferred**, the default,
-asks for the native Metal backend; a scene it cannot draw runs on Compatibility as a
-whole (an effect is never dropped to keep a scene native) and the status line says
-why. **Compatibility** is the Vulkan-through-MoltenVK path for every scene.
-**Native Metal only** has no Compatibility to run on: a scene Native Metal cannot draw
-is held and reported instead ([below](#when-native-metal-cannot-draw-a-scene)). It is
-never the default; it is the failure policy that replaces the fallback once the
-Compatibility path is deleted, available now so that can be a deletion.
-The lock screen and the screen saver follow the setting too (see [lock
+Native Metal is the only scene renderer. There is no setting to choose another, and
+the engine never creates one: a scene Native Metal cannot draw is held and reported
+instead ([below](#when-native-metal-cannot-draw-a-scene)), and no effect is dropped to
+make a scene fit. The lock screen and the screen saver work the same way (see [lock
 screen](lock-screen.md#scene-renderer)).
 
-Native Metal became the default once it drew every scene of the local test library
-the way Compatibility does (drawn by both renderers in one harness, the pictures
-were the same) and cost less to run. Over 12 of those scenes at 3840×2160 and 60
-FPS it took about 21% less process CPU time and 14% less GPU time in its own command
-buffers (one per frame instead of three), about 3% less memory footprint, and held
-60 FPS where Compatibility dropped frames; the commands are in the
-[verification log](../testing/verification-log.md). A configuration saved before
-then holds `compatibility` whether or not anyone chose it, so it moves to Native
-Metal preferred once, when this version first loads it, and records that it did
-(`native_metal_default_applied`); choosing Compatibility afterwards is kept.
+The Compatibility renderer (Vulkan through MoltenVK) and the **Scene renderer** setting
+that chose it are gone. Native Metal replaced it once it drew every scene of the local
+test library the way Compatibility did (drawn by both renderers in one harness, the
+pictures were the same) and cost less to run: over 12 of those scenes at 3840×2160 and
+60 FPS it took about 21% less process CPU time and 14% less GPU time in its own command
+buffers (one per frame instead of three), about 3% less memory footprint, and held 60
+FPS where Compatibility dropped frames. The commands are in the [verification
+log](../testing/verification-log.md). A saved `scene_renderer` of any value
+(`compatibility`, `native_metal_preferred` or `native_metal_only`) is read past and not
+written back, and means this behaviour. Some Vulkan source stays in the tree for now,
+used only by the tests that draw a scene with it as the reference to compare Native
+Metal against; no shipped code path creates it.
 
-No GPU backend is created until the scene has been parsed and a backend chosen, so
-the row reports one of three states per scene: **preparing** (no backend yet), the
-backend actually in use, or Compatibility with the reason native was not used. It
-never shows the preference in place of the outcome.
+No GPU renderer is created until the scene has been parsed and found drawable, so the
+**Drawn by** row reports one of three states per scene: **preparing** (no renderer yet),
+**Native Metal**, or the reason the scene is held. It never shows a guess in place of the
+outcome.
 
 Native Metal draws image layers, text layers, sprite-sheet animation,
 two-dimensional puppets, two-dimensional sprite, sprite-trail, rope and rope-trail
@@ -55,9 +51,10 @@ plays, and BGRA, 8-bit NV12 or 10-bit video textures — an 8-bit one either con
 once per frame or, with
 [**Direct video plane sampling**](performance.md#direct-video-plane-sampling) on,
 sampled by the layer's own shader, a 10-bit one always converted once per frame
-([10-bit and HDR video](#10-bit-and-hdr-video-textures)). A scene falls back as a
-whole for a plain video wallpaper, a video format the decoder cannot produce (4:2:2,
-4:4:4, 12-bit or an unsupported codec), or a shader that does not translate.
+([10-bit and HDR video](#10-bit-and-hdr-video-textures)). A scene is held as a
+whole for a plain video wallpaper (the app's own players play those), a video format the
+decoder cannot produce (4:2:2, 4:4:4, 12-bit or an unsupported codec), or a shader that
+does not translate.
 A scene with `camerashake` on shakes its camera as Wallpaper Engine does: the eye and
 what it looks at move together by `(cos t, sin 1.333t, sin t)` at
 `t = camerashakespeed² × time`, its length raised to `camerashakeroughness³`, scaled
@@ -249,13 +246,11 @@ a material that could sample 8-bit planes reads the converted image instead, wha
 [**Direct video plane sampling**](performance.md#direct-video-plane-sampling) says, and the
 scene reports its video path as `yuv10_converted`. The 10-bit conversion kernel is compiled
 when a scene whose video is 10-bit is prepared, not before: an 8-bit video never compiles it
-and its frames take exactly the path they did before. The compatibility renderer still does
-not take a 10-bit frame, so a scene that falls back to it for another reason keeps whatever
-that renderer did with such a video.
+and its frames take exactly the path they did before.
 
 
 An effect that composes its layer over the screen (refraction among them) reads
-that screen the right way up on both renderers. The shader compiler defines `HLSL`
+that screen the right way up. The shader compiler defines `HLSL`
 and `HLSL_SM40` as Wallpaper Engine does, so the Direct3D branches of an effect's own
 shaders are the ones compiled: the flipped screen coordinate of the compositing
 pass, a brace-listed sample kernel, and a light falloff that stays defined beyond a
@@ -263,7 +258,7 @@ light's radius.
 
 A vertex shader may assign to its own inputs, as Wallpaper Engine's HLSL lets it (the
 Shadow effect's default `a_TexCoord *= atFactor`, a factor of 1 at its default
-settings). The input keeps reading the mesh attribute it names on both renderers, so
+settings). The input keeps reading the mesh attribute it names, so
 a text or image layer under such an effect is drawn at its own texture coordinates
 and not at the vertex position's, which left a text layer empty and an image layer
 sampled at the wrong place.
@@ -290,7 +285,7 @@ without it the effect failed to compile and its layers lost the bars whatever
 played. A number as an operand of `!`, `&&` or `||` is not converted, whether a mask
 or not ([Known limitations](../testing/renderer.md#known-limitations)).
 
-Scene lighting works as in Wallpaper Engine, on both renderers. A lit shader
+Scene lighting works as in Wallpaper Engine. A lit shader
 (`genericimage4`, `generic4`, the particle, rope, foliage and fluid shaders) asks for
 `#require LightingV1`; the shader compiler writes in a `PerformLighting_V1` with one
 uniform array per light kind, sized by the scene's `general.lightconfig`, and calls
@@ -392,11 +387,10 @@ Metal shading language
 turns GLSL's `inverse`, which Metal has no built-in for, into helper functions, so
 the stock perspective, reflection, water, light-shaft and cursor-ripple effects
 translate. A step that samples an image nothing in the scene produces (a layer
-texture whose layer draws no composite) is skipped on Native Metal exactly as
-Compatibility skips it, instead of sending the scene to Compatibility; an image that
-exists and does not load still does.
+texture whose layer draws no composite) is skipped on Native Metal, instead of holding
+the scene; an image that exists and does not load still holds it.
 
-Puppets and rope geometry behave the same on both renderers. A puppet is deformed
+Puppets and rope geometry behave the same. A puppet is deformed
 by its author's own skinning shader, and its pose comes from the one animation
 system the scene already has (animation layers, their play, pause, stop, rate,
 blend and visibility, and any script or user property driving them); the renderer
@@ -442,13 +436,12 @@ established (the one frame that covers it shows the text script's value). Effect
 video output of Native Metal has not been compared against real wallpapers.
 
 A video texture plays against the clock of the layer that shows it, the scene's until a script
-moves it, on both renderers. A render graph built again under a playing video (a text layer
+moves it. A render graph built again under a playing video (a text layer
 whose card changes size in texels, a property that shows or hides a layer, a change of the
 render scale on Native Metal) does not close the videos the new graph still shows. Wallpaper Engine resizes a text
 card's buffers in place and touches nothing else a scene holds, so its video neither goes back
 to the head of its clip nor stops. Here the host asks the renderer to clear the graph *for a
-rebuild* (`clearLastRenderGraphForRebuild`), which sets every open video aside (Native Metal:
-`MetalVideoTextures::hold`; Compatibility: `TextureCache::ClearForRebuild`); the compile that
+rebuild* (`clearLastRenderGraphForRebuild`), which sets every open video aside (`MetalVideoTextures::hold`); the compile that
 follows takes back the ones the new graph binds, by texture, and closes the rest when it ends,
 however it ends: a compile that is refused, or a clear that fails, closes them too. A video
 taken back is not parsed, so one packaged in the scene is not read, copied and hashed again
@@ -457,9 +450,8 @@ a 319 MB one, which a rebuild paid for every video it opened), and it is not ope
 decoder carries on from the frame it had, given the scene's clock as any draw gives it. A
 decoder that failed while it waited is opened again like any other. Only the rebuild of the
 scene that is drawing keeps videos: a scene that is replaced and a renderer that is destroyed
-close them with the graph, as before, and so does a Compatibility surface that is released (a
-display change), which clears the texture cache; Native Metal keeps its graph, and the videos
-with it, through a surface release. A video whose layer a property shows again was left out of
+close them with the graph, as before; Native Metal keeps its graph, and the videos
+with it, through a surface release (a display change). A video whose layer a property shows again was left out of
 the graph by the rebuild that hid it, and closed then: it opens at the head of its clip and is
 sought to the clock, as any open is (below). Nothing is added to a frame, and no decoder is kept
 that was not open already. On the clock wallpaper of the re-test (3326873240: five 4K videos
@@ -493,7 +485,7 @@ runs while the seek is made being where it should be. A seek of any length there
 the frames after it are decoded on to the clock, at several times the pace the clip plays,
 instead of sought to again.
 
-Particle systems follow Wallpaper Engine 2.8's own rules, on both renderers, because
+Particle systems follow Wallpaper Engine 2.8's own rules, because
 one simulation feeds both. A system is simulated for its file's `starttime` before the
 first frame (steps of 0.05 s, or 0.2 s once the file holds 500 or more particles; at most
 6000 steps are run, and an even longer start time only advances the system clock), so
@@ -779,7 +771,7 @@ cross-fade's `$mediaPreviousThumbnail` slot stays on its authored picture until 
 track has a predecessor. `ApplySystemUserTextures` binds such a slot through
 `RuntimeImageSource::BindCoverSlot`, which hands back a runtime image name that
 resolves to the cover while one is published and to the authored picture while it is
-not, so both renderers swap it on a version change like any cover, with no graph
+not, so the renderer swaps it on a version change like any cover, with no graph
 rebuild and no per-frame work beyond the version check they already did. The picture
 is decoded the first time a renderer asks for it, after the texture budget is known,
 and stays resident so a clear costs no decode (one picture per cover name and
@@ -832,12 +824,12 @@ make; it has no texture, and its last effect, with `DIRECTDRAW` forced on, is dr
 straight onto the scene as the layer's own geometry, so it keeps a layer's transform,
 parents, visibility and scripts. An effect of more than one pass is left out.
 
-Desktop posters work on both backends and need no setting: each re-draws its final
+Desktop posters need no setting: the renderer re-draws its final
 composition — fit, zoom, flip and position included — into an image of its own only
 when a poster is requested, including while the scene is idle or paused. The
-Compatibility drawable is therefore only ever rendered to, never read back.
+drawable is therefore only ever rendered to, never read back.
 
-Where the picture sits is one layout shared by both backends, the pointer mapping and
+Where the picture sits is one layout, shared with the pointer mapping and
 the posters. The scaling mode and the scale factor decide how large the picture is;
 whatever room that leaves around it (bars for Fit, Original size or a factor below 1)
 or whatever it overflows by (Fill, or a factor above 1) is split by a position, a
@@ -901,10 +893,10 @@ there. The archive is written in the app's temporary folder and moved into the c
 only once it is complete, so clearing the cache while a write is due costs that
 write and nothing else.
 
-Compatibility keeps no compiled Metal code of its own. MoltenVK's pipeline cache
-(`vk-pipeline-cache.bin`, beside the same scene's shaders) stores the Metal source
-MoltenVK generated, which saves translating it again but not compiling it; the
-compiled forms come from macOS's own Metal shader cache. That cache survives
+The Compatibility renderer, retired, kept no compiled Metal code of its own. Its MoltenVK
+pipeline cache (`vk-pipeline-cache.bin`, beside the same scene's shaders) stored the Metal
+source MoltenVK generated, which saved translating it again but not compiling it; the
+compiled forms came from macOS's own Metal shader cache. That cache survives
 relaunching the app, rebuilding it, a new version number and a bundle replaced at
 the same path, but it keeps compiled Metal source per app location: a second copy of
 the app at another path — an installed copy beside a development build, say —
@@ -915,11 +907,10 @@ stores pipelines, so it covers the smaller part. Method and what recompiles:
 
 ### When Native Metal cannot draw a scene
 
-With **Native Metal only** (`scene_renderer = "native_metal_only"`, `OWE_SCENE_RENDERER_NATIVE_METAL_ONLY`
-in the C API) a scene Native Metal cannot draw is not drawn by anything else. No Vulkan
-renderer is created, and no layer, effect or pass is dropped to make the scene fit. The
-scene is **held** instead, and the failure is said once, with its reason, in the log and
-in the panel. Five things can stop a scene, each with a stage the host words in the user's
+A scene Native Metal cannot draw is not drawn by anything else. No other renderer is
+created, and no layer, effect or pass is dropped to make the scene fit. The scene is
+**held** instead, and the failure is said once, with its reason, in the log and in the
+panel. Five things can stop a scene, each with a stage the host words in the user's
 language and the engine's own English explanation beside it:
 
 | Stage | What happened | Where the engine found out |
@@ -952,25 +943,20 @@ What a held scene leaves on the display:
   rolled back with a message that names no cause. This happens once per scene.
 
 The failure is published as the scene's `failure_stage` and `failure_reason` in the
-bridge's `scene_renderers` row, with `backend` `unknown` (nothing is drawing it) and no
-`fallback_reason`. The engine's log line, at error level and once per failure, is
+bridge's `scene_renderers` row, with `backend` `unknown` (nothing is drawing it). The engine's log line, at error level and once per failure, is
 `scene cannot be drawn with native Metal (<stage>): <reason>; holding the last frame|preview picture`.
 **Settings → Performance → Advanced → Drawn by** words it as "not drawn — <stage in the
 user's language> (reason: …). Showing its last picture.", the scene is in **Updating
 now** as "stopped after a rendering failure" with **Retry**, the inspector's Compatibility
 check card says the same, and the diagnostics report and a library issue report name the
-stage and reason. The reason itself stays English, as the fallback reason always has.
+stage and reason. The reason itself stays English.
 
-A retry really retries: under this mode the engine neither remembers a failure against
-the scene nor consults one, so **Retry** (or the host's recovery) asks the native renderer
-again. The mode is read when a scene's backend is chosen and held for that scene, so
-changing it while a scene runs affects the next scene, not this one. Under the other two
-settings nothing changes: the same failures still end in Compatibility with their
-reason, which is what the tests pin.
+A retry really retries: the engine neither remembers a failure against the scene nor
+consults one, so **Retry** (or the host's recovery) asks the native renderer again.
 
 The same faults are forced in `scene_failure_policy_test`, on a layer no window owns, and
-each leaves no Vulkan renderer created, the failure logged once, the frame loop stopped
-without presenting again, and the last frame or the preview in place.
+each leaves the failure logged once, the frame loop stopped without presenting again, and
+the last frame or the preview in place.
 
 ### Live property edits
 
@@ -1132,9 +1118,8 @@ The only scene control that ships on. It reuses the result of scene subgraphs wh
 inputs have not changed and removes render passes proven redundant, inside the scene
 renderer's own render graph. It is not a quality tier: the same pixels are
 produced, and resolution, frame rate and animation speed are untouched. It reaches
-wallpapers the scene engine draws — scenes on either renderer, and video wallpapers
-on Compatibility, which the engine draws as a one-texture scene; native video and
-web wallpapers do not go through it. It is on the
+scene wallpapers; video and web wallpapers do not go through it, since the app's own
+players and web view draw them. It is on the
 [Performance page](performance.md#advanced) so it can be turned off and on for an
 A/B comparison without an environment variable.
 
@@ -1167,8 +1152,7 @@ follows the screen come from the raster, a target the author sized keeps scaling
 with the render scale alone, and the canvas stays the source extent of layout,
 cursor mapping and scripts. The raster is the Fill layout of the canvas over the
 output in whole points, at the display's backing scale, capped at the device's
-largest texture (Native Metal reads Apple's published limit for the GPU family,
-Compatibility the Vulkan device's `maxImageDimension2D`). A perspective scene and a
+largest texture (Native Metal reads Apple's published limit for the GPU family). A perspective scene and a
 plain video do not read it.
 
 The choice is process-wide, like [scene render optimisation](#scene-render-optimisation):
@@ -1185,17 +1169,12 @@ bloom scene pays more than one with author-sized buffers, is under
 
 With scene render optimisation on, a frame that would put back exactly the picture
 already on screen is not drawn, submitted or presented, and the surface keeps
-showing the last frame. Two cases qualify:
-
-- a Compatibility video wallpaper whose playback clock selected the same decoded
-  frame as the last present, which is most ticks of a 24 or 30 fps clip under a 60
-  or 120 fps limit;
-- a scene, on either renderer, whose every pass was reused from the previous frame,
-  leaving only the final composition to redo.
+showing the last frame. A scene qualifies when every pass was reused from the
+previous frame, leaving only the final composition to redo.
 
 The frame clock still ticks at the configured rate, and the scene still runs its
 scripts, timeline, sound and events on every tick; only drawing an identical
-picture is left out. A newly decoded video frame is presented on the tick that
+picture is left out. A newly decoded video frame of a scene layer is presented on the tick that
 selects it, so this is neither content pacing (an
 [experimental switch](performance.md#experimental-switches)) nor updating only when
 the scene changes, and no drawable is held to keep the picture. A resize, fill, scaling,
@@ -1402,11 +1381,10 @@ scene on its mirror have not been checked on a desktop.
 
 ## Renderer memory
 
-On Apple platforms, the Compatibility renderer grows its Vulkan allocator in 8 MiB
-preferred blocks rather than the library's 256 MiB default. This reduces unused
-reservations in unified memory; it is not a cap on wallpaper size, and larger
-resources still allocate normally. The offscreen probe prints allocator reserved and
-used bytes separately from process memory.
+The Vulkan source that remains in the tree for the comparison tests grows its allocator
+in 8 MiB preferred blocks rather than the library's 256 MiB default. No shipped path
+creates it. The offscreen probe prints allocator reserved and used bytes separately from
+process memory.
 
 For scenes with an authored 2D canvas, both backends load packaged mip chains to
 match the physical display: a leading mip is skipped only while the next one is still
@@ -1481,8 +1459,7 @@ buffers are metadata until a pass needs them. References from hidden passes left
 the graph (a script decides their visibility) and elided copies still count, so
 animation and live optimization toggles retain the targets they can use, and the
 same filter applies when a toggle reallocates targets.
-This applies to scenes drawn with **Native Metal preferred**; the Compatibility
-backend already requests its targets from the cache as passes prepare them.
+This applies to every scene Native Metal draws.
 
 Native Metal also lets targets that are never alive at the same time share one
 image, as Compatibility's cache pools them. A target qualifies when its first touch
@@ -1526,7 +1503,7 @@ render scale, animation speed or audio-response subscription:
   match shader values to their uniform slots through a per-pass table built once;
   every value is still written every frame and no camera, bone, script or effect
   result is cached by this path.
-- On Compatibility, a hidden layer's first-use clear is left out when nothing can
+- On the retired Compatibility renderer, a hidden layer's first-use clear was left out when nothing can
   see its target, the first draw into a composite just cleared to transparent opens
   with that clear, and a plain video wallpaper whose decoded frame is exactly the
   scene's size draws straight through the final composition instead of copying into

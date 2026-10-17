@@ -1118,13 +1118,6 @@ final class BridgeStore {
         apply(bundle)
     }
 
-    /// Which renderer draws scene wallpapers. A preference: `sceneRenderers` in the
-    /// returned bundle is what each running scene actually got.
-    func setSceneRendererAsync(_ mode: String) async throws {
-        let bundle = try await bridge.setSceneRenderer(mode: mode)
-        apply(bundle)
-    }
-
     /// How many pixels a 2D scene is rasterized with, `"display"` or `"canvas"`. A preference every
     /// running 2D scene follows live, by resizing its render targets in place: nothing is reparsed (on
     /// Native Metal the scene's own video layers are reopened, as for any render-scale change).
@@ -1459,7 +1452,6 @@ final class BridgeStore {
                 sceneOptimizationEnabled: true,
                 sceneOnDemandEnabled: false,
                 sceneVideoPlaneSamplingEnabled: false,
-                sceneRenderer: "native_metal_preferred",
                 sceneResolution: "display",
                 sceneUpdateModes: [],
                 sceneRenderers: [],

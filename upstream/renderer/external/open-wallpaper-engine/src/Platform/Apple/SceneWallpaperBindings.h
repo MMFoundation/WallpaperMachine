@@ -60,21 +60,22 @@ int owe_scene_wallpaper_init(owe_scene_wallpaper* scene);
 int owe_scene_wallpaper_shutdown(owe_scene_wallpaper* scene);
 
 /*
- * Initializes the Vulkan renderer with a CAMetalLayer-backed surface.
+ * Gives the scene a CAMetalLayer-backed surface. The Metal renderer is created on
+ * it once the scene is parsed and known to be drawable.
  *
  * Render width/height may be 0/0 to use the output dimensions. A single zero is
  * invalid and rejected by the implementation.
  */
-int owe_scene_wallpaper_init_metal_vulkan(owe_scene_wallpaper* scene, void* metal_layer,
-                                          uint32_t width, uint32_t height, uint32_t render_width,
-                                          uint32_t render_height, double display_scale_factor);
+int owe_scene_wallpaper_init_metal(owe_scene_wallpaper* scene, void* metal_layer,
+                                   uint32_t width, uint32_t height, uint32_t render_width,
+                                   uint32_t render_height, double display_scale_factor);
 
 /*
- * Pauses rendering and releases the Vulkan surface + swapchain. The scene
+ * Pauses rendering and releases the renderer's surface. The scene
  * graph, compiled shaders, render-graph non-present passes, textures, audio,
  * and runtime state remain loaded. After this returns, the caller may safely
  * destroy the CAMetalLayer that was passed to
- * owe_scene_wallpaper_init_metal_vulkan (or to a prior
+ * owe_scene_wallpaper_init_metal (or to a prior
  * owe_scene_wallpaper_finish_surface_reconfigure).
  *
  * Synchronous: blocks until the render thread confirms completion.
@@ -83,8 +84,8 @@ int owe_scene_wallpaper_init_metal_vulkan(owe_scene_wallpaper* scene, void* meta
 int owe_scene_wallpaper_begin_surface_reconfigure(owe_scene_wallpaper* scene);
 
 /*
- * Rebuilds the Vulkan surface + swapchain from a new CAMetalLayer and resumes
- * rendering. Dimensions replace those passed to init_metal_vulkan. The render
+ * Rebuilds the renderer's surface from a new CAMetalLayer and resumes
+ * rendering. Dimensions replace those passed to init_metal. The render
  * graph is rebuilt unconditionally.
  *
  * Preconditions: begin_surface_reconfigure must have returned 0 since the
@@ -421,54 +422,34 @@ typedef struct owe_surface_health {
 int owe_scene_wallpaper_surface_health(void* scene, owe_surface_health* out);
 
 /*
- * Scene renderer preference, process-wide. Compatibility by default.
- *
- * A preference, not an outcome. Under NATIVE_METAL_PREFERRED a scene the native
- * backend cannot draw falls back to the compatibility backend and says why.
- * Under NATIVE_METAL_ONLY there is no compatibility backend: such a scene is not
- * drawn, the surface keeps the last frame it showed (or shows the project's
- * preview picture when it has drawn nothing), and the failure is reported
- * through owe_scene_wallpaper_backend_failure. The preference is never reported
- * as the backend in use.
+ * Native Metal is the only scene renderer. A scene it cannot draw is not drawn:
+ * the surface keeps the last frame it showed (or shows the project's preview
+ * picture when it has drawn nothing), and the failure is reported through
+ * owe_scene_wallpaper_backend_failure.
  */
-typedef enum owe_scene_renderer_preference {
-    OWE_SCENE_RENDERER_COMPATIBILITY = 0,
-    OWE_SCENE_RENDERER_NATIVE_METAL_PREFERRED = 1,
-    OWE_SCENE_RENDERER_NATIVE_METAL_ONLY = 2
-} owe_scene_renderer_preference;
-
 typedef enum owe_scene_backend {
-    OWE_SCENE_BACKEND_LEGACY_VULKAN = 0,
     OWE_SCENE_BACKEND_NATIVE_METAL = 1
 } owe_scene_backend;
 
-void owe_set_scene_renderer_preference(int preference);
-int  owe_current_scene_renderer_preference(void);
-
 /*
- * Which backend actually drew this scene, or -1 when nothing has been observed
- * yet -- no scene, or a surface whose backend has not been created because the
- * scene it depends on is still being parsed -- or when the scene is held in a
- * failure and nothing is drawing it (see owe_scene_wallpaper_backend_failure).
- *
- * `owe_scene_wallpaper_backend_fallback_reason` writes a NUL-terminated reason
- * into `out` and returns the length excluding the terminator; passing a null
- * `out` or a zero `out_len` reports the length that would be needed. Zero means
- * the active backend is the preferred one.
+ * OWE_SCENE_BACKEND_NATIVE_METAL when a renderer is drawing this scene, or -1
+ * when nothing has been observed yet -- no scene, or a surface whose renderer
+ * has not been created because the scene it depends on is still being parsed
+ * -- or when the scene is held in a failure and nothing is drawing it (see
+ * owe_scene_wallpaper_backend_failure).
  */
 int    owe_scene_wallpaper_backend(void* scene);
-size_t owe_scene_wallpaper_backend_fallback_reason(void* scene, char* out, size_t out_len);
 
 /*
- * Why a scene is not being drawn natively when nothing else may draw it
- * (OWE_SCENE_RENDERER_NATIVE_METAL_ONLY), or OWE_SCENE_FAILURE_NONE.
+ * Why a scene is not being drawn, or OWE_SCENE_FAILURE_NONE.
  *
  * A failed scene reports backend -1 from owe_scene_wallpaper_backend: nothing is
  * drawing it. The stage is a category the host words for the user;
  * owe_scene_wallpaper_backend_failure_reason writes the engine's own
- * NUL-terminated explanation (English, for diagnostics) with the same sizing
- * convention as the fallback reason. The two clear together when a recovery
- * makes the scene draw again.
+ * NUL-terminated explanation (English, for diagnostics) into `out` and returns
+ * the length excluding the terminator; passing a null `out` or a zero `out_len`
+ * reports the length that would be needed. The two clear together when a
+ * recovery makes the scene draw again.
  */
 typedef enum owe_scene_failure_stage {
     OWE_SCENE_FAILURE_NONE = 0,
@@ -491,8 +472,7 @@ size_t owe_scene_wallpaper_backend_failure_reason(void* scene, char* out, size_t
  * for it. Both programs are compiled with the scene's graph, so this selects
  * between them and never triggers a compile inside a frame. A material with no
  * usable variant, and any frame that is not 8-bit NV12, keeps the existing
- * conversion whatever this says; nothing here falls back to the compatibility
- * backend.
+ * conversion whatever this says.
  */
 void owe_set_scene_video_plane_sampling_enabled(bool enabled);
 bool owe_scene_video_plane_sampling_enabled(void);

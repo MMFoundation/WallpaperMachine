@@ -84,14 +84,14 @@ use crate::{
             SetQualityThrottle, SetRenderScale,
             SetVerboseLogging,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
-            SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneRenderer,
+            SetSceneOnDemandEnabled, SetSceneOptimizationEnabled,
             SetSceneResolution, SetSceneVideoPlaneSamplingEnabled, SetSharedVideoDecodeEnabled,
             SetTargetFps, SetVolume,
             SetWebAudioSubscribed, Shutdown,
         },
         state::BridgeActorState,
     },
-    config::{ConfigStore, SceneRendererModeCfg, SceneResolutionCfg},
+    config::{ConfigStore, SceneResolutionCfg},
     engine::{EngineFacade, LoadJournal, RealEngineFacade},
     login::LaunchAtLoginController,
     media::SystemMediaStore,
@@ -245,11 +245,10 @@ impl<E: EngineFacade> BridgeBuilder<E> {
             // What the renderer was asked to do, so a report says which
             // preferences were in force when a wallpaper misbehaved.
             log::info!(
-                "configuration: scene renderer {:?}, render scale {}, \
+                "configuration: render scale {}, \
                  battery mode {:?} ({} fps, scale {}), frame-rate cap {}, scene optimization \
                  {}, on-demand {}, scene resolution {:?}, content pacing {}, shared video \
                  decode {}, video plane sampling {}",
-                config.scene_renderer,
                 config.quality.render_scale,
                 config.power.on_battery,
                 config.quality.battery.target_fps,
@@ -729,13 +728,6 @@ impl EngineFacade for ArcEngineFacade {
         enabled: bool,
     ) -> Result<(), wallpaper_core::EngineError> {
         self.0.set_scene_video_plane_sampling_enabled(enabled)
-    }
-
-    fn set_scene_renderer_preference(
-        &self,
-        preference: wallpaper_core::SceneRendererPreference,
-    ) -> Result<(), wallpaper_core::EngineError> {
-        self.0.set_scene_renderer_preference(preference)
     }
 
     fn set_scene_resolution(
@@ -1972,9 +1964,9 @@ impl WallpaperBridge {
     /// were both compiled with the scene's graph, so a running scene picks it
     /// up at its next frame boundary without being reparsed or restarted. A
     /// material with no usable plane variant, and any frame that is not 8-bit
-    /// NV12, keeps converting whatever this says; nothing here changes which
-    /// backend draws a scene. The snapshot's `scene_renderers` reports the
-    /// path each running scene's video textures actually took.
+    /// NV12, keeps converting whatever this says. The snapshot's
+    /// `scene_renderers` reports the path each running scene's video textures
+    /// actually took.
     ///
     /// # Errors
     ///
@@ -1987,40 +1979,6 @@ impl WallpaperBridge {
         self.actor
             .ask(SetSceneVideoPlaneSamplingEnabled { enabled })
             .await
-    }
-
-    /// Chooses which renderer draws scene wallpapers.
-    ///
-    /// `"compatibility"` keeps every scene on the established Vulkan/MoltenVK
-    /// path. `"native_metal_preferred"` asks for the native Metal backend
-    /// where the whole scene falls inside the subset it can draw, and falls
-    /// back as a whole scene otherwise. `"native_metal_only"` asks for the
-    /// native backend and nothing else: a scene it cannot draw is held on its
-    /// last frame (or its preview picture), the failure and its reason are
-    /// reported in `scene_renderers`, and no Vulkan renderer is created.
-    /// A plain video is never a scene: the app's own video players always play it. The
-    /// snapshot's `scene_renderers` reports what each display actually got.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when `mode` is not one of the three names, or when the
-    /// scene list cannot be rebuilt for the new routing, in which case the
-    /// previous renderer keeps running.
-    pub async fn set_scene_renderer(
-        &self,
-        mode: String,
-    ) -> Result<BridgeSnapshotBundle, BridgeError> {
-        let mode = match mode.as_str() {
-            "compatibility" => SceneRendererModeCfg::Compatibility,
-            "native_metal_preferred" => SceneRendererModeCfg::NativeMetalPreferred,
-            "native_metal_only" => SceneRendererModeCfg::NativeMetalOnly,
-            other => {
-                return Err(BridgeError::invalid_input(format!(
-                    "unknown scene renderer mode {other}"
-                )));
-            }
-        };
-        self.actor.ask(SetSceneRenderer { mode }).await
     }
 
     /// Chooses how many pixels a 2D scene wallpaper is rasterized with.

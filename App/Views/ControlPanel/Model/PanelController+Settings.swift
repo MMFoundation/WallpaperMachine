@@ -14,7 +14,7 @@ import UniformTypeIdentifiers
 enum RenderingSetting: String, CaseIterable, Sendable {
   case batteryMode, batteryRenderScale, batteryTargetFps, frameRateCap, qualityPreset, renderScale
   case contentPacing, sharedVideoDecode, sceneOptimization, sceneOnDemand
-  case sceneVideoPlaneSampling, sceneRenderer, sceneResolution
+  case sceneVideoPlaneSampling, sceneResolution
   case lowPowerModeAction, thermalAction, lowBatteryAction
 }
 
@@ -286,11 +286,6 @@ extension PanelController {
     try await change(.sceneVideoPlaneSampling) {
       try await store.setSceneVideoPlaneSamplingEnabledAsync(enabled)
     }
-  }
-
-  /// `sceneRenderer`.
-  func setSceneRenderer(_ mode: SceneRendererMode) async throws {
-    try await change(.sceneRenderer) { try await store.setSceneRendererAsync(mode.rawValue) }
   }
 
   /// `sceneResolution`: running 2D scenes resize their render targets in place.

@@ -263,13 +263,13 @@ creates no window, surface, swapchain, audio device, or screenshot. Missing
 required GPU capabilities fail explicitly rather than skipping. Run the built
 executable directly from the renderer check build directory.
 
-`offscreen_scene_probe` is Vulkan-only. With the Native Metal preference
-(`scene_renderer = "native_metal_preferred"`), a scene the capability gate
-accepts runs on the native backend with nothing behind it, so a probe result
-describes a renderer that wallpaper may never use. Check the backend first —
-`metal_scene_draw_smoke` with `WE_TEST_METAL_PROJECTS` prints the decision per
-project — and repeat any comparison there before calling a difference
-backend-independent. Under `NativeMetalOnly` an offscreen surface (no Metal layer) is a prepare failure and no Vulkan renderer is created, so the probe cannot be run with that preference.
+`offscreen_scene_probe` is Vulkan-only, and it drives the Vulkan renderer directly,
+without `SceneWallpaper`: the engine never creates a Vulkan renderer (an offscreen surface
+with no Metal layer is a prepare failure), so a probe result describes a renderer wallpapers
+no longer use. It stays as the reference the comparison tests measure Native Metal against,
+until the Vulkan code is deleted. Check the backend first — `metal_scene_draw_smoke` with
+`WE_TEST_METAL_PROJECTS` prints the decision per project — and repeat any comparison there
+before calling a difference backend-independent.
 
 ### Metal compile across processes
 
@@ -670,8 +670,15 @@ values draws and the empty document restores the first frame byte for byte;
 once and that an on-demand scene wakes for exactly one frame. See
 [scene regressions](scene-regressions.md#scene-scripts-and-property-bindings).
 
-`unchanged_present_test` exercises Compatibility frames that would repeat the
-picture through a real swapchain on a `CAMetalLayer` no window owns. In
+`unchanged_present_test` exercises the frames Native Metal leaves out because they
+would repeat the picture, through the real frame clock and drawable loop on a
+`CAMetalLayer` no window owns (the counters it reads are draws executed, presents
+requested and presents skipped). The video tests that exercised the Compatibility
+renderer's skip for a plain video are retired with it: the engine is never given a
+plain video, and Native Metal's own repeat-frame behaviour for a scene's video layer
+is pinned in `metal_scene_draw_smoke`
+(`AFrameThatWouldRepeatThePictureTakesNoDrawableAndPresentsNothing` and its
+neighbours). In
 `AStaticSceneStopsPresentingOnceEveryPassIsReused` it also reads
 `surfaceHealth()` across the 1000 ms window: with the skip on, frames completed
 tracks the draws that ran while frames presented stays flat and no stop is
@@ -689,10 +696,10 @@ replaces only the failure, not its consequences; a real swapchain failure is not
 produced.
 
 `LocalProjectEnergyIsMeasuredHeadlessly`, in the same binary, is the headless
-renderer A/B: it skips unless `WE_TEST_ENERGY_PROJECT` names a local
+energy measurement: it skips unless `WE_TEST_ENERGY_PROJECT` names a local
 `project.json` (with `WE_TEST_ASSETS`), then runs the production
-`SceneWallpaper` on the renderer `WE_TEST_ENERGY_RENDERER` asks for
-(`compatibility` or `native`) with its own 60 FPS clock into an unattached layer
+`SceneWallpaper` (Native Metal, the only renderer; `WE_TEST_ENERGY_RENDERER` is no
+longer read) with its own 60 FPS clock into an unattached layer
 of `WE_TEST_ENERGY_WIDTH` x `WE_TEST_ENERGY_HEIGHT` (default 1920x1080), waits
 `WE_TEST_ENERGY_WARMUP` seconds (default 5) after the first frame and samples a
 `WE_TEST_ENERGY_SECONDS` window (default 20). `WE_TEST_ENERGY_RESOLUTION`
@@ -703,12 +710,12 @@ the backend actually used, this process's CPU seconds and CPU energy
 (`ri_energy_nj`), the GPU time of this process's own Metal command buffers and
 how many there were (`gpu_own_s`, `command_buffers`: the test wraps the device's
 command-buffer `commit` to read each buffer's GPU start and end, which counts
-MoltenVK's buffers and the native backend's alike), the whole GPU's energy and
+every buffer the process commits), the whole GPU's energy and
 busy time over all resource coalitions (other processes included), frames
 completed and presented, and the physical footprint. Counting is off and scene
 optimisation on, as shipped; `WE_TEST_ENERGY_CACHE` keeps the shader and pipeline
-caches between runs. Run one renderer per process, warm both caches with an
-unmeasured run first and alternate the renderers. The whole-GPU figures are only
+caches between runs. Run one renderer per process, warm the caches with an
+unmeasured run first and alternate the settings under comparison. The whole-GPU figures are only
 usable against an idle window of the same length on an otherwise quiet machine:
 a process launched from a terminal shares a coalition with that terminal, and
 any other process drawing at the time is in them. GPU time is workload, not
@@ -732,7 +739,7 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
 
 `audio_tests` gains `SoundStreamTest.*`, which pins what a scene sound decodes to through `CreateSoundStream`, whichever decoder serves it: WAV in every sample format, remix levels, resampled lengths and tone, loop seams, end of file, refused and cut-short input, tiny MP3, Ogg Vorbis and FLAC fixtures (`tests/audio/sound_fixture_data.hpp`), and the output worker on the null backend. It needs no GPU, window or audio device. The project's own sound path in `Renderer/Sound` ([sound-decoding.md](../sound-decoding.md)) adds two headless binaries registered in `REGRESSION_BINARIES`: `sound_core_tests` (the resampler's exact output lengths, tone, anti-alias cut, chunk independence and which ratios are supported, the remix coefficients, and the loop pipeline over synthetic decoders) and `sound_apple_tests` (the AudioToolbox decoder over a generated WAV and two tiny MP4 files: layout, chunks, rewind, a video's audio track, refused input, and the audio-optional rule). `tests.test_check_renderer` reads `Renderer/Sound/tests/CMakeLists.txt` (`wm_sound_test()`), so an unregistered sound test binary fails it. `sound_vorbis_tests` (also in `REGRESSION_BINARIES`) runs the Ogg Vorbis decoder over a tiny generated file: exact granule length, chunks, rewind, files cut off in the headers and in the audio, comment headers of several shapes that must open and ones that lie about their lengths (two billion comments, a vendor string longer than the file) that must be refused, 4600 damaged variants that must neither crash nor produce a non-finite sample, sample rates no format uses, and channel order.
 
-`scene_failure_policy_test` (registered, GPU-gated like `unchanged_present_test`) drives the whole scene wallpaper on a `CAMetalLayer` no window owns and forces the failures a real GPU almost never produces through `SceneBackendFaults` (compiled into tests only): the admission gate, creating the native renderer, compiling its graph, a frame after the scene runs and a replacement surface. Under the `NativeMetalOnly` preference each must leave no compatibility renderer created or even asked for (counted at `createVulkan`), the failure logged exactly once (read through `SetWallpaperLogCallback`), the frame loop stopped without presenting again, the host's first frame settled once, and either the last frame (a layer that drew carries no sublayer) or the project's preview picture (one sublayer) in place; a retry creates the native renderer and draws, a rebuilt surface heals a failed frame and re-arms the report, and a surface with no Metal layer is a prepare failure. A scene refused on a reload while another scene was drawing releases the outgoing renderer: a following resize leaves the refused scene failed, presenting nothing, with the last frame held. The same faults armed under `NativeMetalPreferred` must still end in the compatibility backend with the fault's reason. `surface_path_tests` (pure C++: which file is a project's preview and that none outside the project folder, through a symbolic link, absolute, with `..`, empty or over 32 MB is read) and `surface_still_tests` (the `preview` key lookup, decoding, one replaceable sublayer, a replaced layer, an unreadable file) cover `Renderer/Surface` on a plain `CALayer`. `tests.test_check_renderer` reads `Renderer/Surface/tests/CMakeLists.txt` (`wm_surface_test()`), so an unregistered surface test binary fails it.
+`scene_failure_policy_test` (registered, GPU-gated like `unchanged_present_test`) drives the whole scene wallpaper on a `CAMetalLayer` no window owns and forces the failures a real GPU almost never produces through `SceneBackendFaults` (compiled into tests only): the admission gate, creating the native renderer, compiling its graph, a frame after the scene runs and a replacement surface. Each must leave the failure logged exactly once (read through `SetWallpaperLogCallback`), the frame loop stopped without presenting again, the host's first frame settled once, and either the last frame (a layer that drew carries no sublayer) or the project's preview picture (one sublayer) in place; a retry creates the native renderer and draws, a rebuilt surface heals a failed frame and re-arms the report, and a surface with no Metal layer is a prepare failure. A scene refused on a reload while another scene was drawing releases the outgoing renderer: a following resize leaves the refused scene failed, presenting nothing, with the last frame held. There is no other renderer to hand a scene to, so there is nothing else to count; the test that armed the same faults under the old preferred mode and expected the Compatibility backend, and the counters of Vulkan renderers created, are retired with it. `surface_path_tests` (pure C++: which file is a project's preview and that none outside the project folder, through a symbolic link, absolute, with `..`, empty or over 32 MB is read) and `surface_still_tests` (the `preview` key lookup, decoding, one replaceable sublayer, a replaced layer, an unreadable file) cover `Renderer/Surface` on a plain `CALayer`. `tests.test_check_renderer` reads `Renderer/Surface/tests/CMakeLists.txt` (`wm_surface_test()`), so an unregistered surface test binary fails it.
 
 ## Known limitations
 

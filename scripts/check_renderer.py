@@ -71,11 +71,7 @@ REALTIME_TESTS = {
         "ThreadTimerTest.RequestsAfterALongWaitStillRespectTheCeiling",
     ),
     "unchanged_present_test": (
-        "UnchangedPresent.APlainVideoPresentsEveryNewFrameAndNothingElse",
-        "UnchangedPresent.TheSkipPresentsTheSameVideoFramesInTheSameOrder",
-        "UnchangedPresent.ARepeatedVideoFramePresentsAgainOnlyWhenSomethingChanges",
         "UnchangedPresent.AStaticSceneStopsPresentingOnceEveryPassIsReused",
-        "UnchangedPresent.OutputChangesOnAHeldVideoFramePresentOnceEach",
         "UnchangedPresent.APropertyPreviewShowsOnAStillSceneAndWakesAnIdleOneForOneFrame",
         "UnchangedPresent.AHistoryLoopKeepsTheClockRunningWithoutATimeUniform",
     ),

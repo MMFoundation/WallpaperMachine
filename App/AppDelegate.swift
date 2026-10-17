@@ -183,8 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             workshopStore.startDownloadLifecycle(bridge: store)
             let lockScreen = LockScreenConfiguration.isSupportedBySystem
                 ? LockScreenWallpaperService(
-                    bridge: store.bridge, contentRevision: { [weak store] in store?.wallpaperContentRevision ?? 0 },
-                    sceneRendererSetting: { [weak store] in store?.settingsSnapshot.sceneRenderer }) : nil
+                    bridge: store.bridge, contentRevision: { [weak store] in store?.wallpaperContentRevision ?? 0 }) : nil
             if let lockScreen {
                 store.lockScreenWallpaper = lockScreen
                 lockScreen.beforeActivation = { [weak self] in
@@ -790,7 +789,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         for scene in settings.sceneRenderers where !policy.suspendedDisplayIDs.contains(scene.displayId) {
             scenes[scene.displayId] = TelemetryFrameContext.Scene(
                 wallpaperID: scene.wallpaperId, kind: TelemetryReport.Kind(kinds[scene.wallpaperId]),
-                backend: scene.backend, fallback: scene.fallbackReason != nil, mode: modes[scene.displayId])
+                backend: scene.backend, mode: modes[scene.displayId])
         }
         let process = ProcessInfo.processInfo
         return TelemetryFrameContext(

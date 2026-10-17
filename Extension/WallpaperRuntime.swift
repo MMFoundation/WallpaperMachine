@@ -213,18 +213,6 @@ enum WallpaperRuntime {
     }
   }
 
-  /// Sets the engine's process-wide scene renderer preference to what the app chose. The
-  /// engine's own default is Compatibility, which is Vulkan, so without this the lock screen
-  /// and the screen saver would never use the renderer the app does. A call that changes
-  /// nothing is skipped, because setting the preference also forgets which scenes the native
-  /// renderer already failed to prepare.
-  static func applySceneRenderer(_ renderer: LockScreenSceneRenderer?) {
-    guard let renderer, owe_current_scene_renderer_preference() != renderer.enginePreference
-    else { return }
-    owe_set_scene_renderer_preference(renderer.enginePreference)
-    log("Scene renderer preference=\(renderer.rawValue)")
-  }
-
   static func asset(_ relativePath: String) throws -> URL {
     let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
     guard !relativePath.isEmpty, !relativePath.hasPrefix("/"), !components.contains(".."),

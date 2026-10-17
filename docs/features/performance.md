@@ -90,7 +90,7 @@ kernel's resource-coalition accounting (`CoalitionEnergySource`,
 - **Before and after.** A setting on Performance or Playback & Power that changes rendering work
   (`RenderingSetting` in `PanelController+Settings.swift`: presets, frame-rate limit, render scale,
   2D scene resolution, battery mode and quality, what to do in Low Power Mode, when the Mac is hot and when
-  the battery is low, scene renderer and the scene and
+  the battery is low, and the scene and
   experimental switches) calls `EnergyUsageMonitor.settingChanged()` once the
   engine has accepted it. The window restarts, the row reads **Measuring…** with
   the last settled figure as **Before it**, and once four uncontended samples under
@@ -299,7 +299,7 @@ from the same Fill-sized raster. The aspect handling itself is unchanged: a canv
 display's shape is filled and cropped.
 
 The choice reaches a running scene as a render-scale change does: the renderer
-resizes its targets in place on both renderers, with no reparse and no timeline
+resizes its targets in place, with no reparse and no timeline
 reset, and a pause is kept; the scene's own video layers stay open and carry on, on Native Metal
 too, where the graph is compiled again but its decoders are kept for it. Every scene opened
 afterwards, a display change that rebuilds a scene's graph included, sizes its targets from the
@@ -314,7 +314,7 @@ Display, Canvas; [`LocalProjectEnergyIsMeasuredHeadlessly`](../testing/renderer.
 | Scene | Renderer | GPU time per frame | Render targets | Process footprint (peak) |
 | --- | --- | --- | --- | --- |
 | Bloom and an effect chain | Native Metal | 1.62 → 3.42 ms | 35 → 94 MB | 380 → 455 MB |
-| Bloom and an effect chain | Compatibility | 1.91 → 3.27 ms | not read | 399 → 480 MB |
+| Bloom and an effect chain | Compatibility (retired) | 1.91 → 3.27 ms | not read | 399 → 480 MB |
 | 26 layers, author-sized effect buffers, no bloom | Native Metal | 1.76 → 2.33 ms | 132 → 160 MB | 515 → 555 MB |
 
 The cost follows how much of a scene is screen-sized, so a scene of mostly
@@ -641,21 +641,25 @@ above, without disabling its system-audio response.
 
 ## Advanced
 
-Collapsed by default, with a **Renderers & experimental options** preview. Inside,
+Collapsed by default, with a **Diagnostics & experimental options** preview. Inside,
 three flat sections separate **Video playback**, **Scene wallpapers** and
-**Experimental**; scene renderer selection comes before the optimisation and
-update-only-on-change switches. The video section holds only its collapsed **Live
+**Experimental**. The video section holds only its collapsed **Live
 diagnostics** disclosure (there is nothing to choose); the scene section has one too: video lists each running video by display and wallpaper; scenes show the renderer
 and video path, whether optimisation is in force, and what is keeping the scene
 updating. These reports continue to update from snapshots, and their open state
 survives setting changes. **Renderer compatibility** remains beside the scene
-diagnostics. **What these settings change** belongs to Playback & Power, not Advanced.
-What the three scene controls do (**Scene renderer**, **Scene render optimisation**
+diagnostics: what Native Metal draws, and what it does with a scene it cannot.
+**What these settings change** belongs to Playback & Power, not Advanced.
+What the two scene controls do (**Scene render optimisation**
 and **Update only when the scene changes**) is described in
-[scene rendering](scene-rendering.md#scene-wallpapers). **Native Metal only**, the third
-**Scene renderer** value, draws nothing with Compatibility: a scene it cannot draw is held
-on its last picture and the reason shows under **Drawn by**
+[scene rendering](scene-rendering.md#scene-wallpapers). There is no renderer to choose:
+Native Metal is the only one, and a scene it cannot draw is held on its last picture with
+the reason under **Drawn by**
 ([scene rendering](scene-rendering.md#when-native-metal-cannot-draw-a-scene)).
+The **Scene renderer** setting that chose between Compatibility, Native Metal preferred
+and Native Metal only is gone: `config.toml` files that still hold `scene_renderer` (and
+its `native_metal_default_applied` marker) load, the keys are ignored and are not
+written back.
 
 ## Video playback
 
@@ -919,8 +923,7 @@ does any frame that is not 8-bit NV12, which is what a software decoder produces
 the same file. A 10-bit video is always converted, with HDR tone mapped to SDR in the
 same pass ([10-bit and HDR video](scene-rendering.md#10-bit-and-hdr-video-textures)),
 whatever this switch says, and costs no more per frame than an 8-bit conversion
-plus the extra arithmetic of the curve; an 8-bit video is untouched by it. Nothing here changes which renderer draws a scene
-([scene renderer](scene-rendering.md#scene-renderer)).
+plus the extra arithmetic of the curve; an 8-bit video is untouched by it.
 
 **Where the two differ.** At a one-to-one mapping between video texels and output
 pixels the two paths produce the same picture, to within the single code value the

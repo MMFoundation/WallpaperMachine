@@ -2679,7 +2679,7 @@ TEST(SceneSurface, DeferredBackendRetainsTheLayerUntilTheSceneIsDeleted) {
         weak_layer = layer;
         // No scene or window: initialization queues the layer without creating
         // a GPU backend, as it does while startup is still loading a wallpaper.
-        ASSERT_EQ(owe_scene_wallpaper_init_metal_vulkan(
+        ASSERT_EQ(owe_scene_wallpaper_init_metal(
             scene.get(), (__bridge void*)layer, 32, 32, 0, 0, 1.0), 0);
     }
     // Drain Core Animation's implicit transaction so only the scene owns it.

@@ -6,37 +6,12 @@
 namespace wallpaper
 {
 
-/// Which renderer the user asked for.
+/// What stopped a scene from being drawn.
 ///
-/// A preference, never an outcome. Asking for the native backend does not make
-/// a scene use it: the scene is checked against what that backend can actually
-/// draw. Under `NativeMetalPreferred` one it cannot draw runs on the
-/// compatibility backend and says why. Under `NativeMetalOnly` there is no
-/// compatibility backend to run on: the scene is not drawn, the surface keeps
-/// its last picture (or shows the project's still preview when it has drawn
-/// nothing), and the failure and its reason are reported.
-enum class SceneRendererPreference : uint8_t
-{
-    Compatibility = 0,
-    NativeMetalPreferred = 1,
-    NativeMetalOnly = 2,
-};
-
-/// Whether a scene the native backend cannot draw may be handed to the
-/// compatibility backend. The one place that answers it, so no failure path can
-/// decide differently from another.
-[[nodiscard]] constexpr bool SceneRendererAllowsCompatibility(SceneRendererPreference preference)
-{
-    return preference != SceneRendererPreference::NativeMetalOnly;
-}
-
-/// Whether the native backend is asked for at all.
-[[nodiscard]] constexpr bool SceneRendererWantsNative(SceneRendererPreference preference)
-{
-    return preference != SceneRendererPreference::Compatibility;
-}
-
-/// What stopped a scene from being drawn natively, when nothing else may draw it.
+/// Native Metal is the only renderer there is. A scene it cannot draw is not
+/// handed to another one: the surface keeps its last picture (or shows the
+/// project's still preview when it has drawn nothing), and the failure and its
+/// reason are reported.
 ///
 /// A category, never the whole explanation: the host words each one for the
 /// user in their language and shows the engine's own `failure_reason` beside it.
@@ -70,40 +45,24 @@ enum class SceneFailureStage : uint8_t
     return "";
 }
 
-/// Which renderer actually drew a scene.
-enum class SceneBackend : uint8_t
-{
-    LegacyVulkan = 0,
-    NativeMetal = 1,
-};
-
-void SetSceneRendererPreference(SceneRendererPreference preference);
-SceneRendererPreference CurrentSceneRendererPreference();
-
-/// Why a scene is not on the preferred backend.
+/// Whether a scene can be drawn, and when not, why.
 ///
-/// Empty means it is. Every rejection carries a specific, user-readable reason:
-/// "unsupported" with no reason is indistinguishable from a bug, and this is
-/// the string a user will quote when asking why their wallpaper did not switch.
+/// A failure always carries a specific, user-readable reason: "unsupported"
+/// with no reason is indistinguishable from a bug, and this is the string a
+/// user will quote when asking why their wallpaper does not play.
 struct SceneBackendSelection
 {
-    SceneBackend backend { SceneBackend::LegacyVulkan };
-    std::string  fallback_reason;
-
     /// False while this is still only a decision, true once a renderer has
-    /// actually been created for it. A surface whose scene has not been parsed
-    /// yet has no backend at all, and reporting the default as if it were the
-    /// answer would name a renderer that is not drawing.
+    /// actually been created for it (or the scene has been held). A surface
+    /// whose scene has not been parsed yet has no renderer at all, and
+    /// reporting one as if it existed would name a renderer that is not
+    /// drawing.
     bool created { false };
 
-    /// Set only when the scene is not being drawn natively and no other backend
-    /// may draw it (`SceneRendererPreference::NativeMetalOnly`). Mutually
-    /// exclusive with `fell_back()`: a scene either runs somewhere else with a
-    /// reason, or does not run, with one.
+    /// Set when the scene is not being drawn.
     SceneFailureStage failure_stage { SceneFailureStage::None };
     std::string       failure_reason;
 
-    [[nodiscard]] bool fell_back() const { return ! fallback_reason.empty(); }
     [[nodiscard]] bool failed() const { return failure_stage != SceneFailureStage::None; }
 };
 

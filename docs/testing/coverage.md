@@ -679,14 +679,14 @@ or depend on a second physical monitor.
   clock without waiting and is bounded below the surface's 30 seconds; and that a player
   failure that beats the handler's assignment is delivered once when it is assigned.
   `LockScreenHeldFailureTests` covers the engine's stages and the `video` stage the extension
-  itself reports. The surface wiring and the order in which the scene renderer preference is
-  applied live in the extension target, which no unit test compiles, so they are checked by
-  building it. `LockScreenWallpaperTests` also covers the configuration keys `sceneRenderer`,
-  `plainVideo` and `nativeVideoFile` (round trip with and without, the default, an unknown
-  name, which changes replace a renderer, and that a changed frame rate replaces neither a
-  video player nor the scene engine), and the service tests that the Scene renderer setting is
-  published and a change republishes, and that a video project is always published as a video,
-  with its media file when the app finds it. Not covered: a real lock screen, the player playing a clip there.
+  itself reports. The surface wiring lives in the extension target, which no unit test
+  compiles, so it is checked by building it. `LockScreenWallpaperTests` also covers the
+  configuration keys `plainVideo` and `nativeVideoFile` (round trip with and without, which
+  changes replace a renderer, and that a changed frame rate replaces neither a video player
+  nor the scene engine), that a `sceneRenderer` key an older app wrote is read past whatever
+  it names and that none is written now, and the service tests that a video project is always
+  published as a video, with its media file when the app finds it, and that a refresh that
+  changes nothing publishes nothing. Not covered: a real lock screen, the player playing a clip there.
 - `LockScreenExtensionRegistrationTests` use synthetic app bundles and an
   injected registry: current-copy selection, duplicate and removed-copy cleanup,
   symlink aliases, invalid inventory rejection, cancellation, command failures;

@@ -9,7 +9,6 @@ struct WallpaperCompatibilityContext: Hashable, Sendable {
   let supported: Bool
   let targetFPS: UInt32
   let targetAvailable: Bool
-  let sceneRenderer: String
   let libraryRevision: UInt64
   let assetsConfiguration: String
 }
@@ -73,7 +72,7 @@ actor WallpaperCompatibilityService {
            ? String(localized: "Web wallpapers are not supported on the lock screen.")
            : context.kind == .unknown
              ? String(localized: "This wallpaper type has no supported lock-screen route.")
-             : String(localized: "Video and scene wallpapers have a lock-screen route. Publishing, resource access and extension playback still require runtime verification; scenes use Compatibility there."))
+             : String(localized: "Video and scene wallpapers have a lock-screen route. Publishing, resource access and extension playback still require runtime verification."))
     guard Self.validID(context.wallpaperID) else {
       append("project", .unavailable, String(localized: "Installed project"),
              String(localized: "The installed wallpaper identifier is not a safe library path."))
@@ -158,7 +157,7 @@ actor WallpaperCompatibilityService {
                ? String(localized: "The required baseline shared shaders and material are installed. Authored resources are not fully validated.")
                : String(localized: "Baseline Wallpaper Engine shaders or materials are missing. Install or locate the complete scene assets folder."))
         append("sceneCapability", .unknown, String(localized: "Scene shader and graph support"),
-               String(localized: "Preflight has no parsed render-graph capability result. Shader, puppet, particle and effect support need runtime evaluation; the live backend and fallback reason are shown separately."))
+               String(localized: "Preflight has no parsed render-graph capability result. Shader, puppet, particle and effect support need runtime evaluation; the live backend, and the reason a scene it cannot draw is held, are shown separately."))
       case .web:
         append("webRuntime", .unknown, String(localized: "Web runtime"),
                String(localized: "The entry file check does not execute scripts or verify media, local dependencies or WebGL. These need runtime evaluation."))

@@ -1,7 +1,9 @@
 #pragma once
 #include "SceneWallpaper.hpp"
+#include "Swapchain/ExSwapchain.hpp"
 
 #include <functional>
+#include <memory>
 #include <string_view>
 #include <vulkan/vulkan.h>
 #include <cstdint>
@@ -24,15 +26,15 @@ struct RenderInitInfo {
     TexTiling                     offscreen_tiling { TexTiling::OPTIMAL };
     VulkanSurfaceInfo             surface_info;
 
-    /// The `CAMetalLayer` this surface presents to, when there is one.
-    ///
-    /// `surface_info.createSurfaceOp` already closes over it, but a closure
-    /// cannot be handed to a backend that does not create a `VkSurfaceKHR`.
-    /// Carrying the handle alongside lets the native Metal backend adopt the
-    /// same layer without a second plumbing path, and keeps the invariant that
-    /// exactly one backend ever owns it. Null off Apple platforms and in
+    /// The `CAMetalLayer` this surface presents to, when there is one: the
+    /// layer the native Metal renderer adopts. Null off Apple platforms and in
     /// offscreen mode.
     void* metal_layer { nullptr };
+
+    /// Keeps `metal_layer` alive for as long as this description is held, even
+    /// if the host replaces its window layer before the renderer adopts it.
+    /// Empty when the creator keeps the layer alive some other way.
+    std::shared_ptr<void> metal_layer_owner;
 
     uint16_t width { 1920 };
     uint16_t height { 1080 };

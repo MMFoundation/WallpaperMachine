@@ -182,21 +182,18 @@ impl SceneUpdateMode {
     }
 }
 
-/// Which renderer actually drew a scene.
+/// The renderer that draws a scene. Native Metal is the only one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SceneBackend {
-    /// The Vulkan/MoltenVK backend.
-    LegacyVulkan,
     /// The native Metal backend.
     NativeMetal,
 }
 
 impl SceneBackend {
-    /// Maps a raw `owe_scene_backend`; negative means not reported.
+    /// Maps a raw `owe_scene_backend`; negative or unknown means not reported.
     #[must_use]
     pub const fn from_raw(raw: i32) -> Option<Self> {
         match raw {
-            0 => Some(Self::LegacyVulkan),
             1 => Some(Self::NativeMetal),
             _ => None,
         }
@@ -206,49 +203,7 @@ impl SceneBackend {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::LegacyVulkan => "legacy_vulkan",
             Self::NativeMetal => "native_metal",
-        }
-    }
-}
-
-/// Which renderer the user asked for.
-///
-/// A preference, not an outcome: under `NativeMetalPreferred` a scene the Metal
-/// backend cannot draw falls back, and the fallback is reported rather than
-/// silently satisfying the preference. Under `NativeMetalOnly` there is nothing
-/// to fall back to: such a scene is held on its last frame (or its preview
-/// picture) and the failure is reported as a [`SceneFailure`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum SceneRendererPreference {
-    /// Always use the Vulkan/MoltenVK backend.
-    #[default]
-    Compatibility,
-    /// Use the native Metal backend for scenes it fully supports.
-    NativeMetalPreferred,
-    /// Use the native Metal backend and nothing else: a scene it cannot draw is
-    /// not drawn, and no Vulkan renderer is ever created for it.
-    NativeMetalOnly,
-}
-
-impl SceneRendererPreference {
-    /// Raw value for `owe_set_scene_renderer_preference`.
-    #[must_use]
-    pub const fn as_raw(self) -> i32 {
-        match self {
-            Self::Compatibility => 0,
-            Self::NativeMetalPreferred => 1,
-            Self::NativeMetalOnly => 2,
-        }
-    }
-
-    /// Stable lowercase name used by config and the panel.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Compatibility => "compatibility",
-            Self::NativeMetalPreferred => "native_metal_preferred",
-            Self::NativeMetalOnly => "native_metal_only",
         }
     }
 }
@@ -310,11 +265,9 @@ pub struct SceneRuntimeReport {
     pub demand_reasons: SceneDemandReasons,
     /// `None` when the renderer reported nothing.
     pub backend: Option<SceneBackend>,
-    /// Why the active backend is not the preferred one, when it is not.
-    pub fallback_reason: Option<String>,
-    /// Why the scene is held and not drawn, when the preference leaves no other
-    /// backend (`SceneRendererPreference::NativeMetalOnly`). `backend` is
-    /// `None` while this is set: nothing is drawing the scene.
+    /// Why the scene is held and not drawn: Native Metal is the only renderer
+    /// and cannot draw it. `backend` is `None` while this is set: nothing is
+    /// drawing the scene.
     pub failure: Option<SceneFailure>,
     /// How this scene's video textures reached the shaders sampling them on the
     /// last frame it drew.
@@ -328,7 +281,7 @@ pub struct SceneRuntimeReport {
     pub surface: Option<SurfaceHealth>,
 }
 
-/// What stopped a scene from being drawn natively when nothing else may draw it.
+/// What stopped a scene from being drawn.
 ///
 /// Mirrors `owe_scene_failure_stage`: a category the host words for the user in
 /// their language, shown beside the renderer's own explanation.

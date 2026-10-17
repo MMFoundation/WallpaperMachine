@@ -56,7 +56,7 @@ struct PerformanceSettingsSection: View {
   // Advanced
   static let advanced = SettingsItem(
     id: "performance.advanced", section: .performance, title: "Advanced",
-    note: "Renderers & experimental options")
+    note: "Diagnostics & experimental options")
 
   static let videoDiagnostics = SettingsItem(
     id: "performance.video-diagnostics", section: .performance, group: video, inside: advanced,
@@ -66,16 +66,11 @@ struct PerformanceSettingsSection: View {
     inside: videoDiagnostics, title: "In use now",
     keywords: ["No video wallpaper is running."])
 
-  static let sceneRenderer = SettingsItem(
-    id: "performance.scene-renderer", section: .performance, group: scene, inside: advanced,
-    title: "Scene renderer",
-    note: "Unsupported scenes use Compatibility, or with Native Metal only are not drawn and keep their last picture. The lock screen and screen saver follow this setting too.",
-    keywords: ["Compatibility", "Native Metal preferred", "Native Metal only"])
   static let sceneOptimization = SettingsItem(
     id: "performance.scene-optimization", section: .performance, group: scene, inside: advanced,
     title: "Scene render optimisation",
     note:
-      "Skips rendering work that wouldn’t change the picture, such as parts of a scene that stay the same. Resolution, frame rate and animation speed are unaffected. Works with both scene renderers. Turn it off to compare.",
+      "Skips rendering work that wouldn’t change the picture, such as parts of a scene that stay the same. Resolution, frame rate and animation speed are unaffected. Turn it off to compare.",
     keywords: [
       "How much can be skipped depends on the scene. If everything in it moves, nothing is skipped."
     ])
@@ -124,7 +119,7 @@ struct PerformanceSettingsSection: View {
 
   static let items = [
     energyUse, energyMethod, preset, frameRateLimit, renderScale, renderScaleEffective,
-    sceneResolution, advanced, videoDiagnostics, videoInUse, sceneRenderer, sceneOptimization, sceneOnDemand,
+    sceneResolution, advanced, videoDiagnostics, videoInUse, sceneOptimization, sceneOnDemand,
     sceneDiagnostics, sceneDrawnBy, sceneInForce, sceneUpdating, sceneCompatibility,
     contentPacing, sharedVideoDecode, sharedDecodeInUse, videoPlaneSampling,
   ]
@@ -225,14 +220,6 @@ struct PerformanceSettingsSection: View {
 
   private func sceneGroup(_ performance: PerformanceSettings) -> some View {
     SettingsGroup(Self.scene, in: .performance) {
-      SettingsRow(Self.sceneRenderer) {
-        SettingsMenuControl(
-          key: "sceneRenderer", saved: performance.sceneRenderer,
-          options: SceneRendererMode.allCases.map {
-            SettingsMenuOption(value: $0, title: $0.title)
-          }
-        ) { try await controller.setSceneRenderer($0) }
-      }
       SettingsRow(Self.sceneOptimization, note: optimisationNote(performance)) {
         SettingsSwitchControl(key: .sceneOptimization)
       }
@@ -240,7 +227,7 @@ struct PerformanceSettingsSection: View {
       SettingsDisclosure(Self.sceneDiagnostics) {
         SettingsRow(Self.sceneDrawnBy, stacked: true) {
           report(
-            performance.sceneRenderers.map { $0.line(preferred: performance.sceneRenderer) },
+            performance.sceneRenderers.map(\.line),
             empty: "No scene wallpaper is running.")
         }
         if let text = performance.optimization.text {
@@ -251,10 +238,10 @@ struct PerformanceSettingsSection: View {
       SettingsDisclosure(Self.sceneCompatibility) {
         SettingsProse {
           Text(
-            "Native Metal draws a scene only if it supports everything in it: image layers, sprite-sheet animation, 2D puppets with their own skinning shader, 2D sprite, sprite-trail, rope and rope-trail particles, 3D models, perspective cameras, scene lights, standard effect chains and post-processing, effects that read the previous frame, layer links, and BGRA, 8-bit NV12 or 10-bit video textures (HDR video is tone mapped to SDR). Scenes with anything else use Compatibility. This applies to the lock screen and screen saver too."
+            "Native Metal is the only scene renderer. It draws a scene only if it supports everything in it: image layers, sprite-sheet animation, 2D puppets with their own skinning shader, 2D sprite, sprite-trail, rope and rope-trail particles, 3D models, perspective cameras, scene lights, standard effect chains and post-processing, effects that read the previous frame, layer links, and BGRA, 8-bit NV12 or 10-bit video textures (HDR video is tone mapped to SDR). This applies to the lock screen and screen saver too."
           )
           Text(
-            "With Native Metal only, a scene it can't draw is not drawn at all: it keeps its last picture, or its preview when it has drawn nothing yet, and the reason appears under “Drawn by”."
+            "A scene it can't draw is not drawn at all: it keeps its last picture, or its preview when it has drawn nothing yet, and the reason appears under “Drawn by”."
           )
         }
       }
@@ -276,12 +263,12 @@ struct PerformanceSettingsSection: View {
 
   // MARK: Pieces
 
-  /// The note of Scene render optimisation, which says more while a running scene is drawn by Native
-  /// Metal, the only drawing it is true of.
+  /// The note of Scene render optimisation, which says more while a running scene is drawn, the only
+  /// time it is true of anything.
   private func optimisationNote(_ performance: PerformanceSettings) -> String? {
     guard performance.nativeSceneRunning else { return nil }
     return L(
-      "Skips rendering work that wouldn’t change the picture, such as parts of a scene that stay the same. Resolution, frame rate and animation speed are unaffected. Works with both scene renderers. Turn it off to compare."
+      "Skips rendering work that wouldn’t change the picture, such as parts of a scene that stay the same. Resolution, frame rate and animation speed are unaffected. Turn it off to compare."
     ) + " "
       + L(
         "How much can be skipped depends on the scene. If everything in it moves, nothing is skipped."

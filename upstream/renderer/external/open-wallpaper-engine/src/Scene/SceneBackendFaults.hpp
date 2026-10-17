@@ -11,7 +11,6 @@
 
 #ifdef WESCENE_BUILD_TESTS
 
-#include <atomic>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -63,21 +62,7 @@ public:
     {
         std::scoped_lock lock(m_mutex);
         for (auto& slot : m_slots) slot = Armed {};
-        m_vulkan_created.store(0);
-        m_vulkan_attempts.store(0);
-
     }
-
-    /// How many compatibility renderers were created (successfully) since the
-    /// last `Reset`, and how many times creating one was asked for. The
-    /// evidence that a failure policy created none.
-    void NoteVulkanCreated(bool ok)
-    {
-        m_vulkan_attempts.fetch_add(1);
-        if (ok) m_vulkan_created.fetch_add(1);
-    }
-    [[nodiscard]] int vulkanCreated() const { return m_vulkan_created.load(); }
-    [[nodiscard]] int vulkanAttempts() const { return m_vulkan_attempts.load(); }
 
 private:
     struct Armed
@@ -87,10 +72,8 @@ private:
     };
     Armed& Slot(SceneBackendFault fault) { return m_slots[static_cast<std::size_t>(fault)]; }
 
-    std::mutex       m_mutex;
-    Armed            m_slots[5];
-    std::atomic<int> m_vulkan_created { 0 };
-    std::atomic<int> m_vulkan_attempts { 0 };
+    std::mutex m_mutex;
+    Armed      m_slots[5];
 };
 
 } // namespace wallpaper::testing

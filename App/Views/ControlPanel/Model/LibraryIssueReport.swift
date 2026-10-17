@@ -27,11 +27,11 @@ enum LibraryIssueReport {
   }
 
   /// The backends the engine reports for `wallpaperID`, each once, in the order the scene reports
-  /// and then the video reports name them: `legacy_vulkan (fallback: lit particles)`.
+  /// and then the video reports name them: `native_metal`, or `not drawn (unsupported: …)` for a held scene.
   static func renderers(for wallpaperID: String, in settings: BridgeSettingsSnapshot) -> [String] {
     var seen = Set<String>()
     let reports =
-      settings.sceneRenderers.map { ($0.wallpaperId, $0.backend, $0.fallbackReason, $0.failureStage, $0.failureReason) }
+      settings.sceneRenderers.map { ($0.wallpaperId, $0.backend, String?.none, $0.failureStage, $0.failureReason) }
       + settings.videoBackends.map { ($0.wallpaperId, $0.backend, $0.fallbackReason, String?.none, String?.none) }
     return reports.compactMap { id, backend, reason, failure, failureReason in
       guard id == wallpaperID, !backend.isEmpty else { return nil }

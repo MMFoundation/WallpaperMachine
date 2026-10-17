@@ -241,9 +241,6 @@
     "This wallpaper type has no supported lock-screen route." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "This wallpaper type has no supported lock-screen route."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "この壁紙の種類には、対応するロック画面での表示方法がありません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "此壁纸类型没有受支持的锁定屏幕方式。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "此桌布類型沒有支援的鎖定畫面方式。"}}}
     },
-    "Video and scene wallpapers have a lock-screen route. Publishing, resource access and extension playback still require runtime verification; scenes use Compatibility there." : {
-      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Video and scene wallpapers have a lock-screen route. Publishing, resource access and extension playback still require runtime verification; scenes use Compatibility there."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "動画とシーン壁紙にはロック画面への表示経路があります。公開、リソースへのアクセス、拡張機能での再生は実行時の検証が必要です。シーンは互換モードを使用します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频和场景壁纸支持锁定屏幕方式。发布、资源访问和扩展播放仍需运行时验证；场景在此使用兼容模式。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片和場景桌布支援鎖定畫面方式。發佈、資源存取和延伸功能播放仍需執行時驗證；場景在此使用相容模式。"}}}
-    },
     "Installed project" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Installed project"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "インストール済みプロジェクト"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已安装项目"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已安裝專案"}}}
     },
@@ -294,9 +291,6 @@
     },
     "Scene shader and graph support" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Scene shader and graph support"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "シーンのシェーダーとグラフの対応"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "场景着色器和图支持"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "場景著色器和圖支援"}}}
-    },
-    "Preflight has no parsed render-graph capability result. Shader, puppet, particle and effect support need runtime evaluation; the live backend and fallback reason are shown separately." : {
-      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Preflight has no parsed render-graph capability result. Shader, puppet, particle and effect support need runtime evaluation; the live backend and fallback reason are shown separately."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "事前確認には解析済みレンダーグラフの対応結果がありません。シェーダー、パペット、パーティクル、エフェクトは実行時の評価が必要です。実際のバックエンドとフォールバック理由は別途表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "预检没有已解析的渲染图能力结果。着色器、骨骼模型、粒子和特效支持需运行时评估；实际后端和回退原因另行显示。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "預先檢查沒有已解析的算繪圖能力結果。著色器、骨骼模型、粒子和特效支援需執行時評估；實際後端和備援原因另行顯示。"}}}
     },
     "Web runtime" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Web runtime"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Web 実行環境"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "网页运行时"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "網頁執行環境"}}}
@@ -5264,18 +5258,6 @@
     "Video playback" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ビデオ再生"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频播放"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片播放"}}}
     },
-    "Compatibility" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "互換モード"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "兼容模式"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "相容模式"}}}
-    },
-    "Native Metal preferred" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalを優先"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "优先原生 Metal"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "優先使用原生 Metal"}}}
-    },
-    "Native Metal only" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalのみ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "仅原生 Metal"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "僅使用原生 Metal"}}}
-    },
-    "With Native Metal only, a scene it can't draw is not drawn at all: it keeps its last picture, or its preview when it has drawn nothing yet, and the reason appears under “Drawn by”." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "「ネイティブMetalのみ」では、ネイティブMetalで描画できないシーンはまったく描画されません。最後の画像（まだ何も描画していない場合はプレビュー）が保持され、理由は「描画バックエンド」の下に表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "选择“仅原生 Metal”时，原生 Metal 无法绘制的场景完全不会绘制：它会保留最后的画面（尚未绘制任何内容时则显示预览），原因会显示在“绘制方”下方。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "選擇「僅使用原生 Metal」時，原生 Metal 無法繪製的場景完全不會繪製：它會保留最後的畫面（尚未繪製任何內容時則顯示預覽），原因會顯示在「繪製者」下方。"}}}
-    },
     "it uses something Native Metal can't draw" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalで描画できない要素が含まれています"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "其中包含原生 Metal 无法绘制的内容"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "其中包含原生 Metal 無法繪製的內容"}}}
     },
@@ -5305,9 +5287,6 @@
     },
     "Renderer compatibility" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "レンダラの互換性"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "渲染器兼容性"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "渲染器相容性"}}}
-    },
-    "Unsupported scenes use Compatibility, or with Native Metal only are not drawn and keep their last picture. The lock screen and screen saver follow this setting too." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "対応していないシーンには互換モードが使用されます。「ネイティブMetalのみ」では描画されず、最後の画像が保持されます。ロック画面とスクリーンセーバーもこの設定に従います。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "不支持的场景会使用兼容模式；选择“仅原生 Metal”时则不会绘制，并保留最后一帧画面。锁屏和屏幕保护程序也遵循此设置。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "不支援的場景會使用相容模式；選擇「僅使用原生 Metal」時則不會繪製，並保留最後一個畫面。鎖定畫面和螢幕保護程式也會遵循此設定。"}}}
     },
     "Native Metal" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetal"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal"}}}
@@ -5480,9 +5459,6 @@
     "Scene render optimisation" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "シーンレンダリングの最適化"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "场景渲染优化"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "場景渲染最佳化"}}}
     },
-    "Skips rendering work that wouldn’t change the picture, such as parts of a scene that stay the same. Resolution, frame rate and animation speed are unaffected. Works with both scene renderers. Turn it off to compare." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "シーン内の変化しない部分など、画像に影響しないレンダリング処理を省略します。解像度、フレームレート、アニメーションの速度は変わりません。どちらのシーンレンダラでも機能します。オフにすると比較できます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "跳过不影响画面的渲染工作，比如场景中没有变化的部分。分辨率、帧率和动画速度都不受影响。两种场景渲染器都支持，可以关掉对比效果。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "略過不會改變畫面的渲染工作，例如場景中保持不變的部分。解析度、影格率與動畫速度皆不受影響。兩種場景渲染器都支援此功能。可關閉此功能來比較差異。"}}}
-    },
     "How much can be skipped depends on the scene. If everything in it moves, nothing is skipped." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "省略できる量はシーンによって異なります。シーン内のすべてが動いている場合は、何も省略されません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "能跳过多少取决于场景本身。如果画面里的内容都在动，就没有可以跳过的部分。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "能略過多少取決於場景本身。如果場景中的所有內容都在移動，就沒有可略過的部分。"}}}
     },
@@ -5597,20 +5573,11 @@
     "running — state could not be read" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "実行中 — 状態を読み取れません"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "运行中 — 无法读取状态"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "執行中 — 無法讀取狀態"}}}
     },
-    "Scene renderer" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "シーンレンダラ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "场景渲染器"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "場景渲染器"}}}
-    },
-    "Native Metal draws a scene only if it supports everything in it: image layers, sprite-sheet animation, 2D puppets with their own skinning shader, 2D sprite, sprite-trail, rope and rope-trail particles, 3D models, perspective cameras, scene lights, standard effect chains and post-processing, effects that read the previous frame, layer links, and BGRA, 8-bit NV12 or 10-bit video textures (HDR video is tone mapped to SDR). Scenes with anything else use Compatibility. This applies to the lock screen and screen saver too." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalは、シーン内のすべての要素に対応している場合にのみそのシーンを描画します。対応している要素：画像レイヤー、スプライトシートアニメーション、独自のスキニングシェーダを持つ2Dパペット、2Dのスプライト／スプライトトレイル／ロープ／ロープトレイルパーティクル、3Dモデル、透視投影カメラ、シーンのライト、標準的なエフェクトチェーンとポストプロセス、前のフレームを読み取るエフェクト、レイヤーリンク、BGRA、8ビットNV12、または10ビットのビデオテクスチャ（HDRビデオはSDRにトーンマッピングされます）。それ以外の要素を含むシーンには互換モードが使用されます。これはロック画面とスクリーンセーバーにも適用されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "只有场景里的内容全部受支持时，原生 Metal 才会绘制它。支持的内容包括：图像图层、精灵表动画、使用自身蒙皮着色器的二维木偶、二维的精灵、精灵拖尾、绳索和绳索拖尾粒子、3D 模型、透视摄像机、场景光源、常规效果链和后期处理、读取上一帧的效果、图层链接，以及 BGRA、8 位 NV12 或 10 位视频纹理（HDR 视频会被色调映射为 SDR）。含有其他内容的场景会使用兼容模式。此设置同样适用于锁定屏幕和屏幕保护程序。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "只有在原生 Metal 支援場景中的所有內容時，才會由它繪製該場景。支援的內容包括：影像圖層、精靈圖集動畫、使用自身蒙皮著色器的 2D 人偶、2D 精靈圖、精靈圖拖尾、繩索與繩索拖尾粒子、3D 模型、透視攝影機、場景光源、標準效果鏈與後製處理、讀取上一影格的效果、圖層連結，以及 BGRA、8 位元 NV12 或 10 位元影片紋理（HDR 影片會被色調映射為 SDR）。含有其他內容的場景會使用相容模式。此設定同樣適用於鎖定畫面和螢幕保護程式。"}}}
-    },
     "Drawn by" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "描画バックエンド"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "绘制方"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "繪製者"}}}
     },
     "preparing — no backend chosen yet" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "準備中 — バックエンドはまだ選択されていません"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "准备中 — 尚未选择后端"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "準備中 — 尚未選擇後端"}}}
-    },
-    "(fell back: %@)" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "（フォールバック済み：%@）"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "（已回退：%@）"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "（已改用備援：%@）"}}}
     },
     "— video: %@" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "— ビデオ：%@"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "— 视频：%@"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "— 影片：%@"}}}
@@ -5629,9 +5596,6 @@
     },
     "Advanced" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "詳細"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "高级"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "進階"}}}
-    },
-    "Renderers & experimental options" : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "レンダラーと実験的な設定"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "渲染器与实验性选项"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "繪製器與實驗性選項"}}}
     },
     "Live diagnostics" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "現在の動作状況"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "实时诊断"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "即時診斷"}}}
@@ -7287,6 +7251,24 @@
     },
     "This video’s format isn’t supported (%@), or the file is damaged. Convert it to MP4 or MOV with H.264 or HEVC, or import a complete copy, then apply it again." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "このビデオの形式（%@）には対応していないか、ファイルが破損しています。H.264またはHEVCのMP4またはMOVに変換するか、完全なコピーを読み込んでから、もう一度適用してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "不支持此视频的格式（%@），或文件已损坏。请将其转换为 H.264 或 HEVC 编码的 MP4 或 MOV，或导入完整的副本，然后重新应用。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "不支援此影片的格式（%@），或檔案已損毀。請轉換為 H.264 或 HEVC 編碼的 MP4 或 MOV，或匯入完整的副本，然後重新套用。"}}}
+    },
+    "Diagnostics & experimental options" : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "診断と実験的な設定"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "诊断与实验性选项"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "診斷與實驗性選項"}}}
+    },
+    "A scene it can't draw is not drawn at all: it keeps its last picture, or its preview when it has drawn nothing yet, and the reason appears under “Drawn by”." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブMetalで描画できないシーンはまったく描画されません。最後の画像（まだ何も描画していない場合はプレビュー）が保持され、理由は「描画バックエンド」の下に表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 无法绘制的场景完全不会绘制：它会保留最后的画面（尚未绘制任何内容时则显示预览），原因会显示在“绘制方”下方。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 無法繪製的場景完全不會繪製：它會保留最後的畫面（尚未繪製任何內容時則顯示預覽），原因會顯示在「繪製者」下方。"}}}
+    },
+    "Native Metal is the only scene renderer. It draws a scene only if it supports everything in it: image layers, sprite-sheet animation, 2D puppets with their own skinning shader, 2D sprite, sprite-trail, rope and rope-trail particles, 3D models, perspective cameras, scene lights, standard effect chains and post-processing, effects that read the previous frame, layer links, and BGRA, 8-bit NV12 or 10-bit video textures (HDR video is tone mapped to SDR). This applies to the lock screen and screen saver too." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "シーンのレンダラはネイティブMetalのみです。ネイティブMetalは、シーン内のすべての要素に対応している場合にのみそのシーンを描画します。対応している要素：画像レイヤー、スプライトシートアニメーション、独自のスキニングシェーダを持つ2Dパペット、2Dのスプライト／スプライトトレイル／ロープ／ロープトレイルパーティクル、3Dモデル、透視投影カメラ、シーンのライト、標準的なエフェクトチェーンとポストプロセス、前のフレームを読み取るエフェクト、レイヤーリンク、BGRA、8ビットNV12、または10ビットのビデオテクスチャ（HDRビデオはSDRにトーンマッピングされます）。これはロック画面とスクリーンセーバーにも適用されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 是唯一的场景渲染器。只有场景里的内容全部受支持时，它才会绘制该场景。支持的内容包括：图像图层、精灵表动画、使用自身蒙皮着色器的二维木偶、二维的精灵、精灵拖尾、绳索和绳索拖尾粒子、3D 模型、透视摄像机、场景光源、常规效果链和后期处理、读取上一帧的效果、图层链接，以及 BGRA、8 位 NV12 或 10 位视频纹理（HDR 视频会被色调映射为 SDR）。此设置同样适用于锁定屏幕和屏幕保护程序。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生 Metal 是唯一的場景算繪器。只有在它支援場景中的所有內容時，才會繪製該場景。支援的內容包括：影像圖層、精靈圖集動畫、使用自身蒙皮著色器的 2D 人偶、2D 精靈圖、精靈圖拖尾、繩索與繩索拖尾粒子、3D 模型、透視攝影機、場景光源、標準效果鏈與後製處理、讀取上一影格的效果、圖層連結，以及 BGRA、8 位元 NV12 或 10 位元影片紋理（HDR 影片會被色調映射為 SDR）。此設定同樣適用於鎖定畫面和螢幕保護程式。"}}}
+    },
+    "Skips rendering work that wouldn’t change the picture, such as parts of a scene that stay the same. Resolution, frame rate and animation speed are unaffected. Turn it off to compare." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "シーン内の変化しない部分など、画像に影響しないレンダリング処理を省略します。解像度、フレームレート、アニメーションの速度は変わりません。オフにすると比較できます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "跳过不影响画面的渲染工作，比如场景中没有变化的部分。分辨率、帧率和动画速度都不受影响。可以关掉对比效果。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "略過不會改變畫面的渲染工作，例如場景中保持不變的部分。解析度、影格率與動畫速度皆不受影響。可關閉此功能來比較差異。"}}}
+    },
+    "Video and scene wallpapers have a lock-screen route. Publishing, resource access and extension playback still require runtime verification." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "動画とシーン壁紙にはロック画面への表示経路があります。公開、リソースへのアクセス、拡張機能での再生は実行時の検証が必要です。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频和场景壁纸支持锁定屏幕方式。发布、资源访问和扩展播放仍需运行时验证。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片和場景桌布支援鎖定畫面方式。發佈、資源存取和延伸功能播放仍需執行時驗證。"}}}
+    },
+    "Preflight has no parsed render-graph capability result. Shader, puppet, particle and effect support need runtime evaluation; the live backend, and the reason a scene it cannot draw is held, are shown separately." : {
+      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "事前確認には解析済みレンダーグラフの対応結果がありません。シェーダー、パペット、パーティクル、エフェクトは実行時の評価が必要です。実際のバックエンドと、描画できないシーンが保持されている理由は別途表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "预检没有已解析的渲染图能力结果。着色器、骨骼模型、粒子和特效支持需运行时评估；实际后端，以及无法绘制的场景被保留的原因，会另行显示。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "預先檢查沒有已解析的算繪圖能力結果。著色器、骨骼模型、粒子和特效支援需執行時評估；實際後端，以及無法繪製的場景被保留的原因，會另行顯示。"}}}
     }
   },
   "version" : "1.0"

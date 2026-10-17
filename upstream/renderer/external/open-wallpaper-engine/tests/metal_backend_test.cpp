@@ -182,7 +182,7 @@ struct ImageScene
 
 std::string RejectionFor(ImageScene& fixture)
 {
-    return EvaluateMetalSupport(fixture.scene).fallback_reason;
+    return EvaluateMetalSupport(fixture.scene).failure_reason;
 }
 
 /// The mesh shape the particle generator writes into: one dynamic vertex
@@ -301,9 +301,9 @@ TEST(MetalCapability, AcceptsAMinimalTwoDimensionalImageScene)
 {
     ImageScene fixture;
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-    EXPECT_TRUE(selection.fallback_reason.empty());
-    EXPECT_FALSE(selection.fell_back());
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
+    EXPECT_TRUE(selection.failure_reason.empty());
+    EXPECT_FALSE(selection.failed());
 }
 
 TEST(MetalCapability, AnUnusedPerspectiveCameraDoesNotRejectTheScene)
@@ -316,7 +316,7 @@ TEST(MetalCapability, AnUnusedPerspectiveCameraDoesNotRejectTheScene)
     ASSERT_TRUE(fixture.scene.cameras["global_perspective"]->IsPerspective());
     ASSERT_EQ(fixture.scene.activeCamera, fixture.global.get());
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, ASupportedLayerWithAPerspectiveCameraIsAccepted)
@@ -325,7 +325,7 @@ TEST(MetalCapability, ASupportedLayerWithAPerspectiveCameraIsAccepted)
     fixture.node->SetCamera("global_perspective");
     ASSERT_NE(fixture.scene.activeCamera, fixture.global_perspective.get());
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, AnActivePerspectiveCameraIsAcceptedForSupportedLayers)
@@ -333,7 +333,7 @@ TEST(MetalCapability, AnActivePerspectiveCameraIsAcceptedForSupportedLayers)
     ImageScene fixture;
     fixture.scene.activeCamera = fixture.global_perspective.get();
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, ASpriteParticleLayerWithAPerspectiveCameraIsAccepted)
@@ -346,7 +346,7 @@ TEST(MetalCapability, ASpriteParticleLayerWithAPerspectiveCameraIsAccepted)
     fixture.scene.sceneGraph->AppendChild(node);
     fixture.scene.paritileSys->subsystems.push_back(nullptr);
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, EveryUnsupportedConstructHasItsOwnReason)
@@ -430,7 +430,7 @@ TEST(MetalCapability, AcceptsAPlainSpriteSheetTexture)
     fixture.scene.textures["materials/card.tex"] = std::move(sheet);
 
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, AcceptsAStandardTwoDimensionalSpriteParticleLayer)
@@ -442,7 +442,7 @@ TEST(MetalCapability, AcceptsAStandardTwoDimensionalSpriteParticleLayer)
     AttachParticleLayer(fixture, ParticleMesh("genericparticle"));
 
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, AcceptsASkinnedMeshWithAPuppetShader)
@@ -451,8 +451,8 @@ TEST(MetalCapability, AcceptsASkinnedMeshWithAPuppetShader)
     fixture.node->AddMesh(SkinnedMesh(kBonesReflectionJson));
 
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-    EXPECT_TRUE(selection.fallback_reason.empty());
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
+    EXPECT_TRUE(selection.failure_reason.empty());
 }
 
 namespace
@@ -510,7 +510,7 @@ TEST(MetalCapability, APuppetUnderAnEffectChainIsJudgedByTheMeshTheChainResolves
     // puppet that has an effect; what it will be drawn with is the final mesh.
     PuppetEffectChain resolved(/*skinned_node=*/1, /*final_mesh_has_weights=*/true);
     const auto        selection = EvaluateMetalSupport(resolved.fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 
     // A final mesh without bone weights leaves the skinning shader nothing to read.
     PuppetEffectChain plain_final(1, false);
@@ -532,7 +532,7 @@ TEST(MetalCapability, ASceneWithLightsIsAccepted)
     fixture.scene.lights.push_back(
         std::make_unique<SceneLight>(linalg::Vector3f { 1.0f, 1.0f, 1.0f }, 100.0f, 1.0f));
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, AnImageEffectChainIsNoLongerRejectedBeforeTheGraphExists)
@@ -546,13 +546,13 @@ TEST(MetalCapability, AnImageEffectChainIsNoLongerRejectedBeforeTheGraphExists)
         fixture.node.get(), 1920.0f, 1080.0f, "_rt_effect_pingpong_a_0",
         "_rt_effect_pingpong_b_0"));
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 
     ImageScene post;
     post.scene.post_processes.push_back(std::make_shared<ScenePostProcess>());
     const auto post_selection = EvaluateMetalSupport(post.scene);
-    EXPECT_EQ(post_selection.backend, SceneBackend::NativeMetal)
-        << post_selection.fallback_reason;
+    EXPECT_FALSE(post_selection.failed())
+        << post_selection.failure_reason;
 }
 
 TEST(MetalGraph, SequentialEffectPassesAreAccepted)

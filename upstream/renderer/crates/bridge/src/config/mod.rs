@@ -9,7 +9,7 @@ pub mod writer;
 
 pub use app::{
     AppConfig, BatteryModeCfg, FilterCfg, GeneralCfg, MonitorCfg, MonitorSettingsCfg, PowerCfg,
-    QualityCfg, QualityInForce, QualityProfileCfg, SceneRendererModeCfg, SceneResolutionCfg,
+    QualityCfg, QualityInForce, QualityProfileCfg, SceneResolutionCfg,
     SerializedSelector, UiCfg, WindowGeom, clamp_render_scale,
 };
 pub use store::{ConfigLoad, ConfigStore};

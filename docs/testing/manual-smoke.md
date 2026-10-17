@@ -329,8 +329,7 @@ reuse, or visual behavior, which is why these items are manual.
       show a scene or video whose shape differs from the display with **Fill**, then drag
       **Horizontal position** and **Vertical position** across 0 to 100%. The visible part
       follows the thumb while it is dragged, smoothly enough to steer by, and slides on the
-      display without the wallpaper restarting, once on each scene renderer
-      (Compatibility and Native Metal preferred) and with Compatibility video playback.
+      display without the wallpaper restarting, once with a scene and once with a video.
       Releasing keeps it where it stopped, a drag back to where it began returns to that
       position, and the lock screen and the Mission Control picture do not change until the
       release. With **Fit** and a **Scale factor** below 1 the picture slides inside the
@@ -414,8 +413,8 @@ describes what should happen and the log lines to read afterwards.
       player plays them): the clip's window appears like any other native clip's, the held picture
       goes when its first frame is ready, it loops without a visible or audible seam, pause and
       volume follow the controls, and a WebM with Opus or Vorbis sound is heard. A VP8 WebM
-      still goes to the scene engine (the held picture stays until its fallback has drawn, the
-      log has `veil on scene layer` and `released ... (scene first frame)`, no clip window).
+      is refused with a message naming the format, and the display keeps the picture it had (no
+      clip window); nothing else draws it.
 - [ ] Apply a clip stored on a slow or sleeping external drive: the old clip keeps playing
       through the read. If the read outlasts 8 seconds the clip's window opens without a
       picture over it and the log says `no window took it`.

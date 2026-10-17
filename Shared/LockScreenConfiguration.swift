@@ -56,11 +56,6 @@ struct LockScreenScene: Codable, Equatable {
   /// configuration an older app wrote and for a web page, which fills its window; both
   /// read as centred, and a copy of the extension that predates the key ignores it.
   var framing: LockScreenFraming? = nil
-  /// The app's Scene renderer setting for this scene. Absent from a configuration an
-  /// older app wrote and for a web page, which has no scene renderer; absent reads as
-  /// `LockScreenSceneRenderer.default`, the app's own default, and a copy of the
-  /// extension that predates the key ignores it.
-  var sceneRenderer: LockScreenSceneRenderer? = nil
   /// Whether this is a plain video wallpaper, which the extension plays with its own players (an
   /// AVFoundation layer, or the WebM player for WebM and Matroska) and never with the scene engine:
   /// a clip they cannot play is held and reported, as on the desktop. Absent for scenes and web
@@ -72,62 +67,18 @@ struct LockScreenScene: Codable, Equatable {
   var nativeVideoFile: String? = nil
 
   var effectiveFraming: LockScreenFraming { framing ?? .centered }
-  var effectiveSceneRenderer: LockScreenSceneRenderer { sceneRenderer ?? .default }
 
   /// Whether a surface already showing `other` can take this scene without a new
   /// renderer. Frame rate, title and pause apply to the running renderer, and the
   /// preview path is not read by it. The scaling and the position are, like the
   /// project, only read when the renderer is built, so a change of either replaces it.
-  /// So is the scene renderer, which the engine reads once, when the scene is parsed, and the
-  /// kind of wallpaper and the file a video plays.
+  /// So are the kind of wallpaper and the file a video plays.
   func sharesRenderer(with other: LockScreenScene) -> Bool {
     projectPath == other.projectPath && assetsPath == other.assetsPath
       && webEntryFile == other.webEntryFile && propertiesJSON == other.propertiesJSON
       && scalingMode == other.scalingMode && scalingFactor == other.scalingFactor
       && effectiveFraming == other.effectiveFraming
-      && effectiveSceneRenderer == other.effectiveSceneRenderer
       && plainVideo == other.plainVideo && nativeVideoFile == other.nativeVideoFile
-  }
-}
-
-/// Which renderer draws a scene, by the names the app's Scene renderer setting and the
-/// engine use. A preference, not an outcome: a scene the native backend cannot draw as a
-/// whole is drawn by Compatibility, and the extension logs which one drew. With
-/// `nativeMetalOnly` there is no Compatibility to fall to, and the scene is held instead.
-enum LockScreenSceneRenderer: String, Codable, Equatable {
-  case compatibility
-  case nativeMetalPreferred = "native_metal_preferred"
-  /// Native Metal and nothing else: a scene it cannot draw is held, on its last frame or its preview
-  /// picture, and reported as a failure (`LockScreenHeldFailure`) instead of being drawn by Compatibility.
-  case nativeMetalOnly = "native_metal_only"
-
-  /// What the app's setting defaults to, and so what a configuration without the key means.
-  static let `default` = LockScreenSceneRenderer.nativeMetalPreferred
-
-  /// The value of `owe_scene_renderer_preference`.
-  var enginePreference: Int32 {
-    switch self {
-    case .compatibility: 0
-    case .nativeMetalPreferred: 1
-    case .nativeMetalOnly: 2
-    }
-  }
-
-  /// A name this build does not know, written by a newer app, reads as the default
-  /// rather than making the whole configuration unreadable: the default is itself only
-  /// a preference, so the worst outcome is Compatibility for a scene Metal cannot draw.
-  init(from decoder: Decoder) throws {
-    let name = try decoder.singleValueContainer().decode(String.self)
-    self = Self(rawValue: name) ?? .default
-  }
-}
-
-extension LockScreenConfiguration {
-  /// The renderer every scene of this configuration shares: the engine's preference is
-  /// process-wide, and the app writes one value for all of them. A configuration without
-  /// scenes has none.
-  var sceneRenderer: LockScreenSceneRenderer? {
-    scenes.first(where: { $0.webEntryFile == nil })?.effectiveSceneRenderer
   }
 }
 
@@ -150,9 +101,9 @@ struct LockScreenFraming: Codable, Equatable {
 /// Written once a non-preview surface has GPU-ready pixels, or with `error` when
 /// acquiring or replacing its renderer failed; never optimistically.
 ///
-/// `held` is the other way a surface can be ready without drawing: Native Metal is the only renderer it
-/// may use and could not draw the scene, so it shows its last frame or the project's preview picture and
-/// says why, in words the extension has already localized. It is not an `error`: the surface exists and
+/// `held` is the other way a surface can be ready without drawing: Native Metal could not draw the scene
+/// (or the extension's players could not play the video), so it shows its last frame or the project's
+/// preview picture and says why, in words the extension has already localized. It is not an `error`: the surface exists and
 /// shows a picture, and the app keeps the lock screen on it and shows the note. A file an older
 /// extension wrote has no such key and reads as nil.
 struct LockScreenReadiness: Codable {

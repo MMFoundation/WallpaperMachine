@@ -1,17 +1,14 @@
-// What a scene does when the native Metal backend cannot draw it and the
-// renderer preference leaves no other backend to try (`NativeMetalOnly`): it is
-// held and reported, never silently drawn by the compatibility backend.
+// What a scene does when the native Metal backend cannot draw it. There is no
+// other backend to try: the scene is held and reported.
 //
 // Driven end to end through `SceneWallpaper` on a `CAMetalLayer` no window owns,
 // so no desktop is involved. The failures are forced where a real one would
 // strike (`SceneBackendFaults`): the admission gate, creating the native
 // renderer, compiling its graph, a frame after the scene runs, and taking a
-// replacement surface. The evidence is what is observable from outside: no
-// compatibility renderer was ever asked for, the failure was logged once, the
-// frame loop stopped without presenting again, and the surface shows its last
-// frame (a layer that drew) or the project's preview picture (a layer that did
-// not). The same faults are armed under the default preference too, where each
-// must still end in the compatibility backend with its reason.
+// replacement surface. The evidence is what is observable from outside: the
+// failure was logged once, the frame loop stopped without presenting again, and
+// the surface shows its last frame (a layer that drew) or the project's preview
+// picture (a layer that did not).
 
 #include "Core/RendererCounters.hpp"
 #include "Scene/SceneBackendFaults.hpp"
@@ -23,9 +20,6 @@
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
-
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_metal.h>
 
 #include <gtest/gtest.h>
 
@@ -166,7 +160,7 @@ public:
                                           ++m_failure_reports;
                                           m_changed.notify_all();
                                       }));
-        m_wallpaper.initVulkan(MakeSurface());
+        m_wallpaper.initSurface(MakeSurface());
 
         std::filesystem::create_directories(scratch / "assets");
         SceneWallpaperConfig config;
@@ -237,28 +231,11 @@ private:
     RenderInitInfo MakeSurface(uint16_t width = kWidth, uint16_t height = kHeight)
     {
         RenderInitInfo info;
-        void*          handle = (__bridge void*)m_layer;
-        info.metal_layer      = handle;
+        info.metal_layer      = (__bridge void*)m_layer;
         info.width            = width;
         info.height           = height;
         info.render_width     = width;
         info.render_height    = height;
-        info.surface_info.instanceExts = {
-            VK_KHR_SURFACE_EXTENSION_NAME,
-            VK_EXT_METAL_SURFACE_EXTENSION_NAME,
-        };
-        info.surface_info.createSurfaceOp = [handle](VkInstance instance, VkSurfaceKHR* surface) {
-            auto* create = reinterpret_cast<PFN_vkCreateMetalSurfaceEXT>(
-                vkGetInstanceProcAddr(instance, "vkCreateMetalSurfaceEXT"));
-            if (create == nullptr) return VK_ERROR_EXTENSION_NOT_PRESENT;
-            const VkMetalSurfaceCreateInfoEXT create_info {
-                .sType  = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
-                .pNext  = nullptr,
-                .flags  = 0,
-                .pLayer = (__bridge CAMetalLayer*)handle,
-            };
-            return create(instance, &create_info, nullptr, surface);
-        };
         return info;
     }
 
@@ -289,15 +266,13 @@ protected:
     void TearDown() override
     {
         SceneBackendFaults::Instance().Reset();
-        SetSceneRendererPreference(SceneRendererPreference::Compatibility);
         RendererCounters::SetEnabled(false);
         std::error_code ignored;
         std::filesystem::remove_all(root_, ignored);
     }
 
-    /// What every refusal under `NativeMetalOnly` must leave behind, however it
-    /// was forced: the scene is held, not running anywhere, reported once, and
-    /// no compatibility renderer was so much as asked for.
+    /// What every refusal must leave behind, however it was forced: the scene
+    /// is held, not running anywhere, and reported once.
     void ExpectHeld(Running& running, SceneFailureStage stage, const std::string& reason)
     {
         const auto selection = running.wallpaper().sceneBackendSelection();
@@ -305,12 +280,7 @@ protected:
         EXPECT_EQ(selection.failure_stage, stage) << ToString(selection.failure_stage);
         EXPECT_NE(selection.failure_reason.find(reason), std::string::npos)
             << selection.failure_reason;
-        EXPECT_FALSE(selection.fell_back()) << "a held scene did not fall back: "
-                                            << selection.fallback_reason;
         EXPECT_TRUE(selection.created);
-        EXPECT_EQ(SceneBackendFaults::Instance().vulkanAttempts(), 0)
-            << "the compatibility renderer was asked for";
-        EXPECT_EQ(SceneBackendFaults::Instance().vulkanCreated(), 0);
         EXPECT_EQ(LogCapture::Count(kFailureLine), 1) << "the failure is said once";
         EXPECT_NE(running.wallpaper().surfaceHealth().stop_reason, SurfaceStopReason::Running);
     }
@@ -323,10 +293,9 @@ protected:
 // A scene the gate refuses is not drawn by anything else. The host is still told
 // a first picture exists (otherwise its activation waits out 90 seconds and puts
 // the previous wallpaper back), and that picture is the project's own preview.
-TEST_F(SceneFailurePolicy, ARefusedAdmissionIsHeldWithThePreviewAndNothingElseDrawsIt)
+TEST_F(SceneFailurePolicy, ARefusedAdmissionIsHeldWithThePreview)
 {
     LogCapture log;
-    SetSceneRendererPreference(SceneRendererPreference::NativeMetalOnly);
     SceneBackendFaults::Instance().Arm(SceneBackendFault::Admission, "forced refusal for the test");
 
     Running running(WriteScene(root_ / "scene"), root_ / "run");
@@ -349,7 +318,6 @@ TEST_F(SceneFailurePolicy, ARefusedAdmissionIsHeldWithThePreviewAndNothingElseDr
 TEST_F(SceneFailurePolicy, AHeldSceneWithNoPreviewStillSettlesTheHostAndShowsNothingMadeUp)
 {
     LogCapture log;
-    SetSceneRendererPreference(SceneRendererPreference::NativeMetalOnly);
     SceneBackendFaults::Instance().Arm(SceneBackendFault::Admission, "forced refusal for the test");
 
     Running running(WriteScene(root_ / "scene", false), root_ / "run");
@@ -361,7 +329,6 @@ TEST_F(SceneFailurePolicy, AHeldSceneWithNoPreviewStillSettlesTheHostAndShowsNot
 TEST_F(SceneFailurePolicy, AFailedPrepareIsHeldAndTheNextAttemptTriesNativeAgain)
 {
     LogCapture log;
-    SetSceneRendererPreference(SceneRendererPreference::NativeMetalOnly);
     SceneBackendFaults::Instance().Arm(SceneBackendFault::NativeCreate, "forced prepare failure");
 
     {
@@ -379,16 +346,14 @@ TEST_F(SceneFailurePolicy, AFailedPrepareIsHeldAndTheNextAttemptTriesNativeAgain
     std::this_thread::sleep_for(300ms);
     const auto selection = retry.wallpaper().sceneBackendSelection();
     EXPECT_FALSE(selection.failed()) << selection.failure_reason;
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal);
+    EXPECT_TRUE(selection.created);
     EXPECT_GT(retry.Presented(), 0u);
     EXPECT_EQ(retry.layer().sublayers.count, 0u) << "a real frame replaced the preview";
-    EXPECT_EQ(SceneBackendFaults::Instance().vulkanAttempts(), 0);
 }
 
-TEST_F(SceneFailurePolicy, AShaderThatDoesNotCompileIsHeldWithoutACompatibilityRenderer)
+TEST_F(SceneFailurePolicy, AShaderThatDoesNotCompileIsHeld)
 {
     LogCapture log;
-    SetSceneRendererPreference(SceneRendererPreference::NativeMetalOnly);
     SceneBackendFaults::Instance().Arm(SceneBackendFault::NativeCompile, "forced compile failure");
 
     Running running(WriteScene(root_ / "scene"), root_ / "run");
@@ -406,13 +371,13 @@ TEST_F(SceneFailurePolicy, AShaderThatDoesNotCompileIsHeldWithoutACompatibilityR
 TEST_F(SceneFailurePolicy, AFrameThatFailsMidRunHoldsTheLastFrameAndReportsOnce)
 {
     LogCapture log;
-    SetSceneRendererPreference(SceneRendererPreference::NativeMetalOnly);
     Running running(WriteScene(root_ / "scene"), root_ / "run");
     ASSERT_TRUE(running.WaitForFirstFrame());
     std::this_thread::sleep_for(300ms);
     ASSERT_EQ(running.wallpaper().surfaceHealth().stop_reason, SurfaceStopReason::Running);
     ASSERT_GT(running.Presented(), 0u);
-    ASSERT_EQ(running.wallpaper().sceneBackendSelection().backend, SceneBackend::NativeMetal);
+    ASSERT_TRUE(running.wallpaper().sceneBackendSelection().created);
+    ASSERT_FALSE(running.wallpaper().sceneBackendSelection().failed());
 
     SceneBackendFaults::Instance().Arm(SceneBackendFault::NativeDraw, "forced frame failure");
     ASSERT_TRUE(running.WaitForFailureReports(1)) << "the host was never told the scene stopped";
@@ -434,10 +399,9 @@ TEST_F(SceneFailurePolicy, AFrameThatFailsMidRunHoldsTheLastFrameAndReportsOnce)
     std::this_thread::sleep_for(500ms);
     const auto healed = running.wallpaper().sceneBackendSelection();
     EXPECT_FALSE(healed.failed());
-    EXPECT_EQ(healed.backend, SceneBackend::NativeMetal);
+    EXPECT_TRUE(healed.created);
     EXPECT_EQ(running.wallpaper().surfaceHealth().stop_reason, SurfaceStopReason::Running);
     EXPECT_GT(running.Presented(), held);
-    EXPECT_EQ(SceneBackendFaults::Instance().vulkanAttempts(), 0);
 
     // The next failure is a new report.
     SceneBackendFaults::Instance().Arm(SceneBackendFault::NativeDraw, "second forced failure");
@@ -451,12 +415,12 @@ TEST_F(SceneFailurePolicy, AFrameThatFailsMidRunHoldsTheLastFrameAndReportsOnce)
 TEST_F(SceneFailurePolicy, ARefusedReloadIsNotDrawnByTheOutgoingScenesRendererAfterAResize)
 {
     LogCapture log;
-    SetSceneRendererPreference(SceneRendererPreference::NativeMetalOnly);
     Running running(WriteScene(root_ / "scene"), root_ / "run");
     ASSERT_TRUE(running.WaitForFirstFrame());
     std::this_thread::sleep_for(300ms);
     ASSERT_GT(running.Presented(), 0u);
-    ASSERT_EQ(running.wallpaper().sceneBackendSelection().backend, SceneBackend::NativeMetal);
+    ASSERT_TRUE(running.wallpaper().sceneBackendSelection().created);
+    ASSERT_FALSE(running.wallpaper().sceneBackendSelection().failed());
 
     SceneBackendFaults::Instance().Arm(SceneBackendFault::Admission, "forced refusal on reload");
     running.Reload(WriteScene(root_ / "scene-b"), root_ / "run");
@@ -477,14 +441,12 @@ TEST_F(SceneFailurePolicy, ARefusedReloadIsNotDrawnByTheOutgoingScenesRendererAf
     EXPECT_EQ(running.Presented(), held) << "the refused scene presented a frame";
     EXPECT_NE(running.wallpaper().surfaceHealth().stop_reason, SurfaceStopReason::Running);
     EXPECT_EQ(running.layer().sublayers.count, 0u) << "the last picture is held, no preview over it";
-    EXPECT_EQ(SceneBackendFaults::Instance().vulkanAttempts(), 0);
     EXPECT_EQ(LogCapture::Count(kFailureLine), 1);
 }
 
-TEST_F(SceneFailurePolicy, ASurfaceTheNativeRendererCannotTakeIsHeldNotHandedToCompatibility)
+TEST_F(SceneFailurePolicy, ASurfaceTheNativeRendererCannotTakeIsHeld)
 {
     LogCapture log;
-    SetSceneRendererPreference(SceneRendererPreference::NativeMetalOnly);
     Running running(WriteScene(root_ / "scene"), root_ / "run");
     ASSERT_TRUE(running.WaitForFirstFrame());
     std::this_thread::sleep_for(300ms);
@@ -495,63 +457,17 @@ TEST_F(SceneFailurePolicy, ASurfaceTheNativeRendererCannotTakeIsHeldNotHandedToC
     ExpectHeld(running, SceneFailureStage::Surface, "forced surface failure");
 }
 
-// The same faults under the default preference still end in the compatibility
-// backend, with the reason: the failure policy is only for `NativeMetalOnly`.
-TEST_F(SceneFailurePolicy, TheDefaultPreferenceStillFallsBackToCompatibilityForEachFailure)
-{
-    struct Case
-    {
-        const char*       name;
-        SceneBackendFault fault;
-        const char*       reason;
-    };
-    for (const auto& run : { Case { "admission", SceneBackendFault::Admission, "forced refusal" },
-                             Case { "prepare", SceneBackendFault::NativeCreate, "forced prepare" },
-                             Case { "compile", SceneBackendFault::NativeCompile, "forced compile" },
-                             Case { "frame", SceneBackendFault::NativeDraw, "forced frame" } }) {
-        SCOPED_TRACE(run.name);
-        SceneBackendFaults::Instance().Reset();
-        SetSceneRendererPreference(SceneRendererPreference::NativeMetalPreferred);
-        const bool mid_run = run.fault == SceneBackendFault::NativeDraw;
-        if (! mid_run) SceneBackendFaults::Instance().Arm(run.fault, run.reason);
-
-        Running running(WriteScene(root_ / (std::string(run.name) + "-scene")),
-                        root_ / (std::string(run.name) + "-run"));
-        ASSERT_TRUE(running.WaitForFirstFrame());
-        if (mid_run) {
-            std::this_thread::sleep_for(300ms);
-            SceneBackendFaults::Instance().Arm(run.fault, run.reason);
-        }
-        // Wait until the fallback has happened.
-        const auto deadline = std::chrono::steady_clock::now() + 10s;
-        while (running.wallpaper().sceneBackendSelection().backend != SceneBackend::LegacyVulkan &&
-               std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::sleep_for(20ms);
-        }
-        const auto selection = running.wallpaper().sceneBackendSelection();
-        EXPECT_EQ(selection.backend, SceneBackend::LegacyVulkan);
-        EXPECT_FALSE(selection.failed());
-        EXPECT_NE(selection.fallback_reason.find(run.reason), std::string::npos)
-            << selection.fallback_reason;
-        EXPECT_GE(SceneBackendFaults::Instance().vulkanCreated(), 1);
-        std::this_thread::sleep_for(300ms);
-        EXPECT_GT(running.Presented(), 0u) << "the fallback never drew";
-        EXPECT_EQ(running.wallpaper().surfaceHealth().stop_reason, SurfaceStopReason::Running);
-    }
-}
-
-// A surface with nothing the native renderer could adopt is a failure to report
-// under `NativeMetalOnly`, not a licence to create the compatibility renderer.
-TEST_F(SceneFailurePolicy, ASurfaceWithNoMetalLayerIsAFailureNotACompatibilityRenderer)
+// A surface with nothing the native renderer could adopt is a failure to report,
+// not a reason to create some other renderer.
+TEST_F(SceneFailurePolicy, ASurfaceWithNoMetalLayerIsAFailureToReport)
 {
     LogCapture log;
-    SetSceneRendererPreference(SceneRendererPreference::NativeMetalOnly);
 
     SceneWallpaper wallpaper;
     ASSERT_TRUE(wallpaper.init());
     RenderInitInfo info;
     info.offscreen = true;
-    wallpaper.initVulkan(std::move(info));
+    wallpaper.initSurface(std::move(info));
     std::filesystem::create_directories(root_ / "run/assets");
     SceneWallpaperConfig config;
     config.source     = WriteScene(root_ / "scene").string();
@@ -568,5 +484,4 @@ TEST_F(SceneFailurePolicy, ASurfaceWithNoMetalLayerIsAFailureNotACompatibilityRe
     wallpaper.shutdown();
     EXPECT_TRUE(selection.failed());
     EXPECT_EQ(selection.failure_stage, SceneFailureStage::Prepare) << selection.failure_reason;
-    EXPECT_EQ(SceneBackendFaults::Instance().vulkanAttempts(), 0);
 }

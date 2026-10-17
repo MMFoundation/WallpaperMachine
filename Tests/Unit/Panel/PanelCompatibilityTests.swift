@@ -66,7 +66,7 @@ final class PanelCompatibilityTests: PanelTestCase {
       store.settingsSnapshot.sceneRenderers = [
         .init(
           displayId: 7, displayName: "Display", wallpaperId: "one", wallpaperTitle: "One", backend: "metal",
-          fallbackReason: nil, failureStage: nil, failureReason: nil, videoPath: "none", optimizationApplied: nil)
+          failureStage: nil, failureReason: nil, videoPath: "none", optimizationApplied: nil)
       ]
       XCTAssertEqual(panel.controller.compatibilityState?.backend, "metal")
     }

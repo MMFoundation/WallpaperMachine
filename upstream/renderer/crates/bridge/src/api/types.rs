@@ -499,12 +499,10 @@ pub struct BridgeSceneUpdateModeReport {
     pub reasons: Vec<String>,
 }
 
-/// Which renderer actually drew the scene on one display.
+/// Whether a renderer is drawing the scene on one display.
 ///
-/// `backend` is what ran, not what was asked for. `fallback_reason` is present
-/// only when the user preferred the native Metal backend and this scene did
-/// not get it, so its absence on a compatibility row means the user never
-/// asked rather than that no reason was recorded.
+/// `backend` is `"native_metal"` while Native Metal is drawing it, and
+/// `"unknown"` while the scene is still being read or is held in a failure.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct BridgeSceneBackendReport {
     pub display_id: u32,
@@ -512,15 +510,13 @@ pub struct BridgeSceneBackendReport {
     pub wallpaper_id: String,
     pub wallpaper_title: String,
     pub backend: String,
-    pub fallback_reason: Option<String>,
-    /// Why the scene is held and not drawn, when the preference is
-    /// `native_metal_only` and the native backend could not draw it: the
-    /// stage (`"unsupported"`, `"prepare"`, `"compile"`, `"frame"` or
+    /// Why the scene is held and not drawn, when Native Metal could not draw
+    /// it: the stage (`"unsupported"`, `"prepare"`, `"compile"`, `"frame"` or
     /// `"surface"`), a category the host words for the user, and the renderer's
     /// own English explanation for diagnostics. Both are `None` for a scene
     /// that is drawing, and `backend` is `"unknown"` while they are set:
     /// nothing is drawing the scene, and the display shows its last frame or
-    /// the project's preview picture. Mutually exclusive with `fallback_reason`.
+    /// the project's preview picture.
     pub failure_stage: Option<String>,
     pub failure_reason: Option<String>,
     /// How this scene's video textures reached the shaders that sample them on
@@ -576,10 +572,6 @@ pub struct BridgeSettingsSnapshot {
     /// the `video_path` of each `scene_renderers` row is what actually
     /// happened.
     pub scene_video_plane_sampling_enabled: bool,
-    /// `"compatibility"`, `"native_metal_preferred"` or `"native_metal_only"`: the user's choice,
-    /// which for a given scene may or may not be what `scene_renderers`
-    /// reports. A saved preference, not a read-back.
-    pub scene_renderer: String,
     /// `"display"` or `"canvas"`: how many pixels a 2D scene is rasterized
     /// with before the render scale divides them. The saved preference, which
     /// every running 2D scene follows; perspective scenes and plain videos

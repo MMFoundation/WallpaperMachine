@@ -19,7 +19,7 @@ use wallpaper_core::project::SceneTemplate;
 use wallpaper_core::{
     AudioSpectrum128, DisplaySelector, DisplaySnapshotEntry, EngineError, FirstFrameCallback,
     PropertyPreview, RecoveryOutcome, RecoveryReason, SceneBackend, SceneDemandReasons,
-    SceneRendererPreference, SceneResolution, SceneUpdateMode, WallpaperAssignment, WallpaperEngine,
+    SceneResolution, SceneUpdateMode, WallpaperAssignment, WallpaperEngine,
     media::audio::{
         AudioCaptureBackend, AudioCaptureController, AudioVolume, PlatformAudioCaptureBackend,
         RESTART_RETRY_DELAYS, RestartOutcome, device_watch::OutputDeviceWatcher,
@@ -269,22 +269,6 @@ pub trait EngineFacade: Send + Sync + 'static {
         let _ = enabled;
         Ok(())
     }
-    /// Chooses which renderer draws scene wallpapers, process-wide.
-    /// `Compatibility` by default.
-    ///
-    /// A preference, not a guarantee: a scene the native backend cannot draw
-    /// in full falls back as a whole scene.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the renderer rejects the call.
-    fn set_scene_renderer_preference(
-        &self,
-        preference: SceneRendererPreference,
-    ) -> Result<(), EngineError> {
-        let _ = preference;
-        Ok(())
-    }
     /// Chooses how many pixels a 2D scene is rasterized with, process-wide.
     /// `Canvas` by default.
     ///
@@ -511,13 +495,6 @@ impl EngineFacade for RealEngineFacade {
 
     fn set_scene_video_plane_sampling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
         self.engine.set_scene_video_plane_sampling_enabled(enabled)
-    }
-
-    fn set_scene_renderer_preference(
-        &self,
-        preference: SceneRendererPreference,
-    ) -> Result<(), EngineError> {
-        self.engine.set_scene_renderer_preference(preference)
     }
 
     fn set_scene_resolution(&self, resolution: SceneResolution) -> Result<(), EngineError> {
@@ -1198,7 +1175,6 @@ pub struct FakeEngineFacade {
     scene_optimization_calls: Arc<ArcSwap<Vec<bool>>>,
     scene_on_demand_calls: Arc<ArcSwap<Vec<bool>>>,
     scene_video_plane_sampling_calls: Arc<ArcSwap<Vec<bool>>>,
-    scene_renderer_calls: Arc<ArcSwap<Vec<SceneRendererPreference>>>,
     scene_resolution_calls: Arc<ArcSwap<Vec<SceneResolution>>>,
     scene_runtime_reports: Arc<ArcSwap<Vec<SceneRuntimeReport>>>,
     /// Readings handed out one per read before the stored value is used again,
@@ -1626,12 +1602,6 @@ impl FakeEngineFacade {
     #[must_use]
     pub fn scene_video_plane_sampling_calls(&self) -> Vec<bool> {
         load_log(&self.scene_video_plane_sampling_calls)
-    }
-
-    /// Every scene renderer preference the bridge pushed, in order.
-    #[must_use]
-    pub fn scene_renderer_calls(&self) -> Vec<SceneRendererPreference> {
-        load_log(&self.scene_renderer_calls)
     }
 
     /// Every 2D scene resolution the bridge pushed, in order.
@@ -2391,14 +2361,6 @@ impl EngineFacade for FakeEngineFacade {
 
     fn set_scene_video_plane_sampling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
         push_log(&self.scene_video_plane_sampling_calls, enabled);
-        Ok(())
-    }
-
-    fn set_scene_renderer_preference(
-        &self,
-        preference: SceneRendererPreference,
-    ) -> Result<(), EngineError> {
-        push_log(&self.scene_renderer_calls, preference);
         Ok(())
     }
 

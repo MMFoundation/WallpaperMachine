@@ -68,8 +68,6 @@ final class LockScreenWallpaperService {
   @ObservationIgnored private var lastInputs: [LockScreenPublishInput]?
   @ObservationIgnored private var lastContentRevision: UInt64?
   @ObservationIgnored private let contentRevision: () -> UInt64
-  /// The app's Scene renderer setting by the bridge's name; nil reads as the default.
-  @ObservationIgnored private let sceneRendererSetting: () -> String?
   @ObservationIgnored private var lastLockScreenRequested: Bool?
   @ObservationIgnored private var lastScreenSaverRequested = false
   @ObservationIgnored private var lastHasWebWallpapers = false
@@ -80,8 +78,7 @@ final class LockScreenWallpaperService {
   @ObservationIgnored private var lockScreenActivationError: String?
 
   convenience init(
-    bridge: WallpaperBridge, contentRevision: @escaping () -> UInt64 = { 0 },
-    sceneRendererSetting: @escaping () -> String? = { nil }
+    bridge: WallpaperBridge, contentRevision: @escaping () -> UInt64 = { 0 }
   ) {
     let registration = LockScreenExtensionRegistration(processes: .live)
     self.init(
@@ -95,8 +92,7 @@ final class LockScreenWallpaperService {
       scenes: { try await bridge.lockScreenScenes() },
       selection: LockScreenWallpaperSelection(
         folder: ClientPaths.supportURL.appendingPathComponent("LockScreen")),
-      exchange: LockScreenConfiguration.exchangeDirectory, contentRevision: contentRevision,
-      sceneRendererSetting: sceneRendererSetting)
+      exchange: LockScreenConfiguration.exchangeDirectory, contentRevision: contentRevision)
   }
 
   init(
@@ -116,10 +112,8 @@ final class LockScreenWallpaperService {
       "Contents/Extensions/WallpaperMachineExtension.appex"),
     runningExtensionBundles: @escaping () -> [URL] = LockScreenExtensionDiagnostics.runningExtensionBundles,
     readinessTimeout: TimeInterval = 35,
-    contentRevision: @escaping () -> UInt64 = { 0 },
-    sceneRendererSetting: @escaping () -> String? = { nil }
+    contentRevision: @escaping () -> UInt64 = { 0 }
   ) {
-    self.sceneRendererSetting = sceneRendererSetting
     self.scenes = scenes
     self.selection = selection
     self.exchange = exchange
@@ -334,8 +328,6 @@ final class LockScreenWallpaperService {
       try Task.checkCancellation()
       guard generation == revision else { return }
       var inputs: [LockScreenPublishInput] = []
-      let sceneRenderer = sceneRendererSetting().flatMap(LockScreenSceneRenderer.init(rawValue:))
-        ?? .default
       for record in records {
         guard let uuid = displayUUID(record.displayId) else {
           // Keep the last complete mapping while Core Graphics settles during wake.
@@ -362,8 +354,7 @@ final class LockScreenWallpaperService {
           projectPath: record.projectPath, assetsPath: record.assetsPath, fps: record.fps,
           scalingMode: mode, scalingFactor: record.scalingFactor,
           framing: LockScreenFraming(panX: record.framing.panX, panY: record.framing.panY),
-          propertiesJSON: record.propertiesJson, paused: record.paused,
-          sceneRenderer: sceneRenderer))
+          propertiesJSON: record.propertiesJson, paused: record.paused))
       }
       inputs.sort { $0.displayID < $1.displayID }
       let currentContentRevision = contentRevision()
@@ -752,8 +743,6 @@ private struct LockScreenPublishInput: Equatable, Sendable {
   var framing: LockScreenFraming
   var propertiesJSON: String?
   var paused: Bool
-  /// Part of the input, so changing the Scene renderer setting republishes a revision.
-  var sceneRenderer: LockScreenSceneRenderer
 }
 
 /// A source-tree metadata fingerprint reuses immutable snapshots without reading
@@ -846,9 +835,8 @@ private enum LockScreenAssetPublisher {
           previewPath: nil,
           fps: input.fps, scalingMode: input.scalingMode, scalingFactor: input.scalingFactor,
           propertiesJSON: properties, paused: input.paused, webEntryFile: webEntry,
-          // A web page fills its window, so it has no position and no scene renderer to carry.
+          // A web page fills its window, so it has no position to carry.
           framing: isWeb ? nil : input.framing,
-          sceneRenderer: isWeb ? nil : input.sceneRenderer,
           plainVideo: isVideo ? true : nil, nativeVideoFile: nativeVideoFile))
     }
     return Prepared(

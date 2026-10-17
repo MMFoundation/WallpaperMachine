@@ -94,27 +94,6 @@ final class PanelPerformanceSettingsTests: PanelTestCase {
     XCTAssertEqual(DisplaySleepAction.allCases.map(\.rawValue), ["pause", "stop"])
   }
 
-  /// An unknown renderer name is refused instead of falling back to Compatibility behind the user's
-  /// back: the typed choice has no way to name one.
-  func testSceneRendererOffersOnlyTheNamesTheEngineAccepts() async throws {
-    for rejected in ["metal", "native_preferred", "NativeMetalPreferred", ""] {
-      XCTAssertNil(SceneRendererMode(rawValue: rejected), rejected)
-    }
-    XCTAssertEqual(
-      SceneRendererMode.allCases.map(\.rawValue),
-      ["compatibility", "native_metal_preferred", "native_metal_only"])
-
-    try await withRecordingPanel { panel, bridge in
-      try await panel.controller.setSceneRenderer(.nativeMetalPreferred)
-      XCTAssertEqual(bridge.sceneRendererCalls, ["native_metal_preferred"])
-      XCTAssertEqual(panel.controller.performanceSettings.sceneRenderer, .nativeMetalPreferred)
-
-      try await panel.controller.setSceneRenderer(.nativeMetalOnly)
-      XCTAssertEqual(bridge.sceneRendererCalls.last, "native_metal_only")
-      XCTAssertEqual(panel.controller.performanceSettings.sceneRenderer, .nativeMetalOnly)
-    }
-  }
-
   /// The choice is by the names the engine accepts, ships on the display and comes back as the engine
   /// answered it. A name the typed choice cannot make is not offered, so the engine never has to refuse
   /// one the panel sent.

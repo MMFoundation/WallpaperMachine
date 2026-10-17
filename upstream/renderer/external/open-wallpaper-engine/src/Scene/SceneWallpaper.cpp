@@ -45,7 +45,6 @@
 #include "Runtime/RuntimeImageSource.hpp"
 #include "RenderCommon/SceneToRenderGraph.hpp"
 #include "RenderCommon/StaticSubgraphCache.hpp"
-#include "VulkanRender/VulkanRender.hpp"
 #include "Runtime/VirtualAssetRegistry.hpp"
 #include <algorithm>
 #include <atomic>
@@ -472,7 +471,7 @@ public:
     /// cast back has to be defined for every value that can arrive.
     enum class CMD : int32_t
     {
-        CMD_INIT_VULKAN,
+        CMD_INIT_SURFACE,
         CMD_SET_SCENE,
         CMD_SET_FILLMODE,
         CMD_SET_SCALINGMODE,
@@ -545,7 +544,7 @@ public:
                 CASE_CMD(APPLY_PROJECT_PROPERTIES);
                 CASE_CMD(SET_SCENE);
                 CASE_CMD(SET_SPEED);
-                CASE_CMD(INIT_VULKAN);
+                CASE_CMD(INIT_SURFACE);
                 CASE_CMD(BEGIN_SURFACE_RECONFIGURE);
                 CASE_CMD(FINISH_SURFACE_RECONFIGURE);
                 CASE_CMD(POSTER_REQUEST);
@@ -578,18 +577,6 @@ public:
             // when — and only when — the pixels actually moved.
             if (cmd != CMD::CMD_DRAW && cmd != CMD::CMD_SYSTEM_MEDIA_ARTWORK) requestFrame();
         }
-    }
-
-    // Vulkan-only: these export a swapchain and a sync fd, which the Metal
-    // backend has no equivalent of. Null while Metal is driving, which is what
-    // the offscreen export path already treats as "not available".
-    ExSwapchain* exSwapchain() const {
-        auto* vulkan = m_render->vulkanOnly();
-        return vulkan != nullptr ? vulkan->exSwapchain() : nullptr;
-    }
-    int takeLastFrameSyncFd() {
-        auto* vulkan = m_render->vulkanOnly();
-        return vulkan != nullptr ? vulkan->takeLastFrameSyncFd() : -1;
     }
 
     bool renderInited() const { return m_render->inited(); }
@@ -721,106 +708,50 @@ public:
     /// does so for a scene.
     ///
     /// Runs once per scene, after the scene is parsed and before its graph is
-    /// built, because the choice depends on what the scene contains — which is
-    /// also why nothing is created before this point. The selection is published
-    /// only once a backend exists, so the host never names a renderer that is
-    /// not drawing.
+    /// built, because whether the scene can be drawn depends on what it
+    /// contains -- which is also why nothing is created before this point. The
+    /// selection is published only once the renderer exists, so the host never
+    /// names a renderer that is not drawing.
     void selectSceneBackend() {
         if (m_scene == nullptr || m_render_init_info == nullptr) return;
-
-        // Captured once per scene, here, so every failure path that follows
-        // answers the same question the same way even if the process-wide
-        // preference is changed while the scene runs.
-        const auto preference  = CurrentSceneRendererPreference();
-        m_allows_compatibility = SceneRendererAllowsCompatibility(preference);
 
         auto selection = metal::SelectSceneBackend(*m_scene);
 #ifdef WESCENE_BUILD_TESTS
         if (auto forced = testing::SceneBackendFaults::Instance().Consume(
                 testing::SceneBackendFault::Admission)) {
-            selection = metal::NativeRefusal(preference, *forced);
+            selection = metal::NativeRefusal(*forced);
         }
 #endif
 
-        // Refused, and nothing may draw it instead. No renderer is created: not
-        // the compatibility one, and not a native one that would only have
+        // Refused, and nothing else may draw it instead. No renderer is
+        // created: not another one, and not a native one that would only have
         // been torn down again.
         if (selection.failed()) {
             holdFailedScene(selection.failure_stage, selection.failure_reason);
             return;
         }
 
-        if (selection.backend == SceneBackend::NativeMetal) {
-            if (m_render->backend() == SceneBackend::NativeMetal && m_render->inited()) {
-                setSceneBackendSelection(selection);
-                return;
-            }
-            std::string error;
-            if (m_render->createMetal(*m_render_init_info, error)) {
-                setSceneBackendSelection(selection);
-                reapplySurfaceState();
-                return;
-            }
-            // Prepare failed, and the handle is empty. Remember the failure
-            // against this scene so the next reconcile does not try again and
-            // produce a native/legacy flip-flop, then create the compatibility
-            // backend carrying the concrete reason.
-            if (error.empty()) error = "the native renderer could not be prepared";
-            if (! m_allows_compatibility) {
-                holdFailedScene(SceneFailureStage::Prepare, error);
-                return;
-            }
-            metal::RecordMetalPrepareFailure(*m_scene, error);
-            if (! m_render->createVulkan(*m_render_init_info)) {
-                suspendAfterGraphFailure();
-                return;
-            }
-            setSceneBackendSelection(SceneBackendSelection { SceneBackend::LegacyVulkan, error });
-            reapplySurfaceState();
-            return;
-        }
-
-        // A Vulkan renderer already driving this surface is reused: a wallpaper
-        // switch invalidates the scene, not the device or the swapchain, and
+        // A renderer already driving this surface is reused: a wallpaper switch
+        // invalidates the scene, not the device or the drawable loop, and
         // rebuilding one that works costs a visible gap for nothing.
-        if (m_render->backend() == SceneBackend::LegacyVulkan && m_render->inited()) {
+        if (m_render->hasBackend() && m_render->inited()) {
             setSceneBackendSelection(selection);
             return;
         }
-        if (! m_render->createVulkan(*m_render_init_info)) {
-            suspendAfterGraphFailure();
+        std::string error;
+        if (m_render->createMetal(*m_render_init_info, error)) {
+            setSceneBackendSelection(selection);
+            reapplySurfaceState();
             return;
         }
-        setSceneBackendSelection(selection);
-        reapplySurfaceState();
+        // Prepare failed, and the handle is empty. Nothing else may draw the
+        // scene, so the failure is held and reported with its reason.
+        if (error.empty()) error = "the native renderer could not be prepared";
+        holdFailedScene(SceneFailureStage::Prepare, error);
     }
 
-    /// Abandons the native backend for this scene and re-establishes the
-    /// compatibility one on the same surface.
-    ///
-    /// The failure is remembered against the scene so the next reconcile does
-    /// not try native again and produce a native/legacy flip-flop. Returns
-    /// false only when the compatibility backend could not be re-established
-    /// either, which is the one case that genuinely has no renderer left.
-    bool fallBackToCompatibility() {
-        // Never under `NativeMetalOnly`: the callers decide what a refusal
-        // means there, and none of them may reach the compatibility renderer.
-        if (! m_allows_compatibility) return false;
-        if (m_render->backend() != SceneBackend::NativeMetal) return false;
-        auto reason = m_render->lastError();
-        if (reason.empty()) reason = "the native renderer could not draw this scene";
-        if (m_scene != nullptr) metal::RecordMetalPrepareFailure(*m_scene, reason);
-        // `reason` is read off the native renderer above, before creating the
-        // compatibility one destroys it.
-        if (m_render_init_info == nullptr) return false;
-        if (! m_render->createVulkan(*m_render_init_info)) return false;
-        setSceneBackendSelection(SceneBackendSelection { SceneBackend::LegacyVulkan, reason });
-        reapplySurfaceState();
-        return true;
-    }
-
-    /// A scene that cannot be drawn with the native backend, when nothing else
-    /// may draw it: the surface keeps what it shows, the failure is said once,
+    /// A scene that cannot be drawn with the native backend: nothing else may
+    /// draw it, so the surface keeps what it shows, the failure is said once,
     /// and rendering stops. The picture on a layer that has already drawn is its
     /// last frame, which the layer holds on its own; a layer that has drawn
     /// nothing gets the project's preview picture instead of staying black.
@@ -853,7 +784,6 @@ public:
         if (reason.empty()) reason = "the native renderer could not draw this wallpaper";
         m_failure_stage = stage;
         SceneBackendSelection selection;
-        selection.backend        = SceneBackend::NativeMetal;
         selection.failure_stage  = stage;
         selection.failure_reason = std::move(reason);
         setSceneBackendSelection(std::move(selection));
@@ -896,19 +826,16 @@ public:
         std::scoped_lock lock(m_backend_selection_mutex);
         if (! m_backend_selection.failed()) return;
         m_backend_selection = SceneBackendSelection {};
-        if (m_render->hasBackend() && m_render->backend() == SceneBackend::NativeMetal) {
-            m_backend_selection.backend = SceneBackend::NativeMetal;
-            m_backend_selection.created = true;
-        }
+        if (m_render->hasBackend()) m_backend_selection.created = true;
     }
 
     /// Re-applies the surface state a newly created renderer does not inherit.
     ///
-    /// Creating a backend produces an object that holds none of the scaling,
+    /// Creating a renderer produces an object that holds none of the scaling,
     /// flip, playback rate, pause or counter state the settings commands have
     /// already recorded, so every one of them has to be pushed again. Pause in
     /// particular: a wallpaper the user paused must not start playing because
-    /// they changed a renderer preference.
+    /// its renderer was created after the pause.
     void reapplySurfaceState() {
         m_render->SetCounters(&counters);
         m_render->SetWallpaperScalingMode(m_scalingmode);
@@ -1167,23 +1094,20 @@ private:
         if (! m_render->compileRenderGraph(*m_scene, *m_rg)) {
             // Shader libraries and pipeline states are created here, not at
             // init, so this is where a scene that passed the capability gate
-            // actually trips the Metal compiler. Suspending would leave that
-            // wallpaper black; the compatibility backend draws it, unless the
-            // preference allows none, when the failure is held and reported.
-            if (! m_allows_compatibility) {
-                auto reason = m_render->lastError();
-                if (reason.empty()) reason = "the native renderer could not compile this scene";
-                holdFailedScene(SceneFailureStage::Compile, std::move(reason));
-                return false;
-            }
-            if (! fallBackToCompatibility()) {
+            // actually trips the Metal compiler. Nothing else may draw it, so
+            // the failure is held (what the layer shows stays) and reported.
+            //
+            // With no renderer at all and no failure already held, no surface has
+            // reached this scene yet: nothing failed to compile, so there is
+            // nothing to report and the host is not told a picture exists.
+            if (! m_render->hasBackend() && m_failure_stage == SceneFailureStage::None) {
                 suspendAfterGraphFailure();
                 return false;
             }
-            if (! m_render->compileRenderGraph(*m_scene, *m_rg)) {
-                suspendAfterGraphFailure();
-                return false;
-            }
+            auto reason = m_render->lastError();
+            if (reason.empty()) reason = "the native renderer could not compile this scene";
+            holdFailedScene(SceneFailureStage::Compile, std::move(reason));
+            return false;
         }
         m_render->SetWallpaperScalingMode(m_scalingmode);
         m_render->SetWallpaperScalingFactor(m_scalingfactor);
@@ -1201,10 +1125,8 @@ private:
 
     /// Publishes a now-playing cover into the scene's runtime images.
     ///
-    /// A cover is pixels behind a name both backends already re-read on their
-    /// own: Vulkan replaces the texture from the pass's per-frame update when
-    /// `Image::key` moves (`CustomShaderPass.cpp`), Metal from
-    /// `refreshRuntimeImages` when `Version()` moves. Rebuilding the render
+    /// A cover is pixels behind a name the renderer already re-reads on its
+    /// own: Metal does it from `refreshRuntimeImages` when `Version()` moves. Rebuilding the render
     /// graph here on top of that idled the device, destroyed every pipeline
     /// and framebuffer, dropped every uploaded texture and reopened every
     /// video — once per track change, and once more per replay — to change one
@@ -1365,8 +1287,7 @@ private:
             if (frame_ok && m_scene != nullptr) {
                 RequestSceneMetalVariants(
                     *m_scene,
-                    m_render->hasBackend() && m_render->backend() == SceneBackend::NativeMetal &&
-                        metal::MetalVideoPlaneSamplingEnabled(),
+                    m_render->hasBackend() && metal::MetalVideoPlaneSamplingEnabled(),
                     m_shader_cache_path);
             }
 
@@ -1408,22 +1329,13 @@ private:
                 frame_ok = m_render->drawFrame(*m_scene, &presented);
                 // A native frame can fail after the graph compiled -- a video
                 // texture that stops decoding, a copy that cannot be encoded.
-                // Suspending would leave that wallpaper black; the scene is
-                // handed to the compatibility backend as a whole instead, and
-                // the failure is remembered so it does not flip back.
-                if (! frame_ok && m_render->hasBackend() &&
-                    m_render->backend() == SceneBackend::NativeMetal) {
-                    if (m_allows_compatibility) {
-                        frame_ok = fallBackToCompatibility() && rebuildRenderGraph() &&
-                                   m_render->drawFrame(*m_scene, &presented);
-                    } else {
-                        // Nothing may draw it instead, so the frame is lost and
-                        // the failure is reported. What the layer already shows
-                        // stays; `failFrame` below stops the clock.
-                        auto reason = m_render->lastError();
-                        if (reason.empty()) reason = "the native renderer could not draw a frame";
-                        reportFailure(SceneFailureStage::Frame, std::move(reason));
-                    }
+                // Nothing else may draw the scene, so the frame is lost and the
+                // failure is reported. What the layer already shows stays;
+                // `failFrame` below stops the clock.
+                if (! frame_ok && m_render->hasBackend()) {
+                    auto reason = m_render->lastError();
+                    if (reason.empty()) reason = "the native renderer could not draw a frame";
+                    reportFailure(SceneFailureStage::Frame, std::move(reason));
                 }
             }
             if (frame_ok) {
@@ -1705,13 +1617,12 @@ private:
             }
         }
     }
-    /// Takes over a surface description. No GPU backend is created here.
+    /// Takes over a surface description. No GPU renderer is created here.
     ///
-    /// Which backend this surface needs is decided from the parsed scene, so
-    /// building a Vulkan device and swapchain now would mean tearing them down
-    /// again the moment the scene turns out to want the native one. The name is
-    /// kept because it is part of the host-facing message vocabulary.
-    MHANDLER_CMD(INIT_VULKAN) {
+    /// Whether the scene can be drawn is decided from the parsed scene, so
+    /// building a renderer now would mean tearing it down again the moment the
+    /// scene turns out to be refused.
+    MHANDLER_CMD(INIT_SURFACE) {
         std::shared_ptr<RenderInitInfo> info;
         if (! msg->findObject("info", &info) || info == nullptr) return;
 
@@ -1721,21 +1632,8 @@ private:
         // the display changes, so the resolution is republished here too.
         publishScreenResolution();
 
-        // Offscreen surfaces and surfaces with no layer have no native option
-        // at all, so there is nothing to wait for: the probe and test paths
-        // keep behaving exactly as they did.
-        // Not under `NativeMetalOnly`: such a surface has nothing the native
-        // renderer could adopt, which is a failure to report once the scene
-        // arrives, not a licence to create the compatibility renderer.
-        if ((m_render_init_info->offscreen || m_render_init_info->metal_layer == nullptr) &&
-            SceneRendererAllowsCompatibility(CurrentSceneRendererPreference())) {
-            if (! m_render->createVulkan(*m_render_init_info)) {
-                suspendAfterGraphFailure();
-                return;
-            }
-            setSceneBackendSelection(SceneBackendSelection { SceneBackend::LegacyVulkan, {} });
-            reapplySurfaceState();
-        }
+        // A surface with no layer has nothing the native renderer could adopt:
+        // that is a failure to report once the scene arrives.
 
         main_handler.sendCmdLoadScene();
         publishPauseReasons();
@@ -1753,16 +1651,10 @@ private:
         // it. `m_render_blocked` covers a surface mid-reconfigure; a wallpaper
         // the user merely paused is not blocked and is still sampled.
         if (! m_render->hasBackend() || m_scene == nullptr || m_render_blocked) return;
-        // The Vulkan path can only answer from inside a frame, so the frame
-        // already requested for this command is how it answers. While the user
-        // has paused the wallpaper that request is dropped, and no poster is
-        // exported — drawing behind the user's back would be worse.
-        if (m_render->backend() != SceneBackend::NativeMetal) return;
-
         switch (m_render->ServicePosterRequest(*m_scene)) {
         case metal::PosterServiceResult::Failed:
-            // Not a fallback: the scene still draws, only this export failed,
-            // and the mailbox's own backoff decides when to try again.
+            // The scene still draws, only this export failed, and the mailbox's
+            // own backoff decides when to try again.
             LOG_ERROR("desktop poster export failed: %s", m_render->lastError().c_str());
             break;
         case metal::PosterServiceResult::NoFrameYet:
@@ -1835,16 +1727,14 @@ private:
                 promise->set_value(true);
                 return;
             }
-            // A Metal surface that cannot take the new layer falls back here
-            // rather than inside the holder, so the backend change is recorded
-            // and published exactly once, by the routine that owns it.
-            bool surface_ok = m_render->resetSurface(*m_render_init_info);
-            if (! surface_ok && ! m_allows_compatibility) {
+            // A Metal surface that cannot take the new layer is held here
+            // rather than inside the holder, so the failure is recorded and
+            // published exactly once, by the routine that owns it.
+            const bool surface_ok = m_render->resetSurface(*m_render_init_info);
+            if (! surface_ok) {
                 auto reason = m_render->lastError();
                 if (reason.empty()) reason = "the native renderer could not take the new surface";
                 holdFailedScene(SceneFailureStage::Surface, std::move(reason));
-            } else if (! surface_ok) {
-                surface_ok = fallBackToCompatibility();
             }
             const bool ok = surface_ok && rebuildRenderGraph();
             // The host asked for this stop; failing to end it is not the host's
@@ -1940,11 +1830,8 @@ public:
                       m_layer_has_picture ? "last frame" : "preview picture");
         } else {
             // Once per scene: the first thing to know about a wallpaper that looks
-            // wrong is which renderer drew it, and why not the preferred one.
-            LOG_INFO("scene backend: %s%s%s",
-                     selection.backend == SceneBackend::NativeMetal ? "native_metal" : "legacy_vulkan",
-                     selection.fell_back() ? "; fell back: " : "",
-                     selection.fallback_reason.c_str());
+            // wrong is whether a renderer is drawing it.
+            LOG_INFO("scene backend: native_metal");
         }
         std::scoped_lock lock(m_backend_selection_mutex);
         m_backend_selection = std::move(selection);
@@ -1975,10 +1862,6 @@ private:
     float                  m_speed { 1.0f };
 
     std::unique_ptr<SceneRendererHandle> m_render;
-    /// Whether a scene the native backend cannot draw may be handed to the
-    /// compatibility one. Decided when the scene's backend is chosen from the
-    /// process-wide preference, and read by every failure path after it.
-    bool                                 m_allows_compatibility { true };
     /// Why this scene is held without a renderer drawing it, or `None`. Render
     /// thread only; the host reads the published copy in `m_backend_selection`.
     SceneFailureStage                    m_failure_stage { SceneFailureStage::None };
@@ -1991,8 +1874,8 @@ private:
     bool                                 m_layer_has_picture { false };
     /// The preview picture shown instead of a frame nothing could draw.
     surface::StillPreview                m_still;
-    /// Retained from `INIT_VULKAN` so either backend can be created, or
-    /// re-created, on the same surface once the choice is known.
+    /// Retained from `INIT_SURFACE` so the renderer can be created, or
+    /// re-created, on the same surface once the scene is known to be drawable.
     std::shared_ptr<RenderInitInfo>      m_render_init_info;
     std::unique_ptr<rg::RenderGraph>      m_rg { nullptr };
     bool                                m_render_blocked { false };
@@ -2151,11 +2034,11 @@ SceneWallpaperInputTestAccess::CreateVideoProjectNode(const std::string& texture
 }
 #endif
 
-void SceneWallpaper::initVulkan(const RenderInitInfo& info) {
+void SceneWallpaper::initSurface(const RenderInitInfo& info) {
     m_offscreen                             = info.offscreen;
     std::shared_ptr<RenderInitInfo> sp_info = std::make_shared<RenderInitInfo>(info);
     auto                            msg =
-        CreateMsgWithCmd(m_main_handler->renderHandler(), RenderHandler::CMD::CMD_INIT_VULKAN);
+        CreateMsgWithCmd(m_main_handler->renderHandler(), RenderHandler::CMD::CMD_INIT_SURFACE);
     msg->setObject("info", sp_info);
     msg->post();
 }
@@ -2330,14 +2213,6 @@ void SceneWallpaper::setFraming(const WallpaperFraming& framing) {
     // together; normalised here so what travels is already in range.
     setPropertyObject(PROPERTY_FRAMING,
                       std::make_shared<WallpaperFraming>(NormalizeWallpaperFraming(framing)));
-}
-
-int SceneWallpaper::takeLastFrameSyncFd() {
-    return m_main_handler->renderHandler()->takeLastFrameSyncFd();
-}
-
-ExSwapchain* SceneWallpaper::exSwapchain() const {
-    return m_main_handler->renderHandler()->exSwapchain();
 }
 
 std::size_t SceneWallpaper::counters(uint64_t* out, std::size_t len) const {

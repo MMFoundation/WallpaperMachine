@@ -12,7 +12,6 @@
 #include "Scene/include/Scene/SceneResolution.hpp"
 #include "Scene/include/Scene/SceneVideoPath.hpp"
 #include "Scene/include/Scene/SceneUpdateDemand.hpp"
-#include "Swapchain/ExSwapchain.hpp"
 
 #if defined(WESCENE_BUILD_TESTS) && defined(__APPLE__)
 struct owe_scene_wallpaper;
@@ -109,17 +108,17 @@ public:
     /// `init()`; see `SetWallpaperLogScope`.
     void setLogScope(uint64_t scope);
 
-    void initVulkan(const RenderInitInfo&);
+    void initSurface(const RenderInitInfo&);
     void applyConfig(const SceneWallpaperConfig&);
 
-    /// Pauses rendering and releases the Vulkan surface + swapchain on the
-    /// render thread. Blocks until the render thread confirms completion.
+    /// Pauses rendering and releases the renderer's surface on the render
+    /// thread. Blocks until the render thread confirms completion.
     /// The scene, shaders, render graph, audio, and runtime state remain
     /// loaded. Returns false on any internal failure.
     bool beginSurfaceReconfigure();
 
-    /// Rebuilds the Vulkan surface + swapchain on the render thread from a
-    /// new RenderInitInfo and resumes rendering. Blocks until the render
+    /// Rebuilds the renderer's surface on the render thread from a new
+    /// RenderInitInfo and resumes rendering. Blocks until the render
     /// thread confirms completion.
     /// Preconditions: `beginSurfaceReconfigure` has returned true since the
     /// last successful init/finish. Returns false on failure.
@@ -156,11 +155,11 @@ public:
     /// reports `Running`.
     [[nodiscard]] SurfaceHealthSnapshot surfaceHealth() const;
 
-    /// Which renderer actually drew this scene, and why it is not the
-    /// preferred one.
+    /// Whether this scene has a renderer drawing it and, when it has none,
+    /// why it is held instead.
     ///
-    /// Reports the backend in use, never the preference: a scene that fell
-    /// back has to look like it fell back.
+    /// Reports what is the case now: a scene held in a failure has no
+    /// renderer, whatever it had before.
     [[nodiscard]] SceneBackendSelection sceneBackendSelection() const;
     /// How this scene's video textures reached the shaders sampling them on the
     /// last frame drawn.
@@ -186,14 +185,6 @@ public:
     /// [0, 1] and a non-finite one becomes the centre. Safe before the first
     /// frame: the value is kept and applied when the surface exists.
     void setFraming(const WallpaperFraming&);
-
-    ExSwapchain* exSwapchain() const;
-
-    // Ownership-transfer getter for the dma_fence sync_file fd that
-    // was exported after the most recent completed offscreen frame.
-    // Returns -1 if no frame has completed since the last call (or
-    // export failed). The caller MUST close() the returned fd.
-    int takeLastFrameSyncFd();
 
     /// Copies the renderer work counters for this surface. Returns how many
     /// values were written, which is never more than `len`. Safe to call from

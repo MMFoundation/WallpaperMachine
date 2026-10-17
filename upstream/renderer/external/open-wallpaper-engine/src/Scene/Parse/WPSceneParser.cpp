@@ -95,10 +95,6 @@ struct PendingMetalTranslation {
 thread_local std::vector<PendingMetalTranslation> g_pending_metal_translations;
 thread_local const LayerObjectIndex* g_parse_layer_index { nullptr };
 
-bool MetalTranslationRequested() {
-    return SceneRendererWantsNative(CurrentSceneRendererPreference());
-}
-
 /// The one material texture slot a direct NV12 variant could be compiled for,
 /// or nothing.
 ///
@@ -159,10 +155,9 @@ void CaptureVideoPlaneInputs(Scene& scene, PendingMetalTranslation& request,
 
 /// Runs the queued translations, if the scene is still a candidate.
 ///
-/// A failure here never fails the parse: the wallpaper loads and draws on the
-/// compatibility backend, and the recorded error is what the capability gate
-/// turns into a user-readable reason. A wallpaper must not stop working
-/// because someone ticked a renderer preference.
+/// A failure here never fails the parse: the wallpaper loads, and the recorded
+/// error is what the capability gate turns into a user-readable reason for
+/// holding the scene.
 void FlushPendingMetalTranslations(Scene& scene) {
     auto pending = std::move(g_pending_metal_translations);
     g_pending_metal_translations.clear();
@@ -1566,7 +1561,7 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
         // the exact input the SPIR-V compile saw rather than the state it left
         // behind. Overwritten on every iteration, so the last one to run is the
         // one that stabilised.
-        if (MetalTranslationRequested()) {
+        {
             PendingMetalTranslation pending;
             pending.shader      = shader;
             pending.shader_name = wpmat.shader;
@@ -1857,7 +1852,7 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
     // text layer is an ordinary scene layer to both backends, so it needs the
     // same second translation; without it the native backend has no program for
     // the card and the whole scene falls back.
-    if (MetalTranslationRequested()) {
+    {
         PendingMetalTranslation pending;
         pending.shader      = shader;
         pending.shader_name = shader_name;

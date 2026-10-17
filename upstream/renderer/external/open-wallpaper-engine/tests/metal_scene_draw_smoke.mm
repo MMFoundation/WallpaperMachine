@@ -44,6 +44,7 @@
 #include "WPShaderValueUpdater.hpp"
 #include "RenderGraph/RenderGraph.hpp"
 #include "VulkanRender/CopyPass.hpp"
+#include "VulkanRender/VulkanRender.hpp"
 #include "RenderCommon/ScenePass.hpp"
 #include "RenderCommon/SceneToRenderGraph.hpp"
 #include "RenderCommon/StaticSubgraphCache.hpp"
@@ -361,7 +362,94 @@ struct RebuildWatch
     int accepted_at { -1 };
 };
 
-/// Draws `scene` with one renderer through `SceneRendererHandle` on a layer no
+/// The two renderers behind one set of calls, for the tests that draw a scene with both and
+/// compare the pictures.
+///
+/// Native Metal is the product's only renderer and goes through `SceneRendererHandle`, as
+/// the host drives it. The Vulkan one no longer exists in the shipped engine; it is created
+/// here, by the test alone, as the reference those comparisons measure Metal against, for as
+/// long as the Vulkan code stays in the tree. Retired with it.
+class DrawRenderer {
+public:
+    explicit DrawRenderer(bool native) : m_native(native) {}
+
+    bool create(const RenderInitInfo& info, std::string& error)
+    {
+        if (m_native) return m_metal.createMetal(info, error);
+        m_vulkan = std::make_unique<vulkan::VulkanRender>();
+        if (m_vulkan->init(info)) return true;
+        m_vulkan.reset();
+        return false;
+    }
+    void destroy()
+    {
+        if (m_native) {
+            m_metal.destroy();
+        } else if (m_vulkan != nullptr) {
+            m_vulkan->destroy();
+            m_vulkan.reset();
+        }
+    }
+    void SetCounters(RendererCounters* counters)
+    {
+        if (m_native) m_metal.SetCounters(counters);
+        else if (m_vulkan != nullptr) m_vulkan->SetCounters(counters);
+    }
+    bool compileRenderGraph(Scene& scene, rg::RenderGraph& graph)
+    {
+        if (m_native) return m_metal.compileRenderGraph(scene, graph);
+        return m_vulkan != nullptr && m_vulkan->compileRenderGraph(scene, graph);
+    }
+    bool clearLastRenderGraphForRebuild()
+    {
+        if (m_native) return m_metal.clearLastRenderGraphForRebuild();
+        return m_vulkan != nullptr && m_vulkan->clearLastRenderGraphForRebuild();
+    }
+    bool drawFrame(Scene& scene)
+    {
+        if (m_native) return m_metal.drawFrame(scene);
+        return m_vulkan != nullptr && m_vulkan->drawFrame(scene);
+    }
+    std::string lastError() const { return m_native ? m_metal.lastError() : std::string {}; }
+    void SetWallpaperScalingMode(WallpaperScalingMode mode)
+    {
+        if (m_native) m_metal.SetWallpaperScalingMode(mode);
+        else if (m_vulkan != nullptr) m_vulkan->SetWallpaperScalingMode(mode);
+    }
+    void SetWallpaperScalingFactor(double value)
+    {
+        if (m_native) m_metal.SetWallpaperScalingFactor(value);
+        else if (m_vulkan != nullptr) m_vulkan->SetWallpaperScalingFactor(value);
+    }
+    void SetWallpaperFraming(const WallpaperFraming& value)
+    {
+        if (m_native) m_metal.SetWallpaperFraming(value);
+        else if (m_vulkan != nullptr) m_vulkan->SetWallpaperFraming(value);
+    }
+    void SetWallpaperHorizontalFlip(bool value)
+    {
+        if (m_native) m_metal.SetWallpaperHorizontalFlip(value);
+        else if (m_vulkan != nullptr) m_vulkan->SetWallpaperHorizontalFlip(value);
+    }
+    WallpaperCursorMapping CursorMapping(const Scene& scene) const
+    {
+        if (m_native) return m_metal.CursorMapping(scene);
+        return m_vulkan != nullptr ? m_vulkan->CursorMapping(scene) : WallpaperCursorMapping {};
+    }
+    /// Only Native Metal can serve a poster without a frame; the Vulkan reference polls
+    /// `wants_poster` inside its own frame.
+    metal::PosterServiceResult ServicePosterRequest(Scene& scene)
+    {
+        return m_native ? m_metal.ServicePosterRequest(scene) : metal::PosterServiceResult::NotRequested;
+    }
+
+private:
+    bool                                  m_native;
+    SceneRendererHandle                   m_metal;
+    std::unique_ptr<vulkan::VulkanRender> m_vulkan;
+};
+
+/// Draws `scene` with one renderer on a layer no
 /// window owns, as the host drives it -- the scaling it pushes to every
 /// renderer it creates, its per-frame `FrameBegin`, a graph rebuilt on every
 /// mutation -- and returns the last frame through the poster path both
@@ -436,9 +524,9 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
             poster_arrived.notify_all();
         };
 
-        SceneRendererHandle render;
-        std::string         error;
-        if (native ? ! render.createMetal(info, error) : ! render.createVulkan(info)) {
+        DrawRenderer render(native);
+        std::string  error;
+        if (! render.create(info, error)) {
             picture.error = "could not start: " + error;
             return picture;
         }
@@ -664,14 +752,10 @@ protected:
                 ("owe-metal-smoke-" + std::to_string(::getpid()));
         std::filesystem::remove_all(root_);
         std::filesystem::create_directories(root_);
-        SetSceneRendererPreference(SceneRendererPreference::NativeMetalPreferred);
-        ForgetMetalPrepareFailures();
     }
 
     void TearDown() override
     {
-        SetSceneRendererPreference(SceneRendererPreference::Compatibility);
-        ForgetMetalPrepareFailures();
         std::error_code ignored;
         std::filesystem::remove_all(root_, ignored);
     }
@@ -1040,7 +1124,8 @@ TEST_F(MetalSceneDraw, ParsedHdrMissingLayerSourceRetainsBackendRejection)
     std::string error;
     ASSERT_TRUE(LoadScene(project, directory / "cache", loaded, error)) << error;
     ASSERT_FALSE(loaded.scene->layer_texture_error.empty());
-    EXPECT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::LegacyVulkan);
+    EXPECT_TRUE(SelectSceneBackend(*loaded.scene).failed())
+        << "a scene whose layer source is missing is refused, not drawn";
 }
 
 namespace
@@ -1123,7 +1208,7 @@ TEST_F(MetalSceneDraw, AComposeLayersEffectSamplesItsOwnChild)
     auto& scene = *loaded.scene;
     ASSERT_TRUE(scene.layer_texture_error.empty()) << scene.layer_texture_error;
     const auto selection = SelectSceneBackend(scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
     const auto graph = sceneToRenderGraph(scene);
     ASSERT_NE(graph, nullptr);
 
@@ -1204,7 +1289,7 @@ TEST_F(MetalSceneDraw, TranslatedAuthorShaderCompilesAndDrawsTheScene)
 
     // ---- 3. the gate accepts the scene
     const auto selection = SelectSceneBackend(*loaded.scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
     // ---- 4. a real frame, drawn by render command encoders
     @autoreleasepool {
@@ -1324,7 +1409,7 @@ void main() {
     ASSERT_NE(program, nullptr);
     ASSERT_TRUE(program->error.empty()) << "metal translation failed: " << program->error;
     const auto selection = SelectSceneBackend(*loaded.scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
     @autoreleasepool {
         CAMetalLayer* layer = [CAMetalLayer layer];
@@ -1391,7 +1476,7 @@ void main() {
             << "the authored material was dropped instead of compiling its helper";
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
         ASSERT_TRUE(picture.error.empty()) << picture.error;
@@ -1511,7 +1596,7 @@ void main() { gl_FragColor = v_Color; }
             ASSERT_NE(FirstMaterial(loaded.scene->sceneGraph.get()), nullptr);
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
@@ -1745,7 +1830,7 @@ TEST_F(MetalSceneDraw, ASceneRasterizedForTheDisplayIsTheSamePictureOnBothRender
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             loaded.scene->resolution = resolution;
             pictures[native] =
@@ -2402,7 +2487,7 @@ TEST_F(MetalSceneDraw, APerspectiveCameraDrawsThroughTheAuthoredShader)
     node->SetRotation(linalg::Vector3f { 0.0f, 0.55f, 0.0f });
 
     const auto selection = SelectSceneBackend(*loaded.scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
     @autoreleasepool {
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -2512,7 +2597,7 @@ TEST_F(MetalSceneDraw, APerspectiveLayerIsSeenFromTheEyeDistanceOfTheScenesField
             ASSERT_NE(node, nullptr);
             node->SetCamera("global_perspective");
             if (native) {
-                ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+                ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
             }
             const auto picture = DrawWithRenderer(*loaded.scene, native, 480, 270, 1, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
@@ -2643,7 +2728,7 @@ TEST_F(MetalSceneDraw, ADepthWritingDrawHidesLaterDrawsAsOnCompatibility)
                 << error;
             loaded.scene->FindRenderTarget(std::string(SpecTex_Default))->withDepth = c.depth;
             if (native) {
-                ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+                ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
             }
             pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
             ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -2983,7 +3068,7 @@ TEST_F(MetalSceneDraw, ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWriteOnBo
                 << error;
             loaded.scene->FindRenderTarget(std::string(SpecTex_Default))->withDepth = true;
             if (native) {
-                ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+                ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
             }
             const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
@@ -3063,7 +3148,7 @@ TEST_F(MetalSceneDraw, ADepthTestedDrawCullsTheSameFacesAsCompatibility)
             material->cull_mode   = c.cull;
             loaded.scene->FindRenderTarget(std::string(SpecTex_Default))->withDepth = c.depth;
             if (native) {
-                ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+                ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
             }
             pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
             ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -3155,7 +3240,7 @@ TEST_F(MetalSceneDraw, ALayerLitByScenePointAndDirectionalLightsIsTheSameOnBothR
         ASSERT_EQ(loaded.scene->lights.size(), 2u);
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
         ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -3497,7 +3582,7 @@ TEST_F(MetalSceneDraw, AMediaWidgetIsHiddenWhileNothingPlaysOnBothRenderers)
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
         ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -3529,7 +3614,7 @@ TEST_F(MetalSceneDraw, AMediaWidgetShowsWhileSomethingPlaysOnBothRenderers)
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         loaded.scene->runtime->SetMediaIntegrationEnabled(true);
         loaded.scene->runtime->DispatchMediaEventJson(R"({"type":"mediaPlaybackChanged","state":1})");
@@ -3565,7 +3650,7 @@ TEST_F(MetalSceneDraw, ANoMusicPlaceholderShowsWhileNothingPlaysOnBothRenderers)
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
         ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -3666,7 +3751,7 @@ TEST_F(MetalSceneDraw, AnImageLayersColourScriptDecidesItsColourOnBothRenderers)
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             if (variant.with_cover || variant.cover_frame >= 0) {
                 loaded.scene->runtime->SetMediaIntegrationEnabled(true);
@@ -3781,8 +3866,8 @@ RendererPicture DrawLayerAlpha(const std::filesystem::path& root, const std::str
     if (! LoadScene(project, root / (name + "-cache"), loaded, picture.error)) return picture;
     if (native) {
         const auto selection = SelectSceneBackend(*loaded.scene);
-        if (selection.backend != SceneBackend::NativeMetal) {
-            picture.error = selection.fallback_reason;
+        if (selection.failed()) {
+            picture.error = selection.failure_reason;
             return picture;
         }
     }
@@ -3931,8 +4016,8 @@ TEST_F(MetalSceneDraw, AnAuthoredBoundOrScriptedAlphaIsAppliedOnceUnderEffectsOn
                 ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
                 if (native) {
                     const auto selection = SelectSceneBackend(*loaded.scene);
-                    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal)
-                        << selection.fallback_reason;
+                    ASSERT_FALSE(selection.failed())
+                        << selection.failure_reason;
                 }
                 pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
                 ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -4059,7 +4144,7 @@ TEST_F(MetalSceneDraw, AComposeLayersAlphaFollowsWhatDrivesItOnBothRenderers)
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
             ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -4246,7 +4331,7 @@ TEST_F(MetalSceneDraw, AFullscreenLayerCoversTheScreenWhereverItsGroupSitsOnBoth
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             // Several frames, so the runtime has ticked as it does in the app.
             auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
@@ -4398,7 +4483,7 @@ TEST_F(MetalSceneDraw, TheChildrenOfAFullscreenLayerAreSavedAgainstItsOwnTransfo
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << label << ": " << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << label << ": " << picture.error;
@@ -4489,7 +4574,7 @@ TEST_F(MetalSceneDraw, TheEffectsOfAFullscreenLayerReachItsChildrenOnBothRendere
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
         ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -4618,7 +4703,7 @@ TEST_F(MetalSceneDraw, TheChildrenOfAFullscreenLayerFollowTheSceneCameraOnBothRe
             if (loaded.scene == nullptr) return RendererPicture {};
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                EXPECT_FALSE(selection.failed()) << selection.failure_reason;
             }
             auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
             EXPECT_TRUE(picture.error.empty()) << tree.name << ": " << picture.error;
@@ -4694,7 +4779,7 @@ TEST_F(MetalSceneDraw, ParallaxMovesTheChildrenOfAFullscreenLayerWithTheirTreeOn
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << trees[t].name << ": " << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             loaded.scene->shaderValueUpdater->MouseInput(0.5, 0.5);
             auto drawn = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
@@ -4772,7 +4857,7 @@ TEST_F(MetalSceneDraw, AVertexShaderThatWritesItsInputsStillReadsTheMeshOnBothRe
                 ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
                 if (native) {
                     const auto selection = SelectSceneBackend(*loaded.scene);
-                    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
                 }
                 auto& picture = pictures[name];
                 picture       = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
@@ -4925,7 +5010,7 @@ TEST_F(MetalSceneDraw, AModelsTangentReachesTheShaderThatDeclaresItOnBothRendere
             node->AddMesh(MakeMdlQuadMesh(material));
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
@@ -4996,7 +5081,7 @@ TEST_F(MetalSceneDraw, ABooleanMultipliedIntoAStepMaskClipsItOnBothRenderers)
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         auto& picture = pictures[name];
         picture       = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
@@ -5054,7 +5139,7 @@ TEST_F(MetalSceneDraw, AScreenReadBeforeAnyDrawSeesTheBackgroundEveryFrameOnBoth
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
         ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -5084,7 +5169,7 @@ TEST_F(MetalSceneDraw, AnAddColorBlendLayerIsAddedOntoTheSceneOnBothRenderers)
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
         ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -5115,7 +5200,7 @@ TEST_F(MetalSceneDraw, AColorBlendLayersColourAndAlphaApplyOnceOnBothRenderers)
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 1, 1.0 / 60.0);
         ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -5227,7 +5312,7 @@ TEST_F(MetalSceneDraw, AnImageLayersBrightnessTintsItOnlyWhereTheSceneRendersHdr
                     ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
                     if (native) {
                         const auto selection = SelectSceneBackend(*loaded.scene);
-                        ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
                     }
                     pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
                     ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -5465,8 +5550,8 @@ RendererPicture DrawFoggedLayer(const std::filesystem::path& root, const std::st
     if (! LoadScene(project, root / (name + "-cache"), loaded, picture.error)) return picture;
     if (native) {
         const auto selection = SelectSceneBackend(*loaded.scene);
-        if (selection.backend != SceneBackend::NativeMetal) {
-            picture.error = selection.fallback_reason;
+        if (selection.failed()) {
+            picture.error = selection.failure_reason;
             return picture;
         }
     }
@@ -5797,7 +5882,7 @@ TEST_F(MetalSceneDraw, AnEffectsSwappedBuffersAccumulateAndItsFloatBuffersKeepTh
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
         ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -5914,7 +5999,7 @@ TEST_F(MetalSceneDraw, ADrawnFrameIsReportedAsPresentedAndLeavesTheFirstFrameFla
     LoadedScene loaded;
     std::string error;
     ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
-    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
 
     @autoreleasepool {
         id<MTLDevice>  device = MTLCreateSystemDefaultDevice();
@@ -5947,33 +6032,6 @@ TEST_F(MetalSceneDraw, ADrawnFrameIsReportedAsPresentedAndLeavesTheFirstFrameFla
 
         render.destroy();
     }
-}
-
-TEST_F(MetalSceneDraw, RememberedPrepareFailureStopsTheBackendFlipFlopping)
-{
-    const auto project = WriteFixture(root_ / "project");
-    LoadedScene loaded;
-    std::string error;
-    ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
-
-    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
-
-    RecordMetalPrepareFailure(*loaded.scene, "a shader pipeline could not be created");
-    for (int attempt = 0; attempt < 3; ++attempt) {
-        const auto selection = SelectSceneBackend(*loaded.scene);
-        EXPECT_EQ(selection.backend, SceneBackend::LegacyVulkan);
-        EXPECT_EQ(selection.fallback_reason, "a shader pipeline could not be created");
-    }
-
-    // Turning the preference off and on again is the one thing the user can do
-    // that makes the question worth asking a second time.
-    SetSceneRendererPreference(SceneRendererPreference::Compatibility);
-    const auto off = SelectSceneBackend(*loaded.scene);
-    EXPECT_EQ(off.backend, SceneBackend::LegacyVulkan);
-    EXPECT_TRUE(off.fallback_reason.empty()) << "choosing compatibility is not a fallback";
-
-    SetSceneRendererPreference(SceneRendererPreference::NativeMetalPreferred);
-    EXPECT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
 }
 
 TEST_F(MetalSceneDraw, OverbrightRadianceReachesBloomWithoutChangingLdrColor)
@@ -6140,7 +6198,7 @@ TEST_F(MetalSceneDraw, AnUnchangedTargetIsReusedAndProducesTheSamePixels)
     LoadedScene loaded;
     std::string error;
     ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
-    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
 
     @autoreleasepool {
         id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -6245,7 +6303,7 @@ TEST_F(MetalSceneDraw, AFrameThatWouldRepeatThePictureTakesNoDrawableAndPresents
     LoadedScene loaded;
     std::string error;
     ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
-    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
 
     RendererCounters::SetEnabled(true);
     RendererCounters counters;
@@ -6354,7 +6412,7 @@ TEST_F(MetalSceneDraw, APannedWallpaperIsComposedAtTheChosenPositionInTheDrawabl
     LoadedScene loaded;
     std::string error;
     ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
-    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
 
     struct Poster {
         std::mutex              mutex;
@@ -6528,8 +6586,8 @@ TEST_F(MetalSceneDraw, GeometryRebuiltEveryFrameIsUploadedAndDrawnFromItsOwnSlot
     dynamic_mesh->MaterialSlots().push_back(material);
     node->AddMesh(dynamic_mesh);
 
-    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal)
-        << SelectSceneBackend(*loaded.scene).fallback_reason;
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed())
+        << SelectSceneBackend(*loaded.scene).failure_reason;
 
     @autoreleasepool {
         id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -6626,8 +6684,8 @@ TEST_F(MetalSceneDraw, ASpriteSheetAdvancesOnItsOwnClockAndRedrawsOnlyWhenTheFra
     loaded.scene->textures["materials/sheet.tex"] = std::move(sheet);
     material->textures = { "materials/sheet.tex" };
 
-    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal)
-        << SelectSceneBackend(*loaded.scene).fallback_reason;
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed())
+        << SelectSceneBackend(*loaded.scene).failure_reason;
 
     @autoreleasepool {
         id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -6982,7 +7040,7 @@ TEST_F(MetalSceneDraw, AVideoLayerSamplesTheDecoderPlanesThroughItsOwnShader)
     EXPECT_NE(variant->stages.front().source, program->stages.front().source);
 
     const auto selection = SelectSceneBackend(*loaded.scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
     // ---- 3. a real frame, drawn through the variant
     ScopedPlaneSampling sampling(true);
@@ -7384,7 +7442,7 @@ struct TenBitDraw {
     bool                   ran { false };
     std::string            reason;
     SceneVideoPath         path { SceneVideoPath::None };
-    SceneBackend           backend { SceneBackend::LegacyVulkan };
+    SceneBackendSelection  selection;
     std::array<int, 3>     center {};   // red, green, blue of the middle pixel
 };
 
@@ -7405,7 +7463,7 @@ TenBitDraw DrawTenBitClip(const std::filesystem::path& directory,
     if (! LoadScene(project, directory / "cache", loaded, result.reason)) return result;
     // Decided by what the scene is made of, before any decoder is opened: a
     // 10-bit video is not a reason to leave the native backend.
-    result.backend = SelectSceneBackend(*loaded.scene).backend;
+    result.selection = SelectSceneBackend(*loaded.scene);
 
     @autoreleasepool {
         id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -7498,7 +7556,7 @@ TEST_F(MetalSceneDraw, ATenBitVideoLayerStaysOnNativeMetalAndIsToneMappedToSdr)
             GTEST_SKIP() << drawn.reason;
         }
         ASSERT_TRUE(drawn.ran) << drawn.reason;
-        EXPECT_EQ(drawn.backend, SceneBackend::NativeMetal);
+        EXPECT_FALSE(drawn.selection.failed()) << drawn.selection.failure_reason;
         if (drawn.path != SceneVideoPath::Yuv10Converted) {
             GTEST_SKIP() << "the decoder produced " << SceneVideoPathName(drawn.path)
                          << " rather than 10-bit planes, so the 10-bit path was not exercised";
@@ -8733,7 +8791,7 @@ TEST_F(MetalSceneDraw,
         ASSERT_NE(loaded.scene->runtime, nullptr);
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         auto& runtime = *loaded.scene->runtime;
 
@@ -8843,7 +8901,7 @@ TEST_F(MetalSceneDraw, AVideoTheRebuiltGraphLeavesOutIsClosedOnBothRenderers)
         ASSERT_NE(loaded.scene->runtime, nullptr);
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         auto& runtime = *loaded.scene->runtime;
 
@@ -8893,7 +8951,7 @@ TEST_F(MetalSceneDraw, AVideoStaysOpenWhenARenderScaleChangeCompilesTheGraphAgai
     std::string error;
     ASSERT_TRUE(LoadScene(project, root_ / "video-scale-cache", loaded, error)) << error;
     const auto selection = SelectSceneBackend(*loaded.scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
     const CountersOn counting;
     @autoreleasepool {
@@ -8957,7 +9015,7 @@ TEST_F(MetalSceneDraw, AVideoSetAsideForACompileThatIsRefusedIsClosedOnNativeMet
     std::string error;
     ASSERT_TRUE(LoadScene(project, root_ / "video-refused-cache", loaded, error)) << error;
     const auto selection = SelectSceneBackend(*loaded.scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
     const int files_before_scene = OpenMediaFiles();
     @autoreleasepool {
@@ -9181,7 +9239,7 @@ TEST_F(MetalSceneDraw, ATextLayerIsParsedTranslatedAndDrawnByTheNativeBackend)
     ASSERT_NE(loaded.scene->runtime, nullptr);
 
     const auto selection = SelectSceneBackend(*loaded.scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
     @autoreleasepool {
         id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -9287,7 +9345,7 @@ TEST_F(MetalSceneDraw, ATextLayersColourBlendModeAppliesItsColourAndAlphaOnceOnB
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
             ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -9384,7 +9442,7 @@ void ExpectTextColourBlendModesDrawTheirTextAndNoBox(const std::filesystem::path
             ASSERT_TRUE(load(project, root / (name + "-cache"), loaded, error)) << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             pictures[mode.mode][native] =
                 DrawWithRenderer(*loaded.scene, native, kWidth, kHeight, 3, 1.0 / 60.0);
@@ -9430,7 +9488,7 @@ void ExpectTextColourBlendModesDrawTheirTextAndNoBox(const std::filesystem::path
             ASSERT_TRUE(load(project, root / (name + "-cache"), loaded, error)) << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             const auto picture = DrawWithRenderer(*loaded.scene, native, kWidth, kHeight, 3, 1.0 / 60.0);
             ASSERT_TRUE(picture.error.empty()) << picture.error;
@@ -9574,8 +9632,8 @@ TEST_F(MetalSceneDraw, CameraParallaxMovesATextLayerAsItMovesAnImageOnBothRender
                 ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
                 if (native) {
                     const auto selection = SelectSceneBackend(*loaded.scene);
-                    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal)
-                        << selection.fallback_reason;
+                    ASSERT_FALSE(selection.failed())
+                        << selection.failure_reason;
                 }
                 loaded.scene->shaderValueUpdater->MouseInput(variant.cursor, 0.5);
                 pictures[depth] =
@@ -9750,8 +9808,8 @@ TEST_F(MetalSceneDraw, AComposeLayerHoldsWhatIsBehindWhereParallaxDrawsItOnBothR
                 ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
                 if (native) {
                     const auto selection = SelectSceneBackend(*loaded.scene);
-                    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal)
-                        << selection.fallback_reason;
+                    ASSERT_FALSE(selection.failed())
+                        << selection.failure_reason;
                 }
                 loaded.scene->shaderValueUpdater->MouseInput(variant.cursor, 0.5);
                 picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
@@ -9891,7 +9949,7 @@ TEST_F(MetalSceneDraw, AnImageLayersTargetsArePointSampledWhenItAsksOnBothRender
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             auto& picture = pictures[std::make_pair(point, native)];
             picture       = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
@@ -9987,7 +10045,7 @@ TEST_F(MetalSceneDraw, AShapeIsAddedOntoTheSceneOnBothRenderers)
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
             ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -10032,7 +10090,7 @@ TEST_F(MetalSceneDraw, StyledTextIsDrawnWithItsOutlineAndShadowByTheNativeBacken
     std::string error;
     ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
     const auto selection = SelectSceneBackend(*loaded.scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
     @autoreleasepool {
         id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -10103,7 +10161,7 @@ TEST_F(MetalSceneDraw, StyledTextWithoutAnOutlineKeepsTheLayersColourAtItsEdgesO
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 3, 1.0 / 60.0);
             ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -10155,7 +10213,7 @@ TEST_F(MetalSceneDraw, AMagnifiedTextsEdgesFadeToItsColourNotToBlackOnBothRender
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             pictures[native] = DrawWithRenderer(*loaded.scene, native, kWidth, kHeight, 3, 1.0 / 60.0);
             ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -10267,7 +10325,7 @@ TEST_F(MetalSceneDraw, ATexturePointSampledByItsHeaderPicksItsMipLevelByPointOnB
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
             ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -10364,7 +10422,7 @@ TEST_F(MetalSceneDraw, ATextureWhoseNextLevelFallsShortOfTheSurfaceKeepsItsFullS
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         if (native) {
             const auto selection = SelectSceneBackend(*loaded.scene);
-            ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         }
         pictures[native] = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
         ASSERT_TRUE(pictures[native].error.empty()) << pictures[native].error;
@@ -10516,7 +10574,7 @@ TEST_F(MetalSceneDraw, ACoverSlotShowsItsAuthoredTextureUntilACoverArrivesOnBoth
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+                ASSERT_FALSE(selection.failed()) << selection.failure_reason;
             }
             auto* images = dynamic_cast<RuntimeImageSource*>(loaded.scene->imageParser.get());
             ASSERT_NE(images, nullptr);
@@ -10600,7 +10658,7 @@ TEST_F(MetalSceneDraw, AnIdleCoverSlotUploadsItsPictureOnceAndACoverChangeCostsO
     LoadedScene loaded;
     std::string error;
     ASSERT_TRUE(LoadScene(project, root_ / "cover-cost-cache", loaded, error)) << error;
-    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
     auto* images = dynamic_cast<RuntimeImageSource*>(loaded.scene->imageParser.get());
     ASSERT_NE(images, nullptr);
     const std::vector<uint8_t> green = [] {
@@ -10722,7 +10780,7 @@ TEST_F(MetalSceneDraw, AHiddenTextLayerAnotherSamplesIsItsCardInItsComposite)
         auto& scene = *loaded.scene;
         ASSERT_TRUE(scene.layer_texture_error.empty()) << scene.layer_texture_error;
         const auto selection = SelectSceneBackend(scene);
-        ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
         @autoreleasepool {
             CAMetalLayer* layer = [CAMetalLayer layer];
@@ -10835,7 +10893,7 @@ TEST_F(MetalSceneDraw, ALayersOwnEffectReadsItsBufferANotItsComposite)
         auto& scene = *loaded.scene;
         ASSERT_TRUE(scene.layer_texture_error.empty()) << scene.layer_texture_error;
         const auto selection = SelectSceneBackend(scene);
-        ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         const auto graph = sceneToRenderGraph(scene);
         ASSERT_NE(graph, nullptr);
 
@@ -10885,7 +10943,7 @@ TEST_F(MetalSceneDraw, ALayersOwnEffectReadsItsBufferANotItsComposite)
         auto& scene = *loaded.scene;
         ASSERT_TRUE(scene.layer_texture_error.empty()) << scene.layer_texture_error;
         const auto selection = SelectSceneBackend(scene);
-        ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
         @autoreleasepool {
             CAMetalLayer* layer = [CAMetalLayer layer];
@@ -10930,7 +10988,7 @@ TEST_F(MetalSceneDraw, ALayersOwnEffectReadsItsBufferBAsTheImageItWorksOn)
         auto& scene = *loaded.scene;
         ASSERT_TRUE(scene.layer_texture_error.empty()) << scene.layer_texture_error;
         const auto selection = SelectSceneBackend(scene);
-        ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
         const auto graph = sceneToRenderGraph(scene);
         ASSERT_NE(graph, nullptr);
 
@@ -10984,7 +11042,7 @@ TEST_F(MetalSceneDraw, ALayersOwnEffectReadsItsBufferBAsTheImageItWorksOn)
         auto& scene = *loaded.scene;
         ASSERT_TRUE(scene.layer_texture_error.empty()) << scene.layer_texture_error;
         const auto selection = SelectSceneBackend(scene);
-        ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
         @autoreleasepool {
             CAMetalLayer* layer = [CAMetalLayer layer];
@@ -11090,8 +11148,8 @@ TEST_F(MetalSceneDraw, ALayerReadingItsOwnCompositeSeesTheFrameBeforeOnBothRende
                     << loaded.scene->layer_texture_error;
                 if (native) {
                     const auto selection = SelectSceneBackend(*loaded.scene);
-                    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal)
-                        << selection.fallback_reason;
+                    ASSERT_FALSE(selection.failed())
+                        << selection.failure_reason;
                 }
                 auto& picture = pictures[frames][native] =
                     DrawWithRenderer(*loaded.scene, native, 384, 256, frames, 1.0 / 60.0);
@@ -11131,7 +11189,7 @@ TEST_F(MetalSceneDraw, TextThatHasNotChangedIsNeitherLaidOutNorUploadedAgain)
     std::string error;
     ASSERT_TRUE(LoadScene(project, root_ / "cache", loaded, error)) << error;
     ASSERT_NE(loaded.scene->runtime, nullptr);
-    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
 
     @autoreleasepool {
         id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -11270,7 +11328,7 @@ TEST_F(MetalSceneDraw, ATextLayerWithAnEffectChainKeepsBothOfItsCards)
     ASSERT_NE(loaded.scene->runtime, nullptr);
 
     const auto selection = SelectSceneBackend(*loaded.scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
     @autoreleasepool {
         id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -12161,7 +12219,7 @@ TEST_F(MetalSceneDraw, APuppetIsSkinnedByItsOwnShaderFromThePoseTheRuntimeProduc
         ->SetNodeData(node, data);
 
     const auto selection = SelectSceneBackend(*loaded.scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
     MetalShaderReflection reflection;
     std::string           reflection_error;
@@ -12335,8 +12393,8 @@ TEST_F(MetalSceneDraw, ARopeLayoutMeshReachesTheTarget)
     dynamic_mesh->MaterialSlots().push_back(material);
     node->AddMesh(dynamic_mesh);
 
-    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal)
-        << SelectSceneBackend(*loaded.scene).fallback_reason;
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed())
+        << SelectSceneBackend(*loaded.scene).failure_reason;
 
     @autoreleasepool {
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -12467,8 +12525,8 @@ TEST_F(MetalSceneDraw, ASpriteTrailMeshReachesTheTarget)
     dynamic_mesh->MaterialSlots().push_back(material);
     node->AddMesh(dynamic_mesh);
 
-    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal)
-        << SelectSceneBackend(*loaded.scene).fallback_reason;
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed())
+        << SelectSceneBackend(*loaded.scene).failure_reason;
 
     @autoreleasepool {
         id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -12689,7 +12747,7 @@ TEST_F(MetalSceneDraw, TheShippedRopeAndTrailPreviewScenesAreParsedTranslatedAnd
             << "the preview scene's particle object did not load";
 
         const auto selection = SelectSceneBackend(*loaded.scene);
-        ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
         @autoreleasepool {
             id<MTLDevice> device       = MTLCreateSystemDefaultDevice();
@@ -12834,7 +12892,7 @@ TEST_F(MetalSceneDraw, TheShippedImageShaderSkinsAPuppetThroughTheNativeBackend)
         ->SetNodeData(node, data);
 
     const auto selection = SelectSceneBackend(*loaded.scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
     @autoreleasepool {
         id<MTLDevice> device       = MTLCreateSystemDefaultDevice();
@@ -12942,7 +13000,7 @@ TEST_F(MetalSceneDraw, ARopeTrailPastTheOldSixteenBitIndexLimitStaysARopeTrail)
     EXPECT_GT(indices.QuadCapacity(), kMaxPackedUInt16Quads);
 
     const auto selection = SelectSceneBackend(*loaded.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 namespace
@@ -13361,9 +13419,9 @@ TEST_F(MetalSceneDraw, LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBack
 
         InjectSystemMediaForMetal(*loaded.scene);
         const auto selection = SelectSceneBackend(*loaded.scene);
-        if (selection.backend != SceneBackend::NativeMetal) {
+        if (selection.failed()) {
             std::cout << "[ LOCAL    ] " << paths.scene_id << ": Compatibility -- "
-                      << selection.fallback_reason << std::endl;
+                      << selection.failure_reason << std::endl;
             continue;
         }
         // Runtime ticks before the graph is built, as `offscreen_scene_probe`
@@ -13735,8 +13793,6 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
         std::string             scene_id;
         for (const bool native : { false, true }) {
             if (native_only && ! native) continue;
-            SetSceneRendererPreference(native ? SceneRendererPreference::NativeMetalPreferred
-                                              : SceneRendererPreference::Compatibility);
             if (const char* seed = std::getenv("WE_TEST_RANDOM_SEED")) {
                 Random::seed(static_cast<uint32_t>(std::strtoul(seed, nullptr, 10)));
             }
@@ -13772,9 +13828,9 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
             InjectSystemMediaForMetal(*loaded.scene);
             if (native) {
                 const auto selection = SelectSceneBackend(*loaded.scene);
-                if (selection.backend != SceneBackend::NativeMetal) {
+                if (selection.failed()) {
                     std::cout << "[ COMPARE  ] " << scene_id << ": native refused -- "
-                              << selection.fallback_reason << std::endl;
+                              << selection.failure_reason << std::endl;
                     break;
                 }
             }
@@ -13854,7 +13910,6 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
             }
         }
     }
-    SetSceneRendererPreference(SceneRendererPreference::Compatibility);
 }
 
 TEST_F(MetalSceneDraw, LayersSharingATargetShareOneRenderPassAndHiddenLayersCostNone)
@@ -13892,7 +13947,7 @@ TEST_F(MetalSceneDraw, LayersSharingATargetShareOneRenderPassAndHiddenLayersCost
         LoadedScene loaded;
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / (variant.name + "-cache"), loaded, error)) << error;
-        ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+        ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
 
         @autoreleasepool {
             id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -13988,7 +14043,7 @@ TEST_F(MetalSceneDraw, ALayerItsPropertiesHideHoldsNoImagesUntilAScriptShowsIt)
         std::string error;
         ASSERT_TRUE(LoadScene(project, directory / "cache", loaded, error)) << error;
         auto& scene = *loaded.scene;
-        ASSERT_EQ(SelectSceneBackend(scene).backend, SceneBackend::NativeMetal);
+        ASSERT_FALSE(SelectSceneBackend(scene).failed());
 
         @autoreleasepool {
             CAMetalLayer* layer   = [CAMetalLayer layer];
@@ -14134,7 +14189,7 @@ TEST_F(MetalSceneDraw, APropertyPreviewChangesThePixelsAndAnEmptyDocumentRestore
         std::string error;
         ASSERT_TRUE(LoadScene(project, root_ / "reference-cache", loaded, error)) << error;
         auto& scene = *loaded.scene;
-        ASSERT_EQ(SelectSceneBackend(scene).backend, SceneBackend::NativeMetal);
+        ASSERT_FALSE(SelectSceneBackend(scene).failed());
         @autoreleasepool {
             CAMetalLayer* layer   = [CAMetalLayer layer];
             layer.device          = MTLCreateSystemDefaultDevice();
@@ -14163,7 +14218,7 @@ TEST_F(MetalSceneDraw, APropertyPreviewChangesThePixelsAndAnEmptyDocumentRestore
     ASSERT_TRUE(LoadScene(project, root_ / "preview-cache", loaded, error)) << error;
     auto& scene = *loaded.scene;
     ASSERT_NE(scene.runtime, nullptr);
-    ASSERT_EQ(SelectSceneBackend(scene).backend, SceneBackend::NativeMetal);
+    ASSERT_FALSE(SelectSceneBackend(scene).failed());
 
     @autoreleasepool {
         CAMetalLayer* layer   = [CAMetalLayer layer];
@@ -14252,7 +14307,7 @@ TEST_F(MetalSceneDraw, AFeedbackCopyTradesTexturesAndDrawsTheSamePicture)
         LoadedScene       loaded;
         std::string       error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-        ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+        ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
 
         @autoreleasepool {
             id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -14330,7 +14385,7 @@ TEST_F(MetalSceneDraw, ASceneLightReachesTheAuthorsLightingUniforms)
     ASSERT_TRUE(LoadScene(project, root_ / "lit-cache", loaded, error)) << error;
     ASSERT_EQ(loaded.scene->lights.size(), 1u);
     const auto selection = SelectSceneBackend(*loaded.scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
     @autoreleasepool {
         id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -14410,7 +14465,7 @@ TEST_F(MetalSceneDraw, AStepSamplingAnImageNothingProducesIsSkippedLikeOnCompati
     std::string error;
     ASSERT_TRUE(LoadScene(project, root_ / "unproduced-cache", loaded, error)) << error;
     const auto selection = SelectSceneBackend(*loaded.scene);
-    ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
     @autoreleasepool {
         id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -14477,7 +14532,7 @@ TEST_F(MetalSceneDraw, TheParallaxEasingStepsOnceForEachFrameTheHostDraws)
     LoadedScene loaded;
     std::string error;
     ASSERT_TRUE(LoadScene(project, root_ / "pointer-cache", loaded, error)) << error;
-    ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+    ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
 
     @autoreleasepool {
         id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -14551,7 +14606,7 @@ TEST_F(MetalSceneDraw, ALayerReadingThePreviousFrameSeesExactlyThePreviousFrame)
         std::string       error;
         ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
         const auto selection = SelectSceneBackend(*loaded.scene);
-        ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+        ASSERT_FALSE(selection.failed()) << selection.failure_reason;
 
         @autoreleasepool {
             id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
@@ -14680,7 +14735,7 @@ TEST_F(MetalSceneDraw, TargetsThatAreNeverAliveTogetherShareImagesAndDrawTheSame
             LoadedScene loaded;
             std::string error;
             ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
-            ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+            ASSERT_FALSE(SelectSceneBackend(*loaded.scene).failed());
             @autoreleasepool {
                 CAMetalLayer* layer   = [CAMetalLayer layer];
                 layer.device          = MTLCreateSystemDefaultDevice();

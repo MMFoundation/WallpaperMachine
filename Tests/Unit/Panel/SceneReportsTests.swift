@@ -14,14 +14,14 @@ final class SceneReportsTests: PanelTestCase {
   }
 
   private func renderer(
-    _ id: UInt32, backend: String, fallback: String? = nil, failureStage: String? = nil,
+    _ id: UInt32, backend: String, failureStage: String? = nil,
     failureReason: String? = nil, videoPath: String = "none", applied: Bool? = true,
     display: String = "Display 1", title: String = "Forest"
   ) -> SceneRendererReport {
     SceneRendererReport(
       BridgeSceneBackendReport(
         displayId: id, displayName: display, wallpaperId: "w\(id)", wallpaperTitle: title,
-        backend: backend, fallbackReason: fallback, failureStage: failureStage,
+        backend: backend, failureStage: failureStage,
         failureReason: failureReason, videoPath: videoPath, optimizationApplied: applied))
   }
 
@@ -95,42 +95,34 @@ final class SceneReportsTests: PanelTestCase {
     XCTAssertEqual(byID.line, "Display 9 — w9: updating continuously")
   }
 
-  /// The renderer that drew a scene is a read-back, and only a real fallback is called one.
-  func testSceneRendererLinesNameTheBackendInUseAndOnlyRealFallbacks() throws {
+  /// The renderer that draws a scene is a read-back: the backend the engine named, "preparing" while it has
+  /// named none, and a name this build does not know, as given.
+  func testSceneRendererLinesNameTheBackendInUse() throws {
     try pinPanelLanguageToEnglish()
     let native = renderer(1, backend: "native_metal")
     XCTAssertEqual(native.backend, .nativeMetal)
-    XCTAssertEqual(native.line(preferred: .nativeMetalPreferred), "Display 1 — Forest: Native Metal")
-
-    let fellBack = renderer(2, backend: "legacy_vulkan", fallback: "the scene uses a puppet")
-    XCTAssertEqual(
-      fellBack.line(preferred: .nativeMetalPreferred),
-      "Display 1 — Forest: Compatibility (fell back: the scene uses a puppet)")
-    XCTAssertEqual(
-      fellBack.line(preferred: .compatibility), "Display 1 — Forest: Compatibility",
-      "Compatibility is not a fallback from a preference for Compatibility")
-
-    let noReason = renderer(3, backend: "legacy_vulkan", fallback: nil)
-    XCTAssertEqual(
-      noReason.line(preferred: .nativeMetalPreferred), "Display 1 — Forest: Compatibility",
-      "A fallback the renderer gave no reason for must not acquire an invented one")
+    XCTAssertEqual(native.line, "Display 1 — Forest: Native Metal")
 
     let preparing = renderer(4, backend: "unknown")
     XCTAssertEqual(preparing.backend, .preparing)
     XCTAssertEqual(
-      preparing.line(preferred: .nativeMetalPreferred),
-      "Display 1 — Forest: preparing — no backend chosen yet",
-      "A backend the renderer could not name is not shown as the preference")
-    XCTAssertNotEqual(preparing.backend, fellBack.backend, "Preparing and Compatibility stay different values")
+      preparing.line, "Display 1 — Forest: preparing — no backend chosen yet",
+      "A backend the renderer could not name is not shown as drawing")
+    XCTAssertNotEqual(preparing.backend, native.backend, "Preparing and Native Metal stay different values")
 
     let other = renderer(5, backend: "future_backend")
     XCTAssertEqual(other.backend, .other("future_backend"))
     XCTAssertEqual(
-      other.line(preferred: .nativeMetalPreferred), "Display 1 — Forest: future_backend",
+      other.line, "Display 1 — Forest: future_backend",
       "A name this build does not know still drew the scene, so it is named as given")
+
+    let retired = renderer(6, backend: "legacy_vulkan")
+    XCTAssertEqual(
+      retired.backend, .other("legacy_vulkan"),
+      "the Compatibility renderer no longer exists, so its old name is not a backend this build knows")
   }
 
-  /// With Native Metal as the only renderer, a scene it cannot draw is held, not running on any backend.
+  /// A scene Native Metal cannot draw is held, not running on any backend.
   /// Its row says so in words the user can read, in a stage of its own and with the renderer's reason,
   /// instead of "preparing" for ever or the name of a backend that is not drawing.
   func testAHeldSceneIsWordedAsNotDrawnWithItsStageAndTheRenderersOwnReason() throws {
@@ -140,12 +132,12 @@ final class SceneReportsTests: PanelTestCase {
     XCTAssertEqual(held.failureStage, .unsupported)
     XCTAssertEqual(held.backend, .preparing, "nothing is drawing it, and the bridge says so")
     XCTAssertEqual(
-      held.line(preferred: .nativeMetalOnly),
+      held.line,
       "Display 1 — Forest: not drawn — it uses something Native Metal can't draw "
         + "(reason: the scene uses a puppet). Showing its last picture.")
     XCTAssertNotEqual(
-      held.line(preferred: .nativeMetalOnly),
-      renderer(1, backend: "unknown").line(preferred: .nativeMetalOnly),
+      held.line,
+      renderer(1, backend: "unknown").line,
       "a held scene is not one that is still preparing")
 
     let words = ["unsupported", "prepare", "compile", "frame", "surface"].map {
@@ -154,7 +146,7 @@ final class SceneReportsTests: PanelTestCase {
     XCTAssertEqual(Set(words).count, words.count, "no two stages share words")
     XCTAssertEqual(SceneFailureStage(name: "future").title, "it stopped (future)")
     XCTAssertEqual(
-      renderer(2, backend: "unknown", failureStage: "frame").line(preferred: .nativeMetalOnly),
+      renderer(2, backend: "unknown", failureStage: "frame").line,
       "Display 1 — Forest: not drawn — a frame failed in Native Metal. Showing its last picture.",
       "an engine that gave no reason does not acquire an invented one")
 
@@ -176,7 +168,7 @@ final class SceneReportsTests: PanelTestCase {
     ]
     for (name, words) in paths {
       let report = renderer(1, backend: "native_metal", videoPath: name)
-      let line = report.line(preferred: .nativeMetalPreferred)
+      let line = report.line
       if let words {
         XCTAssertEqual(line, "Display 1 — Forest: Native Metal — video: \(words)", name)
       } else {
@@ -202,7 +194,7 @@ final class SceneReportsTests: PanelTestCase {
     XCTAssertEqual(
       status([
         renderer(1, backend: "native_metal", applied: true),
-        renderer(2, backend: "legacy_vulkan", applied: true),
+        renderer(2, backend: "native_metal", applied: true),
       ], saved: false).text,
       "Saved off and in force on all 2 running scenes.")
     XCTAssertEqual(
@@ -215,7 +207,7 @@ final class SceneReportsTests: PanelTestCase {
     XCTAssertEqual(
       status([
         renderer(1, backend: "native_metal", applied: true),
-        renderer(2, backend: "legacy_vulkan", applied: nil),
+        renderer(2, backend: "native_metal", applied: nil),
       ]).text,
       "Saved on; 1 of 2 running scenes confirmed, the rest could not be read.",
       "A scene the renderer could not answer for is unknown, which is not the same as applied")
@@ -253,7 +245,6 @@ final class SceneReportsTests: PanelTestCase {
   func testThePerformanceSettingsCarryTheReportsAndFlagANativeScene() async throws {
     try await withRecordingPanel { panel, _ in
       panel.store.settingsSnapshot = BridgeSnapshotFixtures.settings(
-        sceneRenderer: "native_metal_preferred",
         sceneUpdateModes: [
           BridgeSceneUpdateModeReport(
             displayId: 1, displayName: "Display 1", wallpaperId: "forest", wallpaperTitle: "Forest",
@@ -262,10 +253,9 @@ final class SceneReportsTests: PanelTestCase {
         sceneRenderers: [
           BridgeSceneBackendReport(
             displayId: 1, displayName: "Display 1", wallpaperId: "forest", wallpaperTitle: "Forest",
-            backend: "native_metal", fallbackReason: nil, failureStage: nil, failureReason: nil, videoPath: "none", optimizationApplied: true)
+            backend: "native_metal", failureStage: nil, failureReason: nil, videoPath: "none", optimizationApplied: true)
         ])
       let performance = panel.controller.performanceSettings
-      XCTAssertEqual(performance.sceneRenderer, .nativeMetalPreferred)
       XCTAssertEqual(performance.sceneUpdates.map(\.canRetry), [true])
       XCTAssertTrue(performance.nativeSceneRunning)
       XCTAssertEqual(performance.optimization.total, 1)

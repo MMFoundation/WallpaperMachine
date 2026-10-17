@@ -32,7 +32,7 @@ header:
 
 ```
 … INFO [load#7] backend.rs:93 scene load: display 1 3456x2234 @2x 120Hz, fps 60, scaling fit x1, render native, paused false; project title="Rain" type="scene" version=3 workshop=123456 file="scene.json" at …/123456/project.json
-… INFO [load#7] SceneWallpaper.cpp:1540 scene backend: legacy_vulkan; fell back: …
+… INFO [load#7] SceneWallpaper.cpp:1540 scene backend: native_metal
 ```
 
 - **Scene and video wallpapers on the scene engine**: the header is written by
@@ -89,8 +89,7 @@ the load.
 ### What each session starts with
 
 - The logger's own line: process id and level in force.
-- The saved preferences that decide how wallpapers render: scene renderer, video
-  backend, render scale, battery mode, frame-rate limit, scene optimisation,
+- The saved preferences that decide how wallpapers render: render scale, battery mode, frame-rate limit, scene optimisation,
   on-demand updating and the experimental switches.
 - `environment:` lines from Swift (`DiagnosticEnvironment`): app version and
   build, macOS, hardware model, CPU, core count, memory, GPU, low-power and
@@ -322,7 +321,7 @@ reveals it in Finder. It is built off the main actor by `DiagnosticsBundle`
 | `load-journal.json` | The crash-loop guard's journal, [crash-recovery.md](crash-recovery.md): the strikes per wallpaper and the scenes that were opening when the app last stopped. Wallpaper ids, display numbers, times, the build and an opaque session id; no paths. The file exists once a scene has been opened; without it the report notes that it was not present |
 | `crash-reports/*.ips` | Up to 5 macOS crash reports from the last 14 days whose name starts with `WallpaperMachine` (app and extension) |
 | `diagnostic-reports/*.diag`, `*.spin`, `*.hang` | Up to 5 macOS resource, spin and hang reports from the last 14 days whose name starts with `WallpaperMachine`, newest first across both report folders. See [below](#macos-resource-spin-and-hang-reports) |
-| `environment.txt` | The environment lines above, read at export time, plus the saved renderer preferences with the reasons Reduced quality holds and the frame-rate ceiling in force, the backend and live mode of each running scene (`mode stopped_after_failure` for a scene whose renderer stopped after a failure, apart from `user_paused` and `policy_suspended`; see [scene rendering](scene-rendering.md#a-scene-that-stops-drawing)), the state of each wallpaper window with whether the displays have separate Spaces ([below](#wallpaper-window-state)), and the app's memory footprint at export time ([above](#memory-pressure)) |
+| `environment.txt` | The environment lines above, read at export time, plus the saved render settings with the reasons Reduced quality holds and the frame-rate ceiling in force, the backend and live mode of each running scene (`mode stopped_after_failure` for a scene whose renderer stopped after a failure, apart from `user_paused` and `policy_suspended`; see [scene rendering](scene-rendering.md#a-scene-that-stops-drawing)), the state of each wallpaper window with whether the displays have separate Spaces ([below](#wallpaper-window-state)), and the app's memory footprint at export time ([above](#memory-pressure)) |
 | `README.txt` | What is included, what was missing or skipped, and what was redacted |
 
 Everything except `README.txt` passes through `DiagnosticsRedactor` first:

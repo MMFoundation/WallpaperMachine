@@ -23,8 +23,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
   private var video: LockScreenVideoPlaying?
   private var nativeStart: Task<Void, Never>?
   private var contentError: Error?
-  /// Set once, when the engine reports it cannot draw the scene and Native Metal is the only renderer it
-  /// may use, or when the extension's players cannot play a video. The surface then keeps what it shows
+  /// Set once, when the engine reports it cannot draw the scene (Native Metal is the only renderer), or when
+  /// the extension's players cannot play a video. The surface then keeps what it shows
   /// and says why; it is not a `contentError`, because the surface is alive and showing a picture, and
   /// the same wallpaper can reuse it.
   private var heldFailure: LockScreenHeldFailure?
@@ -147,7 +147,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     try check(owe_scene_wallpaper_new(&renderer))
     try check(owe_scene_wallpaper_init(renderer))
     try check(
-      owe_scene_wallpaper_init_metal_vulkan(
+      owe_scene_wallpaper_init_metal(
         renderer, Unmanaged.passUnretained(metal).toOpaque(), UInt32(metal.drawableSize.width),
         UInt32(metal.drawableSize.height), 0, 0, Double(scale)))
     // The lock-screen process never plays sound, reads input, or receives media data.
@@ -234,15 +234,14 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     return LockScreenHeldFailure(rawStage: owe_scene_wallpaper_backend_failure(scene), reason: reason)
   }
 
-  /// Native Metal is the only renderer and could not draw the scene. Said once, in the log and in the
-  /// readiness the app reads; the surface keeps its last frame, or shows the engine's preview picture.
+  /// Native Metal could not draw the scene, or no player could play the video. Said once, in the log and in
+  /// the readiness the app reads; the surface keeps its last frame, or shows the engine's preview picture.
   private func settleHeld(_ held: LockScreenHeldFailure, afterSignal signal: EngineSignal) {
     guard heldFailure == nil else { return }
     heldFailure = held
     heldNotice = Self.heldMessage(held)
     WallpaperRuntime.log(
-      "Held display=\(scene.displayID) preferred=\(scene.effectiveSceneRenderer.rawValue) "
-        + "\(held.logDetail); not drawn, holding the last frame or the preview picture")
+      "Held display=\(scene.displayID) \(held.logDetail); not drawn, holding the last frame or the preview picture")
     switch signal {
     case .firstFrame:
       // The picture the wait was for is the one on the surface, so the wait is over. The preview, when
@@ -467,8 +466,8 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
     waiters.forEach { $0(nil) }
   }
 
-  /// Which backend drew the first frame, and why it is not the preferred one when it is not.
-  /// The backend is only known once the scene is parsed, which the first frame proves.
+  /// Which backend drew the first frame. The backend is only known once the scene is parsed, which the
+  /// first frame proves.
   private func logBackend() {
     if video != nil {
       WallpaperRuntime.log(
@@ -476,22 +475,10 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       return
     }
     guard let renderer else { return }
-    let scene = UnsafeMutableRawPointer(renderer)
-    let backend: String
-    switch owe_scene_wallpaper_backend(scene) {
-    case Int32(OWE_SCENE_BACKEND_NATIVE_METAL.rawValue): backend = "native Metal"
-    case Int32(OWE_SCENE_BACKEND_LEGACY_VULKAN.rawValue): backend = "Compatibility"
-    default: backend = "unknown"
-    }
-    var reason = ""
-    let needed = owe_scene_wallpaper_backend_fallback_reason(scene, nil, 0)
-    if needed > 0 {
-      var buffer = [CChar](repeating: 0, count: needed + 1)
-      _ = owe_scene_wallpaper_backend_fallback_reason(scene, &buffer, buffer.count)
-      reason = " fallback=" + String(cString: buffer)
-    }
-    WallpaperRuntime.log(
-      "Backend display=\(self.scene.displayID) preferred=\(self.scene.effectiveSceneRenderer.rawValue) drew=\(backend)\(reason)")
+    let backend =
+      owe_scene_wallpaper_backend(UnsafeMutableRawPointer(renderer))
+        == Int32(OWE_SCENE_BACKEND_NATIVE_METAL.rawValue) ? "native Metal" : "unknown"
+    WallpaperRuntime.log("Backend display=\(scene.displayID) drew=\(backend)")
   }
 
   private func startWeb(project: URL, entry: String, completion: @escaping (Error?) -> Void) throws {

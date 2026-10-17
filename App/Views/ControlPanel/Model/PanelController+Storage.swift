@@ -102,7 +102,7 @@ extension PanelController {
     var environment = DiagnosticEnvironment.current()
     environment.append(
       """
-      settings: scene renderer \(settings.sceneRenderer), scene resolution \(settings.sceneResolution), \
+      settings: scene resolution \(settings.sceneResolution), \
       render scale \(settings.renderScale) (preferred \(settings.preferredRenderScale)), battery mode \
       \(settings.batteryMode), frame-rate cap \(settings.frameRateCap.map(String.init) ?? "none"), on battery \
       \(settings.onBatteryPower), reduced quality for \(throttle.isEmpty ? "nothing" : throttle), effective \

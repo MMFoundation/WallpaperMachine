@@ -853,21 +853,6 @@ impl WallpaperEngine {
         self.backend.set_scene_video_plane_sampling_enabled(enabled)
     }
 
-    /// Chooses which renderer new and rebuilt scenes prefer.
-    ///
-    /// A preference, not a guarantee: a scene the native backend cannot draw
-    /// runs on the compatibility backend and reports why.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the renderer rejects the call.
-    pub fn set_scene_renderer_preference(
-        &self,
-        preference: crate::SceneRendererPreference,
-    ) -> Result<(), EngineError> {
-        self.backend.set_scene_renderer_preference(preference)
-    }
-
     /// Chooses how many pixels a 2D scene is rasterized with: the canvas it
     /// was authored at, or the size it is presented at on the display.
     ///

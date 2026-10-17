@@ -6,16 +6,12 @@
 #include "Runtime/MediaArtwork.hpp"
 #include "SceneWallpaperSurface.hpp"
 #include "Utils/Logging.h"
-#include "MetalRender/MetalBackendRouter.hpp"
 #include "MetalRender/MetalVideoSupport.hpp"
 #include "RenderCommon/StaticSubgraphCache.hpp"
 #include "Video/SharedVideoSession.hpp"
 #include "Video/VideoFramePacing.hpp"
 
 #import <QuartzCore/CAMetalLayer.h>
-
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_metal.h>
 
 #include <algorithm>
 #include <cstring>
@@ -221,9 +217,15 @@ wallpaper::RenderInitInfo make_render_init_info(
     // wallpaper-core.
     wallpaper::RenderInitInfo info;
     info.offscreen = false;
-    // Carried alongside the surface closure so a backend that does not create a
-    // VkSurfaceKHR can still adopt this layer. Exactly one backend ever owns it.
+    // The layer the Metal renderer adopts once the scene is parsed. The caller
+    // keeps it alive even if the host replaces its window layer before that
+    // work runs.
     info.metal_layer = metal_layer_handle;
+    // Retained by the description itself: the renderer is created later, from the
+    // parsed scene, and the host may have replaced its window layer by then.
+    info.metal_layer_owner = std::shared_ptr<void>(
+        (__bridge_retained void*)(__bridge CAMetalLayer*)metal_layer_handle,
+        [](void* layer) { CFRelease(layer); });
     info.width = static_cast<uint16_t>(width);
     info.height = static_cast<uint16_t>(height);
     info.render_width = static_cast<uint16_t>(render_width == 0 ? width : render_width);
@@ -232,27 +234,6 @@ wallpaper::RenderInitInfo make_render_init_info(
         display_scale_factor > 0.0 && std::isfinite(display_scale_factor)
             ? display_scale_factor
             : 1.0;
-    info.surface_info.instanceExts = {
-        VK_KHR_SURFACE_EXTENSION_NAME,
-        VK_EXT_METAL_SURFACE_EXTENSION_NAME,
-    };
-    // Backend selection is deferred until the scene loads. Keep the layer alive
-    // even if the host replaces its window layer before that work runs.
-    CAMetalLayer* metal_layer = (__bridge CAMetalLayer*)metal_layer_handle;
-    info.surface_info.createSurfaceOp =
-        [metal_layer](VkInstance instance, VkSurfaceKHR* surface) {
-            auto* create_surface = reinterpret_cast<PFN_vkCreateMetalSurfaceEXT>(
-                vkGetInstanceProcAddr(instance, "vkCreateMetalSurfaceEXT"));
-            if (create_surface == nullptr) return VK_ERROR_EXTENSION_NOT_PRESENT;
-
-            const VkMetalSurfaceCreateInfoEXT create_info {
-                .sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
-                .pNext = nullptr,
-                .flags = 0,
-                .pLayer = metal_layer,
-            };
-            return create_surface(instance, &create_info, nullptr, surface);
-        };
     configure_desktop_poster(info, metal_layer_handle);
     return info;
 }
@@ -439,7 +420,7 @@ extern "C" int owe_scene_wallpaper_shutdown(owe_scene_wallpaper* scene)
     return 0;
 }
 
-extern "C" int owe_scene_wallpaper_init_metal_vulkan(
+extern "C" int owe_scene_wallpaper_init_metal(
     owe_scene_wallpaper* scene,
     void* metal_layer,
     uint32_t width,
@@ -458,7 +439,7 @@ extern "C" int owe_scene_wallpaper_init_metal_vulkan(
         return finish_with_error(error);
     }
 
-    scene->scene.initVulkan(make_render_init_info(
+    scene->scene.initSurface(make_render_init_info(
         metal_layer,
         width,
         height,
@@ -1038,58 +1019,18 @@ extern "C" int owe_scene_wallpaper_surface_health(void* scene, owe_surface_healt
     return 0;
 }
 
-extern "C" void owe_set_scene_renderer_preference(int preference)
-{
-    // An unrecognised value falls back to compatibility rather than being
-    // stored: a host built against a newer enum must not silently select a
-    // backend this binary does not have.
-    auto value = wallpaper::SceneRendererPreference::Compatibility;
-    switch (preference) {
-    case OWE_SCENE_RENDERER_NATIVE_METAL_PREFERRED:
-        value = wallpaper::SceneRendererPreference::NativeMetalPreferred;
-        break;
-    case OWE_SCENE_RENDERER_NATIVE_METAL_ONLY:
-        value = wallpaper::SceneRendererPreference::NativeMetalOnly;
-        break;
-    default: break;
-    }
-    wallpaper::SetSceneRendererPreference(value);
-    // A remembered prepare failure is only meaningful for the preference that
-    // was in force when it happened. Turning the preference off and on again is
-    // the one deliberate act that makes the question worth asking a second
-    // time, so the record is cleared here rather than aged out on a timer.
-    wallpaper::metal::ForgetMetalPrepareFailures();
-}
-
-extern "C" int owe_current_scene_renderer_preference(void)
-{
-    switch (wallpaper::CurrentSceneRendererPreference()) {
-    case wallpaper::SceneRendererPreference::NativeMetalOnly:
-        return OWE_SCENE_RENDERER_NATIVE_METAL_ONLY;
-    case wallpaper::SceneRendererPreference::NativeMetalPreferred:
-        return OWE_SCENE_RENDERER_NATIVE_METAL_PREFERRED;
-    case wallpaper::SceneRendererPreference::Compatibility:
-        break;
-    }
-    return OWE_SCENE_RENDERER_COMPATIBILITY;
-}
-
 extern "C" int owe_scene_wallpaper_backend(void* scene)
 {
     auto* wallpaper_scene = static_cast<wallpaper::SceneWallpaper*>(scene);
     if (wallpaper_scene == nullptr) return -1;
     const auto selection = wallpaper_scene->sceneBackendSelection();
-    // Same -1 as "no scene": the host shows it as preparing. A backend is only
-    // chosen once the scene is parsed, and naming one before that would make
+    // Same -1 as "no scene": the host shows it as preparing. A renderer is only
+    // created once the scene is parsed, and naming one before that would make
     // the panel claim a renderer that has not been created.
-    // A scene held in a failure has no backend drawing it right now, whatever
+    // A scene held in a failure has no renderer drawing it right now, whatever
     // renderer it had before; the failure accessors say why.
     if (! selection.created || selection.failed()) return -1;
-    switch (selection.backend) {
-    case wallpaper::SceneBackend::NativeMetal: return OWE_SCENE_BACKEND_NATIVE_METAL;
-    case wallpaper::SceneBackend::LegacyVulkan: break;
-    }
-    return OWE_SCENE_BACKEND_LEGACY_VULKAN;
+    return OWE_SCENE_BACKEND_NATIVE_METAL;
 }
 
 extern "C" void owe_set_scene_video_plane_sampling_enabled(bool enabled)
@@ -1127,21 +1068,6 @@ extern "C" int owe_scene_wallpaper_scene_optimization_applied(void* scene)
     auto* wallpaper_scene = static_cast<wallpaper::SceneWallpaper*>(scene);
     if (wallpaper_scene == nullptr) return -1;
     return wallpaper_scene->sceneOptimizationApplied() ? 1 : 0;
-}
-
-extern "C" size_t owe_scene_wallpaper_backend_fallback_reason(void* scene, char* out,
-                                                              size_t out_len)
-{
-    auto* wallpaper_scene = static_cast<wallpaper::SceneWallpaper*>(scene);
-    if (wallpaper_scene == nullptr) return 0;
-    const auto reason = wallpaper_scene->sceneBackendSelection().fallback_reason;
-    if (reason.empty()) return 0;
-    // Sizing call: report what would be needed without writing anything.
-    if (out == nullptr || out_len == 0) return reason.size();
-    const size_t copied = std::min(reason.size(), out_len - 1);
-    std::memcpy(out, reason.data(), copied);
-    out[copied] = '\0';
-    return reason.size();
 }
 
 extern "C" int owe_scene_wallpaper_backend_failure(void* scene)

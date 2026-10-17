@@ -12,7 +12,7 @@ use crate::{
         BridgeWebWallpaper,
     },
     config::{
-        AppConfig, SceneRendererModeCfg, SceneResolutionCfg, WallpaperConfig,
+        AppConfig, SceneResolutionCfg, WallpaperConfig,
     },
     power::PowerSource,
 };
@@ -259,10 +259,6 @@ pub struct SetRendererCountersEnabled {
 
 pub struct RendererCounters;
 
-pub struct SetSceneRenderer {
-    pub mode: SceneRendererModeCfg,
-}
-
 pub struct SetSceneResolution {
     pub resolution: SceneResolutionCfg,
 }
@@ -490,7 +486,6 @@ pub type SetBatteryQualityProfileReply = AllSnapshotsReply;
 pub type SetContentPacingEnabledReply = AllSnapshotsReply;
 pub type SetSharedVideoDecodeEnabledReply = AllSnapshotsReply;
 pub type SetSceneOptimizationEnabledReply = AllSnapshotsReply;
-pub type SetSceneRendererReply = AllSnapshotsReply;
 pub type SetSceneResolutionReply = AllSnapshotsReply;
 pub type SetSceneOnDemandEnabledReply = AllSnapshotsReply;
 pub type SetSceneVideoPlaneSamplingEnabledReply = AllSnapshotsReply;

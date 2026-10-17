@@ -294,21 +294,6 @@ impl OweBackend {
         }
     }
 
-    /// Chooses which renderer newly opened scenes prefer.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if the call unwinds.
-    pub fn set_scene_renderer_preference(
-        &self,
-        preference: crate::SceneRendererPreference,
-    ) -> Result<(), EngineError> {
-        unsafe {
-            UnwindSafeFFI::new("owe_set_scene_renderer_preference")
-                .call(|| sys::owe_set_scene_renderer_preference(preference.as_raw()))
-        }
-    }
-
     /// Chooses how many pixels a 2D scene is rasterized with, process-wide.
     ///
     /// New scenes take it when they are built; a running scene takes it the
@@ -1268,8 +1253,8 @@ impl OweScene {
         call_status("owe_scene_wallpaper_init", || unsafe {
             sys::owe_scene_wallpaper_init(raw.as_ptr())
         })?;
-        call_status("owe_scene_wallpaper_init_metal_vulkan", || unsafe {
-            sys::owe_scene_wallpaper_init_metal_vulkan(
+        call_status("owe_scene_wallpaper_init_metal", || unsafe {
+            sys::owe_scene_wallpaper_init_metal(
                 raw.as_ptr(),
                 metal_layer,
                 desc.display.width,

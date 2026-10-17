@@ -12,7 +12,7 @@ use kameo::{
 };
 use wallpaper_core::{
     DisplayIdentity, DisplaySelector, DisplaySnapshotEntry, PropertyPreview,
-    SceneRendererPreference, SceneResolution, WallpaperAssignment,
+    SceneResolution, WallpaperAssignment,
     media::audio::AudioVolume,
     project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SerdeValudeExt},
     render::{
@@ -51,7 +51,7 @@ use crate::{
             SetPresentationSuspended, SetPresentationUnloaded, SetPropertyPath,
             SetRenderScale,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
-            SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneRenderer,
+            SetSceneOnDemandEnabled, SetSceneOptimizationEnabled,
             SetSceneResolution, SetSceneVideoPlaneSamplingEnabled, SetSharedVideoDecodeEnabled,
             SetTargetFps, SetVerboseLogging, SetVolume, SetWebAudioSubscribed,
             Shutdown,
@@ -68,7 +68,7 @@ use crate::{
         BridgeWallpaperMutationBundle, BridgeWallpaperPreview, BridgeWebWallpaper, MousePollingControl,
     },
     config::{
-        AppConfig, ConfigStore, FramingCfg, SceneRendererModeCfg, SceneResolutionCfg,
+        AppConfig, ConfigStore, FramingCfg, SceneResolutionCfg,
         SerializedSelector, WallpaperConfig,
     },
     display::{DisplaySelectorExt, DisplaySnapshotExt},
@@ -2329,14 +2329,6 @@ impl<E: EngineFacade + Clone> Message<Bootstrap> for BridgeActor<E> {
         {
             self.state.errors.push(error.to_string());
         }
-        if let Err(error) = self
-            .engine
-            .set_scene_renderer_preference(scene_renderer_preference(
-                self.state.app_config.scene_renderer,
-            ))
-        {
-            self.state.errors.push(error.to_string());
-        }
 
         if let Err(error) = self.refresh_displays().await {
             self.state.errors.push(error.message().to_string());
@@ -3496,15 +3488,6 @@ impl<E: EngineFacade + Clone> Message<SetDisplayPresentationSuspended> for Bridg
     }
 }
 
-/// The renderer-facing spelling of the saved scene renderer preference.
-fn scene_renderer_preference(mode: SceneRendererModeCfg) -> SceneRendererPreference {
-    match mode {
-        SceneRendererModeCfg::Compatibility => SceneRendererPreference::Compatibility,
-        SceneRendererModeCfg::NativeMetalPreferred => SceneRendererPreference::NativeMetalPreferred,
-        SceneRendererModeCfg::NativeMetalOnly => SceneRendererPreference::NativeMetalOnly,
-    }
-}
-
 fn scene_resolution(resolution: SceneResolutionCfg) -> SceneResolution {
     match resolution {
         SceneResolutionCfg::Canvas => SceneResolution::Canvas,
@@ -3537,49 +3520,6 @@ impl<E: EngineFacade + Clone> Message<SetSceneResolution> for BridgeActor<E> {
             .set_scene_resolution(scene_resolution(msg.resolution))
             .map_err(|error| BridgeError::engine(error.to_string()))?;
         self.apply_effective_render_scale().await?;
-        self.bump_generation();
-        Ok(self.all_snapshots())
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetSceneRenderer> for BridgeActor<E> {
-    type Reply = messages::SetSceneRendererReply;
-
-    async fn handle(
-        &mut self,
-        msg: SetSceneRenderer,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        if self.state.app_config.scene_renderer == msg.mode {
-            return Ok(self.all_snapshots());
-        }
-        // The renderer picks a backend when a scene is opened, so the process
-        // switch has to be in place before anything is rebuilt against it.
-        self.engine
-            .set_scene_renderer_preference(scene_renderer_preference(msg.mode))
-            .map_err(|error| BridgeError::engine(error.to_string()))?;
-        let mut app_config = self.state.app_config.clone();
-        app_config.scene_renderer = msg.mode;
-        // A scene already on screen keeps the backend it was opened with, so
-        // the scene list is rebuilt for the new preference before it is
-        // committed: a failure leaves the previous renderer running rather
-        // than nothing at all. The descriptors are rebuilt from actor state
-        // this change never touches, so a wallpaper the user paused and a
-        // display whose presentation is suspended stay that way.
-        let wallpaper_configs = self.state.wallpaper_configs.clone();
-        // Forced: the descriptors are identical across a renderer-preference
-        // change, so without this the reconcile is a no-op and the setting has
-        // no effect until the wallpaper is changed or the app restarts. The
-        // rebuild is also what re-runs shader translation, which is gated on
-        // the preference at parse time.
-        let scenes = self
-            .reconcile_engine_with(app_config.clone(), wallpaper_configs, true)
-            .await?;
-        if let Some(store) = &self.config_store {
-            store.save_app_config(&app_config)?;
-        }
-        self.state.app_config = app_config;
-        self.state.set_active_ids_from_scenes(&scenes);
         self.bump_generation();
         Ok(self.all_snapshots())
     }

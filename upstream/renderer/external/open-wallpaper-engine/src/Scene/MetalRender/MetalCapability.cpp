@@ -1,5 +1,7 @@
 #include "MetalRender/MetalCapability.hpp"
 
+#include "MetalRender/MetalBackendRouter.hpp"
+
 #include "MetalRender/MetalShaderReflection.hpp"
 #include "MetalRender/MetalVideoSupport.hpp"
 #include "MetalRender/SceneMetalProgram.hpp"
@@ -294,36 +296,30 @@ std::string SceneMetalStructuralRejection(const Scene& scene)
 
 SceneBackendSelection EvaluateMetalSupport(const Scene& scene)
 {
-    if (! scene.layer_texture_error.empty()) {
-        return SceneBackendSelection { SceneBackend::LegacyVulkan, scene.layer_texture_error };
-    }
+    if (! scene.layer_texture_error.empty()) return NativeRefusal(scene.layer_texture_error);
     if (auto reason = SceneMetalStructuralRejection(scene); ! reason.empty()) {
-        return SceneBackendSelection { SceneBackend::LegacyVulkan, std::move(reason) };
+        return NativeRefusal(std::move(reason));
     }
 
     bool saw_any_attempt = false;
     if (auto reason = RejectShaders(scene, scene.sceneGraph.get(), saw_any_attempt);
         ! reason.empty()) {
-        return SceneBackendSelection { SceneBackend::LegacyVulkan, std::move(reason) };
+        return NativeRefusal(std::move(reason));
     }
     for (auto* node : PostProcessNodes(scene)) {
         if (auto reason = RejectShaders(scene, node, saw_any_attempt); ! reason.empty()) {
-            return SceneBackendSelection { SceneBackend::LegacyVulkan, std::move(reason) };
+            return NativeRefusal(std::move(reason));
         }
     }
 
     // No shader carries a translation at all. That is not the author's fault
-    // and must not be reported as one: it is what every scene looks like when
-    // it was parsed while the compatibility renderer was selected, because the
-    // second compile is only run when the native renderer is asked for.
+    // and must not be reported as one: it means the parser did not run the
+    // Metal translation for this scene.
     if (! saw_any_attempt) {
-        return SceneBackendSelection {
-            SceneBackend::LegacyVulkan,
-            "the wallpaper was loaded before the native renderer was selected",
-        };
+        return NativeRefusal("the wallpaper was parsed without the Metal translation of its shaders");
     }
 
-    return SceneBackendSelection { SceneBackend::NativeMetal, {} };
+    return SceneBackendSelection {};
 }
 
 MetalPassKind ClassifyMetalPassKind(int pass_node_type)

@@ -251,9 +251,10 @@ crate was reviewed file by file. The result is 154 third-party crates (naga coun
 vendored copy in `upstream/naga`), all compiled into `libwallpaper_bridge.a`,
 which the app links (`-lwallpaper_bridge` in `project.yml`).
 
-The table below says which renderer path needs each blocked crate. "Native
-Metal" and "Compatibility" (Vulkan through MoltenVK) are the two scene
-renderers described in [docs/features/scene-rendering.md](docs/features/scene-rendering.md#scene-renderer):
+The table below says which renderer path needs each blocked crate. Native Metal is
+the only scene renderer ([docs/features/scene-rendering.md](docs/features/scene-rendering.md#scene-renderer)).
+The Compatibility renderer (Vulkan through MoltenVK) is never created by the engine any
+more, but its source and libraries stay in the build until their deletion:
 
 | Crate | Pulled in by | Needed by |
 |---|---|---|
@@ -326,8 +327,10 @@ or compiled into, the same process as the GPL-2.0-only renderer:
 - the Rust crate `spirv` (Apache-2.0), compiled into `libwallpaper_bridge.a`
   ([Rust crates](#rust-crates)).
 
-Retiring the Compatibility (Vulkan) path does not clear the Rust crate on its
-own: `spirv` leaves only if naga's `spv-out` feature is dropped as well.
+The Compatibility (Vulkan) path is already unreachable: the engine never creates it and the
+Scene renderer setting that chose it is gone. Its code and these libraries are still built
+and linked, so nothing above is cleared yet. Deleting that code does not clear the Rust
+crate on its own: `spirv` leaves only if naga's `spv-out` feature is dropped as well.
 `codespan-reporting` no longer blocks: the vendored naga (`upstream/naga`)
 makes it optional and the `shader` crate does not enable it.
 
@@ -336,9 +339,9 @@ sold or given away. Resolution means one of:
 
 1. **Replace** the component with one under a GPLv2-compatible license or with
    code written for this project, and remove the Apache-2.0 code from the link
-   closure. For the Vulkan path this is a large engineering change (the
-   renderer's native Metal backend exists but does not cover every scene; see
-   [docs/features/performance.md](docs/features/performance.md)). For a Rust
+   closure. For the Vulkan path this is a deletion: the renderer's native Metal backend
+   is the only scene renderer, so the Vulkan code and its libraries only need to
+   leave the build. For a Rust
    crate it means dropping the feature or dependency that pulls it in, or
    replacing or patching the crate that needs it: the vendored naga builds
    without `codespan-reporting`.

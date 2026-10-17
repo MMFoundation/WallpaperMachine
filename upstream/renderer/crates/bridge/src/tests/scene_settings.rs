@@ -1,18 +1,19 @@
-//! Whole-scene on-demand updating and the scene renderer preference.
+//! Whole-scene on-demand updating and what the renderer reports per scene.
 //!
-//! Four properties matter here. Both settings have to survive a restart and be
+//! Three properties matter here. The settings have to survive a restart and be
 //! pushed back into the renderer, because the switches live in C rather than in
-//! the config file. Both have to reach the engine through *both* halves of the
+//! the config file. They have to reach the engine through *both* halves of the
 //! facade — `RealEngineFacade` and the `ArcEngineFacade` the bridge actually
 //! holds — because a forward added to only one of the two compiles cleanly and
-//! silently does nothing. An unrecognised renderer name has to be refused
-//! rather than quietly becoming Compatibility. And the live per-scene status
-//! has to keep `unknown` apart from `continuous`: a scene that is running and
-//! could not be read is not evidence that anything is ticking.
+//! silently does nothing. And the live per-scene status has to keep `unknown`
+//! apart from `continuous`: a scene that is running and could not be read is
+//! not evidence that anything is ticking. There is no renderer to choose:
+//! Native Metal draws every scene it can, and a scene it cannot draw is held
+//! and reported.
 
 use wallpaper_core::{
     DisplayDesc, DisplayIdentity, DisplaySnapshotEntry, SceneBackend, SceneDemandReasons,
-    SceneFailure, SceneFailureStage, SceneRendererPreference, SceneResolution, SceneRuntimeReport, SceneUpdateMode, SceneVideoPath,
+    SceneFailure, SceneFailureStage, SceneResolution, SceneRuntimeReport, SceneUpdateMode, SceneVideoPath,
     SurfaceHealth, SurfaceStopReason, project::SceneHandle,
 };
 
@@ -28,8 +29,7 @@ fn report(display_id: u32, handle: u64) -> SceneRuntimeReport {
         handle,
         update_mode: Some(SceneUpdateMode::Continuous),
         demand_reasons: SceneDemandReasons::default(),
-        backend: Some(SceneBackend::LegacyVulkan),
-        fallback_reason: None,
+        backend: Some(SceneBackend::NativeMetal),
         failure: None,
         video_path: SceneVideoPath::None,
         optimization_applied: Some(true),
@@ -114,125 +114,11 @@ async fn scene_on_demand_defaults_off_and_reaches_the_engine_through_both_facade
     );
 }
 
-#[tokio::test]
-async fn scene_renderer_defaults_to_native_metal_and_reaches_both_facade_halves() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = ConfigStore::open(temp.path().to_path_buf());
-    let engine = FakeEngineFacade::default();
-    let bridge = BridgeBuilder::new(engine.clone())
-        .with_config_store(store.clone())
-        .build()
-        .unwrap();
-
-    assert_eq!(
-        bridge.settings_snapshot().await.unwrap().scene_renderer,
-        "native_metal_preferred"
-    );
-
-    let snapshot = bridge
-        .set_scene_renderer("compatibility".into())
-        .await
-        .unwrap()
-        .settings;
-    assert_eq!(snapshot.scene_renderer, "compatibility");
-    // End state only: the switch is process-wide while the rebuild is per
-    // wallpaper, so the number of transitions is not a contract.
-    assert_eq!(
-        engine.scene_renderer_calls().last().copied(),
-        Some(SceneRendererPreference::Compatibility),
-        "a delegation missing from ArcEngineFacade would leave this log empty"
-    );
-
-    drop(bridge);
-    let restarted_engine = FakeEngineFacade::default();
-    let restarted = BridgeBuilder::new(restarted_engine.clone())
-        .with_config_store(store)
-        .build()
-        .unwrap();
-    restarted.bootstrap().await.unwrap();
-    assert_eq!(
-        restarted_engine.scene_renderer_calls().last().copied(),
-        Some(SceneRendererPreference::Compatibility),
-        "the saved choice has to be pushed back in before anything opens, and a \
-         return to Compatibility is not moved to the default again"
-    );
-}
-
-#[tokio::test]
-async fn an_unknown_scene_renderer_name_is_refused_and_changes_nothing() {
-    let engine = FakeEngineFacade::default();
-    let bridge = bridge(&engine);
-
-    let error = bridge
-        .set_scene_renderer("metal".into())
-        .await
-        .expect_err("only the declared names exist");
-
-    assert_eq!(error.kind(), crate::BridgeErrorKind::InvalidInput);
-    assert!(
-        engine.scene_renderer_calls().is_empty(),
-        "a refused name must not be silently substituted with Compatibility"
-    );
-    assert_eq!(
-        bridge.settings_snapshot().await.unwrap().scene_renderer,
-        "native_metal_preferred",
-        "the saved preference must be untouched by a rejected call"
-    );
-}
-
-/// `native_metal_only` is the engine's no-fallback mode. It is chosen only by
-/// naming it, is saved and pushed back in like the other two, and is never what
-/// a configuration that never chose it means.
-#[tokio::test]
-async fn native_metal_only_is_chosen_by_name_saved_and_pushed_to_the_engine() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = ConfigStore::open(temp.path().to_path_buf());
-    let engine = FakeEngineFacade::default();
-    let bridge = BridgeBuilder::new(engine.clone())
-        .with_config_store(store.clone())
-        .build()
-        .unwrap();
-    assert_ne!(
-        bridge.settings_snapshot().await.unwrap().scene_renderer,
-        "native_metal_only",
-        "the default stays the preferred mode, with its fallback, until the Vulkan path is deleted"
-    );
-
-    let snapshot = bridge
-        .set_scene_renderer("native_metal_only".into())
-        .await
-        .unwrap()
-        .settings;
-    assert_eq!(snapshot.scene_renderer, "native_metal_only");
-    assert_eq!(
-        engine.scene_renderer_calls().last().copied(),
-        Some(SceneRendererPreference::NativeMetalOnly),
-        "the engine must be told, or the setting would only be a label"
-    );
-
-    drop(bridge);
-    let restarted_engine = FakeEngineFacade::default();
-    let restarted = BridgeBuilder::new(restarted_engine.clone())
-        .with_config_store(store)
-        .build()
-        .unwrap();
-    restarted.bootstrap().await.unwrap();
-    assert_eq!(
-        restarted.settings_snapshot().await.unwrap().scene_renderer,
-        "native_metal_only",
-        "a saved choice is not moved to the default again"
-    );
-    assert_eq!(
-        restarted_engine.scene_renderer_calls().last().copied(),
-        Some(SceneRendererPreference::NativeMetalOnly)
-    );
-}
-
 /// A scene held by the failure policy is not running anywhere: its row carries the
-/// stage and the renderer's own reason, no backend and no fallback, and a surface
-/// that stopped is reported as stopped, never as ticking.
+/// stage and the renderer's own reason and no backend, and a surface that stopped
+/// is reported as stopped, never as ticking.
 #[tokio::test]
-async fn a_held_scene_reports_its_failure_and_no_backend_or_fallback() {
+async fn a_held_scene_reports_its_failure_and_no_backend() {
     let engine = FakeEngineFacade::default();
     engine.set_scene_runtime_reports(vec![
         SceneRuntimeReport {
@@ -261,7 +147,6 @@ async fn a_held_scene_reports_its_failure_and_no_backend_or_fallback() {
         "the renderer's own reason is what the panel shows beside the stage"
     );
     assert_eq!(renderers[0].backend, "unknown", "nothing is drawing a held scene");
-    assert_eq!(renderers[0].fallback_reason, None, "a held scene did not fall back");
     assert_eq!(settings.scene_update_modes[0].mode, "stopped_after_failure");
     assert_eq!(renderers[1].failure_stage, None);
     assert_eq!(renderers[1].failure_reason, None);
@@ -596,7 +481,7 @@ async fn a_suspended_display_reports_policy_rather_than_the_users_own_pause() {
 }
 
 #[tokio::test]
-async fn the_backend_report_names_what_ran_and_only_real_fallbacks() {
+async fn the_backend_report_names_what_ran_and_says_unknown_when_it_cannot() {
     let engine = FakeEngineFacade::default();
     engine.set_scene_runtime_reports(vec![
         SceneRuntimeReport {
@@ -604,13 +489,8 @@ async fn the_backend_report_names_what_ran_and_only_real_fallbacks() {
             ..report(7, 1)
         },
         SceneRuntimeReport {
-            backend: Some(SceneBackend::LegacyVulkan),
-            fallback_reason: Some("the scene uses a puppet the native backend cannot draw".into()),
-            ..report(8, 2)
-        },
-        SceneRuntimeReport {
             backend: None,
-            ..report(9, 3)
+            ..report(8, 2)
         },
     ]);
     let bridge = bridge(&engine);
@@ -619,27 +499,18 @@ async fn the_backend_report_names_what_ran_and_only_real_fallbacks() {
 
     assert_eq!(renderers[0].backend, "native_metal");
     assert_eq!(
-        renderers[0].fallback_reason, None,
-        "a scene that got what was asked for did not fall back"
-    );
-    assert_eq!(renderers[1].backend, "legacy_vulkan");
-    assert_eq!(
-        renderers[1].fallback_reason.as_deref(),
-        Some("the scene uses a puppet the native backend cannot draw")
-    );
-    assert_eq!(
-        renderers[2].backend, "unknown",
-        "a backend the renderer could not name must not be reported as the preference"
+        renderers[1].backend, "unknown",
+        "a backend the renderer could not name must not be reported as drawing"
     );
 }
 
-/// No GPU backend exists until a scene has been parsed and one has been chosen,
-/// so an absent backend is a phase of the scene's life rather than a failed
-/// reading. It has to reach the panel as its own value, distinct from both real
-/// backends and from the preference, and it has to carry no fallback reason:
-/// nothing has fallen back while nothing has been chosen.
+/// No GPU renderer exists until a scene has been parsed and found drawable, so
+/// an absent backend is a phase of the scene's life rather than a failed
+/// reading. It has to reach the panel as its own value, distinct from the real
+/// backend, and the row has to survive: a scene still being read is a running
+/// scene.
 #[tokio::test]
-async fn a_scene_with_no_backend_yet_is_reported_separately_from_a_fallback() {
+async fn a_scene_with_no_backend_yet_is_reported_as_unknown_and_kept() {
     let engine = FakeEngineFacade::default();
     engine.set_scene_runtime_reports(vec![
         SceneRuntimeReport {
@@ -647,16 +518,11 @@ async fn a_scene_with_no_backend_yet_is_reported_separately_from_a_fallback() {
             ..report(7, 1)
         },
         SceneRuntimeReport {
-            backend: Some(SceneBackend::LegacyVulkan),
-            fallback_reason: Some("the scene uses a puppet the native backend cannot draw".into()),
+            backend: Some(SceneBackend::NativeMetal),
             ..report(8, 2)
         },
     ]);
     let bridge = bridge(&engine);
-    bridge
-        .set_scene_renderer(SceneRendererPreference::NativeMetalPreferred.as_str().into())
-        .await
-        .unwrap();
 
     let settings = bridge.settings_snapshot().await.unwrap();
     let renderers = &settings.scene_renderers;
@@ -664,26 +530,14 @@ async fn a_scene_with_no_backend_yet_is_reported_separately_from_a_fallback() {
     assert_eq!(
         renderers.len(),
         2,
-        "a scene still choosing a backend is a running scene and must not be dropped"
+        "a scene still waiting for its renderer is a running scene and must not be dropped"
     );
     assert_eq!(renderers[0].backend, "unknown");
     assert_ne!(
-        renderers[0].backend, settings.scene_renderer,
-        "preferring the native backend must not be published as having got it"
-    );
-    assert_ne!(
         renderers[0].backend, renderers[1].backend,
-        "not chosen yet and chose compatibility are different answers"
+        "not created yet and drawing are different answers"
     );
-    assert_eq!(
-        renderers[0].fallback_reason, None,
-        "nothing has been chosen, so nothing has fallen back"
-    );
-    assert_eq!(
-        renderers[1].fallback_reason.as_deref(),
-        Some("the scene uses a puppet the native backend cannot draw"),
-        "the renderer's own reason is what the panel shows, so it must survive the snapshot"
-    );
+    assert_eq!(renderers[0].failure_stage, None, "nothing has failed while nothing has been tried");
 }
 
 #[tokio::test]

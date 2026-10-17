@@ -34,7 +34,6 @@ final class SettingsSectionsRenderTests: PanelTestCase {
           backend: "native", fallbackReason: long ? longName : nil)
       ],
       sharedVideoDecodeEnabled: true, sharedVideoDecodeSessions: 1, sharedVideoDecodeConsumers: 2,
-      sceneRenderer: "native_metal_preferred",
       sceneUpdateModes: [
         BridgeSceneUpdateModeReport(
           displayId: 1, displayName: name, wallpaperId: "a", wallpaperTitle: name,
@@ -46,12 +45,13 @@ final class SettingsSectionsRenderTests: PanelTestCase {
       sceneRenderers: [
         BridgeSceneBackendReport(
           displayId: 1, displayName: name, wallpaperId: "a", wallpaperTitle: name,
-          backend: "native_metal", fallbackReason: nil, failureStage: nil, failureReason: nil, videoPath: "nv12_converted_preparing",
+          backend: "native_metal", failureStage: nil, failureReason: nil, videoPath: "nv12_converted_preparing",
           optimizationApplied: true),
         BridgeSceneBackendReport(
           displayId: 2, displayName: name, wallpaperId: "b", wallpaperTitle: name,
-          backend: "legacy_vulkan", fallbackReason: long ? longName : "Uses lit particles",
-          failureStage: nil, failureReason: nil, videoPath: "none", optimizationApplied: false),
+          backend: "unknown", failureStage: "unsupported",
+          failureReason: long ? longName : "Uses lit particles", videoPath: "none",
+          optimizationApplied: false),
       ],
       renderScale: 0.75, preferredRenderScale: 1, frameRateCap: 45, onBatteryPower: true,
       qualityThrottle: [.lowPowerMode])
