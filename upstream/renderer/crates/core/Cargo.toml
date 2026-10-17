@@ -21,7 +21,7 @@ objc2-io-surface = "0.3.2"
 objc2-quartz-core = "0.3.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-shader = { path = "../shader", features = ["ffi"] }
+wm-shader = { path = "../../../../Renderer/Shader", features = ["ffi"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 async-channel = "2"
 block2 = "0.6.2"

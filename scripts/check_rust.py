@@ -10,17 +10,20 @@ import tempfile
 
 from build import cargo_environment
 from lib.glyphs import markers
-from lib.paths import ARTIFACTS, RENDERER
+from lib.paths import ARTIFACTS, OWN_RENDERER, RENDERER
 from lib.xcode import run_quiet, skipped_test_lines
 
 MARK = markers()
+# (name, cargo arguments, workspace directory). Cargo runs inside the workspace it tests:
+# rustup resolves rust-toolchain.toml from the working directory. The shader layer is this
+# project's own workspace (Renderer/), apart from the vendored renderer's (upstream/renderer).
 CHECKS = (
-    ("core", ("-p", "wallpaper-core", "--lib")),
-    ("bridge", ("-p", "wallpaper-bridge", "--lib")),
+    ("core", ("-p", "wallpaper-core", "--lib"), RENDERER),
+    ("bridge", ("-p", "wallpaper-bridge", "--lib"), RENDERER),
     ("core-integration", ("-p", "wallpaper-core", "--test", "audio_response_controller",
                           "--test", "core_audio_api", "--test", "project_override_json",
-                          "--test", "wallpaper_background")),
-    ("shader", ("-p", "shader", "--features", "ffi")),
+                          "--test", "wallpaper_background"), RENDERER),
+    ("shader", ("-p", "wm-shader", "--features", "ffi"), OWN_RENDERER),
 )
 OPT_INS = ("WE_RUN_MACOS_WINDOW_TESTS", "WALLPAPER_MACHINE_MEDIA_TESTS", "WALLPAPER_MACHINE_NETWORK_TESTS")
 CORE_EXCLUSIONS = {
@@ -48,14 +51,14 @@ def run_checks(output, environment, runner=run_quiet):
         for variable in OPT_INS:
             env.pop(variable, None)
         env["WALLPAPER_MACHINE_HOME"] = home
-        for name, arguments in CHECKS:
+        for name, arguments, directory in CHECKS:
             command = ["cargo", "test", "--release", "--locked", *arguments, "--", "--nocapture"]
             if name == "core":
                 for test in CORE_EXCLUSIONS:
                     command += ["--skip", test]
             log = output / f"{name}.log"
             try:
-                completed, _ = runner(command, log, cwd=RENDERER, env=env)
+                completed, _ = runner(command, log, cwd=directory, env=env)
                 status = completed.returncode
             except OSError as error:
                 status = 1

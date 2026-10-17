@@ -13,7 +13,7 @@ from pathlib import Path
 import subprocess
 
 from build import build_environment, cargo_environment
-from lib.paths import RENDERER, RENDERER_ARTIFACTS, ROOT
+from lib.paths import OWN_RENDERER, RENDERER, RENDERER_ARTIFACTS, ROOT
 from lib.xcode import skipped_test_lines
 
 GENERATED_CASE_COUNT = 12
@@ -490,11 +490,11 @@ def main(argv=None):
     env = build_environment()
     build = RENDERER_ARTIFACTS / "bin"
     if not args.skip_build:
-        # Cargo must run inside the renderer tree: rustup resolves
-        # rust-toolchain.toml from the working directory, not --manifest-path.
+        # Cargo must run inside the workspace it builds (Renderer/ for the shader layer):
+        # rustup resolves rust-toolchain.toml from the working directory, not --manifest-path.
         steps = [
-            (["cargo", "build", "-p", "shader", "--features", "ffi", "--release"], "shader-build", RENDERER),
-            (["cmake", "-S", RENDERER / "external/open-wallpaper-engine", "-B", build, "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_TESTS=ON", "-DRUST_SHADER_FFI=ON", "-DRUST_SHADER_STATICLIB=" + str(RENDERER / "target/release/libshader.a")], "configure", ROOT),
+            (["cargo", "build", "-p", "wm-shader", "--features", "ffi", "--release", "--locked"], "shader-build", OWN_RENDERER),
+            (["cmake", "-S", RENDERER / "external/open-wallpaper-engine", "-B", build, "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_TESTS=ON", "-DRUST_SHADER_FFI=ON", "-DRUST_SHADER_STATICLIB=" + str(OWN_RENDERER / "target/release/libwm_shader.a")], "configure", ROOT),
             (["cmake", "--build", build, "--target", OFFSCREEN_PROBE, RELOAD_PROBE, *REGRESSION_BINARIES, "-j", "6"], "build", ROOT),
         ]
         for command, name, cwd in steps:

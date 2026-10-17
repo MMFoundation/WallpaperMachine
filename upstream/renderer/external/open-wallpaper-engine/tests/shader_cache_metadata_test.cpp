@@ -12,6 +12,7 @@
 #include <limits>
 #include <fstream>
 #include <string>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -21,6 +22,20 @@ namespace wallpaper
 {
 namespace
 {
+
+// The shader layer has one target, Metal, and the compile that settles a
+// program's metadata is the compile that generates its stages. These tests look
+// at what it merges into the units and the shader info; the stages are not
+// their subject.
+bool CompileProgram(std::string_view scene_id, std::string_view shader_name,
+                    std::span<WPShaderUnit> units, fs::VFS& vfs, WPShaderInfo* shader_info,
+                    std::span<const WPShaderTexInfo> textures,
+                    std::string* reflection_json = nullptr)
+{
+    std::vector<shader::RustShaderMetalStage> stages;
+    return WPShaderParser::CompileToMslRust(scene_id, shader_name, units, stages, vfs,
+                                            shader_info, textures, reflection_json);
+}
 
 std::filesystem::path MakeTempDir() {
     // Per process: concurrent runs share the temporary directory, and this
@@ -88,7 +103,7 @@ TEST(ShaderCacheMetadataTest, CacheHitStillPopulatesActiveTextureSlots) {
     {
         WPShaderInfo info;
         auto         units = MakeShaderUnits();
-        ASSERT_TRUE(WPShaderParser::AnalyzeRust(
+        ASSERT_TRUE(CompileProgram(
             "demo-scene", "tests/cache-metadata", units, vfs, &info, textures))
             << shader::LastRustShaderError();
         ASSERT_TRUE(units[1].preprocess_info.active_tex_slots.contains(0));
@@ -106,7 +121,7 @@ TEST(ShaderCacheMetadataTest, CacheHitStillPopulatesActiveTextureSlots) {
     {
         WPShaderInfo info;
         auto         units = MakeShaderUnits();
-        ASSERT_TRUE(WPShaderParser::AnalyzeRust(
+        ASSERT_TRUE(CompileProgram(
             "demo-scene", "tests/cache-metadata", units, vfs, &info, textures))
             << shader::LastRustShaderError();
         ASSERT_TRUE(units[1].preprocess_info.active_tex_slots.contains(0));
@@ -118,7 +133,7 @@ TEST(ShaderCacheMetadataTest, CacheHitStillPopulatesActiveTextureSlots) {
         auto units = MakeShaderUnits();
         units[1].src = "#include \"tint.h\"\n" + units[1].src;
         std::string reflection;
-        EXPECT_TRUE(WPShaderParser::AnalyzeRust(
+        EXPECT_TRUE(CompileProgram(
             "demo-scene", "tests/cache-includes", units, vfs, &info, textures, &reflection));
         EXPECT_FALSE(reflection.empty());
         EXPECT_TRUE(units[1].preprocess_info.active_tex_slots.contains(0));

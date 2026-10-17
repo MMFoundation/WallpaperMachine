@@ -99,7 +99,7 @@ TEST(RustShaderBridge, BuildsSerdeTaggedRequestJsonWithEnabledCachePolicy)
     const auto json = wallpaper::shader::BuildRustShaderRequestJson(TinyRequest());
 
     ASSERT_EQ(json.at("shader_name"), "bridge/tiny");
-    ASSERT_EQ(json.at("target"), "analysis");
+    ASSERT_EQ(json.at("target"), "metal_msl");
     ASSERT_EQ(json.at("cache_policy"), (nlohmann::json {
                                              { "mode", "enabled" },
                                              { "scene_id", "3611439897" },
@@ -185,7 +185,7 @@ TEST(RustShaderBridge, ParsesMetadataAndTheActiveSlotsOfAReflection)
     ASSERT_TRUE(output.fragment_preprocessor_info.active_tex_slots.contains(0));
 }
 
-TEST(RustShaderBridge, AnalysesATinyProgramWithoutGeneratingCode)
+TEST(RustShaderBridge, CompilesATinyProgramToOneMetalStagePerSourceStage)
 {
 #ifndef WESCENE_HAS_RUST_SHADER_FFI
     GTEST_SKIP() << "Rust shader staticlib was not linked";
@@ -193,7 +193,7 @@ TEST(RustShaderBridge, AnalysesATinyProgramWithoutGeneratingCode)
     wallpaper::shader::RustShaderOutput output;
 
     ASSERT_TRUE(wallpaper::shader::CompileRustShaderProgram(TinyRequest(), output));
-    ASSERT_TRUE(output.metal_stages.empty());
+    ASSERT_EQ(output.metal_stages.size(), 2u);
     ASSERT_FALSE(output.metadata_json.empty());
     ASSERT_FALSE(output.reflection_json.empty());
 #endif
@@ -337,7 +337,7 @@ TEST(RustShaderBridge, FailedCompileClearsPreviousOutput)
 #endif
 }
 
-TEST(RustShaderBridge, WPShaderParserAnalyzeRustPopulatesMetadataReflectionAndPreprocessInfo)
+TEST(RustShaderBridge, WPShaderParserCompilePopulatesMetadataReflectionAndPreprocessInfo)
 {
 #ifndef WESCENE_HAS_RUST_SHADER_FFI
     GTEST_SKIP() << "Rust shader staticlib was not linked";
@@ -354,10 +354,13 @@ TEST(RustShaderBridge, WPShaderParserAnalyzeRustPopulatesMetadataReflectionAndPr
     };
     auto units = ParserBridgeUnits();
 
-    ASSERT_TRUE(wallpaper::WPShaderParser::AnalyzeRust(
+    std::vector<wallpaper::shader::RustShaderMetalStage> stages;
+
+    ASSERT_TRUE(wallpaper::WPShaderParser::CompileToMslRust(
         "parser-bridge-scene",
         "tests/parser-bridge",
         units,
+        stages,
         vfs,
         &shader_info,
         textures,
@@ -395,7 +398,7 @@ TEST(RustShaderBridge, WPShaderParserAnalyzeRustPopulatesMetadataReflectionAndPr
 #endif
 }
 
-TEST(RustShaderBridge, WPShaderParserAnalyzeRustReportsGeneratedFragmentPath)
+TEST(RustShaderBridge, WPShaderParserCompileReportsGeneratedFragmentPath)
 {
 #ifndef WESCENE_HAS_RUST_SHADER_FFI
     GTEST_SKIP() << "Rust shader staticlib was not linked";
@@ -416,10 +419,13 @@ TEST(RustShaderBridge, WPShaderParserAnalyzeRustReportsGeneratedFragmentPath)
         "  gl_FragColor = missing_value;\n"
         "}\n";
 
-    ASSERT_FALSE(wallpaper::WPShaderParser::AnalyzeRust(
+    std::vector<wallpaper::shader::RustShaderMetalStage> stages;
+
+    ASSERT_FALSE(wallpaper::WPShaderParser::CompileToMslRust(
         "parser-bridge-scene",
         "tests/parser-bridge-invalid",
         units,
+        stages,
         vfs,
         &shader_info,
         textures,
@@ -432,8 +438,7 @@ TEST(RustShaderBridge, WPShaderParserAnalyzeRustReportsGeneratedFragmentPath)
 
 TEST(RustShaderBridge, BuildsMetalTargetRequestJson)
 {
-    auto request   = TinyRequest();
-    request.target = wallpaper::shader::RustShaderTarget::MetalMsl;
+    auto request = TinyRequest();
 
     const auto json = wallpaper::shader::BuildRustShaderRequestJson(request);
 
@@ -495,8 +500,10 @@ TEST(RustShaderBridge, WPShaderParserCompileToMslRustReturnsSourceBindingsAndRef
     ASSERT_NE(texture_binding, fragment_bindings.end());
     EXPECT_EQ(texture_binding->set, 0u);
     EXPECT_EQ(texture_binding->slot_kind, wallpaper::shader::RustShaderMetalSlotKind::Texture);
-    // The mapping the Metal backend reproduces: metal slot == GLSL binding.
-    EXPECT_EQ(texture_binding->slot, texture_binding->binding);
+    // Slots are dense inside each Metal argument-table namespace, in ascending
+    // GLSL binding order, so the only texture is texture slot 0 whatever binding
+    // number the GLSL gave it.
+    EXPECT_EQ(texture_binding->slot, 0u);
 
     const auto sampler_binding =
         std::find_if(fragment_bindings.begin(),
@@ -506,7 +513,7 @@ TEST(RustShaderBridge, WPShaderParserCompileToMslRustReturnsSourceBindingsAndRef
                      });
     ASSERT_NE(sampler_binding, fragment_bindings.end());
     EXPECT_EQ(sampler_binding->slot_kind, wallpaper::shader::RustShaderMetalSlotKind::Sampler);
-    EXPECT_EQ(sampler_binding->slot, sampler_binding->binding);
+    EXPECT_EQ(sampler_binding->slot, 0u);
     EXPECT_NE(texture_binding->binding, sampler_binding->binding);
 
     // The Metal target must return the reflection payload; the Metal backend reads uniform layout and texture slot
@@ -519,14 +526,4 @@ TEST(RustShaderBridge, WPShaderParserCompileToMslRustReturnsSourceBindingsAndRef
     EXPECT_EQ(shader_info.alias.at("albedo"), "g_Texture0");
     EXPECT_TRUE(units.at(1).preprocess_info.active_tex_slots.contains(0));
 #endif
-}
-
-TEST(RustShaderBridge, MetalAndAnalysisTargetsUseDifferentProgramCacheKeys)
-{
-    auto analysis_request = TinyRequest();
-    auto metal_request    = TinyRequest();
-    metal_request.target  = wallpaper::shader::RustShaderTarget::MetalMsl;
-
-    EXPECT_NE(wallpaper::shader::BuildRustShaderRequestJson(analysis_request).dump(),
-              wallpaper::shader::BuildRustShaderRequestJson(metal_request).dump());
 }

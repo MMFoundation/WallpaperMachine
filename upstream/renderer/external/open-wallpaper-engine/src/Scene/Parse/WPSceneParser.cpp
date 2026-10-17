@@ -69,31 +69,87 @@ std::string getAddr(void* p) { return std::to_string(reinterpret_cast<intptr_t>(
 namespace
 {
 
-/// One material's shader, captured with everything a Metal translation needs.
+/// One material's shader, captured with the Metal program its settled compile
+/// produced and everything a later plane variant of it would be compiled from.
 ///
-/// Metal Shading Language can only be produced here. It needs the final combo
-/// set, the preprocessed units and the texture info the analysis compile settled
-/// on, and none of those outlive `LoadMaterial`. The translation itself is
-/// deferred to the end of the parse so a scene that has already disqualified
-/// itself structurally -- a particle emitter, a puppet, a video texture --
-/// never pays for a second full shader compile it would not have used.
+/// The compile that settles a material's combos, default textures and texture
+/// slots is the Metal compile: the stages of its last iteration are the program.
+/// Turning them into the scene's program is deferred to the end of the parse,
+/// because whether the scene is a candidate for this backend at all (a particle
+/// emitter, a puppet, a video texture it cannot play) is only known once the
+/// whole scene exists, and the inputs of the optional plane variant are
+/// snapshots of what the settled compile was handed, which do not outlive
+/// `LoadMaterial`.
 struct PendingMetalTranslation {
     std::shared_ptr<SceneShader>      shader;
     std::string                       shader_name;
     std::string                       scene_id;
+    /// What the settled compile was handed, before it merged its results in.
     std::vector<WPShaderUnit>         units;
     WPShaderInfo                      shader_info;
     std::vector<WPShaderTexInfo>      texinfos;
     /// The material's texture keys, in slot order, so the flush can ask the
     /// scene which slot is a video without re-deriving the list.
     std::vector<std::string>          texture_keys;
-    fs::VFS*                          vfs { nullptr };
+    /// What the settled compile produced.
+    std::vector<shader::RustShaderMetalStage> stages;
+    std::string                       reflection_json;
+    /// Every include that compile read, for translating the same program again.
+    WPShaderIncludeMap                includes;
 };
+
 
 /// Parsing is single-threaded per scene but several scenes may parse at once,
 /// so the queue is per-thread rather than global.
 thread_local std::vector<PendingMetalTranslation> g_pending_metal_translations;
 thread_local const LayerObjectIndex* g_parse_layer_index { nullptr };
+
+/// Compiles one iteration of a material's shader to Metal, merging what the
+/// compile learned into `units` and `shader_info`, and queues the program it
+/// made (or, for a later iteration of the same shader, replaces the earlier
+/// one). The inputs are copied before the compile consumes them, so the record
+/// holds exactly what the compile saw rather than the state it left behind; the
+/// last iteration to run is the one that settled. A failed compile leaves
+/// nothing queued for the shader.
+bool CompileAndQueueMetalProgram(const std::shared_ptr<SceneShader>& shader,
+                                 std::string_view scene_id, std::string_view shader_name,
+                                 std::span<WPShaderUnit> units, fs::VFS& vfs,
+                                 WPShaderInfo* shader_info,
+                                 std::span<const WPShaderTexInfo> texinfos,
+                                 std::vector<std::string> texture_keys,
+                                 std::string* reflection_json) {
+    PendingMetalTranslation pending;
+    pending.shader       = shader;
+    pending.shader_name  = std::string(shader_name);
+    pending.scene_id     = std::string(scene_id);
+    pending.units.assign(units.begin(), units.end());
+    pending.shader_info  = *shader_info;
+    pending.texinfos.assign(texinfos.begin(), texinfos.end());
+    pending.texture_keys = std::move(texture_keys);
+
+    const bool replaces = ! g_pending_metal_translations.empty() &&
+                          g_pending_metal_translations.back().shader == shader;
+    if (! WPShaderParser::CompileToMslRust(scene_id,
+                                           shader_name,
+                                           units,
+                                           pending.stages,
+                                           vfs,
+                                           shader_info,
+                                           texinfos,
+                                           &pending.reflection_json,
+                                           std::nullopt,
+                                           &pending.includes)) {
+        if (replaces) g_pending_metal_translations.pop_back();
+        return false;
+    }
+    if (reflection_json != nullptr) *reflection_json = pending.reflection_json;
+    if (replaces) {
+        g_pending_metal_translations.back() = std::move(pending);
+    } else {
+        g_pending_metal_translations.push_back(std::move(pending));
+    }
+    return true;
+}
 
 /// The one material texture slot a direct NV12 variant could be compiled for,
 /// or nothing.
@@ -153,10 +209,11 @@ void CaptureVideoPlaneInputs(Scene& scene, PendingMetalTranslation& request,
     program.video_plane_inputs = std::move(inputs);
 }
 
-/// Runs the queued translations, if the scene is still a candidate.
+/// Attaches the queued programs to their shaders, if the scene is still a
+/// candidate for this backend.
 ///
-/// A failure here never fails the parse: the wallpaper loads, and the recorded
-/// error is what the capability gate turns into a user-readable reason for
+/// A program that cannot be used (no stages, no reflection) is recorded with its
+/// error, which the capability gate turns into a user-readable reason for
 /// holding the scene.
 void FlushPendingMetalTranslations(Scene& scene) {
     auto pending = std::move(g_pending_metal_translations);
@@ -166,72 +223,37 @@ void FlushPendingMetalTranslations(Scene& scene) {
     if (! metal::SceneMetalStructuralRejection(scene).empty()) return;
 
     for (auto& request : pending) {
-        if (request.shader == nullptr || request.vfs == nullptr) continue;
+        if (request.shader == nullptr) continue;
         auto program = std::make_shared<SceneMetalProgram>();
 
-        std::vector<shader::RustShaderMetalStage> stages;
-        std::string                               reflection_json;
-        WPShaderIncludeMap                        includes;
-        bool                                      compiled = false;
-        // The units this compile is handed are the ones the snapshot below has
-        // to describe, so the snapshot is taken from a copy made before the
-        // compile merges its results into them.
-        const auto captured_units       = request.units;
-        const auto captured_shader_info = request.shader_info;
-        try {
-            compiled = WPShaderParser::CompileToMslRust(request.scene_id,
-                                                        request.shader_name,
-                                                        request.units,
-                                                        stages,
-                                                        *request.vfs,
-                                                        &request.shader_info,
-                                                        request.texinfos,
-                                                        &reflection_json,
-                                                        std::nullopt,
-                                                        &includes);
-        } catch (const std::exception& e) {
-            program->error = e.what();
-        }
-        if (! compiled && program->error.empty()) {
-            program->error = shader::LastRustShaderError();
-            if (program->error.empty()) program->error = "metal translation failed";
-        }
-
-        if (compiled) {
-            program->reflection_json = std::move(reflection_json);
-            for (const auto& stage : stages) {
-                SceneMetalStage out;
-                out.kind             = stage.kind == ShaderType::FRAGMENT
-                                           ? SceneMetalStageKind::Fragment
-                                           : SceneMetalStageKind::Vertex;
-                out.source           = stage.source;
-                out.entry_point      = stage.entry_point;
-                out.language_version = stage.language_version;
-                out.bindings.reserve(stage.bindings.size());
-                for (const auto& binding : stage.bindings) {
-                    out.bindings.push_back(SceneMetalBinding {
-                        .name      = binding.name,
-                        .set       = binding.set,
-                        .binding   = binding.binding,
-                        .slot_kind = ToSceneMetalSlotKind(binding.slot_kind),
-                        .slot      = binding.slot,
-                    });
-                }
-                program->stages.push_back(std::move(out));
+        program->reflection_json = std::move(request.reflection_json);
+        for (const auto& stage : request.stages) {
+            SceneMetalStage out;
+            out.kind             = stage.kind == ShaderType::FRAGMENT
+                                       ? SceneMetalStageKind::Fragment
+                                       : SceneMetalStageKind::Vertex;
+            out.source           = stage.source;
+            out.entry_point      = stage.entry_point;
+            out.language_version = stage.language_version;
+            out.bindings.reserve(stage.bindings.size());
+            for (const auto& binding : stage.bindings) {
+                out.bindings.push_back(SceneMetalBinding {
+                    .name      = binding.name,
+                    .set       = binding.set,
+                    .binding   = binding.binding,
+                    .slot_kind = ToSceneMetalSlotKind(binding.slot_kind),
+                    .slot      = binding.slot,
+                });
             }
-            if (program->stages.empty() || program->reflection_json.empty()) {
-                program->error = "metal translation produced no usable shader";
-            }
+            program->stages.push_back(std::move(out));
         }
-        if (! program->error.empty()) {
+        if (program->stages.empty() || program->reflection_json.empty()) {
+            program->error = "metal translation produced no usable shader";
             LOG_ERROR("metal translation of '%s' failed: %s",
                       request.shader_name.c_str(),
                       program->error.c_str());
-        }
-        if (compiled) {
-            request.units       = captured_units;
-            request.shader_info = captured_shader_info;
-            CaptureVideoPlaneInputs(scene, request, *program, std::move(includes));
+        } else {
+            CaptureVideoPlaneInputs(scene, request, *program, std::move(request.includes));
             if (program->hasVideoPlaneCandidate()) {
                 scene.metal_variant_candidates.push_back(program);
             }
@@ -1556,29 +1578,11 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
             const bool author_bound = slot < base_textures.size() && ! base_textures[slot].empty();
             if (! author_bound && ! textures[slot].empty()) texinfos[slot].present = false;
         }
-        // Captured before the compile that consumes them, so the record holds
-        // the exact input the analysis compile saw rather than the state it left
-        // behind. Overwritten on every iteration, so the last one to run is the
-        // one that stabilised.
-        {
-            PendingMetalTranslation pending;
-            pending.shader      = shader;
-            pending.shader_name = wpmat.shader;
-            pending.scene_id    = pScene->scene_id;
-            pending.units.assign(sd_units.begin(), sd_units.end());
-            pending.shader_info = *pWPShaderInfo;
-            pending.texinfos.assign(texinfos.begin(), texinfos.end());
-            pending.texture_keys = textures;
-            pending.vfs = &vfs;
-            if (! g_pending_metal_translations.empty() &&
-                g_pending_metal_translations.back().shader == shader) {
-                g_pending_metal_translations.back() = std::move(pending);
-            } else {
-                g_pending_metal_translations.push_back(std::move(pending));
-            }
-        }
-        if (! WPShaderParser::AnalyzeRust(
-                pScene->scene_id, wpmat.shader, sd_units, vfs, pWPShaderInfo, texinfos, &reflection_json)) {
+        // The Metal compile settles the pass and is the program it draws with.
+        // The record of its inputs is overwritten on every iteration, so the
+        // last one to run is the one that stabilised.
+        if (! CompileAndQueueMetalProgram(shader, pScene->scene_id, wpmat.shader, sd_units, vfs,
+                                          pWPShaderInfo, texinfos, textures, &reflection_json)) {
             return false;
         }
         DeduplicateDefaultTextures(pWPShaderInfo->defTexs);
@@ -1846,26 +1850,13 @@ std::shared_ptr<SceneShader> BuildTextSceneShader(fs::VFS& vfs, std::string_view
     auto shader              = std::make_shared<SceneShader>();
     shader->name             = shader_name;
     std::string reflection_json;
-    // Captured before the analysis compile consumes the units and merges its
-    // results into `shader_info`, exactly as a material's translation is. A
-    // text layer is an ordinary scene layer to the renderer, so it needs the
-    // same translation; without it the renderer has no program for
-    // the card and the whole scene is held.
-    {
-        PendingMetalTranslation pending;
-        pending.shader      = shader;
-        pending.shader_name = shader_name;
-        pending.scene_id    = std::string(scene_id);
-        pending.units.assign(units.begin(), units.end());
-        pending.shader_info  = shader_info;
-        pending.texinfos.assign(tex_infos.begin(), tex_infos.end());
-        pending.texture_keys = { texture_key };
-        if (composite) pending.texture_keys.push_back(std::string(SpecTex_Default));
-        pending.vfs          = &vfs;
-        g_pending_metal_translations.push_back(std::move(pending));
-    }
-    if (! WPShaderParser::AnalyzeRust(
-            scene_id, shader_name, units, vfs, &shader_info, tex_infos, &reflection_json)) {
+    // A text layer is an ordinary scene layer to the renderer, so its card is
+    // compiled and queued like a material's; without a program the renderer has
+    // nothing to draw the card with and the whole scene is held.
+    std::vector<std::string> texture_keys { texture_key };
+    if (composite) texture_keys.push_back(std::string(SpecTex_Default));
+    if (! CompileAndQueueMetalProgram(shader, scene_id, shader_name, units, vfs, &shader_info,
+                                      tex_infos, std::move(texture_keys), &reflection_json)) {
         return nullptr;
     }
     shader->rust_reflection_json = std::move(reflection_json);

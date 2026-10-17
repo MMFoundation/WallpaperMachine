@@ -116,6 +116,12 @@ Renderer/                          this project's own renderer code (not vendore
                                    AudioToolbox decoder and the Ogg Vorbis decoder over the vendored stb_vorbis),
                                    Matroska/ (the audio track of a WebM or Matroska file as PCM), tests/
                                    (see sound-decoding.md)
+  Cargo.toml, Cargo.lock,          the Rust workspace of this project's own code (apart from upstream/renderer's); its
+  rust-toolchain.toml              one member so far is Shader/
+  Shader/                          wm-shader: the shader layer (Wallpaper Engine shader text to Metal Shading Language,
+                                   reflection, the C ABI of include/rs_shader.h behind the `ffi` feature), written
+                                   from a clean-room specification; NOTES.md records its choices; tests in src/ and tests/.
+                                   upstream/renderer's wallpaper-core links it as a path crate (`wm-shader` with `ffi`)
   Surface/                         wmSurface: the still preview a wallpaper that cannot be drawn shows instead of an empty
                                    layer (ImageIO and Core Animation, ObjC++ with a C++ header) and the pure rule that
                                    keeps the picture inside the project's folder; tests/ (see scene-rendering.md)
@@ -124,8 +130,8 @@ Renderer/                          this project's own renderer code (not vendore
                                    and two small embedded clips (VP9 in WebM, H.264 with B-frames in Matroska)
 upstream/                          vendored third-party code only
   provenance.json                  repositories, pinned revisions, modification status
-  renderer/                        Rust workspace (crates/), C++ scene engine (external/), cargo target/;
-                                   trimmed to what the build and renderer checks use
+  renderer/                        Rust workspace (crates/bridge, crates/core), C++ scene engine (external/),
+                                   cargo target/; trimmed to what the build and renderer checks use
   mediaremote-adapter/             ungive/mediaremote-adapter, BSD-3-Clause; built as an embedded framework
   naga/                            naga 29.0.3 (MIT OR Apache-2.0, used under MIT), patched so codespan-reporting is
                                    optional (PATCHES.md lists the differences); wired in by [patch.crates-io] in
@@ -170,8 +176,8 @@ Things that must not appear:
 | Developer script | `scripts/<name>.py` | `snake_case.py`, argparse flags, no shell wrappers |
 | Shared Python helper | `scripts/lib/` | With a test in `scripts/tests/` |
 | Documentation | `docs/`, `docs/features/` (product behavior) or `docs/testing/` | Add it to the index in [README.md](README.md); one topic per file |
-| Renderer, scene-engine or shader change | `upstream/renderer/` | Vendored: keep changes minimal and reflect them in `upstream/provenance.json` |
-| New renderer code that is this project's own (container readers, test support such as the synthetic video writer, and later the decoders and engine pieces that replace vendored ones) | `Renderer/<Area>/` | Never under `upstream/`; written from public specifications and Apple documentation, never copied from another implementation. Pure C++17 until a layer needs a platform API; headers are included as `"<Area>/<Header>.hpp"`; tests in `Renderer/<Area>/tests/`, registered in `scripts/check_renderer.py` (`REGRESSION_BINARIES`). The engine build includes it from `upstream/renderer/external/open-wallpaper-engine/CMakeLists.txt` (`Renderer/Testing` from its `tests/CMakeLists.txt`) |
+| Renderer or scene-engine change | `upstream/renderer/` | Vendored: keep changes minimal and reflect them in `upstream/provenance.json` |
+| New renderer code that is this project's own (container readers, the shader layer, test support such as the synthetic video writer, and later the decoders and engine pieces that replace vendored ones) | `Renderer/<Area>/` | Never under `upstream/`; written from public specifications and Apple documentation, never copied from another implementation. Pure C++17 until a layer needs a platform API; headers are included as `"<Area>/<Header>.hpp"`; tests in `Renderer/<Area>/tests/`, registered in `scripts/check_renderer.py` (`REGRESSION_BINARIES`). The engine build includes it from `upstream/renderer/external/open-wallpaper-engine/CMakeLists.txt` (`Renderer/Testing` from its `tests/CMakeLists.txt`) |
 | Generated code | nowhere by hand | Regenerate via `scripts/build.py`; commit only what the tooling produces |
 | Evidence, logs, result bundles | `artifacts/` | Disposable; never committed |
 

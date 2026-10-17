@@ -64,7 +64,6 @@ nlohmann::json MetalStageMetaJson(const wallpaper::shader::RustShaderMetalStage&
 
 bool RestoreProgram(const nlohmann::json& cached, const std::string& request,
                     const wallpaper::shader::RustShaderIncludeReader& reader,
-                    wallpaper::shader::RustShaderTarget target,
                     wallpaper::shader::RustShaderOutput& output) {
     try {
         if (cached.at("request") != request ||
@@ -75,21 +74,19 @@ bool RestoreProgram(const nlohmann::json& cached, const std::string& request,
         }
         const auto stage_count = nlohmann::json::parse(request).at("stages").size();
         wallpaper::shader::RustShaderOutput restored;
-        if (target == wallpaper::shader::RustShaderTarget::MetalMsl) {
-            const auto& metal = cached.at("metal");
-            if (metal.size() != stage_count) return false;
-            for (const auto& stage_json : metal) {
-                const auto source = stage_json.at("source").get<std::string>();
-                if (source.empty()) return false;
-                wallpaper::shader::RustShaderMetalStage stage;
-                wallpaper::shader::ApplyRustShaderMetalStageJson(
-                    stage_json.at("meta").get<std::string>(),
-                    source,
-                    stage_json.at("kind").get<int>() == 0 ? ShaderType::VERTEX
-                                                          : ShaderType::FRAGMENT,
-                    stage);
-                restored.metal_stages.push_back(std::move(stage));
-            }
+        const auto& metal = cached.at("metal");
+        if (metal.size() != stage_count) return false;
+        for (const auto& stage_json : metal) {
+            const auto source = stage_json.at("source").get<std::string>();
+            if (source.empty()) return false;
+            wallpaper::shader::RustShaderMetalStage stage;
+            wallpaper::shader::ApplyRustShaderMetalStageJson(
+                stage_json.at("meta").get<std::string>(),
+                source,
+                stage_json.at("kind").get<int>() == 0 ? ShaderType::VERTEX
+                                                      : ShaderType::FRAGMENT,
+                stage);
+            restored.metal_stages.push_back(std::move(stage));
         }
         restored.metadata_json = cached.at("metadata").get<std::string>();
         restored.reflection_json = cached.at("reflection").get<std::string>();
@@ -154,15 +151,15 @@ void WPShaderParser::ClearProgramCache() { g_program_cache.clear(); }
 namespace
 {
 
-// Shared Rust-pipeline compile path for both targets. Include resolution, combo
-// defaults, program caching and reflection are target independent; only the
-// compiled payload in `output` differs, and an analysis carries none.
 // Where one compile reads its includes from and what it is allowed to cache.
 //
 // A parse has the project mounted and caches to it. A variant compiled later
 // has neither: it replays the includes the ordinary translation of the same
 // program recorded, and writes nothing. Both go through the identical compile
 // below, so the second is not a different translation with different rules.
+// The one compile path of the Rust shader layer, which has a single target
+// (Metal Shading Language): include resolution, combo defaults, program caching,
+// metadata and reflection, and the compiled stages.
 struct RustCompileEnv {
     fs::VFS*                  vfs { nullptr };
     const WPShaderIncludeMap* includes { nullptr };
@@ -170,7 +167,7 @@ struct RustCompileEnv {
 };
 
 bool CompileProgramRust(std::string_view scene_id, std::string_view shader_name,
-                        std::span<WPShaderUnit> units, wallpaper::shader::RustShaderTarget target,
+                        std::span<WPShaderUnit> units,
                         wallpaper::shader::RustShaderOutput& output, const RustCompileEnv& env,
                         WPShaderInfo* shader_info, std::span<const WPShaderTexInfo> texs,
                         std::string* reflection_json,
@@ -180,7 +177,6 @@ bool CompileProgramRust(std::string_view scene_id, std::string_view shader_name,
     wallpaper::shader::RustShaderRequest request {
         .shader_name   = std::string(shader_name),
         .scene_id      = std::string(scene_id),
-        .target        = target,
         .cache_enabled = env.vfs != nullptr && env.vfs->IsMounted("cache"),
     };
     request.combos = shader_info->combos;
@@ -240,12 +236,12 @@ bool CompileProgramRust(std::string_view scene_id, std::string_view shader_name,
     bool hit = false;
     if (request.cache_enabled) {
         if (const auto it = g_program_cache.find(program_key); it != g_program_cache.end()) {
-            hit = RestoreProgram(it->second, request_json, include_reader, target, output);
+            hit = RestoreProgram(it->second, request_json, include_reader, output);
         }
         if (!hit && env.vfs != nullptr) {
             if (auto file = env.vfs->Open(program_path); file != nullptr && file->Size() > 0 && file->Size() <= 16 * 1024 * 1024) {
                 const auto cached = nlohmann::json::parse(file->ReadAllStr(), nullptr, false);
-                hit = RestoreProgram(cached, request_json, include_reader, target, output);
+                hit = RestoreProgram(cached, request_json, include_reader, output);
                 if (hit) RememberProgram(program_key, cached);
             }
         }
@@ -278,17 +274,15 @@ bool CompileProgramRust(std::string_view scene_id, std::string_view shader_name,
                 {"metadata", output.metadata_json}, {"reflection", output.reflection_json},
                 {"cache_key", output.cache_key},
             };
-            if (target == wallpaper::shader::RustShaderTarget::MetalMsl) {
-                auto metal = nlohmann::json::array();
-                for (const auto& stage : output.metal_stages) {
-                    metal.push_back({
-                        {"kind", stage.kind == ShaderType::VERTEX ? 0 : 1},
-                        {"source", stage.source},
-                        {"meta", MetalStageMetaJson(stage).dump()},
-                    });
-                }
-                program["metal"] = std::move(metal);
+            auto metal = nlohmann::json::array();
+            for (const auto& stage : output.metal_stages) {
+                metal.push_back({
+                    {"kind", stage.kind == ShaderType::VERTEX ? 0 : 1},
+                    {"source", stage.source},
+                    {"meta", MetalStageMetaJson(stage).dump()},
+                });
             }
+            program["metal"] = std::move(metal);
             RememberProgram(program_key, program);
         }
     }
@@ -346,18 +340,6 @@ bool CompileProgramRust(std::string_view scene_id, std::string_view shader_name,
 
 } // namespace
 
-bool WPShaderParser::AnalyzeRust(std::string_view scene_id, std::string_view shader_name,
-                                 std::span<WPShaderUnit> units, fs::VFS& vfs,
-                                 WPShaderInfo* shader_info,
-                                 std::span<const WPShaderTexInfo> texs,
-                                 std::string* reflection_json) {
-    wallpaper::shader::RustShaderOutput output;
-    const RustCompileEnv env { .vfs = &vfs };
-    return CompileProgramRust(scene_id, shader_name, units,
-                              wallpaper::shader::RustShaderTarget::Analysis, output, env,
-                              shader_info, texs, reflection_json);
-}
-
 bool WPShaderParser::CompileToMslRust(std::string_view scene_id, std::string_view shader_name,
                                       std::span<WPShaderUnit> units,
                                       std::vector<wallpaper::shader::RustShaderMetalStage>& stages,
@@ -368,8 +350,7 @@ bool WPShaderParser::CompileToMslRust(std::string_view scene_id, std::string_vie
                                       WPShaderIncludeMap* used_includes) {
     wallpaper::shader::RustShaderOutput output;
     const RustCompileEnv env { .vfs = &vfs, .used_includes = used_includes };
-    if (! CompileProgramRust(scene_id, shader_name, units,
-                             wallpaper::shader::RustShaderTarget::MetalMsl, output, env,
+    if (! CompileProgramRust(scene_id, shader_name, units, output, env,
                              shader_info, texs, reflection_json, nv12_plane_slot)) {
         return false;
     }
@@ -421,8 +402,7 @@ bool WPShaderParser::CompileMslVariant(const SceneMetalVariantInputs&           
     };
 
     try {
-        if (! CompileProgramRust(inputs.scene_id, inputs.shader_name, units,
-                                 wallpaper::shader::RustShaderTarget::MetalMsl, output, env,
+        if (! CompileProgramRust(inputs.scene_id, inputs.shader_name, units, output, env,
                                  &shader_info, inputs.texinfos, reflection_json,
                                  inputs.nv12_plane_slot)) {
             auto message = wallpaper::shader::LastRustShaderError();

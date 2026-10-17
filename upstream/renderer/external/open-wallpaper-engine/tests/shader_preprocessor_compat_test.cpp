@@ -9,7 +9,9 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
+#include <string_view>
 #include <unistd.h>
 #include <vector>
 
@@ -17,6 +19,20 @@ namespace wallpaper
 {
 namespace
 {
+
+// The shader layer has one target, Metal, and the compile that settles a
+// program's metadata is the compile that generates its stages. These tests look
+// at what it merges into the units and the shader info; the stages are not
+// their subject.
+bool CompileProgram(std::string_view scene_id, std::string_view shader_name,
+                    std::span<WPShaderUnit> units, fs::VFS& vfs, WPShaderInfo* shader_info,
+                    std::span<const WPShaderTexInfo> textures,
+                    std::string* reflection_json = nullptr)
+{
+    std::vector<shader::RustShaderMetalStage> stages;
+    return WPShaderParser::CompileToMslRust(scene_id, shader_name, units, stages, vfs,
+                                            shader_info, textures, reflection_json);
+}
 
 // Removes a MakeTempDir folder when the test is done with it, so repeated runs
 // do not leave one folder per test in the shared temporary directory.
@@ -89,7 +105,7 @@ void main() {
         },
     };
 
-    return WPShaderParser::AnalyzeRust("compat-fragment",
+    return CompileProgram("compat-fragment",
                                        "tests/compat-fragment",
                                        units,
                                        vfs,
@@ -241,7 +257,7 @@ void main() {
         },
     };
 
-    EXPECT_TRUE(WPShaderParser::AnalyzeRust(
+    EXPECT_TRUE(CompileProgram(
         "compat-include", "tests/compat-include", units, vfs, &info, textures))
         << shader::LastRustShaderError();
 #endif
@@ -407,7 +423,7 @@ void main() {
         },
     };
 
-    EXPECT_TRUE(WPShaderParser::AnalyzeRust(
+    EXPECT_TRUE(CompileProgram(
         "compat-macro-sv-position", "tests/macro-sv-position", units, vfs, &info, textures))
         << shader::LastRustShaderError();
 #endif
@@ -458,7 +474,7 @@ void main() {
         },
     };
 
-    EXPECT_TRUE(WPShaderParser::AnalyzeRust(
+    EXPECT_TRUE(CompileProgram(
         "compat-geometry", "tests/genericropeparticle", units, vfs, &info, textures))
         << shader::LastRustShaderError();
 #endif

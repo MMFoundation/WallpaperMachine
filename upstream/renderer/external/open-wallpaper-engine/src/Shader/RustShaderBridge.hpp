@@ -16,16 +16,6 @@
 namespace wallpaper::shader
 {
 
-// Shader compilation target requested from the Rust shader pipeline.
-//
-// `Analysis` parses, validates and reflects a program and generates no code: it
-// settles a material's combos, default textures and metadata. `MetalMsl` is the
-// translation the renderer draws with.
-enum class RustShaderTarget {
-    Analysis,
-    MetalMsl,
-};
-
 // Metal argument-table namespace a shader resource is bound into. Metal keeps
 // buffers, textures and samplers in independent index spaces, so a slot is
 // only meaningful together with its namespace.
@@ -71,7 +61,6 @@ struct RustShaderProperty {
 struct RustShaderRequest {
     std::string                         shader_name;
     std::string                         scene_id;
-    RustShaderTarget                    target { RustShaderTarget::Analysis };
     bool                                cache_enabled { false };
     std::vector<RustShaderStageSource>  stages;
     Combos                              combos;
@@ -121,8 +110,8 @@ struct RustShaderOutput {
     std::string        reflection_json;
     std::string        diagnostics_json;
     std::string        cache_key;
-    // Populated only for RustShaderTarget::MetalMsl, one entry per stage in
-    // request order.
+    // One entry per stage, in request order. The shader layer has one target,
+    // Metal Shading Language, so every successful compile carries them.
     std::vector<RustShaderMetalStage> metal_stages;
 };
 

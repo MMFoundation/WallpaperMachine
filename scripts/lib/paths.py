@@ -21,6 +21,10 @@ GENERATED_BRIDGE = APP / "Bridge/Generated"
 # Vendored third-party renderer; see upstream/provenance.json.
 RENDERER = ROOT / "upstream/renderer"
 
+# This project's own Rust workspace (the shader layer, `wm-shader`), a separate Cargo
+# workspace from the vendored renderer's; `upstream/renderer` links it as a path crate.
+OWN_RENDERER = ROOT / "Renderer"
+
 PROJECT_YML = ROOT / "project.yml"
 XCODEPROJ = ROOT / "WallpaperMachine.xcodeproj"
 

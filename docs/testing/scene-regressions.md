@@ -1597,9 +1597,10 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   whose material turns `FOG` off stays unfogged under an effect, and
   `SceneSchema.ATextureSlotsTexelIsTheStepOfTheTextureItSamples` that
   `g_Texture<N>Texel` is (1 / width, 1 / height, width, height) of the sampled
-  texture. After a shader-crate change, rebuild
-  `target/release/libshader.a` (`cargo build -p shader --features ffi --release`)
-  before the CMake test binaries, or they link the old compiler.
+  texture. After a shader-layer change, rebuild
+  `Renderer/target/release/libwm_shader.a` (`cargo build -p wm-shader --features ffi
+  --release`, run inside `Renderer/`) before the CMake test binaries, or they link the
+  old compiler.
 - **HDR, bloom and emissive masks** — an authored `hdr` scene with bloom on uses
   RGBA16F color intermediates
   (`SceneSchema.AnHdrSceneWithoutBloomRendersAsAnOrdinaryOne`: with bloom off it is
@@ -2455,9 +2456,9 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 
 ## Shader pipeline
 
-Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
-`video_planes`, `pipeline`) cover these paths with synthetic shader sources;
-`pipeline` skips asset-dependent cases with a printed reason.
+Rust regressions in `Renderer/Shader` (`src/*/tests/` for the preprocessor, the dialect
+converter, the legalizer and the pipeline, and `tests/`) cover these paths with synthetic
+shader sources; the corpus sweeps skip asset-dependent cases with a printed reason.
 
 - **Built-in simulation uniforms** —
   `ShaderValueUpdaterCompat.SimulationEffectsSeeFrameTimeCursorTravelAndButtons`
@@ -2479,12 +2480,13 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   loads an effect and material whose arrays and objects end with a comma, as
   Wallpaper Engine's own `effects/fluidsimulation/effect.json` does; strict
   parsing had dropped every fluid simulation effect.
-- **Pipeline revision** — `ShaderPipelineRevision::CURRENT`
-  (`crates/shader/src/pipeline/revision.rs`) is part of the cache key. Bump it
+- **Pipeline revision** — `PIPELINE_REVISION`
+  (`Renderer/Shader/src/identity.rs`) is part of the cache key, and a golden test
+  (`src/pipeline/tests/golden.rs`) fails when the output changes without a new identity. Bump it
   whenever codegen can produce different output for source that already
   compiled; each bump invalidates previously compiled programs.
 - **`HLSL` is true, as in Wallpaper Engine** — a stage sees `GLSL`, `HLSL` and
-  `HLSL_SM40` defined as 1 (`crates/shader/src/preprocess/macros.rs`).
+  `HLSL_SM40` defined as 1 (`Renderer/Shader/src/preprocess/mod.rs`).
   Wallpaper Engine compiles its shaders as HLSL: it prepends `#define HLSL 1` and
   `#define HLSL_SM40 1` and never defines `GLSL`, which stays defined here so the
   `#if GLSL` paths shaders pick for the backend language stay picked. `HLSL`

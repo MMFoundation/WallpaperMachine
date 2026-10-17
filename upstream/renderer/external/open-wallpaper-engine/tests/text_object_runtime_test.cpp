@@ -372,7 +372,7 @@ struct TextEffectScene {
     SceneRenderTarget* FirstTarget() { return scene->FindRenderTarget(effect_layer->FirstTarget()); }
 };
 
-/// The reflection payload of a shader's analysis, or null when there is none or it
+/// The reflection payload of a shader's compile, or null when there is none or it
 /// does not parse.
 nlohmann::json ReflectionOf(const SceneShader& shader) {
     if (! shader.rust_reflection_json.has_value()) return nullptr;

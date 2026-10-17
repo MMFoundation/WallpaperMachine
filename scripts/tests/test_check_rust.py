@@ -26,7 +26,8 @@ class RustGateTests(unittest.TestCase):
             def run(command, log, cwd, env):
                 environments.append(dict(env))
                 self.assertTrue(Path(env["WALLPAPER_MACHINE_HOME"]).is_dir())
-                self.assertEqual(cwd, check_rust.RENDERER)
+                expected = {name: directory for name, _, directory in check_rust.CHECKS}
+                self.assertEqual(cwd, expected[log.stem])
                 if unavailable:
                     raise FileNotFoundError("cargo unavailable")
                 code = 1 if log.stem == fail else 0
@@ -42,7 +43,7 @@ class RustGateTests(unittest.TestCase):
         return code, report, environments, stdout.getvalue()
 
     def test_every_cargo_failure_blocks_the_gate_and_remains_in_the_report(self):
-        for name, _ in check_rust.CHECKS:
+        for name, _, _ in check_rust.CHECKS:
             with self.subTest(check=name):
                 code, report, _, _ = self.gate(fail=name)
                 self.assertEqual(code, 1)
@@ -67,6 +68,16 @@ class RustGateTests(unittest.TestCase):
             self.assertTrue(all(name not in env for name in check_rust.OPT_INS))
             self.assertNotEqual(env["WALLPAPER_MACHINE_HOME"], "/never-use-the-real-library")
             self.assertFalse(Path(env["WALLPAPER_MACHINE_HOME"]).exists(), "isolated state is removed after the run")
+
+    def test_the_shader_layer_is_tested_in_its_own_workspace_with_the_ffi_feature(self):
+        checks = {name: (arguments, directory) for name, arguments, directory in check_rust.CHECKS}
+        arguments, directory = checks["shader"]
+        self.assertEqual(directory, check_rust.OWN_RENDERER)
+        self.assertEqual((directory.parent, directory.name), (check_rust.RENDERER.parents[1], "Renderer"))
+        self.assertTrue((directory / "Cargo.toml").is_file())
+        self.assertIn("wm-shader", arguments)
+        self.assertIn("ffi", arguments)
+        self.assertTrue(all(directory == check_rust.RENDERER for name, (_, directory) in checks.items() if name != "shader"))
 
 
 if __name__ == "__main__":

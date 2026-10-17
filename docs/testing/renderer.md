@@ -15,14 +15,14 @@ python3 scripts/check_renderer.py
 
 It assembles the Homebrew environment from `scripts/build.py`, then:
 
-1. builds `cargo build -p shader --features ffi --release` **from
-   `upstream/renderer`**, because rustup resolves that tree's
-   `rust-toolchain.toml` (nightly) from the working directory, not from
+1. builds `cargo build -p wm-shader --features ffi --release --locked` **from
+   `Renderer/`** (the shader layer's own workspace), because rustup resolves that
+   tree's `rust-toolchain.toml` (nightly) from the working directory, not from
    `--manifest-path`; running it from the repository root picks the default
    stable toolchain instead,
 2. configures CMake over `upstream/renderer/external/open-wallpaper-engine` with
    `CMAKE_BUILD_TYPE=Release`, `BUILD_TESTS=ON`, `RUST_SHADER_FFI=ON`, and
-   `RUST_SHADER_STATICLIB` pointing at `upstream/renderer/target/release/libshader.a`,
+   `RUST_SHADER_STATICLIB` pointing at `Renderer/target/release/libwm_shader.a`,
 3. builds `offscreen_scene_probe`, `scene_reload_cycle_probe` and every target
    in the script's `REGRESSION_BINARIES` registry, the one list that drives
    build, run and verdict,
@@ -312,8 +312,9 @@ Homebrew Cargo environment, uses a temporary `WALLPAPER_MACHINE_HOME`, disables
 the desktop, media and network opt-ins, and runs, all with `--release --locked`:
 the `wallpaper-core` and `wallpaper-bridge` library tests, four device-free
 `wallpaper-core` integration targets (`audio_response_controller`,
-`core_audio_api`, `project_override_json`, `wallpaper_background`) and the
-`shader` crate with `ffi`. It prints and records the nine explicit
+`core_audio_api`, `project_override_json`, `wallpaper_background`) and, from
+`Renderer/` (the shader layer's own workspace), `wm-shader` with `ffi`: its unit,
+corpus, GPU-probe and C-ABI tests, warnings denied by the crate. It prints and records the nine explicit
 desktop/external-corpus exclusions (`CORE_EXCLUSIONS` in the script) and any
 emitted skip reasons. A nonzero command or missing tool fails the check. Full
 logs and the JSON verdict go under `artifacts/rust/` (`--output` redirects them);
@@ -527,9 +528,10 @@ cargo test -p shader --test pipeline -- --nocapture
   the battery policy from such a change through the bridge). They use the real run
   loop and `IOKit` source but fake the read and the actor, and prove the
   sleep-until-signalled structure, not a measured saving.
-- `shader`'s `pipeline` test skips asset-dependent cases (for example
-  `genericimage4` and a Workshop package) with a printed `skipping …` reason; read
-  those lines before claiming shader coverage. See
+- `wm-shader`'s corpus sweeps (`Renderer/Shader/tests/corpus.rs` and the sweeps
+  under `src/*/tests/`) skip with a printed `skipped: …` reason when the shipped
+  shader folder or the unpacked Workshop shaders are absent; read those lines
+  before claiming shader coverage. See
   [wallpaper-corpus.md](wallpaper-corpus.md) for the asset roots.
 
 ## C++/CMake test binaries

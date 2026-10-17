@@ -40,7 +40,7 @@ fn main() {
 }
 """
 CARGO_TREE_OUTPUT = """\
-shader v0.1.0 (/work/upstream/renderer/crates/shader)|GPL-2.0-only
+wm-shader v0.1.0 (/work/Renderer/Shader)|GPL-2.0-only
 miette v7.6.0|Apache-2.0
 backtrace v0.3.76|MIT OR Apache-2.0
 cfg-if v1.0.4|MIT OR Apache-2.0
@@ -179,7 +179,7 @@ class CargoTreeTests(unittest.TestCase):
         crates = [c for c in components if c.kind == "crate"]
         self.assertEqual(sorted(c.name for c in crates),
                          ["backtrace", "cfg-if", "miette", "mystery", "rustc-demangle", "shadow-rs"])
-        self.assertEqual(sorted(c.name for c in components if c.kind == "first-party"), ["shader", "wallpaper-core"])
+        self.assertEqual(sorted(c.name for c in components if c.kind == "first-party"), ["wallpaper-core", "wm-shader"])
         by_name = {c.name: c for c in crates}
         self.assertEqual(by_name["miette"].version, "7.6.0")
         self.assertEqual(by_name["cfg-if"].license, "MIT OR Apache-2.0")
@@ -207,7 +207,7 @@ class CargoTreeTests(unittest.TestCase):
         for path, vendored in (
             (root / "upstream/naga", True),
             (root / "upstream/naga/crate", True),
-            (root / "upstream/renderer/crates/shader", False),
+            (root / "Renderer/Shader", False),
             (root / "tools/helper", False),
             (Path("/elsewhere/upstream/naga"), True),
             (Path("/elsewhere/upstream/renderer/crates/core"), False),

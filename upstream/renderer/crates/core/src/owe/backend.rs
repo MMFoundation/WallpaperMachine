@@ -69,7 +69,8 @@ impl OweBackend {
     /// Reserved for future backend initialization failures; currently always
     /// returns `Ok`.
     pub fn initialize() -> Result<Self, EngineError> {
-        shader::ffi::ensure_linked();
+        // The engine calls the rs_shader_* exports from C++ only; naming one keeps their object in the link.
+        let _ = wm_shader::ffi::keep_exports_alive();
         unsafe {
             UnwindSafeFFI::new("owe_set_log_callback")
                 .call(|| sys::owe_set_log_callback(Some(owe_log_callback)))?;

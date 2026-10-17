@@ -345,10 +345,10 @@ device.
   equivalent at a one-to-one mapping; under resampling they differ only where the
   stream carries codes outside the range it declares, bounded by that clamp's own
   excursion.
-- **Plane variant refusals** — `video_planes.rs` in `crates/shader`: an
-  explicit-LOD sample, a size query, and any other use of the video slot refuse
-  the variant instead of mistranslating it, and the ordinary program is unchanged
-  by the option existing.
+- **Plane variant refusals** — the plane tests of `Renderer/Shader`
+  (`src/legalize/tests/`, `tests/gpu_probe.rs`): an explicit-LOD sample, a size
+  query, and any other use of the video slot refuse the variant instead of
+  mistranslating it, and the ordinary program is unchanged by the option existing.
 
 ## Continuous-playback work contracts
 

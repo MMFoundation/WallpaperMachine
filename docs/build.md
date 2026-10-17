@@ -109,7 +109,8 @@ Products:
 |---|---|
 | `build/Build/Products/Debug/WallpaperMachine.app` | Debug app, used by `scripts/test.py` |
 | `build/Build/Products/Release/WallpaperMachine.app` | Release app; this is the bundle the user runs, who quits and reopens it to load a new build |
-| `upstream/renderer/target/release/` | Renderer static libraries (`libwallpaper_bridge.a`, `libshader.a`) and `uniffi-bindgen` |
+| `upstream/renderer/target/release/` | Renderer static library (`libwallpaper_bridge.a`, which contains the shader layer) and `uniffi-bindgen` |
+| `Renderer/target/release/` | The shader layer on its own (`libwm_shader.a`), built only by `scripts/check_renderer.py` and `scripts/check_rust.py` for the C++ and Rust tests |
 | `App/Bridge/Generated/` | Generated uniffi Swift bindings |
 
 `build/` is Git-ignored and disposable, but it holds the locally delivered app:

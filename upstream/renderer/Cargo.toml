@@ -2,7 +2,6 @@
 members = [
     "crates/core",
     "crates/bridge",
-    "crates/shader",
 ]
 resolver = "2"
 

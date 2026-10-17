@@ -82,7 +82,7 @@ struct SceneMetalStage
 ///
 /// Attached to `SceneShader` by the parser, which is the only place that still
 /// holds the final combos, the preprocessed units and the texture info the
-/// analysis compile settled on. A null `metal_program` on a shader therefore
+/// settling compile ran with. A null `metal_program` on a shader therefore
 /// means "translation was never attempted", which is a different answer from
 /// "translation was attempted and failed" and has to stay distinguishable: the
 /// first is what a scene looks like until its pending translations are

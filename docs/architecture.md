@@ -21,7 +21,7 @@ flowchart TD
   Store --> Generated["App/Bridge/Generated (uniffi Swift)"]
   Generated --> BridgeLib["libwallpaper_bridge.a"]
   BridgeLib --> Core["wallpaper-core (windows, media, display)"]
-  Core --> Shader["shader crate (naga)"]
+  Core --> Shader["wm-shader (Renderer/Shader, naga)"]
   Core --> OWE["Open Wallpaper Engine (C++ wescene-renderer)"]
   Core --> Brew["Homebrew: quickjs-ng, freetype, lz4"]
   Services -->|"LockScreenExchange/configuration.json + Darwin notification"| Ext["WallpaperMachineExtension (sandboxed)"]
@@ -541,13 +541,24 @@ rendering](features/scene-rendering.md#live-property-edits).
 ### Rust crates and the C++ scene engine
 
 `upstream/renderer` is a Cargo workspace (`resolver = "2"`, edition 2024, GPL-2.0-only) with
-three members:
+two members:
 
 | Crate | Output | Role |
 |---|---|---|
 | `crates/bridge` (`wallpaper-bridge`, lib name `wallpaper_bridge`) | `staticlib` + `rlib`, plus the `uniffi-bindgen` binary | uniffi API surface (`api/`), kameo actor (`actor/`), engine facade (`engine/`), config store (`config/`), library scanner (`library/`), display rows (`display/`), user assets, logging, login item, power |
 | `crates/core` (`wallpaper-core`) | `rlib` | Runtime state machine (`engine/`): scene reconciliation, display discovery and watching, wallpaper windows, media decode (`media/video`, `media/audio` capture for audio response), render cache, and the `owe` FFI wrappers |
-| `crates/shader` (`shader`) | `rlib` + `staticlib` | GLSL parsing/translation via `naga` (the patched copy in `upstream/naga`), exposed to C++ through the `ffi` feature; parse and validation errors are formatted by the crate's own `error/report.rs`, not by codespan-reporting |
+
+The shader layer is not a member: it is `wm-shader`, this project's own crate in the separate
+workspace `Renderer/` (`Renderer/Shader`, `rlib` + `staticlib`; `Renderer/Cargo.toml` pins naga to the
+patched copy in `upstream/naga`). It turns Wallpaper Engine shader text into Metal Shading Language
+through `naga` and exposes thirteen `rs_shader_*` functions to the C++ scene engine through the
+`ffi` feature (header `Renderer/Shader/include/rs_shader.h`; the engine declares them itself in
+`Shader/RustShaderBridge.cpp`). `wallpaper-core` depends on it by path with `ffi`, so the exports end
+up in `libwallpaper_bridge.a`; `OweBackend::initialize` calls `wm_shader::ffi::keep_exports_alive()`,
+which names one of them so the linker keeps the object that holds all thirteen. The layer's design
+choices are in `Renderer/Shader/NOTES.md`. `scripts/check_rust.py` runs its tests from `Renderer/`
+(its own `rust-toolchain.toml`), and `scripts/check_renderer.py` builds `libwm_shader.a` there for
+the CMake test binaries.
 
 `crates/core/build.rs` drives the C++ layer: it runs `bindgen` over
 `upstream/renderer/external/open-wallpaper-engine/src/Platform/Apple/SceneWallpaperBindings.h`,

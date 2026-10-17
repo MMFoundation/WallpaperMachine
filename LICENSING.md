@@ -207,7 +207,8 @@ see [Rust crates](#rust-crates) for how.
 
 | Component | Where | License | GPL-2.0-only combination |
 |---|---|---|---|
-| Renderer (`wallpaper-core`, `shader`, `wallpaper-bridge`) | `upstream/renderer`, revision in `provenance.json` | GPL-2.0-only | Same license |
+| Renderer (`wallpaper-core`, `wallpaper-bridge`) | `upstream/renderer`, revision in `provenance.json` | GPL-2.0-only | Same license |
+| Shader layer (`wm-shader`: Wallpaper Engine shader text to Metal Shading Language, reflection, the C ABI the scene engine calls) | `Renderer/Shader` (a Rust workspace of its own, `Renderer/Cargo.toml`), linked into `libwallpaper_bridge.a` | GPL-2.0-only (this project; clean-room, see the [implementation record](#implementation-record)) | Same license |
 | Scene engine (open-wallpaper-engine) | `upstream/renderer/external/open-wallpaper-engine` | GPL-2.0-only (vendored under the renderer) | Same license |
 | Application shell, extension, Workshop browser, control panel, scripts, new renderer code | `App/`, `Extension/`, `Shared/`, `Renderer/`, `scripts/` | GPL-2.0-only (this project) | Same license |
 | Phosphene ABI reference | notice in `Extension/Phosphene-LICENSE.txt` | MIT | Compatible |
@@ -220,9 +221,9 @@ see [Rust crates](#rust-crates) for how.
 | lz4 | Homebrew `lz4` 1.10.0 | BSD-2-Clause | Compatible |
 | FreeType | Homebrew `freetype` 2.14.3 | FTL or GPL-2.0-or-later, licensee's choice (`LICENSE.TXT` in the keg) | Compatible under the GPLv2 option; the FTL option is not GPLv2-compatible and is not the one used |
 | libpng | Homebrew `libpng` 1.6.58 (FreeType dependency) | libpng-2.0 | Compatible |
-| naga 29.0.3 | Rust crate, a patched copy vendored in `upstream/naga` (`upstream/naga/PATCHES.md`): the shader translator and validator the `shader` crate uses for every shader; built with `glsl-in` and `msl-out` only | MIT OR Apache-2.0, used under MIT | Compatible under the MIT terms; the patch makes Apache-2.0 `codespan-reporting` an optional dependency the `shader` crate does not enable, so it is no longer linked, and dropping `spv-out` removed the Apache-2.0 `spirv` crate |
+| naga 29.0.3 | Rust crate, a patched copy vendored in `upstream/naga` (`upstream/naga/PATCHES.md`): the shader translator and validator the `wm-shader` crate (`Renderer/Shader`) uses for every shader; built with `glsl-in` and `msl-out` only | MIT OR Apache-2.0, used under MIT | Compatible under the MIT terms; the patch makes Apache-2.0 `codespan-reporting` an optional dependency `wm-shader` does not enable, so it is no longer linked, and dropping `spv-out` removed the Apache-2.0 `spirv` crate |
 | uniffi 0.28.3 (`uniffi`, `uniffi_core`, `uniffi_bindgen`, `uniffi_meta`, `uniffi_udl`, `uniffi_testing`), option-ext 0.2.0 | Rust crates: the Swift bridge, and `dirs` | MPL-2.0 | Compatible through MPL-2.0 section 3.3, which names GPL-2.0 as a Secondary License; none of their source files carries the "Incompatible With Secondary Licenses" notice |
-| The other 143 linked Rust crates | `upstream/renderer/Cargo.lock` | 139 offer MIT, alone or as a choice; the rest are Zlib (foldhash), BSD-3-Clause (pp-rs) or BSD-3-Clause OR Apache-2.0 (moxcms, pxfm) | Compatible under the MIT, Zlib or BSD-3-Clause terms |
+| The other 140 linked Rust crates | `upstream/renderer/Cargo.lock` | 136 offer MIT, alone or as a choice; the rest are Zlib (foldhash), BSD-3-Clause (pp-rs) or BSD-3-Clause OR Apache-2.0 (moxcms, pxfm) | Compatible under the MIT, Zlib or BSD-3-Clause terms |
 | Valve SteamCMD | installed at runtime into the app's support directory, never bundled | Valve's terms | Outside the GPL entirely; see [Rights outside software licenses](#rights-outside-software-licenses) |
 
 "Compatible" in this table means compatible with GPLv2 according to the FSF's
@@ -254,7 +255,7 @@ Checked 2026-10-17 (and again after the FFmpeg crates left, `d2c891aa`) against 
 --offline --workspace -e normal,no-proc-macro --target aarch64-apple-darwin`.
 That resolves features the way `scripts/build.py`'s `cargo build --workspace
 --release` does. Each crate's license is the one its manifest declares; no
-crate was reviewed file by file. The result is 151 third-party crates (naga counted among them, as the
+crate was reviewed file by file. The result is 148 third-party crates (naga counted among them, as the
 vendored copy in `upstream/naga`), all compiled into `libwallpaper_bridge.a`,
 which the app links (`-lwallpaper_bridge` in `project.yml`).
 
@@ -508,6 +509,22 @@ prefix is `app.wallpapermachine`.
   on 2026-10-17 ([FFmpeg](#ffmpeg)): the native backend is the only video decoder.
 - The sound path in `Renderer/Sound` (channel remix, resampler, loop pipeline the AudioToolbox and Ogg Vorbis decoder adapters, and `Renderer/Sound/Matroska`, which decodes the audio of a WebM or Matroska file: Opus, AAC and MP3 packets through an AudioToolbox AudioConverter, Vorbis packets re-framed as an in-memory Ogg stream for stb_vorbis, written from the Matroska, RFC 6716, RFC 7845 and RFC 3533 specifications and Apple's documentation) was written for this project from the documented behaviour of a conventional downmix, the mathematics of windowed-sinc resampling and Apple's AudioToolbox documentation. No code from FFmpeg, libswresample, libvorbis, opus or any other implementation was copied; Ogg Vorbis decoding is the public-domain stb_vorbis, vendored unchanged. FFmpeg no longer decodes scene sounds, and no longer decodes the audio of a plain video wallpaper on the desktop, where the app's own players play it (AVFoundation, or the WebM player over the sound decoders above); the scene engine no longer builds a plain-video scene at all (removed 2026-10-17), so it decodes no plain video's audio anywhere.
 - The still preview in `Renderer/Surface` (`wmSurface`: the rule that picks a project's preview file inside the project's own folder, and an ImageIO decoder that lays the picture over a surface's layer as a Core Animation sublayer) was written for this project from Apple's ImageIO and Core Animation documentation. No code from any other implementation was copied. It is linked into the app and, through the scene engine, into the lock-screen extension, and it adds no third-party dependency.
+- The shader layer in `Renderer/Shader` (the Rust crate `wm-shader`: the preprocessor, the
+  converter from Wallpaper Engine's HLSL-flavoured GLSL to GLSL 450, the legalizer that lays out
+  resources and interfaces for naga, the Metal back end and reflection, and the C ABI the scene
+  engine calls) replaced the shader crate that came with the imported renderer, in the commit
+  titled "replace the imported shader crate with the clean-room wm-shader" (2026-10-17). It was written under a clean-room protocol: one session studied the
+  retired crate and wrote plain-prose specifications (contract, preprocessor, dialect and types,
+  legalization and structure, pipeline and back end, and a first amendment list); separate sessions
+  that never opened the retired crate, its history or the study notes wrote the code and its tests
+  from those specifications, naga's public documentation and Apple's Metal documentation; a
+  verification session compared the two as black boxes; only the swap session, which deleted the
+  retired crate, read both. The specification files and their SHA-256 are in
+  `upstream/provenance.json` (`renderer.shaderCrateReplacement`). The retired crate's source is
+  gone from the tree (`upstream/renderer/crates/shader`); it remains in Git history, under
+  GPL-2.0-only. The only third-party dependency of the new crate is the vendored naga; the crates
+  the retired one used for tokens, string storage and static registration (`logos`, `smol_str`,
+  `linkme`) are no longer linked.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
   at revision `73f14ab1568371e6e3c44063f21c34c5e2712c4d`, BSD-3-Clause, vendored
   under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes

@@ -15,7 +15,9 @@
 #include <iterator>
 #include <optional>
 #include <sstream>
+#include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -26,6 +28,20 @@ namespace wallpaper
 {
 namespace
 {
+
+// The shader layer has one target, Metal, and the compile that settles a
+// program's metadata is the compile that generates its stages. These tests look
+// at what it merges into the units and the shader info; the stages are not
+// their subject.
+bool CompileProgram(std::string_view scene_id, std::string_view shader_name,
+                    std::span<WPShaderUnit> units, fs::VFS& vfs, WPShaderInfo* shader_info,
+                    std::span<const WPShaderTexInfo> textures,
+                    std::string* reflection_json = nullptr)
+{
+    std::vector<shader::RustShaderMetalStage> stages;
+    return WPShaderParser::CompileToMslRust(scene_id, shader_name, units, stages, vfs,
+                                            shader_info, textures, reflection_json);
+}
 
 #ifndef UNPACK_SHADER_COMPILE_SMOKE_DEFAULT_CORPUS_ROOT
 #error "UNPACK_SHADER_COMPILE_SMOKE_DEFAULT_CORPUS_ROOT must be provided by CMake"
@@ -1012,7 +1028,7 @@ void CompileDirectShaderJob(fs::VFS& vfs, const DirectShaderCompileJob& job,
         }
 
         const auto tex_infos = BuildConservativeTextureInfos(textures);
-        if (! WPShaderParser::AnalyzeRust("unpack-shader-compile-smoke",
+        if (! CompileProgram("unpack-shader-compile-smoke",
                                           job.shader_name,
                                           units,
                                           vfs,

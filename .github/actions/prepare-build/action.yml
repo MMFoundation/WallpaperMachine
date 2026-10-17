@@ -69,5 +69,6 @@ runs:
           ~/.cargo/registry
           ~/.cargo/git
           upstream/renderer/target
-        key: renderer-ccache-${{ steps.brew.outputs.os }}-${{ hashFiles('upstream/renderer/Cargo.lock', 'upstream/renderer/rust-toolchain.toml', 'upstream/provenance.json') }}
+          Renderer/target
+        key: renderer-ccache-${{ steps.brew.outputs.os }}-${{ hashFiles('upstream/renderer/Cargo.lock', 'upstream/renderer/rust-toolchain.toml', 'Renderer/Cargo.lock', 'Renderer/rust-toolchain.toml', 'upstream/provenance.json') }}
         restore-keys: renderer-ccache-${{ steps.brew.outputs.os }}-
