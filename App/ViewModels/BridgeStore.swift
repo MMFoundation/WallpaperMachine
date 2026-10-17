@@ -1202,22 +1202,19 @@ final class BridgeStore {
         let folder = ClientPaths.libraryURL.appendingPathComponent(wallpaperId)
         let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("project.json"))) as? [String: Any]
         if (manifest?["type"] as? String)?.lowercased() == "video" {
-            // Whether macOS can play the file is the native host's to decide at playback, but a
-            // format nothing can play is refused here, before any display changes, with the
-            // format named. Matroska and WebM stay: the scene engine still plays them.
+            // A video file is played by the app's own players alone (AVFoundation, and the WebM
+            // player for Matroska and WebM), so a format neither can play is refused here, before
+            // any display changes, with the format named. Whether the player then succeeds is the
+            // native host's to report at playback.
             guard let file = manifest?["file"] as? String, !file.isEmpty,
                   let values = try? folder.appendingPathComponent(file).resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
                   values.isRegularFile == true, (values.fileSize ?? 0) > 0,
                   FileManager.default.isReadableFile(atPath: folder.appendingPathComponent(file).path) else {
                 throw NSError(domain: "WallpaperMachine", code: 1, userInfo: [NSLocalizedDescriptionKey: String(localized: "This video cannot be decoded. Import a complete, playable video file before applying it.")])
             }
-            // Only where macOS would be the one to play it: a user who chose Compatibility has
-            // the scene engine (FFmpeg) decode every video, so an AVI it plays must not be refused.
-            if settingsSnapshot.videoBackend == "native_preferred" {
-                let verdict = await videoFormatCheck(folder.appendingPathComponent(file))
-                if let message = VideoFormatSupport.message(for: verdict) {
-                    throw WallpaperActionError(message: message)
-                }
+            let verdict = await videoFormatCheck(folder.appendingPathComponent(file))
+            if let message = VideoFormatSupport.message(for: verdict) {
+                throw WallpaperActionError(message: message)
             }
         }
         if (manifest?["type"] as? String)?.lowercased() == "scene" {

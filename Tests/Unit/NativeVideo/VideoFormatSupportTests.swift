@@ -125,13 +125,14 @@ final class VideoFormatSupportTests: XCTestCase {
             .unsupported(Format(container: "MP4", codec: nil), .notPlayable))
     }
 
-    func testMatroskaAndWebMThatAVFoundationCannotOpenStayWithTheSceneEngine() {
+    func testMatroskaAndWebMAreNotAVFoundationsToPlayAndTheOwnReaderDecidesTheRest() {
+        // AVFoundation never opens them, so the pure rule only says "not playable here"; inspecting
+        // a file then asks the app's own reader, which can still accept it.
         XCTAssertEqual(
             VideoFormatSupport.decide(
                 container: webm, report: report(playable: false, video: false, codec: nil),
                 hardwareAV1: false),
-            .sceneEngineOnly(Format(container: "WebM", codec: nil)),
-            "the scene engine plays WebM until the app has its own player for it")
+            .unsupported(Format(container: "WebM", codec: nil), .notPlayable))
     }
 
     func testTheNameCarriesTheCodecWhenItIsKnown() {
@@ -156,7 +157,7 @@ final class VideoFormatSupportTests: XCTestCase {
 
     func testNothingIsSaidAboutAFileThatIsNotRefused() {
         XCTAssertNil(VideoFormatSupport.message(for: .supported))
-        XCTAssertNil(VideoFormatSupport.message(for: .sceneEngineOnly(Format(container: "WebM", codec: nil))))
+        XCTAssertNil(VideoFormatSupport.message(for: .supportedWebM))
         XCTAssertNil(VideoFormatSupport.message(for: .unreadable("the volume is busy")))
     }
 
@@ -236,18 +237,23 @@ final class VideoFormatSupportTests: XCTestCase {
         XCTAssertTrue(VideoFormatSupport.isMatroska(url))
     }
 
-    func testAWebMFileWithACodecNobodyPlaysIsStillLeftToTheSceneEngine() async throws {
+    func testAWebMFileWithACodecNobodyPlaysIsRefusedWithItsFormatNamed() async throws {
         let url = directory.appendingPathComponent("vp8.webm")
         try WebMFixture.vp8.write(to: url)
         let verdict = await VideoFormatSupport.inspect(url: url)
-        guard case let .sceneEngineOnly(format) = verdict else {
-            return XCTFail("VP8 is not played by the app's player yet, got \(verdict)")
-        }
-        XCTAssertEqual(format.container, "WebM")
+        XCTAssertEqual(verdict, .unsupported(Format(container: "WebM", codec: "VP8"), .notPlayable))
         let refusal = await VideoFormatSupport.refusal(url: url)
-        guard case .notPlayable? = refusal else {
-            return XCTFail("the host hands it to the scene engine, got \(String(describing: refusal))")
+        guard case let .unsupportedFormat(message)? = refusal else {
+            return XCTFail("the host reports the display as failed, got \(String(describing: refusal))")
         }
+        XCTAssertTrue(message.contains("WebM (VP8)"), message)
+    }
+
+    func testAMatroskaFileThatIsDamagedIsRefusedWithoutACodec() async throws {
+        let url = directory.appendingPathComponent("cut.webm")
+        try WebMFixture.vp9.prefix(120).write(to: url)
+        let verdict = await VideoFormatSupport.inspect(url: url)
+        XCTAssertEqual(verdict, .unsupported(Format(container: "WebM", codec: nil), .notPlayable))
     }
 
     func testTheOpenedFilesAreKeyedByTheFileAndForgetAChangedOne() throws {

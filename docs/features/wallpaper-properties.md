@@ -475,8 +475,8 @@ and identity; if the file was replaced since the check, the result is dropped, t
 click reports that the video changed, and the card goes back to offering a new
 look.
 
-Both video backends apply the scale factor with the same Fill layout ([Video
-backend](performance.md#video-backend)), so the button does not depend on which one
+Both video players apply the scale factor with the same Fill layout ([Video
+playback](performance.md#video-playback)), so the button does not depend on which one
 plays the clip. Once the display holds the factor the card drops the button. It adds
 the line about Apply changes and Revert only for the factor this card set, and only
 while that factor is still waiting in the unsaved draft: the app remembers what it

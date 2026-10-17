@@ -69,7 +69,7 @@ use crate::{
             EditProperty, EjectWallpaperFromDisplay, GetAllSnapshots, GetAppSnapshot,
             GetLibrarySnapshot, GetLockScreenScenes, GetWallpaperPreview, GetMonitorInformationSnapshot,
             GetSettingsSnapshot, GetWallpaperOptionsSnapshot, GetWebWallpapers, InitialFrameReady,
-            GetNativeVideoWallpapers, PollMousePosition, RejectNativeVideo, RendererCounters,
+            GetNativeVideoWallpapers, PollMousePosition, RendererCounters,
             RefreshDisplays, RefreshLibrary, ReleaseHeldWallpaper, RestoreAllPropertyDefaults,
             RestorePropertyDefault,
             SelectWallpaper,
@@ -1885,24 +1885,6 @@ impl WallpaperBridge {
         self.actor.ask(SetVideoBackend { mode }).await
     }
 
-    /// Turns the experimental native video backend on or off.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the scene list cannot be rebuilt for the new
-    /// routing, in which case the previous backend keeps running.
-    pub async fn set_native_video_backend_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<BridgeSnapshotBundle, BridgeError> {
-        let mode = if enabled {
-            VideoBackendModeCfg::NativePreferred
-        } else {
-            VideoBackendModeCfg::Compatibility
-        };
-        self.actor.ask(SetVideoBackend { mode }).await
-    }
-
     /// Sets the internal rasterization scale the user prefers.
     ///
     /// Clamped to the range the renderer honours. This is a preference: while
@@ -2360,34 +2342,6 @@ impl WallpaperBridge {
         &self,
     ) -> Result<Vec<BridgeNativeVideoWallpaper>, BridgeError> {
         self.actor.ask(GetNativeVideoWallpapers).await
-    }
-
-    /// Hands a wallpaper back to the scene engine because the native player
-    /// cannot honour it — an unsupported target frame rate, for example.
-    ///
-    /// `admission_key` is the key of the descriptor the host judged. The
-    /// refusal is recorded against that key and holds for the rest of the
-    /// session, so a wallpaper cannot oscillate between the two backends; it
-    /// stops applying as soon as the configuration it describes changes. A key
-    /// that already does not match the live configuration is a refusal that
-    /// lost a race with the user and is dropped.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the scene list cannot be rebuilt.
-    pub async fn reject_native_video(
-        &self,
-        wallpaper_id: String,
-        admission_key: u64,
-        reason: String,
-    ) -> Result<(), BridgeError> {
-        self.actor
-            .ask(RejectNativeVideo {
-                wallpaper_id,
-                admission_key,
-                reason,
-            })
-            .await
     }
 
     /// # Errors

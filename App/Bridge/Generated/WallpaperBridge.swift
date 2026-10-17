@@ -866,23 +866,6 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     func refreshLibrary() async throws  -> BridgeSnapshotBundle
     
     /**
-     * Hands a wallpaper back to the scene engine because the native player
-     * cannot honour it — an unsupported target frame rate, for example.
-     *
-     * `admission_key` is the key of the descriptor the host judged. The
-     * refusal is recorded against that key and holds for the rest of the
-     * session, so a wallpaper cannot oscillate between the two backends; it
-     * stops applying as soon as the configuration it describes changes. A key
-     * that already does not match the live configuration is a refusal that
-     * lost a race with the user and is dropped.
-     *
-     * # Errors
-     *
-     * Returns an error when the scene list cannot be rebuilt.
-     */
-    func rejectNativeVideo(wallpaperId: String, admissionKey: UInt64, reason: String) async throws 
-    
-    /**
      * Opens a wallpaper the load journal holds back after repeated crashes
      * while it loaded, and lifts the hold. A wallpaper that is not held is
      * left alone.
@@ -1195,16 +1178,6 @@ public protocol WallpaperBridgeProtocol : AnyObject {
      * Returns an error when the wallpaper id is unknown or persistence fails.
      */
     func setMuted(wallpaperId: String, muted: Bool) async throws  -> BridgeWallpaperMutationBundle
-    
-    /**
-     * Turns the experimental native video backend on or off.
-     *
-     * # Errors
-     *
-     * Returns an error when the scene list cannot be rebuilt for the new
-     * routing, in which case the previous backend keeps running.
-     */
-    func setNativeVideoBackendEnabled(enabled: Bool) async throws  -> BridgeSnapshotBundle
     
     /**
      * Suspends or resumes rendering and system-audio capture for every
@@ -2301,38 +2274,6 @@ open func refreshLibrary()async throws  -> BridgeSnapshotBundle {
 }
     
     /**
-     * Hands a wallpaper back to the scene engine because the native player
-     * cannot honour it — an unsupported target frame rate, for example.
-     *
-     * `admission_key` is the key of the descriptor the host judged. The
-     * refusal is recorded against that key and holds for the rest of the
-     * session, so a wallpaper cannot oscillate between the two backends; it
-     * stops applying as soon as the configuration it describes changes. A key
-     * that already does not match the live configuration is a refusal that
-     * lost a race with the user and is dropped.
-     *
-     * # Errors
-     *
-     * Returns an error when the scene list cannot be rebuilt.
-     */
-open func rejectNativeVideo(wallpaperId: String, admissionKey: UInt64, reason: String)async throws  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_reject_native_video(
-                    self.uniffiClonePointer(),
-                    FfiConverterString.lower(wallpaperId),FfiConverterUInt64.lower(admissionKey),FfiConverterString.lower(reason)
-                )
-            },
-            pollFunc: ffi_wallpaper_bridge_rust_future_poll_void,
-            completeFunc: ffi_wallpaper_bridge_rust_future_complete_void,
-            freeFunc: ffi_wallpaper_bridge_rust_future_free_void,
-            liftFunc: { $0 },
-            errorHandler: FfiConverterTypeBridgeError.lift
-        )
-}
-    
-    /**
      * Opens a wallpaper the load journal holds back after repeated crashes
      * while it loaded, and lifts the hold. A wallpaper that is not held is
      * left alone.
@@ -3096,31 +3037,6 @@ open func setMuted(wallpaperId: String, muted: Bool)async throws  -> BridgeWallp
             completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeBridgeWallpaperMutationBundle.lift,
-            errorHandler: FfiConverterTypeBridgeError.lift
-        )
-}
-    
-    /**
-     * Turns the experimental native video backend on or off.
-     *
-     * # Errors
-     *
-     * Returns an error when the scene list cannot be rebuilt for the new
-     * routing, in which case the previous backend keeps running.
-     */
-open func setNativeVideoBackendEnabled(enabled: Bool)async throws  -> BridgeSnapshotBundle {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_wallpaper_bridge_fn_method_wallpaperbridge_set_native_video_backend_enabled(
-                    self.uniffiClonePointer(),
-                    FfiConverterBool.lower(enabled)
-                )
-            },
-            pollFunc: ffi_wallpaper_bridge_rust_future_poll_rust_buffer,
-            completeFunc: ffi_wallpaper_bridge_rust_future_complete_rust_buffer,
-            freeFunc: ffi_wallpaper_bridge_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeBridgeSnapshotBundle.lift,
             errorHandler: FfiConverterTypeBridgeError.lift
         )
 }
@@ -5390,15 +5306,13 @@ public func FfiConverterTypeBridgeMonitorInformationSnapshot_lower(_ value: Brid
 
 
 /**
- * A plain local video routed to the native platform player instead of the
- * scene engine.
+ * A plain local video, played by the host's own player.
  *
- * Only the declared subset appears here. The player plays a clip at the clip's
- * own frame rate: the frame-rate cap applies to scenes and web wallpapers, so
- * no rate travels with this descriptor and none decides whether the host may
- * take the clip. The host refuses a wallpaper only for a reason about the file
- * itself, and a refusal sends the whole mirror group back to the scene engine,
- * which supports everything the platform player does not.
+ * Every plain video with a resolvable media file appears here; the scene engine is never given
+ * one. The player plays a clip at the clip's own frame rate: the frame-rate cap applies to scenes
+ * and web wallpapers, so no rate travels with this descriptor and none decides whether the host may
+ * take the clip. A file the host cannot play is the host's to report as a failed state of that
+ * display (the display keeps its previous picture); nothing else plays it instead.
  */
 public struct BridgeNativeVideoWallpaper {
     public var displayId: UInt32
@@ -5414,12 +5328,11 @@ public struct BridgeNativeVideoWallpaper {
      */
     public var mediaPath: String
     /**
-     * Identifies the exact configuration this descriptor was produced from:
-     * the media file, its length and its modification time. Identical for every
-     * member of a mirror group. The host must pass it back
-     * to `reject_native_video` when it refuses, so that a refusal arriving
-     * after the user changed something is discarded instead of killing a
-     * configuration the host never judged.
+     * Identifies the media file this descriptor plays: its path, length and
+     * modification time. Identical for every member of a mirror group. The host
+     * keeps its verdict on the file, and the surface it opened for it, under this
+     * key, so a replaced file is judged afresh and an unchanged one is not read
+     * again.
      */
     public var admissionKey: UInt64
     /**
@@ -5449,12 +5362,11 @@ public struct BridgeNativeVideoWallpaper {
          * project directory.
          */mediaPath: String, 
         /**
-         * Identifies the exact configuration this descriptor was produced from:
-         * the media file, its length and its modification time. Identical for every
-         * member of a mirror group. The host must pass it back
-         * to `reject_native_video` when it refuses, so that a refusal arriving
-         * after the user changed something is discarded instead of killing a
-         * configuration the host never judged.
+         * Identifies the media file this descriptor plays: its path, length and
+         * modification time. Identical for every member of a mirror group. The host
+         * keeps its verdict on the file, and the surface it opened for it, under this
+         * key, so a replaced file is judged afresh and an unchanged one is not read
+         * again.
          */admissionKey: UInt64, 
         /**
          * Where the picture sits on this display when it is larger or smaller than
@@ -10440,9 +10352,6 @@ private var initializationResult: InitializationResult = {
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_refresh_library() != 64122) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_reject_native_video() != 52338) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_release_held_wallpaper() != 62348) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -10534,9 +10443,6 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_muted() != 46581) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_native_video_backend_enabled() != 10196) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_presentation_suspended() != 9550) {

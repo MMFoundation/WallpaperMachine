@@ -43,7 +43,17 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
     private static let refusedPath = "/tmp/does-not-need-to-exist/refused.mp4"
 
     private final class Recorder {
-        var rejected: [(id: String, key: UInt64, reason: String)] = []
+        /// Every state the host reported, in order. A display the host could not play is reported
+        /// as failed (with the reason and the key of the file), which is all the host says: nothing
+        /// takes a failed clip over, so there is no hand-off to count.
+        var states: [HostWallpaperState] = []
+        /// The failures among `states`, as the host stated them. Identical consecutive states of a
+        /// display are reported once, so a failure repeated for the same offer reads as one.
+        var rejected: [(id: String, key: UInt64, reason: String)] {
+            states.filter { $0.phase == .failed }.map {
+                (id: $0.wallpaperID, key: $0.nativeAdmissionKey ?? 0, reason: $0.message ?? "")
+            }
+        }
         var fetched = 0
         var presented = 0
         var stopped = 0
@@ -67,9 +77,6 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         /// stopped (`stop`) and a window put on the desktop (`present`, with `+veil` when the held
         /// picture was already over it).
         var events: [String] = []
-        /// When set, a refusal's report to the bridge does not return until the gate opens: the
-        /// scene engine is still taking the wallpaper over.
-        var rejectGate: AsyncGate?
     }
 
     private struct BridgeUnreachable: Error {}
@@ -224,15 +231,11 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         } else {
             limits = { try await Task.sleep(for: $0) }
         }
-        return NativeVideoWallpaperHost(
+        let host = NativeVideoWallpaperHost(
             fetch: {
                 recorder.fetched += 1
                 if let failure = recorder.fetchFailure { throw failure }
                 return recorder.offered ?? wallpapers
-            },
-            reject: { id, key, reason in
-                recorder.rejected.append((id: id, key: key, reason: reason))
-                await recorder.rejectGate?.wait()
             },
             screens: { [weak self] in self?.screenFrames ?? [] },
             refusal: { url in
@@ -270,6 +273,8 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
                 return storage(url)
             },
             switchHold: switchHold)
+        host.onStateChanged = { recorder.states.append($0) }
+        return host
     }
 
     func testStartupWaitsForSurfaceReadinessAndAcknowledgesNewRevisions() async throws {
@@ -570,10 +575,9 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         host.shutdown()
     }
 
-    func testAPersistentMetadataFailureStopsRetryingAndHandsOff() async {
-        // The other half of the bound: a file that never loads must not leave
-        // the display with no wallpaper at all, and must not be re-read
-        // forever.
+    func testAPersistentMetadataFailureStopsRetryingAndIsReportedAsFailed() async {
+        // The other half of the bound: a file that never loads is reported as
+        // failed, and must not be re-read forever.
         let recorder = Recorder()
         let host = makeHost(
             wallpapers: [],
@@ -585,10 +589,9 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
 
         XCTAssertEqual(
             recorder.admissionProbes.count, NativeVideoWallpaperHost.admissionAttemptLimit,
-            "retries are bounded and the settled answer is cached, so the second offer "
-                + "costs no further file reads")
-        XCTAssertEqual(
-            recorder.rejected.count, 2, "each offer is answered; the bridge is what stops offering")
+            "retries are bounded and the failure is remembered for the offer, so the second "
+                + "offer costs no further file reads")
+        XCTAssertEqual(recorder.rejected.count, 1, "the second offer restates the same failed state")
         XCTAssertTrue(host.isEmpty)
         host.shutdown()
     }
@@ -694,9 +697,9 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         // whole budget has nothing left to retry with, and its refusal is not
         // a verdict about the file: remembering it would make a disk that was
         // asleep once this host's answer whenever the bridge offers the key
-        // again. (The bridge keeps its own record of the hand-off until the key
-        // changes or the backend is switched; the host's part is to read the
-        // file afresh when it is offered.)
+        // again. (For the offer it failed, the host restates the failure
+        // without reading; a newer offer, from any apply or reconcile, reads
+        // the file afresh.)
         let recorder = Recorder()
         let gate = stuckFile(recorder)
         let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
@@ -714,10 +717,14 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         gate.open()
         await letOrphanedProbesReturn(host)
         await host.apply([wallpaper(admissionKey: 5)])
+        XCTAssertEqual(recorder.admissionProbes.count, 1, "the same offer is answered as it was")
+        var newer = wallpaper(admissionKey: 5)
+        newer.startupRevision = 1
+        await host.apply([newer])
 
-        XCTAssertEqual(recorder.admissionProbes.count, 2)
+        XCTAssertEqual(recorder.admissionProbes.count, 2, "a newer offer reads the file again")
         XCTAssertEqual(host.activeDisplayIDs, [7], "and this time the clip plays")
-        XCTAssertEqual(recorder.rejected.count, 1, "only the timeout was handed over")
+        XCTAssertEqual(recorder.rejected.count, 1, "only the timeout was reported")
     }
 
     func testAStuckFileHasAtMostOneOrphanedProbe() async {
@@ -809,7 +816,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
 
         XCTAssertTrue(host.isEmpty, "the player of the wallpaper that left is closed")
         XCTAssertEqual(recorder.stopped, 1)
-        XCTAssertEqual(recorder.rejected.map(\.key), [2, 2], "display 9 goes to the scene engine")
+        XCTAssertEqual(recorder.rejected.map(\.key), [2], "display 9 is reported as failed, once")
         XCTAssertEqual(
             recorder.admissionProbes.count, 2,
             "the file was read once and not again by the trailing pass")
@@ -1327,11 +1334,11 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         return try XCTUnwrap(surfacesMade[7])
     }
 
-    func testASurfaceThatNeverShowsAFrameIsRestartedOnceThenHandedBack() async throws {
+    func testASurfaceThatNeverShowsAFrameIsRestartedOnceThenReportedAsFailed() async throws {
         // A clip the platform calls playable can reach readyToPlay with its
         // clock running and never produce a picture; nothing reports a failure.
-        // Without a deadline the display stays black with the scene engine
-        // excluded and the wallpaper's state stuck at loading.
+        // Without a deadline the display stays black and the wallpaper's state
+        // stuck at loading.
         let recorder = Recorder()
         let host = makeHost(wallpapers: [], recorder: recorder, manualLimits: true)
         defer { host.shutdown() }
@@ -1356,8 +1363,8 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         sleeper.fireNext()
         await passes.wait(for: 1)
 
-        XCTAssertEqual(recorder.rejected.count, 1, "the scene engine takes it")
-        XCTAssertEqual(recorder.rejected.first?.key, 5)
+        XCTAssertEqual(states.filter { $0.phase == .failed }.count, 1, "the display is reported as failed")
+        XCTAssertEqual(states.last?.nativeAdmissionKey, 5)
         XCTAssertEqual(surface.restartReasons.count, 1, "one restart and no more")
         XCTAssertTrue(host.isEmpty, "no window is left behind")
         XCTAssertEqual(recorder.stopped, 1)
@@ -1412,7 +1419,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         host.onSurfacesChanged = { passes.record() }
         sleeper.fireNext()
         await passes.wait(for: 1)
-        XCTAssertEqual(recorder.rejected.count, 1)
+        XCTAssertEqual(states.filter { $0.phase == .failed }.count, 1)
 
         surface.isReadyForDisplay = true
         surface.onReadyForDisplay?()
@@ -1420,7 +1427,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
 
         XCTAssertEqual(states.last?.phase, .failed, "a picture that arrives too late does not reopen startup")
         XCTAssertFalse(states.contains { $0.phase == .ready })
-        XCTAssertEqual(recorder.rejected.count, 1, "and nothing is reported twice")
+        XCTAssertEqual(states.filter { $0.phase == .failed }.count, 1, "and nothing is reported twice")
         XCTAssertEqual(sleeper.pendingCount, 0)
         XCTAssertTrue(host.isEmpty)
     }
@@ -1593,7 +1600,7 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
 
     func testADecoderFailureIsStillRememberedAsAVerdict() async throws {
         // The contrast: a decoder that could not open the track is a statement
-        // about the file, so the same key goes straight back to the scene engine.
+        // about the file, so the same key is not opened again.
         let recorder = Recorder()
         let host = makeHost(wallpapers: [], recorder: recorder)
         defer { host.shutdown() }
@@ -1606,8 +1613,9 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
 
         await host.apply([wallpaper(admissionKey: 5)])
 
-        XCTAssertTrue(host.isEmpty)
-        XCTAssertEqual(recorder.rejected.count, 2, "answered again, from the remembered verdict")
+        XCTAssertTrue(host.isEmpty, "the same key is not opened again")
+        XCTAssertEqual(recorder.rejected.count, 1, "the remembered verdict is restated, not reported anew")
+        XCTAssertEqual(recorder.states.last?.phase, .failed)
         XCTAssertEqual(recorder.presented, 1)
     }
 
@@ -1974,11 +1982,10 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         host.shutdown()
     }
 
-    func testARepeatedOfferOfAStillRefusedKeyIsAnsweredEachTimeItIsOffered() async {
-        // The bridge stops offering a key once it records the refusal, so in
-        // practice this does not repeat. What must not happen is the host
-        // deciding on its own to stop answering: that is the state where the
-        // two sides disagree and a display falls through the gap.
+    func testARepeatedOfferOfAStillRefusedKeyIsRestatedWithoutReadingTheFileAgain() async {
+        // The bridge goes on offering a key the host failed on (it holds no record of failures).
+        // The display's failed state is restated under each offer so the panel and the bridge's
+        // wait for startup both see an answer, but the file is not read, nor reported, again.
         let recorder = Recorder()
         let host = makeHost(
             wallpapers: [],
@@ -1988,10 +1995,11 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         await host.apply([wallpaper(admissionKey: 77)])
         await host.apply([wallpaper(admissionKey: 77)])
 
-        XCTAssertEqual(recorder.rejected.count, 2)
+        XCTAssertEqual(recorder.rejected.count, 1, "reported once: the second offer restates the same state")
+        XCTAssertEqual(recorder.states.last?.phase, .failed)
         XCTAssertEqual(
             recorder.admissionProbes.count, 1,
-            "but the file is still only read once, because the verdict is cached")
+            "the file is only read once, because the verdict is cached")
         host.shutdown()
     }
 
@@ -2120,7 +2128,8 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         await host.apply([wallpaper(admissionKey: 6)])
 
         XCTAssertEqual(host.activeDisplayIDs, [7], "a file that plays is opened as usual")
-        XCTAssertTrue(recorder.rejected.isEmpty)
+        XCTAssertEqual(recorder.rejected.count, 1, "only the first file failed")
+        XCTAssertEqual(recorder.states.last?.phase, .loading)
         host.shutdown()
     }
 
@@ -2754,8 +2763,8 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
     }
 
     func testAClipThatFailsToPlayReleasesTheHeldPicture() async throws {
-        // The window the picture sat on is closed and the scene engine takes the wallpaper over:
-        // the picture must not wait for a successor it was not made for.
+        // The window the picture sat on is closed and nothing takes the wallpaper over: the
+        // picture must not wait for a successor that is not coming.
         let recorder = Recorder()
         let harness = HoldHarness()
         defer { harness.finish() }
@@ -2855,15 +2864,13 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         XCTAssertNotNil(harness.veil(on: scene))
     }
 
-    func testARefusedReplacementKeepsTheHeldPictureForTheSceneEngine() async throws {
-        // A refusal comes before any window exists, so nothing here carries the picture. It waits
-        // for the scene the engine opens instead, and goes when the engine has presented it.
+    func testARefusedReplacementEndsTheHoldAfterTheGrace() async throws {
+        // A refusal comes before any window exists, and nothing takes the clip over: the display
+        // is reported as failed and the picture is not kept for a window that is not coming. It
+        // goes after the short grace a host window would have had.
         let recorder = Recorder()
         let harness = HoldHarness()
         defer { harness.finish() }
-        let gate = AsyncGate()
-        openedAtTeardown.append(gate)
-        recorder.rejectGate = gate
         let host = makeHost(
             wallpapers: [],
             refusalByPath: [Self.refusedPath: .notPlayable("synthetic: no video track")],
@@ -2871,47 +2878,17 @@ final class NativeVideoWallpaperHostTests: XCTestCase {
         defer { host.shutdown() }
         let first = try await showAndHold(
             wallpaper(id: "300", admissionKey: 1), on: host, harness)
-
-        let pass = Task { await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)]) }
-        await gate.waitUntilWaiting()
-
-        // The bridge has the refusal and the engine is taking the wallpaper over.
-        XCTAssertEqual(recorder.rejected.map(\.id), ["301"])
-        XCTAssertTrue(first.isStopped)
-        XCTAssertEqual(recorder.made.count, 1, "no window for a clip the backend refused")
-        XCTAssertEqual(harness.state(), .armed, "neither handed to a window nor given up")
-
-        let scene = CALayer()
-        harness.announce(scene, display: 7, reason: .open)
-        XCTAssertEqual(harness.state(), .onScene)
-        XCTAssertNotNil(harness.veil(on: scene))
-
-        gate.open()
-        await pass.value
-
-        XCTAssertNil(harness.state(), "the engine presented its scene")
-        XCTAssertNil(harness.veil(on: scene))
-    }
-
-    func testARefusalThatNoSceneFollowsEndsTheHoldAfterTheGrace() async throws {
-        // The engine could not present it either: the picture is not kept for a window that is
-        // not coming.
-        let recorder = Recorder()
-        let harness = HoldHarness()
-        defer { harness.finish() }
-        let host = makeHost(
-            wallpapers: [],
-            refusalByPath: [Self.refusedPath: .notPlayable("synthetic: no video track")],
-            recorder: recorder, switchHold: harness.hold)
-        defer { host.shutdown() }
-        _ = try await showAndHold(wallpaper(id: "300", admissionKey: 1), on: host, harness)
+        XCTAssertEqual(harness.state(), .armed)
 
         await host.apply([wallpaper(id: "301", admissionKey: 2, mediaPath: Self.refusedPath)])
 
-        XCTAssertEqual(recorder.rejected.count, 1)
-        XCTAssertEqual(harness.state(), .armed, "a window may still come")
-        await harness.timers.waitUntilPending()
-        XCTAssertEqual(harness.timers.requested.last, WallpaperSwitchHold.Configuration().hostGrace)
+        XCTAssertEqual(recorder.rejected.map(\.id), ["301"], "the display is reported as failed")
+        XCTAssertTrue(first.isStopped)
+        XCTAssertEqual(recorder.made.count, 1, "no window for a clip nothing can play")
+        XCTAssertEqual(harness.state(), .armed, "a window of another host may still come")
+        let grace = WallpaperSwitchHold.Configuration().hostGrace
+        await settle { harness.timers.requested.contains(grace) }
+        XCTAssertTrue(harness.timers.requested.contains(grace), "the hold now runs out after the grace")
         harness.timers.fireNext()
         await settle { harness.state() == nil }
     }

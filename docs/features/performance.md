@@ -659,55 +659,44 @@ and **Update only when the scene changes**) is described in
 on its last picture and the reason shows under **Drawn by**
 ([scene rendering](scene-rendering.md#when-native-metal-cannot-draw-a-scene)).
 
-## Video backend
+## Video playback
 
-| Setting | Values | Default |
-| --- | --- | --- |
-| Video playback | **Compatibility**, **Native video preferred** | Native video preferred |
-
-Native video preferred is the default. A config saved before that default moved
-holds `compatibility` whether or not anyone chose it, so the first launch of a build
-with the default moves every such config to native once and records
-`native_video_default_applied = true` in `config.toml`; choosing Compatibility
-afterwards is kept, the way the scene renderer's move to Native Metal was.
-
-Native is a preference, not a guarantee: the engine selects a backend per running
-wallpaper and keeps anything that does not qualify on Compatibility. **In use now**
-lists the backend each running video wallpaper actually got, and names the
-fallback reason when the user asked for native and did not get it. It reads `No
-video wallpaper is running.` when nothing is playing video. An unrecognised backend
-name is refused rather than silently mapped to Compatibility, so a stale page cannot
-report a choice that was never applied.
+Every plain video wallpaper is played by the app's own players: AVFoundation for the containers
+macOS opens (MP4, MOV and the like), and the WebM player below for WebM and Matroska. There is
+no other player. The scene engine is never given a plain video on the desktop; it used to be the
+fallback for any video the native player refused, and the **Video backend** setting chose between
+the two. The setting no longer decides anything (the panel's row for it goes in the next change),
+**In use now** lists the display and wallpaper of each running video, and it names a problem only
+when the project's media file cannot be found. It reads `No video wallpaper is running.` when
+nothing is playing video. A video the player cannot play is not handed to anything else: its
+display is reported as failed with the reason (below) and keeps the picture it had. The lock screen
+and screen saver still draw a plain video with the scene engine when their own player cannot
+([lock screen](lock-screen.md#plain-video-wallpapers)).
 
 Applying a video checks that its entry is a readable, nonempty file. A file that is
-missing or empty fails with the usual error, whichever backend is chosen. With
-**Native video preferred** it also checks that the format can be played, on both
-**Apply** and **Apply changes** (and on Reapply), before any display changes. With
-**Compatibility** that second check is skipped, because the scene engine decodes
-every video there (FFmpeg opens an AVI that macOS does not) and refusing a file it
-plays would be wrong. A file nothing can play is refused with a message that names its format, for example "This video's
-format isn't supported (AVI), or the file is damaged. Convert it to MP4 or MOV with
-H.264 or HEVC, or import a complete copy, then apply it again.", and the display
-keeps what it showed. The format check (`VideoFormatSupport`) asks AVFoundation
-whether the file is playable and has a video track, reads the container from the
-file's first bytes (MP4, MOV, WebM, Matroska, AVI, Ogg, WMV, FLV, MPEG; the file
-extension only names a file whose bytes show none), and refuses AV1 on a Mac with no
-hardware AV1 decoder, with its own message, because software AV1 decoding of a
-wallpaper that runs all day is a cost the app does not take on. Two cases are not
-refused: Matroska and WebM, which AVFoundation never opens, are opened with the app's
-own reader and played by the WebM player (below) when it plays them (H.264, HEVC and
-VP9 in them, and AV1 on a Mac with hardware AV1 decoding), and the ones it does not
-play (VP8, AV1 without hardware decoding, 4:2:2 or 4:4:4 pictures, an encrypted track,
-a damaged file) stay with the scene engine for now (**In use now** says so); and a file
-that could not be read at that moment (a busy volume, a file still being written) says
-nothing about its
-format, so the apply goes on and the native host tries it. Importing never checks the
-format: an `avi` or an AV1 file is imported and refused only when it is applied.
-Decoder failures after this check still go through the engine's apply recovery.
+missing or empty fails with the usual error. It also checks that the format can be played,
+on both **Apply** and **Apply changes** (and on Reapply), before any display changes. A
+file nothing can play is refused with a message that names its format, for example "This
+video's format isn't supported (AVI), or the file is damaged. Convert it to MP4 or MOV with
+H.264 or HEVC, or import a complete copy, then apply it again.", and the display keeps what
+it showed. The format check (`VideoFormatSupport`) asks AVFoundation whether the file is
+playable and has a video track, reads the container from the file's first bytes (MP4, MOV,
+WebM, Matroska, AVI, Ogg, WMV, FLV, MPEG; the file extension only names a file whose bytes
+show none), and refuses AV1 on a Mac with no hardware AV1 decoder, with its own message,
+because software AV1 decoding of a wallpaper that runs all day is a cost the app does not
+take on. Matroska and WebM, which AVFoundation never opens, are opened with the app's own
+reader and played by the WebM player (below) when it plays them (H.264, HEVC and VP9 in them,
+and AV1 on a Mac with hardware AV1 decoding); every other codec in them (VP8, an encrypted
+track, 4:2:2 or 4:4:4 pictures) and a damaged file are refused with the container and codec
+named ("WebM (VP8)"). A file that could not be read at that moment (a busy volume, a file
+still being written) says nothing about its format, so the apply goes on and the host tries
+it. Importing never checks the format: an `avi` or a VP8 file is imported and refused only
+when it is applied. Decoder failures after this check still go through the engine's apply
+recovery.
 
 A file already assigned to a display that is found to be in such a format when the
 wallpaper loads (a library item applied before this check existed, or a migrated
-config) is not handed to the scene engine either. The display keeps the picture it
+config) is refused the same way. The display keeps the picture it
 had, no window covers it, and the wallpaper's state in the panel reads **Wallpaper
 could not load** with the same message. The verdict is kept under the file's key, so
 the file is not read again until it changes, and a replaced file is judged afresh.
@@ -738,15 +727,13 @@ A clip on the native player plays at **its own frame rate**. An `AVPlayerLayer` 
 be capped without copying every frame through the CPU, so the frame-rate limit
 (**Frame rate limit**, a quality preset, **Reduced quality** on battery or in Low
 Power Mode, a hot Mac or a throttle) and a display's own frame rate apply to scenes,
-web wallpapers and any clip the scene engine draws, not to a clip the native player
-draws. The native player never refuses a clip because it is faster than a target, and
-changing a target neither reopens a running clip nor moves it between backends: its
-identity is its file. The inspector hides **Frame rate** on a display the native
-player draws, because the field would do nothing there, and shows it again for a
-display the scene engine draws.
+and web wallpapers, not to a plain video. The player never refuses a clip because it is faster
+than a target, and changing a target does not reopen a running clip: its identity is its
+file. The inspector hides **Frame rate** on a display a plain video plays on, because the
+field would do nothing there.
 
-Native playback honours the wallpaper's scaling mode and scale factor the way
-Compatibility does, so switching backends does not move the picture: **Fill**,
+Playback honours the wallpaper's scaling mode and scale factor by the renderer's own
+layout rule, so a clip sits where the scene engine used to put it: **Fill**,
 **Fit** and **Stretch** scale it to the display, **Original size** shows one video
 pixel per point (a 1920x1080 clip covers 1920x1080 points of a Retina display, not
 1920x1080 device pixels), and the scale factor multiplies whichever applies, with
@@ -757,13 +744,12 @@ other Spaces and Mission Control is drawn with the same layout. The wallpaper's
 position on the display is honoured too: the layer is placed by the same layout with the
 saved Position of the wallpaper on that display, and the desktop picture shown in other Spaces
 is drawn with it ([display position](wallpaper-properties.md#display-position)). The lock
-screen and screen saver apply the position the same way: with this backend selected, a plain
-video there is played by an AVFoundation layer in the lock-screen extension, placed by the same
-layout with the position the app publishes ([lock screen](lock-screen.md#plain-video-wallpapers)).
+screen and screen saver apply the position the same way: a plain video there is played by an AVFoundation
+layer (or the WebM player) in the lock-screen extension, placed by the same layout with the
+position the app publishes ([lock screen](lock-screen.md#plain-video-wallpapers)).
 A mirror is centred. One known difference:
-the native player applies a clip's pixel aspect ratio to the picture's size and
-Compatibility ignores it, so an anamorphic clip is laid out by its displayed size
-here. Layer placement is in `NativeVideoLayout`; its expected rectangles come from
+the players apply a clip's pixel aspect ratio to the picture's size (the scene
+engine ignored it), so an anamorphic clip is laid out by its displayed size. Layer placement is in `NativeVideoLayout`; its expected rectangles come from
 the renderer's own layout code (see [coverage](../testing/coverage.md#nativevideo)).
 How a very large factor affects composition cost on a real display has not been
 measured.
@@ -775,45 +761,36 @@ runs in the same pass that opens, closes and pauses every other display's video.
 limit follows where the file lives: 8 seconds on the internal drive, 30 seconds on an
 external drive or when the volume cannot be identified (long enough for a hard disk
 to spin up), and 60 seconds on a network volume or a cloud-backed file. A read that
-runs out of time hands the wallpaper to Compatibility like any other refusal, and
-**In use now** says the metadata read did not finish and what kind of storage it was
-waiting on. It is not retried within the pass and is not remembered by the app as a
-verdict on the file, so a clip that is offered natively again is read afresh; but
-while the first read is still blocked, that file is not read a second time, so one
-stuck file never holds more than one blocked call. The hand-off itself lasts for the
-session: the bridge records the refusal against the clip's file and does not offer it
-natively again, so a clip handed over by a slow disk stays on Compatibility until its
-file changes, or **Video playback**
-is switched to Compatibility and back to **Native video preferred**. Nothing retries
-it on its own, since the bridge never passes a wallpaper back and forth between
-backends. A diagnostic recording counts these as `nativeVideoProbeTimeout`; a count on
-the internal drive means the read is stuck, while on a share or a cloud file it may
-only be slow. The same bound applies to a read that fails and is retried: each of the
+runs out of time reports the display as failed like any other refusal, and
+the wallpaper's state in the panel says the metadata read did not finish and what kind of
+storage it was waiting on. It is not retried within the pass and is not remembered as a
+verdict on the file: the failure stands for the offer it was made under, and the next offer of
+the clip (from any apply or reconcile, which carries a newer startup revision) reads the file
+afresh; but while the first read is still blocked, that file is not read a second time, so one
+stuck file never holds more than one blocked call. A diagnostic recording counts these as
+`nativeVideoProbeTimeout`; a count on the internal drive means the read is stuck, while on a
+share or a cloud file it may only be slow. The same bound applies to a read that fails and is retried: each of the
 three attempts gets the whole limit.
 
-A clip that never shows a picture is handed back too. A file the platform calls
+A clip that never shows a picture is reported as failed too. A file the platform calls
 playable can reach ready with its clock running and still produce no frame (an HEVC
 clip tagged `hev1` does this on macOS 27), and nothing reports a failure, so the
-display would stay black with Compatibility excluded and the wallpaper's startup
-never finishing. Native playback therefore waits for the first picture: 10 seconds on
-the internal drive, 30 seconds on an external drive or when the volume cannot be
-identified, and 90 seconds on a network volume or a cloud-backed file, the same
-storage classes as the metadata read. If none arrives, the player is rebuilt once and
-given the same time again. If that fails as well, or the player has no rebuild left
+display would stay black and the wallpaper's startup never finish. Playback therefore waits
+for the first picture: 10 seconds on the internal drive, 30 seconds on an external drive or
+when the volume cannot be identified, and 90 seconds on a network volume or a cloud-backed
+file, the same storage classes as the metadata read. If none arrives, the player is rebuilt
+once and given the same time again. If that fails as well, or the player has no rebuild left
 (two per ten minutes for a display's clip, given back after a minute of uninterrupted
-frames), the wallpaper goes to Compatibility and **In use now** says that no first
-frame arrived, after one restart or not, with the state of the pipeline (item status,
-the picture size it reports, whether the clock runs, whether the layer has a frame).
-The wait does not run while the display is hidden or asleep: it starts again with a
-full deadline when the display returns. The user's own pause does not stop it, since
-a paused clip still shows its first frame. As with a slow metadata read, the app does
-not remember this as a verdict on the file, so an offer of the same wallpaper would
-open it again, but the bridge keeps its refusal for the session: a clip handed over by
-a slow volume stays on Compatibility until its file or its target frame rate changes,
-or **Video playback** is switched to Compatibility and back. A diagnostic recording
-counts every deadline that passed without a frame as `nativeVideoFirstFrameTimeout`:
-a single count with no refusal means the rebuild brought the picture, and on the
-internal drive any count means the pipeline stalled.
+frames), the display is reported as failed and the wallpaper's state says that no first frame
+arrived, after one restart or not, with the state of the pipeline (item status, the picture
+size it reports, whether the clock runs, whether the layer has a frame). The wait does not
+run while the display is hidden or asleep: it starts again with a full deadline when the
+display returns. The user's own pause does not stop it, since a paused clip still shows its
+first frame. The failure is not remembered as a verdict on the file: the next offer of the
+wallpaper, from any apply or reconcile, opens it afresh. A diagnostic recording counts every
+deadline that passed without a frame as `nativeVideoFirstFrameTimeout`: a single count with no
+failure means the rebuild brought the picture, and on the internal drive any count means the
+pipeline stalled.
 
 A clip that has shown a picture is checked, and repaired if need be, after anything that
 can cost it its decoder. The system may reclaim the decoder while nothing is playing (a
@@ -825,8 +802,7 @@ Mac wakes or the session becomes active again (an unlock, or a switch back to th
 A wake waits one second first, so the system can hand the decoder back, and the
 notifications that arrive in a burst make one check, taken after the last of them. Only
 clips that are playing are asked: a clip the user paused stays paused, and a hidden
-display is not looked at. With no native clip open, which is every Mac that chose the
-Compatibility backend, a wake starts no wait at all.
+display is not looked at. With no plain video open, a wake starts no wait at all.
 
 A check waits half a second and then, for up to 2 seconds, looks every tenth of a second
 at the playing item. It needs both signs of life in that time: a new picture handed over by
@@ -844,15 +820,12 @@ of repairs, looking again after each:
    second. It spends the surface's recovery allowance, the same one the first-frame wait
    uses (two rebuilds per ten minutes, given back after a minute of uninterrupted
    pictures), and its look lasts 5 seconds, since the new item has to load first.
-3. If pictures are still missing, or no allowance is left for a rebuild, the wallpaper goes
-   to Compatibility like any other player failure, and **In use now** says that playback
-   stalled after the trigger (`the displays woke`), what was seen, what was tried and how
-   much of the allowance was spent. The bridge keeps the refusal for the session, so the
-   clip stays on Compatibility until its file changes or **Video
-   playback** is switched to Compatibility and back. The native host does not remember the
-   hand-off as a verdict on the file, unlike a decoder failure: a decoder the system took
-   back during a long sleep says nothing about the clip, so when the bridge does offer the
-   same wallpaper again it opens natively once more.
+3. If pictures are still missing, or no allowance is left for a rebuild, the display is
+   reported as failed like any other player failure, and the wallpaper's state says that playback
+   stalled after the trigger (`the displays woke`), what was seen, what was tried and how much of
+   the allowance was spent. Nothing takes the clip over. The host does not remember the failure
+   as a verdict on the file, unlike a decoder failure: a decoder the system took back during a
+   long sleep says nothing about the clip, so the next offer of the same wallpaper opens it again.
 
 A clip whose player said throughout that it was waiting for data is looked at again, twice
 at most, before it is treated as stuck, so a disk that is still spinning up is not nudged;
@@ -903,9 +876,8 @@ When the clip's audio output cannot start (no output device, or one that will no
 start), AVFoundation fails the whole clip, muted or not, and reports only
 `AVErrorUnknown`. Native playback then rebuilds the clip from its video track alone
 and keeps playing it natively without sound, logging the original failure against
-the wallpaper's load. A clip without audio, or one whose picture fails too, falls
-back to Compatibility for the session. Native fallback reasons include each error's
-domain and code, so a report shows which part of playback failed.
+the wallpaper's load. A clip without audio, or one whose picture fails too, is reported as failed. Failure
+reasons include each error's domain and code, so a report shows which part of playback failed.
 
 ## Experimental switches
 

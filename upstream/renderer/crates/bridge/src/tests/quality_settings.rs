@@ -238,7 +238,7 @@ async fn render_scale_is_supported_when_a_web_wallpaper_runs() {
 }
 
 #[tokio::test]
-async fn video_backend_report_names_the_running_backend_and_only_real_fallbacks() {
+async fn the_video_report_names_the_display_and_wallpaper_and_has_no_problem_to_report() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
     engine.set_snapshot(vec![display_with_scene(7, 1)]);
@@ -246,83 +246,20 @@ async fn video_backend_report_names_the_running_backend_and_only_real_fallbacks(
     commit(&bridge, "300", "video", "7").await;
 
     let native = settings(&bridge).await;
-    assert_eq!(native.video_backend, "native_preferred", "native video is the default");
     assert_eq!(native.video_backends.len(), 1);
     assert_eq!(native.video_backends[0].display_id, 7);
     assert_eq!(native.video_backends[0].wallpaper_id, "300");
     assert_eq!(native.video_backends[0].backend, "native");
     assert_eq!(native.video_backends[0].fallback_reason, None);
-
-    let compatibility = bridge
-        .set_video_backend("compatibility".into())
-        .await
-        .unwrap()
-        .settings;
-    assert_eq!(compatibility.video_backend, "compatibility");
-    assert_eq!(compatibility.video_backends[0].backend, "legacy");
-    assert_eq!(
-        compatibility.video_backends[0].fallback_reason, None,
-        "the scene engine is not a fallback when it is what the user chose"
-    );
-
-    bridge
-        .set_video_backend("native_preferred".into())
-        .await
-        .unwrap();
-
-    let key = bridge
-        .native_video_wallpapers()
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|row| row.wallpaper_id == "300")
-        .expect("the wallpaper has to be offered natively before it can be refused")
-        .admission_key;
-    bridge
-        .reject_native_video("300".into(), key, "codec the player cannot decode".into())
-        .await
-        .unwrap();
-
-    let refused = settings(&bridge).await;
-    assert_eq!(refused.video_backends[0].backend, "legacy");
-    assert_eq!(
-        refused.video_backends[0].fallback_reason.as_deref(),
-        Some("codec the player cannot decode")
-    );
 }
 
 #[tokio::test]
-async fn battery_video_backend_report_preserves_native_rejection() {
+async fn a_battery_frame_rate_does_not_change_what_the_video_report_says() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
     engine.set_snapshot(vec![display_with_scene(7, 1)]);
     let bridge = bridge_with(&engine, &temp);
     commit(&bridge, "300", "video", "7").await;
-
-    let native = settings(&bridge).await;
-    assert_eq!(native.video_backend, "native_preferred", "native video is the default");
-    assert_eq!(native.video_backends.len(), 1);
-    assert_eq!(native.video_backends[0].display_id, 7);
-    assert_eq!(native.video_backends[0].wallpaper_id, "300");
-    assert_eq!(native.video_backends[0].backend, "native");
-    assert_eq!(native.video_backends[0].fallback_reason, None);
-
-    let compatibility = bridge
-        .set_video_backend("compatibility".into())
-        .await
-        .unwrap()
-        .settings;
-    assert_eq!(compatibility.video_backend, "compatibility");
-    assert_eq!(compatibility.video_backends[0].backend, "legacy");
-    assert_eq!(
-        compatibility.video_backends[0].fallback_reason, None,
-        "the scene engine is not a fallback when it is what the user chose"
-    );
-
-    bridge
-        .set_video_backend("native_preferred".into())
-        .await
-        .unwrap();
 
     bridge.set_battery_quality_profile(0.5, 24).await.unwrap();
     bridge.set_battery_mode(crate::BridgeBatteryMode::ReducedQuality).await.unwrap();
@@ -332,26 +269,9 @@ async fn battery_video_backend_report_preserves_native_rejection() {
         1,
         "a battery frame rate does not take a clip off the native player"
     );
-
-    let key = bridge
-        .native_video_wallpapers()
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|row| row.wallpaper_id == "300")
-        .expect("the wallpaper has to be offered natively before it can be refused")
-        .admission_key;
-    bridge
-        .reject_native_video("300".into(), key, "codec the player cannot decode".into())
-        .await
-        .unwrap();
-
-    let refused = settings(&bridge).await;
-    assert_eq!(refused.video_backends[0].backend, "legacy");
-    assert_eq!(
-        refused.video_backends[0].fallback_reason.as_deref(),
-        Some("codec the player cannot decode")
-    );
+    let report = settings(&bridge).await;
+    assert_eq!(report.video_backends[0].backend, "native");
+    assert_eq!(report.video_backends[0].fallback_reason, None);
 }
 
 #[tokio::test]

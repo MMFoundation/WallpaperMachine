@@ -620,7 +620,7 @@ unit-tested; how the menu draws and reads on real screens is not.
       on the same display: the picture covers the same area with the same crop and the
       same black bars. Original size shows one video pixel per point, so a 1920x1080 clip covers
       1920x1080 points of a Retina display. An anamorphic clip is the one documented
-      difference ([performance](../features/performance.md#video-backend)).
+      difference ([performance](../features/performance.md#video-playback)).
 - [ ] Change the mode and the factor while the clip plays: the picture moves without the
       clip restarting or going black, and the log (detailed) has a `scaling … -> …` line
       for the change.

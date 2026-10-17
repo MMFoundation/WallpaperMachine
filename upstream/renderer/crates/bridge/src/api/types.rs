@@ -753,15 +753,13 @@ pub struct BridgeSurfaceCheck {
     pub frames_after: u64,
 }
 
-/// A plain local video routed to the native platform player instead of the
-/// scene engine.
+/// A plain local video, played by the host's own player.
 ///
-/// Only the declared subset appears here. The player plays a clip at the clip's
-/// own frame rate: the frame-rate cap applies to scenes and web wallpapers, so
-/// no rate travels with this descriptor and none decides whether the host may
-/// take the clip. The host refuses a wallpaper only for a reason about the file
-/// itself, and a refusal sends the whole mirror group back to the scene engine,
-/// which supports everything the platform player does not.
+/// Every plain video with a resolvable media file appears here; the scene engine is never given
+/// one. The player plays a clip at the clip's own frame rate: the frame-rate cap applies to scenes
+/// and web wallpapers, so no rate travels with this descriptor and none decides whether the host may
+/// take the clip. A file the host cannot play is the host's to report as a failed state of that
+/// display (the display keeps its previous picture); nothing else plays it instead.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct BridgeNativeVideoWallpaper {
     pub display_id: u32,
@@ -772,12 +770,11 @@ pub struct BridgeNativeVideoWallpaper {
     /// Absolute path to the media file, already containment-checked against the
     /// project directory.
     pub media_path: String,
-    /// Identifies the exact configuration this descriptor was produced from:
-    /// the media file, its length and its modification time. Identical for every
-    /// member of a mirror group. The host must pass it back
-    /// to `reject_native_video` when it refuses, so that a refusal arriving
-    /// after the user changed something is discarded instead of killing a
-    /// configuration the host never judged.
+    /// Identifies the media file this descriptor plays: its path, length and
+    /// modification time. Identical for every member of a mirror group. The host
+    /// keeps its verdict on the file, and the surface it opened for it, under this
+    /// key, so a replaced file is judged afresh and an unchanged one is not read
+    /// again.
     pub admission_key: u64,
     /// Where the picture sits on this display when it is larger or smaller than
     /// it, as the saved Position of this wallpaper on this display; centred for a

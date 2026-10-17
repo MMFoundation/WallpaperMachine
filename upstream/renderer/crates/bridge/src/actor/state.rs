@@ -18,7 +18,6 @@ use crate::{
         BridgeWallpaperEntry, BridgeWallpaperKind,
     },
     config::{AppConfig, QualityInForce, SerializedSelector, WallpaperConfig},
-    engine::NativeVideoRejections,
     project::{ProjectModel, localization::FALLBACK_LOCALE},
 };
 
@@ -55,24 +54,6 @@ pub struct BridgeActorState {
     /// Whether a diagnostic session asked the renderer to count its work. Off
     /// by default; nothing counts and nothing is reported until it is on.
     pub renderer_counters_enabled: bool,
-    /// Refusals the native video player recorded, per wallpaper id and then
-    /// per admission key — one key per display slot, so two displays showing
-    /// the same clip at different target rates are refused independently and
-    /// neither refusal erases the other. A refusal excludes only the
-    /// configuration it describes: raise the target frame rate, restore an
-    /// unsupported setting or replace the media file and that slot is offered
-    /// natively again. Within one configuration it holds for the session, so a
-    /// wallpaper cannot oscillate between the two backends, and the scene
-    /// engine — which supports everything — takes it back.
-    pub native_video_rejected: NativeVideoRejections,
-    /// A refusal was dropped because the configuration it described is gone
-    /// (the frame-rate ceiling moved), and the scene list has not been rebuilt
-    /// since, so the engine may still hold a scene for a clip the native player
-    /// is offered again. Set when the refusal goes and cleared only by the
-    /// rebuild that hands the clip back: a rebuild that failed leaves it set, so
-    /// the next change of quality, or the host's next ask for the native list,
-    /// owes the same rebuild instead of finding nothing left to drop.
-    pub native_video_release_owed: bool,
     /// Wallpapers the load journal holds back: the app died while opening
     /// them in consecutive sessions. Activation plans skip them until the
     /// user applies one again. Nothing here is persisted; the journal is.
@@ -120,8 +101,6 @@ impl Default for BridgeActorState {
             label_locales: vec![FALLBACK_LOCALE.to_owned()],
             suspended_displays: BTreeSet::new(),
             renderer_counters_enabled: false,
-            native_video_rejected: BTreeMap::new(),
-            native_video_release_owed: false,
             held_wallpapers: BTreeSet::new(),
             selected_wallpaper_id: None,
             active_wallpaper_ids: Vec::new(),

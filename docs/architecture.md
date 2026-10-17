@@ -302,12 +302,11 @@ Rust side resolves the same paths.
 
 ### Desktop wallpaper windows and private-API handling
 
-Three owners create live desktop windows. Scene wallpapers, and videos on the Compatibility
-backend, are drawn by the Rust core: `upstream/renderer/crates/core/src/window.rs` defines the
+Three owners create live desktop windows. Scene wallpapers are drawn by the Rust core: `upstream/renderer/crates/core/src/window.rs` defines the
 `NSWindow` subclass `MWEWallpaperDesktopWindow` (a stable Objective-C name, deliberately
 depended on by Swift) hosting a `CAMetalLayer` at a wallpaper window level. Web projects
-(`MWEWebWallpaperDesktopWindow`, `App/Services/WebWallpaper/`) and videos on the native backend
-(`MWENativeVideoDesktopWindow`, `App/Services/NativeVideo/`) get the same window shape from
+(`MWEWebWallpaperDesktopWindow`, `App/Services/WebWallpaper/`) and every plain video
+(`MWENativeVideoDesktopWindow` for AVFoundation, `MWEWebMVideoDesktopWindow` for the WebM player, `App/Services/NativeVideo/`) get the same window shape from
 Swift; the bridge excludes them from engine reconciliation and reports them through
 `webWallpapers()` and `nativeVideoWallpapers()`. Every wallpaper window sets `canHide = false`,
 so hiding the app (Cmd-H, or the panel hiding itself after an activation) hides only the panel;
@@ -458,7 +457,7 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   hold before the hosts and gives it to `NativeVideoWallpaperHost`, which decides a replacement
   clip's admission before it stops the old surface, calls `adopt` just before it presents the
   new window, `contentReady` on `isReadyForDisplay`, `cancel` when the clip fails to play and
-  `engineSettled` once the bridge has answered a refusal (or, for a format nothing can play, once the failure is recorded: that file is not handed to the scene engine, so no new picture replaces the held one), and to `WebWallpaperHost`, which
+  `engineSettled` once a refusal is reported as a failed display (nothing takes the clip over, so no new picture replaces the held one and the hold ends after the host grace), and to `WebWallpaperHost`, which
   calls `adopt` after `page.load()` and before it presents a new page's window, `contentReady`
   500 ms after the page finishes loading (or at once when it fails) and `windowClosed` when it
   closes a window that has no web successor, which ends a veil on that window and leaves one

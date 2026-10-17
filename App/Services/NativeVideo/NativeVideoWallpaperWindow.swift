@@ -27,9 +27,9 @@ protocol NativeVideoSurface: AnyObject {
     ///
     /// Metadata loading succeeding says nothing about whether playback will:
     /// a track can be readable and still fail to decode, and the failure only
-    /// surfaces on `AVPlayerItem.status`. Without this the wallpaper stays
-    /// native-selected with the scene engine excluded, so the display shows a
-    /// black rectangle for as long as it is assigned. The argument is the
+    /// surfaces on `AVPlayerItem.status`. Without this the display shows a
+    /// black rectangle for as long as it is assigned, with nothing said about
+    /// why. The host closes the surface and reports the display as failed. The argument is the
     /// surface's own generation, so a failure from a surface that has since
     /// been replaced cannot condemn its successor.
     ///
@@ -38,12 +38,11 @@ protocol NativeVideoSurface: AnyObject {
     /// way next time, so the host may remember it. A pipeline that stopped
     /// delivering pictures and was not revived is not (a decoder the system took
     /// back while the Mac slept says nothing about the clip), and the host must
-    /// not remember the hand-off it causes as one. The bridge still holds the
-    /// hand-off for the session, so the clip is tried again only when the bridge
-    /// offers it again.
+    /// not remember the failure it causes as one: the clip is tried again when
+    /// the bridge offers it under a newer revision.
     var onPreparationFailure: (@MainActor (UInt64, String, Bool) -> Void)? { get set }
     /// Called when the clip failed with its audio and keeps playing without
-    /// it, with the failure. Not a hand-off: the surface is still playing.
+    /// it, with the failure. Not a failure of the display: the surface is still playing.
     var onAudioDropped: (@MainActor (String) -> Void)? { get set }
     /// Called with what each look of a health check concluded about the
     /// pipeline, together with the step the surface takes next (a kick, a
@@ -55,7 +54,7 @@ protocol NativeVideoSurface: AnyObject {
     /// the pipeline if they do not, for a reason the surface cannot see itself:
     /// the Mac or its displays woke, or the session came back. A kick and at
     /// most one rebuild are tried; if neither helps the surface reports a
-    /// preparation failure, which hands the wallpaper to the scene engine. A
+    /// preparation failure, which reports the display as failed. A
     /// surface that is paused or hidden, or has not yet shown a picture, is not
     /// checked.
     func verifyPlayback(reason: String)

@@ -283,12 +283,6 @@
     "The declared entry file is missing or unreadable. Reinstall this wallpaper." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "The declared entry file is missing or unreadable. Reinstall this wallpaper."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "宣言されたエントリファイルが見つからないか、読み取れません。この壁紙を再インストールしてください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "声明的入口文件缺失或不可读。请重新安装此壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "宣告的入口檔案遺失或無法讀取。請重新安裝此桌布。"}}}
     },
-    "Native video admission" : {
-      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Native video admission"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブ動画の適合確認"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生视频准入"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生影片准入"}}}
-    },
-    "Native admission needs a supported installed video, a readable entry and a valid target display." : {
-      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Native admission needs a supported installed video, a readable entry and a valid target display."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ネイティブ適合確認には、対応するインストール済み動画、読み取れるエントリ、有効な対象ディスプレイが必要です。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "原生准入需要受支持的已安装视频、可读入口和有效目标显示器。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "原生准入需要支援的已安裝影片、可讀取入口和有效目標顯示器。"}}}
-    },
     "Shared scene resources" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Shared scene resources"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "共有シーンリソース"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "共享场景资源"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "共用場景資源"}}}
     },
@@ -306,6 +300,12 @@
     },
     "Web runtime" : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Web runtime"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Web 実行環境"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "网页运行时"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "網頁執行環境"}}}
+    },
+    "This video can be played, at its own frame rate. Actual player preparation and on-screen presentation are not verified by this check." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "This video can be played, at its own frame rate. Actual player preparation and on-screen presentation are not verified by this check."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このビデオは再生できます。ビデオは動画自体のフレームレートで再生されます。実際のプレイヤーの準備や画面表示は、この確認では検証しません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "此视频可以播放，视频按自身帧率播放。此检查不验证实际播放器准备和屏幕显示。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "此影片可以播放，影片會以自身的影格率播放。此檢查不驗證實際播放器準備和螢幕顯示。"}}}
+    },
+    "Video playback needs a supported installed video, a readable entry and a valid target display." : {
+      "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Video playback needs a supported installed video, a readable entry and a valid target display."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ビデオ再生の確認には、対応するインストール済み動画、読み取れるエントリ、有効な対象ディスプレイが必要です。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频播放检查需要受支持的已安装视频、可读入口和有效目标显示器。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片播放檢查需要支援的已安裝影片、可讀取入口和有效目標顯示器。"}}}
     },
     "The entry file check does not execute scripts or verify media, local dependencies or WebGL. These need runtime evaluation." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "The entry file check does not execute scripts or verify media, local dependencies or WebGL. These need runtime evaluation."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "エントリファイルの確認では、スクリプトの実行やメディア、ローカル依存リソース、WebGL の検証は行いません。これらは実行時の評価が必要です。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "入口文件检查不会执行脚本或验证媒体、本地依赖或 WebGL。这些需要运行时评估。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "入口檔案檢查不會執行指令碼或驗證媒體、本機相依資源或 WebGL。這些需要執行時評估。"}}}
@@ -7293,12 +7293,6 @@
     },
     "At the top of the slider there is no limit, and each display runs at its own frame rate: up to 60 fps unless you chose more for it. A lower value caps scenes and web wallpapers on every display, while a video plays at its own frame rate; saved per-display frame rates are not rewritten." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "スライダの一番上では制限がなく、各ディスプレイがそれぞれのフレームレートで動作します（個別により高い値を選択していない限り最大60 fps）。低い値にすると、すべてのディスプレイのシーンとWeb壁紙に上限が適用されます。ビデオは動画自体のフレームレートで再生されます。ディスプレイごとに保存されたフレームレートは書き換えられません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "滑块最顶端表示不限制，每台显示器按各自的帧率运行：除非你为它选了更高的帧率，否则最高 60 fps。更低的值会限制每台显示器上的场景和网页壁纸，而视频按自身帧率播放；不会改写各显示器已保存的帧率。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "滑桿拉到最頂端時沒有限制，每台顯示器會以各自的影格率執行：除非你為它選擇了更高的值，否則最高為 60 fps。較低的值會限制每台顯示器上的場景與網頁桌布，而影片會以自身的影格率播放；不會改寫各顯示器已儲存的影格率。"}}}
-    },
-    "AVFoundation can open this video, which plays at its own frame rate. Actual player preparation and on-screen presentation are not verified by this check." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation はこのビデオを開けます。ビデオは動画自体のフレームレートで再生されます。実際のプレイヤーの準備や画面表示は、この確認では検証しません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 可以打开此视频，视频按自身帧率播放。此检查不验证实际播放器准备和屏幕显示。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 可以開啟此影片，影片會以自身的影格率播放。此檢查不驗證實際播放器準備和螢幕顯示。"}}}
-    },
-    "AVFoundation can open this video, which plays at its own frame rate. Compatibility remains selected; this check does not change your backend." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation はこのビデオを開けます。ビデオは動画自体のフレームレートで再生されます。互換モードの選択は維持され、この確認でバックエンドは変更されません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 可以打开此视频，视频按自身帧率播放。仍选择兼容模式；此检查不会更改后端。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "AVFoundation 可以開啟此影片，影片會以自身的影格率播放。仍選擇相容模式；此檢查不會變更後端。"}}}
     },
     "AV1 video needs hardware decoding, which this Mac doesn’t have. Convert it to MP4 or MOV with H.264 or HEVC, then import it again." : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "AV1ビデオにはハードウェアデコードが必要ですが、このMacには搭載されていません。H.264またはHEVCのMP4またはMOVに変換してから、もう一度読み込んでください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "AV1 视频需要硬件解码，而这台 Mac 不支持。请先将其转换为 H.264 或 HEVC 编码的 MP4 或 MOV，再重新导入。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "AV1 影片需要硬體解碼，但這台 Mac 不支援。請先轉換為 H.264 或 HEVC 編碼的 MP4 或 MOV，再重新匯入。"}}}

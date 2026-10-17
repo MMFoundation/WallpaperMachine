@@ -37,7 +37,6 @@ const SHADER_PIPELINE_VERSION: &str = "0.1.0";
 const VIDEO_BACKEND_COMPATIBILITY: &str = "compatibility";
 const VIDEO_BACKEND_NATIVE_PREFERRED: &str = "native_preferred";
 const RUNNING_BACKEND_NATIVE: &str = "native";
-const RUNNING_BACKEND_LEGACY: &str = "legacy";
 const SCENE_RENDERER_COMPATIBILITY: &str = "compatibility";
 const SCENE_RENDERER_NATIVE_METAL_PREFERRED: &str = "native_metal_preferred";
 const SCENE_RENDERER_NATIVE_METAL_ONLY: &str = "native_metal_only";
@@ -643,9 +642,7 @@ impl BridgeActorState {
             paths,
             force_shader_refresh: false,
             project_models: &self.project_models,
-            native_video_enabled: self.app_config.video_backend
-                == VideoBackendModeCfg::NativePreferred,
-            native_video_rejected: &self.native_video_rejected,
+            videos_as_scenes: false,
             frame_rate_cap: self.active_target_fps_cap(),
             audio_suppressed: self.audio_suppressed,
             held: &self.held_wallpapers,
@@ -675,12 +672,8 @@ impl BridgeActorState {
                     .map(|entry| entry.title.clone())
                     .unwrap_or_default(),
                 wallpaper_id: routed.wallpaper_id,
-                backend: if routed.native {
-                    RUNNING_BACKEND_NATIVE.to_string()
-                } else {
-                    RUNNING_BACKEND_LEGACY.to_string()
-                },
-                fallback_reason: routed.fallback_reason,
+                backend: RUNNING_BACKEND_NATIVE.to_string(),
+                fallback_reason: routed.problem,
             })
             .collect();
         let scene_labels = self.scene_report_labels(displays, &app_config, scene_reports);

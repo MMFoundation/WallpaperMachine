@@ -368,16 +368,6 @@ pub struct SetPropertyPath {
 
 pub struct GetNativeVideoWallpapers;
 
-/// The host could not play a wallpaper natively and hands it back.
-pub struct RejectNativeVideo {
-    pub wallpaper_id: String,
-    /// The `admission_key` of the descriptor the host judged. A key that no
-    /// longer matches the wallpaper's live configuration means the refusal
-    /// arrived after the user changed something, and it is discarded.
-    pub admission_key: u64,
-    pub reason: String,
-}
-
 pub struct SetPowerSource {
     pub source: PowerSource,
     pub initial_sample: bool,
@@ -518,6 +508,5 @@ pub type GetSystemMediaSceneHandlesReply = Result<Vec<u64>, BridgeError>;
 pub type GetSystemMediaConsentHandlesReply = Result<Vec<u64>, BridgeError>;
 pub type SetPropertyPathReply = WallpaperMutationReply;
 pub type GetNativeVideoWallpapersReply = Result<Vec<BridgeNativeVideoWallpaper>, BridgeError>;
-pub type RejectNativeVideoReply = Result<(), BridgeError>;
 pub type CompleteRestoreAfterReconcileReply = Result<(), BridgeError>;
 pub type ReconcileFailedReply = Result<(), BridgeError>;

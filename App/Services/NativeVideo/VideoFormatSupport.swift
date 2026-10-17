@@ -15,9 +15,10 @@ import VideoToolbox
 /// it cannot give: the container, read from the file's first bytes so a message can say "AVI"
 /// instead of a file extension that may lie, and whether the Mac can decode AV1 in hardware,
 /// because software AV1 decoding of a wallpaper that runs all day is a cost this app does not
-/// take on. Matroska and WebM files AVFoundation cannot open are tried with the app's own reader
-/// (`WebMOpening`), which plays H.264, HEVC and VP9 in them (and AV1 with hardware decoding) through
-/// `WebMPlayer`; the rest are not refused yet: the scene engine still plays them.
+/// take on. Matroska and WebM files, which AVFoundation never opens, are opened with the app's own
+/// reader (`WebMOpening`): H.264, HEVC and VP9 in them (and AV1 with hardware decoding) play through
+/// `WebMPlayer`, and every other codec, VP8 for one, is refused with its format named. There is no
+/// other player to hand a refused file to.
 enum VideoFormatSupport {
     /// A container and the video codec in it, as a person would name them.
     struct Format: Equatable, Sendable {
@@ -40,9 +41,6 @@ enum VideoFormatSupport {
         /// Matroska or WebM that AVFoundation cannot open and the app's own player plays. The file
         /// the check opened is kept for the surface (`WebMOpenedFiles`).
         case supportedWebM
-        /// Matroska or WebM that neither AVFoundation nor the app's own player plays. Not refused:
-        /// the scene engine plays it.
-        case sceneEngineOnly(Format)
         case unsupported(Format, Reason)
         /// The file could not be read (a busy volume, a file still being written). Says nothing
         /// about the format, so nothing is refused for it.
@@ -78,9 +76,7 @@ enum VideoFormatSupport {
             }
             return .supported
         }
-        let format = Format(container: container.name, codec: codec)
-        if container.family == .matroska { return .sceneEngineOnly(format) }
-        return .unsupported(format, .notPlayable)
+        return .unsupported(Format(container: container.name, codec: codec), .notPlayable)
     }
 
     /// Reads the file and decides. Nothing is decoded: this is the metadata AVFoundation loads
@@ -94,23 +90,37 @@ enum VideoFormatSupport {
         switch outcome {
         case let .success(report):
             let verdict = decide(container: container, report: report, hardwareAV1: hardwareAV1)
-            // AVFoundation does not open Matroska at all; the app's own reader may.
-            if case .sceneEngineOnly = verdict, openWebM(url) { return .supportedWebM }
+            // AVFoundation does not open Matroska at all; the app's own reader decides.
+            if case .unsupported(_, .notPlayable) = verdict, container.family == .matroska {
+                return judgeWebM(url, container: container)
+            }
             return verdict
         case let .failure(failure):
             return .unreadable(failure.detail)
         }
     }
 
-    /// Whether the app's own player plays the file, which it opened to find out: the opened file is kept
-    /// for the surface. Reads the file's headers and block headers, so it takes as long as the volume does.
-    private static func openWebM(_ url: URL) -> Bool {
+    /// What the app's own reader says about a Matroska or WebM file, which it opens to find out:
+    /// the opened file is kept for the surface. Reads the file's headers and block headers, so it
+    /// takes as long as the volume does.
+    private static func judgeWebM(_ url: URL, container: Container) -> Verdict {
         switch WebMOpening.open(url: url) {
         case .success(let file):
             WebMOpenedFiles.shared.store(file, for: url)
-            return true
-        case .failure:
-            return false
+            return .supportedWebM
+        case .failure(let failure):
+            switch failure.kind {
+            case .unsupported(let name):
+                if name == "AV1" {
+                    return .unsupported(
+                        Format(container: container.name, codec: "AV1"), .needsHardwareAV1Decode)
+                }
+                return .unsupported(Format(container: container.name, codec: name), .notPlayable)
+            case .notMatroska, .damaged:
+                return .unsupported(Format(container: container.name, codec: nil), .notPlayable)
+            case .unreadable:
+                return .unreadable(failure.detail)
+            }
         }
     }
 
@@ -118,15 +128,12 @@ enum VideoFormatSupport {
         var detail: String
     }
 
-    /// The same verdict as a routing answer for the native host: `nil` to play it, a scene-engine
-    /// hand-off for a container only the engine reads, a refusal that is final for a format
-    /// nothing can play, and an unsettled one for a file that could not be read.
+    /// The same verdict as an answer for the native host: `nil` to play it, a refusal that is final
+    /// for a format nothing can play, and an unsettled one for a file that could not be read.
     static func refusal(url: URL) async -> NativeVideoRefusal? {
         switch await inspect(url: url) {
         case .supported, .supportedWebM:
             return nil
-        case let .sceneEngineOnly(format):
-            return .notPlayable("\(format.name) is not opened by AVFoundation; the scene engine plays it")
         case let .unsupported(format, reason):
             return .unsupportedFormat(message(for: format, reason: reason))
         case let .unreadable(detail):

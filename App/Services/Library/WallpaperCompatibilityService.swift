@@ -50,7 +50,7 @@ actor WallpaperCompatibilityService {
 
   init(libraryURL: URL = ClientPaths.libraryURL,
        assetsURL: @escaping @Sendable () -> URL = { ClientPaths.assetsURL },
-       probe: @escaping Probe = { await NativeVideoAdmission.probe(url: $0) }) {
+       probe: @escaping Probe = { await WallpaperCompatibilityService.playbackProbe(url: $0) }) {
     self.libraryURL = libraryURL
     self.assetsURL = assetsURL
     self.probe = probe
@@ -145,15 +145,12 @@ actor WallpaperCompatibilityService {
           case .refused(let failure): refusal = failure
           }
           cacheable = refusal?.isSettled ?? true
-          let selected = context.videoBackend == "native_preferred"
           append("nativeVideo", refusal == nil ? .ok : refusal?.isSettled == true ? .warning : .unknown,
-                 String(localized: "Native video admission"), refusal.map(\.reason)
-                 ?? (selected
-                     ? String(localized: "AVFoundation can open this video, which plays at its own frame rate. Actual player preparation and on-screen presentation are not verified by this check.")
-                     : String(localized: "AVFoundation can open this video, which plays at its own frame rate. Compatibility remains selected; this check does not change your backend.")))
+                 String(localized: "Video playback"), refusal.map(\.reason)
+                 ?? String(localized: "This video can be played, at its own frame rate. Actual player preparation and on-screen presentation are not verified by this check."))
         } else {
-          append("nativeVideo", .unavailable, String(localized: "Native video admission"),
-                 String(localized: "Native admission needs a supported installed video, a readable entry and a valid target display."))
+          append("nativeVideo", .unavailable, String(localized: "Video playback"),
+                 String(localized: "Video playback needs a supported installed video, a readable entry and a valid target display."))
         }
       case .scene:
         let sharedReady = markers.allSatisfy { Self.readableRegular(shared.appendingPathComponent($0)) }
@@ -188,6 +185,19 @@ actor WallpaperCompatibilityService {
       append("resources", .unknown, String(localized: "Installed resources"),
              String(localized: "The resource check could not complete: \(error.localizedDescription)"))
       return checks
+    }
+  }
+
+  /// What the app's players say about the file: AVFoundation for most, the WebM reader for Matroska
+  /// and WebM. Expressed as the admission probe the check already reads.
+  static func playbackProbe(url: URL) async -> NativeVideoProbeOutcome {
+    switch await VideoFormatSupport.inspect(url: url) {
+    case .supported, .supportedWebM:
+      return .probed(NativeVideoTrackProbe(isPlayable: true, hasVideoTrack: true))
+    case let .unsupported(format, reason):
+      return .refused(.unsupportedFormat(VideoFormatSupport.message(for: format, reason: reason)))
+    case let .unreadable(detail):
+      return .refused(.preparationFailed(detail))
     }
   }
 

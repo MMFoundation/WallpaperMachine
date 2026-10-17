@@ -4,20 +4,20 @@ import Foundation
 
 /// Why the native player cannot take a wallpaper.
 ///
-/// A refusal is a routing decision, not an error: the wallpaper goes back to
-/// the scene engine, which supports everything this backend does not. No
-/// refusal is about frame rate: the player plays a clip at the clip's own rate,
-/// and the frame-rate cap applies to scenes and web wallpapers, so how fast a
-/// clip is never decides who plays it.
+/// On the desktop a refusal is a failure of that display, reported with its reason: no other player
+/// takes the clip, and the display keeps the picture it had. (The lock-screen extension still draws
+/// a refused clip with the scene engine.) No refusal is about frame rate: the player plays a clip
+/// at the clip's own rate, and the frame-rate cap applies to scenes and web wallpapers, so how fast
+/// a clip is never decides whether it plays.
 enum NativeVideoRefusal: Equatable {
     /// The asset is not playable, or carries no video track. A settled answer
     /// about this file: retrying it would read the same bytes again.
     case notPlayable(String)
     /// Loading the asset's metadata failed. This is *not* a statement about
     /// the content — an I/O error, a file still being written, a busy
-    /// device — so it is retried a bounded number of times before it becomes
-    /// a handoff. Kept apart from `notPlayable` precisely so a transient
-    /// failure cannot demote a wallpaper for the rest of the session.
+    /// device — so it is retried a bounded number of times before it is
+    /// reported. Kept apart from `notPlayable` precisely so a transient
+    /// failure cannot fail a wallpaper for the rest of the session.
     case preparationFailed(String)
     /// Metadata loaded and admission accepted, but the platform player then
     /// failed to prepare or play the asset. A settled answer for this file and
@@ -25,10 +25,8 @@ enum NativeVideoRefusal: Equatable {
     /// Distinct from `preparationFailed`, which is a metadata read that did
     /// not complete and says nothing about the content.
     case playbackFailed(String)
-    /// The file is in a format nothing in this app can play: not the platform player, and not
-    /// the scene engine, which is no longer the answer for it. The string is the message a
-    /// person reads, naming the format. A settled answer, and one the host does not hand to the
-    /// scene engine: the display keeps the picture it had.
+    /// The file is in a format nothing in this app can play. The string is the message a person
+    /// reads, naming the format. A settled answer: the display keeps the picture it had.
     case unsupportedFormat(String)
 
     /// Whether this answer is settled for the inputs it was decided on. A

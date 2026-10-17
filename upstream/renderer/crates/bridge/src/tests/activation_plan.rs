@@ -11,7 +11,7 @@ use crate::{
         AppConfig, FramingCfg, MonitorCfg, MonitorRender, MonitorSettingsCfg, SerializedSelector,
         WallpaperConfig,
     },
-    engine::{ActivationInputs, NativeVideoRejection},
+    engine::ActivationInputs,
     paths::BridgePaths,
 };
 
@@ -57,8 +57,7 @@ fn activation_plan_marks_scenes_paused_when_global_playback_is_paused() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
+        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -108,8 +107,7 @@ fn activation_plan_leaves_display_empty_when_assigned_wallpaper_left_the_library
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
+        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -168,8 +166,7 @@ fn activation_plan_gives_primary_wallpaper_to_current_primary_display() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
+        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -191,8 +188,7 @@ fn activation_plan_gives_primary_wallpaper_to_current_primary_display() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
+        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -238,8 +234,7 @@ fn activation_plan_uses_primary_render_override_for_identity_primary_monitor() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
+        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -289,8 +284,7 @@ fn activation_plan_uses_identity_render_override_for_primary_monitor() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
+        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -382,8 +376,7 @@ fn mirror_scene_follows_source_wallpaper_with_monitor_overrides() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
+        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -460,13 +453,11 @@ fn display_snapshot(display_id: u32) -> DisplaySnapshotEntry {
 
 /// The routing rules themselves, with no actor and no host query in the way.
 ///
-/// Every reconcile runs through `build()`/`build_native_video()`, including the
-/// ones the bridge spawns for unrelated reasons, so a recorded refusal has to
-/// be re-evaluated here rather than only in the bookkeeping that runs when the
-/// host asks what to play. Otherwise a wallpaper whose configuration changed
-/// would be rendered by both backends until the host happened to ask again.
+/// Every plain video is played by the host's own player, so a Video project never gets a scene
+/// and always gets a descriptor when its file is there; the scene engine has no say in it. Only
+/// the lock-screen export asks for the video as a scene as well.
 #[test]
-fn a_rejection_recorded_for_another_admission_key_does_not_route_a_video_to_the_engine() {
+fn a_plain_video_is_never_a_scene_and_is_always_a_native_descriptor_when_its_file_exists() {
     let temp = tempfile::tempdir().unwrap();
     let paths = BridgePaths::for_home(temp.path().to_path_buf());
     let project_dir = paths.steam_workshop_root().join("500");
@@ -494,88 +485,45 @@ fn a_rejection_recorded_for_another_admission_key_does_not_route_a_video_to_the_
     );
     let displays = vec![display_snapshot(1)];
     let suspended = BTreeSet::new();
-
-    fn plan<'a>(
-        app_config: &'a AppConfig,
-        wallpapers: &'a BTreeMap<String, WallpaperConfig>,
-        displays: &'a [DisplaySnapshotEntry],
-        suspended_displays: &'a BTreeSet<u32>,
-        paths: &'a BridgePaths,
-        project_models: &'a BTreeMap<String, crate::project::ProjectModel>,
-        native_video_rejected: &'a crate::engine::NativeVideoRejections,
-    ) -> ActivationInputs<'a> {
-        ActivationInputs {
-            app_config,
-            wallpapers,
-            library: None,
-            displays,
-            suspended_displays,
-            paused: false,
-            paths,
-            force_shader_refresh: false,
-            project_models,
-            native_video_enabled: true,
-            native_video_rejected,
-            frame_rate_cap: None,
-            audio_suppressed: false,
-            held: &NONE_HELD,
-        }
-    }
+    let plan = |videos_as_scenes: bool| ActivationInputs {
+        app_config: &config,
+        wallpapers: &wallpapers,
+        library: None,
+        displays: &displays,
+        suspended_displays: &suspended,
+        paused: false,
+        paths: &paths,
+        force_shader_refresh: false,
+        project_models: &project_models,
+        videos_as_scenes,
+        frame_rate_cap: None,
+        audio_suppressed: false,
+        held: &NONE_HELD,
+    };
     static NONE_HELD: BTreeSet<String> = BTreeSet::new();
-    macro_rules! inputs {
-        ($rejected:expr) => {
-            plan(
-                &config,
-                &wallpapers,
-                &displays,
-                &suspended,
-                &paths,
-                &project_models,
-                $rejected,
-            )
-        };
-    }
 
-    let empty = BTreeMap::new();
-    let live_key = inputs!(&empty).build_native_video().unwrap()[0].admission_key;
-
-    let matching: crate::engine::NativeVideoRejections = [(
-        "500".to_string(),
-        [(
-            live_key,
-            NativeVideoRejection {
-                reason: "unsupported".to_string(),
-            },
-        )]
-        .into(),
-    )]
-    .into();
-    assert!(inputs!(&matching).build_native_video().unwrap().is_empty());
+    assert_eq!(plan(false).build_native_video().unwrap().len(), 1);
+    assert!(plan(false).build().unwrap().is_empty(), "the engine is not given a video it has no part in");
+    assert_eq!(plan(false).render_backends().videos[0].problem, None);
     assert_eq!(
-        inputs!(&matching).build().unwrap().len(),
+        plan(true).build().unwrap().len(),
         1,
-        "a refusal that describes the live configuration puts the wallpaper on the engine"
+        "the lock-screen export carries the video as a scene too"
     );
+    // The key is the file's identity: a replaced file is a different key, a frame-rate cap is not.
+    let key = plan(false).build_native_video().unwrap()[0].admission_key;
+    let capped = ActivationInputs { frame_rate_cap: Some(15), ..plan(false) };
+    assert_eq!(capped.build_native_video().unwrap()[0].admission_key, key);
+    std::fs::write(project_dir.join("clip.mp4"), b"a longer clip than before").unwrap();
+    assert_ne!(plan(false).build_native_video().unwrap()[0].admission_key, key);
 
-    let stale: crate::engine::NativeVideoRejections = [(
-        "500".to_string(),
-        [(
-            live_key ^ 1,
-            NativeVideoRejection {
-                reason: "unsupported".to_string(),
-            },
-        )]
-        .into(),
-    )]
-    .into();
+    // A video whose file is gone gets neither descriptor nor scene, and the report says why.
+    std::fs::remove_file(project_dir.join("clip.mp4")).unwrap();
+    assert!(plan(false).build_native_video().unwrap().is_empty());
+    assert!(plan(false).build().unwrap().is_empty(), "no scene stands in for a file that cannot be found");
     assert_eq!(
-        inputs!(&stale).build_native_video().unwrap().len(),
-        1,
-        "a refusal for a configuration that no longer exists must not exclude this one"
-    );
-    assert!(
-        inputs!(&stale).build().unwrap().is_empty(),
-        "and the engine must not also be handed a scene for it"
+        plan(false).render_backends().videos[0].problem.as_deref(),
+        Some("the project's video file could not be found")
     );
 }
 fn independent(display_id: u32, wallpaper: &str) -> MonitorCfg {
@@ -598,7 +546,6 @@ struct HeldFixture {
     models: BTreeMap<String, crate::project::ProjectModel>,
     displays: Vec<DisplaySnapshotEntry>,
     suspended: BTreeSet<u32>,
-    rejected: crate::engine::NativeVideoRejections,
 }
 
 impl HeldFixture {
@@ -637,7 +584,6 @@ impl HeldFixture {
             models,
             displays: vec![display_snapshot(1), display_snapshot(2), display_snapshot(3)],
             suspended: BTreeSet::new(),
-            rejected: BTreeMap::new(),
         }
     }
 
@@ -652,8 +598,7 @@ impl HeldFixture {
             paths: &self.paths,
             force_shader_refresh: false,
             project_models: &self.models,
-            native_video_enabled: true,
-            native_video_rejected: &self.rejected,
+            videos_as_scenes: false,
             frame_rate_cap: None,
             audio_suppressed: false,
             held,
@@ -718,7 +663,7 @@ fn build_owned_maps_each_display_to_its_wallpaper_including_mirrors() {
     };
     let displays = vec![display_snapshot(1), display_snapshot(2), display_snapshot(3)];
     let paths = BridgePaths::for_home("/tmp/test-home");
-    let (suspended, models, rejected) = (BTreeSet::new(), BTreeMap::new(), BTreeMap::new());
+    let (suspended, models) = (BTreeSet::new(), BTreeMap::new());
     let inputs = |held| ActivationInputs {
         app_config: &config,
         wallpapers: &wallpapers,
@@ -729,8 +674,7 @@ fn build_owned_maps_each_display_to_its_wallpaper_including_mirrors() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &models,
-        native_video_enabled: false,
-        native_video_rejected: &rejected,
+        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
         held,
@@ -838,8 +782,7 @@ fn a_saved_position_reaches_only_the_scene_built_for_its_display() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
+        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -902,8 +845,7 @@ fn a_saved_position_follows_the_display_across_the_ways_it_is_addressed() {
             paths: &paths,
             force_shader_refresh: false,
             project_models: &BTreeMap::new(),
-            native_video_enabled: false,
-            native_video_rejected: &BTreeMap::new(),
+            videos_as_scenes: false,
             frame_rate_cap: None,
             audio_suppressed: false,
         }
@@ -963,8 +905,7 @@ fn a_mirror_is_centred_even_when_its_source_is_positioned() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
+        videos_as_scenes: false,
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -984,14 +925,12 @@ fn a_mirror_is_centred_even_when_its_source_is_positioned() {
 
 /// The native player places its picture by the saved position, so the
 /// descriptor it is handed carries it. A position says nothing about the file,
-/// so the key its admission is judged by stays what it was, and the clip does
-/// not fall back to the engine.
+/// so the key the host judges the file by stays what it was.
 #[test]
-fn a_position_reaches_the_native_video_player_without_changing_its_admission() {
+fn a_position_reaches_the_native_video_player_without_changing_its_key() {
     let mut fixture = HeldFixture::new();
     let none = BTreeSet::new();
     let before = fixture.inputs(&none).build_native_video().unwrap();
-    let keys_before = fixture.inputs(&none).native_video_admission_keys();
     assert_eq!(before.len(), 1);
     assert_eq!(before[0].framing, SceneFraming::default(), "centred until moved");
 
@@ -1016,10 +955,7 @@ fn a_position_reaches_the_native_video_player_without_changing_its_admission() {
     let mut recentred = moved[0].clone();
     recentred.framing = SceneFraming::default();
     assert_eq!(recentred, before[0], "and nothing else about the descriptor moved");
-    assert_eq!(
-        fixture.inputs(&none).native_video_admission_keys(),
-        keys_before
-    );
+    assert_eq!(moved[0].admission_key, before[0].admission_key, "a position says nothing about the file");
     assert_eq!(
         fixture.inputs(&none).build().unwrap().len(),
         1,

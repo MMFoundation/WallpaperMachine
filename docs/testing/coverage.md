@@ -104,7 +104,7 @@ macOS accepting or restoring native selections. Both are on
 application preflight and recovery, not decoded frames or desktop playback.
 Missing, empty and non-file video entries are rejected before any change; an
 original synthetic H.264 Matroska clip applies through Apply and Apply changes
-with either backend preference (the playable-format refusal applies to Native video preferred only: an AVI applies under Compatibility); decoder failures keep the error and leave the
+(the playable-format refusal applies to every video now: an AVI is refused with its format named); decoder failures keep the error and leave the
 library usable for retry; history changes only after a successful activation;
 playback-environment changes (suspend/resume, unload/reload, audio, reduced quality) and library
 refreshes wait for an in-flight apply and the reverse, while explicit Pause still
@@ -772,10 +772,11 @@ need an authorized runtime check
   playing, user pause and suspension as separate reasons, the scaling choice and position moving the
   picture, a file that cannot be opened failing as a verdict (held until a handler arrives), a window
   opening its own file, the poster at the display's size, stopping.
-- `NativeVideoWallpaperHostTests` — startup waits for surface readiness, refused
-  wallpapers are handed back to the scene engine with their reason, a format nothing can play
-  is not handed back (no window, no rejection, the failure and its message in the wallpaper's
-  state, read once and not reopened for every snapshot, judged afresh when the file changes), re-evaluation
+- `NativeVideoWallpaperHostTests` — startup waits for surface readiness, a refused
+  wallpaper is reported as a failed display with its reason (no window, nothing takes the clip
+  over, the failure and its message in the wallpaper's state, read once and not reopened for every
+  snapshot, judged afresh when the file changes; a failure that is not a verdict on the file is
+  restated for its own startup revision and tried again under a newer one), re-evaluation
   when the admission key (the file) changes, one surface per display, a mirror group
   judged once under its source's key, hidden-display and user-pause handling, a clip stopped
   by a reading taken while the desktop (or one display) was covered playing again
@@ -788,10 +789,9 @@ need an authorized runtime check
 - The metadata-read bound, in the host suite with a hand-fired clock
   (`ManualSleeper`) and a read held open by a gate: a read that never returns is
   abandoned after the limit for its storage (8, 30 or 60 seconds, per class) and the
-  wallpaper is handed over with a reason that says the read did not finish; the
-  timeout is not retried in the pass, not cached by the host (the bridge holds the
-  hand-off for the session, which only its own `native_video_routing` tests pin: no
-  test joins the two), and counted as
+  display is reported as failed with a reason that says the read did not finish; the
+  timeout is not retried in the pass, not cached as a verdict (a newer startup revision reads
+  the file again), and counted as
   `nativeVideoProbeTimeout`; each retry is bounded too; the same file has at most one
   read outstanding and is answered at once while it is, and a pass cancelled before a
   retry's read begins leaves no read outstanding; a close queued behind the
@@ -805,19 +805,18 @@ need an authorized runtime check
   classification that never returns counting as unknown after 2 seconds.
 - The first-frame deadline, in the host suite with the same hand-fired clock and a
   fake surface that never reports a frame: the first miss asks the surface to restart
-  and starts a second deadline of the same length, the second miss hands the wallpaper
-  back once, under its admission key, closes the window and ends its startup, a restart
-  the surface refuses hands it back at once (the text of the reason is not pinned),
+  and starts a second deadline of the same length, the second miss reports the display as
+  failed once, under its admission key, closes the window and ends its startup, a restart
+  the surface refuses fails it at once (the text of the reason is not pinned),
   and each missed deadline counts as `nativeVideoFirstFrameTimeout`. The deadline is
   10, 30 or 90 seconds per storage class; a frame before the deadline stops the
-  countdown, and a frame after the hand-off, a replaced surface, a closed surface and a
+  countdown, and a frame after the failure, a replaced surface, a closed surface and a
   shut-down host leave nothing to fire. A display that is hidden (on its own or
   globally) is not judged: the watch parks and starts again with a full deadline only
   when every reason has ended, keeping a restart it had already spent; a user-paused
   clip is still judged, and one display's frame settles only its own watch. A timeout
-  is not remembered by the host as a verdict, so the same key opens again when it is
-  offered, while a decoder failure still is (the bridge's hold on the hand-off is
-  outside this suite). `NativeVideoRecoveryBudgetTests` — two rebuilds per window and a refusal
+  is not remembered by the host as a verdict, so a newer offer of the same key opens again,
+  while a decoder failure still is. `NativeVideoRecoveryBudgetTests` — two rebuilds per window and a refusal
   after that, the allowance returning as old rebuilds leave the window, a stable run
   forgiving the history (measured from its first frame, interrupted only by a
   permitted rebuild, not by a refusal), and a reset.
@@ -856,10 +855,10 @@ need an authorized runtime check
   is open charges nothing and agrees with the real request. The host suite checks that a
   stalled report is counted as `nativeVideoPlaybackStalled` once per check, at its first
   look, and that the host does nothing about a report itself, that healthy and waiting
-  reports are not counted, and that a report from a replaced surface is ignored. A hand-off
+  reports are not counted, and that a report from a replaced surface is ignored. A failure
   after the ladder gave up (an unsettled failure) is not remembered by the host as a
-  verdict, so the same key opens natively when it is offered again, while a settled
-  decoder failure still is (the bridge's hold on the hand-off is outside this suite). A wake
+  verdict, so a newer offer of the same key opens again, while a settled
+  decoder failure still is. A wake
   (displays, Mac or session, each of the three) asks only the surfaces that are playing to
   verify, after a settle and not before; a burst of notifications is one request; a
   surface that stopped playing during the settle is not asked; a host with no surface open
@@ -948,14 +947,14 @@ or other-Space poster of a rotated clip as macOS shows it, a side-by-side of
 Fit, Original size and a scale factor on a real display against Compatibility
 (including the composition cost of a large factor), and a genuinely stuck volume (a
 sleeping external disk, an unreachable share, an evicted cloud file) with the restart,
-the hand-off and the reason they produce in **In use now**: the limits and rules are
+the failure and the reason they produce in the wallpaper's state: the limits and rules are
 covered, and the frame-less clip by the opt-in `hev1` test, but no test blocks a real
 `AVAsset` load or starts a clip from a volume that is slow to answer. Also not covered:
 whether a real long suspension, sleep, lock or covered desktop (hours, display sleep, Low
 Power Mode) ever costs a clip its decoder on this Mac, and whether a kick or a rebuild
 brings one back. The check and the ladder are covered, and so is the dead pipeline they
 must recognise (`hev1`, which a kick and a rebuild cannot repair, so it always ends in the
-hand-off), but nothing here reclaims a decoder and no test shows a repair that works on
+failure), but nothing here reclaims a decoder and no test shows a repair that works on
 a stuck pipeline. Those premises are answered by the `nativeVideoPlaybackStalled`,
 `nativeVideoPlaybackKick` and `nativeVideoPlaybackRebuild` counters on a real machine, and
 by the sleep, lock and unlock rows in [manual-smoke](manual-smoke.md#native-video-backend-experimental-opt-in).

@@ -127,11 +127,12 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
 
     func testVideoDecoderFailurePreservesErrorAndAllowsRetry() async throws {
         for applyChanges in [false, true] {
-            // Under Compatibility the scene engine decodes the file, so the format check does not
-            // apply and a corrupt file reaches it: its own failure is what the apply reports.
-            let folder = try writeVideoProject(entry: "broken.mov")
-            _ = try SyntheticVideoFixture.writeCorrupt(name: "broken", into: folder)
-            let (store, bridge) = try await videoStore(backend: "compatibility")
+            // A file the format check accepts (the app's own reader plays this Matroska clip) can
+            // still fail in the renderer's apply: that failure is what the apply reports, and the
+            // display keeps what it had.
+            let folder = try writeVideoProject(entry: "compatibility.mkv")
+            _ = try SyntheticVideoFixture.writeMatroska(name: "compatibility", into: folder)
+            let (store, bridge) = try await videoStore(backend: "native_preferred")
             let decoderError = NSError(domain: "VideoDecoder", code: 23)
             bridge.applyError = decoderError
 
@@ -200,31 +201,6 @@ final class WallpaperActivationRecoveryTests: XCTestCase {
             // A playable copy of the same wallpaper goes through.
             _ = try writeVideoProject(entry: "compatibility.mkv")
             _ = try SyntheticVideoFixture.writeMatroska(name: "compatibility", into: folder)
-            if applyChanges {
-                try await store.applyWallpaperOptionsAsync(wallpaperId: "failing")
-            } else {
-                try await store.activateWallpaperAsync(id: "failing", displayId: "primary")
-            }
-            XCTAssertEqual(store.monitorInformationSnapshot.rows.first?.wallpaperId, "failing")
-        }
-    }
-
-    /// A user who chose Compatibility has the scene engine decode every video, so a format
-    /// macOS cannot open is not refused for them.
-    func testAFormatMacOSCannotPlayStillAppliesUnderCompatibility() async throws {
-        var avi = Data("RIFF".utf8)
-        avi.append(contentsOf: [0x24, 0, 0, 0])
-        avi.append(Data("AVI LIST".utf8))
-        avi.append(Data(repeating: 0, count: 64))
-        for applyChanges in [false, true] {
-            let folder = try writeVideoProject(entry: "clip.avi")
-            try avi.write(to: folder.appendingPathComponent("clip.avi"))
-            let (store, bridge) = try await videoStore(backend: "compatibility")
-            bridge.applyError = nil
-            store.videoFormatCheck = { _ in
-                XCTFail("the format check is for the native player only")
-                return .unsupported(.init(container: "AVI", codec: nil), .notPlayable)
-            }
             if applyChanges {
                 try await store.applyWallpaperOptionsAsync(wallpaperId: "failing")
             } else {

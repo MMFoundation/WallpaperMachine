@@ -402,7 +402,6 @@ async fn new_scenes_and_every_host_descriptor_follow_the_throttle() {
     let _release = EngineRelease::of(&engine);
     engine.set_snapshot(vec![display(7, None), display(8, None), display(9, None)]);
     let bridge = bridge_with(&engine, &temp);
-    bridge.set_video_backend("native_preferred".into()).await.unwrap();
     bridge.set_render_scale(0.9).await.unwrap();
     bridge.set_quality_throttle(heat()).await.unwrap();
 
@@ -468,13 +467,12 @@ async fn new_scenes_and_every_host_descriptor_follow_the_throttle() {
 /// only backend that can play it, and leaves a clip the native player took where
 /// it is.
 #[tokio::test]
-async fn a_frame_rate_ceiling_neither_refuses_nor_hands_back_a_clip() {
+async fn a_frame_rate_ceiling_never_moves_a_clip_off_the_native_player() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
     let _release = EngineRelease::of(&engine);
     engine.set_snapshot(vec![display(7, Some(1)), display(9, None)]);
     let bridge = bridge_with(&engine, &temp);
-    bridge.set_video_backend("native_preferred".into()).await.unwrap();
     commit(&bridge, "100", SCENE, "7").await;
     commit(&bridge, "400", CLIP, "9").await;
     let plays_in_scene_engine = || {
@@ -496,19 +494,11 @@ async fn a_frame_rate_ceiling_neither_refuses_nor_hands_back_a_clip() {
     assert_eq!(offered[0].admission_key, key);
     assert!(!plays_in_scene_engine());
 
-    // Refused for a reason about the file, and no ceiling gives it back.
-    bridge
-        .reject_native_video("400".into(), key, "the player cannot decode it".into())
-        .await
-        .unwrap();
-    assert!(plays_in_scene_engine());
+    // Lifting every ceiling changes nothing either: the clip is the native player's throughout.
     bridge.set_quality_throttle(Vec::new()).await.unwrap();
     bridge.set_battery_mode(BridgeBatteryMode::KeepRunning).await.unwrap();
     bridge.set_power_source_for_test(PowerSource::External).await;
     bridge.set_frame_rate_cap(None).await.unwrap();
-    assert!(bridge.native_video_wallpapers().await.unwrap().is_empty());
-    assert!(
-        plays_in_scene_engine(),
-        "the refusal was about the file, which no frame-rate change touched"
-    );
+    assert_eq!(bridge.native_video_wallpapers().await.unwrap().len(), 1);
+    assert!(!plays_in_scene_engine());
 }

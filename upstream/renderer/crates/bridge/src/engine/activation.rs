@@ -47,12 +47,11 @@ pub struct ActivationInputs<'a> {
     /// [`ActivationInputs::build_web`] instead of the scene engine; ids
     /// without a model are treated as engine-rendered.
     pub project_models: &'a BTreeMap<String, ProjectModel>,
-    /// Whether plain local video wallpapers may be routed to the native
-    /// player. Off by default; see [`ActivationInputs::build_native_video`].
-    pub native_video_enabled: bool,
-    /// Refusals the native player recorded, per wallpaper and then per
-    /// admission key. See [`NativeVideoRejections`].
-    pub native_video_rejected: &'a NativeVideoRejections,
+    /// Whether a plain video is also described as a scene. Never on the desktop: every plain local
+    /// video is played by the host's own player ([`ActivationInputs::build_native_video`]) and the
+    /// scene engine is not given it. Only the lock-screen export turns it on, because the extension
+    /// plays the clip itself and keeps the scene as the picture it draws when its player cannot.
+    pub videos_as_scenes: bool,
     /// Global frame-rate ceiling in force. `None` means no limit. Call sites
     /// pass `active_target_fps_cap()`, so it already includes the profile's
     /// cap while Reduced quality is selected and the Mac is on battery, and
@@ -68,55 +67,21 @@ pub struct ActivationInputs<'a> {
     pub held: &'a BTreeSet<String>,
 }
 
-/// Refusals recorded per wallpaper id, then per admission key.
-///
-/// A wallpaper has one admission key *per display slot*, so the same clip on
-/// two displays at different target rates is two independent decisions. One
-/// record per wallpaper id cannot hold both: the second display's refusal
-/// overwrote the first's, the first display's live key then no longer matched
-/// the stored one so the record looked stale and was pruned, and the wallpaper
-/// was offered natively again to a host that had already refused that exact
-/// key. The host opened nothing and [`ActivationInputs::build`] had already
-/// excluded the display as natively routed, so that display was left with no
-/// backend at all. A refusal may only ever suppress the key it was decided
-/// against.
-pub type NativeVideoRejections = BTreeMap<String, BTreeMap<u64, NativeVideoRejection>>;
-
-/// A refusal the host recorded for one native-video configuration.
-///
-/// Scoped by [`NativeVideoWallpaperDesc::admission_key`] rather than by
-/// wallpaper id alone. A refusal is a statement about the configuration the
-/// host evaluated — "60 fps clip, target 30" — not about the wallpaper
-/// forever: raising the target rate, restoring an unsupported setting or
-/// replacing the media file produces a different key, and that slot is offered
-/// to the native backend again. Within one configuration the refusal still
-/// holds for the rest of the session, so the two backends cannot hand a
-/// wallpaper back and forth.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NativeVideoRejection {
-    /// The host's own wording. Logged when the refusal is recorded and again
-    /// when it expires, never parsed.
-    pub reason: String,
-}
-
 /// A plain local video assigned to one display, played by the host process
-/// with the platform video player instead of by the scene engine.
+/// with its own video player instead of by the scene engine.
 ///
-/// Only the declared subset reaches this: a project whose type is Video, with
-/// a resolvable local media file, and with no option this backend cannot
-/// honour. Everything else stays on the scene engine.
+/// Every project whose type is Video with a resolvable local media file reaches this. There is no
+/// other player for it: a file the host cannot play is reported as a failure of that display, not
+/// handed to the scene engine.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeVideoWallpaperDesc {
     pub display: DisplayDesc,
     pub wallpaper_id: String,
     pub media_path: PathBuf,
-    /// Identifies the exact inputs the host's admission decision rests on: the
-    /// media file, its length and its modification time. Identical for every
-    /// member of a mirror group, so one verdict covers the group and a refusal
-    /// recorded against it suppresses the group rather than one display. The
-    /// host must echo it back when it refuses, so a refusal that arrives after
-    /// the configuration changed can be discarded instead of killing a
-    /// configuration it never judged. See [`native_video_admission_key`].
+    /// Identifies the media the host plays: the file, its length and its modification time.
+    /// Identical for every member of a mirror group, so one verdict covers the group. The host keeps
+    /// its verdict on a file (and a surface it opened for it) under this key, so a replaced file is
+    /// judged afresh and an unchanged one is not read again. See [`native_video_admission_key`].
     ///
     /// The frame-rate cap is deliberately not part of it: the player plays a
     /// clip at the clip's own rate, so no cap decides whether it may take one.
@@ -133,18 +98,17 @@ pub struct NativeVideoWallpaperDesc {
     pub scaling_factor: f64,
 }
 
-/// Which renderer is actually playing the video on one display.
+/// What plays the video on one display, and whether it can.
 ///
-/// `native` is what is running, not what was preferred. `fallback_reason` is
-/// recorded only when the user asked for the native player and this display
-/// did not get it, so `None` never means "no reason known" on a display the
-/// user never pointed at the native player.
+/// Every plain video is played by the host's own player, so there is no backend to choose: this
+/// says which display shows which wallpaper, and carries the one problem the bridge itself can see
+/// (the project's media file is missing or is not a regular file). A file the player cannot play is
+/// the host's to report.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VideoBackendRouting {
     pub display: DisplayDesc,
     pub wallpaper_id: String,
-    pub native: bool,
-    pub fallback_reason: Option<String>,
+    pub problem: Option<String>,
 }
 
 /// What the renderers behind the current configuration actually are.
@@ -161,13 +125,11 @@ pub struct RenderBackendSurvey {
     pub render_scale_supported: bool,
 }
 
-/// Why a video is on the scene engine when the native player was asked for and
-/// the host never got as far as judging it.
+/// Why a video shows nothing when the host never got as far as judging it.
 ///
 /// Deliberately narrow: this is the one case the bridge itself can see, and
 /// anything the host refused carries the host's own wording instead.
-const NATIVE_VIDEO_MEDIA_UNRESOLVED: &str =
-    "the project's video file could not be opened by the native player";
+const NATIVE_VIDEO_MEDIA_UNRESOLVED: &str = "the project's video file could not be found";
 
 /// A web wallpaper assigned to one display, rendered by the host process in a
 /// web view rather than by the scene engine.
@@ -202,8 +164,7 @@ struct MirrorSlot {
     settings: MonitorSettingsCfg,
 }
 
-/// One mirror group's native-video candidacy: the media file the host would
-/// open and the key that identifies exactly that judgement.
+/// One mirror group's native-video media: the file the host opens and the key that identifies it.
 struct NativeVideoAdmission {
     media_path: PathBuf,
     admission_key: u64,
@@ -213,12 +174,10 @@ struct NativeVideoAdmission {
 const FNV1A_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-/// Identifies one native-video admission decision: the media the host would
-/// open and the bytes behind that path. Those are exactly the inputs the host's
-/// accept-or-refuse answer depends on. A frame-rate target is not one of them:
-/// the player plays a clip at its own rate, so the same file is the same
-/// decision at every target, and lowering a cap neither reopens nor refuses a
-/// running clip.
+/// Identifies one native-video file: the path the host opens and the bytes behind that path. Those
+/// are exactly the inputs the host's verdict on the file depends on. A frame-rate target is not one
+/// of them: the player plays a clip at its own rate, so the same file is the same decision at every
+/// target, and lowering a cap neither reopens nor refuses a running clip.
 ///
 /// FNV-1a is written out here rather than reached for through [`std::hash`]:
 /// `DefaultHasher`'s output is explicitly not guaranteed stable across Rust
@@ -286,10 +245,13 @@ impl ActivationInputs<'_> {
         let (direct, mirrors) = self.slots();
         let mut scenes: Vec<(SceneDesc, String)> = Vec::new();
         for slot in direct {
-            // A wallpaper routed to a host-rendered backend must not also get a
+            // A wallpaper played by a host-rendered backend must not also get a
             // scene: two renderers for one display would decode and present the
-            // same content twice.
-            if self.is_web(slot.wallpaper_id) || self.native_video_admission(&slot).is_some() {
+            // same content twice. A plain video has no other player, so it never
+            // gets one, whether or not its file can be found.
+            if self.is_web(slot.wallpaper_id)
+                || (self.is_native_video(slot.wallpaper_id) && !self.videos_as_scenes)
+            {
                 continue;
             }
             let owner = slot.wallpaper_id.to_string();
@@ -434,36 +396,14 @@ impl ActivationInputs<'_> {
         self.web_model(wallpaper_id).is_some()
     }
 
-    /// Whether this slot is routed to the native player right now.
-    ///
-    /// Requires the opt-in, a Video project, a resolvable media file, and no
-    /// refusal recorded against this slot's *current* admission key. Any of
-    /// those failing leaves it on the scene engine, which is the backend that
-    /// supports everything.
-    ///
-    /// A mirror group shares its source's key and moves together, because a
-    /// mirror has no scene of its own to fall back to. Two displays showing the
-    /// same file share a key too, so the host's verdict for that file covers
-    /// both.
-    fn native_video_admission(&self, slot: &DirectSlot<'_>) -> Option<NativeVideoAdmission> {
-        let candidate = self.native_video_candidate(slot.wallpaper_id)?;
-        // Only a refusal recorded against this slot's own live key applies. Any
-        // other record describes a configuration that is not this one.
-        self.native_video_rejected
-            .get(slot.wallpaper_id)
-            .is_none_or(|by_key| !by_key.contains_key(&candidate.admission_key))
-            .then_some(candidate)
+    /// Whether the wallpaper is a plain video, which only the host's own player plays.
+    fn is_native_video(&self, wallpaper_id: &str) -> bool {
+        self.project_models
+            .get(wallpaper_id)
+            .is_some_and(|model| model.project_type == WallpaperProjectType::Video)
     }
 
-    /// The candidate ignoring any recorded refusal.
-    ///
-    /// Refusals are matched by key, so the key of a refused configuration has
-    /// to stay computable while that refusal is in force — otherwise a repeat
-    /// refusal would look stale and a settled fallback would start flapping.
     fn native_video_candidate(&self, wallpaper_id: &str) -> Option<NativeVideoAdmission> {
-        if !self.native_video_enabled {
-            return None;
-        }
         let model = self.project_models.get(wallpaper_id)?;
         if model.project_type != WallpaperProjectType::Video {
             return None;
@@ -477,8 +417,8 @@ impl ActivationInputs<'_> {
             .steam_workshop_root()
             .join(wallpaper_id)
             .join(file);
-        // The player opens a path, so a project whose media is missing has to
-        // stay on the engine rather than produce a window that can never play.
+        // The player opens a path, so a project whose media is missing gets no
+        // window that could never play.
         let metadata = fs::metadata(&media_path).ok()?;
         if !metadata.is_file() {
             return None;
@@ -489,32 +429,6 @@ impl ActivationInputs<'_> {
         })
     }
 
-    /// Every admission key the live configuration currently produces, per
-    /// wallpaper id, ignoring recorded refusals.
-    ///
-    /// The caller uses this to separate a refusal that describes the live
-    /// configuration from one that arrived after the user changed it, and to
-    /// drop records whose configuration is gone.
-    pub fn native_video_admission_keys(&self) -> BTreeMap<String, BTreeSet<u64>> {
-        let (direct, _) = self.slots();
-        let mut keys: BTreeMap<String, BTreeSet<u64>> = BTreeMap::new();
-        for slot in direct {
-            let Some(candidate) = self.native_video_candidate(slot.wallpaper_id) else {
-                continue;
-            };
-            keys.entry(slot.wallpaper_id.to_string())
-                .or_default()
-                .insert(candidate.admission_key);
-        }
-        keys
-    }
-
-    /// What is actually rendering right now: which backend plays each video,
-    /// and whether anything on screen can honour an internal render scale.
-    ///
-    /// Reported from the same routing decision [`Self::build`] and
-    /// [`Self::build_native_video`] make, so a display cannot be described as
-    /// native here while the scene engine is the one holding it.
     #[must_use]
     pub fn render_backends(&self) -> RenderBackendSurvey {
         let (direct, mirrors) = self.slots();
@@ -537,26 +451,14 @@ impl ActivationInputs<'_> {
                 WallpaperProjectType::Video => {}
                 WallpaperProjectType::Unknown => continue,
             }
-            let candidate = self.native_video_candidate(slot.wallpaper_id);
-            let refusal = candidate.as_ref().and_then(|candidate| {
-                self.native_video_rejected
-                    .get(slot.wallpaper_id)?
-                    .get(&candidate.admission_key)
-            });
-            let native = candidate.is_some() && refusal.is_none();
-            // A reason is a statement about a choice the user made. With the
-            // scene engine selected there is no fallback to explain.
-            let fallback_reason = (self.native_video_enabled && !native).then(|| {
-                refusal.map_or_else(
-                    || NATIVE_VIDEO_MEDIA_UNRESOLVED.to_string(),
-                    |record| record.reason.clone(),
-                )
-            });
+            let problem = self
+                .native_video_candidate(slot.wallpaper_id)
+                .is_none()
+                .then(|| NATIVE_VIDEO_MEDIA_UNRESOLVED.to_string());
             videos.push(VideoBackendRouting {
                 display: slot.display,
                 wallpaper_id: slot.wallpaper_id.to_string(),
-                native,
-                fallback_reason,
+                problem,
             });
         }
 
@@ -660,7 +562,7 @@ impl ActivationInputs<'_> {
         let (direct, mirrors) = self.slots();
         let mut videos = Vec::new();
         for slot in direct {
-            let Some(admission) = self.native_video_admission(&slot) else {
+            let Some(admission) = self.native_video_candidate(slot.wallpaper_id) else {
                 continue;
             };
             let render = RenderOverrideResolver {

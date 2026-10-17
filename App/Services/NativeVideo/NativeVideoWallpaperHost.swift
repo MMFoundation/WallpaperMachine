@@ -2,20 +2,19 @@ import AVFoundation
 import AppKit
 
 /// Keeps one native video window per display in step with the bridge's
-/// committed native video wallpapers.
+/// committed plain-video wallpapers.
 ///
-/// This is the experimental backend's whole host side. The bridge decides
-/// which wallpapers are eligible and stops giving them to the scene engine;
-/// this host either plays them or hands them back. It never runs alongside the
-/// scene engine for the same wallpaper, and it never silently substitutes a
-/// setting it cannot honour.
+/// This is the whole host side of plain video. The bridge offers every plain video with a file to
+/// play and gives the scene engine none of them, so this host is the only player: it plays what it
+/// can and reports what it cannot as a failed state of that display (the display keeps the picture it
+/// had, and the panel shows the reason). Nothing takes a failed video over, and it never silently
+/// substitutes a setting it cannot honour.
 @MainActor
 final class NativeVideoWallpaperHost {
     private let fetch: @MainActor () async throws -> [BridgeNativeVideoWallpaper]
-    private let reject: @MainActor (String, UInt64, String) async throws -> Void
     private let screens: @MainActor () -> [(id: UInt32, frame: NSRect)]
-    /// Decides whether a wallpaper can be honoured. Injected so the routing and
-    /// fallback rules can be tested without an asset or a window server.
+    /// Decides whether a wallpaper can be played. Injected so the failure rules can be tested
+    /// without an asset or a window server.
     private let refusal: @MainActor (URL) async -> NativeVideoRefusal?
     /// Builds one display's surface. Injected so the routing and suspension
     /// rules can be exercised without opening a desktop window.
@@ -44,26 +43,26 @@ final class NativeVideoWallpaperHost {
     /// occluded screen cannot stop a video on a visible screen.
     private var suspendedDisplays: Set<UInt32> = []
     private var suspended = false
-    /// Admission keys with a refusal report in flight right now.
-    ///
-    /// Deliberately NOT a permanent record. The bridge is the authority on
-    /// which wallpapers are refused, and it keys them per (wallpaper, display
-    /// slot); a second permanent set here could only ever disagree with it.
-    /// It did: a key refused, then superseded, then returned to would be
-    /// pruned by the bridge and offered again, while this set went on skipping
-    /// it forever — leaving that display with the native backend selected, the
-    /// scene engine excluded, and nothing on screen. This set now only stops
-    /// the same refusal being reported twice while one report is outstanding.
-    private var reportingRefusal: Set<UInt64> = []
+    /// What this host knows has failed for a display's current offer, so the file is not opened
+    /// again for every snapshot. A failure that is a verdict on the file is kept in
+    /// `admissionCache` under its key; one that is not (a read that never finished, a pipeline that
+    /// stalled) is kept here until the bridge's startup revision moves on, which any new apply or
+    /// reconcile does, and the clip is then tried afresh. Cleared on shutdown.
+    private struct FailedOffer {
+        let key: UInt64
+        let revision: UInt64
+        let refusal: NativeVideoRefusal
+    }
+    private var failures: [UInt32: FailedOffer] = [:]
     /// Decisions already taken this session, so a display reconfiguration does
     /// not re-read the same file. Bounded, and cleared on shutdown.
     private var admissionCache: [UInt64: NativeVideoRefusal?] = [:]
     private var admissionCacheOrder: [UInt64] = []
     static let admissionCacheLimit = 16
     /// How many times one offer's metadata is re-read after an unsettled
-    /// failure before the wallpaper is handed to the scene engine. Bounded so
-    /// a file that never loads cannot leave a display blank indefinitely, and
-    /// greater than one so a single transient error is not a demotion.
+    /// failure before the display is reported as failed. Bounded so a file that
+    /// never loads cannot hold the reconcile pass indefinitely, and greater
+    /// than one so a single transient error is not a failure.
     static let admissionAttemptLimit = 3
     static let admissionRetryDelay = Duration.milliseconds(150)
     /// Files whose metadata read has started and not yet returned, with the
@@ -109,7 +108,6 @@ final class NativeVideoWallpaperHost {
 
     init(
         fetch: @escaping @MainActor () async throws -> [BridgeNativeVideoWallpaper],
-        reject: @escaping @MainActor (String, UInt64, String) async throws -> Void,
         screens: (@MainActor () -> [(id: UInt32, frame: NSRect)])? = nil,
         refusal: (@MainActor (URL) async -> NativeVideoRefusal?)? = nil,
         makeSurface: (
@@ -123,7 +121,6 @@ final class NativeVideoWallpaperHost {
         switchHold: WallpaperSwitchHold? = nil
     ) {
         self.fetch = fetch
-        self.reject = reject
         self.screens = screens ?? { WebWallpaperHost.systemScreens() }
         self.refusal = refusal ?? { url in
             await VideoFormatSupport.refusal(url: url)
@@ -159,10 +156,6 @@ final class NativeVideoWallpaperHost {
     convenience init(bridge: WallpaperBridge, switchHold: WallpaperSwitchHold? = nil) {
         self.init(
             fetch: { try await bridge.nativeVideoWallpapers() },
-            reject: { id, admissionKey, reason in
-                try await bridge.rejectNativeVideo(
-                    wallpaperId: id, admissionKey: admissionKey, reason: reason)
-            },
             switchHold: switchHold)
     }
 
@@ -383,11 +376,19 @@ final class NativeVideoWallpaperHost {
                 continue
             }
             guard currentFrame(of: displayID) != nil else { continue }
-            // A file already found to be in a format nothing can play is not opened again for
-            // every snapshot: the failure stays what the display and the panel show, and is
-            // restated under this offer's startup revision so the bridge's wait for it ends.
-            if let refusal = knownUnsupportedFormat(of: wallpaper) {
-                recordState(wallpaper, phase: .failed, message: refusal.reason)
+            // A file already found to fail is not opened again for every snapshot: the failure
+            // stays what the display and the panel show, and is restated under this offer's
+            // startup revision so the bridge's wait for it ends.
+            if let refusal = knownFailure(of: wallpaper) {
+                if let state = states[displayID], state.phase == .failed,
+                    state.nativeAdmissionKey == wallpaper.admissionKey
+                {
+                    recordState(wallpaper, phase: .failed, message: refusal.reason)
+                } else {
+                    // Decided while the old surface was being replaced: the first time this offer
+                    // is answered, so it is reported, not only restated.
+                    fail(wallpaper: wallpaper, refusal: refusal, load: logLoads[displayID])
+                }
                 continue
             }
             await open(wallpaper: wallpaper, displayID: displayID, generation: generation)
@@ -422,13 +423,19 @@ final class NativeVideoWallpaperHost {
         }
     }
 
-    /// The settled verdict this host holds for the offer's file when it is a format nothing can
-    /// play, so the file is neither read nor opened again until its key changes.
-    private func knownUnsupportedFormat(of wallpaper: BridgeNativeVideoWallpaper) -> NativeVideoRefusal? {
-        guard let entry = admissionCache[wallpaper.admissionKey], let refusal = entry,
-            case .unsupportedFormat = refusal
-        else { return nil }
-        return refusal
+    /// The failure this host holds for the offer, so its file is neither read nor opened again: a
+    /// settled verdict on the file under its key, or an unsettled failure of this offer's own
+    /// revision (a newer revision, from any apply or reconcile, tries the clip again).
+    private func knownFailure(of wallpaper: BridgeNativeVideoWallpaper) -> NativeVideoRefusal? {
+        if let entry = admissionCache[wallpaper.admissionKey], let refusal = entry, refusal.isSettled {
+            return refusal
+        }
+        if let failed = failures[wallpaper.displayId], failed.key == wallpaper.admissionKey,
+            wallpaper.startupRevision <= failed.revision
+        {
+            return failed.refusal
+        }
+        return nil
     }
 
     private func currentFrame(of displayID: UInt32) -> NSRect? {
@@ -496,22 +503,7 @@ final class NativeVideoWallpaperHost {
         // rectangle on the desktop.
         if let refusal = await admission(for: url, wallpaper: wallpaper, load: load) {
             guard !stopped, !Task.isCancelled else { return }
-            recordState(wallpaper, phase: .failed, message: refusal.reason)
-            if case .unsupportedFormat = refusal {
-                // No player can play this file, so the scene engine is not asked either: the
-                // display keeps the picture it had and the panel shows the message. Nothing
-                // retries it on its own; the verdict is cached under the admission key, so the
-                // file is read again only when it changes.
-                counters.record(
-                    .nativeVideoRefused,
-                    for: RuntimeSurfaceKey(kind: .desktopNativeVideo, displayID: 0))
-                AppLog.warn(
-                    "native video wallpaper \(wallpaper.wallpaperId): \(refusal.reason); "
-                        + "not played, the previous picture stays", load: load)
-                switchHold?.engineSettled(displays: [wallpaper.displayId])
-                return
-            }
-            await handOff(wallpaper: wallpaper, refusal: refusal, load: load)
+            fail(wallpaper: wallpaper, refusal: refusal, load: load)
             return
         }
         guard !stopped else { return }
@@ -572,7 +564,7 @@ final class NativeVideoWallpaperHost {
             self.record(health: event, displayID: displayID, surface: surface)
         }
         // Installing the callback can deliver a failure the player was already
-        // holding, and that runs the hand-off synchronously — closing this
+        // holding, and that runs the failure synchronously — closing this
         // surface and removing it from the registry before the next line.
         // Presenting anyway would order a stopped window onto the desktop that
         // nothing owns and nothing can close.
@@ -647,11 +639,10 @@ final class NativeVideoWallpaperHost {
     /// judged: the watch waits for it, and starts again with a full deadline
     /// when it returns. A clip that has not shown by then gets one rebuild of
     /// its pipeline and a second deadline of the same length; if that does not
-    /// help, or the player has no rebuild left to spend, the scene engine takes
-    /// the wallpaper. The hand-off is not recorded as a verdict on the file: a
-    /// slow volume or a one-off stall is not proof that the clip cannot play.
-    /// That is this host's memory only; the bridge still holds the hand-off for
-    /// the admission key (see `handOff`).
+    /// help, or the player has no rebuild left to spend, the display is reported
+    /// as failed. The failure is not recorded as a verdict on the file: a slow
+    /// volume or a one-off stall is not proof that the clip cannot play, so the
+    /// next apply or reconcile tries it again (see `failures`).
     private func firstFrameDeadlinePassed(
         displayID: UInt32, surface: NativeVideoSurface, url: URL,
         location: NativeVideoStoragePolicy.Location, limit: Duration, restarted: Bool
@@ -694,8 +685,8 @@ final class NativeVideoWallpaperHost {
     /// Logs and counts what a health check found at one look.
     ///
     /// The surface repairs its own pipeline (a kick, one rebuild, then a
-    /// preparation failure that `handlePreparationFailure` turns into the
-    /// hand-off), so this only reports. A stall is counted once per check, at
+    /// preparation failure that `handlePreparationFailure` turns into a failed
+    /// display), so this only reports. A stall is counted once per check, at
     /// the first look: the looks that follow a repair are the same stall seen
     /// again, and the kick and rebuild counters say how far it went.
     private func record(
@@ -761,19 +752,14 @@ final class NativeVideoWallpaperHost {
 
     /// The player could not play an asset admission had accepted.
     ///
-    /// This is a different failure from a metadata refusal and is handled in
-    /// the same place, because the outcome has to be the same: the scene
-    /// engine takes the wallpaper. Leaving it here would mean a display
-    /// showing black with the other backend excluded.
-    ///
-    /// `settled` says whether the failure is a verdict on the file. A decoder
-    /// that could not open the track is, and is remembered so the next offer of
-    /// the same key goes straight back to the scene engine. A clip that merely
-    /// never showed a frame in time, or whose pipeline stalled and was not
-    /// revived by the repairs (the system can take the decoder back while the
-    /// Mac sleeps), is not: this host does not remember it, so if the bridge
-    /// offers the key again the clip is opened afresh. The bridge holds the
-    /// hand-off for the session either way (see `handOff`).
+    /// A different failure from a metadata refusal, handled the same way: the surface is closed, the
+    /// display is reported as failed with the reason, and nothing takes the clip over, because
+    /// nothing else can play it. `settled` says whether the failure is a verdict on the file. A
+    /// decoder that could not open the track is, and is remembered under the file's key, so the
+    /// same file is not opened again until it changes. A clip that merely never showed a frame in
+    /// time, or whose pipeline stalled and was not revived by the repairs (the system can take the
+    /// decoder back while the Mac sleeps), is not: it is remembered for this offer's revision only,
+    /// and the next apply or reconcile opens it afresh.
     private func handlePreparationFailure(
         displayID: UInt32, surface: NativeVideoSurface, detail: String, settled: Bool = true
     ) {
@@ -781,23 +767,16 @@ final class NativeVideoWallpaperHost {
         // Staleness is identity, not a counter. `surfaceGeneration` is
         // host-wide and moves whenever ANY display opens a surface, so
         // comparing against it discards a live display's real failure as soon
-        // as a second display has opened since — which left the first display
-        // native-selected with the scene engine excluded, showing black.
+        // as a second display has opened since.
         guard surfaces[displayID] === surface else { return }
         let refusal = NativeVideoRefusal.playbackFailed(detail)
         let load = logLoads[displayID]
-        // Stop before handing over, so the clip is never being decoded by both
-        // backends at once.
         close(displayID: displayID, surface: surface)
-        // The window the held picture sat on is closed, and the scene engine that takes the
-        // wallpaper is not the successor the hold was made for.
+        // The window the held picture sat on is closed, and nothing takes its place.
         switchHold?.cancel(displays: [displayID])
-        recordState(wallpaper, phase: .failed, message: refusal.reason)
         if settled { admissionCache[wallpaper.admissionKey] = refusal }
-        Task { @MainActor [weak self] in
-            await self?.handOff(wallpaper: wallpaper, refusal: refusal, load: load)
-            self?.notifySurfacesChanged()
-        }
+        fail(wallpaper: wallpaper, refusal: refusal, load: load)
+        notifySurfacesChanged()
     }
 
     /// The admission decision for one offer, taken at most once per admission
@@ -807,11 +786,11 @@ final class NativeVideoWallpaperHost {
     /// into repeated file reads.
     ///
     /// An unsettled failure — metadata that could not be read, as opposed to
-    /// content this backend cannot honour — is retried a bounded number of
-    /// times before it is allowed to become a handoff, and is never cached as
-    /// a verdict. Without that split, one I/O blip would demote a wallpaper
-    /// for the rest of the session; without the bound, a file that never loads
-    /// would leave the display showing nothing for as long as it is offered.
+    /// content this backend cannot play — is retried a bounded number of
+    /// times before it is reported, and is never cached as a verdict. Without
+    /// that split, one I/O blip would fail a wallpaper for the rest of the
+    /// session; without the bound, a file that never loads would hold the
+    /// reconcile pass for as long as it is offered.
     ///
     /// Every read is also bounded in time, by where the file lives. Admission
     /// runs inside the one reconcile pass, so a read that never returns — a
@@ -820,12 +799,9 @@ final class NativeVideoWallpaperHost {
     /// behind it. A read that outlives its limit ends the attempt at once: the
     /// budget is already spent, so it is neither retried nor cached.
     ///
-    /// Not caching it is all this host can do about it. The wallpaper is still
-    /// handed to the scene engine, and the bridge holds that hand-off for its
-    /// admission key (see `handOff`), so a disk that was asleep once keeps the
-    /// clip on the scene engine until the key changes or Video playback is
-    /// switched to Compatibility and back. What the host guarantees is that
-    /// the file is read afresh whenever the bridge does offer the key again.
+    /// Not caching it is all this host can do about it. The display is reported
+    /// as failed for this offer's revision (see `failures`) and the file is read
+    /// afresh when the bridge offers it again under a newer one.
     private func admission(
         for url: URL, wallpaper: BridgeNativeVideoWallpaper, load: UInt64?
     ) async -> NativeVideoRefusal? {
@@ -918,44 +894,27 @@ final class NativeVideoWallpaperHost {
     private static let probeAbandoned = NativeVideoRefusal.preparationFailed(
         "the metadata read was abandoned")
 
-    /// Gives a wallpaper back to the scene engine.
+    /// Reports a wallpaper this host cannot play.
     ///
-    /// Every hand-off is reported to the bridge the same way, whatever caused
-    /// it. The bridge records it as a refusal of this admission key and holds
-    /// it for the rest of the session, so that a wallpaper the player cannot
-    /// honour never passes back and forth between the two backends. It lets go
-    /// only when the key changes (the file it was
-    /// judged at) or when Video playback is switched to Compatibility and back;
-    /// nothing here retries on the host's own initiative. Whether the cause was
-    /// settled (`NativeVideoRefusal.isSettled`) decides only what this host
-    /// remembers: a settled verdict is kept, so the key is answered at once if
-    /// the bridge offers it again, and an unsettled one is not, so the clip is
-    /// tried afresh then.
-    private func handOff(
+    /// The display is reported as failed with the reason and keeps the picture it had: no window
+    /// covers it, and nothing else plays the clip. Counted and logged once per failure (an offer
+    /// that is already known to have failed is restated, not logged again). An unsettled failure is
+    /// remembered for this offer's revision; see `failures`.
+    private func fail(
         wallpaper: BridgeNativeVideoWallpaper, refusal: NativeVideoRefusal, load: UInt64?
-    ) async {
-        guard reportingRefusal.insert(wallpaper.admissionKey).inserted else { return }
-        defer { reportingRefusal.remove(wallpaper.admissionKey) }
+    ) {
+        recordState(wallpaper, phase: .failed, message: refusal.reason)
+        if !refusal.isSettled {
+            failures[wallpaper.displayId] = FailedOffer(
+                key: wallpaper.admissionKey, revision: wallpaper.startupRevision, refusal: refusal)
+        }
         counters.record(
             .nativeVideoRefused,
             for: RuntimeSurfaceKey(kind: .desktopNativeVideo, displayID: 0))
         AppLog.warn(
             "native video wallpaper \(wallpaper.wallpaperId): \(refusal.reason); "
-                + "falling back to the scene engine", load: load)
-        do {
-            // The key the decision was taken against travels with the refusal:
-            // a verdict that arrives after the configuration changed describes
-            // something that no longer exists and must not exclude the new one.
-            try await reject(wallpaper.wallpaperId, wallpaper.admissionKey, refusal.reason)
-        } catch {
-            AppLog.error(
-                "native video fallback for \(wallpaper.wallpaperId) failed: "
-                    + error.localizedDescription, load: load)
-            onError?(error.localizedDescription)
-        }
-        // The bridge answered, and with it the scene engine has presented the wallpaper or
-        // failed to. A refusal comes before any surface exists, so the picture a switch held
-        // is still waiting and the engine's scene has carried it; this lets it go.
+                + "not played, the previous picture stays", load: load)
+        // Nothing will cover the display, so a picture held for a successor is not waiting for one.
         switchHold?.engineSettled(displays: [wallpaper.displayId])
     }
 
@@ -1071,6 +1030,7 @@ final class NativeVideoWallpaperHost {
         firstFrameWatches.removeAll()
         admissionCache.removeAll()
         admissionCacheOrder.removeAll()
+        failures.removeAll()
         outstandingProbes.removeAll()
         offeredButUnseenDisplayIDsForTest.removeAll()
         warnedUnseen.removeAll()

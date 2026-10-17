@@ -34,7 +34,7 @@ use crate::{
             InjectSceneWallpaperConfigForTest, InjectWallpaperForTest, PollMousePosition,
             GetNativeVideoWallpapers, ReconcileFailed, RefreshDisplays, RefreshLibrary,
             PreviewDisplayPosition, PreviewWallpaperProperties, ReleaseHeldWallpaper,
-            RejectNativeVideo, RendererCounters,
+            RendererCounters,
             ReplaceLibraryForTest,
             ReplaceWallpaperConfigForTest, RestoreAllPropertyDefaults, RestorePropertyDefault,
             SelectWallpaper,
@@ -69,12 +69,11 @@ use crate::{
     },
     config::{
         AppConfig, ConfigStore, FramingCfg, SceneRendererModeCfg, SceneResolutionCfg,
-        SerializedSelector, VideoBackendModeCfg, WallpaperConfig,
+        SerializedSelector, WallpaperConfig,
     },
     display::{DisplaySelectorExt, DisplaySnapshotExt},
     engine::{
-        ActivationInputs, AudioCaptureDemand, EngineFacade, LoadJournal, NativeVideoRejection,
-        NativeVideoRejections, displays_awaiting_first_frame,
+        ActivationInputs, AudioCaptureDemand, EngineFacade, LoadJournal, displays_awaiting_first_frame,
     },
     library::scan,
     login::LaunchAtLoginController,
@@ -941,7 +940,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 .await
                 .map_err(|error| BridgeError::engine(error.to_string()))?;
         }
-        self.release_stale_native_video().await
+        Ok(())
     }
 
     async fn apply_power_policy(&mut self) -> Result<(), BridgeError> {
@@ -1211,105 +1210,15 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             paths: &self.paths,
             force_shader_refresh: false,
             project_models: &self.state.project_models,
-            native_video_enabled: self.state.app_config.video_backend == VideoBackendModeCfg::NativePreferred,
-            native_video_rejected: &self.state.native_video_rejected,
+            videos_as_scenes: false,
             frame_rate_cap: self.active_target_fps_cap(),
             audio_suppressed: self.state.audio_suppressed,
             held: &self.state.held_wallpapers,
         }
     }
 
-    /// Every admission key the live configuration currently produces, per
-    /// wallpaper id. Recorded refusals are ignored, so a repeat refusal for a
-    /// configuration that is already excluded still reads as current.
-    fn native_video_admission_keys(&self) -> BTreeMap<String, BTreeSet<u64>> {
-        let displays = self.engine.display_snapshot();
-        self.activation_inputs(&displays, self.playback_paused())
-            .native_video_admission_keys()
-    }
-
-    /// Drops refusals whose configuration is gone, reporting whether any went.
-    ///
-    /// [`ActivationInputs`] already ignores a record whose key matches no live
-    /// slot, so dropping it does not by itself change routing; what the return
-    /// value buys is knowing that routing just changed, because a slot that
-    /// was excluded is offered natively again and the scene engine has to let
-    /// go of it. Without this the map would also keep dead records for the
-    /// rest of the session.
-    ///
-    /// A wallpaper's records are checked against *all* of its live keys, one
-    /// per display slot: the same clip on two displays at different target
-    /// rates has two keys, and a record matching either of them is alive.
-    /// A wallpaper with no live key at all — unassigned, or with missing media
-    /// — is left alone, because nothing has been shown to have changed.
-    fn prune_stale_native_video_rejections(&mut self) -> bool {
-        if self.state.native_video_rejected.is_empty() {
-            return false;
-        }
-        let live_keys = self.native_video_admission_keys();
-        let mut pruned = false;
-        self.state.native_video_rejected.retain(|wallpaper_id, by_key| {
-            let Some(live) = live_keys.get(wallpaper_id) else {
-                return true;
-            };
-            by_key.retain(|admission_key, record| {
-                if live.contains(admission_key) {
-                    return true;
-                }
-                pruned = true;
-                log::info!(
-                    "native video wallpaper {wallpaper_id} refusal for admission key \
-                     {admission_key} no longer applies and is dropped (was: {})",
-                    record.reason
-                );
-                false
-            });
-            !by_key.is_empty()
-        });
-        pruned
-    }
-
-    /// Hands a clip back to the native player once the refusal that kept it on
-    /// the scene engine describes a configuration that is gone.
-    ///
-    /// A replaced media file changes a native video's admission key, which makes
-    /// the refusal recorded for the old file stale. The refusal is dropped and
-    /// the scene list is rebuilt, which is what lets the engine give up a clip
-    /// the native player is about to be offered; left alone, both would decode
-    /// and play it. The frame-rate ceiling is not part of the key: the player
-    /// plays a clip at its own rate, so a cap never makes a refusal stale.
-    ///
-    /// This does not compare the keys before and after one change, because a
-    /// change that fails halfway has already been made when it is asked for
-    /// again, and the second attempt would then find nothing different. What is
-    /// stale is read from the refusals themselves, and a rebuild that is owed
-    /// stays owed until one succeeds ([`BridgeActorState::native_video_release_owed`]),
-    /// so a repeated request, any other change of quality and the host's next
-    /// ask for the native list all finish what an earlier attempt did not.
-    async fn release_stale_native_video(&mut self) -> Result<(), BridgeError> {
-        if self.prune_stale_native_video_rejections() {
-            self.state.native_video_release_owed = true;
-        }
-        if !self.state.native_video_release_owed {
-            return Ok(());
-        }
-        // Nothing is drawn while presentation is unloaded, and loading it again
-        // rebuilds the scene list from the refusals as they stand now.
-        if !self.state.presentation_unloaded {
-            let app_config = self.state.app_config.clone();
-            let wallpaper_configs = self.state.wallpaper_configs.clone();
-            let scenes = self.reconcile_engine(app_config, wallpaper_configs).await?;
-            self.state.set_active_ids_from_scenes(&scenes);
-        }
-        self.state.native_video_release_owed = false;
-        Ok(())
-    }
-
-    /// Committed web wallpapers for connected displays, rendered by the host.
-    /// Committed plain-video wallpapers routed to the native player.
-    ///
-    /// Empty whenever the backend is off, so the host creates nothing and the
-    /// scene engine keeps every wallpaper.
+    /// Committed plain-video wallpapers, played by the host's own player. Empty only while
+    /// presentation is unloaded.
     fn native_video_wallpapers(&self) -> Result<Vec<BridgeNativeVideoWallpaper>, BridgeError> {
         if self.state.presentation_unloaded {
             return Ok(Vec::new());
@@ -1485,7 +1394,9 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         let no_suspended_displays = BTreeSet::new();
         let inputs = ActivationInputs {
             suspended_displays: &no_suspended_displays,
-            native_video_enabled: false,
+            // The extension plays a plain video itself and keeps the scene as the picture it draws
+            // when its own player cannot, so the export carries videos as scenes.
+            videos_as_scenes: true,
             frame_rate_cap: self.active_target_fps_cap(),
             ..self.activation_inputs(&displays, self.state.playback_state == BridgePlaybackState::Paused)
         };
@@ -1783,7 +1694,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         let project_models = self.state.configured_project_models(&app_config);
         let paused = self.playback_paused();
         let suspended_displays = self.state.suspended_displays.clone();
-        let native_video_rejected_snapshot = self.state.native_video_rejected.clone();
         let quality = self.quality_runtime();
         let paths = self.paths.clone();
         let presentation_unloaded = self.state.presentation_unloaded;
@@ -1800,7 +1710,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 suspended_displays,
                 paths,
                 false,
-                native_video_rejected_snapshot,
                 quality,
                 presentation_unloaded,
                 audio_suppressed,
@@ -1866,7 +1775,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             self.state.suspended_displays.clone(),
             self.paths.clone(),
             force_shader_refresh,
-            self.state.native_video_rejected.clone(),
             self.quality_runtime(),
             self.state.presentation_unloaded,
             self.state.audio_suppressed,
@@ -1890,7 +1798,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         let suspended_displays = self.state.suspended_displays.clone();
         let actor = ctx.actor_ref().clone();
         let engine = self.engine.clone();
-        let native_video_rejected_snapshot = self.state.native_video_rejected.clone();
         let quality = self.quality_runtime();
         let paths = self.paths.clone();
         let presentation_unloaded = self.state.presentation_unloaded;
@@ -1907,7 +1814,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 suspended_displays,
                 paths,
                 false,
-                native_video_rejected_snapshot,
                 quality,
                 presentation_unloaded,
                 audio_suppressed,
@@ -2281,7 +2187,6 @@ async fn reconcile_with<E: EngineFacade>(
     suspended_displays: BTreeSet<u32>,
     paths: BridgePaths,
     force_shader_refresh: bool,
-    native_video_rejected: NativeVideoRejections,
     quality: QualityRuntime,
     presentation_unloaded: bool,
     audio_suppressed: bool,
@@ -2301,8 +2206,7 @@ async fn reconcile_with<E: EngineFacade>(
             paths: &paths,
             force_shader_refresh,
             project_models: &project_models,
-            native_video_enabled: app_config.video_backend == VideoBackendModeCfg::NativePreferred,
-            native_video_rejected: &native_video_rejected,
+            videos_as_scenes: false,
             frame_rate_cap: quality.target_fps_cap,
             audio_suppressed,
             held: &load_guard.held,
@@ -2609,7 +2513,6 @@ impl<E: EngineFacade + Clone> Message<ClearShaderCache> for BridgeActor<E> {
             self.state.suspended_displays.clone(),
             self.paths.clone(),
             true,
-            self.state.native_video_rejected.clone(),
             self.quality_runtime(),
             self.state.presentation_unloaded,
             self.state.audio_suppressed,
@@ -3609,11 +3512,6 @@ impl<E: EngineFacade + Clone> Message<SetVideoBackend> for BridgeActor<E> {
         }
         let mut app_config = self.state.app_config.clone();
         app_config.video_backend = msg.mode;
-        // Changing the backend moves wallpapers between renderers, so the
-        // refusals recorded against the previous setting no longer describe
-        // anything: keeping them would permanently exclude a wallpaper that was
-        // only ever refused by a configuration the user has since changed.
-        let previous_rejections = std::mem::take(&mut self.state.native_video_rejected);
         let generation = self.reserve_reconcile();
         // A wallpaper that changes backend must stop being rendered by the old
         // one in the same transition, so the scene list is rebuilt before the
@@ -3628,7 +3526,6 @@ impl<E: EngineFacade + Clone> Message<SetVideoBackend> for BridgeActor<E> {
         let scenes = match result {
             Ok(scenes) => scenes,
             Err(error) => {
-                self.state.native_video_rejected = previous_rejections;
                 self.reconcile_failure(generation, BridgeError::engine(error.message().to_owned()), ctx.actor_ref().clone());
                 return Err(error);
             }
@@ -4242,71 +4139,7 @@ impl<E: EngineFacade + Clone> Message<GetNativeVideoWallpapers> for BridgeActor<
         _msg: GetNativeVideoWallpapers,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        // This is where the host asks what to play, so it is where a refusal
-        // that has outlived its configuration expires. The wallpaper goes back
-        // to the native player, so the scene engine has to let go of it in the
-        // same step or both would render it.
-        self.release_stale_native_video().await?;
         self.native_video_wallpapers()
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<RejectNativeVideo> for BridgeActor<E> {
-    type Reply = messages::RejectNativeVideoReply;
-
-    async fn handle(
-        &mut self,
-        msg: RejectNativeVideo,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        let live_keys = self.native_video_admission_keys();
-        let current = live_keys.get(&msg.wallpaper_id);
-        if !current.is_some_and(|keys| keys.contains(&msg.admission_key)) {
-            // The host judged a configuration that no longer exists: the user
-            // changed the target rate, an option or the media file while the
-            // refusal was in flight. Recording it would kill a configuration
-            // nothing has actually refused.
-            log::info!(
-                "native video wallpaper {} refused for admission key {} that is no longer \
-                 current ({}); the configuration changed while the refusal was in flight, so \
-                 the refusal is dropped",
-                msg.wallpaper_id,
-                msg.admission_key,
-                msg.reason
-            );
-            return Ok(());
-        }
-        // Recorded once per admission key and never retried, so a wallpaper the
-        // player cannot honour cannot bounce between the two backends. Keyed by
-        // admission key rather than by wallpaper id: another display's refusal
-        // of the same clip is a different decision and must not be overwritten.
-        let record = NativeVideoRejection {
-            reason: msg.reason.clone(),
-        };
-        if self
-            .state
-            .native_video_rejected
-            .entry(msg.wallpaper_id.clone())
-            .or_default()
-            .insert(msg.admission_key, record)
-            .is_some()
-        {
-            return Ok(());
-        }
-        log::info!(
-            "native video wallpaper {} refused for admission key {}: {}; falling back to the \
-             scene engine",
-            msg.wallpaper_id,
-            msg.admission_key,
-            msg.reason
-        );
-        // The scene engine has to take it back now, or the display shows
-        // nothing until something else triggers a reconcile.
-        let app_config = self.state.app_config.clone();
-        let wallpaper_configs = self.state.wallpaper_configs.clone();
-        let scenes = self.reconcile_engine(app_config, wallpaper_configs).await?;
-        self.state.set_active_ids_from_scenes(&scenes);
-        Ok(())
     }
 }
 
@@ -5125,8 +4958,7 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
                     paths: &self.paths,
                     force_shader_refresh: false,
                     project_models: &self.state.project_models,
-                    native_video_enabled: app_config.video_backend == VideoBackendModeCfg::NativePreferred,
-                    native_video_rejected: &self.state.native_video_rejected,
+                    videos_as_scenes: false,
                     frame_rate_cap: self.active_target_fps_cap(),
                     audio_suppressed: self.state.audio_suppressed,
                     held: &self.state.held_wallpapers,
@@ -5154,8 +4986,7 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
             let restore_hold = lifts_hold.then(|| wallpaper_id.clone());
             let forgive_when_opened = msg.user_initiated;
             let journal = self.load_journal.clone();
-            let native_video_rejected_snapshot = self.state.native_video_rejected.clone();
-            let quality = self.quality_runtime();
+                let quality = self.quality_runtime();
             let paths = self.paths.clone();
             let presentation_unloaded = self.state.presentation_unloaded;
             let audio_suppressed = self.state.audio_suppressed;
@@ -5171,8 +5002,7 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
                     suspended_displays,
                     paths,
                     false,
-                    native_video_rejected_snapshot,
-                    quality,
+                        quality,
                     presentation_unloaded,
                     audio_suppressed,
                     load_guard,

@@ -4,7 +4,7 @@ mod load_journal;
 pub(crate) mod revalidate;
 
 pub use activation::{
-    ActivationInputs, NativeVideoRejection, NativeVideoRejections, RenderBackendSurvey,
+    ActivationInputs, RenderBackendSurvey,
     VideoBackendRouting, WallpaperAssignmentExt,
 };
 #[cfg(test)]
