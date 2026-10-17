@@ -31,7 +31,7 @@
 #include "Fs/PhysicalFs.h"
 
 #include "Audio/SoundManager.h"
-#include "Audio/FfmpegSoundStream.hpp"
+#include "Audio/SoundStreamFactory.hpp"
 #include "Video/VideoMedia.hpp"
 #include "Video/VideoFramePacing.hpp"
 
@@ -2606,7 +2606,7 @@ bool MainHandler::loadNonSceneProject(const ProjectManifest&   manifest,
         if (media_path.is_relative()) {
             media_path = std::filesystem::path(m_source).parent_path() / media_path;
         }
-        if (auto stream = audio::CreateFfmpegSoundStream(media_path, &error, {}, true); stream != nullptr) {
+        if (auto stream = audio::CreateMediaSoundStream(media_path, &error, {}, true); stream != nullptr) {
             m_sound_manager->MountStream(std::move(stream));
         } else if (!error.empty()) {
             LOG_ERROR("failed to create pure-video wallpaper audio stream: %s", error.c_str());

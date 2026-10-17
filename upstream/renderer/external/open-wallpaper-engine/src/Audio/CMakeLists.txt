@@ -6,6 +6,7 @@ add_library(${LIB_NAME}
     AudioResponseService.cpp
     FfmpegSoundStream.cpp
     SoundManager.cpp
+    SoundStreamFactory.cpp
 )
 
 target_link_libraries(${LIB_NAME}

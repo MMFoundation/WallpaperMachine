@@ -1,5 +1,5 @@
 #include "Audio/SoundManager.h"
-#include "Audio/FfmpegSoundStream.hpp"
+#include "Audio/SoundStreamFactory.hpp"
 #include "miniaudio-wrapper.hpp"
 #include "Fs/IBinaryStream.h"
 #include "Core/Literals.hpp"
@@ -183,9 +183,9 @@ wallpaper::audio::CreateSoundStream(std::shared_ptr<wallpaper::fs::IBinaryStream
                                     const SoundStream::Desc&                      desc,
                                     SoundStream::Options options) {
     std::string error;
-    auto        sound_stream = CreateFfmpegSoundStream(std::move(stream), &error, options);
+    auto        sound_stream = CreateSceneSoundStream(std::move(stream), &error, options);
     if (sound_stream == nullptr) {
-        LOG_ERROR("failed to create FFmpeg sound stream: %s", error.c_str());
+        LOG_ERROR("failed to create sound stream: %s", error.c_str());
         return nullptr;
     }
     sound_stream->PassDesc(desc);
