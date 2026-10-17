@@ -322,3 +322,95 @@ void main() {{
         assert!(near(out[i], w), "data[{i}] = {}, wanted {w}", out[i]);
     }
 }
+
+#[test]
+fn converted_calls_and_assignments_have_the_expected_values_on_the_gpu() {
+    // data[0..12] are inputs; results go to data[16..].
+    let src = format!(
+        "{KERNEL_HEAD}
+struct Pair {{ vec2 xy; float k; }};
+vec2 cut(vec4 v, float s) {{ return v * s; }}           // a 4-vector into a vec2 parameter: .xy
+vec3 spread(vec3 c) {{ return c + 1.0; }}               // a scalar argument broadcasts
+int whole(int n) {{ return n * 2; }}                    // a float argument truncates
+float lum(vec3 c) {{ return dot(c, vec3(1.0)); }}        // a scalar function into a vector target
+vec3 widen(float s) {{ return s; }}                     // a scalar returned from a vec3 function
+float first(vec3 a, vec3 b) {{ return a * b; }}         // a vector returned from a float function
+bool nonzero(float f) {{ return f; }}                   // a number returned from a bool function
+void main() {{
+  float a = data[0];                    // 1.5
+  float b = data[1];                    // 2.0
+  vec4 v4 = vec4(data[2], data[3], data[4], data[5]);   // 1 2 3 4
+  vec3 base = vec3(data[6], data[7], data[8]);          // 10 20 30
+  data[16] = cut(v4, b).x + cut(v4, b).y * 100.0;       // 2 + 400
+  vec3 sp = spread(0.5);
+  data[17] = sp.x + sp.y + sp.z;                        // 4.5
+  data[18] = float(whole(a * 3.0));                     // whole(4) = 8
+  vec3 l = lum(base);                                   // 60 each
+  data[19] = l.x + l.y + l.z;                           // 180
+  vec3 w = widen(b);
+  data[20] = w.x + w.y + w.z;                           // 6
+  data[21] = first(base, base);                         // 100
+  data[22] = nonzero(a) ? 1.0 : 0.0;                    // 1
+  vec3 padded = base + vec2(1.0, 2.0);                  // the 2-vector is padded with 0
+  data[23] = padded.x + padded.y * 100.0 + padded.z * 10000.0;   // 11 + 2200 + 300000
+  vec3 acc = vec3(1.0);
+  acc *= 2;                                             // int literal into a float vector
+  acc += v4;                                            // a wider vector into a vec3
+  acc -= (a > 1.0);                                     // a bool into a vector
+  data[24] = acc.x + acc.y * 10.0 + acc.z * 100.0;      // (2+1-1) + (2+2-1)*10 + (2+3-1)*100 = 2 + 30 + 400
+  float f = 10.0;
+  f %= 4;                                               // 2
+  f += (b > 1.0);                                       // 3
+  f *= (b > 5.0);                                       // 0
+  data[25] = f;
+  int i = 7;
+  i = i / 2;                                            // integer division: 3
+  i += a;                                               // truncated: 3 + 1 = 4
+  data[26] = float(i);
+  Pair p; p.xy = vec2(5.0, 6.0); p.k = 3.0;
+  vec3 pp = p.xy.xyx * p.k;                             // member of a struct
+  data[27] = pp.x + pp.y + pp.z;                        // 15 + 18 + 15
+  vec2 m = max(v4 * vec2(2.0), vec2(3.0, 100.0));       // a 4-vector times a 2-vector: first two
+  data[28] = m.x + m.y;                                 // 3 + 100
+  float g = (a ? 4 : 5.5);                              // number condition, promoted branches
+  data[29] = g;                                         // 4
+  vec3 mixd = mix(base, 3, 0.5);                        // scalar broadcast in mix
+  data[30] = mixd.x + mixd.y + mixd.z;                  // (6.5 + 11.5 + 16.5)
+  mat3 m3 = mat3(2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0);
+  vec3 q = mul(m3, vec3(1.0, 1.0, 1.0));                // v * m3 for a diagonal matrix
+  data[31] = q.x + q.y * 10.0 + q.z * 100.0;            // 2 + 30 + 400
+  float ct = 0.0;
+  for (uint u = 0u; u < 3u; u++) {{ ct += float(u); }}  // 0 + 1 + 2
+  for (float s = 1.0; s > 0.25; s -= 0.25) {{ ct += s; }}   // 1 + .75 + .5
+  data[32] = ct;                                        // 5.25
+  if (!(a - 1.5)) {{ data[33] = 7.0; }} else {{ data[33] = 8.0; }}   // a - 1.5 is zero: 7
+  data[34] = (v4.x < 2 ? 1.0 : 0.0) + (v4.y >= 2.0 ? 10.0 : 0.0);  // int against float: 1 + 10
+}}"
+    );
+    let inputs = [1.5, 2.0, 1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0];
+    let Some(out) = gpu_run(&src, &inputs) else { return };
+    let want = [
+        (16, 2.0 + 400.0),
+        (17, 4.5),
+        (18, 8.0),
+        (19, 180.0),
+        (20, 6.0),
+        (21, 100.0),
+        (22, 1.0),
+        (23, 11.0 + 2200.0 + 300000.0),
+        (24, 2.0 + 30.0 + 400.0),
+        (25, 0.0),
+        (26, 4.0),
+        (27, 15.0 + 18.0 + 15.0),
+        (28, 103.0),
+        (29, 4.0),
+        (30, 6.5 + 11.5 + 16.5),
+        (31, 2.0 + 30.0 + 400.0),
+        (32, 5.25),
+        (33, 7.0),
+        (34, 11.0),
+    ];
+    for (i, w) in want {
+        assert!(near(out[i], w), "data[{i}] = {}, wanted {w}", out[i]);
+    }
+}
