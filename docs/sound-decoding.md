@@ -32,14 +32,12 @@ A scene sound reaches the device in four steps.
 A sound the engine cannot decode (an unsupported codec, a file that is not
 audio, a file whose headers are cut off) is not played: the layer stays silent
 and the log names the reason. A file cut short in its audio plays what is there.
-No scene sound reaches FFmpeg.
+FFmpeg decodes no sound at all: neither a scene's sounds nor a video's.
 
-The audio track of a plain video wallpaper no longer comes through here on the desktop: the
-app's own players play it (AVFoundation for MP4 and MOV, and for WebM and Matroska the track
-decoded by `Matroska/MatroskaAudio`, below). The one remaining use of FFmpeg for sound is the
-scene engine's pure-video scene (`CreateMediaSoundStream`, `src/Audio/FfmpegSoundStream`, with
-`AudioDecodePump`), which only the lock screen's fallback can still build (a clip the extension's
-own player could not play); it goes with the scene engine's plain-video path.
+The audio track of a plain video wallpaper does not come through here: the app's own players
+play it (AVFoundation for MP4 and MOV, and for WebM and Matroska the track decoded by
+`Matroska/MatroskaAudio`, below). The scene engine no longer builds a video's sound; its
+`CreateMediaSoundStream` and the FFmpeg stream behind it were deleted on 2026-10-17.
 
 ## What is ours and what is the system's
 

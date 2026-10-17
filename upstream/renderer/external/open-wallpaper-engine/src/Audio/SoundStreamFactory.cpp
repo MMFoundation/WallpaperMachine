@@ -1,7 +1,6 @@
 #include "Audio/SoundStreamFactory.hpp"
 
 #include "Audio/BinaryStreamByteSource.hpp"
-#include "Audio/FfmpegSoundStream.hpp"
 #include "Audio/PcmSoundStream.hpp"
 #include "Fs/IBinaryStream.h"
 #include "Sound/Apple/AppleDecoder.hpp"
@@ -51,14 +50,6 @@ std::unique_ptr<SoundStream> CreateSceneSoundStream(std::shared_ptr<fs::IBinaryS
     auto decoder = ogg ? sound::OpenVorbisDecoder(source, error) : sound::OpenAppleDecoder(std::move(source), error);
     if (decoder == nullptr) return nullptr;
     return std::make_unique<PcmSoundStream>(std::move(decoder), options, "VFS audio stream");
-}
-
-std::unique_ptr<SoundStream> CreateMediaSoundStream(const std::filesystem::path& media_path,
-                                                    std::string*                 error,
-                                                    SoundStream::Options         options,
-                                                    bool                         audio_optional)
-{
-    return CreateFfmpegSoundStream(media_path, error, options, audio_optional);
 }
 
 } // namespace wallpaper::audio
