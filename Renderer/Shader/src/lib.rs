@@ -19,6 +19,7 @@ pub mod identity;
 pub mod include;
 pub mod items;
 pub mod json;
+pub mod legalize;
 pub mod lexer;
 pub mod metadata;
 pub mod names;

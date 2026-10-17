@@ -174,17 +174,13 @@ pub fn text(decls: &str, body: &str) -> String {
     frag(&stage(decls, body))
 }
 
-/// Converts a stage written in Wallpaper Engine's legacy form, gives it the layout the later
-/// pipeline step would, and compiles it.
+/// Legalizes a stage written in Wallpaper Engine's legacy form (converted, then given its
+/// interface and resource layout by the legalizer) and compiles it.
 pub fn legacy(kind: StageKind, src: &str) -> Compiled {
-    let converted = match convert_stage(kind, src) {
-        Ok(c) => c,
-        Err(d) => panic!("conversion failed: {:?}\n{src}", d.iter().map(|d| d.message.clone()).collect::<Vec<_>>()),
-    };
-    let glsl = super::layout::naga_ready(kind, &converted);
+    let glsl = legacy_text(kind, src);
     match compile_glsl(kind, &glsl) {
         Ok(c) => c,
-        Err(e) => panic!("naga rejected the converted stage: {e}\n--- source ---\n{src}"),
+        Err(e) => panic!("naga rejected the legalized stage: {e}\n--- source ---\n{src}"),
     }
 }
 
@@ -196,10 +192,12 @@ pub fn legacy_vert(src: &str) -> Compiled {
     legacy(StageKind::Vertex, src)
 }
 
-/// The naga-ready text of a legacy stage.
+/// The legalized text of a legacy stage.
 pub fn legacy_text(kind: StageKind, src: &str) -> String {
-    let converted = convert_stage(kind, src).unwrap_or_else(|d| panic!("{:?}", d.iter().map(|d| d.message.clone()).collect::<Vec<_>>()));
-    super::layout::naga_ready(kind, &converted)
+    match crate::legalize::legalize_stage(kind, src) {
+        Ok((stage, _)) => stage.text,
+        Err(e) => panic!("legalization failed: {e}\n--- source ---\n{src}"),
+    }
 }
 
 impl Compiled {

@@ -174,7 +174,7 @@ fn an_array_parameter_the_body_writes_is_copied_into_a_local() {
 float pool(float v[4]) { v[0] = 3.0; return v[0] + v[1]; }
 void main() { gl_FragColor = vec4(pool(taps)); }";
     let t = legacy_text(StageKind::Fragment, src);
-    assert!(t.contains("float v[4] = taps;"), "{t}");
+    assert!(t.contains("float v[4] = float[4](taps[0].x, taps[1].x"), "{t}");
 }
 
 #[test]
@@ -191,7 +191,7 @@ void main() { gl_FragColor = fetch(MAKE_SAMPLER2D_ARGUMENT(g_Texture0), v_T, 1.0
     let c = legacy_frag(src);
     assert!(c.has_function("fetch_wm1") && c.has_function("fetch_wm2"));
     let t = legacy_text(StageKind::Fragment, src);
-    assert!(t.contains("sampler2D(g_Texture0, _s_g_Texture0), uv)") && t.contains("sampler2D(g_Texture1, _s_g_Texture1), uv)"), "{t}");
+    assert!(t.contains("sampler2D(g_Texture0, _we_Sampler_g_Texture0), uv)") && t.contains("sampler2D(g_Texture1, _we_Sampler_g_Texture1), uv)"), "{t}");
 }
 
 #[test]

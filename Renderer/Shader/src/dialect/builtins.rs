@@ -99,6 +99,8 @@ pub fn is_dialect_call(name: &str) -> bool {
             | "tex2D"
             | "texture2D"
             | "texSample2DLod"
+            | "texture2DLod"
+            | "tex2DLod"
             | "texSample3D"
             | "MAKE_SAMPLER2D_ARGUMENT"
     )
@@ -185,6 +187,23 @@ pub const RESERVED_IDENTIFIERS: &[&str] = &[
 pub fn is_reserved_identifier(name: &str) -> bool {
     RESERVED_IDENTIFIERS.contains(&name)
 }
+
+/// The names a stage may restate with a stage qualifier although the backend provides them,
+/// whatever type they are written with (interface part R11). `gl_VertexID` and `gl_InstanceID`
+/// are restatements only with the type `uint`; the converter handles them by that rule.
+pub const RESTATED_BUILTINS: [&str; 11] = [
+    "gl_Position",
+    "gl_PointSize",
+    "gl_VertexIndex",
+    "gl_InstanceIndex",
+    "gl_BaseVertex",
+    "gl_BaseInstance",
+    "gl_FragCoord",
+    "gl_FrontFacing",
+    "gl_PointCoord",
+    "gl_FragDepth",
+    "gl_SampleID",
+];
 
 /// The type of a GLSL built-in variable by name, for the variables a stage may read or write.
 pub fn builtin_variable(name: &str) -> Option<super::ty::Ty> {

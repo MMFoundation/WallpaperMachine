@@ -59,6 +59,18 @@ pub fn parse_stage(kind: StageKind, text: &str) -> Result<(Module, std::collecti
 /// diagnostics (E17).
 pub fn convert_stage(kind: StageKind, text: &str) -> Result<Converted, Vec<Diagnostic>> {
     let (module, taken) = parse_stage(kind, text)?;
+    convert_parsed(kind, module, taken, text)
+}
+
+/// Converts a stage that [`parse_stage`] parsed (and that the caller may have adjusted, as the
+/// interface part does when it reconciles the width of a varying). `text` is the stage text the
+/// tree came from; it is only used for the informational diagnostic.
+pub fn convert_parsed(
+    kind: StageKind,
+    module: Module,
+    taken: std::collections::HashSet<String>,
+    text: &str,
+) -> Result<Converted, Vec<Diagnostic>> {
     let mut module = convert::convert(module, kind, taken)?;
     // The header already declares the default precision; a stage that restates it (as a
     // converted stage does) is not given a second copy.
@@ -69,4 +81,4 @@ pub fn convert_stage(kind: StageKind, text: &str) -> Result<Converted, Vec<Diagn
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

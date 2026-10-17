@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use crate::lexer::Operator;
 
 use super::super::ast::*;
-use super::super::builtins::unsupported_reason;
+use super::super::builtins::{RESTATED_BUILTINS, unsupported_reason};
 use super::super::ty::*;
 use super::helpers::HelperKind;
 use super::{Converter, FnInfo, ParamInfo, StructInfo, VarKind};
@@ -175,9 +175,15 @@ impl Converter {
             self.error(&span, format!("unsupported construct `{}`: {reason}", d.ty.name));
         }
         let interface = d.quals.iter().any(|q| matches!(q, Qualifier::Word(w) if INTERFACE_WORDS.contains(&w.as_str())));
-        // A restated index builtin is not an input: the backend provides it (R88).
-        if interface && d.ty.name == "uint" && d.ty.dims.is_empty() {
-            d.declarators.retain(|x| x.name != "gl_VertexID" && x.name != "gl_InstanceID");
+        // A restated builtin is not an input or an output: the backend provides it (R88, and
+        // the interface part's R11). The OpenGL spellings of the index builtins count only
+        // when written with the type `uint`.
+        let stage_qualified = d.quals.iter().any(|q| matches!(q, Qualifier::Word(w) if matches!(w.as_str(), "attribute" | "varying" | "in" | "out")));
+        if stage_qualified {
+            let uint_index = d.ty.name == "uint" && d.ty.dims.is_empty();
+            d.declarators.retain(|x| {
+                !(RESTATED_BUILTINS.contains(&x.name.as_str()) || uint_index && (x.name == "gl_VertexID" || x.name == "gl_InstanceID"))
+            });
             if d.declarators.is_empty() {
                 return Vec::new();
             }

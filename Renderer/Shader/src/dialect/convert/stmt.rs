@@ -26,34 +26,42 @@ fn is_color_alpha(e: &Expr, color: &str) -> bool {
     }
 }
 
-/// Matches `[saturate]((c.a - 0.5) / max(fwidth(c.a), 0.0001) + 0.5)` for the colour `c` and
-/// reports whether `saturate` wraps it (R83). Nothing broader matches.
-fn sharpening_form(rhs: &Expr, color: &str) -> Option<bool> {
-    let mut x = rhs.peel();
-    let mut saturated = false;
-    if let ExprKind::Call(Callee::Name(n), args) = &x.kind
-        && n == "saturate" && args.len() == 1 {
-            x = args[0].peel();
-            saturated = true;
+/// What the sharpening idiom needs to contain (R83 and the interface part's R59): at least two
+/// reads of the colour output's alpha, a derivative call, a `max` call and at least two literals
+/// `0.5`. The shipped form `(c.a - 0.5) / max(fwidth(c.a), 0.0001) + 0.5` is one instance.
+fn is_sharpening(inner: &Expr, color: &str) -> bool {
+    let (mut alpha_reads, mut derivative, mut max, mut halves) = (0, false, false, 0);
+    walk_expr(inner, &mut |e| match &e.kind {
+        ExprKind::Member(..) if is_color_alpha(e, color) => alpha_reads += 1,
+        ExprKind::Call(Callee::Name(n), _) => {
+            derivative |= matches!(n.as_str(), "fwidth" | "dFdx" | "dFdy" | "ddx" | "ddy");
+            max |= n == "max";
         }
-    let ExprKind::Binary(Operator::Add, l, r) = &x.kind else { return None };
-    if !number_is(r, 0.5) {
-        return None;
+        ExprKind::Number(_) if number_is(e, 0.5) => halves += 1,
+        _ => {}
+    });
+    alpha_reads >= 2 && derivative && max && halves >= 2
+}
+
+/// The argument of the `saturate` call the right-hand side begins with, if it begins with one:
+/// what follows the call (a further product, say) is not part of the idiom.
+fn leading_saturate(rhs: &Expr) -> Option<&Expr> {
+    let mut x = rhs;
+    loop {
+        match &x.kind {
+            ExprKind::Call(Callee::Name(n), args) if n == "saturate" && args.len() == 1 => return Some(&args[0]),
+            ExprKind::Binary(_, l, _) => x = l,
+            _ => return None,
+        }
     }
-    let ExprKind::Binary(Operator::Div, num, den) = &l.peel().kind else { return None };
-    let ExprKind::Binary(Operator::Sub, a, half) = &num.peel().kind else { return None };
-    if !is_color_alpha(a, color) || !number_is(half, 0.5) {
-        return None;
+}
+
+/// Replaces the leading `saturate(...)` call of `rhs` (found like [`leading_saturate`]) by `with`.
+fn replace_leading_saturate(rhs: &mut Expr, with: Expr) {
+    match &mut rhs.kind {
+        ExprKind::Binary(_, l, _) => replace_leading_saturate(l, with),
+        _ => *rhs = with,
     }
-    let ExprKind::Call(Callee::Name(m), margs) = &den.peel().kind else { return None };
-    if m != "max" || margs.len() != 2 || !number_is(&margs[1], 0.0001) {
-        return None;
-    }
-    let ExprKind::Call(Callee::Name(w), wargs) = &margs[0].peel().kind else { return None };
-    if w != "fwidth" || wargs.len() != 1 || !is_color_alpha(&wargs[0], color) {
-        return None;
-    }
-    Some(saturated)
 }
 
 /// True when a declaration list has an array declarator that another declarator follows.
@@ -252,7 +260,8 @@ impl Converter {
     }
 
     /// `color.a = [saturate](sharpening of color.a)` becomes the clamped alpha of the colour's
-    /// source (R83). The target and the form must match exactly; anything else is untouched.
+    /// source (R83, R59). The target must be the colour output's alpha and the right-hand side must
+    /// contain the idiom; anything else is untouched.
     fn neutralise_sharpening(&mut self, e: &Expr) -> Option<Expr> {
         let ExprKind::Assign(Operator::Assign, l, r) = &e.kind else { return None };
         let ExprKind::Member(base, field) = &l.peel().kind else { return None };
@@ -263,15 +272,18 @@ impl Converter {
         if !self.is_color_name(color) {
             return None;
         }
-        let saturated = sharpening_form(r, color)?;
+        let wrapper = leading_saturate(r);
+        if !is_sharpening(wrapper.unwrap_or(r), color) {
+            return None;
+        }
+        let saturated = wrapper.is_some();
         let (source, id) = self.color_source.clone()?;
         let var = self.lookup(&source)?;
         if var.id != id {
             return None;
         }
-        let source_emit = var.emit.clone();
         let span = e.span.clone();
-        let alpha = Expr::ident(&source_emit, span.clone()).member("a");
+        let alpha = Expr::ident(&source, span.clone()).member("a");
         let value = if saturated {
             let zero = Expr::number("0.0", span.clone());
             let one = Expr::number("1.0", span.clone());
@@ -279,7 +291,15 @@ impl Converter {
         } else {
             alpha
         };
+        // Anything after a leading `saturate(...)` stays: it is converted like any expression.
+        let mut rhs = (**r).clone();
+        if saturated {
+            replace_leading_saturate(&mut rhs, value);
+        } else {
+            rhs = value;
+        }
+        let rhs = self.expr(rhs).e;
         let lhs = self.expr((**l).clone()).e;
-        Some(Expr::new(ExprKind::Assign(Operator::Assign, Box::new(lhs), Box::new(value)), span))
+        Some(Expr::new(ExprKind::Assign(Operator::Assign, Box::new(lhs), Box::new(rhs)), span))
     }
 }

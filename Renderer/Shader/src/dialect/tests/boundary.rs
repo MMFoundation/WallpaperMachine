@@ -243,7 +243,7 @@ fn converted_output_is_pinned_per_pipeline_revision() {
 fn a_macro_alias_of_a_sampler_samples_that_texture() {
     let src = "uniform sampler2D g_Texture4; varying vec2 v_T;\n#define GRAD g_Texture4\nvoid main() { gl_FragColor = texSample2D(GRAD, v_T); }";
     let t = legacy_text(StageKind::Fragment, src);
-    assert!(t.contains("texture(sampler2D(g_Texture4, _s_g_Texture4), v_T)"), "{t}");
+    assert!(t.contains("texture(sampler2D(g_Texture4, _we_Sampler_g_Texture4), v_T)"), "{t}");
     legacy_frag(src);
 }
 
@@ -263,8 +263,8 @@ void main() {
   gl_FragColor = a + b + c;
 }";
     let t = legacy_text(StageKind::Fragment, src);
-    assert!(t.contains("texture(sampler2D(g_Texture1, _s_g_Texture1), uv)"), "{t}");
-    assert!(count(&t, "sampler2D(g_Texture2, _s_g_Texture2)") >= 2, "{t}");
+    assert!(t.contains("texture(sampler2D(g_Texture1, _we_Sampler_g_Texture1), uv)"), "{t}");
+    assert!(count(&t, "sampler2D(g_Texture2, _we_Sampler_g_Texture2)") >= 2, "{t}");
     legacy_frag(src);
 }
 
@@ -372,7 +372,7 @@ fn a_3d_texture_is_sampled_with_a_three_component_coordinate() {
     let c = legacy_frag("uniform sampler3D lut; varying vec3 v_3; varying vec4 v_4;\nvoid main() { vec3 a = texSample3D(lut, v_3); vec3 b = texSample3D(lut, v_4); gl_FragColor = vec4(a + b, 1.0); }");
     assert_eq!(c.local_type("a"), "vec3<f32>");
     let t = legacy_text(StageKind::Fragment, "uniform sampler3D lut; varying vec4 v_4;\nvoid main() { vec3 b = texSample3D(lut, v_4); gl_FragColor = vec4(b, 1.0); }");
-    assert!(t.contains("sampler3D(lut, _s_lut)") && t.contains("v_4.xyz"), "{t}");
+    assert!(t.contains("sampler3D(lut, _we_Sampler_lut)") && t.contains("v_4.xyz"), "{t}");
 }
 
 #[test]

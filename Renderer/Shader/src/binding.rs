@@ -48,12 +48,16 @@ pub struct Binding {
     /// The resource index, unique across kinds within the program.
     pub binding: u32,
     pub slot_kind: SlotKind,
-    /// The Metal argument-table index within its kind. Equal to `binding` (R35).
+    /// The Metal argument-table index within its kind. Equal to `binding` for a buffer and a
+    /// texture; the dense rank among the program's samplers for a sampler (C2 R88, see
+    /// [`assign_metal_slots`]).
     pub slot: u32,
 }
 
 impl Binding {
-    /// Maps a resource to its Metal slot, or says why it cannot be mapped:
+    /// Maps a buffer or texture to its Metal slot (the slot is the binding), or says why it
+    /// cannot be mapped (a sampler goes through [`assign_metal_slots`], whose slot is not its
+    /// binding):
     /// a name that is not an ASCII identifier (R104), a descriptor set other
     /// than 0 or no binding at all (R34), or a slot above the limit of its
     /// namespace (R35). The layer never invents a slot.
@@ -117,11 +121,11 @@ impl fmt::Display for BindingError {
                 quote(name)
             ),
             BindingError::SlotLimit { kind, slot, name } => format!(
-                "metal binding map: resource {} needs {} slot {slot}, above the highest {} slot {}",
+                "metal binding map: resource {} needs {} slot {slot}, above the argument-table limit of {} for {} slots",
                 quote(name),
                 kind.name(),
-                kind.name(),
-                kind.max_slot()
+                kind.max_slot(),
+                kind.name()
             ),
             BindingError::NonCanonicalTextureName { name } => {
                 format!("{} is not a canonical g_TextureN binding name", quote(name))
@@ -145,6 +149,54 @@ pub fn check_canonical_texture_name(name: &str) -> Result<(), BindingError> {
         SlotName::NonCanonical => Err(BindingError::NonCanonicalTextureName { name: name.to_string() }),
         _ => Ok(()),
     }
+}
+
+/// One resource of a program, as the layout decided it (the input of [`assign_metal_slots`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProgramResource {
+    pub name: String,
+    pub set: u32,
+    pub binding: Option<u32>,
+    pub kind: SlotKind,
+}
+
+/// The Metal slots of a whole program (R88): a buffer or texture keeps the value of its
+/// binding index; a sampler takes its dense rank among the program's samplers (unique by
+/// name, both stages, video chroma samplers included) counted from 0 in ascending binding
+/// order. A program with more than sixteen distinct samplers fails naming the limit.
+pub fn assign_metal_slots(resources: &[ProgramResource]) -> Result<Vec<Binding>, BindingError> {
+    let mut out: Vec<Binding> = Vec::with_capacity(resources.len());
+    let mut samplers: Vec<(u32, &ProgramResource)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for r in resources {
+        if !seen.insert((r.name.as_str(), r.kind.name())) {
+            continue;
+        }
+        match r.kind {
+            SlotKind::Sampler => {
+                if !is_valid_resource_name(&r.name) {
+                    return Err(BindingError::InvalidName { name: r.name.clone() });
+                }
+                if r.set != 0 {
+                    return Err(BindingError::UnmappableSet { name: r.name.clone(), set: r.set });
+                }
+                let Some(binding) = r.binding else {
+                    return Err(BindingError::NoBinding { name: r.name.clone() });
+                };
+                samplers.push((binding, r));
+            }
+            kind => out.push(Binding::for_resource(&r.name, r.set, r.binding, kind)?),
+        }
+    }
+    samplers.sort_by_key(|(binding, r)| (*binding, r.name.clone()));
+    for (rank, (binding, r)) in samplers.into_iter().enumerate() {
+        let slot = rank as u32;
+        if slot > SlotKind::Sampler.max_slot() {
+            return Err(BindingError::SlotLimit { kind: SlotKind::Sampler, slot, name: r.name.clone() });
+        }
+        out.push(Binding { name: r.name.clone(), set: 0, binding, slot_kind: SlotKind::Sampler, slot });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -209,5 +261,46 @@ mod tests {
         }
         let text = BindingError::DuplicateTextureIndex { index: 1, first: "a".into(), second: "b".into() }.to_string();
         assert!(text.contains("`a`") && text.contains("`b`") && text.contains('1'));
+    }
+
+    fn res(name: &str, binding: u32, kind: SlotKind) -> ProgramResource {
+        ProgramResource { name: name.to_string(), set: 0, binding: Some(binding), kind }
+    }
+
+    #[test]
+    fn thirteen_textures_and_the_block_map_samplers_to_dense_slots() {
+        let mut list = vec![res("GlobalUniforms", 13, SlotKind::Buffer)];
+        for n in 0..13 {
+            list.push(res(&format!("g_Texture{n}"), n, SlotKind::Texture));
+            list.push(res(&format!("_we_Sampler_g_Texture{n}"), 14 + n, SlotKind::Sampler));
+        }
+        let map = assign_metal_slots(&list).unwrap();
+        let find = |name: &str| map.iter().find(|b| b.name == name).unwrap();
+        assert_eq!((find("GlobalUniforms").slot_kind, find("GlobalUniforms").slot), (SlotKind::Buffer, 13));
+        for n in 0..13u32 {
+            assert_eq!(find(&format!("g_Texture{n}")).slot, n);
+            let s = find(&format!("_we_Sampler_g_Texture{n}"));
+            assert_eq!((s.binding, s.slot), (14 + n, n));
+        }
+    }
+
+    #[test]
+    fn sixteen_samplers_fit_and_seventeen_name_the_limit() {
+        let many = |n: u32| -> Vec<ProgramResource> { (0..n).map(|i| res(&format!("_we_Sampler_t{i}"), i, SlotKind::Sampler)).collect() };
+        let ok = assign_metal_slots(&many(16)).unwrap();
+        assert_eq!(ok.iter().map(|b| b.slot).max(), Some(15));
+        let text = assign_metal_slots(&many(17)).unwrap_err().to_string();
+        for needle in ["_we_Sampler_t16", "sampler slot 16", "argument-table limit of 15"] {
+            assert!(text.contains(needle), "{needle}: {text}");
+        }
+    }
+
+    #[test]
+    fn a_sampler_shared_by_both_stages_has_one_slot() {
+        let list = vec![res("_we_Sampler_a", 5, SlotKind::Sampler), res("_we_Sampler_b", 2, SlotKind::Sampler), res("_we_Sampler_a", 5, SlotKind::Sampler)];
+        let map = assign_metal_slots(&list).unwrap();
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.iter().find(|b| b.name == "_we_Sampler_b").unwrap().slot, 0);
+        assert_eq!(map.iter().find(|b| b.name == "_we_Sampler_a").unwrap().slot, 1);
     }
 }

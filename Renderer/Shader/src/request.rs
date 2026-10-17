@@ -286,6 +286,10 @@ pub enum RequestError {
     /// A shader annotation that cannot be used (R75): an unparsable default,
     /// an empty material alias.
     Metadata(String),
+    /// The resources or interface of the program cannot be laid out: a conflicting uniform
+    /// or binding, an unresolved array bound, a video slot that cannot be sampled as planes
+    /// (spec C2, R16 to R30, R39, R49).
+    Program(String),
 }
 
 impl fmt::Display for RequestError {
@@ -330,6 +334,7 @@ impl fmt::Display for RequestError {
                 format!("invalid shader request: property {} has no value", quote(name))
             }
             RequestError::Metadata(message) => format!("invalid shader request: {message}"),
+            RequestError::Program(message) => format!("invalid shader request: {message}"),
         };
         f.write_str(&sanitize(&text))
     }

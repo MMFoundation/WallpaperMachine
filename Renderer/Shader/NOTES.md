@@ -29,6 +29,18 @@ known about calls by name), `convert` (the typed rewrite: `expr`, `coerce`, `cal
 `items`, `special`, `helpers`), `print` (tree to GLSL text) and `usage` (the use facts of
 R7). `dialect::convert_stage` is the entry point; its result carries the text *and* the
 rewritten tree, so the interface and resource parts can work on the tree.
+Step 4 (part C2 of the spec) is the module `legalize`: `collect` (declaration planning, R9 to R13),
+`block` (the uniform block, R14 to R23 and R83, R87), `bindings` (R24 to R31), `interface` (locations,
+reconciliation and synthesized outputs, R32 to R41, R82, R84), `rewrite` (sampling calls, plane
+sampling, widened reads, the colour output; R42 to R44, R47, R49, R21, R78), `planes` (R45 to R48)
+and `stage` (assembly, R6 and R8). `legalize::legalize` takes both stages of a program (or one
+stage, which gets the standalone numbering of R31 and R41) and returns the GLSL text of each stage
+plus `ProgramLayout`, the facts reflection needs (block members and binding, textures with their
+two bindings, planes, vertex inputs under their author names, varyings, kept samplers).
+`binding::assign_metal_slots` is R88 (dense sampler slots). `src/legalize/tests/` holds the tests of
+section 8 and the corpus sweeps; `tests/gpu_probe.rs` gained the NV12 conversion probe and the
+float remainder probe.
+
 `tests/dialect_robustness.rs` is the hostile-input test of this part (run on a 2 MiB stack),
 `tests/gpu_probe.rs` the opt-in Metal probes (a Swift runner dispatches one compute thread; no window,
 no display): the smoothstep and `fmod` probe, and kernels written in the dialect that are converted,
@@ -361,25 +373,132 @@ Design:
 64. **Float swizzle on a scalar** (`f.x`, `f.xxx`, legal HLSL) is not supported: the swizzle's
     type is `Unknown` and naga refuses it (the spec asks for no such rule).
 
+## Step 4 choices (interface and resource legalisation)
+
+How it is built:
+
+65. **A tree, not text edits.** The converter hands over a tree, so the legalizer rewrites the
+    tree and prints it. The rules of C2 4.1 are therefore not a list of text edits that have to be
+    merged: R2's order shows only through effects, R3(c) to R3(e) and R81 hold by construction
+    (nothing overlaps, nothing is inserted into a span), and the new tests assert the effects (a
+    sampling call is paired with its sampler although `tex2D` is renamed, a renamed local is seen
+    by the coercions and by the alpha idiom, reads through a specialised parameter are narrowed,
+    the colour output is renamed last, text inside a replaced span disappears with it). Generated
+    declarations and helper functions are carried as raw text items; the printed stage is the
+    header, `#extension` lines, the texture, sampler and chroma declarations, the block, the
+    interface and colour output declarations, the plane helpers, then the author's items.
+66. **Order of the passes for a program.** Both stages are parsed; qualified declarations with
+    several names are split into one declaration each (no declarator is ever dropped, section 5);
+    array bounds and varying widths are reconciled on the *parsed* trees (R36 changes the type of a
+    declaration, and the converter must see the reconciled type, C1 R89); both stages are
+    converted; the block, bindings and locations are planned from the converted trees; each stage
+    is finished. A stage alone skips the cross-stage part and uses R31 and R41.
+67. **Macros are already expanded** (C1), which settles three C2 items. R4 and R85 (rules acting in
+    macro bodies, alias macros of widened arrays, function-like macros, an alias define with a
+    trailing comment) hold because the use site sees the replacement. R39 and R18 both use the macro
+    table *at the declaration*: R18 says a uniform bound uses the table at the end of the stage, so
+    a bound macro redefined after the uniform declaration reads the value at the declaration here
+    (no shipped shader redefines one). A bare `#define N` used as a bound is empty, not 1 (R39's
+    implicit value is not reproduced).
+68. **R12 position-redirect output is not special-cased.** A `#define gl_Position p` with an
+    `out vec4 p;` expands before this part sees it, so `p` is an ordinary vertex output that no
+    fragment input matches (a vertex-only varying with a location). That is harmless on naga and
+    keeps the rule that no name is special-cased.
+
+Spec conflicts and the choice made:
+
+69. **R56 stability refusal.** C2 R56 refuses a function whose calls pass different top-level
+    arrays; C1 R66 prefers cloning the function per array. The converter clones (Step 3), so the
+    refusal and its pinned message are not reproduced; the stereo audio helpers that call one
+    function with the left and the right spectrum work. A black-box port of the upstream refusal
+    tests will fail on this and the spec should be amended.
+70. **R59 against C1 R83.** C2 R59 detects the sharpening idiom by what the right-hand side
+    contains (two reads of the colour alpha, a derivative call, `max`, two literals `0.5`); C1 R83
+    said "the shipped form and nothing broader". The converter now follows R59 (a superset: the
+    shipped `(a - 0.5) / max(fwidth(a), 0.0001) + 0.5` is one instance) and keeps whatever follows a
+    leading `saturate(...)` call.
+71. **R68 loop bounds, R65 `int` from `step`.** The converter compares a counter with a float
+    bound as floats (`float(i) < n`, HLSL's meaning) and keeps `int(step(...))` as an integer with a
+    cast, instead of C2's `int(n)` and `float q = step(...)`. Both compile and agree whenever the
+    bound is integral; the spelling differs from the old code (section 10 item 23 allows it).
+72. **R41 standalone numbering.** A stage legalized alone numbers its interface from 0 in source
+    order, but an array or matrix takes one location per element or column (R34), not one: two
+    variables on one location are refused by naga (`downsample_quarter` declares a four-element
+    varying followed by more). Non-array stages number as R41 says.
+73. **R9 `sampler3D`.** Kept samplers stay as written, except that `sampler3D` is split into a
+    `texture3D` and a sampler like a 2D texture (C1 R105d asks for it; naga reads no combined
+    sampler of any kind, so the kept form can never compile). Cube and the other kinds stay kept.
+    Sampling calls with `textureGrad`, `textureOffset`, `textureProj`, `textureProjLod`,
+    `textureLodOffset`, `textureGather` and `textureQueryLod` are paired with the sampler as well;
+    `texelFetch`, `textureSize` and `textureQueryLevels` take the separated texture object.
+74. **Block member types naga cannot hold.** naga validates no `bool` in a uniform block and reads no
+    matrix with two rows (`mat2`, `mat3x2`, `mat4x2`) in std140. A `bool` or `bvecN` member is
+    declared `uint` or `uvecN` (the same four bytes per component) and read back as a comparison
+    with zero; an array of booleans and every two-row matrix are refused with an "invalid
+    request" message naming the member (R87 and section 10 item 9 allow the refusal). Integer
+    arrays are widened to `ivec4` or `uvec4` (R87); the test `a_narrow_uint_array_stays_tight_on_metal_without_the_widening`
+    shows that naga writes a plain `uint[3]` with a four-byte stride, so the widening is needed.
+75. **Whole-array reads of a widened array** (`float bins[16] = g_Audio;`, an argument passed on)
+    are an array constructor of the author's element type reading each element with its selector
+    (R58 asks for the declaration to be erased and the uses replaced; the copy is the same work as
+    the old copy and needs no scope analysis). Longer than 4096 elements is refused.
+76. **Interpolation qualifiers** `flat`, `smooth` and `noperspective` are carried over to the
+    re-emitted declaration (section 10 item 17); `centroid`, `sample` and precision words are
+    dropped.
+77. **A vector `uniform` declared wider in one stage** (R19) is read through `(name.x)` style
+    parentheses by the narrower stage: the tree has no `#define` to carry, so the stage's reads of
+    the name are rewritten (hidden by a parameter or local of the same name, they are not).
+78. **Errors.** "Invalid request" failures are `LegalizeError::Request` (message only) or
+    `LegalizeError::Uniform` (the contract wording of `UniformError`); `ShaderError` gained
+    `RequestError::Program` for them. The stage-local and cross-stage classes carry a
+    diagnostic (pass `Codegen`, the stage, a span of the preprocessed text). Messages: the pinned
+    ones are produced word for word (unsupported member type, conflicting declarations,
+    "cross-stage varying `x` type mismatch: vertex outputs T1 but fragment inputs T2",
+    "unsupported stage-interface array bound", "cannot be sampled as planes", "canonical"); the
+    metal limit text names the "argument-table limit of 15".
+79. **Names the legalizer picks** (C2 2.4, free): the colour output `_we_FragColor`, synthesized
+    vertex outputs `_we_out_<name>` (then `_N`), the plane helpers `_we_plane<N>` and
+    `_we_nv12_convert<N>` (a pure function of the eight constants, so the arithmetic can be
+    evaluated on its own), written inputs `_we_in_<name>` (the converter's). A taken spelling gets
+    `_1`, `_2`, ...
+80. **Not done in this step**: R79's optional early failure for a program the engine would refuse
+    (a texture with another name, a kept sampler); the cache key and pipeline revision (nothing of
+    this part reaches a compiled program until the pipeline calls it); the reflection document and
+    the MSL writer call (the next step); the engine-side binding of non-`g_Texture<N>` resources.
+
+Results of the corpus sweeps (`cargo test --lib legalize::tests::corpus -- --nocapture`), three combo
+sets, both stages together, every stage compiled through naga to Metal:
+
+- Shipped shaders: 164 of 165 programs legalize and compile. The one failure is
+  `shadowcasterfoliage4` (skinned and reflective): its vertex stage reads `g_Texture1Texel`, which
+  no shipped file declares, so no translator can compile it; the test names it and fails on any
+  other cause.
+- Workshop shaders (unpacked copies of the local library, distinct file texts): 855 of 870 programs.
+  The 15 failures are not this part's: `textoutline7x7` has a 49-element varying (model limit 31
+  locations, R30; 3 programs), `frame_builder` contains text that is not GLSL
+  (`varying vec4 v_Size . xy ;`; 6), `phantomtransitionfx` reads an undeclared varying (3) and
+  `lens_distorsion` has a `#if` expression the preprocessor refuses (3).
+- Mutation fuzzing of the shipped programs (3,000 edited programs) and truncation of a stage at every
+  character: no panic.
+- Stage by stage (the dialect sweep through the standalone entry point): 317 of 318 shipped stages;
+  the 27 workshop failures are the ones above plus a varying width only the program can reconcile.
+
 ## What a later step takes from this one
 
-The interface and resource steps (C2, D) receive `Converted::module`. Still in the form
-the author wrote it, for them to rewrite: `uniform`, `attribute`, `varying`, `in` and `out`
-declarations (including `layout(...)`), `uniform sampler2D` declarations and the
-`texture(name, coord)` / `textureLod(name, ...)` calls on them (R84: the texture-and-sampler
-split), `gl_FragColor`, widened scalar uniform arrays (R104b), the 3D texture check (R105d) and
-the cross-stage varying widths (R89). `src/dialect/tests/layout.rs` is a stand-in that does the
-minimum of that to compile converted stages with naga; it is test code and not the interface step.
+The interface and resource part (C2) is done (Step 4, above); it consumes `Converted::module`. The
+pipeline step takes `legalize::legalize` (or `legalize_stage`), compiles each `LegalStage::text`
+with naga (`glsl-in`, then the validator, then the Metal writer with the binding map built from
+`ProgramLayout` and `binding::assign_metal_slots`) and builds reflection from the layout facts
+and from naga's module. `src/dialect/tests/layout.rs` (the old stand-in) is deleted: the dialect
+tests use the real legalizer.
 
 ## Not yet done (planned for later steps)
 
 The C ABI and last-error buffer (R1 to R9, R70 buffer, R89 to R93), the engine-backed include
-provider (callback, free callback; the in-memory and closure providers exist), uniform
-declaration merging across stages (R46), array-bound resolution (R100), resource index
-allocation (R31 to R35, R102), the declaration planning, interface and resource layout of part
-C2, the naga calls and the MSL writer in the pipeline, the NV12 variant (R63 to R69 of the
-contract part), the MSL/golden checks of R88, and the end-to-end checks of test items 58
-(compile half) and 66. The cache identity is not bumped: nothing this step adds reaches a
+provider (callback, free callback; the in-memory and closure providers exist), the naga calls, the
+MSL writer and the reflection document in the pipeline, the request-level NV12 plumbing (the
+legalizer takes the flagged slots; the pipeline passes them), and the end-to-end checks of test
+items 58 (compile half) and 66. The cache identity is not bumped: nothing this step adds reaches a
 compiled program until the pipeline uses it. `src/dialect/tests/boundary.rs` pins a
 digest of the converter's output per `PIPELINE_REVISION`, so the first change of converted
 output after that revision forces a deliberate bump.

@@ -332,7 +332,7 @@ impl Converter {
             }
             ("clip", 1) if self.kind == StageKind::Fragment => return self.clip_call(targs.pop().unwrap(), span),
             ("texSample2D" | "tex2D" | "texture2D", 2 | 3) => return self.texture_call("texture", targs, span),
-            ("texSample2DLod", 3) => return self.texture_call("textureLod", targs, span),
+            ("texSample2DLod" | "texture2DLod" | "tex2DLod", 3) => return self.texture_call("textureLod", targs, span),
             ("texSample3D", 2) => return self.texture_call("texture", targs, span),
             _ => {}
         }
