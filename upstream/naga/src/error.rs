@@ -1,4 +1,6 @@
-use alloc::{borrow::Cow, boxed::Box, string::String};
+#[cfg(feature = "codespan")]
+use alloc::borrow::Cow;
+use alloc::{boxed::Box, string::String};
 use core::{error::Error, fmt};
 
 #[derive(Clone, Debug)]
@@ -22,8 +24,19 @@ impl fmt::Display for ShaderError<crate::front::wgsl::ParseError> {
 impl fmt::Display for ShaderError<crate::front::glsl::ParseErrors> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let label = self.label.as_deref().unwrap_or_default();
-        let string = self.inner.emit_to_string(&self.source);
-        write!(f, "\nShader '{label}' parsing {string}")
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "codespan")] {
+                let string = self.inner.emit_to_string(&self.source);
+                write!(f, "\nShader '{label}' parsing {string}")
+            } else {
+                // Without `codespan-reporting` there is no source excerpt: list the errors.
+                write!(f, "\nShader '{label}' parsing")?;
+                for error in &self.inner.errors {
+                    write!(f, "\nerror: {error}")?;
+                }
+                Ok(())
+            }
+        }
     }
 }
 
@@ -38,22 +51,30 @@ impl fmt::Display for ShaderError<crate::front::spv::Error> {
 
 impl fmt::Display for ShaderError<crate::WithSpan<crate::valid::ValidationError>> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use codespan_reporting::{files::SimpleFile, term};
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "codespan")] {
+                use codespan_reporting::{files::SimpleFile, term};
 
-        let label = self.label.as_deref().unwrap_or_default();
-        let files = SimpleFile::new(label, replace_control_chars(&self.source));
-        let config = term::Config::default();
+                let label = self.label.as_deref().unwrap_or_default();
+                let files = SimpleFile::new(label, replace_control_chars(&self.source));
+                let config = term::Config::default();
 
-        let mut writer = DiagnosticBuffer::new();
-        writer
-            .emit_to_self(&config, &files, &self.inner.diagnostic())
-            .expect("cannot write error");
-        let writer = writer.into_string();
+                let mut writer = DiagnosticBuffer::new();
+                writer
+                    .emit_to_self(&config, &files, &self.inner.diagnostic())
+                    .expect("cannot write error");
+                let writer = writer.into_string();
 
-        write!(f, "\nShader validation {writer}")
+                write!(f, "\nShader validation {writer}")
+            } else {
+                // Without `codespan-reporting` there is no source excerpt: show the message.
+                write!(f, "\nShader validation error: {}", self.inner)
+            }
+        }
     }
 }
 
+#[cfg(feature = "codespan")]
 cfg_if::cfg_if! {
     if #[cfg(feature = "termcolor")] {
         type DiagnosticBufferInner = codespan_reporting::term::termcolor::NoColor<alloc::vec::Vec<u8>>;
@@ -64,6 +85,7 @@ cfg_if::cfg_if! {
     }
 }
 
+#[cfg(feature = "codespan")]
 cfg_if::cfg_if! {
     if #[cfg(all(feature = "stderr", feature = "termcolor"))] {
         pub(crate) use codespan_reporting::term::termcolor::WriteColor as _ErrorWrite;
@@ -98,10 +120,12 @@ pub(crate) fn emit_to_writer<'files, F: codespan_reporting::files::Files<'files>
     }
 }
 
+#[cfg(feature = "codespan")]
 pub(crate) struct DiagnosticBuffer {
     inner: DiagnosticBufferInner,
 }
 
+#[cfg(feature = "codespan")]
 impl DiagnosticBuffer {
     #[cfg_attr(
         not(feature = "termcolor"),
@@ -166,6 +190,7 @@ where
     }
 }
 
+#[cfg(feature = "codespan")]
 pub(crate) fn replace_control_chars(s: &str) -> Cow<'_, str> {
     const REPLACEMENT_CHAR: &str = "\u{FFFD}";
     debug_assert_eq!(
@@ -187,6 +212,7 @@ pub(crate) fn replace_control_chars(s: &str) -> Cow<'_, str> {
     res
 }
 
+#[cfg(feature = "codespan")]
 #[test]
 fn test_replace_control_chars() {
     // The UTF-8 encoding of \u{0080} is multiple bytes.

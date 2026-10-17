@@ -49,6 +49,7 @@ arbitrary = [
     "half/arbitrary",
     "half/std",
 ]
+codespan = ["dep:codespan-reporting"]
 default = []
 deserialize = [
     "dep:serde",
@@ -73,14 +74,22 @@ serialize = [
     "indexmap/serde",
 ]
 spv-in = [
+    "codespan",
     "dep:petgraph",
     "petgraph/graphmap",
     "dep:spirv",
 ]
 spv-out = ["dep:spirv"]
-stderr = ["codespan-reporting/std"]
-termcolor = ["codespan-reporting/termcolor"]
+stderr = [
+    "codespan",
+    "codespan-reporting/std",
+]
+termcolor = [
+    "codespan",
+    "codespan-reporting/termcolor",
+]
 wgsl-in = [
+    "codespan",
     "dep:hexf-parse",
     "dep:unicode-ident",
 ]
@@ -111,6 +120,7 @@ version = "1"
 
 [dependencies.codespan-reporting]
 version = "0.13"
+optional = true
 default-features = false
 
 [dependencies.half]

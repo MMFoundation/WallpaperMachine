@@ -746,6 +746,7 @@ therefore still depends on Homebrew until `scripts/package.py` bundles those lib
 | `upstream/renderer/` | Fork of `bigsaltyfishes/wallpaper-engine-for-macos`, GPL-2.0-only, modified |
 | `upstream/renderer/external/open-wallpaper-engine/` | Fork of `bigsaltyfishes/open-wallpaper-engine`, modified; vendors Apache-2.0 `spirv_reflect` and public-domain/MIT-0 `miniaudio` under `third_party/` |
 | `upstream/mediaremote-adapter/` | `ungive/mediaremote-adapter`, BSD-3-Clause, modified (see `upstream/provenance.json`) |
+| `upstream/naga/` | The published `naga` 29.0.3 crate (MIT OR Apache-2.0, used under MIT), patched so `codespan-reporting` is an optional dependency (`upstream/naga/PATCHES.md`); `upstream/renderer/Cargo.toml` points the workspace at it with `[patch.crates-io]` |
 
 `upstream/provenance.json` records the repositories, pinned revisions, modification status and
 the current `distributionStatus`. The Workshop browser is recorded there and in

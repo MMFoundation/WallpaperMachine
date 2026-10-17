@@ -1,12 +1,15 @@
+#[cfg(feature = "codespan")]
+use alloc::borrow::ToOwned;
 use alloc::{
-    borrow::ToOwned,
     format,
     string::{String, ToString},
     vec::Vec,
 };
 use core::{error::Error, fmt, ops::Range};
 
-use crate::{error::replace_control_chars, Arena, Handle, UniqueArena};
+#[cfg(feature = "codespan")]
+use crate::error::replace_control_chars;
+use crate::{Arena, Handle, UniqueArena};
 
 /// A source code span, used for error reporting.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -245,6 +248,7 @@ impl<E> WithSpan<E> {
         Some(self.spans[0].0.location(source))
     }
 
+    #[cfg(feature = "codespan")]
     pub(crate) fn diagnostic(&self) -> codespan_reporting::diagnostic::Diagnostic<()>
     where
         E: Error,
@@ -305,6 +309,7 @@ impl<E> WithSpan<E> {
     }
 
     /// Emits a summary of the error to a string.
+    #[cfg(feature = "codespan")]
     pub fn emit_to_string(&self, source: &str) -> String
     where
         E: Error,
@@ -313,6 +318,7 @@ impl<E> WithSpan<E> {
     }
 
     /// Emits a summary of the error to a string.
+    #[cfg(feature = "codespan")]
     pub fn emit_to_string_with_path(&self, source: &str, path: &str) -> String
     where
         E: Error,

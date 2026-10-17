@@ -26,8 +26,8 @@
     "revision": "4cbe6232b2d7c289b6e1a38416a6ae1461a22e81",
     "license": "MIT OR Apache-2.0, used under MIT",
     "directory": "upstream/naga",
-    "modified": false,
-    "note": "The published naga 29.0.3 crate (path_in_vcs naga), vendored unchanged so a later change can make codespan-reporting (Apache-2.0) an optional dependency; upstream/renderer/Cargo.toml points the workspace at it with [patch.crates-io]. LICENSE.MIT and LICENSE.APACHE are the crate's own; the project uses naga under the MIT option."
+    "modified": true,
+    "note": "The published naga 29.0.3 crate (path_in_vcs naga), vendored so codespan-reporting (Apache-2.0) can be an optional dependency; upstream/renderer/Cargo.toml points the workspace at it with [patch.crates-io]. The only differences from the published crate are listed in upstream/naga/PATCHES.md (a non-default `codespan` feature gates the codespan-reporting text helpers); the shader crate does not enable it. LICENSE.MIT and LICENSE.APACHE are the crate's own; the project uses naga under the MIT option."
   },
   "sceneMediaChanges": "2026-09-21: media delivery follows the effective consumer set (pause, power policy, presentation suspend, per-display suspend) while consent stays a separate question; cover updates replace one texture instead of rebuilding the render graph, and an unchanged cover is a true no-op. 2026-09-20: SceneScript video.isPlaying, vector.mix and MediaPlaybackEvent compatibility; native host media snapshots routed through the bridge and core actor to scene scripts, $mediaThumbnail and $mediaPreviousThumbnail. Effect shaders receive owner layer and screen projection matrices; empty scenes initialize their camera pointer. Shader pipeline revision 6 reserves array varying locations, narrows unambiguous vector function arguments, and shares compatible custom uniform vector prefixes across stages. Synthetic media events/artwork and asset inspection options added to the offscreen probe. Regression coverage in Swift, bridge, shader and C++ tests.",
   "project": "WallpaperMachine",

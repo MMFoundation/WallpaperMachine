@@ -1,12 +1,16 @@
+#[cfg(feature = "codespan")]
+use alloc::vec;
 use alloc::{
     borrow::Cow,
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 
+#[cfg(feature = "codespan")]
 use codespan_reporting::diagnostic::{Diagnostic, Label};
+#[cfg(feature = "codespan")]
 use codespan_reporting::files::SimpleFile;
+#[cfg(feature = "codespan")]
 use codespan_reporting::term;
 use pp_rs::token::PreprocessorError;
 use thiserror::Error;
@@ -14,7 +18,9 @@ use thiserror::Error;
 use super::token::TokenValue;
 #[cfg(feature = "stderr")]
 use crate::error::ErrorWrite;
-use crate::{error::replace_control_chars, SourceLocation};
+#[cfg(feature = "codespan")]
+use crate::error::replace_control_chars;
+use crate::SourceLocation;
 use crate::{proc::ConstantEvaluatorError, Span};
 
 fn join_with_comma(list: &[ExpectedToken]) -> String {
@@ -205,10 +211,12 @@ impl ParseErrors {
         }
     }
 
+    #[cfg(feature = "codespan")]
     pub fn emit_to_string(&self, source: &str) -> String {
         self.emit_to_string_with_path(source, "glsl")
     }
 
+    #[cfg(feature = "codespan")]
     pub fn emit_to_string_with_path(&self, source: &str, path: &str) -> String {
         let path = path.to_string();
         let files = SimpleFile::new(path, replace_control_chars(source));
@@ -224,6 +232,7 @@ impl ParseErrors {
         writer.into_string()
     }
 
+    #[cfg(feature = "codespan")]
     fn make_diagnostic(err: &Error) -> Diagnostic<()> {
         let mut diagnostic = Diagnostic::error().with_message(err.kind.to_string());
         if let Some(range) = err.meta.to_range() {
