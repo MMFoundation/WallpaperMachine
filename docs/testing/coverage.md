@@ -755,11 +755,23 @@ need an authorized runtime check
   trusted over them; a file whose bytes show none is named by its extension), codec names, and
   the rule: a playable clip with a video track is supported, AV1 is refused without hardware
   decode and named as AV1, a file nothing opens (or with no video track) is refused with its
-  container and codec named, Matroska and WebM that AVFoundation cannot open are left to the
-  scene engine, an unreadable file refuses nothing; real files: an H.264 clip supported, garbage
-  named by its extension, an audio-only file refused, Matroska left alone. `WallpaperActivationRecoveryTests`
+  container and codec named, Matroska and WebM that AVFoundation cannot open are tried with the
+  app's own reader (playable ones are `supportedWebM` and keep their opened file for the surface, the
+  rest are left to the scene engine), an unreadable file refuses nothing; real files: an H.264 clip supported, garbage
+  named by its extension, an audio-only file refused, H.264 in Matroska supported by the WebM player, VP8 left to the scene engine. `WallpaperActivationRecoveryTests`
   checks Apply, Apply changes and an AV1 verdict refuse before the renderer is reached with the
   format named, and the same wallpaper applies once its file plays.
+- `WebMOpeningTests` — the WebM reader through Swift: the properties of a VP9 file, the sample
+  buffers (decode order, key frames, seeking), Opus audio as float buffers, VP8 named and refused, junk
+  and a cut-off file and a missing file told apart, and the poster. `WebMPlayerTests` — the feeder over
+  recording sinks (the wrap at the end with time continuing, one pass of audio cut where the picture
+  wraps, repositioning to the key frame before a time and dropping sound the clock has passed, a turned
+  clip's axes), and the player on a layer that is not in a window: first picture, running and looping,
+  pause and resume, start paused, a restart that spends its allowance, an upright poster, a decoder
+  that refuses the frames. `WebMVideoWallpaperWindowTests` — the desktop surface for WebM: ready and
+  playing, user pause and suspension as separate reasons, the scaling choice and position moving the
+  picture, a file that cannot be opened failing as a verdict (held until a handler arrives), a window
+  opening its own file, the poster at the display's size, stopping.
 - `NativeVideoWallpaperHostTests` — startup waits for surface readiness, refused
   wallpapers are handed back to the scene engine with their reason, a format nothing can play
   is not handed back (no window, no rejection, the failure and its message in the wallpaper's

@@ -225,17 +225,47 @@ final class VideoFormatSupportTests: XCTestCase {
         }
     }
 
-    func testMatroskaIsLeftToTheSceneEngine() async throws {
+    func testMatroskaTheOwnPlayerPlaysIsSupportedAndItsFileIsKeptForTheSurface() async throws {
         let url = try SyntheticVideoFixture.writeMatroska(name: "clip", into: directory)
+        WebMOpenedFiles.shared.removeAll()
+        let verdict = await VideoFormatSupport.inspect(url: url)
+        XCTAssertEqual(verdict, .supportedWebM, "AVFoundation does not open Matroska; the app's own player does")
+        XCTAssertNotNil(WebMOpenedFiles.shared.file(for: url), "the surface takes the file the check opened")
+        let refusal = await VideoFormatSupport.refusal(url: url)
+        XCTAssertNil(refusal, "nothing is refused or handed to the scene engine")
+        XCTAssertTrue(VideoFormatSupport.isMatroska(url))
+    }
+
+    func testAWebMFileWithACodecNobodyPlaysIsStillLeftToTheSceneEngine() async throws {
+        let url = directory.appendingPathComponent("vp8.webm")
+        try WebMFixture.vp8.write(to: url)
         let verdict = await VideoFormatSupport.inspect(url: url)
         guard case let .sceneEngineOnly(format) = verdict else {
-            return XCTFail("Matroska must not be refused while the scene engine plays it, got \(verdict)")
+            return XCTFail("VP8 is not played by the app's player yet, got \(verdict)")
         }
-        XCTAssertEqual(format.container, "Matroska")
+        XCTAssertEqual(format.container, "WebM")
         let refusal = await VideoFormatSupport.refusal(url: url)
         guard case .notPlayable? = refusal else {
             return XCTFail("the host hands it to the scene engine, got \(String(describing: refusal))")
         }
+    }
+
+    func testTheOpenedFilesAreKeyedByTheFileAndForgetAChangedOne() throws {
+        let url = directory.appendingPathComponent("a.webm")
+        try WebMFixture.vp9.write(to: url)
+        guard case .success(let file) = WebMOpening.open(url: url) else { return XCTFail("must open") }
+        let cache = WebMOpenedFiles()
+        cache.store(file, for: url)
+        XCTAssertTrue(cache.file(for: url) === file)
+        try WebMFixture.vp9Opus.write(to: url)
+        XCTAssertNil(cache.file(for: url), "a file that changed on disk is another entry")
+        for index in 0..<(WebMOpenedFiles.capacity + 2) {
+            let other = directory.appendingPathComponent("o\(index).webm")
+            try WebMFixture.vp9.write(to: other)
+            cache.store(file, for: other)
+        }
+        XCTAssertNil(cache.file(for: directory.appendingPathComponent("o0.webm")), "the oldest entries go")
+        XCTAssertNotNil(cache.file(for: directory.appendingPathComponent("o\(WebMOpenedFiles.capacity + 1).webm")))
     }
 
     func testAMissingFileIsNotReportedAsAFormat() async {

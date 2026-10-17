@@ -130,6 +130,18 @@ final class NativeVideoWallpaperHost {
         }
         let sharedCounters = counters ?? .shared
         self.makeSurface = makeSurface ?? { url, frame, surface, paused in
+            // AVFoundation plays what it opens; Matroska and WebM, which it never does, go to the
+            // app's own player. The format check opened the file and kept it for this.
+            if let file = WebMOpenedFiles.shared.file(for: url) {
+                return WebMVideoWallpaperWindow(
+                    frame: frame, url: url, file: file, surface: surface, counters: sharedCounters,
+                    paused: paused)
+            }
+            if VideoFormatSupport.isMatroska(url) {
+                return WebMVideoWallpaperWindow(
+                    frame: frame, url: url, file: nil, surface: surface, counters: sharedCounters,
+                    paused: paused)
+            }
             let player = NativeVideoPlayer(
                 surface: surface, counters: sharedCounters, paused: paused)
             let window = NativeVideoWallpaperWindow(frame: frame, player: player)

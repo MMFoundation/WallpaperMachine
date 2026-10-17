@@ -93,6 +93,24 @@ final class NativeVideoWallpaperWindow: NSWindow {
     init(frame: NSRect, player: NativeVideoPlayer) {
         self.player = player
         super.init(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
+        configureAsDesktopVideoWindow()
+        let container = NativeVideoContainerView(frame: NSRect(origin: .zero, size: frame.size))
+        container.player = player
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.black.cgColor
+        container.autoresizesSubviews = true
+        contentView = container
+        player.attach(to: container)
+    }
+
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
+extension NSWindow {
+    /// What every window that carries a plain video on the desktop shares: a borderless window at
+    /// the desktop level that follows the Spaces, takes no input and cannot be hidden with the app.
+    func configureAsDesktopVideoWindow() {
         isReleasedWhenClosed = false
         level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)))
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
@@ -107,17 +125,7 @@ final class NativeVideoWallpaperWindow: NSWindow {
         isExcludedFromWindowsMenu = true
         animationBehavior = .none
         backgroundColor = .black
-        let container = NativeVideoContainerView(frame: NSRect(origin: .zero, size: frame.size))
-        container.player = player
-        container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor.black.cgColor
-        container.autoresizesSubviews = true
-        contentView = container
-        player.attach(to: container)
     }
-
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
 }
 
 extension NativeVideoWallpaperWindow: NativeVideoSurface {
@@ -195,6 +203,8 @@ extension NativeVideoWallpaperWindow: NativeVideoSurface {
 /// must not show the picture at the old display's geometry until it is.
 final class NativeVideoContainerView: NSView {
     weak var player: NativeVideoPlayer?
+    /// Another kind of player's way of hearing about the same changes.
+    var onLayout: ((CGRect, CGFloat) -> Void)?
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -212,7 +222,9 @@ final class NativeVideoContainerView: NSView {
     }
 
     private func relayoutPlayer() {
-        player?.relayout(bounds: bounds, backingScale: window?.backingScaleFactor ?? 1)
+        let scale = window?.backingScaleFactor ?? 1
+        player?.relayout(bounds: bounds, backingScale: scale)
+        onLayout?(bounds, scale)
     }
 }
 

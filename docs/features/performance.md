@@ -694,10 +694,13 @@ file's first bytes (MP4, MOV, WebM, Matroska, AVI, Ogg, WMV, FLV, MPEG; the file
 extension only names a file whose bytes show none), and refuses AV1 on a Mac with no
 hardware AV1 decoder, with its own message, because software AV1 decoding of a
 wallpaper that runs all day is a cost the app does not take on. Two cases are not
-refused: Matroska and WebM that AVFoundation cannot open stay with the scene engine
-(**In use now** says so), because the app has no WebM player of its own yet and that
-is where they play, H.264 in Matroska included; and a file that could not be read
-at that moment (a busy volume, a file still being written) says nothing about its
+refused: Matroska and WebM, which AVFoundation never opens, are opened with the app's
+own reader and played by the WebM player (below) when it plays them (H.264, HEVC and
+VP9 in them, and AV1 on a Mac with hardware AV1 decoding), and the ones it does not
+play (VP8, AV1 without hardware decoding, 4:2:2 or 4:4:4 pictures, an encrypted track,
+a damaged file) stay with the scene engine for now (**In use now** says so); and a file
+that could not be read at that moment (a busy volume, a file still being written) says
+nothing about its
 format, so the apply goes on and the native host tries it. Importing never checks the
 format: an `avi` or an AV1 file is imported and refused only when it is applied.
 Decoder failures after this check still go through the engine's apply recovery.
@@ -708,6 +711,28 @@ config) is not handed to the scene engine either. The display keeps the picture 
 had, no window covers it, and the wallpaper's state in the panel reads **Wallpaper
 could not load** with the same message. The verdict is kept under the file's key, so
 the file is not read again until it changes, and a replaced file is judged afresh.
+
+**WebM and Matroska.** AVFoundation does not open them, so the desktop plays them with
+`WebMPlayer` (`Shared/WebMPlayer.swift`) in a window of its own (`WebMVideoWallpaperWindow`,
+`MWEWebMVideoDesktopWindow`). The project's own Matroska reader (see
+[container readers](../container-readers.md)) hands compressed samples to an
+`AVSampleBufferDisplayLayer`, and the system decodes and shows them (VP9 through
+VideoToolbox's supplemental decoder), so the process does no per-frame work beyond feeding
+the next sample when the renderer asks for it. The picture and the sound run on one
+`AVSampleBufferRenderSynchronizer`. A loop is gapless by timestamps: at the end of the
+file the reader goes back to the first key frame and its times rise by one duration, so
+the clock runs on with no flush; the sound wraps the same way and is cut where the picture
+wraps. A single-frame file is shown and held. Opus, Vorbis, AAC and MP3 are played (Opus
+above stereo and more than two channels in the others are left out, with a log line); the
+sound follows the wallpaper's volume and mute. The player handles scaling, scale factor,
+position and the file's own orientation with the same layout rule as the AVFoundation
+player, pauses by stopping the clock (the renderers fill and stop asking for samples), and
+keeps a poster for the desktop-picture sync from one decoded key frame. Its health check
+(after a wake, a session change or a pause of five seconds or more) compares the clock with
+the renderer's frame count and, when pictures stopped, flushes and feeds again from where the
+clock is, at most as often as the recovery allowance permits, before reporting the clip
+unplayable. The renderer asking to be flushed (the system took the decoder back) restarts the
+feed the same way, and so does the system flushing the sound when the output device changes.
 
 A clip on the native player plays at **its own frame rate**. An `AVPlayerLayer` cannot
 be capped without copying every frame through the CPU, so the frame-rate limit

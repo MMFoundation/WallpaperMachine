@@ -411,10 +411,12 @@ describes what should happen and the log lines to read afterwards.
 - [ ] Switch from a scene to a native clip, and from a clip to a scene: the system picture may
       show for as long as the clip's metadata read takes after a scene (the engine closes the
       scene's window first); a clip to a scene behaves like any scene switch.
-- [ ] Apply a WebM or Matroska video that macOS cannot open (the native backend refuses it
-      and the scene engine plays it): the held picture stays until the scene engine's
-      fallback has drawn, the log has `veil on scene layer` and `released ... (scene first
-      frame)`, and no clip window appears.
+- [ ] Apply a VP9 WebM or an H.264 Matroska video (macOS cannot open them; the app's own WebM
+      player plays them): the clip's window appears like any other native clip's, the held picture
+      goes when its first frame is ready, it loops without a visible or audible seam, pause and
+      volume follow the controls, and a WebM with Opus or Vorbis sound is heard. A VP8 WebM
+      still goes to the scene engine (the held picture stays until its fallback has drawn, the
+      log has `veil on scene layer` and `released ... (scene first frame)`, no clip window).
 - [ ] Apply a clip stored on a slow or sleeping external drive: the old clip keeps playing
       through the read. If the read outlasts 8 seconds the clip's window opens without a
       picture over it and the log says `no window took it`.

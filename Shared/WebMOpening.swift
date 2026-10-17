@@ -54,3 +54,48 @@ enum WebMOpening {
     }
   }
 }
+
+/// Files opened to judge a wallpaper, kept for the surface that plays them, so a file the format check
+/// has just indexed is not indexed again. A handful at most, each tied to the file's size and
+/// modification time: a file that changed on disk is a different entry.
+final class WebMOpenedFiles: @unchecked Sendable {
+  static let shared = WebMOpenedFiles()
+  static let capacity = 4
+
+  private struct Key: Hashable {
+    var path: String
+    var size: Int64
+    var modified: TimeInterval
+  }
+
+  private let lock = NSLock()
+  private var entries: [(key: Key, file: WebMFile)] = []
+
+  private func key(for url: URL) -> Key? {
+    // A URL caches what it read; the file may have changed since.
+    var fresh = url
+    fresh.removeAllCachedResourceValues()
+    guard let values = try? fresh.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+      let size = values.fileSize
+    else { return nil }
+    return Key(
+      path: url.standardizedFileURL.path, size: Int64(size),
+      modified: values.contentModificationDate?.timeIntervalSince1970 ?? 0)
+  }
+
+  func store(_ file: WebMFile, for url: URL) {
+    guard let key = key(for: url) else { return }
+    lock.withLock {
+      entries.removeAll { $0.key == key }
+      entries.append((key, file))
+      if entries.count > Self.capacity { entries.removeFirst(entries.count - Self.capacity) }
+    }
+  }
+
+  func file(for url: URL) -> WebMFile? {
+    guard let key = key(for: url) else { return nil }
+    return lock.withLock { entries.last { $0.key == key }?.file }
+  }
+
+  func removeAll() { lock.withLock { entries.removeAll() } }
+}

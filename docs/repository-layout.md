@@ -46,8 +46,9 @@ App/                               WallpaperMachine application target sources o
                                    (InstanceLock, SingleInstance)
     Localization/                  AppLanguage.swift: shipped-language registry and the language preference store
     LockScreen/                    lock-screen selection overrides, extension registration and configuration publishing
-    NativeVideo/                   AVFoundation video backend: player and host window, and the format
-                                   check Apply uses (the admission rule and the layout rules are in Shared/)
+    NativeVideo/                   native video backend: the AVFoundation player and the WebM player's window, the
+                                   host, and the format check Apply uses (the admission rule, the layout rules
+                                   and the WebM player itself are in Shared/)
     Pixiv/                         pixiv browsing, sign-in session, downloads and still-wallpaper packaging
     Playlist/                      per-display playlists: model, planner, store and the scheduler that switches wallpapers
     Preview/                       isolated live preview inputs, lifecycle, WebKit and scene/video surfaces
@@ -82,7 +83,8 @@ Extension/                         WallpaperMachineExtension sources, Info.plist
 Shared/                            contracts compiled into both targets: lock-screen configuration, status and surface
                                    lifecycle, web-wallpaper protocol and screen-saver surface, RuntimeCounters,
                                    WallpaperPresentationAuthority, display power and its re-check burst,
-                                   the native video admission and layout rules, and the lock-screen
+                                   the native video admission and layout rules, the WebM player and its
+                                   opening (WebMPlayer, WebMOpening), the recovery budget, and the lock-screen
                                    video planner and player
 Resources/StarterWallpaper/        bundled sample wallpaper (Aurora.mp4, preview.jpg, project.json)
 Resources/ReleaseBanners/          bundled release banners, x.y.z.jpg and x.y.z.zh-Hans.jpg (or .png), shown by What's New and the release page
