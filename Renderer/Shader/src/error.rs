@@ -35,6 +35,26 @@ impl FailedDiagnostic {
     }
 }
 
+/// The class of a failure (D section 5): the distinctions the callers and the tests rely on,
+/// whatever the variant that carries the facts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ErrorCategory {
+    /// The request, or a program-level rule about it, is violated.
+    InvalidRequest,
+    /// An include file could not be read.
+    SourceRead,
+    /// Includes, conditionals or macros of a stage.
+    Preprocess,
+    /// A rule found by the dialect conversion, the legalizer or the cross-stage analysis.
+    Legalization,
+    /// The downstream compiler's front end, validation or Metal writer failed.
+    Compile,
+    /// A translated module cannot be described, or does not fit the host's tables.
+    Reflection,
+    /// A bug-induced panic caught at the boundary.
+    Internal,
+}
+
 /// Why a compile failed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ShaderError {
@@ -57,6 +77,39 @@ pub enum ShaderError {
 }
 
 impl ShaderError {
+    /// The class of this failure.
+    pub fn category(&self) -> ErrorCategory {
+        use crate::diagnostic::Pass;
+        match self {
+            ShaderError::Request(_) | ShaderError::Uniform(_) | ShaderError::NonFiniteDefault { .. } => {
+                ErrorCategory::InvalidRequest
+            }
+            ShaderError::Include(_) => ErrorCategory::SourceRead,
+            ShaderError::Source { failures, .. } => {
+                match failures.first().and_then(|f| f.diagnostic.pass) {
+                    Some(Pass::Preprocess) => ErrorCategory::Preprocess,
+                    Some(Pass::Parse | Pass::Legalize | Pass::Codegen) | None => ErrorCategory::Legalization,
+                    Some(Pass::GlslParse | Pass::Validate | Pass::MslWrite) => ErrorCategory::Compile,
+                    Some(Pass::Binding | Pass::Reflection) => ErrorCategory::Reflection,
+                }
+            }
+            ShaderError::NoEntryPoint { .. } => ErrorCategory::Compile,
+            ShaderError::Binding(_) | ShaderError::Reflection(_) => ErrorCategory::Reflection,
+            ShaderError::Internal { .. } => ErrorCategory::Internal,
+        }
+    }
+
+    /// Fills in the shader name of a source failure that does not carry one yet, so the
+    /// rendered text names it (2.4).
+    pub fn named(mut self, name: &str) -> ShaderError {
+        if let ShaderError::Source { shader_name, .. } = &mut self
+            && shader_name.is_none()
+        {
+            *shader_name = Some(name.to_string());
+        }
+        self
+    }
+
     /// A failure made of diagnostics, tagged with the shader's normalised name.
     pub fn source_failure(shader_name: &str, failures: Vec<FailedDiagnostic>) -> ShaderError {
         ShaderError::Source { shader_name: Some(shader_name.to_string()), failures }

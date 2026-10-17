@@ -14,6 +14,9 @@ use crate::error::{FailedDiagnostic, ShaderError};
 use crate::request::{RequestError, StageKind};
 use crate::uniforms::UniformError;
 
+/// The origin label of a cross-stage interface failure (D R10, R13).
+pub const CROSS_STAGE_ORIGIN: &str = "cross-stage interface check";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LegalizeError {
     /// A stage-local legalisation error (codegen pass).
@@ -42,7 +45,7 @@ impl LegalizeError {
     }
 
     pub(crate) fn cross_stage(kind: StageKind, span: Option<Range<usize>>, message: impl Into<String>) -> LegalizeError {
-        LegalizeError::CrossStage(diagnostic(kind, span, message.into()))
+        LegalizeError::CrossStage(diagnostic(kind, span, message.into()).in_origin(CROSS_STAGE_ORIGIN))
     }
 
     pub(crate) fn request(message: impl Into<String>) -> LegalizeError {

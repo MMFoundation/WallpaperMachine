@@ -206,8 +206,8 @@ mod tests {
     #[test]
     fn the_stage_payload_has_the_required_keys_in_order() {
         let bindings = vec![
-            Binding::for_resource("g_Texture0", 0, Some(0), SlotKind::Texture).unwrap(),
-            Binding::for_resource("GlobalUniforms", 0, Some(1), SlotKind::Buffer).unwrap(),
+            Binding { name: "g_Texture0".into(), set: 0, binding: 0, slot_kind: SlotKind::Texture, slot: 0 },
+            Binding { name: "GlobalUniforms".into(), set: 0, binding: 1, slot_kind: SlotKind::Buffer, slot: 1 },
         ];
         let payload = StagePayload::new(StageKind::Fragment, "msl".into(), "main0".into(), bindings);
         let text = payload.to_json();

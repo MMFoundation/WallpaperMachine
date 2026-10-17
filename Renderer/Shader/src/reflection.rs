@@ -15,18 +15,21 @@ use crate::names::{MAX_TEXTURE_SLOT, SlotName, classify_slot_name};
 use crate::request::StageKind;
 use crate::text::{quote, sanitize};
 
-/// Highest resource index and vertex location of the response schema as shipped (R36).
+/// Limits of the reflection model (D R61): descriptor set, resource index and vertex location.
+/// The vertex location stops at 30 because the host's vertex descriptor has attributes 0 to 30.
+pub const MAX_DESCRIPTOR_SET: u32 = 3;
 pub const MAX_RESOURCE_INDEX: u32 = 31;
-pub const MAX_VERTEX_LOCATION: u32 = 31;
+pub const MAX_VERTEX_LOCATION: u32 = 30;
 
-/// The descriptor kinds of the vocabulary. The order is the sort order of R43.
+/// The descriptor kinds of the vocabulary. The order is the sort order of the merged
+/// descriptor list (D R33): alphabetical by the snake_case label.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DescriptorKind {
-    UniformBuffer,
-    SampledImage,
     /// Part of the vocabulary; the layer never emits it (R42).
     CombinedImageSampler,
+    SampledImage,
     Sampler,
+    UniformBuffer,
 }
 
 impl DescriptorKind {
@@ -236,6 +239,21 @@ pub enum ReflectionError {
     ConflictingBlock { name: String, set: u32, binding: u32 },
     NonCanonicalTexture { name: String },
     TextureSlotOutOfRange { name: String, slot: u32 },
+    /// A used resource whose descriptor kind the document cannot express (a storage buffer or
+    /// a storage texture), D R55.
+    UnsupportedDescriptor { name: String, set: u32, binding: u32, what: String },
+    /// A vertex input whose type has no vertex format (D R59).
+    UnsupportedVertexInput { name: String, ty: String },
+    /// A name that is not an ASCII identifier (D R61): `what` says whose name it is.
+    InvalidSymbol { what: &'static str, name: String },
+    /// A uniform global that cannot be described as a block (D R56).
+    UnusableBlock { name: String, reason: String },
+    /// A descriptor set above the model's limit (D R61).
+    SetOutOfRange { name: String, set: u32 },
+    /// The module has no entry point of the stage that is being reflected.
+    NoEntryPoint { stage: &'static str },
+    /// The module is not valid, so no usage information exists (D R53).
+    Validation { message: String },
 }
 
 impl fmt::Display for ReflectionError {
@@ -260,8 +278,36 @@ impl fmt::Display for ReflectionError {
             ReflectionError::NonCanonicalTexture { name } => {
                 format!("{} is not a canonical g_TextureN binding name", quote(name))
             }
-            ReflectionError::TextureSlotOutOfRange { name, slot } => format!(
-                "texture {} names slot {slot}, outside the supported range 0 to {MAX_TEXTURE_SLOT}",
+            ReflectionError::TextureSlotOutOfRange { name, slot } if *slot <= 255 => format!(
+                "texture {} names slot {slot}, outside shader model limits (slots 0 to {MAX_TEXTURE_SLOT})",
+                quote(name)
+            ),
+            ReflectionError::TextureSlotOutOfRange { name, .. } => format!(
+                "texture {} has an invalid slot suffix: the number does not fit a byte",
+                quote(name)
+            ),
+            ReflectionError::UnsupportedDescriptor { name, set, binding, what } => format!(
+                "used resource {} (set {set}, binding {binding}) has an unsupported descriptor kind: {what}",
+                quote(name)
+            ),
+            ReflectionError::UnsupportedVertexInput { name, ty } => format!(
+                "vertex input {} has type {}, which no vertex format can carry (32-bit float, signed or unsigned integer scalars and 2 to 4 component vectors are supported)",
+                quote(name),
+                quote(ty)
+            ),
+            ReflectionError::InvalidSymbol { what, name } => format!(
+                "{what} name {} is not a usable symbol: it must be a non-empty ASCII identifier",
+                quote(name)
+            ),
+            ReflectionError::UnusableBlock { name, reason } => {
+                format!("uniform global {} cannot be reflected as a block: {reason}", quote(name))
+            }
+            ReflectionError::NoEntryPoint { stage } => {
+                format!("the module has no {stage} entry point to reflect")
+            }
+            ReflectionError::Validation { message } => format!("the module cannot be reflected: {message}"),
+            ReflectionError::SetOutOfRange { name, set } => format!(
+                "reflected resource metadata is outside shader model limits: resource {} is in set {set}, above the highest set {MAX_DESCRIPTOR_SET}",
                 quote(name)
             ),
         };
@@ -285,17 +331,40 @@ pub fn active_slot_for_texture(name: &str) -> Result<Option<u8>, ReflectionError
 }
 
 impl Reflection {
-    /// R36: used resources and vertex inputs must fit the schema's index limits.
+    /// R36 and D R61: used resources and vertex inputs must fit the model's limits, and the
+    /// names of descriptors, blocks, members and inputs must be usable symbols.
     pub fn check_limits(&self) -> Result<(), ReflectionError> {
+        use crate::names::is_valid_resource_name;
+        let symbol = |what: &'static str, name: &str| {
+            if is_valid_resource_name(name) {
+                Ok(())
+            } else {
+                Err(ReflectionError::InvalidSymbol { what, name: name.to_string() })
+            }
+        };
         for d in &self.descriptor_bindings {
+            symbol("descriptor", &d.name)?;
+            if d.set > MAX_DESCRIPTOR_SET {
+                return Err(ReflectionError::SetOutOfRange { name: d.name.clone(), set: d.set });
+            }
             if d.binding > MAX_RESOURCE_INDEX {
                 return Err(ReflectionError::OutsideLimits { name: d.name.clone(), set: d.set, index: d.binding });
             }
         }
         for b in &self.uniform_blocks {
+            symbol("uniform block", &b.name)?;
+            for m in &b.members {
+                symbol("block member", &m.name)?;
+            }
+            if b.set > MAX_DESCRIPTOR_SET {
+                return Err(ReflectionError::SetOutOfRange { name: b.name.clone(), set: b.set });
+            }
             if b.binding > MAX_RESOURCE_INDEX {
                 return Err(ReflectionError::OutsideLimits { name: b.name.clone(), set: b.set, index: b.binding });
             }
+        }
+        for v in &self.vertex_inputs {
+            symbol("vertex input", &v.name)?;
         }
         for v in &self.vertex_inputs {
             if v.location > MAX_VERTEX_LOCATION {
@@ -315,7 +384,7 @@ impl Reflection {
     pub fn merge(parts: &[Reflection]) -> Result<Reflection, ReflectionError> {
         let mut descriptors: BTreeMap<(u32, u32, DescriptorKind, &str), DescriptorBinding> = BTreeMap::new();
         let mut blocks: BTreeMap<(u32, u32, &str), &UniformBlock> = BTreeMap::new();
-        let mut inputs: BTreeMap<(u32, &str), VertexInput> = BTreeMap::new();
+        let mut inputs: BTreeMap<u32, VertexInput> = BTreeMap::new();
         let mut slots = BTreeSet::new();
 
         for part in parts {
@@ -344,7 +413,7 @@ impl Reflection {
                 }
             }
             for v in &part.vertex_inputs {
-                inputs.entry((v.location, v.name.as_str())).or_insert_with(|| v.clone());
+                inputs.entry(v.location).or_insert_with(|| v.clone());
             }
             slots.extend(part.active_texture_slots.iter().copied());
         }
@@ -461,9 +530,9 @@ mod tests {
             order,
             [
                 ("c", 0, DescriptorKind::SampledImage),
-                ("a", 1, DescriptorKind::UniformBuffer),
                 ("a", 1, DescriptorKind::SampledImage),
                 ("b", 1, DescriptorKind::Sampler),
+                ("a", 1, DescriptorKind::UniformBuffer),
                 ("z", 2, DescriptorKind::Sampler),
             ]
         );
@@ -540,12 +609,43 @@ mod tests {
     }
 
     #[test]
-    fn vertex_location_above_31_fails_and_names_the_limit() {
-        let r = Reflection { vertex_inputs: vec![input("a_Far", 32)], ..Reflection::default() };
+    fn vertex_location_above_30_fails_and_names_the_limit() {
+        let r = Reflection { vertex_inputs: vec![input("a_Far", 31)], ..Reflection::default() };
         let text = Reflection::merge(&[r]).unwrap_err().to_string();
-        assert!(text.contains("location index 32") && text.contains("out of range") && text.contains("31"), "{text}");
+        assert!(text.contains("location index 31") && text.contains("out of range") && text.contains("30"), "{text}");
         assert!(text.contains("`a_Far`"));
-        assert!(Reflection::merge(&[Reflection { vertex_inputs: vec![input("a_Edge", 31)], ..Reflection::default() }]).is_ok());
+        assert!(Reflection::merge(&[Reflection { vertex_inputs: vec![input("a_Edge", 30)], ..Reflection::default() }]).is_ok());
+    }
+
+    #[test]
+    fn the_first_stage_that_lists_a_location_wins() {
+        let a = Reflection { vertex_inputs: vec![input("a_First", 2)], ..Reflection::default() };
+        let b = Reflection { vertex_inputs: vec![input("a_Second", 2), input("a_Other", 0)], ..Reflection::default() };
+        let merged = Reflection::merge(&[a, b]).unwrap();
+        let names: Vec<&str> = merged.vertex_inputs.iter().map(|v| v.name.as_str()).collect();
+        assert_eq!(names, ["a_Other", "a_First"]);
+    }
+
+    #[test]
+    fn symbol_names_and_sets_are_checked() {
+        let bad = |name: &str| Reflection {
+            descriptor_bindings: vec![desc(name, 0, DescriptorKind::SampledImage, StageMask::FRAGMENT)],
+            ..Reflection::default()
+        };
+        for name in ["", "1x", "a-b", "é"] {
+            let text = Reflection::merge(&[bad(name)]).unwrap_err().to_string();
+            assert!(text.contains("not a usable symbol"), "{name:?}: {text}");
+        }
+        assert!(Reflection::merge(&[bad("a.b")]).is_ok());
+        let mut far = desc("u_Far", 0, DescriptorKind::SampledImage, StageMask::FRAGMENT);
+        far.set = 3;
+        assert!(Reflection::merge(&[Reflection { descriptor_bindings: vec![far.clone()], ..Reflection::default() }]).is_ok());
+        far.set = 4;
+        let text = Reflection::merge(&[Reflection { descriptor_bindings: vec![far], ..Reflection::default() }]).unwrap_err().to_string();
+        assert!(text.contains("model limits") && text.contains("set 4"), "{text}");
+        let mut member_block = block("GlobalUniforms", 0, 0);
+        member_block.members[0].name = "u bad".into();
+        assert!(Reflection::merge(&[Reflection { uniform_blocks: vec![member_block], ..Reflection::default() }]).is_err());
     }
 
     #[test]
@@ -559,8 +659,9 @@ mod tests {
         let text = active_slot_for_texture("g_Texture007").unwrap_err().to_string();
         assert!(text.contains("not a canonical g_TextureN binding name"), "{text}");
         let text = active_slot_for_texture("g_Texture40").unwrap_err().to_string();
-        assert!(text.contains("g_Texture40") && text.contains("40") && text.contains("31"), "{text}");
-        assert!(active_slot_for_texture("g_Texture300").is_err());
+        assert!(text.contains("g_Texture40") && text.contains("40") && text.contains("model limits"), "{text}");
+        let text = active_slot_for_texture("g_Texture300").unwrap_err().to_string();
+        assert!(text.contains("g_Texture300") && text.contains("slot suffix") && !text.contains("model limits"), "{text}");
     }
 
     #[test]

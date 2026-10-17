@@ -192,11 +192,11 @@ pub(crate) fn is_sampler_like(ty: &str) -> bool {
 
 fn literal_count(e: &Expr) -> Option<u32> {
     let ExprKind::Number(t) = &e.peel().kind else { return None };
-    let digits = t.trim_end_matches(['u', 'U']);
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+    // A decimal integer literal: a suffix (`3u`), a prefix (`0x4`) or a fraction (`2.0`) is not one.
+    if t.is_empty() || !t.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    let n: u64 = digits.parse().ok()?;
+    let n: u64 = t.parse().ok()?;
     (n > 0).then(|| u32::try_from(n).ok()).flatten()
 }
 
@@ -384,12 +384,22 @@ fn classify(out: &mut StageDecls, index: usize, d: &VarDecl) -> Result<(), Legal
 }
 
 impl StageDecls {
-    /// The interface array bounds that are not resolved to a positive literal (R39).
-    pub fn check_interface_bounds(&self) -> Result<(), LegalizeError> {
+    /// The interface array bounds that are not resolved to a positive literal (R39). `source` is
+    /// the text of the stage the declarations were read from: the message quotes the bound as it
+    /// is written there.
+    pub fn check_interface_bounds(&self, source: &str) -> Result<(), LegalizeError> {
         for d in self.inputs.iter().chain(&self.outputs) {
             if let Bound::Bad(text) = &d.bound {
+                let written = written_bound(source, d);
+                let shown = match &written {
+                    Some(w) if w.split_whitespace().collect::<String>() != text.split_whitespace().collect::<String>() => {
+                        format!("`[{w}]` (read as `[{text}]`)")
+                    }
+                    Some(w) => format!("`[{w}]`"),
+                    None => format!("`[{text}]`"),
+                };
                 return Err(LegalizeError::request(format!(
-                    "unsupported stage-interface array bound `[{text}]` on `{}` in the {} stage: an interface array is sized by a positive decimal integer literal, or by a macro whose value at that declaration is one",
+                    "unsupported stage-interface array bound {shown} on `{}` in the {} stage: an interface array is sized by a positive decimal integer literal, or by a macro whose value at that declaration is one",
                     d.author,
                     self.kind.name()
                 )));
@@ -397,4 +407,26 @@ impl StageDecls {
         }
         Ok(())
     }
+}
+
+/// The text between the brackets of the declaration `d` as written in `source`.
+fn written_bound(source: &str, d: &IfaceDecl) -> Option<String> {
+    let decl = source.get(d.span.clone())?;
+    let name_at = decl.find(d.author.as_str())?;
+    let rest = &decl[name_at + d.author.len()..];
+    let open = rest.find('[')?;
+    let mut depth = 0usize;
+    for (i, c) in rest[open..].char_indices() {
+        match c {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(rest[open + 1..open + i].trim().to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }

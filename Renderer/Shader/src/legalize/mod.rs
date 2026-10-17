@@ -171,10 +171,10 @@ pub fn legalize(input: &ProgramInput<'_>) -> Result<LegalProgram, LegalizeError>
     }
     let standalone = parsed.len() == 1;
     if standalone {
-        collect(&parsed[0].module, parsed[0].kind)?.check_interface_bounds()?;
+        collect(&parsed[0].module, parsed[0].kind)?.check_interface_bounds(&parsed[0].text)?;
     } else {
         let (v, f) = parsed.split_at_mut(1);
-        reconcile(&mut v[0].module, &mut f[0].module)?;
+        reconcile(&mut v[0].module, &mut f[0].module, &v[0].text, &f[0].text)?;
     }
 
     // Convert (C1), then classify what the converted stages declare.

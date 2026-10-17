@@ -418,9 +418,41 @@ impl<'a> Parser<'a> {
         if self.eat_op(Operator::RBracket) {
             return Ok(None);
         }
+        let first = self.pos;
         let e = self.assign()?;
+        if self.at_op(Operator::RBracket) {
+            self.pos += 1;
+            return Ok(Some(e));
+        }
+        // Something the grammar cannot place follows the expression (`0x4` lexes as `0` then
+        // `x4`): everything up to the closing bracket is kept as one opaque expression, written as
+        // it was in the source, so the declaration survives and its bound can be named in a message.
+        let mut depth = 0usize;
+        let mut end = self.pos;
+        while let Some(t) = self.toks.get(end) {
+            if t.is_operator(Operator::LBracket) {
+                depth += 1;
+            } else if t.is_operator(Operator::RBracket) {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            }
+            end += 1;
+        }
+        let mut text = String::new();
+        let mut previous_end = None;
+        for t in &self.toks[first..end.min(self.toks.len())] {
+            if previous_end.is_some_and(|p| t.start > p) {
+                text.push(' ');
+            }
+            text.push_str(&t.text);
+            previous_end = Some(t.end);
+        }
+        let span = self.toks[first].start..self.toks[end.min(self.toks.len()) - 1].end;
+        self.pos = end;
         self.expect_op(Operator::RBracket)?;
-        Ok(Some(e))
+        Ok(Some(Expr::new(ExprKind::Opaque(text), span)))
     }
 
     fn declarators(&mut self, allow_init: bool) -> PResult<Vec<Declarator>> {

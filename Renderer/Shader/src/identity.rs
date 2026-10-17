@@ -30,9 +30,11 @@ pub const MSL_LANGUAGE_VERSION: &str = "2.0";
 /// (all three conventions of R26 are false).
 pub const COMPILE_OPTIONS: &str = "untransformed";
 
-/// Builds an identity from its parts. Only ASCII letters, digits, `.` and `-`.
+/// Builds an identity from its parts: `<revision>:<options identity>` (D R37). The options
+/// identity names the translator, the Metal language version and the compile options, and only
+/// uses ASCII letters, digits, `.` and `-`.
 pub fn build_identity(revision: u32, compiler_version: &str, msl_version: &str, options: &str) -> String {
-    format!("wm{revision}-naga-{compiler_version}-msl{msl_version}-{options}")
+    format!("{revision}:naga-{compiler_version}-msl{msl_version}-{options}")
 }
 
 /// The identity of this build; computed once, valid for the process lifetime.
@@ -59,9 +61,18 @@ mod tests {
     }
 
     #[test]
+    fn identity_is_an_integer_then_a_colon_then_text_and_never_mentions_spirv() {
+        let id = compiler_identity();
+        let (revision, options) = id.split_once(':').expect("<revision>:<options>");
+        assert!(revision.parse::<u32>().is_ok(), "{id}");
+        assert!(!options.is_empty());
+        assert!(!id.to_lowercase().contains("spir") && !id.to_lowercase().contains("spv"), "{id}");
+    }
+
+    #[test]
     fn identity_has_no_per_build_or_per_launch_data() {
         let id = compiler_identity();
-        assert!(id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-'), "{id}");
+        assert!(id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b':'), "{id}");
         assert!(!id.contains('/'), "no path");
     }
 

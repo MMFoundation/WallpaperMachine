@@ -1,0 +1,9 @@
+// This project's own code, written from the clean-room specification (no upstream code consulted).
+//
+//! Behaviour tests of the program pipeline, written from the behaviour list of spec part D
+//! (section 8).
+
+pub(crate) mod support;
+
+mod corpus;
+mod varyings;

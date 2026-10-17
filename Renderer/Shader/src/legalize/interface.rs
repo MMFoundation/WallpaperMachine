@@ -178,11 +178,11 @@ fn set_type(module: &mut Module, item: usize, ty: &str) {
 /// Reconciles the widths of the varyings the two stages declare under one name (R33 to R37,
 /// R84) on the parsed stages, before they are converted, so that the converter sees the
 /// reconciled types (C1 R89).
-pub(crate) fn reconcile(vertex: &mut Module, fragment: &mut Module) -> Result<(), LegalizeError> {
+pub(crate) fn reconcile(vertex: &mut Module, fragment: &mut Module, vertex_text: &str, fragment_text: &str) -> Result<(), LegalizeError> {
     let vd = collect(vertex, StageKind::Vertex)?;
     let fd = collect(fragment, StageKind::Fragment)?;
-    vd.check_interface_bounds()?;
-    fd.check_interface_bounds()?;
+    vd.check_interface_bounds(vertex_text)?;
+    fd.check_interface_bounds(fragment_text)?;
     let v_out: Vec<IfaceDecl> = vd.outputs.clone();
     let f_in: Vec<IfaceDecl> = fd.inputs.clone();
     check_duplicates(&vd, &v_out)?;

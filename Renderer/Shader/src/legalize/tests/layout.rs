@@ -412,25 +412,21 @@ fn thirteen_textures_and_the_block_compile_to_metal() {
     let both = compile_program(PASS_V, &f);
     let layout = &both.program.layout;
     assert_eq!(layout.textures.len(), 13);
-    // the Metal map of R88 gives the samplers slots 0 to 12
-    let mut resources = vec![crate::binding::ProgramResource {
+    // the backend ranks each namespace of a stage from 0 (D R46), so the samplers take slots 0 to 12
+    let mut resources = vec![crate::binding::StageResource {
         name: "GlobalUniforms".into(),
         set: 0,
         binding: layout.block.as_ref().map(|b| b.binding),
         kind: crate::binding::SlotKind::Buffer,
     }];
     for t in &layout.textures {
-        resources.push(crate::binding::ProgramResource { name: t.name.clone(), set: 0, binding: Some(t.texture_binding), kind: crate::binding::SlotKind::Texture });
-        resources.push(crate::binding::ProgramResource { name: t.sampler_name.clone(), set: 0, binding: Some(t.sampler_binding), kind: crate::binding::SlotKind::Sampler });
+        resources.push(crate::binding::StageResource { name: t.name.clone(), set: 0, binding: Some(t.texture_binding), kind: crate::binding::SlotKind::Texture });
+        resources.push(crate::binding::StageResource { name: t.sampler_name.clone(), set: 0, binding: Some(t.sampler_binding), kind: crate::binding::SlotKind::Sampler });
     }
-    let map = crate::binding::assign_metal_slots(&resources).unwrap();
+    let map = crate::binding::assign_stage_slots(&resources).unwrap();
     let mut sampler_slots: Vec<u32> = map.iter().filter(|b| b.slot_kind == crate::binding::SlotKind::Sampler).map(|b| b.slot).collect();
     sampler_slots.sort();
     assert_eq!(sampler_slots, (0..13).collect::<Vec<_>>());
-    for n in 0..13 {
-        let b = map.iter().find(|b| b.name == format!("g_Texture{n}")).unwrap();
-        assert_eq!((b.binding, b.slot), (n, n), "textures keep their binding as the slot");
-    }
 }
 
 #[test]

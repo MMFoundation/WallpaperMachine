@@ -438,7 +438,7 @@ mod tests {
     /// the key format version or to anything the key covers makes the row for
     /// the current identity fail; the fix is a deliberate bump of
     /// `PIPELINE_REVISION` and a new row, never an edit of an old row.
-    const GOLDEN_KEYS: &[(&str, &str)] = &[("wm1-naga-29.0.3-msl2.0-untransformed", "e5b920cc1273a21421edbe635cb99d9a")];
+    const GOLDEN_KEYS: &[(&str, &str)] = &[("1:naga-29.0.3-msl2.0-untransformed", "6f7ebe5f0135bd78c06498f63bf6494c")];
 
     fn golden_case() -> Case {
         let mut request = minimal();

@@ -148,6 +148,18 @@ impl Expander {
                     let mac = self.macros[&name].clone();
                     match &mac.params {
                         None => {
+                            // A macro defined with no replacement text and used alone as an array
+                            // bound has the value 1 (`#define TAPS` then `[TAPS]` is `[1]`).
+                            let bare_bound = mac.body.is_empty()
+                                && out.last().is_some_and(|p| p.tok.is_left_bracket())
+                                && stack.last().is_some_and(|n| n.tok.is_operator(Operator::RBracket));
+                            if bare_bound {
+                                let mut tok = q.tok.clone();
+                                tok.kind = TokenKind::Number;
+                                tok.text = "1".to_string();
+                                out.push(Q { tok, hide: q.hide.clone() });
+                                continue;
+                            }
                             let hide = extend_hide(&q.hide, &name);
                             let span = (q.tok.start, q.tok.end);
                             let body = relocate(&mac.body, span, &hide, None);
@@ -287,6 +299,15 @@ mod tests {
         assert_eq!(run("#define A 1\n#define B A + A\nx = B ;"), "x = 1 + 1 ;");
         assert_eq!(run("#define E\nx E y"), "x y");
         assert_eq!(run("#define A B\n#define B 2\nA"), "2");
+    }
+
+    #[test]
+    fn a_bare_macro_used_alone_as_an_array_bound_is_one() {
+        assert_eq!(run("#define TAPS 6\n#define TAPS\nfloat a[TAPS];"), "float a [ 1 ] ;");
+        assert_eq!(run("#define E\n#define A E\nfloat a[A];"), "float a [ 1 ] ;");
+        // Anywhere else an empty macro is still empty.
+        assert_eq!(run("#define E\nfloat a[E + 2]; E x"), "float a [ + 2 ] ; x");
+        assert_eq!(run("#define E\nfloat a[2 E];"), "float a [ 2 ] ;");
     }
 
     #[test]

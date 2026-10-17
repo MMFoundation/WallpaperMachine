@@ -9,6 +9,7 @@
 #![cfg_attr(not(feature = "ffi"), forbid(unsafe_code))]
 
 pub mod annotation;
+pub mod backend;
 pub mod binding;
 pub mod cache_key;
 pub mod diagnostic;
@@ -23,8 +24,11 @@ pub mod legalize;
 pub mod lexer;
 pub mod metadata;
 pub mod names;
+mod nagair;
+pub mod pipeline;
 pub mod prepare;
 pub mod preprocess;
+pub mod reflect;
 pub mod reflection;
 pub mod request;
 pub mod request_json;
