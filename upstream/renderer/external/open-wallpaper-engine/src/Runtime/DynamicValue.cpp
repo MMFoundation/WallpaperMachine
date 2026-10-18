@@ -341,18 +341,25 @@ std::function<void()> DynamicValue::listen(const std::function<void(const Dynami
 
 void DynamicValue::propagate() const {
     if (m_hub == nullptr || m_hub->slots.empty()) return;
-    // Keep the hub alive even if a callback destroys this value.
+    // Keep the hub alive even if a callback destroys this value, and leave the notification
+    // in order even if one throws.
     const auto hub   = m_hub;
     const auto count = hub->slots.size();
-    ++hub->notifying;
+    struct Notification
+    {
+        Hub& hub;
+        explicit Notification(Hub& target) : hub(target) { ++hub.notifying; }
+        ~Notification() {
+            if (--hub.notifying == 0 && hub.needs_compaction) {
+                std::erase_if(hub.slots, [](const Hub::Slot& slot) { return !slot.callback; });
+                hub.needs_compaction = false;
+            }
+        }
+    } notification(*hub);
     for (std::size_t i = 0; i < count && i < hub->slots.size(); ++i) {
         // A copy: the callback may remove itself, which empties the slot it is running from.
         auto callback = hub->slots[i].callback;
         if (callback) callback(*this);
-    }
-    if (--hub->notifying == 0 && hub->needs_compaction) {
-        std::erase_if(hub->slots, [](const Hub::Slot& slot) { return !slot.callback; });
-        hub->needs_compaction = false;
     }
 }
 
