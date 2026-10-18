@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e1c-render-graph.md; written without access to the original source.
 #include "RenderCommon/ScenePass.hpp"
 
 #include <cassert>
@@ -14,9 +15,10 @@ CopyPass::~CopyPass() = default;
 DrawPass::DrawPass(const Desc& desc): m_desc(desc) {}
 DrawPass::~DrawPass() = default;
 
-void DrawPass::setDescTex(uint32_t, std::string_view)
+void DrawPass::setDescTex(uint32_t index, std::string_view tex_key)
 {
-    // CLEANROOM RG13
+    if (index >= m_desc.textures.size()) return;
+    m_desc.textures[index] = std::string(tex_key);
 }
 
 uint32_t NormalizeSampleCount(uint32_t requested)
