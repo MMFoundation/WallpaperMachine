@@ -844,6 +844,14 @@ private:
     // tells the scripts. Returns the sorted names whose value changed.
     std::vector<std::string> ApplyProjectProperties(ProjectProperties next_properties);
 
+    // Looked up by name every frame the cursor is in the window, so the maps
+    // below take a `string_view` without making a string of it.
+    struct StringHash {
+        using is_transparent = void;
+        std::size_t operator()(std::string_view value) const noexcept {
+            return std::hash<std::string_view> {}(value);
+        }
+    };
     std::unique_ptr<ScriptEngine>                                  m_script_engine;
     std::unique_ptr<ScriptHostContext>                             m_host_context;
     Scene*                                                         m_scene { nullptr };
@@ -858,7 +866,7 @@ private:
     std::map<std::string, std::optional<RuntimeScalarValue>>       m_load_only_properties;
     bool                                                           m_project_properties_changing { false };
     std::vector<std::unique_ptr<DynamicValue>>                     m_owned_values;
-    std::unordered_map<std::string, SceneNode*>                    m_nodes;
+    std::unordered_map<std::string, SceneNode*, StringHash, std::equal_to<>> m_nodes;
     /// Registration order of `m_nodes`, which `SetLayerOrder` reorders to the
     /// scene file's and `SortLayer` changes.
     std::vector<std::string>                                       m_node_order;
@@ -928,20 +936,12 @@ private:
     std::vector<MaterialConstantBinding>                           m_material_constants;
     std::vector<TextValueBinding>                                  m_text_values;
     OwnTextWrite*                                                  m_own_text_write { nullptr };
-    std::unordered_map<std::string, linalg::Vector2f>               m_node_size;
-    std::unordered_map<std::string, NodeHitMask>                   m_node_hit_masks;
+    std::unordered_map<std::string, linalg::Vector2f, StringHash, std::equal_to<>> m_node_size;
+    std::unordered_map<std::string, NodeHitMask, StringHash, std::equal_to<>> m_node_hit_masks;
     std::unordered_map<std::string, WPPuppetLayer>                 m_puppet_layers;
-    std::unordered_map<std::string, TextLayer>                     m_text_layers;
+    std::unordered_map<std::string, TextLayer, StringHash, std::equal_to<>> m_text_layers;
     std::unordered_map<std::string, TextEffectGate>                m_text_effect_gates;
     std::unordered_map<std::string, NodeAlignmentBinding>          m_node_alignment;
-    // Looked up by name every frame the cursor is in the window, so the maps
-    // below take a `string_view` without making a string of it.
-    struct StringHash {
-        using is_transparent = void;
-        std::size_t operator()(std::string_view value) const noexcept {
-            return std::hash<std::string_view> {}(value);
-        }
-    };
     std::unordered_map<std::string, NodeCursorTarget, StringHash, std::equal_to<>>
         m_node_cursor_targets;
     // Set once any layer is registered as one that stops the cursor walk; the

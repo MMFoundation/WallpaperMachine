@@ -2774,7 +2774,7 @@ linalg::Vector3f SceneRuntimeContext::NodeRotation(std::string_view name) const 
 }
 
 linalg::Vector2f SceneRuntimeContext::NodeSize(std::string_view name) const {
-    const auto found = m_node_size.find(std::string(name));
+    const auto found = m_node_size.find(name);
     return found != m_node_size.end() ? found->second : linalg::Vector2f(linalg::Vector2f::Zero());
 }
 
@@ -2795,7 +2795,7 @@ bool SceneRuntimeContext::NodeTextDirty(std::string_view name) const {
 }
 
 std::optional<TextLayerState> SceneRuntimeContext::NodeTextState(std::string_view name) const {
-    const auto layer = m_text_layers.find(std::string(name));
+    const auto layer = m_text_layers.find(name);
     if (layer == m_text_layers.end()) return std::nullopt;
     return layer->second.state();
 }
@@ -3248,7 +3248,7 @@ SceneRuntimeContext::NodeCursorTargetOf(std::string_view name) const {
 // nothing but that quad; a layer a script handles the cursor for also answers
 // to its coverage mask, so a cut-out layer is only hit where it is drawn.
 bool SceneRuntimeContext::CursorHitsLayerGeometry(std::string_view name) const {
-    const auto found = m_nodes.find(std::string(name));
+    const auto found = m_nodes.find(name);
     if (found == m_nodes.end() || found->second == nullptr) return false;
     SceneNode& node = *found->second;
 
@@ -3299,7 +3299,7 @@ bool SceneRuntimeContext::CursorHitsLayerGeometry(std::string_view name) const {
 
     // A layer a script handles the cursor for also answers to its coverage mask: the card's
     // left-top is texture 0, 0.
-    const auto mask = m_node_hit_masks.find(std::string(name));
+    const auto mask = m_node_hit_masks.find(name);
     if (mask == m_node_hit_masks.end() || ! (half_x > 0.0) || ! (half_y > 0.0)) return true;
     const double u = (across + half_x) / static_cast<double>(size.x());
     const double v = (half_y - down) / static_cast<double>(size.y());
