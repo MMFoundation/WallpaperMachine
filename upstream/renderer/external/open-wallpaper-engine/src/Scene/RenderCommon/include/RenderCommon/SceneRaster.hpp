@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e1c-render-graph.md; written without access to the original source.
 #pragma once
 
 #include "Presentation/WallpaperScaling.hpp"
@@ -14,6 +15,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 
 // Scene-side raster arithmetic: how large each render target is for a given
@@ -36,13 +38,22 @@ namespace render
 
 inline constexpr i32 kMinRenderTargetDimension = 4;
 
-inline i32 ResolveScreenBoundRenderTargetDimension(double, double) {
-    // CLEANROOM RG16
-    return kMinRenderTargetDimension;
+inline i32 ResolveScreenBoundRenderTargetDimension(double source, double scale) {
+    if (! std::isfinite(source) || source <= 0.0) source = kMinRenderTargetDimension;
+    if (! std::isfinite(scale) || scale <= 0.0) scale = 1.0;
+    // std::round takes halves away from zero. The product can overflow a double
+    // (or an i32) for absurd sources, so it saturates rather than converting.
+    const double scaled = std::round(source * scale);
+    if (! (scaled < static_cast<double>(std::numeric_limits<i32>::max())))
+        return std::numeric_limits<i32>::max();
+    return std::max(kMinRenderTargetDimension, static_cast<i32>(scaled));
 }
 
-inline void ResolveScreenBoundRenderTargetSize(SceneRenderTarget&, const Extent2D&) {
-    // CLEANROOM RG17
+inline void ResolveScreenBoundRenderTargetSize(SceneRenderTarget& target, const Extent2D& extent) {
+    target.width  = ResolveScreenBoundRenderTargetDimension(static_cast<double>(extent.width),
+                                                           target.bind.scale);
+    target.height = ResolveScreenBoundRenderTargetDimension(static_cast<double>(extent.height),
+                                                           target.bind.scale);
 }
 
 /// The smallest internal render scale that still leaves a usable image. Below
@@ -77,9 +88,27 @@ inline void ResolveRenderScaledSize(SceneRenderTarget& target, double render_sca
 /// The author's canvas, in scene units. Never scaled: presentation layout and
 /// cursor mapping are computed against this, so the internal raster size
 /// cannot move the letterbox or offset the hit test.
-inline Extent2D ResolveSceneSourceExtent(const wallpaper::Scene&, const Extent2D&) {
-    // CLEANROOM RG18
-    return {};
+inline Extent2D ResolveSceneSourceExtent(const wallpaper::Scene& scene, const Extent2D& fallback) {
+    const Extent2D output { std::max(1u, fallback.width), std::max(1u, fallback.height) };
+    if (scene.display_sized) return output;
+    if (scene.scene_extent[0] > 0 && scene.scene_extent[1] > 0)
+        return { static_cast<uint32_t>(scene.scene_extent[0]),
+                 static_cast<uint32_t>(scene.scene_extent[1]) };
+    // The default target is found by its own key; an alias must not redirect it.
+    const auto found = scene.renderTargets.find(std::string(SpecTex_Default));
+    if (found != scene.renderTargets.end()) {
+        const SceneRenderTarget& target = found->second;
+        const bool               latched = target.authored_width > 0 && target.authored_height > 0;
+        const i32                width   = latched ? target.authored_width : target.width;
+        const i32                height  = latched ? target.authored_height : target.height;
+        if (width > 0 && height > 0)
+            return { static_cast<uint32_t>(width), static_cast<uint32_t>(height) };
+    }
+    const i32 canvas_width  = std::max<i32>(0, scene.ortho[0]);
+    const i32 canvas_height = std::max<i32>(0, scene.ortho[1]);
+    if (canvas_width > 2 && canvas_height > 2)
+        return { static_cast<uint32_t>(canvas_width), static_cast<uint32_t>(canvas_height) };
+    return output;
 }
 
 /// The authored canvas and the internal raster it is drawn at. Equal at render
@@ -222,11 +251,61 @@ inline void RefreshScreenBoundTextureResolutions(Scene& scene) {
     }
 }
 
-inline SceneRasterExtents ResolveScreenBoundRenderTargetSizes(Scene&,
-                                                              const Extent2D&,
-                                                              const SceneRasterSurface& = {}) {
-    // CLEANROOM RG19
-    return {};
+inline SceneRasterExtents ResolveScreenBoundRenderTargetSizes(Scene& scene,
+                                                              const Extent2D& fallback,
+                                                              const SceneRasterSurface& surface = {}) {
+    const Extent2D source = ResolveSceneSourceExtent(scene, fallback);
+
+    if (scene.display_sized) {
+        const double aspect = static_cast<double>(source.width) / static_cast<double>(source.height);
+        for (auto& entry : scene.cameras) {
+            SceneCamera* camera = entry.second.get();
+            if (camera == nullptr || ! camera->IsPerspective()) continue;
+            camera->SetAspect(aspect);
+            camera->Update();
+        }
+    }
+
+    // The display basis only exists for a scene that has a canvas to rasterise.
+    const bool display_basis =
+        scene.resolution == SceneResolution::Display && SceneResolutionAffectsRaster(scene);
+    const Extent2D basis =
+        display_basis ? ResolveSceneDisplayExtent(source, fallback, surface.display_scale_factor)
+                      : source;
+    const double render_scale = ResolveSceneRenderScale(scene);
+    Extent2D     raster {
+        static_cast<uint32_t>(ResolveScreenBoundRenderTargetDimension(basis.width, render_scale)),
+        static_cast<uint32_t>(ResolveScreenBoundRenderTargetDimension(basis.height, render_scale)),
+    };
+    const uint32_t limit = display_basis ? surface.max_dimension : 0;
+    if (limit != 0) raster = CapRasterExtent(raster, limit);
+
+    for (auto& [key, target] : scene.renderTargets) {
+        if (key == SpecTex_Default) {
+            if (target.authored_width <= 0 || target.authored_height <= 0) {
+                target.authored_width  = static_cast<i32>(source.width);
+                target.authored_height = static_cast<i32>(source.height);
+            }
+            target.width  = static_cast<i32>(raster.width);
+            target.height = static_cast<i32>(raster.height);
+            continue;
+        }
+        if (! (target.bind.enable && target.bind.screen)) continue;
+        if (target.authored_width <= 0 || target.authored_height <= 0) {
+            target.authored_width =
+                ResolveScreenBoundRenderTargetDimension(source.width, target.bind.scale);
+            target.authored_height =
+                ResolveScreenBoundRenderTargetDimension(source.height, target.bind.scale);
+        }
+        ResolveScreenBoundRenderTargetSize(target, raster);
+        if (limit != 0) {
+            target.width  = std::min(target.width, static_cast<i32>(limit));
+            target.height = std::min(target.height, static_cast<i32>(limit));
+        }
+    }
+
+    RefreshScreenBoundTextureResolutions(scene);
+    return { source, raster };
 }
 
 /// Fits the scene's authored canvas into an output of `width` x `height`.
@@ -234,8 +313,43 @@ inline SceneRasterExtents ResolveScreenBoundRenderTargetSizes(Scene&,
 /// Purely scene-side camera arithmetic with nothing GPU-specific in it, so
 /// every caller shares this one definition. Two copies of it would drift, and
 /// the drift would show as the same wallpaper framed differently.
-inline void ApplyCameraFillMode(wallpaper::Scene&, wallpaper::FillMode, uint32_t, uint32_t) {
-    // CLEANROOM RG20
+inline void ApplyCameraFillMode(wallpaper::Scene& scene, wallpaper::FillMode mode, uint32_t width,
+                                uint32_t height) {
+    if (width == 0 || height == 0) return;
+    const auto canvas_entry      = scene.cameras.find("global");
+    const auto perspective_entry = scene.cameras.find("global_perspective");
+    if (canvas_entry == scene.cameras.end() || perspective_entry == scene.cameras.end()) return;
+    SceneCamera* canvas      = canvas_entry->second.get();
+    SceneCamera* perspective = perspective_entry->second.get();
+    if (canvas == nullptr || perspective == nullptr) return;
+
+    const double scene_width  = std::max<i32>(1, scene.ortho[0]);
+    const double scene_height = std::max<i32>(1, scene.ortho[1]);
+    const double scene_aspect = scene_width / scene_height;
+    const double output_aspect = static_cast<double>(width) / static_cast<double>(height);
+
+    double frame_width  = scene_width;
+    double frame_height = scene_height;
+    double aspect       = scene_aspect;
+    switch (mode) {
+    case wallpaper::FillMode::STRETCH: break;
+    case wallpaper::FillMode::ASPECTFIT:
+        aspect = output_aspect;
+        if (output_aspect < scene_aspect) frame_height = scene_width / output_aspect;
+        else frame_width = scene_height * output_aspect;
+        break;
+    default:
+        aspect = output_aspect;
+        if (output_aspect > scene_aspect) frame_height = scene_width / output_aspect;
+        else frame_width = scene_height * output_aspect;
+        break;
+    }
+    canvas->SetWidth(frame_width);
+    canvas->SetHeight(frame_height);
+    perspective->SetAspect(aspect);
+    FitCanvasPerspective(*perspective, *canvas);
+    canvas->Update();
+    perspective->Update();
 }
 
 /// Folds into a static-reuse sample the cameras a pass depends on: the one it
