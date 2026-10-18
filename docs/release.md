@@ -532,6 +532,11 @@ the extractor sees every Swift compile. C/C++ (only vendored third-party code is
 visible to it), Ruby (only the FFmpeg formula) and JavaScript/TypeScript (none since
 the SwiftUI control panel; CodeQL fails a language with no code) are deliberately not
 analyzed.
+Removing a language from the matrix does not remove its configuration: **Security ->
+Code scanning -> Tool status** keeps showing that language's last scan, failed or
+not, because nothing uploads to its category again. In the same change, delete it
+there (the configuration's **⋯ -> Delete configuration**) once no alert in it needs
+keeping.
 Default setup must stay off under **Settings -> Code security -> CodeQL
 analysis**; while it is on, GitHub rejects this workflow's results.
 
