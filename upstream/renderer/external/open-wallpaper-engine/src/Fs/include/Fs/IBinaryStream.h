@@ -1,8 +1,8 @@
 #pragma once
+#include <bit>
 #include <cstdint>
 #include <string>
 #include <type_traits>
-#include "Bswap.hpp"
 #include "Core/NoCopyMove.hpp"
 #include "Core/Literals.hpp"
 
@@ -12,44 +12,29 @@ namespace fs
 {
 
 class IBinaryStream : NoCopy, NoMove {
-public:
-    enum class ByteOrder
-    {
-        BigEndian,
-        LittleEndian
-    };
-
-    constexpr static ByteOrder sys_byte_order {
-#ifdef WP_BIG_ENDIAN
-        ByteOrder::BigEndian
-#else
-        ByteOrder::LittleEndian
-#endif
-    };
+    // Integers in the files this engine reads are little-endian and are read
+    // straight into the value, so the host has to be little-endian too.
+    static_assert(std::endian::native == std::endian::little,
+                  "binary streams read little-endian values by copying them");
 
 protected:
+    // A value of the type's width from the current position, or 0 when fewer bytes
+    // than that are left.
     template<typename T>
     T _ReadInt() {
-        // CLEANROOM U54: implement from specs/engine/e7-small-units.md
-        return T { 0 };
-    }
-    template<typename T>
-    bool _WriteInt(T) {
-        // CLEANROOM U55: implement from specs/engine/e7-small-units.md
-        return false;
+        T value { 0 };
+        if (Read(&value, sizeof(T)) != sizeof(T)) return T { 0 };
+        return value;
     }
 
 public:
     IBinaryStream()          = default;
     virtual ~IBinaryStream() = default;
 
-    void SetByteOrder(ByteOrder) {
-        // CLEANROOM U56: implement from specs/engine/e7-small-units.md
-    }
-
     float ReadFloat() {
-        // CLEANROOM U57: implement from specs/engine/e7-small-units.md
-        return 0.0f;
+        float value { 0.0f };
+        if (Read(&value, sizeof(value)) != sizeof(value)) return 0.0f;
+        return value;
     }
 
     i64 ReadInt64() { return _ReadInt<i64>(); }
@@ -64,14 +49,22 @@ public:
     i8 ReadInt8() { return _ReadInt<i8>(); }
     u8 ReadUint8() { return _ReadInt<u8>(); }
 
+    // Bytes up to the next NUL, which is consumed but not returned; or whatever was
+    // left when the stream ended first.
     std::string ReadStr() {
-        // CLEANROOM U58: implement from specs/engine/e7-small-units.md
-        return {};
+        std::string text;
+        char        c { 0 };
+        while (Read(&c, 1) == 1 && c != '\0') text.push_back(c);
+        return text;
     }
 
+    // Every byte from the current position to the end.
     std::string ReadAllStr() {
-        // CLEANROOM U59: implement from specs/engine/e7-small-units.md
-        return {};
+        const isize left = Size() - Tell();
+        if (left <= 0) return {};
+        std::string text(static_cast<usize>(left), '\0');
+        text.resize(Read(text.data(), text.size()));
+        return text;
     }
 
     bool Rewind() { return SeekSet(0); }
@@ -90,19 +83,12 @@ public:
 
 protected:
     virtual usize Write_impl(const void* buffer, usize sizeInByte) = 0;
-
-private:
-    constexpr static ByteOrder default_byte_order { ByteOrder::LittleEndian };
-    ByteOrder                  m_byte_order { default_byte_order };
-    bool                       m_noswap { sys_byte_order == default_byte_order };
 };
 
 class IBinaryStreamW : IBinaryStream {
 public:
     virtual ~IBinaryStreamW() = default;
     usize Write(const void* buffer, usize sizeInByte) { return Write_impl(buffer, sizeInByte); }
-    i32   WriteInt32(i32 x) { return _WriteInt<i32>(x); }
-    i32   WriteUint32(u32 x) { return _WriteInt<u32>(x); }
 };
 
 } // namespace fs
