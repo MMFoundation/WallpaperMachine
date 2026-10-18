@@ -3166,7 +3166,9 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         }
 
         auto camera = std::make_shared<SceneCamera>(geometry.extent[0], geometry.extent[1], -1.0f, 1.0f);
-        camera->SetLayerLocal(! composition);
+        // The first pass of a composition model reads the screen where the layer is drawn, so
+        // its camera is not local to the layer's own picture, children or none.
+        camera->SetLayerLocal(! composition && ! kind.compose_model);
         camera->SetComposeLayer(composition);
         camera->SetChildrenUseSceneCamera(composition && kind.fullscreen);
         camera->AttatchNode(composition ? node : context.effect_camera_node);
