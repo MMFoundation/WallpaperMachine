@@ -2545,6 +2545,41 @@ int32_t EntryId(const nlohmann::json& entry) {
     return id;
 }
 
+/// The object list with the files of each image object read into it: under
+/// `__external`, the model the object names and the material that model names. The
+/// layers those files sample are sources like the ones the object names itself (P2 R60),
+/// and the scans of the object list look at the whole of each object.
+nlohmann::json WithExternalMaterials(const nlohmann::json& objects, fs::VFS& vfs) {
+    if (! objects.is_array()) return objects;
+    nlohmann::json scanned = objects;
+    const auto     read    = [&vfs](const std::string& path, nlohmann::json& into) {
+        if (path.empty()) return false;
+        nlohmann::json json;
+        if (! vfs.Contains("/assets/" + path) ||
+            ! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + path), json) || ! json.is_object()) {
+            return false;
+        }
+        into = std::move(json);
+        return true;
+    };
+    for (auto& object : scanned) {
+        if (! object.is_object()) continue;
+        const auto image = object.find("image");
+        if (image == object.end() || ! image->is_string()) continue;
+        nlohmann::json model;
+        if (! read(image->get<std::string>(), model)) continue;
+        nlohmann::json external = nlohmann::json::array();
+        if (const auto material = model.find("material");
+            material != model.end() && material->is_string()) {
+            nlohmann::json file;
+            if (read(material->get<std::string>(), file)) external.push_back(std::move(file));
+        }
+        external.push_back(std::move(model));
+        object["__external"] = std::move(external);
+    }
+    return scanned;
+}
+
 /// What the scripts of the object list could reach: the quoted strings of every
 /// script anywhere in it.
 std::unordered_set<std::string> ScriptLiterals(const nlohmann::json& objects) {
@@ -2574,7 +2609,7 @@ bool RetainedWhileHidden(EntryKind kind, const nlohmann::json& entry, int32_t id
 
 /// Decides, for every entry, what is built and what is called.
 std::vector<EntryPlan> PlanEntries(ParseContext& context, const nlohmann::json& objects,
-                                   const LayerObjectIndex& index) {
+                                   const nlohmann::json& scanned, const LayerObjectIndex& index) {
     std::vector<EntryPlan> plans(objects.size());
     std::unordered_set<int32_t> parent_ids;
     for (const auto& entry : objects) {
@@ -2586,7 +2621,7 @@ std::vector<EntryPlan> PlanEntries(ParseContext& context, const nlohmann::json& 
             }
         }
     }
-    const auto reachable = CollectReachableLayerIds(objects, index, context.vfs);
+    const auto reachable = CollectReachableLayerIds(scanned, index, context.vfs);
     const auto literals  = ScriptLiterals(objects);
 
     for (std::size_t at = 0; at < objects.size(); ++at) {
@@ -5467,7 +5502,9 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
 
     const LayerObjectIndex index = BuildLayerObjectIndex(objects);
     g_parse_layer_index          = &index;
-    const auto plans             = PlanEntries(context, objects, index);
+    // What the files of the image objects sample counts as much as what the objects name.
+    const nlohmann::json scanned = WithExternalMaterials(objects, vfs);
+    const auto plans             = PlanEntries(context, objects, scanned, index);
 
     const auto canvas = ResolveCanvas(context, general, objects, plans);
     context.ortho_w   = canvas[0];
@@ -5504,7 +5541,7 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
     InstallSceneZoom(context, std::move(zoom));
 
     // The layers other layers sample are known before any is built.
-    const auto early_refs = CollectLayerTextureRefs(objects, index, &vfs);
+    const auto early_refs = CollectLayerTextureRefs(scanned, index, &vfs);
     for (const auto& ref : early_refs) {
         if (ref.source_id != 0) context.referenced_layer_ids.insert(ref.source_id);
     }
@@ -5518,7 +5555,7 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
     BuildBloom(context, general, bloom);
 
     // Layers that read other layers' pictures, and whether that is legal.
-    const auto refs = CollectLayerTextureRefs(objects, index, &vfs);
+    const auto refs = CollectLayerTextureRefs(scanned, index, &vfs);
     for (const auto& ref : refs) scene->layer_texture_sources.insert(ref.source_id);
     scene->layer_texture_error = ClassifyLayerTextureReferences(refs, index);
 
