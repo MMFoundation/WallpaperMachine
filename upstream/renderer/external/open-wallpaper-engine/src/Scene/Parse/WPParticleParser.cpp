@@ -13,6 +13,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_set>
+#include <map>
 
 #include "Utils/Linalg.hpp"
 
@@ -322,47 +323,75 @@ Vec3d HsvToRgbD(const Vec3d& hsv) {
 
 double Frac(double v) { return v - std::floor(v); }
 
-/// The override colour of a record, if it has one, on a 0..1 scale.
-std::optional<Vec3d> OverrideColor(const wpscene::ParticleInstanceoverride* over) {
-    if (over == nullptr || ! over->enabled) return std::nullopt;
-    if (over->overColor)
-        return Vec3d { over->color[0] / 255.0, over->color[1] / 255.0, over->color[2] / 255.0 };
-    if (over->overColorn) return Vec3d { over->colorn[0], over->colorn[1], over->colorn[2] };
-    return std::nullopt;
-}
+/// The colour side of the scene object's instance override, resolved once per
+/// record: it remembers the file's own reference colour (and its HSV) and reads
+/// the override record live every time it is asked, so a property that moves
+/// the override shows in the next birth or step.
+class OverrideTint {
+public:
+    /// The override colour moved from the reference: where it points and the
+    /// HSV step (hue in turns, saturation, value) from the reference to it.
+    struct Offset {
+        Vec3d target;
+        Vec3d hsv_step;
+    };
 
-/// How an override colour moves a file's own colours: the HSV difference from
-/// the file's reference colour to the override.
-struct ColourShift {
-    bool  active { false };
-    Vec3d target { 1.0, 1.0, 1.0 };   // the override colour
-    Vec3d delta { 0.0, 0.0, 0.0 };    // hue, saturation, value
+    OverrideTint() = default;
+    OverrideTint(std::shared_ptr<const wpscene::ParticleInstanceoverride> over,
+                 const ParticleColorDefinition&                           file_colour)
+        : m_over(std::move(over)),
+          m_file_has_source(file_colour.hasColor),
+          m_reference { file_colour.defaultColor.x(), file_colour.defaultColor.y(),
+                        file_colour.defaultColor.z() },
+          m_reference_hsv(RgbToHsv(m_reference)) {}
+
+    /// The override colour on a 0..1 scale; nothing when the record is missing,
+    /// disabled, or sets neither `color` nor `colorn`.
+    std::optional<Vec3d> Colour() const {
+        if (! m_over || ! m_over->enabled) return std::nullopt;
+        if (m_over->overColor) {
+            const auto& c = m_over->color;
+            return Vec3d { c[0] / 255.0, c[1] / 255.0, c[2] / 255.0 };
+        }
+        if (m_over->overColorn) {
+            const auto& c = m_over->colorn;
+            return Vec3d { c[0], c[1], c[2] };
+        }
+        return std::nullopt;
+    }
+
+    /// The flat tint of a file that has no colour source of its own.
+    std::optional<Vec3d> FlatTint() const {
+        return m_file_has_source ? std::nullopt : Colour();
+    }
+
+    /// The retint a colour-bearing file applies, if the override differs from
+    /// the reference by at least 0.9/255 in some channel.
+    std::optional<Offset> Shifted() const {
+        if (! m_file_has_source) return std::nullopt;
+        const auto colour = Colour();
+        if (! colour) return std::nullopt;
+        const Vec3d gap = *colour - m_reference;
+        constexpr double kSame = 0.9 / 255.0;
+        if (std::abs(gap.x()) < kSame && std::abs(gap.y()) < kSame && std::abs(gap.z()) < kSame)
+            return std::nullopt;
+        return Offset { *colour, RgbToHsv(*colour) - m_reference_hsv };
+    }
+
+    /// `rgb` moved in HSV by `step`: hue added modulo 1, saturation and value
+    /// added and held in 0..1.
+    static Vec3d Moved(const Vec3d& rgb, const Vec3d& step) {
+        const Vec3d hsv = RgbToHsv(rgb);
+        return HsvToRgbD({ Frac(hsv.x() + step.x()), std::clamp(hsv.y() + step.y(), 0.0, 1.0),
+                           std::clamp(hsv.z() + step.z(), 0.0, 1.0) });
+    }
+
+private:
+    std::shared_ptr<const wpscene::ParticleInstanceoverride> m_over;
+    bool  m_file_has_source { false };
+    Vec3d m_reference { 1.0, 1.0, 1.0 };
+    Vec3d m_reference_hsv { 0.0, 0.0, 1.0 };
 };
-
-ColourShift ShiftOf(const ParticleParseContext& ctx) {
-    ColourShift shift;
-    if (! ctx.color.hasColor) return shift;
-    const auto colour = OverrideColor(ctx.over.get());
-    if (! colour) return shift;
-    const Vec3d reference { ctx.color.defaultColor.x(), ctx.color.defaultColor.y(),
-                            ctx.color.defaultColor.z() };
-    const double tolerance = 0.9 / 255.0;
-    if (std::abs((*colour - reference).x()) < tolerance && std::abs((*colour - reference).y()) < tolerance &&
-        std::abs((*colour - reference).z()) < tolerance)
-        return shift;
-    shift.active = true;
-    shift.target = *colour;
-    shift.delta  = RgbToHsv(*colour) - RgbToHsv(reference);
-    return shift;
-}
-
-/// A colour moved in HSV by `delta`: hue added modulo 1, saturation and value
-/// added and held in 0..1.
-Vec3d Retint(const Vec3d& rgb, const Vec3d& delta) {
-    const Vec3d hsv = RgbToHsv(rgb);
-    return HsvToRgbD({ Frac(hsv.x() + delta.x()), std::clamp(hsv.y() + delta.y(), 0.0, 1.0),
-                       std::clamp(hsv.z() + delta.z(), 0.0, 1.0) });
-}
 
 /// A draw between `centre - noise` and `centre + noise`, the interval cut off
 /// at 0 and 1 before it is sampled.
@@ -483,13 +512,12 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json&        
     if (name == "colorrandom") {
         const Vec3d lo = ReadVec3(wpj, "min", { 0, 0, 0 }) / 255.0;
         const Vec3d hi = ReadVec3(wpj, "max", { 255, 255, 255 }) / 255.0;
-        const ParticleParseContext context = ctx;
+        const OverrideTint tint(ctx.over, ctx.color);
         return [=](Particle& p, double) {
             Vec3d from = lo, to = hi;
-            const ColourShift shift = ShiftOf(context);
-            if (shift.active) {
-                from = Retint(from, shift.delta);
-                to   = Retint(to, shift.delta);
+            if (const auto moved = tint.Shifted()) {
+                from = OverrideTint::Moved(from, moved->hsv_step);
+                to   = OverrideTint::Moved(to, moved->hsv_step);
             }
             const double u = DrawShaped(exponent);
             PM::MutiplyInitColor(p, Lerp(from.x(), to.x(), u), Lerp(from.y(), to.y(), u),
@@ -504,14 +532,13 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json&        
         const double sat_hi = ReadKey<double>(wpj, "saturationmax", 1.0);
         const double val_lo = ReadKey<double>(wpj, "valuemin", 0.5);
         const double val_hi = ReadKey<double>(wpj, "valuemax", 1.0);
-        const ParticleParseContext context = ctx;
+        const OverrideTint tint(ctx.over, ctx.color);
         return [=](Particle& p, double) {
             double hmin = hue_lo, hmax = hue_hi;
             double smin = sat_lo, smax = sat_hi, vmin = val_lo, vmax = val_hi;
-            const ColourShift shift = ShiftOf(context);
-            if (shift.active) {
+            if (const auto moved = tint.Shifted()) {
                 // The ranges are recentred on the override colour.
-                const Vec3d o     = RgbToHsv(shift.target);
+                const Vec3d o     = RgbToHsv(moved->target);
                 const double width = steps > 1 ? hue_hi - hue_lo : 0.0;
                 hmin = o.x() - width / 2.0;
                 hmax = hmin + (hue_hi - hue_lo);
@@ -542,15 +569,15 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json&        
         const double hue_noise = ReadKey<double>(wpj, "huenoise", 0.0);
         const double sat_noise = ReadKey<double>(wpj, "saturationnoise", 0.0);
         const double val_noise = ReadKey<double>(wpj, "valuenoise", 0.0);
-        const ParticleParseContext context = ctx;
+        const OverrideTint tint(ctx.over, ctx.color);
         return [=](Particle& p, double) {
             const Vec3d& entry = entries[static_cast<std::size_t>(
                 Random::get<int>(0, static_cast<int>(entries.size()) - 1))];
             const Vec3d hsv = RgbToHsv(entry);
             Vec3d       rgb = HsvToRgbD({ NoisyUnit(hsv.x(), hue_noise), NoisyUnit(hsv.y(), sat_noise),
                                           NoisyUnit(hsv.z(), val_noise) });
-            const ColourShift shift = ShiftOf(context);
-            if (shift.active) rgb = Retint(rgb, RgbToHsv(shift.target) - RgbToHsv(entries.front()));
+            if (const auto moved = tint.Shifted())
+                rgb = OverrideTint::Moved(rgb, RgbToHsv(moved->target) - RgbToHsv(entries.front()));
             PM::MutiplyInitColor(p, rgb.x(), rgb.y(), rgb.z());
         };
     }
@@ -747,41 +774,80 @@ ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json&        
         };
     }
     if (name == "inheritinitialvaluefromevent") {
-        const std::string input = ReadKey<std::string>(wpj, "input", "setcolor");
+        // The selector is "<mode><quantity>"; any string outside the table
+        // does nothing.
+        enum class Quantity { Colour, Opacity, ColourOpacity, Velocity, Size, Rotation, AngularVelocity };
+        enum class Mode { Set, Multiply, Add };
+        static const std::map<std::string, std::pair<Quantity, Mode>> kSelectors = [] {
+            std::map<std::string, std::pair<Quantity, Mode>> table;
+            const std::pair<const char*, Quantity> quantities[] = {
+                { "color", Quantity::Colour },
+                { "opacity", Quantity::Opacity },
+                { "coloropacity", Quantity::ColourOpacity },
+                { "velocity", Quantity::Velocity },
+                { "size", Quantity::Size },
+                { "rotation", Quantity::Rotation },
+                { "angularvelocity", Quantity::AngularVelocity },
+            };
+            const std::pair<const char*, Mode> modes[] = { { "set", Mode::Set },
+                                                           { "multiply", Mode::Multiply },
+                                                           { "add", Mode::Add } };
+            for (const auto& [quantity_name, quantity] : quantities) {
+                for (const auto& [mode_name, mode] : modes) {
+                    // Colour and opacity combine by set or multiply, velocity,
+                    // rotation and angular velocity by set or add, size by set
+                    // or multiply.
+                    const bool scaling = mode == Mode::Multiply;
+                    const bool offset  = mode == Mode::Add;
+                    const bool scalable = quantity == Quantity::Colour || quantity == Quantity::Opacity ||
+                                          quantity == Quantity::ColourOpacity || quantity == Quantity::Size;
+                    if ((scaling && ! scalable) || (offset && scalable)) continue;
+                    table[std::string(mode_name) + quantity_name] = { quantity, mode };
+                }
+            }
+            return table;
+        }();
+
+        const auto chosen = kSelectors.find(ReadKey<std::string>(wpj, "input", "setcolor"));
+        if (chosen == kSelectors.end()) return inert;
+        const auto [quantity, mode] = chosen->second;
         return [=](Particle& p, double) {
             if (! spawn || spawn->parent == nullptr) return;
             const Particle& parent = *spawn->parent;
-            const Vec3d     color  = parent.color.cast<double>();
-            if (input == "setcolor") {
-                PM::InitColor(p, color.x(), color.y(), color.z());
-            } else if (input == "multiplycolor") {
-                PM::MutiplyInitColor(p, color.x(), color.y(), color.z());
-            } else if (input == "setopacity") {
-                PM::InitAlpha(p, parent.alpha);
-            } else if (input == "multiplyopacity") {
-                PM::MutiplyInitAlpha(p, parent.alpha);
-            } else if (input == "setcoloropacity") {
-                PM::InitColor(p, color.x(), color.y(), color.z());
-                PM::InitAlpha(p, parent.alpha);
-            } else if (input == "multiplycoloropacity") {
-                PM::MutiplyInitColor(p, color.x(), color.y(), color.z());
-                PM::MutiplyInitAlpha(p, parent.alpha);
-            } else if (input == "setvelocity") {
-                PM::InitVelocity(p, parent.velocity.cast<double>());
-            } else if (input == "addvelocity") {
-                PM::ChangeVelocity(p, parent.velocity.cast<double>());
-            } else if (input == "setsize") {
-                PM::InitSize(p, parent.size);
-            } else if (input == "multiplysize") {
-                PM::MutiplyInitSize(p, static_cast<double>(parent.size) / kParticleSizeOverEngine);
-            } else if (input == "setrotation") {
-                p.rotation = parent.rotation;
-            } else if (input == "addrotation") {
-                PM::Rotate(p, parent.rotation.cast<double>());
-            } else if (input == "setangularvelocity") {
-                p.angularVelocity = parent.angularVelocity;
-            } else if (input == "addangularvelocity") {
-                PM::ChangeAngularVelocity(p, parent.angularVelocity.cast<double>());
+            const bool      assign = mode == Mode::Set;
+            const bool      scale  = mode == Mode::Multiply;
+            const auto take_colour = [&] {
+                const Vec3d c = parent.color.cast<double>();
+                if (assign) PM::InitColor(p, c.x(), c.y(), c.z());
+                else PM::MutiplyInitColor(p, c.x(), c.y(), c.z());
+            };
+            const auto take_opacity = [&] {
+                if (assign) PM::InitAlpha(p, parent.alpha);
+                else PM::MutiplyInitAlpha(p, parent.alpha);
+            };
+            switch (quantity) {
+            case Quantity::Colour: take_colour(); break;
+            case Quantity::Opacity: take_opacity(); break;
+            case Quantity::ColourOpacity:
+                take_colour();
+                take_opacity();
+                break;
+            case Quantity::Velocity:
+                if (assign) PM::InitVelocity(p, parent.velocity.cast<double>());
+                else PM::ChangeVelocity(p, parent.velocity.cast<double>());
+                break;
+            case Quantity::Size:
+                if (scale) PM::MutiplyInitSize(p, static_cast<double>(parent.size) / kParticleSizeOverEngine);
+                else PM::InitSize(p, parent.size);
+                break;
+            case Quantity::Rotation:
+                if (assign) p.rotation = parent.rotation;
+                else PM::Rotate(p, parent.rotation.cast<double>());
+                break;
+            case Quantity::AngularVelocity:
+                if (assign) p.angularVelocity = parent.angularVelocity;
+                else PM::ChangeAngularVelocity(p, parent.angularVelocity.cast<double>());
+                break;
             }
         };
     }
@@ -793,7 +859,8 @@ ParticleInitOp WPParticleParser::genOverrideInitOp(
     std::shared_ptr<const wpscene::ParticleInstanceoverride> over, ParticleColorDefinition def,
     bool speed_override, bool size_override) {
     LastFinite lifetime, alpha, size, speed, brightness;
-    return [over = std::move(over), def, speed_override, size_override, lifetime, alpha, size, speed,
+    const OverrideTint tint(over, def);
+    return [over = std::move(over), tint, speed_override, size_override, lifetime, alpha, size, speed,
             brightness](Particle& p, double) mutable {
         if (! over || ! over->enabled) return;
         // The record is read now, so a property that moved it shows in the next birth.
@@ -803,11 +870,7 @@ ParticleInitOp WPParticleParser::genOverrideInitOp(
         PM::MutiplyInitAlpha(p, alpha(over->alpha));
         if (size_override) PM::MutiplyInitSize(p, size(over->size));
         if (speed_override) PM::MutiplyVelocity(p, speed(over->speed));
-        if (! def.hasColor) {
-            if (const auto colour = OverrideColor(over.get())) {
-                PM::InitColor(p, colour->x(), colour->y(), colour->z());
-            }
-        }
+        if (const auto flat = tint.FlatTint()) PM::InitColor(p, flat->x(), flat->y(), flat->z());
         const double glow = brightness(over->brightness);
         if (over->hdr && glow != 1.0) PM::MutiplyInitColor(p, glow, glow, glow);
     };
@@ -836,31 +899,41 @@ struct OverrideReader {
     }
 };
 
-/// The window over a particle's life in which an operator is in force.
-struct BlendWindow {
-    bool   used { false };
-    double in_start { 0.0 }, in_end { 0.0 }, out_start { 1.0 }, out_end { 1.0 };
+/// The share of a particle's life over which an operator is in force, as a
+/// fade-in edge and a fade-out edge on the life position 0..1. An envelope
+/// whose keys leave the whole life untouched weighs 1 everywhere.
+class LifeEnvelope {
+public:
+    explicit LifeEnvelope(const Json& record) {
+        const double in_from  = ReadKey<double>(record, "blendinstart", 0.0);
+        const double in_to    = ReadKey<double>(record, "blendinend", 0.0);
+        const double out_from = ReadKey<double>(record, "blendoutstart", 1.0);
+        const double out_to   = ReadKey<double>(record, "blendoutend", 1.0);
+        // Each edge keeps a width of at least 0.0001.
+        m_rise_from = std::min(in_from, in_to - 0.0001);
+        m_rise_to   = in_to;
+        m_fall_from = out_from;
+        m_fall_to   = std::max(out_to, out_from + 0.0001);
 
-    static BlendWindow Read(const Json& j) {
-        BlendWindow w;
-        w.in_start  = ReadKey<double>(j, "blendinstart", 0.0);
-        w.in_end    = ReadKey<double>(j, "blendinend", 0.0);
-        w.out_start = ReadKey<double>(j, "blendoutstart", 1.0);
-        w.out_end   = ReadKey<double>(j, "blendoutend", 1.0);
-        w.in_start  = std::min(w.in_start, w.in_end - 0.0001);
-        w.out_end   = std::max(w.out_end, w.out_start + 0.0001);
-        const bool reaches = w.in_end > 0.01 || w.out_start < 0.99;
-        const bool shaped  = (w.out_start - w.in_end) > 0.01 || (w.in_end - w.in_start) > 0.01 ||
-                            (w.out_end - w.out_start) > 0.01;
-        w.used = reaches && shaped;
-        return w;
+        const double rise_width = m_rise_to - m_rise_from;
+        const double fall_width = m_fall_to - m_fall_from;
+        const double plateau    = m_fall_from - m_rise_to;
+        const bool   touches    = m_rise_to > 0.01 || m_fall_from < 0.99;
+        const bool   visible    = plateau > 0.01 || rise_width > 0.01 || fall_width > 0.01;
+        m_enabled               = touches && visible;
     }
+
+    /// The factor at life position `t`.
     double At(double t) const {
-        if (! used) return 1.0;
-        const double rise = std::clamp((t - in_start) / (in_end - in_start), 0.0, 1.0);
-        const double fall = std::clamp((out_end - t) / (out_end - out_start), 0.0, 1.0);
-        return rise * fall;
+        if (! m_enabled) return 1.0;
+        const double fade_in  = std::clamp((t - m_rise_from) / (m_rise_to - m_rise_from), 0.0, 1.0);
+        const double fade_out = std::clamp((m_fall_to - t) / (m_fall_to - m_fall_from), 0.0, 1.0);
+        return fade_in * fade_out;
     }
+
+private:
+    bool   m_enabled { false };
+    double m_rise_from { 0.0 }, m_rise_to { 0.0 }, m_fall_from { 1.0 }, m_fall_to { 1.0 };
 };
 
 /// The `audioprocessing*` keys of an operator.
@@ -1002,13 +1075,12 @@ ParticleOperatorOp WPParticleParser::genParticleOperatorOp(const nlohmann::json&
         const double t0 = ReadKey<double>(wpj, "starttime", 0.0), t1 = ReadKey<double>(wpj, "endtime", 1.0);
         const Vec3d  from = ReadVec3(wpj, "startvalue", { 1, 1, 1 });
         const Vec3d  to   = ReadVec3(wpj, "endvalue", { 0, 0, 0 });
-        const ParticleParseContext context = ctx;
+        const OverrideTint tint(ctx.over, ctx.color);
         return [=](const ParticleInfo& info) mutable {
             Vec3d a = from, b = to;
-            const ColourShift shift = ShiftOf(context);
-            if (shift.active) {
-                a = Retint(a, shift.delta);
-                b = Retint(b, shift.delta);
+            if (const auto moved = tint.Shifted()) {
+                a = OverrideTint::Moved(a, moved->hsv_step);
+                b = OverrideTint::Moved(b, moved->hsv_step);
             }
             for (auto& p : info.particles) {
                 const double t = PM::LifetimePos(p);
@@ -1043,7 +1115,7 @@ ParticleOperatorOp WPParticleParser::genParticleOperatorOp(const nlohmann::json&
         const double ph_lo = ReadKey<double>(wpj, "phasemin", 0.0);
         const double ph_hi = ReadKey<double>(wpj, "phasemax", 2.0 * Pi);
         const Vec3d  mask  = ReadVec3(wpj, "mask", { 1, 1, 0 });
-        const BlendWindow blend = BlendWindow::Read(wpj);
+        const LifeEnvelope blend(wpj);
         return [=](const ParticleInfo& info) mutable {
             const double dt    = info.time_pass;
             const double speed = reader.Speed();
@@ -1078,7 +1150,7 @@ ParticleOperatorOp WPParticleParser::genParticleOperatorOp(const nlohmann::json&
         const Vec3d  mask = ReadVec3(wpj, "mask", pixel ? Vec3d { 1, 1, 0 } : Vec3d { 1, 1, 1 });
         const double ph_lo = ReadKey<double>(wpj, "phasemin", 0.0);
         const double ph_hi = ReadKey<double>(wpj, "phasemax", 0.0);
-        const BlendWindow blend = BlendWindow::Read(wpj);
+        const LifeEnvelope blend(wpj);
         const AudioGate   gate  = AudioGate::Read(wpj, ctx);
         return [=](const ParticleInfo& info) mutable {
             const double dt    = info.time_pass;
@@ -1105,7 +1177,7 @@ ParticleOperatorOp WPParticleParser::genParticleOperatorOp(const nlohmann::json&
         const Vec3d  offset = ReadVec3(wpj, "offset", { 0, 0, 0 });
         Vec3d        axis   = ReadVec3(wpj, "axis", { 0, 0, 1 });
         if (axis.squaredNorm() >= 0.001) axis = axis.normalized();
-        const BlendWindow blend = BlendWindow::Read(wpj);
+        const LifeEnvelope blend(wpj);
         const AudioGate   gate  = AudioGate::Read(wpj, ctx);
         return [=](const ParticleInfo& info) mutable {
             const auto* point  = PointOf(info.controlpoints, index);
@@ -1157,7 +1229,7 @@ ParticleOperatorOp WPParticleParser::genParticleOperatorOp(const nlohmann::json&
     }
     if (name == "capvelocity") {
         const double max_speed = ReadKey<double>(wpj, "maxspeed", pixel ? 100.0 : 1.0);
-        const BlendWindow blend = BlendWindow::Read(wpj);
+        const LifeEnvelope blend(wpj);
         return [=](const ParticleInfo& info) {
             for (auto& p : info.particles) {
                 if (! PM::LifetimeOk(p)) continue;

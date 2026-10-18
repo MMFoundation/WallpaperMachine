@@ -337,30 +337,38 @@ void ParticleSubSystem::KeepWorldPositions() {
     m_have_prev_model = true;
 }
 
+namespace
+{
+
+/// Moves a recording clock on by `dt` and reports whether it came due. A due
+/// clock wraps to the remainder of the period; a clock whose configuration
+/// records nothing stays still.
+bool TickRecordingClock(const ParticleTrailConfig& config, double& clock, double dt) {
+    if (! config.enabled()) return false;
+    clock += dt;
+    if (clock < config.period) return false;
+    clock = std::fmod(clock, config.period);
+    return true;
+}
+
+} // namespace
+
 void ParticleSubSystem::Advance(double dt) {
-    // The layer may have moved since the last step.
-    KeepWorldPositions();
+    KeepWorldPositions();   // a move of the layer since the last step
 
     m_time += dt;
-    bool record_trail = false;
-    if (m_trail.enabled()) {
-        m_trail_timer += dt;
-        if (m_trail_timer >= m_trail.period) {
-            record_trail  = true;
-            m_trail_timer = std::fmod(m_trail_timer, m_trail.period);
-        }
-    }
+    const bool recording = TickRecordingClock(m_trail, m_trail_timer, dt);
 
     UpdateControlpoints();
 
-    if (m_spawn_type == SpawnType::STATIC && m_instances.empty()) {
-        m_instances.push_back(std::make_unique<ParticleInstance>());
-    }
-    // Events may add instances to the children, never to this system's own
-    // list while it steps, but index anyway.
-    for (std::size_t i = 0; i < m_instances.size(); ++i) {
-        AdvanceInstance(*m_instances[i], dt, m_time, record_trail);
-    }
+    // A static system always owns one instance to run.
+    if (m_spawn_type == SpawnType::STATIC && m_instances.empty())
+        m_instances.emplace_back(std::make_unique<ParticleInstance>());
+
+    // Events create instances in the children only, but the count is read each
+    // round so a growing list is never stepped past its end.
+    for (std::size_t next = 0; next != m_instances.size(); ++next)
+        AdvanceInstance(*m_instances[next], dt, m_time, recording);
 
     for (auto& point : m_controlpoints) point.prev_offset = point.offset;
 }

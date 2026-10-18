@@ -139,153 +139,151 @@ void GenerateSprites(std::span<const std::unique_ptr<ParticleInstance>> instance
 
 // --- ropes -------------------------------------------------------------------------
 
-/// One point of a rope strip: where it is and what it looks like there.
-struct RopePoint {
-    Vector3d position;
-    Vector3d color;
-    double   alpha;
-    double   half;
+/// A station on a ribbon: where it lies and how the ribbon looks there.
+struct Station {
+    Vector3d at;
+    Vector3d tint;
+    double   opacity;
+    double   radius;
 };
 
-RopePoint PointOf(const Particle& p, const Vector3d& anchor) {
+Station StationOf(const Particle& p, const Vector3d& anchor) {
     return { Vector3d { p.position.x() + anchor.x(), p.position.y() + anchor.y(),
                         p.position.z() + anchor.z() },
              Vector3d { p.color.x(), p.color.y(), p.color.z() }, p.alpha,
              static_cast<double>(p.size) / kParticleSizeOverEngine };
 }
 
-RopePoint Blend(const RopePoint& a, const RopePoint& b, double s) {
-    return { Vector3d(a.position + (b.position - a.position) * s),
-             Vector3d(a.color + (b.color - a.color) * s), a.alpha + (b.alpha - a.alpha) * s,
-             a.half + (b.half - a.half) * s };
+/// The station a fraction `s` of the way from `a` to `b`.
+Station Between(const Station& a, const Station& b, double s) {
+    return { Vector3d(a.at + (b.at - a.at) * s), Vector3d(a.tint + (b.tint - a.tint) * s),
+             a.opacity + (b.opacity - a.opacity) * s, a.radius + (b.radius - a.radius) * s };
 }
 
 struct StripParams {
-    uint32_t pieces { 1 };     // pieces drawn between two connected points
+    uint32_t pieces { 1 };     // pieces drawn between two connected stations
     float    uv_scale { 1.0f };
     bool     smoothing { false };
     float    length { 0.0f };  // the strip's length before the uv scale is applied
 };
 
-void WritePiece(Target& t, const Vector3d& start, double start_half, const Vector3d& end,
-                double end_half, const Vector3d& control_a, const Vector3d& control_b,
-                const RopePoint& from, const RopePoint& to, float encoded, float along) {
+/// Everything the vertex data of one ribbon piece is made of.
+struct PieceData {
+    Station  head;            // where the piece starts
+    Station  tail;            // where it ends
+    Vector3d handle_head;     // first control vector
+    Vector3d handle_tail;     // second control vector
+    float    encoded_length;  // the strip's encoded length
+    float    along;           // the piece's position along the strip
+};
+
+/// Fills a vertex front to back in groups of four floats.
+class GroupWriter {
+public:
+    explicit GroupWriter(float* first) : m_next(first) {}
+
+    void Group(float a, float b, float c, float d) {
+        m_next[0] = a;
+        m_next[1] = b;
+        m_next[2] = c;
+        m_next[3] = d;
+        m_next += 4;
+    }
+    void Group(const Vector3d& xyz, double w) {
+        Group(static_cast<float>(xyz.x()), static_cast<float>(xyz.y()), static_cast<float>(xyz.z()),
+              static_cast<float>(w));
+    }
+
+private:
+    float* m_next;
+};
+
+void WritePiece(Target& t, const PieceData& piece) {
     std::array<float, kMaxFloatsPerVertex * 4> quad;
-    for (std::size_t v = 0; v < 4; ++v) {
-        float* out = quad.data() + v * t.floats;
-        out[0]     = static_cast<float>(start.x());
-        out[1]     = static_cast<float>(start.y());
-        out[2]     = static_cast<float>(start.z());
-        out[3]     = static_cast<float>(start_half);
-        out[4]     = static_cast<float>(end.x());
-        out[5]     = static_cast<float>(end.y());
-        out[6]     = static_cast<float>(end.z());
-        out[7]     = encoded;
-        out[8]     = static_cast<float>(control_a.x());
-        out[9]     = static_cast<float>(control_a.y());
-        out[10]    = static_cast<float>(control_a.z());
-        out[11]    = along;
-        out[12]    = static_cast<float>(control_b.x());
-        out[13]    = static_cast<float>(control_b.y());
-        out[14]    = static_cast<float>(control_b.z());
-        if (t.thick) {
-            out[15] = static_cast<float>(end_half);
-            out[16] = static_cast<float>(to.color.x());
-            out[17] = static_cast<float>(to.color.y());
-            out[18] = static_cast<float>(to.color.z());
-            out[19] = static_cast<float>(to.alpha);
-            out[20] = kCorners[v][0];
-            out[21] = kCorners[v][1];
-            out[22] = 0.0f;
-            out[23] = 0.0f;
-            out[24] = static_cast<float>(from.color.x());
-            out[25] = static_cast<float>(from.color.y());
-            out[26] = static_cast<float>(from.color.z());
-            out[27] = static_cast<float>(from.alpha);
-        } else {
-            out[15] = static_cast<float>(end_half);
-            out[16] = kCorners[v][0];
-            out[17] = kCorners[v][1];
-            out[18] = 0.0f;
-            out[19] = 0.0f;
-            out[20] = static_cast<float>(from.color.x());
-            out[21] = static_cast<float>(from.color.y());
-            out[22] = static_cast<float>(from.color.z());
-            out[23] = static_cast<float>(from.alpha);
-        }
+    for (std::size_t corner = 0; corner < kCorners.size(); ++corner) {
+        GroupWriter vertex(quad.data() + corner * t.floats);
+        vertex.Group(piece.head.at, piece.head.radius);
+        vertex.Group(piece.tail.at, piece.encoded_length);
+        vertex.Group(piece.handle_head, piece.along);
+        vertex.Group(piece.handle_tail, piece.tail.radius);
+        if (t.thick) vertex.Group(piece.tail.tint, piece.tail.opacity);
+        vertex.Group(kCorners[corner][0], kCorners[corner][1], 0.0f, 0.0f);
+        vertex.Group(piece.head.tint, piece.head.opacity);
     }
     StoreQuad(t, quad.data());
 }
 
-/// The tangent of a strip at point `i`: the difference of its neighbours, or the
-/// chord to the one neighbour an end point has.
-Vector3d TangentAt(const RopePoint* points, std::size_t count, std::size_t i) {
-    if (i == 0) return points[1].position - points[0].position;
-    if (i + 1 == count) return points[i].position - points[i - 1].position;
-    return points[i + 1].position - points[i - 1].position;
+/// The heading of a strip at station `i`: the difference of the stations on
+/// either side, an end station using itself for the side it lacks.
+Vector3d HeadingAt(const Station* stations, std::size_t count, std::size_t i) {
+    const std::size_t before = i > 0 ? i - 1 : i;
+    const std::size_t after  = std::min(i + 1, count - 1);
+    return stations[after].at - stations[before].at;
 }
 
-/// Writes the pieces of one strip: each pair of consecutive points becomes
+/// Writes the pieces of one strip: each pair of consecutive stations becomes
 /// `pieces` pieces along a smooth curve through them, spaced by smoothstep.
-void WriteStrip(Target& t, const RopePoint* points, std::size_t count, const StripParams& params) {
+void WriteStrip(Target& t, const Station* stations, std::size_t count, const StripParams& params) {
     if (count < 2) return;
-    const uint32_t pieces      = std::max<uint32_t>(params.pieces, 1);
-    const double   total       = static_cast<double>(count - 1) * pieces;
-    const float    encoded     = EncodeRopeTrailLength(params.length, params.uv_scale);
-    const bool     smooth_uv   = params.smoothing && total > 1.0;
+    const uint32_t pieces    = std::max<uint32_t>(params.pieces, 1);
+    const double   total     = static_cast<double>(count - 1) * pieces;
+    const float    encoded   = EncodeRopeTrailLength(params.length, params.uv_scale);
+    const bool     smooth_uv = params.smoothing && total > 1.0;
 
     for (std::size_t i = 0; i + 1 < count; ++i) {
-        const RopePoint& a     = points[i];
-        const RopePoint& b     = points[i + 1];
-        const Vector3d   chord = b.position - a.position;
-        if (chord.norm() < 1.0e-6) {
-            // No piece between coincident points; the strip's counting goes on.
-            continue;
-        }
-        Vector3d tangent_a = TangentAt(points, count, i);
-        Vector3d tangent_b = TangentAt(points, count, i + 1);
-        if (tangent_a.norm() < 1.0e-12) tangent_a = chord;
-        if (tangent_b.norm() < 1.0e-12) tangent_b = chord;
-        const Vector3d ca = a.position + tangent_a * 0.15;
-        const Vector3d cb = b.position - tangent_b * 0.15;
+        const Station& first = stations[i];
+        const Station& last  = stations[i + 1];
+        const Vector3d chord = last.at - first.at;
+        // No piece between coincident stations; the strip's counting goes on.
+        if (chord.norm() < 1.0e-6) continue;
 
-        const auto curve = [&](double s) -> Vector3d {
+        Vector3d lead  = HeadingAt(stations, count, i);
+        Vector3d trail = HeadingAt(stations, count, i + 1);
+        if (lead.norm() < 1.0e-12) lead = chord;
+        if (trail.norm() < 1.0e-12) trail = chord;
+        const Vector3d inner_first = first.at + lead * 0.15;
+        const Vector3d inner_last  = last.at - trail * 0.15;
+
+        const auto point_at = [&](double s) -> Vector3d {
             const double u = 1.0 - s;
-            return a.position * (u * u * u) + ca * (3.0 * u * u * s) + cb * (3.0 * u * s * s) +
-                   b.position * (s * s * s);
+            return first.at * (u * u * u) + inner_first * (3.0 * u * u * s) +
+                   inner_last * (3.0 * u * s * s) + last.at * (s * s * s);
         };
-        const auto slope = [&](double s) -> Vector3d {
+        const auto slope_at = [&](double s) -> Vector3d {
             const double u = 1.0 - s;
-            return (ca - a.position) * (3.0 * u * u) + (cb - ca) * (6.0 * u * s) +
-                   (b.position - cb) * (3.0 * s * s);
+            return (inner_first - first.at) * (3.0 * u * u) + (inner_last - inner_first) * (6.0 * u * s) +
+                   (last.at - inner_last) * (3.0 * s * s);
         };
 
         for (uint32_t j = 0; j < pieces; ++j) {
             ++t.wanted;
             if (t.quads >= t.capacity) continue;
-            const double s0 = j == 0 ? 0.0 : SmoothStep(static_cast<double>(j) / pieces);
-            const double s1 = j + 1 == pieces ? 1.0 : SmoothStep(static_cast<double>(j + 1) / pieces);
-            const RopePoint from = Blend(a, b, s0);
-            const RopePoint to   = Blend(a, b, s1);
-            const Vector3d  start = j == 0 ? a.position : curve(s0);
-            const Vector3d  end   = j + 1 == pieces ? b.position : curve(s1);
+            const bool   at_first = j == 0;
+            const bool   at_last  = j + 1 == pieces;
+            const double s0 = at_first ? 0.0 : SmoothStep(static_cast<double>(j) / pieces);
+            const double s1 = at_last ? 1.0 : SmoothStep(static_cast<double>(j + 1) / pieces);
+
+            PieceData piece;
+            piece.head = Between(first, last, s0);
+            piece.tail = Between(first, last, s1);
+            if (at_first) piece.head.at = first.at; else piece.head.at = point_at(s0);
+            if (at_last) piece.tail.at = last.at; else piece.tail.at = point_at(s1);
             // The piece's own tangents, scaled so the shader's curve through its
             // two ends is the stretch of the pair's curve between s0 and s1.
-            const double    span = (s1 - s0) / 0.45;
-            const Vector3d  ta   = slope(s0) * span;
-            const Vector3d  tb   = slope(s1) * span;
-            const double m = static_cast<double>(i) * pieces + j;
-            double along = m;
-            if (smooth_uv) along = SmoothStep(m / total) * total;
-            WritePiece(t, start, from.half, end, to.half, end - ta, start + tb, from, to, encoded,
-                       static_cast<float>(along));
+            const double span = (s1 - s0) / 0.45;
+            piece.handle_head = piece.tail.at - slope_at(s0) * span;
+            piece.handle_tail = piece.head.at + slope_at(s1) * span;
+            const double index = static_cast<double>(i) * pieces + j;
+            piece.along        = static_cast<float>(smooth_uv ? SmoothStep(index / total) * total : index);
+            piece.encoded_length = encoded;
+            WritePiece(t, piece);
         }
     }
 }
 
 void GenerateRopes(std::span<const std::unique_ptr<ParticleInstance>> instances, Target& t,
                    const ParticleRenderScale& scale) {
-    thread_local std::vector<RopePoint> strip;
+    thread_local std::vector<Station> strip;
     StripParams params;
     params.pieces    = std::clamp<uint32_t>(scale.rope_subdivision, 1u, 64u);
     params.uv_scale  = RopeUvScaleOrOne(scale.uv_scale);
@@ -297,19 +295,19 @@ void GenerateRopes(std::span<const std::unique_ptr<ParticleInstance>> instances,
         const Vector3d anchor { bound.pos.x(), bound.pos.y(), bound.pos.z() };
         strip.clear();
         for (const auto& p : instance->Particles()) {
-            if (PM::LifetimeOk(p)) strip.push_back(PointOf(p, anchor));
+            if (PM::LifetimeOk(p)) strip.push_back(StationOf(p, anchor));
         }
         if (strip.size() < 2) continue;
-        const double points = static_cast<double>(strip.size() - 1) * params.pieces + 1.0;
-        params.length       = scale.uv_scrolling ? static_cast<float>(t.capacity) + 1.0f
-                                                 : static_cast<float>(points);
+        const double stations = static_cast<double>(strip.size() - 1) * params.pieces + 1.0;
+        params.length         = scale.uv_scrolling ? static_cast<float>(t.capacity) + 1.0f
+                                                   : static_cast<float>(stations);
         WriteStrip(t, strip.data(), strip.size(), params);
     }
 }
 
 void GenerateRopeTrails(std::span<const std::unique_ptr<ParticleInstance>> instances, Target& t,
                         const ParticleRenderScale& scale) {
-    thread_local std::vector<RopePoint> strip;
+    thread_local std::vector<Station> strip;
     StripParams params;
     params.pieces    = std::clamp<uint32_t>(scale.rope_subdivision, 1u, 64u);
     params.uv_scale  = RopeUvScaleOrOne(scale.uv_scale);
@@ -329,32 +327,35 @@ void GenerateRopeTrails(std::span<const std::unique_ptr<ParticleInstance>> insta
             const uint32_t              held    = history.Count();
             if (held == 0) continue;
 
+            // The particle as drawn now, then its recorded points newest to oldest.
             strip.clear();
-            const RopePoint head = PointOf(p, anchor);
+            const Station head = StationOf(p, anchor);
             strip.push_back(head);
             for (uint32_t age = 0; age < held; ++age) {
-                RopePoint point = head;
-                const auto& at  = history.At(age).position;
-                point.position  = Vector3d { at.x(), at.y(), at.z() };
-                strip.push_back(point);
+                Station recorded = head;
+                const auto& where = history.At(age).position;
+                recorded.at       = Vector3d { where.x(), where.y(), where.z() };
+                strip.push_back(recorded);
             }
             // A full history gives its oldest point up to the newer one as the
             // period goes by, so the tail shrinks by what the head grew.
             if (held == history.Capacity() && held >= 2) {
-                RopePoint& oldest = strip[strip.size() - 1];
-                const RopePoint& newer = strip[strip.size() - 2];
-                oldest.position = oldest.position + (newer.position - oldest.position) * fraction;
+                Station&       oldest = strip[strip.size() - 1];
+                const Station& newer  = strip[strip.size() - 2];
+                oldest.at += (newer.at - oldest.at) * fraction;
             }
 
-            const double pieces   = params.pieces;
-            const double subdivided = static_cast<double>(held) * pieces + 1.0;
-            const double capacity = static_cast<double>(history.Capacity());
+            const double pieces     = params.pieces;
+            const double capacity   = static_cast<double>(history.Capacity());
+            const bool   subdivided = params.pieces != 1;
+            const double recorded_count = static_cast<double>(held);
+            double       units;
             if (scale.uv_scrolling) {
-                params.length = static_cast<float>(params.pieces == 1 ? capacity : capacity * pieces);
+                units = subdivided ? capacity * pieces : capacity;
             } else {
-                params.length = static_cast<float>(params.pieces == 1 ? static_cast<double>(held)
-                                                                      : subdivided);
+                units = subdivided ? recorded_count * pieces + 1.0 : recorded_count;
             }
+            params.length = static_cast<float>(units);
             WriteStrip(t, strip.data(), strip.size(), params);
         }
     }
