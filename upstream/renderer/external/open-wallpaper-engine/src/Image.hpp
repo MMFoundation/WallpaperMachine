@@ -59,10 +59,9 @@ struct Image : NoCopy, NoMove {
 
         std::vector<ImageData> mipmaps;
 
-        operator bool() {
-            // CLEANROOM UV16
-            return false;
-        }
+        // A usable picture has a positive size (both sides, so two negatives never
+        // pass) and at least one level.
+        operator bool() const { return width > 0 && height > 0 && ! mipmaps.empty(); }
     };
     ImageHeader       header;
     std::vector<Slot> slots;
