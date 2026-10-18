@@ -91,8 +91,33 @@ public:
     void FireNow();
 
 private:
-    // CLEANROOM RT32
+    using Clock = std::chrono::steady_clock;
+
+    void Loop();
+
+    // Named for the tests, which call it as the timer's tick.
     std::function<void()> m_callback;
+
+    // Start and Stop are serialised by this one.
+    std::mutex m_control_mutex;
+    std::thread m_thread;
+    std::atomic<bool> m_running { false };
+
+    // Everything below is guarded by `m_mutex`, the lock the waiting thread re-checks.
+    mutable std::mutex      m_mutex;
+    std::condition_variable m_wake;
+    std::chrono::microseconds m_interval { 33'333 };
+    std::chrono::microseconds m_min_interval { 0 };
+    bool                      m_idle { false };
+    // One-shot request: a latch, with the moment the first request of the batch was made.
+    bool                      m_request { false };
+    Clock::time_point         m_request_time {};
+    std::optional<Clock::time_point> m_appointment;
+    bool                      m_fire_now { false };
+    // The cadence is a grid anchored to due times: the next cadence tick is `anchor + interval`.
+    Clock::time_point         m_cadence_anchor {};
+    // The due moment of the last tick; the ceiling is measured from it.
+    Clock::time_point         m_last_due {};
 };
 
 } // namespace wallpaper

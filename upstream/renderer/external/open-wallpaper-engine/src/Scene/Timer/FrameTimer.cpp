@@ -1,11 +1,9 @@
+// Clean-room implementation from the WallpaperMachine spec e2-runtime-animation.md; written without access to the original source.
 #include "FrameTimer.hpp"
 #include "Utils//Logging.h"
 
 #include <algorithm>
 #include <numeric>
-
-// CLEANROOM: the stubs below leave their parameters unused until they are rewritten.
-#pragma clang diagnostic ignored "-Wunused-parameter"
 
 using namespace wallpaper;
 using micros = std::chrono::microseconds;
@@ -21,26 +19,28 @@ constexpr auto MAX_FRAME_DURATION = seconds(5);
 /// suspension feed hours into scene simulation.
 constexpr i32  SUSPENSION_INTERVAL_SLACK { 3 };
 constexpr u16  DEFAULT_REQUIRED_FPS { 30 };
+/// How many draws the render-cost statistic averages.
+constexpr std::size_t COST_WINDOW { 5 };
 }
 
 FrameTimer::FrameTimer(std::function<void()> cb)
-    : m_timer(std::function<void()> {}) {
-    // CLEANROOM RT33
-    (void)cb;
+    : m_draw(std::move(cb)), m_timer([this] { OnTick(); }) {
+    m_req_fps  = DEFAULT_REQUIRED_FPS;
+    m_ideatime = microseconds(1'000'000 / DEFAULT_REQUIRED_FPS);
+    m_elapsed_frametime = m_ideatime.load();
+    m_frame_busy_count  = 0;
+    m_frame_cost        = m_ideatime.load();
+    m_costs.assign(COST_WINDOW, m_ideatime.load());
+    m_timer.SetMinInterval(m_ideatime.load());
+    m_timer.SetInterval(ResolveInterval());
 }
 
-FrameTimer::~FrameTimer() {
-    // CLEANROOM RT33
-}
+FrameTimer::~FrameTimer() { m_timer.Stop(); }
 
-u16 FrameTimer::RequiredFps() const {
-    // CLEANROOM RT33
-    return 0;
-}
+u16 FrameTimer::RequiredFps() const { return m_req_fps.load(); }
 
 double FrameTimer::FrameTime() const {
-    // CLEANROOM RT33
-    return 0;
+    return duration_cast<duration<double>>(m_frame_cost.load()).count();
 }
 
 double FrameTimer::IdeaTime() const {
@@ -48,11 +48,16 @@ double FrameTimer::IdeaTime() const {
 }
 
 void FrameTimer::UpdateFrametime() {
-    // CLEANROOM RT33
+    std::lock_guard lock(m_costs_mutex);
+    if (m_costs.empty()) return;
+    const auto sum = std::accumulate(m_costs.begin(), m_costs.end(), micros::zero());
+    m_frame_cost.store(sum / static_cast<micros::rep>(m_costs.size()));
 }
 
 void FrameTimer::AddFrametime(micros t) {
-    // CLEANROOM RT33
+    std::lock_guard lock(m_costs_mutex);
+    m_costs.push_back(t);
+    while (m_costs.size() > COST_WINDOW) m_costs.pop_front();
 }
 
 void FrameTimer::SetRequiredFps(u16 value) {
@@ -171,19 +176,81 @@ void FrameTimer::FrameBegin(steady_clock::time_point now) {
 }
 void FrameTimer::FrameEnd() { FrameEnd(steady_clock::now()); }
 void FrameTimer::FrameEnd(steady_clock::time_point now) {
-    // CLEANROOM RT33
+    const auto cost = duration_cast<microseconds>(now - m_clock);
+    if (cost > MAX_FRAME_DURATION) {
+        // The process was suspended inside this frame: its length says nothing about the cost
+        // of drawing, and the next frame starts afresh.
+        {
+            std::lock_guard lock(m_costs_mutex);
+            m_costs.assign(COST_WINDOW, m_ideatime.load());
+        }
+        UpdateFrametime();
+        m_elapsed_frametime.store(m_ideatime.load());
+        m_reset_frame_clock.store(true);
+    } else {
+        AddFrametime(cost);
+        UpdateFrametime();
+    }
+
+    // One draw less in flight, never below none.
+    auto busy = m_frame_busy_count.load();
+    while (busy > 0 && ! m_frame_busy_count.compare_exchange_weak(busy, busy - 1)) {}
+
+    // A tick that was dropped because this draw was still running is owed, and taken now when
+    // the draw ended soon after it was due: a frame that overruns by a millisecond does not
+    // halve the rate. The dropped tick was itself a whole interval after the last one, so this
+    // cannot outrun the ceiling.
+    const auto owed = m_owed_tick_ns.exchange(kNoOwedTick);
+    if (owed != kNoOwedTick) {
+        const auto late = now.time_since_epoch() - nanoseconds(owed);
+        if (late >= nanoseconds::zero() && late <= m_tick_interval.load() / 4) {
+            m_timer.FireNow();
+            return;
+        }
+    }
+    if (m_frame_requested.load() && m_timer.Running()) m_timer.WakeOnce();
 }
 
 void FrameTimer::SetCallback(const std::function<void()>& cb) {
-    // CLEANROOM RT33
+    if (! m_timer.Running()) m_draw = cb;
 }
+
 void FrameTimer::Run() {
-    // CLEANROOM RT33
+    if (m_timer.Running()) return;
+    // A start is a fresh clock: the first frame counts one ideal interval, nothing inherits a
+    // draw that will never complete, and no tick is owed.
+    const auto ideal = m_ideatime.load();
+    {
+        std::lock_guard lock(m_costs_mutex);
+        m_costs.assign(COST_WINDOW, ideal);
+    }
+    UpdateFrametime();
+    m_elapsed_frametime.store(ideal);
+    m_reset_frame_clock.store(true);
+    m_frame_busy_count.store(0);
+    m_owed_tick_ns.store(kNoOwedTick);
+    m_timer.SetInterval(ResolveInterval());
+    m_timer.Start();
 }
-void FrameTimer::Stop() {
-    // CLEANROOM RT33
-}
-bool FrameTimer::Running() const {
-    // CLEANROOM RT33
-    return false;
+
+void FrameTimer::Stop() { m_timer.Stop(); }
+
+bool FrameTimer::Running() const { return m_timer.Running(); }
+
+void FrameTimer::OnTick() {
+    m_timer.SetInterval(ResolveInterval());
+    auto* counters = m_counters.load(std::memory_order_relaxed);
+    if (counters != nullptr) counters->Add(OWE_RC_TIMER_WAKEUPS);
+    if (m_draw && m_frame_busy_count.load() == 0) {
+        m_owed_tick_ns.store(kNoOwedTick);
+        m_frame_busy_count.fetch_add(1);
+        m_frame_requested.store(false);
+        if (counters != nullptr) counters->Add(OWE_RC_DRAW_REQUESTS);
+        m_draw();
+        return;
+    }
+    if (m_draw) {
+        m_owed_tick_ns.store(steady_clock::now().time_since_epoch().count());
+    }
+    if (counters != nullptr) counters->Add(OWE_RC_DRAW_TICKS_SUPPRESSED);
 }
