@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
@@ -19,127 +20,138 @@ using namespace wallpaper;
 using namespace wallpaper::audio;
 
 // One mounted stream, decoded ahead of the device on its own worker so a slow or failing
-// stream never delays the audio thread or the other streams. The audio thread only copies
-// out of a bounded ring (about half a second of frames) and never waits for the worker.
+// stream never delays the audio thread or the other streams. The decoded audio waits in a
+// small set of equal blocks (together just under half a second at the device rate). The
+// worker fills a block that nobody reads and then publishes it; the audio thread consumes
+// published blocks from the front. Neither side waits for the other.
 class Channel_Impl : public miniaudio::Channel {
+    static constexpr size_t kBlockCount   = 12;
+    static constexpr size_t kBlocksPerSec = 25; // a block is 1/25 s of device time
+
 public:
     explicit Channel_Impl(std::shared_ptr<SoundStream> stream): m_ss { std::move(stream) } {}
-    ~Channel_Impl() override { StopWorker(); }
+    ~Channel_Impl() override { HaltWorker(); }
 
     ma_uint64 NextPcmData(void* pData, ma_uint32 frameCount) override {
-        const uint32_t channels = m_channels.load(std::memory_order_relaxed);
-        if (pData == nullptr || frameCount == 0 || channels == 0) return frameCount;
-        auto*        out     = static_cast<float*>(pData);
-        const size_t samples = static_cast<size_t>(frameCount) * channels;
+        const size_t width = m_width.load(std::memory_order_relaxed);
+        if (pData == nullptr || frameCount == 0 || width == 0) return frameCount;
+        float* const dst = static_cast<float*>(pData);
 
-        std::unique_lock<std::mutex> lock { m_mutex, std::try_to_lock };
-        if (! lock.owns_lock() || m_filled == 0 || m_capacity == 0 || m_ring.empty() ||
-            m_layout_channels != channels) {
-            std::fill(out, out + samples, 0.0f);
-            return frameCount;
-        }
-        const size_t take = std::min<size_t>(m_filled, frameCount);
-        size_t       head = m_head;
-        size_t       done = 0;
-        while (done < take) {
-            const size_t run = std::min(take - done, m_capacity - head);
-            std::memcpy(out + done * channels, m_ring.data() + head * channels,
-                        run * channels * sizeof(float));
-            head = (head + run) % m_capacity;
-            done += run;
-        }
-        m_head = head;
-        m_filled -= take;
-        std::fill(out + take * channels, out + samples, 0.0f);
-        const bool room = m_capacity - m_filled >= m_chunk;
-        lock.unlock();
-        if (room) m_cv.notify_one();
+        // The layout owner (PassDeviceDesc) may be rebuilding the blocks: play silence then.
+        std::unique_lock<std::mutex> layout { m_layout_mutex, std::try_to_lock };
+        size_t                       copied = 0;
+        if (layout.owns_lock() && m_width_laid_out == width) copied = Drain(dst, frameCount, width);
+        std::fill(dst + copied * width, dst + static_cast<size_t>(frameCount) * width, 0.0f);
+        if (copied > 0) WakeWorker();
         return frameCount;
     }
 
     void PassDeviceDesc(const miniaudio::DeviceDesc& desc) override {
-        StopWorker();
+        HaltWorker();
         if (m_ss) m_ss->PassDesc({ desc.phyChannels, desc.sampleRate });
+        const bool usable = desc.phyChannels != 0 && desc.sampleRate != 0;
         {
-            std::lock_guard<std::mutex> lock { m_mutex };
-            m_head            = 0;
-            m_filled          = 0;
-            m_layout_channels = desc.phyChannels;
-            m_rate            = desc.sampleRate;
-            m_capacity        = std::max<size_t>(desc.sampleRate / 2, 2048);
-            m_chunk           = desc.sampleRate == 0
-                                    ? 512
-                                    : std::clamp<size_t>(desc.sampleRate / 50, 512, 2048);
-            if (desc.phyChannels == 0 || desc.sampleRate == 0) {
-                m_ring.clear();
-                m_capacity = 0;
-            } else {
-                m_ring.assign(m_capacity * desc.phyChannels, 0.0f);
-            }
-            m_stop = false;
+            std::lock_guard<std::mutex> layout { m_layout_mutex };
+            m_ready.store(0, std::memory_order_relaxed);
+            m_read_block = m_write_block = m_read_offset = 0;
+            m_width_laid_out                            = desc.phyChannels;
+            m_block_frames = usable ? std::max<size_t>(desc.sampleRate / kBlocksPerSec, 1) : 0;
+            m_storage.assign(usable ? kBlockCount * m_block_frames * desc.phyChannels : 0, 0.0f);
+            m_block_period = std::chrono::microseconds(
+                usable ? 1000000 * m_block_frames / desc.sampleRate : 0);
         }
-        m_channels.store(desc.phyChannels, std::memory_order_relaxed);
-        if (desc.phyChannels != 0 && desc.sampleRate != 0 && m_ss)
-            m_worker = std::thread([this] { WorkerMain(); });
+        m_width.store(desc.phyChannels, std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> wake { m_wake_mutex };
+            m_halt = false;
+        }
+        if (usable && m_ss) m_worker = std::thread([this] { DecodeBlocks(); });
     }
 
 private:
-    void StopWorker() {
-        {
-            std::lock_guard<std::mutex> lock { m_mutex };
-            m_stop = true;
+    // Audio side. Moves up to `want` buffered frames into dst; returns how many.
+    size_t Drain(float* dst, size_t want, size_t width) {
+        size_t got = 0;
+        while (got < want && m_ready.load(std::memory_order_acquire) > 0) {
+            const float* src   = m_storage.data() + m_read_block * m_block_frames * width;
+            const size_t avail = m_block_frames - m_read_offset;
+            const size_t n     = std::min(avail, want - got);
+            std::memcpy(dst + got * width, src + m_read_offset * width, n * width * sizeof(float));
+            got += n;
+            m_read_offset += n;
+            if (m_read_offset == m_block_frames) {
+                m_read_offset = 0;
+                m_read_block  = (m_read_block + 1) % kBlockCount;
+                m_ready.fetch_sub(1, std::memory_order_release);
+            }
         }
-        m_cv.notify_all();
+        return got;
+    }
+
+    // Never blocks: if the worker holds the mutex it is about to look at the count anyway,
+    // and a timed wait covers the rare missed notification.
+    void WakeWorker() {
+        std::unique_lock<std::mutex> wake { m_wake_mutex, std::try_to_lock };
+        if (wake.owns_lock()) {
+            wake.unlock();
+            m_wake.notify_one();
+        }
+    }
+
+    void HaltWorker() {
+        {
+            std::lock_guard<std::mutex> wake { m_wake_mutex };
+            m_halt = true;
+        }
+        m_wake.notify_all();
         if (m_worker.joinable()) m_worker.join();
     }
 
-    void WorkerMain() {
-        std::vector<float> chunk;
+    // Worker thread: runs while the layout is usable. It sleeps while every block is full.
+    void DecodeBlocks() {
+        const size_t width = m_width_laid_out;
         for (;;) {
-            size_t   frames;
-            uint32_t channels;
             {
-                std::unique_lock<std::mutex> lock { m_mutex };
-                m_cv.wait(lock, [this] { return m_stop || m_capacity - m_filled >= m_chunk; });
-                if (m_stop) return;
-                frames   = m_chunk;
-                channels = m_layout_channels;
+                std::unique_lock<std::mutex> wake { m_wake_mutex };
+                m_wake.wait_for(wake, m_block_period, [this] {
+                    return m_halt || m_ready.load(std::memory_order_acquire) < kBlockCount;
+                });
+                if (m_halt) return;
+                if (m_ready.load(std::memory_order_acquire) >= kBlockCount) continue;
             }
-            chunk.assign(frames * channels, 0.0f);
-            // A short read keeps the rest silent; a read of 0 (ended, empty or failing
-            // stream) still queues a chunk of silence, which paces the worker.
-            m_ss->NextPcmData(chunk.data(), static_cast<uint32_t>(frames));
-            {
-                std::lock_guard<std::mutex> lock { m_mutex };
-                if (m_stop) return;
-                size_t tail = (m_head + m_filled) % m_capacity;
-                size_t done = 0;
-                while (done < frames) {
-                    const size_t run = std::min(frames - done, m_capacity - tail);
-                    std::memcpy(m_ring.data() + tail * channels, chunk.data() + done * channels,
-                                run * channels * sizeof(float));
-                    tail = (tail + run) % m_capacity;
-                    done += run;
-                }
-                m_filled += frames;
-            }
+            float* const slot = m_storage.data() + m_write_block * m_block_frames * width;
+            // Whatever the stream does not deliver (a short read, an ended, empty or
+            // failing stream) stays silence, and the block still counts as decoded time.
+            const size_t read = std::min<size_t>(
+                m_ss->NextPcmData(slot, static_cast<uint32_t>(m_block_frames)), m_block_frames);
+            std::fill(slot + read * width, slot + m_block_frames * width, 0.0f);
+            m_write_block = (m_write_block + 1) % kBlockCount;
+            m_ready.fetch_add(1, std::memory_order_release);
         }
     }
 
     std::shared_ptr<SoundStream> m_ss;
 
-    std::mutex              m_mutex;
-    std::condition_variable m_cv;
-    std::thread             m_worker;
-    std::vector<float>      m_ring;
-    size_t                  m_head { 0 };
-    size_t                  m_filled { 0 };
-    size_t                  m_capacity { 0 };
-    size_t                  m_chunk { 512 };
-    uint32_t                m_layout_channels { 0 };
-    uint32_t                m_rate { 0 };
-    bool                    m_stop { false };
-    std::atomic<uint32_t>   m_channels { 0 };
+    std::thread m_worker;
+
+    // Wake-up of the worker (stop request and "a block was freed").
+    std::mutex              m_wake_mutex;
+    std::condition_variable m_wake;
+    bool                    m_halt { false };
+
+    // Layout and storage: rebuilt only while the worker is joined.
+    std::mutex                m_layout_mutex;
+    std::vector<float>        m_storage;
+    size_t                    m_block_frames { 0 };
+    size_t                    m_width_laid_out { 0 };
+    std::chrono::microseconds m_block_period { 0 };
+    std::atomic<size_t>       m_width { 0 };
+
+    // Block cursors: the reader owns read_*, the worker owns write_block, `ready` links them.
+    std::atomic<size_t> m_ready { 0 };
+    size_t              m_read_block { 0 };
+    size_t              m_read_offset { 0 };
+    size_t              m_write_block { 0 };
 };
 
 std::unique_ptr<SoundStream>

@@ -80,62 +80,83 @@ WPSoundStream::WPSoundStream(std::vector<StreamFactory> factories, Config config
 WPSoundStream::~WPSoundStream() = default;
 
 uint64_t WPSoundStream::NextPcmData(void* data, uint32_t frame_count) {
-    if (data == nullptr || frame_count == 0 || m_desc.channels == 0 || m_desc.sampleRate == 0 ||
-        m_stream_factories.empty())
-        return 0;
+    const bool unusable = data == nullptr || frame_count == 0 || m_desc.channels == 0 ||
+                          m_desc.sampleRate == 0 || m_stream_factories.empty();
+    if (unusable) return 0;
 
-    const std::size_t channels = m_desc.channels;
-    auto*             out      = static_cast<float*>(data);
-    audio::ClearInterleavedF32(out, static_cast<std::size_t>(frame_count) * channels);
+    const std::size_t width   = m_desc.channels;
+    const std::size_t total   = frame_count;
+    const std::size_t samples = total * width;
+    auto*             out     = static_cast<float*>(data);
+    audio::ClearInterleavedF32(out, samples);
 
-    // stop(), or play() on a finished one-shot, rewinds at the next request, paused or not.
+    // A rewind asked for by stop() (or by play() on a finished one-shot) happens now,
+    // whether or not the layer is currently playing.
     if (m_rewind_requested.exchange(false, std::memory_order_acq_rel)) {
         m_cur_active.reset();
         m_cur_index    = 0;
         m_delay_frames = 0;
         m_finished.store(false, std::memory_order_relaxed);
     }
-    if (! m_playing.load(std::memory_order_acquire)) return frame_count;
 
-    uint32_t    filled         = 0;
-    std::size_t empty_in_a_row = 0;
-    while (filled < frame_count) {
-        const uint32_t wanted = frame_count - filled;
-        if (m_delay_frames > 0) {
-            const uint32_t quiet = static_cast<uint32_t>(std::min<uint64_t>(m_delay_frames, wanted));
-            m_delay_frames -= quiet;
-            filled += quiet;
-            continue;
-        }
-        if (! m_cur_active) {
-            Switch();
-            if (! m_cur_active) break; // unreadable file: silence now, the next one next time
-        }
-        const uint64_t got = m_cur_active->NextPcmData(out + static_cast<std::size_t>(filled) * channels, wanted);
-        if (got > 0) {
-            filled += static_cast<uint32_t>(std::min<uint64_t>(got, wanted));
-            empty_in_a_row = 0;
-            continue;
-        }
-        // The file is over (or empty, or failing).
-        m_cur_active.reset();
-        if (m_config.mode == PlaybackMode::OneShot) {
-            m_finished.store(true, std::memory_order_relaxed);
-            m_playing.store(false, std::memory_order_release);
-            break;
-        }
-        if (m_config.mode == PlaybackMode::Random) m_delay_frames = DelayFrames();
-        if (++empty_in_a_row > m_stream_factories.size()) break; // never spin on a dead list
+    std::size_t produced  = 0;
+    std::size_t dead_files = 0;
+    while (produced < total && m_playing.load(std::memory_order_acquire)) {
+        const Piece piece = NextPiece(out + produced * width, total - produced, dead_files);
+        produced += piece.frames;
+        if (piece.starved) break;
     }
 
-    const std::size_t samples = static_cast<std::size_t>(frame_count) * channels;
+    ApplyLayerGain(out, samples);
+    return frame_count;
+}
+
+// Produces the next stretch of one request into `out` (room frames are available, all
+// silent already): either part of the pending random-mode silence, or audio of the active
+// file, or the bookkeeping that follows the end of a file.
+WPSoundStream::Piece WPSoundStream::NextPiece(float* out, std::size_t room,
+                                              std::size_t& dead_files) {
+    if (m_delay_frames > 0) {
+        const std::size_t span = static_cast<std::size_t>(std::min<uint64_t>(m_delay_frames, room));
+        m_delay_frames -= span;
+        return { span, false };
+    }
+
+    if (! m_cur_active) {
+        Switch();
+        if (! m_cur_active) return { 0, true }; // nothing opens now; the next request retries
+    }
+
+    const uint64_t delivered = m_cur_active->NextPcmData(out, static_cast<uint32_t>(room));
+    if (delivered > 0) {
+        dead_files = 0;
+        return { static_cast<std::size_t>(std::min<uint64_t>(delivered, room)), false };
+    }
+
+    // The file delivered nothing: it is over (or empty, or failing).
+    DropActiveFile();
+    if (m_config.mode == PlaybackMode::OneShot) {
+        m_finished.store(true, std::memory_order_relaxed);
+        m_playing.store(false, std::memory_order_release);
+        return { 0, true };
+    }
+    if (m_config.mode == PlaybackMode::Random) m_delay_frames = DelayFrames();
+    // When every file of the list has just ended without audio, stop instead of spinning.
+    ++dead_files;
+    return { 0, dead_files > m_stream_factories.size() };
+}
+
+void WPSoundStream::DropActiveFile() {
+    m_cur_active.reset();
+}
+
+void WPSoundStream::ApplyLayerGain(float* out, std::size_t samples) const {
     if (m_muted.load(std::memory_order_relaxed)) {
         audio::ClearInterleavedF32(out, samples);
-    } else {
-        const float volume = m_volume.load(std::memory_order_relaxed);
-        if (volume != 1.0f) audio::ApplyVolumeF32(out, samples, volume);
+        return;
     }
-    return frame_count;
+    const float gain = m_volume.load(std::memory_order_relaxed);
+    if (gain != 1.0f) audio::ApplyVolumeF32(out, samples, gain);
 }
 
 uint64_t WPSoundStream::DelayFrames() {

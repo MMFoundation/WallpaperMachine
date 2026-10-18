@@ -161,7 +161,7 @@ bool ClockedVideoSource::refreshFrame(std::string* error)
     const double slack    = presentationSlackSeconds();
     const double backward = std::max(0.05, period * 2.0);
     const double forward  = ForwardResyncSeconds(period, static_cast<double>(kDecodedFrameQueueCapacity),
-                                                 m_seek_landing_lag_seconds);
+                                                 m_seek.landing_lag);
 
     // A clock that went back past what is shown gets a seek of its own, display emptied first.
     if (m_display_frame_ready && desired < m_display_frame.absolute_seconds - backward) {
@@ -180,7 +180,7 @@ bool ClockedVideoSource::refreshFrame(std::string* error)
            (!m_display_frame_ready || m_pending_frames.front().absolute_seconds <= desired + slack)) {
         promoted = promoteNextFrameLocked() || promoted;
     }
-    if (promoted || m_seek_requested || !m_display_frame_ready) m_condition.notify_all();
+    if (promoted || m_seek.unclaimed || !m_display_frame_ready) m_condition.notify_all();
     if (m_display_frame_ready) return true;
 
     // Nothing is on display: wait for the first frame for a bounded time.
@@ -245,7 +245,7 @@ VideoSourceStats ClockedVideoSource::sourceStats() const
     return VideoSourceStats {
         .instance_id = m_instance_id,
         .decoded_frames = m_decoded_frame_count,
-        .seek_requests = m_seek_request_count,
+        .seek_requests = m_seek.requests,
         .observed_period_seconds = m_pacing.ObservedPeriodSeconds(),
         .observed_samples = m_pacing.SampleCount(),
     };
@@ -314,18 +314,13 @@ double ClockedVideoSource::latestBufferedAbsoluteLocked() const
 
 void ClockedVideoSource::requestSeekLocked(double absolute_seconds)
 {
-    m_requested_seek_absolute_seconds = std::max(0.0, absolute_seconds);
-    m_seek_requested                  = true;
-    m_seek_awaiting_frame             = true;
-    m_seek_requested_at               = std::chrono::steady_clock::now();
-    ++m_seek_ticket;
-    ++m_seek_request_count;
     clearPendingFramesLocked();
+    m_seek.Arm(std::max(0.0, absolute_seconds), std::chrono::steady_clock::now());
 }
 
 double ClockedVideoSource::secondsSinceSeekRequestedLocked() const
 {
-    return std::chrono::duration<double>(std::chrono::steady_clock::now() - m_seek_requested_at).count();
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - m_seek.asked_at).count();
 }
 
 /// Whether a seek that has been asked for and has not yet delivered a frame
@@ -338,8 +333,8 @@ bool ClockedVideoSource::seekInFlightCoversLocked(double desired_absolute_second
                                                   double backward_slack,
                                                   double forward_slack) const
 {
-    if (!m_seek_awaiting_frame) return false;
-    return SeekOnItsWayCoversClock(m_requested_seek_absolute_seconds, desired_absolute_seconds,
+    if (!m_seek.unlanded) return false;
+    return SeekOnItsWayCoversClock(m_seek.target, desired_absolute_seconds,
                                    secondsSinceSeekRequestedLocked(), m_playback_state.rate,
                                    backward_slack, forward_slack);
 }
@@ -421,23 +416,29 @@ ClockedVideoSource::DecodeOutcome ClockedVideoSource::decodeNextFrame(double min
     }
 }
 
-void ClockedVideoSource::queueDecodedFrame(DecodedFrameSlot frame_slot, uint64_t seek_ticket)
+void ClockedVideoSource::queueDecodedFrame(DecodedFrameSlot frame_slot, uint64_t seek_epoch)
 {
     std::lock_guard lock(m_mutex);
-    if (m_stop_requested || seek_ticket != m_seek_ticket) {
+    const bool stale = m_stop_requested || seek_epoch != m_seek.epoch;
+    if (stale) {
         releaseFrameSlot(&frame_slot);
         return;
     }
-    if (m_seek_awaiting_frame) {
-        m_seek_awaiting_frame       = false;
-        m_seek_landing_lag_seconds = ClockRunOnSeconds(secondsSinceSeekRequestedLocked(), m_playback_state.rate);
+
+    // The first frame after a request settles the wait for it and times how long it took.
+    if (m_seek.unlanded) {
+        m_seek.unlanded    = false;
+        m_seek.landing_lag = ClockRunOnSeconds(secondsSinceSeekRequestedLocked(), m_playback_state.rate);
     }
-    frame_slot.frame.generation = m_next_generation++;
-    frame_slot.ready            = true;
+
+    const bool display_was_empty = !m_display_frame_ready;
+    frame_slot.ready             = true;
+    frame_slot.frame.generation  = m_next_generation;
+    m_pacing.Observe(frame_slot.absolute_seconds, frame_slot.loop_index, seek_epoch);
+    m_pending_frames.push_back(std::move(frame_slot));
+    ++m_next_generation;
     ++m_decoded_frame_count;
-    m_pacing.Observe(frame_slot.absolute_seconds, frame_slot.loop_index, seek_ticket);
-    m_pending_frames.push_back(frame_slot);
-    if (!m_display_frame_ready) promoteNextFrameLocked();
+    if (display_was_empty) promoteNextFrameLocked();
     m_condition.notify_all();
 }
 
@@ -479,15 +480,15 @@ void ClockedVideoSource::decodeLoop()
             std::unique_lock lock(m_mutex);
             // Nothing to do (queue full, display filled, no seek asked for): no work and no timer.
             m_condition.wait(lock, [this] {
-                return m_stop_requested || m_seek_requested ||
+                return m_stop_requested || m_seek.unclaimed ||
                        m_pending_frames.size() < kDecodedFrameQueueCapacity || !m_display_frame_ready;
             });
             if (m_stop_requested) return;
-            ticket = m_seek_ticket;
-            if (m_seek_requested) {
-                m_seek_requested = false;
+            ticket = m_seek.epoch;
+            if (m_seek.unclaimed) {
+                m_seek.unclaimed = false;
                 seeking          = true;
-                target           = m_requested_seek_absolute_seconds;
+                target           = m_seek.target;
             }
         }
         std::string error;

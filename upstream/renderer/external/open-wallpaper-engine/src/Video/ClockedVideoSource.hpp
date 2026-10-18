@@ -59,6 +59,31 @@ private:
         Failed,
     };
 
+    /// Everything the source knows about seeks: the request the decode thread has yet to
+    /// take, the wait for the first frame of the latest request, and the totals.
+    struct SeekLedger {
+        double   target { 0.0 };        ///< absolute clock the latest request asked for
+        bool     unclaimed { false };   ///< asked for and not yet taken up by the decode thread
+        bool     unlanded { false };    ///< asked for and its first frame has not arrived
+        std::chrono::steady_clock::time_point asked_at {};
+        /// How far behind the clock the last seek that landed left its first frame:
+        /// the clip's time that passed while it was being fetched.
+        double   landing_lag { 0.0 };
+        uint64_t epoch { 0 };           ///< identity of the latest request; decoded frames carry it
+        uint64_t requests { 0 };        ///< requests made, counted when made
+
+        /// Records a new request; frames decoded under any earlier epoch become stale.
+        void Arm(double absolute_target, std::chrono::steady_clock::time_point now)
+        {
+            ++requests;
+            ++epoch;
+            asked_at  = now;
+            unlanded  = true;
+            unclaimed = true;
+            target    = absolute_target;
+        }
+    };
+
     bool primeOnce(std::string* error);
     void stop();
     void releaseFrameSlot(DecodedFrameSlot* slot);
@@ -102,21 +127,12 @@ private:
     /// samples, which keeps an unproven stream on the fixed cadence.
     VideoFramePacingEstimator        m_pacing;
     uint64_t                         m_decoded_frame_count { 0 };
-    uint64_t                         m_seek_request_count { 0 };
     uint64_t                         m_loop_count { 0 };
     uint64_t                         m_next_generation { 1 };
     std::deque<DecodedFrameSlot>     m_pending_frames;
     DecodedFrameSlot                 m_display_frame {};
     bool                             m_display_frame_ready { false };
-    bool                             m_seek_requested { false };
-    /// Set by a seek request and cleared by the first frame decoded for it.
-    bool                             m_seek_awaiting_frame { false };
-    std::chrono::steady_clock::time_point m_seek_requested_at {};
-    /// How far behind the clock the last seek that landed left its first frame:
-    /// the clip's time that passed while it was being fetched.
-    double                           m_seek_landing_lag_seconds { 0.0 };
-    double                           m_requested_seek_absolute_seconds { 0.0 };
-    uint64_t                         m_seek_ticket { 0 };
+    SeekLedger                       m_seek;
     bool                             m_running { false };
     bool                             m_stop_requested { false };
     bool                             m_primed { false };

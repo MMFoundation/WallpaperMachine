@@ -73,6 +73,16 @@ private:
     std::size_t LoopIndex();
     uint64_t    DelayFrames();
 
+    // One piece of a request: how many frames it produced (silence counts) and whether the
+    // layer can offer nothing more for this request.
+    struct Piece {
+        std::size_t frames { 0 };
+        bool        starved { false };
+    };
+    void  DropActiveFile();
+    Piece NextPiece(float* out, std::size_t room, std::size_t& dead_files);
+    void  ApplyLayerGain(float* out, std::size_t samples) const;
+
     Config                              m_config;
     Desc                                m_desc {};
     std::size_t                         m_cur_index { 0 };
