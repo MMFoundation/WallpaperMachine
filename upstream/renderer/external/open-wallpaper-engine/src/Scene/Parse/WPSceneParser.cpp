@@ -2156,8 +2156,12 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
     for (auto& entry : built) {
         effect->nodes.push_back(SceneImageEffectNode { .output = entry.output, .sceneNode = entry.node });
         RegisterMaterialConstants(context, entry.material, entry.authored, entry.info, key);
-        all_materials.push_back(entry.material);
-        if (! white_tint && ! is_closing_pass) tinted.push_back(entry.material);
+        // A pass that takes white takes no alpha of the layer's either, driven or not: what
+        // reaches it has the alpha in it already.
+        if (! white_tint && ! is_closing_pass) {
+            all_materials.push_back(entry.material);
+            tinted.push_back(entry.material);
+        }
     }
     LowerEffectCommands(source, fbo_map, scene, effect->commands);
     RegisterScriptedEffectVisibility(context, source, effect, key);
