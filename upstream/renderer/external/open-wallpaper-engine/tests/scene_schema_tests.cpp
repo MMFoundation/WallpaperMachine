@@ -235,7 +235,7 @@ void WriteTranslate3x4(Bytes& b, float x, float y, float z) {
 
 std::string BuildTwoMeshPuppetMdlFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSceneTestSkinUvFlag);
     b.U32(1);
     b.U32(2);
@@ -260,7 +260,7 @@ std::string BuildTwoMeshPuppetMdlFixture() {
 
 std::string BuildMaskedTwoMeshPuppetMdlFixture() {
     Bytes b;
-    b.Stamp("MDL", 23);
+    b.Stamp("MDLV", 23);
     b.U32(kSceneTestSkinUvFlag);
     b.U32(1);
     b.U32(2);
@@ -295,7 +295,7 @@ std::string BuildMaskedTwoMeshPuppetMdlFixture() {
 
 std::string BuildAttachmentPuppetMdlFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSceneTestSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -334,7 +334,7 @@ std::string BuildAttachmentPuppetMdlFixture() {
 
 std::string BuildMeshOnlyPuppetMdlFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(0x00000008u);
     b.U32(1);
     b.U32(2);

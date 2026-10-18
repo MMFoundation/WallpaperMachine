@@ -281,7 +281,7 @@ void WriteTranslate3x4(Bytes& b, float x, float y, float z) {
 
 std::vector<uint8_t> BuildMdlv21TwoMeshFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(2);
@@ -324,7 +324,7 @@ std::vector<uint8_t> BuildMdlv21TwoMeshFixture() {
 
 std::vector<uint8_t> BuildMdlv21MeshOnlyFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -335,7 +335,7 @@ std::vector<uint8_t> BuildMdlv21MeshOnlyFixture() {
 std::vector<uint8_t> BuildMdlv21InvalidPartRangeFixture(uint32_t part_start,
                                                         uint32_t part_size) {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -345,7 +345,7 @@ std::vector<uint8_t> BuildMdlv21InvalidPartRangeFixture(uint32_t part_start,
 
 std::vector<uint8_t> BuildMdlv23MaskedMeshOnlyFixture() {
     Bytes b;
-    b.Stamp("MDL", 23);
+    b.Stamp("MDLV", 23);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -368,7 +368,7 @@ std::vector<uint8_t> BuildMdlv23MaskedMeshOnlyFixture() {
 std::vector<uint8_t> BuildMdlv23WideIndexMeshFixture() {
     constexpr uint32_t kVertexCount = 65537u;
     Bytes b;
-    b.Stamp("MDL", 23);
+    b.Stamp("MDLV", 23);
     b.U32(0);
     b.U32(1);
     b.U32(1);
@@ -394,7 +394,7 @@ std::vector<uint8_t> BuildMdlv23WideIndexMeshFixture() {
 
 std::vector<uint8_t> BuildMdlv23IncompleteFlagMeshOnlyFixture() {
     Bytes b;
-    b.Stamp("MDL", 23);
+    b.Stamp("MDLV", 23);
     b.I32(9);
     b.U32(1);
     b.U32(1);
@@ -405,7 +405,7 @@ std::vector<uint8_t> BuildMdlv23IncompleteFlagMeshOnlyFixture() {
 
 std::vector<uint8_t> BuildMdlv23MaskedMeshWithInvalidPartIdsFixture() {
     Bytes b;
-    b.Stamp("MDL", 23);
+    b.Stamp("MDLV", 23);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -430,7 +430,7 @@ std::vector<uint8_t> BuildMdlv23TruncatedMaskFixture() {
 
 std::vector<uint8_t> BuildMdlv21Uv2OnlyMeshFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUv2OnlyFlag);
     b.U32(1);
     b.U32(1);
@@ -440,7 +440,7 @@ std::vector<uint8_t> BuildMdlv21Uv2OnlyMeshFixture() {
 
 std::vector<uint8_t> BuildMdlv21ForwardParentFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -470,7 +470,7 @@ std::vector<uint8_t> BuildMdlv21ForwardParentFixture() {
 
 std::vector<uint8_t> BuildMdlv21TranslatedBonesFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -506,7 +506,7 @@ std::vector<uint8_t> BuildMdlv21TranslatedBonesFixture() {
 
 std::vector<uint8_t> BuildMdlv23ParentChainFixture(int version = 23) {
     Bytes b;
-    b.Stamp("MDL", version);
+    b.Stamp("MDLV", version);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -549,7 +549,7 @@ std::vector<uint8_t> BuildMdlv23ParentChainFixture(int version = 23) {
 
 std::vector<uint8_t> BuildMdlv21Mdls3IkAndMdatFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -677,7 +677,7 @@ void WriteMdla6Animation(Bytes& b, int32_t id, std::string_view name,
 
 std::vector<uint8_t> BuildMdlv21Mdls3Mdla6AnimationsFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -712,7 +712,7 @@ std::vector<uint8_t> BuildMdlv21Mdls3Mdla6AnimationsFixture() {
 
 std::vector<uint8_t> BuildMdlv21Mdls3Mdla6InvalidAnimationFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -746,7 +746,7 @@ std::vector<uint8_t> BuildMdlv21Mdls3Mdla6InvalidAnimationFixture() {
 
 std::vector<uint8_t> BuildMdlv21Mdls3Mdla6HugeAnimCountFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -779,7 +779,7 @@ std::vector<uint8_t> BuildMdlv21Mdls3Mdla6HugeAnimCountFixture() {
 
 std::vector<uint8_t> BuildMdlv21MdleAfterInvalidMdlaPayloadFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -822,7 +822,7 @@ std::vector<uint8_t> BuildMdlv21MdleAfterInvalidMdlaPayloadFixture() {
 
 std::vector<uint8_t> BuildMdlv21Mdls3Mdla6HugeBoneTrackCountFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -863,7 +863,7 @@ std::vector<uint8_t> BuildMdlv21Mdls3Mdla6HugeBoneTrackCountFixture() {
 
 std::vector<uint8_t> BuildMdlv21Mdls3Mdla6HugeEventCountFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -897,7 +897,7 @@ std::vector<uint8_t> BuildMdlv21Mdls3Mdla6HugeEventCountFixture() {
 
 std::vector<uint8_t> BuildMdlv21MdleAfterMdlaFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -942,7 +942,7 @@ std::vector<uint8_t> BuildMdlv21MdleWithNonzeroTrailingBodyByteFixture() {
 
 std::vector<uint8_t> BuildMdlv21MdmpAfterMdlaFixture(bool zero_shape_trailer) {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -993,7 +993,7 @@ std::vector<uint8_t> BuildMdlv21MdmpAfterMdlaFixture(bool zero_shape_trailer) {
 
 std::vector<uint8_t> BuildMdlv21WithTruncatedMdatEndOffset() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -1018,7 +1018,7 @@ std::vector<uint8_t> BuildMdlv21WithTruncatedMdatEndOffset() {
 
 std::vector<uint8_t> BuildMdlv21WithTruncatedMdatAttachmentName() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -1048,7 +1048,7 @@ std::vector<uint8_t> BuildMdlv21WithTruncatedMdatAttachmentName() {
 
 std::vector<uint8_t> BuildMdlv21WithTruncatedMdatTransform() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -1078,7 +1078,7 @@ std::vector<uint8_t> BuildMdlv21WithTruncatedMdatTransform() {
 
 std::vector<uint8_t> BuildMdlv21WithMeshCount(uint32_t mesh_count) {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(mesh_count);
@@ -1087,7 +1087,7 @@ std::vector<uint8_t> BuildMdlv21WithMeshCount(uint32_t mesh_count) {
 
 std::vector<uint8_t> BuildMdlv21IncompleteFlagFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.I32(9);
     return b.Take();
 }
@@ -1097,7 +1097,7 @@ std::vector<uint8_t> BuildVersionedMeshFixture(int version, bool skinned,
     const uint32_t flag = (surface_attributes ? 0x0000000Fu : 0x00000008u) |
                           (skinned ? kSkinUvFlag : 0u);
     Bytes b;
-    b.Stamp("MDL", version);
+    b.Stamp("MDLV", version);
     b.U32(flag);
     b.U32(1);
     b.U32(1);
@@ -1154,7 +1154,7 @@ std::vector<uint8_t> BuildVersionedMeshFixture(int version, bool skinned,
 
 std::vector<uint8_t> BuildMdlv21WithTruncatedVertexPayload() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -1174,7 +1174,7 @@ std::vector<uint8_t> BuildMdlv21WithTruncatedVertexPayload() {
 
 std::vector<uint8_t> BuildMdlv21WithTruncatedPartsPayload() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -1201,7 +1201,7 @@ std::vector<uint8_t> BuildMdlv21WithTruncatedPartsPayload() {
 
 std::vector<uint8_t> BuildMdlv21WithInvalidPartsBytes() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -1225,7 +1225,7 @@ std::vector<uint8_t> BuildMdlv21WithInvalidPartsBytes() {
 
 std::vector<uint8_t> BuildMdlv21WithUnsupportedPartsExtras() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -1436,7 +1436,7 @@ TEST(MdlSchema, FullWeightAnimationReplacesRotatedReferencePose) {
 
 TEST(MdlSchema, Mdls2ReferencePoseReassemblesBindVerticesWithoutAnimation) {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);

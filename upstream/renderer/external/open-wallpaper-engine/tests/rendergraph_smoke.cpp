@@ -150,7 +150,7 @@ void WritePuppetMesh(Bytes& b, std::string_view material, uint32_t part_id) {
 
 std::string BuildMaskedPuppetMdlFixture() {
     Bytes b;
-    b.Stamp("MDL", 23);
+    b.Stamp("MDLV", 23);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
@@ -170,7 +170,7 @@ std::string BuildMaskedPuppetMdlFixture() {
 // One triangle skinned to a single root bone, with no animations.
 std::string BuildBonedPuppetMdlFixture() {
     Bytes b;
-    b.Stamp("MDL", 21);
+    b.Stamp("MDLV", 21);
     b.U32(kSkinUvFlag);
     b.U32(1);
     b.U32(1);
