@@ -629,8 +629,14 @@ std::vector<std::string> SceneRuntimeContext::ApplyProjectProperties(
 
     // One transaction: every live value takes its entry, changed or not, and no script
     // re-evaluates itself over a half-applied table.
-    m_project_properties_changing = true;
-    m_project_properties          = std::move(next_properties);
+    struct ChangingScope
+    {
+        bool& flag;
+        explicit ChangingScope(bool& target) : flag(target) { flag = true; }
+        ~ChangingScope() { flag = false; }
+    };
+    std::optional<ChangingScope> changing(std::in_place, m_project_properties_changing);
+    m_project_properties = std::move(next_properties);
     for (const auto& [name, value] : m_project_properties) {
         const auto live = m_property_values.find(name);
         if (live != m_property_values.end()) {
@@ -650,7 +656,7 @@ std::vector<std::string> SceneRuntimeContext::ApplyProjectProperties(
         m_property_values.emplace(name, made.get());
         m_owned_values.push_back(std::move(made));
     }
-    m_project_properties_changing = false;
+    changing.reset();
 
     // Then the programs hear of it, as they were registered when this began.
     ProjectProperties changed_values;
@@ -2017,13 +2023,13 @@ ScalarAnimationPlayback* SceneRuntimeContext::FindAnimationByName(
 }
 
 void SceneRuntimeContext::RegisterSceneScript(std::string script_source, std::string layer_name) {
+    if (m_scripts_torn_down) return;
     // The program's `init` runs inside this call, and may register more of everything.
     auto program = m_script_engine->CreateSceneScriptProgram(
         *this, std::move(script_source), std::move(layer_name), m_project_properties,
         *m_host_context);
     if (program == nullptr || ! program->Valid()) return;
     m_scene_scripts.push_back(SceneScriptBinding { .script = std::move(program) });
-    if (m_scripts_torn_down) return;
 }
 
 void SceneRuntimeContext::RegisterNodeVideoTexture(std::string name, std::string texture_key) {
@@ -2518,8 +2524,10 @@ void SceneRuntimeContext::ReleaseRetiredLayers() {
     std::unordered_set<const SceneMaterial*> materials;
     for (const auto& top : m_retired_layers) {
         for (SceneNode* node : SubtreeOf(*top)) {
-            if (node->Mesh() != nullptr && node->Mesh()->MaterialSlotPtr() != nullptr) {
-                materials.insert(node->Mesh()->MaterialSlotPtr().get());
+            if (node->Mesh() != nullptr) {
+                for (const auto& slot : node->Mesh()->MaterialSlots()) {
+                    if (slot != nullptr) materials.insert(slot.get());
+                }
             }
             if (m_scene != nullptr && m_scene->shaderValueUpdater != nullptr) {
                 m_scene->shaderValueUpdater->ForgetNode(node);
@@ -2528,7 +2536,7 @@ void SceneRuntimeContext::ReleaseRetiredLayers() {
     }
     std::erase_if(m_material_constants, [&materials](const MaterialConstantBinding& binding) {
         const auto material = binding.material.lock();
-        return material != nullptr && materials.contains(material.get());
+        return material == nullptr || materials.contains(material.get());
     });
     // The rasters of text layers that no longer exist.
     if (m_scene != nullptr) {
@@ -2785,7 +2793,7 @@ linalg::Vector2f SceneRuntimeContext::NodeSize(std::string_view name) const {
 }
 
 linalg::Vector2f SceneRuntimeContext::NodeBoxCentre(std::string_view name) const {
-    const auto layer = m_text_layers.find(std::string(name));
+    const auto layer = m_text_layers.find(name);
     return layer != m_text_layers.end() ? layer->second.layout().centre
                                         : linalg::Vector2f(linalg::Vector2f::Zero());
 }
@@ -2801,7 +2809,7 @@ bool SceneRuntimeContext::NodeTextDirty(std::string_view name) const {
 }
 
 std::optional<TextLayerState> SceneRuntimeContext::NodeTextState(std::string_view name) const {
-    const auto layer = m_text_layers.find(name);
+    const auto layer = m_text_layers.find(std::string(name));
     if (layer == m_text_layers.end()) return std::nullopt;
     return layer->second.state();
 }
