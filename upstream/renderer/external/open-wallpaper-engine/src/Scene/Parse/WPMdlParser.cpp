@@ -385,7 +385,7 @@ bool ReadMesh(Cursor& c, uint32_t version, uint32_t header_flag, const char* pat
             return false;
         }
         if (extras > 1) {
-            LOG_ERROR("model %s: unhandled parts extras %u", path, extras);
+            LOG_ERROR("model %s: the parts flag byte is %u, only 0 and 1 are valid", path, extras);
             return false;
         }
         if (extras == 1) {
@@ -953,7 +953,7 @@ bool ParseModel(const std::vector<uint8_t>& file, const char* path, WPMdl& mdl) 
     mdl.mdl_header.mdl_flag   = header_flag;
     if (header_flag == 9) {
         // 9 is not a layout from version 15 on, where each mesh states its own.
-        if (version > 14) LOG_INFO("model %s: the header carries the incomplete flag 9; ignored", path);
+        if (version > 14) LOG_INFO("model %s: header flag value 9 is not meaningful from version 15; using 0", path);
         mdl.mdl_header.mdl_flag = 0;
     }
 
@@ -1061,7 +1061,7 @@ bool ParseModel(const std::vector<uint8_t>& file, const char* path, WPMdl& mdl) 
     // After the last block: one trailing zero byte from version 14, any zero run in 13.
     if (version >= 14) {
         if (pos < file.size()) {
-            if (file[pos] != 0) LOG_INFO("model %s: trailing_nul expected 0, found %u", path, file[pos]);
+            if (file[pos] != 0) LOG_INFO("model %s: the byte after the last block is %u, not 0; skipped", path, file[pos]);
             pos++;
         }
     } else {

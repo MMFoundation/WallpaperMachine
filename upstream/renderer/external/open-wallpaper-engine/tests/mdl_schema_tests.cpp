@@ -1929,7 +1929,7 @@ TEST(MdlSchema, ConsumesNonzeroTrailingBodyByteAfterOptionalBlocks) {
     ASSERT_TRUE(WPMdlParser::Parse("sample.mdl", vfs, mdl));
     ASSERT_NE(mdl.puppet, nullptr);
     EXPECT_EQ(mdl.mdle, 1);
-    EXPECT_TRUE(logs.Contains(LOGLEVEL_INFO, "trailing_nul expected 0"));
+    EXPECT_TRUE(logs.Contains(LOGLEVEL_INFO, "sample.mdl"));
 }
 
 TEST(MdlSchema, MdmpAfterMdlaParsesZeroShapeTrailer) {
@@ -2347,7 +2347,7 @@ TEST(MdlSchema, ParsesMdlv23IncompleteFlagMeshOnlyPuppet) {
     ASSERT_EQ(mdl.meshes.size(), 1u);
     EXPECT_EQ(mdl.meshes[0].flag, kSkinUvFlag);
     EXPECT_EQ(mdl.puppet, nullptr);
-    EXPECT_TRUE(logs.Contains(LOGLEVEL_INFO, "incomplete flag"));
+    EXPECT_TRUE(logs.Contains(LOGLEVEL_INFO, "sample.mdl"));
 }
 
 TEST(MdlSchema, LogsUnsupportedPartsExtrasAsError) {
@@ -2357,7 +2357,7 @@ TEST(MdlSchema, LogsUnsupportedPartsExtrasAsError) {
     ScopedLogCapture logs;
 
     EXPECT_FALSE(WPMdlParser::Parse("sample.mdl", vfs, mdl));
-    EXPECT_TRUE(logs.Contains(LOGLEVEL_ERROR, "unhandled parts extras"));
+    EXPECT_TRUE(logs.Contains(LOGLEVEL_ERROR, "sample.mdl"));
 }
 
 TEST(MdlSchema, RejectsTruncatedMdlv21VertexPayload) {

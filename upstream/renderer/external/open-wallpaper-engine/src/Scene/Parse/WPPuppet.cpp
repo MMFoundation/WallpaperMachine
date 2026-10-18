@@ -193,7 +193,24 @@ Quat QuatFromRotation(const double r[3][3]) {
     return Normalized(q);
 }
 
-constexpr usize kMaxFinishedNotices = 256;
+// Pending end-of-animation notices are kept only up to this many (the spec
+// asks for at least 64; one and a half times that leaves headroom for a
+// scene that drains the queue once per several frames).
+constexpr usize kFinishQueueCapacity = 64 + 64 / 2;
+
+// Appends a notice for the layer at `stack_index`; a full queue drops it.
+void PostFinishNotice(std::vector<i32>& queue, usize stack_index) {
+    if (queue.size() >= kFinishQueueCapacity) return;
+    queue.push_back(static_cast<i32>(stack_index));
+}
+
+// True when `layer` is a running single-shot animation whose clock has
+// reached or passed its duration.
+bool HasReachedEnd(const WPPuppetLayer::AnimationLayer& layer, const WPPuppet::Animation* anim) {
+    if (anim == nullptr || anim->mode != WPPuppet::PlayMode::Single) return false;
+    if (! layer.playing) return false;
+    return anim->max_time > 0.0 && layer.cur_time >= anim->max_time;
+}
 } // namespace
 
 void WPPuppet::prepared() {
@@ -557,20 +574,19 @@ void WPPuppetLayer::updateInterpolation(double time) noexcept {
         }
     }
 
+    // Step 1: record, for every layer, which frames its current time maps to.
+    for (auto& layer : state.m_layers) {
+        double& cur = layer.anim_layer.cur_time;
+        if (! std::isfinite(cur)) cur = 0.0;
+        if (layer.anim != nullptr) layer.interp_info = layer.anim->getInterpolationInfo(&cur);
+    }
+
+    // Step 2: with the frames recorded, find single-shot layers that ran out.
     for (usize i = 0; i < state.m_layers.size(); i++) {
         auto& layer = state.m_layers[i];
-        auto& cur   = layer.anim_layer.cur_time;
-        if (! std::isfinite(cur)) cur = 0.0;
-        if (layer.anim == nullptr) continue;
-        layer.interp_info = layer.anim->getInterpolationInfo(&cur);
-        // A single-shot animation that has played out holds its last sample.
-        if (layer.anim_layer.playing && layer.anim->mode == WPPuppet::PlayMode::Single &&
-            layer.anim->max_time > 0.0 && cur >= layer.anim->max_time) {
-            layer.anim_layer.playing = false;
-            if (state.m_finished_layers.size() < kMaxFinishedNotices) {
-                state.m_finished_layers.push_back(static_cast<i32>(i));
-            }
-        }
+        if (! HasReachedEnd(layer.anim_layer, layer.anim)) continue;
+        layer.anim_layer.playing = false;
+        PostFinishNotice(state.m_finished_layers, i);
     }
 }
 
