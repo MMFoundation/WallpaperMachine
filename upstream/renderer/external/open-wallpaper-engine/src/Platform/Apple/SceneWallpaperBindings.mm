@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e6-platform-host-api.md; written without access to the original source.
 #include "Platform/Apple/SceneWallpaperBindings.h"
 
 #include "Audio/AudioResponseService.h"
@@ -29,22 +30,400 @@
 
 namespace
 {
+// ---------------------------------------------------------------------------
+// Last-error text (status protocol): one string per calling thread.
+// ---------------------------------------------------------------------------
+thread_local std::string t_last_error;
+
 void clear_last_error()
 {
-    // CLEANROOM PH22
+    t_last_error.clear();
 }
 
+// Records the text and returns the failure status. Storing the text may itself
+// run out of memory; the call still fails.
+int fail(std::string_view text)
+{
+    try {
+        t_last_error.assign(text.data(), text.size());
+    } catch (...) {
+    }
+    return 1;
+}
+
+// Runs a body that may allocate or call into the scene host. No exception of
+// any kind leaves the interface: it becomes status 1 with a text.
+template<class Body>
+int guarded(Body&& body)
+{
+    try {
+        return body();
+    } catch (const std::exception& error) {
+        return fail(std::string("the scene host failed internally: ") + error.what());
+    } catch (...) {
+        return fail("the scene host failed internally");
+    }
+}
+
+// Property names are delivered through one buffer per thread, valid until the
+// next accessor call on the same thread.
 const char* property_name(std::string_view value)
 {
-    // CLEANROOM PH23
-    (void)value;
+    thread_local std::string buffer;
+    try {
+        buffer.assign(value.data(), value.size());
+    } catch (...) {
+        return "";
+    }
+    return buffer.c_str();
+}
+
+// ---------------------------------------------------------------------------
+// Callback registrations.
+// ---------------------------------------------------------------------------
+
+// One registration of a host callback together with the host's opaque data and
+// the function that releases it. The scene host's forwarder and the handle both
+// share it, so the data is released only when the last of them lets go.
+template<class Callback, class Drop>
+class Registration {
+public:
+    Registration(Callback callback, void* user_data, Drop drop) noexcept
+        : m_callback(callback), m_user_data(user_data), m_drop(drop) {}
+    Registration(const Registration&)            = delete;
+    Registration& operator=(const Registration&) = delete;
+    ~Registration() { release(); }
+
+    Callback callback() const noexcept { return m_callback; }
+    void*    userData() const noexcept { return m_user_data; }
+
+    // The host data is released only once the registration is installed: until
+    // then a failure on the way leaves it with the host.
+    void arm() noexcept { m_armed.store(true, std::memory_order_release); }
+
+    // Stops every later invocation, then releases the host data (once).
+    void close() noexcept
+    {
+        m_closed.store(true, std::memory_order_release);
+        release();
+    }
+    bool closed() const noexcept { return m_closed.load(std::memory_order_acquire); }
+
+private:
+    void release() noexcept
+    {
+        if (! m_armed.exchange(false, std::memory_order_acq_rel)) return;
+        if (m_drop == nullptr) return;
+        try {
+            m_drop(m_user_data);
+        } catch (...) {
+        }
+    }
+
+    Callback          m_callback;
+    void*             m_user_data;
+    Drop              m_drop;
+    std::atomic<bool> m_armed { false };
+    std::atomic<bool> m_closed { false };
+};
+
+using FirstFrameRegistration =
+    Registration<owe_first_frame_callback, owe_first_frame_callback_drop>;
+using PointerRegistration =
+    Registration<owe_pointer_input_callback, owe_pointer_input_callback_drop>;
+using ShortcutRegistration =
+    Registration<owe_user_shortcut_callback, owe_user_shortcut_callback_drop>;
+using AudioRegistration =
+    Registration<owe_audio_requirement_callback, owe_audio_requirement_callback_drop>;
+using FailureRegistration =
+    Registration<owe_render_failure_callback, owe_render_failure_callback_drop>;
+
+// ---------------------------------------------------------------------------
+// The desktop poster mailbox: one per drawing layer.
+// ---------------------------------------------------------------------------
+
+constexpr std::size_t kPosterContextLimit    = 4096; // UTF-16 units
+constexpr std::size_t kPosterCaptureBacklog  = 4;
+constexpr auto        kPosterRetryBackoff    = std::chrono::seconds(2);
+
+NSString* const kPosterRequestName = @"WallpaperMachine.requestDesktopPoster";
+NSString* const kPosterReadyName   = @"WallpaperMachine.desktopPosterReady";
+
+class PosterMailbox : public std::enable_shared_from_this<PosterMailbox> {
+public:
+    using Clock = std::function<std::chrono::steady_clock::time_point()>;
+
+    PosterMailbox(CAMetalLayer* layer, NSNotificationCenter* center, Clock clock)
+        : m_layer(layer), m_center(center), m_clock(std::move(clock)) {}
+
+    // The observer holds the mailbox weakly, so this runs once the mailbox is
+    // already owned by a shared pointer.
+    void start()
+    {
+        std::weak_ptr<PosterMailbox> weak = weak_from_this();
+        CAMetalLayer*                layer = m_layer;
+        m_observer = [m_center addObserverForName:kPosterRequestName
+                                           object:layer
+                                            queue:nil
+                                       usingBlock:^(NSNotification* note) {
+                                           if (auto self = weak.lock()) self->request(note.userInfo);
+                                       }];
+    }
+
+    ~PosterMailbox()
+    {
+        if (m_observer != nil) [m_center removeObserver:m_observer];
+    }
+
+    void request(NSDictionary* info)
+    {
+        std::string context;
+        id          value = info[@"context"];
+        if ([value isKindOfClass:[NSString class]] && [(NSString*)value length] <= kPosterContextLimit) {
+            const char* utf8 = [(NSString*)value UTF8String];
+            if (utf8 != nullptr) context = utf8;
+        }
+        std::lock_guard lock(m_mutex);
+        ++m_requested;
+        m_context = std::move(context);
+        if (m_wake) m_wake();
+    }
+
+    void bindWake(std::function<void()> hook)
+    {
+        std::lock_guard lock(m_mutex);
+        m_wake = std::move(hook);
+    }
+
+    bool wants()
+    {
+        std::lock_guard lock(m_mutex);
+        if (m_requested == m_delivered) return false;
+        const auto now   = m_clock();
+        const bool retry = ! m_captures.empty() && m_captures.back().number == m_requested;
+        if (retry && now < m_retry_after) return false;
+        m_captures.push_back(Capture { m_requested, m_context });
+        while (m_captures.size() > kPosterCaptureBacklog) m_captures.pop_front();
+        m_retry_after = now + kPosterRetryBackoff;
+        return true;
+    }
+
+    void ready(std::span<const uint8_t> pixels, uint32_t width, uint32_t height, bool bgra)
+    {
+        @autoreleasepool {
+            std::string context;
+            {
+                std::lock_guard lock(m_mutex);
+                while (! m_captures.empty() && m_captures.front().number <= m_delivered) {
+                    m_captures.pop_front();
+                }
+                if (m_captures.empty() || m_layer == nil) return;
+                m_delivered = m_captures.front().number;
+                context     = std::move(m_captures.front().context);
+                m_captures.pop_front();
+            }
+            NSData*   data  = [NSData dataWithBytes:pixels.data() length:pixels.size()];
+            NSString* text  = [NSString stringWithUTF8String:context.c_str()] ?: @"";
+            __weak CAMetalLayer* layer  = m_layer;
+            NSNotificationCenter* center = m_center;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                CAMetalLayer* strong = layer;
+                if (strong == nil) return;
+                [center postNotificationName:kPosterReadyName
+                                      object:strong
+                                    userInfo:@{
+                                        @"pixels" : data,
+                                        @"width" : @(width),
+                                        @"height" : @(height),
+                                        @"bgra" : @(bgra),
+                                        @"context" : text,
+                                    }];
+            });
+        }
+    }
+
+private:
+    struct Capture {
+        uint64_t    number;
+        std::string context;
+    };
+
+    std::mutex                              m_mutex;
+    __weak CAMetalLayer*                    m_layer;
+    NSNotificationCenter*                   m_center;
+    Clock                                   m_clock;
+    id                                      m_observer { nil };
+    uint64_t                                m_requested { 1 };
+    uint64_t                                m_delivered { 0 };
+    std::string                             m_context;
+    std::deque<Capture>                     m_captures;
+    std::chrono::steady_clock::time_point   m_retry_after {};
+    std::function<void()>                   m_wake;
+};
+
+// Validation shared by `init_metal` and `finish_surface_reconfigure`. Returns
+// an empty string when the arguments are acceptable.
+const char* surface_argument_problem(void* layer, uint32_t width, uint32_t height,
+                                     uint32_t render_width, uint32_t render_height)
+{
+    constexpr uint32_t kMaxDimension = 65535;
+    if (layer == nullptr) return "the metal layer is NULL";
+    if (width == 0 || width > kMaxDimension) return "the width must be between 1 and 65535";
+    if (height == 0 || height > kMaxDimension) return "the height must be between 1 and 65535";
+    if ((render_width == 0) != (render_height == 0)) {
+        return "the render width and render height must both be zero or both be set";
+    }
+    if (render_width > kMaxDimension) return "the render width is above 65535";
+    if (render_height > kMaxDimension) return "the render height is above 65535";
     return "";
+}
+
+// The surface description of one layer, with its own poster mailbox.
+wallpaper::RenderInitInfo make_surface_info(void* layer, uint32_t width, uint32_t height,
+                                            uint32_t render_width, uint32_t render_height,
+                                            double display_scale_factor)
+{
+    wallpaper::RenderInitInfo info;
+    info.offscreen   = false;
+    info.metal_layer = layer;
+    CFRetain(layer);
+    info.metal_layer_owner = std::shared_ptr<void>(layer, [](void* held) { CFRelease(held); });
+    info.width             = static_cast<uint16_t>(width);
+    info.height            = static_cast<uint16_t>(height);
+    const bool same_size   = render_width == 0 && render_height == 0;
+    info.render_width      = static_cast<uint16_t>(same_size ? width : render_width);
+    info.render_height     = static_cast<uint16_t>(same_size ? height : render_height);
+    info.display_scale_factor =
+        std::isfinite(display_scale_factor) && display_scale_factor > 0.0 ? display_scale_factor : 1.0;
+
+    auto mailbox = std::make_shared<PosterMailbox>(
+        (__bridge CAMetalLayer*)layer, [NSNotificationCenter defaultCenter],
+        [] { return std::chrono::steady_clock::now(); });
+    mailbox->start();
+    info.wants_poster = [mailbox] { return mailbox->wants(); };
+    info.poster_ready = [mailbox](std::span<const uint8_t> pixels, uint32_t w, uint32_t h,
+                                  bool bgra) { mailbox->ready(pixels, w, h, bgra); };
+    info.bind_poster_wake = [mailbox](std::function<void()> hook) {
+        mailbox->bindWake(std::move(hook));
+    };
+    return info;
+}
+
+// What a property name carries: the setter type that may write it.
+enum class PropertyKind { Unknown, Bool, Int32, Float, String, Object };
+
+PropertyKind property_kind(std::string_view name)
+{
+    using namespace wallpaper;
+    struct Entry {
+        std::string_view name;
+        PropertyKind     kind;
+    };
+    static constexpr Entry kTable[] = {
+        { PROPERTY_SOURCE, PropertyKind::String },
+        { PROPERTY_ASSETS, PropertyKind::String },
+        { PROPERTY_CACHE_PATH, PropertyKind::String },
+        { PROPERTY_FPS, PropertyKind::Int32 },
+        { PROPERTY_FILLMODE, PropertyKind::Int32 },
+        { PROPERTY_SCALINGMODE, PropertyKind::Int32 },
+        { PROPERTY_SCALINGFACTOR, PropertyKind::Float },
+        { PROPERTY_FRAMING, PropertyKind::Object },
+        { PROPERTY_RENDER_SCALE, PropertyKind::Float },
+        { PROPERTY_HORIZONTAL_FLIP, PropertyKind::Bool },
+        { PROPERTY_SPEED, PropertyKind::Float },
+        { PROPERTY_GRAPHIVZ, PropertyKind::Bool },
+        { PROPERTY_VOLUME, PropertyKind::Float },
+        { PROPERTY_MUTED, PropertyKind::Bool },
+        { PROPERTY_AUDIO_RESPONSE_ENABLED, PropertyKind::Bool },
+        { PROPERTY_MEDIA_INTEGRATION_ENABLED, PropertyKind::Bool },
+        { PROPERTY_MEDIA_EVENT_JSON, PropertyKind::String },
+        { PROPERTY_PROJECT_PROPERTY_OVERRIDE_JSON, PropertyKind::String },
+        { PROPERTY_PROJECT_PROPERTY_RESET, PropertyKind::Bool },
+        { PROPERTY_PROJECT_PROPERTY_PREVIEW_JSON, PropertyKind::String },
+        { PROPERTY_FORCE_SHADER_REFRESH, PropertyKind::Bool },
+        { PROPERTY_FIRST_FRAME_CALLBACK, PropertyKind::Object },
+        { PROPERTY_POINTER_INPUT_CALLBACK, PropertyKind::Object },
+        { PROPERTY_USER_SHORTCUT_CALLBACK, PropertyKind::Object },
+        { PROPERTY_AUDIO_REQUIREMENT_CALLBACK, PropertyKind::Object },
+        { PROPERTY_RENDER_FAILURE_CALLBACK, PropertyKind::Object },
+    };
+    for (const auto& entry : kTable) {
+        if (entry.name == name) return entry.kind;
+    }
+    return PropertyKind::Unknown;
+}
+
+const char* kind_word(PropertyKind kind)
+{
+    switch (kind) {
+    case PropertyKind::Bool: return "a boolean";
+    case PropertyKind::Int32: return "an integer";
+    case PropertyKind::Float: return "a float";
+    case PropertyKind::String: return "a string";
+    case PropertyKind::Object: return "a callback registration";
+    case PropertyKind::Unknown: break;
+    }
+    return "unknown";
+}
+
+// Checks of a generic property setter, in the order of the interface table.
+// Returns 0 when the write may go ahead.
+int check_property_write(owe_scene_wallpaper* scene, const char* name, PropertyKind written)
+{
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (name == nullptr || *name == '\0') return fail("the property name is NULL or empty");
+    const PropertyKind expected = property_kind(name);
+    if (expected != PropertyKind::Unknown && expected != written) {
+        return fail(std::string("the property '") + name + "' takes " + kind_word(expected) +
+                    ", not " + kind_word(written));
+    }
+    return 0;
 }
 } // namespace
 
 struct owe_scene_wallpaper {
+    // First member, at offset 0: the pull-only readers receive the handle's
+    // address as a plain pointer to the scene.
     wallpaper::SceneWallpaper scene;
+
+    std::shared_ptr<FirstFrameRegistration> first_frame;
+    std::shared_ptr<PointerRegistration>    pointer_input;
+    std::shared_ptr<ShortcutRegistration>   user_shortcut;
+    std::shared_ptr<AudioRegistration>      audio_requirement;
+    std::shared_ptr<FailureRegistration>    render_failure;
+
+    // No callback runs after the scene stopped, and the host data of every
+    // registration still held is released exactly once.
+    void closeRegistrations() noexcept
+    {
+        if (first_frame) first_frame->close();
+        if (pointer_input) pointer_input->close();
+        if (user_shortcut) user_shortcut->close();
+        if (audio_requirement) audio_requirement->close();
+        if (render_failure) render_failure->close();
+    }
 };
+
+namespace
+{
+// Installs one forwarder under `property`, then arms the registration and keeps
+// it in `slot`. The local `registration` owner pins the host data across the
+// install, whose replay may call back before this function returns.
+template<class Registered, class Callable>
+int install_callback(owe_scene_wallpaper* scene,
+                     std::shared_ptr<Registered>& slot,
+                     std::string_view property,
+                     std::shared_ptr<Registered> registration,
+                     Callable&& make_forwarder)
+{
+    auto forwarder = make_forwarder(registration);
+    scene->scene.setPropertyObject(
+        property, std::static_pointer_cast<void>(std::move(forwarder)));
+    registration->arm();
+    slot = std::move(registration);
+    return 0;
+}
+} // namespace
 
 #ifdef WESCENE_BUILD_TESTS
 wallpaper::SceneWallpaper&
@@ -55,45 +434,69 @@ wallpaper::SceneWallpaperInputTestAccess::FromNative(owe_scene_wallpaper& scene)
 
 extern "C" void owe_set_log_callback(owe_log_callback callback)
 {
-    // CLEANROOM PH24
-    (void)callback;
+    SetWallpaperLogCallback(callback);
 }
 
 extern "C" uint64_t owe_current_log_scope(void) { return WallpaperLogScope(); }
 
 extern "C" int owe_scene_wallpaper_new(owe_scene_wallpaper** out_scene)
 {
-    // CLEANROOM PH25
-    (void)out_scene;
-    return 1;
+    clear_last_error();
+    if (out_scene == nullptr) return fail("the output scene pointer is NULL");
+    return guarded([&] {
+        *out_scene = new owe_scene_wallpaper();
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_delete(owe_scene_wallpaper* scene)
 {
-    // CLEANROOM PH26
-    (void)scene;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return 0;
+    try {
+        scene->scene.shutdown();
+        // Nothing runs any more: release the host data of every registration
+        // that is still held, then the scene itself.
+        scene->closeRegistrations();
+    } catch (...) {
+    }
+    try {
+        delete scene;
+    } catch (...) {
+    }
+    clear_last_error();
+    return 0;
 }
 
 extern "C" int owe_scene_wallpaper_set_log_scope(owe_scene_wallpaper* scene, uint64_t scope)
 {
-    // CLEANROOM PH27
-    (void)scene, (void)scope;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (scene->scene.inited()) return fail("the log scope must be set before the scene host is initialised");
+    return guarded([&] {
+        scene->scene.setLogScope(scope);
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_init(owe_scene_wallpaper* scene)
 {
-    // CLEANROOM PH28
-    (void)scene;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    return guarded([&] {
+        if (! scene->scene.init()) return fail("the scene host could not start its threads");
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_shutdown(owe_scene_wallpaper* scene)
 {
-    // CLEANROOM PH29
-    (void)scene;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return 0;
+    return guarded([&] {
+        scene->scene.shutdown();
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_init_metal(
@@ -105,16 +508,30 @@ extern "C" int owe_scene_wallpaper_init_metal(
     uint32_t render_height,
     double display_scale_factor)
 {
-    // CLEANROOM PH30
-    (void)scene, (void)metal_layer, (void)width, (void)height, (void)render_width, (void)render_height, (void)display_scale_factor;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (const char* problem = surface_argument_problem(metal_layer, width, height, render_width,
+                                                       render_height);
+        *problem != '\0') {
+        return fail(problem);
+    }
+    if (! scene->scene.inited()) return fail("the scene host is not initialised");
+    return guarded([&] {
+        scene->scene.initSurface(make_surface_info(metal_layer, width, height, render_width,
+                                                   render_height, display_scale_factor));
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_begin_surface_reconfigure(owe_scene_wallpaper* scene)
 {
-    // CLEANROOM PH31
-    (void)scene;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (! scene->scene.inited()) return fail("the scene host is not initialised");
+    return guarded([&] {
+        if (! scene->scene.beginSurfaceReconfigure()) return fail("the surface could not be released");
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_finish_surface_reconfigure(
@@ -126,9 +543,22 @@ extern "C" int owe_scene_wallpaper_finish_surface_reconfigure(
     uint32_t render_height,
     double display_scale_factor)
 {
-    // CLEANROOM PH32
-    (void)scene, (void)metal_layer, (void)width, (void)height, (void)render_width, (void)render_height, (void)display_scale_factor;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (const char* problem = surface_argument_problem(metal_layer, width, height, render_width,
+                                                       render_height);
+        *problem != '\0') {
+        return fail(problem);
+    }
+    if (! scene->scene.inited()) return fail("the scene host is not initialised");
+    return guarded([&] {
+        const auto info = make_surface_info(metal_layer, width, height, render_width,
+                                            render_height, display_scale_factor);
+        if (! scene->scene.finishSurfaceReconfigure(info)) {
+            return fail("the surface could not be rebuilt on the new layer");
+        }
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_apply_config(
@@ -141,38 +571,69 @@ extern "C" int owe_scene_wallpaper_apply_config(
     bool force_shader_refresh,
     const char* project_property_override_json)
 {
-    // CLEANROOM PH33
-    (void)scene, (void)source, (void)assets, (void)cache_path, (void)fps, (void)paused, (void)force_shader_refresh, (void)project_property_override_json;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (source == nullptr || *source == '\0') return fail("the wallpaper source is NULL or empty");
+    if (fps == 0) return fail("the frame rate must not be zero");
+    return guarded([&] {
+        wallpaper::SceneWallpaperConfig config;
+        config.source     = source;
+        config.assets     = assets != nullptr ? assets : "";
+        config.cache_path = cache_path != nullptr ? cache_path : "";
+        config.fps        = std::min<uint32_t>(fps, 65535);
+        config.paused     = paused;
+        config.force_shader_refresh          = force_shader_refresh;
+        config.has_project_property_override = project_property_override_json != nullptr;
+        if (project_property_override_json != nullptr) {
+            config.project_property_override_json = project_property_override_json;
+        }
+        scene->scene.applyConfig(config);
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_target_fps(owe_scene_wallpaper* scene, uint32_t fps)
 {
-    // CLEANROOM PH34
-    (void)scene, (void)fps;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (fps == 0) return fail("the frame rate must not be zero");
+    return guarded([&] {
+        scene->scene.setTargetFps(std::min<uint32_t>(fps, 65535));
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_paused(owe_scene_wallpaper* scene, bool paused)
 {
-    // CLEANROOM PH35
-    (void)scene, (void)paused;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    return guarded([&] {
+        scene->scene.setPaused(paused);
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_render_scale(owe_scene_wallpaper* scene, double scale)
 {
-    // CLEANROOM PH36
-    (void)scene, (void)scale;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (! std::isfinite(scale) || scale <= 0.0) return fail("the render scale must be finite and above zero");
+    return guarded([&] {
+        scene->scene.setPropertyFloat(wallpaper::PROPERTY_RENDER_SCALE, static_cast<float>(scale));
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_framing(owe_scene_wallpaper* scene, double pan_x,
                                                double pan_y)
 {
-    // CLEANROOM PH37
-    (void)scene, (void)pan_x, (void)pan_y;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (! std::isfinite(pan_x) || ! std::isfinite(pan_y)) return fail("the framing values must be finite");
+    return guarded([&] {
+        scene->scene.setFraming(wallpaper::WallpaperFraming { pan_x, pan_y });
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_first_frame_callback(
@@ -181,9 +642,22 @@ extern "C" int owe_scene_wallpaper_set_first_frame_callback(
     void* user_data,
     owe_first_frame_callback_drop drop_user_data)
 {
-    // CLEANROOM PH38
-    (void)scene, (void)callback, (void)user_data, (void)drop_user_data;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    return guarded([&] {
+        auto registration = std::make_shared<FirstFrameRegistration>(callback, user_data, drop_user_data);
+        return install_callback(scene, scene->first_frame, wallpaper::PROPERTY_FIRST_FRAME_CALLBACK, registration,
+                                [](const std::shared_ptr<FirstFrameRegistration>& held) {
+                                    return std::make_shared<wallpaper::FirstFrameCallback>(
+                                        [held] {
+                                            if (held->closed() || held->callback() == nullptr) return;
+                                            try {
+                                                held->callback()(held->userData());
+                                            } catch (...) {
+                                            }
+                                        });
+                                });
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_pointer_input_callback(
@@ -192,9 +666,23 @@ extern "C" int owe_scene_wallpaper_set_pointer_input_callback(
     void* user_data,
     owe_pointer_input_callback_drop drop_user_data)
 {
-    // CLEANROOM PH39
-    (void)scene, (void)callback, (void)user_data, (void)drop_user_data;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (! scene->scene.inited()) return fail("the scene host is not initialised");
+    return guarded([&] {
+        auto registration = std::make_shared<PointerRegistration>(callback, user_data, drop_user_data);
+        return install_callback(scene, scene->pointer_input, wallpaper::PROPERTY_POINTER_INPUT_CALLBACK, registration,
+                                [](const std::shared_ptr<PointerRegistration>& held) {
+                                    return std::make_shared<wallpaper::PointerInputCallback>(
+                                        [held](bool accepts) {
+                                            if (held->closed() || held->callback() == nullptr) return;
+                                            try {
+                                                held->callback()(held->userData(), accepts);
+                                            } catch (...) {
+                                            }
+                                        });
+                                });
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_user_shortcut_callback(
@@ -203,9 +691,26 @@ extern "C" int owe_scene_wallpaper_set_user_shortcut_callback(
     void* user_data,
     owe_user_shortcut_callback_drop drop_user_data)
 {
-    // CLEANROOM PH40
-    (void)scene, (void)callback, (void)user_data, (void)drop_user_data;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (! scene->scene.inited()) return fail("the scene host is not initialised");
+    return guarded([&] {
+        auto registration = std::make_shared<ShortcutRegistration>(callback, user_data, drop_user_data);
+        return install_callback(scene, scene->user_shortcut, wallpaper::PROPERTY_USER_SHORTCUT_CALLBACK, registration,
+                                [](const std::shared_ptr<ShortcutRegistration>& held) {
+                                    return std::make_shared<wallpaper::UserShortcutCallback>(
+                                        [held](std::string_view name, std::string_view value) {
+                                            if (held->closed() || held->callback() == nullptr) return;
+                                            try {
+                                                const std::string name_copy(name);
+                                                const std::string value_copy(value);
+                                                held->callback()(held->userData(), name_copy.c_str(),
+                                                                 value_copy.c_str());
+                                            } catch (...) {
+                                            }
+                                        });
+                                });
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_audio_requirement_callback(
@@ -214,9 +719,23 @@ extern "C" int owe_scene_wallpaper_set_audio_requirement_callback(
     void* user_data,
     owe_audio_requirement_callback_drop drop_user_data)
 {
-    // CLEANROOM PH41
-    (void)scene, (void)callback, (void)user_data, (void)drop_user_data;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (! scene->scene.inited()) return fail("the scene host is not initialised");
+    return guarded([&] {
+        auto registration = std::make_shared<AudioRegistration>(callback, user_data, drop_user_data);
+        return install_callback(scene, scene->audio_requirement, wallpaper::PROPERTY_AUDIO_REQUIREMENT_CALLBACK, registration,
+                                [](const std::shared_ptr<AudioRegistration>& held) {
+                                    return std::make_shared<wallpaper::AudioRequirementCallback>(
+                                        [held](bool requires_audio) {
+                                            if (held->closed() || held->callback() == nullptr) return;
+                                            try {
+                                                held->callback()(held->userData(), requires_audio);
+                                            } catch (...) {
+                                            }
+                                        });
+                                });
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_render_failure_callback(
@@ -225,38 +744,67 @@ extern "C" int owe_scene_wallpaper_set_render_failure_callback(
     void* user_data,
     owe_render_failure_callback_drop drop_user_data)
 {
-    // CLEANROOM PH42
-    (void)scene, (void)callback, (void)user_data, (void)drop_user_data;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (! scene->scene.inited()) return fail("the scene host is not initialised");
+    return guarded([&] {
+        auto registration = std::make_shared<FailureRegistration>(callback, user_data, drop_user_data);
+        return install_callback(scene, scene->render_failure, wallpaper::PROPERTY_RENDER_FAILURE_CALLBACK, registration,
+                                [](const std::shared_ptr<FailureRegistration>& held) {
+                                    return std::make_shared<wallpaper::RenderFailureCallback>(
+                                        [held] {
+                                            if (held->closed() || held->callback() == nullptr) return;
+                                            try {
+                                                held->callback()(held->userData());
+                                            } catch (...) {
+                                            }
+                                        });
+                                });
+    });
 }
 
 extern "C" int owe_scene_wallpaper_mouse_input(owe_scene_wallpaper* scene, double x, double y)
 {
-    // CLEANROOM PH43
-    (void)scene, (void)x, (void)y;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (! std::isfinite(x) || ! std::isfinite(y)) return fail("the pointer position must be finite");
+    return guarded([&] {
+        scene->scene.mouseInput(x, y);
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_mouse_button(owe_scene_wallpaper* scene, int button, bool pressed)
 {
-    // CLEANROOM PH44
-    (void)scene, (void)button, (void)pressed;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (button < 0 || button > 31) return fail("the mouse button must be between 0 and 31");
+    return guarded([&] {
+        scene->scene.mouseButton(button, pressed);
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_mouse_button_baseline(
     owe_scene_wallpaper* scene, uint32_t down)
 {
-    // CLEANROOM PH45
-    (void)scene, (void)down;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (! scene->scene.inited()) return fail("the scene host is not initialised");
+    return guarded([&] {
+        scene->scene.mouseButtonBaseline(down);
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_mouse_enter(owe_scene_wallpaper* scene, bool entered)
 {
-    // CLEANROOM PH46
-    (void)scene, (void)entered;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    return guarded([&] {
+        scene->scene.mouseEnter(entered);
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_property_bool(
@@ -264,9 +812,14 @@ extern "C" int owe_scene_wallpaper_set_property_bool(
     const char* name,
     bool value)
 {
-    // CLEANROOM PH47
-    (void)scene, (void)name, (void)value;
-    return 1;
+    clear_last_error();
+    if (const int status = check_property_write(scene, name, PropertyKind::Bool); status != 0) {
+        return status;
+    }
+    return guarded([&] {
+        scene->scene.setPropertyBool(name, value);
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_property_int32(
@@ -274,9 +827,17 @@ extern "C" int owe_scene_wallpaper_set_property_int32(
     const char* name,
     int32_t value)
 {
-    // CLEANROOM PH48
-    (void)scene, (void)name, (void)value;
-    return 1;
+    clear_last_error();
+    if (const int status = check_property_write(scene, name, PropertyKind::Int32); status != 0) {
+        return status;
+    }
+    if (std::string_view(name) == wallpaper::PROPERTY_SCALINGMODE && (value < 0 || value > 3)) {
+        return fail("the scaling mode must be between 0 and 3");
+    }
+    return guarded([&] {
+        scene->scene.setPropertyInt32(name, value);
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_property_float(
@@ -284,9 +845,14 @@ extern "C" int owe_scene_wallpaper_set_property_float(
     const char* name,
     float value)
 {
-    // CLEANROOM PH49
-    (void)scene, (void)name, (void)value;
-    return 1;
+    clear_last_error();
+    if (const int status = check_property_write(scene, name, PropertyKind::Float); status != 0) {
+        return status;
+    }
+    return guarded([&] {
+        scene->scene.setPropertyFloat(name, value);
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_property_string(
@@ -294,32 +860,50 @@ extern "C" int owe_scene_wallpaper_set_property_string(
     const char* name,
     const char* value)
 {
-    // CLEANROOM PH50
-    (void)scene, (void)name, (void)value;
-    return 1;
+    clear_last_error();
+    if (const int status = check_property_write(scene, name, PropertyKind::String); status != 0) {
+        return status;
+    }
+    return guarded([&] {
+        scene->scene.setPropertyString(name, std::string(value != nullptr ? value : ""));
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_audio_volume(owe_scene_wallpaper* scene, float volume)
 {
-    // CLEANROOM PH51
-    (void)scene, (void)volume;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (! std::isfinite(volume) || volume < 0.0f || volume > 1.0f) {
+        return fail("the audio volume must be between 0 and 1");
+    }
+    return guarded([&] {
+        scene->scene.setPropertyFloat(wallpaper::PROPERTY_VOLUME, volume);
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_set_audio_muted(owe_scene_wallpaper* scene, bool muted)
 {
-    // CLEANROOM PH52
-    (void)scene, (void)muted;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    return guarded([&] {
+        scene->scene.setPropertyBool(wallpaper::PROPERTY_MUTED, muted);
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_submit_media_event_json(
     owe_scene_wallpaper* scene,
     const char* event_json)
 {
-    // CLEANROOM PH53
-    (void)scene, (void)event_json;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (event_json == nullptr || *event_json == '\0') return fail("the media event text is NULL or empty");
+    return guarded([&] {
+        scene->scene.setPropertyString(wallpaper::PROPERTY_MEDIA_EVENT_JSON, event_json);
+        return 0;
+    });
 }
 
 extern "C" int owe_scene_wallpaper_apply_system_media_artwork(
@@ -329,57 +913,55 @@ extern "C" int owe_scene_wallpaper_apply_system_media_artwork(
     const uint8_t* rgba,
     uintptr_t rgba_len)
 {
-    // CLEANROOM PH54
-    (void)scene, (void)width, (void)height, (void)rgba, (void)rgba_len;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (! wallpaper::IsValidSystemMediaArtwork(width, height, rgba, rgba_len)) {
+        return fail("the artwork is neither the clear value nor a complete RGBA image");
+    }
+    return guarded([&] {
+        scene->scene.applySystemMediaArtwork(width, height, rgba, rgba_len);
+        return 0;
+    });
 }
 
 extern "C" const char* owe_property_scaling_mode(void)
 {
-    // CLEANROOM PH55
-    return "";
+    return property_name(wallpaper::PROPERTY_SCALINGMODE);
 }
 
 extern "C" const char* owe_property_scaling_factor(void)
 {
-    // CLEANROOM PH56
-    return "";
+    return property_name(wallpaper::PROPERTY_SCALINGFACTOR);
 }
 
 extern "C" const char* owe_property_horizontal_flip(void)
 {
-    // CLEANROOM PH57
-    return "";
+    return property_name(wallpaper::PROPERTY_HORIZONTAL_FLIP);
 }
 
 extern "C" const char* owe_property_audio_response_enabled(void)
 {
-    // CLEANROOM PH58
-    return "";
+    return property_name(wallpaper::PROPERTY_AUDIO_RESPONSE_ENABLED);
 }
 
 extern "C" const char* owe_property_media_integration_enabled(void)
 {
-    // CLEANROOM PH59
-    return "";
+    return property_name(wallpaper::PROPERTY_MEDIA_INTEGRATION_ENABLED);
 }
 
 extern "C" const char* owe_property_force_shader_refresh(void)
 {
-    // CLEANROOM PH60
-    return "";
+    return property_name(wallpaper::PROPERTY_FORCE_SHADER_REFRESH);
 }
 
 extern "C" const char* owe_property_project_property_override_json(void)
 {
-    // CLEANROOM PH61
-    return "";
+    return property_name(wallpaper::PROPERTY_PROJECT_PROPERTY_OVERRIDE_JSON);
 }
 
 extern "C" const char* owe_property_project_property_reset(void)
 {
-    // CLEANROOM PH62
-    return "";
+    return property_name(wallpaper::PROPERTY_PROJECT_PROPERTY_RESET);
 }
 
 extern "C" const char* owe_property_project_property_preview_json(void)
@@ -389,8 +971,9 @@ extern "C" const char* owe_property_project_property_preview_json(void)
 
 extern "C" int owe_audio_spectrum_is_stereo(void)
 {
-    // CLEANROOM PH63
-    return -1;
+    const auto snapshot = wallpaper::audio::CurrentAudioSpectrumSnapshot();
+    if (snapshot.generation == 0) return -1;
+    return snapshot.stereo ? 1 : 0;
 }
 
 extern "C" void owe_set_scene_optimization_enabled(bool enabled)
@@ -559,9 +1142,14 @@ extern "C" int owe_audio_submit_mono_frames(
     uint32_t frame_count,
     const float* pcm_frames)
 {
-    // CLEANROOM PH64
-    (void)sample_rate, (void)frame_count, (void)pcm_frames;
-    return 1;
+    clear_last_error();
+    return guarded([&] {
+        std::string error;
+        if (! wallpaper::audio::SubmitMonoAudioFrames(sample_rate, frame_count, pcm_frames, &error)) {
+            return fail(error.empty() ? std::string_view("the audio frames were refused") : std::string_view(error));
+        }
+        return 0;
+    });
 }
 
 extern "C" int owe_audio_submit_frames(
@@ -569,9 +1157,14 @@ extern "C" int owe_audio_submit_frames(
     uint32_t frame_count,
     const float* pcm_frames)
 {
-    // CLEANROOM PH65
-    (void)sample_rate, (void)frame_count, (void)pcm_frames;
-    return 1;
+    clear_last_error();
+    return guarded([&] {
+        std::string error;
+        if (! wallpaper::audio::SubmitAudioFrames(sample_rate, frame_count, pcm_frames, &error)) {
+            return fail(error.empty() ? std::string_view("the audio frames were refused") : std::string_view(error));
+        }
+        return 0;
+    });
 }
 
 extern "C" int owe_audio_current_spectrum_128(
@@ -579,9 +1172,19 @@ extern "C" int owe_audio_current_spectrum_128(
     uintptr_t out_len,
     uint64_t* out_generation)
 {
-    // CLEANROOM PH66
-    (void)out_bins, (void)out_len, (void)out_generation;
-    return 1;
+    clear_last_error();
+    if (out_bins == nullptr) return fail("the spectrum buffer is NULL");
+    if (out_len < 128) return fail("the spectrum buffer must hold at least 128 values");
+    const auto snapshot = wallpaper::audio::CurrentAudioSpectrumSnapshot();
+    const auto clean    = [](float value) {
+        return std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.0f;
+    };
+    for (std::size_t i = 0; i < 64; ++i) {
+        out_bins[i]      = clean(snapshot.left64[i]);
+        out_bins[64 + i] = clean(snapshot.right64[i]);
+    }
+    if (out_generation != nullptr) *out_generation = snapshot.generation;
+    return 0;
 }
 
 extern "C" int owe_renderer_counters_set_enabled(bool enabled)
@@ -602,9 +1205,14 @@ extern "C" int owe_scene_wallpaper_counters(
     uintptr_t out_len,
     uintptr_t* out_written)
 {
-    // CLEANROOM PH67
-    (void)scene, (void)out_values, (void)out_len, (void)out_written;
-    return 1;
+    clear_last_error();
+    if (scene == nullptr) return fail("the scene host handle is NULL");
+    if (out_values == nullptr) return fail("the counter buffer is NULL");
+    return guarded([&] {
+        const std::size_t written = scene->scene.counters(out_values, static_cast<std::size_t>(out_len));
+        if (out_written != nullptr) *out_written = static_cast<uintptr_t>(written);
+        return 0;
+    });
 }
 
 extern "C" int owe_renderer_shared_counters(
@@ -612,13 +1220,20 @@ extern "C" int owe_renderer_shared_counters(
     uintptr_t out_len,
     uintptr_t* out_written)
 {
-    // CLEANROOM PH68
-    (void)out_values, (void)out_len, (void)out_written;
-    return 1;
+    clear_last_error();
+    if (out_values == nullptr) return fail("the counter buffer is NULL");
+    const auto snapshot = wallpaper::audio::CurrentAudioSpectrumSnapshot();
+    const uint64_t values[OWE_RC_SHARED_COUNT] = {
+        snapshot.generation,
+        snapshot.accepted_frame_count,
+    };
+    const std::size_t written = std::min<std::size_t>(static_cast<std::size_t>(out_len), OWE_RC_SHARED_COUNT);
+    for (std::size_t i = 0; i < written; ++i) out_values[i] = values[i];
+    if (out_written != nullptr) *out_written = static_cast<uintptr_t>(written);
+    return 0;
 }
 
 extern "C" const char* owe_last_error(void)
 {
-    // CLEANROOM PH69
-    return "";
+    return t_last_error.c_str();
 }
