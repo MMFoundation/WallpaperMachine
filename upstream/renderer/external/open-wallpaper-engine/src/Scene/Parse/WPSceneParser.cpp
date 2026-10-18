@@ -2183,8 +2183,6 @@ void ApplyParticleOverrideControlpoints(const wpscene::ParticleInstanceoverride&
 
 // CLEANROOM LS31: the file-local helpers of this group were removed; the rewrite designs its own.
 
-// CLEANROOM LS32: the file-local helpers of this group were removed; the rewrite designs its own.
-
 std::shared_ptr<SceneNode> ReuseOrCreateLayerNode(ParseContext& context, int32_t id) {
     auto node_iterator = context.layer_nodes.find(id);
     if (node_iterator != context.layer_nodes.end() && node_iterator->second != nullptr) {
@@ -3036,6 +3034,132 @@ void SyncEffectFinals(ParseContext& context) {
     }
 }
 
+/// The layer record of a typed entry: the stand-in node its children already hang from,
+/// or a new one. Typed objects register their own timelines.
+ParsedLayer& TypedLayer(ParseContext& context, std::size_t at, const nlohmann::json& entry,
+                        const EntryPlan& plan) {
+    if (plan.placeholder && ! context.layers.empty() && context.layers.back().entry == at) {
+        auto& layer = context.layers.back();
+        layer.plain = false;
+        if (auto* runtime = context.scene->runtime.get(); runtime != nullptr) {
+            wpscene::WPMiscObjectBase base;
+            base.FromCommonJson(entry);
+            RegisterNodeTransformSettings(*runtime, layer.node.get(), plan.key, base.origin_setting,
+                                          base.scale_setting, base.angles_setting, true);
+        }
+        return layer;
+    }
+    return AddLayer(context, at, entry, plan, true, false);
+}
+
+/// A model material: read as a material file, with the defaults of a solid model where
+/// the pass leaves a word out (normal blending, back faces culled, depth tested and written).
+std::optional<wpscene::WPMaterial> ReadModelMaterial(fs::VFS& vfs, const std::string& path) {
+    nlohmann::json json;
+    if (path.empty() || ! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + path), json)) return std::nullopt;
+    wpscene::WPMaterial material;
+    if (! material.FromJson(json)) return std::nullopt;
+    const nlohmann::json* pass = nullptr;
+    if (const auto passes = json.find("passes"); passes != json.end() && passes->is_array() && ! passes->empty()) {
+        pass = &passes->front();
+    }
+    const auto says = [pass](const char* key) { return pass != nullptr && pass->is_object() && pass->contains(key); };
+    if (! says("blending")) material.blending = "normal";
+    if (! says("cullmode")) material.cullmode = "normal";
+    if (! says("depthtest")) material.depthtest = "enabled";
+    if (! says("depthwrite")) material.depthwrite = "enabled";
+    return material;
+}
+
+/// Loads one 3D model object (P5 R74 to R78).
+bool LoadModelEntry(ParseContext& context, std::size_t at, const nlohmann::json& entry,
+                    const EntryPlan& plan, const wpscene::WPSceneGeneral&) {
+    auto& scene = *context.scene;
+    wpscene::WPModelObject model;
+    if (! model.FromJson(entry, *context.vfs)) {
+        LOG_ERROR("model object %d names no model", plan.id);
+        return false;
+    }
+    WPMdl mdl;
+    if (! WPMdlParser::Parse(model.model, *context.vfs, mdl) ||
+        std::none_of(mdl.meshes.begin(), mdl.meshes.end(),
+                     [](const WPMdl::Mesh& mesh) { return ! mesh.positions.empty(); })) {
+        LOG_ERROR("model '%s' cannot be read or has no vertices", model.model.c_str());
+        return false;
+    }
+    const bool has_bones = mdl.puppet != nullptr && ! mdl.puppet->bones.empty();
+
+    auto mesh = std::make_shared<SceneMesh>();
+    WPMdlParser::GenPuppetMesh(*mesh, mdl, false);
+    struct Slot {
+        wpscene::WPMaterial authored;
+        WPShaderInfo        info;
+        LoadedMaterial      loaded;
+        bool                ok { false };
+    };
+    std::vector<Slot> slots;
+    for (const auto& source : mdl.meshes) {
+        if (source.positions.empty()) continue;
+        Slot slot;
+        if (auto material = ReadModelMaterial(*context.vfs, source.mat_json_file); material.has_value()) {
+            slot.authored = std::move(*material);
+            if (has_bones) WPMdlParser::AddPuppetMatInfo(slot.authored, mdl);
+            SceneMaterial scene_material;
+            if (LoadMaterial(context, slot.authored, scene_material, slot.loaded)) {
+                slot.ok = true;
+                mesh->AddMaterial(std::move(scene_material));
+            }
+        }
+        if (! slot.ok) {
+            LOG_ERROR("model '%s': the material '%s' cannot be loaded", model.model.c_str(),
+                      source.mat_json_file.c_str());
+            mesh->AddMaterial(SceneMaterial {});
+            const std::size_t index = slots.size();
+            if (index < mesh->Submeshes().size()) {
+                mesh->Submeshes()[index].SetDrawRanges(
+                    std::array<SceneMesh::DrawRange, 1> { SceneMesh::DrawRange { 0, 0 } });
+            }
+        }
+        slots.push_back(std::move(slot));
+    }
+    context.uses_models = true;
+
+    auto& layer = TypedLayer(context, at, entry, plan);
+    const auto node = layer.node;
+    node->AddMesh(mesh);
+    if (model.perspective || (scene.activeCamera != nullptr && scene.activeCamera->IsPerspective())) {
+        node->SetCamera("global_perspective");
+    }
+
+    WPPuppetLayer puppet_layer;
+    auto*         runtime = scene.runtime.get();
+    if (mdl.puppet != nullptr) {
+        puppet_layer = WPPuppetLayer(mdl.puppet);
+        puppet_layer.prepared(model.puppet_layers);
+        if (runtime != nullptr) {
+            runtime->RegisterPuppetLayer(plan.key, puppet_layer);
+            BindPuppetAnimationLayerSettings(context, plan.key, model, puppet_layer);
+        }
+    }
+    for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+        if (context.shader_updater != nullptr) {
+            WPShaderValueData data;
+            data.parallaxDepth = model.parallaxDepth;
+            data.renderTargets = slots[slot].loaded.render_targets;
+            data.puppet_layer  = puppet_layer;
+            context.shader_updater->SetNodeData(node.get(), static_cast<uint32_t>(slot), data);
+        }
+        if (slots[slot].ok) {
+            RegisterMaterialConstants(context, mesh->MaterialSlotPtr(slot), slots[slot].authored,
+                                      slots[slot].loaded.info, plan.key);
+        }
+    }
+    if (runtime != nullptr) {
+        runtime->SetNodeCursorTarget(plan.key, true, model.solid, model.disablepropagation);
+    }
+    return true;
+}
+
 /// A light: a member of the tree with no picture of its own. Its colour, radius,
 /// exponent and intensity follow their bindings; its cones and control point are
 /// fixed at load (R100 to R102).
@@ -3185,6 +3309,7 @@ void BuildLayers(ParseContext& context, const wpscene::WPSceneGeneral& general,
         case EntryKind::Sound: built = LoadSoundEntry(context, entry, sm); break;
         case EntryKind::Light: built = LoadLightEntry(context, at, entry, plan); break;
         case EntryKind::Image: built = LoadImageEntry(context, at, entry, plan, general); break;
+        case EntryKind::Model: built = LoadModelEntry(context, at, entry, plan, general); break;
         case EntryKind::Camera: built = LoadCameraEntry(context, at, entry, plan, general); break;
         default:
             LOG_ERROR("object %d (%s) is not built: its kind is not loaded by this parser yet",
