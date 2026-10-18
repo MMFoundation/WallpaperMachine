@@ -3329,17 +3329,25 @@ bool BuildLdrBloom(ParseContext& context, const wpscene::WPSceneGeneral& general
     post.steps.push_back(ScenePostProcessCopy { .src = "_rt_bloom_combine", .dst = frame });
 
     if (auto* runtime = scene.runtime.get(); runtime != nullptr && extract_material != nullptr) {
-        if (HasDynamicSetting(general.bloomstrength_setting)) {
-            runtime->RegisterMaterialConstant(extract_material, "g_BloomStrength",
-                                              ResolveFloatSetting(*runtime, general.bloomstrength_setting));
-        }
-        if (HasDynamicSetting(general.bloomthreshold_setting)) {
-            runtime->RegisterMaterialConstant(extract_material, "g_BloomThreshold",
-                                              ResolveFloatSetting(*runtime, general.bloomthreshold_setting));
-        }
+        // Followed through listeners, so a changed property reaches the pass at once.
+        const auto follow_float = [&](const nlohmann::json& setting, const char* uniform) {
+            if (! HasDynamicSetting(setting)) return;
+            runtime->RegisterDynamicValueListener(
+                ResolveFloatSetting(*runtime, setting),
+                [extract_material, uniform](const DynamicValue& now) {
+                    extract_material->customShader.constValues[uniform] = ShaderValue(now.getFloat());
+                });
+        };
+        follow_float(general.bloomstrength_setting, "g_BloomStrength");
+        follow_float(general.bloomthreshold_setting, "g_BloomThreshold");
         if (general.dynamic_bloomtint) {
-            runtime->RegisterMaterialConstant(extract_material, "g_BloomTint",
-                                              ResolveVec3Setting(*runtime, general.bloomtint_setting));
+            runtime->RegisterDynamicValueListener(
+                ResolveVec3Setting(*runtime, general.bloomtint_setting),
+                [extract_material](const DynamicValue& now) {
+                    const auto tint = now.getVec3();
+                    extract_material->customShader.constValues["g_BloomTint"] =
+                        ShaderValue(std::array<float, 3> { tint.x(), tint.y(), tint.z() });
+                });
         }
     }
     targets.Commit();
@@ -3457,8 +3465,13 @@ bool BuildHdrBloom(ParseContext& context, const wpscene::WPSceneGeneral& general
         follow(general.bloomhdrthreshold_setting, &HdrBloomState::threshold, apply_blend);
         follow(general.bloomhdrfeather_setting, &HdrBloomState::feather, apply_blend);
         if (general.dynamic_bloomtint && extract_material != nullptr) {
-            runtime->RegisterMaterialConstant(extract_material, "g_BloomTint",
-                                              ResolveVec3Setting(*runtime, general.bloomtint_setting));
+            runtime->RegisterDynamicValueListener(
+                ResolveVec3Setting(*runtime, general.bloomtint_setting),
+                [extract_material](const DynamicValue& now) {
+                    const auto tint = now.getVec3();
+                    extract_material->customShader.constValues["g_BloomTint"] =
+                        ShaderValue(std::array<float, 3> { tint.x(), tint.y(), tint.z() });
+                });
         }
         apply_scatter();
         apply_blend();
