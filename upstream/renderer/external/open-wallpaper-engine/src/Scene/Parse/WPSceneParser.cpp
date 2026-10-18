@@ -3756,6 +3756,8 @@ bool LoadTextEntry(ParseContext& context, std::size_t at, const nlohmann::json& 
         chain->FinalMesh().ChangeMeshDataFrom(*final_card);
         // The last pass is drawn translucent by the alpha it holds, whatever the blend.
         chain->SetFinalBlend(BlendMode::Translucent);
+        // With every effect off the layer is plain text again, added when it says so.
+        if (additive) chain->SetIdleFinalBlend(BlendMode::Additive);
         chain->SetFinalDepth(false, false);
 
         std::vector<std::shared_ptr<SceneMaterial>> unused_tint;
