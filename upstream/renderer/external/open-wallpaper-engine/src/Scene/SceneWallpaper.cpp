@@ -260,7 +260,8 @@ public:
         }
     }
 
-    void sendCmdLoadScene();
+    /// Asks for the scene to be loaded because surface hand-over `epoch` completed.
+    void sendCmdLoadScene(uint64_t epoch);
     void sendFirstFrameOk();
     void sendPointerInputCapability(bool accepts_pointer_input);
     void sendUserShortcut(std::string_view property_name, std::string_view property_value);
@@ -306,6 +307,8 @@ private:
     std::vector<std::shared_ptr<SurfaceTicket>> m_tickets;
 
     /// Configuration as the control thread last stored it.
+    /// The newest surface hand-over a load has already seen. Control thread.
+    uint64_t                   m_loaded_epoch { 0 };
     std::string                m_source;
     std::string                m_assets;
     std::string                m_cache_path;
@@ -465,6 +468,13 @@ public:
         // An atomic of its own: the control thread asks this while the render thread may be
         // replacing the description it describes.
         return m_surface_handed.load(std::memory_order_acquire);
+    }
+
+    /// How many surfaces have been handed over by `INIT_SURFACE`. Lets the
+    /// control thread tell a hand-over that a load already answered from one it
+    /// has yet to answer.
+    [[nodiscard]] uint64_t surfaceEpoch() const {
+        return m_surface_epoch.load(std::memory_order_acquire);
     }
 
     /// Tells the frame clock whether this scene's content is still changing: it
@@ -1394,13 +1404,14 @@ private:
         std::shared_ptr<RenderInitInfo> info;
         if (! msg->findObject("info", &info) || info == nullptr) return;
         adoptRenderInitInfo(std::move(info));
+        const uint64_t epoch = m_surface_epoch.fetch_add(1, std::memory_order_acq_rel) + 1;
         m_surface_handed.store(true, std::memory_order_release);
         m_surface_released     = false;
         m_scene_awaits_surface = false;
         clearRenderBlock();
         syncFrameClock();
         publishScreenResolution();
-        main_handler.sendCmdLoadScene();
+        main_handler.sendCmdLoadScene(epoch);
         publishPauseReasons();
     }
     /// Completes a desktop poster request that arrived from outside the clock.
@@ -1698,6 +1709,7 @@ private:
     std::atomic<uint64_t>             m_pointer_bits { PackPointer(0.5f, 0.5f) };
     /// Whether a surface description has ever been handed over.
     std::atomic<bool>                 m_surface_handed { false };
+    std::atomic<uint64_t>             m_surface_epoch { 0 };
     /// Host settings kept on this thread and pushed to every renderer it creates.
     float                             m_speed { 1.0f };
     FillMode                          m_fill_mode { FillMode::ASPECTFIT };
@@ -1934,7 +1946,10 @@ std::size_t SceneWallpaper::counters(uint64_t* out, std::size_t len) const {
 }
 
 MHANDLER_CMD_IMPL(MainHandler, LOAD_SCENE) {
-    (void)msg;
+    // A configuration that arrived after the hand-over may already have loaded the scene; the
+    // same scene is not parsed a second time (the second commit would replace a running one).
+    std::shared_ptr<uint64_t> epoch;
+    if (msg->findObject("epoch", &epoch) && epoch != nullptr && *epoch <= m_loaded_epoch) return;
     loadScene();
 }
 
@@ -2193,6 +2208,7 @@ void MainHandler::previewProjectProperties(const std::string& json) {
 void MainHandler::loadScene() {
     // Nothing to load, or nowhere to show it yet: the surface hand-over asks again.
     if (m_source.empty() || ! m_render_handler->renderSurfaceReady()) return;
+    m_loaded_epoch = m_render_handler->surfaceEpoch();
     LOG_INFO("loading scene: %s", m_source.c_str());
 
     SceneSourceResolution resolved;
@@ -2291,8 +2307,10 @@ bool MainHandler::loadNonSceneProject(const ProjectManifest& manifest) {
     return false;
 }
 
-void MainHandler::sendCmdLoadScene() {
-    CreateMsgWithCmd(shared_from_this(), CMD::CMD_LOAD_SCENE)->post();
+void MainHandler::sendCmdLoadScene(uint64_t epoch) {
+    auto msg = CreateMsgWithCmd(shared_from_this(), CMD::CMD_LOAD_SCENE);
+    msg->setObject("epoch", std::make_shared<uint64_t>(epoch));
+    msg->post();
 }
 void MainHandler::sendFirstFrameOk() {
     CreateMsgWithCmd(shared_from_this(), CMD::CMD_FIRST_FRAME)->post();
