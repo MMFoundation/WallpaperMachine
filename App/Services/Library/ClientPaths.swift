@@ -21,8 +21,16 @@ enum ClientPaths {
     /// the user's imported files with it.
     static var userAssetsURL: URL { supportURL.appendingPathComponent("UserAssets", isDirectory: true) }
     static var assetsURL: URL {
-        // CLEANROOM A17: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A17")
+        if let chosen = ClientPreferences.defaults.string(forKey: "WallpaperMachineAssetsPath"), !chosen.isEmpty {
+            let url = URL(fileURLWithPath: chosen, isDirectory: true)
+            if hasSceneAssets(at: url) { return url }
+        }
+        let steamInstall = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Steam/steamapps/common/wallpaper_engine/assets", isDirectory: true)
+        let supportCopy = supportURL
+            .appendingPathComponent("Steam/steamapps/common/wallpaper_engine/assets", isDirectory: true)
+        // None usable: the managed folder, so an install knows where to write.
+        return [managedAssetsURL, steamInstall, supportCopy].first { hasSceneAssets(at: $0) } ?? managedAssetsURL
     }
     static var managedSteamCMDURL: URL { supportURL.appendingPathComponent("SteamCMD", isDirectory: true) }
     /// Performance data waiting to be sent, kept only while sending is on (docs/features/telemetry.md).
@@ -44,8 +52,38 @@ enum ClientPaths {
     }
 
     static func prepare() throws {
-        // CLEANROOM A18: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A18")
+        try FileManager.default.createDirectory(at: libraryURL, withIntermediateDirectories: true)
+        prepareExcludedFolders()
+        installStarterWallpaper()
+        setenv("WALLPAPER_MACHINE_SUPPORT_ROOT", supportURL.path, 1)
+        setenv("WALLPAPER_MACHINE_LIBRARY_ROOT", libraryURL.path, 1)
+        setenv("WALLPAPER_MACHINE_ASSETS_ROOT", assetsURL.path, 1)
+        setenv("WALLPAPER_MACHINE_USER_ASSETS_ROOT", userAssetsURL.path, 1)
+        setenv("WALLPAPER_MACHINE_BUILD", buildStamp(), 1)
+    }
+
+    /// Puts the bundled sample wallpaper into the library exactly once. The marker outlives the
+    /// folder, so a user who deletes the sample never gets it back.
+    private static func installStarterWallpaper(bundle: Bundle = .main) {
+        let fileManager = FileManager.default
+        let marker = libraryURL.appendingPathComponent(".starter-installed")
+        let destination = libraryURL.appendingPathComponent("starter-aurora", isDirectory: true)
+        guard !fileManager.fileExists(atPath: marker.path) else { return }
+        if fileManager.fileExists(atPath: destination.path) {
+            // An older library that has the folder but not the marker.
+            fileManager.createFile(atPath: marker.path, contents: Data())
+            return
+        }
+        guard let resource = bundle.url(forResource: "StarterWallpaper", withExtension: nil) else { return }
+        let pending = libraryURL.appendingPathComponent(".starter-pending-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fileManager.removeItem(at: pending) }
+        do {
+            try fileManager.copyItem(at: resource, to: pending)
+            try fileManager.moveItem(at: pending, to: destination)
+            fileManager.createFile(atPath: marker.path, contents: Data())
+        } catch {
+            AppLog.warn("could not install the starter wallpaper: \(error.localizedDescription)")
+        }
     }
 
     /// Names the running build for the renderer's load journal, which releases
@@ -100,8 +138,16 @@ enum ClientPaths {
     }
 
     static func hasSceneAssets(at url: URL) -> Bool {
-        // CLEANROOM A19: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A19")
+        let required = ["shaders/genericimage2.vert", "shaders/genericimage2.frag",
+                        "materials/util/effectpassthrough.json"]
+        let fileManager = FileManager.default
+        return required.allSatisfy { relative in
+            let path = url.appendingPathComponent(relative).path
+            guard let attributes = try? fileManager.attributesOfItem(atPath: path),
+                  attributes[.type] as? FileAttributeType == .typeRegular,
+                  (attributes[.size] as? NSNumber)?.intValue ?? 0 > 0 else { return false }
+            return fileManager.isReadableFile(atPath: path)
+        }
     }
 
     static func configureAssetsFolder(at url: URL) throws {
@@ -113,7 +159,16 @@ enum ClientPaths {
     }
 
     static func installSceneAssets(from source: URL, to destination: URL) throws {
-        // CLEANROOM A20: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A20")
+        guard hasSceneAssets(at: source) else {
+            throw WorkshopFailure(message: String(localized: "Steam did not produce complete scene assets. Confirm this account owns Wallpaper Engine and retry. Existing assets have not been changed."))
+        }
+        try Task.checkCancellation()
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: destination.path) {
+            _ = try fileManager.replaceItemAt(destination, withItemAt: source)
+        } else {
+            try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fileManager.moveItem(at: source, to: destination)
+        }
     }
 }

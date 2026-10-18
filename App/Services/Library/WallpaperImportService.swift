@@ -66,8 +66,176 @@ actor WallpaperImportService {
         _ sources: [URL], into library: URL, duplicates: DuplicatePolicy,
         progress: @Sendable (String) async -> Void
     ) async throws -> Report {
-        // CLEANROOM A22: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A22")
+        let fm = FileManager.default
+        try fm.createDirectory(at: library, withIntermediateDirectories: true)
+        let managed = library.resolvingSymlinksInPath().standardizedFileURL
+        // Beside the library, so publishing a finished project is a rename on one volume, and
+        // outside it, so the library scan never lists a half-built import.
+        let staging = Self.stagingRoot(forLibrary: library)
+            .appendingPathComponent(Self.stagingPrefix + UUID().uuidString, isDirectory: true)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: false)
+        ClientPaths.excludeFromBackup(staging)
+        let claim: Int32
+        do {
+            claim = try Self.claimStaging(staging)
+        } catch {
+            try? fm.removeItem(at: staging)
+            throw error
+        }
+        defer {
+            close(claim)
+            try? fm.removeItem(at: staging)
+        }
+
+        var report = Report()
+        var seen = Set<String>()
+        for source in sources {
+            let scoped = source.startAccessingSecurityScopedResource()
+            defer { if scoped { source.stopAccessingSecurityScopedResource() } }
+            do {
+                try Task.checkCancellation()
+                for candidate in try discover(source) {
+                    try Task.checkCancellation()
+                    guard seen.insert(candidate.resolvingSymlinksInPath().standardizedFileURL.path).inserted else { continue }
+                    let name = candidate.lastPathComponent
+                    await progress(String(localized: "Importing \(name)…"))
+                    do {
+                        try await importCandidate(candidate, into: managed, staging: staging,
+                                                  duplicates: duplicates, report: &report)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        report.failures.append("\(name): \(error.localizedDescription)")
+                    }
+                }
+            } catch is CancellationError {
+                report.cancelled = true
+                break
+            } catch {
+                report.failures.append("\(source.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+        return report
+    }
+
+    /// What a candidate is, by what the chooser handed over.
+    private enum CandidateKind {
+        case project
+        case video
+        case web
+        case image(String)
+    }
+
+    /// Imports one candidate into `library`, recording the outcome in `report`. Throws what stops
+    /// this candidate; the caller turns that into a failure line and carries on.
+    private func importCandidate(
+        _ candidate: URL, into library: URL, staging: URL, duplicates: DuplicatePolicy, report: inout Report
+    ) async throws {
+        let fm = FileManager.default
+        let name = candidate.lastPathComponent
+        let resolved = candidate.resolvingSymlinksInPath().standardizedFileURL
+        guard !isWithin(resolved, library), !isWithin(library, resolved) else {
+            throw ImportError(message: String(localized: "Choose a source outside WallpaperMachine’s managed library."))
+        }
+
+        let isDirectory = try downloadMetadata(at: candidate).st_mode & S_IFMT == S_IFDIR
+        let ext = candidate.pathExtension.lowercased()
+        let kind: CandidateKind
+        var id = name
+        if isDirectory {
+            kind = .project
+            if Self.workshopID(name) == nil, let inferred = inferredWorkshopID(of: candidate) {
+                id = inferred
+                report.recognizedWorkshopIDs[name] = inferred
+                AppLog.info("import: \(name) is a copy of Workshop item \(inferred); filing it under that id")
+            }
+        } else if Self.imageExtensions.contains(ext) {
+            kind = .image(ext)
+            id = Self.imageIDPrefix + name
+        } else if Self.videoExtensions.contains(ext) {
+            kind = .video
+            id = "local-" + name
+        } else if Self.webExtensions.contains(ext) {
+            kind = .web
+            id = "local-" + name
+        } else {
+            throw ImportError(message: String(localized: "Choose a video, image, HTML file, or Wallpaper Engine project folder."))
+        }
+        guard !id.contains("/"), isSafeRelativePath(id) else {
+            throw ImportError(message: String(localized: "The folder name cannot be used as a library identifier."))
+        }
+
+        var destination = library.appendingPathComponent(id, isDirectory: true)
+        var replacing = false
+        if (try? downloadMetadata(at: destination)) != nil {
+            var imageExtension: String?
+            if case .image(let kept) = kind { imageExtension = kept }
+            switch try resolveDuplicate(duplicates, candidate: candidate, isDirectory: isDirectory,
+                                        imageExtension: imageExtension, installed: destination) {
+            case .skip(let identical):
+                report.skipped.append(name)
+                if identical { report.identical.append(name) }
+                return
+            case .keepBoth:
+                id += "-" + UUID().uuidString
+                destination = library.appendingPathComponent(id, isDirectory: true)
+            case .replace:
+                replacing = true
+            }
+        }
+
+        let built = staging.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        switch kind {
+        case .project:
+            if let preset = presetManifest(at: candidate) {
+                try buildPreset(preset, from: candidate, into: built, library: library,
+                                workshopID: Self.workshopID(id))
+            } else {
+                try validateProject(at: candidate)
+                try copySafely(candidate, to: built)
+            }
+        case .image(let kept):
+            try packageImage(candidate, extension: kept, into: built)
+        case .video, .web:
+            try fm.createDirectory(at: built, withIntermediateDirectories: false)
+            try copySafely(candidate, to: built.appendingPathComponent(name))
+            var isVideo = false
+            if case .video = kind { isVideo = true }
+            let manifest: [String: Any] = [
+                "title": candidate.deletingPathExtension().lastPathComponent,
+                "type": isVideo ? "video" : "web",
+                "file": name,
+                "general": ["properties": [String: Any]()],
+            ]
+            let data = try JSONSerialization.data(withJSONObject: manifest,
+                                                  options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+            try data.write(to: built.appendingPathComponent("project.json"), options: .atomic)
+        }
+
+        try validateProject(at: built)
+        try Task.checkCancellation()
+        if replacing {
+            try requireInstalledProject(destination)
+            let code = Self.exchange(built, with: destination)
+            guard code == 0 else { throw Self.replaceFailure(id, String(cString: strerror(code)) + ".") }
+            report.replacedIDs.append(id)
+            AppLog.info("import: replaced \(id) with the imported copy")
+        } else {
+            try fm.moveItem(at: built, to: destination)
+        }
+        report.importedIDs.append(id)
+    }
+
+    /// Builds a self-contained wallpaper from a preset folder and the base it names, found beside
+    /// the preset or already installed. The base is copied, never changed.
+    private func buildPreset(_ preset: Preset, from source: URL, into built: URL, library: URL, workshopID: String?) throws {
+        let beside = source.deletingLastPathComponent().appendingPathComponent(preset.dependency, isDirectory: true)
+        let installed = library.appendingPathComponent(preset.dependency, isDirectory: true)
+        let base = try presetBase(of: preset, among: [beside, installed])
+        try requireRegularTree(base)
+        try FileManager.default.copyItem(at: base, to: built)
+        try overlay(source, onto: built) { try copySafely($0, to: $1) }
+        try writePresetManifest(preset, into: built, workshopID: workshopID)
     }
 
     /// What an import does with a candidate whose library id is already taken.
@@ -591,8 +759,32 @@ actor WallpaperImportService {
     }()
 
     private func discover(_ source: URL) throws -> [URL] {
-        // CLEANROOM A23: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A23")
+        let metadata = try downloadMetadata(at: source)
+        guard metadata.st_mode & S_IFMT != S_IFLNK else {
+            throw ImportError(message: String(localized: "Symbolic links are not imported. Choose the original folder or file instead."))
+        }
+        guard metadata.st_mode & S_IFMT == S_IFDIR else { return [projectFolder(ofFile: source) ?? source] }
+        if holdsProjectManifest(source) { return [source] }
+
+        let fm = FileManager.default
+        let chosen = source.resolvingSymlinksInPath().standardizedFileURL
+        var found: [URL] = []
+        var known = Set<String>()
+        for relative in Self.projectRoots {
+            try Task.checkCancellation()
+            let root = (relative.isEmpty ? source : source.appendingPathComponent(relative, isDirectory: true))
+                .resolvingSymlinksInPath().standardizedFileURL
+            guard isWithin(root, chosen),
+                  let children = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil,
+                                                             options: [.skipsHiddenFiles]) else { continue }
+            for child in children where holdsProjectManifest(child) && known.insert(child.path).inserted {
+                found.append(child)
+            }
+        }
+        guard !found.isEmpty else {
+            throw ImportError(message: String(localized: "No project.json found. Choose a wallpaper project, a folder containing projects, a Steam library or a Wallpaper Engine folder."))
+        }
+        return found.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
     }
 
     /// The project a chosen file belongs to: its own folder, when the file is the manifest, the
@@ -607,13 +799,58 @@ actor WallpaperImportService {
     }
 
     private func validateProject(at root: URL, requireNonemptyContent: Bool = false) throws {
-        // CLEANROOM A24: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A24")
+        let describe = String(localized: "project.json must describe a scene, video, or web wallpaper.")
+        let manifestURL = root.appendingPathComponent("project.json")
+        guard let info = try? downloadMetadata(at: manifestURL), info.st_mode & S_IFMT == S_IFREG,
+              info.st_size <= 16 * 1024 * 1024, let data = try? Data(contentsOf: manifestURL) else {
+            throw ImportError(message: String(localized: "project.json must be a regular JSON file smaller than 16 MB."))
+        }
+        guard !data.starts(with: [0xEF, 0xBB, 0xBF]), String(data: data, encoding: .utf8) != nil else {
+            throw ImportError(message: String(localized: "project.json must use UTF-8 encoding without a byte-order mark. Convert the manifest and import it again."))
+        }
+        guard let manifest = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let type = (manifest["type"] as? String)?.lowercased(),
+              ["scene", "video", "web"].contains(type) else { throw ImportError(message: describe) }
+
+        var entry = ""
+        if let declared = manifest["file"] {
+            guard let text = declared as? String else { throw ImportError(message: describe) }
+            entry = text
+        }
+        if entry.isEmpty {
+            guard type == "scene" else { throw ImportError(message: describe) }
+            entry = "scene.json"
+        }
+        guard isSafeRelativePath(entry) else {
+            throw ImportError(message: String(localized: "The wallpaper entry file is outside its project folder."))
+        }
+
+        func isRegularContent(_ relative: String) -> Bool {
+            guard let metadata = try? downloadMetadata(at: root.appendingPathComponent(relative)),
+                  metadata.st_mode & S_IFMT == S_IFREG else { return false }
+            return !requireNonemptyContent || metadata.st_size > 0
+        }
+        var present = isRegularContent(entry)
+        if !present, type == "scene" {
+            present = isRegularContent((entry as NSString).deletingPathExtension + ".pkg")
+        }
+        guard present else {
+            throw ImportError(message: String(localized: "Missing project content: \(entry). Copy the complete wallpaper folder, not just project.json."))
+        }
+        if let preview = manifest["preview"] as? String, !isSafeRelativePath(preview) {
+            throw ImportError(message: String(localized: "The preview path must remain inside the wallpaper folder."))
+        }
+        if let dependencies = manifest["dependencies"] as? [Any],
+           dependencies.contains(where: { ($0 as? String).map { !isSafeRelativePath($0) } ?? false }) {
+            throw ImportError(message: String(localized: "Project dependency paths may not escape their folder."))
+        }
     }
 
     private func isSafeRelativePath(_ path: String) -> Bool {
-        // CLEANROOM A25: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A25")
+        guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\\"), !path.contains(":"),
+              !path.utf8.contains(0) else { return false }
+        return !path.split(separator: "/", omittingEmptySubsequences: false)
+            .contains { $0.isEmpty || $0 == "." || $0 == ".." }
     }
 
     private func isWithin(_ child: URL, _ parent: URL) -> Bool {
@@ -621,8 +858,56 @@ actor WallpaperImportService {
     }
 
     private func copySafely(_ source: URL, to destination: URL) throws {
-        // CLEANROOM A26: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A26")
+        try Task.checkCancellation()
+        let metadata = try downloadMetadata(at: source)
+        switch metadata.st_mode & S_IFMT {
+        case S_IFLNK:
+            throw ImportError(message: String(localized: "Symbolic links are not imported: \(source.lastPathComponent). Copy the original content into the project folder first."))
+        case S_IFDIR:
+            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: false)
+            for child in try FileManager.default.contentsOfDirectory(at: source, includingPropertiesForKeys: nil) {
+                try copySafely(child, to: destination.appendingPathComponent(child.lastPathComponent))
+            }
+        case S_IFREG:
+            try copyFile(source, to: destination)
+        default:
+            throw ImportError(message: String(localized: "Unsupported special file: \(source.lastPathComponent). Only regular files and folders can be imported."))
+        }
+    }
+
+    /// Streams one regular file in 1 MiB chunks, checking for cancellation between them, and
+    /// flushes it to disk before returning.
+    private func copyFile(_ source: URL, to destination: URL) throws {
+        let input = open(source.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard input >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(input) }
+        let output = open(destination.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o644)
+        guard output >= 0 else {
+            throw ImportError(message: String(localized: "Could not create \(destination.lastPathComponent). Check available disk space and folder permissions."))
+        }
+        defer { close(output) }
+        let chunk = Self.comparisonChunk
+        let buffer = UnsafeMutableRawPointer.allocate(byteCount: chunk, alignment: 16)
+        defer { buffer.deallocate() }
+        while true {
+            try Task.checkCancellation()
+            let count = Darwin.read(input, buffer, chunk)
+            if count < 0 {
+                if errno == EINTR { continue }
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            if count == 0 { break }
+            var written = 0
+            while written < count {
+                let step = Darwin.write(output, buffer + written, count - written)
+                if step < 0 {
+                    if errno == EINTR { continue }
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
+                written += step
+            }
+        }
+        guard fsync(output) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
     }
 
     // MARK: Identical content
