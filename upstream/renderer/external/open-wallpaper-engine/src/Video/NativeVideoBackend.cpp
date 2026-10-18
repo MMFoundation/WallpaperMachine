@@ -30,8 +30,9 @@ namespace
 
 bool SetError(std::string* error, std::string message)
 {
-    if (error != nullptr) *error = std::move(message);
-    return false;
+    (void)error;
+    (void)message;
+    return false; // CLEANROOM MV86
 }
 
 /// How long a receive waits for the decoder when the decoder is full or draining.

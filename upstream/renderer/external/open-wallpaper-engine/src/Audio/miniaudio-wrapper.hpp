@@ -91,13 +91,7 @@ public:
     void MountChannel(std::shared_ptr<Channel> chn) {
         std::lock_guard<std::mutex> control { m_control_mutex };
         if (! IsInited()) InitLocked({});
-        ChannelWrap chnw;
-        chnw.chn = chn;
-        chnw.chn->PassDeviceDesc(GetDesc());
-        {
-            std::unique_lock<std::mutex> lock { m_mutex };
-            m_channels.push_back(chnw);
-        }
+        (void)chn; // CLEANROOM MV29
         UpdateOutputLocked();
     }
     void UnmountAll() {
@@ -106,8 +100,7 @@ public:
         UpdateOutputLocked();
     }
     DeviceDesc GetDesc() const {
-        return DeviceDesc { .phyChannels = m_device.playback.channels,
-                            .sampleRate  = m_device.sampleRate };
+        return {}; // CLEANROOM MV30
     }
 
 private:
@@ -163,60 +156,19 @@ private:
 private:
     static void data_callback(ma_device* pMaDevice, void* pOutput, const void* pInput,
                               ma_uint32 frameCount) {
-        Device* pDevice = static_cast<Device*>(pMaDevice->pUserData);
-        if (! pDevice->IsInited()) return;
-        pDevice->data_callback(pOutput, pInput, frameCount);
+        (void)pMaDevice;
+        (void)pOutput;
+        (void)pInput;
+        (void)frameCount; // CLEANROOM MV31
     }
     void data_callback(void* pOutput, const void* pInput, ma_uint32 frameCount) {
+        (void)pOutput;
         (void)pInput;
-        const auto phyChannels = m_device.playback.channels;
-        if (phyChannels == 0) return;
-        const auto framesSize     = frameCount * phyChannels;
-        const auto framesByteSize = framesSize * sizeof(float);
-        wallpaper::audio::ClearInterleavedF32(pOutput, framesSize);
-        if (! m_running.load(std::memory_order_relaxed) ||
-            m_muted.load(std::memory_order_relaxed)) {
-            return;
-        }
-        {
-            if (m_frameBuffer.size() < framesByteSize) m_frameBuffer.resize(framesByteSize);
-        }
-        {
-            std::unique_lock<std::mutex> lock { m_mutex, std::try_to_lock };
-            if (! lock.owns_lock()) return;
-
-            float*      pOutput_float = static_cast<float*>(pOutput);
-            float*      pBuffer_float = reinterpret_cast<float*>(m_frameBuffer.data());
-            const float volume        = m_volume.load(std::memory_order_relaxed);
-            for (ma_uint32 i = 0; i < m_channels.size(); i++) {
-                wallpaper::audio::ClearInterleavedF32(m_frameBuffer.data(), framesSize);
-                ma_uint64 framesReaded =
-                    m_channels[i].chn->NextPcmData(m_frameBuffer.data(), frameCount);
-                if (framesReaded == 0) {
-                    m_channels[i].end = true;
-                } else {
-                    const auto framesToMix = static_cast<std::size_t>(
-                        std::min<ma_uint64>(framesReaded, frameCount) * phyChannels);
-                    wallpaper::audio::MixInterleavedF32(
-                        pOutput_float, pBuffer_float, framesToMix, volume);
-                }
-            }
-            m_channels.erase(std::remove_if(m_channels.begin(),
-                                            m_channels.end(),
-                                            [](auto& c) {
-                                                return c.end;
-                                            }),
-                             m_channels.end());
-        }
+        (void)frameCount; // CLEANROOM MV32
     }
     ma_device_config GenMaDeviceConfig(const DeviceDesc& d) {
-        ma_device_config config  = ma_device_config_init(ma_device_type_playback);
-        config.sampleRate        = d.sampleRate;
-        config.playback.format   = ma_format_f32;
-        config.playback.channels = d.phyChannels;
-        config.dataCallback      = data_callback;
-        config.pUserData         = (void*)this;
-        return config;
+        (void)d;
+        return ma_device_config_init(ma_device_type_playback); // CLEANROOM MV33
     }
 
 private:

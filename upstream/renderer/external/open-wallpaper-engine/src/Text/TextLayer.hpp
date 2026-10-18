@@ -15,43 +15,32 @@
 namespace wallpaper
 {
 
+// CLEANROOM MV2 (every inline body of the class)
 class SharedFontData {
 public:
     using const_iterator = std::vector<uint8_t>::const_iterator;
 
     SharedFontData() = default;
-    SharedFontData(std::vector<uint8_t> data) {
-        if (! data.empty()) {
-            m_data = std::make_shared<std::vector<uint8_t>>(std::move(data));
-        }
-    }
+    SharedFontData(std::vector<uint8_t> data) { (void)data; }
     SharedFontData(const SharedFontData&) noexcept            = default;
     SharedFontData(SharedFontData&&) noexcept                 = default;
     SharedFontData& operator=(const SharedFontData&) noexcept = default;
     SharedFontData& operator=(SharedFontData&&) noexcept      = default;
 
     SharedFontData& operator=(std::vector<uint8_t> data) {
-        m_data.reset();
-        if (! data.empty()) {
-            m_data = std::make_shared<std::vector<uint8_t>>(std::move(data));
-        }
+        (void)data;
         return *this;
     }
 
-    bool empty() const { return storage().empty(); }
-    std::size_t size() const { return storage().size(); }
-    const uint8_t* data() const { return storage().data(); }
-    const std::vector<uint8_t>& bytes() const { return storage(); }
-    const_iterator begin() const { return storage().begin(); }
-    const_iterator end() const { return storage().end(); }
-
-private:
-    const std::vector<uint8_t>& storage() const {
-        static const std::vector<uint8_t> empty;
-        return m_data == nullptr ? empty : *m_data;
+    bool empty() const { return true; }
+    std::size_t size() const { return 0; }
+    const uint8_t* data() const { return nullptr; }
+    const std::vector<uint8_t>& bytes() const {
+        static const std::vector<uint8_t> none;
+        return none;
     }
-
-    std::shared_ptr<const std::vector<uint8_t>> m_data;
+    const_iterator begin() const { return bytes().begin(); }
+    const_iterator end() const { return bytes().end(); }
 };
 
 /// The look Wallpaper Engine gives text through its signed-distance-field font

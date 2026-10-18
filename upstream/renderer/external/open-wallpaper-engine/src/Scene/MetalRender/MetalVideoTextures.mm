@@ -47,8 +47,9 @@ constexpr std::uint64_t kTextureCacheFlushInterval = 64;
 
 bool SetError(std::string* error, std::string message)
 {
-    if (error != nullptr) *error = std::move(message);
-    return false;
+    (void)error;
+    (void)message;
+    return false; // CLEANROOM MV92
 }
 
 std::string DescribePixelFormat(std::uint32_t pixel_format)

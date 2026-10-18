@@ -34,7 +34,6 @@ struct AnalyzerResources
     // amplitude a sine of that frequency has in the input.
     float amplitude_scale { 0.0f };
     std::array<uint16_t, kBandCount64 + 1u> edges {};
-    FFTSetup fft_setup { nullptr };
 
     AnalyzerResources()
     {
@@ -42,7 +41,7 @@ struct AnalyzerResources
         float window_sum = 0.0f;
         vDSP_sve(window.data(), 1, &window_sum, static_cast<vDSP_Length>(kWindowSize));
         amplitude_scale = 1.0f / window_sum;
-        fft_setup = vDSP_create_fftsetup(kFftLog2, FFT_RADIX2);
+        // CLEANROOM MV37
 
         const double ratio =
             std::pow(static_cast<double>(kTopBin) / (kLinearBands + 1u), 1.0 / (kBandCount64 - kLinearBands));
@@ -56,12 +55,6 @@ struct AnalyzerResources
         }
     }
 
-    ~AnalyzerResources()
-    {
-        if (fft_setup != nullptr) {
-            vDSP_destroy_fftsetup(fft_setup);
-        }
-    }
 };
 
 AnalyzerResources& Resources()
@@ -110,7 +103,8 @@ ChannelLevels AnalyzeChannel(const float* pcm)
         imagp[index] = windowed[(index * 2u) + 1u];
     }
     DSPSplitComplex split { .realp = realp.data(), .imagp = imagp.data() };
-    vDSP_fft_zrip(resources.fft_setup, &split, 1, kFftLog2, FFT_FORWARD);
+    std::fill(realp.begin(), realp.end(), 0.0f);
+    std::fill(imagp.begin(), imagp.end(), 0.0f); // CLEANROOM MV38
     // Slot 0 mixes DC with Nyquist; no bucket reads it.
     vDSP_zvmags(&split, 1, power.data(), 1, static_cast<vDSP_Length>(power.size()));
 
@@ -192,19 +186,7 @@ void AnalyzeAudioResponseStereoBlock(
 
 void ClearAudioResponseSnapshot(AudioSpectrumSnapshot* snapshot)
 {
-    if (snapshot == nullptr) {
-        return;
-    }
-
-    snapshot->left64.fill(0.0f);
-    snapshot->right64.fill(0.0f);
-    snapshot->average64.fill(0.0f);
-    snapshot->left32.fill(0.0f);
-    snapshot->right32.fill(0.0f);
-    snapshot->average32.fill(0.0f);
-    snapshot->left16.fill(0.0f);
-    snapshot->right16.fill(0.0f);
-    snapshot->average16.fill(0.0f);
+    (void)snapshot; // CLEANROOM MV39
 }
 
 } // namespace wallpaper::audio
