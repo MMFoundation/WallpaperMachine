@@ -3930,10 +3930,15 @@ bool LoadTextEntry(ParseContext& context, std::size_t at, const nlohmann::json& 
         scene.sceneGraph->AppendChild(camera_node);
         wpscene::WPImageObject proxy;
         proxy.id = plan.id;
-        RegisterLayerComposite(context, plan.id, *node,
-                               { std::min(extent[0], kTextEffectExtentLimit),
-                                 std::min(extent[1], kTextEffectExtentLimit) },
-                               obj.clampuvs, camera_node, LayerRenderTargetFilter(scene, proxy));
+        auto& composite_camera = RegisterLayerComposite(
+            context, plan.id, *node,
+            { std::min(extent[0], kTextEffectExtentLimit), std::min(extent[1], kTextEffectExtentLimit) },
+            obj.clampuvs, camera_node, LayerRenderTargetFilter(scene, proxy));
+        // The camera frames the card itself, fraction and all, as it does after a relayout;
+        // only the target holds whole texels.
+        composite_camera.SetWidth(sampled.size.x());
+        composite_camera.SetHeight(sampled.size.y());
+        composite_camera.Update();
     }
 
     // What follows the layer's effects as they are switched (P3 R26, R44).
