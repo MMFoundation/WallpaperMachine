@@ -47,8 +47,10 @@
 #include "RenderCommon/StaticSubgraphCache.hpp"
 #include "Runtime/VirtualAssetRegistry.hpp"
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <charconv>
+#include <string_view>
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
@@ -152,27 +154,39 @@ void UnpackPointer(uint64_t bits, float& x, float& y) {
     std::memcpy(&y, &by, sizeof(y));
 }
 
-/// The package version of the package at `path`, or the unknown value.
+/// The version a package's leading tag names ("PKGV" then decimal digits to the end), or the
+/// unknown value when the tag is anything else (R-H6).
+uint16_t VersionFromPackageTag(std::string_view tag) {
+    constexpr std::string_view kPrefix = "PKGV";
+    if (tag.size() <= kPrefix.size() || tag.substr(0, kPrefix.size()) != kPrefix) {
+        return SceneParseRequest::kUnknownPkgVersion;
+    }
+    const std::string_view digits = tag.substr(kPrefix.size());
+    if (! std::all_of(digits.begin(), digits.end(),
+                      [](char c) { return c >= '0' && c <= '9'; })) {
+        return SceneParseRequest::kUnknownPkgVersion;
+    }
+    uint16_t value = 0;
+    const auto [stop, status] = std::from_chars(digits.data(), digits.data() + digits.size(), value);
+    if (status != std::errc {} || stop != digits.data() + digits.size()) {
+        return SceneParseRequest::kUnknownPkgVersion;
+    }
+    return value;
+}
+
+/// The version of the package file at `path`, or the unknown value (R-H6).
 uint16_t ReadPackageVersion(const std::string& path) {
-    std::ifstream file(path, std::ios::binary);
-    if (! file) return SceneParseRequest::kUnknownPkgVersion;
-    int32_t length = 0;
-    if (! file.read(reinterpret_cast<char*>(&length), sizeof(length))) {
+    constexpr int32_t kLongestTag = 64;
+    std::ifstream     in(path, std::ios::binary);
+    int32_t           declared = 0;
+    if (! in.read(reinterpret_cast<char*>(&declared), sizeof(declared))) {
         return SceneParseRequest::kUnknownPkgVersion;
     }
-    if (length < 1 || length > 64) return SceneParseRequest::kUnknownPkgVersion;
-    std::string stamp(static_cast<std::size_t>(length), '\0');
-    if (! file.read(stamp.data(), length)) return SceneParseRequest::kUnknownPkgVersion;
-    if (stamp.size() <= 4 || stamp.compare(0, 4, "PKGV") != 0) {
-        return SceneParseRequest::kUnknownPkgVersion;
-    }
-    uint32_t version = 0;
-    for (std::size_t i = 4; i < stamp.size(); ++i) {
-        if (stamp[i] < '0' || stamp[i] > '9') return SceneParseRequest::kUnknownPkgVersion;
-        version = version * 10 + static_cast<uint32_t>(stamp[i] - '0');
-        if (version > 0xFFFFu) return SceneParseRequest::kUnknownPkgVersion;
-    }
-    return static_cast<uint16_t>(version);
+    if (declared < 1 || declared > kLongestTag) return SceneParseRequest::kUnknownPkgVersion;
+    std::array<char, kLongestTag> field {};
+    if (! in.read(field.data(), declared)) return SceneParseRequest::kUnknownPkgVersion;
+    return VersionFromPackageTag(
+        std::string_view(field.data(), static_cast<std::size_t>(declared)));
 }
 
 /// Whether `folder` can be written to.
@@ -486,42 +500,42 @@ public:
         frame_timer.SetFrameDemand(demand);
     }
 
-    /// Whether this scene still needs the clock, and why.
+    /// Whether this scene still needs the clock, and why (R-H16, R-Q1 to R-Q4).
     ///
-    /// Runs on the render thread after a frame, when the runtime's registries
-    /// and the renderer's compiled graph both describe the state the next frame
-    /// would start from. Every path that cannot prove stillness returns
-    /// `Continuous`, including every early return: the switch being off, no
-    /// scene, no renderer, and a scene that has not yet presented a frame.
+    /// Runs on the render thread after a frame. The inputs are classified once,
+    /// by precedence; only a scene that is fully set up and has presented is
+    /// analysed, and that analysis is one union of what keeps it moving.
     [[nodiscard]] SceneUpdateDemand evaluateSceneUpdateDemand() const {
-        SceneUpdateDemand demand {};
-        demand.kind = SceneUpdateDemand::Kind::Continuous;
-        if (! SceneOnDemandEnabled()) {
-            // Not analysed: the cadence is fixed, and no reason is the honest way to say so.
-            demand.reasons = 0;
-            return demand;
+        using Kind   = SceneUpdateDemand::Kind;
+        using Reason = SceneDemandReason;
+        enum class Standing { SwitchedOff, NotSetUp, NothingShownYet, Analysable };
+
+        const Standing standing = ! SceneOnDemandEnabled()                      ? Standing::SwitchedOff
+                                  : (m_scene == nullptr || ! renderInited() ||
+                                     m_rg == nullptr)                           ? Standing::NotSetUp
+                                  : ! m_scene->first_frame_ok                   ? Standing::NothingShownYet
+                                                                                : Standing::Analysable;
+
+        SceneUpdateDemand result {};
+        result.kind = Kind::Continuous;
+        switch (standing) {
+        case Standing::SwitchedOff: result.reasons = 0; return result;
+        case Standing::NotSetUp: result.reasons = static_cast<uint32_t>(Reason::UnknownInput); return result;
+        case Standing::NothingShownYet:
+            result.reasons = static_cast<uint32_t>(Reason::NoFrameYet);
+            return result;
+        case Standing::Analysable: break;
         }
-        if (m_scene == nullptr || ! renderInited() || m_rg == nullptr) {
-            demand.reasons = static_cast<uint32_t>(SceneDemandReason::UnknownInput);
-            return demand;
-        }
-        if (! m_scene->first_frame_ok) {
-            demand.reasons = static_cast<uint32_t>(SceneDemandReason::NoFrameYet);
-            return demand;
-        }
-        uint32_t reasons = SceneDemandReasonsFromShaderInputs(m_render->ShaderUpdateDemandReasons());
-        if (m_scene->runtime != nullptr) {
-            reasons |= m_scene->runtime->DescribeTimeAdvancingWork();
-        } else {
-            reasons |= SceneDemandReason::UnknownInput;
-        }
-        if (m_scene->paritileSys != nullptr && m_scene->paritileSys->HasEmitters()) {
-            reasons |= SceneDemandReason::Particles;
-        }
-        demand.reasons = reasons;
-        demand.kind    = reasons == 0 ? SceneUpdateDemand::Kind::WaitingForEvent
-                                      : SceneUpdateDemand::Kind::Continuous;
-        return demand;
+
+        const Scene&   scene     = *m_scene;
+        const uint32_t from_gpu  = SceneDemandReasonsFromShaderInputs(m_render->ShaderUpdateDemandReasons());
+        const uint32_t from_logic = scene.runtime != nullptr
+                                        ? scene.runtime->DescribeTimeAdvancingWork()
+                                        : static_cast<uint32_t>(Reason::UnknownInput);
+        const bool     emitting  = scene.paritileSys != nullptr && scene.paritileSys->HasEmitters();
+        result.reasons = from_gpu | from_logic | (emitting ? static_cast<uint32_t>(Reason::Particles) : 0u);
+        if (result.reasons == 0) result.kind = Kind::WaitingForEvent;
+        return result;
     }
 
     /// Creates the renderer that draws this scene, and is the only place that
@@ -1122,8 +1136,7 @@ private:
         bool paused = false;
         if (! msg->findBool("paused", &paused)) return;
         m_clock_requested = ! paused;
-        // A resume makes the first frame after it present even when it repeats the last one:
-        // the surface may have shown something else meanwhile.
+        // e1 R-R5: a resume forgets which frame was last presented.
         if (! paused) m_render->InvalidatePresentedFrame();
         syncFrameClock();
         m_render->SetVideoPlaybackPaused(! frame_timer.Running() || m_render_blocked);
@@ -1214,7 +1227,7 @@ private:
             m_scene->runtime->SetMediaIntegrationEnabled(value);
         }
         if (! value) {
-            // Consent withdrawn: nothing is replayed to a wallpaper whose user turned it off.
+            // e6 R63.
             m_pending_media_events.clear();
             m_parked_artwork.reset();
         }
@@ -1242,62 +1255,71 @@ private:
         // No scene that takes pixels yet: the newest cover waits for the next commit.
         m_parked_artwork = std::move(*artwork);
     }
-    /// Commits a scene the control thread loaded. The order matters: every step that sets or lifts
-    /// the stop state is the only place that state changes, and the renderer is chosen only after
-    /// the scene's runtime has what it needs.
-    MHANDLER_CMD(SET_SCENE) {
-        std::shared_ptr<Scene> scene;
-        // A scene that is null is a commit of no scene at all; a payload that is missing is not a
-        // commit.
-        if (! msg->findObject("scene", &scene)) return;
-        std::string cache_path;
-        (void)msg->findString("cache_path", &cache_path);
-
-        // Optional work queued for the scene being replaced is of no use to the new one.
-        CancelSceneMetalVariants();
-        m_shader_cache_path = std::move(cache_path);
-        m_render->SetPipelineArchivePath(m_shader_cache_path);
+    /// Puts `incoming` in place of the current scene (R-H22 a to c). Returns false, with the
+    /// outgoing scene still current, when the outgoing graph cannot be released. Whether the
+    /// incoming scene refuses pointer input is reported through `incoming_takes_pointer`.
+    bool replaceCurrentScene(std::shared_ptr<Scene> incoming, bool& incoming_takes_pointer) {
         if (m_render->hasBackend() && ! m_render->clearLastRenderGraph()) {
             m_rg.reset();
             suspendAfterGraphFailure();
-            return;
+            return false;
         }
         m_rg.reset();
 
         if (m_scene != nullptr && m_scene->runtime != nullptr) {
             m_scene->runtime->SetAudioRequirementListener({});
         }
-        const bool old_takes_pointer = m_scene == nullptr || m_scene->accepts_pointer_input;
-        const bool new_takes_pointer = scene == nullptr || scene->accepts_pointer_input;
-        auto       previous          = std::move(m_scene);
-        m_scene                      = std::move(scene);
-        if (! old_takes_pointer || ! new_takes_pointer) {
-            // An edge that belongs to input nobody could take must not reach the next scene.
-            std::scoped_lock lock(m_mouse_mutex);
-            m_mouse_buttons.pressed  = 0;
-            m_mouse_buttons.released = 0;
-        }
-        previous.reset();
+        const bool outgoing_takes_pointer = m_scene == nullptr || m_scene->accepts_pointer_input;
+        incoming_takes_pointer            = incoming == nullptr || incoming->accepts_pointer_input;
 
-        commitAudioRequirement();
-        main_handler.sendPointerInputCapability(new_takes_pointer);
+        std::shared_ptr<Scene> outgoing;
+        {
+            std::scoped_lock lock(m_mouse_mutex);
+            outgoing = std::exchange(m_scene, std::move(incoming));
+            if (! outgoing_takes_pointer || ! incoming_takes_pointer) {
+                m_mouse_buttons.pressed  = 0;
+                m_mouse_buttons.released = 0;
+            }
+        }
+        return true;
+    }
+
+    /// Gives the current scene's runtime what scripts may read on their first frame (R-H22 f).
+    void equipSceneRuntime() {
+        if (m_scene == nullptr || m_scene->runtime == nullptr) return;
+        installContentWake(*m_scene);
+        publishScreenResolution();
+        m_scene->runtime->SetMediaIntegrationEnabled(m_media_integration);
+        replayMediaEvents();
+    }
+
+    /// Commits a scene the control thread loaded (e6 R20, R-H22).
+    MHANDLER_CMD(SET_SCENE) {
+        std::shared_ptr<Scene> incoming;
+        // A null scene is a commit of no scene; a message without the key is not a commit.
+        if (! msg->findObject("scene", &incoming)) return;
+        std::string cache_path;
+        (void)msg->findString("cache_path", &cache_path);
+
+        bool takes_pointer = true;
+        if (! replaceCurrentScene(std::move(incoming), takes_pointer)) return;
 
         m_failure_first_frame_sent = false;
         clearRenderBlock();
         syncFrameClock();
-        publishPauseReasons();
+        equipSceneRuntime();
 
-        if (m_scene != nullptr && m_scene->runtime != nullptr) {
-            m_scene->runtime->SetMediaIntegrationEnabled(m_media_integration);
-            publishScreenResolution();
-            replayMediaEvents();
-            installContentWake(*m_scene);
-        }
+        CancelSceneMetalVariants();
+        m_shader_cache_path = std::move(cache_path);
+        m_render->SetPipelineArchivePath(m_shader_cache_path);
+
+        commitAudioRequirement();
+        main_handler.sendPointerInputCapability(takes_pointer);
+
         selectSceneBackend();
         publishParkedArtwork();
-        // A scene that was refused or could not get a renderer is held already.
         if (m_failure_stage == SceneFailureStage::None) (void)rebuildRenderGraph();
-        syncFrameClock();
+
         publishPauseReasons();
         refreshFrameDemand();
     }
