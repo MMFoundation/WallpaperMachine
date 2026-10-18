@@ -2073,7 +2073,8 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
                  const std::string& camera_name,
                  std::vector<std::shared_ptr<SceneMaterial>>& tinted,
                  std::vector<std::shared_ptr<SceneMaterial>>& all_materials,
-                 std::shared_ptr<SceneImageEffect>*           built_out) {
+                 std::shared_ptr<SceneImageEffect>*           built_out,
+                 const WPPuppetLayer*                         puppet = nullptr) {
     auto&      scene = *context.scene;
     const auto previous_name = PingPongName(WE_EFFECT_PPONG_PREFIX_A, camera_name);
     const auto output_name   = PingPongName(WE_EFFECT_PPONG_PREFIX_B, camera_name);
@@ -2129,7 +2130,9 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
         MaterialLoadOptions options;
         options.defer_fog = defer_fog;
         if (! LoadMaterial(context, material, scene_material, loaded, options)) return false;
-        scene_material.own_user_alpha = true;
+        // The closing pass of a puppet is the layer's own material, with the layer's alpha
+        // as its own; every other pass keeps an alpha of its own.
+        scene_material.own_user_alpha = puppet == nullptr;
         const bool white = white_tint || is_closing_pass;
         SetLayerTint(context, scene_material, image, white);
         scene_material.blenmode = BlendMode::Normal;
@@ -2147,6 +2150,7 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
             data.parallaxDepth  = image.parallaxDepth;
             data.parallax_layer = layer_node.get();
             data.renderTargets  = std::move(loaded.render_targets);
+            if (puppet != nullptr) data.puppet_layer = *puppet;
             context.shader_updater->SetNodeData(entry.node.get(), 0, data);
         }
         built.push_back(std::move(entry));
@@ -2916,8 +2920,8 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     // A sampled layer whose effects all failed to load still renders into its own base buffer.
     const bool failed_effects = built_effects == 0 && referenced && entry.contains("effects") &&
                                 entry.at("effects").is_array() && ! entry.at("effects").empty();
-    const bool has_effects = built_effects > 0 || composition || failed_effects ||
-                             (kind.compose_model && ! image.copybackground);
+    bool has_effects = built_effects > 0 || composition || failed_effects ||
+                       (kind.compose_model && ! image.copybackground);
     // A puppet (R66, R75): one that cannot be read leaves the layer an ordinary card.
     WPMdl mdl;
     bool  puppet_ok = false;
@@ -2931,15 +2935,30 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     const bool puppet_bones  = puppet_ok && mdl.puppet != nullptr && ! mdl.puppet->bones.empty();
     const bool puppet_direct = puppet_ok && built_effects == 0 && ! composition &&
                                (image.colorBlendMode == 0 || additive_blend);
-    if (puppet_ok && ! puppet_direct) {
-        LOG_ERROR("layer %d: a puppet under effects is drawn as its card", image.id);
+    // Under effects the chain works on the flat sheet and closes with one pass that draws
+    // the assembled model (R72); a model with bones takes the colour blend into that pass.
+    const bool puppet_closing = puppet_ok && ! puppet_direct;
+    const bool blend_closing  = puppet_closing && puppet_bones && blend_pass;
+    const bool blend_separate = blend_pass && ! blend_closing;
+    if (blend_closing) chain_sources.pop_back();
+    if (puppet_closing) has_effects = true;
+    wpscene::WPMaterial closing_material;
+    if (puppet_closing) {
+        closing_material = image.material;
+        if (puppet_bones) {
+            WPMdlParser::AddPuppetMatInfo(closing_material, mdl);
+            if (blend_closing) closing_material.combos["BLENDMODE"] = image.colorBlendMode;
+            // Nothing before the closing pass lights anything.
+            image.material.combos["LIGHTING"] = 0;
+        }
     }
     if (puppet_direct && puppet_bones) WPMdlParser::AddPuppetMatInfo(image.material, mdl);
 
     // Fog on a chain (R54).
     std::optional<wpscene::WPImageEffect> fog_pass;
     const bool scene_fog = scene.fog_distance || scene.fog_height;
-    if (scene_fog && built_effects > 0 && ! composition && ! kind.fullscreen && ! blend_pass) {
+    if (scene_fog && built_effects > 0 && ! composition && ! kind.fullscreen && ! blend_pass &&
+        ! puppet_closing) {
         fog_pass = MakeFogCompositeEffect(*context.vfs);
     }
 
@@ -3049,7 +3068,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     node->AddMesh(mesh);
     auto own_material = mesh->MaterialSlotPtr(0);
     WPPuppetLayer puppet_layer;
-    if (puppet_direct && mdl.puppet != nullptr) {
+    if (puppet_ok && mdl.puppet != nullptr) {
         puppet_layer = WPPuppetLayer(mdl.puppet);
         puppet_layer.prepared(image.puppet_layers);
         layer.puppet       = mdl.puppet;
@@ -3126,7 +3145,16 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         auto chain = std::make_shared<SceneImageEffectLayer>(
             node.get(), static_cast<float>(geometry.extent[0]), static_cast<float>(geometry.extent[1]),
             first, other);
-        const auto final_card = MakeCardMesh(geometry.size[0], geometry.size[1], 1.0f, 1.0f);
+        // The final pass draws the layer's card, or for a puppet the assembled model: every
+        // mesh, with the layer's one material.
+        std::shared_ptr<SceneMesh> final_card;
+        if (puppet_closing) {
+            final_card = std::make_shared<SceneMesh>();
+            WPMdlParser::GenPuppetMesh(*final_card, mdl, false);
+            for (auto& submesh : final_card->Submeshes()) submesh.material_slot = 0;
+        } else {
+            final_card = MakeCardMesh(geometry.size[0], geometry.size[1], 1.0f, 1.0f);
+        }
         chain->FinalMesh().ChangeMeshDataFrom(*final_card);
         chain->SetFinalBlend(blend_pass ? BlendMode::Normal
                                         : (additive_blend ? BlendMode::Additive : authored_blend));
@@ -3138,7 +3166,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         std::size_t index = 0;
         bool        any_fixed = false;
         for (const auto* source : chain_sources) {
-            const bool is_blend_pass = blend_pass && source == chain_sources.back();
+            const bool is_blend_pass = blend_separate && source == chain_sources.back();
             if (BuildEffect(context, image, *source, index, node, *chain, geometry.extent, kind.fullscreen,
                             is_blend_pass, defer, false, plan.key, camera_name, tinted, all_materials, nullptr)) {
                 if (! source->scripted_visible) any_fixed = true;
@@ -3162,6 +3190,17 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
                                 tinted, all_materials, &fallback) && fallback != nullptr) {
                     fallback->fallback = true;
                 }
+            }
+        }
+
+        if (puppet_closing) {
+            // The last pass: the layer's own material over what the chain made, skinned.
+            wpscene::WPImageEffect closing;
+            closing.materials.push_back(closing_material);
+            if (BuildEffect(context, image, closing, index++, node, *chain, geometry.extent, false, false,
+                            false, false, plan.key, camera_name, tinted, all_materials, nullptr,
+                            mdl.puppet != nullptr ? &puppet_layer : nullptr)) {
+                any_fixed = true;
             }
         }
 
