@@ -7,6 +7,10 @@
 #include "RenderCommon/SceneToRenderGraph.hpp"
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 namespace wallpaper {
 namespace {
 struct TestPass : rg::Pass {
@@ -282,6 +286,56 @@ TEST(RenderTargetLifetime, ReleasePlanMatchesLastAccessForGeneratedMultiVersionG
         }
         EXPECT_EQ(released.size(), last_access.size());
     }
+}
+
+TEST(RenderTargetLifetime, DrawsIntoOneTargetStayTogetherWhereTheDependenciesAllow) {
+    // Three layers, each drawing a card and a step into its own buffers and then a final
+    // pass onto the shared output. The finals have no reason to be apart, and a backend
+    // draws consecutive passes into one image with a single render pass.
+    rg::RenderGraph graph;
+    const auto add = [&](const char* name, std::vector<std::string> reads, const std::string& write) {
+        return graph.addPass<TestPass>(name, rg::PassNode::Type::CustomShader,
+            [&](auto& b, auto&) {
+                for (const auto& key : reads)
+                    b.read(b.createTexNode({ .name = key, .key = key, .type = rg::TexNode::TexType::Temp }));
+                b.write(b.createTexNode({ .name = write, .key = write, .type = rg::TexNode::TexType::Temp }, true));
+            });
+    };
+    std::vector<rg::NodeID> finals, steps;
+    for (int layer = 0; layer < 3; ++layer) {
+        const std::string card = "card" + std::to_string(layer), step = "step" + std::to_string(layer);
+        add("card", {}, card);
+        steps.push_back(add("step", { card }, step)->ID());
+        finals.push_back(add("final", { step }, "out")->ID());
+    }
+    const auto order = graph.topologicalOrder();
+    ASSERT_EQ(order.size(), 9u);
+    std::vector<std::size_t> at;
+    for (std::size_t i = 0; i < order.size(); ++i)
+        if (std::find(finals.begin(), finals.end(), order[i]) != finals.end()) at.push_back(i);
+    ASSERT_EQ(at.size(), 3u);
+    EXPECT_EQ(at[1], at[0] + 1);
+    EXPECT_EQ(at[2], at[1] + 1);
+    // The draws onto the output keep the order they were added in.
+    EXPECT_EQ(order[at[0]], finals[0]);
+    EXPECT_EQ(order[at[1]], finals[1]);
+    EXPECT_EQ(order[at[2]], finals[2]);
+    // Passes that depend on each other keep their direction.
+    const auto position = [&](rg::NodeID id) {
+        return std::find(order.begin(), order.end(), id) - order.begin();
+    };
+    for (std::size_t layer = 0; layer < 3; ++layer)
+        EXPECT_LT(position(steps[layer]), position(finals[layer]));
+    // Independent passes into different targets keep creation order, whatever the call.
+    rg::RenderGraph plain;
+    std::vector<rg::NodeID> ids;
+    for (const char* key : { "a", "b", "c" })
+        ids.push_back(plain.addPass<TestPass>(key, rg::PassNode::Type::CustomShader,
+            [&](auto& b, auto&) {
+                b.write(b.createTexNode({ .name = key, .key = key, .type = rg::TexNode::TexType::Temp }, true));
+            })->ID());
+    EXPECT_EQ(plain.topologicalOrder(), ids);
+    EXPECT_EQ(plain.topologicalOrder(), plain.topologicalOrder());
 }
 } // namespace
 } // namespace wallpaper

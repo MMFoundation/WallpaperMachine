@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <string_view>
 
 // Scene-side raster arithmetic: how large each render target is for a given
 // output, render scale and display, and how the authored canvas is framed in
@@ -251,61 +252,93 @@ inline void RefreshScreenBoundTextureResolutions(Scene& scene) {
     }
 }
 
+namespace detail
+{
+
+/// What one sizing pass decided for a scene, before any record is touched.
+struct ScreenBoundSizingPlan {
+    Extent2D source {};
+    Extent2D raster {};
+    /// Longest side a record may keep; zero when nothing caps it.
+    uint32_t cap { 0 };
+};
+
+inline Extent2D ScaleExtent(const Extent2D& extent, double scale) {
+    return {
+        static_cast<uint32_t>(ResolveScreenBoundRenderTargetDimension(extent.width, scale)),
+        static_cast<uint32_t>(ResolveScreenBoundRenderTargetDimension(extent.height, scale)),
+    };
+}
+
+/// The raster extent and the cap that goes with it. Only a Display-resolution
+/// scene with a canvas is sized from the display and limited by the device.
+inline ScreenBoundSizingPlan PlanScreenBoundSizing(const Scene& scene, const Extent2D& fallback,
+                                                   const SceneRasterSurface& surface) {
+    ScreenBoundSizingPlan plan;
+    plan.source = ResolveSceneSourceExtent(scene, fallback);
+    const bool from_display =
+        scene.resolution == SceneResolution::Display && SceneResolutionAffectsRaster(scene);
+    const Extent2D basis =
+        from_display
+            ? ResolveSceneDisplayExtent(plan.source, fallback, surface.display_scale_factor)
+            : plan.source;
+    plan.raster = ScaleExtent(basis, ResolveSceneRenderScale(scene));
+    plan.cap    = from_display ? surface.max_dimension : 0u;
+    if (plan.cap != 0) plan.raster = CapRasterExtent(plan.raster, plan.cap);
+    return plan;
+}
+
+/// Sets the authored size once; a record that already has both sides keeps it.
+inline void LatchAuthoredSize(SceneRenderTarget& record, i32 width, i32 height) {
+    if (record.authored_width > 0 && record.authored_height > 0) return;
+    record.authored_width  = width;
+    record.authored_height = height;
+}
+
+/// Applies the sizing rules of one record: the scene output follows the raster,
+/// an enabled screen-bound record follows its own scale of it, the rest stay.
+inline void SizeRecord(const ScreenBoundSizingPlan& plan, std::string_view key,
+                       SceneRenderTarget& record) {
+    if (key == SpecTex_Default) {
+        LatchAuthoredSize(record, static_cast<i32>(plan.source.width),
+                          static_cast<i32>(plan.source.height));
+        record.width  = static_cast<i32>(plan.raster.width);
+        record.height = static_cast<i32>(plan.raster.height);
+        return;
+    }
+    if (! record.bind.enable || ! record.bind.screen) return;
+    const Extent2D latched = ScaleExtent(plan.source, record.bind.scale);
+    LatchAuthoredSize(record, static_cast<i32>(latched.width), static_cast<i32>(latched.height));
+    ResolveScreenBoundRenderTargetSize(record, plan.raster);
+    if (plan.cap == 0) return;
+    const i32 ceiling = static_cast<i32>(plan.cap);
+    record.width      = std::min(record.width, ceiling);
+    record.height     = std::min(record.height, ceiling);
+}
+
+/// A display-sized scene draws at the output's aspect, so its perspective
+/// cameras take the source's.
+inline void FollowSourceAspect(Scene& scene, const Extent2D& source) {
+    if (! scene.display_sized) return;
+    const double aspect = static_cast<double>(source.width) / static_cast<double>(source.height);
+    for (auto& entry : scene.cameras) {
+        SceneCamera* camera = entry.second.get();
+        if (camera == nullptr || ! camera->IsPerspective()) continue;
+        camera->SetAspect(aspect);
+        camera->Update();
+    }
+}
+
+} // namespace detail
+
 inline SceneRasterExtents ResolveScreenBoundRenderTargetSizes(Scene& scene,
                                                               const Extent2D& fallback,
                                                               const SceneRasterSurface& surface = {}) {
-    const Extent2D source = ResolveSceneSourceExtent(scene, fallback);
-
-    if (scene.display_sized) {
-        const double aspect = static_cast<double>(source.width) / static_cast<double>(source.height);
-        for (auto& entry : scene.cameras) {
-            SceneCamera* camera = entry.second.get();
-            if (camera == nullptr || ! camera->IsPerspective()) continue;
-            camera->SetAspect(aspect);
-            camera->Update();
-        }
-    }
-
-    // The display basis only exists for a scene that has a canvas to rasterise.
-    const bool display_basis =
-        scene.resolution == SceneResolution::Display && SceneResolutionAffectsRaster(scene);
-    const Extent2D basis =
-        display_basis ? ResolveSceneDisplayExtent(source, fallback, surface.display_scale_factor)
-                      : source;
-    const double render_scale = ResolveSceneRenderScale(scene);
-    Extent2D     raster {
-        static_cast<uint32_t>(ResolveScreenBoundRenderTargetDimension(basis.width, render_scale)),
-        static_cast<uint32_t>(ResolveScreenBoundRenderTargetDimension(basis.height, render_scale)),
-    };
-    const uint32_t limit = display_basis ? surface.max_dimension : 0;
-    if (limit != 0) raster = CapRasterExtent(raster, limit);
-
-    for (auto& [key, target] : scene.renderTargets) {
-        if (key == SpecTex_Default) {
-            if (target.authored_width <= 0 || target.authored_height <= 0) {
-                target.authored_width  = static_cast<i32>(source.width);
-                target.authored_height = static_cast<i32>(source.height);
-            }
-            target.width  = static_cast<i32>(raster.width);
-            target.height = static_cast<i32>(raster.height);
-            continue;
-        }
-        if (! (target.bind.enable && target.bind.screen)) continue;
-        if (target.authored_width <= 0 || target.authored_height <= 0) {
-            target.authored_width =
-                ResolveScreenBoundRenderTargetDimension(source.width, target.bind.scale);
-            target.authored_height =
-                ResolveScreenBoundRenderTargetDimension(source.height, target.bind.scale);
-        }
-        ResolveScreenBoundRenderTargetSize(target, raster);
-        if (limit != 0) {
-            target.width  = std::min(target.width, static_cast<i32>(limit));
-            target.height = std::min(target.height, static_cast<i32>(limit));
-        }
-    }
-
+    const detail::ScreenBoundSizingPlan plan = detail::PlanScreenBoundSizing(scene, fallback, surface);
+    for (auto& [key, record] : scene.renderTargets) detail::SizeRecord(plan, key, record);
+    detail::FollowSourceAspect(scene, plan.source);
     RefreshScreenBoundTextureResolutions(scene);
-    return { source, raster };
+    return { plan.source, plan.raster };
 }
 
 /// Fits the scene's authored canvas into an output of `width` x `height`.

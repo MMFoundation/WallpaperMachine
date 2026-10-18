@@ -172,7 +172,13 @@ private:
     }
 
     void noteWrite(const std::string& key) {
-        if (key == SpecTex_Default) m_output_written = true;
+        if (key == SpecTex_Default) m_screen_has_content = true;
+    }
+
+    // A hidden layer that would have been the first thing drawn onto the scene output
+    // is remembered: the output then has to keep what it already holds.
+    void noteBypassedContender(SceneNode* node) {
+        if (! m_screen_has_content && subtreeHasMesh(node)) m_phantom_first_draw = true;
     }
 
     // ---- walking the tree --------------------------------------------------------
@@ -196,7 +202,7 @@ private:
         SceneNode* node = handle.get();
         if (node == nullptr) return;
         if (leftOut(node)) {
-            if (! m_output_written && subtreeHasMesh(node)) m_output_writer_left_out = true;
+            noteBypassedContender(node);
             return;
         }
         if (isCompose(node) || chainOf(node) != nullptr) return;
@@ -212,7 +218,7 @@ private:
         if (node == nullptr) return;
         if (leftOut(node)) {
             m_scene.render_excluded_nodes.push_back(handle);
-            if (! m_output_written && subtreeHasMesh(node)) m_output_writer_left_out = true;
+            noteBypassedContender(node);
             return;
         }
         const auto children = [&] {
@@ -679,7 +685,7 @@ private:
             if (output) {
                 desc.clear_on_first_use = m_scene.clearEnabled;
                 desc.preserve_target_contents =
-                    ! m_scene.clearEnabled && m_output_writer_left_out;
+                    ! m_scene.clearEnabled && m_phantom_first_draw;
             } else {
                 desc.clear_on_first_use = record != nullptr && (record->allowReuse || record->forceClear);
             }
@@ -707,8 +713,8 @@ private:
     std::unordered_set<const void*>            m_cleared;
     std::unordered_set<std::string>            m_logged;
 
-    bool m_output_written { false };
-    bool m_output_writer_left_out { false };
+    bool m_screen_has_content { false };
+    bool m_phantom_first_draw { false };
     bool m_mip_frame_sampled { false };
     std::size_t m_snapshot_count { 0 };
 

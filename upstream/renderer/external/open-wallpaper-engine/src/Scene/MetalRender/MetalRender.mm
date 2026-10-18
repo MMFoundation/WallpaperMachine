@@ -4317,8 +4317,13 @@ bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
     // The image parser decides how many levels of a texture to keep from the size of the
     // surface it ends up on; a display-sized scene has no surface of its own, so no cap.
     if (scene.imageParser != nullptr) {
-        scene.imageParser->SetTextureSurfaceSize(scene.display_sized ? 0u : output_width,
-                                                 scene.display_sized ? 0u : output_height);
+        uint32_t cap_width  = 0;
+        uint32_t cap_height = 0;
+        if (! scene.display_sized) {
+            cap_width  = output_width;
+            cap_height = output_height;
+        }
+        scene.imageParser->SetTextureSurfaceSize(cap_width, cap_height);
     }
 
     if (auto reason = MetalGraphRejection(scene, graph); ! reason.empty()) {

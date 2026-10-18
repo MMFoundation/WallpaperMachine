@@ -60,7 +60,9 @@ public:
     Pass*     getPass(NodeID) const;
 
     // Every non-virtual pass once, in an order that honours the declared reads and
-    // writes; ties go to the smaller id.
+    // writes. Passes free to run in either order are kept together by the target
+    // they write (fewer render passes for a backend), otherwise the smaller id goes
+    // first; the order is the same on every call and every run.
     std::vector<NodeID>                topologicalOrder() const;
     std::vector<std::vector<TexNode*>> getLastReadTexs(std::span<const NodeID>) const;
     std::vector<std::string>           getCarriedOverKeys(std::span<const NodeID>) const;
