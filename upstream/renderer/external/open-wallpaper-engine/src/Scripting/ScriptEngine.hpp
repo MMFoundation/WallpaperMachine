@@ -112,21 +112,7 @@ public:
     void                  Destroy();
 
 private:
-    void UpdateHostContext(const ScriptHostContext& host_context);
-    void UpdateScriptProperties();
-
-    std::map<std::string, DynamicValue*> m_script_properties;
-    void*                                m_impl_runtime = nullptr;
-    void*                                m_impl_context = nullptr;
-    SceneRuntimeContext*                 m_runtime      = nullptr;
-    std::string                          m_current_layer_name;
-    std::string                          m_exports_object_name;
-    std::string                          m_script_properties_name;
-    PropertyScriptValueSemantic          m_semantic { PropertyScriptValueSemantic::Generic };
     ScriptProgramCapabilities             m_capabilities;
-    bool                                 m_owns_context = false;
-    bool                                 m_valid        = false;
-    bool                                 m_init_called  = false;
     bool                                 m_update_returned_value = false;
     bool                                 m_destroyed    = false;
     // The animation layer this script is attached to (`animationlayers[i]`), or -1
@@ -147,7 +133,7 @@ public:
 
     bool               Valid() const;
     const ScriptProgramCapabilities& Capabilities() const noexcept { return m_capabilities; }
-    const std::string& LayerName() const { return m_current_layer_name; }
+    const std::string& LayerName() const;
     void               Tick(const ScriptHostContext& host_context);
     void               DispatchCursorClick(const ScriptHostContext& host_context);
     void               DispatchCursorDown(const ScriptHostContext& host_context);
@@ -168,18 +154,7 @@ public:
 
 private:
     void ApplyUserProperties(const ProjectProperties& property_changes);
-    void UpdateHostContext(const ScriptHostContext& host_context);
-
-    SceneRuntimeContext* m_runtime = nullptr;
-    std::string          m_script_source;
-    std::string          m_current_layer_name;
-    ProjectProperties    m_project_properties;
-    std::string          m_exports_object_name;
-    void*                m_impl_runtime = nullptr;
-    void*                m_impl_context = nullptr;
     ScriptProgramCapabilities m_capabilities;
-    bool                 m_owns_context = false;
-    bool                 m_valid        = false;
     bool                 m_destroyed    = false;
 };
 
@@ -218,11 +193,6 @@ public:
     // `addEndedCallback` listeners of one animation layer of a puppet layer.
     void NotifyAnimationLayerEnded(const ScriptHostContext& host_context,
                                    std::string_view layer_name, int animation_layer_index);
-
-private:
-    JSRuntime* m_runtime         = nullptr;
-    JSContext* m_context         = nullptr;
-    uint64_t   m_next_program_id = 0;
 };
 
 } // namespace wallpaper
