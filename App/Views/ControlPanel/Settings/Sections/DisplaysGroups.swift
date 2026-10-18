@@ -323,7 +323,6 @@ struct DisplaysSolarGroup: View {
       if let error = controller.automationLoadError {
         DisplaysMessageRow(text: error, isError: true)
       }
-      DisplaysItemNote(item: DisplaysSettingsSection.solarIntro)
       DisplaysRow(item: DisplaysSettingsSection.solarSource) {
         Picker(
           noLabel,
@@ -337,6 +336,7 @@ struct DisplaysSolarGroup: View {
         ) {
           Text("Coordinates").tag(WallpaperSolarSource.coordinates)
           Text("Fixed times").tag(WallpaperSolarSource.fixed)
+          Text("Automatic").tag(WallpaperSolarSource.automatic)
         }
         .labelsHidden()
         .pickerStyle(.menu)
@@ -344,6 +344,7 @@ struct DisplaysSolarGroup: View {
       }
       switch model.solarSource {
       case .coordinates:
+        DisplaysItemNote(item: DisplaysSettingsSection.solarIntro)
         DisplaysRow(item: DisplaysSettingsSection.solarIntro, note: "") {
           coordinateField(latitude, busy: busy, canSave: canSave)
         }
@@ -390,6 +391,24 @@ struct DisplaysSolarGroup: View {
                   try await model.setSolarFixedTimes(sunrise: nil, sunset: minute)
                 }
               }))
+        }
+      case .automatic:
+        DisplaysRow(item: DisplaysSettingsSection.solarActions, note: model.solarAutomaticStatus) {
+          if model.solarLocationDenied {
+            Button("Open Location Settings") {
+              controller.launch(PanelActionCoordinator.key("automationSolarSettings")) {
+                try await controller.showSolarLocationSettings()
+              }
+            }
+            .disabled(busy)
+          } else {
+            Button("Use current location") {
+              controller.launch(PanelActionCoordinator.key("automationSolarLocate")) {
+                try await model.startAutomaticLocation()
+              }
+            }
+            .disabled(busy)
+          }
         }
       }
       DisplaysNote(text: L("Solar times are approximate. Near the poles, a day may have no sunrise or sunset."))

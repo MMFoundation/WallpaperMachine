@@ -1263,3 +1263,13 @@ Issue #28: preset 3610485014 (base 2983846453, a day/night switch template) drew
 - Before rebase: six temporary real offscreen WKWebView feature flows passed and were removed after retaining focused regressions; renderer draft/metadata and synthetic pointer-capture boundaries were injected. Native WebKit output probe invoked media gain and read back mute false→true→false without audio hardware.
 - Desktop/visual presentation, actual speaker output, live account services, Siri/Shortcuts UI and power remain unverified. No app launch, permission prompt, wallpaper change, install or restart.
 
+## 2026-10-18 — Solar settings restore and automatic location
+
+PR #56 and #57 repairs: solar backup compatibility, location lifecycle and localized permission resources.
+
+- Rebuilt the unchanged shared PR renderer and bindings with python3 scripts/build.py --renderer-only; exit 0.
+- PR #56 targeted native tests: 57 passed, 0 failed. Full python3 scripts/test.py: 3864 passed, 0 failed, 45 skipped.
+- PR #57 targeted native tests: 68 passed, 0 failed. Full python3 scripts/test.py: 3877 passed, 0 failed, 45 skipped; all Python modules passed.
+- New regressions exercise real backup restore and rollback, fake location source/authorization transitions, panel actions and compiled permission resources in every shipped language.
+- The 45 media/device and live-network tests remain opt-in and were skipped. No desktop interaction, real location permission request, Release build or installed-app launch/replacement was performed.
+
