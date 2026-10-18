@@ -6,8 +6,22 @@ enum SteamCMDReportedFailure: String, Sendable {
     case cachedCredentials, steamGuard, connection, rateLimited, credentials, unknown
 
     init(reason: String, cachedCredentialsRejected: Bool = false, awaitingSteamGuard: Bool = false) {
-        // CLEANROOM A27: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A27")
+        let key = String(reason.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) })
+        func mentions(_ words: [String]) -> Bool { words.contains { key.contains($0) } }
+        if cachedCredentialsRejected, key.contains("cachedcredential") {
+            self = .cachedCredentials
+        } else if mentions(["twofactor", "authcode", "steamguard"])
+                    || (awaitingSteamGuard && mentions(["denied", "cancel"])) {
+            self = .steamGuard
+        } else if mentions(["timeout", "timedout", "connection", "connectfailed", "serviceunavailable"]) {
+            self = .connection
+        } else if mentions(["ratelimit", "toomany"]) {
+            self = .rateLimited
+        } else if mentions(["invalidpassword", "invalidlogin", "accountlogondenied"]) {
+            self = .credentials
+        } else {
+            self = .unknown
+        }
     }
 
     /// Whether trying the same request again can succeed without the user doing anything: a dropped
