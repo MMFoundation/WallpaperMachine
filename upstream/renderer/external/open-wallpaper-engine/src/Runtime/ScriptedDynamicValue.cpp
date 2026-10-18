@@ -1,10 +1,8 @@
+// Clean-room implementation from the WallpaperMachine spec e2-runtime-animation.md; written without access to the original source.
 #include "Runtime/ScriptedDynamicValue.hpp"
 
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Scripting/ScriptEngine.hpp"
-
-// CLEANROOM: the stubs below leave their parameters unused until they are rewritten.
-#pragma clang diagnostic ignored "-Wunused-parameter"
 
 namespace wallpaper
 {
@@ -12,8 +10,30 @@ namespace wallpaper
 ScriptedDynamicValue::ScriptedDynamicValue(
     SceneRuntimeContext& runtime, std::string script_source, std::string current_layer_name,
     std::map<std::string, DynamicValueUniquePtr> script_properties, DynamicValue base_value,
-    ScriptedValueSemantic semantic, int animation_layer_index) {
-    // CLEANROOM RT11
+    ScriptedValueSemantic semantic, int animation_layer_index) :
+    m_runtime(&runtime),
+    m_registry(runtime.ScriptedValueRegistryToken()),
+    m_current_layer_name(std::move(current_layer_name)),
+    m_script_properties(std::move(script_properties)) {
+    // The value starts as the setting it replaces: the same content, kind included.
+    DynamicValue::update(base_value);
+
+    std::map<std::string, DynamicValue*> parameters;
+    for (auto& [name, property] : m_script_properties) {
+        if (property != nullptr) parameters.emplace(name, property.get());
+    }
+    m_program = runtime.scriptEngine().CreatePropertyScriptProgram(
+        &runtime, std::move(script_source), m_current_layer_name, std::move(parameters),
+        std::move(base_value), runtime.hostContext(),
+        semantic == ScriptedValueSemantic::AnglesDegrees ? PropertyScriptValueSemantic::AnglesDegrees
+                                                          : PropertyScriptValueSemantic::Generic,
+        animation_layer_index);
+
+    // A parameter that changes re-runs the script at once.
+    for (auto& [name, property] : m_script_properties) {
+        if (property == nullptr) continue;
+        property->listen([this](const DynamicValue&) { reevaluate(); });
+    }
 }
 
 ScriptedDynamicValue::~ScriptedDynamicValue() {
@@ -49,27 +69,27 @@ uint8_t ScriptedDynamicValue::CursorHandlerMask() const noexcept {
 }
 
 void ScriptedDynamicValue::DispatchCursorClick(const ScriptHostContext& host_context) {
-    // CLEANROOM RT11
+    if (m_program != nullptr) m_program->DispatchCursorClick(host_context);
 }
 
 void ScriptedDynamicValue::DispatchCursorDown(const ScriptHostContext& host_context) {
-    // CLEANROOM RT11
+    if (m_program != nullptr) m_program->DispatchCursorDown(host_context);
 }
 
 void ScriptedDynamicValue::DispatchCursorEnter(const ScriptHostContext& host_context) {
-    // CLEANROOM RT11
+    if (m_program != nullptr) m_program->DispatchCursorEnter(host_context);
 }
 
 void ScriptedDynamicValue::DispatchCursorLeave(const ScriptHostContext& host_context) {
-    // CLEANROOM RT11
+    if (m_program != nullptr) m_program->DispatchCursorLeave(host_context);
 }
 
 void ScriptedDynamicValue::DispatchCursorMove(const ScriptHostContext& host_context) {
-    // CLEANROOM RT11
+    if (m_program != nullptr) m_program->DispatchCursorMove(host_context);
 }
 
 void ScriptedDynamicValue::DispatchCursorUp(const ScriptHostContext& host_context) {
-    // CLEANROOM RT11
+    if (m_program != nullptr) m_program->DispatchCursorUp(host_context);
 }
 
 void ScriptedDynamicValue::DispatchAnimationEvent(const ScriptHostContext& host_context,
@@ -79,11 +99,11 @@ void ScriptedDynamicValue::DispatchAnimationEvent(const ScriptHostContext& host_
 
 void ScriptedDynamicValue::DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
                                                          const linalg::Vector3f& text_color) {
-    // CLEANROOM RT11
+    if (m_program != nullptr) m_program->DispatchMediaThumbnailChanged(primary_color, text_color);
 }
 
 void ScriptedDynamicValue::DispatchMediaEventJson(std::string_view event_json) {
-    // CLEANROOM RT11
+    if (m_program != nullptr) m_program->DispatchMediaEventJson(event_json);
 }
 
 void ScriptedDynamicValue::DispatchResizeScreen(const ScriptHostContext& host_context) {

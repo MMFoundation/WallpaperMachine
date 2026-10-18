@@ -48,6 +48,10 @@ public:
     explicit DynamicValue(int value);
     explicit DynamicValue(bool value);
     explicit DynamicValue(std::string value);
+    // A copy holds the same readings and condition; it does not inherit the subscribers or the
+    // sources of the value it was made from.
+    DynamicValue(const DynamicValue& other);
+    DynamicValue& operator=(const DynamicValue& other);
     virtual ~DynamicValue();
 
     [[nodiscard]] const linalg::Vector4i& getIVec4() const;
@@ -84,8 +88,25 @@ public:
     void                  attachCondition(const ConditionInfo& condition);
 
 private:
+    struct Hub;
     void propagate() const;
+    void takeContent(const DynamicValue& other);
+    void clearReadings();
+    void assignText(const std::string& text);
+    void finishAssignment();
+    void track(DynamicValue* other, bool as_vec3);
+
     mutable uint64_t m_generation { 0 };
+    UnderlyingType   m_type { Null };
+    float            m_float { 0.0f };
+    int              m_int { 0 };
+    bool             m_bool { false };
+    std::string      m_string;
+    std::optional<ConditionInfo> m_condition;
+    // Subscribers live in a shared hub so a deregistration closure that outlives the value
+    // finds the hub gone instead of a dangling value.
+    std::shared_ptr<Hub> m_hub;
+    std::vector<std::function<void()>> m_trackings;
     linalg::Vector4i m_ivec4 = linalg::Vector4i::Zero();
     linalg::Vector3i m_ivec3 = linalg::Vector3i::Zero();
     linalg::Vector2i m_ivec2 = linalg::Vector2i::Zero();

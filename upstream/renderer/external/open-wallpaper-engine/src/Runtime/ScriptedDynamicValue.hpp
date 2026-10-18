@@ -58,6 +58,8 @@ private:
     SceneRuntimeContext*                         m_runtime = nullptr;
     std::weak_ptr<void>                          m_registry;
     std::string                                  m_current_layer_name;
+    // The script's parameters. They outlive the program, which is declared after them.
+    std::map<std::string, DynamicValueUniquePtr> m_script_properties;
     std::unique_ptr<PropertyScriptProgram>       m_program;
 };
 
