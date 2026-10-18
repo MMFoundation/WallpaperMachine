@@ -165,13 +165,22 @@ public:
 
     double elapsingTime { 0.0f }, frameTime { 0.0f };
     void   PassFrameTime(double t) {
-        // CLEANROOM SM2
-        (void)t;
+        frameTime = t;
+        elapsingTime += t;
     }
 
     void UpdateLinkedCamera(const std::string& name) {
-        // CLEANROOM SM3
-        (void)name;
+        const auto list = linkedCameras.find(name);
+        if (list == linkedCameras.end()) return;
+        const auto source = cameras.find(name);
+        if (source == cameras.end() || source->second == nullptr) return;
+        for (const auto& linked_name : list->second) {
+            const auto linked = cameras.find(linked_name);
+            if (linked == cameras.end() || linked->second == nullptr) continue;
+            if (linked->second == source->second) continue;
+            linked->second->Clone(*source->second);
+            linked->second->Update();
+        }
     }
 
     /// Points a 2D scene's view: `zoom` narrows it about its centre and
@@ -181,28 +190,23 @@ public:
     /// with no offset shows the whole canvas.
     void FrameCanvas(double zoom, const linalg::Vector2f& offset);
 
+    /// One hop through the alias table; a name that is no alias comes back as it is.
     std::string ResolveRenderTargetName(std::string_view name) const {
-        // CLEANROOM SM4
-        (void)name;
-        return {};
+        const std::string key(name);
+        const auto        alias = renderTargetAliases.find(key);
+        return alias != renderTargetAliases.end() ? alias->second : key;
     }
 
-    bool HasRenderTarget(std::string_view name) const {
-        // CLEANROOM SM4
-        (void)name;
-        return false;
-    }
+    bool HasRenderTarget(std::string_view name) const { return FindRenderTarget(name) != nullptr; }
 
     SceneRenderTarget* FindRenderTarget(std::string_view name) {
-        // CLEANROOM SM4
-        (void)name;
-        return nullptr;
+        const auto found = renderTargets.find(ResolveRenderTargetName(name));
+        return found != renderTargets.end() ? &found->second : nullptr;
     }
 
     const SceneRenderTarget* FindRenderTarget(std::string_view name) const {
-        // CLEANROOM SM4
-        (void)name;
-        return nullptr;
+        const auto found = renderTargets.find(ResolveRenderTargetName(name));
+        return found != renderTargets.end() ? &found->second : nullptr;
     }
 };
 } // namespace wallpaper

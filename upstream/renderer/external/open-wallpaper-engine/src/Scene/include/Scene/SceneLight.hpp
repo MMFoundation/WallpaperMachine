@@ -58,10 +58,7 @@ public:
 
     SceneLightType  type() const { return m_type; }
     linalg::Vector3f color() const { return m_color; }
-    float           radius() const {
-        // CLEANROOM SM20
-        return 0.0f;
-    }
+    float           radius() const { return m_radius; }
     /// The intensity this frame: its timeline's value when it has one.
     float           intensity() const {
         return m_intensity_animation != nullptr ? m_intensity_animation->Value() : m_intensity;
@@ -72,10 +69,7 @@ public:
     float           outerCone() const { return m_outer_cone; }
     /// A tube's far end, in the light's own space; its near end is the origin.
     linalg::Vector3f controlPoint() const { return m_control_point; }
-    SceneNode*      node() const {
-        // CLEANROOM SM20
-        return nullptr;
-    }
+    SceneNode*      node() const { return m_node.get(); }
 
     /// The legacy light's colour as `g_LightsColorPremultiplied` holds it.
     linalg::Vector3f premultipliedColor() const {

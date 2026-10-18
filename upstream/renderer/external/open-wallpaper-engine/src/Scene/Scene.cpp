@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e1b-scene-model.md; written without access to the original source.
 #include "Scene.h"
 
 #include "Fs/VFS.h"
@@ -10,8 +11,8 @@
 namespace wallpaper 
 {
 
-Scene::Scene() {
-    // CLEANROOM SM1
+Scene::Scene(): sceneGraph(std::make_shared<SceneNode>()) {
+    paritileSys = std::make_unique<ParticleSystem>(*this);
 }
 Scene::~Scene() {
     // A script's `destroy()` may reach the file system, the render-exclusion list

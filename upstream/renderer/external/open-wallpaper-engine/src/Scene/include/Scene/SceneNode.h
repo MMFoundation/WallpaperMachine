@@ -16,83 +16,43 @@ namespace wallpaper
 
 class SceneNode : NoCopy, NoMove {
 public:
-    SceneNode() {
-        // CLEANROOM SM5
-    }
+    SceneNode() = default;
     SceneNode(const linalg::Vector3f& translate, const linalg::Vector3f& scale,
-              const linalg::Vector3f& rotation, const std::string& name = "") {
-        // CLEANROOM SM5
-        (void)translate;
-        (void)scale;
-        (void)rotation;
-        (void)name;
+              const linalg::Vector3f& rotation, const std::string& name = "")
+        : m_name(name), m_translate(translate), m_scale(scale), m_rotation(rotation) {}
+    /// Children may outlive their parent through registries, and their link up is
+    /// not owning: it is cut here so it can never dangle.
+    ~SceneNode() {
+        for (const auto& child : m_children) {
+            if (child != nullptr && child->m_parent == this) child->m_parent = nullptr;
+        }
     }
 
-    const auto& Camera() const {
-        // CLEANROOM SM6
-        static const std::string none;
-        return none;
-    }
-    void SetCamera(const std::string& name) {
-        // CLEANROOM SM6
-        (void)name;
-    }
-    void AddMesh(std::shared_ptr<SceneMesh> mesh) {
-        // CLEANROOM SM6
-        (void)mesh;
-    }
+    const auto& Camera() const { return m_cameraName; }
+    void SetCamera(const std::string& name) { m_cameraName = name; }
+    void AddMesh(std::shared_ptr<SceneMesh> mesh) { m_mesh = std::move(mesh); }
     void AppendChild(std::shared_ptr<SceneNode> sub) {
-        // CLEANROOM SM6
-        (void)sub;
+        if (sub == nullptr) return;
+        sub->m_parent = this;
+        sub->InvalidateSubtree();
+        m_children.push_back(std::move(sub));
     }
     linalg::Matrix4d GetLocalTrans() const;
     static linalg::Matrix4d LocalTransOf(const linalg::Vector3f& translate,
                                         const linalg::Vector3f& scale,
                                         const linalg::Vector3f& rotation);
 
-    const auto& Translate() const {
-        // CLEANROOM SM7
-        static const linalg::Vector3f none = linalg::Vector3f::Zero();
-        return none;
-    }
-    const auto& Scale() const {
-        // CLEANROOM SM7
-        static const linalg::Vector3f none { 1.0f, 1.0f, 1.0f };
-        return none;
-    }
-    const auto& Rotation() const {
-        // CLEANROOM SM7
-        static const linalg::Vector3f none = linalg::Vector3f::Zero();
-        return none;
-    }
-    const auto& Name() const {
-        // CLEANROOM SM6
-        static const std::string none;
-        return none;
-    }
-    void SetName(std::string name) {
-        // CLEANROOM SM6
-        (void)name;
-    }
-    bool Visible() const {
-        // CLEANROOM SM8
-        return true;
-    }
-    bool SkipRenderPass() const {
-        // CLEANROOM SM8
-        return false;
-    }
+    const auto& Translate() const { return m_translate; }
+    const auto& Scale() const { return m_scale; }
+    const auto& Rotation() const { return m_rotation; }
+    const auto& Name() const { return m_name; }
+    void SetName(std::string name) { m_name = std::move(name); }
+    bool Visible() const { return m_visible; }
+    bool SkipRenderPass() const { return m_skipRenderPass; }
     /// A frame a script pinned the sprite sheet to; the sheet holds it until
     /// `ClearTextureFrame` (a script's `play()`) lets it run again.
-    const auto& TextureFrame() const {
-        // CLEANROOM SM8
-        static const std::optional<double> none;
-        return none;
-    }
-    void SetTextureFrame(double frame) {
-        // CLEANROOM SM8
-        (void)frame;
-    }
+    const auto& TextureFrame() const { return m_textureFrame; }
+    void SetTextureFrame(double frame) { m_textureFrame = frame; }
     void ClearTextureFrame() { m_textureFrame.reset(); }
     /// What a script's `pause()`, `stop()`, `play()` and `rate` say about the
     /// sprite sheet the layer draws. The renderer advances the sheet by the
@@ -122,7 +82,9 @@ public:
     bool        CompositeOnly() const { return m_composite_only; }
     void        SetCompositeOnly(bool only) { m_composite_only = only; }
     bool        EffectiveVisible() const {
-        // CLEANROOM SM8
+        for (const SceneNode* node = this; node != nullptr; node = node->m_parent) {
+            if (! node->m_visible) return false;
+        }
         return true;
     }
     /// Visibility only a reload changes: an authored value or one of the
@@ -131,26 +93,11 @@ public:
     /// this one's visibility, since from then on the script decides.
     bool        VisibilitySettled() const { return m_visibility_settled; }
     void        SetVisibilitySettled(bool settled) { m_visibility_settled = settled; }
-    void        SetRotation(linalg::Vector3f v) {
-        // CLEANROOM SM7
-        (void)v;
-    }
-    void        SetTranslate(linalg::Vector3f v) {
-        // CLEANROOM SM7
-        (void)v;
-    }
-    void        SetScale(linalg::Vector3f v) {
-        // CLEANROOM SM7
-        (void)v;
-    }
-    void        SetVisible(bool visible) {
-        // CLEANROOM SM8
-        (void)visible;
-    }
-    void        SetSkipRenderPass(bool skip) {
-        // CLEANROOM SM8
-        (void)skip;
-    }
+    void        SetRotation(linalg::Vector3f v) { Assign(m_rotation, v); }
+    void        SetTranslate(linalg::Vector3f v) { Assign(m_translate, v); }
+    void        SetScale(linalg::Vector3f v) { Assign(m_scale, v); }
+    void        SetVisible(bool visible) { m_visible = visible; }
+    void        SetSkipRenderPass(bool skip) { m_skipRenderPass = skip; }
     /// A node placed by its own transform alone, whatever its ancestors do: a
     /// fullscreen layer covers the screen from whichever group it sits in.
     /// The hierarchy above it still decides whether it shows (`EffectiveVisible`),
@@ -188,21 +135,18 @@ public:
     }
 
     void CopyTrans(const SceneNode& node) {
-        // CLEANROOM SM7
-        (void)node;
+        m_translate               = node.m_translate;
+        m_scale                   = node.m_scale;
+        m_rotation                = node.m_rotation;
+        m_renderTransformOverride = node.m_renderTransformOverride;
+        MarkTransDirty();
     }
 
     void SetRenderTransformOverride(linalg::Matrix4d transform) {
-        // CLEANROOM SM7
-        (void)transform;
+        m_renderTransformOverride = transform;
     }
-    void ClearRenderTransformOverride() {
-        // CLEANROOM SM7
-    }
-    bool HasRenderTransformOverride() const {
-        // CLEANROOM SM7
-        return false;
-    }
+    void ClearRenderTransformOverride() { m_renderTransformOverride.reset(); }
+    bool HasRenderTransformOverride() const { return m_renderTransformOverride.has_value(); }
     /// A translation in world space added to where the node is drawn and to nothing
     /// else. `RenderTrans` carries it; `ModelTrans`, which the node's children, its
     /// cameras and its hit test compose from, does not (a hit test adds it itself).
@@ -223,43 +167,37 @@ public:
     /// The matrix the children's own are composed on (after `UpdateTrans`).
     linalg::Matrix4d ChildTrans() const { return m_childTrans; }
 
-    SceneMesh* Mesh() {
-        // CLEANROOM SM6
-        return nullptr;
-    }
-    bool       HasMaterial() const {
-        // CLEANROOM SM6
-        return false;
-    };
+    SceneMesh* Mesh() { return m_mesh.get(); }
+    bool       HasMaterial() const { return m_mesh != nullptr && m_mesh->Material() != nullptr; };
 
-    const auto& GetChildren() const {
-        // CLEANROOM SM6
-        static const std::list<std::shared_ptr<SceneNode>> none;
-        return none;
-    }
-    auto&       GetChildren() {
-        // CLEANROOM SM6
-        static std::list<std::shared_ptr<SceneNode>> none;
-        none.clear();
-        return none;
-    }
-    SceneNode*  Parent() const {
-        // CLEANROOM SM6
-        return nullptr;
-    }
-    bool        NodeHasParent() const {
-        // CLEANROOM SM6
-        return false;
-    }
+    const auto& GetChildren() const { return m_children; }
+    auto&       GetChildren() { return m_children; }
+    SceneNode*  Parent() const { return m_parent; }
+    bool        NodeHasParent() const { return m_parent != nullptr; }
 
-    i32& ID() {
-        // CLEANROOM SM6
-        static i32 none = 0;
-        return none;
-    }
+    i32& ID() { return m_id; }
 
 private:
     void MarkTransDirty();
+    /// Marks this node and everything below it stale, without trusting that a
+    /// node already stale has stale descendants.
+    void InvalidateSubtree();
+    /// Stores `value` into `slot` unless it is a rounding away from what it holds.
+    void Assign(linalg::Vector3f& slot, const linalg::Vector3f& value) {
+        if (slot.isApprox(value, 1.0e-6f)) return;
+        slot = value;
+        MarkTransDirty();
+    }
+
+    bool                       m_dirty { true };
+    bool                       m_visible { true };
+    bool                       m_skipRenderPass { false };
+    i32                        m_id { 0 };
+    std::string                m_name;
+    std::string                m_cameraName;
+    std::shared_ptr<SceneMesh> m_mesh;
+    SceneNode*                 m_parent { nullptr };
+    std::list<std::shared_ptr<SceneNode>> m_children;
 
     bool        m_ignoreParentTransform { false };
     bool        m_must_produce { false };
