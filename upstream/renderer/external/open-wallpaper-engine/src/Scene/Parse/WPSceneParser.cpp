@@ -47,7 +47,9 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <functional>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -385,33 +387,6 @@ bool HasDynamicSetting(const nlohmann::json& value) { return wpscene::SettingIsD
 bool VisibilitySettledBy(const nlohmann::json& setting) {
     return ! setting.is_object() || ! setting.contains("script");
 }
-
-/// Undoes what an object registered under its runtime name (the name, its node,
-/// the scene scripts queued for it) unless the object is committed: an object
-/// that fails to build leaves nothing behind, and a node of the same name that
-/// was there before is put back.
-class NodeRegistrationGuard {
-public:
-    NodeRegistrationGuard(SceneRuntimeContext* runtime, std::string name, SceneNode* node)
-        : m_runtime(runtime), m_name(std::move(name)), m_node(node) {
-        if (m_runtime != nullptr) m_memo = m_runtime->CaptureNodeRegistration(m_name);
-    }
-    NodeRegistrationGuard(const NodeRegistrationGuard&)            = delete;
-    NodeRegistrationGuard& operator=(const NodeRegistrationGuard&) = delete;
-    ~NodeRegistrationGuard() {
-        if (! m_committed && m_runtime != nullptr) {
-            m_runtime->RollbackNodeRegistration(m_name, m_node, m_memo);
-        }
-    }
-    void Commit() { m_committed = true; }
-
-private:
-    SceneRuntimeContext*                                       m_runtime;
-    std::string                                                m_name;
-    SceneNode*                                                 m_node;
-    std::shared_ptr<SceneRuntimeContext::LayerRegistrationMemo> m_memo;
-    bool                                                       m_committed { false };
-};
 
 // Runs the prewarms the particle layers queued, now that every layer sits under
 // its parent.
@@ -1017,15 +992,22 @@ void SetNodeTransformFromMatrix(SceneNode& node, const Matrix4d& transform) {
 /// binding members, in the shape of a scene-object setting.
 nlohmann::json MaterialConstantSettingJson(const wpscene::WPConstantShaderValue& source) {
     nlohmann::json setting = nlohmann::json::object();
-    if (source.value.size() == 1) {
-        setting["value"] = source.value.front();
-    } else if (! source.value.empty()) {
-        setting["value"] = source.value;
+    if (! source.value.empty()) {
+        setting["value"] = source.value.size() == 1 ? nlohmann::json(source.value.front())
+                                                    : nlohmann::json(source.value);
     }
-    if (! source.user.empty()) setting["user"] = source.user;
-    if (! source.script.empty()) setting["script"] = source.script;
-    if (source.scriptproperties.is_object()) setting["scriptproperties"] = source.scriptproperties;
-    if (source.animation.is_object()) setting["animation"] = source.animation;
+    // The binding members, each copied across only when the constant has it.
+    const nlohmann::json user_name = source.user;
+    const nlohmann::json script_text = source.script;
+    const std::pair<const char*, const nlohmann::json*> bindings[] = {
+        { "user", source.user.empty() ? nullptr : &user_name },
+        { "script", source.script.empty() ? nullptr : &script_text },
+        { "scriptproperties", source.scriptproperties.is_object() ? &source.scriptproperties : nullptr },
+        { "animation", source.animation.is_object() ? &source.animation : nullptr },
+    };
+    for (const auto& [key, content] : bindings) {
+        if (content != nullptr) setting.emplace(key, *content);
+    }
     return setting;
 }
 
@@ -1102,9 +1084,11 @@ struct ResolvedConstant {
     const wpscene::WPConstantShaderValue* constant { nullptr };
 };
 
-/// The uniform of every constant that names one, with the unmatched ones reported.
+/// The uniform of every constant that names one, in key order. The keys that
+/// resolve to nothing (and are not a Start/End pair) go to `unmatched` when given.
 std::vector<ResolvedConstant> ResolveConstantUniforms(const wpscene::WPMaterial& wpmat,
-                                                      const WPShaderInfo&        info) {
+                                                      const WPShaderInfo&        info,
+                                                      std::vector<std::string>*  unmatched = nullptr) {
     std::vector<ResolvedConstant> resolved;
     std::vector<std::string> keys;
     keys.reserve(wpmat.constantshadervalues.size());
@@ -1114,8 +1098,8 @@ std::vector<ResolvedConstant> ResolveConstantUniforms(const wpscene::WPMaterial&
         const auto& constant = wpmat.constantshadervalues.at(key);
         if (const auto uniform = ConstantUniformName(info, key); uniform.has_value()) {
             resolved.push_back({ key, *uniform, &constant });
-        } else if (! ConstantIsSplitInTwo(info, wpmat, key)) {
-            LOG_ERROR("ShaderValue: %s not found in glsl", key.c_str());
+        } else if (unmatched != nullptr && ! ConstantIsSplitInTwo(info, wpmat, key)) {
+            unmatched->push_back(key);
         }
     }
     return resolved;
@@ -1124,121 +1108,140 @@ std::vector<ResolvedConstant> ResolveConstantUniforms(const wpscene::WPMaterial&
 /// Writes the authored lanes of every constant that has a uniform.
 void LoadStaticMaterialConstants(SceneMaterial& material, const wpscene::WPMaterial& wpmat,
                                  const WPShaderInfo& info) {
-    for (const auto& entry : ResolveConstantUniforms(wpmat, info)) {
+    std::vector<std::string> unmatched;
+    const auto               resolved = ResolveConstantUniforms(wpmat, info, &unmatched);
+    for (const auto& key : unmatched) LOG_ERROR("ShaderValue: %s not found in glsl", key.c_str());
+    for (const auto& entry : resolved) {
         if (entry.constant->value.empty()) continue;
         material.customShader.constValues[entry.uniform] =
             ShaderValue(entry.constant->value.data(), entry.constant->value.size());
     }
 }
 
+/// One timeline-driven constant, ready to register: its curves (a follower's
+/// already set to play once) and the clock it reads.
+using ConstantTimelineTable = std::unordered_map<std::string, std::shared_ptr<MaterialConstantAnimation>>;
+
+/// Which clock a constant's timeline reads. `root` names the constant that owns the
+/// clock; for a broken chain it names what broke the chain instead (the parent that is
+/// not a timeline of the pass, or the constant where a loop closed), so constants that
+/// share the fault share the group.
+struct ConstantClockGroup {
+    std::string root;
+    bool        frozen { false };
+
+    std::string Label() const { return (frozen ? "!" : "=") + root; }
+};
+
+/// Resolves the group of `key` by following `options.parent.key`, memoising every
+/// member it passes (linear overall).
+ConstantClockGroup
+GroupOfConstantTimeline(const std::string&                                                  key,
+                        const std::unordered_map<std::string, MaterialConstantAnimationSource>& timelines,
+                        std::unordered_map<std::string, ConstantClockGroup>&             memo,
+                        std::unordered_set<std::string>&                                 on_path) {
+    if (const auto known = memo.find(key); known != memo.end()) return known->second;
+    if (! on_path.insert(key).second) return { key, true };
+
+    const std::string& parent = timelines.at(key).parent_key;
+    ConstantClockGroup group { key, false };
+    if (! parent.empty()) {
+        group = timelines.contains(parent) ? GroupOfConstantTimeline(parent, timelines, memo, on_path)
+                                           : ConstantClockGroup { parent, true };
+    }
+    on_path.erase(key);
+    memo[key] = group;
+    return group;
+}
+
+/// Builds the playback of every constant of the pass that a timeline drives, one
+/// clock per group registered with the runtime (R46).
+ConstantTimelineTable BuildConstantTimelines(SceneRuntimeContext& runtime,
+                                             const wpscene::WPMaterial& wpmat,
+                                             std::string_view layer_name) {
+    auto timelines = CollectMaterialConstantAnimations(wpmat);
+    // A constant a property or a script drives is not played from its timeline.
+    std::erase_if(timelines, [&](const auto& entry) {
+        return HasDynamicSetting(MaterialConstantSettingJson(wpmat.constantshadervalues.at(entry.first)));
+    });
+
+    std::vector<std::string> keys;
+    keys.reserve(timelines.size());
+    for (const auto& entry : timelines) keys.push_back(entry.first);
+    std::sort(keys.begin(), keys.end());
+
+    // Phase one: the group of every constant, and what each group spans.
+    struct GroupSpan {
+        ConstantClockGroup group;
+        std::string        lead; // the constant whose curve lends the clock
+        double             last_frame { 0.0 };
+    };
+    std::unordered_map<std::string, ConstantClockGroup> memo;
+    std::unordered_set<std::string>                     on_path;
+    std::map<std::string, GroupSpan>                    spans; // by group label
+    for (const auto& key : keys) {
+        const auto group = GroupOfConstantTimeline(key, timelines, memo, on_path);
+        auto [at, first_member] = spans.try_emplace(group.Label());
+        auto& span = at->second;
+        if (first_member) {
+            span.group = group;
+            span.lead  = group.frozen ? key : group.root;
+            if (group.frozen) {
+                LOG_ERROR("material constant timelines of '%s' cannot follow their parent (%s)",
+                          std::string(layer_name).c_str(), group.root.c_str());
+            }
+        }
+        span.last_frame = std::max(span.last_frame, timelines.at(key).last_frame);
+    }
+
+    // Phase two: one clock per group, then every member's playback.
+    std::map<std::string, std::shared_ptr<ScalarAnimationPlayback>> clock_of;
+    for (const auto& [label, span] : spans) {
+        const auto&     lead  = timelines.at(span.lead);
+        ScalarAnimation clock = lead.components[lead.first_curve];
+        if (span.group.frozen || ! (clock.length_frames > 0.0)) {
+            clock.length_frames = std::max(clock.length_frames, span.last_frame);
+        }
+        clock.start_paused = clock.start_paused || span.group.frozen;
+        clock_of[label]    = runtime.RegisterScalarAnimation(layer_name, std::move(clock));
+    }
+
+    ConstantTimelineTable table;
+    for (const auto& key : keys) {
+        const auto& group  = memo.at(key);
+        const auto& source = timelines.at(key);
+        auto        play   = std::make_shared<MaterialConstantAnimation>();
+        play->playback        = clock_of.at(group.Label());
+        play->component_count = source.component_count;
+        play->components      = source.components;
+        if (group.frozen || group.root != key) {
+            for (auto& curve : play->components) curve.mode = ScalarAnimationMode::Single;
+        }
+        table.emplace(key, std::move(play));
+    }
+    return table;
+}
+
 /// The constants of one material pass that a property, a script or a timeline
 /// drives, registered with the runtime on the material (R45, R46).
-void RegisterMaterialConstants(ParseContext& context, const std::shared_ptr<SceneMaterial>& material,
-                               const wpscene::WPMaterial& wpmat, const WPShaderInfo& info,
-                               std::string_view layer_name) {
+void RegisterDrivenMaterialConstants(ParseContext& context, const std::shared_ptr<SceneMaterial>& material,
+                                     const wpscene::WPMaterial& wpmat, const WPShaderInfo& info,
+                                     std::string_view layer_name) {
     auto* runtime = context.scene->runtime.get();
     if (runtime == nullptr || material == nullptr) return;
 
-    // Constants a timeline drives, grouped by the clock they share.
-    auto sources = CollectMaterialConstantAnimations(wpmat);
-    std::unordered_map<std::string, std::shared_ptr<ScalarAnimationPlayback>> clocks; // by root key
-    std::unordered_map<std::string, std::string>                              root_of;
-    std::unordered_set<std::string>                                           frozen_roots;
-    std::unordered_set<std::string>                                           reported;
-
-    const auto animated = [&](const std::string& key) {
-        const auto found = wpmat.constantshadervalues.find(key);
-        return found != wpmat.constantshadervalues.end() &&
-               ! HasDynamicSetting(MaterialConstantSettingJson(found->second));
-    };
-    for (auto it = sources.begin(); it != sources.end();) {
-        if (animated(it->first)) ++it;
-        else it = sources.erase(it);
-    }
-    // Follow each constant to the root of its chain once; a chain that ends in a
-    // constant with no usable timeline, or loops, freezes at its first frame.
-    for (const auto& [key, source] : sources) {
-        std::vector<std::string> walk;
-        std::unordered_set<std::string> seen;
-        std::string current = key;
-        std::string root;
-        std::string broken;
-        while (true) {
-            if (const auto known = root_of.find(current); known != root_of.end()) {
-                root = known->second;
-                break;
-            }
-            if (! seen.insert(current).second) {
-                broken = "cycle:" + current;
-                root   = current;
-                break;
-            }
-            walk.push_back(current);
-            const auto& parent = sources.at(current).parent_key;
-            if (parent.empty()) {
-                root = current;
-                break;
-            }
-            if (! sources.contains(parent)) {
-                broken = "orphan:" + parent;
-                root   = broken;
-                break;
-            }
-            current = parent;
-        }
-        if (! broken.empty()) {
-            frozen_roots.insert(root);
-            if (reported.insert(broken).second) {
-                LOG_ERROR("material constant timelines of '%s' name a parent that cannot drive them (%s)",
-                          std::string(layer_name).c_str(), broken.c_str());
-            }
-        }
-        for (const auto& member : walk) root_of[member] = root;
-    }
-    std::unordered_map<std::string, double> group_last_frame;
-    for (const auto& [key, source] : sources) {
-        auto& last = group_last_frame[root_of[key]];
-        last       = std::max(last, source.last_frame);
-    }
-    for (const auto& [key, source] : sources) {
-        const auto& root = root_of[key];
-        if (clocks.contains(root)) continue;
-        // The clock is the root's first curve; an orphaned or looping chain has no
-        // root constant, so its first member lends its own.
-        const auto& origin = sources.contains(root) ? sources.at(root) : source;
-        ScalarAnimation clock = origin.components[origin.first_curve];
-        if (! (clock.length_frames > 0.0) || ! sources.contains(root)) {
-            clock.length_frames = std::max(clock.length_frames, group_last_frame[root]);
-        }
-        if (frozen_roots.contains(root)) clock.start_paused = true;
-        clocks[root] = runtime->RegisterScalarAnimation(layer_name, std::move(clock));
-    }
-
+    const auto timelines = BuildConstantTimelines(*runtime, wpmat, layer_name);
     for (const auto& entry : ResolveConstantUniforms(wpmat, info)) {
-        const std::string* key      = &entry.key;
-        const auto&        uniform  = entry.uniform;
-        const auto*        constant = entry.constant;
-        const auto setting = MaterialConstantSettingJson(*constant);
+        const auto setting = MaterialConstantSettingJson(*entry.constant);
         if (HasDynamicSetting(setting)) {
-            auto value = constant->value.empty()
-                             ? ResolveStringSetting(*runtime, setting, layer_name)
-                             : ResolveVectorSetting(*runtime, setting, constant->value.size(),
-                                                    layer_name);
-            runtime->RegisterMaterialConstant(material, uniform, std::move(value));
-            continue;
+            const auto lanes = entry.constant->value.size();
+            auto       value = lanes == 0 ? ResolveStringSetting(*runtime, setting, layer_name)
+                                          : ResolveVectorSetting(*runtime, setting, lanes, layer_name);
+            runtime->RegisterMaterialConstant(material, entry.uniform, std::move(value));
+        } else if (const auto timeline = timelines.find(entry.key); timeline != timelines.end()) {
+            runtime->RegisterMaterialConstant(material, entry.uniform,
+                                              std::make_unique<DynamicValue>(0.0f), timeline->second);
         }
-        const auto source = sources.find(*key);
-        if (source == sources.end()) continue;
-        auto animation              = std::make_shared<MaterialConstantAnimation>();
-        animation->playback         = clocks.at(root_of.at(*key));
-        animation->component_count  = source->second.component_count;
-        animation->components       = source->second.components;
-        // Only the clock's owner loops or restarts; the rest read its frame and play once.
-        if (root_of.at(*key) != *key || frozen_roots.contains(root_of.at(*key))) {
-            for (auto& curve : animation->components) curve.mode = ScalarAnimationMode::Single;
-        }
-        runtime->RegisterMaterialConstant(material, uniform,
-                                          std::make_unique<DynamicValue>(0.0f), animation);
     }
 }
 
@@ -1966,7 +1969,7 @@ void RegisterAlphaSetting(ParseContext& context, const std::string& key,
     runtime->RegisterNodeAlpha(key, materials, authored);
 }
 
-void RegisterLayerAlpha(ParseContext& context, const std::string& key,
+void RegisterLayerAlphaDrivers(ParseContext& context, const std::string& key,
                         const wpscene::WPImageObject&                      image,
                         const std::vector<std::shared_ptr<SceneMaterial>>& materials) {
     RegisterAlphaSetting(context, key, image.alpha_setting, image.alpha, materials);
@@ -2067,6 +2070,61 @@ std::shared_ptr<SceneNode> MakeEffectPassNode(SceneMaterial&& material) {
     return node;
 }
 
+/// A pass of an effect after its file entry and its instance entry are settled: the
+/// assembled material (slots included) and the buffer it writes.
+struct EffectPassPlan {
+    wpscene::WPMaterial material;
+    std::string         output;
+};
+
+/// Settles every pass of `source` before any of them is compiled (R42, R55, R79):
+/// the instance's entry overlays the file's, the chain's input stands in for the
+/// layer's own composite, binds fill their slots, slot 0 defaults to the chain's
+/// input and `target` picks the buffer written (the chain's output when it names
+/// nothing known).
+std::vector<EffectPassPlan> PlanEffectPasses(const wpscene::WPImageEffect& source, int32_t layer_id,
+                                             const std::unordered_map<std::string, std::string>& buffers,
+                                             const std::string& chain_input,
+                                             const std::string& chain_output) {
+    const auto buffer_named = [&buffers](const std::string& name) -> const std::string* {
+        const auto found = buffers.find(name);
+        return found == buffers.end() ? nullptr : &found->second;
+    };
+
+    std::vector<EffectPassPlan> plans(source.materials.size());
+    for (std::size_t pass = 0; pass < plans.size(); ++pass) {
+        auto&                          plan     = plans[pass];
+        const wpscene::WPMaterialPass* instance = pass < source.passes.size() ? &source.passes[pass] : nullptr;
+        plan.material = source.materials[pass];
+        plan.output   = chain_output;
+        if (instance != nullptr) {
+            plan.material.MergePass(*instance);
+            if (! instance->target.empty()) {
+                if (const auto* written = buffer_named(instance->target)) plan.output = *written;
+            }
+        }
+        BindOwnEffectChainInput(plan.material, layer_id, chain_input);
+
+        auto& slots = plan.material.textures;
+        if (instance != nullptr) {
+            for (const auto& bind : instance->bind) {
+                if (bind.index < 0 || bind.index >= static_cast<int32_t>(kMaxTextureSlots)) continue;
+                const auto* buffer = buffer_named(bind.name);
+                if (buffer == nullptr) {
+                    LOG_INFO("effect pass binds the unknown buffer '%s'", bind.name.c_str());
+                    continue;
+                }
+                const auto slot = static_cast<std::size_t>(bind.index);
+                slots.resize(std::max(slots.size(), slot + 1));
+                slots[slot] = *buffer;
+            }
+        }
+        slots.resize(std::max<std::size_t>(slots.size(), 1));
+        if (slots.front().empty()) slots.front() = chain_input;
+    }
+    return plans;
+}
+
 /// One effect of a layer's chain (R53 to R57, R79 to R82). Returns false when a pass
 /// of it cannot be built; the effect is then left out and the layer kept.
 bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
@@ -2101,34 +2159,10 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
         wpscene::WPMaterial            authored;
     };
     std::vector<Built> built;
-    for (std::size_t pass = 0; pass < source.materials.size(); ++pass) {
-        auto material = source.materials[pass];
-        const wpscene::WPMaterialPass* overrides = pass < source.passes.size() ? &source.passes[pass] : nullptr;
-        if (overrides != nullptr) material.MergePass(*overrides);
-        BindOwnEffectChainInput(material, image.id, previous_name);
-        if (overrides != nullptr) {
-            for (const auto& bind : overrides->bind) {
-                if (bind.index < 0 || bind.index >= static_cast<int32_t>(kMaxTextureSlots)) continue;
-                const auto mapped = fbo_map.find(bind.name);
-                if (mapped == fbo_map.end()) {
-                    LOG_INFO("effect pass binds the unknown buffer '%s'", bind.name.c_str());
-                    continue;
-                }
-                if (material.textures.size() <= static_cast<std::size_t>(bind.index)) {
-                    material.textures.resize(static_cast<std::size_t>(bind.index) + 1);
-                }
-                material.textures[static_cast<std::size_t>(bind.index)] = mapped->second;
-            }
-        }
-        if (material.textures.empty()) material.textures.resize(1);
-        if (material.textures[0].empty()) material.textures[0] = previous_name;
-
-        std::string output = output_name;
-        if (overrides != nullptr && ! overrides->target.empty()) {
-            if (const auto mapped = fbo_map.find(overrides->target); mapped != fbo_map.end()) {
-                output = mapped->second;
-            }
-        }
+    auto plans = PlanEffectPasses(source, image.id, fbo_map, previous_name, output_name);
+    for (auto& plan : plans) {
+        auto&               material = plan.material;
+        auto&               output   = plan.output;
         SceneMaterial  scene_material;
         LoadedMaterial loaded;
         MaterialLoadOptions options;
@@ -2163,7 +2197,7 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
 
     for (auto& entry : built) {
         effect->nodes.push_back(SceneImageEffectNode { .output = entry.output, .sceneNode = entry.node });
-        RegisterMaterialConstants(context, entry.material, entry.authored, entry.info, key);
+        RegisterDrivenMaterialConstants(context, entry.material, entry.authored, entry.info, key);
         // A pass that takes white takes no alpha of the layer's either, driven or not: what
         // reaches it has the alpha in it already.
         if (! white_tint && ! is_closing_pass) {
@@ -2855,6 +2889,35 @@ std::optional<wpscene::WPMaterial> ReadPuppetMaterial(fs::VFS& vfs, const std::s
     return material;
 }
 
+/// The clipping-mask material of one mask (R69): the shipped `clippingmaskimage4`
+/// shader, translucent, never depth tested, written or culled, drawing the piece's
+/// picture with the mask's picture. Skinning combos apply to it as to any slot.
+wpscene::WPMaterial MakeClippingMaskMaterial(const std::string& piece_texture,
+                                             const std::string& mask_texture, const WPMdl& mdl,
+                                             bool has_bones) {
+    wpscene::WPMaterial material {
+        .blending   = "translucent",
+        .cullmode   = "nocull",
+        .shader     = "clippingmaskimage4",
+        .depthtest  = "disabled",
+        .depthwrite = "disabled",
+        .textures   = { piece_texture, mask_texture },
+        .use_puppet = true,
+    };
+    if (has_bones) WPMdlParser::AddPuppetMatInfo(material, mdl);
+    return material;
+}
+
+/// The mesh's own material drawn through a mask (R69, R25): both clipping combos on and
+/// texture slot 8 holding the mask target.
+wpscene::WPMaterial MakeClippedCopy(wpscene::WPMaterial material) {
+    constexpr std::size_t kMaskSlot = 8;
+    for (const char* combo : { "CLIPPINGTARGET", "CLIPPINGUVS" }) material.combos[combo] = 1;
+    material.textures.resize(std::max(material.textures.size(), kMaskSlot + 1));
+    material.textures[kMaskSlot] = std::string(kPuppetMaskTarget);
+    return material;
+}
+
 /// Loads every slot of a puppet drawn directly, in submesh order: the mesh's own material,
 /// then for each mask its mask material and its clipped copy. False abandons the whole set.
 bool LoadPuppetSlots(ParseContext& context, const wpscene::WPImageObject& image, const WPMdl& mdl,
@@ -2895,22 +2958,10 @@ bool LoadPuppetSlots(ParseContext& context, const wpscene::WPImageObject& image,
                 : (! image.material.textures.empty() ? image.material.textures[0] : std::string());
         if (! load(*base, true)) return false;
         for (const auto& mask : source.masks) {
-            wpscene::WPMaterial mask_material;
-            mask_material.shader     = "clippingmaskimage4";
-            mask_material.blending   = "translucent";
-            mask_material.depthtest  = "disabled";
-            mask_material.depthwrite = "disabled";
-            mask_material.cullmode   = "nocull";
-            mask_material.textures   = { first_texture, mask.mat_json_file };
-            mask_material.use_puppet = true;
-            if (has_bones) WPMdlParser::AddPuppetMatInfo(mask_material, mdl);
-            if (! load(std::move(mask_material), true)) return false;
-            auto clipped = *base;
-            clipped.combos["CLIPPINGTARGET"] = 1;
-            clipped.combos["CLIPPINGUVS"]    = 1;
-            if (clipped.textures.size() <= 8) clipped.textures.resize(9);
-            clipped.textures[8] = std::string(kPuppetMaskTarget);
-            if (! load(std::move(clipped), true)) return false;
+            if (! load(MakeClippingMaskMaterial(first_texture, mask.mat_json_file, mdl, has_bones), true)) {
+                return false;
+            }
+            if (! load(MakeClippedCopy(*base), true)) return false;
         }
     }
     return ! slots.empty();
@@ -3136,7 +3187,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         }
     }
     if (puppet_slots.empty()) {
-        RegisterMaterialConstants(context, own_material, image.material, own_loaded.info, plan.key);
+        RegisterDrivenMaterialConstants(context, own_material, image.material, own_loaded.info, plan.key);
         tinted.push_back(own_material);
         all_materials.push_back(own_material);
         if (context.shader_updater != nullptr) {
@@ -3151,7 +3202,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         std::vector<std::string> textures;
         for (std::size_t slot = 0; slot < puppet_slots.size(); ++slot) {
             auto material = mesh->MaterialSlotPtr(slot);
-            RegisterMaterialConstants(context, material, puppet_slots[slot].authored,
+            RegisterDrivenMaterialConstants(context, material, puppet_slots[slot].authored,
                                       puppet_slots[slot].loaded.info, plan.key);
             tinted.push_back(material);
             all_materials.push_back(material);
@@ -3281,7 +3332,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     }
     if (referenced) RegisterImageComposite(context, image, *node);
 
-    RegisterLayerAlpha(context, plan.key, image, all_materials);
+    RegisterLayerAlphaDrivers(context, plan.key, image, all_materials);
     RegisterLayerTint(context, plan.key, entry, image.color, tinted);
     if (runtime != nullptr && ImageObjectHandlesCursorEvents(image)) {
         if (auto mask = BuildImageHitMask(context, image); mask.has_value()) {
@@ -3419,7 +3470,7 @@ bool LoadModelEntry(ParseContext& context, std::size_t at, const nlohmann::json&
             context.shader_updater->SetNodeData(node.get(), static_cast<uint32_t>(slot), data);
         }
         if (slots[slot].ok) {
-            RegisterMaterialConstants(context, mesh->MaterialSlotPtr(slot), slots[slot].authored,
+            RegisterDrivenMaterialConstants(context, mesh->MaterialSlotPtr(slot), slots[slot].authored,
                                       slots[slot].loaded.info, plan.key);
         }
     }
@@ -4043,6 +4094,13 @@ std::shared_ptr<SceneNode> MakeScriptTextLayer(const std::shared_ptr<Scene>& sce
     return lazy.layers.back().node;
 }
 
+/// Reads an asset as a JSON object. A file that is missing (the virtual file system has
+/// already said so) or empty is no document, and is not parsed to log a second error.
+bool ReadAssetObject(fs::VFS& vfs, const std::string& asset_path, nlohmann::json& out) {
+    const auto text = fs::GetFileContent(vfs, "/assets/" + asset_path);
+    return ! text.empty() && PARSE_JSON(text, out) && out.is_object();
+}
+
 /// Builds the template a script's `createLayer(<model path>)` copies (P2 R8): the layer
 /// of an object that holds the model, visible and placed nowhere, built once and never
 /// attached to the scene. A model that gives no size takes the picture size of its first
@@ -4052,10 +4110,7 @@ bool LoadLayerTemplate(const std::shared_ptr<Scene>& scene, fs::VFS* vfs,
     if (scene == nullptr || scene->runtime == nullptr || vfs == nullptr) return false;
     const std::string path(requested);
     nlohmann::json    model;
-    if (path.empty() || ! PARSE_JSON(fs::GetFileContent(*vfs, "/assets/" + path), model) ||
-        ! model.is_object()) {
-        return false;
-    }
+    if (path.empty() || ! ReadAssetObject(*vfs, path, model)) return false;
     const auto flag = [&model](const char* key) {
         const auto found = model.find(key);
         return found != model.end() && found->is_boolean() && found->get<bool>();
@@ -4083,8 +4138,7 @@ bool LoadLayerTemplate(const std::shared_ptr<Scene>& scene, fs::VFS* vfs,
         nlohmann::json material;
         const auto     named = model.find("material");
         if (named != model.end() && named->is_string() &&
-            PARSE_JSON(fs::GetFileContent(*vfs, "/assets/" + named->get<std::string>()), material) &&
-            material.is_object()) {
+            ReadAssetObject(*vfs, named->get<std::string>(), material)) {
             const auto passes = material.find("passes");
             if (passes != material.end() && passes->is_array() && ! passes->empty() &&
                 passes->front().is_object()) {
@@ -4379,7 +4433,7 @@ void AttachParticleMesh(ParticleCommit& commit, const std::shared_ptr<SceneNode>
     node->AddMesh(mesh);
     if (perspective && context.is_ortho) node->SetCamera("global_perspective");
     const auto material = mesh->MaterialSlotPtr(0);
-    RegisterMaterialConstants(context, material, renderer.authored, renderer.loaded.info, commit.key);
+    RegisterDrivenMaterialConstants(context, material, renderer.authored, renderer.loaded.info, commit.key);
     RegisterLayerVideos(context, commit.key, material->textures);
     if (context.shader_updater != nullptr) {
         WPShaderValueData data;
@@ -4657,7 +4711,7 @@ void LoadShapeEntry(ParseContext& context, ParsedLayer& layer, const nlohmann::j
     auto mesh = MakeQuadMesh(positions, uvs);
     mesh->AddMaterial(std::move(scene_material));
     layer.node->AddMesh(mesh);
-    RegisterMaterialConstants(context, mesh->MaterialSlotPtr(0), material, loaded.info, plan.key);
+    RegisterDrivenMaterialConstants(context, mesh->MaterialSlotPtr(0), material, loaded.info, plan.key);
     if (context.shader_updater != nullptr) {
         WPShaderValueData data;
         data.renderTargets = loaded.render_targets;
@@ -4665,33 +4719,29 @@ void LoadShapeEntry(ParseContext& context, ParsedLayer& layer, const nlohmann::j
     }
 }
 
-/// The render targets a bloom chain adds, taken back unless the chain is committed (R105).
-class BloomTargets {
-public:
-    explicit BloomTargets(Scene& scene) : m_scene(scene) {}
-    BloomTargets(const BloomTargets&)            = delete;
-    BloomTargets& operator=(const BloomTargets&) = delete;
-    ~BloomTargets() {
-        if (m_committed) return;
-        for (auto it = m_saved.rbegin(); it != m_saved.rend(); ++it) {
-            if (it->second.has_value()) m_scene.renderTargets[it->first] = *it->second;
-            else m_scene.renderTargets.erase(it->first);
-        }
-    }
-    void Add(const std::string& name, SceneRenderTarget target) {
-        const auto held = m_scene.renderTargets.find(name);
-        m_saved.emplace_back(name, held == m_scene.renderTargets.end()
-                                       ? std::nullopt
-                                       : std::optional<SceneRenderTarget>(held->second));
-        m_scene.renderTargets[name] = std::move(target);
-    }
-    void Commit() { m_committed = true; }
+/// Steps that take back what a build has done so far; run newest first.
+using UndoList = std::vector<std::function<void()>>;
 
-private:
-    Scene&                                                              m_scene;
-    std::vector<std::pair<std::string, std::optional<SceneRenderTarget>>> m_saved;
-    bool                                                                m_committed { false };
-};
+void RunUndo(UndoList& undo) {
+    while (! undo.empty()) {
+        auto step = std::move(undo.back());
+        undo.pop_back();
+        step();
+    }
+}
+
+/// Adds (or replaces) a scene render target and notes in `undo` how to give it back:
+/// the target that held the name before returns, or the name goes away (R105).
+void PutSceneRenderTarget(Scene& scene, UndoList& undo, const std::string& name,
+                          SceneRenderTarget target) {
+    auto& table = scene.renderTargets;
+    if (const auto held = table.find(name); held != table.end()) {
+        undo.push_back([&table, name, previous = held->second]() { table[name] = previous; });
+    } else {
+        undo.push_back([&table, name]() { table.erase(name); });
+    }
+    table[name] = std::move(target);
+}
 
 /// A screen-following bloom target of `fraction` of the colour buffer.
 SceneRenderTarget BloomTarget(const Scene& scene, double fraction) {
@@ -4751,13 +4801,12 @@ ShaderValue Vec4Value(const std::array<float, 4>& lanes) { return ShaderValue(la
 
 /// The LDR chain (R107): extract, vertical down-sample, horizontal blur, combine.
 bool BuildLdrBloom(ParseContext& context, const wpscene::WPSceneGeneral& general,
-                   ScenePostProcess& post) {
-    auto&        scene = *context.scene;
-    BloomTargets targets(scene);
-    targets.Add("_rt_bloom_mip1", BloomTarget(scene, 0.25));
-    targets.Add("_rt_bloom_mip2", BloomTarget(scene, 0.125));
-    targets.Add("_rt_bloom_blur", BloomTarget(scene, 0.125));
-    targets.Add("_rt_bloom_combine", BloomTarget(scene, 1.0));
+                   ScenePostProcess& post, UndoList& undo) {
+    auto& scene = *context.scene;
+    PutSceneRenderTarget(scene, undo, "_rt_bloom_mip1", BloomTarget(scene, 0.25));
+    PutSceneRenderTarget(scene, undo, "_rt_bloom_mip2", BloomTarget(scene, 0.125));
+    PutSceneRenderTarget(scene, undo, "_rt_bloom_blur", BloomTarget(scene, 0.125));
+    PutSceneRenderTarget(scene, undo, "_rt_bloom_combine", BloomTarget(scene, 1.0));
     const std::string frame(SpecTex_Default);
 
     float strength = general.bloomstrength;
@@ -4804,7 +4853,6 @@ bool BuildLdrBloom(ParseContext& context, const wpscene::WPSceneGeneral& general
                 });
         }
     }
-    targets.Commit();
     return true;
 }
 
@@ -4819,7 +4867,7 @@ struct HdrBloomState {
 
 /// The HDR chain (R108). A missing required material is a failure of the whole scene.
 bool BuildHdrBloom(ParseContext& context, const wpscene::WPSceneGeneral& general,
-                   ScenePostProcess& post) {
+                   ScenePostProcess& post, UndoList& undo) {
     auto&       scene = *context.scene;
     const auto  exists = [&](const char* name) {
         return ! fs::GetFileContent(*context.vfs, std::string("/assets/materials/util/") + name + ".json").empty();
@@ -4840,12 +4888,11 @@ bool BuildHdrBloom(ParseContext& context, const wpscene::WPSceneGeneral& general
     state->levels    = HDRBloomLevels(general.bloomhdriterations, context.ortho_w, context.ortho_h);
     const int levels = state->levels;
 
-    BloomTargets targets(scene);
     for (int level = 0; level < levels; ++level) {
-        targets.Add("_rt_hdr_bloom_" + std::to_string(level),
-                    BloomTarget(scene, 1.0 / static_cast<double>(1 << (level + 1))));
+        PutSceneRenderTarget(scene, undo, "_rt_hdr_bloom_" + std::to_string(level),
+                             BloomTarget(scene, 1.0 / static_cast<double>(1 << (level + 1))));
     }
-    targets.Add("_rt_bloom_combine", BloomTarget(scene, 1.0));
+    PutSceneRenderTarget(scene, undo, "_rt_bloom_combine", BloomTarget(scene, 1.0));
     const std::string frame(SpecTex_Default);
     const auto        level_name = [](int level) { return "_rt_hdr_bloom_" + std::to_string(level); };
     const std::pair<std::string, ShaderValue> zero_var { "g_RenderVar0", Vec4Value({ 0, 0, 0, 0 }) };
@@ -4930,7 +4977,6 @@ bool BuildHdrBloom(ParseContext& context, const wpscene::WPSceneGeneral& general
         apply_scatter();
         apply_blend();
     }
-    targets.Commit();
     return true;
 }
 
@@ -4938,9 +4984,17 @@ bool BuildHdrBloom(ParseContext& context, const wpscene::WPSceneGeneral& general
 void BuildBloom(ParseContext& context, const wpscene::WPSceneGeneral& general, bool bloom) {
     if (! bloom) return;
     auto post = std::make_shared<ScenePostProcess>();
-    const bool built = context.scene->hdr ? BuildHdrBloom(context, general, *post)
-                                          : BuildLdrBloom(context, general, *post);
+    UndoList undo;
+    bool     built = false;
+    try {
+        built = context.scene->hdr ? BuildHdrBloom(context, general, *post, undo)
+                                   : BuildLdrBloom(context, general, *post, undo);
+    } catch (...) {
+        RunUndo(undo);
+        throw;
+    }
     if (built) context.scene->post_processes.push_back(std::move(post));
+    else RunUndo(undo);
 }
 
 /// A light: a member of the tree with no picture of its own. Its colour, radius,

@@ -4,7 +4,9 @@
 
 #include "Utils/Logging.h"
 
+#include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <cstddef>
 #include <sstream>
 
@@ -13,60 +15,49 @@ using namespace wallpaper::wpscene;
 namespace
 {
 
-bool UserTextureIsEmpty(const WPUserTexture& texture) {
-    return texture.name.empty() && texture.type.empty();
+// Reads a JSON array into a list, one `decode` call per element. Anything that
+// is not an array reads as an empty list.
+template<typename Item, typename Decode>
+std::vector<Item> DecodeArray(const nlohmann::json& json, Decode decode) {
+    std::vector<Item> items;
+    if (! json.is_array()) return items;
+    items.reserve(json.size());
+    std::transform(json.begin(), json.end(), std::back_inserter(items), decode);
+    return items;
+}
+
+// The slot-indexed lists of a pass (`textures`, `usertextures`) layer on top of
+// each other: the list grows to the longer one, and a slot of `top` that is not
+// `vacant` replaces the slot below it.
+template<typename Item, typename Vacant>
+void OverlaySlots(std::vector<Item>& base, const std::vector<Item>& top, Vacant vacant) {
+    if (top.size() > base.size()) base.resize(top.size());
+    for (std::size_t i = 0; i < top.size(); ++i) {
+        if (! vacant(top[i])) base[i] = top[i];
+    }
 }
 
 // A `usertextures` entry: a bare string names a project property; an object
 // holds `name` and, for the runtime's own images, `type`. Anything else
 // (`null`, an empty object, a number) leaves the slot as it is.
-WPUserTexture ReadUserTexture(const nlohmann::json& json) {
+WPUserTexture DecodeUserTexture(const nlohmann::json& json) {
+    const auto text = [&json](const char* key) {
+        const auto found = json.find(key);
+        return found != json.end() && found->is_string() ? found->get<std::string>()
+                                                         : std::string();
+    };
     WPUserTexture texture;
     if (json.is_string()) {
         texture.name = json.get<std::string>();
     } else if (json.is_object()) {
-        if (const auto name = json.find("name"); name != json.end() && name->is_string()) {
-            texture.name = name->get<std::string>();
-        }
-        if (const auto type = json.find("type"); type != json.end() && type->is_string()) {
-            texture.type = type->get<std::string>();
-        }
+        texture.name = text("name");
+        texture.type = text("type");
     }
     return texture;
 }
 
-std::vector<WPUserTexture> ReadUserTextures(const nlohmann::json& json) {
-    std::vector<WPUserTexture> list;
-    if (! json.is_array()) return list;
-    list.reserve(json.size());
-    for (const auto& entry : json) list.push_back(ReadUserTexture(entry));
-    return list;
-}
-
-// The later list replaces the earlier one slot by slot where it names something,
-// and extends it where it is longer.
-void MergeUserTextures(std::vector<WPUserTexture>& into, const std::vector<WPUserTexture>& from) {
-    if (into.size() < from.size()) into.resize(from.size());
-    for (std::size_t slot = 0; slot < from.size(); ++slot) {
-        if (! UserTextureIsEmpty(from[slot])) into[slot] = from[slot];
-    }
-}
-
-void MergeTextures(std::vector<std::string>& into, const std::vector<std::string>& from) {
-    if (into.size() < from.size()) into.resize(from.size());
-    for (std::size_t slot = 0; slot < from.size(); ++slot) {
-        if (! from[slot].empty()) into[slot] = from[slot];
-    }
-}
-
-std::vector<std::string> ReadTextures(const nlohmann::json& json) {
-    std::vector<std::string> list;
-    if (! json.is_array()) return list;
-    list.reserve(json.size());
-    for (const auto& entry : json) {
-        list.push_back(entry.is_string() ? entry.get<std::string>() : std::string());
-    }
-    return list;
+std::string DecodeTexturePath(const nlohmann::json& json) {
+    return json.is_string() ? json.get<std::string>() : std::string();
 }
 
 std::unordered_map<std::string, int32_t> ReadCombos(const nlohmann::json& json) {
@@ -147,10 +138,10 @@ std::unordered_map<std::string, WPConstantShaderValue> ReadConstants(const nlohm
 template<typename Target>
 void ReadPassShape(const nlohmann::json& json, Target& target) {
     if (const auto found = json.find("textures"); found != json.end()) {
-        target.textures = ReadTextures(*found);
+        target.textures = DecodeArray<std::string>(*found, DecodeTexturePath);
     }
     if (const auto found = json.find("usertextures"); found != json.end()) {
-        target.usertextures = ReadUserTextures(*found);
+        target.usertextures = DecodeArray<WPUserTexture>(*found, DecodeUserTexture);
     }
     if (const auto found = json.find("combos"); found != json.end()) {
         target.combos = ReadCombos(*found);
@@ -162,8 +153,11 @@ void ReadPassShape(const nlohmann::json& json, Target& target) {
 
 template<typename Target>
 void OverlayPassShape(Target& target, const WPMaterialPass& later) {
-    MergeTextures(target.textures, later.textures);
-    MergeUserTextures(target.usertextures, later.usertextures);
+    OverlaySlots(target.textures, later.textures,
+                 [](const std::string& path) { return path.empty(); });
+    OverlaySlots(target.usertextures, later.usertextures, [](const WPUserTexture& user) {
+        return user.name.empty() && user.type.empty();
+    });
     for (const auto& [name, value] : later.combos) target.combos[name] = value;
     for (const auto& [name, value] : later.constantshadervalues) {
         target.constantshadervalues[name] = value;

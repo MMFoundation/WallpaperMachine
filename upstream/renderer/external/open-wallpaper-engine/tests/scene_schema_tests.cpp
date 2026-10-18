@@ -7108,6 +7108,17 @@ TEST(SceneSchema, OneBrokenVectorTimelineGroupIsReportedOnce) {
     EXPECT_EQ(separate_parents.size(), 2u);
 }
 
+TEST(SceneSchema, AConstantThatNamesNoUniformIsReportedOncePerPass) {
+    const auto logs = ParseVectorTimelineErrors({
+        { "ghost page", nlohmann::json {
+              { "point1", VectorConstant({ 0.25f, 0.5f }) },
+              { "ghostpoint", VectorConstant({ 1.0f, 2.0f }) },
+          } },
+    });
+    ASSERT_EQ(logs.size(), 1u);
+    EXPECT_NE(logs.front().find("ghostpoint"), std::string::npos);
+}
+
 TEST(SceneSchema, ScriptedMaterialConstantsKeepTheComponentsTheShaderDeclares) {
     // A script that swaps the components only produces the authored numbers when
     // it is handed a vector. Reaching it as a string yields NaN on `.x`/`.y`.
@@ -8881,6 +8892,51 @@ TEST(SceneSchema, CreateLayerFromAPassthroughModelLeavesNothingBoundToTheFreedTe
     for (const auto& child : scene->sceneGraph->GetChildren()) {
         EXPECT_FALSE(child->Name().starts_with("__generated_layer_"))
             << "a passthrough model cannot be copied into a layer";
+    }
+}
+
+// A model path no file answers is no template, and nothing more: the file system has said
+// it is missing, and parsing the empty text it returns would log a second, misleading error.
+TEST(SceneSchema, CreateLayerFromAMissingModelLogsNoParseError) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const nlohmann::json source {
+        { "camera", { { "center", { 0, 0, -1 } }, { "eye", { 0, 0, 0 } }, { "up", { 0, 1, 0 } } } },
+        { "general",
+          { { "ambientcolor", { 0, 0, 0 } },
+            { "skylightcolor", { 0, 0, 0 } },
+            { "clearcolor", { 0, 0, 0 } },
+            { "cameraparallax", false },
+            { "orthogonalprojection", { { "width", 640 }, { "height", 360 } } } } },
+        { "objects",
+          nlohmann::json::array({
+              { { "id", 2 }, { "name", "owner" }, { "image", "image.json" },
+                { "origin", { 320, 180, 0 } },
+                { "visible",
+                  { { "value", true },
+                    { "script",
+                      "export function init() { thisScene.createLayer('models/ghost.json'); }\n"
+                      "export function update(value) { return value; }\n" } } } },
+          }) },
+    };
+
+    std::vector<std::string> logs;
+    captured_parse_errors = &logs;
+    SetWallpaperLogCallback(CaptureParseErrors);
+    audio::SoundManager sound_manager;
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    auto scene = parser.Parse(SceneParseRequest {
+        .scene_id = "missing-template-layer", .project_properties = &properties,
+    }, source.dump(), vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    scene->runtime->Tick(1.0 / 60.0);
+    SetWallpaperLogCallback(nullptr);
+    captured_parse_errors = nullptr;
+
+    for (const auto& line : logs) {
+        EXPECT_EQ(line.find("LoadLayerTemplate"), std::string::npos) << line;
     }
 }
 
