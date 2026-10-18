@@ -2023,7 +2023,6 @@ void SceneRuntimeContext::RegisterSceneScript(std::string script_source, std::st
         *m_host_context);
     if (program == nullptr || ! program->Valid()) return;
     m_scene_scripts.push_back(SceneScriptBinding { .script = std::move(program) });
-    if (m_scripts_torn_down) return;
 }
 
 void SceneRuntimeContext::RegisterNodeVideoTexture(std::string name, std::string texture_key) {
@@ -2103,9 +2102,12 @@ uint32_t SceneRuntimeContext::DescribeTimeAdvancingWork() const {
     // Scripted values re-evaluate every tick and may read the clock, the
     // pointer or anything else the script engine exposes. Their bodies are not
     // analysed; their presence is the answer.
-    if (! m_scripted_values.empty() || ! m_scene_scripts.empty()) {
-        reasons |= SceneDemandReason::Script;
-    }
+    const bool has_program =
+        std::any_of(m_scripted_values.begin(), m_scripted_values.end(),
+                    [](const ScriptedDynamicValue* value) { return value != nullptr; }) ||
+        std::any_of(m_scene_scripts.begin(), m_scene_scripts.end(),
+                    [](const SceneScriptBinding& binding) { return binding.script != nullptr; });
+    if (has_program) reasons |= SceneDemandReason::Script;
 
     // A binding existing is not a reason to keep ticking; a binding whose value
     // moves by itself is. The parser registers a visibility binding for every
