@@ -267,6 +267,8 @@ float ScalarAnimation::Evaluate(double seconds) const {
     const auto& to   = *next;
     const double span = to.frame - from.frame;
     if (!(span > 0.0)) return to.value;
+    // A playhead exactly on a key shows that key, not what the interpolation makes of it.
+    if (frame == from.frame) return from.value;
     const double along = (frame - from.frame) / span;
     if (!from.front.enabled && !to.back.enabled) {
         return static_cast<float>(from.value + (static_cast<double>(to.value) - from.value) * along);

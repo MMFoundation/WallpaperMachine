@@ -647,11 +647,16 @@ private:
     struct NodeVisibilityBinding {
         SceneNode*    node { nullptr };
         DynamicValue* value { nullptr };
+        /// The value's change counter when the layer last took its flag.
+        uint64_t      observed_generation { 0 };
     };
     struct NodeAlignmentBinding {
         std::string     alignment;
         linalg::Vector3f origin { linalg::Vector3f::Zero() };
         linalg::Vector3f scale { linalg::Vector3f::Ones() };
+        /// The scale the layer had when a script gave it an alignment: the offset of such an
+        /// anchor grows with the scale from there.
+        linalg::Vector3f base_scale { linalg::Vector3f::Ones() };
         bool            size_anchor { false };
         bool transform_dirty { true };
         linalg::Vector3f cached_translate { linalg::Vector3f::Zero() };
@@ -682,11 +687,14 @@ private:
         const linalg::Vector2f* size { nullptr };
         std::shared_ptr<const NodeVec3Animation> animation;
         double sampled_animation_frame { std::numeric_limits<double>::quiet_NaN() };
+        /// The value's change counter when the layer last took it.
+        uint64_t observed_generation { std::numeric_limits<uint64_t>::max() };
     };
     static void ApplyNodeVec3Animation(NodeVec3Binding& binding);
     struct MaterialAlphaBinding {
         std::weak_ptr<SceneMaterial> material;
         std::shared_ptr<ScalarAnimationPlayback> animation;
+        double sampled_animation_frame { std::numeric_limits<double>::quiet_NaN() };
     };
     struct MaterialColorBinding {
         std::vector<std::weak_ptr<SceneMaterial>> materials;
@@ -707,10 +715,63 @@ private:
     struct TextValueBinding {
         std::string   name;
         DynamicValue* value { nullptr };
+        /// The value's change counter when the layer last took its text.
+        uint64_t      observed_generation { 0 };
+    };
+    /// A layer whose picture goes through an effect chain: the chain's last card follows the
+    /// layer wherever the layer is.
+    struct NodeEffectFinalBinding {
+        SceneNode*             node { nullptr };
+        SceneImageEffectLayer* layer { nullptr };
+        TextLayerRenderFrame   target_frame {};
+    };
+    /// A layer a script can copy (`createLayer`), as registered by the loader.
+    struct LayerTemplate {
+        std::shared_ptr<SceneNode> node;
+        linalg::Vector2f           size { linalg::Vector2f::Zero() };
+    };
+    /// What the text worker finished for one layer.
+    struct FinishedTextLayout {
+        std::string     name;
+        std::string     cache_identity;
+        uint64_t        revision { 0 };
+        TextLayerLayout layout;
+        uint32_t        raster_width { 0 };
+        uint32_t        raster_height { 0 };
+        std::vector<uint8_t> rgba;
     };
 public:
-    // CLEANROOM RT22
-    struct NodeRegistrationSnapshot {};
+    /// What `CaptureNodeRegistration` keeps of one layer key, and how long every runtime-wide
+    /// list was, so a layer whose build failed can be taken back out. Opaque to the loader.
+    struct NodeRegistrationSnapshot {
+        SceneNode*                       node { nullptr };
+        std::optional<std::size_t>       order_index;
+        std::optional<NodeVisibilityBinding> visibility;
+        std::optional<NodeVec3Binding>   translate;
+        std::optional<NodeVec3Binding>   scale;
+        std::optional<NodeVec3Binding>   rotation;
+        std::optional<NodeEffectFinalBinding> effect_final;
+        std::optional<linalg::Vector2f>  size;
+        std::optional<NodeHitMask>       hit_mask;
+        std::optional<NodeCursorTarget>  cursor_target;
+        std::optional<WPPuppetLayer>     puppet;
+        std::optional<TextLayer>         text_layer;
+        std::optional<TextEffectGate>    text_gate;
+        std::vector<TextValueBinding>    text_values;
+        std::optional<NodeAlignmentBinding> alignment;
+        std::optional<std::string>       template_path;
+        std::vector<std::string>         video_textures;
+        std::weak_ptr<WPSoundStream>     sound;
+        bool                             has_sound { false };
+        std::size_t owned_values { 0 };
+        std::size_t scripted_values { 0 };
+        std::size_t scene_scripts { 0 };
+        std::size_t material_constants { 0 };
+        std::size_t material_alpha { 0 };
+        std::size_t material_colors { 0 };
+        std::size_t clocks { 0 };
+        std::size_t listeners { 0 };
+    };
 
 private:
     struct VideoTexturePlaybackBinding {
@@ -955,6 +1016,62 @@ private:
     /// The display's size or the language changed since the scripts were told.
     bool m_screen_resize_pending { false };
     bool m_general_settings_pending { false };
+
+    // ---- State added with the clean-room rewrite ----------------------------------------
+    /// What the project declares: the table a document is applied over.
+    ProjectProperties m_default_properties;
+    /// The live value of each property, owned by `m_owned_values`.
+    std::unordered_map<std::string, DynamicValue*, StringHash, std::equal_to<>> m_property_values;
+    std::vector<std::string> m_script_errors;
+    /// Ends the subscription a registered listener made, in registration order.
+    std::vector<std::function<void()>> m_listener_ends;
+    std::unordered_map<std::string, NodeEffectFinalBinding> m_node_effect_final;
+    std::unordered_map<std::string, LayerTemplate> m_layer_templates;
+    /// Layer key -> the template path the layer was made from (or the path a template node
+    /// was registered under, which is how a script in a workshop layer finds its siblings).
+    std::unordered_map<std::string, std::string> m_node_template_paths;
+    uint64_t m_next_generated_layer_key { 1 };
+    int32_t  m_next_generated_layer_id { 0x50000000 };
+    /// The texture keys of each layer's video textures, in the order they were registered.
+    std::unordered_map<std::string, std::vector<std::string>, StringHash, std::equal_to<>>
+        m_node_video_textures;
+    /// Every clock registered by `RegisterScalarAnimation`, so a clock that is also held by
+    /// another registry is stepped once.
+    std::unordered_set<const ScalarAnimationPlayback*> m_registered_clocks;
+    double m_scene_zoom_sampled_frame { std::numeric_limits<double>::quiet_NaN() };
+    std::atomic<bool> m_media_integration_enabled { false };
+
+    // The text worker: one thread, one queue (`m_pending_text_jobs`, guarded by
+    // `m_text_worker_mutex` like everything below it) and the newest result of every layer.
+    std::thread                                  m_text_worker;
+    std::condition_variable                      m_text_worker_wake;
+    bool                                         m_text_worker_stop { false };
+    std::vector<FinishedTextLayout>              m_finished_text_layouts;
+    /// The revision of the job last queued for a layer.
+    std::unordered_map<std::string, uint64_t>    m_queued_text_revisions;
+    enum class Vec3Key
+    {
+        Origin,
+        Scale,
+        Angles,
+    };
+    void ApplyVec3Binding(Vec3Key key, const std::string& name, NodeVec3Binding& binding);
+    void ApplyMaterialConstantBinding(MaterialConstantBinding& binding);
+    void TextWorkerLoop();
+    bool ApplyFinishedTextLayout(FinishedTextLayout& finished);
+    void QueueTextJobs();
+    void RequestShownLayerGraph();
+    void AdvanceClocks(double seconds);
+    void ApplyNodeVisibilityBindings();
+    void ApplyNodeTransformBindings();
+    void ApplyTextValueBindings();
+    void ApplyEffectFinalBindings();
+    void ApplyMaterialConstantBindings();
+    void ApplyMaterialAlphaBindings();
+    void ApplyAnchoredTransform(const std::string& name);
+    void ApplyScreenAnchor(const std::string& name);
+    void ForgetLayerScripts(const std::string& name);
+    std::size_t TrimScriptsTo(std::size_t value_count, std::size_t script_count);
 };
 
 std::unique_ptr<SceneRuntimeContext> CreateSceneRuntimeContext(SceneRuntimeBootstrap bootstrap);
