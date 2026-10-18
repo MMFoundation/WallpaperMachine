@@ -611,8 +611,14 @@ Scene support is experimental; [web wallpapers](web-wallpapers.md) run in a
 built-in web view; Windows application wallpapers are labeled unsupported.
 
 **Download from Steam…** in **Settings → Library & Steam**, or **Get shared
-resources** in a scene's details, starts the installation; **Locate an
-installation…** (**Use an existing installation** in the dialog) instead points at
+resources** in a scene's details, starts the installation. While the resources
+are missing, a scene's details lead with that notice (above any failure, with
+**Show in downloads** in place of the button while they download) and offer no
+GitHub report, and **Apply**, **Reapply** or **Apply to all displays** on an
+installed scene opens this setup instead of asking the renderer for a failure
+(`PanelController.getsSceneResourcesInstead(of:)`); the scene is not applied by
+itself once the resources arrive. **Locate an installation…** (**Use an existing
+installation** in the dialog) instead points at
 an existing purchased installation. Installation reuses the private SteamCMD login
 and cancellation flow and requests the Windows application with `app_update
 431960 validate`. Only the validated `assets` tree is retained, at

@@ -82,7 +82,8 @@ enum InspectorPolicy {
   /// The problem report the inspector offers for an installed wallpaper.
   enum IssueReport: Equatable {
     /// None: nothing failed, and the wallpaper's type cannot run on macOS, which its own sentence
-    /// already says.
+    /// already says; or it is a scene waiting for the shared resources, whose notice offers the
+    /// fix instead.
     case none
     /// **Not working? Report on GitHub** under the type sentence, and the menu's report.
     case plain
@@ -92,8 +93,13 @@ enum InspectorPolicy {
   }
 
   /// The page's `failureReport` and `report`: a failure always comes with its report; otherwise
-  /// only a wallpaper that can run gets the plain one.
-  static func issueReport(for row: LibraryRow, failure: String?) -> IssueReport {
+  /// only a wallpaper that can run gets the plain one. A scene that cannot play because the shared
+  /// scene resources are missing gets none, whatever failed: that is setup for the user to do, not
+  /// a problem to report, and a report link beside it is read as the way out.
+  static func issueReport(
+    for row: LibraryRow, failure: String?, sceneResourcesMissing: Bool
+  ) -> IssueReport {
+    if sceneResourcesMissing, row.kind == .scene { return .none }
     if let failure { return .failure(failure) }
     return canRun(row.kind) ? .plain : .none
   }

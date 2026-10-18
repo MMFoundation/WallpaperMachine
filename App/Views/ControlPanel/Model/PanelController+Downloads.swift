@@ -165,6 +165,16 @@ extension PanelController {
     }
   }
 
+  /// **Get shared resources**, and Apply on a scene while they are missing: asks for the shared
+  /// scene resources and opens the download dialog when the request waits on something (SteamCMD,
+  /// the account, the consent to download them). A download already under way is shown instead.
+  func getSceneResources() async throws {
+    try await requestSceneAssets()
+    if let target = downloadDialogTarget(afterRequesting: nil) {
+      downloads.openDialog(for: target)
+    }
+  }
+
   /// Supplies what a retained request waits on, the account and the consent, and resumes it.
   /// `includeResources` is the user's explicit go-ahead to download the shared resources (several
   /// gigabytes). The account is trimmed, as the dialog's field always was before it was sent, and

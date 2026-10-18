@@ -412,8 +412,11 @@ type, app version and, while it is on screen, the backend drawing it (with the
 renderer's fallback reason) pre-filled. When the panel saw this wallpaper fail
 (its download, or the last attempt to apply it), an error notice takes the link's
 place with **Report this problem on GitHub**, whose issue also carries the error;
-an apply failure stays until an apply succeeds. Nothing is submitted by the app:
-the user edits and sends the issue on GitHub. The same report is in the inspector's
+an apply failure stays until an apply succeeds. An installed scene waiting for the
+shared scene resources offers neither report: their notice, with **Get shared
+resources**, is the way forward (see
+[Shared scene resources](workshop-downloads.md#shared-scene-resources)). Nothing is
+submitted by the app: the user edits and sends the issue on GitHub. The same report is in the inspector's
 **More actions** menu.
 
 ### Sharing a wallpaper

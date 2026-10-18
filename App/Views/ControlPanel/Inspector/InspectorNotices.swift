@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// What the inspector says about the wallpaper under its header: why a download was not applied, an
-/// update, the last failure, what each display's host reports, the wallpaper's type, a way to
-/// report a problem and the shared resources scenes need.
+/// update, the shared resources a scene still needs, the last failure, what each display's host
+/// reports, the wallpaper's type and a way to report a problem.
 struct InspectorNotices: View {
   let row: LibraryRow
 
@@ -38,8 +38,13 @@ struct InspectorNotices: View {
       if appliesOnArrival == true {
         InspectorNote("Will apply when the download finishes.")
       }
+      // Missing resources come before any failure: that is what keeps the scene from playing, and
+      // getting them is the way forward, where a failure's report link is not.
+      if controller.workshopSceneAssetsAreMissing(for: row) {
+        SceneResourcesNotice()
+      }
       if let failure {
-        FailureNoticeView(id: id, failure: failure)
+        FailureNoticeView(row: row, failure: failure)
       }
       ForEach(hosts) { host in
         HostStatusView(row: host)
@@ -49,22 +54,34 @@ struct InspectorNotices: View {
           .buttonStyle(.inspectorLink)
       }
       TypeNoteView(row: row)
-      if controller.workshopSceneAssetsAreMissing(for: row) {
-        InspectorNotice(tone: .warning) {
-          Text("Shared scene resources are required before playback.")
-          Button("Get shared resources") {
-            controller.launch("requestAssets") {
-              try await controller.requestSceneAssets()
-              if let target = controller.downloadDialogTarget(afterRequesting: nil) {
-                controller.downloads.openDialog(
-                  for: target == WorkshopStore.sceneAssetsRequestID ? nil : target)
-              }
-            }
-          }
+    }
+  }
+}
+
+// MARK: - Shared scene resources
+
+/// A scene cannot play until Wallpaper Engine's shared resources are installed: the one-time setup,
+/// offered as the notice's own button, or their download when it is already under way.
+struct SceneResourcesNotice: View {
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    InspectorNotice(tone: .warning) {
+      Text("Shared scene resources are required before playback.")
+      if controller.sceneResourcesArePending {
+        Button("Show in downloads") { controller.downloads.showDownloads() }
           .buttonStyle(.inspectorLink)
+      } else {
+        Button {
+          controller.downloads.requestSceneAssets()
+        } label: {
+          Label("Get shared resources", systemImage: "shippingbox")
         }
+        .buttonStyle(.panelPrimary(size: .compact))
+        .disabled(controller.isBusy(PanelActionCoordinator.key("requestDownload", id: "")))
       }
     }
+    .accessibilityElement(children: .contain)
   }
 }
 
@@ -110,7 +127,7 @@ struct UpdateNoticeView: View {
 // MARK: - Failure
 
 struct FailureNoticeView: View {
-  let id: String
+  let row: LibraryRow
   let failure: String
 
   @Environment(PanelController.self) private var controller
@@ -118,7 +135,9 @@ struct FailureNoticeView: View {
   var body: some View {
     InspectorNotice(tone: .error) {
       Text(verbatim: failure).textSelection(.enabled)
-      if let url = controller.issueReportURL(for: id, failure: failure) {
+      if case .failure = controller.inspectorIssueReport(for: row),
+        let url = controller.issueReportURL(for: row.id, failure: failure)
+      {
         Button {
           ExternalLink.open(url)
         } label: {
@@ -193,8 +212,8 @@ struct TypeNoteView: View {
       // After a failure the report travels with the notice above; otherwise this is where someone
       // checking a problem is reading. A wallpaper that cannot run has nothing to report but its
       // type, which the sentence above says.
-      if InspectorPolicy.issueReport(for: row, failure: controller.activationFailures[row.id])
-        == .plain, let url = controller.issueReportURL(for: row.id)
+      if controller.inspectorIssueReport(for: row) == .plain,
+        let url = controller.issueReportURL(for: row.id)
       {
         Button {
           ExternalLink.open(url)

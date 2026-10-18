@@ -17,7 +17,8 @@ extension PanelController {
 
   /// `activate`: applies a wallpaper to the target display. Applying what a display already shows
   /// does nothing; only `reapply` restarts it, so a double-click, Recently used and Previous keep
-  /// leaving a running wallpaper alone.
+  /// leaving a running wallpaper alone. A scene while the shared resources are missing opens their
+  /// setup instead (`getsSceneResourcesInstead(of:)`), as `reapply` and `activateAll` do.
   func activate(_ id: String) async throws { try await applyToTarget(id, restarts: false) }
 
   /// `reapplyWallpaper`: the inspector's Reapply wallpaper, which takes the wallpaper off the
@@ -28,6 +29,7 @@ extension PanelController {
   /// own turn in the queue, so it must not run inside `run(.queued)`; it rolls every display back
   /// when one fails, and says so. A failure leaves the wallpaper selected, where its note is.
   func activateAll(_ id: String) async throws {
+    if try await getsSceneResourcesInstead(of: id) { return }
     do {
       try await run(.direct) {
         let id = try installedWallpaperID(id)
@@ -77,6 +79,7 @@ extension PanelController {
   /// Applies or restarts `id` on the display targeted *now*, which is the one the user means:
   /// the command may wait behind others, and the target can change in the meantime.
   private func applyToTarget(_ id: String, restarts: Bool) async throws {
+    if try await getsSceneResourcesInstead(of: id) { return }
     do {
       let id = try installedWallpaperID(id)
       let displayID = navigation.targetDisplayID
@@ -101,6 +104,22 @@ extension PanelController {
       recordActivationFailure(error, for: id)
       throw error
     }
+  }
+
+  /// A scene cannot play without Wallpaper Engine's shared resources, and while they are missing
+  /// applying one is the way into their one-time setup: the request for them is made (the download
+  /// dialog opens on what it needs, or their running download is shown) and the renderer is not
+  /// asked for a failure the user could only report. They are looked for again first, in case
+  /// they were installed meanwhile. Returns whether it did so; anything but an installed scene
+  /// that macOS can play is left to the apply.
+  private func getsSceneResourcesInstead(of id: String) async throws -> Bool {
+    guard let row = libraryRow(id: id), row.kind == .scene, row.isSupported else { return false }
+    workshop.refreshSceneAssetsReadiness()
+    guard workshopSceneAssetsAreMissing(for: row) else { return false }
+    // The notice that offers the resources says why it cannot play now.
+    activationFailures[id] = nil
+    try await getSceneResources()
+    return true
   }
 
   /// Keeps why Apply last failed for `id`, which the inspector and the tile show with a report

@@ -234,6 +234,48 @@ final class PanelLibraryActionsTests: PanelTestCase {
     }
   }
 
+  func testApplyingASceneWithoutTheSharedResourcesOpensTheirSetupInsteadOfFailing() async throws {
+    try await withApplyingPanel { panel, bridge, _ in
+      let controller = panel.controller
+      // "c" is a scene as far as the panel knows; its files still play once resources are there.
+      panel.store.librarySnapshot.wallpapers = panel.store.librarySnapshot.wallpapers.map {
+        var entry = $0
+        if entry.id == "c" { entry.kind = .projectScene }
+        return entry
+      }
+      XCTAssertEqual(controller.libraryRow(id: "c")?.kind, .scene)
+      XCTAssertFalse(panel.workshop.sceneAssetsReady)
+      controller.activationFailures["c"] = "An earlier failure."
+      let before = bridge.assignments
+
+      let applies: [@MainActor () async throws -> Void] = [
+        { try await controller.activate("c") }, { try await controller.reapply("c") },
+        { try await controller.activateAll("c") },
+      ]
+      for apply in applies {
+        controller.downloads.closeDialog()
+        let message = await banner(panel, apply)
+        XCTAssertNil(message, "the setup is the answer, not an error")
+        XCTAssertEqual(controller.downloads.target, WorkshopStore.sceneAssetsRequestID, "their setup opens")
+        XCTAssertEqual(bridge.assignments, before, "the renderer is not asked")
+      }
+      XCTAssertEqual(
+        controller.downloadRequestRows.map(\.id), [WorkshopStore.sceneAssetsRequestID],
+        "one request for the resources, however often Apply is pressed")
+      XCTAssertNil(controller.activationFailures["c"], "the resources notice says why, without a report")
+      let row = try XCTUnwrap(controller.libraryRow(id: "c"))
+      XCTAssertNil(controller.inspectorIssueReportURL(for: row))
+
+      // Installed meanwhile (found without waiting for the panel to come forward), it applies.
+      controller.downloads.closeDialog()
+      panel.sceneAssets.available = true
+      try await controller.activate("c")
+      XCTAssertEqual(bridge.assignments["primary"], "c")
+      XCTAssertFalse(controller.downloads.isDialogOpen)
+      XCTAssertNotNil(controller.inspectorIssueReportURL(for: row), "a scene that can play gets its report")
+    }
+  }
+
   func testApplyingToEveryDisplayHidesAfterwardsAndAFailureRestoresThemAndSelectsTheWallpaper() async throws {
     try await withApplyingPanel { panel, bridge, _ in
       let controller = panel.controller
