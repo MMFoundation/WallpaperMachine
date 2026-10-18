@@ -24,6 +24,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -142,123 +143,198 @@ using FailureRegistration =
 // The desktop poster mailbox: one per drawing layer.
 // ---------------------------------------------------------------------------
 
-constexpr std::size_t kPosterContextLimit    = 4096; // UTF-16 units
-constexpr std::size_t kPosterCaptureBacklog  = 4;
-constexpr auto        kPosterRetryBackoff    = std::chrono::seconds(2);
+constexpr std::size_t kPosterContextLimit = 4096; // UTF-16 units
+constexpr std::size_t kPosterLedgerSize   = 4;
+constexpr auto        kPosterRetryWindow  = std::chrono::seconds(2);
 
 NSString* const kPosterRequestName = @"WallpaperMachine.requestDesktopPoster";
 NSString* const kPosterReadyName   = @"WallpaperMachine.desktopPosterReady";
 
+using PosterTime = std::chrono::steady_clock::time_point;
+
+// What has been asked for: requests are numbered tickets, and answering a ticket
+// satisfies it and every older one. Requests that pile up are one open demand.
+class PosterDemand {
+public:
+    void ask(std::string text)
+    {
+        ++m_newest;
+        m_text = std::move(text);
+    }
+    bool satisfied(uint64_t ticket) const noexcept { return ticket <= m_answered_up_to; }
+    bool open() const noexcept { return ! satisfied(m_newest); }
+    uint64_t newest() const noexcept { return m_newest; }
+    const std::string& text() const noexcept { return m_text; }
+    void settle(uint64_t ticket) noexcept { m_answered_up_to = std::max(m_answered_up_to, ticket); }
+
+private:
+    uint64_t    m_newest { 1 }; // a fresh surface owes its first frame
+    uint64_t    m_answered_up_to { 0 };
+    std::string m_text;
+};
+
+// The captures that were started and have not been answered yet, oldest first.
+class PosterLedger {
+public:
+    struct Entry {
+        uint64_t    ticket;
+        std::string text;
+        PosterTime  started;
+    };
+
+    void enter(uint64_t ticket, std::string text, PosterTime started)
+    {
+        m_entries.push_back(Entry { ticket, std::move(text), started });
+        if (m_entries.size() > kPosterLedgerSize) m_entries.pop_front();
+    }
+    // When the newest capture was started, if it served exactly this ticket.
+    std::optional<PosterTime> newest_start_for(uint64_t ticket) const
+    {
+        if (m_entries.empty() || m_entries.back().ticket != ticket) return std::nullopt;
+        return m_entries.back().started;
+    }
+    template <class Pred>
+    void forget_if(Pred&& pred)
+    {
+        std::erase_if(m_entries, pred);
+    }
+    std::optional<Entry> take_oldest()
+    {
+        if (m_entries.empty()) return std::nullopt;
+        Entry oldest = std::move(m_entries.front());
+        m_entries.pop_front();
+        return oldest;
+    }
+
+private:
+    std::deque<Entry> m_entries;
+};
+
+// The render thread's wake hook. Firing and rebinding exclude each other, so once
+// an unbind returns the old hook is neither running nor going to run.
+class PosterWakeSlot {
+public:
+    void bind(std::function<void()> hook)
+    {
+        std::lock_guard guard(m_lock);
+        m_hook = std::move(hook);
+    }
+    void fire()
+    {
+        std::lock_guard guard(m_lock);
+        if (m_hook) m_hook();
+    }
+
+private:
+    std::mutex            m_lock;
+    std::function<void()> m_hook;
+};
+
 class PosterMailbox : public std::enable_shared_from_this<PosterMailbox> {
 public:
-    using Clock = std::function<std::chrono::steady_clock::time_point()>;
+    using Clock = std::function<PosterTime()>;
 
     PosterMailbox(CAMetalLayer* layer, NSNotificationCenter* center, Clock clock)
-        : m_layer(layer), m_center(center), m_clock(std::move(clock)) {}
-
-    // The observer holds the mailbox weakly, so this runs once the mailbox is
-    // already owned by a shared pointer.
-    void start()
-    {
-        std::weak_ptr<PosterMailbox> weak = weak_from_this();
-        CAMetalLayer*                layer = m_layer;
-        m_observer = [m_center addObserverForName:kPosterRequestName
-                                           object:layer
-                                            queue:nil
-                                       usingBlock:^(NSNotification* note) {
-                                           if (auto self = weak.lock()) self->request(note.userInfo);
-                                       }];
-    }
+        : m_now(std::move(clock)), m_notifications(center), m_target(layer) {}
 
     ~PosterMailbox()
     {
-        if (m_observer != nil) [m_center removeObserver:m_observer];
+        if (m_listener != nil) [m_notifications removeObserver:m_listener];
     }
 
-    void request(NSDictionary* info)
+    // Listens for requests aimed at the layer; the listener only holds the mailbox
+    // weakly, so this needs the mailbox to be owned by a shared pointer already.
+    void start()
     {
-        std::string context;
-        id          value = info[@"context"];
-        if ([value isKindOfClass:[NSString class]] && [(NSString*)value length] <= kPosterContextLimit) {
-            const char* utf8 = [(NSString*)value UTF8String];
-            if (utf8 != nullptr) context = utf8;
+        std::weak_ptr<PosterMailbox> weak = weak_from_this();
+        m_listener = [m_notifications addObserverForName:kPosterRequestName
+                                                  object:m_target
+                                                   queue:nil
+                                              usingBlock:^(NSNotification* note) {
+                                                  if (auto alive = weak.lock()) alive->noteRequest(note.userInfo);
+                                              }];
+    }
+
+    void noteRequest(NSDictionary* info)
+    {
+        std::string text;
+        if (id raw = info[@"context"]; [raw isKindOfClass:[NSString class]]) {
+            NSString* candidate = raw;
+            if (candidate.length <= kPosterContextLimit) {
+                if (const char* utf8 = candidate.UTF8String) text = utf8;
+            }
         }
-        std::lock_guard lock(m_mutex);
-        ++m_requested;
-        m_context = std::move(context);
-        if (m_wake) m_wake();
+        {
+            std::lock_guard guard(m_state_lock);
+            m_demand.ask(std::move(text));
+        }
+        m_wake.fire();
     }
 
-    void bindWake(std::function<void()> hook)
-    {
-        std::lock_guard lock(m_mutex);
-        m_wake = std::move(hook);
-    }
+    void bindWake(std::function<void()> hook) { m_wake.bind(std::move(hook)); }
 
     bool wants()
     {
-        std::lock_guard lock(m_mutex);
-        if (m_requested == m_delivered) return false;
-        const auto now   = m_clock();
-        const bool retry = ! m_captures.empty() && m_captures.back().number == m_requested;
-        if (retry && now < m_retry_after) return false;
-        m_captures.push_back(Capture { m_requested, m_context });
-        while (m_captures.size() > kPosterCaptureBacklog) m_captures.pop_front();
-        m_retry_after = now + kPosterRetryBackoff;
+        std::lock_guard guard(m_state_lock);
+        if (! m_demand.open()) return false;
+        const uint64_t ticket = m_demand.newest();
+        const PosterTime now  = m_now();
+        if (const auto last = m_ledger.newest_start_for(ticket)) {
+            // already handed to a capture: only a retry after the window
+            if (now - *last < kPosterRetryWindow) return false;
+        }
+        m_ledger.enter(ticket, m_demand.text(), now);
         return true;
     }
 
     void ready(std::span<const uint8_t> pixels, uint32_t width, uint32_t height, bool bgra)
     {
         @autoreleasepool {
-            std::string context;
-            {
-                std::lock_guard lock(m_mutex);
-                while (! m_captures.empty() && m_captures.front().number <= m_delivered) {
-                    m_captures.pop_front();
-                }
-                if (m_captures.empty() || m_layer == nil) return;
-                m_delivered = m_captures.front().number;
-                context     = std::move(m_captures.front().context);
-                m_captures.pop_front();
-            }
-            NSData*   data  = [NSData dataWithBytes:pixels.data() length:pixels.size()];
-            NSString* text  = [NSString stringWithUTF8String:context.c_str()] ?: @"";
-            __weak CAMetalLayer* layer  = m_layer;
-            NSNotificationCenter* center = m_center;
+            CAMetalLayer* layer = m_target;
+            if (layer == nil) return;
+            const std::optional<std::string> text = creditOldestCapture();
+            if (! text) return;
+
+            NSData*   bytes   = [NSData dataWithBytes:pixels.data() length:pixels.size()];
+            NSString* context = [NSString stringWithUTF8String:text->c_str()] ?: @"";
+            NSNotificationCenter* center = m_notifications;
+            __weak CAMetalLayer*  weakLayer = layer;
             dispatch_async(dispatch_get_main_queue(), ^{
-                CAMetalLayer* strong = layer;
-                if (strong == nil) return;
+                CAMetalLayer* target = weakLayer;
+                if (target == nil) return;
                 [center postNotificationName:kPosterReadyName
-                                      object:strong
+                                      object:target
                                     userInfo:@{
-                                        @"pixels" : data,
+                                        @"pixels" : bytes,
                                         @"width" : @(width),
                                         @"height" : @(height),
                                         @"bgra" : @(bgra),
-                                        @"context" : text,
+                                        @"context" : context,
                                     }];
             });
         }
     }
 
 private:
-    struct Capture {
-        uint64_t    number;
-        std::string context;
-    };
+    // The oldest capture whose request is still unanswered becomes the answered one.
+    std::optional<std::string> creditOldestCapture()
+    {
+        std::lock_guard guard(m_state_lock);
+        m_ledger.forget_if([this](const PosterLedger::Entry& e) { return m_demand.satisfied(e.ticket); });
+        auto oldest = m_ledger.take_oldest();
+        if (! oldest) return std::nullopt;
+        m_demand.settle(oldest->ticket);
+        return std::move(oldest->text);
+    }
 
-    std::mutex                              m_mutex;
-    __weak CAMetalLayer*                    m_layer;
-    NSNotificationCenter*                   m_center;
-    Clock                                   m_clock;
-    id                                      m_observer { nil };
-    uint64_t                                m_requested { 1 };
-    uint64_t                                m_delivered { 0 };
-    std::string                             m_context;
-    std::deque<Capture>                     m_captures;
-    std::chrono::steady_clock::time_point   m_retry_after {};
-    std::function<void()>                   m_wake;
+    Clock                 m_now;
+    NSNotificationCenter* m_notifications;
+    __weak CAMetalLayer*  m_target;
+    id                    m_listener { nil };
+    std::mutex            m_state_lock;
+    PosterDemand          m_demand;
+    PosterLedger          m_ledger;
+    PosterWakeSlot        m_wake;
 };
 
 // Validation shared by `init_metal` and `finish_surface_reconfigure`. Returns
@@ -1222,13 +1298,13 @@ extern "C" int owe_renderer_shared_counters(
 {
     clear_last_error();
     if (out_values == nullptr) return fail("the counter buffer is NULL");
-    const auto snapshot = wallpaper::audio::CurrentAudioSpectrumSnapshot();
-    const uint64_t values[OWE_RC_SHARED_COUNT] = {
-        snapshot.generation,
-        snapshot.accepted_frame_count,
-    };
-    const std::size_t written = std::min<std::size_t>(static_cast<std::size_t>(out_len), OWE_RC_SHARED_COUNT);
-    for (std::size_t i = 0; i < written; ++i) out_values[i] = values[i];
+    static_assert(OWE_RC_SHARED_COUNT == 2, "one slot per shared counter below");
+    const std::size_t written =
+        out_len < static_cast<uintptr_t>(OWE_RC_SHARED_COUNT) ? static_cast<std::size_t>(out_len)
+                                                              : static_cast<std::size_t>(OWE_RC_SHARED_COUNT);
+    const auto analysis = wallpaper::audio::CurrentAudioSpectrumSnapshot();
+    if (written > 0) out_values[0] = analysis.generation;
+    if (written > 1) out_values[1] = analysis.accepted_frame_count;
     if (out_written != nullptr) *out_written = static_cast<uintptr_t>(written);
     return 0;
 }

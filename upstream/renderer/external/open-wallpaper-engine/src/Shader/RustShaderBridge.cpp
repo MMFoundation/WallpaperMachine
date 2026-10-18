@@ -2,9 +2,8 @@
 #include "Shader/RustShaderBridge.hpp"
 
 #include <algorithm>
-#include <cstdlib>
-#include <cstring>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 
 namespace wallpaper::shader
@@ -97,80 +96,118 @@ void MergeActiveSlots(const nlohmann::json& document, RustShaderOutput& output)
 }
 
 #ifdef WESCENE_HAS_RUST_SHADER_FFI
-struct ProgramRelease {
-    void operator()(RsShaderProgram* program) const noexcept { rs_shader_program_free(program); }
-};
-using ProgramHandle = std::unique_ptr<RsShaderProgram, ProgramRelease>;
-
-void ReleaseIncludeBytes(uint8_t* ptr, size_t, void*)
+std::string CopyCString(const char* text)
 {
-    std::free(ptr);
+    return text ? std::string(text) : std::string();
+}
+
+// Owns the compiler's program for the span of one compile.
+class ScopedCompilerProgram {
+public:
+    explicit ScopedCompilerProgram(RsShaderProgram* program) noexcept: m_program(program) {}
+    ScopedCompilerProgram(const ScopedCompilerProgram&)            = delete;
+    ScopedCompilerProgram& operator=(const ScopedCompilerProgram&) = delete;
+    ~ScopedCompilerProgram()
+    {
+        if (m_program != nullptr) rs_shader_program_free(m_program);
+    }
+    const RsShaderProgram* get() const noexcept { return m_program; }
+    explicit operator bool() const noexcept { return m_program != nullptr; }
+
+private:
+    RsShaderProgram* m_program;
+};
+
+// An include reply owns its text as a heap string; the compiler's release call deletes it.
+void DeleteIncludeText(uint8_t*, size_t, void* owner)
+{
+    delete static_cast<std::string*>(owner);
+}
+
+RsShaderOwnedBytes NoInclude()
+{
+    return RsShaderOwnedBytes { nullptr, 0, nullptr, nullptr };
 }
 
 RsShaderOwnedBytes ServeInclude(const char* path, void* user_data)
 {
-    const RsShaderOwnedBytes none { nullptr, 0, nullptr, nullptr };
     const auto* reader = static_cast<const RustShaderIncludeReader*>(user_data);
-    if (path == nullptr || reader == nullptr || ! *reader) return none;
+    if (reader == nullptr || ! static_cast<bool>(*reader) || path == nullptr) return NoInclude();
+
+    std::unique_ptr<std::string> text;
     try {
-        const std::optional<std::string> found = (*reader)(path);
-        if (! found.has_value()) return none;
-        // An empty include is not a missing one: hand back a non-null pointer.
-        auto* bytes = static_cast<uint8_t*>(std::malloc(std::max<size_t>(found->size(), 1)));
-        if (bytes == nullptr) return none;
-        if (! found->empty()) std::memcpy(bytes, found->data(), found->size());
-        return RsShaderOwnedBytes { bytes, found->size(), &ReleaseIncludeBytes, nullptr };
+        std::optional<std::string> found = (*reader)(path);
+        if (found) text = std::make_unique<std::string>(std::move(*found));
     } catch (...) {
-        return none;
+        // a reader fault or an allocation failure is "not available" to the compiler
     }
+    if (! text) return NoInclude();
+
+    // std::string::data() is never null, so an empty include stays distinguishable from a missing one.
+    auto* bytes = reinterpret_cast<uint8_t*>(text->data());
+    const size_t length = text->size();
+    return RsShaderOwnedBytes { bytes, length, &DeleteIncludeText, text.release() };
 }
 
-std::string Borrowed(const char* text)
+// What reading a compiler program produced: a complete output, or nothing usable.
+struct ProgramReading {
+    bool             usable { false };
+    RustShaderOutput output;
+};
+
+ProgramReading ReadProgram(const RsShaderProgram* program)
 {
-    return text != nullptr ? std::string(text) : std::string {};
+    ProgramReading reading;
+    try {
+        RustShaderOutput gathered;
+        const size_t count = rs_shader_program_stage_count(program);
+        gathered.metal_stages.reserve(count);
+        for (size_t index = 0; index < count; ++index) {
+            const char* source = rs_shader_program_stage_msl_source(program, index);
+            if (source == nullptr || source[0] == '\0') return reading;
+            if (rs_shader_program_stage_target(program, index) != 1) return reading;
+            const int  kind  = rs_shader_program_stage_kind(program, index);
+            const bool is_vs = kind == 0;
+            if (! is_vs && kind != 1) return reading;
+
+            RustShaderMetalStage stage;
+            ApplyRustShaderMetalStageJson(CopyCString(rs_shader_program_stage_metal_json(program, index)),
+                                          source,
+                                          is_vs ? ShaderType::VERTEX : ShaderType::FRAGMENT,
+                                          stage);
+            gathered.metal_stages.push_back(std::move(stage));
+        }
+
+        gathered.cache_key        = CopyCString(rs_shader_program_cache_key(program));
+        gathered.diagnostics_json = CopyCString(rs_shader_program_diagnostics_json(program));
+        gathered.reflection_json  = CopyCString(rs_shader_program_reflection_json(program));
+        gathered.metadata_json    = CopyCString(rs_shader_program_metadata_json(program));
+        ApplyRustShaderReflectionJson(gathered.reflection_json, gathered);
+        ApplyRustShaderMetadataJson(gathered.metadata_json, gathered);
+
+        reading.output = std::move(gathered);
+        reading.usable = true;
+    } catch (...) {
+        reading = ProgramReading {};
+    }
+    return reading;
 }
 
 bool CompileRequestText(const std::string& request_text,
                         RustShaderOutput& output,
                         const RustShaderIncludeReader& include_reader)
 {
-    output = RustShaderOutput {};
-    RsShaderProgram* raw = nullptr;
-    const int status = rs_shader_compile_program(request_text.c_str(),
-                                                 include_reader ? &ServeInclude : nullptr,
-                                                 const_cast<RustShaderIncludeReader*>(&include_reader),
-                                                 &raw);
-    ProgramHandle program(raw);
-    if (status != 0 || ! program) return false;
+    RsShaderProgram* produced = nullptr;
+    RsShaderIncludeCallback callback = include_reader ? &ServeInclude : nullptr;
+    const int status = rs_shader_compile_program(
+        request_text.c_str(), callback, const_cast<RustShaderIncludeReader*>(&include_reader), &produced);
+    const ScopedCompilerProgram program(produced);
 
-    try {
-        RustShaderOutput built;
-        const size_t stage_count = rs_shader_program_stage_count(program.get());
-        for (size_t i = 0; i < stage_count; ++i) {
-            const int kind = rs_shader_program_stage_kind(program.get(), i);
-            if (kind != 0 && kind != 1) return false;
-            if (rs_shader_program_stage_target(program.get(), i) != 1) return false;
-            const std::string msl = Borrowed(rs_shader_program_stage_msl_source(program.get(), i));
-            if (msl.empty()) return false;
-            const std::string metal_json =
-                Borrowed(rs_shader_program_stage_metal_json(program.get(), i));
-            RustShaderMetalStage stage;
-            ApplyRustShaderMetalStageJson(
-                metal_json, msl, kind == 0 ? ShaderType::VERTEX : ShaderType::FRAGMENT, stage);
-            built.metal_stages.push_back(std::move(stage));
-        }
-        built.metadata_json    = Borrowed(rs_shader_program_metadata_json(program.get()));
-        built.reflection_json  = Borrowed(rs_shader_program_reflection_json(program.get()));
-        built.diagnostics_json = Borrowed(rs_shader_program_diagnostics_json(program.get()));
-        built.cache_key        = Borrowed(rs_shader_program_cache_key(program.get()));
-        ApplyRustShaderMetadataJson(built.metadata_json, built);
-        ApplyRustShaderReflectionJson(built.reflection_json, built);
-        output = std::move(built);
-        return true;
-    } catch (...) {
-        output = RustShaderOutput {};
-        return false;
-    }
+    ProgramReading reading;
+    if (status == 0 && program) reading = ReadProgram(program.get());
+
+    output = reading.usable ? std::move(reading.output) : RustShaderOutput {};
+    return reading.usable;
 }
 #endif
 
@@ -328,7 +365,7 @@ bool CompileRustShaderProgram(
 std::string RustShaderCacheIdentity()
 {
 #ifdef WESCENE_HAS_RUST_SHADER_FFI
-    return Borrowed(rs_shader_cache_identity());
+    return CopyCString(rs_shader_cache_identity());
 #else
     return "wallpaper-machine-shader-compiler-not-linked";
 #endif
@@ -337,7 +374,7 @@ std::string RustShaderCacheIdentity()
 std::string LastRustShaderError()
 {
 #ifdef WESCENE_HAS_RUST_SHADER_FFI
-    return Borrowed(rs_shader_last_error());
+    return CopyCString(rs_shader_last_error());
 #else
     return "the shader compiler is not linked into this build";
 #endif
