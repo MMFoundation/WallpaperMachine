@@ -368,12 +368,6 @@ struct ParseContext {
 
 namespace
 {
-/// The whole content of an asset file, empty when it is absent.
-std::vector<uint8_t> ReadAssetBytes(fs::VFS& vfs, const std::string& path) {
-    const std::string text = fs::GetFileContent(vfs, path);
-    return std::vector<uint8_t>(text.begin(), text.end());
-}
-
 void MarkSceneRequiresAudioResponse(Scene* scene) {
     if (scene != nullptr && scene->runtime != nullptr) scene->runtime->MarkSceneRequiresAudioResponse();
 }
@@ -4353,7 +4347,9 @@ bool PrepareParticleSystem(ParseContext& context, const wpscene::Particle& file,
     for (const auto& child : file.children) {
         ParticleSystemBuild prepared;
         bool                child_skipped = false;
-        const uint64_t      share = instances * static_cast<uint64_t>(std::max(1, child.maxcount));
+        // Saturating: a chain of children with huge counts must not wrap round to a small product.
+        constexpr uint64_t  kMostInstances = uint64_t { 1 } << 32;
+        const uint64_t      share = std::min(kMostInstances, instances * static_cast<uint64_t>(std::max(1, child.maxcount)));
         if (PrepareParticleSystem(context, child.obj, &child, share, prepared, child_skipped)) {
             build.children.push_back(std::move(prepared));
         }
@@ -5621,10 +5617,10 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
     PrewarmParticleSystems(context);
     BuildBloom(context, general, bloom);
 
-    // Layers that read other layers' pictures, and whether that is legal.
-    const auto refs = CollectLayerTextureRefs(scanned, index, &vfs);
-    for (const auto& ref : refs) scene->layer_texture_sources.insert(ref.source_id);
-    scene->layer_texture_error = ClassifyLayerTextureReferences(refs, index);
+    // Layers that read other layers' pictures, and whether that is legal: the references
+    // found before any layer was built (the files they came from do not change).
+    for (const auto& ref : early_refs) scene->layer_texture_sources.insert(ref.source_id);
+    scene->layer_texture_error = ClassifyLayerTextureReferences(early_refs, index);
 
     FlushPendingMetalTranslations(*scene);
     scene->shader_compile_error = ShaderFailureReason();

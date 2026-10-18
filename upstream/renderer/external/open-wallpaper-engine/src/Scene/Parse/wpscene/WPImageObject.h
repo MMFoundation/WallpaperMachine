@@ -49,7 +49,7 @@ class WPImageEffect {
 public:
     bool                         FromJson(const nlohmann::json&, fs::VFS& vfs);
     bool                         FromFileJson(const nlohmann::json&, fs::VFS& vfs);
-    int32_t                      id;
+    int32_t                      id { 0 };
     std::string                  name;
     bool                         visible { true };
     /// `visible` as written when a user property or a script decides it:
@@ -58,7 +58,7 @@ public:
     /// the scene runs (`scripted_visible`). Null for a fixed visibility.
     nlohmann::json               visible_setting;
     bool                         scripted_visible { false };
-    int32_t                      version;
+    int32_t                      version { 0 };
     std::vector<WPMaterial>      materials;
     std::vector<WPMaterialPass>  passes;
     std::vector<WPEffectCommand> commands;

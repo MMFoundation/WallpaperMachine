@@ -95,7 +95,10 @@ inline bool ReadTolerantVec3(const nlohmann::json& setting, std::array<float, 3>
         if (value.size() < 3) return false;
         std::array<float, 3> lanes;
         for (std::size_t i = 0; i < 3; ++i) {
-            if (! value[i].is_number()) return false;
+            if (! value[i].is_number()) {
+                LOG_INFO("vector holds an element that is not a number, keeping its default");
+                return false;
+            }
             lanes[i] = value[i].get<float>();
         }
         out = lanes;
@@ -114,6 +117,8 @@ inline bool ReadTolerantVec3(const nlohmann::json& setting, std::array<float, 3>
         float number = 0.0f;
         if (! detail::ParseNumberToken(std::string_view(text).substr(begin, at - begin), number) ||
             ! std::isfinite(number)) {
+            LOG_INFO("vector text '%s' holds a token that is not a finite number, keeping its default",
+                     text.c_str());
             return false;
         }
         lanes[count++] = number;
@@ -161,7 +166,8 @@ bool ReadStrictVec(const nlohmann::json& setting, std::array<float, N>& out) {
     return true;
 }
 
-/// A plain or wrapped scalar number. Returns whether `out` was read.
+/// A plain or wrapped scalar number. Returns whether `out` was read. A number
+/// that does not fit an integer target takes the nearest value that does.
 template<typename T>
 bool ReadNumberSetting(const nlohmann::json& setting, T& out) {
     const auto& value = UnwrapSetting(setting);
@@ -171,7 +177,11 @@ bool ReadNumberSetting(const nlohmann::json& setting, T& out) {
     } else {
         const double number = value.get<double>();
         if (! std::isfinite(number)) return false;
-        out = static_cast<T>(number);
+        constexpr double lowest  = static_cast<double>(std::numeric_limits<T>::lowest());
+        constexpr double highest = static_cast<double>(std::numeric_limits<T>::max());
+        out = number <= lowest ? std::numeric_limits<T>::lowest()
+              : number >= highest ? std::numeric_limits<T>::max()
+                                  : static_cast<T>(number);
     }
     return true;
 }

@@ -15,7 +15,7 @@ class WPMaterialPassBindItem {
 public:
     bool        FromJson(const nlohmann::json&);
     std::string name;
-    int32_t     index;
+    int32_t     index { 0 };
 };
 
 struct WPUserTexture {

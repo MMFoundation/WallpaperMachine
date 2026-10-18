@@ -9428,3 +9428,19 @@ TEST(SceneSchema, ADocumentNestedWithoutBoundIsRefusedRatherThanOverflowingTheSt
     quoted += R"(\"["}]})";
     EXPECT_NE(parser.Parse("nested-quoted", quoted, vfs, sound_manager), nullptr);
 }
+
+TEST(SceneSchema, IntegerSettingsOutsideTheirRangeTakeTheNearestValue) {
+    wpscene::WPMaterial material;
+    ASSERT_TRUE(material.FromJson(nlohmann::json::parse(
+        R"({"passes":[{"shader":"s","combos":{"HIGH":1e30,"LOW":-1e30,"PLAIN":3.9}}]})")));
+    EXPECT_EQ(material.combos.at("HIGH"), std::numeric_limits<int32_t>::max());
+    EXPECT_EQ(material.combos.at("LOW"), std::numeric_limits<int32_t>::lowest());
+    EXPECT_EQ(material.combos.at("PLAIN"), 3);
+
+    int32_t id = 7;
+    EXPECT_TRUE(wpscene::ReadNumberSetting(nlohmann::json::parse("1e30"), id));
+    EXPECT_EQ(id, std::numeric_limits<int32_t>::max());
+    uint32_t count = 7;
+    EXPECT_TRUE(wpscene::ReadNumberSetting(nlohmann::json::parse("-5"), count));
+    EXPECT_EQ(count, 0u);
+}

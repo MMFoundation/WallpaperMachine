@@ -67,8 +67,8 @@ std::unordered_map<std::string, int32_t> ReadCombos(const nlohmann::json& json) 
         if (value.is_boolean()) {
             combos[name] = value.get<bool>() ? 1 : 0;
         } else if (value.is_number()) {
-            const double number = value.get<double>();
-            if (std::isfinite(number)) combos[name] = static_cast<int32_t>(number);
+            int32_t number = 0;
+            if (ReadNumberSetting(value, number)) combos[name] = number;
         }
     }
     return combos;
