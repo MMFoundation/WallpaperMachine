@@ -84,7 +84,6 @@ struct WPShaderValueData {
     /// scene, for a draw that is not that layer's own node (an effect pass);
     /// null for the layer's own draws.
     SceneNode* parallax_layer { nullptr };
-    // index + name
     std::vector<std::pair<usize, std::string>> renderTargets;
 
     WPPuppetLayer puppet_layer;
@@ -142,7 +141,8 @@ public:
     };
     void RegisterPuppetAttachments(WPPuppetLayer layer, std::vector<PuppetAttachment> attachments);
 
-    void SetScreenSize(i32 w, i32 h) override { m_screen_size = { (float)w, (float)h }; }
+    // CLEANROOM SH55
+    void SetScreenSize(i32, i32) override {}
 
 private:
     struct PuppetAttachmentGroup {
@@ -156,7 +156,6 @@ private:
     WallClock            m_wall_clock;
     WPCameraParallax     m_parallax;
     double               m_dayTime { 0.0f };
-    std::array<float, 2> m_texelSize { 1.0f / 1920.0f, 1.0f / 1080.0f };
 
     std::array<float, 2> m_mousePos { 0.5f, 0.5f };
     /// `m_mousePos` as the previous frame's shaders saw it.
@@ -166,10 +165,8 @@ private:
     std::array<float, 2> m_mousePosInput { 0.5f, 0.5f };
     /// The cursor parallax follows, eased by the camera parallax delay.
     std::array<float, 2> m_parallaxPos { 0.5f, 0.5f };
-    uint                 m_mouseInputCount { 0 };
 
 
-    std::array<float, 2> m_screen_size { 1920, 1080 };
     std::optional<ShaderValue> m_audioSpectrumPacked;
 
     Map<void*, Map<uint32_t, WPShaderValueData>> m_nodeDataMap;

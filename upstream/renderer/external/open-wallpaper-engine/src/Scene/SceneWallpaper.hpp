@@ -111,17 +111,8 @@ public:
     void initSurface(const RenderInitInfo&);
     void applyConfig(const SceneWallpaperConfig&);
 
-    /// Pauses rendering and releases the renderer's surface on the render
-    /// thread. Blocks until the render thread confirms completion.
-    /// The scene, shaders, render graph, audio, and runtime state remain
-    /// loaded. Returns false on any internal failure.
     bool beginSurfaceReconfigure();
 
-    /// Rebuilds the renderer's surface on the render thread from a new
-    /// RenderInitInfo and resumes rendering. Blocks until the render
-    /// thread confirms completion.
-    /// Preconditions: `beginSurfaceReconfigure` has returned true since the
-    /// last successful init/finish. Returns false on failure.
     bool finishSurfaceReconfigure(const RenderInitInfo& info);
 
     void play();
@@ -193,15 +184,11 @@ public:
     std::size_t counters(uint64_t* out, std::size_t len) const;
 
 private:
-    bool m_inited { false };
-
-private:
     friend class MainHandler;
 #ifdef WESCENE_BUILD_TESTS
     friend struct SceneWallpaperInputTestAccess;
 #endif
 
-    bool                         m_offscreen { false };
     std::shared_ptr<MainHandler> m_main_handler;
 };
 

@@ -30,8 +30,6 @@ struct RenderInitInfo {
     double   display_scale_factor { 1.0 };
     ReDrawCB redraw_callback;
 
-    // Optional, demand-driven export of the final presented pixels. The host
-    // uses this for a native desktop poster, not for screen/window capture.
     std::function<bool()> wants_poster;
     std::function<void(std::span<const uint8_t>, uint32_t, uint32_t, bool)> poster_ready;
     /// Lets the host wake the render handler when a poster is requested.

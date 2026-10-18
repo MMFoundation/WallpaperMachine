@@ -46,8 +46,6 @@ constexpr std::string_view WE_IN_TANGENT { "a_Tangent4" };
 constexpr std::string_view WE_IN_BLENDINDICES { "a_BlendIndices" };
 constexpr std::string_view WE_IN_BLENDWEIGHTS { "a_BlendWeights" };
 
-// particle
-
 constexpr std::string_view WE_IN_POSITIONVEC4 { "a_PositionVec4" };
 constexpr std::string_view WE_IN_COLOR { "a_Color" };
 constexpr std::string_view WE_IN_TEXCOORDVEC4 { "a_TexCoordVec4" };
@@ -113,28 +111,13 @@ constexpr std::string_view G_ORIENTATIONFORWARD { "g_OrientationForward" };
 constexpr std::string_view SpecTex_Default { "_rt_default" };
 constexpr std::string_view SpecTex_Link { "_rt_link_" };
 
-inline bool IsImplicitSpecTex(const std::string_view name) {
-    return !name.empty() && name.front() == '_' && name.find('/') == std::string_view::npos &&
-           name.find('.') == std::string_view::npos;
-}
-inline bool IsSpecTex(const std::string_view name) {
-    return sstart_with(name, WE_SPEC_PREFIX) || sstart_with(name, WE_ALIAS_PREFIX) ||
-           IsImplicitSpecTex(name);
-}
-inline std::string EnsureSpecTexName(const std::string_view name) {
-    if (name.empty() || IsSpecTex(name)) return std::string(name);
-    return std::string(WE_SPEC_PREFIX) + std::string(name);
-}
-inline bool IsSpecLinkTex(const std::string_view name) { return sstart_with(name, SpecTex_Link); }
-inline uint32_t ParseLinkTex(const std::string_view name) {
-    // The id is the digits after the prefix; a name no longer than the prefix has none.
-    if (name.size() <= SpecTex_Link.size()) return 0;
-    std::string sid { name.substr(SpecTex_Link.size()) };
-    uint32_t result { 0 };
-    STRTONUM(sid, result);
-    return result;
-}
-inline std::string GenLinkTex(idx id) { return std::string(SpecTex_Link) + std::to_string(id); }
+// CLEANROOM SH56
+inline bool IsImplicitSpecTex(const std::string_view) { return false; }
+inline bool IsSpecTex(const std::string_view) { return false; }
+inline std::string EnsureSpecTexName(const std::string_view name) { return std::string(name); }
+inline bool IsSpecLinkTex(const std::string_view) { return false; }
+inline uint32_t ParseLinkTex(const std::string_view) { return 0; }
+inline std::string GenLinkTex(idx) { return {}; }
 inline std::string LayerCompositeTargetKey(idx id) {
     return std::string(WE_IMAGE_LAYER_COMPOSITE_PREFIX) + std::to_string(id);
 }
