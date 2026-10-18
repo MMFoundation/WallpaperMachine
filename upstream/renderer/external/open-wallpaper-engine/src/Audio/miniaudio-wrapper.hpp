@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e5-text-audio-video-runtime.md; written without access to the original source.
 #pragma once
 #include <memory>
 #include <vector>
@@ -91,7 +92,13 @@ public:
     void MountChannel(std::shared_ptr<Channel> chn) {
         std::lock_guard<std::mutex> control { m_control_mutex };
         if (! IsInited()) InitLocked({});
-        (void)chn; // CLEANROOM MV29
+        if (chn) {
+            // The stream learns the layout before the mix can read it; a device that did
+            // not open reports zeros, which keeps the stream from starting.
+            chn->PassDeviceDesc(GetDesc());
+            std::unique_lock<std::mutex> lock { m_mutex };
+            m_channels.push_back(ChannelWrap { false, std::move(chn) });
+        }
         UpdateOutputLocked();
     }
     void UnmountAll() {
@@ -100,7 +107,8 @@ public:
         UpdateOutputLocked();
     }
     DeviceDesc GetDesc() const {
-        return {}; // CLEANROOM MV30
+        if (! IsInited()) return { 0, 0 };
+        return { m_device.playback.channels, m_device.sampleRate };
     }
 
 private:
@@ -156,19 +164,57 @@ private:
 private:
     static void data_callback(ma_device* pMaDevice, void* pOutput, const void* pInput,
                               ma_uint32 frameCount) {
-        (void)pMaDevice;
-        (void)pOutput;
-        (void)pInput;
-        (void)frameCount; // CLEANROOM MV31
+        if (pMaDevice == nullptr) return;
+        auto* self = static_cast<Device*>(pMaDevice->pUserData);
+        if (self != nullptr) self->data_callback(pOutput, pInput, frameCount);
     }
     void data_callback(void* pOutput, const void* pInput, ma_uint32 frameCount) {
-        (void)pOutput;
         (void)pInput;
-        (void)frameCount; // CLEANROOM MV32
+        if (pOutput == nullptr || ! IsInited()) return;
+        const std::size_t channels = m_device.playback.channels;
+        if (channels == 0) return;
+        const std::size_t samples = static_cast<std::size_t>(frameCount) * channels;
+        auto*             out     = static_cast<float*>(pOutput);
+        wallpaper::audio::ClearInterleavedF32(out, samples);
+        if (! m_running.load(std::memory_order_relaxed) || m_muted.load(std::memory_order_relaxed))
+            return;
+
+        // A control thread changing the stream list makes this cycle silent; it never waits.
+        std::unique_lock<std::mutex> lock { m_mutex, std::try_to_lock };
+        if (! lock.owns_lock() || m_channels.empty()) return;
+
+        const std::size_t bytes = samples * sizeof(float);
+        if (m_frameBuffer.size() < bytes) m_frameBuffer.resize(bytes);
+        auto*       scratch = reinterpret_cast<float*>(m_frameBuffer.data());
+        const float master  = m_volume.load(std::memory_order_relaxed);
+
+        bool any_finished = false;
+        for (auto& wrap : m_channels) {
+            wallpaper::audio::ClearInterleavedF32(scratch, samples);
+            const ma_uint64 got = wrap.chn->NextPcmData(scratch, frameCount);
+            if (got == 0) {
+                wrap.end     = true;
+                any_finished = true;
+                continue;
+            }
+            const std::size_t real = static_cast<std::size_t>(std::min<ma_uint64>(got, frameCount));
+            wallpaper::audio::MixInterleavedF32(out, scratch, real * channels, master);
+        }
+        if (any_finished) {
+            m_channels.erase(std::remove_if(m_channels.begin(), m_channels.end(),
+                                            [](const ChannelWrap& w) { return w.end; }),
+                             m_channels.end());
+        }
     }
     ma_device_config GenMaDeviceConfig(const DeviceDesc& d) {
-        (void)d;
-        return ma_device_config_init(ma_device_type_playback); // CLEANROOM MV33
+        ma_device_config config = ma_device_config_init(ma_device_type_playback);
+        // 0 channels and rate 0 mean the system's default output as it is.
+        config.playback.format   = DeviceDesc::format;
+        config.playback.channels = d.phyChannels;
+        config.sampleRate        = d.sampleRate;
+        config.dataCallback      = &Device::data_callback;
+        config.pUserData         = this;
+        return config;
     }
 
 private:
