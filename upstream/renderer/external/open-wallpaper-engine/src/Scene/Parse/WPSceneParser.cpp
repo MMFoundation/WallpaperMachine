@@ -337,6 +337,10 @@ struct ParseContext {
     /// Work that waits for the layers to sit in their tree (a child system's place under a
     /// world-space parent depends on the scale it is drawn under).
     std::vector<std::function<void()>>                      after_attach;
+    /// Bindings whose scripts read other layers as they are made: bound once every layer exists.
+    std::vector<std::function<void()>>                      deferred_bindings;
+    /// A parse after the scene exists (a layer a script makes) binds at once: every layer is there.
+    bool                                                    bind_now { false };
     std::unordered_set<int32_t>                             referenced_layer_ids;
     /// The layers of the tree, in the order the scene file declares them.
     std::vector<ParsedLayer>                                layers;
@@ -2405,6 +2409,7 @@ ParseContext MakeLazyParseContext(const std::shared_ptr<Scene>& scene, fs::VFS& 
     lazy.shader_updater           = static_cast<WPShaderValueUpdater*>(scene->shaderValueUpdater.get());
     lazy.ortho_w                  = scene->ortho[0];
     lazy.ortho_h                  = scene->ortho[1];
+    lazy.bind_now                 = true;
     lazy.global_base_uniforms     = inputs.globals;
     lazy.is_ortho                 = inputs.is_ortho;
     lazy.uses_models              = inputs.uses_models;
@@ -2713,8 +2718,24 @@ std::shared_ptr<SceneNode> MakePlainLayerNode(ParseContext& context, const nlohm
                 if (! authored.empty()) runtime.RegisterLayerAlias(authored, plan.key);
             }
         }
-        RegisterNodeTransformSettings(runtime, node.get(), plan.key, base.origin_setting,
-                                      base.scale_setting, base.angles_setting, animate);
+        const auto has_script = [](const nlohmann::json& setting) {
+            return setting.is_object() && setting.contains("script");
+        };
+        if (! context.bind_now && (has_script(base.origin_setting) || has_script(base.scale_setting) ||
+                                   has_script(base.angles_setting))) {
+            // A script may look up other layers when it is made, so it is made once they all exist.
+            context.deferred_bindings.push_back(
+                [&context, weak = std::weak_ptr<SceneNode>(node), key = plan.key, base, animate]() {
+                    const auto held = weak.lock();
+                    auto* const live = context.scene->runtime.get();
+                    if (held == nullptr || live == nullptr) return;
+                    RegisterNodeTransformSettings(*live, held.get(), key, base.origin_setting,
+                                                  base.scale_setting, base.angles_setting, animate);
+                });
+        } else {
+            RegisterNodeTransformSettings(runtime, node.get(), plan.key, base.origin_setting,
+                                          base.scale_setting, base.angles_setting, animate);
+        }
         QueueSceneScripts(context, base.field_bindings, plan.key);
 
         // Visibility: the authored flag, or the value a property or script gives it,
@@ -5478,6 +5499,12 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
             [weak, vfs_pointer, inputs](const std::string& config, int32_t object_id) {
                 return MakeScriptTextLayer(weak.lock(), vfs_pointer, inputs, config, object_id);
             });
+    }
+
+    // The scripts bound to transforms are made now that every layer, id and hook exists.
+    {
+        auto bindings = std::move(context.deferred_bindings);
+        for (auto& bind : bindings) bind();
     }
 
     // Scene scripts start last, once every layer, id and hook they may use exists,
