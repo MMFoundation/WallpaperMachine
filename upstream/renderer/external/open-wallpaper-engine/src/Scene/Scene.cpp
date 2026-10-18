@@ -10,7 +10,9 @@
 namespace wallpaper 
 {
 
-Scene::Scene(): sceneGraph(std::make_shared<SceneNode>()) ,paritileSys(std::make_unique<ParticleSystem>(*this)) {}
+Scene::Scene() {
+    // CLEANROOM SM1
+}
 Scene::~Scene() {
     // A script's `destroy()` may reach the file system, the render-exclusion list
     // and the scene graph. Members die in reverse order of declaration, and the

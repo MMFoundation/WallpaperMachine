@@ -45,45 +45,90 @@ public:
 
 	class Submesh {
 	public:
-		std::size_t VertexCount() const { return m_vertexArrays.size(); }
-		std::size_t IndexCount() const { return m_indexArrays.size(); }
+		std::size_t VertexCount() const {
+			// CLEANROOM SM19
+			return 0;
+		}
+		std::size_t IndexCount() const {
+			// CLEANROOM SM19
+			return 0;
+		}
 
-		const SceneVertexArray& GetVertexArray(const std::size_t index) const { return m_vertexArrays[index]; }
-		const SceneIndexArray& GetIndexArray(const std::size_t index) const { return m_indexArrays[index]; }
+		const SceneVertexArray& GetVertexArray(const std::size_t index) const {
+			// CLEANROOM SM19
+			(void)index;
+			static const SceneVertexArray none({}, 0);
+			return none;
+		}
+		const SceneIndexArray& GetIndexArray(const std::size_t index) const {
+			// CLEANROOM SM19
+			(void)index;
+			static const SceneIndexArray none(std::span<const uint32_t> {});
+			return none;
+		}
 
-		SceneVertexArray& GetVertexArray(const std::size_t index) { return m_vertexArrays[index]; }
-		SceneIndexArray& GetIndexArray(const std::size_t index) { return m_indexArrays[index]; }
+		SceneVertexArray& GetVertexArray(const std::size_t index) {
+			// CLEANROOM SM19
+			(void)index;
+			static SceneVertexArray none({}, 0);
+			return none;
+		}
+		SceneIndexArray& GetIndexArray(const std::size_t index) {
+			// CLEANROOM SM19
+			(void)index;
+			static SceneIndexArray none(std::span<const uint32_t> {});
+			return none;
+		}
 
 		void AddIndexArray(SceneIndexArray&& array) {
-			m_indexArrays.emplace_back(std::move(array));
+			// CLEANROOM SM19
+			(void)array;
 		}
 		void AddVertexArray(SceneVertexArray&& array) {
-			m_vertexArrays.emplace_back(std::move(array));
+			// CLEANROOM SM19
+			(void)array;
 		}
 
-		const std::vector<DrawRange>& DrawRanges() const { return m_drawRanges; }
-		std::vector<DrawRange>& DrawRanges() { return m_drawRanges; }
+		const std::vector<DrawRange>& DrawRanges() const {
+			// CLEANROOM SM19
+			static const std::vector<DrawRange> none;
+			return none;
+		}
+		std::vector<DrawRange>& DrawRanges() {
+			// CLEANROOM SM19
+			static std::vector<DrawRange> none;
+			return none;
+		}
 		void SetDrawRanges(std::span<const DrawRange> ranges) {
-			m_drawRanges.assign(ranges.begin(), ranges.end());
+			// CLEANROOM SM19
+			(void)ranges;
 		}
 
 		uint32_t material_slot {0};
 		std::string output_override;
-
-	private:
-		std::vector<SceneVertexArray> m_vertexArrays;
-		std::vector<SceneIndexArray> m_indexArrays;
-		std::vector<DrawRange> m_drawRanges;
 	};
 
-	explicit SceneMesh(MeshUpdate update = MeshUpdate::Fixed):m_update(update),m_dirty(false),
-		m_data(std::make_shared<Data>()) {}
+	explicit SceneMesh(MeshUpdate update = MeshUpdate::Fixed):m_update(update) {
+		// CLEANROOM SM19
+	}
 
-	std::size_t VertexCount() const { return HasSubmeshZero() ? SubmeshZero().VertexCount() : 0; }
-	std::size_t IndexCount() const { return HasSubmeshZero() ? SubmeshZero().IndexCount() : 0; }
+	std::size_t VertexCount() const {
+		// CLEANROOM SM19
+		return 0;
+	}
+	std::size_t IndexCount() const {
+		// CLEANROOM SM19
+		return 0;
+	}
 
-	MeshPrimitive Primitive() const { return m_primitive; }
-	uint32_t PointSize() const { return m_pointSize; }
+	MeshPrimitive Primitive() const {
+		// CLEANROOM SM19
+		return MeshPrimitive::TRIANGLE;
+	}
+	uint32_t PointSize() const {
+		// CLEANROOM SM19
+		return 1;
+	}
 
 	/// Whether the vertices may be rewritten after parsing. Every upload,
 	/// buffer-allocation and pixel-reuse decision asks this and nothing else.
@@ -92,92 +137,149 @@ public:
 	/// scene has to keep drawing; never to decide how to upload.
 	MeshUpdate UpdateDriver() const { return m_update; }
 	bool UpdatesOnEvent() const { return m_update == MeshUpdate::OnEvent; }
-	const auto& Dirty() const { return m_dirty; }
-	auto& Dirty() { return m_dirty; }
-	void SetDirty() {
-		m_dirty.store(true);
-		m_dirty_generation.fetch_add(1);
+	const auto& Dirty() const {
+		// CLEANROOM SM19
+		static const std::atomic<bool> none { false };
+		return none;
 	}
-	uint64_t DirtyGeneration() const { return m_dirty_generation.load(); }
+	auto& Dirty() {
+		// CLEANROOM SM19
+		static std::atomic<bool> none { false };
+		return none;
+	}
+	void SetDirty() {
+		// CLEANROOM SM19
+	}
+	uint64_t DirtyGeneration() const {
+		// CLEANROOM SM19
+		return 0;
+	}
 
-	uint32_t ID() const { return m_id; };
-	void SetID(uint32_t v) { m_id = v; };
+	uint32_t ID() const {
+		// CLEANROOM SM19
+		return 0;
+	}
+	void SetID(uint32_t v) {
+		// CLEANROOM SM19
+		(void)v;
+	}
 
-	const SceneVertexArray& GetVertexArray(const std::size_t index) const { return SubmeshZero().GetVertexArray(index); }
-	const SceneIndexArray& GetIndexArray(const std::size_t index) const { return SubmeshZero().GetIndexArray(index); }
+	const SceneVertexArray& GetVertexArray(const std::size_t index) const {
+		// CLEANROOM SM19
+		(void)index;
+		static const SceneVertexArray none({}, 0);
+		return none;
+	}
+	const SceneIndexArray& GetIndexArray(const std::size_t index) const {
+		// CLEANROOM SM19
+		(void)index;
+		static const SceneIndexArray none(std::span<const uint32_t> {});
+		return none;
+	}
 
-	SceneVertexArray& GetVertexArray(const std::size_t index) { return SubmeshZero().GetVertexArray(index); }
-	SceneIndexArray& GetIndexArray(const std::size_t index) { return SubmeshZero().GetIndexArray(index); }
-
+	SceneVertexArray& GetVertexArray(const std::size_t index) {
+		// CLEANROOM SM19
+		(void)index;
+		static SceneVertexArray none({}, 0);
+		return none;
+	}
+	SceneIndexArray& GetIndexArray(const std::size_t index) {
+		// CLEANROOM SM19
+		(void)index;
+		static SceneIndexArray none(std::span<const uint32_t> {});
+		return none;
+	}
 
 	void AddIndexArray(SceneIndexArray&& array) {
-		SubmeshZero().AddIndexArray(std::move(array));
+		// CLEANROOM SM19
+		(void)array;
 	}
 	void AddVertexArray(SceneVertexArray&& array) {
-		SubmeshZero().AddVertexArray(std::move(array));
+		// CLEANROOM SM19
+		(void)array;
 	}
 	void AddMaterial(SceneMaterial&& material) {
-		m_materialSlots.emplace_back(std::make_shared<SceneMaterial>(std::move(material)));
+		// CLEANROOM SM19
+		(void)material;
 	}
 
-	void SetPrimitive(MeshPrimitive v) {  m_primitive = v; }
-	void SetPointSize(uint32_t v) { m_pointSize = v; }
+	void SetPrimitive(MeshPrimitive v) {
+		// CLEANROOM SM19
+		(void)v;
+	}
+	void SetPointSize(uint32_t v) {
+		// CLEANROOM SM19
+		(void)v;
+	}
 
-
-	SceneMaterial* Material() { return m_materialSlots.empty() ? nullptr : m_materialSlots[0].get(); }
-	const SceneMaterial* Material() const { return MaterialForSlot(0); }
+	SceneMaterial* Material() {
+		// CLEANROOM SM19
+		return nullptr;
+	}
+	const SceneMaterial* Material() const {
+		// CLEANROOM SM19
+		return nullptr;
+	}
 	SceneMaterial* MaterialForSlot(uint32_t slot) {
-		if (slot >= m_materialSlots.size()) return nullptr;
-		if (m_materialSlots[slot] == nullptr) return nullptr;
-		return m_materialSlots[slot].get();
+		// CLEANROOM SM19
+		(void)slot;
+		return nullptr;
 	}
 	const SceneMaterial* MaterialForSlot(uint32_t slot) const {
-		if (slot >= m_materialSlots.size()) return nullptr;
-		if (m_materialSlots[slot] == nullptr) return nullptr;
-		return m_materialSlots[slot].get();
+		// CLEANROOM SM19
+		(void)slot;
+		return nullptr;
 	}
 
-	const std::vector<Submesh>& Submeshes() const { return m_data->submeshes; }
-	std::vector<Submesh>& Submeshes() { return m_data->submeshes; }
+	const std::vector<Submesh>& Submeshes() const {
+		// CLEANROOM SM19
+		static const std::vector<Submesh> none;
+		return none;
+	}
+	std::vector<Submesh>& Submeshes() {
+		// CLEANROOM SM19
+		static std::vector<Submesh> none;
+		return none;
+	}
 
-	const std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() const { return m_materialSlots; }
-	std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() { return m_materialSlots; }
+	const std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() const {
+		// CLEANROOM SM19
+		static const std::vector<std::shared_ptr<SceneMaterial>> none;
+		return none;
+	}
+	std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() {
+		// CLEANROOM SM19
+		static std::vector<std::shared_ptr<SceneMaterial>> none;
+		return none;
+	}
 	std::shared_ptr<SceneMaterial> MaterialSlotPtr(std::size_t index = 0) const {
-		return (index < m_materialSlots.size()) ? m_materialSlots[index] : nullptr;
+		// CLEANROOM SM19
+		(void)index;
+		return nullptr;
 	}
 
 	const std::vector<DrawRange>& DrawRanges() const {
-		static const std::vector<DrawRange> kEmpty;
-		return HasSubmeshZero() ? SubmeshZero().DrawRanges() : kEmpty;
+		// CLEANROOM SM19
+		static const std::vector<DrawRange> none;
+		return none;
 	}
-	std::vector<DrawRange>& DrawRanges() { return SubmeshZero().DrawRanges(); }
-	void SetDrawRanges(std::span<const DrawRange> ranges) { SubmeshZero().SetDrawRanges(ranges); }
+	std::vector<DrawRange>& DrawRanges() {
+		// CLEANROOM SM19
+		static std::vector<DrawRange> none;
+		return none;
+	}
+	void SetDrawRanges(std::span<const DrawRange> ranges) {
+		// CLEANROOM SM19
+		(void)ranges;
+	}
 
 	void ChangeMeshDataFrom(const SceneMesh& o) {
-		m_data = o.m_data;
+		// CLEANROOM SM19
+		(void)o;
 	}
 
 private:
-	struct Data {
-		std::vector<Submesh> submeshes;
-	};
-
-	bool HasSubmeshZero() const { return ! m_data->submeshes.empty(); }
-	const Submesh& SubmeshZero() const { return m_data->submeshes[0]; }
-	Submesh& SubmeshZero() {
-		if (m_data->submeshes.empty()) m_data->submeshes.emplace_back();
-		return m_data->submeshes[0];
-	}
-
-	uint32_t m_id { std::numeric_limits<uint32_t>::max() };
-	MeshPrimitive m_primitive {MeshPrimitive::TRIANGLE};
-	uint32_t m_pointSize {1};
 	MeshUpdate m_update;
-	std::atomic<bool> m_dirty;
-	std::atomic<uint64_t> m_dirty_generation {0};
-
-	std::shared_ptr<Data> m_data;
-	std::vector<std::shared_ptr<SceneMaterial>> m_materialSlots;
 };
 
 }

@@ -28,12 +28,20 @@ public:
     ShaderValue(const ShaderValue&)            = default;
     ShaderValue& operator=(const ShaderValue&) = default;
 
-    ShaderValue(const value_type& value) noexcept { fromSpan(spanone { value }); }
+    ShaderValue(const value_type& value) noexcept {
+        // CLEANROOM SM15
+        (void)value;
+    }
     template<typename Range>
     ShaderValue(const Range& range) noexcept {
-        fromSpan(range);
+        // CLEANROOM SM15
+        (void)range;
     }
-    ShaderValue(const value_type* ptr, std::size_t num) noexcept { fromSpan({ ptr, num }); }
+    ShaderValue(const value_type* ptr, std::size_t num) noexcept {
+        // CLEANROOM SM15
+        (void)ptr;
+        (void)num;
+    }
 
     template<typename Derived>
     static ShaderValue fromMatrix(const linalg::DenseBase<Derived>& mat) {
@@ -56,22 +64,35 @@ public:
         pack(mat.derived());
         return result;
     }
-    const auto& operator[](std::size_t index) const { return _value()[index]; }
-    auto& operator[](std::size_t index) { return m_dynamic ? m_dvalue[index] : m_value[index]; }
+    const auto& operator[](std::size_t index) const {
+        // CLEANROOM SM15
+        (void)index;
+        static const value_type none = 0.0f;
+        return none;
+    }
+    auto& operator[](std::size_t index) {
+        // CLEANROOM SM15
+        (void)index;
+        static value_type none = 0.0f;
+        none                   = 0.0f;
+        return none;
+    }
 
-    auto data() const noexcept { return _value().data(); };
-    // constexpr auto data() noexcept { return m_value.data(); };
-    size_t size() const noexcept { return m_size; };
+    const value_type* data() const noexcept {
+        // CLEANROOM SM15
+        return nullptr;
+    };
+    size_t size() const noexcept {
+        // CLEANROOM SM15
+        return 0;
+    };
 
-    void setSize(size_t v) noexcept { m_size = std::min(v, (size_t)_value().size()); }
+    void setSize(size_t v) noexcept {
+        // CLEANROOM SM15
+        (void)v;
+    }
 
 private:
-    void fromSpan(std::span<const value_type> s) noexcept;
-
-    std::span<const value_type> _value() const noexcept {
-        if (m_dynamic) return m_dvalue;
-        return m_value;
-    }
     bool                    m_dynamic { false };
     ShaderValueInter        m_value;
     std::vector<value_type> m_dvalue;

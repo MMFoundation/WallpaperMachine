@@ -77,8 +77,6 @@ inline bool ParticleGeometryFits(uint64_t quads, uint64_t floats_per_vertex,
 }
 
 class SceneIndexArray : NoCopy {
-    constexpr static size_t Unit_Byte_Size { sizeof(uint32_t) };
-
 public:
     SceneIndexArray(usize indexCount);
     SceneIndexArray(usize quadCount, SceneIndexWidth width);
@@ -87,18 +85,38 @@ public:
     SceneIndexArray(SceneIndexArray&&) noexcept;
     ~SceneIndexArray();
 
-    void Assign(usize index, std::span<const uint32_t> data) { AssignSpan(index, data); }
-    void AssignHalf(usize index, std::span<const uint16_t> data) { AssignSpan(index, data); }
+    void Assign(usize index, std::span<const uint32_t> data) {
+        // CLEANROOM SM18
+        (void)index;
+        (void)data;
+    }
+    void AssignHalf(usize index, std::span<const uint16_t> data) {
+        // CLEANROOM SM18
+        (void)index;
+        (void)data;
+    }
 
-    // Get
-    const uint32_t* Data() const { return m_pData; }
-    usize           DataCount() const { return m_size; }
-    usize           DataSizeOf() const { return m_size * Unit_Byte_Size; }
+    const uint32_t* Data() const {
+        // CLEANROOM SM18
+        return nullptr;
+    }
+    usize           DataCount() const {
+        // CLEANROOM SM18
+        return 0;
+    }
+    usize           DataSizeOf() const {
+        // CLEANROOM SM18
+        return 0;
+    }
 
     usize RenderDataCount() const noexcept {
-        return m_render_size > m_size ? m_size : m_render_size;
+        // CLEANROOM SM18
+        return 0;
     }
-    void SetRenderDataCount(usize val) noexcept { m_render_size = val; }
+    void SetRenderDataCount(usize val) noexcept {
+        // CLEANROOM SM18
+        (void)val;
+    }
 
     SceneIndexWidth Width() const noexcept { return m_width; }
     usize           ElementSize() const noexcept {
@@ -135,36 +153,31 @@ public:
         m_render_size = index_count / 2;
     }
 
-    usize CapacityCount() const { return m_capacity; }
-    usize CapacitySizeof() const { return m_capacity * Unit_Byte_Size; }
-
-    uint32_t ID() const { return m_id; }
-    void     SetID(uint32_t id) { m_id = id; }
-
-private:
-    bool IncreaseCheckSet(size_t size);
-
-    template<typename T>
-    void AssignSpan(usize index, std::span<const T> data) {
-        using in_value_type = T;
-        uint64_t end   = 0;
-        uint64_t bytes = 0;
-        if (! CheckedAddU64(index, data.size(), end) ||
-            ! CheckedMulU64(end, sizeof(in_value_type), bytes) ||
-            bytes > std::numeric_limits<size_t>::max()) {
-            return;
-        }
-        if (! IncreaseCheckSet(static_cast<size_t>(bytes))) return;
-        std::copy(data.begin(), data.end(), ((in_value_type*)m_pData) + index);
+    usize CapacityCount() const {
+        // CLEANROOM SM18
+        return 0;
+    }
+    usize CapacitySizeof() const {
+        // CLEANROOM SM18
+        return 0;
     }
 
-    uint32_t* m_pData;
-    usize     m_size;
-    usize     m_capacity;
+    uint32_t ID() const {
+        // CLEANROOM SM18
+        return 0;
+    }
+    void     SetID(uint32_t id) {
+        // CLEANROOM SM18
+        (void)id;
+    }
+
+private:
+    uint32_t* m_pData { nullptr };
+    usize     m_size { 0 };
+    usize     m_capacity { 0 };
 
     usize m_render_size { std::numeric_limits<usize>::max() };
 
-    uint32_t m_id;
     SceneIndexWidth m_width { SceneIndexWidth::UInt16 };
 };
 } // namespace wallpaper

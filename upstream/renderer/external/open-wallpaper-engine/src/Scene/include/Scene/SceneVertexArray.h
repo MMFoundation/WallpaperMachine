@@ -38,36 +38,56 @@ public:
     bool GetOption(std::string_view) const;
     void SetOption(std::string_view, bool);
 
-    const float* Data() const { return m_pData; }
-    usize        DataSize() const { return m_size; }
-    usize        DataSizeOf() const { return m_size * sizeof(float); }
-    usize        VertexCount() const { return m_size / m_oneSize; }
-    usize        CapacitySize() const { return m_capacity; }
-    usize        CapacitySizeOf() const { return m_capacity * sizeof(float); }
-    usize        OneSize() const { return m_oneSize; }
-    usize        OneSizeOf() const { return m_oneSize * sizeof(float); }
+    const float* Data() const {
+        // CLEANROOM SM16
+        return nullptr;
+    }
+    usize        DataSize() const {
+        // CLEANROOM SM16
+        return 0;
+    }
+    usize        DataSizeOf() const {
+        // CLEANROOM SM16
+        return 0;
+    }
+    usize        VertexCount() const {
+        // CLEANROOM SM16
+        return 0;
+    }
+    usize        CapacitySize() const {
+        // CLEANROOM SM16
+        return 0;
+    }
+    usize        CapacitySizeOf() const {
+        // CLEANROOM SM16
+        return 0;
+    }
+    usize        OneSize() const {
+        // CLEANROOM SM16
+        return 0;
+    }
+    usize        OneSizeOf() const {
+        // CLEANROOM SM16
+        return 0;
+    }
 
-    const auto&                                  Attributes() const { return m_attributes; }
+    const auto&                                  Attributes() const {
+        // CLEANROOM SM17
+        static const std::vector<SceneVertexAttribute> none;
+        return none;
+    }
     Map<std::string, SceneVertexAttributeOffset> GetAttrOffsetMap() const;
 
-    uint32_t ID() const { return m_id; }
-    void     SetID(uint32_t id) { m_id = id; }
+    uint32_t ID() const {
+        // CLEANROOM SM16
+        return 0;
+    }
+    void     SetID(uint32_t id) {
+        // CLEANROOM SM16
+        (void)id;
+    }
 
     static uint8_t TypeCount(VertexType);
     static uint8_t RealAttributeSize(const SceneVertexAttribute&);
-
-private:
-    bool TrySetSize(usize) noexcept;
-
-    std::vector<SceneVertexAttribute> m_attributes;
-
-    Map<std::string, bool> m_options;
-
-    float* m_pData { nullptr };
-    usize  m_oneSize { 0 };
-    usize  m_size { 0 };
-    usize  m_capacity { 0 };
-
-    uint32_t m_id;
 };
 } // namespace wallpaper

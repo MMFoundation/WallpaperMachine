@@ -16,50 +16,83 @@ namespace wallpaper
 
 class SceneNode : NoCopy, NoMove {
 public:
-    SceneNode()
-        : m_name(),
-          m_dirty(true),
-          m_translate(linalg::Vector3f::Zero()),
-          m_scale { 1.0f, 1.0f, 1.0f },
-          m_rotation(linalg::Vector3f::Zero()) {}
+    SceneNode() {
+        // CLEANROOM SM5
+    }
     SceneNode(const linalg::Vector3f& translate, const linalg::Vector3f& scale,
-              const linalg::Vector3f& rotation, const std::string& name = "")
-        : m_name(name),
-          m_dirty(true),
-          m_translate(translate),
-          m_scale(scale),
-          m_rotation(rotation) {};
+              const linalg::Vector3f& rotation, const std::string& name = "") {
+        // CLEANROOM SM5
+        (void)translate;
+        (void)scale;
+        (void)rotation;
+        (void)name;
+    }
 
-    const auto& Camera() const { return m_cameraName; }
-    void        SetCamera(const std::string& name) { m_cameraName = name; }
-    void        AddMesh(std::shared_ptr<SceneMesh> mesh) { m_mesh = mesh; }
-    void        AppendChild(std::shared_ptr<SceneNode> sub) {
-               sub->m_parent = this;
-               m_children.push_back(sub);
-               // Acquiring a parent changes the child's world transform exactly
-               // as moving it does. A node whose matrix was already computed
-               // while it was unparented would otherwise keep that matrix for
-               // good, because UpdateTrans() stops at a clean node — which is
-               // how a composition layer ended up drawing its whole subtree at
-               // its own local coordinates instead of its parent's.
-               sub->MarkTransDirty();
+    const auto& Camera() const {
+        // CLEANROOM SM6
+        static const std::string none;
+        return none;
+    }
+    void SetCamera(const std::string& name) {
+        // CLEANROOM SM6
+        (void)name;
+    }
+    void AddMesh(std::shared_ptr<SceneMesh> mesh) {
+        // CLEANROOM SM6
+        (void)mesh;
+    }
+    void AppendChild(std::shared_ptr<SceneNode> sub) {
+        // CLEANROOM SM6
+        (void)sub;
     }
     linalg::Matrix4d GetLocalTrans() const;
     static linalg::Matrix4d LocalTransOf(const linalg::Vector3f& translate,
                                         const linalg::Vector3f& scale,
                                         const linalg::Vector3f& rotation);
 
-    const auto& Translate() const { return m_translate; }
-    const auto& Scale() const { return m_scale; }
-    const auto& Rotation() const { return m_rotation; }
-    const auto& Name() const { return m_name; }
-    void        SetName(std::string name) { m_name = std::move(name); }
-    bool        Visible() const { return m_visible; }
-    bool        SkipRenderPass() const { return m_skipRenderPass; }
+    const auto& Translate() const {
+        // CLEANROOM SM7
+        static const linalg::Vector3f none = linalg::Vector3f::Zero();
+        return none;
+    }
+    const auto& Scale() const {
+        // CLEANROOM SM7
+        static const linalg::Vector3f none { 1.0f, 1.0f, 1.0f };
+        return none;
+    }
+    const auto& Rotation() const {
+        // CLEANROOM SM7
+        static const linalg::Vector3f none = linalg::Vector3f::Zero();
+        return none;
+    }
+    const auto& Name() const {
+        // CLEANROOM SM6
+        static const std::string none;
+        return none;
+    }
+    void SetName(std::string name) {
+        // CLEANROOM SM6
+        (void)name;
+    }
+    bool Visible() const {
+        // CLEANROOM SM8
+        return true;
+    }
+    bool SkipRenderPass() const {
+        // CLEANROOM SM8
+        return false;
+    }
     /// A frame a script pinned the sprite sheet to; the sheet holds it until
     /// `ClearTextureFrame` (a script's `play()`) lets it run again.
-    const auto& TextureFrame() const { return m_textureFrame; }
-    void SetTextureFrame(double frame) { m_textureFrame = frame; }
+    const auto& TextureFrame() const {
+        // CLEANROOM SM8
+        static const std::optional<double> none;
+        return none;
+    }
+    void SetTextureFrame(double frame) {
+        // CLEANROOM SM8
+        (void)frame;
+    }
     void ClearTextureFrame() { m_textureFrame.reset(); }
     /// What a script's `pause()`, `stop()`, `play()` and `rate` say about the
     /// sprite sheet the layer draws. The renderer advances the sheet by the
@@ -89,7 +122,8 @@ public:
     bool        CompositeOnly() const { return m_composite_only; }
     void        SetCompositeOnly(bool only) { m_composite_only = only; }
     bool        EffectiveVisible() const {
-        return m_visible && (m_parent == nullptr || m_parent->EffectiveVisible());
+        // CLEANROOM SM8
+        return true;
     }
     /// Visibility only a reload changes: an authored value or one of the
     /// wallpaper's own properties, which reparse the scene when they change.
@@ -98,22 +132,25 @@ public:
     bool        VisibilitySettled() const { return m_visibility_settled; }
     void        SetVisibilitySettled(bool settled) { m_visibility_settled = settled; }
     void        SetRotation(linalg::Vector3f v) {
-        if (m_rotation.isApprox(v, 1.0e-6f)) return;
-        m_rotation = v;
-        MarkTransDirty();
+        // CLEANROOM SM7
+        (void)v;
     }
     void        SetTranslate(linalg::Vector3f v) {
-        if (m_translate.isApprox(v, 1.0e-6f)) return;
-        m_translate = v;
-        MarkTransDirty();
+        // CLEANROOM SM7
+        (void)v;
     }
     void        SetScale(linalg::Vector3f v) {
-        if (m_scale.isApprox(v, 1.0e-6f)) return;
-        m_scale = v;
-        MarkTransDirty();
+        // CLEANROOM SM7
+        (void)v;
     }
-    void        SetVisible(bool visible) { m_visible = visible; }
-    void        SetSkipRenderPass(bool skip) { m_skipRenderPass = skip; }
+    void        SetVisible(bool visible) {
+        // CLEANROOM SM8
+        (void)visible;
+    }
+    void        SetSkipRenderPass(bool skip) {
+        // CLEANROOM SM8
+        (void)skip;
+    }
     /// A node placed by its own transform alone, whatever its ancestors do: a
     /// fullscreen layer covers the screen from whichever group it sits in.
     /// The hierarchy above it still decides whether it shows (`EffectiveVisible`),
@@ -151,17 +188,21 @@ public:
     }
 
     void CopyTrans(const SceneNode& node) {
-        m_translate = node.m_translate;
-        m_scale     = node.m_scale;
-        m_rotation  = node.m_rotation;
-        m_renderTransformOverride = node.m_renderTransformOverride;
+        // CLEANROOM SM7
+        (void)node;
     }
 
     void SetRenderTransformOverride(linalg::Matrix4d transform) {
-        m_renderTransformOverride = std::move(transform);
+        // CLEANROOM SM7
+        (void)transform;
     }
-    void ClearRenderTransformOverride() { m_renderTransformOverride.reset(); }
-    bool HasRenderTransformOverride() const { return m_renderTransformOverride.has_value(); }
+    void ClearRenderTransformOverride() {
+        // CLEANROOM SM7
+    }
+    bool HasRenderTransformOverride() const {
+        // CLEANROOM SM7
+        return false;
+    }
     /// A translation in world space added to where the node is drawn and to nothing
     /// else. `RenderTrans` carries it; `ModelTrans`, which the node's children, its
     /// cameras and its hit test compose from, does not (a hit test adds it itself).
@@ -177,30 +218,49 @@ public:
         return moved;
     }
 
-    // update self modle trans (will update parent before)
     void            UpdateTrans();
     linalg::Matrix4d ModelTrans() const { return m_trans; };
     /// The matrix the children's own are composed on (after `UpdateTrans`).
     linalg::Matrix4d ChildTrans() const { return m_childTrans; }
 
-    SceneMesh* Mesh() { return m_mesh.get(); }
-    bool       HasMaterial() const { return m_mesh && m_mesh->Material() != nullptr; };
+    SceneMesh* Mesh() {
+        // CLEANROOM SM6
+        return nullptr;
+    }
+    bool       HasMaterial() const {
+        // CLEANROOM SM6
+        return false;
+    };
 
-    const auto& GetChildren() const { return m_children; }
-    auto&       GetChildren() { return m_children; }
-    SceneNode*  Parent() const { return m_parent; }
-    bool        NodeHasParent() const { return m_parent != nullptr; }
+    const auto& GetChildren() const {
+        // CLEANROOM SM6
+        static const std::list<std::shared_ptr<SceneNode>> none;
+        return none;
+    }
+    auto&       GetChildren() {
+        // CLEANROOM SM6
+        static std::list<std::shared_ptr<SceneNode>> none;
+        none.clear();
+        return none;
+    }
+    SceneNode*  Parent() const {
+        // CLEANROOM SM6
+        return nullptr;
+    }
+    bool        NodeHasParent() const {
+        // CLEANROOM SM6
+        return false;
+    }
 
-    i32& ID() { return m_id; }
+    i32& ID() {
+        // CLEANROOM SM6
+        static i32 none = 0;
+        return none;
+    }
 
 private:
-    // mark self and all children
     void MarkTransDirty();
 
-    i32         m_id;
-    std::string m_name;
-    bool        m_visible { true };
-    bool        m_skipRenderPass { false };
     bool        m_ignoreParentTransform { false };
     bool        m_must_produce { false };
     bool        m_composite_only { false };
@@ -210,7 +270,6 @@ private:
     double                m_textureAnimationRate { 1.0 };
     std::optional<double> m_textureAnimationFrame;
 
-    bool            m_dirty;
     linalg::Matrix4d m_trans { linalg::Matrix4d::Identity() };
     linalg::Matrix4d m_childTrans { linalg::Matrix4d::Identity() };
     std::optional<linalg::Matrix4d> m_childLocal;
@@ -221,14 +280,5 @@ private:
     std::optional<linalg::Matrix4d> m_renderTransformOverride {};
     linalg::Vector3f m_drawOffset { 0.0f, 0.0f, 0.0f };
     std::optional<linalg::Matrix4d> m_attachmentTransform;
-
-    std::shared_ptr<SceneMesh> m_mesh;
-
-    // specific a camera not active, used for image effect
-    std::string m_cameraName;
-
-    SceneNode* m_parent { nullptr };
-
-    std::list<std::shared_ptr<SceneNode>> m_children;
 };
 } // namespace wallpaper

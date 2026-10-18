@@ -14,16 +14,21 @@ class SceneNode;
 
 class SceneCamera {
 public:
-    explicit SceneCamera(i32 width, i32 height, float near, float far)
-        : m_width(width),
-          m_height(height),
-          m_aspect(m_width / m_height),
-          m_nearClip(near),
-          m_farClip(far),
-          m_perspective(false) {}
+    explicit SceneCamera(i32 width, i32 height, float near, float far) {
+        // CLEANROOM SM9
+        (void)width;
+        (void)height;
+        (void)near;
+        (void)far;
+    }
 
-    explicit SceneCamera(float aspect, float near, float far, float fov)
-        : m_aspect(aspect), m_nearClip(near), m_farClip(far), m_fov(fov), m_perspective(true) {}
+    explicit SceneCamera(float aspect, float near, float far, float fov) {
+        // CLEANROOM SM9
+        (void)aspect;
+        (void)near;
+        (void)far;
+        (void)fov;
+    }
 
     SceneCamera(const SceneCamera&) = default;
 
@@ -31,24 +36,51 @@ public:
 
     void AttatchNode(std::shared_ptr<SceneNode>);
 
-    bool   IsPerspective() const { return m_perspective; }
-    double Aspect() const { return m_aspect; }
-    double Width() const { return m_width; }
-    double Height() const { return m_height; }
-    double NearClip() const { return m_nearClip; }
-    double FarClip() const { return m_farClip; }
-    double Fov() const { return m_fov; }
+    bool   IsPerspective() const {
+        // CLEANROOM SM9
+        return false;
+    }
+    double Aspect() const {
+        // CLEANROOM SM9
+        return 0.0;
+    }
+    double Width() const {
+        // CLEANROOM SM9
+        return 0.0;
+    }
+    double Height() const {
+        // CLEANROOM SM9
+        return 0.0;
+    }
+    double NearClip() const {
+        // CLEANROOM SM9
+        return 0.0;
+    }
+    double FarClip() const {
+        // CLEANROOM SM9
+        return 0.0;
+    }
+    double Fov() const {
+        // CLEANROOM SM9
+        return 0.0;
+    }
 
     void SetWidth(double value) {
-        m_width  = value;
-        m_aspect = m_width / m_height;
+        // CLEANROOM SM9
+        (void)value;
     }
     void SetHeight(double value) {
-        m_height = value;
-        m_aspect = m_width / m_height;
+        // CLEANROOM SM9
+        (void)value;
     }
-    void SetAspect(double aspect) { m_aspect = aspect; }
-    void SetFov(double value) { m_fov = value; }
+    void SetAspect(double aspect) {
+        // CLEANROOM SM9
+        (void)aspect;
+    }
+    void SetFov(double value) {
+        // CLEANROOM SM9
+        (void)value;
+    }
     /// The depth range a perspective projection keeps.
     void SetClip(double near_clip, double far_clip) {
         m_nearClip = near_clip;
@@ -65,11 +97,28 @@ public:
     double VisibleWidth() const { return m_width / EffectiveZoom(); }
     double VisibleHeight() const { return m_height / EffectiveZoom(); }
 
-    void  AttatchImgEffect(std::shared_ptr<SceneImageEffectLayer> eff) { m_imgEffect = eff; }
-    bool  HasImgEffect() const { return (bool)m_imgEffect; }
-    auto& GetImgEffect() { return m_imgEffect; }
-    void  SetComposeLayer(bool compose) { m_isComposeLayer = compose; }
-    bool  IsComposeLayer() const { return m_isComposeLayer; }
+    void  AttatchImgEffect(std::shared_ptr<SceneImageEffectLayer> eff) {
+        // CLEANROOM SM10
+        (void)eff;
+    }
+    bool  HasImgEffect() const {
+        // CLEANROOM SM10
+        return false;
+    }
+    auto& GetImgEffect() {
+        // CLEANROOM SM10
+        static std::shared_ptr<SceneImageEffectLayer> none;
+        none.reset();
+        return none;
+    }
+    void  SetComposeLayer(bool compose) {
+        // CLEANROOM SM10
+        (void)compose;
+    }
+    bool  IsComposeLayer() const {
+        // CLEANROOM SM10
+        return false;
+    }
     /// A camera that frames one layer's card in that layer's own texture space:
     /// the card fills the target and nothing about where the layer sits in the
     /// scene -- its transform, the scene camera, parallax -- reaches the image.
@@ -105,7 +154,10 @@ public:
     };
     Axes GetAxes() const;
 
-    std::shared_ptr<SceneNode> GetAttachedNode() const { return m_node; }
+    std::shared_ptr<SceneNode> GetAttachedNode() const {
+        // CLEANROOM SM10
+        return nullptr;
+    }
 
     /// Camera shake: moves the eye and what it looks at together, on top of
     /// wherever the camera's node puts them.
@@ -113,22 +165,11 @@ public:
     const linalg::Vector3d& ShakeOffset() const { return m_shake; }
 
     void Clone(const SceneCamera& cam) {
-        m_width       = cam.m_width;
-        m_height      = cam.m_height;
-        m_aspect      = cam.m_aspect;
-        m_nearClip    = cam.m_nearClip;
-        m_farClip     = cam.m_farClip;
-        m_perspective = cam.m_perspective;
-        m_fov         = cam.m_fov;
-        m_fovLocked   = cam.m_fovLocked;
-        m_zoom        = cam.m_zoom;
-        m_isComposeLayer = cam.m_isComposeLayer;
-        m_layerLocal     = cam.m_layerLocal;
-        m_childrenUseSceneCamera = cam.m_childrenUseSceneCamera;
+        // CLEANROOM SM10
+        (void)cam;
     }
 
 private:
-    void CalculateViewProjectionMatrix();
     // A zoom of zero, a negative one or a NaN is not a frame anybody can see,
     // so it reads as the whole canvas rather than as a division.
     double EffectiveZoom() const {
@@ -138,20 +179,12 @@ private:
     linalg::Vector3d m_shake { linalg::Vector3d::Zero() };
     double m_width { 1.0f };
     double m_height { 1.0f };
-    double m_aspect { 16.0f / 9.0f };
     double m_nearClip { 0.01f };
     double m_farClip { 1000.0f };
-    double m_fov { 45.0f };
     double m_zoom { 1.0 };
-    bool   m_perspective;
     bool   m_fovLocked { false };
 
-    linalg::Matrix4d m_viewMat { linalg::Matrix4d::Identity() };
-    linalg::Matrix4d m_viewProjectionMat { linalg::Matrix4d::Identity() };
-
     std::shared_ptr<SceneNode>             m_node;
-    std::shared_ptr<SceneImageEffectLayer> m_imgEffect { nullptr };
-    bool                                   m_isComposeLayer { false };
     bool                                   m_layerLocal { false };
     bool                                   m_childrenUseSceneCamera { false };
 };

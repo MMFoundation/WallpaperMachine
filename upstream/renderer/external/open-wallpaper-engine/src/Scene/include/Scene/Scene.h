@@ -165,20 +165,13 @@ public:
 
     double elapsingTime { 0.0f }, frameTime { 0.0f };
     void   PassFrameTime(double t) {
-        frameTime = t;
-        elapsingTime += t;
+        // CLEANROOM SM2
+        (void)t;
     }
 
     void UpdateLinkedCamera(const std::string& name) {
-        if (linkedCameras.count(name) != 0) {
-            auto& cams = linkedCameras.at(name);
-            for (auto& cam : cams) {
-                if (cameras.count(cam) != 0) {
-                    cameras.at(cam)->Clone(*cameras.at(name));
-                    cameras.at(cam)->Update();
-                }
-            }
-        }
+        // CLEANROOM SM3
+        (void)name;
     }
 
     /// Points a 2D scene's view: `zoom` narrows it about its centre and
@@ -189,25 +182,27 @@ public:
     void FrameCanvas(double zoom, const linalg::Vector2f& offset);
 
     std::string ResolveRenderTargetName(std::string_view name) const {
-        auto alias = renderTargetAliases.find(std::string(name));
-        if (alias != renderTargetAliases.end()) return alias->second;
-        return std::string(name);
+        // CLEANROOM SM4
+        (void)name;
+        return {};
     }
 
-    bool HasRenderTarget(std::string_view name) const { return FindRenderTarget(name) != nullptr; }
+    bool HasRenderTarget(std::string_view name) const {
+        // CLEANROOM SM4
+        (void)name;
+        return false;
+    }
 
     SceneRenderTarget* FindRenderTarget(std::string_view name) {
-        const std::string resolved = ResolveRenderTargetName(name);
-        auto              it       = renderTargets.find(resolved);
-        if (it == renderTargets.end()) return nullptr;
-        return &it->second;
+        // CLEANROOM SM4
+        (void)name;
+        return nullptr;
     }
 
     const SceneRenderTarget* FindRenderTarget(std::string_view name) const {
-        const std::string resolved = ResolveRenderTargetName(name);
-        auto              it       = renderTargets.find(resolved);
-        if (it == renderTargets.end()) return nullptr;
-        return &it->second;
+        // CLEANROOM SM4
+        (void)name;
+        return nullptr;
     }
 };
 } // namespace wallpaper
