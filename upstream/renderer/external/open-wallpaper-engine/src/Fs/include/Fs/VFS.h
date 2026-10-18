@@ -72,7 +72,7 @@ public:
 		const MountedFs* owner = nullptr;
 		std::string      inside;
 		if (! Locate(path, &owner, &inside)) {
-			LOG_ERROR("can't find \"%.*s\" in any mounted file system", (int)path.size(), path.data());
+			LOG_ERROR("not found \"%.*s\" in any mounted file system", (int)path.size(), path.data());
 			return nullptr;
 		}
 		return owner->fs->Open(inside);
