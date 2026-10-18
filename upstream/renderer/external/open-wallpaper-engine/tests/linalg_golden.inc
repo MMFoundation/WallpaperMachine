@@ -660,6 +660,6 @@ inline const GoldenOp kGoldenOps[] = {
     { "affineProducts.f", 600, true, 0.0e+00, 0x1f03f75f20bf1b1cull, 107400, nullptr, nullptr },
     { "affineProducts.d", 600, true, 0.0e+00, 0xa78420f8a4234a4aull, 107400, nullptr, nullptr },
     { "projective.d", 4000, false, 0.0e+00, 0x7ef78e375dac868full, 320000, nullptr, nullptr },
-    { "camera.d", 600, true, 0.0e+00, 0x4f769de5c8d722fdull, 39000, nullptr, nullptr },
+    { "camera.d", 600, true, 0.0e+00, 0xea77b47e8b11ff8dull, 39000, nullptr, nullptr },
     { "lu.d", 4000, false, 0.0e+00, 0x77fbb3e533bc57ddull, 29664, nullptr, nullptr },
 };

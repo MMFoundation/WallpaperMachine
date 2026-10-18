@@ -683,19 +683,50 @@ private:
 
 constexpr double Radians(double a) noexcept { return (a / 180.0f) * Pi; }
 
-inline Matrix4d LookAt(Vector3d, Vector3d, Vector3d) noexcept {
-    // CLEANROOM U77: implement from specs/engine/e7-small-units.md
-    return Matrix4d::Identity();
+// The camera's own frame as columns: `b` points from the target back to the eye, `r`
+// is `up x b` and `u` is `b x r`, so the upper-left block holds `r`, `u`, `b` and the
+// last column is that block applied to `-eye`. Coincident eye and target leave the
+// block, and so the translation, zero rather than not-a-number.
+inline Matrix4d LookAt(Vector3d eye, Vector3d center, Vector3d up) noexcept {
+    const Vector3d b = (eye - center).normalized();
+    const Vector3d r = up.cross(b).normalized();
+    const Vector3d u = b.cross(r).normalized();
+
+    Matrix4d m = Matrix4d::Identity();
+    for (int i = 0; i < 3; ++i) {
+        m.elem(i, 0) = r.coeff(i);
+        m.elem(i, 1) = u.coeff(i);
+        m.elem(i, 2) = b.coeff(i);
+        m.elem(i, 3) = -(r.coeff(i) * eye.x() + u.coeff(i) * eye.y() + b.coeff(i) * eye.z());
+    }
+    return m;
 }
 
-inline Matrix4d Ortho(double, double, double, double, double, double) noexcept {
-    // CLEANROOM U78: implement from specs/engine/e7-small-units.md
-    return Matrix4d::Identity();
+// View x in [left, right] and y in [bottom, top] map to [-1, 1]; view z of -near and
+// -far map to depth 0 and 1.
+inline Matrix4d Ortho(double left, double right, double bottom, double top, double near,
+                      double far) noexcept {
+    Matrix4d m   = Matrix4d::Identity();
+    m.elem(0, 0) = 2.0 / (right - left);
+    m.elem(1, 1) = 2.0 / (top - bottom);
+    m.elem(2, 2) = -1.0 / (far - near);
+    m.elem(0, 3) = -(right + left) / (right - left);
+    m.elem(1, 3) = -(top + bottom) / (top - bottom);
+    m.elem(2, 3) = -near / (far - near);
+    return m;
 }
 
-inline Matrix4d Perspective(double, double, double, double) noexcept {
-    // CLEANROOM U79: implement from specs/engine/e7-small-units.md
-    return Matrix4d::Identity();
+// `fovY` is the vertical field of view in radians, `aspect` width over height. Clip w
+// is the negated view z; depth after the divide runs 0 at `near` to 1 at `far`.
+inline Matrix4d Perspective(double fovY, double aspect, double near, double far) noexcept {
+    const double t = std::tan(fovY / 2.0);
+    Matrix4d     m = Matrix4d::Zero();
+    m.elem(0, 0)   = 1.0 / (aspect * t);
+    m.elem(1, 1)   = 1.0 / t;
+    m.elem(2, 2)   = -far / (far - near);
+    m.elem(2, 3)   = -(near * far) / (far - near);
+    m.elem(3, 2)   = -1.0;
+    return m;
 }
 
 } // namespace wallpaper::linalg
