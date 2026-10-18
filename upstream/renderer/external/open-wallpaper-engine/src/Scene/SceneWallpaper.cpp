@@ -1456,6 +1456,8 @@ private:
         adoptRenderInitInfo(std::move(info));
         m_surface_handed.store(true, std::memory_order_release);
         m_surface_released = false;
+        // A display change is news to scripts that size themselves against the screen.
+        publishScreenResolution();
         // A scene that landed while the surface was out chose no renderer and built no graph.
         const bool scene_waited = std::exchange(m_scene_awaits_surface, false) && m_scene != nullptr;
 
