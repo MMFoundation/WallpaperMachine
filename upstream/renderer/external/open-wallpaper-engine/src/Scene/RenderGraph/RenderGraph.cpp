@@ -4,9 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
-#include <optional>
 #include <set>
-#include <tuple>
 
 namespace wallpaper::rg
 {
@@ -18,16 +16,20 @@ void PushUnique(std::vector<T*>& list, T* item) {
     if (std::find(list.begin(), list.end(), item) == list.end()) list.push_back(item);
 }
 
-// Picks the order passes run in once their dependencies are fixed. Passes that
-// draw into the same target are kept together where the dependencies allow it,
-// because a backend renders consecutive passes into one target in a single render
-// pass and every extra one stores and reloads the whole image. Within that:
-//  - the pass after one that wrote target T is, when one is ready, the smallest-id
-//    ready pass that also writes T;
-//  - otherwise the ready pass whose target has the fewest passes still to come goes
-//    next (smallest id on a tie), so the most written-to target is drawn last and
-//    in one stretch while the short-lived ones are finished first.
-// Independent passes that write different once-written targets keep creation order.
+// Picks the order passes run in once their dependencies are fixed. The order is built
+// from the back: a pass is placed only after every pass that has to follow it, so a
+// pass lands as late as its dependants allow, in front of the first pass that needs
+// its result, and a buffer is written close to where it is read instead of being kept
+// alive across work it has nothing to do with. Buffers whose uses do not overlap can
+// then be given one image.
+//
+// Among the passes that may go next (the ones nothing unplaced has to follow), the one
+// placed in front of the pass placed last is
+//  1. a pass writing the same target, because a backend renders consecutive passes into
+//     one target in a single render pass and every extra one stores and reloads the
+//     whole image;
+//  2. else the one with the largest id, so passes with nothing to tie them keep the
+//     order they were added in.
 class PassScheduler {
 public:
     PassScheduler(const DependencyGraph& edges, std::vector<char> is_pass,
@@ -39,123 +41,80 @@ public:
 
     std::vector<NodeID> run() {
         const size_t count = m_is_pass.size();
-        m_waiting.assign(count, 0);
+        m_blockers.assign(count, 0);
         m_placed.assign(count, 0);
+        size_t pending      = 0;
         size_t target_count = 0;
         for (NodeID id = 0; id < count; ++id) {
-            if (! m_is_pass[id]) continue;
-            ++m_pending;
-            m_waiting[id] = m_edges.GetNodeIn(id).size();
-            if (! m_is_virtual[id] && m_target_of[id] != kNone)
-                target_count = std::max(target_count, m_target_of[id] + 1);
+            if (! counts(id)) continue;
+            ++pending;
+            for (NodeID next : m_edges.GetNodeOut(id))
+                if (counts(next)) ++m_blockers[id];
+            if (m_target_of[id] != kNone) target_count = std::max(target_count, m_target_of[id] + 1);
         }
-        m_stretches.assign(target_count, Stretch {});
-        for (NodeID id = 0; id < count; ++id) {
-            if (m_is_pass[id] && ! m_is_virtual[id] && m_target_of[id] != kNone)
-                ++m_stretches[m_target_of[id]].to_come;
-        }
+        m_ready_by_target.assign(target_count, std::set<NodeID> {});
         for (NodeID id = 0; id < count; ++id)
-            if (m_is_pass[id] && m_waiting[id] == 0) makeReady(id);
+            if (counts(id) && m_blockers[id] == 0) makeReady(id);
 
-        std::vector<NodeID> order;
-        NodeID              cursor = 0;
-        while (m_pending > 0) {
-            if (! m_bookkeeping.empty()) {
-                const NodeID id = *m_bookkeeping.begin();
-                m_bookkeeping.erase(m_bookkeeping.begin());
-                place(id, order);
-                continue;
+        std::vector<NodeID> backwards;
+        backwards.reserve(pending);
+        NodeID cursor = count;
+        while (backwards.size() < pending) {
+            NodeID next = kNoPass;
+            if (m_last != kNoPass && m_target_of[m_last] != kNone) {
+                const auto& same = m_ready_by_target[m_target_of[m_last]];
+                if (! same.empty()) next = *same.rbegin();
             }
-            NodeID next = 0;
-            if (m_current != kNone && ! m_stretches[m_current].ready.empty()) {
-                next = takeSmallest(m_current);
-            } else if (! m_by_priority.empty()) {
-                next = takeSmallest(std::get<2>(*m_by_priority.begin()));
-            } else {
-                // Only a dependency cycle leaves nothing ready: the smallest pass
-                // not yet placed breaks it.
-                while (cursor < count && (! m_is_pass[cursor] || m_placed[cursor])) ++cursor;
-                next = cursor;
-                withdraw(next);
+            if (next == kNoPass && ! m_ready.empty()) next = *m_ready.rbegin();
+            if (next == kNoPass) {
+                // Only a dependency cycle leaves nothing ready: the largest pass not
+                // yet placed breaks it.
+                while (cursor > 0 && (! counts(cursor - 1) || m_placed[cursor - 1])) --cursor;
+                next = cursor - 1;
             }
-            place(next, order);
+            place(next, backwards);
         }
-        return order;
+        std::reverse(backwards.begin(), backwards.end());
+        return backwards;
     }
 
 private:
-    static constexpr size_t kNone = std::numeric_limits<size_t>::max();
+    static constexpr size_t kNone   = std::numeric_limits<size_t>::max();
+    static constexpr NodeID kNoPass = std::numeric_limits<NodeID>::max();
 
-    using Entry = std::tuple<size_t, NodeID, size_t>;
-
-    struct Stretch {
-        std::set<NodeID>     ready;
-        size_t               to_come { 0 };
-        std::optional<Entry> listed;
-    };
-
-    void reprioritise(size_t target) {
-        Stretch& stretch = m_stretches[target];
-        if (stretch.listed) m_by_priority.erase(*stretch.listed);
-        stretch.listed.reset();
-        if (stretch.ready.empty()) return;
-        const Entry entry { stretch.to_come, *stretch.ready.begin(), target };
-        m_by_priority.insert(entry);
-        stretch.listed = entry;
-    }
+    // Virtual passes only carry dependencies and never reach the order. They have no
+    // incoming edges, so leaving them out cannot loosen a constraint between others.
+    bool counts(NodeID id) const { return m_is_pass[id] && ! m_is_virtual[id]; }
 
     void makeReady(NodeID id) {
-        if (m_is_virtual[id] || m_target_of[id] == kNone) {
-            m_bookkeeping.insert(id);
-            return;
-        }
-        m_stretches[m_target_of[id]].ready.insert(id);
-        reprioritise(m_target_of[id]);
+        m_ready.insert(id);
+        if (m_target_of[id] != kNone) m_ready_by_target[m_target_of[id]].insert(id);
     }
 
-    NodeID takeSmallest(size_t target) {
-        const NodeID id = *m_stretches[target].ready.begin();
-        m_stretches[target].ready.erase(m_stretches[target].ready.begin());
-        return id;
-    }
-
-    // Removes a pass that was picked outside the ready sets.
-    void withdraw(NodeID id) {
-        if (m_is_virtual[id] || m_target_of[id] == kNone) {
-            m_bookkeeping.erase(id);
-            return;
-        }
-        m_stretches[m_target_of[id]].ready.erase(id);
-    }
-
-    void place(NodeID id, std::vector<NodeID>& order) {
+    void place(NodeID id, std::vector<NodeID>& backwards) {
+        m_ready.erase(id);
+        if (m_target_of[id] != kNone) m_ready_by_target[m_target_of[id]].erase(id);
         m_placed[id] = 1;
-        --m_pending;
-        if (! m_is_virtual[id]) {
-            order.push_back(id);
-            if (m_target_of[id] != kNone) {
-                m_current = m_target_of[id];
-                --m_stretches[m_current].to_come;
-                reprioritise(m_current);
-            }
-        }
-        for (NodeID next : m_edges.GetNodeOut(id)) {
-            if (! m_is_pass[next] || m_placed[next] || m_waiting[next] == 0) continue;
-            if (--m_waiting[next] == 0) makeReady(next);
+        backwards.push_back(id);
+        m_last = id;
+        for (NodeID before : m_edges.GetNodeIn(id)) {
+            if (! counts(before) || m_placed[before] || m_blockers[before] == 0) continue;
+            if (--m_blockers[before] == 0) makeReady(before);
         }
     }
 
-    const DependencyGraph& m_edges;
-    std::vector<char>      m_is_pass;
-    std::vector<char>      m_is_virtual;
-    std::vector<size_t>    m_target_of;
-    std::vector<size_t>    m_waiting;
-    std::vector<char>      m_placed;
-    std::vector<Stretch>   m_stretches;
-    std::set<Entry>        m_by_priority;
-    std::set<NodeID>       m_bookkeeping;
-    size_t                 m_current { kNone };
-    size_t                 m_pending { 0 };
+    const DependencyGraph&        m_edges;
+    std::vector<char>             m_is_pass;
+    std::vector<char>             m_is_virtual;
+    std::vector<size_t>           m_target_of;
+    // Per pass: how many passes that must follow it are not placed yet.
+    std::vector<size_t>           m_blockers;
+    std::vector<char>             m_placed;
+    // Passes ready to be placed, all of them and by the target they write.
+    std::set<NodeID>              m_ready;
+    std::vector<std::set<NodeID>> m_ready_by_target;
+    // The pass placed last.
+    NodeID                        m_last { kNoPass };
 };
 } // namespace
 

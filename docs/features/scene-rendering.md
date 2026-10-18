@@ -1485,7 +1485,13 @@ traded copies of one source share a small set of images: each copy takes one whe
 runs and gives it back once its last reader has drawn, so a scene with forty such
 copies keeps two or three images instead of forty-one, with no extra blit. A scene
 that draws over the whole screen many times holds about a quarter of the target
-memory it did. `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` gives every target its own
+memory it did. How much can be shared depends on the order the render graph returns
+its passes in. The graph builds that order from the back: a pass runs as late as the
+passes that read its result allow, so a layer's buffers are filled next to where they
+are read and not kept alive across unrelated work, and passes that draw into one target
+stay together, so the backend opens one render pass for the stretch instead of one per
+layer. Passes with nothing to tie them keep the order they were added in.
+`WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` gives every target its own
 image again, for comparison or to read each target's own pixels after a frame.
 
 The lock-screen extension keeps its renderer paused while unlocked or asleep to

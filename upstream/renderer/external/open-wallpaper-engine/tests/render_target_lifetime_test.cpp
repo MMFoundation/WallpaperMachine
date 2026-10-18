@@ -337,5 +337,120 @@ TEST(RenderTargetLifetime, DrawsIntoOneTargetStayTogetherWhereTheDependenciesAll
     EXPECT_EQ(plain.topologicalOrder(), ids);
     EXPECT_EQ(plain.topologicalOrder(), plain.topologicalOrder());
 }
+
+rg::PassNode* AddTempPass(rg::RenderGraph& graph, const char* name, const std::vector<std::string>& reads,
+                          const std::string& write) {
+    return graph.addPass<TestPass>(name, rg::PassNode::Type::CustomShader, [&](auto& b, auto&) {
+        for (const auto& key : reads)
+            b.read(b.createTexNode({ .name = key, .key = key, .type = rg::TexNode::TexType::Temp }));
+        b.write(b.createTexNode({ .name = write, .key = write, .type = rg::TexNode::TexType::Temp }, true));
+    });
+}
+
+TEST(RenderTargetLifetime, ABufferIsNotFilledAheadOfUnrelatedWorkBeforeItsReader) {
+    // Two draws onto the output, a pass that samples the output so far into a buffer of its
+    // own, a draw that reads that buffer and draws onto the output again, then three layers
+    // that each draw a card into a buffer and a final pass onto the output. The last draw and
+    // the finals are one stretch onto the output, so the cards go in front of that stretch.
+    // Nothing makes them run before the output was sampled, and doing so would keep their
+    // buffers alive through all of it.
+    rg::RenderGraph graph;
+    const auto first  = AddTempPass(graph, "first", {}, "out")->ID();
+    const auto second = AddTempPass(graph, "second", {}, "out")->ID();
+    const auto sample = AddTempPass(graph, "sample", { "out" }, "grab")->ID();
+    const auto blend  = AddTempPass(graph, "blend", { "grab" }, "out")->ID();
+    std::vector<rg::NodeID> cards, finals;
+    for (int layer = 0; layer < 3; ++layer) {
+        const std::string card = "card" + std::to_string(layer);
+        cards.push_back(AddTempPass(graph, "card", {}, card)->ID());
+        finals.push_back(AddTempPass(graph, "final", { card }, "out")->ID());
+    }
+    const auto order = graph.topologicalOrder();
+    ASSERT_EQ(order.size(), 10u);
+    const auto position = [&](rg::NodeID id) {
+        return std::find(order.begin(), order.end(), id) - order.begin();
+    };
+    EXPECT_LT(position(first), position(second));
+    EXPECT_LT(position(second), position(sample));
+    EXPECT_LT(position(sample), position(blend));
+    for (std::size_t layer = 0; layer < 3; ++layer) {
+        EXPECT_GT(position(cards[layer]), position(sample)) << "card " << layer << " was drawn too early";
+        EXPECT_LT(position(cards[layer]), position(finals[layer]));
+    }
+    // The stretch onto the output stays one stretch, in the order the draws were added.
+    EXPECT_EQ(position(finals[0]), position(blend) + 1);
+    EXPECT_EQ(position(finals[1]), position(finals[0]) + 1);
+    EXPECT_EQ(position(finals[2]), position(finals[1]) + 1);
+}
+
+TEST(RenderTargetLifetime, EveryPassRunsOnceAfterEverythingItDependsOnInGeneratedGraphs) {
+    // Passes that read one or two of nine targets and write one of seven. A pass runs after
+    // an earlier pass when that one writes something it touches or it writes something the
+    // earlier one reads, so the check names every such pair, not only the nearest.
+    for (int seed = 1; seed <= 32; ++seed) {
+        SCOPED_TRACE(seed);
+        const auto build = [&](std::vector<std::pair<std::set<std::string>, std::string>>& accesses) {
+            auto graph = std::make_unique<rg::RenderGraph>();
+            std::vector<rg::NodeID> ids;
+            for (int i = 0; i < 60; ++i) {
+                std::set<std::string> reads { "_rt_" + std::to_string((i * seed + 3) % 9) };
+                if (i % 3 == 0) reads.insert("_rt_" + std::to_string((i + 2 * seed) % 9));
+                const auto write = "_rt_" + std::to_string((i + seed) % 7);
+                ids.push_back(AddTempPass(*graph, "generated", { reads.begin(), reads.end() }, write)->ID());
+                accesses.emplace_back(reads, write);
+            }
+            return std::make_pair(std::move(graph), ids);
+        };
+        std::vector<std::pair<std::set<std::string>, std::string>> accesses;
+        auto [graph, ids] = build(accesses);
+        const auto order = graph->topologicalOrder();
+        ASSERT_EQ(order.size(), ids.size());
+        EXPECT_EQ(std::set<rg::NodeID>(order.begin(), order.end()).size(), ids.size());
+        std::map<rg::NodeID, std::size_t> position;
+        for (std::size_t i = 0; i < order.size(); ++i) position[order[i]] = i;
+        for (std::size_t later = 0; later < ids.size(); ++later) {
+            for (std::size_t earlier = 0; earlier < later; ++earlier) {
+                const auto& [earlier_reads, earlier_write] = accesses[earlier];
+                const auto& [later_reads, later_write]     = accesses[later];
+                const bool conflict = later_reads.contains(earlier_write) || later_write == earlier_write ||
+                                      earlier_reads.contains(later_write);
+                if (conflict) EXPECT_LT(position[ids[earlier]], position[ids[later]]) << earlier << " before " << later;
+            }
+        }
+        // The same graph built again gives the same order.
+        std::vector<std::pair<std::set<std::string>, std::string>> again_accesses;
+        auto [again, again_ids] = build(again_accesses);
+        EXPECT_EQ(again->topologicalOrder(), order);
+    }
+}
+
+TEST(RenderTargetLifetime, PassesOnADependencyCycleAreStillEachReturnedOnce) {
+    // A pass that reads what a later pass writes closes a cycle; the order has to hold every
+    // pass once, whatever it makes of the passes on the cycle.
+    rg::RenderGraph graph;
+    rg::TexNode*    second_output = nullptr;
+    const auto      first = graph.addPass<TestPass>("first", rg::PassNode::Type::CustomShader,
+                                                    [&](auto& b, auto&) {
+        b.write(b.createTexNode({ .name = "a", .key = "a", .type = rg::TexNode::TexType::Temp }, true));
+    });
+    const auto second = graph.addPass<TestPass>("second", rg::PassNode::Type::CustomShader,
+                                                [&](auto& b, auto&) {
+        b.read(b.createTexNode({ .name = "a", .key = "a", .type = rg::TexNode::TexType::Temp }));
+        second_output = b.createTexNode({ .name = "b", .key = "b", .type = rg::TexNode::TexType::Temp }, true);
+        b.write(second_output);
+    });
+    const auto third = AddTempPass(graph, "third", { "b" }, "c");
+    ASSERT_TRUE(graph.afterBuild(first->ID(), [&](auto& b, auto&) {
+        b.read(second_output);
+        return true;
+    }));
+    EXPECT_TRUE(graph.mustPrecede(first->ID(), second->ID()));
+    EXPECT_TRUE(graph.mustPrecede(second->ID(), first->ID()));
+    const auto order = graph.topologicalOrder();
+    ASSERT_EQ(order.size(), 3u);
+    EXPECT_EQ(std::set<rg::NodeID>(order.begin(), order.end()),
+              (std::set<rg::NodeID> { first->ID(), second->ID(), third->ID() }));
+    EXPECT_EQ(graph.topologicalOrder(), order);
+}
 } // namespace
 } // namespace wallpaper
