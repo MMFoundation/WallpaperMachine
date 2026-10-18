@@ -14,14 +14,18 @@ using Set = std::set<Key, std::less<>>;
 
 template<class Key, class Value, class KeyLike, class Allocator>
 inline bool exists(const std::map<Key, Value, std::less<>, Allocator>& m, const KeyLike& key) noexcept {
-    auto iter = m.find(key);
-    return iter != m.end();
+    // CLEANROOM PH7
+    (void)m;
+    (void)key;
+    return false;
 }
 
 template<class Key, class KeyLike, class Allocator>
 inline bool exists(const std::set<Key, std::less<>, Allocator>& m, const KeyLike& key) noexcept {
-    auto iter = m.find(key);
-    return iter != m.end();
+    // CLEANROOM PH8
+    (void)m;
+    (void)key;
+    return false;
 }
 
 }

@@ -29,334 +29,21 @@
 
 namespace
 {
-thread_local std::string g_last_error;
-
 void clear_last_error()
 {
-    g_last_error.clear();
-}
-
-int finish_with_error(std::string error)
-{
-    g_last_error = std::move(error);
-    return 1;
-}
-
-bool valid_scene(owe_scene_wallpaper* scene)
-{
-    return scene != nullptr;
-}
-
-std::string_view view_or_empty(const char* value)
-{
-    return value == nullptr ? std::string_view {} : std::string_view { value };
-}
-
-bool validate_dimensions(uint32_t width, uint32_t height, std::string* error)
-{
-    if (width == 0 || height == 0) {
-        *error = "render dimensions must be non-zero";
-        return false;
-    }
-    if (width > std::numeric_limits<uint16_t>::max() ||
-        height > std::numeric_limits<uint16_t>::max()) {
-        *error = "render dimensions exceed SceneWallpaper limits";
-        return false;
-    }
-    return true;
-}
-
-bool validate_render_resolution(uint32_t width, uint32_t height, std::string* error)
-{
-    if (width == 0 && height == 0) return true;
-    if (width == 0 || height == 0) {
-        *error = "render resolution must provide both width and height";
-        return false;
-    }
-    if (width > std::numeric_limits<uint16_t>::max() ||
-        height > std::numeric_limits<uint16_t>::max()) {
-        *error = "render resolution exceeds SceneWallpaper limits";
-        return false;
-    }
-    return true;
-}
-
-// A layer-scoped mailbox keeps requests independent across displays and scene
-// replacements. Notifications stay in-process; no screen-recording permission
-// or private WindowServer API is involved.
-//
-// Three threads touch this: the notification thread raises requests, the render
-// thread polls `wants_poster`, and the native backend delivers pixels from a
-// command-buffer completion handler. One mutex covers every field rather than
-// atomics per field, because the interesting invariants span several of them.
-struct DesktopPosterMailbox {
-    std::mutex guard;
-    uint64_t requested { 1 };
-    uint64_t delivered { 0 };
-    // Ids handed to captures that have started but not reported back, oldest
-    // first. A single slot would credit whichever request happens to be in
-    // flight when pixels arrive, and a capture that overlaps a newer request
-    // would then mark that newer request satisfied with older pixels.
-    std::string context;
-    std::deque<std::pair<uint64_t, std::string>> handed_out;
-    std::chrono::steady_clock::time_point next_attempt {};
-    std::function<void()> wake;
-    __weak CAMetalLayer* layer;
-    id observer;
-
-    // A capture that never reports back would otherwise sit at the head of the
-    // queue and misalign every later result. Four is well past the number of
-    // captures that can overlap in practice, so dropping the oldest beyond it
-    // only ever discards an id nothing is going to answer for.
-    static constexpr std::size_t kMaxOutstanding = 4;
-
-    ~DesktopPosterMailbox() {
-        if (observer != nil) [[NSNotificationCenter defaultCenter] removeObserver:observer];
-    }
-};
-
-void configure_desktop_poster(wallpaper::RenderInitInfo& info, void* metal_layer_handle)
-{
-    auto mailbox = std::make_shared<DesktopPosterMailbox>();
-    mailbox->layer = (__bridge CAMetalLayer*)metal_layer_handle;
-    std::weak_ptr<DesktopPosterMailbox> weak_mailbox = mailbox;
-    mailbox->observer = [[NSNotificationCenter defaultCenter]
-        addObserverForName:@"WallpaperMachine.requestDesktopPoster"
-        object:mailbox->layer queue:nil usingBlock:^(NSNotification* notification) {
-            auto state = weak_mailbox.lock();
-            if (state == nullptr) return;
-            std::scoped_lock lock(state->guard);
-            ++state->requested;
-            NSString* context = notification.userInfo[@"context"];
-            const char* text = [context isKindOfClass:[NSString class]] && context.length <= 4096
-                ? context.UTF8String : nullptr;
-            state->context = text != nullptr ? text : "";
-            // Woken under the lock that unbinding also takes, so a render
-            // handler that has already unbound cannot be poked afterwards.
-            // The wake only enqueues a message, so it does not re-enter here.
-            if (state->wake) state->wake();
-        }];
-    info.bind_poster_wake = [mailbox](std::function<void()> wake) {
-        std::scoped_lock lock(mailbox->guard);
-        mailbox->wake = std::move(wake);
-    };
-    // New apply/refresh requests must export the next presented frame, even if
-    // the previous wallpaper was sampled less than two seconds ago. Only
-    // retries of a FAILED readback retain the backoff.
-    const auto due = [](const DesktopPosterMailbox& state,
-                        std::chrono::steady_clock::time_point now) {
-        if (state.requested == state.delivered) return false;
-        const bool retry =
-            ! state.handed_out.empty() && state.handed_out.back().first == state.requested;
-        return ! (retry && now < state.next_attempt);
-    };
-    info.wants_poster = [mailbox, due] {
-        std::scoped_lock lock(mailbox->guard);
-        const auto now = std::chrono::steady_clock::now();
-        if (! due(*mailbox, now)) return false;
-        mailbox->next_attempt = now + std::chrono::seconds(2);
-        mailbox->handed_out.emplace_back(mailbox->requested, mailbox->context);
-        if (mailbox->handed_out.size() > DesktopPosterMailbox::kMaxOutstanding) {
-            mailbox->handed_out.pop_front();
-        }
-        return true;
-    };
-    info.poster_ready = [mailbox](std::span<const uint8_t> pixels, uint32_t width,
-                                  uint32_t height, bool bgra) {
-        @autoreleasepool {
-            CAMetalLayer* layer = nil;
-            std::string captured_context;
-            {
-                std::scoped_lock lock(mailbox->guard);
-                // Captures report in the order they were started, so the head
-                // is the request these pixels were taken for. Nothing recorded
-                // means an old generation answering after the mailbox moved on.
-                // A retried capture records its id twice; once the first copy
-                // is satisfied the second is already answered, and leaving it
-                // at the head would throw away the next request's pixels.
-                while (! mailbox->handed_out.empty() &&
-                       mailbox->handed_out.front().first <= mailbox->delivered) {
-                    mailbox->handed_out.pop_front();
-                }
-                if (mailbox->handed_out.empty()) return;
-                const uint64_t captured = mailbox->handed_out.front().first;
-                captured_context = mailbox->handed_out.front().second;
-                mailbox->handed_out.pop_front();
-                mailbox->delivered = captured;
-                layer = mailbox->layer;
-            }
-            if (layer == nil) return;
-            NSData* data = [NSData dataWithBytes:pixels.data() length:pixels.size()];
-            NSString* context = [NSString stringWithUTF8String:captured_context.c_str()];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [[NSNotificationCenter defaultCenter]
-                    postNotificationName:@"WallpaperMachine.desktopPosterReady"
-                    object:layer userInfo:@{ @"pixels": data, @"width": @(width),
-                                            @"height": @(height), @"bgra": @(bgra),
-                                            @"context": context != nil ? context : @"" }];
-            });
-        }
-    };
-}
-
-wallpaper::RenderInitInfo make_render_init_info(
-    void* metal_layer_handle,
-    uint32_t width,
-    uint32_t height,
-    uint32_t render_width,
-    uint32_t render_height,
-    double display_scale_factor)
-{
-    // RenderInitInfo owns C++ callbacks and vectors, which bindgen cannot model
-    // safely. Keep that construction here and pass only primitive inputs from
-    // wallpaper-core.
-    wallpaper::RenderInitInfo info;
-    info.offscreen = false;
-    // The layer the Metal renderer adopts once the scene is parsed. The caller
-    // keeps it alive even if the host replaces its window layer before that
-    // work runs.
-    info.metal_layer = metal_layer_handle;
-    // Retained by the description itself: the renderer is created later, from the
-    // parsed scene, and the host may have replaced its window layer by then.
-    info.metal_layer_owner = std::shared_ptr<void>(
-        (__bridge_retained void*)(__bridge CAMetalLayer*)metal_layer_handle,
-        [](void* layer) { CFRelease(layer); });
-    info.width = static_cast<uint16_t>(width);
-    info.height = static_cast<uint16_t>(height);
-    info.render_width = static_cast<uint16_t>(render_width == 0 ? width : render_width);
-    info.render_height = static_cast<uint16_t>(render_height == 0 ? height : render_height);
-    info.display_scale_factor =
-        display_scale_factor > 0.0 && std::isfinite(display_scale_factor)
-            ? display_scale_factor
-            : 1.0;
-    configure_desktop_poster(info, metal_layer_handle);
-    return info;
+    // CLEANROOM PH22
 }
 
 const char* property_name(std::string_view value)
 {
-    // std::string_view constants in SceneWallpaper.hpp need stable C pointers
-    // for Rust. The thread-local buffer is valid until the next property-name
-    // request on the same thread, which is longer than each setter call needs.
-    thread_local std::string name;
-    name.assign(value);
-    return name.c_str();
-}
-
-struct FirstFrameCallbackRegistration {
-    owe_first_frame_callback      callback { nullptr };
-    void*                         user_data { nullptr };
-    owe_first_frame_callback_drop drop_user_data { nullptr };
-
-    FirstFrameCallbackRegistration(
-        owe_first_frame_callback callback,
-        void* user_data,
-        owe_first_frame_callback_drop drop_user_data):
-        callback(callback), user_data(user_data), drop_user_data(drop_user_data)
-    {
-    }
-
-    ~FirstFrameCallbackRegistration()
-    {
-        if (drop_user_data != nullptr) drop_user_data(user_data);
-    }
-
-    void operator()() const
-    {
-        if (callback != nullptr) callback(user_data);
-    }
-};
-
-struct PointerInputCallbackRegistration {
-    owe_pointer_input_callback callback { nullptr };
-    void* user_data { nullptr };
-    owe_pointer_input_callback_drop drop_user_data { nullptr };
-
-    PointerInputCallbackRegistration(owe_pointer_input_callback callback, void* user_data)
-        : callback(callback), user_data(user_data) {}
-
-    ~PointerInputCallbackRegistration() {
-        if (drop_user_data != nullptr) drop_user_data(user_data);
-    }
-
-    void operator()(bool accepts_pointer_input) const {
-        if (callback != nullptr) callback(user_data, accepts_pointer_input);
-    }
-};
-
-struct UserShortcutCallbackRegistration {
-    owe_user_shortcut_callback callback { nullptr };
-    void* user_data { nullptr };
-    owe_user_shortcut_callback_drop drop_user_data { nullptr };
-
-    UserShortcutCallbackRegistration(owe_user_shortcut_callback callback, void* user_data)
-        : callback(callback), user_data(user_data) {}
-
-    ~UserShortcutCallbackRegistration() {
-        if (drop_user_data != nullptr) drop_user_data(user_data);
-    }
-
-    void operator()(std::string_view property_name, std::string_view property_value) const {
-        if (callback == nullptr) return;
-        // The engine's strings are not null-terminated views of storage the
-        // callee may keep; both are copied for the length of the call only.
-        const std::string name(property_name);
-        const std::string value(property_value);
-        callback(user_data, name.c_str(), value.c_str());
-    }
-};
-
-struct AudioRequirementCallbackRegistration {
-    owe_audio_requirement_callback callback { nullptr };
-    void* user_data { nullptr };
-    owe_audio_requirement_callback_drop drop_user_data { nullptr };
-
-    AudioRequirementCallbackRegistration(owe_audio_requirement_callback callback, void* user_data)
-        : callback(callback), user_data(user_data) {}
-
-    ~AudioRequirementCallbackRegistration() {
-        if (drop_user_data != nullptr) drop_user_data(user_data);
-    }
-
-    void operator()(bool requires_audio) const {
-        if (callback != nullptr) callback(user_data, requires_audio);
-    }
-};
-
-struct RenderFailureCallbackRegistration {
-    owe_render_failure_callback callback { nullptr };
-    void* user_data { nullptr };
-    owe_render_failure_callback_drop drop_user_data { nullptr };
-
-    RenderFailureCallbackRegistration(owe_render_failure_callback callback, void* user_data)
-        : callback(callback), user_data(user_data) {}
-
-    ~RenderFailureCallbackRegistration() {
-        if (drop_user_data != nullptr) drop_user_data(user_data);
-    }
-
-    void operator()() const {
-        if (callback != nullptr) callback(user_data);
-    }
-};
-
-int finish_with_error_noexcept(const char* message) noexcept {
-    try {
-        return finish_with_error(message);
-    } catch (...) {
-        // Even reporting an allocation failure must not unwind through the C ABI.
-        return 1;
-    }
+    // CLEANROOM PH23
+    (void)value;
+    return "";
 }
 } // namespace
 
 struct owe_scene_wallpaper {
     wallpaper::SceneWallpaper scene;
-    std::shared_ptr<FirstFrameCallbackRegistration> first_frame_callback;
-    std::shared_ptr<PointerInputCallbackRegistration> pointer_input_callback;
-    std::shared_ptr<UserShortcutCallbackRegistration> user_shortcut_callback;
-    std::shared_ptr<AudioRequirementCallbackRegistration> audio_requirement_callback;
-    std::shared_ptr<RenderFailureCallbackRegistration> render_failure_callback;
 };
 
 #ifdef WESCENE_BUILD_TESTS
@@ -368,51 +55,45 @@ wallpaper::SceneWallpaperInputTestAccess::FromNative(owe_scene_wallpaper& scene)
 
 extern "C" void owe_set_log_callback(owe_log_callback callback)
 {
-    SetWallpaperLogCallback(callback);
+    // CLEANROOM PH24
+    (void)callback;
 }
 
 extern "C" uint64_t owe_current_log_scope(void) { return WallpaperLogScope(); }
 
 extern "C" int owe_scene_wallpaper_new(owe_scene_wallpaper** out_scene)
 {
-    clear_last_error();
-    if (out_scene == nullptr) return finish_with_error("out_scene must not be null");
-
-    *out_scene = new owe_scene_wallpaper();
-    return 0;
+    // CLEANROOM PH25
+    (void)out_scene;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_delete(owe_scene_wallpaper* scene)
 {
-    clear_last_error();
-    delete scene;
-    return 0;
+    // CLEANROOM PH26
+    (void)scene;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_log_scope(owe_scene_wallpaper* scene, uint64_t scope)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (scene->scene.inited()) return finish_with_error("log scope must be set before init");
-    scene->scene.setLogScope(scope);
-    return 0;
+    // CLEANROOM PH27
+    (void)scene, (void)scope;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_init(owe_scene_wallpaper* scene)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (!scene->scene.init()) return finish_with_error("failed to initialize SceneWallpaper");
-    return 0;
+    // CLEANROOM PH28
+    (void)scene;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_shutdown(owe_scene_wallpaper* scene)
 {
-    clear_last_error();
-    if (scene == nullptr) return 0;
-
-    scene->scene.shutdown();
-    return 0;
+    // CLEANROOM PH29
+    (void)scene;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_init_metal(
@@ -424,35 +105,16 @@ extern "C" int owe_scene_wallpaper_init_metal(
     uint32_t render_height,
     double display_scale_factor)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (metal_layer == nullptr) return finish_with_error("metal_layer must not be null");
-
-    std::string error;
-    if (!validate_dimensions(width, height, &error)) return finish_with_error(error);
-    if (!validate_render_resolution(render_width, render_height, &error)) {
-        return finish_with_error(error);
-    }
-
-    scene->scene.initSurface(make_render_init_info(
-        metal_layer,
-        width,
-        height,
-        render_width,
-        render_height,
-        display_scale_factor));
-    return 0;
+    // CLEANROOM PH30
+    (void)scene, (void)metal_layer, (void)width, (void)height, (void)render_width, (void)render_height, (void)display_scale_factor;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_begin_surface_reconfigure(owe_scene_wallpaper* scene)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-
-    if (!scene->scene.beginSurfaceReconfigure()) {
-        return finish_with_error("surface reconfigure begin failed");
-    }
-    return 0;
+    // CLEANROOM PH31
+    (void)scene;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_finish_surface_reconfigure(
@@ -464,27 +126,9 @@ extern "C" int owe_scene_wallpaper_finish_surface_reconfigure(
     uint32_t render_height,
     double display_scale_factor)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (metal_layer == nullptr) return finish_with_error("metal_layer must not be null");
-
-    std::string error;
-    if (!validate_dimensions(width, height, &error)) return finish_with_error(error);
-    if (!validate_render_resolution(render_width, render_height, &error)) {
-        return finish_with_error(error);
-    }
-
-    if (!scene->scene.finishSurfaceReconfigure(make_render_init_info(
-            metal_layer,
-            width,
-            height,
-            render_width,
-            render_height,
-            display_scale_factor)))
-    {
-        return finish_with_error("surface reconfigure finish failed");
-    }
-    return 0;
+    // CLEANROOM PH32
+    (void)scene, (void)metal_layer, (void)width, (void)height, (void)render_width, (void)render_height, (void)display_scale_factor;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_apply_config(
@@ -497,74 +141,38 @@ extern "C" int owe_scene_wallpaper_apply_config(
     bool force_shader_refresh,
     const char* project_property_override_json)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (source == nullptr || source[0] == '\0') {
-        return finish_with_error("source must not be empty");
-    }
-    if (fps == 0) return finish_with_error("fps must be greater than zero");
-
-    wallpaper::SceneWallpaperConfig config;
-    config.source = std::string(view_or_empty(source));
-    config.assets = std::string(view_or_empty(assets));
-    config.cache_path = std::string(view_or_empty(cache_path));
-    config.fps = fps;
-    config.paused = paused;
-    config.force_shader_refresh = force_shader_refresh;
-    config.has_project_property_override = project_property_override_json != nullptr;
-    config.project_property_override_json =
-        std::string(view_or_empty(project_property_override_json));
-    scene->scene.applyConfig(config);
-    return 0;
+    // CLEANROOM PH33
+    (void)scene, (void)source, (void)assets, (void)cache_path, (void)fps, (void)paused, (void)force_shader_refresh, (void)project_property_override_json;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_target_fps(owe_scene_wallpaper* scene, uint32_t fps)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (fps == 0) return finish_with_error("fps must be greater than zero");
-
-    scene->scene.setTargetFps(fps);
-    return 0;
+    // CLEANROOM PH34
+    (void)scene, (void)fps;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_paused(owe_scene_wallpaper* scene, bool paused)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-
-    scene->scene.setPaused(paused);
-    return 0;
+    // CLEANROOM PH35
+    (void)scene, (void)paused;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_render_scale(owe_scene_wallpaper* scene, double scale)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (!std::isfinite(scale) || scale <= 0.0) {
-        return finish_with_error("render scale must be a positive finite value");
-    }
-
-    scene->scene.setPropertyFloat(wallpaper::PROPERTY_RENDER_SCALE, static_cast<float>(scale));
-    return 0;
+    // CLEANROOM PH36
+    (void)scene, (void)scale;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_framing(owe_scene_wallpaper* scene, double pan_x,
                                                double pan_y)
 {
-    // No log line on this path: a drag sets it many times a second.
-    try {
-        clear_last_error();
-        if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-        if (!std::isfinite(pan_x) || !std::isfinite(pan_y)) {
-            return finish_with_error("framing must be finite");
-        }
-
-        scene->scene.setFraming(wallpaper::WallpaperFraming { pan_x, pan_y });
-        return 0;
-    } catch (...) {
-        return finish_with_error_noexcept("failed to set framing");
-    }
+    // CLEANROOM PH37
+    (void)scene, (void)pan_x, (void)pan_y;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_first_frame_callback(
@@ -573,21 +181,9 @@ extern "C" int owe_scene_wallpaper_set_first_frame_callback(
     void* user_data,
     owe_first_frame_callback_drop drop_user_data)
 {
-    try {
-        clear_last_error();
-        if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-
-        auto registration = std::make_shared<FirstFrameCallbackRegistration>(
-            callback, user_data, nullptr);
-        auto forwarder = std::make_shared<wallpaper::FirstFrameCallback>(
-            [registration]() { (*registration)(); });
-        scene->scene.setPropertyObject(wallpaper::PROPERTY_FIRST_FRAME_CALLBACK, forwarder);
-        registration->drop_user_data = drop_user_data;
-        scene->first_frame_callback = std::move(registration);
-        return 0;
-    } catch (...) {
-        return finish_with_error_noexcept("failed to register first-frame callback");
-    }
+    // CLEANROOM PH38
+    (void)scene, (void)callback, (void)user_data, (void)drop_user_data;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_pointer_input_callback(
@@ -596,24 +192,9 @@ extern "C" int owe_scene_wallpaper_set_pointer_input_callback(
     void* user_data,
     owe_pointer_input_callback_drop drop_user_data)
 {
-    try {
-        clear_last_error();
-        if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-        if (!scene->scene.inited()) return finish_with_error("scene must be initialized");
-
-        // Keep drop unarmed until enqueue succeeds. The local owner pins the
-        // registration even when the looper executes the replay before return.
-        auto registration =
-            std::make_shared<PointerInputCallbackRegistration>(callback, user_data);
-        auto forwarder = std::make_shared<wallpaper::PointerInputCallback>(
-            [registration](bool accepts) { (*registration)(accepts); });
-        scene->scene.setPropertyObject(wallpaper::PROPERTY_POINTER_INPUT_CALLBACK, forwarder);
-        registration->drop_user_data = drop_user_data;
-        scene->pointer_input_callback = std::move(registration);
-        return 0;
-    } catch (...) {
-        return finish_with_error_noexcept("failed to register pointer-input callback");
-    }
+    // CLEANROOM PH39
+    (void)scene, (void)callback, (void)user_data, (void)drop_user_data;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_user_shortcut_callback(
@@ -622,26 +203,9 @@ extern "C" int owe_scene_wallpaper_set_user_shortcut_callback(
     void* user_data,
     owe_user_shortcut_callback_drop drop_user_data)
 {
-    try {
-        clear_last_error();
-        if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-        if (!scene->scene.inited()) return finish_with_error("scene must be initialized");
-
-        // Keep drop unarmed until the registration is installed, exactly as the
-        // pointer callback does: a failure here must not consume user_data.
-        auto registration =
-            std::make_shared<UserShortcutCallbackRegistration>(callback, user_data);
-        auto forwarder = std::make_shared<wallpaper::UserShortcutCallback>(
-            [registration](std::string_view name, std::string_view value) {
-                (*registration)(name, value);
-            });
-        scene->scene.setPropertyObject(wallpaper::PROPERTY_USER_SHORTCUT_CALLBACK, forwarder);
-        registration->drop_user_data = drop_user_data;
-        scene->user_shortcut_callback = std::move(registration);
-        return 0;
-    } catch (...) {
-        return finish_with_error_noexcept("failed to register user-shortcut callback");
-    }
+    // CLEANROOM PH40
+    (void)scene, (void)callback, (void)user_data, (void)drop_user_data;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_audio_requirement_callback(
@@ -650,24 +214,9 @@ extern "C" int owe_scene_wallpaper_set_audio_requirement_callback(
     void* user_data,
     owe_audio_requirement_callback_drop drop_user_data)
 {
-    try {
-        clear_last_error();
-        if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-        if (!scene->scene.inited()) return finish_with_error("scene must be initialized");
-
-        // Keep drop unarmed until the registration is installed, as the pointer
-        // callback does: a failure here must not consume user_data.
-        auto registration =
-            std::make_shared<AudioRequirementCallbackRegistration>(callback, user_data);
-        auto forwarder = std::make_shared<wallpaper::AudioRequirementCallback>(
-            [registration](bool requires_audio) { (*registration)(requires_audio); });
-        scene->scene.setPropertyObject(wallpaper::PROPERTY_AUDIO_REQUIREMENT_CALLBACK, forwarder);
-        registration->drop_user_data = drop_user_data;
-        scene->audio_requirement_callback = std::move(registration);
-        return 0;
-    } catch (...) {
-        return finish_with_error_noexcept("failed to register audio-requirement callback");
-    }
+    // CLEANROOM PH41
+    (void)scene, (void)callback, (void)user_data, (void)drop_user_data;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_render_failure_callback(
@@ -676,68 +225,38 @@ extern "C" int owe_scene_wallpaper_set_render_failure_callback(
     void* user_data,
     owe_render_failure_callback_drop drop_user_data)
 {
-    try {
-        clear_last_error();
-        if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-        if (!scene->scene.inited()) return finish_with_error("scene must be initialized");
-
-        // Keep drop unarmed until the registration is installed, as the other
-        // callbacks do: a failure here must not consume user_data.
-        auto registration =
-            std::make_shared<RenderFailureCallbackRegistration>(callback, user_data);
-        auto forwarder = std::make_shared<wallpaper::RenderFailureCallback>(
-            [registration]() { (*registration)(); });
-        scene->scene.setPropertyObject(wallpaper::PROPERTY_RENDER_FAILURE_CALLBACK, forwarder);
-        registration->drop_user_data = drop_user_data;
-        scene->render_failure_callback = std::move(registration);
-        return 0;
-    } catch (...) {
-        return finish_with_error_noexcept("failed to register render-failure callback");
-    }
+    // CLEANROOM PH42
+    (void)scene, (void)callback, (void)user_data, (void)drop_user_data;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_mouse_input(owe_scene_wallpaper* scene, double x, double y)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (!std::isfinite(x) || !std::isfinite(y)) return finish_with_error("mouse coordinates must be finite");
-
-    scene->scene.mouseInput(x, y);
-    return 0;
+    // CLEANROOM PH43
+    (void)scene, (void)x, (void)y;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_mouse_button(owe_scene_wallpaper* scene, int button, bool pressed)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (button < 0 || button > 31) return finish_with_error("mouse button must be in range 0..31");
-
-    scene->scene.mouseButton(button, pressed);
-    return 0;
+    // CLEANROOM PH44
+    (void)scene, (void)button, (void)pressed;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_mouse_button_baseline(
     owe_scene_wallpaper* scene, uint32_t down)
 {
-    try {
-        clear_last_error();
-        if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-        if (!scene->scene.inited()) return finish_with_error("scene must be initialized");
-
-        scene->scene.mouseButtonBaseline(down);
-        return 0;
-    } catch (...) {
-        return finish_with_error_noexcept("failed to set mouse-button baseline");
-    }
+    // CLEANROOM PH45
+    (void)scene, (void)down;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_mouse_enter(owe_scene_wallpaper* scene, bool entered)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-
-    scene->scene.mouseEnter(entered);
-    return 0;
+    // CLEANROOM PH46
+    (void)scene, (void)entered;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_property_bool(
@@ -745,12 +264,9 @@ extern "C" int owe_scene_wallpaper_set_property_bool(
     const char* name,
     bool value)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (name == nullptr || name[0] == '\0') return finish_with_error("property name is empty");
-
-    scene->scene.setPropertyBool(name, value);
-    return 0;
+    // CLEANROOM PH47
+    (void)scene, (void)name, (void)value;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_property_int32(
@@ -758,12 +274,9 @@ extern "C" int owe_scene_wallpaper_set_property_int32(
     const char* name,
     int32_t value)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (name == nullptr || name[0] == '\0') return finish_with_error("property name is empty");
-
-    scene->scene.setPropertyInt32(name, value);
-    return 0;
+    // CLEANROOM PH48
+    (void)scene, (void)name, (void)value;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_property_float(
@@ -771,12 +284,9 @@ extern "C" int owe_scene_wallpaper_set_property_float(
     const char* name,
     float value)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (name == nullptr || name[0] == '\0') return finish_with_error("property name is empty");
-
-    scene->scene.setPropertyFloat(name, value);
-    return 0;
+    // CLEANROOM PH49
+    (void)scene, (void)name, (void)value;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_property_string(
@@ -784,49 +294,32 @@ extern "C" int owe_scene_wallpaper_set_property_string(
     const char* name,
     const char* value)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (name == nullptr || name[0] == '\0') return finish_with_error("property name is empty");
-
-    scene->scene.setPropertyString(name, std::string(view_or_empty(value)));
-    return 0;
+    // CLEANROOM PH50
+    (void)scene, (void)name, (void)value;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_audio_volume(owe_scene_wallpaper* scene, float volume)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (!std::isfinite(volume) || volume < 0.0f || volume > 1.0f) {
-        return finish_with_error("audio volume must be finite and between 0.0 and 1.0");
-    }
-
-    scene->scene.setPropertyFloat(wallpaper::PROPERTY_VOLUME, volume);
-    return 0;
+    // CLEANROOM PH51
+    (void)scene, (void)volume;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_set_audio_muted(owe_scene_wallpaper* scene, bool muted)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-
-    scene->scene.setPropertyBool(wallpaper::PROPERTY_MUTED, muted);
-    return 0;
+    // CLEANROOM PH52
+    (void)scene, (void)muted;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_submit_media_event_json(
     owe_scene_wallpaper* scene,
     const char* event_json)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (event_json == nullptr || event_json[0] == '\0') {
-        return finish_with_error("media event json must not be empty");
-    }
-
-    scene->scene.setPropertyString(
-        wallpaper::PROPERTY_MEDIA_EVENT_JSON,
-        std::string(event_json));
-    return 0;
+    // CLEANROOM PH53
+    (void)scene, (void)event_json;
+    return 1;
 }
 
 extern "C" int owe_scene_wallpaper_apply_system_media_artwork(
@@ -836,58 +329,57 @@ extern "C" int owe_scene_wallpaper_apply_system_media_artwork(
     const uint8_t* rgba,
     uintptr_t rgba_len)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (!wallpaper::IsValidSystemMediaArtwork(width, height, rgba, static_cast<std::size_t>(rgba_len))) {
-        return finish_with_error("media artwork must be complete RGBA pixels or the empty clear value");
-    }
-
-    scene->scene.applySystemMediaArtwork(
-        width,
-        height,
-        rgba,
-        static_cast<std::size_t>(rgba_len));
-    return 0;
+    // CLEANROOM PH54
+    (void)scene, (void)width, (void)height, (void)rgba, (void)rgba_len;
+    return 1;
 }
 
 extern "C" const char* owe_property_scaling_mode(void)
 {
-    return property_name(wallpaper::PROPERTY_SCALINGMODE);
+    // CLEANROOM PH55
+    return "";
 }
 
 extern "C" const char* owe_property_scaling_factor(void)
 {
-    return property_name(wallpaper::PROPERTY_SCALINGFACTOR);
+    // CLEANROOM PH56
+    return "";
 }
 
 extern "C" const char* owe_property_horizontal_flip(void)
 {
-    return property_name(wallpaper::PROPERTY_HORIZONTAL_FLIP);
+    // CLEANROOM PH57
+    return "";
 }
 
 extern "C" const char* owe_property_audio_response_enabled(void)
 {
-    return property_name(wallpaper::PROPERTY_AUDIO_RESPONSE_ENABLED);
+    // CLEANROOM PH58
+    return "";
 }
 
 extern "C" const char* owe_property_media_integration_enabled(void)
 {
-    return property_name(wallpaper::PROPERTY_MEDIA_INTEGRATION_ENABLED);
+    // CLEANROOM PH59
+    return "";
 }
 
 extern "C" const char* owe_property_force_shader_refresh(void)
 {
-    return property_name(wallpaper::PROPERTY_FORCE_SHADER_REFRESH);
+    // CLEANROOM PH60
+    return "";
 }
 
 extern "C" const char* owe_property_project_property_override_json(void)
 {
-    return property_name(wallpaper::PROPERTY_PROJECT_PROPERTY_OVERRIDE_JSON);
+    // CLEANROOM PH61
+    return "";
 }
 
 extern "C" const char* owe_property_project_property_reset(void)
 {
-    return property_name(wallpaper::PROPERTY_PROJECT_PROPERTY_RESET);
+    // CLEANROOM PH62
+    return "";
 }
 
 extern "C" const char* owe_property_project_property_preview_json(void)
@@ -897,9 +389,8 @@ extern "C" const char* owe_property_project_property_preview_json(void)
 
 extern "C" int owe_audio_spectrum_is_stereo(void)
 {
-    const auto snapshot = wallpaper::audio::CurrentAudioSpectrumSnapshot();
-    if (snapshot.generation == 0) return -1;
-    return snapshot.stereo ? 1 : 0;
+    // CLEANROOM PH63
+    return -1;
 }
 
 extern "C" void owe_set_scene_optimization_enabled(bool enabled)
@@ -1068,12 +559,9 @@ extern "C" int owe_audio_submit_mono_frames(
     uint32_t frame_count,
     const float* pcm_frames)
 {
-    clear_last_error();
-    std::string error;
-    if (!wallpaper::audio::SubmitMonoAudioFrames(sample_rate, frame_count, pcm_frames, &error)) {
-        return finish_with_error(error);
-    }
-    return 0;
+    // CLEANROOM PH64
+    (void)sample_rate, (void)frame_count, (void)pcm_frames;
+    return 1;
 }
 
 extern "C" int owe_audio_submit_frames(
@@ -1081,12 +569,9 @@ extern "C" int owe_audio_submit_frames(
     uint32_t frame_count,
     const float* pcm_frames)
 {
-    clear_last_error();
-    std::string error;
-    if (!wallpaper::audio::SubmitAudioFrames(sample_rate, frame_count, pcm_frames, &error)) {
-        return finish_with_error(error);
-    }
-    return 0;
+    // CLEANROOM PH65
+    (void)sample_rate, (void)frame_count, (void)pcm_frames;
+    return 1;
 }
 
 extern "C" int owe_audio_current_spectrum_128(
@@ -1094,30 +579,9 @@ extern "C" int owe_audio_current_spectrum_128(
     uintptr_t out_len,
     uint64_t* out_generation)
 {
-    clear_last_error();
-    if (out_bins == nullptr) {
-        return finish_with_error("out_bins must not be null");
-    }
-    if (out_len < 128u) {
-        return finish_with_error("out_len must be at least 128");
-    }
-
-    const auto sanitize_audio_bin = [](float value) -> float {
-        if (! std::isfinite(value)) {
-            return 0.0f;
-        }
-        return std::clamp(value, 0.0f, 1.0f);
-    };
-
-    const auto snapshot = wallpaper::audio::CurrentAudioSpectrumSnapshot();
-    for (size_t i = 0; i < 64u; ++i) {
-        out_bins[i]       = sanitize_audio_bin(snapshot.left64[i]);
-        out_bins[i + 64u] = sanitize_audio_bin(snapshot.right64[i]);
-    }
-    if (out_generation != nullptr) {
-        *out_generation = snapshot.generation;
-    }
-    return 0;
+    // CLEANROOM PH66
+    (void)out_bins, (void)out_len, (void)out_generation;
+    return 1;
 }
 
 extern "C" int owe_renderer_counters_set_enabled(bool enabled)
@@ -1138,13 +602,9 @@ extern "C" int owe_scene_wallpaper_counters(
     uintptr_t out_len,
     uintptr_t* out_written)
 {
-    clear_last_error();
-    if (!valid_scene(scene)) return finish_with_error("scene must not be null");
-    if (out_values == nullptr) return finish_with_error("out_values must not be null");
-
-    const std::size_t written = scene->scene.counters(out_values, static_cast<std::size_t>(out_len));
-    if (out_written != nullptr) *out_written = written;
-    return 0;
+    // CLEANROOM PH67
+    (void)scene, (void)out_values, (void)out_len, (void)out_written;
+    return 1;
 }
 
 extern "C" int owe_renderer_shared_counters(
@@ -1152,24 +612,13 @@ extern "C" int owe_renderer_shared_counters(
     uintptr_t out_len,
     uintptr_t* out_written)
 {
-    clear_last_error();
-    if (out_values == nullptr) return finish_with_error("out_values must not be null");
-
-    // The audio analysis worker already accounts for itself; reading its
-    // snapshot avoids adding any bookkeeping to the real-time callback.
-    const auto        snapshot = wallpaper::audio::CurrentAudioSpectrumSnapshot();
-    const uint64_t    values[OWE_RC_SHARED_COUNT] = {
-        snapshot.generation,
-        snapshot.accepted_frame_count,
-    };
-    const std::size_t written =
-        std::min(static_cast<std::size_t>(out_len), static_cast<std::size_t>(OWE_RC_SHARED_COUNT));
-    for (std::size_t i = 0; i < written; ++i) out_values[i] = values[i];
-    if (out_written != nullptr) *out_written = written;
-    return 0;
+    // CLEANROOM PH68
+    (void)out_values, (void)out_len, (void)out_written;
+    return 1;
 }
 
 extern "C" const char* owe_last_error(void)
 {
-    return g_last_error.c_str();
+    // CLEANROOM PH69
+    return "";
 }

@@ -6,22 +6,6 @@
 namespace wallpaper
 {
 
-namespace
-{
-
-int32_t round_px(double value)
-{
-    return static_cast<int32_t>(std::lround(value));
-}
-
-double normalize_scale_factor(double factor)
-{
-    if (!std::isfinite(factor) || factor <= 0.0) return 1.0;
-    return factor;
-}
-
-} // namespace
-
 WallpaperScalingLayout ComputeWallpaperScalingLayout(
     WallpaperScalingMode mode,
     uint32_t scene_width,
@@ -33,67 +17,17 @@ WallpaperScalingLayout ComputeWallpaperScalingLayout(
     double pan_x,
     double pan_y)
 {
-    WallpaperScalingLayout layout {};
-    layout.scene_width = std::max<uint32_t>(1, scene_width);
-    layout.scene_height = std::max<uint32_t>(1, scene_height);
-    layout.display_logical_width = std::max<uint32_t>(1, display_logical_width);
-    layout.display_logical_height = std::max<uint32_t>(1, display_logical_height);
-
-    const double sx = layout.display_logical_width / layout.scene_width;
-    const double sy = layout.display_logical_height / layout.scene_height;
-
-    switch (mode) {
-    case WallpaperScalingMode::NONE:
-        layout.scale_x = 1.0;
-        layout.scale_y = 1.0;
-        break;
-    case WallpaperScalingMode::STRETCH:
-        layout.scale_x = sx;
-        layout.scale_y = sy;
-        break;
-    case WallpaperScalingMode::FIT: {
-        const double scale = std::min(sx, sy);
-        layout.scale_x = scale;
-        layout.scale_y = scale;
-        break;
-    }
-    case WallpaperScalingMode::FILL: {
-        const double scale = std::max(sx, sy);
-        layout.scale_x = scale;
-        layout.scale_y = scale;
-        break;
-    }
-    }
-
-    const double user_factor = normalize_scale_factor(wallpaper_scale_factor);
-    layout.scale_x *= user_factor;
-    layout.scale_y *= user_factor;
-
-    const double logical_width = layout.scene_width * layout.scale_x;
-    const double logical_height = layout.scene_height * layout.scale_y;
-    // The slack is what the display has left after the wallpaper, negative when
-    // the wallpaper overflows it, so one expression places both a letterboxed
-    // and a cropped wallpaper. `viewport_px.y` is measured from the window top,
-    // so a pan of 0 puts the wallpaper's top edge on the display's top. A
-    // mirrored wallpaper is flipped inside this rectangle by the renderer, so
-    // the position places the rectangle, not the mirrored picture.
-    const WallpaperFraming framing = NormalizeWallpaperFraming({ pan_x, pan_y });
-    const double logical_x = (layout.display_logical_width - logical_width) * framing.pan_x;
-    const double logical_y = (layout.display_logical_height - logical_height) * framing.pan_y;
-
-    layout.viewport_px = PixelRect {
-        round_px(logical_x * display_scale_factor),
-        round_px(logical_y * display_scale_factor),
-        round_px(logical_width * display_scale_factor),
-        round_px(logical_height * display_scale_factor),
-    };
-    layout.scissor_px = PixelRect {
-        0,
-        0,
-        round_px(layout.display_logical_width * display_scale_factor),
-        round_px(layout.display_logical_height * display_scale_factor),
-    };
-    return layout;
+    // CLEANROOM PH11
+    (void)mode;
+    (void)scene_width;
+    (void)scene_height;
+    (void)display_logical_width;
+    (void)display_logical_height;
+    (void)display_scale_factor;
+    (void)wallpaper_scale_factor;
+    (void)pan_x;
+    (void)pan_y;
+    return {};
 }
 
 WallpaperCursorMapping ComputeWallpaperCursorMapping(const WallpaperScalingLayout& layout,
