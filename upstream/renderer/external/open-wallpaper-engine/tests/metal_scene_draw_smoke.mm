@@ -10327,6 +10327,7 @@ std::filesystem::path WriteCoverSlotFixture(const std::filesystem::path& root,
                                                    255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
                                                    255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
                                                    255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
+                                                   255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
                                                    255, 0, 0, 255 });
     WriteSingleLevelTexture(root / "materials/red_blocks.tex", 4, 4,
                             std::vector<uint8_t> { 255, 255, 0, 0, 0, 0, 0, 0,
