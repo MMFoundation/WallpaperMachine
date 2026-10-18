@@ -289,7 +289,7 @@ function notifyAnimationLayerEnded(layerKey, index) {
   for (var i = 0; i < copy.length; ++i) {
     try { copy[i](); } catch (e) { if (!failed) { failed = true; failure = e; } }
   }
-  if (failed) reportError('animation layer ended', failure);
+  if (failed) reportError('layer-ended notice', failure);
 }
 
 class Sheet {
@@ -332,66 +332,66 @@ function getLayer(x) {
   return layerFor(n.resolve(String(x)));
 }
 
-var TEXT_STRINGS = ['font', 'horizontalalign', 'verticalalign', 'anchor'];
-var TEXT_NUMBERS = ['pointsize', 'padding', 'maxwidth', 'maxrows', 'alpha', 'brightness'];
-var TEXT_FLAGS = ['limitwidth', 'limitrows', 'limituseellipsis', 'perspective'];
+// What each forwarded text-layer key is converted to (R58, R129); order is not significant.
+var TEXT_KEY_KINDS = {
+  font: 'text', horizontalalign: 'text', verticalalign: 'text', anchor: 'text',
+  pointsize: 'number', padding: 'number', maxwidth: 'number', maxrows: 'number',
+  alpha: 'number', brightness: 'number',
+  limitwidth: 'flag', limitrows: 'flag', limituseellipsis: 'flag', perspective: 'flag',
+  color: 'vec3', size: 'vec2'
+};
+var TEXT_CONVERTERS = {
+  text: function (v) { return String(v); },
+  number: function (v) { var x = Number(v); return isFinite(x) ? x : undefined; },
+  flag: function (v) { return !!v; },
+  vec3: function (v) { return vec3Parts(v).join(' '); },
+  vec2: function (v) { return vec2Parts(v).join(' '); }
+};
+// A `{ value }` wrapper stands for the value inside it.
 function unwrap(v) {
   if (v !== null && typeof v === 'object' && !isVecLike(v) && !Array.isArray(v) && 'value' in v) return v.value;
   return v;
 }
-function vectorText(v, count) {
-  var parts = count === 2 ? vec2Parts(v) : vec3Parts(v);
-  return parts.join(' ');
-}
 function textConfig(cfg) {
-  var out = { visible: true };
-  var text = unwrap(cfg.text);
-  out.text = text === undefined || text === null ? '' : String(text);
-  var i, v;
-  for (i = 0; i < TEXT_STRINGS.length; ++i) {
-    v = unwrap(cfg[TEXT_STRINGS[i]]);
-    if (v !== undefined && v !== null) out[TEXT_STRINGS[i]] = String(v);
-  }
-  for (i = 0; i < TEXT_NUMBERS.length; ++i) {
-    v = unwrap(cfg[TEXT_NUMBERS[i]]);
-    if (v === undefined || v === null) continue;
-    v = Number(v);
-    if (isFinite(v)) out[TEXT_NUMBERS[i]] = v;
-  }
-  for (i = 0; i < TEXT_FLAGS.length; ++i) {
-    v = unwrap(cfg[TEXT_FLAGS[i]]);
-    if (v !== undefined && v !== null) out[TEXT_FLAGS[i]] = !!v;
-  }
-  v = unwrap(cfg.color);
-  if (v !== undefined && v !== null) out.color = vectorText(v, 3);
-  v = unwrap(cfg.size);
-  if (v !== undefined && v !== null) out.size = vectorText(v, 2);
+  var body = unwrap(cfg.text);
+  var out = { visible: true, text: body === undefined || body === null ? '' : String(body) };
+  Object.keys(TEXT_KEY_KINDS).forEach(function (key) {
+    var raw = unwrap(cfg[key]);
+    if (raw === undefined || raw === null) return;
+    var converted = TEXT_CONVERTERS[TEXT_KEY_KINDS[key]](raw);
+    if (converted !== undefined) out[key] = converted;
+  });
   return JSON.stringify(out);
 }
 
+// The layer a `parent` option names (a layer object, its name, or an object with a
+// name), or undefined.
+function parentKeyOf(parent) {
+  if (typeof parent === 'string') return n.resolve(parent);
+  if (parent === null || typeof parent !== 'object') return undefined;
+  if (parent[KEY] !== undefined) return parent[KEY].key;
+  return typeof parent.name === 'string' ? n.resolve(parent.name) : undefined;
+}
+// Options that do not depend on one another: each is the layer member of that name.
+var INDEPENDENT_OPTIONS = ['parallaxDepth', 'origin', 'scale', 'angles', 'color', 'alpha', 'visible',
+                           'alignment'];
 function applyCreateOptions(layer, cfg) {
-  var key = layer[KEY].key;
-  var parent = cfg.parent;
-  if (parent !== undefined && parent !== null) {
-    var parentKey;
-    if (typeof parent === 'string') parentKey = n.resolve(parent);
-    else if (typeof parent === 'object' && parent[KEY] !== undefined) parentKey = parent[KEY].key;
-    else if (typeof parent === 'object' && typeof parent.name === 'string') parentKey = n.resolve(parent.name);
-    if (parentKey !== undefined && parentKey !== key && n.hasNode(parentKey)) n.setParent(key, parentKey);
-  }
-  if (cfg.size !== undefined && cfg.size !== null) { var s = vec2Parts(cfg.size); n.setSize(key, s[0], s[1]); }
+  var st = layer[KEY];
+  // The parent comes first so placement options are relative to it.
+  var parentKey = parentKeyOf(cfg.parent);
+  if (parentKey !== undefined && parentKey !== st.key && n.hasNode(parentKey)) n.setParent(st.key, parentKey);
   if (cfg.name !== undefined && cfg.name !== null) {
-    var given = String(cfg.name);
-    if (n.nameLayer(key, given)) layer[KEY].name = given;
+    var wanted = String(cfg.name);
+    if (n.nameLayer(st.key, wanted)) st.name = wanted;
   }
-  if (cfg.parallaxDepth !== undefined) layer.parallaxDepth = cfg.parallaxDepth;
-  if (cfg.origin !== undefined) layer.origin = cfg.origin;
-  if (cfg.scale !== undefined) layer.scale = cfg.scale;
-  if (cfg.angles !== undefined) layer.angles = cfg.angles;
-  if (cfg.color !== undefined) layer.color = cfg.color;
-  if (cfg.alpha !== undefined) layer.alpha = cfg.alpha;
-  if (cfg.visible !== undefined) layer.visible = cfg.visible;
-  if (cfg.alignment !== undefined) layer.alignment = cfg.alignment;
+  if (cfg.size !== undefined && cfg.size !== null) {
+    var extent = vec2Parts(cfg.size);
+    n.setSize(st.key, extent[0], extent[1]);
+  }
+  INDEPENDENT_OPTIONS.forEach(function (member) {
+    if (cfg[member] !== undefined && cfg[member] !== null) layer[member] = cfg[member];
+  });
+  // Recorded once everything else has taken effect.
   layer.originalOrigin = layer.origin;
 }
 
@@ -470,10 +470,12 @@ var sceneProxy = new Proxy(sceneApi, {
 
 // ---- audio buffers --------------------------------------------------------
 var audioBuffers = [];
+// Generous for a scene whose layers each register once; each entry costs a few hundred bytes.
+var MAX_AUDIO_REGISTRATIONS = 1024;
 engine.registerAudioBuffers = function (resolution) {
   var size = resolution >>> 0;
   if (size !== 16 && size !== 32 && size !== 64) size = 64;
-  if (audioBuffers.length >= 64) throw new RangeError('Too many audio buffer registrations');
+  if (audioBuffers.length >= MAX_AUDIO_REGISTRATIONS) throw new RangeError('Too many audio buffer registrations');
   n.audioMark();
   var buffer = { size: size, generation: -1, left: new Float32Array(size), right: new Float32Array(size),
                  average: new Float32Array(size) };

@@ -134,13 +134,9 @@ constexpr char kVectorBootstrap[] = R"JS(
         return sum;
       },
       distance: function(v) { return Math.sqrt(this.distanceSqr(v)); },
+      // Squared length of the componentwise difference (NaN where `v` lacks a component).
       distanceSqr: function(v) {
-        var sum = 0;
-        for (var i = 0; i < size; ++i) {
-          var delta = this[fields[i]] - component(v, i);
-          sum += delta * delta;
-        }
-        return sum;
+        return combine(this, v, undefined, function(a, b) { return a - b; }).lengthSqr();
       },
       normalize: function() { return this.divide(this.length()); },
       copy: function() { return each(this, function(value) { return value; }); },
@@ -1661,7 +1657,7 @@ bool ScriptEngineContext::EnsureReady() {
 
     const auto text = CompleteLibraryText();
     JSValue    factory = JS_Eval(ctx, text.data(), text.size(), "<library>", JS_EVAL_TYPE_GLOBAL);
-    if (JS_IsException(factory)) return fail("compile");
+    if (JS_IsException(factory)) return fail("script load");
     JSValue natives = JS_NewObject(ctx);
     for (std::size_t i = 0; i < std::size(kNativeNames); ++i) {
         JSValue function = JS_NewCFunctionMagic(ctx, NativeThunk, kNativeNames[i], 0,
@@ -2079,11 +2075,11 @@ bool CreateProgram(ProgramCore& core, bool scene, const std::string& source, con
     std::string error;
     JSValue     factory = e.Factory(scene, source, &error);
     if (JS_IsUndefined(factory)) {
-        e.ReportError("compile", error, "");
+        e.ReportError("script load", error, "");
         return false;
     }
     JSValue record = JS_UNDEFINED;
-    if (! e.Call(&core.guard, "top-level run", kLibMake,
+    if (! e.Call(&core.guard, "script start", kLibMake,
                  { JS_DupValue(e.ctx, factory), JS_NewInt32(e.ctx, scene ? 1 : 0),
                    JS_NewStringLen(e.ctx, layer.data(), layer.size()),
                    JS_NewInt32(e.ctx, animation_layer_index) },
@@ -2148,7 +2144,7 @@ void DispatchMedia(ProgramCore& core, std::string_view json) {
     if (! core.Usable() || core.destroyed || json.empty()) return;
     auto& e = *core.engine;
     CallScope scope(e, core.runtime, 0.0);
-    e.Call(&core.guard, "media event", kLibMediaJson,
+    e.Call(&core.guard, "media dispatch", kLibMediaJson,
            { core.Prog(), JS_NewStringLen(e.ctx, json.data(), json.size()) }, e.limits.call_budget_ms);
 }
 
@@ -2509,7 +2505,7 @@ void ScriptEngine::NotifyAnimationLayerEnded(const ScriptHostContext& host_conte
     auto&     e = *m_context;
     CallScope scope(e, nullptr, 0.0);
     e.RefreshHost(host_context);
-    e.Call(nullptr, "animation layer ended", kLibNotifyEnded,
+    e.Call(nullptr, "layer-ended notice", kLibNotifyEnded,
            { JS_NewStringLen(e.ctx, layer_name.data(), layer_name.size()),
              JS_NewInt32(e.ctx, animation_layer_index) },
            e.limits.call_budget_ms);

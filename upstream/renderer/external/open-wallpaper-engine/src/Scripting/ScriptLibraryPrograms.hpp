@@ -116,6 +116,12 @@ function startNotices(prog) {
   guard('applyUserProperties', prog, Object.assign({}, engine.userProperties));
 }
 
+// What a handler may keep or change without touching what the next handler gets
+// (R14: every call receives its own copy of the property's value).
+function ownCopy(value) {
+  return value instanceof Vec2 || value instanceof Vec3 || value instanceof Vec4 ? value.copy() : value;
+}
+
 // One evaluation of a value program (the host has refreshed `engine` already).
 // Answers what `update` returned; `undefined` is "no value".
 function evaluate(prog, value, hasRuntime) {
@@ -124,13 +130,13 @@ function evaluate(prog, value, hasRuntime) {
   var h = prog.h;
   if (!prog.started) {
     prog.started = true;
-    guard('init', prog, value);
+    guard('init', prog, ownCopy(value));
     noticeLanguage(prog);
     if (hasRuntime) guard('applyUserProperties', prog, Object.assign({}, engine.userProperties));
   }
   var update = h.update;
   if (typeof update !== 'function') return undefined;
-  try { return update(value); } catch (e) { reportError('update', e); return undefined; }
+  try { return update(ownCopy(value)); } catch (e) { reportError('update', e); return undefined; }
 }
 
 function setParam(prog, name, value) { prog.sp[name] = value; }
@@ -184,9 +190,9 @@ function mediaEvent(prog, event) {
 }
 function mediaJson(prog, text) {
   var event;
-  try { event = JSON.parse(text); } catch (e) { reportError('media event parse', e); return; }
+  try { event = JSON.parse(text); } catch (e) { reportError('unreadable media payload', e); return; }
   if (event === null || typeof event !== 'object' || typeof event.type !== 'string') {
-    reportError('media event type', new Error('media event has no readable type'));
+    reportError('untyped media payload', new Error('media event has no readable type'));
     return;
   }
   for (var i = 0; i < MEDIA_COLORS.length; ++i) {

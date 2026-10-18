@@ -176,7 +176,7 @@ function runTimers() {
     for (var j = 0; j < timers.length; ++j) if (!timers[j].dead) kept.push(timers[j]);
     timers = kept;
   }
-  if (failed) reportError('__processTimeouts', failure);
+  if (failed) reportError('timer pass', failure);
 }
 engine.setTimeout = function (fn, delay) { return addTimer(fn, delay, false); };
 engine.setInterval = function (fn, delay) { return addTimer(fn, delay, true); };

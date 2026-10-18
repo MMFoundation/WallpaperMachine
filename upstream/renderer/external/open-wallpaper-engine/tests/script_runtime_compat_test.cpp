@@ -3306,6 +3306,37 @@ export function update() {
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
+TEST(AudioResponseCompat, ASceneWhoseLayersAllRegisterBuffersKeepsEveryRegistration) {
+    Scene scene;
+    auto runtime = MakeRuntimeWithScene(scene);
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update() {
+    var last;
+    for (var i = 0; i < 200; ++i) last = engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_16);
+    return last.left.length;
+}
+)JS", "", {}, DynamicValue(0.0f), runtime->hostContext());
+    ASSERT_TRUE(program->Valid());
+    const auto result = program->Evaluate(runtime->hostContext(), DynamicValue(0.0f));
+    ASSERT_NE(result, nullptr);
+    EXPECT_FLOAT_EQ(result->getFloat(), 16.0f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
+TEST(ScriptRuntimeCompat, InitAndUpdateEachReceiveTheirOwnCopyOfTheValue) {
+    Scene scene;
+    auto runtime = MakeRuntimeWithScene(scene);
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function init(value) { value.y = 90; return value; }
+export function update(value) { return value; }
+)JS", "", {}, DynamicValue(linalg::Vector3f(1, 2, 3)), runtime->hostContext());
+    ASSERT_TRUE(program->Valid());
+    const auto result = program->Evaluate(runtime->hostContext(), DynamicValue(linalg::Vector3f(1, 2, 3)));
+    ASSERT_NE(result, nullptr);
+    EXPECT_TRUE(result->getVec3().isApprox(linalg::Vector3f(1, 2, 3)));
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
 TEST(AudioResponseCompat, ShaderSpectrumUniformsUseVec4ArrayStride) {
     struct ResetAudioOnExit {
         ~ResetAudioOnExit() { audio::ResetAudioResponseServiceForTesting(); }
