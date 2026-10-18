@@ -2590,7 +2590,8 @@ nlohmann::json WithExternalMaterials(const nlohmann::json& objects, fs::VFS& vfs
         if (path.empty()) return false;
         nlohmann::json json;
         if (! vfs.Contains("/assets/" + path) ||
-            ! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + path), json) || ! json.is_object()) {
+            ! wpscene::ParseBoundedJson(fs::GetFileContent(vfs, "/assets/" + path), json) ||
+            ! json.is_object()) {
             return false;
         }
         into = std::move(json);
@@ -2881,7 +2882,10 @@ struct PuppetSlot {
 std::optional<wpscene::WPMaterial> ReadPuppetMaterial(fs::VFS& vfs, const std::string& path,
                                                       const WPMdl& mdl, bool has_bones) {
     nlohmann::json json;
-    if (path.empty() || ! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + path), json)) return std::nullopt;
+    if (path.empty() ||
+        ! wpscene::ParseBoundedJson(fs::GetFileContent(vfs, "/assets/" + path), json)) {
+        return std::nullopt;
+    }
     wpscene::WPMaterial material;
     if (! material.FromJson(json)) return std::nullopt;
     material.use_puppet = true;
@@ -3374,7 +3378,10 @@ ParsedLayer& TypedLayer(ParseContext& context, std::size_t at, const nlohmann::j
 /// the pass leaves a word out (normal blending, back faces culled, depth tested and written).
 std::optional<wpscene::WPMaterial> ReadModelMaterial(fs::VFS& vfs, const std::string& path) {
     nlohmann::json json;
-    if (path.empty() || ! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + path), json)) return std::nullopt;
+    if (path.empty() ||
+        ! wpscene::ParseBoundedJson(fs::GetFileContent(vfs, "/assets/" + path), json)) {
+        return std::nullopt;
+    }
     wpscene::WPMaterial material;
     if (! material.FromJson(json)) return std::nullopt;
     const nlohmann::json* pass = nullptr;
@@ -4098,7 +4105,7 @@ std::shared_ptr<SceneNode> MakeScriptTextLayer(const std::shared_ptr<Scene>& sce
 /// already said so) or empty is no document, and is not parsed to log a second error.
 bool ReadAssetObject(fs::VFS& vfs, const std::string& asset_path, nlohmann::json& out) {
     const auto text = fs::GetFileContent(vfs, "/assets/" + asset_path);
-    return ! text.empty() && PARSE_JSON(text, out) && out.is_object();
+    return ! text.empty() && wpscene::ParseBoundedJson(text, out) && out.is_object();
 }
 
 /// Builds the template a script's `createLayer(<model path>)` copies (P2 R8): the layer
@@ -5113,7 +5120,8 @@ bool LoadCameraEntry(ParseContext& context, std::size_t at, const nlohmann::json
     CameraPathPlayback path;
     if (! camera.path.empty()) {
         nlohmann::json document;
-        if (PARSE_JSON(fs::GetFileContent(*context.vfs, "/assets/" + camera.path), document)) {
+        if (wpscene::ParseBoundedJson(fs::GetFileContent(*context.vfs, "/assets/" + camera.path),
+                                      document)) {
             path = CameraPathPlayback(ParseCameraPaths(document), camera.queuemode);
         }
     }
@@ -5521,7 +5529,7 @@ struct ParseSession {
 std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, const std::string& buf,
                                           fs::VFS& vfs, audio::SoundManager& sm) {
     nlohmann::json json;
-    if (! PARSE_JSON(buf, json) || ! json.is_object()) {
+    if (! wpscene::ParseBoundedJson(buf, json) || ! json.is_object()) {
         LOG_ERROR("the scene file is not a JSON document with an object at its top");
         return nullptr;
     }

@@ -36,7 +36,7 @@ void ReadUnsigned(const nlohmann::json& json, const char* key, uint32_t& out) {
 
 // The scene's lenient JSON of one asset file.
 bool ReadAssetJson(wallpaper::fs::VFS& vfs, const std::string& path, nlohmann::json& out) {
-    return PARSE_JSON(wallpaper::fs::GetFileContent(vfs, "/assets/" + path), out);
+    return ParseBoundedJson(wallpaper::fs::GetFileContent(vfs, "/assets/" + path), out);
 }
 
 } // namespace

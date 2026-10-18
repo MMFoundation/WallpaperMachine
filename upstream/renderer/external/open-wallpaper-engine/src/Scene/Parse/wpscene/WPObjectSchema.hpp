@@ -14,6 +14,8 @@
 #include <vector>
 
 #include "Scripting/ScriptModuleSyntax.hpp"
+#include "Utils/Logging.h"
+#include "WPJson.hpp"
 
 namespace wallpaper::wpscene
 {
@@ -172,6 +174,45 @@ bool ReadNumberSetting(const nlohmann::json& setting, T& out) {
         out = static_cast<T>(number);
     }
     return true;
+}
+
+/// How many arrays and objects a document may hold inside one another. Real
+/// files stay in the tens; the readers of a document walk it recursively, so a
+/// file that nests without bound would exhaust the stack.
+inline constexpr std::size_t kMaxJsonNesting = 512;
+
+/// Whether `text` opens more than `limit` arrays and objects inside one another.
+/// Brackets inside strings do not count.
+inline bool JsonNestsDeeperThan(std::string_view text, std::size_t limit) {
+    std::size_t depth     = 0;
+    bool        in_string = false;
+    bool        escaped   = false;
+    for (const char c : text) {
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (c == '\\') escaped = true;
+            else if (c == '"') in_string = false;
+            continue;
+        }
+        if (c == '"') {
+            in_string = true;
+        } else if (c == '[' || c == '{') {
+            if (++depth > limit) return true;
+        } else if ((c == ']' || c == '}') && depth > 0) {
+            --depth;
+        }
+    }
+    return false;
+}
+
+/// Reads a document of the package (the scene, a model, a material, an effect)
+/// with the engine's lenient reader, refusing one that nests too deeply.
+inline bool ParseBoundedJson(const std::string& text, nlohmann::json& out) {
+    if (JsonNestsDeeperThan(text, kMaxJsonNesting)) {
+        LOG_ERROR("json document nests deeper than %zu levels, refusing it", kMaxJsonNesting);
+        return false;
+    }
+    return PARSE_JSON(text, out);
 }
 
 /// A plain or wrapped flag. With `numbers_count`, a number reads as non-zero.

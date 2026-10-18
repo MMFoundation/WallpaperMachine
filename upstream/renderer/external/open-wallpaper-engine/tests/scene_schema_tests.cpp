@@ -9407,3 +9407,24 @@ TEST(SceneSchema, TextLayersAScriptMadeAndDestroyedLeaveNoTextureBehind) {
     }
     EXPECT_TRUE(images->IsRuntimeImage("$mediaThumbnail")) << "the covers are never removed";
 }
+
+TEST(SceneSchema, ADocumentNestedWithoutBoundIsRefusedRatherThanOverflowingTheStack) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    audio::SoundManager sound_manager { audio::SoundManager::OutputBackend::Null };
+    WPSceneParser       parser;
+    const auto          nested = [](std::size_t depth) {
+        std::string text =
+            R"({"camera":{},"general":{"bloom":false},"objects":[{"id":1,"name":"g","extra":)";
+        text.append(depth, '[');
+        text.append(depth, ']');
+        return text + "}]}";
+    };
+    EXPECT_NE(parser.Parse("nested-ok", nested(100), vfs, sound_manager), nullptr);
+    EXPECT_EQ(parser.Parse("nested-deep", nested(100000), vfs, sound_manager), nullptr);
+    // Brackets inside a string do not count as nesting.
+    std::string quoted = R"({"camera":{},"general":{"bloom":false},"objects":[{"id":1,"name":")";
+    quoted.append(2000, '[');
+    quoted += R"(\"["}]})";
+    EXPECT_NE(parser.Parse("nested-quoted", quoted, vfs, sound_manager), nullptr);
+}
