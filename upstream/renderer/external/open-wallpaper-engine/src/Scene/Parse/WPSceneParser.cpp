@@ -1501,7 +1501,12 @@ bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, Scene
     for (const auto& [name, value] : context.global_base_uniforms) constants[name] = value;
     for (std::size_t slot = 0; slot < slots.size(); ++slot) {
         const auto& name = slots[slot];
-        if (name.empty() || IsSpecLinkTex(name)) continue;
+        if (name.empty()) continue;
+        if (IsSpecLinkTex(name)) {
+            // Another layer's composite: its size is the value updater's to supply.
+            loaded.render_targets.emplace_back(slot, name);
+            continue;
+        }
         std::array<float, 4> resolution {};
         if (classified[slot].is_target) {
             const auto* target = scene.FindRenderTarget(name);
@@ -1993,8 +1998,8 @@ void RegisterLayerVideos(ParseContext& context, const std::string& key,
 }
 
 /// The reserved names of a layer's working buffers.
-std::string PingPongName(std::string_view prefix, int32_t id) {
-    return std::string(prefix) + std::to_string(id);
+std::string PingPongName(std::string_view prefix, std::string_view camera_name) {
+    return std::string(prefix) + std::string(camera_name);
 }
 
 /// Registers the render target of one effect buffer (R55).
@@ -2049,12 +2054,13 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
                  const std::shared_ptr<SceneNode>& layer_node, SceneImageEffectLayer& chain,
                  const std::array<int32_t, 2>& extent, bool fullscreen, bool white_tint,
                  bool defer_fog, bool is_closing_pass, const std::string& key,
+                 const std::string& camera_name,
                  std::vector<std::shared_ptr<SceneMaterial>>& tinted,
                  std::vector<std::shared_ptr<SceneMaterial>>& all_materials,
                  std::shared_ptr<SceneImageEffect>*           built_out) {
     auto&      scene = *context.scene;
-    const auto previous_name = PingPongName(WE_EFFECT_PPONG_PREFIX_A, image.id);
-    const auto output_name   = PingPongName(WE_EFFECT_PPONG_PREFIX_B, image.id);
+    const auto previous_name = PingPongName(WE_EFFECT_PPONG_PREFIX_A, camera_name);
+    const auto output_name   = PingPongName(WE_EFFECT_PPONG_PREFIX_B, camera_name);
 
     std::unordered_map<std::string, std::string> fbo_map;
     fbo_map["previous"] = previous_name;
@@ -2803,7 +2809,10 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     const bool composition =
         (kind.compose_model && kind.children && (! image.copybackground || built_effects > 0)) ||
         (kind.fullscreen && kind.passthrough && kind.children && built_effects > 0);
-    const bool has_effects = built_effects > 0 || composition ||
+    // A sampled layer whose effects all failed to load still renders into its own base buffer.
+    const bool failed_effects = built_effects == 0 && referenced && entry.contains("effects") &&
+                                entry.at("effects").is_array() && ! entry.at("effects").empty();
+    const bool has_effects = built_effects > 0 || composition || failed_effects ||
                              (kind.compose_model && ! image.copybackground);
     const bool is_puppet = ! image.puppet.empty();
     if (is_puppet) LOG_ERROR("layer %d: puppets are not built by this parser yet", image.id);
@@ -2820,7 +2829,9 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     LoadedMaterial own_loaded;
     MaterialLoadOptions own_options;
     own_options.defer_fog = fog_pass.has_value();
-    const bool draws_nothing = ! has_effects && kind.passthrough && ! composition;
+    const bool bare_compose  = kind.compose_model && ! has_effects;
+    const bool draws_nothing = ! has_effects && ((bare_compose && ! referenced) ||
+                                                 (kind.passthrough && ! kind.compose_model));
     if (! LoadMaterial(context, image.material, own, own_loaded, own_options)) {
         LOG_ERROR("layer %d: the material cannot be loaded", image.id);
         return false;
@@ -2862,7 +2873,12 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     }
     if (runtime != nullptr) {
         runtime->RegisterNodeSize(plan.key, linalg::Vector2f(geometry.size[0], geometry.size[1]));
-        if (! kind.fullscreen && AlignmentHasAnchorOffset(image.alignment)) {
+        if (kind.fullscreen) {
+            runtime->SetNodeAnchorAlignment(
+                plan.key, "center",
+                Vector3f(static_cast<float>(context.ortho_w) * 0.5f,
+                         static_cast<float>(context.ortho_h) * 0.5f, 0.0f));
+        } else if (AlignmentHasAnchorOffset(image.alignment)) {
             runtime->SetNodeAnchorAlignment(plan.key, image.alignment, node->Translate());
         }
         runtime->SetNodeCursorTarget(plan.key, true, image.solid, image.disablepropagation);
@@ -2914,6 +2930,9 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
 
     if (draws_nothing) {
         node->SetSkipRenderPass(true);
+    } else if (bare_compose) {
+        // Only its composite is drawn: its card covers the whole target.
+        node->SetCompositeOnly(true);
     } else if (composition && built_effects == 0) {
         // A composition with no effect of its own draws nothing, or only its composite.
         if (referenced) node->SetCompositeOnly(true);
@@ -2922,8 +2941,9 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
 
     // The effect chain (R53 to R57, R79 to R84).
     if (has_effects) {
-        const auto first = PingPongName(WE_EFFECT_PPONG_PREFIX_A, image.id);
-        const auto other = PingPongName(WE_EFFECT_PPONG_PREFIX_B, image.id);
+        const std::string camera_name = "__effect_layer_" + std::to_string(image.id);
+        const auto first = PingPongName(WE_EFFECT_PPONG_PREFIX_A, camera_name);
+        const auto other = PingPongName(WE_EFFECT_PPONG_PREFIX_B, camera_name);
         const auto sample = LayerRenderTargetSample(scene, image);
         for (const auto& name : { first, other }) {
             SceneRenderTarget target;
@@ -2957,28 +2977,27 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         for (const auto* source : chain_sources) {
             const bool is_blend_pass = blend_pass && source == chain_sources.back();
             if (BuildEffect(context, image, *source, index, node, *chain, geometry.extent, kind.fullscreen,
-                            is_blend_pass, defer, false, plan.key, tinted, all_materials, nullptr)) {
+                            is_blend_pass, defer, false, plan.key, camera_name, tinted, all_materials, nullptr)) {
                 if (! source->scripted_visible) any_fixed = true;
             }
             ++index;
         }
         if (fog_pass.has_value()) {
             BuildEffect(context, image, *fog_pass, index++, node, *chain, geometry.extent,
-                        kind.fullscreen, true, false, true, plan.key, tinted, all_materials, nullptr);
+                        kind.fullscreen, true, false, true, plan.key, camera_name, tinted, all_materials, nullptr);
         }
         if (! any_fixed && ! chain_sources.empty()) {
             if (auto idle = MakeColorBlendEffect(*context.vfs, 0); idle.has_value()) {
                 for (auto& material : idle->materials) material.combos.erase("BLENDMODE");
                 std::shared_ptr<SceneImageEffect> fallback;
                 if (BuildEffect(context, image, *idle, index++, node, *chain, geometry.extent,
-                                kind.fullscreen, true, false, true, plan.key, tinted, all_materials,
+                                kind.fullscreen, true, false, true, plan.key, camera_name, tinted, all_materials,
                                 &fallback) && fallback != nullptr) {
                     fallback->fallback = true;
                 }
             }
         }
 
-        const std::string camera_name = "__effect_layer_" + std::to_string(image.id);
         auto camera = std::make_shared<SceneCamera>(geometry.extent[0], geometry.extent[1], -1.0f, 1.0f);
         camera->SetLayerLocal(! composition);
         camera->SetComposeLayer(composition);
@@ -3268,8 +3287,9 @@ void BuildCamerasAndTargets(ParseContext& context, const wpscene::WPScene& wp, d
     const Vector3f centre(static_cast<float>(width) * 0.5f, static_cast<float>(height) * 0.5f, 0.0f);
 
     // Targets first: every parse registers them before any object is built.
-    const i32  frame_w = std::max(1, width);
-    const i32  frame_h = std::max(1, height);
+    // The colour buffer is the view the scene starts with: the canvas over the starting zoom.
+    const i32  frame_w = ZoomedExtent(width, zoom);
+    const i32  frame_h = ZoomedExtent(height, zoom);
     const auto format  = scene.hdr ? TextureFormat::RGBA16F : TextureFormat::RGBA8;
     auto&      targets = scene.renderTargets;
     targets[std::string(SpecTex_Default)] = SceneRenderTarget {
