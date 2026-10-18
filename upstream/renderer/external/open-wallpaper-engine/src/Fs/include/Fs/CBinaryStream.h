@@ -28,7 +28,8 @@ public:
     }
 
 protected:
-    CBinaryStream(std::string_view path, std::FILE* file): m_path(path), m_file(file) {}
+    CBinaryStream(std::string_view path, std::FILE* file, bool writable)
+        : m_path(path), m_file(file), m_writable(writable) {}
     virtual usize Write_impl(const void* buffer, usize sizeInBytes) override {
         // One item for a write that reached the file whole, none otherwise.
         if (sizeInBytes == 0) return 1;
@@ -55,7 +56,14 @@ public:
     }
     virtual bool  SeekEnd(idx offset) override { return SeekTo(Size() + offset); }
     virtual isize Size() const override {
-        // Measured at the end and put back, so the position does not visibly move.
+        // A reader asks the file itself: that moves nothing and keeps the buffered
+        // bytes, which the window streams' reposition-before-every-read relies on.
+        if (! m_writable) {
+            struct stat info {};
+            return ::fstat(::fileno(m_file), &info) == 0 ? static_cast<isize>(info.st_size) : 0;
+        }
+        // A writer's pending bytes only count once flushed; seeking flushes them. The
+        // position is put back, so it does not visibly move.
         const long here = std::ftell(m_file);
         if (here < 0 || std::fseek(m_file, 0, SEEK_END) != 0) return 0;
         const long end = std::ftell(m_file);
@@ -71,6 +79,7 @@ private:
 
     std::string m_path;
     std::FILE*  m_file;
+    bool        m_writable;
 };
 
 template<typename TBinaryStream>
@@ -78,7 +87,8 @@ inline std::shared_ptr<TBinaryStream> t_CreateCBinaryStream(std::string_view pat
                                                             const char*      mode) {
     // Public constructor for make_shared; the base keeps its own protected.
     struct Opened final : CBinaryStream<TBinaryStream> {
-        Opened(std::string_view p, std::FILE* f): CBinaryStream<TBinaryStream>(p, f) {}
+        Opened(std::string_view p, std::FILE* f, bool writable)
+            : CBinaryStream<TBinaryStream>(p, f, writable) {}
     };
 
     const auto refuse = [path](const char* why) -> std::shared_ptr<TBinaryStream> {
@@ -97,7 +107,8 @@ inline std::shared_ptr<TBinaryStream> t_CreateCBinaryStream(std::string_view pat
         std::fclose(handle);
         return refuse("it is a folder, not a file");
     }
-    return std::make_shared<Opened>(path, handle);
+    // Only the reading mode leaves nothing pending in the handle.
+    return std::make_shared<Opened>(path, handle, mode[0] != 'r' || std::strchr(mode, '+') != nullptr);
 }
 
 inline std::shared_ptr<IBinaryStream> CreateCBinaryStream(std::string_view path) {
