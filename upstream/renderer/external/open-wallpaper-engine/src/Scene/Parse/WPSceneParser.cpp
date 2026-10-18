@@ -581,10 +581,13 @@ std::shared_ptr<SceneMesh> MakeQuadMesh(const std::array<float, 12>& positions,
         vertex[5] = uvs[corner * 2 + 1];
     }
     vertices.SetVertexs(0, packed);
-    const std::array<uint32_t, 6> indices { 0, 1, 2, 2, 1, 3 };
+    // Sixteen-bit indices, two to a slot of the index array.
+    const std::array<uint16_t, 6> indices { 0, 1, 2, 2, 1, 3 };
+    SceneIndexArray index_array(1);
+    index_array.AssignHalf(0, indices);
     auto mesh = std::make_shared<SceneMesh>(update);
     mesh->AddVertexArray(std::move(vertices));
-    mesh->AddIndexArray(SceneIndexArray(std::span<const uint32_t>(indices)));
+    mesh->AddIndexArray(std::move(index_array));
     return mesh;
 }
 
