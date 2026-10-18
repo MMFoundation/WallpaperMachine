@@ -61,6 +61,8 @@ struct LinkConsumer {
 struct Route {
     std::string dest;
     std::string camera;
+    // The destination came from a submesh's output override, not from the layer's routing.
+    bool overridden { false };
 };
 
 // What the load-action rules remember about one render target.
@@ -414,7 +416,7 @@ private:
         const bool composite_only =
             source.visibility_node != nullptr && source.visibility_node->CompositeOnly();
         if (! output_override.empty()) {
-            routes.push_back({ resolve(output_override), plain.camera });
+            routes.push_back({ resolve(output_override), plain.camera, true });
         } else if (referenced(source.image_id) && source.destination == SpecTex_Default) {
             const std::string composite = LayerCompositeTargetKey(source.image_id);
             ensureCompositeRecord(composite);
@@ -505,6 +507,8 @@ private:
                        TexNode* written) {
         const i32 id = source.image_id;
         if (id == 0 || written == nullptr) return;
+        // A submesh drawn into its own override target says nothing about the layer's picture.
+        if (route.overridden && (referenced(id) || route.dest != SpecTex_Default)) return;
         if (referenced(id)) {
             const bool is_picture =
                 source.role == PictureRole::PlainCard || source.role == PictureRole::ChainFinal;
