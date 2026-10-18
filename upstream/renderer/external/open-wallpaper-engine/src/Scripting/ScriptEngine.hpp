@@ -7,6 +7,7 @@
 
 #include <map>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -18,6 +19,8 @@ namespace wallpaper
 {
 
 class SceneRuntimeContext;
+// The execution context of one engine and the state around it (defined in ScriptEngine.cpp).
+struct ScriptEngineContext;
 
 struct ScriptHostContext {
     linalg::Vector2f canvas_size { 0.0f, 0.0f };
@@ -34,6 +37,32 @@ struct ScriptHostContext {
     // Lower-case BCP-47 tag of the interface language, which a script is told in
     // `applyGeneralSettings({ language })`.
     std::string     language { "en-us" };
+};
+
+// The cost and bookkeeping limits of the script host (spec R98, R99). One value
+// holds them all; a test replaces it with `ScriptEngine::SetLimits` and a fake
+// clock so hostile scripts run in no time.
+struct ScriptLimits {
+    // Wall-clock budget of one host-initiated call into a script (a tick of one
+    // program, an event, a notification, a timer pass) and of program creation
+    // (compile, top level and, for a scene program, `init` and its notices).
+    double      call_budget_ms { 50.0 };
+    double      creation_budget_ms { 250.0 };
+    // A program interrupted on this many consecutive calls is disabled for good.
+    int         max_consecutive_interrupts { 3 };
+    std::size_t memory_limit_bytes { 64u * 1024u * 1024u };
+    std::size_t stack_limit_bytes { 1024u * 1024u };
+    // Recorded error texts are cut to this many characters.
+    std::size_t max_error_text_chars { 1024 };
+    // Per entry point: this many errors are logged in full, then one summary line
+    // per `log_summary_seconds` states how many were held back.
+    int         log_full_count { 5 };
+    double      log_summary_seconds { 10.0 };
+    // Monotonic nanoseconds that do not run during system sleep; empty means
+    // `std::chrono::steady_clock`. Interrupts are measured on it.
+    std::function<int64_t()> clock_nanoseconds {};
+    // Seconds for the log rate limit; empty means the same clock.
+    std::function<double()>  log_clock_seconds {};
 };
 
 struct ScriptStartupMetrics {
@@ -112,12 +141,14 @@ public:
     void                  Destroy();
 
 private:
+    struct State;
     ScriptProgramCapabilities             m_capabilities;
     bool                                 m_update_returned_value = false;
     bool                                 m_destroyed    = false;
     // The animation layer this script is attached to (`animationlayers[i]`), or -1
     // when it is attached to the layer itself. `thisObject` is that animation layer.
     int                                  m_animation_layer_index = -1;
+    std::unique_ptr<State>               m_state;
 };
 
 class SceneScriptProgram {
@@ -153,9 +184,12 @@ public:
     void               Destroy();
 
 private:
+    struct State;
     void ApplyUserProperties(const ProjectProperties& property_changes);
     ScriptProgramCapabilities m_capabilities;
     bool                 m_destroyed    = false;
+    std::string          m_layer_name;
+    std::unique_ptr<State> m_state;
 };
 
 class ScriptEngine {
@@ -165,6 +199,11 @@ public:
 
     ScriptEngine(const ScriptEngine&)            = delete;
     ScriptEngine& operator=(const ScriptEngine&) = delete;
+
+    /// Replaces this engine's limits (R98, R99). Budgets, interrupt policy, log
+    /// rate limit and the memory and stack caps apply from the next call on.
+    void                        SetLimits(const ScriptLimits& limits);
+    ScriptLimits                Limits() const;
 
     static void                 ResetStartupMetrics();
     static ScriptStartupMetrics GetStartupMetrics();
@@ -193,6 +232,9 @@ public:
     // `addEndedCallback` listeners of one animation layer of a puppet layer.
     void NotifyAnimationLayerEnded(const ScriptHostContext& host_context,
                                    std::string_view layer_name, int animation_layer_index);
+
+private:
+    std::shared_ptr<ScriptEngineContext> m_context;
 };
 
 } // namespace wallpaper
