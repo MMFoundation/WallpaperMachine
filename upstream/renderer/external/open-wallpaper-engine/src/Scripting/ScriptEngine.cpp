@@ -31,8 +31,7 @@ namespace
   // A plain object handed to a vector constructor (the host and older scripts
   // pass `{x, y, z}`) is read leniently: a missing or non-finite field is 0.
   function lenient(value) {
-    // CLEANROOM SC1
-    return 0;
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
   }
 
   var Vec2, Vec3, Vec4;
@@ -108,7 +107,7 @@ namespace
         }
       }
     };
-    // CLEANROOM SC2
+    Object.defineProperty(Vector, 'name', { value: name, configurable: true });
 
     define(Vector.prototype, {
       length: function() { return Math.sqrt(this.lengthSqr()); },
@@ -119,8 +118,12 @@ namespace
       },
       distance: function(v) { return Math.sqrt(this.distanceSqr(v)); },
       distanceSqr: function(v) {
-        // CLEANROOM SC3
-        return 0;
+        var sum = 0;
+        for (var i = 0; i < size; ++i) {
+          var delta = this[fields[i]] - component(v, i);
+          sum += delta * delta;
+        }
+        return sum;
       },
       normalize: function() { return this.divide(this.length()); },
       copy: function() { return each(this, function(value) { return value; }); },
