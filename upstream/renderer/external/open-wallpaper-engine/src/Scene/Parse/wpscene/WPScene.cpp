@@ -1,66 +1,195 @@
+// Clean-room implementation from the WallpaperMachine spec p1-scene-structure.md; written without access to the original source.
 #include <type_traits>
 #include "WPScene.h"
+#include "WPObjectSchema.hpp"
 
-#include <sstream>
-
-// CLEANROOM: the stubs below leave their parameters and helpers unused until they are rewritten.
-#pragma clang diagnostic ignored "-Wunused-parameter"
-#pragma clang diagnostic ignored "-Wunused-function"
+#include "Utils/Logging.h"
 
 using namespace wallpaper::wpscene;
 
 bool Orthogonalprojection::FromJson(const nlohmann::json& json) {
-    // CLEANROOM LS46
-    return {};
+    if (! json.is_object()) return false;
+    // An `auto` key of any value takes the size from the layers, and then the
+    // object's own width and height are not read at all.
+    if (const auto automatic = json.find("auto"); automatic != json.end()) {
+        auto_ = automatic->is_boolean() && automatic->get<bool>();
+        return true;
+    }
+    if (json.contains("width")) ReadNumberSetting(json.at("width"), width);
+    if (json.contains("height")) ReadNumberSetting(json.at("height"), height);
+    return true;
 }
 
 bool WPSceneCamera::FromJson(const nlohmann::json& json) {
-    // CLEANROOM LS46
-    return {};
+    if (! json.is_object()) return false;
+    if (json.contains("center")) ReadStrictVec(json.at("center"), center);
+    if (json.contains("eye")) ReadStrictVec(json.at("eye"), eye);
+    if (json.contains("up")) ReadStrictVec(json.at("up"), up);
+    return true;
 }
 
 bool WPSceneGeneral::FromJson(const nlohmann::json& json) {
-    // CLEANROOM LS46
-    return {};
+    return FromJson(json, kSceneVersionUnknown);
 }
 
 namespace
 {
-// CLEANROOM LS46: the file-local helpers of this group were removed; the rewrite designs its own.
 
-const nlohmann::json& UnwrapSettingValue(const nlohmann::json& value) {
-    // CLEANROOM LS46
-    static const nlohmann::json neutral {};
-    return neutral;
-}
-
-template <typename T>
+// A scene setting that may be bound: the setting is kept whole beside the value
+// read from it. A boolean setting also accepts a number, non-zero meaning on.
+template<typename T>
 void ReadScalarSetting(const nlohmann::json& json, const char* key, T& destination,
                        nlohmann::json& setting) {
-    if (! json.contains(key)) return;
-    setting = json.at(key);
-    const auto& value = UnwrapSettingValue(setting);
+    const auto found = json.find(key);
+    if (found == json.end()) return;
+    setting = *found;
     if constexpr (std::is_same_v<T, bool>) {
-        if (value.is_boolean()) destination = value.get<bool>();
-        else if (value.is_number()) destination = value.get<double>() != 0.0;
-    } else if (value.is_number()) {
-        destination = value.get<T>();
+        ReadFlagSetting(setting, destination, true);
+    } else {
+        ReadNumberSetting(setting, destination);
     }
 }
 
+// A plain number of the scene file.
+template<typename T>
+void ReadPlainNumber(const nlohmann::json& json, const char* key, T& destination) {
+    if (const auto found = json.find(key); found != json.end()) {
+        ReadNumberSetting(*found, destination);
+    }
 }
 
+// A plain switch of the scene file: only a real boolean counts.
+void ReadPlainFlag(const nlohmann::json& json, const char* key, bool& destination) {
+    if (const auto found = json.find(key); found != json.end()) {
+        ReadFlagSetting(*found, destination);
+    }
+}
+
+void ReadPlainVec3(const nlohmann::json& json, const char* key, std::array<float, 3>& destination) {
+    if (const auto found = json.find(key); found != json.end()) ReadStrictVec(*found, destination);
+}
+
+} // namespace
+
 bool WPSceneGeneral::FromJson(const nlohmann::json& json, uint16_t pkg_version) {
-    // CLEANROOM LS47
-    return {};
+    if (! json.is_object()) return false;
+    // A key is read when the package is of unknown version or at least the
+    // version that introduced it.
+    const auto reads = [pkg_version](uint16_t gate) {
+        return pkg_version == kSceneVersionUnknown || pkg_version >= gate;
+    };
+
+    if (const auto found = json.find("clearcolor"); found != json.end()) {
+        clearcolor_setting = *found;
+        ReadTolerantVec3(clearcolor_setting, clearcolor);
+        dynamic_clearcolor = SettingIsDriven(clearcolor_setting);
+    }
+    ReadPlainFlag(json, "clearenabled", clearenabled);
+
+    if (const auto found = json.find("orthogonalprojection"); found != json.end()) {
+        if (found->is_null()) {
+            isOrtho     = false;
+            pixelCanvas = false;
+        } else {
+            isOrtho = true;
+            orthogonalprojection.FromJson(*found);
+            pixelCanvas = orthogonalprojection.auto_ ||
+                          (orthogonalprojection.width != 0 && orthogonalprojection.height != 0);
+        }
+    }
+
+    ReadScalarSetting(json, "zoom", zoom, zoom_setting);
+    ReadPlainNumber(json, "fov", fov);
+    ReadPlainNumber(json, "nearz", nearz);
+    ReadPlainNumber(json, "farz", farz);
+    ReadPlainNumber(json, "perspectiveoverridefov", perspectiveoverridefov);
+    ReadPlainVec3(json, "ambientcolor", ambientcolor);
+    ReadPlainVec3(json, "skylightcolor", skylightcolor);
+
+    ReadScalarSetting(json, "camerashake", camerashake, camerashake_setting);
+    ReadScalarSetting(json, "camerashakeamplitude", camerashakeamplitude,
+                      camerashakeamplitude_setting);
+    ReadScalarSetting(json, "camerashakespeed", camerashakespeed, camerashakespeed_setting);
+    ReadScalarSetting(json, "camerashakeroughness", camerashakeroughness,
+                      camerashakeroughness_setting);
+
+    ReadScalarSetting(json, "cameraparallax", cameraparallax, cameraparallax_setting);
+    ReadScalarSetting(json, "cameraparallaxamount", cameraparallaxamount,
+                      cameraparallaxamount_setting);
+    ReadScalarSetting(json, "cameraparallaxdelay", cameraparallaxdelay,
+                      cameraparallaxdelay_setting);
+    ReadScalarSetting(json, "cameraparallaxmouseinfluence", cameraparallaxmouseinfluence,
+                      cameraparallaxmouseinfluence_setting);
+
+    ReadScalarSetting(json, "bloom", bloom, bloom_setting);
+    ReadScalarSetting(json, "bloomstrength", bloomstrength, bloomstrength_setting);
+    ReadScalarSetting(json, "bloomthreshold", bloomthreshold, bloomthreshold_setting);
+
+    if (reads(10)) {
+        ReadPlainFlag(json, "hdr", hdr);
+        ReadPlainFlag(json, "norecompile", norecompile);
+        ReadScalarSetting(json, "bloomhdrstrength", bloomhdrstrength, bloomhdrstrength_setting);
+        ReadScalarSetting(json, "bloomhdrthreshold", bloomhdrthreshold, bloomhdrthreshold_setting);
+        ReadScalarSetting(json, "bloomhdrscatter", bloomhdrscatter, bloomhdrscatter_setting);
+        ReadScalarSetting(json, "bloomhdrfeather", bloomhdrfeather, bloomhdrfeather_setting);
+        ReadScalarSetting(json, "bloomhdriterations", bloomhdriterations,
+                          bloomhdriterations_setting);
+    }
+    if (reads(20)) {
+        if (const auto found = json.find("bloomtint"); found != json.end()) {
+            bloomtint_setting = *found;
+            ReadTolerantVec3(bloomtint_setting, bloomtint);
+            dynamic_bloomtint = SettingIsDriven(bloomtint_setting);
+        }
+    }
+    if (reads(21)) {
+        ReadPlainFlag(json, "windenabled", windenabled);
+        ReadPlainVec3(json, "winddirection", winddirection);
+        ReadPlainNumber(json, "windstrength", windstrength);
+        ReadPlainVec3(json, "gravitydirection", gravitydirection);
+        ReadPlainNumber(json, "gravitystrength", gravitystrength);
+        if (const auto found = json.find("lightconfig"); found != json.end() && found->is_object()) {
+            lightconfig = *found;
+        }
+    }
+    if (reads(22)) {
+        ReadPlainFlag(json, "transparentsorting", transparentsorting);
+        ReadPlainFlag(json, "fogdistance", fogdistance);
+        ReadPlainNumber(json, "fogdistancestart", fogdistancestart);
+        ReadPlainNumber(json, "fogdistanceend", fogdistanceend);
+        ReadPlainNumber(json, "fogdistancestartdensity", fogdistancestartdensity);
+        ReadPlainNumber(json, "fogdistanceenddensity", fogdistanceenddensity);
+        ReadPlainVec3(json, "fogdistancecolor", fogdistancecolor);
+    }
+    if (reads(23)) {
+        ReadPlainFlag(json, "fogheight", fogheight);
+        ReadPlainNumber(json, "fogheightstart", fogheightstart);
+        ReadPlainNumber(json, "fogheightend", fogheightend);
+        ReadPlainNumber(json, "fogheightstartdensity", fogheightstartdensity);
+        ReadPlainNumber(json, "fogheightenddensity", fogheightenddensity);
+        ReadPlainVec3(json, "fogheightcolor", fogheightcolor);
+    }
+    return true;
 }
 
 bool WPScene::FromJson(const nlohmann::json& json) {
-    // CLEANROOM LS48
-    return {};
+    return FromJson(json, WPSceneGeneral::kSceneVersionUnknown);
 }
 
-bool WPScene::FromJson(const nlohmann::json& json, uint16_t pkg_version) {
-    // CLEANROOM LS48
-    return {};
+bool WPScene::FromJson(const nlohmann::json& json, uint16_t pkg_version_stamp) {
+    if (! json.is_object()) return false;
+    pkg_version = pkg_version_stamp;
+    // A block that is missing or is not an object leaves its defaults; the
+    // general block is read whether or not the camera block is there.
+    if (const auto found = json.find("camera"); found != json.end() && found->is_object()) {
+        camera.FromJson(*found);
+    } else {
+        LOG_ERROR("scene has no camera block, using defaults");
+    }
+    if (const auto found = json.find("general"); found != json.end() && found->is_object()) {
+        general.FromJson(*found, pkg_version_stamp);
+    } else {
+        LOG_ERROR("scene has no general block, using defaults");
+    }
+    return true;
 }

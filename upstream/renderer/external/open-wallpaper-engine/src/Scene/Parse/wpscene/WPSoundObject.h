@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec p1-scene-structure.md; written without access to the original source.
 #pragma once
 #include <cstdint>
 #include <unordered_map>
@@ -32,8 +33,43 @@ struct WPSoundObject {
     nlohmann::json           field_bindings;
 
     bool FromJson(const nlohmann::json& json, fs::VFS&) {
-        // CLEANROOM LS52
-        return {};
+        if (! json.is_object()) return false;
+        // The file list is the object's reason to exist: without an array of
+        // names there is nothing to play.
+        const auto files = json.find("sound");
+        if (files == json.end() || ! files->is_array()) return false;
+        sound.clear();
+        for (const auto& entry : *files) {
+            if (entry.is_string() && ! entry.get_ref<const std::string&>().empty()) {
+                sound.push_back(entry.get<std::string>());
+            }
+        }
+        if (json.contains("name")) ReadStringSetting(json.at("name"), name);
+        if (const auto mode = json.find("playbackmode"); mode != json.end()) {
+            ReadStringSetting(*mode, playbackmode);
+        }
+        if (json.contains("mintime")) ReadNumberSetting(json.at("mintime"), mintime);
+        if (json.contains("maxtime")) ReadNumberSetting(json.at("maxtime"), maxtime);
+        if (json.contains("muted")) ReadFlagSetting(json.at("muted"), muted);
+        if (json.contains("startsilent")) ReadFlagSetting(json.at("startsilent"), startsilent);
+        // A sound follows no visibility binding: only the authored value counts.
+        if (json.contains("visible")) ReadFlagSetting(json.at("visible"), visible);
+        if (const auto level = json.find("volume"); level != json.end()) {
+            ReadNumberSetting(*level, volume);
+            if (level->is_object()) {
+                if (const auto user = level->find("user"); user != level->end()) {
+                    if (user->is_string()) {
+                        volume_user = user->get<std::string>();
+                    } else if (user->is_object() && user->contains("name") &&
+                               user->at("name").is_string()) {
+                        volume_user = user->at("name").get<std::string>();
+                    }
+                }
+            }
+        }
+        ParseDependencies(json, dependencies);
+        AbsorbFieldBindings(json, field_bindings);
+        return true;
     }
 };
 } // namespace wpscene

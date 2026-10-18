@@ -1,14 +1,176 @@
+// Clean-room implementation from the WallpaperMachine spec p1-scene-structure.md; written without access to the original source.
 #include "WPMaterial.h"
+#include "WPObjectSchema.hpp"
 
+#include "Utils/Logging.h"
+
+#include <cmath>
 #include <cstddef>
-
-// CLEANROOM: the stubs below leave their parameters and helpers unused until they are rewritten.
-#pragma clang diagnostic ignored "-Wunused-parameter"
-#pragma clang diagnostic ignored "-Wunused-function"
+#include <sstream>
 
 using namespace wallpaper::wpscene;
 
-// CLEANROOM LS43: the file-local helpers of this file were removed; the rewrite designs its own.
+namespace
+{
+
+bool UserTextureIsEmpty(const WPUserTexture& texture) {
+    return texture.name.empty() && texture.type.empty();
+}
+
+// A `usertextures` entry: a bare string names a project property; an object
+// holds `name` and, for the runtime's own images, `type`. Anything else
+// (`null`, an empty object, a number) leaves the slot as it is.
+WPUserTexture ReadUserTexture(const nlohmann::json& json) {
+    WPUserTexture texture;
+    if (json.is_string()) {
+        texture.name = json.get<std::string>();
+    } else if (json.is_object()) {
+        if (const auto name = json.find("name"); name != json.end() && name->is_string()) {
+            texture.name = name->get<std::string>();
+        }
+        if (const auto type = json.find("type"); type != json.end() && type->is_string()) {
+            texture.type = type->get<std::string>();
+        }
+    }
+    return texture;
+}
+
+std::vector<WPUserTexture> ReadUserTextures(const nlohmann::json& json) {
+    std::vector<WPUserTexture> list;
+    if (! json.is_array()) return list;
+    list.reserve(json.size());
+    for (const auto& entry : json) list.push_back(ReadUserTexture(entry));
+    return list;
+}
+
+// The later list replaces the earlier one slot by slot where it names something,
+// and extends it where it is longer.
+void MergeUserTextures(std::vector<WPUserTexture>& into, const std::vector<WPUserTexture>& from) {
+    if (into.size() < from.size()) into.resize(from.size());
+    for (std::size_t slot = 0; slot < from.size(); ++slot) {
+        if (! UserTextureIsEmpty(from[slot])) into[slot] = from[slot];
+    }
+}
+
+void MergeTextures(std::vector<std::string>& into, const std::vector<std::string>& from) {
+    if (into.size() < from.size()) into.resize(from.size());
+    for (std::size_t slot = 0; slot < from.size(); ++slot) {
+        if (! from[slot].empty()) into[slot] = from[slot];
+    }
+}
+
+std::vector<std::string> ReadTextures(const nlohmann::json& json) {
+    std::vector<std::string> list;
+    if (! json.is_array()) return list;
+    list.reserve(json.size());
+    for (const auto& entry : json) {
+        list.push_back(entry.is_string() ? entry.get<std::string>() : std::string());
+    }
+    return list;
+}
+
+std::unordered_map<std::string, int32_t> ReadCombos(const nlohmann::json& json) {
+    std::unordered_map<std::string, int32_t> combos;
+    if (! json.is_object()) return combos;
+    for (const auto& [name, value] : json.items()) {
+        if (value.is_boolean()) {
+            combos[name] = value.get<bool>() ? 1 : 0;
+        } else if (value.is_number()) {
+            const double number = value.get<double>();
+            if (std::isfinite(number)) combos[name] = static_cast<int32_t>(number);
+        }
+    }
+    return combos;
+}
+
+// The numbers a constant's `value` holds. A string is split at white space and a
+// piece that is not a number reads as 0; an array keeps its numbers (and reads
+// any other element as 0); a bare number is one component.
+std::vector<float> ReadConstantComponents(const nlohmann::json& value) {
+    std::vector<float> lanes;
+    if (value.is_number()) {
+        lanes.push_back(value.get<float>());
+    } else if (value.is_string()) {
+        std::istringstream words(value.get<std::string>());
+        std::string        piece;
+        while (words >> piece) {
+            float number = 0.0f;
+            if (! detail::ParseNumberToken(piece, number)) number = 0.0f;
+            lanes.push_back(number);
+        }
+    } else if (value.is_array()) {
+        for (const auto& element : value) {
+            lanes.push_back(element.is_number() ? element.get<float>() : 0.0f);
+        }
+    }
+    return lanes;
+}
+
+// One `constantshadervalues` entry. An entry that cannot be read has no
+// components and does not fail the material.
+WPConstantShaderValue ReadConstant(const nlohmann::json& json) {
+    WPConstantShaderValue constant;
+    if (! json.is_object()) {
+        if (json.is_number() || json.is_string()) constant.value = ReadConstantComponents(json);
+        return constant;
+    }
+    if (const auto value = json.find("value"); value != json.end()) {
+        constant.value = ReadConstantComponents(*value);
+    }
+    // A constant's property is a plain name; the `{name, condition}` form
+    // belongs to flags and is not read here.
+    if (const auto user = json.find("user"); user != json.end() && user->is_string()) {
+        constant.user = user->get<std::string>();
+    }
+    if (const auto script = json.find("script"); script != json.end() && script->is_string()) {
+        constant.script = script->get<std::string>();
+    }
+    if (const auto props = json.find("scriptproperties"); props != json.end() && props->is_object()) {
+        constant.scriptproperties = *props;
+    }
+    if (const auto animation = json.find("animation");
+        animation != json.end() && animation->is_object()) {
+        constant.animation = *animation;
+    }
+    return constant;
+}
+
+std::unordered_map<std::string, WPConstantShaderValue> ReadConstants(const nlohmann::json& json) {
+    std::unordered_map<std::string, WPConstantShaderValue> constants;
+    if (! json.is_object()) return constants;
+    for (const auto& [name, entry] : json.items()) constants[name] = ReadConstant(entry);
+    return constants;
+}
+
+// What every layer of a pass has in common: slots, user textures, combos and
+// constants (the pass-shaped keys a later layer may override).
+template<typename Target>
+void ReadPassShape(const nlohmann::json& json, Target& target) {
+    if (const auto found = json.find("textures"); found != json.end()) {
+        target.textures = ReadTextures(*found);
+    }
+    if (const auto found = json.find("usertextures"); found != json.end()) {
+        target.usertextures = ReadUserTextures(*found);
+    }
+    if (const auto found = json.find("combos"); found != json.end()) {
+        target.combos = ReadCombos(*found);
+    }
+    if (const auto found = json.find("constantshadervalues"); found != json.end()) {
+        target.constantshadervalues = ReadConstants(*found);
+    }
+}
+
+template<typename Target>
+void OverlayPassShape(Target& target, const WPMaterialPass& later) {
+    MergeTextures(target.textures, later.textures);
+    MergeUserTextures(target.usertextures, later.usertextures);
+    for (const auto& [name, value] : later.combos) target.combos[name] = value;
+    for (const auto& [name, value] : later.constantshadervalues) {
+        target.constantshadervalues[name] = value;
+    }
+}
+
+} // namespace
 
 bool wallpaper::wpscene::IsSystemUserTexture(const WPUserTexture& user_texture) {
     // The two cover slots a wallpaper may bind. Anything else named `system` is
@@ -19,24 +181,68 @@ bool wallpaper::wpscene::IsSystemUserTexture(const WPUserTexture& user_texture) 
 }
 
 bool WPMaterialPassBindItem::FromJson(const nlohmann::json& json) {
-    // CLEANROOM LS44
-    return {};
+    if (! json.is_object()) return false;
+    const auto name = json.find("name");
+    if (name == json.end() || ! name->is_string()) return false;
+    this->name = name->get<std::string>();
+    index      = 0;
+    if (const auto slot = json.find("index"); slot != json.end()) {
+        ReadNumberSetting(*slot, index);
+    }
+    return true;
 }
 
+// A later layer of the same pass: textures and user textures replace by slot
+// where it names one, constants and combos replace by key. `target` and `bind`
+// belong to the effect file's entry and are never overridden.
 void WPMaterialPass::Update(const WPMaterialPass& p) {
-    // CLEANROOM LS44
+    OverlayPassShape(*this, p);
 }
 
 void WPMaterial::MergePass(const WPMaterialPass& p) {
-    // CLEANROOM LS44
+    OverlayPassShape(*this, p);
 }
 
 bool WPMaterialPass::FromJson(const nlohmann::json& json) {
-    // CLEANROOM LS45
-    return {};
+    if (! json.is_object()) return false;
+    ReadPassShape(json, *this);
+    if (const auto found = json.find("target"); found != json.end() && found->is_string()) {
+        target = found->get<std::string>();
+    }
+    if (const auto found = json.find("bind"); found != json.end() && found->is_array()) {
+        for (const auto& entry : *found) {
+            WPMaterialPassBindItem item;
+            if (item.FromJson(entry)) bind.push_back(std::move(item));
+        }
+    }
+    return true;
 }
 
 bool WPMaterial::FromJson(const nlohmann::json& json) {
-    // CLEANROOM LS45
-    return {};
+    if (! json.is_object()) return false;
+    const auto passes = json.find("passes");
+    if (passes == json.end() || ! passes->is_array() || passes->empty()) {
+        LOG_ERROR("material has no passes");
+        return false;
+    }
+    // Only the first pass is a layer's material.
+    const auto& first = passes->front();
+    if (! first.is_object()) return false;
+    const auto shader_name = first.find("shader");
+    if (shader_name == first.end() || ! shader_name->is_string()) {
+        LOG_ERROR("material pass has no shader");
+        return false;
+    }
+    shader = shader_name->get<std::string>();
+    const auto word = [&first](const char* key, std::string& out) {
+        if (const auto found = first.find(key); found != first.end() && found->is_string()) {
+            out = found->get<std::string>();
+        }
+    };
+    word("blending", blending);
+    word("cullmode", cullmode);
+    word("depthtest", depthtest);
+    word("depthwrite", depthwrite);
+    ReadPassShape(first, *this);
+    return true;
 }

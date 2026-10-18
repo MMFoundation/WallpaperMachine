@@ -1,10 +1,13 @@
+// Clean-room implementation from the WallpaperMachine spec p1-scene-structure.md; written without access to the original source.
 #pragma once
 
 #include "WPJson.hpp"
 #include "WPImageObject.h"
 #include "WPObjectSchema.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -24,12 +27,49 @@ namespace wpscene
 {
 
 inline const nlohmann::json& UnwrapMiscSettingValue(const nlohmann::json& value) {
-    // CLEANROOM LS49
-    static const nlohmann::json neutral {};
-    return neutral;
+    return UnwrapSetting(value);
 }
 
-// CLEANROOM LS49: the file-local helpers of this group were removed; the rewrite designs its own.
+/// A two-lane text value: a number fills both lanes, a string holds two numbers
+/// of which a missing second one means 0, an array is not read.
+inline void ReadMiscPairSetting(const nlohmann::json& json, const char* key,
+                                std::array<float, 2>& out) {
+    if (! json.contains(key)) return;
+    const auto& value = UnwrapSetting(json.at(key));
+    if (value.is_number()) {
+        out = { value.get<float>(), value.get<float>() };
+    } else if (value.is_string()) {
+        std::istringstream words(value.get<std::string>());
+        float              first = 0.0f, second = 0.0f;
+        if (! (words >> first)) return;
+        if (! (words >> second)) second = 0.0f;
+        out = { first, second };
+    }
+}
+
+/// Reads the `effects` list of an object. An effect that cannot be read builds
+/// nothing and is left out; the object keeps the rest.
+inline void ReadMiscEffects(const nlohmann::json& json, fs::VFS& vfs,
+                            std::vector<WPImageEffect>& effects) {
+    if (! json.contains("effects") || ! json.at("effects").is_array()) return;
+    for (const auto& entry : json.at("effects")) {
+        if (! entry.is_object()) continue;
+        WPImageEffect effect;
+        if (effect.FromJson(entry, vfs)) effects.push_back(std::move(effect));
+    }
+}
+
+inline void ReadMiscFlag(const nlohmann::json& json, const char* key, bool& out) {
+    if (json.contains(key)) ReadFlagSetting(json.at(key), out);
+}
+
+inline void ReadMiscNumber(const nlohmann::json& json, const char* key, float& out) {
+    if (json.contains(key)) ReadNumberSetting(json.at(key), out);
+}
+
+inline void ReadMiscString(const nlohmann::json& json, const char* key, std::string& out) {
+    if (json.contains(key)) ReadStringSetting(json.at(key), out);
+}
 
 // A setting Wallpaper Engine registers as an enumeration, read as the word it
 // is written as. A key that is missing leaves `word` as it was. A key that is
@@ -68,7 +108,36 @@ struct WPMiscObjectBase {
     nlohmann::json       field_bindings;
 
     void FromCommonJson(const nlohmann::json& json) {
-        // CLEANROOM LS49
+        if (! json.is_object()) return;
+        if (json.contains("id")) ReadInt32(json.at("id"), id);
+        if (json.contains("parent")) ReadInt32(json.at("parent"), parent_id);
+        ReadMiscString(json, "name", name);
+
+        const auto read_vec3 = [&json](const char* key, std::array<float, 3>& lanes,
+                                       nlohmann::json& setting) {
+            if (! json.contains(key)) return false;
+            setting = json.at(key);
+            ReadTolerantVec3(setting, lanes);
+            return true;
+        };
+        if (read_vec3("origin", origin, origin_setting)) dynamic_origin = SettingIsDriven(origin_setting);
+        read_vec3("scale", scale, scale_setting);
+        read_vec3("angles", angles, angles_setting);
+        if (json.contains("parallaxDepth")) ReadStrictVec(json.at("parallaxDepth"), parallaxDepth);
+
+        if (json.contains("visible")) {
+            visible_setting = json.at("visible");
+            ReadFlagSetting(visible_setting, visible);
+            dynamic_visible = VisibilityIsBound(visible_setting);
+        }
+        ReadMiscFlag(json, "locktransforms", locktransforms);
+        ReadMiscFlag(json, "muteineditor", muteineditor);
+        ReadMiscFlag(json, "nointerpolation", nointerpolation);
+        ParseDependencies(json, dependencies);
+        if (const auto block = json.find("instance"); block != json.end() && block->is_object()) {
+            instance = *block;
+        }
+        AbsorbFieldBindings(json, field_bindings);
     }
 };
 
@@ -133,8 +202,54 @@ struct WPTextObject : WPMiscObjectBase {
     std::vector<WPImageEffect> effects;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
-        // CLEANROOM LS50
-        return false;
+        if (! json.is_object()) return false;
+        FromCommonJson(json);
+        if (json.contains("text")) text = json.at("text");
+        if (json.contains("font")) font = json.at("font");
+        ReadMiscNumber(json, "pointsize", pointsize);
+        ReadMiscPairSetting(json, "padding", padding);
+        ReadMiscPairSetting(json, "spacing", spacing);
+        ReadMiscEnumWord(json, "horizontalalign", "left", horizontalalign);
+        ReadMiscEnumWord(json, "verticalalign", "center", verticalalign);
+        ReadMiscEnumWord(json, "anchor", "none", anchor);
+        if (json.contains("maxrows")) {
+            double rows = 0.0;
+            if (ReadNumberSetting(json.at("maxrows"), rows) && std::isfinite(rows) && rows >= 0.0) {
+                maxrows = static_cast<uint32_t>(std::min(rows, 4294967295.0));
+            }
+        }
+        ReadMiscNumber(json, "maxwidth", maxwidth);
+        ReadMiscFlag(json, "limitrows", limitrows);
+        ReadMiscFlag(json, "limitwidth", limitwidth);
+        ReadMiscFlag(json, "limituseellipsis", limituseellipsis);
+        ReadMiscFlag(json, "blockalign", blockalign);
+        if (json.contains("color")) ReadStrictVec(json.at("color"), color);
+        ReadMiscNumber(json, "alpha", alpha);
+        ReadMiscNumber(json, "brightness", brightness);
+        if (json.contains("colorBlendMode")) ReadNumberSetting(json.at("colorBlendMode"), colorBlendMode);
+        if (json.contains("size")) ReadStrictVec(json.at("size"), size);
+        ReadMiscFlag(json, "clampuvs", clampuvs);
+        ReadMiscFlag(json, "perspective", perspective);
+        ReadMiscFlag(json, "copybackground", copybackground);
+        ReadMiscFlag(json, "solid", solid);
+        ReadMiscFlag(json, "disablepropagation", disablepropagation);
+        ReadMiscFlag(json, "opaquebackground", opaquebackground);
+        ReadMiscFlag(json, "ledsource", ledsource);
+        if (json.contains("backgroundcolor")) ReadStrictVec(json.at("backgroundcolor"), backgroundcolor);
+        ReadMiscNumber(json, "backgroundbrightness", backgroundbrightness);
+        ReadMiscFlag(json, "msdf", msdf);
+        ReadMiscFlag(json, "outline", outline);
+        ReadMiscNumber(json, "outlinethickness", outlinethickness);
+        if (json.contains("outlinecolor")) ReadStrictVec(json.at("outlinecolor"), outlinecolor);
+        ReadMiscFlag(json, "blur", blur);
+        ReadMiscNumber(json, "blursize", blursize);
+        ReadMiscFlag(json, "dropshadow", dropshadow);
+        ReadMiscNumber(json, "dropshadowsize", dropshadowsize);
+        ReadMiscNumber(json, "dropshadowopacity", dropshadowopacity);
+        ReadMiscPairSetting(json, "dropshadowoffset", dropshadowoffset);
+        if (json.contains("dropshadowcolor")) ReadStrictVec(json.at("dropshadowcolor"), dropshadowcolor);
+        ReadMiscEffects(json, vfs, effects);
+        return true;
     }
 };
 
@@ -148,8 +263,18 @@ struct WPModelObject : WPMiscObjectBase {
     std::vector<nlohmann::json> puppet_layer_settings;
 
     bool FromJson(const nlohmann::json& json, fs::VFS&) {
-        // CLEANROOM LS51
-        return false;
+        if (! json.is_object()) return false;
+        FromCommonJson(json);
+        ReadMiscString(json, "model", model);
+        ReadMiscString(json, "attachment", attachment);
+        ReadMiscFlag(json, "perspective", perspective);
+        ReadMiscFlag(json, "solid", solid);
+        ReadMiscFlag(json, "disablepropagation", disablepropagation);
+        if (json.contains("animationlayers")) {
+            ParsePuppetAnimationLayers(json.at("animationlayers"), puppet_layers,
+                                       puppet_layer_settings);
+        }
+        return ! model.empty();
     }
 };
 
@@ -162,8 +287,11 @@ struct WPShapeObject : WPMiscObjectBase {
     std::vector<WPImageEffect> effects;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
-        // CLEANROOM LS51
-        return false;
+        if (! json.is_object()) return false;
+        FromCommonJson(json);
+        ReadMiscString(json, "shape", shape);
+        ReadMiscEffects(json, vfs, effects);
+        return true;
     }
 };
 
@@ -181,8 +309,19 @@ struct WPCameraObject : WPMiscObjectBase {
     bool        disablepropagation { false };
 
     bool FromJson(const nlohmann::json& json, fs::VFS&) {
-        // CLEANROOM LS51
-        return false;
+        if (! json.is_object()) return false;
+        FromCommonJson(json);
+        ReadMiscString(json, "camera", camera);
+        ReadMiscString(json, "path", path);
+        ReadMiscString(json, "queuemode", queuemode);
+        ReadMiscNumber(json, "fov", fov);
+        if (json.contains("zoom")) {
+            zoom_setting = json.at("zoom");
+            ReadNumberSetting(zoom_setting, zoom);
+        }
+        ReadMiscFlag(json, "solid", solid);
+        ReadMiscFlag(json, "disablepropagation", disablepropagation);
+        return true;
     }
 };
 

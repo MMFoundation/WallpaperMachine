@@ -1,12 +1,9 @@
+// Clean-room implementation from the WallpaperMachine spec p1-scene-structure.md; written without access to the original source.
 #include "WPLightObject.hpp"
 #include "WPObjectSchema.hpp"
 
 #include "Utils/Logging.h"
 #include "Fs/VFS.h"
-
-// CLEANROOM: the stubs below leave their parameters and helpers unused until they are rewritten.
-#pragma clang diagnostic ignored "-Wunused-parameter"
-#pragma clang diagnostic ignored "-Wunused-function"
 
 using namespace wallpaper::wpscene;
 
@@ -27,6 +24,21 @@ void ReadScalarSetting(const nlohmann::json& json, const char* key, float& value
 } // namespace
 
 bool WPLightObject::FromJson(const nlohmann::json& json, fs::VFS&) {
-    // CLEANROOM LS54
-    return false;
+    if (! json.is_object()) return false;
+    FromCommonJson(json);
+    ReadMiscString(json, "light", light);
+    if (json.contains("color")) {
+        color_setting = json.at("color");
+        ReadTolerantVec3(color_setting, color);
+    }
+    ReadScalarSetting(json, "radius", radius, radius_setting);
+    ReadScalarSetting(json, "intensity", intensity, intensity_setting);
+    ReadScalarSetting(json, "exponent", exponent, exponent_setting);
+    ReadMiscNumber(json, "innercone", innercone);
+    ReadMiscNumber(json, "outercone", outercone);
+    if (json.contains("controlpoint")) ReadStrictVec(json.at("controlpoint"), controlpoint);
+    ReadMiscFlag(json, "castshadow", castshadow);
+    ReadMiscFlag(json, "usecookie", usecookie);
+    ReadMiscFlag(json, "castvolumetrics", castvolumetrics);
+    return true;
 }
