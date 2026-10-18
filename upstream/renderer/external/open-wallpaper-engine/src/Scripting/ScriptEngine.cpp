@@ -12,6 +12,10 @@
 
 #include <quickjs.h>
 
+#if defined(__APPLE__)
+#include <pthread.h>
+#endif
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -882,7 +886,9 @@ std::string NormalizeScript(std::string_view source) {
         // Code.
         if (IsIdentifierByte(static_cast<unsigned char>(c))) {
             const bool wordStart = i == 0 || ! IsIdentifierByte(static_cast<unsigned char>(source[i - 1]));
-            if (wordStart && source[i] == 'e' && ExportKeywordAt(source, i) && (i == 0 || source[i - 1] != '.')) {
+            // `ExportKeywordAt` decides what may stand before the keyword, including the
+            // non-ASCII whitespace whose bytes count as identifier bytes here.
+            if (source[i] == 'e' && ExportKeywordAt(source, i) && (i == 0 || source[i - 1] != '.')) {
                 const std::size_t next = i + 6;
                 if (source.substr(SkipBlanks(source, next), 7) == "default" &&
                     ! IsIdentifierByte(static_cast<unsigned char>(
@@ -1146,6 +1152,8 @@ struct ScriptEngineContext : std::enable_shared_from_this<ScriptEngineContext> {
     uint64_t                                  next_program_id { 1 };
     int64_t                                   deadline_ns { 0 };
     bool                                      interrupted { false };
+    // How many call scopes are open on this context; the outermost one is the host's entry.
+    int                                       call_depth { 0 };
     struct LogRecord {
         int    logged { 0 };
         int    suppressed { 0 };
@@ -1160,6 +1168,13 @@ struct ScriptEngineContext : std::enable_shared_from_this<ScriptEngineContext> {
     ScriptEngineContext& operator=(const ScriptEngineContext&) = delete;
 
     void     ApplyLimits(const ScriptLimits& configured);
+    // Points the script stack limit at the stack of the thread that is calling in now.
+    void     AdoptThreadStack();
+    // One interrupted call or step: its error, and a strike against the program.
+    void     RecordInterrupt(ScriptGuard* guard, const char* entry, double budget_ms);
+    // Script code that ran in the open scope outside `Call` (an accessor the script
+    // defined, a getter on the value it returned) ran out of its budget.
+    bool     Overran(ScriptGuard* guard, const char* entry, double budget_ms);
     bool     EnsureReady();
     int64_t  NowNanoseconds() const;
     double   LogSeconds() const;
@@ -1195,6 +1210,9 @@ public:
           m_previous_deadline(context.deadline_ns),
           m_previous_interrupted(context.interrupted) {
         if (runtime != nullptr) context.runtime = runtime;
+        // The host enters from the thread that loaded the scene and from the one that
+        // ticks it; the limit follows the thread that is on the stack now.
+        if (context.call_depth++ == 0) context.AdoptThreadStack();
         context.interrupted = false;
         const auto budget   = static_cast<int64_t>(budget_ms * 1.0e6);
         const auto deadline = budget > 0 ? context.NowNanoseconds() + budget : int64_t { 0 };
@@ -1204,6 +1222,7 @@ public:
                                   : (deadline != 0 ? deadline : m_previous_deadline);
     }
     ~CallScope() {
+        --m_context.call_depth;
         m_context.deadline_ns = m_previous_deadline;
         m_context.interrupted = m_previous_interrupted;
         if (m_previous_runtime != nullptr) m_context.runtime = m_previous_runtime;
@@ -1267,6 +1286,29 @@ void ScriptEngineContext::ApplyLimits(const ScriptLimits& configured) {
     if (rt == nullptr) return;
     JS_SetMemoryLimit(rt, limits.memory_limit_bytes);
     JS_SetMaxStackSize(rt, limits.stack_limit_bytes);
+}
+
+void ScriptEngineContext::AdoptThreadStack() {
+    if (rt == nullptr) return;
+    std::size_t size = limits.stack_limit_bytes;
+#if defined(__APPLE__)
+    // The limit may not reach past the end of the stack of the thread that is running:
+    // a secondary thread has far less than the configured size, and running off its
+    // end is a crash where a deep script should get a RangeError.
+    const pthread_t self  = pthread_self();
+    const auto      total = static_cast<std::size_t>(pthread_get_stacksize_np(self));
+    const auto*     top   = static_cast<const char*>(pthread_get_stackaddr_np(self));
+    const char      here  = 0;
+    const std::size_t used = top > &here ? static_cast<std::size_t>(top - &here) : 0;
+    const std::size_t room = total > used ? total - used : 0;
+    // What the host code a script call reaches (layer creation, parsing) needs.
+    constexpr std::size_t kHostReserve = 128u * 1024u;
+    constexpr std::size_t kLeastStack  = 16u * 1024u;
+    size = std::min(size, room > kHostReserve + kLeastStack ? room - kHostReserve : kLeastStack);
+#endif
+    JS_SetMaxStackSize(rt, size);
+    // The limit is measured from where the stack was when the runtime was told.
+    JS_UpdateStackTop(rt);
 }
 
 int64_t ScriptEngineContext::NowNanoseconds() const {
@@ -1334,7 +1376,12 @@ void ScriptEngineContext::PumpJobs() {
 
 void ScriptEngineContext::ReportError(const std::string& entry, std::string message,
                                       const std::string& stack) {
-    if (message.size() > limits.max_error_text_chars) message.resize(limits.max_error_text_chars);
+    if (message.size() > limits.max_error_text_chars) {
+        std::size_t cut = limits.max_error_text_chars;
+        // Never in the middle of a UTF-8 sequence.
+        while (cut > 0 && (static_cast<unsigned char>(message[cut]) & 0xC0u) == 0x80u) --cut;
+        message.resize(cut);
+    }
     const std::string record = entry + ": " + message;
     if (runtime != nullptr) runtime->RecordScriptError(record);
 
@@ -1389,6 +1436,41 @@ JSValue ScriptEngineContext::Factory(bool scene, const std::string& source, std:
     return found->second.factory;
 }
 
+void ScriptEngineContext::RecordInterrupt(ScriptGuard* guard, const char* entry, double budget_ms) {
+    // A call that borrowed the budget of the scope around it names that one.
+    const double shown   = budget_ms > 0.0 ? budget_ms : limits.call_budget_ms;
+    const auto   message = "interrupted after " + std::to_string(static_cast<long long>(shown)) + " ms";
+    // The interrupted call may have left transient script state behind. The budget it
+    // ran out of may be the one of the scope still open, so this runs without one.
+    if (! JS_IsUndefined(lib[kLibResetTransient])) {
+        const int64_t open_deadline = deadline_ns;
+        deadline_ns                 = 0;
+        JSValue reset = JS_Call(ctx, lib[kLibResetTransient], JS_UNDEFINED, 0, nullptr);
+        deadline_ns   = open_deadline;
+        if (JS_IsException(reset)) TakeException(nullptr);
+        JS_FreeValue(ctx, reset);
+    }
+    if (guard != nullptr && ++guard->interrupts >= limits.max_consecutive_interrupts && ! guard->disabled) {
+        guard->disabled = true;
+        ReportError(entry, message, "");
+        ReportError("disabled", "script " + guard->name + " was interrupted on " +
+                                    std::to_string(guard->interrupts) +
+                                    " consecutive calls and is switched off",
+                    "");
+        return;
+    }
+    ReportError(entry, message, "");
+}
+
+bool ScriptEngineContext::Overran(ScriptGuard* guard, const char* entry, double budget_ms) {
+    if (! interrupted) return false;
+    interrupted = false;
+    // The interrupt left its exception behind in whatever C call it stopped.
+    if (JS_HasException(ctx)) TakeException(nullptr);
+    RecordInterrupt(guard, entry, budget_ms);
+    return true;
+}
+
 bool ScriptEngineContext::Call(ScriptGuard* guard, const char* entry, LibFn fn,
                                std::initializer_list<JSValue> args, double budget_ms,
                                JSValue* result) {
@@ -1409,25 +1491,10 @@ bool ScriptEngineContext::Call(ScriptGuard* guard, const char* entry, LibFn fn,
         std::string stack;
         auto        message = TakeException(&stack);
         if (expired) {
-            message = "interrupted after " + std::to_string(static_cast<long long>(budget_ms)) + " ms";
-            stack.clear();
-            // The interrupted call may have left transient script state behind.
-            if (! JS_IsUndefined(lib[kLibResetTransient])) {
-                JSValue reset = JS_Call(ctx, lib[kLibResetTransient], JS_UNDEFINED, 0, nullptr);
-                JS_FreeValue(ctx, reset);
-            }
-            if (guard != nullptr && ++guard->interrupts >= limits.max_consecutive_interrupts &&
-                ! guard->disabled) {
-                guard->disabled = true;
-                ReportError(entry, message, stack);
-                ReportError("disabled", "script " + guard->name + " was interrupted on " +
-                                            std::to_string(guard->interrupts) +
-                                            " consecutive calls and is switched off",
-                            "");
-                return false;
-            }
+            RecordInterrupt(guard, entry, budget_ms);
+        } else {
+            ReportError(entry, message, stack);
         }
-        ReportError(entry, message, stack);
         return false;
     }
     if (guard != nullptr) guard->interrupts = 0;
@@ -1444,6 +1511,11 @@ JSValue ScriptEngineContext::NewVector(int size, double x, double y, double z, d
                         JS_NewFloat64(ctx, w) };
     JSValue vector  = JS_CallConstructor(ctx, vector_classes[size - 2], size, argv);
     for (auto& entry : argv) JS_FreeValue(ctx, entry);
+    if (JS_IsException(vector)) {
+        // A script that tampered with the vector classes' prototypes made the constructor throw.
+        if (JS_HasException(ctx)) JS_FreeValue(ctx, JS_GetException(ctx));
+        return JS_UNDEFINED;
+    }
     return vector;
 }
 
@@ -1540,7 +1612,8 @@ void ScriptEngineContext::RefreshHost(const ScriptHostContext& host) {
            JS_NewUint32(ctx, host.mouse_buttons_down),
            JS_NewUint32(ctx, host.mouse_buttons_pressed),
            JS_NewUint32(ctx, host.mouse_buttons_released),
-           JS_NewStringLen(ctx, host.language.data(), host.language.size()) },
+           (mask & 128u) != 0 ? JS_NewStringLen(ctx, host.language.data(), host.language.size())
+                              : JS_UNDEFINED },
          0.0);
 }
 
@@ -1636,6 +1709,7 @@ DynamicValueUniquePtr ScriptEngineContext::FromJs(JSValueConst value, const Dyna
 bool ScriptEngineContext::EnsureReady() {
     if (ready) return true;
     if (broken || ctx == nullptr) return false;
+    AdoptThreadStack();
     const auto start = std::chrono::steady_clock::now();
     const auto fail  = [&](const char* stage) {
         const auto message = TakeException(nullptr);
@@ -1722,7 +1796,8 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         return linalg::Vector3f(static_cast<float>(num(first)), static_cast<float>(num(first + 1)),
                                 static_cast<float>(num(first + 2)));
     };
-    const bool node_known = rt_ != nullptr && argc > 0 && rt_->HasNodeNamed(str(0));
+    // Only the calls that read a node's state ask whether it exists.
+    const auto node_known = [&] { return rt_ != nullptr && argc > 0 && rt_->HasNodeNamed(str(0)); };
 
     switch (id) {
     case kNative_error: ReportError(str(0), str(1), str(2)); return JS_UNDEFINED;
@@ -1730,7 +1805,7 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         const auto name = str(0);
         return text(rt_ != nullptr ? rt_->ResolveLayerName(name) : name);
     }
-    case kNative_hasNode: return boolean(node_known);
+    case kNative_hasNode: return boolean(node_known());
     case kNative_layerCount: return number(rt_ != nullptr ? static_cast<double>(rt_->LayerCount()) : 0.0);
     case kNative_layerNameAt: {
         const double index = num(0);
@@ -1740,8 +1815,11 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
     case kNative_layerIndex: return number(rt_ != nullptr ? rt_->LayerIndex(str(0)) : -1);
     case kNative_sortLayer:
         return boolean(rt_ != nullptr && rt_->SortLayer(str(0), static_cast<int>(std::min(num(1), 1.0e9))));
-    case kNative_layerById:
-        return text(rt_ != nullptr ? rt_->LayerNameForId(static_cast<int32_t>(num(0))) : std::string());
+    case kNative_layerById: {
+        const double id = num(0);
+        const bool   ok = rt_ != nullptr && id >= -2147483648.0 && id <= 2147483647.0;
+        return text(ok ? rt_->LayerNameForId(static_cast<int32_t>(id)) : std::string());
+    }
     case kNative_authoredName: {
         const auto key = str(0);
         return text(rt_ != nullptr ? rt_->LayerAuthoredName(key) : key);
@@ -1751,26 +1829,26 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         return JS_UNDEFINED;
     case kNative_initialConfig:
         return text(rt_ != nullptr ? rt_->InitialLayerConfigJson(str(0)) : std::string());
-    case kNative_visible: return boolean(node_known && rt_->NodeVisible(str(0)));
+    case kNative_visible: return boolean(node_known() && rt_->NodeVisible(str(0)));
     case kNative_setVisible:
         if (rt_ != nullptr) rt_->SetNodeVisible(str(0), flag(1));
         return JS_UNDEFINED;
     case kNative_origin: {
-        const auto v = node_known ? rt_->NodeTranslate(str(0)) : linalg::Vector3f(0, 0, 0);
+        const auto v = node_known() ? rt_->NodeTranslate(str(0)) : linalg::Vector3f(0, 0, 0);
         return array({ v.x(), v.y(), v.z() });
     }
     case kNative_setOrigin:
         if (rt_ != nullptr) rt_->SetNodeTranslate(str(0), vec3(1));
         return JS_UNDEFINED;
     case kNative_scale: {
-        const auto v = node_known ? rt_->NodeScale(str(0)) : linalg::Vector3f(1, 1, 1);
+        const auto v = node_known() ? rt_->NodeScale(str(0)) : linalg::Vector3f(1, 1, 1);
         return array({ v.x(), v.y(), v.z() });
     }
     case kNative_setScale:
         if (rt_ != nullptr) rt_->SetNodeScale(str(0), vec3(1));
         return JS_UNDEFINED;
     case kNative_rotation: {
-        const auto v = node_known ? rt_->NodeRotation(str(0)) : linalg::Vector3f(0, 0, 0);
+        const auto v = node_known() ? rt_->NodeRotation(str(0)) : linalg::Vector3f(0, 0, 0);
         return array({ v.x(), v.y(), v.z() });
     }
     case kNative_setRotation:
@@ -1781,7 +1859,7 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         return array({ v.x(), v.y() });
     }
     case kNative_color: {
-        const auto v = node_known ? rt_->NodeColor(str(0)) : linalg::Vector3f(1, 1, 1);
+        const auto v = node_known() ? rt_->NodeColor(str(0)) : linalg::Vector3f(1, 1, 1);
         return array({ v.x(), v.y(), v.z() });
     }
     case kNative_setColor:
@@ -2016,7 +2094,6 @@ struct ProgramCore {
     bool                                      valid { false };
     bool                                      started { false };
     bool                                      destroyed { false };
-    bool                                      scene { false };
     PropertyScriptValueSemantic               semantic { PropertyScriptValueSemantic::Generic };
     std::map<std::string, DynamicValue*>      props;
     std::unordered_map<std::string, uint64_t> param_generations;
@@ -2052,8 +2129,10 @@ void WriteParams(ProgramCore& core) {
             core.param_generations[name] = generation;
         }
         JSValue js = e.ToJs(*value, false);
-        if (JS_SetPropertyStr(e.ctx, core.params, name.c_str(), js) < 0 && JS_HasException(e.ctx)) {
-            JS_FreeValue(e.ctx, JS_GetException(e.ctx));
+        if (JS_SetPropertyStr(e.ctx, core.params, name.c_str(), js) < 0) {
+            if (JS_HasException(e.ctx)) JS_FreeValue(e.ctx, JS_GetException(e.ctx));
+            // A setter the script defined on its parameters ran out of time.
+            if (e.interrupted) return;
         }
     }
 }
@@ -2061,7 +2140,7 @@ void WriteParams(ProgramCore& core) {
 bool CreateProgram(ProgramCore& core, bool scene, const std::string& source, const std::string& layer,
                    const ScriptHostContext& host, int animation_layer_index, int& capabilities) {
     auto& e = *core.engine;
-    CallScope scope(e, core.runtime, 0.0);
+    CallScope scope(e, core.runtime, e.limits.creation_budget_ms);
     e.RefreshHost(host);
     if (scene) {
         e.PushProps(core.snapshot);
@@ -2111,7 +2190,7 @@ void DispatchCursor(ProgramCore& core, const ScriptProgramCapabilities& caps, Sc
     const int index = CursorIndex(event);
     if (needs_capability && (caps.cursor_handlers & static_cast<uint8_t>(event)) == 0) return;
     auto& e = *core.engine;
-    CallScope scope(e, core.runtime, 0.0);
+    CallScope scope(e, core.runtime, e.limits.call_budget_ms);
     e.RefreshHost(host);
     e.Call(&core.guard, kCursorEntries[index], kLibCursorEvent,
            { core.Prog(), JS_NewInt32(e.ctx, index), JS_NewInt32(e.ctx, host.cursor_button) },
@@ -2122,7 +2201,7 @@ void DispatchAnimationMarker(ProgramCore& core, const ScriptProgramCapabilities&
                              const ScriptHostContext& host, std::string_view name, double frame) {
     if (! core.Usable() || core.destroyed || ! caps.animation_event) return;
     auto& e = *core.engine;
-    CallScope scope(e, core.runtime, 0.0);
+    CallScope scope(e, core.runtime, e.limits.call_budget_ms);
     e.RefreshHost(host);
     e.Call(&core.guard, "animationEvent", kLibAnimationEvent,
            { core.Prog(), JS_NewStringLen(e.ctx, name.data(), name.size()), JS_NewFloat64(e.ctx, frame) },
@@ -2132,7 +2211,7 @@ void DispatchAnimationMarker(ProgramCore& core, const ScriptProgramCapabilities&
 void DispatchThumbnail(ProgramCore& core, const linalg::Vector3f& primary, const linalg::Vector3f& text) {
     if (! core.Usable() || core.destroyed) return;
     auto& e = *core.engine;
-    CallScope scope(e, core.runtime, 0.0);
+    CallScope scope(e, core.runtime, e.limits.call_budget_ms);
     e.Call(&core.guard, "mediaThumbnailChanged", kLibMediaThumbnail,
            { core.Prog(), JS_NewFloat64(e.ctx, primary.x()), JS_NewFloat64(e.ctx, primary.y()),
              JS_NewFloat64(e.ctx, primary.z()), JS_NewFloat64(e.ctx, text.x()),
@@ -2143,7 +2222,7 @@ void DispatchThumbnail(ProgramCore& core, const linalg::Vector3f& primary, const
 void DispatchMedia(ProgramCore& core, std::string_view json) {
     if (! core.Usable() || core.destroyed || json.empty()) return;
     auto& e = *core.engine;
-    CallScope scope(e, core.runtime, 0.0);
+    CallScope scope(e, core.runtime, e.limits.call_budget_ms);
     e.Call(&core.guard, "media dispatch", kLibMediaJson,
            { core.Prog(), JS_NewStringLen(e.ctx, json.data(), json.size()) }, e.limits.call_budget_ms);
 }
@@ -2151,7 +2230,7 @@ void DispatchMedia(ProgramCore& core, std::string_view json) {
 void DispatchResize(ProgramCore& core, const ScriptHostContext& host, bool needs_start) {
     if (! core.Usable() || core.destroyed || (needs_start && ! core.started)) return;
     auto& e = *core.engine;
-    CallScope scope(e, core.runtime, 0.0);
+    CallScope scope(e, core.runtime, e.limits.call_budget_ms);
     e.RefreshHost(host);
     e.Call(&core.guard, "resizeScreen", kLibResizeProgram, { core.Prog() }, e.limits.call_budget_ms);
 }
@@ -2159,7 +2238,7 @@ void DispatchResize(ProgramCore& core, const ScriptHostContext& host, bool needs
 void DispatchLanguage(ProgramCore& core, const ScriptHostContext& host, bool needs_start) {
     if (! core.Usable() || core.destroyed || (needs_start && ! core.started)) return;
     auto& e = *core.engine;
-    CallScope scope(e, core.runtime, 0.0);
+    CallScope scope(e, core.runtime, e.limits.call_budget_ms);
     e.RefreshHost(host);
     e.Call(&core.guard, "applyGeneralSettings", kLibNoticeLanguage, { core.Prog() },
            e.limits.call_budget_ms);
@@ -2170,7 +2249,7 @@ void EndProgram(ProgramCore& core, bool needs_start) {
     core.destroyed = true;
     if (! core.Usable()) return;
     auto& e = *core.engine;
-    CallScope scope(e, core.runtime, 0.0);
+    CallScope scope(e, core.runtime, e.limits.call_budget_ms);
     e.Call(&core.guard, "destroy", kLibDestroyProgram, { core.Prog() }, e.limits.call_budget_ms);
 }
 
@@ -2217,10 +2296,12 @@ PropertyScriptProgram::PropertyScriptProgram(
         return;
     }
     m_capabilities = CapabilitiesOf(capabilities);
-    {
-        CallScope scope(*m_state->engine, runtime, 0.0);
-        WriteParams(*m_state);
-    }
+    auto&     e      = *m_state->engine;
+    CallScope scope(e, runtime, e.limits.call_budget_ms);
+    WriteParams(*m_state);
+    // Parameter accessors the script defined must not hold the loader up either; a
+    // program that cannot be given its parameters in time is not started.
+    if (e.Overran(&m_state->guard, "script parameters", e.limits.call_budget_ms)) m_state->valid = false;
 }
 
 PropertyScriptProgram::~PropertyScriptProgram() = default;
@@ -2231,9 +2312,11 @@ void PropertyScriptProgram::ApplyProjectProperties(const ProjectProperties& proj
                                                    const ProjectProperties& changed_properties) {
     if (! Valid() || m_destroyed) return;
     auto& core = *m_state;
-    CallScope scope(*core.engine, core.runtime, 0.0);
-    core.engine->PushProps(project_properties);
+    auto& e    = *core.engine;
+    CallScope scope(e, core.runtime, e.limits.call_budget_ms);
+    e.PushProps(project_properties);
     WriteParams(core);
+    if (e.Overran(&core.guard, "script parameters", e.limits.call_budget_ms)) return;
     if (core.started) DeliverChanges(core, changed_properties);
 }
 
@@ -2241,22 +2324,30 @@ DynamicValueUniquePtr PropertyScriptProgram::Evaluate(const ScriptHostContext& h
                                                       const DynamicValue&      current_value) {
     m_update_returned_value = false;
     if (! Valid() || m_destroyed) return nullptr;
-    auto&     core = *m_state;
-    auto&     e    = *core.engine;
-    CallScope scope(e, core.runtime, 0.0);
+    auto&        core   = *m_state;
+    auto&        e      = *core.engine;
+    const double budget = e.limits.call_budget_ms;
+    // One budget for everything the host does for this evaluation, so accessors the
+    // script defined on its parameters or getters on what it returns are held to it too.
+    CallScope scope(e, core.runtime, budget);
     e.RefreshHost(host_context);
     if (! core.started && core.runtime != nullptr) e.PushProps(core.runtime->projectProperties());
     WriteParams(core);
-    const bool degrees = core.semantic == PropertyScriptValueSemantic::AnglesDegrees;
+    const bool degrees  = core.semantic == PropertyScriptValueSemantic::AnglesDegrees;
     JSValue    argument = e.ToJs(current_value, degrees);
-    JSValue    result   = JS_UNDEFINED;
-    core.started        = true;
+    if (e.Overran(&core.guard, "update", budget)) {
+        JS_FreeValue(e.ctx, argument);
+        return m_capabilities.update ? CopyOf(current_value) : nullptr;
+    }
+    JSValue result = JS_UNDEFINED;
+    core.started   = true;
     const bool completed = e.Call(&core.guard, "update", kLibEvaluate,
                                   { core.Prog(), argument, JS_NewBool(e.ctx, core.runtime != nullptr) },
-                                  e.limits.call_budget_ms, &result);
+                                  budget, &result);
     DynamicValueUniquePtr answer;
     if (completed && m_capabilities.update) answer = e.FromJs(result, current_value, degrees);
     JS_FreeValue(e.ctx, result);
+    if (e.Overran(&core.guard, "update", budget)) answer.reset();
     if (! m_capabilities.update) return nullptr;
     if (answer != nullptr) {
         m_update_returned_value = true;
@@ -2329,7 +2420,6 @@ SceneScriptProgram::SceneScriptProgram(SceneRuntimeContext& runtime, std::string
     m_state           = std::make_unique<State>();
     m_state->engine   = std::move(engine);
     m_state->runtime  = &runtime;
-    m_state->scene    = true;
     m_state->snapshot = std::move(project_properties);
     m_state->guard.name = m_layer_name.empty() ? "scene" : m_layer_name;
     int capabilities = 0;
@@ -2339,7 +2429,7 @@ SceneScriptProgram::SceneScriptProgram(SceneRuntimeContext& runtime, std::string
     m_capabilities = CapabilitiesOf(capabilities);
     // The script's top level has run; now `init`, the notices and the `load` listeners.
     auto&     e = *m_state->engine;
-    CallScope scope(e, &runtime, 0.0);
+    CallScope scope(e, &runtime, e.limits.creation_budget_ms);
     m_state->started = true;
     e.Call(&m_state->guard, "init", kLibStartScene, { m_state->Prog() }, e.limits.creation_budget_ms);
 }
@@ -2353,8 +2443,9 @@ const std::string& SceneScriptProgram::LayerName() const { return m_layer_name; 
 void SceneScriptProgram::ApplyUserProperties(const ProjectProperties& property_changes) {
     if (! Valid() || m_destroyed) return;
     auto&     core = *m_state;
-    CallScope scope(*core.engine, core.runtime, 0.0);
-    core.engine->PushProps(core.snapshot);
+    auto&     e    = *core.engine;
+    CallScope scope(e, core.runtime, e.limits.call_budget_ms);
+    e.PushProps(core.snapshot);
     DeliverChanges(core, property_changes);
 }
 
@@ -2369,7 +2460,7 @@ void SceneScriptProgram::Tick(const ScriptHostContext& host_context) {
     if (! Valid() || m_destroyed) return;
     auto&     core = *m_state;
     auto&     e    = *core.engine;
-    CallScope scope(e, core.runtime, 0.0);
+    CallScope scope(e, core.runtime, e.limits.call_budget_ms);
     e.RefreshHost(host_context);
     e.Call(&core.guard, "update", kLibTickScene, { core.Prog() }, e.limits.call_budget_ms);
 }
@@ -2484,7 +2575,7 @@ void ScriptEngine::RunAnimationEventCallbacks(const ScriptHostContext& host_cont
                                               std::string_view event_name, double frame) {
     if (m_context == nullptr || ! m_context->ready) return;
     auto&     e = *m_context;
-    CallScope scope(e, nullptr, 0.0);
+    CallScope scope(e, nullptr, e.limits.call_budget_ms);
     e.RefreshHost(host_context);
     e.Call(nullptr, "animationEvent", kLibAnimationListeners,
            { JS_NewStringLen(e.ctx, event_name.data(), event_name.size()), JS_NewFloat64(e.ctx, frame) },
@@ -2494,7 +2585,7 @@ void ScriptEngine::RunAnimationEventCallbacks(const ScriptHostContext& host_cont
 void ScriptEngine::RunResizeScreenCallbacks(const ScriptHostContext& host_context) {
     if (m_context == nullptr || ! m_context->ready) return;
     auto&     e = *m_context;
-    CallScope scope(e, nullptr, 0.0);
+    CallScope scope(e, nullptr, e.limits.call_budget_ms);
     e.RefreshHost(host_context);
     e.Call(nullptr, "resizeScreen", kLibResizeListeners, {}, e.limits.call_budget_ms);
 }
@@ -2503,7 +2594,7 @@ void ScriptEngine::NotifyAnimationLayerEnded(const ScriptHostContext& host_conte
                                              std::string_view layer_name, int animation_layer_index) {
     if (m_context == nullptr || ! m_context->ready) return;
     auto&     e = *m_context;
-    CallScope scope(e, nullptr, 0.0);
+    CallScope scope(e, nullptr, e.limits.call_budget_ms);
     e.RefreshHost(host_context);
     e.Call(nullptr, "layer-ended notice", kLibNotifyEnded,
            { JS_NewStringLen(e.ctx, layer_name.data(), layer_name.size()),

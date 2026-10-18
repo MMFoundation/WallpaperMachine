@@ -71,6 +71,15 @@ var input = {
   inWindow: false
 };
 
+// The host writes these on every refresh, so a script may assign to them but may not
+// turn one into an accessor: that would run script code inside the host's own update.
+['canvasSize', 'screenResolution', 'frametime', 'runtime', 'userProperties'].forEach(function (key) {
+  Object.defineProperty(engine, key, { configurable: false });
+});
+Object.keys(input).forEach(function (key) { Object.defineProperty(input, key, { configurable: false }); });
+Object.defineProperty(G, 'canvasSize', { value: engine.canvasSize, writable: true, enumerable: true,
+                                          configurable: false });
+
 // Called by the host with the groups of the context that changed since the last
 // call (bit 0 canvas, 1 resolution, 2 times, 3 pointer, 4 world pointer, 5
 // buttons, 6 in-window flag, 7 language).

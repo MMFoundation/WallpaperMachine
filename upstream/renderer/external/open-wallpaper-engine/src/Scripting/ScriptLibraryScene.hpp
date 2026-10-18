@@ -225,6 +225,9 @@ function sceneAnimation(name) {
 
 var endedListeners = new Map();
 var animationLayers = new Map();
+// The ids a layer's animation-layer objects and listeners are filed under, so they
+// go when the layer does.
+var animationIds = new Map();
 class AnimationLayer {
   constructor(layerKey, ref, index, asked) {
     Object.defineProperty(this, KEY, { value: { layer: layerKey, ref: ref, index: index, asked: asked } });
@@ -255,7 +258,13 @@ class AnimationLayer {
     if (st.index < 0 || typeof fn !== 'function') return;
     var id = st.layer + '\u0001' + st.index;
     var list = endedListeners.get(id);
-    if (list === undefined) { list = []; endedListeners.set(id, list); }
+    if (list === undefined) {
+      list = [];
+      endedListeners.set(id, list);
+      var ids = animationIds.get(st.layer);
+      if (ids === undefined) animationIds.set(st.layer, ids = []);
+      ids.push(id);
+    }
     list.push(fn);
   }
   removeEndedCallback(fn) {
@@ -277,6 +286,9 @@ function animationLayerOf(layerKey, x) {
   if (found === undefined) {
     found = new AnimationLayer(layerKey, index >= 0 ? String(index) : ref, index, ref);
     animationLayers.set(id, found);
+    var ids = animationIds.get(layerKey);
+    if (ids === undefined) animationIds.set(layerKey, ids = []);
+    ids.push(id);
   }
   return found;
 }
@@ -287,6 +299,8 @@ function notifyAnimationLayerEnded(layerKey, index) {
   var copy = list.slice();
   var failed = false, failure;
   for (var i = 0; i < copy.length; ++i) {
+    // A listener an earlier one removed never fires.
+    if (list.indexOf(copy[i]) < 0) continue;
     try { copy[i](); } catch (e) { if (!failed) { failed = true; failure = e; } }
   }
   if (failed) reportError('layer-ended notice', failure);
@@ -424,7 +438,15 @@ function destroyLayer(x) {
   var key = keyOf(x);
   var result = n.destroyLayer(key);
   if (!result[0]) return false;
-  for (var i = 1; i < result.length; ++i) layerCache.delete(result[i]);
+  for (var i = 1; i < result.length; ++i) {
+    var gone = result[i];
+    layerCache.delete(gone);
+    var ids = animationIds.get(gone);
+    if (ids !== undefined) {
+      for (var j = 0; j < ids.length; ++j) { animationLayers.delete(ids[j]); endedListeners.delete(ids[j]); }
+      animationIds.delete(gone);
+    }
+  }
   return true;
 }
 

@@ -51,7 +51,9 @@ struct ScriptLimits {
     // A program interrupted on this many consecutive calls is disabled for good.
     int         max_consecutive_interrupts { 3 };
     std::size_t memory_limit_bytes { 64u * 1024u * 1024u };
-    std::size_t stack_limit_bytes { 1024u * 1024u };
+    // At 1 MiB a function with a dozen locals only nests ~900 calls deep (R99 asks for
+    // 1,000); a thread with less stack than this is given what it has (see the engine).
+    std::size_t stack_limit_bytes { 2u * 1024u * 1024u };
     // Recorded error texts are cut to this many characters.
     std::size_t max_error_text_chars { 1024 };
     // Per entry point: this many errors are logged in full, then one summary line

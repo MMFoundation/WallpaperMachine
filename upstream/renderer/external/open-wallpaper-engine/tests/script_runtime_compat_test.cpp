@@ -7015,5 +7015,230 @@ export function update(value) {
     EXPECT_LT(fixture.Displacement(*fixture.Created(2)), 1e-3f) << "no depth asked for, none given";
 }
 
+
+// ---- host limits on the paths that run script code outside `update` ----------------
+
+ScriptLimits QuickLimits() {
+    ScriptLimits limits;
+    limits.call_budget_ms     = 30.0;
+    limits.creation_budget_ms = 60.0;
+    return limits;
+}
+
+double MillisecondsOf(std::chrono::steady_clock::time_point since) {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - since).count();
+}
+
+TEST(ScriptHostLimits, AGetterOnTheReturnedValueIsHeldToTheCallBudget) {
+    ScriptEngine engine;
+    engine.SetLimits(QuickLimits());
+    const auto start  = std::chrono::steady_clock::now();
+    const auto result = engine.Evaluate(R"JS(
+export function update(value) { return { get x() { for (;;) {} } }; }
+)JS", {}, DynamicValue(linalg::Vector3f(1, 2, 3)), {});
+    ASSERT_NE(result, nullptr);
+    EXPECT_LT(MillisecondsOf(start), 2000.0) << "an endless getter must be interrupted";
+}
+
+TEST(ScriptHostLimits, ASetterOnTheScriptParametersIsHeldToTheCallBudget) {
+    ScriptEngine engine;
+    engine.SetLimits(QuickLimits());
+    DynamicValue parameter(1.0f);
+    const auto   start  = std::chrono::steady_clock::now();
+    const auto   result = engine.Evaluate(R"JS(
+Object.defineProperty(scriptProperties, 'p', { set: function () { for (;;) {} }, get: function () { return 0; },
+                                               configurable: true });
+export function update(value) { return 2; }
+)JS", { { "p", &parameter } }, DynamicValue(0.0f), {});
+    ASSERT_NE(result, nullptr);
+    EXPECT_LT(MillisecondsOf(start), 2000.0) << "an endless setter must be interrupted";
+}
+
+TEST(ScriptHostLimits, RunawayRecursionOnASecondaryThreadIsAnErrorNotACrash) {
+    ScriptEngine engine;
+    DynamicValue initial(0.0f);
+    std::unique_ptr<PropertyScriptProgram> program;
+    program = engine.CreatePropertyScriptProgram(nullptr, R"JS(
+function down(n) { return down(n + 1) + 1; }
+export function update(value) { try { down(0); } catch (e) { return 7; } return 1; }
+)JS", "", {}, initial, {});
+    ASSERT_NE(program, nullptr);
+    double answer = 0.0;
+    std::thread worker([&] {
+        const auto result = program->Evaluate({}, DynamicValue(0.0f));
+        if (result != nullptr) answer = result->getFloat();
+    });
+    worker.join();
+    EXPECT_FLOAT_EQ(static_cast<float>(answer), 7.0f);
+}
+
+
+TEST(ScriptHostLimits, ExportAfterUnicodeWhitespaceAtTheStartOfALineIsRemoved) {
+    ScriptEngine engine;
+    EXPECT_FLOAT_EQ(EvaluateScalar(engine, " export function update(value) { return 5; }\n").getFloat(), 5.0f);
+    EXPECT_FLOAT_EQ(EvaluateScalar(engine, "var a = 1;\n﻿export function update(value) { return 6; }\n").getFloat(), 6.0f);
+    EXPECT_FLOAT_EQ(EvaluateScalar(engine, "var a = 1;\n  export function update(value) { return 8; }\n").getFloat(), 8.0f);
+}
+
+
+TEST(ScriptHostLimits, ARecordedErrorTextIsCutBetweenCharacters) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update(value) { throw new Error('€'.repeat(2000)); }
+)JS", "", {}, DynamicValue(0.0f), runtime->hostContext());
+    ASSERT_NE(program, nullptr);
+    program->Evaluate(runtime->hostContext(), DynamicValue(0.0f));
+    ASSERT_EQ(runtime->scriptErrorCount(), 1u);
+    const auto& text = runtime->scriptErrors().front();
+    EXPECT_LE(text.size(), std::string("update: ").size() + 1024u);
+    EXPECT_NO_THROW((void)nlohmann::json(text).dump()) << "the text must stay valid UTF-8";
+}
+
+TEST(ScriptHostLimits, ACursorEventHandsEveryProgramItsOwnWorldPosition) {
+    ScriptEngine engine;
+    DynamicValue initial(0.0f);
+    auto         editor = engine.CreatePropertyScriptProgram(nullptr, R"JS(
+export function cursorClick(event) { event.worldPosition.x = 999; }
+)JS", "", {}, initial, {});
+    auto reader = engine.CreatePropertyScriptProgram(nullptr, R"JS(
+export function cursorClick(event) { globalThis.seen = event.worldPosition.x * 1000 + input.cursorWorldPosition.x; }
+export function update(value) { return globalThis.seen; }
+)JS", "", {}, initial, {});
+    ASSERT_NE(editor, nullptr);
+    ASSERT_NE(reader, nullptr);
+    ScriptHostContext host;
+    host.cursor_world_position = linalg::Vector3f(5, 6, 0);
+    editor->DispatchCursorClick(host);
+    reader->DispatchCursorClick(host);
+    const auto seen = reader->Evaluate(host, DynamicValue(0.0f));
+    ASSERT_NE(seen, nullptr);
+    EXPECT_FLOAT_EQ(seen->getFloat(), 5005.0f);
+}
+
+TEST(ScriptHostLimits, AnEndedListenerRemovedByAnEarlierOneDoesNotFire) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto node    = std::make_shared<SceneNode>();
+    auto probe   = std::make_shared<SceneNode>();
+    runtime->RegisterNode("character", node.get());
+    runtime->RegisterNode("probe", probe.get());
+    std::vector<WPPuppetLayer::AnimationLayer> authored(1);
+    authored[0].id   = 7;
+    authored[0].name = "siche";
+    WPPuppetLayer layer(MakeSingleShotPuppet());
+    layer.prepared(authored);
+    runtime->RegisterPuppetLayer("character", layer);
+    runtime->RegisterNodeVisibility("character", node.get(), ResolveBoolSetting(*runtime, {
+        { "value", true }, { "script", R"JS(
+export function init(value) {
+  var animation = thisLayer.getAnimationLayer('siche');
+  var second = function() { thisScene.getLayer('probe').origin = new Vec3(1, 0, 0); };
+  animation.addEndedCallback(function() { animation.removeEndedCallback(second); });
+  animation.addEndedCallback(second);
+  return value;
+}
+)JS" } }, "character"));
+    runtime->Tick(0.01);
+    WPPuppetLayer render_copy = layer;
+    render_copy.genFrame(0.0);
+    render_copy.genFrame(2.0);
+    runtime->Tick(0.01);
+    EXPECT_FLOAT_EQ(probe->Translate().x(), 0.0f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
+
+TEST(ScriptHostLimits, ThousandNestedCallsWorkAndRunawayRecursionDoesNot) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+function nest(depth, a, b, c) {
+  var x = 1, y = 2, z = 3, w = 4, v = 5, u = 6, t = 7;
+  return depth === 0 ? 0 : 1 + nest(depth - 1, a + x, b + y, c + z);
+}
+function runaway(n) { return runaway(n + 1) + 1; }
+export function update(value) {
+  var caught = 0;
+  try { runaway(0); } catch (e) { caught = 1; }
+  return nest(1000, 0, 0, 0) + caught * 10000;
+}
+)JS", "", {}, DynamicValue(0.0f), runtime->hostContext());
+    ASSERT_NE(program, nullptr);
+    const auto result = program->Evaluate(runtime->hostContext(), DynamicValue(0.0f));
+    ASSERT_NE(result, nullptr);
+    EXPECT_FLOAT_EQ(result->getFloat(), 11000.0f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
+TEST(ScriptHostLimits, AnEndlessUpdateIsInterruptedAndThreeInARowSwitchTheProgramOff) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update(value) { for (;;) {} }
+)JS", "looper", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(program, nullptr);
+    for (int tick = 0; tick < 3; ++tick) {
+        ASSERT_TRUE(program->Valid()) << "interrupted " << tick << " times so far";
+        const auto result = program->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+        ASSERT_NE(result, nullptr);
+        EXPECT_FLOAT_EQ(result->getFloat(), 1.0f) << "the property keeps its value";
+    }
+    EXPECT_FALSE(program->Valid());
+    // Three interrupted calls and one error naming the program.
+    EXPECT_EQ(runtime->scriptErrorCount(), 4u);
+}
+
+TEST(ScriptHostLimits, HugeAllocationAndASelfRearmingThrowingTimerAreErrorsNotHangs) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto memory = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update(value) {
+  var keep = [];
+  for (;;) keep.push(new Array(1000000).fill(1));
+}
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(memory, nullptr);
+    memory->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    EXPECT_TRUE(memory->Valid());
+    EXPECT_GE(runtime->scriptErrorCount(), 1u);
+
+    auto timer = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+function again() { engine.setTimeout(again, 0); throw new Error('again'); }
+engine.setTimeout(again, 0);
+export function update(value) { return value; }
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(timer, nullptr);
+    const auto before = runtime->scriptErrorCount();
+    for (int tick = 0; tick < 5; ++tick) timer->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    EXPECT_EQ(runtime->scriptErrorCount() - before, 5u) << "one error per timer pass";
+}
+
+
+TEST(ScriptHostLimits, AScriptCannotPutItsOwnCodeInsideTheHostsRefreshOfEngine) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto hostile = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+Object.defineProperty(engine, 'frametime', { set: function () { for (;;) {} }, configurable: true });
+export function update(value) { return 9; }
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    EXPECT_EQ(hostile, nullptr) << "the engine's fields stay data properties";
+    EXPECT_GE(runtime->scriptErrorCount(), 1u);
+
+    auto bystander = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update(value) { return engine.frametime; }
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(bystander, nullptr);
+    ScriptHostContext host = runtime->hostContext();
+    host.frame_time        = 0.25;
+    const auto start       = std::chrono::steady_clock::now();
+    const auto answer      = bystander->Evaluate(host, DynamicValue(1.0f));
+    ASSERT_NE(answer, nullptr);
+    EXPECT_FLOAT_EQ(answer->getFloat(), 0.25f);
+    EXPECT_LT(MillisecondsOf(start), 1000.0);
+}
+
 } // namespace
 } // namespace wallpaper

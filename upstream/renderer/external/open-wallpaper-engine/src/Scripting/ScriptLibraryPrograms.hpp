@@ -93,8 +93,16 @@ function make(factory, kind, layerName, animIndex) {
     writable: true, configurable: true, enumerable: false
   });
   var prog = { kind: kind, layerName: layerName, h: null, sp: sp, started: false, caps: 0 };
-  prog.h = factory(layer, object, scene, function createScriptProperties() { return builder; }, sp,
-                   moduleNamespace, moduleNamed, hooks);
+  try {
+    prog.h = factory(layer, object, scene, function createScriptProperties() { return builder; }, sp,
+                     moduleNamespace, moduleNamed, hooks);
+  } catch (e) {
+    // What a script threw is described here, inside the budgeted call, rather than by
+    // the host reading properties off an object the script made.
+    var failure = new Error(describe(e));
+    failure.stack = stackOf(e);
+    throw failure;
+  }
   var h = prog.h;
   var caps = typeof h.update === 'function' ? 1 : 0;
   for (var i = 0; i < 6; ++i) if (typeof h[CURSOR[i]] === 'function') caps |= 2 << i;
@@ -139,8 +147,6 @@ function evaluate(prog, value, hasRuntime) {
   try { return update(ownCopy(value)); } catch (e) { reportError('update', e); return undefined; }
 }
 
-function setParam(prog, name, value) { prog.sp[name] = value; }
-
 function startScene(prog) {
   prog.started = true;
   guard('init', prog, undefined);
@@ -157,7 +163,9 @@ function tickScene(prog) {
 
 function cursorEvent(prog, index, button) {
   var name = CURSOR[index];
-  var world = input.cursorWorldPosition;
+  // Each program gets its own vectors: one that edits `event.worldPosition` must not
+  // change what `input` or the next program's event holds.
+  var world = input.cursorWorldPosition.copy();
   var event = {
     button: button,
     normalizedPosition: new Vec2(input.cursorPosition.x, input.cursorPosition.y),
@@ -240,7 +248,7 @@ G.logInterrupts = false;
 G.tips = false;
 
 return {
-  hostUpdate: hostUpdate, setProps: setProps, make: make, evaluate: evaluate, setParam: setParam,
+  hostUpdate: hostUpdate, setProps: setProps, make: make, evaluate: evaluate,
   startScene: startScene, tickScene: tickScene, cursorEvent: cursorEvent,
   animationEvent: animationEvent, animationListeners: animationListeners,
   mediaJson: mediaJson, mediaThumbnail: mediaThumbnail, resizeProgram: resizeProgram,
