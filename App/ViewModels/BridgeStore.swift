@@ -1176,8 +1176,38 @@ final class BridgeStore {
     }
 
     private func validateWallpaperForPlayback(id wallpaperId: String) async throws {
-        // CLEANROOM A43: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A43")
+        let folder = ClientPaths.libraryURL.appendingPathComponent(wallpaperId, isDirectory: true)
+        let manifestData = try Data(contentsOf: folder.appendingPathComponent("project.json"))
+        let manifest = try JSONSerialization.jsonObject(with: manifestData) as? [String: Any] ?? [:]
+        let entry = manifest["file"] as? String ?? ""
+        func failure(_ code: Int, _ message: String) -> NSError {
+            NSError(domain: "WallpaperMachine", code: code, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        switch (manifest["type"] as? String ?? "").lowercased() {
+        case "video":
+            let file = folder.appendingPathComponent(entry)
+            let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard !entry.isEmpty, FileManager.default.isReadableFile(atPath: file.path),
+                  values?.isRegularFile == true, (values?.fileSize ?? 0) > 0 else {
+                throw failure(1, String(localized: "This video cannot be decoded. Import a complete, playable video file before applying it."))
+            }
+            // A format nothing can play is refused here, before any display changes.
+            if let message = VideoFormatSupport.message(for: await videoFormatCheck(file)) {
+                throw WallpaperActionError(message: message)
+            }
+        case "scene":
+            let assets = ClientPaths.assetsURL
+            guard ClientPaths.hasSceneAssets(at: assets) else {
+                throw failure(2, String(localized: "This wallpaper is downloaded, but Wallpaper Engine’s shared scene resources are not installed. Choose Get shared resources in the wallpaper’s details, or go to Settings → Library & Steam."))
+            }
+            setenv("WALLPAPER_MACHINE_ASSETS_ROOT", assets.path, 1)
+        case "web":
+            guard !entry.isEmpty, FileManager.default.fileExists(atPath: folder.appendingPathComponent(entry).path) else {
+                throw failure(3, String(localized: "This web wallpaper’s entry page is missing. Import the complete project folder, including its HTML file, before applying it."))
+            }
+        default:
+            break
+        }
     }
 
     /// `userInitiated` is what lets the apply open a wallpaper the load journal holds back after
@@ -1366,8 +1396,25 @@ final class BridgeStore {
     }
 
     private static func emptySnapshots() -> Snapshots {
-        // CLEANROOM A44: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A44")
+        let app = BridgeAppSnapshot(
+            playbackState: .paused, selectedWallpaperId: nil, activeWallpaperIds: [], errors: [], heldWallpaperIds: [])
+        let library = BridgeLibrarySnapshot(
+            wallpapers: [], scanStatus: BridgeLibraryScanStatus(scanning: false, done: 0, total: 0),
+            sceneCount: 0, videoCount: 0, webpageCount: 0, unknownCount: 0)
+        let monitor = BridgeMonitorInformationSnapshot(rows: [])
+        let settings = BridgeSettingsSnapshot(
+            displays: [], launchAtLoginAvailable: false, launchAtLoginEnabled: false,
+            launchAtLoginNeedsApproval: false, batteryMode: .keepRunning, verboseLogging: false,
+            gitSha: "", bridgeVersion: "", coreVersion: "", shaderPipelineVersion: "",
+            storage: BridgeStorageStatus(
+                shaderCacheSizeBytes: 0,
+                logs: BridgeLogStatus(logsRoot: "", activeSession: "", activeFile: "", activeFileSizeBytes: 0)),
+            videoBackends: [], sceneOptimizationEnabled: true, sceneOnDemandEnabled: false,
+            sceneVideoPlaneSamplingEnabled: false, sceneResolution: "display", sceneUpdateModes: [],
+            sceneRenderers: [], userAssetsPath: "", renderScale: 1, preferredRenderScale: 1,
+            frameRateCap: nil, batteryRenderScale: 0.75, batteryTargetFps: 30, onBatteryPower: false,
+            qualityThrottle: [], effectiveFrameRateCap: nil, renderScaleSupported: false)
+        return Snapshots(app: app, library: library, wallpaperOptions: nil, monitorInformation: monitor, settings: settings)
     }
 
     private func apply(_ bundle: BridgeSnapshotBundle) {
@@ -1397,8 +1444,22 @@ final class BridgeStore {
     }
 
     private func finishSnapshotApply() {
-        // CLEANROOM A45: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A45")
+        if let options = wallpaperOptionsSnapshot {
+            // Drafts for properties that no longer take text are stale.
+            let textProperties = Set(options.properties.filter { $0.kind == .textInput && $0.enabled }.map(\.id))
+            editorState.reconcile(wallpaperID: options.wallpaperId, textPropertyIDs: textProperties)
+            // The inspector moved on to this wallpaper, so a drag left on another is over: that
+            // wallpaper's displays follow its draft again.
+            for other in editorState.clearPropertyPreviews(except: options.wallpaperId).sorted() {
+                propertyDraftEdited(other)
+            }
+        }
+        snapshotRevision &+= 1
+        onSnapshotApplied?()
+        if let newest = appSnapshot.errors.last, newest != latestBridgeErrorMessage {
+            latestBridgeErrorMessage = newest
+            latestBridgeErrorRevision &+= 1
+        }
     }
 }
 

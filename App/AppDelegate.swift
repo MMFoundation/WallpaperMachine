@@ -99,6 +99,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var diagnostics: RuntimeDiagnosticsSession?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Hosted unit tests need these types but not the desktop lifecycle, so they get no
+        // windows, no status item and no services. The UI tests run in a separate runner process,
+        // which is why the real app starts there.
         if NSClassFromString("XCTestCase") != nil {
             NSApp.setActivationPolicy(.prohibited)
             return
@@ -1292,6 +1295,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         false
     }
 
+    /// A click on the Dock icon returns to the section the panel last showed. The delegate has
+    /// handled the reopen itself, so it answers false and AppKit adds nothing of its own.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showControlPanel(selection: controlPanelNavigation.selection ?? .wallpaper)
         return false
@@ -1312,6 +1317,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         retryHeldUpdatePrompt()
     }
 
+    /// Closing the panel releases its controller; the stores and the navigation object outlive it,
+    /// so opening it again builds a fresh view around them and resumes where it was.
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
         if window === whatsNewWindow {
@@ -1479,9 +1486,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         rebuildMenu(menu)
     }
 
+    /// An item created while Launch Services is still starting the app can stay out of the menu
+    /// bar until the activation policy is set again and the menu rebuilt once the first run-loop
+    /// turn has passed, so both happen then.
     private func synchronizeStatusItem() {
-        // CLEANROOM A1: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A1")
+        // On the next turn, not now: see above.
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.statusItem != nil else { return }
+                if self.controlPanelWindow == nil, self.whatsNewWindow == nil, self.previewWindow == nil {
+                    NSApp.setActivationPolicy(.accessory)
+                }
+                self.rebuildMenu()
+            }
+        }
     }
 
     private func installDisplayChangeObserver() {
@@ -1510,13 +1528,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     private func installApplicationMenu() {
-        // CLEANROOM A2: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A2")
+        let main = NSMenu()
+
+        let applicationItem = NSMenuItem()
+        let applicationMenu = NSMenu(title: "WallpaperMachine")
+        let settings = menuItem("Settings…", action: #selector(openSettings))
+        settings.keyEquivalent = ","
+        applicationMenu.addItem(settings)
+        applicationMenu.addItem(menuItem("Check for Updates…", action: #selector(checkForUpdates)))
+        applicationMenu.addItem(.separator())
+        // Through the app's own exit handler, so the quit sequence runs.
+        let quit = menuItem("Quit WallpaperMachine", action: #selector(exitApplication))
+        quit.keyEquivalent = "q"
+        applicationMenu.addItem(quit)
+        applicationItem.submenu = applicationMenu
+        main.addItem(applicationItem)
+
+        let fileItem = NSMenuItem()
+        let fileMenu = NSMenu(title: String(localized: "File"))
+        let close = NSMenuItem(title: String(localized: "Close"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        fileMenu.addItem(close)
+        fileItem.submenu = fileMenu
+        main.addItem(fileItem)
+
+        // Standard responder actions, so the search and setup fields get their shortcuts.
+        let editItem = NSMenuItem()
+        let editMenu = NSMenu(title: String(localized: "Edit"))
+        editMenu.addItem(NSMenuItem(title: String(localized: "Undo"), action: Selector(("undo:")), keyEquivalent: "z"))
+        let redo = NSMenuItem(title: String(localized: "Redo"), action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redo)
+        editMenu.addItem(.separator())
+        editMenu.addItem(NSMenuItem(title: String(localized: "Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        editMenu.addItem(NSMenuItem(title: String(localized: "Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        editMenu.addItem(NSMenuItem(title: String(localized: "Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        editMenu.addItem(NSMenuItem(title: String(localized: "Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+        editItem.submenu = editMenu
+        main.addItem(editItem)
+
+        NSApp.mainMenu = main
     }
 
     private func rebuildMenu(_ menu: NSMenu? = nil) {
-        // CLEANROOM A3: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A3")
+        guard let menu = menu ?? statusItem?.menu else { return }
+        menu.removeAllItems()
+        statusMenuItems(for: StatusMenuModel.entries(for: statusMenuInput())).forEach(menu.addItem)
+        if let update = updateMenuItem() {
+            menu.addItem(.separator())
+            menu.addItem(update)
+        }
+        if let store, !store.heldWallpaperIDs.isEmpty {
+            menu.addItem(.separator())
+            menu.addItem(disabledMenuItem(String(localized: "A wallpaper was held back after a crash")))
+        }
+        if let error = startupError ?? lastError {
+            menu.addItem(.separator())
+            menu.addItem(disabledMenuItem(error.localizedDescription))
+        }
+        menu.addItem(.separator())
+        if shutdownInProgress {
+            menu.addItem(disabledMenuItem(String(localized: "Quitting…")))
+        } else {
+            menu.addItem(menuItem("Exit", action: #selector(exitApplication)))
+        }
     }
 
     private func menuItem(_ title: String.LocalizationValue, action: Selector) -> NSMenuItem {
@@ -1828,13 +1902,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     private func showControlPanel(selection: SidebarSelection) {
-        // CLEANROOM A4: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A4")
+        controlPanelNavigation.selection = selection
+        NSApp.setActivationPolicy(.regular)
+        if let window = controlPanelWindow {
+            ControlPanelWindow.constrainToScreen(window)
+            ControlPanelWindow.bringForward(window)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let root: AnyView
+        if let store {
+            root = AnyView(ControlPanelView(
+                store: store, navigation: controlPanelNavigation, workshop: workshopStore,
+                pixiv: pixivStore, updater: appUpdater, imports: libraryImports))
+        } else {
+            root = AnyView(BridgeUnavailableView(error: startupError ?? lastError))
+        }
+        let hosting = NSHostingController(rootView: root)
+        // The window keeps its own size floor, and the hosted toolbar and title belong to it.
+        hosting.sizingOptions = []
+        hosting.sceneBridgingOptions = [.toolbars, .title]
+        let window = ControlPanelWindow.make(contentViewController: hosting, delegate: self)
+        if !window.setFrameUsingName(ControlPanelWindow.frameAutosaveName) { window.center() }
+        ControlPanelWindow.constrainToScreen(window)
+        // After the saved frame is restored, so restoring does not overwrite it.
+        window.setFrameAutosaveName(ControlPanelWindow.frameAutosaveName)
+        controlPanelWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func togglePlayback() {
-        // CLEANROOM A5: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A5")
+        guard let store, !shutdownInProgress, !shutdownComplete, playbackSnapshotCurrent,
+              !store.appSnapshot.activeWallpaperIds.isEmpty else { return }
+        Task { [weak self] in
+            do {
+                if store.appSnapshot.playbackState == .paused {
+                    try await store.playAllAsync()
+                } else {
+                    try await store.pauseAllAsync()
+                }
+                self?.lastError = nil
+                self?.playbackSnapshotCurrent = true
+                self?.rebuildMenu()
+            } catch {
+                guard let self else { return }
+                lastError = error
+                playbackSnapshotCurrent = false
+                rebuildMenu()
+                presentErrorAlert(error)
+            }
+        }
     }
 
     /// A display whose playlist rotates moves along the playlist; any other display takes the
@@ -2079,14 +2198,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     private func refreshStoreSnapshot() {
-        // CLEANROOM A6: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A6")
+        guard let store, !shutdownInProgress, !shutdownComplete else { return }
+        Task { [weak self] in
+            do {
+                try await store.refreshAllAsync()
+                self?.lastError = nil
+                self?.playbackSnapshotCurrent = true
+            } catch {
+                self?.lastError = error
+                self?.playbackSnapshotCurrent = false
+            }
+            self?.rebuildMenu()
+        }
     }
 
     /// Whether the bridge took the refresh.
     private func refreshDisplaysFromSystemEvent() async -> Bool {
-        // CLEANROOM A7: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A7")
+        guard let store, !shutdownInProgress, !shutdownComplete else { return false }
+        let accepted: Bool
+        do {
+            try await store.refreshDisplaysAsync()
+            lastError = nil
+            playbackSnapshotCurrent = true
+            accepted = true
+        } catch {
+            lastError = error
+            playbackSnapshotCurrent = false
+            accepted = false
+        }
+        rebuildMenu()
+        return accepted
     }
 
     /// The applied desktop Scenes that have consented to now-playing.
@@ -2121,7 +2262,11 @@ private struct BridgeUnavailableView: View {
     let error: Error?
 
     var body: some View {
-        // CLEANROOM A8: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A8")
+        ContentUnavailableView {
+            Label("Bridge Unavailable", systemImage: "exclamationmark.triangle")
+        } description: {
+            Text(verbatim: error?.localizedDescription ?? String(localized: "The rendering bridge could not be started."))
+        }
+        .frame(minWidth: 640, minHeight: 420)
     }
 }

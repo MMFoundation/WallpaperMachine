@@ -21,6 +21,8 @@ struct WallpaperEngineApp {
                 AppLog.error("startup backup restore failed: \(error.localizedDescription)")
             }
         }
+        // AppKit owns the control panel and the menu-bar item, so a SwiftUI scene here would only
+        // add an empty window; the app has none.
         let application = NSApplication.shared
         let delegate = AppDelegate()
         application.delegate = delegate
