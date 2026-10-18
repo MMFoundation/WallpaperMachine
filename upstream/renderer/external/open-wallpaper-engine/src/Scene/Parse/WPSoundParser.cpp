@@ -124,7 +124,13 @@ WPSoundStream::Piece WPSoundStream::NextPiece(float* out, std::size_t room,
 
     if (! m_cur_active) {
         Switch();
-        if (! m_cur_active) return { 0, true }; // nothing opens now; the next request retries
+        if (! m_cur_active) {
+            // This file does not open (a failure is remembered for a while, so asking is
+            // cheap): go on with the next one in this request, until a whole pass of the
+            // list has given nothing.
+            ++dead_files;
+            return { 0, dead_files > m_stream_factories.size() };
+        }
     }
 
     const uint64_t delivered = m_cur_active->NextPcmData(out, static_cast<uint32_t>(room));

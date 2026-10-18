@@ -42,7 +42,10 @@ public:
         size_t                       copied = 0;
         if (layout.owns_lock() && m_width_laid_out == width) copied = Drain(dst, frameCount, width);
         std::fill(dst + copied * width, dst + static_cast<size_t>(frameCount) * width, 0.0f);
-        if (copied > 0) WakeWorker();
+        // A block was freed (or the buffer ran dry): wake the sleeping worker. Every cycle
+        // that finds room tries again, so a notification skipped because the worker held
+        // the mutex is made up one device cycle later.
+        if (m_ready.load(std::memory_order_acquire) < kBlockCount) WakeWorker();
         return frameCount;
     }
 
@@ -57,8 +60,6 @@ public:
             m_width_laid_out                            = desc.phyChannels;
             m_block_frames = usable ? std::max<size_t>(desc.sampleRate / kBlocksPerSec, 1) : 0;
             m_storage.assign(usable ? kBlockCount * m_block_frames * desc.phyChannels : 0, 0.0f);
-            m_block_period = std::chrono::microseconds(
-                usable ? 1000000 * m_block_frames / desc.sampleRate : 0);
         }
         m_width.store(desc.phyChannels, std::memory_order_relaxed);
         {
@@ -89,7 +90,7 @@ private:
     }
 
     // Never blocks: if the worker holds the mutex it is about to look at the count anyway,
-    // and a timed wait covers the rare missed notification.
+    // and the next audio cycle asks again.
     void WakeWorker() {
         std::unique_lock<std::mutex> wake { m_wake_mutex, std::try_to_lock };
         if (wake.owns_lock()) {
@@ -107,13 +108,14 @@ private:
         if (m_worker.joinable()) m_worker.join();
     }
 
-    // Worker thread: runs while the layout is usable. It sleeps while every block is full.
+    // Worker thread: runs while the layout is usable. It sleeps, with no timer, while every
+    // block is full.
     void DecodeBlocks() {
         const size_t width = m_width_laid_out;
         for (;;) {
             {
                 std::unique_lock<std::mutex> wake { m_wake_mutex };
-                m_wake.wait_for(wake, m_block_period, [this] {
+                m_wake.wait(wake, [this] {
                     return m_halt || m_ready.load(std::memory_order_acquire) < kBlockCount;
                 });
                 if (m_halt) return;
@@ -144,7 +146,6 @@ private:
     std::vector<float>        m_storage;
     size_t                    m_block_frames { 0 };
     size_t                    m_width_laid_out { 0 };
-    std::chrono::microseconds m_block_period { 0 };
     std::atomic<size_t>       m_width { 0 };
 
     // Block cursors: the reader owns read_*, the worker owns write_block, `ready` links them.

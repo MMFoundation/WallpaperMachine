@@ -147,6 +147,39 @@ TEST(SoundLayerControlTest, EmptyLoopReadProducesSilenceAndKeepsPlaying) {
     }
 }
 
+TEST(SoundLayerControlTest, AFileThatDoesNotOpenIsPassedOverInTheSameRequest) {
+    // The first file of the list cannot be opened: the layer goes on to the next file
+    // without leaving a request of silence behind, and a list in which nothing opens ends
+    // the request in silence instead of spinning.
+    auto good = MakeFakeStream({ 1.0f, 2.0f, 3.0f, 4.0f });
+    int  bad_calls = 0;
+    WPSoundStream stream({ [&bad_calls](const audio::SoundStream::Desc&) {
+                             ++bad_calls;
+                             return std::shared_ptr<audio::SoundStream> {};
+                         },
+                           [good](const audio::SoundStream::Desc&) { return good; } },
+                         { .mode = PlaybackMode::Loop });
+    stream.PassDesc({ .channels = 2, .sampleRate = 48'000 });
+
+    std::array<float, 4> output { 9.0f, 9.0f, 9.0f, 9.0f };
+    EXPECT_EQ(stream.NextPcmData(output.data(), 2), 2u);
+    EXPECT_EQ(bad_calls, 1);
+    EXPECT_FLOAT_EQ(output[0], 1.0f);
+    EXPECT_FLOAT_EQ(output[3], 4.0f);
+
+    int           calls = 0;
+    WPSoundStream broken({ [&calls](const audio::SoundStream::Desc&) {
+                             ++calls;
+                             return std::shared_ptr<audio::SoundStream> {};
+                         } },
+                         { .mode = PlaybackMode::Loop });
+    broken.PassDesc({ .channels = 2, .sampleRate = 48'000 });
+    output = { 9.0f, 9.0f, 9.0f, 9.0f };
+    EXPECT_EQ(broken.NextPcmData(output.data(), 2), 2u);
+    EXPECT_LE(calls, 4);
+    for (float sample : output) EXPECT_FLOAT_EQ(sample, 0.0f);
+}
+
 TEST(SoundLayerControlTest, ScriptTriggeredOneShotStopsAfterEnd) {
     int factory_calls = 0;
     WPSoundStream stream({ [&factory_calls](const audio::SoundStream::Desc&) {

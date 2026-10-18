@@ -1185,6 +1185,8 @@ float SampleField(const std::vector<float>& field, std::size_t width, std::size_
 void ComposeStyledText(const StyleMetrics& style, const std::vector<uint8_t>& coverage,
                        uint32_t width, uint32_t height, std::vector<uint8_t>& rgba) {
     const std::size_t w = width, h = height;
+    // Nothing is written past the buffer the caller gave.
+    if (rgba.size() < w * h * 4u || coverage.size() < w * h) return;
     // The field is only needed where something could be drawn.
     std::size_t min_x = w, max_x = 0, min_y = h, max_y = 0;
     for (std::size_t y = 0; y < h; ++y) {
