@@ -557,7 +557,68 @@ void LowerEffectCommands(const wpscene::WPImageEffect& effect,
     }
 }
 
-// CLEANROOM LS8: the file-local helpers of this group were removed; the rewrite designs its own.
+/// A quad of four vertices in the order left-bottom, left-top, right-bottom,
+/// right-top, drawn as the triangles (0, 1, 2) and (2, 1, 3).
+std::shared_ptr<SceneMesh> MakeQuadMesh(const std::array<float, 12>& positions,
+                                        const std::array<float, 8>&  uvs) {
+    SceneVertexArray vertices({ { std::string(WE_IN_POSITION), VertexType::FLOAT3 },
+                                { std::string(WE_IN_TEXCOORD), VertexType::FLOAT2 } },
+                              4);
+    for (std::size_t corner = 0; corner < 4; ++corner) {
+        const std::array<float, 5> vertex { positions[corner * 3], positions[corner * 3 + 1],
+                                            positions[corner * 3 + 2], uvs[corner * 2],
+                                            uvs[corner * 2 + 1] };
+        vertices.AddVertex(vertex.data());
+    }
+    const std::array<uint32_t, 6> indices { 0, 1, 2, 2, 1, 3 };
+    auto mesh = std::make_shared<SceneMesh>();
+    mesh->AddVertexArray(std::move(vertices));
+    mesh->AddIndexArray(SceneIndexArray(std::span<const uint32_t>(indices)));
+    return mesh;
+}
+
+/// A layer's own card: a rectangle centred on the origin, as wide and tall as the
+/// size cut down to whole units (kept inside 0..65535). Texture coordinate v is 0
+/// at the top; (u, v) is how much of a padded texture holds the picture.
+std::shared_ptr<SceneMesh> MakeCardMesh(float width, float height, float u = 1.0f, float v = 1.0f) {
+    const auto whole = [](float size) {
+        return std::isfinite(size) ? std::clamp(std::trunc(size), 0.0f, 65535.0f) : 0.0f;
+    };
+    const float half_w = whole(width) * 0.5f;
+    const float half_h = whole(height) * 0.5f;
+    return MakeQuadMesh({ -half_w, -half_h, 0.0f, -half_w, half_h, 0.0f, half_w, -half_h, 0.0f,
+                          half_w, half_h, 0.0f },
+                        { 0.0f, v, 0.0f, 0.0f, u, v, u, 0.0f });
+}
+
+/// A text layer's card over the box `[left, right] x [bottom, top]`, with the whole
+/// texture across it.
+std::shared_ptr<SceneMesh> MakeTextCardMesh(float left, float bottom, float right, float top) {
+    return MakeQuadMesh({ left, bottom, 0.0f, left, top, 0.0f, right, bottom, 0.0f, right, top,
+                          0.0f },
+                        { 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.0f });
+}
+
+/// The card of a passthrough layer with effects: its four corners where the layer's
+/// own local transform puts them (canvas positions, y up, in the order of
+/// `MakeQuadMesh`), each sampling the scene output at that place. With
+/// `clip_space` the positions are the same corners in clip space, so a pass that
+/// copies the footprint draws it 1:1.
+std::shared_ptr<SceneMesh> MakePassthroughMesh(const std::array<linalg::Vector2f, 4>& corners,
+                                               float canvas_width, float canvas_height,
+                                               bool clip_space) {
+    std::array<float, 12> positions {};
+    std::array<float, 8>  uvs {};
+    for (std::size_t corner = 0; corner < 4; ++corner) {
+        const float x = corners[corner].x();
+        const float y = corners[corner].y();
+        positions[corner * 3]     = clip_space ? 2.0f * x / canvas_width - 1.0f : x;
+        positions[corner * 3 + 1] = clip_space ? 2.0f * y / canvas_height - 1.0f : y;
+        uvs[corner * 2]           = x / canvas_width;
+        uvs[corner * 2 + 1]       = 1.0f - y / canvas_height;
+    }
+    return MakeQuadMesh(positions, uvs);
+}
 
 void AddParticleIndexArray(SceneMesh& mesh, uint32_t count) {
     const auto layout = PlanParticleIndexLayout(count);
@@ -655,7 +716,30 @@ bool AlignmentHasAnchorOffset(std::string_view align) {
     return false;
 }
 
-// CLEANROOM LS14: the file-local helpers of this group were removed; the rewrite designs its own.
+/// Where an aligned image layer's quad centre lies from its origin: half the
+/// scaled size towards the middle from the edge or corner the word names (`bottom`
+/// beats `top`, `left` beats `right`), turned by the layer's angles so a rotated
+/// layer keeps that edge on the origin.
+Vector3f AlignmentAnchorOffset(std::string_view align, const std::array<float, 2>& size,
+                               const Vector3f& scale, const Vector3f& angles) {
+    const auto names = [align](std::string_view edge) {
+        return align.find(edge) != std::string_view::npos;
+    };
+    const double half_x = static_cast<double>(size[0]) * scale.x() * 0.5;
+    const double half_y = static_cast<double>(size[1]) * scale.y() * 0.5;
+    double       x      = 0.0;
+    double       y      = 0.0;
+    if (names("bottom")) y = half_y;
+    else if (names("top")) y = -half_y;
+    if (names("left")) x = half_x;
+    else if (names("right")) x = -half_x;
+    if (x == 0.0 && y == 0.0) return Vector3f::Zero();
+    const Matrix4d turn = SceneNode::LocalTransOf(Vector3f::Zero(), Vector3f(1.0f, 1.0f, 1.0f), angles);
+    const double   rx   = turn(0, 0) * x + turn(0, 1) * y;
+    const double   ry   = turn(1, 0) * x + turn(1, 1) * y;
+    const double   rz   = turn(2, 0) * x + turn(2, 1) * y;
+    return Vector3f(static_cast<float>(rx), static_cast<float>(ry), static_cast<float>(rz));
+}
 
 // CLEANROOM LS15: the file-local helpers of this group were removed; the rewrite designs its own.
 
