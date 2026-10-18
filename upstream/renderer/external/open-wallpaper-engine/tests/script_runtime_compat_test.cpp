@@ -5516,6 +5516,18 @@ function destroy() { scene.getObject('sceneProbe').origin = new Vec3(77, 0, 0); 
     EXPECT_FLOAT_EQ(scene_probe->Translate().x(), 77.0f) << "scene scripts end too";
 }
 
+// Once the scripts have been ended, a scene program is not started: it would run `init`
+// against a scene that is going away and nothing would end it.
+TEST(ScriptRuntimeCompat, ASceneProgramRegisteredAfterTeardownNeverStarts) {
+    auto probe   = std::make_shared<SceneNode>();
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    runtime->RegisterNode("probe", probe.get());
+    runtime->TearDownScripts();
+    runtime->RegisterSceneScript("scene.getObject('probe').origin = new Vec3(5, 0, 0);\n", "");
+    EXPECT_EQ(runtime->sceneScriptCount(), 0u);
+    EXPECT_FLOAT_EQ(probe->Translate().x(), 0.0f);
+}
+
 // A timeline with no usable frame rate moves nothing and does not wander backwards, and a
 // time too large to place on a loop answers the initial value.
 TEST(ScriptRuntimeCompat, ATimelineWithoutAFrameRateStandsStill) {

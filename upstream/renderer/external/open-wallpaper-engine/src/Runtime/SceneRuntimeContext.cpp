@@ -358,7 +358,9 @@ SceneRuntimeContext::~SceneRuntimeContext() {
 
 void SceneRuntimeContext::TearDownScripts() {
     // A `destroy()` may create layers, which can register more scripts: those
-    // are never started, so only the ones present now are ended, by index.
+    // are never started (a scene program starts as it is created, so none is
+    // created from here on), and only the ones present now are ended, by index.
+    m_scripts_torn_down = true;
     const auto value_count  = m_scripted_values.size();
     const auto script_count = m_scene_scripts.size();
     for (std::size_t index = 0; index < value_count; ++index) {
@@ -2021,6 +2023,7 @@ void SceneRuntimeContext::RegisterSceneScript(std::string script_source, std::st
         *m_host_context);
     if (program == nullptr || ! program->Valid()) return;
     m_scene_scripts.push_back(SceneScriptBinding { .script = std::move(program) });
+    if (m_scripts_torn_down) return;
 }
 
 void SceneRuntimeContext::RegisterNodeVideoTexture(std::string name, std::string texture_key) {

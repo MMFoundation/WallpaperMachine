@@ -1017,6 +1017,8 @@ private:
     bool m_render_targets_resized { false };
     std::map<std::string, int> m_render_target_resize_reasons;
     /// The display's size or the language changed since the scripts were told.
+    /// `TearDownScripts` has run: no program starts from then on.
+    bool m_scripts_torn_down { false };
     bool m_screen_resize_pending { false };
     bool m_general_settings_pending { false };
 
