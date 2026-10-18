@@ -54,7 +54,7 @@ private:
     };
     bool loop();
 
-    bool                    m_running { false };
+    std::atomic<bool>       m_running { false };
     std::string             m_name { "unknown" };
     uint64_t                m_log_scope { 0 };
     std::mutex              m_mutex;
@@ -83,6 +83,8 @@ private:
 
     // compare and set
     bool setID(handler_id id, std::weak_ptr<Looper> looper);
+    // Unbinds the handler again when it still carries `id`, so it may be registered anew.
+    void clearID(handler_id id);
 
     void deliverMessage(const std::shared_ptr<Message>& msg);
 

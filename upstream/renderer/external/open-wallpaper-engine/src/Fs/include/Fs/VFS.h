@@ -25,7 +25,7 @@ public:
 		std::string mountPoint; // full path of mount point in "/", last char can't be "/"
 		std::unique_ptr<Fs> fs;
 		static bool CheckMountPoint(const std::string_view mountPoint) {
-			return mountPoint[mountPoint.size()-1] != '/';
+			return ! mountPoint.empty() && mountPoint.front() == '/' && mountPoint.back() != '/';
 		}
 		static bool InMountPoint(const std::string_view mountPoint, const std::string_view path) {
 			return path.compare(0, mountPoint.size() + 1, std::string(mountPoint) + '/') == 0;
@@ -55,6 +55,7 @@ public:
 		return false;
 	}
 	bool IsMounted(std::string_view name) {
+		if(name.empty()) return false;
 		for(const auto& el:m_mountedFss) {
 			if(el.name == name)
 				return true;
@@ -68,7 +69,7 @@ public:
         });
         if(find_it != std::rend(m_mountedFss)) 
             return find_it->fs->Open(MountedFs::GetPathInMount(find_it->mountPoint, path));
-		LOG_ERROR("not found \"%s\" in vfs", path.data());
+		LOG_ERROR("not found \"%.*s\" in vfs", static_cast<int>(path.size()), path.data());
 		return nullptr;
 	}
 	std::shared_ptr<IBinaryStreamW> OpenW(std::string_view path) {
@@ -83,7 +84,7 @@ public:
         }
         if(find_it != std::rend(m_mountedFss))
             return find_it->fs->OpenW(MountedFs::GetPathInMount(find_it->mountPoint, path));
-		LOG_ERROR("not found \"%s\" in vfs", path.data());
+		LOG_ERROR("not found \"%.*s\" in vfs", static_cast<int>(path.size()), path.data());
 		return nullptr;
 	}
 	/// Publishes `from` as `to`, both of which must resolve to the same mount.

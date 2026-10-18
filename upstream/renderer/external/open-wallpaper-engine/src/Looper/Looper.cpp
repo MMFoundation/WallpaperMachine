@@ -122,7 +122,7 @@ void Looper::unregisterHandler(handler_id id) {
     if (m_reg_handler.count(id) > 0) {
         auto handle = m_reg_handler[id].lock();
         if (handle != nullptr) {
-            handle->setID(id, {});
+            handle->clearID(id);
         }
         m_reg_handler.erase(id);
     }
@@ -135,11 +135,16 @@ std::weak_ptr<Looper> Handler::getLooper() const { return m_looper; };
 
 bool Handler::setID(handler_id id, std::weak_ptr<Looper> looper) {
     handler_id iv = INVALID_HANDLER_ID;
-    if (m_id.compare_exchange_weak(iv, id)) {
+    if (m_id.compare_exchange_strong(iv, id)) {
         m_looper = looper;
         return true;
     }
     return false;
+}
+
+void Handler::clearID(handler_id id) {
+    handler_id expected = id;
+    if (m_id.compare_exchange_strong(expected, INVALID_HANDLER_ID)) m_looper.reset();
 }
 
 void Handler::deliverMessage(const std::shared_ptr<Message>& msg) { onMessageReceived(msg); }
