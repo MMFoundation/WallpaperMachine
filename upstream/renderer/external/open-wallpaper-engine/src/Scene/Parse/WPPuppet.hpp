@@ -44,18 +44,9 @@ public:
         uint32_t        file_parent { NO_PARENT };
         std::string     simulation_json;
 
-        bool noParent() const {
-            // CLEANROOM LM13
-            return false;
-        }
-        bool noBindParent() const {
-            // CLEANROOM LM14
-            return false;
-        }
-        bool noAnimParent() const {
-            // CLEANROOM LM15
-            return false;
-        }
+        bool noParent() const { return parent == NO_PARENT; }
+        bool noBindParent() const { return bind_parent == NO_PARENT; }
+        bool noAnimParent() const { return anim_parent == NO_PARENT; }
         linalg::Affine3f offset_trans { linalg::Affine3f::Identity() };
         linalg::Affine3f world_bind { linalg::Affine3f::Identity() };
         linalg::Affine3f inv_bind { linalg::Affine3f::Identity() };
@@ -151,10 +142,7 @@ public:
     WPPuppetLayer(std::shared_ptr<WPPuppet>);
     ~WPPuppetLayer();
 
-    bool hasPuppet() const {
-        // CLEANROOM LM16
-        return false;
-    }
+    bool hasPuppet() const { return m_puppet != nullptr; }
 
     struct AnimationLayer {
         i32         id { 0 };
@@ -214,6 +202,8 @@ private:
         double m_global_blend { 1.0 };
         double m_total_blend { 0.0 };
         double m_last_elapsed { -1.0 };
+        // False until the first evaluation: that one only records the scene time.
+        bool   m_clock_started { false };
 
         std::vector<Layer> m_layers;
         std::vector<i32>   m_finished_layers;
