@@ -1839,12 +1839,10 @@ TextureFilter LayerRenderTargetFilter(const Scene& scene, const wpscene::WPImage
     const auto& textures = image.material.textures;
     if (textures.empty() || textures.front().empty()) return TextureFilter::LINEAR;
     const auto& primary = textures.front();
-    if (const auto texture = scene.textures.find(primary); texture != scene.textures.end()) {
-        return texture->second.sample.magFilter == TextureFilter::NEAREST ? TextureFilter::NEAREST
-                                                                          : TextureFilter::LINEAR;
-    }
     // A render target or a link texture has no header; neither does a file that
-    // could not be read, whose default sample is not a request for points.
+    // could not be read, whose default sample is not a request for points -- which
+    // is why a texture already registered cannot be asked, its sample is that
+    // default as well.
     if (IsSpecTex(primary) || scene.imageParser == nullptr) return TextureFilter::LINEAR;
     const ImageHeader header = scene.imageParser->ParseHeader(primary);
     if (header.mapWidth <= 0 || header.mapHeight <= 0) return TextureFilter::LINEAR;
