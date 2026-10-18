@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e5-text-audio-video-runtime.md; written without access to the original source.
 #include "Video/ClockedVideoSource.hpp"
 
 #include "Platform/Apple/VideoFrameInterop.hpp"
@@ -21,16 +22,18 @@ constexpr auto kPrimeTimeout = std::chrono::seconds(2);
 
 bool SetError(std::string* error, std::string message)
 {
-    (void)error;
-    (void)message;
-    return false; // CLEANROOM MV65
+    if (error != nullptr) *error = std::move(message);
+    return false;
 }
 
 double WrapSeconds(double seconds, double duration_seconds)
 {
-    (void)seconds;
-    (void)duration_seconds;
-    return 0.0; // CLEANROOM MV66
+    if (!(duration_seconds > 0.0) || !std::isfinite(duration_seconds) || !std::isfinite(seconds) ||
+        seconds <= 0.0) {
+        return 0.0;
+    }
+    const double wrapped = std::fmod(seconds, duration_seconds);
+    return wrapped >= duration_seconds ? 0.0 : wrapped;
 }
 
 /// Identity of a running decoder instance. Monotonic and never reused, so a
@@ -89,26 +92,112 @@ bool ClockedVideoSource::prime(std::string* error)
 
 bool ClockedVideoSource::primeOnce(std::string* error)
 {
-    (void)error;
-    return false; // CLEANROOM MV67
+    if (!m_initial_error.empty()) return SetError(error, m_initial_error);
+    if (m_backend == nullptr) return SetError(error, "video source has no decoder");
+    std::string open_error;
+    if (!m_backend->open(&open_error)) {
+        return SetError(error, open_error.empty() ? std::string("failed to open the video") : std::move(open_error));
+    }
+    const auto info = m_backend->streamInfo();
+    m_duration_seconds = (info.duration_seconds > 0.0 && std::isfinite(info.duration_seconds)) ? info.duration_seconds : 0.0;
+    m_frame_duration_seconds = (info.frame_duration_seconds > 0.0 && std::isfinite(info.frame_duration_seconds))
+        ? info.frame_duration_seconds
+        : 1.0 / 60.0;
+    {
+        std::lock_guard lock(m_mutex);
+        m_pacing.Reset(info.shortest_declared_period_seconds);
+        // The clock starts at the head: a clock handed over before the open is given again
+        // by the first sync after it, which is what asks for the seek.
+        m_scene_absolute_seconds = 0.0;
+        m_playback_state         = VideoPlaybackState {};
+        m_stop_requested         = false;
+        m_running                = true;
+    }
+    m_decode_thread = std::thread([this] { decodeLoop(); });
+
+    std::unique_lock lock(m_mutex);
+    m_condition.wait_for(lock, kPrimeTimeout, [this] { return m_display_frame_ready || !m_last_error.empty(); });
+    if (!m_display_frame_ready) {
+        return SetError(error, m_last_error.empty() ? std::string("timed out waiting for the first video frame")
+                                                    : m_last_error);
+    }
+    m_primed        = true;
+    m_counted_open  = true;
+    g_open_decoders.fetch_add(1, std::memory_order_relaxed);
+    return true;
 }
 
 bool ClockedVideoSource::syncPlayback(const VideoPlaybackState& state, std::string* error)
 {
-    (void)state;
-    (void)error;
-    return true; // CLEANROOM MV68
+    if (state.rate < 0.0f) return SetError(error, "negative video playback rates are not supported");
+    std::lock_guard lock(m_mutex);
+    if (!m_last_error.empty()) return SetError(error, m_last_error);
+    m_playback_state              = state;
+    m_playback_state.rate         = std::max(0.0f, state.rate);
+    m_scene_absolute_seconds      = std::max(0.0, state.scene_elapsed_seconds);
+    m_playback_state.scene_elapsed_seconds = m_scene_absolute_seconds;
+    m_clock_initialized           = true;
+    if (m_display_frame_ready) {
+        const double desired   = currentDesiredAbsoluteLocked();
+        const double threshold = std::max(0.5, m_frame_duration_seconds * 8.0);
+        if (desired < m_display_frame.absolute_seconds - threshold) {
+            clearDisplayFrameLocked();
+            requestSeekLocked(desired);
+            m_condition.notify_all();
+        }
+    }
+    return true;
 }
 
 bool ClockedVideoSource::refreshFrame(std::string* error)
 {
-    (void)error;
-    return false; // CLEANROOM MV69
+    std::unique_lock lock(m_mutex);
+    if (!m_last_error.empty() && !m_display_frame_ready) return SetError(error, m_last_error);
+    if (!m_primed) return SetError(error, "video source is not open");
+
+    const auto   started  = std::chrono::steady_clock::now();
+    const double desired  = currentDesiredAbsoluteLocked();
+    const double period   = m_frame_duration_seconds;
+    const double slack    = presentationSlackSeconds();
+    const double backward = std::max(0.05, period * 2.0);
+    const double forward  = ForwardResyncSeconds(period, static_cast<double>(kDecodedFrameQueueCapacity),
+                                                 m_seek_landing_lag_seconds);
+
+    // A clock that went back past what is shown gets a seek of its own, display emptied first.
+    if (m_display_frame_ready && desired < m_display_frame.absolute_seconds - backward) {
+        clearDisplayFrameLocked();
+        requestSeekLocked(desired);
+    }
+    // One seek per jump: while a seek is on its way and still fetches what the clock wants, wait for it.
+    if (!seekInFlightCoversLocked(desired, backward, forward)) {
+        const bool nothing_shown = !m_display_frame_ready;
+        if (nothing_shown || desired - latestBufferedAbsoluteLocked() > forward) requestSeekLocked(desired);
+    }
+
+    // Every frame that has fallen due is passed over except the last, which is shown.
+    bool promoted = false;
+    while (!m_pending_frames.empty() &&
+           (!m_display_frame_ready || m_pending_frames.front().absolute_seconds <= desired + slack)) {
+        promoted = promoteNextFrameLocked() || promoted;
+    }
+    if (promoted || m_seek_requested || !m_display_frame_ready) m_condition.notify_all();
+    if (m_display_frame_ready) return true;
+
+    // Nothing is on display: wait for the first frame for a bounded time.
+    const auto deadline = started + kPrimeTimeout;
+    m_condition.wait_until(lock, deadline, [this, desired] {
+        return m_display_frame_ready || displayFrameCoversDesiredLocked(desired) || !m_last_error.empty() ||
+               m_stop_requested;
+    });
+    if (m_display_frame_ready) return true;
+    if (!m_last_error.empty()) return SetError(error, m_last_error);
+    return SetError(error, "video frame is not ready");
 }
 
 VideoTextureFrame ClockedVideoSource::currentFrame() const
 {
-    return {}; // CLEANROOM MV70
+    std::lock_guard lock(m_mutex);
+    return m_display_frame_ready ? m_display_frame.frame : VideoTextureFrame {};
 }
 
 bool ClockedVideoSource::retainCurrentFrame(VideoTextureFrame* out) const
@@ -125,12 +214,14 @@ bool ClockedVideoSource::retainCurrentFrame(VideoTextureFrame* out) const
 
 double ClockedVideoSource::durationSeconds() const
 {
-    return 0.0; // CLEANROOM MV71
+    std::lock_guard lock(m_mutex);
+    return m_duration_seconds;
 }
 
 double ClockedVideoSource::playbackSeconds() const
 {
-    return 0.0; // CLEANROOM MV72
+    std::lock_guard lock(m_mutex);
+    return currentDesiredSecondsLocked();
 }
 
 uint64_t ClockedVideoSource::loopCount() const
@@ -165,28 +256,39 @@ void ClockedVideoSource::stop()
     // Published before the lock so the decode thread's inner loops and any
     // blocking read in the backend observe it without waiting on us.
     if (m_backend != nullptr) m_backend->cancel();
-    // CLEANROOM MV73
+    {
+        std::lock_guard lock(m_mutex);
+        m_stop_requested = true;
+        m_running        = false;
+        m_condition.notify_all();
+    }
     if (m_decode_thread.joinable()) m_decode_thread.join();
 }
 
 void ClockedVideoSource::releaseFrameSlot(DecodedFrameSlot* slot)
 {
-    (void)slot; // CLEANROOM MV74
+    if (slot == nullptr) return;
+    ReleaseAppleVideoFrame(&slot->frame);
+    *slot = DecodedFrameSlot {};
 }
 
 void ClockedVideoSource::clearPendingFramesLocked()
 {
-    // CLEANROOM MV75
+    for (auto& slot : m_pending_frames) releaseFrameSlot(&slot);
+    m_pending_frames.clear();
 }
 
 void ClockedVideoSource::clearDisplayFrameLocked()
 {
-    // CLEANROOM MV76
+    releaseFrameSlot(&m_display_frame);
+    m_display_frame_ready = false;
 }
 
 void ClockedVideoSource::clearFrames()
 {
-    // CLEANROOM MV77
+    std::lock_guard lock(m_mutex);
+    clearPendingFramesLocked();
+    clearDisplayFrameLocked();
 }
 
 double ClockedVideoSource::currentDesiredAbsoluteLocked() const
@@ -196,7 +298,7 @@ double ClockedVideoSource::currentDesiredAbsoluteLocked() const
 
 double ClockedVideoSource::currentDesiredSecondsLocked() const
 {
-    return 0.0; // CLEANROOM MV78
+    return WrapSeconds(currentDesiredAbsoluteLocked(), m_duration_seconds);
 }
 
 double ClockedVideoSource::presentationSlackSeconds() const
@@ -206,12 +308,19 @@ double ClockedVideoSource::presentationSlackSeconds() const
 
 double ClockedVideoSource::latestBufferedAbsoluteLocked() const
 {
-    return 0.0; // CLEANROOM MV79
+    if (!m_pending_frames.empty()) return m_pending_frames.back().absolute_seconds;
+    return m_display_frame_ready ? m_display_frame.absolute_seconds : 0.0;
 }
 
 void ClockedVideoSource::requestSeekLocked(double absolute_seconds)
 {
-    (void)absolute_seconds; // CLEANROOM MV80
+    m_requested_seek_absolute_seconds = std::max(0.0, absolute_seconds);
+    m_seek_requested                  = true;
+    m_seek_awaiting_frame             = true;
+    m_seek_requested_at               = std::chrono::steady_clock::now();
+    ++m_seek_ticket;
+    ++m_seek_request_count;
+    clearPendingFramesLocked();
 }
 
 double ClockedVideoSource::secondsSinceSeekRequestedLocked() const
@@ -237,13 +346,28 @@ bool ClockedVideoSource::seekInFlightCoversLocked(double desired_absolute_second
 
 bool ClockedVideoSource::displayFrameCoversDesiredLocked(double desired_absolute_seconds) const
 {
-    (void)desired_absolute_seconds;
-    return false; // CLEANROOM MV81
+    if (!m_display_frame_ready) return false;
+    const double slack = presentationSlackSeconds();
+    const double start = m_display_frame.absolute_seconds;
+    double       end   = start + m_frame_duration_seconds;
+    if (!m_pending_frames.empty() && m_pending_frames.front().absolute_seconds > start) {
+        end = m_pending_frames.front().absolute_seconds;
+    }
+    return desired_absolute_seconds + slack >= start && desired_absolute_seconds < end + slack;
 }
 
 bool ClockedVideoSource::promoteNextFrameLocked()
 {
-    return false; // CLEANROOM MV82
+    if (m_pending_frames.empty()) return false;
+    DecodedFrameSlot next = m_pending_frames.front();
+    m_pending_frames.pop_front();
+    if (m_display_frame_ready && next.loop_index > m_display_frame.loop_index) {
+        m_loop_count += next.loop_index - m_display_frame.loop_index;
+    }
+    releaseFrameSlot(&m_display_frame);
+    m_display_frame       = next;
+    m_display_frame_ready = true;
+    return true;
 }
 
 bool ClockedVideoSource::seekBackendToAbsolute(double absolute_seconds, std::string* error)
@@ -262,16 +386,65 @@ ClockedVideoSource::DecodeOutcome ClockedVideoSource::decodeNextFrame(double min
                                                                        DecodedFrameSlot* out,
                                                                        std::string* error)
 {
-    (void)minimum_absolute_seconds;
-    (void)out;
-    (void)error;
-    return DecodeOutcome::Cancelled; // CLEANROOM MV83
+    if (out == nullptr) {
+        SetError(error, "decoded frame output must not be null");
+        return DecodeOutcome::Failed;
+    }
+    bool           filter     = std::isfinite(minimum_absolute_seconds) && minimum_absolute_seconds > 0.0;
+    const double   fallback   = WrapSeconds(minimum_absolute_seconds, m_duration_seconds);
+    const uint64_t start_pass = m_backend->loopIndex();
+    for (;;) {
+        VideoFrameBackend::DecodedPosition position;
+        switch (m_backend->decodeNext(fallback, &position, error)) {
+        case VideoFrameBackend::Decode::Cancelled: return DecodeOutcome::Cancelled;
+        case VideoFrameBackend::Decode::Failed: return DecodeOutcome::Failed;
+        case VideoFrameBackend::Decode::Frame: break;
+        }
+        const double absolute = (m_duration_seconds > 0.0 ? static_cast<double>(position.loop_index) * m_duration_seconds : 0.0) +
+                                position.pts_seconds;
+        if (filter && absolute + m_frame_duration_seconds < minimum_absolute_seconds) {
+            // Ends before the target: decoded to feed what follows, never shown.
+            m_backend->discardFrame();
+            // A whole pass without a frame at the target: the target lies beyond the stream.
+            if (m_backend->loopIndex() > start_pass) filter = false;
+            continue;
+        }
+        DecodedFrameSlot slot;
+        if (!m_backend->takeFrame(&slot.frame, error)) return DecodeOutcome::Failed;
+        slot.pts_seconds       = position.pts_seconds;
+        slot.absolute_seconds  = absolute;
+        slot.loop_index        = position.loop_index;
+        slot.frame.pts_seconds = absolute;
+        slot.ready             = true;
+        *out                   = slot;
+        return DecodeOutcome::Frame;
+    }
 }
 
 void ClockedVideoSource::queueDecodedFrame(DecodedFrameSlot frame_slot, uint64_t seek_ticket)
 {
-    (void)frame_slot;
-    (void)seek_ticket; // CLEANROOM MV84
+    std::lock_guard lock(m_mutex);
+    if (m_stop_requested || seek_ticket != m_seek_ticket) {
+        releaseFrameSlot(&frame_slot);
+        return;
+    }
+    if (m_seek_awaiting_frame) {
+        m_seek_awaiting_frame       = false;
+        m_seek_landing_lag_seconds = ClockRunOnSeconds(secondsSinceSeekRequestedLocked(), m_playback_state.rate);
+    }
+    frame_slot.frame.generation = m_next_generation++;
+    frame_slot.ready            = true;
+    ++m_decoded_frame_count;
+    m_pacing.Observe(frame_slot.absolute_seconds, frame_slot.loop_index, seek_ticket);
+    m_pending_frames.push_back(frame_slot);
+    if (!m_display_frame_ready) promoteNextFrameLocked();
+    m_condition.notify_all();
+}
+
+bool ClockedVideoSource::stopRequested() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_stop_requested;
 }
 
 void ClockedVideoSource::fail(std::string error)
@@ -298,7 +471,39 @@ void ClockedVideoSource::fail(std::string error)
 
 void ClockedVideoSource::decodeLoop()
 {
-    // CLEANROOM MV85
+    double target = 0.0;
+    for (;;) {
+        uint64_t ticket  = 0;
+        bool     seeking = false;
+        {
+            std::unique_lock lock(m_mutex);
+            // Nothing to do (queue full, display filled, no seek asked for): no work and no timer.
+            m_condition.wait(lock, [this] {
+                return m_stop_requested || m_seek_requested ||
+                       m_pending_frames.size() < kDecodedFrameQueueCapacity || !m_display_frame_ready;
+            });
+            if (m_stop_requested) return;
+            ticket = m_seek_ticket;
+            if (m_seek_requested) {
+                m_seek_requested = false;
+                seeking          = true;
+                target           = m_requested_seek_absolute_seconds;
+            }
+        }
+        std::string error;
+        if (seeking && !seekBackendToAbsolute(target, &error)) {
+            if (!stopRequested()) fail(error.empty() ? std::string("video seek failed") : std::move(error));
+            return;
+        }
+        DecodedFrameSlot slot;
+        switch (decodeNextFrame(target, &slot, &error)) {
+        case DecodeOutcome::Cancelled: return;
+        case DecodeOutcome::Failed:
+            if (!stopRequested()) fail(error.empty() ? std::string("video decoding failed") : std::move(error));
+            return;
+        case DecodeOutcome::Frame: queueDecodedFrame(std::move(slot), ticket); break;
+        }
+    }
 }
 
 } // namespace wallpaper::video

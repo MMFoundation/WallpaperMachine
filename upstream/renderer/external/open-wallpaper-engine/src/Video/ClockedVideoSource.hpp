@@ -79,6 +79,7 @@ private:
     DecodeOutcome decodeNextFrame(double minimum_absolute_seconds, DecodedFrameSlot* out, std::string* error);
     void queueDecodedFrame(DecodedFrameSlot frame_slot, uint64_t seek_ticket);
     void fail(std::string error);
+    [[nodiscard]] bool stopRequested() const;
     void decodeLoop();
 
     std::unique_ptr<VideoFrameBackend> m_backend;
