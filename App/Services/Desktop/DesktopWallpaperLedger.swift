@@ -11,13 +11,20 @@ struct DesktopPicture: Equatable, Codable {
     var nativeOptions: Data? = nil
 
     static func poster(_ url: URL) -> Self {
-        // CLEANROOM A10: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A10")
+        // The poster already has the display's aspect ratio: fill the screen without scaling twice.
+        Self(url: url, scaling: Int(NSImageScaling.scaleAxesIndependently.rawValue),
+             allowClipping: false, fill: [0, 0, 0, 1])
     }
 
     var options: [NSWorkspace.DesktopImageOptionKey: Any] {
-        // CLEANROOM A11: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A11")
+        var result: [NSWorkspace.DesktopImageOptionKey: Any] = [
+            .imageScaling: NSNumber(value: scaling),
+            .allowClipping: NSNumber(value: allowClipping),
+        ]
+        if fill.count == 4 {
+            result[.fillColor] = NSColor(srgbRed: fill[0], green: fill[1], blue: fill[2], alpha: fill[3])
+        }
+        return result
     }
 }
 
@@ -104,8 +111,18 @@ final class DesktopWallpaperLedger {
 
     init(folder: URL, workspace: any DesktopPictureWorkspace,
          confirmationWindow: Duration = DesktopWallpaperLedger.confirmationWindow) throws {
-        // CLEANROOM A12: implement from specs/app/a1-app-remnants.md
-        fatalError("CLEANROOM A12")
+        self.folder = folder
+        self.workspace = workspace
+        self.confirmationWindow = confirmationWindow
+        journal = folder.appendingPathComponent(Self.journalName)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: journal.path) {
+            // A journal that cannot be read must stop creation: writing posters without a way
+            // back to the originals would strand the user's wallpaper.
+            entries = try JSONDecoder().decode([String: Entry].self, from: Data(contentsOf: journal))
+        } else {
+            entries = [:]
+        }
     }
 
     /// Whether the journal in `folder` still names a poster whose original has not been put back,
