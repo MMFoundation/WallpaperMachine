@@ -81,6 +81,8 @@ struct ParsedLayer {
     // A node that only carries a transform: a group, a shape, or the stand-in of
     // an entry whose typed object is not (or not yet) built.
     bool                       plain { true };
+    // The effect chain of an image layer that draws through effects.
+    std::shared_ptr<SceneImageEffectLayer> effects;
 };
 
 namespace
@@ -566,12 +568,15 @@ std::shared_ptr<SceneMesh> MakeQuadMesh(const std::array<float, 12>& positions,
     SceneVertexArray vertices({ { std::string(WE_IN_POSITION), VertexType::FLOAT3 },
                                 { std::string(WE_IN_TEXCOORD), VertexType::FLOAT2 } },
                               4);
+    // Each attribute takes four floats of the vertex, padding included.
+    std::array<float, 32> packed {};
     for (std::size_t corner = 0; corner < 4; ++corner) {
-        const std::array<float, 5> vertex { positions[corner * 3], positions[corner * 3 + 1],
-                                            positions[corner * 3 + 2], uvs[corner * 2],
-                                            uvs[corner * 2 + 1] };
-        vertices.AddVertex(vertex.data());
+        float* vertex = packed.data() + corner * 8;
+        for (std::size_t lane = 0; lane < 3; ++lane) vertex[lane] = positions[corner * 3 + lane];
+        vertex[4] = uvs[corner * 2];
+        vertex[5] = uvs[corner * 2 + 1];
     }
+    vertices.SetVertexs(0, packed);
     const std::array<uint32_t, 6> indices { 0, 1, 2, 2, 1, 3 };
     auto mesh = std::make_shared<SceneMesh>();
     mesh->AddVertexArray(std::move(vertices));
@@ -877,8 +882,6 @@ bool TextCardIsPadded(const wpscene::WPTextObject& obj, bool scene_fog) {
            std::any_of(obj.effects.begin(), obj.effects.end(), EffectCountsForText);
 }
 
-// CLEANROOM LS16: the file-local helpers of this group were removed; the rewrite designs its own.
-
 // An effect a user property switches on or off is built only when the
 // property's current value -- a preset or the user's choice, by the same rule
 // as a layer's visibility -- says so. The scene file's value is the editor's
@@ -994,8 +997,6 @@ void SetNodeTransformFromMatrix(SceneNode& node, const Matrix4d& transform) {
                            static_cast<float>(scale[2])));
     node.SetRotation(Vector3f(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)));
 }
-
-// CLEANROOM LS18: the file-local helpers of this group were removed; the rewrite designs its own.
 
 // ---------------------------------------------------------------------------
 // Materials: constants, texture slots and the shader compile (P2 R23 to R48).
@@ -1551,10 +1552,6 @@ bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, Scene
     return true;
 }
 
-// CLEANROOM LS20: the file-local helpers of this group were removed; the rewrite designs its own.
-
-// CLEANROOM LS21: the file-local helpers of this group were removed; the rewrite designs its own.
-
 /// The four corners `point0` to `point3` of the first effect's first pass, in the
 /// 0..1 square of the shape, if all four are there.
 std::optional<std::array<linalg::Vector2f, 4>>
@@ -1575,15 +1572,15 @@ ShapeCornerPoints(const wpscene::WPShapeObject& obj) {
 
 // CLEANROOM LS22: the file-local helpers of this group were removed; the rewrite designs its own.
 
-// CLEANROOM LS23: the file-local helpers of this group were removed; the rewrite designs its own.
-
 bool ScriptHandlesCursor(std::string_view script) {
     return script.find("cursor") != std::string_view::npos;
 }
 
 bool SettingHandlesCursor(const nlohmann::json& setting) {
-    // CLEANROOM LS23
-    return false;
+    if (! setting.is_object()) return false;
+    const auto script = setting.find("script");
+    return script != setting.end() && script->is_string() &&
+           ScriptHandlesCursor(script->get_ref<const std::string&>());
 }
 
 // True when any script bound to this image object can receive cursor events,
@@ -1883,7 +1880,270 @@ bool IsComposeLayerModel(std::string_view image) {
            image == "models/util/composelayer_depthtest.json";
 }
 
-// CLEANROOM LS29: the file-local helpers of this group were removed; the rewrite designs its own.
+// ---------------------------------------------------------------------------
+// Image layers (P2 R1 to R22, R38 to R92).
+// ---------------------------------------------------------------------------
+
+/// Writes a layer's alpha into one material: `g_Color4`'s alpha, `g_Alpha`, and
+/// `g_UserAlpha` where the pass has no opacity of its own (R40).
+void SetMaterialAlpha(SceneMaterial& material, float alpha) {
+    auto& values = material.customShader.constValues;
+    if (! material.own_user_alpha) values["g_UserAlpha"] = ShaderValue(alpha);
+    values["g_Alpha"] = ShaderValue(alpha);
+    std::array<float, 4> tint { 1.0f, 1.0f, 1.0f, alpha };
+    if (const auto held = values.find("g_Color4"); held != values.end() && held->second.size() >= 3) {
+        tint[0] = held->second[0];
+        tint[1] = held->second[1];
+        tint[2] = held->second[2];
+    }
+    values["g_Color4"] = ShaderValue(tint);
+}
+
+/// The colour, brightness and alpha a layer's passes start with (R39, R40). A pass
+/// that only copies or blends what the chain made takes white.
+void SetLayerTint(const ParseContext& context, SceneMaterial& material, const wpscene::WPImageObject& image,
+                  bool white) {
+    auto& values = material.customShader.constValues;
+    if (white) {
+        values["g_Color4"] = ShaderValue(std::array<float, 4> { 1.0f, 1.0f, 1.0f, 1.0f });
+        values["g_Color"]  = ShaderValue(std::array<float, 3> { 1.0f, 1.0f, 1.0f });
+        return;
+    }
+    const float brightness = context.scene->hdr ? image.brightness : 1.0f;
+    material.tint.color      = image.color;
+    material.tint.brightness = brightness;
+    values["g_Color"]        = ShaderValue(image.color.data(), 3);
+    values["g_Color4"]       = ShaderValue(std::array<float, 4> {
+        image.color[0] * brightness, image.color[1] * brightness, image.color[2] * brightness,
+        image.alpha });
+    values["g_Alpha"]        = ShaderValue(image.alpha);
+    if (! material.own_user_alpha || ! values.contains("g_UserAlpha")) {
+        values["g_UserAlpha"] = ShaderValue(image.alpha);
+    }
+}
+
+/// Hands a layer's alpha to the runtime on every material it owns (R40, R90): a
+/// property, a script that exports `update` or a timeline owns it; with none of
+/// them a script may write it.
+void RegisterLayerAlpha(ParseContext& context, const std::string& key,
+                        const wpscene::WPImageObject&                      image,
+                        const std::vector<std::shared_ptr<SceneMaterial>>& materials) {
+    auto* runtime = context.scene->runtime.get();
+    if (runtime == nullptr || materials.empty()) return;
+    const auto& setting = image.alpha_setting;
+    if (HasDynamicSetting(setting)) {
+        auto value = ResolveFloatSetting(*runtime, setting, key);
+        runtime->RegisterDynamicValueListener(
+            std::move(value), [materials](const DynamicValue& now) {
+                for (const auto& material : materials) SetMaterialAlpha(*material, now.getFloat());
+            });
+        return;
+    }
+    if (auto animation = ResolveScalarAnimation(setting); animation.has_value()) {
+        const auto playback = runtime->RegisterScalarAnimation(key, std::move(*animation));
+        for (const auto& material : materials) runtime->RegisterMaterialAlphaAnimation(material, playback);
+        return;
+    }
+    runtime->RegisterNodeAlpha(key, materials, image.alpha);
+}
+
+/// A layer's colour and brightness bindings (R38, R39), applied to every material
+/// that takes the layer's tint.
+void RegisterLayerTint(ParseContext& context, const std::string& key, const nlohmann::json& entry,
+                       const std::array<float, 3>&                         authored,
+                       const std::vector<std::shared_ptr<SceneMaterial>>& tinted) {
+    auto* runtime = context.scene->runtime.get();
+    if (runtime == nullptr || tinted.empty()) return;
+    if (const auto color = entry.find("color"); color != entry.end() && color->is_object()) {
+        if (HasDynamicSetting(*color)) {
+            runtime->BindMaterialColor(key, tinted, ResolveVec3Setting(*runtime, *color, key));
+        } else if (const auto animation = ResolveVec3Animation(*runtime, key, *color);
+                   animation != nullptr) {
+            runtime->RegisterMaterialColorAnimation(tinted, animation);
+        } else if (color->contains("script") || tinted.size() > 1) {
+            // A script that only listens still writes `thisLayer.color`, to every material.
+            runtime->BindMaterialColor(
+                key, tinted, std::make_unique<DynamicValue>(Vector3f(authored.data())));
+        }
+    } else if (tinted.size() > 1) {
+        runtime->BindMaterialColor(key, tinted,
+                                   std::make_unique<DynamicValue>(Vector3f(authored.data())));
+    }
+    if (const auto brightness = entry.find("brightness");
+        brightness != entry.end() && HasDynamicSetting(*brightness)) {
+        runtime->BindMaterialBrightness(
+            context.scene->hdr ? tinted : std::vector<std::shared_ptr<SceneMaterial>> {},
+            ResolveFloatSetting(*runtime, *brightness, key));
+    }
+}
+
+/// The video textures of a layer's own material, for playback control (R89).
+void RegisterLayerVideos(ParseContext& context, const std::string& key,
+                         const std::vector<std::string>& textures) {
+    auto* runtime = context.scene->runtime.get();
+    if (runtime == nullptr) return;
+    std::unordered_set<std::string> seen;
+    for (const auto& name : textures) {
+        if (name.empty() || IsSpecTex(name) || ! seen.insert(name).second) continue;
+        const auto found = context.scene->textures.find(name);
+        if (found != context.scene->textures.end() && found->second.isVideo) {
+            runtime->RegisterNodeVideoTexture(key, name);
+        }
+    }
+}
+
+/// The reserved names of a layer's working buffers.
+std::string PingPongName(std::string_view prefix, int32_t id) {
+    return std::string(prefix) + std::to_string(id);
+}
+
+/// Registers the render target of one effect buffer (R55).
+void RegisterEffectBuffer(ParseContext& context, const std::string& name,
+                          const wpscene::WPEffectFbo& fbo, std::array<int32_t, 2> extent,
+                          bool follows_screen, bool carries_previous_frame) {
+    auto&      scene  = *context.scene;
+    const auto fixed  = follows_screen ? std::nullopt
+                                       : FixedEffectFboExtent(fbo, static_cast<float>(extent[0]),
+                                                              static_cast<float>(extent[1]));
+    const std::array<int32_t, 2> size =
+        fixed.has_value() ? *fixed
+                          : std::array<int32_t, 2> { ResolveRenderTargetDimension(extent[0], fbo.scale),
+                                                     ResolveRenderTargetDimension(extent[1], fbo.scale) };
+    SceneRenderTarget target;
+    target.width                = size[0];
+    target.height               = size[1];
+    target.allowReuse           = ! carries_previous_frame;
+    target.carriesPreviousFrame = carries_previous_frame;
+    target.sample               = { TextureWrap::CLAMP_TO_EDGE, TextureWrap::CLAMP_TO_EDGE,
+                                    TextureFilter::LINEAR, TextureFilter::LINEAR };
+    target.format               = EffectFboFormat(fbo.format, scene.hdr);
+    if (follows_screen) {
+        target.bind.enable = true;
+        target.bind.screen = true;
+        target.bind.scale  = 1.0 / std::max<double>(1.0, fbo.scale);
+    }
+    scene.renderTargets[name] = target;
+}
+
+/// The mesh a layer's own pass draws and the mesh of its final card, sized by the layer.
+struct LayerGeometry {
+    std::array<float, 2>   size { 2.0f, 2.0f };
+    std::array<int32_t, 2> extent { 1, 1 };
+    float                  u { 1.0f };
+    float                  v { 1.0f };
+};
+
+/// A pass of an effect chain: its node, mesh and material, and the effect it belongs to.
+std::shared_ptr<SceneNode> MakeEffectPassNode(SceneMaterial&& material) {
+    auto node = std::make_shared<SceneNode>();
+    auto mesh = std::make_shared<SceneMesh>();
+    mesh->AddMaterial(std::move(material));
+    node->AddMesh(std::move(mesh));
+    return node;
+}
+
+/// One effect of a layer's chain (R53 to R57, R79 to R82). Returns false when a pass
+/// of it cannot be built; the effect is then left out and the layer kept.
+bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
+                 const wpscene::WPImageEffect& source, std::size_t index,
+                 const std::shared_ptr<SceneNode>& layer_node, SceneImageEffectLayer& chain,
+                 const std::array<int32_t, 2>& extent, bool fullscreen, bool white_tint,
+                 bool defer_fog, bool is_closing_pass, const std::string& key,
+                 std::vector<std::shared_ptr<SceneMaterial>>& tinted,
+                 std::vector<std::shared_ptr<SceneMaterial>>& all_materials,
+                 std::shared_ptr<SceneImageEffect>*           built_out) {
+    auto&      scene = *context.scene;
+    const auto previous_name = PingPongName(WE_EFFECT_PPONG_PREFIX_A, image.id);
+    const auto output_name   = PingPongName(WE_EFFECT_PPONG_PREFIX_B, image.id);
+
+    std::unordered_map<std::string, std::string> fbo_map;
+    fbo_map["previous"] = previous_name;
+    for (const auto& fbo : source.fbos) {
+        const auto name = fbo.name + "_" + std::to_string(image.id) + "_" + std::to_string(index);
+        fbo_map[fbo.name] = name;
+        RegisterEffectBuffer(context, name, fbo, extent, fullscreen,
+                             EffectReadsBeforeWriting(source, fbo.name, 0));
+    }
+
+    auto effect = std::make_shared<SceneImageEffect>();
+    struct Built {
+        std::shared_ptr<SceneNode> node;
+        std::string                output;
+        std::shared_ptr<SceneMaterial> material;
+        WPShaderInfo                   info;
+        wpscene::WPMaterial            authored;
+    };
+    std::vector<Built> built;
+    for (std::size_t pass = 0; pass < source.materials.size(); ++pass) {
+        auto material = source.materials[pass];
+        const wpscene::WPMaterialPass* overrides = pass < source.passes.size() ? &source.passes[pass] : nullptr;
+        if (overrides != nullptr) material.MergePass(*overrides);
+        BindOwnEffectChainInput(material, image.id, previous_name);
+        if (overrides != nullptr) {
+            for (const auto& bind : overrides->bind) {
+                if (bind.index < 0 || bind.index >= static_cast<int32_t>(kMaxTextureSlots)) continue;
+                const auto mapped = fbo_map.find(bind.name);
+                if (mapped == fbo_map.end()) {
+                    LOG_INFO("effect pass binds the unknown buffer '%s'", bind.name.c_str());
+                    continue;
+                }
+                if (material.textures.size() <= static_cast<std::size_t>(bind.index)) {
+                    material.textures.resize(static_cast<std::size_t>(bind.index) + 1);
+                }
+                material.textures[static_cast<std::size_t>(bind.index)] = mapped->second;
+            }
+        }
+        if (material.textures.empty()) material.textures.resize(1);
+        if (material.textures[0].empty()) material.textures[0] = previous_name;
+
+        std::string output = output_name;
+        if (overrides != nullptr && ! overrides->target.empty()) {
+            if (const auto mapped = fbo_map.find(overrides->target); mapped != fbo_map.end()) {
+                output = mapped->second;
+            }
+        }
+        SceneMaterial  scene_material;
+        LoadedMaterial loaded;
+        MaterialLoadOptions options;
+        options.defer_fog = defer_fog;
+        if (! LoadMaterial(context, material, scene_material, loaded, options)) return false;
+        scene_material.own_user_alpha = true;
+        const bool white = white_tint || is_closing_pass;
+        SetLayerTint(context, scene_material, image, white);
+        scene_material.blenmode = BlendMode::Normal;
+        Built entry;
+        entry.node     = MakeEffectPassNode(std::move(scene_material));
+        entry.output   = std::move(output);
+        entry.material = entry.node->Mesh()->MaterialSlotPtr(0);
+        entry.info     = std::move(loaded.info);
+        entry.authored = std::move(material);
+        if (context.shader_updater != nullptr) {
+            WPShaderValueData data;
+            data.effect_owner   = layer_node.get();
+            data.effect_extent  = linalg::Vector2f(static_cast<float>(extent[0]),
+                                                   static_cast<float>(extent[1]));
+            data.parallaxDepth  = image.parallaxDepth;
+            data.parallax_layer = layer_node.get();
+            data.renderTargets  = std::move(loaded.render_targets);
+            context.shader_updater->SetNodeData(entry.node.get(), 0, data);
+        }
+        built.push_back(std::move(entry));
+    }
+    if (built.empty()) return false;
+
+    for (auto& entry : built) {
+        effect->nodes.push_back(SceneImageEffectNode { .output = entry.output, .sceneNode = entry.node });
+        RegisterMaterialConstants(context, entry.material, entry.authored, entry.info, key);
+        all_materials.push_back(entry.material);
+        if (! white_tint && ! is_closing_pass) tinted.push_back(entry.material);
+    }
+    LowerEffectCommands(source, fbo_map, scene, effect->commands);
+    RegisterScriptedEffectVisibility(context, source, effect, key);
+    chain.AddEffect(effect);
+    if (built_out != nullptr) *built_out = effect;
+    return true;
+}
+
 
 // CLEANROOM LS30: the file-local helpers of this group were removed; the rewrite designs its own.
 
@@ -2184,6 +2444,7 @@ struct EntryPlan {
     EntryKind   kind { EntryKind::Ignored };
     Admission   admission { Admission::Skip };
     int32_t     id { 0 };
+    bool        has_children { false }; // another entry names this one as its parent
     bool        placeholder { false }; // a node standing in for a typed object that has children
     std::string key;
 };
@@ -2306,6 +2567,7 @@ std::vector<EntryPlan> PlanEntries(ParseContext& context, const nlohmann::json& 
         plan.id            = EntryId(entry);
         const bool has_id  = plan.id != 0;
         const bool has_kids = has_id && parent_ids.contains(plan.id);
+        plan.has_children   = has_kids;
         const bool hidden  = StaticallyHidden(entry);
         switch (plan.kind) {
         case EntryKind::Group:
@@ -2483,6 +2745,278 @@ void SetUnhittable(ParseContext& context, const std::string& key, bool solid = f
     }
 }
 
+/// The model flags and the numbers that decide how an image layer is built.
+struct ImageKind {
+    bool fullscreen { false };
+    bool passthrough { false };
+    bool compose_model { false };
+    bool children { false };
+};
+
+/// Loads one image layer (R1 to R22, R38 to R92).
+bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json& entry,
+                    const EntryPlan& plan, const wpscene::WPSceneGeneral& general) {
+    auto& scene = *context.scene;
+    wpscene::WPImageObject image;
+    if (! image.FromJson(entry, *context.vfs)) return false;
+    if (image.id == 0) image.id = plan.id;
+
+    ImageKind kind;
+    kind.fullscreen    = image.fullscreen;
+    kind.passthrough   = image.config.passthrough;
+    kind.compose_model = IsComposeLayerModel(image.image);
+    kind.children      = plan.has_children;
+    const bool referenced = image.id != 0 && context.referenced_layer_ids.contains(image.id);
+
+    // Size and placement (R11 to R14, R20).
+    std::array<float, 3> origin = image.origin;
+    std::array<float, 3> scale  = image.scale;
+    std::array<float, 3> angles = image.angles;
+    if (kind.fullscreen || (image.autosize && image.projectlayer)) {
+        image.size = { static_cast<float>(context.ortho_w), static_cast<float>(context.ortho_h) };
+    }
+    LayerGeometry geometry;
+    geometry.size   = image.size;
+    geometry.extent = kind.fullscreen
+                          ? std::array<int32_t, 2> { std::max(1, context.ortho_w), std::max(1, context.ortho_h) }
+                          : ResolveImageRenderExtent(image, context);
+
+    ResolveUserEffectVisibility(context, image.effects, plan.key);
+    std::vector<const wpscene::WPImageEffect*> chain_sources;
+    std::vector<wpscene::WPImageEffect>        extras;
+    extras.reserve(2);
+    for (const auto& effect : image.effects) {
+        if (! EffectIsBuilt(effect) || effect.materials.empty()) continue;
+        chain_sources.push_back(&effect);
+    }
+    // The colour blend (R52): mode 31 is additive blending, any other mode one more pass.
+    const bool additive_blend = image.colorBlendMode == kAdditiveColorBlendMode;
+    bool       blend_pass     = false;
+    if (image.colorBlendMode != 0 && ! additive_blend) {
+        auto effect = MakeColorBlendEffect(*context.vfs, image.colorBlendMode);
+        if (! effect.has_value()) return false;
+        extras.push_back(std::move(*effect));
+        chain_sources.push_back(&extras.back());
+        blend_pass = true;
+    }
+    const std::size_t built_effects = chain_sources.size();
+    const bool composition =
+        (kind.compose_model && kind.children && (! image.copybackground || built_effects > 0)) ||
+        (kind.fullscreen && kind.passthrough && kind.children && built_effects > 0);
+    const bool has_effects = built_effects > 0 || composition ||
+                             (kind.compose_model && ! image.copybackground);
+    const bool is_puppet = ! image.puppet.empty();
+    if (is_puppet) LOG_ERROR("layer %d: puppets are not built by this parser yet", image.id);
+
+    // Fog on a chain (R54).
+    std::optional<wpscene::WPImageEffect> fog_pass;
+    const bool scene_fog = scene.fog_distance || scene.fog_height;
+    if (scene_fog && built_effects > 0 && ! composition && ! kind.fullscreen && ! blend_pass) {
+        fog_pass = MakeFogCompositeEffect(*context.vfs);
+    }
+
+    // The layer's own material.
+    SceneMaterial  own;
+    LoadedMaterial own_loaded;
+    MaterialLoadOptions own_options;
+    own_options.defer_fog = fog_pass.has_value();
+    const bool draws_nothing = ! has_effects && kind.passthrough && ! composition;
+    if (! LoadMaterial(context, image.material, own, own_loaded, own_options)) {
+        LOG_ERROR("layer %d: the material cannot be loaded", image.id);
+        return false;
+    }
+    if (fog_pass.has_value() && ! own_loaded.info.fog_deferred) fog_pass.reset();
+    const BlendMode authored_blend = own.blenmode;
+
+    // The mesh of the own pass: a card, with the padding of the picture left out (R21, R22).
+    if (! own.textures.empty() && ! own.textures[0].empty() && ! IsSpecTex(own.textures[0]) &&
+        ! image.nopadding) {
+        const auto& header = TextureHeaderOf(context, own.textures[0]);
+        if (header.width > 0 && header.height > 0 &&
+            static_cast<int64_t>(header.width) * header.height >
+                static_cast<int64_t>(header.mapWidth) * header.mapHeight) {
+            geometry.u = static_cast<float>(header.mapWidth) / static_cast<float>(header.width);
+            geometry.v = static_cast<float>(header.mapHeight) / static_cast<float>(header.height);
+        }
+    }
+
+    auto& layer = AddLayer(context, at, entry, plan, true, false);
+    const auto node = layer.node;
+    auto* runtime   = scene.runtime.get();
+
+    // Placement: a fullscreen layer sits on the canvas centre and keeps its authored
+    // transform for what hangs from it; an anchored layer is moved by its alignment.
+    if (kind.fullscreen) {
+        node->SetChildFrame(Vector3f(origin.data()), Vector3f(scale.data()), Vector3f(angles.data()));
+        node->SetIgnoreParentTransform(true);
+        node->SetTranslate(Vector3f(static_cast<float>(context.ortho_w) * 0.5f,
+                                    static_cast<float>(context.ortho_h) * 0.5f, 0.0f));
+        node->SetScale(Vector3f(1.0f, 1.0f, 1.0f));
+        node->SetRotation(Vector3f::Zero());
+    } else if (AlignmentHasAnchorOffset(image.alignment)) {
+        if (runtime == nullptr) {
+            node->SetTranslate(Vector3f(origin.data()) +
+                               AlignmentAnchorOffset(image.alignment, geometry.size,
+                                                     Vector3f(scale.data()), Vector3f(angles.data())));
+        }
+    }
+    if (runtime != nullptr) {
+        runtime->RegisterNodeSize(plan.key, linalg::Vector2f(geometry.size[0], geometry.size[1]));
+        if (! kind.fullscreen && AlignmentHasAnchorOffset(image.alignment)) {
+            runtime->SetNodeAnchorAlignment(plan.key, image.alignment, node->Translate());
+        }
+        runtime->SetNodeCursorTarget(plan.key, true, image.solid, image.disablepropagation);
+    }
+    node->SetSkipRenderPass(false);
+
+    std::vector<std::shared_ptr<SceneMaterial>> tinted;
+    std::vector<std::shared_ptr<SceneMaterial>> all_materials;
+
+    // The own pass and its mesh.
+    const bool passthrough_card = kind.passthrough && ! kind.compose_model && has_effects;
+    std::shared_ptr<SceneMesh> mesh;
+    if (passthrough_card) {
+        // The card's corners where the layer's own local transform puts them (R78).
+        const Matrix4d local = SceneNode::LocalTransOf(Vector3f(origin.data()), Vector3f(scale.data()),
+                                                       Vector3f(angles.data()));
+        const double half_w = static_cast<double>(geometry.size[0]) * 0.5;
+        const double half_h = static_cast<double>(geometry.size[1]) * 0.5;
+        std::array<linalg::Vector2f, 4> corners;
+        const std::array<std::array<double, 2>, 4> offsets { { { -half_w, -half_h }, { -half_w, half_h },
+                                                               { half_w, -half_h }, { half_w, half_h } } };
+        for (std::size_t corner = 0; corner < 4; ++corner) {
+            const linalg::Vector4d point =
+                local * linalg::Vector4d(offsets[corner][0], offsets[corner][1], 0.0, 1.0);
+            corners[corner] = linalg::Vector2f(static_cast<float>(point.x()), static_cast<float>(point.y()));
+        }
+        mesh = MakePassthroughMesh(corners, static_cast<float>(std::max(1, context.ortho_w)),
+                                   static_cast<float>(std::max(1, context.ortho_h)),
+                                   image.material.shader == "passthrough");
+    } else {
+        mesh = MakeCardMesh(geometry.size[0], geometry.size[1], geometry.u, geometry.v);
+    }
+    if (has_effects) own.blenmode = BlendMode::Normal;
+    else if (additive_blend) own.blenmode = BlendMode::Additive;
+    SetLayerTint(context, own, image, false);
+    mesh->AddMaterial(std::move(own));
+    node->AddMesh(mesh);
+    auto own_material = mesh->MaterialSlotPtr(0);
+    RegisterMaterialConstants(context, own_material, image.material, own_loaded.info, plan.key);
+    tinted.push_back(own_material);
+    all_materials.push_back(own_material);
+    if (context.shader_updater != nullptr) {
+        WPShaderValueData data;
+        data.parallaxDepth = image.parallaxDepth;
+        data.renderTargets = own_loaded.render_targets;
+        context.shader_updater->SetNodeData(node.get(), 0, data);
+    }
+    RegisterLayerVideos(context, plan.key, own_material->textures);
+
+    if (draws_nothing) {
+        node->SetSkipRenderPass(true);
+    } else if (composition && built_effects == 0) {
+        // A composition with no effect of its own draws nothing, or only its composite.
+        if (referenced) node->SetCompositeOnly(true);
+        else node->SetSkipRenderPass(true);
+    }
+
+    // The effect chain (R53 to R57, R79 to R84).
+    if (has_effects) {
+        const auto first = PingPongName(WE_EFFECT_PPONG_PREFIX_A, image.id);
+        const auto other = PingPongName(WE_EFFECT_PPONG_PREFIX_B, image.id);
+        const auto sample = LayerRenderTargetSample(scene, image);
+        for (const auto& name : { first, other }) {
+            SceneRenderTarget target;
+            target.width      = geometry.extent[0];
+            target.height     = geometry.extent[1];
+            target.allowReuse = true;
+            target.sample     = sample;
+            target.format     = scene.hdr ? TextureFormat::RGBA16F : TextureFormat::RGBA8;
+            if (kind.fullscreen) {
+                target.authored_width  = target.width;
+                target.authored_height = target.height;
+                target.bind.enable     = true;
+                target.bind.screen     = true;
+            }
+            scene.renderTargets[name] = target;
+        }
+        auto chain = std::make_shared<SceneImageEffectLayer>(
+            node.get(), static_cast<float>(geometry.extent[0]), static_cast<float>(geometry.extent[1]),
+            first, other);
+        const auto final_card = MakeCardMesh(geometry.size[0], geometry.size[1], 1.0f, 1.0f);
+        chain->FinalMesh().ChangeMeshDataFrom(*final_card);
+        chain->SetFinalBlend(blend_pass ? BlendMode::Normal
+                                        : (additive_blend ? BlendMode::Additive : authored_blend));
+        const bool sorted = ! context.is_ortho && general.transparentsorting && ImageLayerIsSorted(authored_blend);
+        chain->SetFinalDepth(own_material->depth_test, own_material->depth_write && ! sorted);
+        if (kind.fullscreen) chain->SetFinalCamera(std::string(FullscreenLayerCamera));
+
+        const bool defer = fog_pass.has_value();
+        std::size_t index = 0;
+        bool        any_fixed = false;
+        for (const auto* source : chain_sources) {
+            const bool is_blend_pass = blend_pass && source == chain_sources.back();
+            if (BuildEffect(context, image, *source, index, node, *chain, geometry.extent, kind.fullscreen,
+                            is_blend_pass, defer, false, plan.key, tinted, all_materials, nullptr)) {
+                if (! source->scripted_visible) any_fixed = true;
+            }
+            ++index;
+        }
+        if (fog_pass.has_value()) {
+            BuildEffect(context, image, *fog_pass, index++, node, *chain, geometry.extent,
+                        kind.fullscreen, true, false, true, plan.key, tinted, all_materials, nullptr);
+        }
+        if (! any_fixed && ! chain_sources.empty()) {
+            if (auto idle = MakeColorBlendEffect(*context.vfs, 0); idle.has_value()) {
+                for (auto& material : idle->materials) material.combos.erase("BLENDMODE");
+                std::shared_ptr<SceneImageEffect> fallback;
+                if (BuildEffect(context, image, *idle, index++, node, *chain, geometry.extent,
+                                kind.fullscreen, true, false, true, plan.key, tinted, all_materials,
+                                &fallback) && fallback != nullptr) {
+                    fallback->fallback = true;
+                }
+            }
+        }
+
+        const std::string camera_name = "__effect_layer_" + std::to_string(image.id);
+        auto camera = std::make_shared<SceneCamera>(geometry.extent[0], geometry.extent[1], -1.0f, 1.0f);
+        camera->SetLayerLocal(! composition);
+        camera->SetComposeLayer(composition);
+        camera->SetChildrenUseSceneCamera(composition && kind.fullscreen);
+        camera->AttatchNode(composition ? node : context.effect_camera_node);
+        camera->AttatchImgEffect(chain);
+        scene.cameras[camera_name] = camera;
+        node->SetCamera(camera_name);
+        if (! image.copybackground) node->SetSkipRenderPass(true);
+        // The own pass fills its buffer untransformed; the final card carries the placement.
+        node->SetRenderTransformOverride(Matrix4d::Identity());
+        layer.effects = chain;
+        if (runtime != nullptr) runtime->RegisterNodeEffectFinal(plan.key, node.get(), chain.get());
+    } else if (kind.fullscreen) {
+        node->SetCamera(std::string(FullscreenLayerCamera));
+    }
+    if (referenced) RegisterImageComposite(context, image, *node);
+
+    RegisterLayerAlpha(context, plan.key, image, all_materials);
+    RegisterLayerTint(context, plan.key, entry, image.color, tinted);
+    if (runtime != nullptr && ImageObjectHandlesCursorEvents(image)) {
+        if (auto mask = BuildImageHitMask(context, image); mask.has_value()) {
+            runtime->RegisterNodeHitMask(plan.key, std::move(*mask));
+        }
+    }
+    return true;
+}
+
+/// The final card of every layer that draws through effects sits where its layer is
+/// drawn, once the tree exists (R83).
+void SyncEffectFinals(ParseContext& context) {
+    for (auto& layer : context.layers) {
+        if (layer.effects == nullptr || layer.node == nullptr) continue;
+        layer.node->UpdateTrans();
+        SetNodeTransformFromMatrix(layer.effects->FinalNode(), layer.node->ModelTrans());
+    }
+}
+
 /// A light: a member of the tree with no picture of its own. Its colour, radius,
 /// exponent and intensity follow their bindings; its cones and control point are
 /// fixed at load (R100 to R102).
@@ -2631,6 +3165,7 @@ void BuildLayers(ParseContext& context, const wpscene::WPSceneGeneral& general,
         switch (plan.kind) {
         case EntryKind::Sound: built = LoadSoundEntry(context, entry, sm); break;
         case EntryKind::Light: built = LoadLightEntry(context, at, entry, plan); break;
+        case EntryKind::Image: built = LoadImageEntry(context, at, entry, plan, general); break;
         case EntryKind::Camera: built = LoadCameraEntry(context, at, entry, plan, general); break;
         default:
             LOG_ERROR("object %d (%s) is not built: its kind is not loaded by this parser yet",
@@ -3045,8 +3580,15 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
     BuildCamerasAndTargets(context, wp, zoom.start);
     InstallSceneZoom(context, std::move(zoom));
 
+    // The layers other layers sample are known before any is built.
+    const auto early_refs = CollectLayerTextureRefs(objects, index, &vfs);
+    for (const auto& ref : early_refs) {
+        if (ref.source_id != 0) context.referenced_layer_ids.insert(ref.source_id);
+    }
+
     BuildLayers(context, general, objects, plans, sm);
     AttachLayers(context);
+    SyncEffectFinals(context);
 
     ApplyDefaultDepthTarget(context);
     PrewarmParticleSystems(context);

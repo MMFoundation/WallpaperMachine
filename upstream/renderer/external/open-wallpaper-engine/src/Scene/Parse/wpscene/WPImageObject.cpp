@@ -336,7 +336,18 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     material.use_puppet = ! puppet.empty();
     if (const auto found = json.find("instance"); found != json.end() && found->is_object()) {
         WPMaterialPass instance_pass;
-        if (instance_pass.FromJson(*found)) material.MergePass(instance_pass);
+        if (instance_pass.FromJson(*found)) {
+            material.MergePass(instance_pass);
+            // A runtime picture that replaces the placeholder white takes the tint with it;
+            // a property-chosen picture leaves the layer a solid colour.
+            for (std::size_t slot = 0; slot < instance_pass.usertextures.size(); ++slot) {
+                const bool white = slot < material.textures.size() && material.textures[slot] == "util/white";
+                if (white && IsSystemUserTexture(instance_pass.usertextures[slot])) {
+                    color = { 1.0f, 1.0f, 1.0f };
+                    if (field_bindings.is_object()) field_bindings.erase("color");
+                }
+            }
+        }
     }
 
     if (const auto found = json.find("animationlayers"); found != json.end()) {
