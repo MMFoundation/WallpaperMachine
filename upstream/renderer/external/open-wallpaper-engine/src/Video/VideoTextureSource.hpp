@@ -32,7 +32,7 @@ struct VideoTextureFrame {
 
     [[nodiscard]] bool valid() const
     {
-        return false; // CLEANROOM MV63
+        return (pixel_buffer != nullptr || io_surface != nullptr) && width > 0 && height > 0;
     }
 };
 
@@ -48,7 +48,8 @@ struct VideoPlaybackState {
 inline VideoPlaybackState ResolveEffectiveVideoPlaybackState(const VideoPlaybackState& global_state,
                                                              const VideoPlaybackState& layer_state) {
     VideoPlaybackState effective_state = layer_state;
-    (void)global_state; // CLEANROOM MV64
+    effective_state.paused = global_state.paused || layer_state.paused;
+    effective_state.rate = std::max(0.0f, global_state.rate) * std::max(0.0f, layer_state.rate);
     return effective_state;
 }
 

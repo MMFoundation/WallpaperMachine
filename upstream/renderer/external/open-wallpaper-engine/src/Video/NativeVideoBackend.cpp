@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <limits>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace wallpaper::video
@@ -30,9 +31,8 @@ namespace
 
 bool SetError(std::string* error, std::string message)
 {
-    (void)error;
-    (void)message;
-    return false; // CLEANROOM MV86
+    if (error != nullptr) *error = std::move(message);
+    return false;
 }
 
 /// How long a receive waits for the decoder when the decoder is full or draining.

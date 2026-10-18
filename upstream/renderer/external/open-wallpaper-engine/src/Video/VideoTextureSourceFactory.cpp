@@ -14,9 +14,8 @@ namespace
 
 bool SetError(std::string* error, std::string message)
 {
-    (void)error;
-    (void)message;
-    return false; // CLEANROOM MV87
+    if (error != nullptr) *error = std::move(message);
+    return false;
 }
 
 } // namespace

@@ -35,7 +35,7 @@ kernel void nv12_to_bgra(texture2d<float, access::sample> y_texture [[texture(0)
         float2(output_texture.get_width(), output_texture.get_height()), transform);
     const float y = y_texture.sample(sample_state, uv).r;
     const float2 cbcr = (uv_texture.sample(sample_state, uv).rg - params.chroma_offset) * params.chroma_scale;
-    const float luma = 0.0f; // CLEANROOM MV88
+    const float luma = saturate((y - params.y_offset) * params.y_scale);
     const float3 rgb = saturate(float3(luma + params.r_cr * cbcr.y,
         luma + params.g_cb * cbcr.x + params.g_cr * cbcr.y, luma + params.b_cb * cbcr.x));
     const float coverage = video_coverage(uv, transform);
@@ -155,7 +155,7 @@ kernel void p010_to_bgra(texture2d<float, access::sample> y_texture [[texture(0)
     const float y = y_texture.sample(sample_state, uv).r * kTenBitCodeScale;
     const float2 cbcr = (uv_texture.sample(sample_state, uv).rg * kTenBitCodeScale - params.chroma_offset) *
         params.chroma_scale;
-    const float luma = 0.0f; // CLEANROOM MV89
+    const float luma = saturate((y - params.y_offset) * params.y_scale);
     // The picture's own non-linear R'G'B'.
     float3 rgb = saturate(float3(luma + params.r_cr * cbcr.y,
         luma + params.g_cb * cbcr.x + params.g_cr * cbcr.y, luma + params.b_cb * cbcr.x));

@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e5-text-audio-video-runtime.md; written without access to the original source.
 #include "Platform/Apple/VideoFrameInterop.hpp"
 #include "Utils/Logging.h"
 
@@ -210,7 +211,17 @@ bool AdoptPixelBufferAsVideoFrame(void* retained_pixel_buffer, VideoTextureFrame
 
 void ReleaseAppleVideoFrame(VideoTextureFrame* frame)
 {
-    (void)frame; // CLEANROOM MV90
+    if (frame == nullptr) return;
+    if (frame->io_surface != nullptr) {
+        CFRelease(reinterpret_cast<IOSurfaceRef>(frame->io_surface));
+        frame->io_surface = nullptr;
+    }
+    if (frame->pixel_buffer != nullptr) {
+        CFRelease(reinterpret_cast<CVPixelBufferRef>(frame->pixel_buffer));
+        frame->pixel_buffer = nullptr;
+    }
+    frame->pixel_format = 0;
+    frame->plane_count = 0;
 }
 
 void RetainAppleVideoFrame(const VideoTextureFrame& frame, VideoTextureFrame* out)
@@ -246,8 +257,66 @@ YuvColorParams AppleVideoFrameColorParams(const VideoTextureFrame& frame)
 
 std::string DescribeAppleVideoFrame(const VideoTextureFrame& frame)
 {
-    (void)frame;
-    return {}; // CLEANROOM MV91
+    std::ostringstream out;
+    const uint32_t format = frame.pixel_format;
+    out << "format " << format;
+    const char four[5] {
+        static_cast<char>((format >> 24) & 0xff), static_cast<char>((format >> 16) & 0xff),
+        static_cast<char>((format >> 8) & 0xff), static_cast<char>(format & 0xff), 0
+    };
+    if (std::all_of(four, four + 4, [](char c) { return std::isprint(static_cast<unsigned char>(c)) != 0; })) {
+        out << " '" << four << "'";
+    }
+    out << " " << frame.width << "x" << frame.height << " planes " << frame.plane_count;
+
+    auto pixel_buffer = reinterpret_cast<CVPixelBufferRef>(frame.pixel_buffer);
+    if (pixel_buffer == nullptr) {
+        out << ": no pixel buffer";
+        return out.str();
+    }
+    const CVReturn locked = CVPixelBufferLockBaseAddress(pixel_buffer, kCVPixelBufferLock_ReadOnly);
+    if (locked != kCVReturnSuccess) {
+        out << ": lock failed " << locked;
+        return out.str();
+    }
+    const bool planar = CVPixelBufferIsPlanar(pixel_buffer);
+    const size_t planes = planar ? std::min<size_t>(CVPixelBufferGetPlaneCount(pixel_buffer), 3) : 1;
+    for (size_t plane = 0; plane < planes; ++plane) {
+        const auto* base = static_cast<const uint8_t*>(planar ? CVPixelBufferGetBaseAddressOfPlane(pixel_buffer, plane)
+                                                              : CVPixelBufferGetBaseAddress(pixel_buffer));
+        const size_t width = planar ? CVPixelBufferGetWidthOfPlane(pixel_buffer, plane) : CVPixelBufferGetWidth(pixel_buffer);
+        const size_t height = planar ? CVPixelBufferGetHeightOfPlane(pixel_buffer, plane) : CVPixelBufferGetHeight(pixel_buffer);
+        const size_t pitch = planar ? CVPixelBufferGetBytesPerRowOfPlane(pixel_buffer, plane) : CVPixelBufferGetBytesPerRow(pixel_buffer);
+        if (base == nullptr || width == 0 || height == 0) {
+            out << " | plane " << plane << " empty";
+            continue;
+        }
+        const size_t bytes_per_pixel = std::max<size_t>(1, std::min<size_t>(4, pitch / width));
+        const bool bgra = !planar && format == 'BGRA' && bytes_per_pixel == 4;
+        const size_t steps_x = std::min<size_t>(16, width);
+        const size_t steps_y = std::min<size_t>(16, height);
+        unsigned lowest[3] { 255, 255, 255 }, highest[3] {}, sum[3] {};
+        size_t count = 0;
+        for (size_t sy = 0; sy < steps_y; ++sy) {
+            const uint8_t* row = base + (sy * height / steps_y) * pitch;
+            for (size_t sx = 0; sx < steps_x; ++sx) {
+                const uint8_t* texel = row + (sx * width / steps_x) * bytes_per_pixel;
+                for (size_t c = 0; c < (bgra ? 3u : 1u); ++c) {
+                    lowest[c] = std::min<unsigned>(lowest[c], texel[c]);
+                    highest[c] = std::max<unsigned>(highest[c], texel[c]);
+                    sum[c] += texel[c];
+                }
+                ++count;
+            }
+        }
+        out << " | plane " << plane;
+        for (size_t c = 0; c < (bgra ? 3u : 1u); ++c) {
+            out << (bgra ? (c == 0 ? " B " : c == 1 ? " G " : " R ") : " ") << "min " << lowest[c]
+                << " max " << highest[c] << " avg " << (count != 0 ? sum[c] / count : 0u);
+        }
+    }
+    CVPixelBufferUnlockBaseAddress(pixel_buffer, kCVPixelBufferLock_ReadOnly);
+    return out.str();
 }
 
 } // namespace wallpaper::video
