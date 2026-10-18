@@ -618,17 +618,22 @@ std::shared_ptr<SceneMesh> MakeTextCardMesh(float left, float bottom, float righ
 /// own local transform puts them (canvas positions, y up, in the order of
 /// `MakeQuadMesh`), each sampling the scene output at that place. With
 /// `clip_space` the positions are the same corners in clip space, so a pass that
-/// copies the footprint draws it 1:1.
+/// copies the footprint draws it 1:1. Otherwise the pass goes through the camera
+/// that frames the card's own rectangle about the origin, so the positions are the
+/// card's own corners (`half_w` by `half_h` about the origin) and only the texture
+/// coordinates follow the footprint.
 std::shared_ptr<SceneMesh> MakePassthroughMesh(const std::array<linalg::Vector2f, 4>& corners,
                                                float canvas_width, float canvas_height,
-                                               bool clip_space) {
+                                               bool clip_space, float half_w, float half_h) {
     std::array<float, 12> positions {};
     std::array<float, 8>  uvs {};
+    const std::array<std::array<float, 2>, 4> own { { { -half_w, -half_h }, { -half_w, half_h },
+                                                      { half_w, -half_h }, { half_w, half_h } } };
     for (std::size_t corner = 0; corner < 4; ++corner) {
         const float x = corners[corner].x();
         const float y = corners[corner].y();
-        positions[corner * 3]     = clip_space ? 2.0f * x / canvas_width - 1.0f : x;
-        positions[corner * 3 + 1] = clip_space ? 2.0f * y / canvas_height - 1.0f : y;
+        positions[corner * 3]     = clip_space ? 2.0f * x / canvas_width - 1.0f : own[corner][0];
+        positions[corner * 3 + 1] = clip_space ? 2.0f * y / canvas_height - 1.0f : own[corner][1];
         uvs[corner * 2]           = x / canvas_width;
         uvs[corner * 2 + 1]       = 1.0f - y / canvas_height;
     }
@@ -3028,7 +3033,8 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         }
         mesh = MakePassthroughMesh(corners, static_cast<float>(std::max(1, context.ortho_w)),
                                    static_cast<float>(std::max(1, context.ortho_h)),
-                                   image.material.shader == "passthrough");
+                                   image.material.shader == "passthrough", static_cast<float>(half_w),
+                                   static_cast<float>(half_h));
     } else {
         mesh = MakeCardMesh(geometry.size[0], geometry.size[1], geometry.u, geometry.v);
     }
