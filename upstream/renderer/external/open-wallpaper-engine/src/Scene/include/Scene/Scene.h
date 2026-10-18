@@ -192,21 +192,31 @@ public:
 
     /// One hop through the alias table; a name that is no alias comes back as it is.
     std::string ResolveRenderTargetName(std::string_view name) const {
-        const std::string key(name);
-        const auto        alias = renderTargetAliases.find(key);
-        return alias != renderTargetAliases.end() ? alias->second : key;
+        std::string key(name);
+        const auto  alias = renderTargetAliases.find(key);
+        if (alias != renderTargetAliases.end()) return alias->second;
+        return key;
     }
 
     bool HasRenderTarget(std::string_view name) const { return FindRenderTarget(name) != nullptr; }
 
     SceneRenderTarget* FindRenderTarget(std::string_view name) {
-        const auto found = renderTargets.find(ResolveRenderTargetName(name));
+        const std::string key(name);
+        const auto        found = renderTargets.find(AliasTarget(key));
         return found != renderTargets.end() ? &found->second : nullptr;
     }
 
     const SceneRenderTarget* FindRenderTarget(std::string_view name) const {
-        const auto found = renderTargets.find(ResolveRenderTargetName(name));
+        const std::string key(name);
+        const auto        found = renderTargets.find(AliasTarget(key));
         return found != renderTargets.end() ? &found->second : nullptr;
+    }
+
+private:
+    /// The alias table's value for `key`, or `key` itself: one hop, no copy.
+    const std::string& AliasTarget(const std::string& key) const {
+        const auto alias = renderTargetAliases.find(key);
+        return alias != renderTargetAliases.end() ? alias->second : key;
     }
 };
 } // namespace wallpaper

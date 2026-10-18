@@ -62,8 +62,13 @@ void SceneNode::MarkTransDirty() {
 }
 
 void SceneNode::InvalidateSubtree() {
-    // Iterative, so a very deep tree cannot exhaust the stack.
-    std::vector<SceneNode*> pending { this };
+    m_dirty = true;
+    if (m_children.empty()) return; // the common case: a leaf moves every frame, at no cost
+    // Iterative, so a very deep tree cannot exhaust the stack; the work list is kept
+    // between calls so a moving group does not allocate each frame.
+    thread_local std::vector<SceneNode*> pending;
+    pending.clear();
+    pending.push_back(this);
     while (! pending.empty()) {
         SceneNode* node = pending.back();
         pending.pop_back();
