@@ -83,6 +83,9 @@ struct ParsedLayer {
     bool                       plain { true };
     // The effect chain of an image layer that draws through effects.
     std::shared_ptr<SceneImageEffectLayer> effects;
+    // The skeleton and shared playback state of a puppet layer, for attachments.
+    std::shared_ptr<WPPuppet> puppet;
+    WPPuppetLayer             puppet_layer;
 };
 
 namespace
@@ -405,8 +408,6 @@ private:
     std::shared_ptr<SceneRuntimeContext::LayerRegistrationMemo> m_memo;
     bool                                                       m_committed { false };
 };
-
-// CLEANROOM LS6: puppet attachments (registering a layer that hangs from a parent puppet's attachment point) are not built yet.
 
 // Runs the prewarms the particle layers queued, now that every layer sits under
 // its parent.
@@ -3022,6 +3023,8 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     if (puppet_direct && mdl.puppet != nullptr) {
         puppet_layer = WPPuppetLayer(mdl.puppet);
         puppet_layer.prepared(image.puppet_layers);
+        layer.puppet       = mdl.puppet;
+        layer.puppet_layer = puppet_layer;
         if (runtime != nullptr) {
             runtime->RegisterPuppetLayer(plan.key, puppet_layer);
             BindPuppetAnimationLayerSettings(context, plan.key, image, puppet_layer);
@@ -3269,6 +3272,8 @@ bool LoadModelEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     if (mdl.puppet != nullptr) {
         puppet_layer = WPPuppetLayer(mdl.puppet);
         puppet_layer.prepared(model.puppet_layers);
+        layer.puppet       = mdl.puppet;
+        layer.puppet_layer = puppet_layer;
         if (runtime != nullptr) {
             runtime->RegisterPuppetLayer(plan.key, puppet_layer);
             BindPuppetAnimationLayerSettings(context, plan.key, model, puppet_layer);
@@ -3789,6 +3794,34 @@ void BuildLayers(ParseContext& context, const wpscene::WPSceneGeneral& general,
     }
 }
 
+/// Layers that name an attachment of their parent puppet hang from that anchor instead of
+/// the parent's origin (P5 R60, R61): the first attachment of that name, when its bone exists.
+void RegisterPuppetAttachments(ParseContext& context, const std::vector<std::size_t>& parent) {
+    constexpr std::size_t kNone = static_cast<std::size_t>(-1);
+    if (context.shader_updater == nullptr) return;
+    auto& layers = context.layers;
+    std::unordered_map<std::size_t, std::vector<WPShaderValueUpdater::PuppetAttachment>> by_parent;
+    for (std::size_t at = 0; at < layers.size(); ++at) {
+        if (parent[at] == kNone || layers[at].attachment.empty()) continue;
+        const auto& holder = layers[parent[at]];
+        if (holder.puppet == nullptr) continue;
+        const auto& puppet = *holder.puppet;
+        const auto  anchor = std::find_if(puppet.attachments.begin(), puppet.attachments.end(),
+                                          [&](const WPPuppet::Attachment& candidate) {
+                                              return candidate.name == layers[at].attachment;
+                                          });
+        if (anchor == puppet.attachments.end() || anchor->bone_index >= puppet.bones.size()) continue;
+        by_parent[parent[at]].push_back(WPShaderValueUpdater::PuppetAttachment {
+            .node           = layers[at].node.get(),
+            .bone_index     = anchor->bone_index,
+            .bind_transform = puppet.bones[anchor->bone_index].world_bind * anchor->local_xform });
+    }
+    for (auto& [holder, attachments] : by_parent) {
+        context.shader_updater->RegisterPuppetAttachments(layers[holder].puppet_layer,
+                                                          std::move(attachments));
+    }
+}
+
 /// Hangs every layer under its parent, once all of them exist: roots under the
 /// scene's root, children under theirs, both in file order. A parent that is
 /// absent, is no member of the tree, appears under more than one entry, is the
@@ -3832,6 +3865,7 @@ void AttachLayers(ParseContext& context) {
         auto& holder = parent[at] == kNone ? context.scene->sceneGraph : layers[parent[at]].node;
         holder->AppendChild(layers[at].node);
     }
+    RegisterPuppetAttachments(context, parent);
 }
 
 // ---------------------------------------------------------------------------
