@@ -21,6 +21,7 @@
 
 #include "Particle/WPParticleRawGener.h"
 #include "Particle/ParticleSystem.h"
+#include "Particle/ParticleModify.h"
 
 #include "WPShaderValueUpdater.hpp"
 #include "Shader/TextureFormatCombos.hpp"
@@ -64,10 +65,6 @@
 
 using namespace wallpaper;
 using namespace wallpaper::linalg;
-
-// CLEANROOM: the stubs below leave their parameters and helpers unused until they are rewritten.
-#pragma clang diagnostic ignored "-Wunused-parameter"
-#pragma clang diagnostic ignored "-Wunused-function"
 
 /// One entry of the object list that became a member of the layer tree.
 struct ParsedLayer {
@@ -337,6 +334,9 @@ struct ParseContext {
     /// its layer's world matrix, parent groups included, and a layer joins its
     /// group only once every object exists.
     std::vector<ParticleSubSystem*>                         pending_prewarms;
+    /// Work that waits for the layers to sit in their tree (a child system's place under a
+    /// world-space parent depends on the scale it is drawn under).
+    std::vector<std::function<void()>>                      after_attach;
     std::unordered_set<int32_t>                             referenced_layer_ids;
     /// The layers of the tree, in the order the scene file declares them.
     std::vector<ParsedLayer>                                layers;
@@ -412,6 +412,8 @@ private:
 // Runs the prewarms the particle layers queued, now that every layer sits under
 // its parent.
 void PrewarmParticleSystems(ParseContext& context) {
+    for (auto& fixup : context.after_attach) fixup();
+    context.after_attach.clear();
     for (auto* system : context.pending_prewarms) system->Prewarm();
     context.pending_prewarms.clear();
 }
@@ -634,8 +636,6 @@ void AddParticleIndexArray(SceneMesh& mesh, uint32_t count) {
     const auto layout = PlanParticleIndexLayout(count);
     mesh.AddIndexArray(SceneIndexArray(count, layout.width));
 }
-
-// CLEANROOM LS9: the file-local helpers of this group were removed; the rewrite designs its own.
 
 /// What the generators of one particle file read besides their own JSON.
 ParticleParseContext MakeParticleParseContext(
@@ -2159,8 +2159,6 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
 }
 
 
-// CLEANROOM LS30: the file-local helpers of this group were removed; the rewrite designs its own.
-
 /// Puts the scene object's own control points over the preset's: a set
 /// `controlpointN` replaces the preset's offset, a set `controlpointangleN`
 /// turns the control point. Control points that follow the cursor keep their link.
@@ -2188,8 +2186,6 @@ void ApplyParticleOverrideControlpoints(const wpscene::ParticleInstanceoverride&
         }
     }
 }
-
-// CLEANROOM LS31: the file-local helpers of this group were removed; the rewrite designs its own.
 
 std::shared_ptr<SceneNode> ReuseOrCreateLayerNode(ParseContext& context, int32_t id) {
     auto node_iterator = context.layer_nodes.find(id);
@@ -3926,6 +3922,507 @@ std::shared_ptr<SceneNode> MakeScriptTextLayer(const std::shared_ptr<Scene>& sce
 }
 
 // ---------------------------------------------------------------------------
+// Particle layers (P4 R1 to R10, R31 to R34, R50, R51 to R58, R75 to R78, R82 to R90,
+// R92 to R97, R99 to R113, R121, R124; R37, R49, R87).
+// ---------------------------------------------------------------------------
+
+constexpr uint32_t kMaxParticleCapacity = 20000;
+constexpr uint64_t kMaxParticleMeshBytes = 1ull << 30;
+
+enum class ParticleRendererKind
+{
+    Sprite,
+    SpriteTrail,
+    Rope,
+    RopeTrail,
+};
+
+/// A name starting with `rope` is a rope; one ending in `trail` a trail; any other draws a sprite.
+ParticleRendererKind ClassifyParticleRenderer(const std::string& name) {
+    const bool rope  = name.rfind("rope", 0) == 0;
+    const bool trail = name.size() >= 5 && name.compare(name.size() - 5, 5, "trail") == 0;
+    if (rope) return trail ? ParticleRendererKind::RopeTrail : ParticleRendererKind::Rope;
+    return trail ? ParticleRendererKind::SpriteTrail : ParticleRendererKind::Sprite;
+}
+
+bool IsRopeKind(ParticleRendererKind kind) {
+    return kind == ParticleRendererKind::Rope || kind == ParticleRendererKind::RopeTrail;
+}
+
+/// The mesh a renderer fills every frame, with room for `quads` quads: the billboard layout
+/// of a sprite (position, the corner and size record, colour, the thick record for sheets and
+/// trails, the two other angles) or the seven four-float groups of a rope piece.
+std::shared_ptr<SceneMesh> MakeParticleMesh(ParticleRendererKind kind, bool thick, uint32_t quads) {
+    using Attribute = SceneVertexArray::SceneVertexAttribute;
+    std::vector<Attribute> attributes;
+    if (IsRopeKind(kind)) {
+        attributes = { { std::string(WE_IN_POSITIONVEC4), VertexType::FLOAT4 },
+                       { std::string(WE_IN_TEXCOORDVEC4), VertexType::FLOAT4 },
+                       { std::string(WE_IN_TEXCOORDVEC4C1), VertexType::FLOAT4 },
+                       { std::string(WE_IN_TEXCOORDVEC4C2), VertexType::FLOAT4 },
+                       { std::string(WE_IN_TEXCOORDVEC4C3), VertexType::FLOAT4 },
+                       { std::string(WE_IN_TEXCOORDC4), VertexType::FLOAT4 },
+                       { std::string(WE_IN_COLOR), VertexType::FLOAT4 } };
+    } else {
+        attributes = { { std::string(WE_IN_POSITION), VertexType::FLOAT3 },
+                       { std::string(WE_IN_TEXCOORDVEC4), VertexType::FLOAT4 },
+                       { std::string(WE_IN_COLOR), VertexType::FLOAT4 } };
+        if (thick) attributes.push_back({ std::string(WE_IN_TEXCOORDVEC4C1), VertexType::FLOAT4 });
+        attributes.push_back({ std::string(WE_IN_TEXCOORDC2), VertexType::FLOAT2 });
+    }
+    auto mesh = std::make_shared<SceneMesh>(MeshUpdate::PerFrame);
+    mesh->AddVertexArray(SceneVertexArray(attributes, static_cast<std::size_t>(quads) * 4));
+    AddParticleIndexArray(*mesh, quads);
+    auto& vertices = mesh->GetVertexArray(0);
+    vertices.SetOption(WE_CB_THICK_FORMAT, thick);
+    if (IsRopeKind(kind)) vertices.SetOption(WE_PRENDER_ROPE, true);
+    else vertices.SetOption(WE_PRENDER_SPRITE, true);
+    if (kind == ParticleRendererKind::SpriteTrail || kind == ParticleRendererKind::RopeTrail) {
+        vertices.SetOption(WE_PRENDER_TRAIL, true);
+    }
+    if (kind == ParticleRendererKind::RopeTrail) vertices.SetOption(WE_PRENDER_ROPETRAIL, true);
+    return mesh;
+}
+
+/// One renderer entry of a particle file, prepared: its material, mesh and what the
+/// material needs to know about it.
+struct ParticleRendererBuild {
+    ParticleRendererKind       kind { ParticleRendererKind::Sprite };
+    wpscene::ParticleRender    render;
+    SceneMaterial              material;
+    LoadedMaterial             loaded;
+    wpscene::WPMaterial        authored;
+    std::shared_ptr<SceneMesh> mesh;
+    uint32_t                   pieces_per_pair { 1 }; // rope: pieces between two particles
+    uint32_t                   segments { 0 };        // rope trail: recorded points
+};
+
+/// One system of a layer, prepared: nothing of it is registered anywhere yet.
+struct ParticleSystemBuild {
+    const wpscene::Particle*          file { nullptr };
+    const wpscene::ParticleChild*     entry { nullptr };
+    std::vector<ParticleRendererBuild> renderers;
+    std::vector<ParticleSystemBuild>  children;
+    uint32_t                          capacity { 0 };
+    bool                              has_plain_rope { false };
+};
+
+/// Prepares one system and, under it, the children that can be built: the materials load and
+/// the meshes are sized. `instances` is the product of the `maxcount` of the child entries on
+/// the way from the layer (R83). False when the system cannot be built (a material that does
+/// not load, a mesh too large); `skipped` is set for a capacity of zero, which is no error.
+bool PrepareParticleSystem(ParseContext& context, const wpscene::Particle& file,
+                           const wpscene::ParticleChild* entry, uint64_t instances,
+                           ParticleSystemBuild& build, bool& skipped) {
+    skipped            = false;
+    build.file         = &file;
+    build.entry        = entry;
+    build.capacity     = std::min(file.maxcount, kMaxParticleCapacity);
+    if (build.capacity == 0) {
+        LOG_INFO("particle file with a capacity of zero is skipped");
+        skipped = true;
+        return false;
+    }
+    for (const auto& render : file.renderers) {
+        ParticleRendererBuild item;
+        item.render = render;
+        item.kind   = ClassifyParticleRenderer(render.name);
+        item.authored = file.material;
+        if (IsRopeKind(item.kind)) {
+            item.authored.shader = "genericropeparticle";
+            build.has_plain_rope = build.has_plain_rope || item.kind == ParticleRendererKind::Rope;
+        }
+        bool sheet = false;
+        if (! item.authored.textures.empty() && ! item.authored.textures[0].empty() &&
+            ! IsSpecTex(item.authored.textures[0])) {
+            sheet = TextureHeaderOf(context, item.authored.textures[0]).isSprite;
+        }
+        const bool trail = item.kind == ParticleRendererKind::SpriteTrail ||
+                           item.kind == ParticleRendererKind::RopeTrail;
+        const bool thick = sheet || trail || IsRopeKind(item.kind);
+        item.authored.combos["SPRITESHEET"]      = sheet ? 1 : 0;
+        item.authored.combos["THICKFORMAT"]      = thick ? 1 : 0;
+        item.authored.combos["SPRITESHEETBLEND"] = file.BlendsSpriteFrames() ? 1 : 0;
+        item.authored.combos["TRAILRENDERER"]    = trail ? 1 : 0;
+        if (! LoadMaterial(context, item.authored, item.material, item.loaded)) {
+            LOG_ERROR("particle material '%s' cannot be loaded", item.authored.shader.c_str());
+            return false;
+        }
+        auto& constants = item.material.customShader.constValues;
+        if (context.is_ortho) {
+            // A 2D scene's eye: the centre of the canvas view, 2000 units in front of it, and
+            // screen-facing axes (R114).
+            constants["g_EyePosition"] = ShaderValue(std::array<float, 3> {
+                static_cast<float>(context.ortho_w) * 0.5f, static_cast<float>(context.ortho_h) * 0.5f, 2000.0f });
+            constants["g_OrientationUp"]      = ShaderValue(std::array<float, 3> { 0.0f, 1.0f, 0.0f });
+            constants["g_OrientationRight"]   = ShaderValue(std::array<float, 3> { 1.0f, 0.0f, 0.0f });
+            constants["g_OrientationForward"] = ShaderValue(std::array<float, 3> { 0.0f, 0.0f, 1.0f });
+            constants["g_ViewUp"]             = ShaderValue(std::array<float, 3> { 0.0f, 1.0f, 0.0f });
+            constants["g_ViewRight"]          = ShaderValue(std::array<float, 3> { 1.0f, 0.0f, 0.0f });
+        }
+        if (sheet) {
+            const auto& texture = context.scene->textures[item.material.textures[0]];
+            const auto& header  = TextureHeaderOf(context, item.material.textures[0]);
+            if (texture.spriteAnim.numFrames() > 0) {
+                const auto& frame = texture.spriteAnim.FrameAt(0);
+                const float w     = static_cast<float>(std::max(1, header.mapWidth)) * frame.width;
+                const float h     = static_cast<float>(std::max(1, header.mapHeight)) * frame.height;
+                constants["g_RenderVar1"] = ShaderValue(std::array<float, 4> {
+                    frame.width, frame.height, static_cast<float>(texture.spriteAnim.numFrames()),
+                    h > 0.0f ? w / h : 1.0f });
+            }
+        }
+        // How many straight pieces join two particles (rope), or two recorded points (trail).
+        const uint32_t added = static_cast<uint32_t>(std::clamp(render.subdivision, 0.0f, 32.0f));
+        item.pieces_per_pair = added + 1;
+        uint64_t quads = static_cast<uint64_t>(build.capacity) * instances;
+        if (item.kind == ParticleRendererKind::Rope) quads *= item.pieces_per_pair;
+        if (item.kind == ParticleRendererKind::RopeTrail) {
+            item.segments = static_cast<uint32_t>(std::clamp(render.segments, 2.0f, 32.0f));
+            quads *= static_cast<uint64_t>(item.segments) * item.pieces_per_pair;
+        }
+        const uint64_t floats_per_vertex = IsRopeKind(item.kind) ? 28 : (thick ? 20 : 16);
+        const uint64_t bytes             = quads * 4 * floats_per_vertex * 4 + quads * 6 * 4;
+        if (quads > std::numeric_limits<uint32_t>::max() || bytes > kMaxParticleMeshBytes) {
+            LOG_ERROR("particle mesh of %llu quads is too large", static_cast<unsigned long long>(quads));
+            return false;
+        }
+        item.mesh = MakeParticleMesh(item.kind, thick, static_cast<uint32_t>(std::max<uint64_t>(quads, 1)));
+        if (item.kind == ParticleRendererKind::SpriteTrail) {
+            constants["g_RenderVar0"] = ShaderValue(std::array<float, 4> {
+                render.length, render.maxlength, render.minlength,
+                static_cast<float>(build.capacity) - 1.0f });
+        }
+        if (item.kind == ParticleRendererKind::RopeTrail) {
+            const float length = static_cast<float>(item.segments * item.pieces_per_pair);
+            constants["g_RenderVar0"] = ShaderValue(std::array<float, 4> {
+                static_cast<float>(item.segments), 0.0f, 0.0f,
+                EncodeRopeTrailLength(length, render.uvscale) });
+        }
+        build.renderers.push_back(std::move(item));
+    }
+    for (const auto& child : file.children) {
+        ParticleSystemBuild prepared;
+        bool                child_skipped = false;
+        const uint64_t      share = instances * static_cast<uint64_t>(std::max(1, child.maxcount));
+        if (PrepareParticleSystem(context, child.obj, &child, share, prepared, child_skipped)) {
+            build.children.push_back(std::move(prepared));
+        }
+    }
+    return true;
+}
+
+/// Follows the scene object's bound override fields (R57): each value that a property, a
+/// script or a timeline drives is written into the shared override record as it changes.
+void FollowParticleOverride(ParseContext& context, const nlohmann::json& entry,
+                            const std::shared_ptr<wpscene::ParticleInstanceoverride>& over,
+                            const std::string& key) {
+    auto* runtime = context.scene->runtime.get();
+    if (runtime == nullptr || ! over->enabled) return;
+    const auto block = entry.find("instanceoverride");
+    if (block == entry.end() || ! block->is_object()) return;
+    using Override = wpscene::ParticleInstanceoverride;
+    static constexpr std::array<std::pair<const char*, float Override::*>, 7> kNumbers { {
+        { "alpha", &Override::alpha }, { "size", &Override::size }, { "lifetime", &Override::lifetime },
+        { "speed", &Override::speed }, { "count", &Override::count }, { "rate", &Override::rate },
+        { "brightness", &Override::brightness } } };
+    for (const auto& [name, field] : kNumbers) {
+        const auto setting = block->find(name);
+        if (setting == block->end() || ! HasDynamicSetting(*setting)) continue;
+        auto value = ResolveFloatSetting(*runtime, *setting, key);
+        runtime->RegisterDynamicValueListener(std::move(value), [over, field = field](const DynamicValue& now) {
+            const float next = now.getFloat();
+            if (std::isfinite(next)) (*over).*field = next;
+        });
+    }
+    const auto lanes_into = [](std::array<float, 3>& out, const DynamicValue& now) {
+        const auto lanes = now.getVec3();
+        if (lanes.allFinite()) out = { lanes.x(), lanes.y(), lanes.z() };
+    };
+    if (const auto setting = block->find("color"); setting != block->end() && HasDynamicSetting(*setting)) {
+        runtime->RegisterDynamicValueListener(
+            ResolveVec3Setting(*runtime, *setting, key),
+            [over, lanes_into](const DynamicValue& now) { lanes_into(over->color, now); });
+    }
+    if (const auto setting = block->find("colorn"); setting != block->end() && HasDynamicSetting(*setting)) {
+        runtime->RegisterDynamicValueListener(
+            ResolveVec3Setting(*runtime, *setting, key),
+            [over, lanes_into](const DynamicValue& now) { lanes_into(over->colorn, now); });
+    }
+    for (std::size_t index = 0; index < 8; ++index) {
+        if (const auto setting = block->find("controlpoint" + std::to_string(index));
+            setting != block->end() && HasDynamicSetting(*setting)) {
+            runtime->RegisterDynamicValueListener(
+                ResolveVec3Setting(*runtime, *setting, key),
+                [over, lanes_into, index](const DynamicValue& now) {
+                    lanes_into(over->controlpoint[index], now);
+                    over->controlpointSet[index] = true;
+                });
+        }
+        if (const auto setting = block->find("controlpointangle" + std::to_string(index));
+            setting != block->end() && HasDynamicSetting(*setting)) {
+            runtime->RegisterDynamicValueListener(
+                ResolveVec3Setting(*runtime, *setting, key),
+                [over, lanes_into, index](const DynamicValue& now) {
+                    lanes_into(over->controlpointangle[index], now);
+                    over->controlpointangleSet[index] = true;
+                });
+        }
+    }
+}
+
+/// What the commit of every system of one layer shares.
+struct ParticleCommit {
+    ParseContext*                                     context { nullptr };
+    std::string                                       key;
+    std::shared_ptr<wpscene::ParticleInstanceoverride> over;
+    std::shared_ptr<SceneNode>                        layer_node;
+    std::array<float, 2>                              parallax_depth { 1.0f, 1.0f };
+    nlohmann::json                                    entry;
+    std::unordered_set<int>                           logged_audio_modes;
+};
+
+/// The node that draws one renderer's mesh, with its constants and value data registered.
+void AttachParticleMesh(ParticleCommit& commit, const std::shared_ptr<SceneNode>& node,
+                        ParticleRendererBuild& renderer, bool perspective, bool is_layer_node) {
+    auto& context = *commit.context;
+    auto  mesh    = renderer.mesh;
+    mesh->AddMaterial(std::move(renderer.material));
+    node->AddMesh(mesh);
+    if (perspective && context.is_ortho) node->SetCamera("global_perspective");
+    const auto material = mesh->MaterialSlotPtr(0);
+    RegisterMaterialConstants(context, material, renderer.authored, renderer.loaded.info, commit.key);
+    RegisterLayerVideos(context, commit.key, material->textures);
+    if (context.shader_updater != nullptr) {
+        WPShaderValueData data;
+        data.parallaxDepth  = commit.parallax_depth;
+        data.renderTargets  = renderer.loaded.render_targets;
+        if (! is_layer_node) data.parallax_layer = commit.layer_node.get();
+        context.shader_updater->SetNodeData(node.get(), 0, data);
+    }
+}
+
+/// The animation value a sprite shows (R102), written for every particle of a renderer.
+ParticleRawGenSpecOp MakeParticleSpecOp(const wpscene::Particle& file) {
+    const float multiplier = std::isfinite(file.sequencemultiplier) ? file.sequencemultiplier : 1.0f;
+    if (file.animationmode == "randomframe") {
+        return [](const Particle& particle, const ParticleRawGenSpec& spec) { *spec.lifetime = particle.seed; };
+    }
+    return [multiplier](const Particle& particle, const ParticleRawGenSpec& spec) {
+        *spec.lifetime = static_cast<float>(ParticleModify::LifetimePos(particle)) * multiplier;
+    };
+}
+
+/// Builds the subsystem of one prepared system, its mirrors and its children, hung from `node`.
+std::unique_ptr<ParticleSubSystem> CommitParticleSystem(
+    ParticleCommit& commit, ParticleSystemBuild& build, const std::shared_ptr<SceneNode>& node,
+    bool world_space, ParticleSubSystem::SpawnType type, std::vector<ParticleSubSystem*>& statics) {
+    auto&       context = *commit.context;
+    auto&       scene   = *context.scene;
+    const auto& file    = *build.file;
+    const bool  perspective = file.flags[wpscene::Particle::FlagEnum::perspective];
+    const uint32_t entry_instances = build.entry != nullptr ? static_cast<uint32_t>(std::max(1, build.entry->maxcount)) : 1u;
+    const double probability = build.entry != nullptr ? std::clamp<double>(build.entry->probability, 0.0, 1.0) : 1.0;
+
+    std::shared_ptr<SceneMesh> first_mesh = build.renderers.empty() ? nullptr : build.renderers.front().mesh;
+    auto sub = std::make_unique<ParticleSubSystem>(*scene.paritileSys, first_mesh, build.capacity, 1.0,
+                                                   entry_instances, probability, type,
+                                                   MakeParticleSpecOp(file));
+    sub->SetOwnerNode(node);
+    sub->SetWorldSpace(world_space);
+    sub->SetDrawn(! build.renderers.empty());
+    sub->SetStartTime(file.starttime);
+    const auto over = commit.over;
+    sub->SetRateMultiplier([over]() { return over->enabled ? static_cast<double>(over->rate) : 1.0; });
+    sub->SetControlpointSource([over](std::span<ParticleControlpoint> points) {
+        ApplyParticleOverrideControlpoints(*over, points);
+    });
+
+    // Control points: the file's entries by id (or by position), zero for the rest (R75).
+    auto points = sub->Controlpoints();
+    for (std::size_t at = 0; at < file.controlpoints.size() && at < 8; ++at) {
+        const auto& entry = file.controlpoints[at];
+        const std::size_t index = entry.id >= 0 && entry.id < 8 ? static_cast<std::size_t>(entry.id) : at;
+        auto& point = points[index];
+        point.link_mouse  = entry.flags[wpscene::ParticleControlpoint::FlagEnum::link_mouse];
+        point.worldspace  = entry.flags[wpscene::ParticleControlpoint::FlagEnum::worldspace];
+        point.base_offset = linalg::Vector3d(entry.offset[0], entry.offset[1], entry.offset[2]);
+        point.offset      = point.base_offset;
+        point.prev_offset = point.base_offset;
+    }
+    ApplyParticleOverrideControlpoints(*over, points);
+
+    // Emitters, initializers and operators (R3, R31, R32, R50).
+    const std::function<audio::AudioSpectrumSnapshot()> spectrum = [scene_pointer = &scene]() {
+        return scene_pointer->runtime != nullptr ? scene_pointer->runtime->CurrentAudioSpectrumSnapshot()
+                                                 : audio::AudioSpectrumSnapshot {};
+    };
+    const int start = build.entry != nullptr ? build.entry->controlpointstartindex : 0;
+    for (auto emitter : file.emitters) {
+        if (build.entry != nullptr) {
+            const int shifted = emitter.controlpoint + start;
+            emitter.controlpoint = shifted > 7 ? -1 : shifted;
+        }
+        if (emitter.audioprocessingmode >= 1 && emitter.audioprocessingmode <= 3) {
+            MarkSceneRequiresAudioResponse(&scene);
+        } else if (emitter.audioprocessingmode != 0 &&
+                   commit.logged_audio_modes.insert(static_cast<int>(emitter.audioprocessingmode)).second) {
+            LOG_INFO("emitter audio processing mode %u is not supported and is ignored",
+                     emitter.audioprocessingmode);
+        }
+        sub->AddEmitter(WPParticleParser::genParticleEmittOp(emitter, build.has_plain_rope, over, spectrum,
+                                                             sub->SpawnContext()));
+    }
+    const auto parse_context =
+        MakeParticleParseContext(*sub, file, over, &scene, context.pixel_canvas);
+    for (const auto& initializer : file.initializers) {
+        if (initializer.is_object()) sub->AddInitializer(WPParticleParser::genParticleInitOp(initializer, parse_context));
+    }
+    sub->AddInitializer(WPParticleParser::genOverrideInitOp(over, parse_context.color,
+                                                            parse_context.speed_override,
+                                                            parse_context.size_override));
+    for (const auto& op : file.operators) {
+        if (! op.is_object()) continue;
+        sub->AddOperator(WPParticleParser::genParticleOperatorOp(op, parse_context));
+        const auto name = op.find("name");
+        if (name != op.end() && name->is_string()) {
+            if (name->get_ref<const std::string&>() == "movement") sub->SetNeedsWorldAxes(true);
+            if (name->get_ref<const std::string&>() == "controlpointattract") {
+                sub->SetTracksPreviousPosition(true);
+            }
+        }
+    }
+
+    // Renderers: the first draws the simulated system, the others mirror it (R112).
+    for (std::size_t index = 0; index < build.renderers.size(); ++index) {
+        auto& renderer = build.renderers[index];
+        const auto& render = renderer.render;
+        ParticleSubSystem* target = sub.get();
+        std::unique_ptr<ParticleSubSystem> mirror;
+        std::shared_ptr<SceneNode> drawn = node;
+        if (index > 0) {
+            drawn = std::make_shared<SceneNode>();
+            node->AppendChild(drawn);
+            mirror = std::make_unique<ParticleSubSystem>(*scene.paritileSys, renderer.mesh, build.capacity, 1.0,
+                                                         1, 1.0, ParticleSubSystem::SpawnType::STATIC,
+                                                         MakeParticleSpecOp(file));
+            mirror->SetOwnerNode(drawn);
+            mirror->SetWorldSpace(world_space);
+            target = mirror.get();
+        }
+        if (IsRopeKind(renderer.kind)) {
+            target->SetRopeSubdivision(renderer.pieces_per_pair);
+            target->SetRopeUv(render.uvscale, render.uvscrolling, render.uvsmoothing && ! render.uvscrolling);
+        }
+        if (index == 0 && renderer.kind == ParticleRendererKind::RopeTrail && render.length > 0.0f) {
+            ParticleTrailConfig trail;
+            trail.samples = renderer.segments;
+            trail.period  = std::max(0.001, static_cast<double>(render.length)) / renderer.segments;
+            sub->SetTrail(trail);
+        }
+        // A bound `uvscale`, `uvscrolling` or `uvsmoothing` follows its value (R57).
+        if (auto* runtime = scene.runtime.get(); runtime != nullptr && IsRopeKind(renderer.kind)) {
+            auto uv = std::make_shared<std::array<float, 3>>(std::array<float, 3> {
+                render.uvscale, render.uvscrolling ? 1.0f : 0.0f, render.uvsmoothing ? 1.0f : 0.0f });
+            const auto apply = [target, uv]() {
+                target->SetRopeUv((*uv)[0], (*uv)[1] != 0.0f, (*uv)[2] != 0.0f && (*uv)[1] == 0.0f);
+            };
+            const std::array<std::pair<const nlohmann::json*, std::size_t>, 3> settings { {
+                { &render.uvscale_setting, 0 }, { &render.uvscrolling_setting, 1 },
+                { &render.uvsmoothing_setting, 2 } } };
+            for (const auto& [setting, lane] : settings) {
+                if (! HasDynamicSetting(*setting)) continue;
+                runtime->RegisterDynamicValueListener(
+                    ResolveFloatSetting(*runtime, *setting, commit.key),
+                    [uv, lane = lane, apply](const DynamicValue& now) {
+                        (*uv)[lane] = now.getFloat();
+                        apply();
+                    });
+            }
+        }
+        AttachParticleMesh(commit, drawn, renderer, perspective, drawn == commit.layer_node);
+        if (mirror != nullptr) sub->AddMirror(std::move(mirror));
+    }
+
+    // Children hang under this system's node with the entry's own transform (R82, R97).
+    for (auto& child : build.children) {
+        const auto& entry = *child.entry;
+        const auto  child_type = entry.type == "eventfollow" ? ParticleSubSystem::SpawnType::EVENT_FOLLOW
+                                 : entry.type == "eventspawn" ? ParticleSubSystem::SpawnType::EVENT_SPAWN
+                                 : entry.type == "eventdeath" ? ParticleSubSystem::SpawnType::EVENT_DEATH
+                                                              : ParticleSubSystem::SpawnType::STATIC;
+        const bool is_static = child_type == ParticleSubSystem::SpawnType::STATIC;
+        const bool own_world = child.file->flags[wpscene::Particle::FlagEnum::wordspace];
+        const bool child_world = is_static ? own_world : world_space;
+        const bool keeps_units = world_space || (is_static && own_world);
+        auto child_node = std::make_shared<SceneNode>(Vector3f(entry.origin.data()), Vector3f(entry.scale.data()),
+                                                      Vector3f(entry.angles.data()));
+        node->AppendChild(child_node);
+        if (keeps_units) {
+            // The authored offset stays in scene units under a scaled layer: the node takes it
+            // divided by the scale it will be drawn under, once the layer sits in its tree.
+            const Vector3f authored(entry.origin.data());
+            std::weak_ptr<SceneNode> weak_parent = node;
+            std::weak_ptr<SceneNode> weak_child  = child_node;
+            context.after_attach.push_back([authored, weak_parent, weak_child]() {
+                const auto parent = weak_parent.lock();
+                const auto child  = weak_child.lock();
+                if (parent == nullptr || child == nullptr) return;
+                parent->UpdateTrans();
+                const Matrix4d model = parent->ModelTrans();
+                Vector3f       translate = authored;
+                for (int axis = 0; axis < 3; ++axis) {
+                    const double length = model.block<3, 1>(0, axis).norm();
+                    if (length > 1e-12) translate[axis] = static_cast<float>(authored[axis] / length);
+                }
+                child->SetTranslate(translate);
+            });
+        }
+        auto child_sub = CommitParticleSystem(commit, child, child_node, child_world, child_type, statics);
+        if (is_static) statics.push_back(child_sub.get());
+        sub->AddChild(std::move(child_sub));
+    }
+    return sub;
+}
+
+/// Loads one particle layer (P4 R1 to R10, R31 to R34, R57, R75 to R78, R121; R37, R49, R87).
+bool LoadParticleEntry(ParseContext& context, std::size_t at, const nlohmann::json& entry,
+                       const EntryPlan& plan) {
+    auto& scene = *context.scene;
+    wpscene::WPParticleObject object;
+    if (! object.FromJson(entry, *context.vfs)) return false;
+
+    ParticleSystemBuild build;
+    bool                skipped = false;
+    if (! PrepareParticleSystem(context, object.particleObj, nullptr, 1, build, skipped)) {
+        return skipped;
+    }
+
+    // Everything that can fail has: from here the layer is registered.
+    auto over = std::make_shared<wpscene::ParticleInstanceoverride>(object.instanceoverride);
+    over->hdr = scene.hdr;
+    auto& layer = TypedLayer(context, at, entry, plan);
+    SetUnhittable(context, plan.key);
+    ParticleCommit commit;
+    commit.context        = &context;
+    commit.key            = plan.key;
+    commit.over           = over;
+    commit.layer_node     = layer.node;
+    commit.parallax_depth = object.parallaxDepth;
+    FollowParticleOverride(context, entry, over, plan.key);
+
+    std::vector<ParticleSubSystem*> statics;
+    const bool world = object.particleObj.flags[wpscene::Particle::FlagEnum::wordspace];
+    auto sub = CommitParticleSystem(commit, build, layer.node, world,
+                                    ParticleSubSystem::SpawnType::STATIC, statics);
+    // Pre-simulation waits for the finished tree, children before their parent (R91).
+    for (auto* child : statics) context.pending_prewarms.push_back(child);
+    context.pending_prewarms.push_back(sub.get());
+    scene.paritileSys->subsystems.push_back(std::move(sub));
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Shapes (P2 R87) and the bloom post-process (R105 to R109, R114).
 // ---------------------------------------------------------------------------
 
@@ -4410,6 +4907,7 @@ void BuildLayers(ParseContext& context, const wpscene::WPSceneGeneral& general,
         case EntryKind::Image: built = LoadImageEntry(context, at, entry, plan, general); break;
         case EntryKind::Model: built = LoadModelEntry(context, at, entry, plan, general); break;
         case EntryKind::Text: built = LoadTextEntry(context, at, entry, plan); break;
+        case EntryKind::Particle: built = LoadParticleEntry(context, at, entry, plan); break;
         case EntryKind::Camera: built = LoadCameraEntry(context, at, entry, plan, general); break;
         default:
             LOG_ERROR("object %d (%s) is not built: its kind is not loaded by this parser yet",
@@ -4806,6 +5304,7 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
     scene->imageParser   = std::make_unique<RuntimeImageSource>(std::make_unique<WPTexImageParser>(&vfs));
     scene->shaderValueUpdater = std::make_unique<WPShaderValueUpdater>(scene.get());
     scene->paritileSys   = std::make_unique<ParticleSystem>(*scene);
+    scene->paritileSys->gener = std::make_unique<WPParticleRawGener>();
     scene->resolution    = CurrentSceneResolution();
     // The card every chain pass is drawn on: 2 by 2 units, texture coordinates 0 to 1.
     scene->default_effect_mesh.ChangeMeshDataFrom(*MakeCardMesh(2.0f, 2.0f, 1.0f, 1.0f));
