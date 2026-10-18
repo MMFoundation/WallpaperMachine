@@ -24,13 +24,12 @@ namespace wpscene
 {
 
 inline const nlohmann::json& UnwrapMiscSettingValue(const nlohmann::json& value) {
-    if (value.is_object() && value.contains("value")) return value.at("value");
-    return value;
+    // CLEANROOM LS49
+    static const nlohmann::json neutral {};
+    return neutral;
 }
 
-inline bool HasDynamicMiscSetting(const nlohmann::json& value) {
-    return value.is_object() && (value.contains("script") || value.contains("user"));
-}
+// CLEANROOM LS49: the file-local helpers of this group were removed; the rewrite designs its own.
 
 // A setting Wallpaper Engine registers as an enumeration, read as the word it
 // is written as. A key that is missing leaves `word` as it was. A key that is
@@ -43,57 +42,6 @@ inline void ReadMiscEnumWord(const nlohmann::json& json, const char* key, const 
     if (! json.contains(key)) return;
     const auto& source = json.at(key);
     word               = source.is_string() ? source.get<std::string>() : std::string(first_entry);
-}
-
-inline void ReadMiscVec3Setting(const nlohmann::json& json, const char* key,
-                                std::array<float, 3>* destination,
-                                nlohmann::json* setting, bool* dynamic) {
-    if (! json.contains(key) || destination == nullptr || setting == nullptr) return;
-
-    *setting = json.at(key);
-    if (dynamic != nullptr) *dynamic = HasDynamicMiscSetting(*setting);
-
-    const auto& source = UnwrapMiscSettingValue(*setting);
-    if (source.is_array() && source.size() >= 3) {
-        (*destination)[0] = source.at(0).get<float>();
-        (*destination)[1] = source.at(1).get<float>();
-        (*destination)[2] = source.at(2).get<float>();
-        return;
-    }
-    if (source.is_number()) {
-        const float scalar = source.get<float>();
-        *destination       = { scalar, scalar, scalar };
-        return;
-    }
-    if (source.is_string()) {
-        std::istringstream stream(source.get<std::string>());
-        stream >> (*destination)[0] >> (*destination)[1] >> (*destination)[2];
-    }
-}
-
-/// A two-lane setting as Wallpaper Engine's Vec2 properties read it. A number
-/// sets both lanes. A string is "x y": the first number is lane x and the one
-/// after the first space is lane y, so a lone "x" leaves y at 0. An object is
-/// read through its `value`, as a property or script binding wraps one. A JSON
-/// array is not a form the reference reads, and leaves the default.
-inline void ReadMiscVec2Setting(const nlohmann::json& json, const char* key,
-                                std::array<float, 2>& destination) {
-    if (! json.contains(key)) return;
-    const auto& source = UnwrapMiscSettingValue(json.at(key));
-    if (source.is_number()) {
-        const float scalar = source.get<float>();
-        destination        = { scalar, scalar };
-    } else if (source.is_string()) {
-        const auto  text  = source.get<std::string>();
-        const char* begin = text.c_str();
-        char*       end   = nullptr;
-        destination       = { std::strtof(begin, &end), 0.0f };
-        const char* space = std::strchr(begin, ' ');
-        if (space != nullptr) {
-            while (*space == ' ') ++space;
-            if (*space != '\0') destination[1] = std::strtof(space, nullptr);
-        }
-    }
 }
 
 struct WPMiscObjectBase {
@@ -120,26 +68,7 @@ struct WPMiscObjectBase {
     nlohmann::json       field_bindings;
 
     void FromCommonJson(const nlohmann::json& json) {
-        GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
-        GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
-        ReadMiscVec3Setting(json, "origin", &origin, &origin_setting, &dynamic_origin);
-        ReadMiscVec3Setting(json, "scale", &scale, &scale_setting, nullptr);
-        ReadMiscVec3Setting(json, "angles", &angles, &angles_setting, nullptr);
-        GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
-        GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
-        if (json.contains("visible")) {
-            visible_setting  = json.at("visible");
-            dynamic_visible = visible_setting.is_object() &&
-                              (visible_setting.contains("script") ||
-                               visible_setting.contains("user"));
-        }
-        GET_JSON_NAME_VALUE_NOWARN(json, "locktransforms", locktransforms);
-        GET_JSON_NAME_VALUE_NOWARN(json, "muteineditor", muteineditor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
-        GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent_id);
-        ParseDependencies(json, dependencies);
-        if (json.contains("instance")) instance = json.at("instance");
-        AbsorbFieldBindings(json, field_bindings);
+        // CLEANROOM LS49
     }
 };
 
@@ -204,56 +133,8 @@ struct WPTextObject : WPMiscObjectBase {
     std::vector<WPImageEffect> effects;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
-        FromCommonJson(json);
-        if (json.contains("text")) text = json.at("text");
-        if (json.contains("font")) font = json.at("font");
-        GET_JSON_NAME_VALUE_NOWARN(json, "pointsize", pointsize);
-        ReadMiscVec2Setting(json, "padding", padding);
-        ReadMiscVec2Setting(json, "spacing", spacing);
-        // A key that is there but not a string takes the registry's first entry,
-        // which is `left` for the horizontal registry and `center` for the vertical.
-        ReadMiscEnumWord(json, "horizontalalign", "left", horizontalalign);
-        ReadMiscEnumWord(json, "verticalalign", "center", verticalalign);
-        GET_JSON_NAME_VALUE_NOWARN(json, "anchor", anchor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "maxrows", maxrows);
-        GET_JSON_NAME_VALUE_NOWARN(json, "maxwidth", maxwidth);
-        GET_JSON_NAME_VALUE_NOWARN(json, "limitrows", limitrows);
-        GET_JSON_NAME_VALUE_NOWARN(json, "limitwidth", limitwidth);
-        GET_JSON_NAME_VALUE_NOWARN(json, "limituseellipsis", limituseellipsis);
-        GET_JSON_NAME_VALUE_NOWARN(json, "blockalign", blockalign);
-        GET_JSON_NAME_VALUE_NOWARN(json, "color", color);
-        GET_JSON_NAME_VALUE_NOWARN(json, "alpha", alpha);
-        GET_JSON_NAME_VALUE_NOWARN(json, "brightness", brightness);
-        GET_JSON_NAME_VALUE_NOWARN(json, "colorBlendMode", colorBlendMode);
-        GET_JSON_NAME_VALUE_NOWARN(json, "size", size);
-        GET_JSON_NAME_VALUE_NOWARN(json, "clampuvs", clampuvs);
-        GET_JSON_NAME_VALUE_NOWARN(json, "perspective", perspective);
-        GET_JSON_NAME_VALUE_NOWARN(json, "copybackground", copybackground);
-        GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
-        GET_JSON_NAME_VALUE_NOWARN(json, "disablepropagation", disablepropagation);
-        GET_JSON_NAME_VALUE_NOWARN(json, "opaquebackground", opaquebackground);
-        GET_JSON_NAME_VALUE_NOWARN(json, "ledsource", ledsource);
-        GET_JSON_NAME_VALUE_NOWARN(json, "backgroundcolor", backgroundcolor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "backgroundbrightness", backgroundbrightness);
-        GET_JSON_NAME_VALUE_NOWARN(json, "msdf", msdf);
-        GET_JSON_NAME_VALUE_NOWARN(json, "outline", outline);
-        GET_JSON_NAME_VALUE_NOWARN(json, "outlinethickness", outlinethickness);
-        GET_JSON_NAME_VALUE_NOWARN(json, "outlinecolor", outlinecolor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "blur", blur);
-        GET_JSON_NAME_VALUE_NOWARN(json, "blursize", blursize);
-        GET_JSON_NAME_VALUE_NOWARN(json, "dropshadow", dropshadow);
-        GET_JSON_NAME_VALUE_NOWARN(json, "dropshadowsize", dropshadowsize);
-        GET_JSON_NAME_VALUE_NOWARN(json, "dropshadowopacity", dropshadowopacity);
-        ReadMiscVec2Setting(json, "dropshadowoffset", dropshadowoffset);
-        GET_JSON_NAME_VALUE_NOWARN(json, "dropshadowcolor", dropshadowcolor);
-        if (json.contains("effects")) {
-            for (const auto& jE : json.at("effects")) {
-                WPImageEffect effect;
-                effect.FromJson(jE, vfs);
-                effects.push_back(std::move(effect));
-            }
-        }
-        return true;
+        // CLEANROOM LS50
+        return false;
     }
 };
 
@@ -267,14 +148,8 @@ struct WPModelObject : WPMiscObjectBase {
     std::vector<nlohmann::json> puppet_layer_settings;
 
     bool FromJson(const nlohmann::json& json, fs::VFS&) {
-        FromCommonJson(json);
-        GET_JSON_NAME_VALUE_NOWARN(json, "model", model);
-        GET_JSON_NAME_VALUE_NOWARN(json, "attachment", attachment);
-        GET_JSON_NAME_VALUE_NOWARN(json, "perspective", perspective);
-        GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
-        GET_JSON_NAME_VALUE_NOWARN(json, "disablepropagation", disablepropagation);
-        ParsePuppetAnimationLayers(json, puppet_layers, puppet_layer_settings);
-        return true;
+        // CLEANROOM LS51
+        return false;
     }
 };
 
@@ -287,16 +162,8 @@ struct WPShapeObject : WPMiscObjectBase {
     std::vector<WPImageEffect> effects;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
-        FromCommonJson(json);
-        GET_JSON_NAME_VALUE_NOWARN(json, "shape", shape);
-        if (json.contains("effects")) {
-            for (const auto& jE : json.at("effects")) {
-                WPImageEffect effect;
-                effect.FromJson(jE, vfs);
-                effects.push_back(std::move(effect));
-            }
-        }
-        return true;
+        // CLEANROOM LS51
+        return false;
     }
 };
 
@@ -314,16 +181,8 @@ struct WPCameraObject : WPMiscObjectBase {
     bool        disablepropagation { false };
 
     bool FromJson(const nlohmann::json& json, fs::VFS&) {
-        FromCommonJson(json);
-        GET_JSON_NAME_VALUE_NOWARN(json, "camera", camera);
-        GET_JSON_NAME_VALUE_NOWARN(json, "path", path);
-        GET_JSON_NAME_VALUE_NOWARN(json, "queuemode", queuemode);
-        GET_JSON_NAME_VALUE_NOWARN(json, "fov", fov);
-        GET_JSON_NAME_VALUE_NOWARN(json, "zoom", zoom);
-        if (json.contains("zoom")) zoom_setting = json.at("zoom");
-        GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
-        GET_JSON_NAME_VALUE_NOWARN(json, "disablepropagation", disablepropagation);
-        return true;
+        // CLEANROOM LS51
+        return false;
     }
 };
 

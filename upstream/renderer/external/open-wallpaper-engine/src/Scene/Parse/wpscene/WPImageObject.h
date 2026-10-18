@@ -30,7 +30,7 @@ public:
     std::string target;
     std::string source;
 
-    i32 afterpos { 0 }; // 0 for begin, start from 1
+    i32 afterpos { 0 };
 };
 
 class WPEffectFbo {
@@ -46,9 +46,6 @@ public:
 };
 
 class WPImageEffect {
-private:
-    static const std::unordered_set<std::string> BLACKLISTED_WORKSHOP_EFFECTS;
-    bool IsEffectBlacklisted(const std::string& filePath);
 public:
     bool                         FromJson(const nlohmann::json&, fs::VFS& vfs);
     bool                         FromFileJson(const nlohmann::json&, fs::VFS& vfs);
