@@ -1575,8 +1575,6 @@ ShapeCornerPoints(const wpscene::WPShapeObject& obj) {
     return points;
 }
 
-// CLEANROOM LS22: the file-local helpers of this group were removed; the rewrite designs its own.
-
 bool ScriptHandlesCursor(std::string_view script) {
     return script.find("cursor") != std::string_view::npos;
 }
@@ -1793,8 +1791,6 @@ void PlacePerspectiveCameraNode(SceneNode& node, const wpscene::WPSceneCamera& c
     world.translation()   = eye;
     SetNodeTransformFromMatrix(node, world.matrix());
 }
-
-// CLEANROOM LS27: the file-local helpers of this group were removed; the rewrite designs its own.
 
 std::array<float, 4> HDRBloomBlend(float threshold, float feather) {
     const float knee = std::max(0.0f, threshold * feather);
@@ -3160,6 +3156,326 @@ bool LoadModelEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Shapes (P2 R87) and the bloom post-process (R105 to R109, R114).
+// ---------------------------------------------------------------------------
+
+/// A shape object: a quad drawn through its last effect straight onto the scene,
+/// additively, with that effect's `DIRECTDRAW` combo forced on.
+void LoadShapeEntry(ParseContext& context, ParsedLayer& layer, const nlohmann::json& entry,
+                    const EntryPlan& plan) {
+    if (StaticallyHidden(entry)) return;
+    wpscene::WPShapeObject shape;
+    if (! shape.FromJson(entry, *context.vfs)) return;
+    ResolveUserEffectVisibility(context, shape.effects, plan.key);
+    const wpscene::WPImageEffect* last = nullptr;
+    for (const auto& effect : shape.effects) {
+        if (EffectIsBuilt(effect) && ! effect.materials.empty()) last = &effect;
+    }
+    if (last == nullptr || last->materials.size() != 1) return;
+
+    auto material = last->materials.front();
+    if (! last->passes.empty()) material.MergePass(last->passes.front());
+    material.combos["DIRECTDRAW"] = 1;
+    SceneMaterial  scene_material;
+    LoadedMaterial loaded;
+    if (! LoadMaterial(context, material, scene_material, loaded)) return;
+    scene_material.blenmode = BlendMode::Additive;
+
+    const float side = static_cast<float>(std::max(1, context.ortho_h));
+    std::array<float, 12> positions {};
+    std::array<float, 8>  uvs {};
+    // Zigzag order: left-bottom, left-top, right-bottom, right-top.
+    std::array<std::array<float, 2>, 4> corners { { { 0.0f, 1.0f }, { 0.0f, 0.0f }, { 1.0f, 1.0f }, { 1.0f, 0.0f } } };
+    if (const auto points = ShapeCornerPoints(shape); points.has_value()) {
+        const std::array<std::size_t, 4> order { 0, 3, 1, 2 };
+        for (std::size_t corner = 0; corner < 4; ++corner) {
+            const auto& point = (*points)[order[corner]];
+            corners[corner]   = { point.x(), point.y() };
+        }
+    }
+    for (std::size_t corner = 0; corner < 4; ++corner) {
+        positions[corner * 3]     = side * corners[corner][0] - side * 0.5f;
+        positions[corner * 3 + 1] = side * (1.0f - corners[corner][1]) - side * 0.5f;
+        uvs[corner * 2]           = corners[corner][0];
+        uvs[corner * 2 + 1]       = corners[corner][1];
+    }
+    auto mesh = MakeQuadMesh(positions, uvs);
+    mesh->AddMaterial(std::move(scene_material));
+    layer.node->AddMesh(mesh);
+    RegisterMaterialConstants(context, mesh->MaterialSlotPtr(0), material, loaded.info, plan.key);
+    if (context.shader_updater != nullptr) {
+        WPShaderValueData data;
+        data.renderTargets = loaded.render_targets;
+        context.shader_updater->SetNodeData(layer.node.get(), 0, data);
+    }
+}
+
+/// The render targets a bloom chain adds, taken back unless the chain is committed (R105).
+class BloomTargets {
+public:
+    explicit BloomTargets(Scene& scene) : m_scene(scene) {}
+    BloomTargets(const BloomTargets&)            = delete;
+    BloomTargets& operator=(const BloomTargets&) = delete;
+    ~BloomTargets() {
+        if (m_committed) return;
+        for (auto it = m_saved.rbegin(); it != m_saved.rend(); ++it) {
+            if (it->second.has_value()) m_scene.renderTargets[it->first] = *it->second;
+            else m_scene.renderTargets.erase(it->first);
+        }
+    }
+    void Add(const std::string& name, SceneRenderTarget target) {
+        const auto held = m_scene.renderTargets.find(name);
+        m_saved.emplace_back(name, held == m_scene.renderTargets.end()
+                                       ? std::nullopt
+                                       : std::optional<SceneRenderTarget>(held->second));
+        m_scene.renderTargets[name] = std::move(target);
+    }
+    void Commit() { m_committed = true; }
+
+private:
+    Scene&                                                              m_scene;
+    std::vector<std::pair<std::string, std::optional<SceneRenderTarget>>> m_saved;
+    bool                                                                m_committed { false };
+};
+
+/// A screen-following bloom target of `fraction` of the colour buffer.
+SceneRenderTarget BloomTarget(const Scene& scene, double fraction) {
+    const auto* frame = scene.FindRenderTarget(std::string(SpecTex_Default));
+    const i32   w     = frame != nullptr ? frame->width : 1;
+    const i32   h     = frame != nullptr ? frame->height : 1;
+    SceneRenderTarget target;
+    target.width      = std::max(1, static_cast<i32>(std::floor(w * fraction)));
+    target.height     = std::max(1, static_cast<i32>(std::floor(h * fraction)));
+    target.allowReuse = true;
+    target.format     = scene.hdr ? TextureFormat::RGBA16F : TextureFormat::RGBA8;
+    target.bind       = { .enable = true, .screen = true, .scale = fraction };
+    return target;
+}
+
+/// One pass of the chain: a shipped utility material read from the asset tree, its
+/// first textures set by the chain, drawn through the effect camera on the 2 by 2 card.
+std::optional<ScenePostProcessPass> BuildBloomPass(
+    ParseContext& context, const std::string& material_name, std::vector<std::string> textures,
+    std::string output, float source_texel_radius,
+    const std::vector<std::pair<std::string, ShaderValue>>& constants,
+    std::shared_ptr<SceneMaterial>*                          out_material = nullptr) {
+    nlohmann::json json;
+    wpscene::WPMaterial material;
+    if (! PARSE_JSON(fs::GetFileContent(*context.vfs, "/assets/materials/util/" + material_name + ".json"),
+                     json) ||
+        ! material.FromJson(json)) {
+        LOG_ERROR("cannot load bloom material %s", material_name.c_str());
+        return std::nullopt;
+    }
+    material.textures = std::move(textures);
+    SceneMaterial  scene_material;
+    LoadedMaterial loaded;
+    if (! LoadMaterial(context, material, scene_material, loaded)) {
+        LOG_ERROR("cannot load bloom material %s", material_name.c_str());
+        return std::nullopt;
+    }
+    for (const auto& [name, value] : constants) scene_material.customShader.constValues[name] = value;
+    auto mesh = MakeCardMesh(2.0f, 2.0f, 1.0f, 1.0f);
+    const auto shader_name = material.shader;
+    mesh->AddMaterial(std::move(scene_material));
+    auto node = std::make_shared<SceneNode>();
+    node->SetName("__bloom_" + shader_name);
+    node->AddMesh(mesh);
+    node->SetCamera("effect");
+    if (context.shader_updater != nullptr) {
+        WPShaderValueData data;
+        data.renderTargets = loaded.render_targets;
+        context.shader_updater->SetNodeData(node.get(), 0, data);
+    }
+    if (out_material != nullptr) *out_material = mesh->MaterialSlotPtr(0);
+    return ScenePostProcessPass { .node = node, .output = std::move(output),
+                                  .source_texel_radius = source_texel_radius };
+}
+
+ShaderValue Vec4Value(const std::array<float, 4>& lanes) { return ShaderValue(lanes.data(), 4); }
+
+/// The LDR chain (R107): extract, vertical down-sample, horizontal blur, combine.
+bool BuildLdrBloom(ParseContext& context, const wpscene::WPSceneGeneral& general,
+                   ScenePostProcess& post) {
+    auto&        scene = *context.scene;
+    BloomTargets targets(scene);
+    targets.Add("_rt_bloom_mip1", BloomTarget(scene, 0.25));
+    targets.Add("_rt_bloom_mip2", BloomTarget(scene, 0.125));
+    targets.Add("_rt_bloom_blur", BloomTarget(scene, 0.125));
+    targets.Add("_rt_bloom_combine", BloomTarget(scene, 1.0));
+    const std::string frame(SpecTex_Default);
+
+    float strength = general.bloomstrength;
+    float threshold = general.bloomthreshold;
+    std::array<float, 3> tint = general.bloomtint;
+    std::shared_ptr<SceneMaterial> extract_material;
+    auto extract = BuildBloomPass(
+        context, "downsample_quarter_bloom", { frame }, "_rt_bloom_mip1", 0.0f,
+        { { "g_BloomStrength", ShaderValue(strength) }, { "g_BloomThreshold", ShaderValue(threshold) },
+          { "g_BloomTint", ShaderValue(tint.data(), 3) } },
+        &extract_material);
+    auto down = BuildBloomPass(context, "downsample_eighth_blur_v", { "_rt_bloom_mip1" },
+                               "_rt_bloom_mip2", 0.0f, {});
+    auto blur = BuildBloomPass(context, "blur_h_bloom", { "_rt_bloom_mip2" }, "_rt_bloom_blur", 0.0f, {});
+    auto combine = BuildBloomPass(context, "combine_ldr", { frame, "_rt_bloom_blur" },
+                                  "_rt_bloom_combine", 0.0f, {});
+    if (! extract || ! down || ! blur || ! combine) return false;
+    post.name = "__bloom";
+    post.steps.push_back(std::move(*extract));
+    post.steps.push_back(std::move(*down));
+    post.steps.push_back(std::move(*blur));
+    post.steps.push_back(std::move(*combine));
+    post.steps.push_back(ScenePostProcessCopy { .src = "_rt_bloom_combine", .dst = frame });
+
+    if (auto* runtime = scene.runtime.get(); runtime != nullptr && extract_material != nullptr) {
+        if (HasDynamicSetting(general.bloomstrength_setting)) {
+            runtime->RegisterMaterialConstant(extract_material, "g_BloomStrength",
+                                              ResolveFloatSetting(*runtime, general.bloomstrength_setting));
+        }
+        if (HasDynamicSetting(general.bloomthreshold_setting)) {
+            runtime->RegisterMaterialConstant(extract_material, "g_BloomThreshold",
+                                              ResolveFloatSetting(*runtime, general.bloomthreshold_setting));
+        }
+        if (general.dynamic_bloomtint) {
+            runtime->RegisterMaterialConstant(extract_material, "g_BloomTint",
+                                              ResolveVec3Setting(*runtime, general.bloomtint_setting));
+        }
+    }
+    targets.Commit();
+    return true;
+}
+
+/// The values the HDR chain's live bindings recompute from (R109).
+struct HdrBloomState {
+    float strength { 2.0f };
+    float scatter { 1.619f };
+    float threshold { 1.0f };
+    float feather { 0.1f };
+    int   levels { 1 };
+};
+
+/// The HDR chain (R108). A missing required material is a failure of the whole scene.
+bool BuildHdrBloom(ParseContext& context, const wpscene::WPSceneGeneral& general,
+                   ScenePostProcess& post) {
+    auto&       scene = *context.scene;
+    const auto  exists = [&](const char* name) {
+        return ! fs::GetFileContent(*context.vfs, std::string("/assets/materials/util/") + name + ".json").empty();
+    };
+    for (const char* required : { "hdr_downsample_bloom", "hdr_downsample", "hdr_upsample",
+                                  "combine_hdr_upsample_linear" }) {
+        if (! exists(required)) {
+            throw std::runtime_error(std::string("HDR bloom needs the material ") + required);
+        }
+    }
+    const std::string cubic = exists("hdr_upsample_cubic") ? "hdr_upsample_cubic" : "hdr_upsample";
+
+    auto state       = std::make_shared<HdrBloomState>();
+    state->strength  = general.bloomhdrstrength;
+    state->scatter   = general.bloomhdrscatter;
+    state->threshold = general.bloomhdrthreshold;
+    state->feather   = general.bloomhdrfeather;
+    state->levels    = HDRBloomLevels(general.bloomhdriterations, context.ortho_w, context.ortho_h);
+    const int levels = state->levels;
+
+    BloomTargets targets(scene);
+    for (int level = 0; level < levels; ++level) {
+        targets.Add("_rt_hdr_bloom_" + std::to_string(level),
+                    BloomTarget(scene, 1.0 / static_cast<double>(1 << (level + 1))));
+    }
+    targets.Add("_rt_bloom_combine", BloomTarget(scene, 1.0));
+    const std::string frame(SpecTex_Default);
+    const auto        level_name = [](int level) { return "_rt_hdr_bloom_" + std::to_string(level); };
+    const std::pair<std::string, ShaderValue> zero_var { "g_RenderVar0", Vec4Value({ 0, 0, 0, 0 }) };
+
+    std::shared_ptr<SceneMaterial>              extract_material;
+    std::vector<std::shared_ptr<SceneMaterial>> up_materials;
+    const auto blend = HDRBloomBlend(state->threshold, state->feather);
+    auto extract = BuildBloomPass(
+        context, "hdr_downsample_bloom", { frame }, level_name(0), 1.0f,
+        { zero_var,
+          { "g_BloomStrength", ShaderValue(HDRBloomExtractionStrength(state->strength, state->scatter, levels)) },
+          { "g_BloomBlendParams", Vec4Value(blend) },
+          { "g_BloomTint", ShaderValue(general.bloomtint.data(), 3) } },
+        &extract_material);
+    if (! extract) return false;
+    post.name = "__hdr_bloom";
+    post.steps.push_back(std::move(*extract));
+    for (int level = 1; level < levels; ++level) {
+        auto pass = BuildBloomPass(context, "hdr_downsample", { level_name(level - 1) }, level_name(level),
+                                   1.0f, { zero_var });
+        if (! pass) return false;
+        post.steps.push_back(std::move(*pass));
+    }
+    for (int level = levels - 1; level >= 1; --level) {
+        std::shared_ptr<SceneMaterial> material;
+        auto pass = BuildBloomPass(context, level >= levels - 2 ? cubic : "hdr_upsample",
+                                   { level_name(level) }, level_name(level - 1), 0.5f,
+                                   { zero_var, { "g_BloomScatter", ShaderValue(state->scatter) } }, &material);
+        if (! pass) return false;
+        up_materials.push_back(material);
+        post.steps.push_back(std::move(*pass));
+    }
+    auto combine = BuildBloomPass(context, "combine_hdr_upsample_linear", { frame, level_name(0) },
+                                  "_rt_bloom_combine", 0.0f, {});
+    if (! combine) return false;
+    post.steps.push_back(std::move(*combine));
+    post.steps.push_back(ScenePostProcessCopy { .src = "_rt_bloom_combine", .dst = frame });
+
+    if (auto* runtime = scene.runtime.get(); runtime != nullptr) {
+        const auto follow = [&](const nlohmann::json& setting, float HdrBloomState::* field,
+                                std::function<void()> apply) {
+            if (! HasDynamicSetting(setting)) return;
+            auto value = ResolveFloatSetting(*runtime, setting);
+            (*state).*field = value->getFloat();
+            runtime->RegisterDynamicValueListener(
+                std::move(value), [state, field, apply](const DynamicValue& now) {
+                    (*state).*field = now.getFloat();
+                    apply();
+                });
+        };
+        const auto apply_strength = [state, extract_material]() {
+            if (extract_material == nullptr) return;
+            extract_material->customShader.constValues["g_BloomStrength"] = ShaderValue(
+                HDRBloomExtractionStrength(state->strength, state->scatter, state->levels));
+        };
+        const auto apply_scatter = [state, up_materials, apply_strength]() {
+            for (const auto& material : up_materials) {
+                if (material != nullptr) {
+                    material->customShader.constValues["g_BloomScatter"] = ShaderValue(state->scatter);
+                }
+            }
+            apply_strength();
+        };
+        const auto apply_blend = [state, extract_material]() {
+            if (extract_material == nullptr) return;
+            extract_material->customShader.constValues["g_BloomBlendParams"] =
+                Vec4Value(HDRBloomBlend(state->threshold, state->feather));
+        };
+        follow(general.bloomhdrstrength_setting, &HdrBloomState::strength, apply_strength);
+        follow(general.bloomhdrscatter_setting, &HdrBloomState::scatter, apply_scatter);
+        follow(general.bloomhdrthreshold_setting, &HdrBloomState::threshold, apply_blend);
+        follow(general.bloomhdrfeather_setting, &HdrBloomState::feather, apply_blend);
+        if (general.dynamic_bloomtint && extract_material != nullptr) {
+            runtime->RegisterMaterialConstant(extract_material, "g_BloomTint",
+                                              ResolveVec3Setting(*runtime, general.bloomtint_setting));
+        }
+        apply_scatter();
+        apply_blend();
+    }
+    targets.Commit();
+    return true;
+}
+
+/// Installs the bloom chain the scene's settings ask for (R105).
+void BuildBloom(ParseContext& context, const wpscene::WPSceneGeneral& general, bool bloom) {
+    if (! bloom) return;
+    auto post = std::make_shared<ScenePostProcess>();
+    const bool built = context.scene->hdr ? BuildHdrBloom(context, general, *post)
+                                          : BuildLdrBloom(context, general, *post);
+    if (built) context.scene->post_processes.push_back(std::move(post));
+}
+
 /// A light: a member of the tree with no picture of its own. Its colour, radius,
 /// exponent and intensity follow their bindings; its cones and control point are
 /// fixed at load (R100 to R102).
@@ -3300,8 +3616,9 @@ void BuildLayers(ParseContext& context, const wpscene::WPSceneGeneral& general,
         const bool plain = plan.admission == Admission::Node;
         const bool typed_node = plan.kind == EntryKind::Light || plan.kind == EntryKind::Camera;
         if (plain || (plan.placeholder && ! typed_node)) {
-            AddLayer(context, at, entry, plan, plain, true);
+            auto& layer = AddLayer(context, at, entry, plan, plain, true);
             SetUnhittable(context, plan.key);
+            if (plan.kind == EntryKind::Shape) LoadShapeEntry(context, layer, entry, plan);
         }
         if (plain) continue;
         bool built = true;
@@ -3678,6 +3995,8 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
     scene->shaderValueUpdater = std::make_unique<WPShaderValueUpdater>(scene.get());
     scene->paritileSys   = std::make_unique<ParticleSystem>(*scene);
     scene->resolution    = CurrentSceneResolution();
+    // The card every chain pass is drawn on: 2 by 2 units, texture coordinates 0 to 1.
+    scene->default_effect_mesh.ChangeMeshDataFrom(*MakeCardMesh(2.0f, 2.0f, 1.0f, 1.0f));
     scene->display_sized = ! general.isOrtho;
 
     ParseContext context {};
@@ -3737,6 +4056,7 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
 
     ApplyDefaultDepthTarget(context);
     PrewarmParticleSystems(context);
+    BuildBloom(context, general, bloom);
 
     // Layers that read other layers' pictures, and whether that is legal.
     const auto refs = CollectLayerTextureRefs(objects, index, &vfs);
