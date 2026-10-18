@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e1b-scene-model.md; written without access to the original source.
 #pragma once
 #include <vector>
 #include <list>
@@ -5,6 +6,9 @@
 #include <optional>
 #include <cstdint>
 #include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include "Core/Literals.hpp"
 #include "SceneMaterial.h"
 #include "Type.hpp"
@@ -59,6 +63,9 @@ class SceneImageEffectLayer {
 public:
     SceneImageEffectLayer(SceneNode* node, float w, float h, std::string_view pingpong_a,
                           std::string_view pingpong_b);
+    ~SceneImageEffectLayer();
+    SceneImageEffectLayer(const SceneImageEffectLayer&)            = delete;
+    SceneImageEffectLayer& operator=(const SceneImageEffectLayer&) = delete;
 
     void AddEffect(const std::shared_ptr<SceneImageEffect>& node);
     std::size_t EffectCount() const;
@@ -90,6 +97,19 @@ public:
     void ResolveEffect(const SceneMesh& defualt_mesh, std::string_view effect_cam);
 
 private:
+    std::string                                    m_pingpong_a;
+    std::string                                    m_pingpong_b;
+    std::vector<std::shared_ptr<SceneImageEffect>> m_effects;
+    std::unique_ptr<SceneMesh>                     m_final_mesh;
+    std::unique_ptr<SceneNode>                     m_final_node;
+    BlendMode                                      m_final_blend { BlendMode::Normal };
+    SceneNode*                                     m_resolved_final { nullptr };
+    /// Which authored names `ResolveEffect` has recorded already: nodes by address,
+    /// and for each effect how many of its commands.
+    std::unordered_set<const SceneImageEffectNode*>      m_recorded_nodes;
+    std::unordered_map<const SceneImageEffect*, std::size_t> m_recorded_commands;
+    bool                                           m_logged_missing_material { false };
+
     std::string m_final_camera;
     std::optional<BlendMode>   m_idle_final_blend;
 
