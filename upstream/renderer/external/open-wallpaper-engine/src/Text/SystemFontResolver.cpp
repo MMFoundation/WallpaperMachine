@@ -1,6 +1,8 @@
+// Clean-room implementation from the WallpaperMachine spec e5-text-audio-video-runtime.md; written without access to the original source.
 #include "Text/SystemFontResolver.hpp"
 
 #include <array>
+#include <climits>
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -62,9 +64,71 @@ const SceneFont* FindSceneFont(std::string_view key) {
 }
 
 #ifdef __APPLE__
+// RAII holder for a CoreFoundation object; releases it exactly once.
+template<typename T>
+class CfOwned {
+public:
+    explicit CfOwned(T ref = nullptr): m_ref(ref) {}
+    CfOwned(const CfOwned&)            = delete;
+    CfOwned& operator=(const CfOwned&) = delete;
+    ~CfOwned() {
+        if (m_ref != nullptr) CFRelease(m_ref);
+    }
+    T get() const { return m_ref; }
+    explicit operator bool() const { return m_ref != nullptr; }
+
+private:
+    T m_ref;
+};
+
+std::string Utf8FromCf(CFStringRef text) {
+    if (text == nullptr) return {};
+    const CFIndex length = CFStringGetLength(text);
+    const CFIndex size   = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8) + 1;
+    std::string   out(static_cast<std::size_t>(size), '\0');
+    if (! CFStringGetCString(text, out.data(), size, kCFStringEncodingUTF8)) return {};
+    out.resize(std::char_traits<char>::length(out.c_str()));
+    return out;
+}
+
 SystemFontFace ResolveAppleFamily(std::string_view family) {
-    (void)family;
-    return {}; // CLEANROOM MV1
+    if (family.empty()) return {};
+    const CfOwned<CFStringRef> name { CFStringCreateWithBytes(
+        kCFAllocatorDefault, reinterpret_cast<const UInt8*>(family.data()),
+        static_cast<CFIndex>(family.size()), kCFStringEncodingUTF8, false) };
+    if (! name) return {};
+
+    const void*                    keys[]   = { kCTFontFamilyNameAttribute };
+    const void*                    values[] = { name.get() };
+    const CfOwned<CFDictionaryRef> attributes { CFDictionaryCreate(
+        kCFAllocatorDefault, keys, values, 1, &kCFTypeDictionaryKeyCallBacks,
+        &kCFTypeDictionaryValueCallBacks) };
+    if (! attributes) return {};
+    const CfOwned<CTFontDescriptorRef> descriptor { CTFontDescriptorCreateWithAttributes(
+        attributes.get()) };
+    if (! descriptor) return {};
+
+    // The system answers a family it does not have with a fallback font; only the family
+    // that was asked for counts.
+    const CfOwned<CTFontRef> font { CTFontCreateWithFontDescriptor(descriptor.get(), 12.0, nullptr) };
+    if (! font) return {};
+    const CfOwned<CFStringRef> matched_family { CTFontCopyFamilyName(font.get()) };
+    if (! matched_family ||
+        CFStringCompare(matched_family.get(), name.get(), kCFCompareCaseInsensitive) != kCFCompareEqualTo) {
+        return {};
+    }
+
+    const CfOwned<CFURLRef> url { static_cast<CFURLRef>(CTFontCopyAttribute(font.get(), kCTFontURLAttribute)) };
+    if (! url || CFGetTypeID(url.get()) != CFURLGetTypeID()) return {};
+    char path[PATH_MAX] {};
+    if (! CFURLGetFileSystemRepresentation(url.get(), true, reinterpret_cast<UInt8*>(path), sizeof(path))) {
+        return {};
+    }
+    SystemFontFace face;
+    face.path = path;
+    const CfOwned<CFStringRef> postscript { CTFontCopyPostScriptName(font.get()) };
+    face.postscript_name = Utf8FromCf(postscript.get());
+    return face;
 }
 #endif
 

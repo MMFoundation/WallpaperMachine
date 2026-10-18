@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e5-text-audio-video-runtime.md; written without access to the original source.
 #include "Text/TextLayer.hpp"
 #include "Text/SystemFontResolver.hpp"
 
@@ -11,8 +12,10 @@
 #include <mutex>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 #include <utility>
 
 #include <ft2build.h>
@@ -38,17 +41,32 @@ std::mutex g_freetype_mutex;
 
 class FtLibrary {
 public:
+    // Created once, on first use, and destroyed after every face made from it (the faces live
+    // in statics constructed after this one). Null when FreeType cannot start: every face
+    // request then fails and the layout falls back to boxes.
     static FtLibrary& Get() {
-        static FtLibrary stub;
-        return stub;
+        static FtLibrary instance;
+        return instance;
     }
 
-    FT_Library handle() const { return nullptr; } // CLEANROOM MV3
+    FT_Library handle() const { return m_library; }
+
+private:
+    FtLibrary() {
+        if (FT_Init_FreeType(&m_library) != 0) m_library = nullptr;
+    }
+    ~FtLibrary() {
+        if (m_library != nullptr) FT_Done_FreeType(m_library);
+    }
+    FtLibrary(const FtLibrary&)            = delete;
+    FtLibrary& operator=(const FtLibrary&) = delete;
+
+    FT_Library m_library { nullptr };
 };
 
 struct FtFaceDeleter {
     void operator()(FT_Face face) const {
-        (void)face; // CLEANROOM MV4
+        if (face != nullptr) FT_Done_Face(face);
     }
 };
 
@@ -135,14 +153,22 @@ struct TextBlock {
     float Height() const { return top - bottom; }
 };
 
+// One colour channel as a byte; a channel that is not a number counts as full.
 uint8_t ColorByte(float value) {
-    (void)value;
-    return 0; // CLEANROOM MV5
+    if (! std::isfinite(value)) value = 1.0f;
+    return static_cast<uint8_t>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
 }
 
+// The colour every texel of a plain picture takes, and the alpha a fully covered one has. The
+// alpha is the state's own and is not scaled by brightness.
 std::array<uint8_t, 4> TextColorBytes(const TextLayerState& state) {
-    (void)state;
-    return { 0, 0, 0, 0 }; // CLEANROOM MV6
+    const float brightness = std::isfinite(state.brightness) ? std::max(0.0f, state.brightness) : 1.0f;
+    return {
+        ColorByte(state.color.x() * brightness),
+        ColorByte(state.color.y() * brightness),
+        ColorByte(state.color.z() * brightness),
+        ColorByte(state.alpha),
+    };
 }
 
 using OwnedFace = std::unique_ptr<std::remove_pointer_t<FT_Face>, FtFaceDeleter>;
@@ -155,9 +181,15 @@ bool SetFaceSize(FT_Face face, float point_size) {
 
 // A face of a font the wallpaper ships, which is in memory already.
 OwnedFace CreateFreeTypeFaceFromBytes(const std::vector<uint8_t>& data, float point_size) {
-    (void)data;
-    (void)point_size;
-    return nullptr; // CLEANROOM MV7
+    FT_Library library = FtLibrary::Get().handle();
+    if (library == nullptr || data.empty()) return nullptr;
+    FT_Face face = nullptr;
+    // The face reads the bytes where they lie; the state that owns them outlives the layout.
+    if (FT_New_Memory_Face(library, data.data(), static_cast<FT_Long>(data.size()), 0, &face) != 0) {
+        return nullptr;
+    }
+    OwnedFace owned(face);
+    return SetFaceSize(face, point_size) ? std::move(owned) : nullptr;
 }
 
 bool HasPostScriptName(FT_Face face, const std::string& name) {
@@ -468,9 +500,59 @@ private:
     std::size_t          m_next_in_chain { 0 };
 };
 
+// The code points of UTF-8 text; never fails. Ill-formed input becomes U+FFFD: a stray
+// continuation byte or a byte that cannot lead is one, a lead without the continuation bytes
+// it announces is one and decoding goes on with the byte after the lead, and a sequence cut
+// off by the end of the text is one and ends the text. Overlong and surrogate forms decode to
+// the number they spell; no face has such a code point, so they are skipped later.
 std::vector<uint32_t> DecodeUtf8(std::string_view text) {
-    (void)text;
-    return {}; // CLEANROOM MV8
+    constexpr uint32_t kReplacement = 0xFFFD;
+    const auto is_continuation = [](unsigned char byte) { return (byte & 0xC0u) == 0x80u; };
+    std::vector<uint32_t> out;
+    out.reserve(text.size());
+    std::size_t at = 0;
+    while (at < text.size()) {
+        const auto lead = static_cast<unsigned char>(text[at]);
+        if (lead < 0x80u) {
+            out.push_back(lead);
+            ++at;
+            continue;
+        }
+        std::size_t length = 0;
+        uint32_t    value  = 0;
+        if (lead >= 0xC0u && lead <= 0xDFu) { length = 2; value = lead & 0x1Fu; }
+        else if (lead >= 0xE0u && lead <= 0xEFu) { length = 3; value = lead & 0x0Fu; }
+        else if (lead >= 0xF0u && lead <= 0xF7u) { length = 4; value = lead & 0x07u; }
+        if (length == 0) { // a stray continuation byte, or one that cannot lead
+            out.push_back(kReplacement);
+            ++at;
+            continue;
+        }
+        const std::size_t available = text.size() - at - 1;
+        const std::size_t checked   = std::min(available, length - 1);
+        bool              well_formed = true;
+        for (std::size_t index = 1; index <= checked; ++index) {
+            if (! is_continuation(static_cast<unsigned char>(text[at + index]))) {
+                well_formed = false;
+                break;
+            }
+        }
+        if (! well_formed) {
+            out.push_back(kReplacement);
+            ++at;
+            continue;
+        }
+        if (available < length - 1) { // cut off by the end of the text
+            out.push_back(kReplacement);
+            break;
+        }
+        for (std::size_t index = 1; index < length; ++index) {
+            value = (value << 6) | (static_cast<unsigned char>(text[at + index]) & 0x3Fu);
+        }
+        out.push_back(value);
+        at += length;
+    }
+    return out;
 }
 
 // Where a row's pen starts, from where the widest row's does: the rows of a block are
@@ -1177,10 +1259,31 @@ TextLayerLayout MeasureFallbackText(const TextLayerState& state) {
 template<typename Plot>
 void RasterizeFallbackText(const TextLayerState& state, uint32_t width, uint32_t height,
                            Plot&& plot) {
-    (void)state;
-    (void)width;
-    (void)height;
-    (void)plot; // CLEANROOM MV9
+    if (state.text.empty() || width == 0 || height == 0) return;
+    const auto lines   = BuildFallbackLines(state);
+    const auto metrics = FallbackMetrics(state);
+    const auto block   = MeasureTextBlock(lines, metrics);
+    const linalg::Vector2f padding = CardPadding(state) + linalg::Vector2f::Constant(TextStyleMargin(state));
+    const float box_height         = std::max(1.0f, metrics.ascender);
+    for (std::size_t row = 0; row < lines.size(); ++row) {
+        const auto& line     = lines[row];
+        const float baseline = padding.y() + block.top + static_cast<float>(row) * block.pitch;
+        float       pen      = padding.x() - block.min_x + RowOffset(state, block.widest_row, line.LayoutWidth());
+        for (const auto& glyph : line.glyphs) {
+            if (glyph.has_ink) {
+                const long first_x = static_cast<long>(std::floor(pen));
+                const long last_x  = static_cast<long>(std::ceil(pen + glyph.right));
+                const long first_y = static_cast<long>(std::floor(baseline - box_height));
+                const long last_y  = static_cast<long>(std::ceil(baseline));
+                for (long y = std::max(first_y, 0L); y < std::min(last_y, static_cast<long>(height)); ++y) {
+                    for (long x = std::max(first_x, 0L); x < std::min(last_x, static_cast<long>(width)); ++x) {
+                        plot(static_cast<int>(x), static_cast<int>(y), static_cast<uint8_t>(255));
+                    }
+                }
+            }
+            pen += glyph.advance;
+        }
+    }
 }
 
 // Paints the text with FreeType, calling `plot(x, y, coverage)` for each pixel a
@@ -1189,11 +1292,43 @@ void RasterizeFallbackText(const TextLayerState& state, uint32_t width, uint32_t
 template<typename Plot>
 bool RasterizeFreeTypeText(const TextLayerState& state, uint32_t width, uint32_t height,
                            Plot&& plot) {
-    (void)state;
-    (void)width;
-    (void)height;
-    (void)plot;
-    return true; // CLEANROOM MV10
+    FaceChain faces(state);
+    if (faces.primary() == nullptr) return false;
+    if (state.text.empty() || width == 0 || height == 0) return true;
+
+    const auto lines = BuildFreeTypeLines(state, faces);
+    const auto block = MeasureTextBlock(lines, FaceMetrics(state, faces));
+    const linalg::Vector2f padding = CardPadding(state) + linalg::Vector2f::Constant(TextStyleMargin(state));
+    for (std::size_t row = 0; row < lines.size(); ++row) {
+        const auto& line     = lines[row];
+        const float baseline = padding.y() + block.top + static_cast<float>(row) * block.pitch;
+        float       pen      = padding.x() - block.min_x + RowOffset(state, block.widest_row, line.LayoutWidth());
+        for (const auto& glyph : line.glyphs) {
+            FT_Face face = faces.face(glyph.face);
+            // A glyph the face will not render now is skipped, and still moves the pen.
+            if (glyph.has_ink && face != nullptr &&
+                FT_Load_Char(face, glyph.codepoint, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) == 0) {
+                const FT_Bitmap& bitmap = face->glyph->bitmap;
+                if (bitmap.pixel_mode == FT_PIXEL_MODE_GRAY && bitmap.buffer != nullptr) {
+                    const long left = static_cast<long>(std::round(pen)) + face->glyph->bitmap_left;
+                    const long top  = static_cast<long>(std::round(baseline)) - face->glyph->bitmap_top;
+                    for (long r = 0; r < static_cast<long>(bitmap.rows); ++r) {
+                        const long y = top + r;
+                        if (y < 0 || y >= static_cast<long>(height)) continue;
+                        // The pitch is the step to the next row down, whichever way the data flows.
+                        const unsigned char* source = bitmap.buffer + r * static_cast<long>(bitmap.pitch);
+                        for (long c = 0; c < static_cast<long>(bitmap.width); ++c) {
+                            const long x = left + c;
+                            if (x < 0 || x >= static_cast<long>(width) || source[c] == 0) continue;
+                            plot(static_cast<int>(x), static_cast<int>(y), static_cast<uint8_t>(source[c]));
+                        }
+                    }
+                }
+            }
+            pen += glyph.advance;
+        }
+    }
+    return true;
 }
 
 std::optional<TextLayerLayout> MeasureFreeTypeText(const TextLayerState& state) {
@@ -1258,14 +1393,32 @@ float TextStyleMargin(const TextLayerState& state) {
 }
 
 linalg::Vector2f EstimateTextLayerSize(std::string_view text, float point_size, float padding) {
-    (void)text;
-    (void)point_size;
-    (void)padding;
-    return linalg::Vector2f::Zero(); // CLEANROOM MV11
+    const float pixels = PointSizeToPixels(point_size);
+    const float margin = std::isfinite(padding) && padding > 0.0f ? padding : 0.0f;
+    std::size_t longest = 1, current = 0, lines = 1;
+    for (const char byte : text) {
+        if (byte == '\n') {
+            longest = std::max(longest, current);
+            current = 0;
+            ++lines;
+        } else if ((static_cast<unsigned char>(byte) & 0xC0u) != 0x80u) {
+            ++current;
+        }
+    }
+    longest = std::max(longest, current);
+    return { static_cast<float>(longest) * std::max(1.0f, 0.6f * pixels) + 2.0f * margin,
+             static_cast<float>(lines) * std::max(1.0f, 1.2f * pixels) + 2.0f * margin };
 }
 
 TextLayerLayout MeasureTextLayerLayout(const TextLayerState& state) {
-    // CLEANROOM MV12
+#ifdef WESCENE_BUILD_TESTS
+    ++g_measurement_count;
+#endif
+    {
+        const std::lock_guard lock { g_freetype_mutex };
+        if (auto layout = MeasureFreeTypeText(state)) return *layout;
+    }
+    // No face opens: boxes, laid out with the same rules and no font lock.
     return MeasureFallbackText(state);
 }
 
@@ -1371,7 +1524,7 @@ void RasterizeTextLayer(const TextLayerState& state, uint32_t width, uint32_t he
     const auto paint = [&](auto&& plot) {
         bool rasterized = false;
         {
-            // CLEANROOM MV13
+            const std::lock_guard lock { g_freetype_mutex };
             rasterized = RasterizeFreeTypeText(state, width, height, plot);
         }
         if (! rasterized) RasterizeFallbackText(state, width, height, plot);
@@ -1412,8 +1565,8 @@ void RasterizeTextLayer(const TextLayerState& state, uint32_t width, uint32_t he
             static_cast<uint8_t>(std::lround(static_cast<float>(coverage) * alpha_scale));
         const std::size_t offset =
             (static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x)) * 4u;
-        (void)alpha;
-        (void)offset; // CLEANROOM MV14
+        if (offset + 3u >= rgba.size()) return;
+        rgba[offset + 3u] = std::max(rgba[offset + 3u], alpha);
     });
 }
 
@@ -1486,7 +1639,10 @@ std::string FontFitIdentity(const SystemFontFit& fit) {
 TextLayer::TextLayer(TextLayerState state): m_state(std::move(state)) {
     if (m_state.resolved_font_identity.empty()) m_state.resolved_font_identity = m_state.font_key;
     if (m_state.resolved_font_kind.empty()) m_state.resolved_font_kind = "system";
-    // CLEANROOM MV15
+    EnsureCacheIdentity();
+    Relayout();
+    MarkCacheDirty();
+    m_state.dirty = false;
 }
 
 TextLayer::TextLayer(TextLayerState state, TextLayerLayout layout)
@@ -1499,13 +1655,19 @@ TextLayer::TextLayer(TextLayerState state, TextLayerLayout layout)
 }
 
 void TextLayer::SetText(std::string text) {
-    (void)text; // CLEANROOM MV16
+    if (m_state.text == text) return;
+    m_state.text           = std::move(text);
+    m_state.dirty          = true;
+    m_state.layout_pending = true;
+    MarkCacheDirty();
 }
 
 void TextLayer::SetPointSize(float point_size) {
     if (! std::isfinite(point_size) || point_size <= 0.0f || m_state.point_size == point_size) return;
     m_state.point_size     = point_size;
-    // CLEANROOM MV17
+    m_state.dirty          = true;
+    m_state.layout_pending = true;
+    MarkCacheDirty();
 }
 
 void TextLayer::SetFont(std::string font_key, std::string kind, std::string identity,
@@ -1523,21 +1685,27 @@ void TextLayer::SetFont(std::string font_key, std::string kind, std::string iden
     m_state.resolved_font_face     = std::move(face);
     m_state.resolved_font_fit      = std::move(fit);
     m_state.resolved_font_data     = std::move(data);
-    // CLEANROOM MV18
+    m_state.dirty          = true;
+    m_state.layout_pending = true;
+    MarkCacheDirty();
 }
 
 void TextLayer::SetAlignment(std::string horizontal, std::string vertical) {
     if (m_state.horizontal_align == horizontal && m_state.vertical_align == vertical) return;
     m_state.horizontal_align = std::move(horizontal);
     m_state.vertical_align   = std::move(vertical);
-    // CLEANROOM MV19
+    m_state.dirty          = true;
+    m_state.layout_pending = true;
+    MarkCacheDirty();
 }
 
 void TextLayer::SetPaddingApplies(bool applies) {
     if (m_state.padding_applies == applies) return;
     m_state.padding_applies = applies;
     m_state.padding         = applies ? m_state.authored_padding : linalg::Vector2f::Zero();
-    // CLEANROOM MV20
+    m_state.dirty          = true;
+    m_state.layout_pending = true;
+    MarkCacheDirty();
 }
 
 bool TextLayer::ApplyPreparedLayout(uint64_t revision, TextLayerLayout layout) {
@@ -1549,7 +1717,9 @@ bool TextLayer::ApplyPreparedLayout(uint64_t revision, TextLayerLayout layout) {
 }
 
 void TextLayer::ClearDirty() {
-    // CLEANROOM MV21
+    m_state.dirty       = false;
+    m_state.cache_dirty = false;
+    m_state.full_dirty  = false;
 }
 
 linalg::Vector2f TextLayer::rasterSize() const {
@@ -1562,15 +1732,47 @@ TextLayerRenderBounds TextLayer::renderBounds() const {
 
 void TextLayer::Relayout() {
     m_layout               = MeasureTextLayerLayout(m_state);
-    // CLEANROOM MV22
+    m_state.layout_pending = false;
 }
 
 void TextLayer::EnsureCacheIdentity() {
-    // CLEANROOM MV23
+    if (! m_state.texture_cache_key.empty()) return;
+    // Every field that changes the picture, joined so that no field runs into the next.
+    // Alignment and colour are left out: the card's shader and placement take those.
+    std::string identity;
+    const auto  add = [&identity](const std::string& field) {
+        identity += field;
+        identity += '\x1f';
+    };
+    const auto number = [](double value) { return std::to_string(value); };
+    const auto& style = m_state.style;
+    add(m_state.layer_key);
+    add(m_state.text);
+    add(m_state.font_key);
+    add(m_state.resolved_font_kind);
+    add(m_state.resolved_font_identity);
+    add(m_state.resolved_font_path);
+    add(m_state.resolved_font_face);
+    add(FontFitIdentity(m_state.resolved_font_fit));
+    add(number(m_state.point_size));
+    add(number(m_state.max_width));
+    add(std::to_string(m_state.max_rows));
+    add(std::string(m_state.limit_width ? "w" : "-") + (m_state.limit_rows ? "r" : "-") +
+        (m_state.use_ellipsis ? "e" : "-") + (m_state.block_align ? "b" : "-") +
+        (style.outline ? "o" : "-") + (style.blur ? "u" : "-") + (style.drop_shadow ? "s" : "-"));
+    add(number(m_state.padding.x()) + "," + number(m_state.padding.y()));
+    add(number(m_state.authored_padding.x()) + "," + number(m_state.authored_padding.y()));
+    add(number(m_state.spacing.x()) + "," + number(m_state.spacing.y()));
+    add(number(style.outline_thickness) + "," + number(style.blur_size) + "," + number(style.shadow_size) + "," +
+        number(style.shadow_opacity) + "," + number(style.shadow_offset.x()) + "," +
+        number(style.shadow_offset.y()));
+    m_state.texture_cache_key = "textcache:" + std::to_string(std::hash<std::string> {}(identity));
 }
 
 void TextLayer::MarkCacheDirty() {
-    // CLEANROOM MV24
+    m_state.cache_dirty = true;
+    m_state.full_dirty  = true;
+    ++m_state.cache_revision;
 }
 
 } // namespace wallpaper

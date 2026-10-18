@@ -15,32 +15,44 @@
 namespace wallpaper
 {
 
-// CLEANROOM MV2 (every inline body of the class)
+/// The bytes of a font file a wallpaper ships. Copies share one immutable storage, so
+/// copying a layer state never copies font bytes.
 class SharedFontData {
 public:
     using const_iterator = std::vector<uint8_t>::const_iterator;
 
     SharedFontData() = default;
-    SharedFontData(std::vector<uint8_t> data) { (void)data; }
+    SharedFontData(std::vector<uint8_t> data) { assign(std::move(data)); }
     SharedFontData(const SharedFontData&) noexcept            = default;
     SharedFontData(SharedFontData&&) noexcept                 = default;
     SharedFontData& operator=(const SharedFontData&) noexcept = default;
     SharedFontData& operator=(SharedFontData&&) noexcept      = default;
 
     SharedFontData& operator=(std::vector<uint8_t> data) {
-        (void)data;
+        assign(std::move(data));
         return *this;
     }
 
-    bool empty() const { return true; }
-    std::size_t size() const { return 0; }
-    const uint8_t* data() const { return nullptr; }
+    bool empty() const { return m_bytes == nullptr || m_bytes->empty(); }
+    std::size_t size() const { return m_bytes ? m_bytes->size() : 0; }
+    const uint8_t* data() const { return empty() ? nullptr : m_bytes->data(); }
     const std::vector<uint8_t>& bytes() const {
         static const std::vector<uint8_t> none;
-        return none;
+        return m_bytes ? *m_bytes : none;
     }
     const_iterator begin() const { return bytes().begin(); }
     const_iterator end() const { return bytes().end(); }
+
+private:
+    void assign(std::vector<uint8_t> data) {
+        if (data.empty()) {
+            m_bytes.reset();
+        } else {
+            m_bytes = std::make_shared<const std::vector<uint8_t>>(std::move(data));
+        }
+    }
+
+    std::shared_ptr<const std::vector<uint8_t>> m_bytes;
 };
 
 /// The look Wallpaper Engine gives text through its signed-distance-field font
