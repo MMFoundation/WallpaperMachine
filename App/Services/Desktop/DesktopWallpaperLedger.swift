@@ -11,18 +11,13 @@ struct DesktopPicture: Equatable, Codable {
     var nativeOptions: Data? = nil
 
     static func poster(_ url: URL) -> Self {
-        Self(url: url, scaling: Int(NSImageScaling.scaleAxesIndependently.rawValue),
-             allowClipping: false, fill: [0, 0, 0, 1])
+        // CLEANROOM A10: implement from specs/app/a1-app-remnants.md
+        fatalError("CLEANROOM A10")
     }
 
     var options: [NSWorkspace.DesktopImageOptionKey: Any] {
-        var result: [NSWorkspace.DesktopImageOptionKey: Any] = [
-            .imageScaling: scaling, .allowClipping: allowClipping
-        ]
-        if fill.count == 4 {
-            result[.fillColor] = NSColor(srgbRed: fill[0], green: fill[1], blue: fill[2], alpha: fill[3])
-        }
-        return result
+        // CLEANROOM A11: implement from specs/app/a1-app-remnants.md
+        fatalError("CLEANROOM A11")
     }
 }
 
@@ -109,16 +104,8 @@ final class DesktopWallpaperLedger {
 
     init(folder: URL, workspace: any DesktopPictureWorkspace,
          confirmationWindow: Duration = DesktopWallpaperLedger.confirmationWindow) throws {
-        self.folder = folder
-        self.journal = folder.appendingPathComponent(Self.journalName)
-        self.workspace = workspace
-        self.confirmationWindow = confirmationWindow
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        if FileManager.default.fileExists(atPath: journal.path) {
-            entries = try JSONDecoder().decode([String: Entry].self, from: Data(contentsOf: journal))
-        } else {
-            entries = [:]
-        }
+        // CLEANROOM A12: implement from specs/app/a1-app-remnants.md
+        fatalError("CLEANROOM A12")
     }
 
     /// Whether the journal in `folder` still names a poster whose original has not been put back,

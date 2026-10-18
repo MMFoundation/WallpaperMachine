@@ -1,19 +1,9 @@
 import Foundation
 
-/// Only removes direct children of the app-managed library, never import sources.
 enum WallpaperDeletionService {
     static func wallpaperURL(id: String, library: URL) throws -> URL {
-        guard !id.isEmpty, id != ".", id != "..", !id.contains("/"), !id.contains("\\") else {
-            throw failure(String(localized: "Invalid wallpaper ID. Nothing was deleted."))
-        }
-        let root = library.resolvingSymlinksInPath().standardizedFileURL
-        let item = root.appendingPathComponent(id, isDirectory: true)
-        let values = try item.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
-        guard values.isSymbolicLink != true, values.isDirectory == true,
-              item.resolvingSymlinksInPath().deletingLastPathComponent().standardizedFileURL == root else {
-            throw failure(String(localized: "This wallpaper is not a folder in the managed library. Nothing was deleted."))
-        }
-        return item
+        // CLEANROOM A21: implement from specs/app/a1-app-remnants.md
+        fatalError("CLEANROOM A21")
     }
 
     static func moveToTrash(id: String, library: URL,

@@ -6,24 +6,8 @@ enum SteamCMDReportedFailure: String, Sendable {
     case cachedCredentials, steamGuard, connection, rateLimited, credentials, unknown
 
     init(reason: String, cachedCredentialsRejected: Bool = false, awaitingSteamGuard: Bool = false) {
-        // Steam uses both prose ("Service Unavailable") and EResult names ("ServiceUnavailable").
-        let reason = reason.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
-        if cachedCredentialsRejected && reason.contains("cachedcredential") {
-            self = .cachedCredentials
-        } else if reason.contains("twofactor") || reason.contains("authcode") || reason.contains("steamguard")
-            || (awaitingSteamGuard && (reason.contains("denied") || reason.contains("cancel"))) {
-            self = .steamGuard
-        } else if reason.contains("timeout") || reason.contains("timedout") || reason.contains("connection")
-            || reason.contains("connectfailed") || reason.contains("serviceunavailable") {
-            self = .connection
-        } else if reason.contains("ratelimit") || reason.contains("toomany") {
-            self = .rateLimited
-        } else if reason.contains("invalidpassword") || reason.contains("invalidlogin")
-            || reason.contains("accountlogondenied") {
-            self = .credentials
-        } else {
-            self = .unknown
-        }
+        // CLEANROOM A27: implement from specs/app/a1-app-remnants.md
+        fatalError("CLEANROOM A27")
     }
 
     /// Whether trying the same request again can succeed without the user doing anything: a dropped

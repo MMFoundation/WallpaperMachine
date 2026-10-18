@@ -965,43 +965,8 @@ final class WorkshopStore {
   }
 
   private func load(_ request: WorkshopRequest) {
-    searchTask?.cancel()
-    if cacheQuery != request.query { resetCache(for: request.query) }
-    generation = UUID()
-    errorMessage = nil
-    // A page already in the cache (paging back) never shows as loading.
-    if let cached = steamPages[request.page] {
-      isLoading = false
-      publish(cached, for: request)
-      return
-    }
-    let requestID = generation
-    isLoading = true
-    searchTask = Task {
-      do {
-        let result = try await fetchSteamPage(request.page, query: request.query).value
-        guard generation == requestID, !Task.isCancelled else { return }
-        publish(result, for: request)
-      } catch {
-        guard generation == requestID, !Task.isCancelled else { return }
-        AppLog.warn("Workshop \(request.query.source.key) page \(request.page) failed: \(error.localizedDescription)")
-        // No session, or Steam ended it: forget it and drop whatever list was on show, so the
-        // panel offers to sign in instead of leaving another list's tiles behind a Retry.
-        if error is SteamSignInRequired {
-          steamWebSession = nil
-          clearResults()
-        } else if committedQuery?.source != request.query.source {
-          // Another list failed to open: the tiles on show belong to the list it was to replace,
-          // so they go too, rather than standing in for it and paging that list on Next.
-          clearResults()
-        }
-        errorMessage = error.localizedDescription
-        failedRequest = request
-      }
-      if generation == requestID {
-        isLoading = false
-      }
-    }
+      // CLEANROOM A42: implement from specs/app/a1-app-remnants.md
+      fatalError("CLEANROOM A42")
   }
 
   func cancelSearch() {

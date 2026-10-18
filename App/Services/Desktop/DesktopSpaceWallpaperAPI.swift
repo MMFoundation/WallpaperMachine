@@ -252,15 +252,8 @@ final class SystemDesktopPictureWorkspace: DesktopPictureWorkspace {
     private func screen(_ display: String) -> NSScreen? { NSScreen.screens.first { Self.id($0) == display } }
 
     func currentPicture(target: DesktopPictureTarget) throws -> DesktopPicture? {
-        if target.space != nil { return try spaces?.picture(target: target) }
-        guard let screen = screen(target.display), let url = NSWorkspace.shared.desktopImageURL(for: screen) else { return nil }
-        let options = NSWorkspace.shared.desktopImageOptions(for: screen) ?? [:]
-        let color = (options[.fillColor] as? NSColor)?.usingColorSpace(.sRGB)
-            ?? NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
-        return DesktopPicture(url: url,
-                              scaling: (options[.imageScaling] as? NSNumber)?.intValue ?? Int(NSImageScaling.scaleProportionallyUpOrDown.rawValue),
-                              allowClipping: (options[.allowClipping] as? NSNumber)?.boolValue ?? true,
-                              fill: [color.redComponent, color.greenComponent, color.blueComponent, color.alphaComponent])
+        // CLEANROOM A9: implement from specs/app/a1-app-remnants.md
+        fatalError("CLEANROOM A9")
     }
 
     func setPicture(_ picture: DesktopPicture, target: DesktopPictureTarget) throws {
