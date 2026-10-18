@@ -41,6 +41,9 @@ public:
     TexNode* preVer() const;
     TexNode* nextVer() const;
 
+    // The passes that declared a read of exactly this version (render targets only).
+    const std::vector<PassNode*>& readers() const { return m_readers; }
+
     void setName(std::string_view);
     void setKey(std::string_view);
     void setWriter(PassNode*);
