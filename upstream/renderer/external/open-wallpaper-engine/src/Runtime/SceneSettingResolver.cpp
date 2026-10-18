@@ -304,6 +304,8 @@ float ScalarAnimation::Evaluate(double seconds) const {
     const bool   looping = mode == ScalarAnimationMode::Loop && total > 0.0;
     double       frame   = seconds * fps;
     if (looping) frame = std::fmod(frame, total);
+    // A time so large that it overflows the frame position has no position in the loop.
+    if (std::isnan(frame)) return initial_value;
     if (frame < keyframes.front().frame) return looping ? keyframes.front().value : initial_value;
 
     // `later` is the first key beyond the playhead (of keys sharing a frame, the last one wins).
@@ -384,6 +386,8 @@ void CollectCrossedEvents(const ScalarAnimation& animation, double previous, dou
 void ScalarAnimationPlayback::Advance(double seconds)
 {
     if (!playing || !std::isfinite(seconds) || seconds <= 0.0) return;
+    // A clock of no (or a negative) frame rate moves nothing.
+    if (!(animation.fps > 0.0)) return;
     const double length = animation.FrameCount();
     const double previous = frame;
     const double next = frame + seconds * animation.fps * rate;

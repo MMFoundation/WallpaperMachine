@@ -24,6 +24,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <limits>
 #include <set>
 #include <string>
 #include <thread>
@@ -5513,6 +5514,27 @@ function destroy() { scene.getObject('sceneProbe').origin = new Vec3(77, 0, 0); 
     EXPECT_FLOAT_EQ(started->Translate().x(), 1.0f) << "destroy ran, once";
     EXPECT_TRUE(started->Visible());
     EXPECT_FLOAT_EQ(scene_probe->Translate().x(), 77.0f) << "scene scripts end too";
+}
+
+// A timeline with no usable frame rate moves nothing and does not wander backwards, and a
+// time too large to place on a loop answers the initial value.
+TEST(ScriptRuntimeCompat, ATimelineWithoutAFrameRateStandsStill) {
+    ScalarAnimationPlayback clock;
+    clock.animation.fps       = -30.0;
+    clock.animation.length_frames = 10.0;
+    clock.animation.keyframes = { { .frame = 0.0, .value = 0.0f }, { .frame = 10.0, .value = 1.0f } };
+    clock.frame               = 4.0;
+    clock.playing             = true;
+    clock.Advance(1.0);
+    EXPECT_DOUBLE_EQ(clock.frame, 4.0);
+
+    ScalarAnimation loop;
+    loop.initial_value  = 0.25f;
+    loop.fps            = 30.0;
+    loop.mode           = ScalarAnimationMode::Loop;
+    loop.length_frames  = 10.0;
+    loop.keyframes      = { { .frame = 0.0, .value = 0.0f }, { .frame = 10.0, .value = 1.0f } };
+    EXPECT_FLOAT_EQ(loop.Evaluate(std::numeric_limits<double>::max()), 0.25f);
 }
 
 // A setting resolved only for its first value leaves its scripted value

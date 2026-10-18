@@ -2069,7 +2069,8 @@ uint32_t SceneRuntimeContext::DescribeTimeAdvancingWork() const {
     // its own reason. Counting every registered playback kept a scene whose
     // only motion was a camera intro awake for good after the intro ended.
     const auto advances = [](const std::shared_ptr<ScalarAnimationPlayback>& playback) {
-        return playback != nullptr && playback->playing && playback->rate != 0.0;
+        return playback != nullptr && playback->playing && playback->rate != 0.0 &&
+               playback->animation.fps > 0.0;
     };
     if (std::any_of(m_scalar_animations.begin(), m_scalar_animations.end(),
                     [&advances](const ScalarAnimationBinding& binding) {
