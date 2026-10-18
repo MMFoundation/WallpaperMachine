@@ -610,6 +610,15 @@ std::vector<std::string> SceneRuntimeContext::ApplyProjectProperties(
             AssignPropertyValue(*live->second, value);
             continue;
         }
+        // A binding made before the name was declared has been waiting for it.
+        if (const auto waiting = m_absent_property_values.find(name);
+            waiting != m_absent_property_values.end()) {
+            DynamicValue* adopted = waiting->second;
+            m_absent_property_values.erase(waiting);
+            m_property_values.emplace(name, adopted);
+            AssignPropertyValue(*adopted, value);
+            continue;
+        }
         auto made = MakePropertyValue(value);
         m_property_values.emplace(name, made.get());
         m_owned_values.push_back(std::move(made));
@@ -902,6 +911,18 @@ DynamicValue* SceneRuntimeContext::FindPropertyValue(std::string_view name) cons
     return found == m_property_values.end() ? nullptr : found->second;
 }
 
+DynamicValue* SceneRuntimeContext::FollowProperty(std::string_view name, const DynamicValue& authored) {
+    if (name.empty()) return nullptr;
+    if (auto* declared = FindPropertyValue(name); declared != nullptr) return declared;
+    const auto waiting = m_absent_property_values.find(name);
+    if (waiting != m_absent_property_values.end()) return waiting->second;
+    auto standing_in = std::make_unique<DynamicValue>(authored);
+    DynamicValue* raw = standing_in.get();
+    m_owned_values.push_back(std::move(standing_in));
+    m_absent_property_values.emplace(std::string(name), raw);
+    return raw;
+}
+
 void SceneRuntimeContext::RegisterScriptedValue(ScriptedDynamicValue* value) {
     m_scripted_values.push_back(value);
     if (value == nullptr) return;
@@ -1107,7 +1128,15 @@ void SceneRuntimeContext::RollbackNodeRegistration(
         m_registered_clocks.erase(m_scalar_animations[index].playback.get());
     }
     cut(m_scalar_animations, before.clocks);
-    while (m_owned_values.size() > before.owned_values) m_owned_values.pop_back();
+    if (m_owned_values.size() > before.owned_values) {
+        std::unordered_set<const DynamicValue*> dropped;
+        for (std::size_t index = before.owned_values; index < m_owned_values.size(); ++index) {
+            dropped.insert(m_owned_values[index].get());
+        }
+        std::erase_if(m_absent_property_values,
+                      [&dropped](const auto& entry) { return dropped.contains(entry.second); });
+        while (m_owned_values.size() > before.owned_values) m_owned_values.pop_back();
+    }
 
     // And what stood under the key before comes back.
     if (before.node != nullptr) {
@@ -1821,9 +1850,10 @@ void SceneRuntimeContext::RegisterNodeEffectFinal(std::string name,
         registered == m_nodes.end() || registered->second != node) {
         RegisterNode(name, node);
     }
+    // The cards follow the layer from the first tick on: until its parents are attached the
+    // layer's matrix is not where it will be drawn.
     m_node_effect_final[name] =
         NodeEffectFinalBinding { .node = node, .layer = layer, .target_frame = target_frame };
-    ApplyEffectFinalBindings();
 }
 
 void SceneRuntimeContext::RegisterMaterialAlphaAnimation(
@@ -2049,11 +2079,13 @@ uint32_t SceneRuntimeContext::DescribeTimeAdvancingWork() const {
         any_binding_advances(m_node_scale) || any_binding_advances(m_node_rotation) ||
         std::any_of(m_material_constants.begin(),
                     m_material_constants.end(),
-                    [&advances_on_its_own](const MaterialConstantBinding& binding) {
+                    [&advances_on_its_own, &advances](const MaterialConstantBinding& binding) {
                         // An animation writes the constant on a timeline of its
                         // own, which is exactly the case the value pointer
-                        // cannot describe.
-                        return binding.animation != nullptr ||
+                        // cannot describe: it counts while that clock plays, and a
+                        // finished one-shot timeline holds its value.
+                        return (binding.animation != nullptr &&
+                                advances(binding.animation->playback)) ||
                                advances_on_its_own(binding.value);
                     })) {
         reasons |= SceneDemandReason::NodeBinding;

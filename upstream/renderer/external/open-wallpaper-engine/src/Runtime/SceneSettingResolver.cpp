@@ -138,7 +138,8 @@ void bind_user_property(SceneRuntimeContext& context, DynamicValue& value,
     std::string name;
     const auto  condition = parse_condition(setting, &name);
     if (name.empty()) return;
-    DynamicValue* property = context.FindPropertyValue(name);
+    // A property the table does not declare yet is followed once a document supplies it.
+    DynamicValue* property = context.FollowProperty(name, value);
     if (property == nullptr) return;
     if (condition.has_value()) value.attachCondition(*condition);
     if (as_vec3) {

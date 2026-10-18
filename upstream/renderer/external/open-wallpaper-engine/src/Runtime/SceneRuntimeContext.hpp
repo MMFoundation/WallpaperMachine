@@ -160,6 +160,11 @@ public:
     void          SetCursorButtons(uint32_t down, uint32_t pressed, uint32_t released);
     void          BeginFrame();
     DynamicValue* FindPropertyValue(std::string_view name) const;
+    /// The live value a setting bound to property `name` follows. A name the table does not
+    /// declare gets a value that holds `authored` until a property document supplies the
+    /// name, so a binding made before the name appeared follows it once it does (a name
+    /// `FindPropertyValue` still answers nothing for until then).
+    DynamicValue* FollowProperty(std::string_view name, const DynamicValue& authored);
     void          RegisterScriptedValue(ScriptedDynamicValue* value);
     /// A scripted value that goes away (a setting resolved only to read its first
     /// value, a rolled-back layer) leaves the registry, so nothing reaches it
@@ -1022,6 +1027,9 @@ private:
     ProjectProperties m_default_properties;
     /// The live value of each property, owned by `m_owned_values`.
     std::unordered_map<std::string, DynamicValue*, StringHash, std::equal_to<>> m_property_values;
+    /// Values standing in for properties no table has declared yet, adopted by the first
+    /// document that supplies the name.
+    std::unordered_map<std::string, DynamicValue*, StringHash, std::equal_to<>> m_absent_property_values;
     std::vector<std::string> m_script_errors;
     /// Ends the subscription a registered listener made, in registration order.
     std::vector<std::function<void()>> m_listener_ends;
