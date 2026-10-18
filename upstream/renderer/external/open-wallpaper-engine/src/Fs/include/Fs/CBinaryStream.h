@@ -8,8 +8,9 @@
 #include <limits>
 #include <cassert>
 #include <memory>
-#include <filesystem>
-#include <system_error>
+#include <cerrno>
+#include <cstring>
+#include <sys/stat.h>
 #include "IBinaryStream.h"
 #include "Utils/Logging.h"
 
@@ -80,23 +81,23 @@ inline std::shared_ptr<TBinaryStream> t_CreateCBinaryStream(std::string_view pat
         Opened(std::string_view p, std::FILE* f): CBinaryStream<TBinaryStream>(p, f) {}
     };
 
+    const auto refuse = [path](const char* why) -> std::shared_ptr<TBinaryStream> {
+        LOG_ERROR("can't open \"%.*s\": %s", static_cast<int>(path.size()), path.data(), why);
+        return nullptr;
+    };
     // The path is used byte for byte, so one with a NUL in it names nothing.
-    if (path.empty() || path.find('\0') != std::string_view::npos) {
-        LOG_ERROR("can't open a file with an empty path or a NUL in it");
-        return nullptr;
+    if (path.empty()) return refuse("the path is empty");
+    if (path.find('\0') != std::string_view::npos) return refuse("the path contains a NUL byte");
+
+    std::FILE* handle = std::fopen(std::string(path).c_str(), mode);
+    if (handle == nullptr) return refuse(std::strerror(errno));
+    // Reading a folder opens fine and fails later, so look at what was opened.
+    struct stat info {};
+    if (::fstat(::fileno(handle), &info) == 0 && S_ISDIR(info.st_mode)) {
+        std::fclose(handle);
+        return refuse("it is a folder, not a file");
     }
-    const std::string text { path };
-    std::error_code   failure;
-    if (std::filesystem::is_directory(std::filesystem::path(text), failure)) {
-        LOG_ERROR("\"%s\" is a folder, not a file", text.c_str());
-        return nullptr;
-    }
-    std::FILE* file = std::fopen(text.c_str(), mode);
-    if (file == nullptr) {
-        LOG_ERROR("can't open \"%s\" (mode %s)", text.c_str(), mode);
-        return nullptr;
-    }
-    return std::make_shared<Opened>(path, file);
+    return std::make_shared<Opened>(path, handle);
 }
 
 inline std::shared_ptr<IBinaryStream> CreateCBinaryStream(std::string_view path) {

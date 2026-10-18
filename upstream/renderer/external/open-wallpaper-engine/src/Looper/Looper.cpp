@@ -130,9 +130,9 @@ void Looper::post(const std::shared_ptr<Message>& msg) {
 }
 
 void Looper::deliver(const std::shared_ptr<Message>& msg) {
-    const std::shared_ptr<Handler> handler = msg->m_target.lock();
+    const std::shared_ptr<Handler> handler = msg->m_route.to.lock();
     // Only a handler that still exists and is still registered here hears it.
-    if (! handler || ! handler->isBoundTo(this, msg->m_target_id)) return;
+    if (! handler || ! handler->isBoundTo(this, msg->m_route.at.id)) return;
     handler->onMessageReceived(msg);
 }
 
@@ -173,6 +173,11 @@ std::weak_ptr<Looper> Handler::getLooper() const {
     return m_looper;
 }
 
+Handler::Binding Handler::binding() const {
+    std::lock_guard lock(m_bind_mutex);
+    return Binding { m_id.load(), m_looper };
+}
+
 bool Handler::setID(handler_id id, std::weak_ptr<Looper> looper) {
     std::lock_guard lock(m_bind_mutex);
     if (m_id.load() != INVALID_HANDLER_ID) return false;
@@ -205,24 +210,15 @@ std::shared_ptr<Message> Message::create(uint32_t what, const std::shared_ptr<Ha
 }
 
 void Message::setTarget(const std::shared_ptr<Handler>& handler) {
-    if (! handler) {
-        m_target.reset();
-        m_target_id = Handler::INVALID_HANDLER_ID;
-        m_target_looper.reset();
-        return;
-    }
-    m_target    = handler;
-    m_target_id = handler->id();
-    m_target_looper = handler->getLooper();
+    m_route = handler ? Route { handler, handler->binding() } : Route {};
 }
 
 void Message::setWhat(uint32_t what) { m_what = what; }
 
 status_t Message::post() {
-    // A target that was not registered when it was set has no looper to go to.
-    if (m_target_id == Handler::INVALID_HANDLER_ID) return status_t::NOT_FOUND;
-    const std::shared_ptr<Looper> looper = m_target_looper.lock();
-    if (! looper) return status_t::NOT_FOUND;
+    // An address taken before the handler was registered leads nowhere.
+    const auto looper = m_route.at.looper.lock();
+    if (m_route.at.id == Handler::INVALID_HANDLER_ID || ! looper) return status_t::NOT_FOUND;
     looper->post(shared_from_this());
     return status_t::OK;
 }

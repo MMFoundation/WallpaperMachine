@@ -95,32 +95,19 @@ bool ParseDocument(const std::string& text, nlohmann::json* root, std::string* r
 
 RuntimeScalarValue RuntimeScalarValue::Bool(bool value)
 {
-    RuntimeScalarValue v;
-    v.kind         = Kind::Bool;
-    v.bool_value   = value;
-    v.float_value  = value ? 1.0f : 0.0f;
-    v.string_value = value ? "true" : "false";
-    return v;
+    return RuntimeScalarValue { Kind::Bool, value, value ? 1.0f : 0.0f, value ? "true" : "false" };
 }
 
 RuntimeScalarValue RuntimeScalarValue::Float(float value)
 {
-    RuntimeScalarValue v;
-    v.kind         = Kind::Float;
-    v.bool_value   = value != 0.0f; // true for NaN as well
-    v.float_value  = value;
-    v.string_value = FixedText(value);
-    return v;
+    // A flag by comparison: NaN differs from 0, so it is true.
+    return RuntimeScalarValue { Kind::Float, value != 0.0f, value, FixedText(value) };
 }
 
 RuntimeScalarValue RuntimeScalarValue::String(std::string value)
 {
-    RuntimeScalarValue v;
-    v.kind        = Kind::String;
-    v.bool_value  = StringIsTrue(value);
-    v.float_value = 0.0f;
-    v.string_value = std::move(value);
-    return v;
+    const bool flag = StringIsTrue(value);
+    return RuntimeScalarValue { Kind::String, flag, 0.0f, std::move(value) };
 }
 
 bool RuntimeScalarValue::asBool() const

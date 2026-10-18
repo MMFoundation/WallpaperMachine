@@ -53,7 +53,7 @@ bool ResolveSceneSourcePaths(
     if (resolved == nullptr) return Fail(error, "scene source output must not be null");
     // Whatever happens next, a failure leaves nothing half filled.
     *resolved = SceneSourceResolution {};
-    if (source.empty()) return Fail(error, "scene source must not be empty");
+    if (source.empty()) return Fail(error, "no scene source was given");
 
     const std::filesystem::path path { source };
     const std::filesystem::path folder = path.parent_path();

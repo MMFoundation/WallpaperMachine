@@ -77,6 +77,13 @@ private:
     friend class Looper;
     friend class Message;
 
+    // One registration as seen at a single moment: identifier and looper read together.
+    struct Binding {
+        handler_id            id { INVALID_HANDLER_ID };
+        std::weak_ptr<Looper> looper;
+    };
+    Binding binding() const;
+
     bool setID(handler_id id, std::weak_ptr<Looper> looper);
     // Unbinds the handler again when it still carries `id`, so it may be registered anew.
     void clearID(handler_id id);
@@ -133,10 +140,15 @@ private:
     template<typename T>
     bool findValue(std::string_view name, T* out) const;
 
+    // Where the message goes: the handler and the registration it had when it was
+    // addressed. A default record addresses nobody.
+    struct Route {
+        std::weak_ptr<Handler> to;
+        Handler::Binding       at;
+    };
+
     uint32_t                        m_what { 0 };
-    std::weak_ptr<Handler>          m_target;
-    handler_id                      m_target_id { 0 };
-    std::weak_ptr<Looper>           m_target_looper;
+    Route                           m_route;
     std::map<std::string, Value, std::less<>> m_values;
 };
 

@@ -54,13 +54,17 @@ public:
 		return true;
 	}
 	bool Unmount(std::string_view mountpoint) {
-		for (auto it = m_mountedFss.rbegin(); it != m_mountedFss.rend(); ++it) {
-			if (it->mountPoint != mountpoint) continue;
-			m_mountedFss.erase(std::next(it).base());
-			return true;
+		// Topmost first: search the mounts from the back.
+		const auto top = std::find_if(m_mountedFss.rbegin(), m_mountedFss.rend(), [&](const MountedFs& m) {
+			return m.mountPoint == mountpoint;
+		});
+		const bool found = top != m_mountedFss.rend();
+		if (found) {
+			m_mountedFss.erase(m_mountedFss.begin() + (std::distance(top, m_mountedFss.rend()) - 1));
+		} else {
+			LOG_INFO("nothing is mounted at \"%.*s\"", (int)mountpoint.size(), mountpoint.data());
 		}
-		LOG_INFO("nothing is mounted at \"%.*s\"", (int)mountpoint.size(), mountpoint.data());
-		return false;
+		return found;
 	}
 	bool IsMounted(std::string_view name) {
 		if (name.empty()) return false;

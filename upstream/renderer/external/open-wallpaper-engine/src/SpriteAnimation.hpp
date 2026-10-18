@@ -30,29 +30,7 @@ public:
     const auto& GetAnimateFrame(double newtime) {
         // A sheet without frames is not a sprite sheet; there is nothing to step.
         if (m_frames.empty()) return Neutral();
-        if (! std::isfinite(newtime) || newtime <= 0.0) return m_frames[(usize)m_curFrame];
-
-        const usize count = m_frames.size();
-        m_remainTime -= newtime;
-        if (m_remainTime >= 0.0) return m_frames[(usize)m_curFrame];
-
-        double cycle = 0.0;
-        for (const auto& frame : m_frames) cycle += FrameDuration(frame);
-        if (cycle <= 0.0) {
-            // No timed frames: every positive tick is one step.
-            m_curFrame   = (m_curFrame + 1) % (idx)count;
-            m_remainTime = 0.0;
-            return m_frames[(usize)m_curFrame];
-        }
-        // Whole cycles bring the sheet back to the same frame, so only the part of
-        // the deficit beyond them is walked.
-        double deficit = -m_remainTime;
-        if (deficit > cycle) deficit = std::fmod(deficit, cycle);
-        m_remainTime = -deficit;
-        for (usize steps = 0; m_remainTime < 0.0 && steps < count; ++steps) {
-            m_curFrame = (m_curFrame + 1) % (idx)count;
-            m_remainTime += FrameDuration(m_frames[(usize)m_curFrame]);
-        }
+        if (std::isfinite(newtime) && newtime > 0.0) Elapse(newtime);
         return m_frames[(usize)m_curFrame];
     }
     const auto& SetFrame(double frame) {
@@ -74,7 +52,10 @@ public:
     /// A single-frame sprite never advances, so it does not make its pass
     /// time-varying.
     usize FrameCount() const { return m_frames.size(); }
-    void        AppendFrame(const SpriteFrame& frame) { m_frames.push_back(frame); }
+    void        AppendFrame(const SpriteFrame& frame) {
+        m_frames.push_back(frame);
+        m_cycle += FrameDuration(frame);
+    }
 
     usize numFrames() const { return m_frames.size(); }
 
@@ -86,8 +67,39 @@ private:
     static double FrameDuration(const SpriteFrame& frame) {
         return std::isfinite(frame.frametime) && frame.frametime > 0.0f ? frame.frametime : 0.0;
     }
+    // Moves to the next frame (the last wraps to the first) and returns its duration.
+    double StepForward() {
+        m_curFrame = (m_curFrame + 1) % (idx)m_frames.size();
+        return FrameDuration(m_frames[(usize)m_curFrame]);
+    }
+    // `seconds` is positive and finite. The time left is a credit; only what the
+    // credit does not cover is owed, and the owed time is paid by moving on.
+    void Elapse(double seconds) {
+        const double owed = seconds - m_remainTime;
+        if (owed <= 0.0) {
+            m_remainTime -= seconds;
+            return;
+        }
+        if (m_cycle <= 0.0) {
+            // Nothing is timed: each tick is one step.
+            StepForward();
+            m_remainTime = 0.0;
+            return;
+        }
+        m_remainTime = -PayOff(owed);
+    }
+    // Moves on until `debt` is paid and returns what is still owed (at most 0 or a
+    // rounding sliver). Whole cycles come back to the same frame, so they are not
+    // walked: one pass over the frames bounds the work.
+    double PayOff(double debt) {
+        if (debt > m_cycle) debt = std::fmod(debt, m_cycle);
+        for (usize hops = m_frames.size(); hops > 0 && debt > 0.0; --hops) debt -= StepForward();
+        return debt;
+    }
+
     idx    m_curFrame { 0 };
     double m_remainTime { 0 };
+    double m_cycle { 0 };
 
     std::vector<SpriteFrame> m_frames;
 };
