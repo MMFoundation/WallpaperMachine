@@ -1,4 +1,5 @@
 #pragma once
+#include <tuple>
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
@@ -118,18 +119,13 @@ public:
     /// chain stay as they are. The caller updates.
     void Clone(const SceneCamera& cam) {
         if (&cam == this) return;
-        m_width                  = cam.m_width;
-        m_height                 = cam.m_height;
-        m_aspect                 = cam.m_aspect;
-        m_nearClip               = cam.m_nearClip;
-        m_farClip                = cam.m_farClip;
-        m_perspective            = cam.m_perspective;
-        m_fov                    = cam.m_fov;
-        m_fovLocked              = cam.m_fovLocked;
-        m_zoom                   = cam.m_zoom;
-        m_isComposeLayer         = cam.m_isComposeLayer;
-        m_layerLocal             = cam.m_layerLocal;
-        m_childrenUseSceneCamera = cam.m_childrenUseSceneCamera;
+        // Lens first, in the order the members are declared, then the flags.
+        std::tie(m_perspective, m_aspect, m_fov, m_width, m_height, m_nearClip, m_farClip, m_zoom) =
+            std::tie(cam.m_perspective, cam.m_aspect, cam.m_fov, cam.m_width, cam.m_height,
+                     cam.m_nearClip, cam.m_farClip, cam.m_zoom);
+        std::tie(m_fovLocked, m_isComposeLayer, m_layerLocal, m_childrenUseSceneCamera) =
+            std::tie(cam.m_fovLocked, cam.m_isComposeLayer, cam.m_layerLocal,
+                     cam.m_childrenUseSceneCamera);
     }
 
 private:

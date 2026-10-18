@@ -1,6 +1,8 @@
 // Clean-room implementation from the WallpaperMachine spec e1b-scene-model.md; written without access to the original source.
 #include <algorithm>
 #include <stdexcept>
+#include <tuple>
+#include <utility>
 #include "SceneImageEffectLayer.h"
 #include "SceneNode.h"
 #include "SpecTexs.hpp"
@@ -23,6 +25,34 @@ void Restore(std::string& current, const std::string& authored) {
 SceneMaterial* MaterialOf(SceneNode* node) {
     if (node == nullptr || node->Mesh() == nullptr) return nullptr;
     return node->Mesh()->Material();
+}
+
+// Whether an effect takes part in this resolution: a fallback stands in only while
+// nothing else runs, every other effect follows its own visibility.
+bool Participates(const SceneImageEffect& effect, bool anyRunning) {
+    if (! effect.fallback) return effect.visible;
+    return ! anyRunning;
+}
+
+// What every pass of an included effect starts from, before the chain touches it.
+struct PassBaseline {
+    const SceneMesh& geometry;
+    std::string_view camera;
+};
+
+void ApplyBaseline(SceneNode& node, SceneMaterial& material, const PassBaseline& base) {
+    node.Mesh()->ChangeMeshDataFrom(base.geometry);
+    static const SceneNode identity;
+    node.CopyTrans(identity);
+    node.SetCamera(std::string(base.camera));
+    material.blenmode = BlendMode::Normal;
+}
+
+// The blend the closing pass takes: the idle one while the whole chain is idle and
+// one was given, the ordinary final blend otherwise.
+BlendMode PickFinalBlend(bool idle, const std::optional<BlendMode>& idleBlend, BlendMode finalBlend) {
+    if (idle && idleBlend.has_value()) return *idleBlend;
+    return finalBlend;
 }
 } // namespace
 
@@ -108,27 +138,24 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
     }
 
     // 2. Which effects take part.
-    bool any_running = false;
+    const bool any_running = std::any_of(m_effects.begin(), m_effects.end(), [](const auto& e) {
+        return e != nullptr && ! e->fallback && e->visible;
+    });
     for (const auto& effect : m_effects) {
-        if (effect != nullptr && ! effect->fallback && effect->visible) any_running = true;
-    }
-    for (const auto& effect : m_effects) {
-        if (effect == nullptr) continue;
-        effect->included = effect->fallback ? ! any_running : effect->visible;
+        if (effect != nullptr) effect->included = Participates(*effect, any_running);
     }
 
     // 3. Lay the included effects out over the two buffers; the buffers swap once
     //    per included effect.
     m_resolved_final = nullptr;
-    SceneImageEffectNode* last_writer = nullptr;
-    static const SceneNode identity;
-    std::size_t            ordinal = 0;
+    SceneImageEffectNode*  last_writer = nullptr;
+    const PassBaseline     baseline { default_mesh, effect_cam };
+    std::size_t            swaps = 0;
     for (const auto& effect : m_effects) {
         if (effect == nullptr || ! effect->included) continue;
-        const bool         even   = ordinal % 2 == 0;
-        const std::string& input  = even ? m_pingpong_a : m_pingpong_b;
-        const std::string& output = even ? m_pingpong_b : m_pingpong_a;
-        ++ordinal;
+        const std::string& input  = (swaps % 2 == 0) ? m_pingpong_a : m_pingpong_b;
+        const std::string& output = (swaps % 2 == 0) ? m_pingpong_b : m_pingpong_a;
+        ++swaps;
 
         for (auto& command : effect->commands) {
             if (sstart_with(command.src, WE_EFFECT_PPONG_PREFIX_A)) command.src = input;
@@ -137,8 +164,7 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         for (auto& pass : effect->nodes) {
             SceneMaterial* material = MaterialOf(pass.sceneNode.get());
             if (material == nullptr) {
-                if (! m_logged_missing_material) {
-                    m_logged_missing_material = true;
+                if (! std::exchange(m_logged_missing_material, true)) {
                     LOG_ERROR("An effect pass has no material; the pass is skipped");
                 }
                 continue;
@@ -150,32 +176,29 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                 if (sstart_with(texture, WE_EFFECT_PPONG_PREFIX_A)) texture = input;
             }
             if (pass.output == output) last_writer = &pass;
-
-            SceneNode& node = *pass.sceneNode;
-            material->blenmode = BlendMode::Normal;
-            node.SetCamera(std::string(effect_cam));
-            node.CopyTrans(identity);
-            node.Mesh()->ChangeMeshDataFrom(default_mesh);
+            ApplyBaseline(*pass.sceneNode, *material, baseline);
         }
     }
 
     // 4. The last pass that wrote the output buffer closes the chain onto the layer.
     if (last_writer == nullptr) return;
-    SceneNode& node = *last_writer->sceneNode;
+    SceneNode& closing = *last_writer->sceneNode;
     last_writer->output = std::string(SpecTex_Default);
-    if (node.Mesh()->UpdateDriver() != m_final_mesh->UpdateDriver()) {
-        auto replacement = std::make_shared<SceneMesh>(m_final_mesh->UpdateDriver());
-        replacement->AddMaterial(SceneMaterial(*node.Mesh()->Material()));
-        node.AddMesh(std::move(replacement));
+
+    // The closing pass draws with the card's update driver, on a copy of its own material.
+    if (closing.Mesh()->UpdateDriver() != m_final_mesh->UpdateDriver()) {
+        auto swapped = std::make_shared<SceneMesh>(m_final_mesh->UpdateDriver());
+        swapped->AddMaterial(SceneMaterial(*closing.Mesh()->Material()));
+        closing.AddMesh(std::move(swapped));
     }
-    node.Mesh()->ChangeMeshDataFrom(*m_final_mesh);
-    SceneMaterial& material = *node.Mesh()->Material();
-    material.blenmode = (! any_running && m_idle_final_blend) ? *m_idle_final_blend : m_final_blend;
-    if (m_final_depth) {
-        material.depth_test  = m_final_depth->test;
-        material.depth_write = m_final_depth->write;
+    SceneMaterial& material = *closing.Mesh()->Material();
+    material.blenmode       = PickFinalBlend(! any_running, m_idle_final_blend, m_final_blend);
+    if (m_final_depth.has_value()) {
+        std::tie(material.depth_test, material.depth_write) =
+            std::tie(m_final_depth->test, m_final_depth->write);
     }
-    node.SetCamera(m_final_camera);
-    node.CopyTrans(*m_final_node);
-    m_resolved_final = &node;
+    closing.Mesh()->ChangeMeshDataFrom(*m_final_mesh);
+    closing.CopyTrans(*m_final_node);
+    closing.SetCamera(m_final_camera);
+    m_resolved_final = &closing;
 }
