@@ -48,13 +48,13 @@ public:
     virtual void UpdateUniforms(SceneNode*, sprite_map_t&, const UpdateUniformOp&) = 0;
     virtual void InitUniforms(SceneNode* node, uint32_t material_slot,
                               const ExistsUniformOp& exists_op) {
-        // CLEANROOM PH12
-        (void)node, (void)material_slot, (void)exists_op;
+        (void)material_slot;
+        InitUniforms(node, exists_op);
     }
     virtual void UpdateUniforms(SceneNode* node, uint32_t material_slot, sprite_map_t& sprites,
                                 const UpdateUniformOp& update_op) {
-        // CLEANROOM PH13
-        (void)node, (void)material_slot, (void)sprites, (void)update_op;
+        (void)material_slot;
+        UpdateUniforms(node, sprites, update_op);
     }
 
     /// Which self-advancing uniforms this node's material actually binds, drawn

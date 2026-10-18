@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e6-platform-host-api.md; written without access to the original source.
 #pragma once
 #include <array>
 #include <vector>
@@ -9,9 +10,9 @@ namespace wallpaper
 
 template<typename T, typename Tarray>
 std::array<T, std::tuple_size<Tarray>::value> array_cast(const Tarray& array) noexcept {
-    // CLEANROOM PH1
-    (void)array;
-    return {};
+    std::array<T, std::tuple_size<Tarray>::value> out {};
+    for (std::size_t i = 0; i < out.size(); ++i) out[i] = static_cast<T>(array[i]);
+    return out;
 }
 
 template<typename T>
@@ -22,26 +23,22 @@ public:
     using reference  = T&;
     using pointer    = T*;
 
-    constexpr spanone(reference value) noexcept {
-        // CLEANROOM PH2
-        (void)value;
-    }
+    constexpr spanone(reference value) noexcept: m_ptr(&value) {}
     constexpr pointer data() const noexcept {
-        // CLEANROOM PH3
-        return nullptr;
+        return m_ptr;
     }
     constexpr size_type size() const noexcept {
-        // CLEANROOM PH4
-        return 0;
+        return 1;
     }
     constexpr pointer begin() const noexcept {
-        // CLEANROOM PH5
-        return nullptr;
+        return m_ptr;
     }
     constexpr pointer end() const noexcept {
-        // CLEANROOM PH6
-        return nullptr;
+        return m_ptr + 1;
     }
+
+private:
+    pointer m_ptr;
 };
 
 } // namespace wallpaper

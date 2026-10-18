@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e6-platform-host-api.md; written without access to the original source.
 #include "Presentation/WallpaperScaling.hpp"
 
 #include <algorithm>
@@ -17,17 +18,50 @@ WallpaperScalingLayout ComputeWallpaperScalingLayout(
     double pan_x,
     double pan_y)
 {
-    // CLEANROOM PH11
-    (void)mode;
-    (void)scene_width;
-    (void)scene_height;
-    (void)display_logical_width;
-    (void)display_logical_height;
-    (void)display_scale_factor;
-    (void)wallpaper_scale_factor;
-    (void)pan_x;
-    (void)pan_y;
-    return {};
+    const auto usable = [](double v) { return std::isfinite(v) && v > 0.0 ? v : 1.0; };
+    const double user_factor = usable(wallpaper_scale_factor);
+    const double dpr         = usable(display_scale_factor);
+    const WallpaperFraming pan = NormalizeWallpaperFraming(WallpaperFraming { pan_x, pan_y });
+
+    const double scene_w   = std::max<uint32_t>(1, scene_width);
+    const double scene_h   = std::max<uint32_t>(1, scene_height);
+    const double display_w = std::max<uint32_t>(1, display_logical_width);
+    const double display_h = std::max<uint32_t>(1, display_logical_height);
+    const double ratio_x   = display_w / scene_w;
+    const double ratio_y   = display_h / scene_h;
+
+    double scale_x = 1.0;
+    double scale_y = 1.0;
+    switch (mode) {
+    case WallpaperScalingMode::STRETCH:
+        scale_x = ratio_x;
+        scale_y = ratio_y;
+        break;
+    case WallpaperScalingMode::FIT: scale_x = scale_y = std::min(ratio_x, ratio_y); break;
+    case WallpaperScalingMode::FILL: scale_x = scale_y = std::max(ratio_x, ratio_y); break;
+    case WallpaperScalingMode::NONE:
+    default: break;
+    }
+    scale_x *= user_factor;
+    scale_y *= user_factor;
+
+    const double content_w = scene_w * scale_x;
+    const double content_h = scene_h * scale_y;
+    const double x         = (display_w - content_w) * pan.pan_x;
+    const double y         = (display_h - content_h) * pan.pan_y;
+    const auto   px        = [](double v) { return static_cast<int32_t>(std::lround(v)); };
+
+    WallpaperScalingLayout layout;
+    layout.scene_width            = scene_w;
+    layout.scene_height           = scene_h;
+    layout.display_logical_width  = display_w;
+    layout.display_logical_height = display_h;
+    layout.scale_x                = scale_x;
+    layout.scale_y                = scale_y;
+    layout.viewport_px = PixelRect { px(x * dpr), px(y * dpr), px(content_w * dpr),
+                                     px(content_h * dpr) };
+    layout.scissor_px  = PixelRect { 0, 0, px(display_w * dpr), px(display_h * dpr) };
+    return layout;
 }
 
 WallpaperCursorMapping ComputeWallpaperCursorMapping(const WallpaperScalingLayout& layout,

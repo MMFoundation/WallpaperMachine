@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e6-platform-host-api.md; written without access to the original source.
 #pragma once
 #include <string_view>
 
@@ -5,16 +6,10 @@ namespace wallpaper
 {
 
 constexpr bool sstart_with(std::string_view str, std::string_view start) {
-    // CLEANROOM PH9
-    (void)str;
-    (void)start;
-    return false;
+    return str.size() >= start.size() && str.compare(0, start.size(), start) == 0;
 }
 constexpr bool send_with(std::string_view str, std::string_view end) {
-    // CLEANROOM PH10
-    (void)str;
-    (void)end;
-    return false;
+    return str.size() >= end.size() && str.compare(str.size() - end.size(), end.size(), end) == 0;
 }
 
 } // namespace wallpaper
