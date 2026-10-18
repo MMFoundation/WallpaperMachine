@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e1b-scene-model.md; written without access to the original source.
 #include "SceneIndexArray.h"
 #include <cstring>
 #include <utility>
@@ -38,14 +39,18 @@ SceneIndexArray::SceneIndexArray(std::size_t quadCount, SceneIndexWidth width)
 }
 
 SceneIndexArray::SceneIndexArray(std::span<const uint32_t> data) {
-    // CLEANROOM SM18
-    (void)data;
+    if (data.empty()) return;
+    m_pData = new uint32_t[data.size()];
+    std::memcpy(m_pData, data.data(), data.size() * sizeof(uint32_t));
+    m_size     = data.size();
+    m_capacity = data.size();
 }
-SceneIndexArray::SceneIndexArray(SceneIndexArray&& o) noexcept {
-    // CLEANROOM SM18
-    (void)o;
-}
+SceneIndexArray::SceneIndexArray(SceneIndexArray&& o) noexcept
+    : m_pData(std::exchange(o.m_pData, nullptr)),
+      m_size(std::exchange(o.m_size, 0)),
+      m_capacity(std::exchange(o.m_capacity, 0)),
+      m_render_size(std::exchange(o.m_render_size, std::numeric_limits<usize>::max())),
+      m_width(o.m_width),
+      m_id(std::exchange(o.m_id, 0)) {}
 
-SceneIndexArray::~SceneIndexArray() {
-    // CLEANROOM SM18
-}
+SceneIndexArray::~SceneIndexArray() { delete[] m_pData; }

@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e1b-scene-model.md; written without access to the original source.
 #pragma once
 #include <vector>
 #include <cstdint>
@@ -5,6 +6,7 @@
 #include <span>
 #include <limits>
 #include <algorithm>
+#include <cstring>
 
 #include "Core/NoCopyMove.hpp"
 #include "Core/Literals.hpp"
@@ -85,38 +87,22 @@ public:
     SceneIndexArray(SceneIndexArray&&) noexcept;
     ~SceneIndexArray();
 
+    /// Writes 32-bit values at 32-bit element `index`; a write that does not fit
+    /// the capacity is dropped.
     void Assign(usize index, std::span<const uint32_t> data) {
-        // CLEANROOM SM18
-        (void)index;
-        (void)data;
+        WriteBytes(index, sizeof(uint32_t), data.data(), data.size());
     }
+    /// Writes 16-bit values at 16-bit element `index`.
     void AssignHalf(usize index, std::span<const uint16_t> data) {
-        // CLEANROOM SM18
-        (void)index;
-        (void)data;
+        WriteBytes(index, sizeof(uint16_t), data.data(), data.size());
     }
 
-    const uint32_t* Data() const {
-        // CLEANROOM SM18
-        return nullptr;
-    }
-    usize           DataCount() const {
-        // CLEANROOM SM18
-        return 0;
-    }
-    usize           DataSizeOf() const {
-        // CLEANROOM SM18
-        return 0;
-    }
+    const uint32_t* Data() const { return m_pData; }
+    usize           DataCount() const { return m_size; }
+    usize           DataSizeOf() const { return m_size * sizeof(uint32_t); }
 
-    usize RenderDataCount() const noexcept {
-        // CLEANROOM SM18
-        return 0;
-    }
-    void SetRenderDataCount(usize val) noexcept {
-        // CLEANROOM SM18
-        (void)val;
-    }
+    usize RenderDataCount() const noexcept { return std::min(m_render_size, m_size); }
+    void SetRenderDataCount(usize val) noexcept { m_render_size = val; }
 
     SceneIndexWidth Width() const noexcept { return m_width; }
     usize           ElementSize() const noexcept {
@@ -153,25 +139,24 @@ public:
         m_render_size = index_count / 2;
     }
 
-    usize CapacityCount() const {
-        // CLEANROOM SM18
-        return 0;
-    }
-    usize CapacitySizeof() const {
-        // CLEANROOM SM18
-        return 0;
-    }
+    usize CapacityCount() const { return m_capacity; }
+    usize CapacitySizeof() const { return m_capacity * sizeof(uint32_t); }
 
-    uint32_t ID() const {
-        // CLEANROOM SM18
-        return 0;
-    }
-    void     SetID(uint32_t id) {
-        // CLEANROOM SM18
-        (void)id;
-    }
+    uint32_t ID() const { return m_id; }
+    void     SetID(uint32_t id) { m_id = id; }
 
 private:
+    // Copies `count` elements of `element` bytes to element `index`, when the whole
+    // run fits the capacity without any of the arithmetic wrapping.
+    void WriteBytes(usize index, usize element, const void* source, usize count) noexcept {
+        if (count == 0) return;
+        uint64_t last = 0, bytes = 0;
+        if (! CheckedAddU64(index, count, last) || ! CheckedMulU64(last, element, bytes)) return;
+        if (bytes > static_cast<uint64_t>(m_capacity) * sizeof(uint32_t)) return;
+        std::memcpy(reinterpret_cast<char*>(m_pData) + index * element, source, count * element);
+        m_size = std::max<usize>(m_size, static_cast<usize>((bytes + 3) / 4));
+    }
+
     uint32_t* m_pData { nullptr };
     usize     m_size { 0 };
     usize     m_capacity { 0 };
@@ -179,5 +164,6 @@ private:
     usize m_render_size { std::numeric_limits<usize>::max() };
 
     SceneIndexWidth m_width { SceneIndexWidth::UInt16 };
+    uint32_t        m_id { 0 };
 };
 } // namespace wallpaper
