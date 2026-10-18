@@ -47,7 +47,13 @@ std::string WithoutTrailingCommas(const std::string& source) {
 bool ParseJson(const char* file, const char* func, int line, const std::string& source,
                nlohmann::json& result) {
     try {
-        result = nlohmann::json::parse(source);
+        // CLEANROOM LT11
+        (void)file;
+        (void)func;
+        (void)line;
+        (void)source;
+        (void)result;
+        return false;
     } catch (nlohmann::json::parse_error& e) {
         // Only a document strict parsing rejected pays for the second pass.
         auto lenient = nlohmann::json::parse(WithoutTrailingCommas(source), nullptr, false);
@@ -55,112 +61,24 @@ bool ParseJson(const char* file, const char* func, int line, const std::string& 
             result = std::move(lenient);
             return true;
         }
-        WallpaperLog(LOGLEVEL_ERROR, file, line, "parse json(%s), %s", func, e.what());
         return false;
     }
-    return true;
-}
-
-template<typename T>
-inline bool _GetJsonValue(const nlohmann::json&                  json,
-                          typename utils::is_std_array<T>::type& value) {
-    using Tv          = typename T::value_type;
-    const auto* pjson = &json;
-    if (json.contains("value")) pjson = &json.at("value");
-    const auto& njson = *pjson;
-    if (njson.is_number()) {
-        value = { njson.get<Tv>() };
-        return true;
-    } else if (njson.is_array()) {
-        if (njson.size() != value.size()) {
-            throw utils::StrToArray::WrongSizeExp {};
-        }
-        for (std::size_t i = 0; i < value.size(); ++i) {
-            value[i] = njson.at(i).get<Tv>();
-        }
-        return true;
-    } else {
-        std::string strvalue;
-        strvalue = njson.get<std::string>();
-        return utils::StrToArray::Convert(strvalue, value);
-    }
-}
-
-template<typename T>
-inline bool _GetJsonValue(const nlohmann::json& json, T& value) {
-    if (json.contains("value"))
-        value = json.at("value").get<T>();
-    else
-        value = json.get<T>();
-    return true;
-}
-
-template<typename T>
-inline bool _GetJsonValue(const char* file, const char* func, int line, const nlohmann::json& json,
-                          T& value, bool warn, const char* name) {
-    (void)warn;
-
-    using njson = nlohmann::json;
-    std::string nameinfo;
-    if (name != nullptr) nameinfo = std::string("(key: ") + name + ")";
-    try {
-        return _GetJsonValue<T>(json, value);
-    } catch (const njson::type_error& e) {
-        WallpaperLog(LOGLEVEL_INFO,
-                     file,
-                     line,
-                     "%s %s at %s\n%s",
-                     e.what(),
-                     nameinfo.c_str(),
-                     func,
-                     json.dump(4).c_str());
-    } catch (const std::invalid_argument& e) {
-        WallpaperLog(LOGLEVEL_ERROR, file, line, "%s %s at %s", e.what(), nameinfo.c_str(), func);
-    } catch (const std::out_of_range& e) {
-        WallpaperLog(LOGLEVEL_ERROR, file, line, "%s %s at %s", e.what(), nameinfo.c_str(), func);
-    } catch (const utils::StrToArray::WrongSizeExp& e) {
-        WallpaperLog(LOGLEVEL_ERROR, file, line, "%s %s at %s", e.what(), nameinfo.c_str(), func);
-    }
-    return false;
 }
 
 template<typename T>
 typename JsonTemplateTypeCheck<T>::type
 GetJsonValue(const char* file, const char* func, int line, const nlohmann::json& json, T& value,
              bool has_name, std::string_view name_view, bool warn) {
-    std::string name { name_view };
-    if (has_name) {
-        if (! json.contains(name)) {
-            if (warn)
-                WallpaperLog(LOGLEVEL_INFO,
-                             "",
-                             0,
-                             "read json \"%s\" not a key at %s(%s:%d)",
-                             name.data(),
-                             func,
-                             file,
-                             line);
-            return false;
-        } else if (json.at(name).is_null()) {
-            if (warn)
-                WallpaperLog(LOGLEVEL_INFO,
-                             "",
-                             0,
-                             "read json \"%s\" is null at %s(%s:%d)",
-                             name.data(),
-                             func,
-                             file,
-                             line);
-            return false;
-        }
-    }
-    return _GetJsonValue<T>(file,
-                            func,
-                            line,
-                            has_name ? json.at(name) : json,
-                            value,
-                            warn,
-                            name.empty() ? nullptr : name.c_str());
+    // CLEANROOM LT12
+    (void)file;
+    (void)func;
+    (void)line;
+    (void)json;
+    (void)value;
+    (void)has_name;
+    (void)name_view;
+    (void)warn;
+    return false;
 }
 
 #define T_IMPL_GET_JSON(TYPE)                                                            \

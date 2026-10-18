@@ -18,16 +18,6 @@ using namespace wallpaper;
 
 namespace
 {
-thread_local ShaderStartupMetrics g_shader_startup_metrics;
-// Bounded per-thread cache; dependencies are revalidated on every hit, including
-// misses. Switching projects or editing includes must never reuse stale code.
-thread_local std::unordered_map<std::string, nlohmann::json> g_program_cache;
-
-std::string ProgramCacheKey(const std::string& request) {
-    const auto identity = std::string("owe-program-v1:") +
-                          wallpaper::shader::RustShaderCacheIdentity() + ":" + request;
-    return utils::genSha1(std::span<const char>(identity.data(), identity.size()));
-}
 
 // Re-encodes a compiled Metal stage into the same payload shape the Rust
 // bridge returns, so cached programs restore through one parser.
@@ -62,91 +52,25 @@ nlohmann::json MetalStageMetaJson(const wallpaper::shader::RustShaderMetalStage&
     };
 }
 
-bool RestoreProgram(const nlohmann::json& cached, const std::string& request,
-                    const wallpaper::shader::RustShaderIncludeReader& reader,
-                    wallpaper::shader::RustShaderOutput& output) {
-    try {
-        if (cached.at("request") != request ||
-            cached.at("compiler") != wallpaper::shader::RustShaderCacheIdentity()) return false;
-        for (const auto& [path, content] : cached.at("includes").items()) {
-            const auto current = reader(path);
-            if (current ? content != *current : !content.is_null()) return false;
-        }
-        const auto stage_count = nlohmann::json::parse(request).at("stages").size();
-        wallpaper::shader::RustShaderOutput restored;
-        const auto& metal = cached.at("metal");
-        if (metal.size() != stage_count) return false;
-        for (const auto& stage_json : metal) {
-            const auto source = stage_json.at("source").get<std::string>();
-            if (source.empty()) return false;
-            wallpaper::shader::RustShaderMetalStage stage;
-            wallpaper::shader::ApplyRustShaderMetalStageJson(
-                stage_json.at("meta").get<std::string>(),
-                source,
-                stage_json.at("kind").get<int>() == 0 ? ShaderType::VERTEX
-                                                      : ShaderType::FRAGMENT,
-                stage);
-            restored.metal_stages.push_back(std::move(stage));
-        }
-        restored.metadata_json = cached.at("metadata").get<std::string>();
-        restored.reflection_json = cached.at("reflection").get<std::string>();
-        restored.cache_key = cached.at("cache_key").get<std::string>();
-        wallpaper::shader::ApplyRustShaderMetadataJson(restored.metadata_json, restored);
-        wallpaper::shader::ApplyRustShaderReflectionJson(restored.reflection_json, restored);
-        output = std::move(restored);
-        return true;
-    } catch (const nlohmann::json::exception&) {
-        return false;
-    } catch (const std::runtime_error&) {
-        return false;
-    }
-}
-
-void RememberProgram(const std::string& key, const nlohmann::json& program) {
-    if (g_program_cache.size() >= 128) g_program_cache.clear();
-    g_program_cache[key] = program;
-}
-
-double MeasureElapsedMs(const std::chrono::steady_clock::time_point started)
-{
-    return std::chrono::duration<double, std::milli>(
-               std::chrono::steady_clock::now() - started)
-        .count();
-}
-
-std::string RustTextureFormat(TextureFormat format)
-{
-    switch (format) {
-    case TextureFormat::R8: return "r8";
-    case TextureFormat::RG8: return "rg8";
-    case TextureFormat::RGBA8: return "rgba8";
-    default: return "unknown";
-    }
-}
-
-bool WriteBytes(fs::IBinaryStreamW& file, const void* data, usize size)
-{
-    return size == 0 || file.Write(data, size) == 1;
-}
-
 } // namespace
 
 void WPShaderParser::BeginShaderSession() {
-    ClearProgramCache();
-    ResetStartupMetrics();
+    // CLEANROOM LT19
 }
 void WPShaderParser::EndShaderSession() {
-    const auto metrics = GetStartupMetrics();
-    LOG_INFO("scene shader cache: hits=%llu compiled=%llu compile_ms=%.1f cache_read_ms=%.1f",
-             static_cast<unsigned long long>(metrics.cache_hits),
-             static_cast<unsigned long long>(metrics.cache_misses),
-             metrics.compile_ms, metrics.cache_read_ms);
-    ClearProgramCache();
+    // CLEANROOM LT20
 }
 
-void WPShaderParser::ResetStartupMetrics() { g_shader_startup_metrics = {}; }
-ShaderStartupMetrics WPShaderParser::GetStartupMetrics() { return g_shader_startup_metrics; }
-void WPShaderParser::ClearProgramCache() { g_program_cache.clear(); }
+void WPShaderParser::ResetStartupMetrics() {
+    // CLEANROOM LT21
+}
+ShaderStartupMetrics WPShaderParser::GetStartupMetrics() {
+    // CLEANROOM LT22
+    return {};
+}
+void WPShaderParser::ClearProgramCache() {
+    // CLEANROOM LT23
+}
 
 namespace
 {
@@ -172,170 +96,17 @@ bool CompileProgramRust(std::string_view scene_id, std::string_view shader_name,
                         WPShaderInfo* shader_info, std::span<const WPShaderTexInfo> texs,
                         std::string* reflection_json,
                         std::optional<uint32_t> nv12_plane_slot = std::nullopt) {
-    if (shader_info == nullptr) return false;
-
-    wallpaper::shader::RustShaderRequest request {
-        .shader_name   = std::string(shader_name),
-        .scene_id      = std::string(scene_id),
-        .cache_enabled = env.vfs != nullptr && env.vfs->IsMounted("cache"),
-    };
-    request.combos = shader_info->combos;
-    request.stages.reserve(units.size());
-    for (const auto& unit : units) {
-        request.stages.push_back(wallpaper::shader::RustShaderStageSource {
-            .kind   = unit.stage,
-            .source = unit.src,
-        });
-    }
-    request.textures.reserve(texs.size());
-    for (usize slot = 0; slot < texs.size(); ++slot) {
-        request.textures.push_back(wallpaper::shader::RustShaderTextureInfo {
-            .slot       = static_cast<uint32_t>(slot),
-            .present    = texs[slot].present,
-            .enabled    = texs[slot].enabled,
-            .format     = RustTextureFormat(texs[slot].format),
-            .components = texs[slot].composEnabled,
-            .video_planes =
-                nv12_plane_slot.has_value() && *nv12_plane_slot == static_cast<uint32_t>(slot)
-                    ? wallpaper::shader::RustShaderVideoPlanes::Nv12Biplanar
-                    : wallpaper::shader::RustShaderVideoPlanes::None,
-        });
-    }
-
-    const auto read_include = [&env](std::string_view path) -> std::optional<std::string> {
-        if (env.includes != nullptr) {
-            const auto found = env.includes->find(std::string(path));
-            return found == env.includes->end() ? std::nullopt : found->second;
-        }
-        if (env.vfs == nullptr) return std::nullopt;
-
-        std::string asset_path = "/assets/shaders/" + std::string(path);
-        if (auto stream = env.vfs->Open(asset_path); stream != nullptr) return stream->ReadAllStr();
-
-        std::string direct_path(path);
-        if (auto stream = env.vfs->Open(direct_path); stream != nullptr) return stream->ReadAllStr();
-
-        return std::nullopt;
-    };
-    // Recorded on every read, hit or miss, so a caller that wants to translate
-    // this same program again later gets the complete set either way. A cache
-    // hit reads them too -- that is how it revalidates -- so nothing is lost by
-    // not compiling.
-    const auto include_reader = [&](std::string_view path) -> std::optional<std::string> {
-        auto content = read_include(path);
-        if (env.used_includes != nullptr) {
-            env.used_includes->insert_or_assign(std::string(path), content);
-        }
-        return content;
-    };
-    const auto request_json = wallpaper::shader::BuildRustShaderRequestJson(request).dump();
-    const auto program_key = ProgramCacheKey(request_json);
-    const auto program_path = std::string("/cache/") + std::string(scene_id) +
-                              "/programs01/" + program_key + ".json";
-    const auto cache_read_started = std::chrono::steady_clock::now();
-    bool hit = false;
-    if (request.cache_enabled) {
-        if (const auto it = g_program_cache.find(program_key); it != g_program_cache.end()) {
-            hit = RestoreProgram(it->second, request_json, include_reader, output);
-        }
-        if (!hit && env.vfs != nullptr) {
-            if (auto file = env.vfs->Open(program_path); file != nullptr && file->Size() > 0 && file->Size() <= 16 * 1024 * 1024) {
-                const auto cached = nlohmann::json::parse(file->ReadAllStr(), nullptr, false);
-                hit = RestoreProgram(cached, request_json, include_reader, output);
-                if (hit) RememberProgram(program_key, cached);
-            }
-        }
-    }
-    g_shader_startup_metrics.cache_read_ms += MeasureElapsedMs(cache_read_started);
-    nlohmann::json program;
-    if (hit) {
-        ++g_shader_startup_metrics.cache_hits;
-    } else {
-        ++g_shader_startup_metrics.cache_misses;
-        auto includes = nlohmann::json::object();
-        const auto tracking_reader = [&](std::string_view path) -> std::optional<std::string> {
-            const auto content = include_reader(path);
-            includes[std::string(path)] = content ? nlohmann::json(*content) : nlohmann::json(nullptr);
-            return content;
-        };
-        const auto compile_started = std::chrono::steady_clock::now();
-        if (!wallpaper::shader::CompileRustShaderProgram(request, output, tracking_reader)) {
-            g_shader_startup_metrics.compile_ms += MeasureElapsedMs(compile_started);
-            const auto error = wallpaper::shader::LastRustShaderError();
-            LOG_ERROR("Rust shader compile failed for '%s': %s",
-                      std::string(shader_name).c_str(), error.c_str());
-            return false;
-        }
-        g_shader_startup_metrics.compile_ms += MeasureElapsedMs(compile_started);
-        if (request.cache_enabled) {
-            program = {
-                {"request", request_json}, {"compiler", wallpaper::shader::RustShaderCacheIdentity()},
-                {"includes", std::move(includes)},
-                {"metadata", output.metadata_json}, {"reflection", output.reflection_json},
-                {"cache_key", output.cache_key},
-            };
-            auto metal = nlohmann::json::array();
-            for (const auto& stage : output.metal_stages) {
-                metal.push_back({
-                    {"kind", stage.kind == ShaderType::VERTEX ? 0 : 1},
-                    {"source", stage.source},
-                    {"meta", MetalStageMetaJson(stage).dump()},
-                });
-            }
-            program["metal"] = std::move(metal);
-            RememberProgram(program_key, program);
-        }
-    }
-
-    const auto cache_write_started = std::chrono::steady_clock::now();
-    if (!hit && request.cache_enabled && env.vfs != nullptr && ! output.cache_key.empty()) {
-        // Written beside the entry and published over it, so a reader -- this
-        // process, another one, or the next launch -- sees either the previous
-        // complete entry or this one, never half of either. The temporary name
-        // carries the writer's identity because two processes may be compiling
-        // the same program at the same moment; the loser's rename simply
-        // replaces an identical file.
-        const auto staged_path =
-            program_path + ".tmp" + std::to_string(static_cast<long long>(::getpid()));
-        bool published = false;
-        if (auto file = env.vfs->OpenW(staged_path); file != nullptr) {
-            const auto bytes = program.dump();
-            published = WriteBytes(*file, bytes.data(), bytes.size());
-            // Closed before the rename: the stream owns the descriptor, and a
-            // rename over a file still being written is not a publication.
-            file.reset();
-            published = published && env.vfs->Rename(staged_path, program_path);
-        }
-        if (! published) {
-            // A file system with no rename, or one that refused it. Writing in
-            // place is what this did before, and a torn entry is rejected when
-            // it is read.
-            if (auto file = env.vfs->OpenW(program_path); file != nullptr) {
-                const auto bytes = program.dump();
-                WriteBytes(*file, bytes.data(), bytes.size());
-            }
-        }
-    }
-    g_shader_startup_metrics.cache_write_ms += MeasureElapsedMs(cache_write_started);
-
-    shader_info->combos.insert(output.shader_info.combos.begin(), output.shader_info.combos.end());
-    shader_info->svs.insert(output.shader_info.svs.begin(), output.shader_info.svs.end());
-    shader_info->alias.insert(output.shader_info.alias.begin(), output.shader_info.alias.end());
-    shader_info->defTexs.insert(
-        shader_info->defTexs.end(), output.shader_info.defTexs.begin(), output.shader_info.defTexs.end());
-    if (reflection_json != nullptr) {
-        *reflection_json = output.reflection_json;
-    }
-
-    for (auto& unit : units) {
-        if (unit.stage == ShaderType::VERTEX) {
-            unit.preprocess_info = output.vertex_preprocessor_info;
-        } else if (unit.stage == ShaderType::FRAGMENT) {
-            unit.preprocess_info = output.fragment_preprocessor_info;
-        }
-    }
-
-    return true;
+    // CLEANROOM LT24
+    (void)scene_id;
+    (void)shader_name;
+    (void)units;
+    (void)output;
+    (void)env;
+    (void)shader_info;
+    (void)texs;
+    (void)reflection_json;
+    (void)nv12_plane_slot;
+    return false;
 }
 
 } // namespace
@@ -348,7 +119,7 @@ bool WPShaderParser::CompileToMslRust(std::string_view scene_id, std::string_vie
                                       std::string* reflection_json,
                                       std::optional<uint32_t> nv12_plane_slot,
                                       WPShaderIncludeMap* used_includes) {
-    wallpaper::shader::RustShaderOutput output;
+    shader::RustShaderOutput output {};
     const RustCompileEnv env { .vfs = &vfs, .used_includes = used_includes };
     if (! CompileProgramRust(scene_id, shader_name, units, output, env,
                              shader_info, texs, reflection_json, nv12_plane_slot)) {
@@ -393,7 +164,7 @@ bool WPShaderParser::CompileMslVariant(const SceneMetalVariantInputs&           
         }
     }
 
-    wallpaper::shader::RustShaderOutput output;
+    shader::RustShaderOutput output {};
     const RustCompileEnv env { .vfs      = cache_vfs.IsMounted("cache") ? &cache_vfs : nullptr,
                                .includes = &inputs.includes };
     const auto           set_error = [error](std::string message) {
