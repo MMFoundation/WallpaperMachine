@@ -229,7 +229,10 @@ void OrderSlots(std::vector<Particle>& slots) {
             if (rank(p) == wanted) scratch.push_back(p);
         }
     }
-    slots.swap(scratch);
+    // Copied back, not swapped: a swap would hand this instance's buffer to the
+    // next caller and take theirs, so instances of different sizes would make
+    // the scratch grow again every frame.
+    std::copy(scratch.begin(), scratch.end(), slots.begin());
 }
 
 /// The control point an emitter is framed by, or null when it has none.
