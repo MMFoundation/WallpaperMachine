@@ -2399,6 +2399,7 @@ struct LazyParseInputs {
     LayerObjectIndex index;
     bool             is_ortho { true };
     bool             uses_models { false };
+    wpscene::WPSceneGeneral general;
 };
 
 ParseContext MakeLazyParseContext(const std::shared_ptr<Scene>& scene, fs::VFS& vfs,
@@ -4002,6 +4003,72 @@ std::shared_ptr<SceneNode> MakeScriptTextLayer(const std::shared_ptr<Scene>& sce
     return lazy.layers.back().node;
 }
 
+/// Builds the template a script's `createLayer(<model path>)` copies (P2 R8): the layer
+/// of an object that holds the model, visible and placed nowhere, built once and never
+/// attached to the scene. A model that gives no size takes the picture size of its first
+/// texture. False when there is no such model or it is a shape that cannot be copied.
+bool LoadLayerTemplate(const std::shared_ptr<Scene>& scene, fs::VFS* vfs,
+                       const LazyParseInputs& inputs, std::string_view requested) {
+    if (scene == nullptr || scene->runtime == nullptr || vfs == nullptr) return false;
+    const std::string path(requested);
+    nlohmann::json    model;
+    if (path.empty() || ! PARSE_JSON(fs::GetFileContent(*vfs, "/assets/" + path), model) ||
+        ! model.is_object()) {
+        return false;
+    }
+    const auto flag = [&model](const char* key) {
+        const auto found = model.find(key);
+        return found != model.end() && found->is_boolean() && found->get<bool>();
+    };
+    if (IsComposeLayerModel(path) || flag("passthrough") || flag("fullscreen")) {
+        scene->runtime->ReportUnsupportedLayerTemplate(path);
+        return false;
+    }
+
+    nlohmann::json entry = { { "image", path },
+                             { "name", "__we_template_" + path },
+                             { "visible", true },
+                             { "origin", { 0, 0, 0 } },
+                             { "scale", { 1, 1, 1 } },
+                             { "angles", { 0, 0, 0 } } };
+    EntryPlan plan;
+    plan.kind      = EntryKind::Image;
+    plan.admission = Admission::Object;
+    plan.key       = "__we_template_" + path;
+
+    ParseContext lazy = MakeLazyParseContext(scene, *vfs, inputs);
+    LazyShaderParseScope scope(inputs.index);
+    if (! model.contains("width")) {
+        // The picture of the first texture of the model's material, when it can be read.
+        nlohmann::json material;
+        const auto     named = model.find("material");
+        if (named != model.end() && named->is_string() &&
+            PARSE_JSON(fs::GetFileContent(*vfs, "/assets/" + named->get<std::string>()), material) &&
+            material.is_object()) {
+            const auto passes = material.find("passes");
+            if (passes != material.end() && passes->is_array() && ! passes->empty() &&
+                passes->front().is_object()) {
+                const auto textures = passes->front().find("textures");
+                if (textures != passes->front().end() && textures->is_array() && ! textures->empty() &&
+                    textures->front().is_string()) {
+                    const auto& header = TextureHeaderOf(lazy, textures->front().get<std::string>());
+                    const int32_t width  = header.mapWidth > 0 ? header.mapWidth : header.width;
+                    const int32_t height = header.mapHeight > 0 ? header.mapHeight : header.height;
+                    if (width > 0 && height > 0) entry["size"] = { width, height };
+                }
+            }
+        }
+    }
+    if (! LoadImageEntry(lazy, 0, entry, plan, inputs.general) || lazy.layers.empty()) {
+        LOG_ERROR("createLayer: the template of '%s' could not be built", path.c_str());
+        return false;
+    }
+    FlushPendingMetalTranslations(*scene);
+    auto node = lazy.layers.back().node;
+    scene->runtime->RegisterLayerTemplate(path, node, scene->runtime->NodeSize(plan.key));
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Particle layers (P4 R1 to R10, R31 to R34, R50, R51 to R58, R75 to R78, R82 to R90,
 // R92 to R97, R99 to R113, R121, R124; R37, R49, R87).
@@ -5494,7 +5561,12 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
         inputs.index       = index;
         inputs.is_ortho    = context.is_ortho;
         inputs.uses_models = context.uses_models;
+        inputs.general     = general;
         const std::weak_ptr<Scene> weak = scene;
+        scene->runtime->SetLayerTemplateLoader(
+            [weak, vfs_pointer, inputs](std::string_view template_path) {
+                return LoadLayerTemplate(weak.lock(), vfs_pointer, inputs, template_path);
+            });
         scene->runtime->SetTextLayerFactory(
             [weak, vfs_pointer, inputs](const std::string& config, int32_t object_id) {
                 return MakeScriptTextLayer(weak.lock(), vfs_pointer, inputs, config, object_id);
