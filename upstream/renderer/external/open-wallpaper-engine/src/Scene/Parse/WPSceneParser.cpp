@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec p1-scene-structure.md; written without access to the original source.
 #include "WPSceneParser.hpp"
 #include "LayerParallax.hpp"
 #include "WPJson.hpp"
@@ -68,7 +69,19 @@ using namespace wallpaper::linalg;
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wunused-function"
 
-// CLEANROOM LS1: the file-local helpers of this group were removed; the rewrite designs its own.
+/// One entry of the object list that became a member of the layer tree.
+struct ParsedLayer {
+    std::size_t                entry { 0 };      // position in the `objects` array
+    int32_t                    id { 0 };
+    int32_t                    parent_id { -1 }; // as authored; -1 for none
+    std::string                key;              // the name scripts and bindings use
+    std::string                authored_name;
+    std::string                attachment;
+    std::shared_ptr<SceneNode> node;
+    // A node that only carries a transform: a group, a shape, or the stand-in of
+    // an entry whose typed object is not (or not yet) built.
+    bool                       plain { true };
+};
 
 namespace
 {
@@ -302,7 +315,6 @@ void FlushPendingMetalTranslations(Scene& scene) {
 } // namespace
 
 struct ParseContext {
-    // CLEANROOM LS1: the members only the removed code used are gone; the rewrite designs its own.
     std::shared_ptr<Scene>                                  scene;
     WPShaderValueUpdater*                                   shader_updater;
     i32                                                     ortho_w;
@@ -321,6 +333,12 @@ struct ParseContext {
     /// group only once every object exists.
     std::vector<ParticleSubSystem*>                         pending_prewarms;
     std::unordered_set<int32_t>                             referenced_layer_ids;
+    /// The layers of the tree, in the order the scene file declares them.
+    std::vector<ParsedLayer>                                layers;
+    /// Scene-event scripts waiting for the scene to be complete: source, owning layer key.
+    std::vector<std::pair<std::string, std::string>>        scene_scripts;
+    /// How many text layers carry each authored name.
+    std::unordered_map<std::string, uint32_t>               text_name_counts;
     /// The card each text layer shows, for a composite registered only once
     /// a later consumer turns out to sample the layer.
     std::unordered_map<int32_t, TextLayerRenderFrame>       text_cards;
@@ -337,18 +355,18 @@ struct ParseContext {
 
 namespace
 {
-// CLEANROOM LS2: the file-local helpers of this group were removed; the rewrite designs its own.
+/// The whole content of an asset file, empty when it is absent.
+std::vector<uint8_t> ReadAssetBytes(fs::VFS& vfs, const std::string& path) {
+    const std::string text = fs::GetFileContent(vfs, path);
+    return std::vector<uint8_t>(text.begin(), text.end());
+}
 
 void MarkSceneRequiresAudioResponse(Scene* scene) {
-    // CLEANROOM LS2
+    if (scene != nullptr && scene->runtime != nullptr) scene->runtime->MarkSceneRequiresAudioResponse();
 }
 
-// CLEANROOM LS3: the file-local helpers of this group were removed; the rewrite designs its own.
-
-bool HasDynamicSetting(const nlohmann::json& value) {
-    // CLEANROOM LS3
-    return false;
-}
+/// A setting that a project property or a running script decides.
+bool HasDynamicSetting(const nlohmann::json& value) { return wpscene::SettingIsDriven(value); }
 
 /// A visibility only a reload changes: the authored value, or one of the
 /// wallpaper's own properties, which reparse the scene when they change.
@@ -357,11 +375,34 @@ bool VisibilitySettledBy(const nlohmann::json& setting) {
     return ! setting.is_object() || ! setting.contains("script");
 }
 
-// CLEANROOM LS4: the file-local helpers of this group were removed; the rewrite designs its own.
+/// Undoes what an object registered under its runtime name (the name, its node,
+/// the scene scripts queued for it) unless the object is committed: an object
+/// that fails to build leaves nothing behind, and a node of the same name that
+/// was there before is put back.
+class NodeRegistrationGuard {
+public:
+    NodeRegistrationGuard(SceneRuntimeContext* runtime, std::string name, SceneNode* node)
+        : m_runtime(runtime), m_name(std::move(name)), m_node(node) {
+        if (m_runtime != nullptr) m_memo = m_runtime->CaptureNodeRegistration(m_name);
+    }
+    NodeRegistrationGuard(const NodeRegistrationGuard&)            = delete;
+    NodeRegistrationGuard& operator=(const NodeRegistrationGuard&) = delete;
+    ~NodeRegistrationGuard() {
+        if (! m_committed && m_runtime != nullptr) {
+            m_runtime->RollbackNodeRegistration(m_name, m_node, m_memo);
+        }
+    }
+    void Commit() { m_committed = true; }
 
-// CLEANROOM LS5: the node-registration rollback guard was removed; the rewrite designs its own.
+private:
+    SceneRuntimeContext*                                       m_runtime;
+    std::string                                                m_name;
+    SceneNode*                                                 m_node;
+    std::shared_ptr<SceneRuntimeContext::LayerRegistrationMemo> m_memo;
+    bool                                                       m_committed { false };
+};
 
-// CLEANROOM LS6: the file-local helpers of this group were removed; the rewrite designs its own.
+// CLEANROOM LS6: puppet attachments (registering a layer that hangs from a parent puppet's attachment point) are not built yet.
 
 // Runs the prewarms the particle layers queued, now that every layer sits under
 // its parent.
@@ -370,17 +411,39 @@ void PrewarmParticleSystems(ParseContext& context) {
     context.pending_prewarms.clear();
 }
 
-// CLEANROOM LS7: the file-local helpers of this group were removed; the rewrite designs its own.
-
-std::array<int32_t, 2> ResolveImageRenderExtent(const wpscene::WPImageObject& object,
-                                                const ParseContext&           context) {
-    // CLEANROOM LS7
-    return {};
+/// The extent of a view of `canvas` units at `zoom`: the canvas divided by the
+/// zoom, truncated to whole units, at least 1. A zoom that is not finite and
+/// positive counts as 1.
+int32_t ZoomedExtent(int32_t canvas, double zoom) {
+    const double applied = std::isfinite(zoom) && zoom > 0.0 ? zoom : 1.0;
+    const double units   = std::trunc(static_cast<double>(canvas) / applied);
+    return static_cast<int32_t>(std::clamp(units, 1.0, 2147483647.0));
 }
 
+/// The extent of the offscreen targets an image layer draws into: its size
+/// rounded to whole numbers, where an axis of 2 or less (or not finite) takes the
+/// canvas's extent on that axis instead, at least 4.
+std::array<int32_t, 2> ResolveImageRenderExtent(const wpscene::WPImageObject& object,
+                                                const ParseContext&           context) {
+    const std::array<int32_t, 2> canvas { context.ortho_w, context.ortho_h };
+    std::array<int32_t, 2>       extent {};
+    for (std::size_t axis = 0; axis < 2; ++axis) {
+        const double size = object.size[axis];
+        if (std::isfinite(size) && std::round(size) > 2.0) {
+            extent[axis] = static_cast<int32_t>(std::min(std::round(size), 2147483647.0));
+        } else {
+            extent[axis] = std::max(4, canvas[axis]);
+        }
+    }
+    return extent;
+}
+
+/// One axis of an effect buffer: the base divided by the buffer's integer scale
+/// (0 reads as 1), rounded to the nearest whole number, at least 4.
 int32_t ResolveRenderTargetDimension(float base_dimension, uint32_t scale) {
-    // CLEANROOM LS7
-    return {};
+    const double divisor = scale == 0 ? 1.0 : static_cast<double>(scale);
+    const double value   = std::isfinite(base_dimension) ? base_dimension / divisor : 0.0;
+    return static_cast<int32_t>(std::clamp(std::round(value), 4.0, 2147483647.0));
 }
 
 // The format Wallpaper Engine gives an effect buffer. Float buffers hold signed
@@ -802,8 +865,44 @@ void ResolveLoadTimeTextStyle(ParseContext& context, wpscene::WPTextObject& obj,
 
 // CLEANROOM LS17: the file-local helpers of this group were removed; the rewrite designs its own.
 
+/// Gives `node` the local translation, scale and angles that make its local matrix
+/// `transform` (translation, then z, y and x rotations, then scale: the order
+/// `SceneNode::LocalTransOf` composes). A mirrored matrix carries its mirror on x.
 void SetNodeTransformFromMatrix(SceneNode& node, const Matrix4d& transform) {
-    // CLEANROOM LS18
+    const auto at = [&transform](int row, int column) { return transform(row, column); };
+    std::array<double, 3> scale {};
+    for (int column = 0; column < 3; ++column) {
+        scale[column] = std::sqrt(at(0, column) * at(0, column) + at(1, column) * at(1, column) +
+                                  at(2, column) * at(2, column));
+    }
+    // The sign of the 3x3 part's determinant tells a mirror from a turn.
+    const double det = at(0, 0) * (at(1, 1) * at(2, 2) - at(1, 2) * at(2, 1)) -
+                       at(0, 1) * (at(1, 0) * at(2, 2) - at(1, 2) * at(2, 0)) +
+                       at(0, 2) * (at(1, 0) * at(2, 1) - at(1, 1) * at(2, 0));
+    if (det < 0.0) scale[0] = -scale[0];
+    double rotation[3][3];
+    for (int column = 0; column < 3; ++column) {
+        for (int row = 0; row < 3; ++row) {
+            rotation[row][column] = std::abs(scale[column]) > 1e-12 ? at(row, column) / scale[column]
+                                                                    : (row == column ? 1.0 : 0.0);
+        }
+    }
+    // R = Rz * Ry * Rx.
+    const double sin_y = std::clamp(-rotation[2][0], -1.0, 1.0);
+    double       x     = 0.0;
+    double       y     = std::asin(sin_y);
+    double       z     = 0.0;
+    if (std::abs(sin_y) < 1.0 - 1e-9) {
+        x = std::atan2(rotation[2][1], rotation[2][2]);
+        z = std::atan2(rotation[1][0], rotation[0][0]);
+    } else {
+        x = std::atan2(-rotation[1][2], rotation[1][1]);
+    }
+    node.SetTranslate(Vector3f(static_cast<float>(at(0, 3)), static_cast<float>(at(1, 3)),
+                               static_cast<float>(at(2, 3))));
+    node.SetScale(Vector3f(static_cast<float>(scale[0]), static_cast<float>(scale[1]),
+                           static_cast<float>(scale[2])));
+    node.SetRotation(Vector3f(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)));
 }
 
 // CLEANROOM LS18: the file-local helpers of this group were removed; the rewrite designs its own.
@@ -1106,8 +1205,6 @@ void PlacePerspectiveCameraNode(SceneNode& node, const wpscene::WPSceneCamera& c
     SetNodeTransformFromMatrix(node, world.matrix());
 }
 
-// CLEANROOM LS26: the file-local helpers of this group were removed; the rewrite designs its own.
-
 // CLEANROOM LS27: the file-local helpers of this group were removed; the rewrite designs its own.
 
 std::array<float, 4> HDRBloomBlend(float threshold, float feather) {
@@ -1189,7 +1286,7 @@ void ResolveLoadOnlySceneSetting(SceneRuntimeContext& runtime, const nlohmann::j
     runtime.NoteLoadOnlyProperty(UserPropertyName(setting));
 }
 
-// CLEANROOM LS28: the file-local helpers of this group were removed; the rewrite designs its own.
+// CLEANROOM LS28: scene wind and gravity (`windenabled`, `winddirection`, `windstrength`, `gravitydirection`, `gravitystrength`) do not reach the particle systems yet.
 
 /// Wallpaper Engine composes a layer from the flags and shader of its model, not
 /// from the model's path. These are the editor's two models of that kind: the
@@ -1348,8 +1445,6 @@ void CollectScriptStringLiterals(std::string_view source, std::unordered_set<std
     }
 }
 
-// CLEANROOM LS34: the file-local helpers of this group were removed; the rewrite designs its own.
-
 } // namespace
 
 // A texture property carries whatever the editor or the picker wrote into it:
@@ -1441,15 +1536,749 @@ struct LazyShaderParseScope {
 };
 } // namespace
 
+namespace
+{
+// ---------------------------------------------------------------------------
+// Entries of the object list: what each is, whether it is built, what it is
+// called (R31 to R35, R75, R87, R112).
+// ---------------------------------------------------------------------------
+
+enum class EntryKind
+{
+    Ignored,
+    Group,
+    Image,
+    Particle,
+    Sound,
+    Light,
+    Text,
+    Model,
+    Camera,
+    Shape,
+};
+
+/// What becomes of an entry: nothing, a transform-only node, or a typed object
+/// (which owns a node of its own, or none for a sound).
+enum class Admission
+{
+    Skip,
+    Node,
+    Object,
+};
+
+struct EntryPlan {
+    EntryKind   kind { EntryKind::Ignored };
+    Admission   admission { Admission::Skip };
+    int32_t     id { 0 };
+    bool        placeholder { false }; // a node standing in for a typed object that has children
+    std::string key;
+};
+
+/// A script that only registers scene events: it exports no `update` and calls
+/// `engine.on(`, `scene.on(` or `thisScene.on(`. It is run once, as a scene script
+/// of its layer, rather than attached to the value it was written on.
+bool IsSceneEventScript(std::string_view source) {
+    if (ExportsFunction(source, "update")) return false;
+    for (const std::string_view call : { "engine.on(", "scene.on(", "thisScene.on(" }) {
+        if (source.find(call) != std::string_view::npos) return true;
+    }
+    return false;
+}
+
+/// Queues the scene-event scripts among the bindings of a layer.
+void QueueSceneScripts(ParseContext& context, const nlohmann::json& bindings,
+                       const std::string& key) {
+    if (! bindings.is_object()) return;
+    for (const auto& [name, binding] : bindings.items()) {
+        const auto script = binding.find("script");
+        if (script == binding.end() || ! script->is_string()) continue;
+        const auto& source = script->get_ref<const std::string&>();
+        if (IsSceneEventScript(source)) context.scene_scripts.emplace_back(source, key);
+    }
+}
+
+/// The member `key` of an entry when it is there and not `null`.
+const nlohmann::json* NonNullMember(const nlohmann::json& entry, const char* key) {
+    const auto found = entry.find(key);
+    return found == entry.end() || found->is_null() ? nullptr : &*found;
+}
+
+EntryKind ClassifyEntry(const nlohmann::json& entry) {
+    if (! entry.is_object()) return EntryKind::Ignored;
+    if (const auto* image = NonNullMember(entry, "image"); image != nullptr && image->is_string()) {
+        return EntryKind::Image;
+    }
+    if (NonNullMember(entry, "particle") != nullptr) return EntryKind::Particle;
+    if (NonNullMember(entry, "sound") != nullptr) return EntryKind::Sound;
+    if (NonNullMember(entry, "light") != nullptr) return EntryKind::Light;
+    if (NonNullMember(entry, "text") != nullptr) return EntryKind::Text;
+    if (NonNullMember(entry, "model") != nullptr) return EntryKind::Model;
+    if (NonNullMember(entry, "camera") != nullptr) return EntryKind::Camera;
+    // A kind key that holds nothing usable makes the entry neither a group nor a
+    // typed object.
+    for (const char* key : { "image", "particle", "sound", "light", "text", "model", "camera" }) {
+        if (entry.contains(key)) return EntryKind::Ignored;
+    }
+    const auto shape = entry.find("shape");
+    return shape != entry.end() && shape->is_string() ? EntryKind::Shape : EntryKind::Group;
+}
+
+/// `visible` is plainly false: the boolean, or a wrapper whose `value` is false
+/// with neither a property nor a script to change it.
+bool StaticallyHidden(const nlohmann::json& entry) {
+    const auto found = entry.find("visible");
+    if (found == entry.end()) return false;
+    if (found->is_boolean()) return ! found->get<bool>();
+    if (! found->is_object() || wpscene::VisibilityIsBound(*found)) return false;
+    const auto value = found->find("value");
+    return value != found->end() && value->is_boolean() && ! value->get<bool>();
+}
+
+int32_t EntryId(const nlohmann::json& entry) {
+    int32_t id = 0;
+    if (const auto found = entry.find("id"); found != entry.end()) wpscene::ReadInt32(*found, id);
+    return id;
+}
+
+/// What the scripts of the object list could reach: the quoted strings of every
+/// script anywhere in it.
+std::unordered_set<std::string> ScriptLiterals(const nlohmann::json& objects) {
+    std::unordered_set<std::string> literals;
+    std::vector<const std::string*> sources;
+    CollectScriptSources(objects, sources);
+    for (const auto* source : sources) CollectScriptStringLiterals(*source, literals);
+    return literals;
+}
+
+/// Whether a statically hidden entry is built anyway: a script sits inside it, a
+/// script names it by a quoted literal, or (for an image) another built image
+/// reads its picture.
+bool RetainedWhileHidden(EntryKind kind, const nlohmann::json& entry, int32_t id,
+                         const std::unordered_set<int32_t>&     reachable,
+                         const std::unordered_set<std::string>& literals) {
+    if (kind == EntryKind::Image && id != 0 && reachable.contains(id)) return true;
+    std::vector<const std::string*> sources;
+    CollectScriptSources(entry, sources);
+    if (! sources.empty()) return true;
+    if (const auto name = entry.find("name");
+        name != entry.end() && name->is_string() && ! name->get_ref<const std::string&>().empty()) {
+        return literals.contains(name->get<std::string>());
+    }
+    return false;
+}
+
+/// Decides, for every entry, what is built and what is called.
+std::vector<EntryPlan> PlanEntries(ParseContext& context, const nlohmann::json& objects,
+                                   const LayerObjectIndex& index) {
+    std::vector<EntryPlan> plans(objects.size());
+    std::unordered_set<int32_t> parent_ids;
+    for (const auto& entry : objects) {
+        int32_t parent = 0;
+        if (entry.is_object()) {
+            if (const auto found = entry.find("parent");
+                found != entry.end() && wpscene::ReadInt32(*found, parent)) {
+                parent_ids.insert(parent);
+            }
+        }
+    }
+    const auto reachable = CollectReachableLayerIds(objects, index, context.vfs);
+    const auto literals  = ScriptLiterals(objects);
+
+    for (std::size_t at = 0; at < objects.size(); ++at) {
+        const auto& entry = objects[at];
+        auto&       plan  = plans[at];
+        plan.kind         = ClassifyEntry(entry);
+        if (plan.kind == EntryKind::Ignored) continue;
+        plan.id            = EntryId(entry);
+        const bool has_id  = plan.id != 0;
+        const bool has_kids = has_id && parent_ids.contains(plan.id);
+        const bool hidden  = StaticallyHidden(entry);
+        switch (plan.kind) {
+        case EntryKind::Group:
+        case EntryKind::Shape: plan.admission = has_id ? Admission::Node : Admission::Skip; break;
+        case EntryKind::Sound: plan.admission = hidden ? Admission::Skip : Admission::Object; break;
+        case EntryKind::Light:
+            // A light that is statically hidden is dropped whatever binds its
+            // visibility; its children still keep their parent.
+            if (hidden) plan.admission = has_kids ? Admission::Node : Admission::Skip;
+            else plan.admission = Admission::Object;
+            break;
+        case EntryKind::Text: plan.admission = has_id ? Admission::Object : Admission::Skip; break;
+        default:
+            if (! has_id) {
+                plan.admission = Admission::Skip;
+            } else if (! hidden || RetainedWhileHidden(plan.kind, entry, plan.id, reachable, literals)) {
+                plan.admission = Admission::Object;
+            } else {
+                plan.admission = has_kids ? Admission::Node : Admission::Skip;
+            }
+            break;
+        }
+        plan.placeholder = has_kids && plan.admission == Admission::Object &&
+                           (plan.kind == EntryKind::Text || plan.kind == EntryKind::Model ||
+                            plan.kind == EntryKind::Camera);
+        if (plan.admission == Admission::Node && plan.kind != EntryKind::Group &&
+            plan.kind != EntryKind::Shape) {
+            plan.placeholder = true;
+        }
+    }
+
+    // Names. Entries of every kind but text and light are counted together; a
+    // text layer is counted apart.
+    std::unordered_map<std::string, uint32_t> counted;
+    for (std::size_t at = 0; at < objects.size(); ++at) {
+        const auto& plan = plans[at];
+        if (plan.admission == Admission::Skip || plan.kind == EntryKind::Sound ||
+            plan.kind == EntryKind::Light) {
+            continue;
+        }
+        const auto name = objects[at].find("name");
+        if (name == objects[at].end() || ! name->is_string()) continue;
+        const auto& text = name->get_ref<const std::string&>();
+        if (text.empty()) continue;
+        if (plan.kind == EntryKind::Text) {
+            ++context.text_name_counts[text];
+        } else if (plan.admission == Admission::Object || plan.kind == EntryKind::Group ||
+                   plan.kind == EntryKind::Shape) {
+            ++counted[text];
+        }
+    }
+    context.layer_name_counts = counted;
+
+    for (std::size_t at = 0; at < objects.size(); ++at) {
+        auto& plan = plans[at];
+        if (plan.admission == Admission::Skip) continue;
+        std::string authored;
+        if (const auto name = objects[at].find("name"); name != objects[at].end() && name->is_string()) {
+            authored = name->get<std::string>();
+        }
+        const auto count_of = [&](const std::unordered_map<std::string, uint32_t>& table) {
+            const auto found = table.find(authored);
+            return found == table.end() ? 0u : found->second;
+        };
+        const std::string id_text = std::to_string(plan.id);
+        switch (plan.kind) {
+        case EntryKind::Text:
+            plan.key = ! authored.empty() && count_of(counted) == 0 &&
+                               count_of(context.text_name_counts) <= 1
+                           ? authored
+                           : "__we_text_" + id_text;
+            break;
+        case EntryKind::Light:
+            plan.key = ! authored.empty() && count_of(counted) == 0 ? authored
+                                                                    : "__we_light_" + id_text;
+            break;
+        case EntryKind::Sound: plan.key = authored; break;
+        default:
+            plan.key = ! authored.empty() && count_of(counted) <= 1 ? authored
+                                                                    : "__we_layer_" + id_text;
+            break;
+        }
+    }
+    return plans;
+}
+
+// ---------------------------------------------------------------------------
+// The layer tree (R38 to R43, R75 to R78, R87).
+// ---------------------------------------------------------------------------
+
+/// The node of an entry that only carries a transform, registered under its key
+/// with its bindings. `animate` is false for the stand-in of a typed object, whose
+/// own loader registers the timelines.
+std::shared_ptr<SceneNode> MakePlainLayerNode(ParseContext& context, const nlohmann::json& entry,
+                                              const EntryPlan& plan, bool animate) {
+    wpscene::WPMiscObjectBase base;
+    base.FromCommonJson(entry);
+    auto node = std::make_shared<SceneNode>(Vector3f(base.origin.data()),
+                                            Vector3f(base.scale.data()),
+                                            Vector3f(base.angles.data()), plan.key);
+    node->ID() = plan.id;
+    auto& runtime = *context.scene->runtime;
+    runtime.RegisterNode(plan.key, node.get());
+    runtime.RegisterLayerId(plan.id, plan.key);
+    if (const auto name = entry.find("name"); name != entry.end() && name->is_string()) {
+        const auto& authored = name->get_ref<const std::string&>();
+        if (authored != plan.key) {
+            runtime.RegisterLayerAuthoredName(plan.key, authored);
+            // Name lookup answers with the first declaration of a shared name.
+            if (! authored.empty()) runtime.RegisterLayerAlias(authored, plan.key);
+        }
+    }
+    RegisterNodeTransformSettings(runtime, node.get(), plan.key, base.origin_setting,
+                                  base.scale_setting, base.angles_setting, animate);
+    QueueSceneScripts(context, base.field_bindings, plan.key);
+
+    // Visibility: the authored flag, or the value a property or script gives it,
+    // which the runtime then keeps following. A hidden node that only a reload can
+    // change costs the render graph nothing.
+    bool visible = base.visible;
+    if (base.dynamic_visible) {
+        auto value = ResolveBoolSetting(runtime, base.visible_setting, plan.key);
+        visible    = value->getBool();
+        runtime.RegisterNodeVisibility(plan.key, node.get(), std::move(value));
+    }
+    node->SetVisible(visible);
+    node->SetVisibilitySettled(VisibilitySettledBy(base.visible_setting));
+    return node;
+}
+
+bool LoadSoundEntry(ParseContext& context, const nlohmann::json& entry, audio::SoundManager& sm);
+
+/// Builds the entries in the order the file declares them: the plain node of a
+/// group, a shape or a stand-in, and the typed object an entry carries. Layers are
+/// registered with the runtime in this order, which is the order scripts count
+/// them in.
+void BuildLayers(ParseContext& context, const nlohmann::json& objects,
+                 const std::vector<EntryPlan>& plans, audio::SoundManager& sm) {
+    for (std::size_t at = 0; at < objects.size(); ++at) {
+        const auto& plan  = plans[at];
+        const auto& entry = objects[at];
+        if (plan.admission == Admission::Skip) continue;
+        const bool plain = plan.admission == Admission::Node;
+        if (plain || plan.placeholder) {
+            ParsedLayer layer;
+            layer.entry = at;
+            layer.id    = plan.id;
+            layer.key   = plan.key;
+            if (const auto name = entry.find("name"); name != entry.end() && name->is_string()) {
+                layer.authored_name = name->get<std::string>();
+            }
+            if (const auto parent = entry.find("parent"); parent != entry.end()) {
+                wpscene::ReadInt32(*parent, layer.parent_id);
+            }
+            if (const auto attachment = entry.find("attachment");
+                attachment != entry.end() && attachment->is_string()) {
+                layer.attachment = attachment->get<std::string>();
+            }
+            layer.node  = MakePlainLayerNode(context, entry, plan, plain);
+            layer.plain = true;
+            context.layer_nodes[layer.id] = layer.node;
+            context.layers.push_back(std::move(layer));
+        }
+        if (plain) continue;
+        switch (plan.kind) {
+        case EntryKind::Sound: LoadSoundEntry(context, entry, sm); break;
+        default:
+            LOG_ERROR("object %d (%s) is not built: its kind is not loaded by this parser yet",
+                      plan.id, plan.key.c_str());
+            break;
+        }
+    }
+}
+
+/// Hangs every layer under its parent, once all of them exist: roots under the
+/// scene's root, children under theirs, both in file order. A parent that is
+/// absent, is no member of the tree, appears under more than one entry, is the
+/// layer itself or is part of a cycle makes the layer a root.
+void AttachLayers(ParseContext& context) {
+    auto&             layers = context.layers;
+    const std::size_t count  = layers.size();
+    std::unordered_map<int32_t, std::size_t> slot_of;
+    std::unordered_set<int32_t>              ambiguous;
+    for (std::size_t at = 0; at < count; ++at) {
+        if (layers[at].id == 0) continue;
+        if (! slot_of.emplace(layers[at].id, at).second) ambiguous.insert(layers[at].id);
+    }
+    constexpr std::size_t    kNone = static_cast<std::size_t>(-1);
+    std::vector<std::size_t> parent(count, kNone);
+    for (std::size_t at = 0; at < count; ++at) {
+        const int32_t wanted = layers[at].parent_id;
+        if (wanted == 0 || wanted == layers[at].id || ambiguous.contains(wanted)) continue;
+        const auto found = slot_of.find(wanted);
+        if (found != slot_of.end()) parent[at] = found->second;
+    }
+    // Cycles, found without recursion: walk each unvisited chain, and when it runs
+    // into a link of its own walk, every member of that loop becomes a root.
+    std::vector<uint8_t> state(count, 0); // 0 new, 1 on the current walk, 2 settled
+    for (std::size_t start = 0; start < count; ++start) {
+        if (state[start] != 0) continue;
+        std::vector<std::size_t> walk;
+        std::size_t              at = start;
+        while (at != kNone && state[at] == 0) {
+            state[at] = 1;
+            walk.push_back(at);
+            at = parent[at];
+        }
+        if (at != kNone && state[at] == 1) {
+            const auto loop = std::find(walk.begin(), walk.end(), at);
+            for (auto member = loop; member != walk.end(); ++member) parent[*member] = kNone;
+        }
+        for (const auto member : walk) state[member] = 2;
+    }
+    for (std::size_t at = 0; at < count; ++at) {
+        auto& holder = parent[at] == kNone ? context.scene->sceneGraph : layers[parent[at]].node;
+        holder->AppendChild(layers[at].node);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Typed objects: sounds are the only kind this stage builds.
+// ---------------------------------------------------------------------------
+
+bool LoadSoundEntry(ParseContext& context, const nlohmann::json& entry, audio::SoundManager& sm) {
+    wpscene::WPSoundObject sound;
+    if (! sound.FromJson(entry, *context.vfs)) {
+        LOG_ERROR("sound object has no list of sounds");
+        return false;
+    }
+    WPSoundParser::Parse(sound, *context.vfs, sm, context.scene->runtime.get());
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Scene settings and cameras (R12 to R30, R79 to R88, R111, R113).
+// ---------------------------------------------------------------------------
+
+/// The authored setting, or a literal standing in for a key the file leaves out.
+nlohmann::json SettingOrValue(const nlohmann::json& setting, const nlohmann::json& literal) {
+    return setting.is_null() ? literal : setting;
+}
+
+void SetGlobalUniform(ParseContext& context, const char* name, std::initializer_list<float> lanes) {
+    const std::vector<float> values(lanes);
+    context.global_base_uniforms[name] = ShaderValue(values.data(), values.size());
+}
+
+/// floor(extent / divisor), at least 1.
+int32_t FractionOf(int32_t extent, int32_t divisor) { return std::max(1, extent / divisor); }
+
+/// A camera at `translate` under the scene's root, with its own node.
+std::shared_ptr<SceneNode> AddCameraNode(ParseContext& context, SceneCamera& camera,
+                                         const Vector3f& translate) {
+    auto node = std::make_shared<SceneNode>(translate, Vector3f(1.0f, 1.0f, 1.0f),
+                                            Vector3f(0.0f, 0.0f, 0.0f));
+    context.scene->sceneGraph->AppendChild(node);
+    camera.AttatchNode(node);
+    return node;
+}
+
+/// The cameras of the scene and the targets every scene has (R111, R113).
+void BuildCamerasAndTargets(ParseContext& context, const wpscene::WPScene& wp, double zoom) {
+    auto&       scene   = *context.scene;
+    const auto& general = wp.general;
+    const i32   width   = context.ortho_w;
+    const i32   height  = context.ortho_h;
+    const Vector3f centre(static_cast<float>(width) * 0.5f, static_cast<float>(height) * 0.5f, 0.0f);
+
+    // Targets first: every parse registers them before any object is built.
+    const i32  frame_w = std::max(1, width);
+    const i32  frame_h = std::max(1, height);
+    const auto format  = scene.hdr ? TextureFormat::RGBA16F : TextureFormat::RGBA8;
+    auto&      targets = scene.renderTargets;
+    targets[std::string(SpecTex_Default)] = SceneRenderTarget {
+        .width           = frame_w,
+        .height          = frame_h,
+        .authored_width  = frame_w,
+        .authored_height = frame_h,
+        .bind            = { .enable = true, .screen = true },
+        .format          = format,
+    };
+    uint32_t mip_levels = 1;
+    for (i32 side = std::max(frame_w, frame_h); side > 1; side /= 2) ++mip_levels;
+    targets[std::string(WE_MIP_MAPPED_FRAME_BUFFER)] = SceneRenderTarget {
+        .width        = frame_w,
+        .height       = frame_h,
+        .has_mipmap   = true,
+        .mipmap_level = mip_levels,
+        .bind         = { .enable = true, .name = std::string(SpecTex_Default) },
+        .format       = format,
+    };
+    targets["_rt_shadowAtlas"] =
+        SceneRenderTarget { .width = frame_w, .height = frame_h, .allowReuse = true };
+    scene.renderTargetAliases["_alias_lightCookie"] = "_rt_shadowAtlas";
+    for (const auto& [name, divisor] :
+         { std::pair<const char*, i32> { "_rt_4FrameBuffer", 4 }, { "_rt_8FrameBuffer", 8 },
+           { "_rt_Bloom", 8 } }) {
+        targets[name] = SceneRenderTarget { .width      = FractionOf(frame_w, divisor),
+                                            .height     = FractionOf(frame_h, divisor),
+                                            .allowReuse = true,
+                                            .format     = format };
+    }
+
+    // The screen space of effect passes: 2 by 2 units, depth -1 to 1.
+    auto effect = std::make_shared<SceneCamera>(2, 2, -1.0f, 1.0f);
+    context.effect_camera_node = AddCameraNode(context, *effect, Vector3f::Zero());
+    effect->Update();
+    scene.cameras["effect"] = effect;
+
+    // The framed canvas view: the canvas over the starting zoom.
+    auto global = std::make_shared<SceneCamera>(ZoomedExtent(width, zoom),
+                                                ZoomedExtent(height, zoom), -5000.0f, 5000.0f);
+    context.global_camera_node = AddCameraNode(context, *global, centre);
+    global->Update();
+    scene.cameras["global"] = global;
+
+    // The camera of fullscreen layers: the authored canvas, never the zoomed view.
+    auto fullscreen = std::make_shared<SceneCamera>(std::max(1, width), std::max(1, height),
+                                                    -5000.0f, 5000.0f);
+    AddCameraNode(context, *fullscreen, centre);
+    fullscreen->Update();
+    scene.cameras[std::string(FullscreenLayerCamera)] = fullscreen;
+
+    std::shared_ptr<SceneCamera> perspective;
+    if (context.is_ortho) {
+        // The lens perspective layers of a canvas scene look through.
+        perspective = std::make_shared<SceneCamera>(static_cast<float>(global->Aspect()), 5.0f,
+                                                    15000.0f, ResolveCanvasPerspectiveFov(general));
+        context.global_perspective_camera_node = AddCameraNode(context, *perspective, centre);
+        FitCanvasPerspective(*perspective, *global);
+        perspective->Update();
+        scene.activeCamera = global.get();
+    } else {
+        // The scene's own camera, placed by the `camera` block.
+        const float far_plane = general.farz + std::max(1.0f, std::abs(general.farz) * 0.001f);
+        perspective           = std::make_shared<SceneCamera>(
+            static_cast<float>(width) / static_cast<float>(std::max(1, height)), general.nearz,
+            far_plane, ResolvePerspectiveFov(general));
+        perspective->LockFov(true);
+        context.global_perspective_camera_node =
+            AddCameraNode(context, *perspective, Vector3f::Zero());
+        PlacePerspectiveCameraNode(*context.global_perspective_camera_node, wp.camera);
+        perspective->Update();
+        scene.activeCamera = perspective.get();
+    }
+    scene.cameras["global_perspective"] = perspective;
+}
+
+/// Every setting of the `general` block that reaches the scene or its runtime
+/// (R12 to R19, R59, R64): colours, light budget, fog, camera shake and parallax.
+void ApplySceneSettings(ParseContext& context, const wpscene::WPScene& wp) {
+    auto&       scene   = *context.scene;
+    auto&       runtime = *scene.runtime;
+    const auto& general = wp.general;
+
+    scene.clearEnabled = general.clearenabled;
+    scene.clearColor   = general.clearcolor;
+    if (general.dynamic_clearcolor) {
+        runtime.RegisterSceneClearColor(ResolveVec3Setting(runtime, general.clearcolor_setting));
+    }
+    scene.light_config = ParseSceneLightConfig(general.lightconfig);
+    scene.fog_distance = general.fogdistance;
+    scene.fog_height   = general.fogheight;
+    scene.opaque_first = general.transparentsorting && ! context.is_ortho;
+
+    SetGlobalUniform(context, "g_LightAmbientColor",
+                     { general.ambientcolor[0], general.ambientcolor[1], general.ambientcolor[2] });
+    SetGlobalUniform(context, "g_LightSkylightColor",
+                     { general.skylightcolor[0], general.skylightcolor[1], general.skylightcolor[2] });
+    SetGlobalUniform(context, "g_FogDistanceColor",
+                     { general.fogdistancecolor[0], general.fogdistancecolor[1],
+                       general.fogdistancecolor[2] });
+    SetGlobalUniform(context, "g_FogDistanceParams",
+                     { general.fogdistancestart, general.fogdistanceend - general.fogdistancestart,
+                       general.fogdistancestartdensity,
+                       general.fogdistanceenddensity - general.fogdistancestartdensity });
+    SetGlobalUniform(context, "g_FogHeightColor",
+                     { general.fogheightcolor[0], general.fogheightcolor[1],
+                       general.fogheightcolor[2] });
+    SetGlobalUniform(context, "g_FogHeightParams",
+                     { general.fogheightstart, general.fogheightend - general.fogheightstart,
+                       general.fogheightstartdensity,
+                       general.fogheightenddensity - general.fogheightstartdensity });
+
+    // The shake of the camera: static, or following its properties.
+    if (general.camerashake || HasDynamicSetting(general.camerashake_setting)) {
+        runtime.RegisterCameraShake(
+            ResolveBoolSetting(runtime,
+                               SettingOrValue(general.camerashake_setting, general.camerashake)),
+            ResolveFloatSetting(runtime, SettingOrValue(general.camerashakeamplitude_setting,
+                                                        general.camerashakeamplitude)),
+            ResolveFloatSetting(runtime, SettingOrValue(general.camerashakespeed_setting,
+                                                        general.camerashakespeed)),
+            ResolveFloatSetting(runtime, SettingOrValue(general.camerashakeroughness_setting,
+                                                        general.camerashakeroughness)));
+    }
+
+    // Parallax: the switch, amount and mouse influence are read once; the delay follows.
+    WPCameraParallax parallax;
+    parallax.enable         = general.cameraparallax;
+    parallax.amount         = general.cameraparallaxamount;
+    parallax.delay          = general.cameraparallaxdelay;
+    parallax.mouseinfluence = general.cameraparallaxmouseinfluence;
+    parallax.canvas_scene   = context.is_ortho;
+    ResolveLoadOnlySceneSetting(runtime, general.cameraparallax_setting, parallax.enable);
+    ResolveLoadOnlySceneSetting(runtime, general.cameraparallaxamount_setting, parallax.amount);
+    ResolveLoadOnlySceneSetting(runtime, general.cameraparallaxmouseinfluence_setting,
+                                parallax.mouseinfluence);
+    if (HasDynamicSetting(general.cameraparallaxdelay_setting)) {
+        auto value     = ResolveFloatSetting(runtime, general.cameraparallaxdelay_setting);
+        parallax.delay = value->getFloat();
+        auto* updater  = context.shader_updater;
+        runtime.RegisterDynamicValueListener(std::move(value), [updater](const DynamicValue& now) {
+            auto current  = updater->CameraParallax();
+            current.delay = now.getFloat();
+            updater->SetCameraParallax(current);
+        });
+    }
+    context.shader_updater->SetCameraParallax(parallax);
+}
+
+/// Registers the scene's zoom and returns the zoom it starts with. A playable
+/// timeline on the zoom plays even when a property is named too, and the property
+/// then only supplies the start; otherwise a bound zoom follows its property.
+double ApplySceneZoom(ParseContext& context, const wpscene::WPSceneGeneral& general) {
+    auto&  runtime = *context.scene->runtime;
+    double zoom    = general.zoom;
+    auto   animation = ResolveScalarAnimation(general.zoom_setting);
+    if (HasDynamicSetting(general.zoom_setting)) {
+        auto value = ResolveFloatSetting(runtime, general.zoom_setting);
+        zoom       = value->getFloat();
+        if (! animation.has_value()) runtime.RegisterSceneZoom(std::move(value));
+    }
+    if (animation.has_value()) {
+        runtime.RegisterSceneZoomAnimation(
+            runtime.RegisterScalarAnimation("", std::move(*animation)));
+    }
+    return zoom;
+}
+
+/// The canvas of the scene (R21, R88): the authored size, the largest image layer
+/// for an `auto` projection, and the fallback of 1920 by 1080 for the rest.
+std::array<int32_t, 2> ResolveCanvas(ParseContext& context, const wpscene::WPSceneGeneral& general,
+                                     const nlohmann::json&         objects,
+                                     const std::vector<EntryPlan>& plans) {
+    if (! general.isOrtho || ! general.orthogonalprojection.auto_) {
+        return { general.orthogonalprojection.width, general.orthogonalprojection.height };
+    }
+    std::array<int32_t, 2> largest { 0, 0 };
+    int64_t                best = -1;
+    for (std::size_t at = 0; at < objects.size(); ++at) {
+        if (plans[at].kind != EntryKind::Image || plans[at].admission != Admission::Object) continue;
+        wpscene::WPImageObject image;
+        if (! image.FromJson(objects[at], *context.vfs)) continue;
+        const auto side = [](float value) {
+            return std::isfinite(value) ? static_cast<int32_t>(std::clamp(value, 0.0f, 2.0e9f)) : 0;
+        };
+        const std::array<int32_t, 2> size { side(image.size[0]), side(image.size[1]) };
+        const int64_t                area = static_cast<int64_t>(size[0]) * size[1];
+        if (area > best) {
+            best    = area;
+            largest = size;
+        }
+    }
+    return largest;
+}
+
+/// The thread-local state of one parse: nothing from an earlier parse is left in
+/// it, and nothing of this one remains once it ends, however it ends.
+struct ParseSession {
+    ParseSession() {
+        g_pending_metal_translations.clear();
+        g_shader_failures.clear();
+        g_parse_layer_index = nullptr;
+        WPShaderParser::BeginShaderSession();
+    }
+    ~ParseSession() {
+        g_pending_metal_translations.clear();
+        g_shader_failures.clear();
+        g_parse_layer_index = nullptr;
+        WPShaderParser::EndShaderSession();
+    }
+};
+
+std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, const std::string& buf,
+                                          fs::VFS& vfs, audio::SoundManager& sm) {
+    nlohmann::json json;
+    if (! PARSE_JSON(buf, json) || ! json.is_object()) {
+        LOG_ERROR("the scene file is not a JSON document with an object at its top");
+        return nullptr;
+    }
+    const auto objects_found = json.find("objects");
+    if (objects_found == json.end() || ! objects_found->is_array()) {
+        LOG_ERROR("the scene file has no list of objects");
+        return nullptr;
+    }
+    auto& objects = *objects_found;
+    ParseSession session;
+
+    wpscene::WPScene wp;
+    wp.FromJson(json, request.pkg_version);
+    const auto& general = wp.general;
+    // Parented layers ride the outermost parent's parallax depth.
+    ResolveLayerParallax(objects);
+
+    auto scene           = std::make_shared<Scene>();
+    scene->scene_id      = request.scene_id;
+    scene->project_path  = request.project_path;
+    scene->sceneGraph    = std::make_shared<SceneNode>();
+    scene->imageParser   = std::make_unique<RuntimeImageSource>(std::make_unique<WPTexImageParser>(&vfs));
+    scene->shaderValueUpdater = std::make_unique<WPShaderValueUpdater>(scene.get());
+    scene->paritileSys   = std::make_unique<ParticleSystem>(*scene);
+    scene->resolution    = CurrentSceneResolution();
+    scene->display_sized = ! general.isOrtho;
+
+    ParseContext context {};
+    context.scene          = scene;
+    context.vfs            = &vfs;
+    context.shader_updater = static_cast<WPShaderValueUpdater*>(scene->shaderValueUpdater.get());
+    context.is_ortho       = general.isOrtho;
+    context.pixel_canvas   = general.pixelCanvas;
+
+    const LayerObjectIndex index = BuildLayerObjectIndex(objects);
+    g_parse_layer_index          = &index;
+    const auto plans             = PlanEntries(context, objects, index);
+
+    const auto canvas = ResolveCanvas(context, general, objects, plans);
+    context.ortho_w   = canvas[0];
+    context.ortho_h   = canvas[1];
+    scene->ortho[0]   = canvas[0];
+    scene->ortho[1]   = canvas[1];
+    // The extent layout and the cursor map against: the unzoomed canvas, latched.
+    scene->scene_extent[0] = std::max(1, canvas[0]);
+    scene->scene_extent[1] = std::max(1, canvas[1]);
+
+    SceneRuntimeBootstrap bootstrap;
+    bootstrap.canvas_width  = canvas[0];
+    bootstrap.canvas_height = canvas[1];
+    if (request.project_properties != nullptr) bootstrap.project_properties = *request.project_properties;
+    if (request.authored_project_properties != nullptr) {
+        bootstrap.authored_project_properties = *request.authored_project_properties;
+    }
+    scene->runtime = std::make_unique<SceneRuntimeContext>(std::move(bootstrap));
+    scene->runtime->AttachScene(scene.get());
+    auto& runtime = *scene->runtime;
+
+    // What decides how the scene is built is read once, as it loads.
+    bool bloom = general.bloom;
+    ResolveLoadOnlySceneSetting(runtime, general.bloom_setting, bloom);
+    scene->hdr = general.hdr && bloom;
+
+    ApplySceneSettings(context, wp);
+    const double zoom = ApplySceneZoom(context, general);
+    BuildCamerasAndTargets(context, wp, zoom);
+
+    BuildLayers(context, objects, plans, sm);
+    AttachLayers(context);
+
+    ApplyDefaultDepthTarget(context);
+    PrewarmParticleSystems(context);
+
+    // Layers that read other layers' pictures, and whether that is legal.
+    const auto refs = CollectLayerTextureRefs(objects, index, &vfs);
+    for (const auto& ref : refs) scene->layer_texture_sources.insert(ref.source_id);
+    scene->layer_texture_error = ClassifyLayerTextureReferences(refs, index);
+
+    FlushPendingMetalTranslations(*scene);
+    scene->shader_compile_error = ShaderFailureReason();
+
+    // Scene scripts start last, once every layer, id and hook they may use exists,
+    // in the order the file declares their layers.
+    auto scripts = std::move(context.scene_scripts);
+    for (auto& [source, key] : scripts) runtime.RegisterSceneScript(std::move(source), std::move(key));
+    return scene;
+}
+
+} // namespace
+
 std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
                                             const std::string& buf, fs::VFS& vfs,
                                             audio::SoundManager& sm) {
-    // CLEANROOM LS36
-    return {};
+    return ParseSceneDocument(request, buf, vfs, sm);
 }
 
 std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std::string& buf,
                                             fs::VFS& vfs, audio::SoundManager& sm) {
-    // CLEANROOM LS37
-    return {};
+    SceneParseRequest request;
+    request.scene_id = std::string(scene_id);
+    return ParseSceneDocument(request, buf, vfs, sm);
 }
