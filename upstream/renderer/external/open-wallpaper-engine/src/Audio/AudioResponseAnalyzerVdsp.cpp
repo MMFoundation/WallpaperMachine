@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e5-text-audio-video-runtime.md; written without access to the original source.
 #include "AudioResponseAnalyzerVdsp.hpp"
 
 #include <Accelerate/Accelerate.h>
@@ -34,6 +35,7 @@ struct AnalyzerResources
     // amplitude a sine of that frequency has in the input.
     float amplitude_scale { 0.0f };
     std::array<uint16_t, kBandCount64 + 1u> edges {};
+    FFTSetup fft { nullptr };
 
     AnalyzerResources()
     {
@@ -41,7 +43,7 @@ struct AnalyzerResources
         float window_sum = 0.0f;
         vDSP_sve(window.data(), 1, &window_sum, static_cast<vDSP_Length>(kWindowSize));
         amplitude_scale = 1.0f / window_sum;
-        // CLEANROOM MV37
+        fft = vDSP_create_fftsetup(kFftLog2, kFFTRadix2);
 
         const double ratio =
             std::pow(static_cast<double>(kTopBin) / (kLinearBands + 1u), 1.0 / (kBandCount64 - kLinearBands));
@@ -53,6 +55,11 @@ struct AnalyzerResources
                                                    : static_cast<uint32_t>(std::lround(exponential));
             edges[band + 1u] = static_cast<uint16_t>(std::max<uint32_t>(upper, edges[band] + 1u));
         }
+    }
+
+    ~AnalyzerResources()
+    {
+        if (fft != nullptr) vDSP_destroy_fftsetup(fft);
     }
 
 };
@@ -103,8 +110,10 @@ ChannelLevels AnalyzeChannel(const float* pcm)
         imagp[index] = windowed[(index * 2u) + 1u];
     }
     DSPSplitComplex split { .realp = realp.data(), .imagp = imagp.data() };
-    std::fill(realp.begin(), realp.end(), 0.0f);
-    std::fill(imagp.begin(), imagp.end(), 0.0f); // CLEANROOM MV38
+    if (resources.fft == nullptr) {
+        return {};
+    }
+    vDSP_fft_zrip(resources.fft, &split, 1, kFftLog2, kFFTDirection_Forward);
     // Slot 0 mixes DC with Nyquist; no bucket reads it.
     vDSP_zvmags(&split, 1, power.data(), 1, static_cast<vDSP_Length>(power.size()));
 
@@ -186,7 +195,18 @@ void AnalyzeAudioResponseStereoBlock(
 
 void ClearAudioResponseSnapshot(AudioSpectrumSnapshot* snapshot)
 {
-    (void)snapshot; // CLEANROOM MV39
+    if (snapshot == nullptr) {
+        return;
+    }
+    snapshot->left64.fill(0.0f);
+    snapshot->right64.fill(0.0f);
+    snapshot->average64.fill(0.0f);
+    snapshot->left32.fill(0.0f);
+    snapshot->right32.fill(0.0f);
+    snapshot->average32.fill(0.0f);
+    snapshot->left16.fill(0.0f);
+    snapshot->right16.fill(0.0f);
+    snapshot->average16.fill(0.0f);
 }
 
 } // namespace wallpaper::audio
