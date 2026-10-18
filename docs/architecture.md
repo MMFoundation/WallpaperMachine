@@ -409,8 +409,14 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   policy never lets it darken every display: while every display in use is hidden anyway (a
   full-screen app, a covered working area that pauses), it pauses none. The bridge keeps
   `suspended_displays` beside the global flag, resolves each scene's and web descriptor's paused
-  state from its own display, and re-applies the still-hidden displays after a global resume. System audio capture
-  follows visible consumers, not the global pause flag.
+  state from its own display, and re-applies the still-hidden displays after a global resume.
+  A global transition also evaluates per-display visibility in that same pass, so waking or
+  unlocking releases an old per-display pause without waiting for another window event.
+  The bridge also compares live scene pauses with its current policy after a successful
+  reconcile, including an unchanged configuration. Core preserves runtime pause through a
+  rebuild; the bridge corrects any retained pause that no longer applies, on its actor after
+  checking a delegated reconcile's generation. Matching displays receive no extra command.
+  System audio capture follows visible consumers, not the global pause flag.
 - **Display changes.** Screen-parameter changes refresh displays through
   `DisplayRefreshCoalescer`: one refresh runs at a time and a burst that arrives meanwhile gets
   one more. A change that leaves `DisplayConfiguration` (AppKit's in-process copy of what

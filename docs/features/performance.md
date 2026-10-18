@@ -355,6 +355,13 @@ A wallpaper nobody can see — behind a full-screen app, on a hidden Space or un
 windows that leave no pixel of it — pauses automatically, per display. There is no
 control for that part.
 
+Each display follows its own visibility even when both use the same wallpaper.
+Waking or unlocking re-evaluates every display in the same pass: one that is visible
+again resumes without a click or refresh, while one still covered stays paused.
+Reapplying a wallpaper or changing the display arrangement also reconciles the live
+scene's pause with the current playback policy, so a pause retained by a rebuilt
+renderer cannot hold a visible display still. The user's own Pause remains in force.
+
 | Setting | Values | Default |
 | --- | --- | --- |
 | Mute all wallpapers | On, Off | Off |

@@ -755,6 +755,76 @@ final class WallpaperPresentationPolicyTests: XCTestCase {
         XCTAssertEqual(probe.displayDecisions(for: 2), [true])
     }
 
+    func testWakingResumesADisplayUncoveredDuringSleep() {
+        let probe = PolicyProbe()
+        probe.surfaces = [
+            WallpaperSurfaceVisibility(displayID: 1, isVisible: true),
+            WallpaperSurfaceVisibility(displayID: 2, isVisible: false),
+        ]
+        let policy = makePolicy(probe, settle: .zero)
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertEqual(probe.displayDecisions(for: 2), [true])
+
+        workspaceCenter.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
+        probe.setVisible(true, display: 2)
+        workspaceCenter.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+
+        XCTAssertEqual(probe.applied, [true, false])
+        XCTAssertTrue(policy.suspendedDisplayIDs.isEmpty)
+        XCTAssertEqual(
+            probe.displayDecisions(for: 2), [true, false],
+            "Waking must resume a display uncovered during sleep without another window event")
+        XCTAssertEqual(probe.displayDecisions(for: 1), [], "The other display stays running")
+    }
+
+    func testUnlockingResumesADisplayUncoveredWhileLocked() {
+        let probe = PolicyProbe()
+        probe.surfaces = [
+            WallpaperSurfaceVisibility(displayID: 1, isVisible: true),
+            WallpaperSurfaceVisibility(displayID: 2, isVisible: false),
+        ]
+        let policy = makePolicy(probe, settle: .zero)
+        policy.start()
+        defer { policy.stop() }
+        XCTAssertEqual(probe.displayDecisions(for: 2), [true])
+
+        probe.sessionLocked = true
+        lockCenter.post(name: Notification.Name("com.apple.screenIsLocked"), object: nil)
+        probe.setVisible(true, display: 2)
+        probe.sessionLocked = false
+        lockCenter.post(name: Notification.Name("com.apple.screenIsUnlocked"), object: nil)
+
+        XCTAssertEqual(probe.applied, [true, false])
+        XCTAssertTrue(policy.suspendedDisplayIDs.isEmpty)
+        XCTAssertEqual(
+            probe.displayDecisions(for: 2), [true, false],
+            "Unlocking must clear the revealed display's own pause as well as the global pause")
+        XCTAssertEqual(probe.displayDecisions(for: 1), [], "The other display stays running")
+    }
+
+    func testADisplayNewlyHiddenAtWakeStillWaitsForOcclusionToSettle() async throws {
+        let probe = PolicyProbe()
+        probe.surfaces = [
+            WallpaperSurfaceVisibility(displayID: 1, isVisible: true),
+            WallpaperSurfaceVisibility(displayID: 2, isVisible: true),
+        ]
+        let policy = makePolicy(probe, settle: .milliseconds(20))
+        policy.start()
+        defer { policy.stop() }
+
+        workspaceCenter.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
+        probe.setVisible(false, display: 2)
+        workspaceCenter.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+
+        XCTAssertEqual(probe.applied, [true, false])
+        XCTAssertTrue(probe.appliedDisplays.isEmpty, "Wake does not bypass the occlusion settle delay")
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(policy.suspendedDisplayIDs, [2])
+        XCTAssertEqual(probe.displayDecisions(for: 2), [true])
+        XCTAssertEqual(probe.displayDecisions(for: 1), [], "The visible display keeps running")
+    }
+
     func testCountersRecordEachDeliveredDecisionForItsOwnSurface() {
         let counters = RuntimeCounters()
         counters.startSession(duration: .seconds(60))
@@ -1044,10 +1114,14 @@ final class WallpaperPresentationPolicyTests: XCTestCase {
     func testAResumeTheBridgeRefusesIsAnnouncedWhenItLands() {
         let probe = PolicyProbe()
         var accepting = true
+        var attempts = 0
         let policy = WallpaperPresentationPolicy(
             workspaceCenter: workspaceCenter, lockCenter: lockCenter, windowCenter: windowCenter,
             surfaces: { probe.surfaces }, isSessionLocked: { probe.sessionLocked },
-            applyGlobal: { _, completion in completion(accepting ? .success(()) : .failure(CancellationError())) },
+            applyGlobal: { _, completion in
+                attempts += 1
+                completion(accepting ? .success(()) : .failure(CancellationError()))
+            },
             applyDisplay: { _, _, completion in completion(.success(())) })
         var resumes = 0
         policy.onResumed = { resumes += 1 }
@@ -1058,12 +1132,62 @@ final class WallpaperPresentationPolicyTests: XCTestCase {
         accepting = false
         workspaceCenter.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
         XCTAssertEqual(resumes, 0, "the scenes are still suspended: nothing has resumed")
+        XCTAssertEqual(attempts, 2, "A refused resume is not retried inside the same evaluation")
 
         accepting = true
         policy.evaluate()
         XCTAssertEqual(resumes, 1, "the retried resume is the one that is announced, once")
+        XCTAssertEqual(attempts, 3)
         policy.evaluate()
         XCTAssertEqual(resumes, 1)
+        XCTAssertEqual(attempts, 3, "An acknowledged resume is not delivered again")
+    }
+
+    func testFailedGlobalResumeIsNotRetriedWhenDisplaysExchangeVisibility() async throws {
+        for settle in [Duration.zero, .milliseconds(20)] {
+            let probe = PolicyProbe()
+            probe.surfaces = [
+                WallpaperSurfaceVisibility(displayID: 1, isVisible: true),
+                WallpaperSurfaceVisibility(displayID: 2, isVisible: false),
+            ]
+            var accepting = true
+            var attempts = 0
+            let policy = WallpaperPresentationPolicy(
+                workspaceCenter: workspaceCenter, lockCenter: lockCenter, windowCenter: windowCenter,
+                surfaces: { probe.surfaces }, isSessionLocked: { probe.sessionLocked },
+                occlusionSettleDelay: settle,
+                applyGlobal: { _, completion in
+                    attempts += 1
+                    completion(accepting ? .success(()) : .failure(CancellationError()))
+                },
+                applyDisplay: { display, suspended, completion in
+                    probe.appliedDisplays.append((display, suspended))
+                    completion(.success(()))
+                })
+            policy.start()
+            defer { policy.stop() }
+            if settle > .zero { try await Task.sleep(for: .milliseconds(80)) }
+            XCTAssertEqual(probe.displayDecisions(for: 2), [true])
+
+            workspaceCenter.post(name: NSWorkspace.screensDidSleepNotification, object: nil)
+            probe.setVisible(false, display: 1)
+            probe.setVisible(true, display: 2)
+            accepting = false
+            workspaceCenter.post(name: NSWorkspace.screensDidWakeNotification, object: nil)
+            XCTAssertEqual(attempts, 2, "A reveal and a hide must not retry a refused global resume")
+
+            accepting = true
+            policy.evaluate()
+            XCTAssertEqual(attempts, 3)
+            XCTAssertEqual(
+                probe.displayDecisions(for: 2), [true, false],
+                "The revealed display resumes immediately, without waiting for the other display's hide")
+            if settle > .zero {
+                XCTAssertEqual(probe.displayDecisions(for: 1), [], "Only suspension waits to settle")
+                try await Task.sleep(for: .milliseconds(80))
+            }
+            XCTAssertEqual(probe.displayDecisions(for: 1), [true])
+        }
     }
 
     func testResumingOneDisplayIsAnnouncedAndHidingOrNeverHidingIsNot() {
