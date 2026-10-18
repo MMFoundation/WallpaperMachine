@@ -827,6 +827,8 @@ private:
     void suspendRendering() {
         m_render_blocked = true;
         frame_timer.Stop();
+        // Videos stop with the clock: nothing is drawn, so nothing may keep decoding.
+        m_render->SetVideoPlaybackPaused(true);
         publishPauseReasons();
     }
 
@@ -1440,7 +1442,6 @@ private:
         TicketGuard ticket(msg);
         m_surface_released = true;
         suspendRendering();
-        m_render->SetVideoPlaybackPaused(true);
         // Nothing the preview picture holds may refer to the layer that is about to go.
         m_still.Hide();
         if (m_render->hasBackend() && m_render->inited()) {
