@@ -1,4 +1,7 @@
+// Clean-room implementation from the WallpaperMachine spec e7-small-units.md; written without access to the original source.
 #pragma once
+#include <iterator>
+#include <string_view>
 #include <vector>
 #include <memory>
 #include <string>
@@ -23,16 +26,14 @@ public:
 			return ! mountPoint.empty() && mountPoint.front() == '/' && mountPoint.back() != '/';
 		}
 		static bool InMountPoint(const std::string_view mountPoint, const std::string_view path) {
-			// CLEANROOM UV7
-			(void)mountPoint;
-			(void)path;
-			return false;
+			// Covered means: the mount point, then a '/'. Bytes only, no normalising.
+			return path.size() > mountPoint.size() && path.substr(0, mountPoint.size()) == mountPoint &&
+			       path[mountPoint.size()] == '/';
 		}
 		static std::string GetPathInMount(const std::string_view mountPoint, const std::string_view path) {
-			// CLEANROOM UV8
-			(void)mountPoint;
-			(void)path;
-			return {};
+			// What follows the mount point, still starting with '/'; empty if not covered.
+			if (! InMountPoint(mountPoint, path)) return {};
+			return std::string(path.substr(mountPoint.size()));
 		}
 	};
 public:
@@ -40,31 +41,60 @@ public:
 	~VFS() = default;
 
 	bool Mount(std::string_view mountpoint, std::unique_ptr<Fs> fs, std::string_view name="") {
-		// CLEANROOM UV9
-		(void)mountpoint;
-		(void)fs;
-		(void)name;
-		return false;
+		if (! MountedFs::CheckMountPoint(mountpoint)) {
+			LOG_ERROR("\"%.*s\" is not a valid mount point", (int)mountpoint.size(), mountpoint.data());
+			return false;
+		}
+		if (! fs) {
+			LOG_ERROR("can't mount a null file system at \"%.*s\"", (int)mountpoint.size(), mountpoint.data());
+			return false;
+		}
+		// The last mount is the topmost one.
+		m_mountedFss.push_back(MountedFs { std::string(name), std::string(mountpoint), std::move(fs) });
+		return true;
 	}
 	bool Unmount(std::string_view mountpoint) {
-		// CLEANROOM UV10
-		(void)mountpoint;
+		for (auto it = m_mountedFss.rbegin(); it != m_mountedFss.rend(); ++it) {
+			if (it->mountPoint != mountpoint) continue;
+			m_mountedFss.erase(std::next(it).base());
+			return true;
+		}
+		LOG_INFO("nothing is mounted at \"%.*s\"", (int)mountpoint.size(), mountpoint.data());
 		return false;
 	}
 	bool IsMounted(std::string_view name) {
-		// CLEANROOM UV11
-		(void)name;
-		return false;
+		if (name.empty()) return false;
+		return std::any_of(m_mountedFss.begin(), m_mountedFss.end(), [name](const MountedFs& m) {
+			return m.name == name;
+		});
 	}
 	std::shared_ptr<IBinaryStream> Open(std::string_view path) {
-		// CLEANROOM UV12
-		(void)path;
-		return nullptr;
+		const MountedFs* owner = nullptr;
+		std::string      inside;
+		if (! Locate(path, &owner, &inside)) {
+			LOG_ERROR("can't find \"%.*s\" in any mounted file system", (int)path.size(), path.data());
+			return nullptr;
+		}
+		return owner->fs->Open(inside);
 	}
 	std::shared_ptr<IBinaryStreamW> OpenW(std::string_view path) {
-		// CLEANROOM UV13
-		(void)path;
-		return nullptr;
+		// An existing file is overwritten where it lives; a new one goes to the top
+		// of the mounts that cover its path.
+		const MountedFs* owner = nullptr;
+		std::string      inside;
+		if (! Locate(path, &owner, &inside)) {
+			for (auto it = m_mountedFss.rbegin(); it != m_mountedFss.rend(); ++it) {
+				if (! MountedFs::InMountPoint(it->mountPoint, path)) continue;
+				owner  = &*it;
+				inside = MountedFs::GetPathInMount(it->mountPoint, path);
+				break;
+			}
+		}
+		if (owner == nullptr) {
+			LOG_ERROR("no mounted file system covers \"%.*s\" for writing", (int)path.size(), path.data());
+			return nullptr;
+		}
+		return owner->fs->OpenW(inside);
 	}
 	/// Publishes `from` as `to`, both of which must resolve to the same mount.
 	///
@@ -81,19 +111,32 @@ public:
 		                         MountedFs::GetPathInMount(owner->mountPoint, to));
 	}
 	bool Contains(std::string_view path) const {
-		// CLEANROOM UV14
-		(void)path;
-		return false;
+		const MountedFs* owner = nullptr;
+		std::string      inside;
+		return Locate(path, &owner, &inside);
 	}
 private:
+	// The topmost mount that covers `path` and holds the file, with the path as
+	// that mount's file system knows it.
+	bool Locate(std::string_view path, const MountedFs** owner, std::string* inside) const {
+		for (auto it = m_mountedFss.rbegin(); it != m_mountedFss.rend(); ++it) {
+			if (! MountedFs::InMountPoint(it->mountPoint, path)) continue;
+			std::string rel = MountedFs::GetPathInMount(it->mountPoint, path);
+			if (! it->fs->Contains(rel)) continue;
+			*owner  = &*it;
+			*inside = std::move(rel);
+			return true;
+		}
+		return false;
+	}
+
 	std::vector<MountedFs> m_mountedFss;
 };
 
 inline std::string GetFileContent(fs::VFS& vfs, std::string_view path) {
-	// CLEANROOM UV15
-	(void)vfs;
-	(void)path;
-	return {};
+	auto stream = vfs.Open(path);
+	if (! stream) return {};
+	return stream->ReadAllStr();
 }
 
 }

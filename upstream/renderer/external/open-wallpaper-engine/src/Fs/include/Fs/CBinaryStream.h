@@ -1,5 +1,7 @@
+// Clean-room implementation from the WallpaperMachine spec e7-small-units.md; written without access to the original source.
 #pragma once
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -7,6 +9,7 @@
 #include <cassert>
 #include <memory>
 #include <filesystem>
+#include <system_error>
 #include "IBinaryStream.h"
 #include "Utils/Logging.h"
 
@@ -17,17 +20,18 @@ namespace fs
 template<typename TBinaryStream>
 class CBinaryStream : public TBinaryStream {
 public:
+    // The handle belongs to this stream alone and is released here, once. Closing
+    // flushes a writer; a failed flush is not reported.
     virtual ~CBinaryStream() {
-        // CLEANROOM UV1
+        if (m_file != nullptr) std::fclose(m_file);
     }
 
 protected:
     CBinaryStream(std::string_view path, std::FILE* file): m_path(path), m_file(file) {}
     virtual usize Write_impl(const void* buffer, usize sizeInBytes) override {
-        // CLEANROOM UV2
-        (void)buffer;
-        (void)sizeInBytes;
-        return 0;
+        // One item for a write that reached the file whole, none otherwise.
+        if (sizeInBytes == 0) return 1;
+        return std::fwrite(buffer, 1, sizeInBytes, m_file) == sizeInBytes ? 1 : 0;
     }
 
 public:
@@ -35,14 +39,12 @@ public:
         return std::fread(buffer, 1, sizeInBytes, m_file);
     }
     virtual char* Gets(char* buffer, usize sizeStr) override {
-        // CLEANROOM UV3
-        (void)buffer;
-        (void)sizeStr;
-        return nullptr;
+        if (buffer == nullptr || sizeStr == 0) return nullptr;
+        constexpr usize kMostInt = static_cast<usize>(std::numeric_limits<int>::max());
+        return std::fgets(buffer, static_cast<int>(std::min(sizeStr, kMostInt)), m_file);
     }
     virtual idx   Tell() const override {
-        // CLEANROOM UV4
-        return 0;
+        return static_cast<idx>(std::ftell(m_file));
     }
     // Like the other streams, only a position in [0, size] is reachable.
     virtual bool  SeekSet(idx offset) override { return SeekTo(offset); }
@@ -52,8 +54,12 @@ public:
     }
     virtual bool  SeekEnd(idx offset) override { return SeekTo(Size() + offset); }
     virtual isize Size() const override {
-        // CLEANROOM UV5
-        return 0;
+        // Measured at the end and put back, so the position does not visibly move.
+        const long here = std::ftell(m_file);
+        if (here < 0 || std::fseek(m_file, 0, SEEK_END) != 0) return 0;
+        const long end = std::ftell(m_file);
+        std::fseek(m_file, here, SEEK_SET);
+        return end < 0 ? 0 : static_cast<isize>(end);
     }
 
 private:
@@ -69,10 +75,28 @@ private:
 template<typename TBinaryStream>
 inline std::shared_ptr<TBinaryStream> t_CreateCBinaryStream(std::string_view path,
                                                             const char*      mode) {
-    // CLEANROOM UV6
-    (void)path;
-    (void)mode;
-    return nullptr;
+    // Public constructor for make_shared; the base keeps its own protected.
+    struct Opened final : CBinaryStream<TBinaryStream> {
+        Opened(std::string_view p, std::FILE* f): CBinaryStream<TBinaryStream>(p, f) {}
+    };
+
+    // The path is used byte for byte, so one with a NUL in it names nothing.
+    if (path.empty() || path.find('\0') != std::string_view::npos) {
+        LOG_ERROR("can't open a file with an empty path or a NUL in it");
+        return nullptr;
+    }
+    const std::string text { path };
+    std::error_code   failure;
+    if (std::filesystem::is_directory(std::filesystem::path(text), failure)) {
+        LOG_ERROR("\"%s\" is a folder, not a file", text.c_str());
+        return nullptr;
+    }
+    std::FILE* file = std::fopen(text.c_str(), mode);
+    if (file == nullptr) {
+        LOG_ERROR("can't open \"%s\" (mode %s)", text.c_str(), mode);
+        return nullptr;
+    }
+    return std::make_shared<Opened>(path, file);
 }
 
 inline std::shared_ptr<IBinaryStream> CreateCBinaryStream(std::string_view path) {
