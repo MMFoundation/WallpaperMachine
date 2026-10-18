@@ -3454,7 +3454,8 @@ std::string TextFragmentSource(const TextCardKind& kind) {
                   "    vec2 screen = v_ScreenPos.xy / v_ScreenPos.z;\n"
                   "    vec3 behind = texture(g_Texture1, screen).rgb;\n"
                   "    vec3 base = fill > 0.0 ? fill_color : behind;\n"
-                  "    gl_FragColor = vec4(mix(base, color, cover), clamp(cover * cover + fill, 0.0, 1.0));\n"
+                  "    float held = pow(cover, " + std::to_string(kTextCompositeAlphaExponent) + ") + fill * (1.0 - cover);\n"
+                  "    gl_FragColor = vec4(mix(base, color, cover), clamp(held, 0.0, 1.0));\n"
                   "    return;\n"
                   "  }\n";
     }
@@ -3609,9 +3610,8 @@ bool LoadTextEntry(ParseContext& context, std::size_t at, const nlohmann::json& 
     state.authored_padding    = authored_padding;
     state.padding_applies     = padded;
     state.spacing             = linalg::Vector2f(obj.spacing[0], obj.spacing[1]);
-    state.color               = Vector3f(obj.color.data());
-    state.alpha               = obj.alpha;
-    state.brightness          = brightness;
+    // The raster is neutral: colour, alpha and brightness reach the card through its
+    // uniforms, so the state keeps its white, full-alpha defaults.
     state.horizontal_align    = std::string(TextHorizontalAlignWord(ParseTextHorizontalAlign(obj.horizontalalign)));
     state.vertical_align      = std::string(TextVerticalAlignWord(ParseTextVerticalAlign(obj.verticalalign)));
     state.max_width           = obj.maxwidth;
