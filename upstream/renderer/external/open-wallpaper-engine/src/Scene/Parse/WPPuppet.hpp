@@ -38,18 +38,24 @@ public:
         linalg::Vector3f reference_position { linalg::Vector3f::Zero() };
         linalg::Vector3f reference_scale { linalg::Vector3f::Ones() };
         linalg::Quaterniond reference_rotation { linalg::Quaterniond::Identity() };
-        // Local dump/schema compatibility mirror. Runtime hierarchy follows
-        // upstream's bind_parent/anim_parent/file_parent fields below.
         uint32_t        parent { NO_PARENT };
         uint32_t        bind_parent { NO_PARENT };
         uint32_t        anim_parent { NO_PARENT };
         uint32_t        file_parent { NO_PARENT };
         std::string     simulation_json;
 
-        bool noParent() const { return parent == NO_PARENT; }
-        bool noBindParent() const { return bind_parent == NO_PARENT; }
-        bool noAnimParent() const { return anim_parent == NO_PARENT; }
-        // prepared
+        bool noParent() const {
+            // CLEANROOM LM13
+            return false;
+        }
+        bool noBindParent() const {
+            // CLEANROOM LM14
+            return false;
+        }
+        bool noAnimParent() const {
+            // CLEANROOM LM15
+            return false;
+        }
         linalg::Affine3f offset_trans { linalg::Affine3f::Identity() };
         linalg::Affine3f world_bind { linalg::Affine3f::Identity() };
         linalg::Affine3f inv_bind { linalg::Affine3f::Identity() };
@@ -59,11 +65,6 @@ public:
         bool            has_file_skin_pivot { false };
         linalg::Affine3f file_world_bind { linalg::Affine3f::Identity() };
         bool            has_file_world_bind { false };
-        /*
-        linalg::Vector3f world_axis_x;
-        linalg::Vector3f world_axis_y;
-        linalg::Vector3f world_axis_z;
-        */
     };
     struct Attachment {
         uint16_t        bone_index { 0 };
@@ -74,8 +75,6 @@ public:
         linalg::Vector3f position;
         linalg::Vector3f angle;
         linalg::Vector3f scale;
-
-        // prepared
         linalg::Quaterniond quaternion;
     };
     struct Animation {
@@ -119,7 +118,6 @@ public:
         std::vector<BoneFrameCurve> scalar_curves;
         std::vector<AnimEvent>      events;
 
-        // prepared
         double max_time;
         double frame_time;
         struct InterpolationInfo {
@@ -129,43 +127,10 @@ public:
         };
         InterpolationInfo getInterpolationInfo(double* cur_time) const;
     };
-    struct BoneDir {
-        uint32_t             bone_id { 0 };
-        std::array<float, 3> dir {};
-    };
-    struct ChainBoneDir {
-        uint16_t             chain_id { 0 };
-        uint32_t             bone_id { 0 };
-        std::array<float, 3> dir {};
-    };
-    struct BoneCond {
-        uint16_t cnt { 0 };
-        uint32_t id { 0 };
-        uint32_t child { 0 };
-        uint32_t val { 0 };
-    };
-    struct IkConfig {
-        linalg::Matrix4f                         chain_a_target { linalg::Matrix4f::Identity() };
-        uint8_t                                 ik_version { 0 };
-        std::array<uint32_t, 2>                 ik_header {};
-        linalg::Matrix4f                         chain_b_target { linalg::Matrix4f::Identity() };
-        std::array<uint8_t, 7>                  ik_flags {};
-        std::array<linalg::Vector3f, 6>          pole_targets {};
-        std::vector<BoneDir>                    rest_rotations;
-        std::vector<ChainBoneDir>               ik_targets;
-        std::optional<BoneDir>                  ik_target_root;
-        BoneCond                                ik_constraint {};
-        std::array<std::vector<uint32_t>, 2>    ik_bone_lists;
-        uint32_t                                ik_chain_count { 0 };
-        std::array<float, 2>                    ik_chain_length {};
-        std::vector<uint32_t>                   ik_chain_bones;
-    };
-
 public:
     std::vector<Bone>      bones;
     std::vector<Animation> anims;
     std::vector<Attachment> attachments;
-    std::optional<IkConfig> ik_config;
     bool world_anchored_bones { false };
 
     void prepared();
@@ -186,7 +151,10 @@ public:
     WPPuppetLayer(std::shared_ptr<WPPuppet>);
     ~WPPuppetLayer();
 
-    bool hasPuppet() const { return (bool)m_puppet; };
+    bool hasPuppet() const {
+        // CLEANROOM LM16
+        return false;
+    }
 
     struct AnimationLayer {
         i32         id { 0 };
@@ -241,8 +209,6 @@ private:
         double                                 blend;
         const WPPuppet::Animation*             anim { nullptr };
         WPPuppet::Animation::InterpolationInfo interp_info {};
-
-        operator bool() const noexcept { return anim != nullptr; };
     };
     struct State {
         double m_global_blend { 1.0 };

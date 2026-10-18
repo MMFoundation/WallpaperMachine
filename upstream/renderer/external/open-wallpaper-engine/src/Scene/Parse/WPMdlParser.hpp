@@ -95,14 +95,6 @@ struct WPMdl {
 
     // std::vector<linalg::Matrix<float, 3, 4>> bones;
     std::shared_ptr<WPPuppet> puppet;
-    // combo
-    // SKINNING = 1
-    // BONECOUNT
-
-    // input
-    // uvec4 a_BlendIndices
-    // vec4 a_BlendWeights
-    // uniform mat4x3 g_Bones[BONECOUNT]
 };
 
 class WPMdlParser {
