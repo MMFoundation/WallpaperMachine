@@ -1381,8 +1381,6 @@ SceneRuntimeContext::CameraShotTimeline ResolveCameraShotTimeline(
     return timeline;
 }
 
-// CLEANROOM LS33: the file-local helpers of this group were removed; the rewrite designs its own.
-
 void ApplyDefaultDepthTarget(ParseContext& context) {
     auto* target = context.scene->FindRenderTarget(SpecTex_Default.data());
     if (target == nullptr) return;
@@ -1793,75 +1791,238 @@ std::shared_ptr<SceneNode> MakePlainLayerNode(ParseContext& context, const nlohm
                                             Vector3f(base.scale.data()),
                                             Vector3f(base.angles.data()), plan.key);
     node->ID() = plan.id;
-    auto& runtime = *context.scene->runtime;
-    runtime.RegisterNode(plan.key, node.get());
-    runtime.RegisterLayerId(plan.id, plan.key);
-    if (const auto name = entry.find("name"); name != entry.end() && name->is_string()) {
-        const auto& authored = name->get_ref<const std::string&>();
-        if (authored != plan.key) {
-            runtime.RegisterLayerAuthoredName(plan.key, authored);
-            // Name lookup answers with the first declaration of a shared name.
-            if (! authored.empty()) runtime.RegisterLayerAlias(authored, plan.key);
-        }
-    }
-    RegisterNodeTransformSettings(runtime, node.get(), plan.key, base.origin_setting,
-                                  base.scale_setting, base.angles_setting, animate);
-    QueueSceneScripts(context, base.field_bindings, plan.key);
-
-    // Visibility: the authored flag, or the value a property or script gives it,
-    // which the runtime then keeps following. A hidden node that only a reload can
-    // change costs the render graph nothing.
+    // A parse with no property table has no runtime: nothing is bound, and every
+    // value keeps what the file says.
     bool visible = base.visible;
-    if (base.dynamic_visible) {
-        auto value = ResolveBoolSetting(runtime, base.visible_setting, plan.key);
-        visible    = value->getBool();
-        runtime.RegisterNodeVisibility(plan.key, node.get(), std::move(value));
+    if (auto* runtime_ptr = context.scene->runtime.get(); runtime_ptr != nullptr) {
+        auto& runtime = *runtime_ptr;
+        runtime.RegisterNode(plan.key, node.get());
+        runtime.RegisterLayerId(plan.id, plan.key);
+        if (const auto name = entry.find("name"); name != entry.end() && name->is_string()) {
+            const auto& authored = name->get_ref<const std::string&>();
+            if (authored != plan.key) {
+                runtime.RegisterLayerAuthoredName(plan.key, authored);
+                // Name lookup answers with the first declaration of a shared name.
+                if (! authored.empty()) runtime.RegisterLayerAlias(authored, plan.key);
+            }
+        }
+        RegisterNodeTransformSettings(runtime, node.get(), plan.key, base.origin_setting,
+                                      base.scale_setting, base.angles_setting, animate);
+        QueueSceneScripts(context, base.field_bindings, plan.key);
+
+        // Visibility: the authored flag, or the value a property or script gives it,
+        // which the runtime then keeps following. A hidden node that only a reload can
+        // change costs the render graph nothing.
+        if (base.dynamic_visible) {
+            auto value = ResolveBoolSetting(runtime, base.visible_setting, plan.key);
+            visible    = value->getBool();
+            runtime.RegisterNodeVisibility(plan.key, node.get(), std::move(value));
+        }
     }
     node->SetVisible(visible);
     node->SetVisibilitySettled(VisibilitySettledBy(base.visible_setting));
     return node;
 }
 
+/// The authored setting, or a literal standing in for a key the file leaves out.
+nlohmann::json SettingOrValue(const nlohmann::json& setting, const nlohmann::json& literal) {
+    return setting.is_null() ? literal : setting;
+}
+
 bool LoadSoundEntry(ParseContext& context, const nlohmann::json& entry, audio::SoundManager& sm);
+
+/// Makes the node of an entry and puts it in the tree record. A light without an
+/// id hangs from the scene's root and answers to no id.
+ParsedLayer& AddLayer(ParseContext& context, std::size_t at, const nlohmann::json& entry,
+                      const EntryPlan& plan, bool animate, bool plain) {
+    ParsedLayer layer;
+    layer.entry = at;
+    layer.id    = plan.id;
+    layer.key   = plan.key;
+    if (const auto name = entry.find("name"); name != entry.end() && name->is_string()) {
+        layer.authored_name = name->get<std::string>();
+    }
+    if (plan.id != 0) {
+        if (const auto parent = entry.find("parent"); parent != entry.end()) {
+            wpscene::ReadInt32(*parent, layer.parent_id);
+        }
+    }
+    if (const auto attachment = entry.find("attachment");
+        attachment != entry.end() && attachment->is_string()) {
+        layer.attachment = attachment->get<std::string>();
+    }
+    layer.node  = MakePlainLayerNode(context, entry, plan, animate);
+    layer.plain = plain;
+    if (plan.id != 0) context.layer_nodes[plan.id] = layer.node;
+    context.layers.push_back(std::move(layer));
+    return context.layers.back();
+}
+
+/// How the cursor treats a layer the pointer can never hit: groups, lights and
+/// the stand-ins of typed objects.
+void SetUnhittable(ParseContext& context, const std::string& key, bool solid = false,
+                   bool disable_propagation = false) {
+    if (context.scene->runtime != nullptr) {
+        context.scene->runtime->SetNodeCursorTarget(key, false, solid, disable_propagation);
+    }
+}
+
+/// A light: a member of the tree with no picture of its own. Its colour, radius,
+/// exponent and intensity follow their bindings; its cones and control point are
+/// fixed at load (R100 to R102).
+bool LoadLightEntry(ParseContext& context, std::size_t at, const nlohmann::json& entry,
+                    const EntryPlan& plan) {
+    wpscene::WPLightObject light;
+    if (! light.FromJson(entry, *context.vfs)) return false;
+    auto* runtime_ptr = context.scene->runtime.get();
+    auto& layer       = AddLayer(context, at, entry, plan, true, true);
+    SetUnhittable(context, plan.key);
+
+    auto source = std::make_unique<SceneLight>(ParseSceneLightType(light.light),
+                                               Vector3f(light.color.data()), light.radius,
+                                               light.intensity);
+    source->setExponent(light.exponent);
+    source->setCones(light.innercone, light.outercone);
+    source->setControlPoint(Vector3f(light.controlpoint.data()));
+    source->setNode(layer.node);
+    SceneLight* raw = source.get();
+    if (runtime_ptr == nullptr) {
+        context.scene->lights.push_back(std::move(source));
+        return true;
+    }
+    auto& runtime = *runtime_ptr;
+
+    const auto follow_float = [&](const nlohmann::json& setting, auto apply) {
+        if (! HasDynamicSetting(setting)) return;
+        auto value = ResolveFloatSetting(runtime, setting, plan.key);
+        apply(value->getFloat());
+        runtime.RegisterDynamicValueListener(std::move(value), [apply](const DynamicValue& now) {
+            apply(now.getFloat());
+        });
+    };
+    follow_float(light.radius_setting, [raw](float value) { raw->setRadius(value); });
+    follow_float(light.exponent_setting, [raw](float value) { raw->setExponent(value); });
+    if (HasDynamicSetting(light.color_setting)) {
+        auto value = ResolveVec3Setting(runtime, light.color_setting, plan.key);
+        raw->setColor(value->getVec3());
+        runtime.RegisterDynamicValueListener(std::move(value), [raw](const DynamicValue& now) {
+            raw->setColor(now.getVec3());
+        });
+    }
+    // An intensity that a property or script drives is live; a timeline on it
+    // plays on the clock of its own, when nothing else writes the value.
+    if (HasDynamicSetting(light.intensity_setting)) {
+        follow_float(light.intensity_setting, [raw](float value) { raw->setIntensity(value); });
+    } else if (auto animation = ResolveScalarAnimation(light.intensity_setting);
+               animation.has_value()) {
+        raw->setIntensityAnimation(runtime.RegisterScalarAnimation(plan.key, std::move(*animation)));
+    }
+    context.scene->lights.push_back(std::move(source));
+    return true;
+}
+
+/// A camera object. In a scene projected by its canvas it only frames the canvas
+/// (R27, R93); in a perspective scene it is a shot of the camera it names, which
+/// the last visible one poses (R26, R89 to R98).
+bool LoadCameraEntry(ParseContext& context, std::size_t at, const nlohmann::json& entry,
+                     const EntryPlan& plan, const wpscene::WPSceneGeneral& general) {
+    wpscene::WPCameraObject camera;
+    if (! camera.FromJson(entry, *context.vfs)) return false;
+    auto& scene       = *context.scene;
+    auto* runtime_ptr = scene.runtime.get();
+    const bool canvas = context.is_ortho;
+    auto& layer       = AddLayer(context, at, entry, plan, ! canvas, true);
+    SetUnhittable(context, plan.key, camera.solid, camera.disablepropagation);
+
+    if (canvas && runtime_ptr == nullptr) {
+        // No runtime to re-decide it each tick: the shot frames the canvas as it is
+        // authored, when it is visible.
+        if (layer.node->EffectiveVisible() && std::isfinite(camera.zoom) && camera.zoom > 0.0f) {
+            scene.FrameCanvas(camera.zoom, Vector2f(camera.origin[0], camera.origin[1]));
+        }
+        return true;
+    }
+    if (canvas) {
+        auto& runtime = *runtime_ptr;
+        auto zoom = ResolveFloatSetting(runtime, SettingOrValue(camera.zoom_setting, camera.zoom),
+                                        plan.key);
+        runtime.RegisterCameraShot(layer.node.get(), std::move(zoom),
+                                   ResolveCameraShotTimeline(runtime, camera, plan.key),
+                                   camera.dynamic_origin);
+        return true;
+    }
+
+    // The camera the shot addresses: the scene's own for an empty name or
+    // `default`, else one of that name made on first sight.
+    auto own = scene.cameras.at("global_perspective");
+    std::shared_ptr<SceneCamera> target = own;
+    if (! camera.camera.empty() && camera.camera != "default") {
+        auto found = scene.cameras.find(camera.camera);
+        if (found == scene.cameras.end()) {
+            auto named = std::make_shared<SceneCamera>(*own);
+            named->AttatchNode(own->GetAttachedNode());
+            // Born with the field of view its first shot resolves to.
+            named->SetFov(ResolvePerspectiveFov(general, camera.fov));
+            found = scene.cameras.emplace(camera.camera, std::move(named)).first;
+        }
+        target = found->second;
+    }
+    target->LockFov(true);
+
+    if (runtime_ptr == nullptr) {
+        // The last visible shot poses its camera, and that camera projects the scene.
+        if (layer.node->EffectiveVisible()) {
+            target->AttatchNode(layer.node);
+            target->SetFov(ResolvePerspectiveFov(general, camera.fov));
+            target->Update();
+            scene.activeCamera = target.get();
+        }
+        return true;
+    }
+    auto& runtime = *runtime_ptr;
+    CameraPathPlayback path;
+    if (! camera.path.empty()) {
+        nlohmann::json document;
+        if (PARSE_JSON(fs::GetFileContent(*context.vfs, "/assets/" + camera.path), document)) {
+            path = CameraPathPlayback(ParseCameraPaths(document), camera.queuemode);
+        }
+    }
+    runtime.RegisterPerspectiveCameraShot(layer.node, target.get(),
+                                          ResolvePerspectiveFov(general, camera.fov),
+                                          std::move(path));
+    return true;
+}
 
 /// Builds the entries in the order the file declares them: the plain node of a
 /// group, a shape or a stand-in, and the typed object an entry carries. Layers are
 /// registered with the runtime in this order, which is the order scripts count
 /// them in.
-void BuildLayers(ParseContext& context, const nlohmann::json& objects,
-                 const std::vector<EntryPlan>& plans, audio::SoundManager& sm) {
+void BuildLayers(ParseContext& context, const wpscene::WPSceneGeneral& general,
+                 const nlohmann::json& objects, const std::vector<EntryPlan>& plans,
+                 audio::SoundManager& sm) {
     for (std::size_t at = 0; at < objects.size(); ++at) {
         const auto& plan  = plans[at];
         const auto& entry = objects[at];
         if (plan.admission == Admission::Skip) continue;
         const bool plain = plan.admission == Admission::Node;
-        if (plain || plan.placeholder) {
-            ParsedLayer layer;
-            layer.entry = at;
-            layer.id    = plan.id;
-            layer.key   = plan.key;
-            if (const auto name = entry.find("name"); name != entry.end() && name->is_string()) {
-                layer.authored_name = name->get<std::string>();
-            }
-            if (const auto parent = entry.find("parent"); parent != entry.end()) {
-                wpscene::ReadInt32(*parent, layer.parent_id);
-            }
-            if (const auto attachment = entry.find("attachment");
-                attachment != entry.end() && attachment->is_string()) {
-                layer.attachment = attachment->get<std::string>();
-            }
-            layer.node  = MakePlainLayerNode(context, entry, plan, plain);
-            layer.plain = true;
-            context.layer_nodes[layer.id] = layer.node;
-            context.layers.push_back(std::move(layer));
+        const bool typed_node = plan.kind == EntryKind::Light || plan.kind == EntryKind::Camera;
+        if (plain || (plan.placeholder && ! typed_node)) {
+            AddLayer(context, at, entry, plan, plain, true);
+            SetUnhittable(context, plan.key);
         }
         if (plain) continue;
+        bool built = true;
         switch (plan.kind) {
-        case EntryKind::Sound: LoadSoundEntry(context, entry, sm); break;
+        case EntryKind::Sound: built = LoadSoundEntry(context, entry, sm); break;
+        case EntryKind::Light: built = LoadLightEntry(context, at, entry, plan); break;
+        case EntryKind::Camera: built = LoadCameraEntry(context, at, entry, plan, general); break;
         default:
             LOG_ERROR("object %d (%s) is not built: its kind is not loaded by this parser yet",
                       plan.id, plan.key.c_str());
             break;
+        }
+        if (! built) {
+            LOG_ERROR("object %d (%s) could not be built", plan.id, plan.key.c_str());
         }
     }
 }
@@ -1928,11 +2089,6 @@ bool LoadSoundEntry(ParseContext& context, const nlohmann::json& entry, audio::S
 // ---------------------------------------------------------------------------
 // Scene settings and cameras (R12 to R30, R79 to R88, R111, R113).
 // ---------------------------------------------------------------------------
-
-/// The authored setting, or a literal standing in for a key the file leaves out.
-nlohmann::json SettingOrValue(const nlohmann::json& setting, const nlohmann::json& literal) {
-    return setting.is_null() ? literal : setting;
-}
 
 void SetGlobalUniform(ParseContext& context, const char* name, std::initializer_list<float> lanes) {
     const std::vector<float> values(lanes);
@@ -2044,13 +2200,14 @@ void BuildCamerasAndTargets(ParseContext& context, const wpscene::WPScene& wp, d
 /// (R12 to R19, R59, R64): colours, light budget, fog, camera shake and parallax.
 void ApplySceneSettings(ParseContext& context, const wpscene::WPScene& wp) {
     auto&       scene   = *context.scene;
-    auto&       runtime = *scene.runtime;
+    auto* const runtime_ptr = scene.runtime.get();
     const auto& general = wp.general;
 
     scene.clearEnabled = general.clearenabled;
     scene.clearColor   = general.clearcolor;
-    if (general.dynamic_clearcolor) {
-        runtime.RegisterSceneClearColor(ResolveVec3Setting(runtime, general.clearcolor_setting));
+    if (runtime_ptr != nullptr && general.dynamic_clearcolor) {
+        runtime_ptr->RegisterSceneClearColor(
+            ResolveVec3Setting(*runtime_ptr, general.clearcolor_setting));
     }
     scene.light_config = ParseSceneLightConfig(general.lightconfig);
     scene.fog_distance = general.fogdistance;
@@ -2077,7 +2234,9 @@ void ApplySceneSettings(ParseContext& context, const wpscene::WPScene& wp) {
                        general.fogheightenddensity - general.fogheightstartdensity });
 
     // The shake of the camera: static, or following its properties.
-    if (general.camerashake || HasDynamicSetting(general.camerashake_setting)) {
+    if (runtime_ptr != nullptr &&
+        (general.camerashake || HasDynamicSetting(general.camerashake_setting))) {
+        auto& runtime = *runtime_ptr;
         runtime.RegisterCameraShake(
             ResolveBoolSetting(runtime,
                                SettingOrValue(general.camerashake_setting, general.camerashake)),
@@ -2096,40 +2255,58 @@ void ApplySceneSettings(ParseContext& context, const wpscene::WPScene& wp) {
     parallax.delay          = general.cameraparallaxdelay;
     parallax.mouseinfluence = general.cameraparallaxmouseinfluence;
     parallax.canvas_scene   = context.is_ortho;
-    ResolveLoadOnlySceneSetting(runtime, general.cameraparallax_setting, parallax.enable);
-    ResolveLoadOnlySceneSetting(runtime, general.cameraparallaxamount_setting, parallax.amount);
-    ResolveLoadOnlySceneSetting(runtime, general.cameraparallaxmouseinfluence_setting,
-                                parallax.mouseinfluence);
-    if (HasDynamicSetting(general.cameraparallaxdelay_setting)) {
-        auto value     = ResolveFloatSetting(runtime, general.cameraparallaxdelay_setting);
-        parallax.delay = value->getFloat();
-        auto* updater  = context.shader_updater;
-        runtime.RegisterDynamicValueListener(std::move(value), [updater](const DynamicValue& now) {
-            auto current  = updater->CameraParallax();
-            current.delay = now.getFloat();
-            updater->SetCameraParallax(current);
-        });
+    if (runtime_ptr != nullptr) {
+        auto& runtime = *runtime_ptr;
+        ResolveLoadOnlySceneSetting(runtime, general.cameraparallax_setting, parallax.enable);
+        ResolveLoadOnlySceneSetting(runtime, general.cameraparallaxamount_setting, parallax.amount);
+        ResolveLoadOnlySceneSetting(runtime, general.cameraparallaxmouseinfluence_setting,
+                                    parallax.mouseinfluence);
+        if (HasDynamicSetting(general.cameraparallaxdelay_setting)) {
+            auto value     = ResolveFloatSetting(runtime, general.cameraparallaxdelay_setting);
+            parallax.delay = value->getFloat();
+            auto* updater  = context.shader_updater;
+            runtime.RegisterDynamicValueListener(std::move(value), [updater](const DynamicValue& now) {
+                auto current  = updater->CameraParallax();
+                current.delay = now.getFloat();
+                updater->SetCameraParallax(current);
+            });
+        }
     }
     context.shader_updater->SetCameraParallax(parallax);
 }
 
-/// Registers the scene's zoom and returns the zoom it starts with. A playable
-/// timeline on the zoom plays even when a property is named too, and the property
-/// then only supplies the start; otherwise a bound zoom follows its property.
-double ApplySceneZoom(ParseContext& context, const wpscene::WPSceneGeneral& general) {
-    auto&  runtime = *context.scene->runtime;
-    double zoom    = general.zoom;
-    auto   animation = ResolveScalarAnimation(general.zoom_setting);
+/// The scene's zoom: where it starts, and what keeps it going. A playable timeline
+/// on the zoom plays even when a property is named too, and the property then
+/// only supplies the start; otherwise a bound zoom follows its property.
+struct SceneZoomPlan {
+    double                         start { 1.0 };
+    std::unique_ptr<DynamicValue>  bound;
+    std::optional<ScalarAnimation> animation;
+};
+
+SceneZoomPlan PlanSceneZoom(ParseContext& context, const wpscene::WPSceneGeneral& general) {
+    SceneZoomPlan plan;
+    plan.start = general.zoom;
+    auto* runtime = context.scene->runtime.get();
+    if (runtime == nullptr) return plan;
+    plan.animation = ResolveScalarAnimation(general.zoom_setting);
     if (HasDynamicSetting(general.zoom_setting)) {
-        auto value = ResolveFloatSetting(runtime, general.zoom_setting);
-        zoom       = value->getFloat();
-        if (! animation.has_value()) runtime.RegisterSceneZoom(std::move(value));
+        plan.bound = ResolveFloatSetting(*runtime, general.zoom_setting);
+        plan.start = plan.bound->getFloat();
     }
-    if (animation.has_value()) {
-        runtime.RegisterSceneZoomAnimation(
-            runtime.RegisterScalarAnimation("", std::move(*animation)));
+    return plan;
+}
+
+/// Hands the zoom to the runtime; the cameras it frames exist by now.
+void InstallSceneZoom(ParseContext& context, SceneZoomPlan plan) {
+    auto* runtime = context.scene->runtime.get();
+    if (runtime == nullptr) return;
+    if (plan.animation.has_value()) {
+        runtime->RegisterSceneZoomAnimation(
+            runtime->RegisterScalarAnimation("", std::move(*plan.animation)));
+    } else if (plan.bound != nullptr) {
+        runtime->RegisterSceneZoom(std::move(plan.bound));
     }
-    return zoom;
 }
 
 /// The canvas of the scene (R21, R88): the authored size, the largest image layer
@@ -2234,20 +2411,25 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
     if (request.authored_project_properties != nullptr) {
         bootstrap.authored_project_properties = *request.authored_project_properties;
     }
-    scene->runtime = std::make_unique<SceneRuntimeContext>(std::move(bootstrap));
-    scene->runtime->AttachScene(scene.get());
-    auto& runtime = *scene->runtime;
+    // Without a property table there is nothing to bind to, and no runtime.
+    if (request.project_properties != nullptr) {
+        scene->runtime = std::make_unique<SceneRuntimeContext>(std::move(bootstrap));
+        scene->runtime->AttachScene(scene.get());
+    }
 
     // What decides how the scene is built is read once, as it loads.
     bool bloom = general.bloom;
-    ResolveLoadOnlySceneSetting(runtime, general.bloom_setting, bloom);
+    if (scene->runtime != nullptr) {
+        ResolveLoadOnlySceneSetting(*scene->runtime, general.bloom_setting, bloom);
+    }
     scene->hdr = general.hdr && bloom;
 
     ApplySceneSettings(context, wp);
-    const double zoom = ApplySceneZoom(context, general);
-    BuildCamerasAndTargets(context, wp, zoom);
+    auto zoom = PlanSceneZoom(context, general);
+    BuildCamerasAndTargets(context, wp, zoom.start);
+    InstallSceneZoom(context, std::move(zoom));
 
-    BuildLayers(context, objects, plans, sm);
+    BuildLayers(context, general, objects, plans, sm);
     AttachLayers(context);
 
     ApplyDefaultDepthTarget(context);
@@ -2264,7 +2446,11 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
     // Scene scripts start last, once every layer, id and hook they may use exists,
     // in the order the file declares their layers.
     auto scripts = std::move(context.scene_scripts);
-    for (auto& [source, key] : scripts) runtime.RegisterSceneScript(std::move(source), std::move(key));
+    if (scene->runtime != nullptr) {
+        for (auto& [source, key] : scripts) {
+            scene->runtime->RegisterSceneScript(std::move(source), std::move(key));
+        }
+    }
     return scene;
 }
 
