@@ -121,7 +121,7 @@ function noticeLanguage(prog) { guard('applyGeneralSettings', prog, { language: 
 
 function startNotices(prog) {
   noticeLanguage(prog);
-  guard('applyUserProperties', prog, Object.assign({}, engine.userProperties));
+  guard('applyUserProperties', prog, Object.assign({}, userProps));
 }
 
 // What a handler may keep or change without touching what the next handler gets
@@ -140,7 +140,7 @@ function evaluate(prog, value, hasRuntime) {
     prog.started = true;
     guard('init', prog, ownCopy(value));
     noticeLanguage(prog);
-    if (hasRuntime) guard('applyUserProperties', prog, Object.assign({}, engine.userProperties));
+    if (hasRuntime) guard('applyUserProperties', prog, Object.assign({}, userProps));
   }
   var update = h.update;
   if (typeof update !== 'function') return undefined;
@@ -165,10 +165,10 @@ function cursorEvent(prog, index, button) {
   var name = CURSOR[index];
   // Each program gets its own vectors: one that edits `event.worldPosition` must not
   // change what `input` or the next program's event holds.
-  var world = input.cursorWorldPosition.copy();
+  var world = worldVec.copy();
   var event = {
     button: button,
-    normalizedPosition: new Vec2(input.cursorPosition.x, input.cursorPosition.y),
+    normalizedPosition: new Vec2(curX, curY),
     worldPosition: world,
     position: world
   };
@@ -215,10 +215,10 @@ function mediaThumbnail(prog, pr, pg, pb, tr, tg, tb) {
 }
 
 function resizeProgram(prog) {
-  guard('resizeScreen', prog, new Vec2(engine.screenResolution.x, engine.screenResolution.y));
+  guard('resizeScreen', prog, new Vec2(resW, resH));
 }
 function resizeListeners() {
-  try { runListeners('resizeScreen', new Vec2(engine.screenResolution.x, engine.screenResolution.y)); }
+  try { runListeners('resizeScreen', new Vec2(resW, resH)); }
   catch (e) { reportError('resizeScreen', e); }
 }
 

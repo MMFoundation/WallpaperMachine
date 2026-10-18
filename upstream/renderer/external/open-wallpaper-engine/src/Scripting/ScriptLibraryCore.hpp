@@ -36,13 +36,24 @@ function finiteOr(value, fallback) { return typeof value === 'number' && isFinit
 // ---- host values ----------------------------------------------------------
 var language = 'en-us';
 var canvasW = 0, canvasH = 0, resW = 0, resH = 0, curX = 0.5, curY = 0.5;
+var sceneTime = 0;
+var worldVec = new Vec3(0, 0, 0);
+
+// The host's own fields of `engine` and `input`. They read and assign like plain
+// properties, but each is a fixed accessor over a variable of this library: a script
+// can neither turn one into code that runs inside the host's refresh nor freeze the
+// object so that the refresh fails; the host writes through the returned setter.
+function hostField(target, key, initial) {
+  var current = initial;
+  Object.defineProperty(target, key, {
+    get: function () { return current; },
+    set: function (value) { current = value; },
+    enumerable: true, configurable: false
+  });
+  return function (value) { current = value; };
+}
 
 var engine = {
-  canvasSize: new Vec2(0, 0),
-  screenResolution: new Vec2(0, 0),
-  frametime: 0,
-  runtime: 0,
-  userProperties: {},
   AUDIO_RESOLUTION_16: 16,
   AUDIO_RESOLUTION_32: 32,
   AUDIO_RESOLUTION_64: 64,
@@ -51,34 +62,31 @@ var engine = {
   isWallpaper: function () { return !engine.isScreensaver(); },
   isDesktopDevice: function () { return true; },
   isMobileDevice: function () { return false; },
-  isPortrait: function () { return engine.screenResolution.y > engine.screenResolution.x; },
-  isLandscape: function () { return engine.screenResolution.x >= engine.screenResolution.y; },
+  isPortrait: function () { return resH > resW; },
+  isLandscape: function () { return resW >= resH; },
   registerAsset: function (file) { return file === undefined ? '' : file; }
 };
+var putCanvasSize = hostField(engine, 'canvasSize', new Vec2(0, 0));
+var putResolution = hostField(engine, 'screenResolution', new Vec2(0, 0));
+var putFrametime = hostField(engine, 'frametime', 0);
+var putRuntime = hostField(engine, 'runtime', 0);
+var putUserProperties = hostField(engine, 'userProperties', {});
 Object.defineProperty(engine, 'timeOfDay', {
   get: function () { return n.timeOfDay(); }, enumerable: true, configurable: true
 });
 
-var input = {
-  cursorPosition: new Vec2(0.5, 0.5),
-  cursorWorldPosition: new Vec3(0, 0, 0),
-  cursorLocalPosition: new Vec3(0, 0, 0),
-  cursorScreenPosition: new Vec2(0, 0),
-  cursorLeftDown: false,
-  mouseButtonsDown: 0,
-  mouseButtonsPressed: 0,
-  mouseButtonsReleased: 0,
-  inWindow: false
-};
-
-// The host writes these on every refresh, so a script may assign to them but may not
-// turn one into an accessor: that would run script code inside the host's own update.
-['canvasSize', 'screenResolution', 'frametime', 'runtime', 'userProperties'].forEach(function (key) {
-  Object.defineProperty(engine, key, { configurable: false });
-});
-Object.keys(input).forEach(function (key) { Object.defineProperty(input, key, { configurable: false }); });
-Object.defineProperty(G, 'canvasSize', { value: engine.canvasSize, writable: true, enumerable: true,
-                                          configurable: false });
+var input = {};
+var putCursor = hostField(input, 'cursorPosition', new Vec2(0.5, 0.5));
+var putWorld = hostField(input, 'cursorWorldPosition', worldVec);
+var putLocal = hostField(input, 'cursorLocalPosition', worldVec);
+var putScreen = hostField(input, 'cursorScreenPosition', new Vec2(0, 0));
+var putLeftDown = hostField(input, 'cursorLeftDown', false);
+var putDown = hostField(input, 'mouseButtonsDown', 0);
+var putPressed = hostField(input, 'mouseButtonsPressed', 0);
+var putReleased = hostField(input, 'mouseButtonsReleased', 0);
+var putInWindow = hostField(input, 'inWindow', false);
+// Old scripts read the canvas size as a global of its own.
+var putGlobalCanvas = hostField(G, 'canvasSize', engine.canvasSize);
 
 // Called by the host with the groups of the context that changed since the last
 // call (bit 0 canvas, 1 resolution, 2 times, 3 pointer, 4 world pointer, 5
@@ -87,38 +95,41 @@ function hostUpdate(m, cw, ch, rw, rh, ft, rt, cx, cy, wx, wy, wz, inw, down, pr
   if (m & 3) {
     if (m & 1) {
       canvasW = cw; canvasH = ch;
-      engine.canvasSize = new Vec2(cw, ch);
-      G.canvasSize = engine.canvasSize;
+      var canvas = new Vec2(cw, ch);
+      putCanvasSize(canvas);
+      putGlobalCanvas(canvas);
     }
     var w = rw > 0 && isFinite(rw) ? rw : canvasW;
     var h = rh > 0 && isFinite(rh) ? rh : canvasH;
     resW = w; resH = h;
-    engine.screenResolution = new Vec2(w, h);
+    putResolution(new Vec2(w, h));
   }
-  if (m & 4) { engine.frametime = ft; engine.runtime = rt; }
-  if (m & 8) { curX = cx; curY = cy; input.cursorPosition = new Vec2(cx, cy); }
-  if (m & 11) input.cursorScreenPosition = new Vec2(curX * resW, curY * resH);
+  if (m & 4) { sceneTime = rt; putFrametime(ft); putRuntime(rt); }
+  if (m & 8) { curX = cx; curY = cy; putCursor(new Vec2(cx, cy)); }
+  if (m & 11) putScreen(new Vec2(curX * resW, curY * resH));
   if (m & 16) {
-    input.cursorWorldPosition = new Vec3(wx, wy, wz);
-    input.cursorLocalPosition = input.cursorWorldPosition;
+    worldVec = new Vec3(wx, wy, wz);
+    putWorld(worldVec);
+    putLocal(worldVec);
   }
   if (m & 32) {
-    input.mouseButtonsDown = down;
-    input.mouseButtonsPressed = pressed;
-    input.mouseButtonsReleased = released;
-    input.cursorLeftDown = (down & 1) !== 0;
+    putDown(down);
+    putPressed(pressed);
+    putReleased(released);
+    putLeftDown((down & 1) !== 0);
   }
-  if (m & 64) input.inWindow = inw;
+  if (m & 64) putInWindow(inw);
   if (m & 128) language = lang;
 }
 
 // ---- user properties ------------------------------------------------------
 var lowerProps = null;
-function setProps(obj) { engine.userProperties = obj; lowerProps = null; }
+var userProps = {};
+function setProps(obj) { userProps = obj; putUserProperties(obj); lowerProps = null; }
 function propertyFallback(name) {
   if (lowerProps === null) {
     lowerProps = Object.create(null);
-    var props = engine.userProperties;
+    var props = userProps;
     for (var key in props) lowerProps[key.toLowerCase()] = props[key];
   }
   return lowerProps[name.toLowerCase()];
@@ -149,7 +160,7 @@ function addTimer(fn, delay, repeat) {
   var ms = Number(delay);
   if (!(ms > 0)) ms = 0;
   var seconds = ms / 1000;
-  var timer = { fn: fn, due: engine.runtime + seconds, period: seconds, repeat: repeat && ms > 0, dead: false };
+  var timer = { fn: fn, due: sceneTime + seconds, period: seconds, repeat: repeat && ms > 0, dead: false };
   timers.push(timer);
   var cancel = function () { timer.dead = true; };
   cancelers.set(cancel, timer);
@@ -163,7 +174,7 @@ function clearTimer(handle) {
 function runTimers() {
   var count = timers.length;
   if (count === 0) return;
-  var now = engine.runtime;
+  var now = sceneTime;
   var failed = false, failure;
   var anyDead = false;
   for (var i = 0; i < count; ++i) {

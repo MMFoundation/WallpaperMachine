@@ -1186,7 +1186,8 @@ struct ScriptEngineContext : std::enable_shared_from_this<ScriptEngineContext> {
     // One host-initiated call into the library. False when it did not complete.
     bool     Call(ScriptGuard* guard, const char* entry, LibFn fn, std::initializer_list<JSValue> args,
                   double budget_ms, JSValue* result = nullptr);
-    void     PumpJobs();
+    // Runs the queued promise jobs; true when one of them was interrupted.
+    bool     PumpJobs();
     std::string TakeException(std::string* stack);
 
     JSValue  NewVector(int size, double x, double y, double z, double w);
@@ -1288,6 +1289,27 @@ void ScriptEngineContext::ApplyLimits(const ScriptLimits& configured) {
     JS_SetMaxStackSize(rt, limits.stack_limit_bytes);
 }
 
+#if defined(__APPLE__)
+namespace
+{
+// Where the calling thread's stack begins and how large it is, asked of the system once
+// per thread: the main thread's answer is a system call, and this runs on every entry.
+struct ThreadStackBounds {
+    const char* top { nullptr };
+    std::size_t total { 0 };
+};
+
+const ThreadStackBounds& BoundsOfThisThread() {
+    thread_local const ThreadStackBounds bounds = [] {
+        const pthread_t self = pthread_self();
+        return ThreadStackBounds { static_cast<const char*>(pthread_get_stackaddr_np(self)),
+                                   static_cast<std::size_t>(pthread_get_stacksize_np(self)) };
+    }();
+    return bounds;
+}
+} // namespace
+#endif
+
 void ScriptEngineContext::AdoptThreadStack() {
     if (rt == nullptr) return;
     std::size_t size = limits.stack_limit_bytes;
@@ -1295,12 +1317,10 @@ void ScriptEngineContext::AdoptThreadStack() {
     // The limit may not reach past the end of the stack of the thread that is running:
     // a secondary thread has far less than the configured size, and running off its
     // end is a crash where a deep script should get a RangeError.
-    const pthread_t self  = pthread_self();
-    const auto      total = static_cast<std::size_t>(pthread_get_stacksize_np(self));
-    const auto*     top   = static_cast<const char*>(pthread_get_stackaddr_np(self));
-    const char      here  = 0;
-    const std::size_t used = top > &here ? static_cast<std::size_t>(top - &here) : 0;
-    const std::size_t room = total > used ? total - used : 0;
+    const auto&       bounds = BoundsOfThisThread();
+    const char        here   = 0;
+    const std::size_t used   = bounds.top > &here ? static_cast<std::size_t>(bounds.top - &here) : 0;
+    const std::size_t room   = bounds.total > used ? bounds.total - used : 0;
     // What the host code a script call reaches (layer creation, parsing) needs.
     constexpr std::size_t kHostReserve = 128u * 1024u;
     constexpr std::size_t kLeastStack  = 16u * 1024u;
@@ -1361,17 +1381,20 @@ std::string ScriptEngineContext::TakeException(std::string* stack) {
     return message;
 }
 
-void ScriptEngineContext::PumpJobs() {
+bool ScriptEngineContext::PumpJobs() {
     while (JS_IsJobPending(rt)) {
         JSContext* job_context = nullptr;
         const int  status      = JS_ExecutePendingJob(rt, &job_context);
         if (status < 0 && job_context != nullptr) {
             std::string stack;
             const auto  message = TakeException(&stack);
+            // A job that ran out of time is an interrupted call like any other.
+            if (interrupted) return true;
             ReportError("job", message, stack);
         }
         if (status <= 0) break;
     }
+    return false;
 }
 
 void ScriptEngineContext::ReportError(const std::string& entry, std::string message,
@@ -1483,16 +1506,23 @@ bool ScriptEngineContext::Call(ScriptGuard* guard, const char* entry, LibFn fn,
     {
         CallScope scope(*this, nullptr, budget_ms);
         answer = JS_Call(ctx, lib[fn], JS_UNDEFINED, argc, argv);
-        if (! JS_IsException(answer)) PumpJobs();
+        if (! JS_IsException(answer) && PumpJobs()) {
+            // The call itself finished, but a job it queued did not: the call counts as
+            // interrupted and its answer is not used.
+            JS_FreeValue(ctx, answer);
+            answer = JS_EXCEPTION;
+        }
         expired = interrupted;
     }
     for (int i = 0; i < argc; ++i) JS_FreeValue(ctx, argv[i]);
     if (JS_IsException(answer)) {
-        std::string stack;
-        auto        message = TakeException(&stack);
         if (expired) {
+            // The interrupt's exception, if still pending, is of no interest.
+            if (JS_HasException(ctx)) TakeException(nullptr);
             RecordInterrupt(guard, entry, budget_ms);
         } else {
+            std::string stack;
+            const auto  message = TakeException(&stack);
             ReportError(entry, message, stack);
         }
         return false;

@@ -7240,5 +7240,179 @@ export function update(value) { return engine.frametime; }
     EXPECT_LT(MillisecondsOf(start), 1000.0);
 }
 
+
+// ---- more hostile scripts: blocking calls, backtracking, queued jobs, frozen host objects ----
+
+namespace {
+// Runs one `update` that never finishes in time through a value program and answers
+// how many milliseconds the host call took (negative when the program was refused).
+double TimeOneHostileUpdate(const char* script) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(
+        runtime.get(), script, "", {}, DynamicValue(1.0f), runtime->hostContext());
+    if (program == nullptr) return -1.0;
+    const auto start = std::chrono::steady_clock::now();
+    program->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    return MillisecondsOf(start);
+}
+} // namespace
+
+TEST(ScriptHostLimits, AtomicsWaitCannotBlockTheHost) {
+    const double ms = TimeOneHostileUpdate(R"JS(
+export function update(value) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(8)), 0, 0, 5000); } catch (e) {}
+  return 1;
+}
+)JS");
+    EXPECT_GE(ms, 0.0);
+    EXPECT_LT(ms, 1000.0);
+}
+
+TEST(ScriptHostLimits, RegexBacktrackingIsInterrupted) {
+    const double ms = TimeOneHostileUpdate(R"JS(
+export function update(value) { /(a+)+b/.test('a'.repeat(60)); return 1; }
+)JS");
+    EXPECT_GE(ms, 0.0);
+    EXPECT_LT(ms, 1000.0);
+}
+
+TEST(ScriptHostLimits, AnEndlessPromiseJobIsInterruptedAndCounted) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update(value) { Promise.resolve().then(function () { for (;;) {} }); return 1; }
+)JS", "jobber", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(program, nullptr);
+    const auto start = std::chrono::steady_clock::now();
+    for (int tick = 0; tick < 3; ++tick) program->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    EXPECT_LT(MillisecondsOf(start), 2000.0);
+    EXPECT_FALSE(program->Valid()) << "three interrupted calls in a row switch the program off";
+}
+
+TEST(ScriptHostLimits, AFrozenEngineDoesNotStopTheHostsRefresh) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  hostile = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+Object.freeze(engine);
+Object.freeze(input);
+export function update(value) { return 1; }
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    auto reader = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update(value) { return engine.frametime; }
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(reader, nullptr);
+    ScriptHostContext host = runtime->hostContext();
+    host.frame_time        = 0.5;
+    const auto errors      = runtime->scriptErrorCount();
+    const auto answer      = reader->Evaluate(host, DynamicValue(1.0f));
+    ASSERT_NE(answer, nullptr);
+    EXPECT_FLOAT_EQ(answer->getFloat(), 0.5f);
+    EXPECT_EQ(runtime->scriptErrorCount(), errors);
+}
+
+TEST(ScriptHostLimits, AScriptThatReplacesTheInputVectorsDoesNotBreakCursorEvents) {
+    ScriptEngine engine;
+    DynamicValue initial(0.0f);
+    auto         vandal = engine.CreatePropertyScriptProgram(nullptr, R"JS(
+input.cursorWorldPosition = 5;
+input.cursorPosition = null;
+export function update(value) { return 1; }
+)JS", "", {}, initial, {});
+    auto reader = engine.CreatePropertyScriptProgram(nullptr, R"JS(
+export function cursorClick(event) { globalThis.seen = event.worldPosition.x * 100 + event.normalizedPosition.x; }
+export function update(value) { return globalThis.seen; }
+)JS", "", {}, initial, {});
+    ASSERT_NE(reader, nullptr);
+    ScriptHostContext host;
+    host.cursor_world_position      = linalg::Vector3f(3, 4, 0);
+    host.cursor_normalized_position = linalg::Vector2f(0.5f, 0.25f);
+    if (vandal != nullptr) vandal->Evaluate(host, DynamicValue(0.0f));
+    reader->DispatchCursorClick(host);
+    const auto seen = reader->Evaluate(host, DynamicValue(0.0f));
+    ASSERT_NE(seen, nullptr);
+    EXPECT_FLOAT_EQ(seen->getFloat(), 300.5f);
+}
+
+TEST(ScriptHostLimits, AnEndlessTopLevelIsRefusedInTimeAndLeavesOtherProgramsAlone) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    const auto start   = std::chrono::steady_clock::now();
+    auto       endless = runtime->scriptEngine().CreatePropertyScriptProgram(
+        runtime.get(), "for (;;) {}\nexport function update(value) { return 2; }", "", {},
+        DynamicValue(1.0f), runtime->hostContext());
+    EXPECT_EQ(endless, nullptr);
+    EXPECT_LT(MillisecondsOf(start), 2000.0);
+    EXPECT_GE(runtime->scriptErrorCount(), 1u);
+    auto fine = runtime->scriptEngine().CreatePropertyScriptProgram(
+        runtime.get(), "export function update(value) { return 3; }", "", {}, DynamicValue(1.0f),
+        runtime->hostContext());
+    ASSERT_NE(fine, nullptr);
+    const auto answer = fine->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    ASSERT_NE(answer, nullptr);
+    EXPECT_FLOAT_EQ(answer->getFloat(), 3.0f);
+}
+
+TEST(ScriptHostLimits, AnEndlessTimerCallbackIsInterruptedOnceAndTheNextEvaluationRunsNormally) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+engine.setTimeout(function () { for (;;) {} }, 0);
+export function update(value) { return value + 1; }
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(program, nullptr);
+    const auto first = program->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(runtime->scriptErrorCount(), 1u) << "the interrupted pass is one error";
+    EXPECT_TRUE(program->Valid());
+    const auto second = program->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    ASSERT_NE(second, nullptr);
+    EXPECT_FLOAT_EQ(second->getFloat(), 2.0f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 1u) << "the timer that was interrupted is gone";
+}
+
+TEST(ScriptHostLimits, AnEndlessSceneInitAndAnEndlessListenerAreInterruptedInTime) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    const auto start = std::chrono::steady_clock::now();
+    runtime->RegisterSceneScript("export function init() { for (;;) {} }", "");
+    runtime->RegisterSceneScript("engine.on('update', function () { for (;;) {} });", "");
+    runtime->Tick(0.016);
+    EXPECT_LT(MillisecondsOf(start), 3000.0);
+    EXPECT_GE(runtime->scriptErrorCount(), 2u);
+}
+
+TEST(ScriptHostLimits, ADynamicImportCannotLoadAnything) {
+    ScriptEngine engine;
+    EXPECT_FLOAT_EQ(EvaluateScalar(engine, R"JS(
+var state = 0;
+try { import('os').then(function () { state = 2; }, function () { state = 1; }); } catch (e) { state = 3; }
+export function update(value) { return state === 2 ? 99 : 5; }
+)JS").getFloat(), 5.0f);
+}
+
+TEST(ScriptHostLimits, AnErrorObjectThatRunsCodeWhenReadIsHeldToTheCallBudget) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+// The host copies the value it hands to `update` with this method; a throw out of it
+// reaches the host as an error object the script made.
+Vec3.prototype.copy = function () { throw { get message() { for (;;) {} }, get stack() { for (;;) {} } }; };
+export function update(value) { return value; }
+)JS", "", {}, DynamicValue(linalg::Vector3f(1, 2, 3)), runtime->hostContext());
+    ASSERT_NE(program, nullptr);
+    const auto start = std::chrono::steady_clock::now();
+    const auto answer = program->Evaluate(runtime->hostContext(), DynamicValue(linalg::Vector3f(1, 2, 3)));
+    EXPECT_LT(MillisecondsOf(start), 2000.0) << "reading the error must be interrupted too";
+    ASSERT_NE(answer, nullptr);
+    EXPECT_GE(runtime->scriptErrorCount(), 1u);
+}
+
 } // namespace
 } // namespace wallpaper

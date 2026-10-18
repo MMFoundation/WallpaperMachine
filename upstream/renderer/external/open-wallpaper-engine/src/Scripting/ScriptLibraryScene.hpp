@@ -492,6 +492,9 @@ var sceneProxy = new Proxy(sceneApi, {
 
 // ---- audio buffers --------------------------------------------------------
 var audioBuffers = [];
+// The generation every registered buffer holds, or -1 while one of them still waits
+// for its first fill: when the analysis has produced nothing new there is nothing to do.
+var audioUpToDate = -1;
 // Generous for a scene whose layers each register once; each entry costs a few hundred bytes.
 var MAX_AUDIO_REGISTRATIONS = 1024;
 engine.registerAudioBuffers = function (resolution) {
@@ -502,16 +505,19 @@ engine.registerAudioBuffers = function (resolution) {
   var buffer = { size: size, generation: -1, left: new Float32Array(size), right: new Float32Array(size),
                  average: new Float32Array(size) };
   audioBuffers.push(buffer);
+  audioUpToDate = -1;
   return { left: buffer.left, right: buffer.right, average: buffer.average };
 };
 function refreshAudio() {
   if (audioBuffers.length === 0) return;
   var generation = n.audioGeneration();
-  var snapshot;
+  if (generation === audioUpToDate) return;
+  // One snapshot per resolution that needs it, however many buffers share it.
+  var snapshot, snapshotSize = 0;
   for (var i = audioBuffers.length - 1; i >= 0; --i) {
     var buffer = audioBuffers[i];
     if (buffer.generation === generation) continue;
-    if (snapshot === undefined || snapshot.size !== buffer.size) snapshot = n.audio(buffer.size);
+    if (snapshotSize !== buffer.size) { snapshot = n.audio(buffer.size); snapshotSize = buffer.size; }
     try {
       buffer.left.set(snapshot[0]);
       buffer.right.set(snapshot[1]);
@@ -521,6 +527,7 @@ function refreshAudio() {
       audioBuffers.splice(i, 1);
     }
   }
+  audioUpToDate = generation;
 }
 
 // ---- user shortcuts -------------------------------------------------------
