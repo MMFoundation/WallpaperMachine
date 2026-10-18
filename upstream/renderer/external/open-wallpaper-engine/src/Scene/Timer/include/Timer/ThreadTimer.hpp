@@ -91,28 +91,8 @@ public:
     void FireNow();
 
 private:
+    // CLEANROOM RT32
     std::function<void()> m_callback;
-
-    std::mutex m_op_mutex;
-
-    std::thread             m_timer_thread;
-    mutable std::mutex      m_cond_mutex;
-    std::condition_variable m_condition;
-
-    // init
-    std::atomic<std::chrono::microseconds> m_interval;
-    /// Ceiling on callback frequency; zero means no floor on the gap.
-    std::atomic<std::chrono::microseconds> m_min_interval { std::chrono::microseconds::zero() };
-    std::atomic<bool>                      m_running;
-    /// Guarded by `m_cond_mutex` together with the wait, so the waiter cannot
-    /// miss a request made while it was between checks.
-    bool                                   m_idle { false };
-    bool                                   m_wake_once { false };
-    bool                                   m_fire_now { false };
-    /// Set when leaving idle so the thread restarts its cadence from now.
-    bool                                   m_rebase { false };
-    /// One-shot appointment honoured while idle; unset means no deadline.
-    std::optional<std::chrono::steady_clock::time_point> m_wake_at;
 };
 
 } // namespace wallpaper

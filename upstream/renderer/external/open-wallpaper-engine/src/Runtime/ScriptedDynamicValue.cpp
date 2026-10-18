@@ -3,45 +3,17 @@
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Scripting/ScriptEngine.hpp"
 
+// CLEANROOM: the stubs below leave their parameters unused until they are rewritten.
+#pragma clang diagnostic ignored "-Wunused-parameter"
+
 namespace wallpaper
 {
 
 ScriptedDynamicValue::ScriptedDynamicValue(
     SceneRuntimeContext& runtime, std::string script_source, std::string current_layer_name,
     std::map<std::string, DynamicValueUniquePtr> script_properties, DynamicValue base_value,
-    ScriptedValueSemantic semantic, int animation_layer_index)
-    : m_runtime(&runtime),
-      m_registry(runtime.ScriptedValueRegistryToken()),
-      m_current_layer_name(std::move(current_layer_name)),
-      m_script_properties(std::move(script_properties)),
-      m_semantic(semantic) {
-    DynamicValue::update(base_value);
-
-    std::map<std::string, DynamicValue*> raw_properties;
-    for (auto& [name, property] : m_script_properties) {
-        if (property == nullptr) continue;
-        raw_properties.emplace(name, property.get());
-    }
-
-    const auto program_semantic = m_semantic == ScriptedValueSemantic::AnglesDegrees
-                                      ? PropertyScriptValueSemantic::AnglesDegrees
-                                      : PropertyScriptValueSemantic::Generic;
-    m_program                   = m_runtime->scriptEngine().CreatePropertyScriptProgram(m_runtime,
-                                                                      std::move(script_source),
-                                                                      m_current_layer_name,
-                                                                      std::move(raw_properties),
-                                                                      std::move(base_value),
-                                                                      m_runtime->hostContext(),
-                                                                      program_semantic,
-                                                                      animation_layer_index);
-
-    for (auto& [name, property] : m_script_properties) {
-        (void)name;
-        if (property == nullptr) continue;
-        property->listen([this](const DynamicValue&) {
-            reevaluate();
-        });
-    }
+    ScriptedValueSemantic semantic, int animation_layer_index) {
+    // CLEANROOM RT11
 }
 
 ScriptedDynamicValue::~ScriptedDynamicValue() {
@@ -77,27 +49,27 @@ uint8_t ScriptedDynamicValue::CursorHandlerMask() const noexcept {
 }
 
 void ScriptedDynamicValue::DispatchCursorClick(const ScriptHostContext& host_context) {
-    if (m_program != nullptr) m_program->DispatchCursorClick(host_context);
+    // CLEANROOM RT11
 }
 
 void ScriptedDynamicValue::DispatchCursorDown(const ScriptHostContext& host_context) {
-    if (m_program != nullptr) m_program->DispatchCursorDown(host_context);
+    // CLEANROOM RT11
 }
 
 void ScriptedDynamicValue::DispatchCursorEnter(const ScriptHostContext& host_context) {
-    if (m_program != nullptr) m_program->DispatchCursorEnter(host_context);
+    // CLEANROOM RT11
 }
 
 void ScriptedDynamicValue::DispatchCursorLeave(const ScriptHostContext& host_context) {
-    if (m_program != nullptr) m_program->DispatchCursorLeave(host_context);
+    // CLEANROOM RT11
 }
 
 void ScriptedDynamicValue::DispatchCursorMove(const ScriptHostContext& host_context) {
-    if (m_program != nullptr) m_program->DispatchCursorMove(host_context);
+    // CLEANROOM RT11
 }
 
 void ScriptedDynamicValue::DispatchCursorUp(const ScriptHostContext& host_context) {
-    if (m_program != nullptr) m_program->DispatchCursorUp(host_context);
+    // CLEANROOM RT11
 }
 
 void ScriptedDynamicValue::DispatchAnimationEvent(const ScriptHostContext& host_context,
@@ -107,15 +79,11 @@ void ScriptedDynamicValue::DispatchAnimationEvent(const ScriptHostContext& host_
 
 void ScriptedDynamicValue::DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
                                                          const linalg::Vector3f& text_color) {
-    if (m_program != nullptr) {
-        m_program->DispatchMediaThumbnailChanged(primary_color, text_color);
-    }
+    // CLEANROOM RT11
 }
 
 void ScriptedDynamicValue::DispatchMediaEventJson(std::string_view event_json) {
-    if (m_program != nullptr) {
-        m_program->DispatchMediaEventJson(event_json);
-    }
+    // CLEANROOM RT11
 }
 
 void ScriptedDynamicValue::DispatchResizeScreen(const ScriptHostContext& host_context) {

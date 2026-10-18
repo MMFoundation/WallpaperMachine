@@ -21,59 +21,33 @@ namespace wallpaper
 
 class RuntimeImageSource final : public IImageParser {
 public:
-    explicit RuntimeImageSource(std::unique_ptr<IImageParser> fallback)
-        : m_fallback(std::move(fallback)) {
-        std::array<uint8_t, 4> transparent_pixel { 0, 0, 0, 0 };
-        // Both cover slots exist before any track does: a layer that binds one
-        // of them must find an image on the very first parse, and a wallpaper
-        // with media integration off never gets a second chance to be told.
-        SetRgbaImage("$mediaThumbnail", 1, 1, transparent_pixel.data(), transparent_pixel.size());
-        SetRgbaImage(
-            "$mediaPreviousThumbnail", 1, 1, transparent_pixel.data(), transparent_pixel.size());
+    explicit RuntimeImageSource(std::unique_ptr<IImageParser> fallback) {
+        // CLEANROOM RT12
+        (void)fallback;
     }
 
     std::shared_ptr<Image> Parse(const std::string& name) override {
-        std::string authored_name;
-        {
-            std::lock_guard lock(m_mutex);
-            if (auto iterator = m_runtime_images.find(name); iterator != m_runtime_images.end()) {
-                return iterator->second;
-            }
-            if (const auto slot = m_cover_slots.find(name); slot != m_cover_slots.end()) {
-                if (auto cover = RealCoverLocked(slot->second); cover != nullptr) return cover;
-                if (slot->second.authored != nullptr) return slot->second.authored;
-                if (slot->second.authored_failed) return PlaceholderLocked(slot->second);
-                authored_name = slot->second.authored_name;
-            }
-        }
-        if (! authored_name.empty()) return ParseAuthoredForSlot(name, authored_name);
-        return m_fallback != nullptr ? m_fallback->Parse(name) : nullptr;
+        // CLEANROOM RT13
+        (void)name;
+        return nullptr;
     }
 
     ImageHeader ParseHeader(const std::string& name) override {
-        {
-            std::lock_guard lock(m_mutex);
-            if (auto iterator = m_runtime_images.find(name); iterator != m_runtime_images.end()) {
-                return iterator->second->header;
-            }
-            // The authored picture's own header, whichever of the two the slot
-            // shows: what a material reads from it while it loads is fixed then,
-            // and must not depend on whether a track happens to be playing.
-            if (const auto slot = m_cover_slots.find(name); slot != m_cover_slots.end()) {
-                return slot->second.header;
-            }
-        }
-        return m_fallback != nullptr ? m_fallback->ParseHeader(name) : ImageHeader {};
+        // CLEANROOM RT13
+        (void)name;
+        return ImageHeader {};
     }
 
     void SetTextureSurfaceSize(uint32_t width, uint32_t height) override {
-        if (m_fallback != nullptr) m_fallback->SetTextureSurfaceSize(width, height);
+        // CLEANROOM RT13
+        (void)width;
+        (void)height;
     }
 
     bool IsRuntimeImage(const std::string& name) const {
-        std::lock_guard lock(m_mutex);
-        return m_runtime_images.find(name) != m_runtime_images.end() ||
-               m_cover_slots.find(name) != m_cover_slots.end();
+        // CLEANROOM RT12
+        (void)name;
+        return false;
     }
 
     /// Changes whenever a name joins or leaves this source (`RemoveImage`,
@@ -91,14 +65,9 @@ public:
     /// hashing pixels. The same number is what `Image::key` carries, so the two
     /// can never disagree.
     uint64_t Version(const std::string& name) const {
-        std::lock_guard lock(m_mutex);
-        // A cover slot shows either its cover or the picture standing in for it,
-        // and every publication and clear of the cover moves the cover's own
-        // version, so the slot follows that number.
-        const auto slot     = m_cover_slots.find(name);
-        const auto iterator = m_versions.find(slot == m_cover_slots.end() ? name
-                                                                          : slot->second.cover);
-        return iterator == m_versions.end() ? 0 : iterator->second;
+        // CLEANROOM RT12
+        (void)name;
+        return 0;
     }
 
     /// Whether `name` already holds exactly these pixels.
@@ -112,93 +81,23 @@ public:
     /// is cheaper than any of that.
     bool MatchesRgba(const std::string& name, uint32_t width, uint32_t height,
                      const uint8_t* rgba, std::size_t rgba_len) const {
-        if (rgba == nullptr) return false;
-        std::lock_guard lock(m_mutex);
-        const auto iterator = m_runtime_images.find(name);
-        if (iterator == m_runtime_images.end() || iterator->second == nullptr) return false;
-        const auto& image = *iterator->second;
-        if (image.header.format != TextureFormat::RGBA8) return false;
-        if (image.header.width != static_cast<int32_t>(width) ||
-            image.header.height != static_cast<int32_t>(height)) {
-            return false;
-        }
-        if (image.slots.empty() || image.slots.front().mipmaps.empty()) return false;
-        const auto& mip = image.slots.front().mipmaps.front();
-        if (mip.data == nullptr || mip.size < 0) return false;
-        if (static_cast<std::size_t>(mip.size) != rgba_len) return false;
-        return std::memcmp(mip.data.get(), rgba, rgba_len) == 0;
+        // CLEANROOM RT12
+        (void)name;
+        (void)width;
+        (void)height;
+        (void)rgba;
+        (void)rgba_len;
+        return false;
     }
 
     void SetRgbaImage(std::string name, uint32_t width, uint32_t height, const uint8_t* rgba,
                       std::size_t rgba_len) {
-        if (name.empty() || width == 0 || height == 0 || rgba == nullptr) return;
-        if (width > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) ||
-            height > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
-            return;
-        }
-
-        const std::size_t pixel_count = static_cast<std::size_t>(width) * height;
-        if (pixel_count > std::numeric_limits<std::size_t>::max() / 4) return;
-
-        const std::size_t expected_len = pixel_count * 4;
-        if (rgba_len != expected_len) return;
-
-        const auto version             = m_next_version.fetch_add(1, std::memory_order_relaxed) + 1;
-        auto       image               = std::make_shared<Image>();
-        image->key                     = name + "#" + std::to_string(version);
-        image->header.width            = static_cast<int32_t>(width);
-        image->header.height           = static_cast<int32_t>(height);
-        image->header.mapWidth         = static_cast<int32_t>(width);
-        image->header.mapHeight        = static_cast<int32_t>(height);
-        image->header.count            = 1;
-        image->header.format           = TextureFormat::RGBA8;
-        image->header.sample.wrapS     = TextureWrap::CLAMP_TO_EDGE;
-        image->header.sample.wrapT     = TextureWrap::CLAMP_TO_EDGE;
-        image->header.sample.minFilter = TextureFilter::LINEAR;
-        image->header.sample.magFilter = TextureFilter::LINEAR;
-        image->header.extraHeader["compo1"].val = 1;
-        image->header.extraHeader["compo2"].val = 1;
-        image->header.extraHeader["compo3"].val = 1;
-        image->header.extraHeader["compo4"].val = 1;
-
-        Image::Slot slot;
-        slot.width  = static_cast<int32_t>(width);
-        slot.height = static_cast<int32_t>(height);
-
-        ImageData mip;
-        mip.width  = slot.width;
-        mip.height = slot.height;
-        mip.size   = static_cast<isize>(expected_len);
-        mip.data   = ImageDataPtr(new uint8_t[expected_len], [](uint8_t* data) {
-            delete[] data;
-        });
-        std::memcpy(mip.data.get(), rgba, expected_len);
-        slot.mipmaps.push_back(std::move(mip));
-        image->slots.push_back(std::move(slot));
-
-        std::lock_guard lock(m_mutex);
-        const auto names_before = m_runtime_images.size();
-        if (name == "$mediaThumbnail") {
-            const auto previous = m_runtime_images.find(name);
-            const bool cleared  = IsEmptyCoverPixel(width, height, rgba[3]);
-            // Keep the outgoing cover's image and version together. The new
-            // version belongs to the pixels being published now; stamping it
-            // onto the previous slot made Version() disagree with Image::key.
-            if (!cleared && previous != m_runtime_images.end()) {
-                const auto old_version              = m_versions.find(name);
-                m_runtime_images["$mediaPreviousThumbnail"] = previous->second;
-                m_versions["$mediaPreviousThumbnail"] =
-                    old_version == m_versions.end() ? 0 : old_version->second;
-            } else {
-                m_runtime_images["$mediaPreviousThumbnail"] = image;
-                m_versions["$mediaPreviousThumbnail"]       = version;
-            }
-        }
-        m_versions[name]                  = version;
-        m_runtime_images[std::move(name)] = std::move(image);
-        if (m_runtime_images.size() != names_before) {
-            m_names_generation.fetch_add(1, std::memory_order_release);
-        }
+        // CLEANROOM RT12
+        (void)name;
+        (void)width;
+        (void)height;
+        (void)rgba;
+        (void)rgba_len;
     }
 
     /// Forgets the pixels given to `name`, for an image whose owner is gone (the
@@ -226,16 +125,10 @@ public:
     ///
     /// Returns false when `from` has never been given pixels.
     bool AliasRuntimeImage(const std::string& from, const std::string& to) {
-        std::lock_guard lock(m_mutex);
-        const auto iterator = m_runtime_images.find(from);
-        if (iterator == m_runtime_images.end()) return false;
-        const auto names_before = m_runtime_images.size();
-        m_runtime_images[to] = iterator->second;
-        m_versions[to]       = m_versions[from];
-        if (m_runtime_images.size() != names_before) {
-            m_names_generation.fetch_add(1, std::memory_order_release);
-        }
-        return true;
+        // CLEANROOM RT12
+        (void)from;
+        (void)to;
+        return false;
     }
 
     /// Binds a texture slot that asks for a cover to the picture its author left
@@ -262,29 +155,9 @@ public:
     /// here, so a texture budget set after the scene parsed still applies to
     /// it, and stays resident after that so a clear does not decode it again.
     std::string BindCoverSlot(const std::string& cover_name, const std::string& authored_name) {
-        if (m_fallback == nullptr || authored_name.empty() || ! IsCoverName(cover_name)) {
-            return cover_name;
-        }
-        std::string slot_name = cover_name + '|' + authored_name;
-        {
-            std::lock_guard lock(m_mutex);
-            if (m_cover_slots.find(slot_name) != m_cover_slots.end()) return slot_name;
-        }
-        auto header = m_fallback->ParseHeader(authored_name);
-        if (header.isVideo || header.isSprite || header.mapWidth <= 0 || header.mapHeight <= 0 ||
-            ! IsColourPicture(header.format)) {
-            return cover_name;
-        }
-        std::lock_guard lock(m_mutex);
-        const auto inserted = m_cover_slots.try_emplace(slot_name);
-        if (inserted.second) {
-            auto& slot          = inserted.first->second;
-            slot.cover          = cover_name;
-            slot.authored_name  = authored_name;
-            slot.header         = std::move(header);
-            m_names_generation.fetch_add(1, std::memory_order_release);
-        }
-        return slot_name;
+        // CLEANROOM RT13
+        (void)authored_name;
+        return cover_name;
     }
 
 private:
@@ -374,7 +247,6 @@ private:
     std::unordered_map<std::string, std::shared_ptr<Image>> m_runtime_images;
     std::unordered_map<std::string, CoverSlot>              m_cover_slots;
     std::unordered_map<std::string, uint64_t>               m_versions;
-    std::atomic<uint64_t>                                   m_next_version { 0 };
     std::atomic<uint64_t>                                   m_names_generation { 0 };
 };
 

@@ -58,9 +58,7 @@ private:
     SceneRuntimeContext*                         m_runtime = nullptr;
     std::weak_ptr<void>                          m_registry;
     std::string                                  m_current_layer_name;
-    std::map<std::string, DynamicValueUniquePtr> m_script_properties;
     std::unique_ptr<PropertyScriptProgram>       m_program;
-    ScriptedValueSemantic                        m_semantic { ScriptedValueSemantic::Generic };
 };
 
 } // namespace wallpaper

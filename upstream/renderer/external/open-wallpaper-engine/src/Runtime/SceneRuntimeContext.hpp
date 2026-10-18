@@ -75,17 +75,6 @@ struct CursorViewport {
     linalg::Vector2f content_size { linalg::Vector2f::Zero() };
 };
 
-struct RuntimePreparedTextLayerImage {
-    std::string     name;
-    uint64_t        revision { 0 };
-    TextLayerState  state;
-    TextLayerLayout layout;
-    TextLayerRenderFrame render_frame {};
-    uint32_t        width { 0 };
-    uint32_t        height { 0 };
-    std::vector<uint8_t> rgba;
-};
-
 struct RuntimePendingTextLayerJob {
     std::string    name;
     uint64_t       revision { 0 };
@@ -695,15 +684,6 @@ private:
         double sampled_animation_frame { std::numeric_limits<double>::quiet_NaN() };
     };
     static void ApplyNodeVec3Animation(NodeVec3Binding& binding);
-    /// Called when a layer has just become visible: if that shows one the
-    /// render graph left out (`Scene::render_excluded_nodes`), the graph is
-    /// marked mutated so the next frame builds one that draws it.
-    void RequestGraphForShownLayers();
-    struct NodeEffectFinalBinding {
-        SceneNode*             node { nullptr };
-        SceneImageEffectLayer* layer { nullptr };
-        TextLayerRenderFrame   target_frame {};
-    };
     struct MaterialAlphaBinding {
         std::weak_ptr<SceneMaterial> material;
         std::shared_ptr<ScalarAnimationPlayback> animation;
@@ -728,41 +708,9 @@ private:
         std::string   name;
         DynamicValue* value { nullptr };
     };
-    struct DynamicValueListenerBinding {
-        DynamicValue*         value { nullptr };
-        std::function<void()> deregister;
-    };
 public:
-    struct NodeRegistrationSnapshot {
-        bool                                    has_node { false };
-        /// Where the layer stood in `LayerNameAt` order, so a rollback puts it back there.
-        std::size_t                             order_index { static_cast<std::size_t>(-1) };
-        SceneNode*                              node { nullptr };
-        std::optional<NodeVisibilityBinding>    visibility;
-        std::optional<NodeVec3Binding>          translate;
-        std::optional<NodeVec3Binding>          scale;
-        std::optional<NodeVec3Binding>          rotation;
-        std::optional<NodeEffectFinalBinding>   effect_final;
-        std::optional<linalg::Vector2f>          size;
-        std::optional<NodeHitMask>              hit_mask;
-        std::optional<WPPuppetLayer>            puppet_layer;
-        std::optional<TextLayer>                text_layer;
-        std::optional<TextEffectGate>           text_effect_gate;
-        std::vector<TextValueBinding>           text_values;
-        std::optional<NodeAlignmentBinding>     alignment;
-        std::optional<NodeCursorTarget>         cursor_target;
-        std::optional<std::string>              template_path;
-        std::vector<std::string>                video_textures;
-        std::weak_ptr<WPSoundStream>            sound_layer;
-        bool                                    has_sound_layer { false };
-        std::size_t                             owned_values_size { 0 };
-        std::size_t                             scripted_values_size { 0 };
-        std::size_t material_constants_size { 0 };
-        std::size_t dynamic_value_listeners_size { 0 };
-        std::size_t material_alpha_size { 0 };
-        std::size_t material_colors_size { 0 };
-        std::size_t scalar_animations_size { 0 };
-    };
+    // CLEANROOM RT22
+    struct NodeRegistrationSnapshot {};
 
 private:
     struct VideoTexturePlaybackBinding {
@@ -788,30 +736,19 @@ private:
             if (script != nullptr) callback(script);
         }
     }
-    struct LayerTemplateBinding {
-        std::string                canonical_path;
-        std::shared_ptr<SceneNode> node;
-        linalg::Vector2f            size { linalg::Vector2f::Zero() };
-    };
-    std::shared_ptr<WPSoundStream> LockSoundLayer(std::string_view name) const;
-    void DispatchMediaPlaybackChanged(std::string_view name, bool playing);
     /// Tells the scripts nothing is playing, once, for whatever no real media
     /// event has said by the time the scene first runs. See `Tick`.
     void DispatchIdleMediaState();
     /// Notes which media event types a real event has already told the scripts,
     /// until the idle state has been decided.
     void NoteMediaEventTold(std::string_view event_json);
-    void ApplyNodeTransform(std::string_view name);
-    void ApplyAnchoredNodeTransform(std::string_view name);
     /// Re-derives the presented margins from the cursor viewport and moves every
     /// layer pinned to a screen anchor if they changed.
     void UpdatePresentedMargins();
     void RefreshNodeTransformBindings(const std::string& name);
-    void ApplyNodeTransform(SceneNode& node, NodeAlignmentBinding& binding, const linalg::Vector2f& size);
     /// Frees the layers `DestroyLayer` retired once the mutation they caused
     /// has been consumed, that is once no compiled graph can still draw them.
     void ReleaseRetiredLayers();
-    void ApplyMaterialConstantBinding(MaterialConstantBinding& binding);
     void ApplySceneZoomAnimation();
     void ApplySceneZoom(double zoom);
     void ApplyCameraShots();
@@ -825,11 +762,8 @@ private:
     bool CursorBlockedByLayerInFront(std::string_view name) const;
     std::optional<std::size_t> NodeRank(std::string_view name) const;
     std::optional<std::size_t> FrontmostCursorBlocker() const;
-    bool CursorHitsScriptLayer(const ScriptedDynamicValue& value) const;
-    bool CursorHitsScriptLayer(const SceneScriptProgram& script) const;
     CursorVisit VisitScriptLayer(const ScriptedDynamicValue& value) const;
     CursorVisit VisitScriptLayer(const SceneScriptProgram& script) const;
-    void StartTextWorker();
     void StopTextWorker();
     /// Whether this text layer's pending layout is being worked on at all.
     ///
@@ -838,15 +772,11 @@ private:
     /// while it is hidden. Shared with `PumpTextLayerCache` so "in flight" and
     /// "the pump will do it" cannot drift apart.
     [[nodiscard]] bool TextLayerIsBeingPrepared(const std::string& name) const;
-    void EnqueueTextLayerPreparation(std::string name, const TextLayer& layer);
-    void CollectPreparedTextLayers();
-    bool ApplyPreparedTextLayer(const RuntimePreparedTextLayerImage& prepared);
     /// Works the gate of the text layer `name` out from its effects as they stand.
     void RefreshTextEffectGate(const std::string& name);
     /// Moves the composite of a text layer another layer samples onto `card`,
     /// the card a relayout left it with, and resizes the target to it.
     void FitTextLayerComposite(SceneNode& node, const TextLayerRenderFrame& card);
-    void TextWorkerLoop();
     // Makes `next_properties` the table in effect, refreshes every binding and
     // tells the scripts. Returns the sorted names whose value changed.
     std::vector<std::string> ApplyProjectProperties(ProjectProperties next_properties);
@@ -859,14 +789,11 @@ private:
     // (z = 0). Layers are hit in it and particles follow it. It is not what a
     // perspective scene's scripts read as `input.cursorWorldPosition`.
     linalg::Vector3f                                                m_cursor_plane_position { linalg::Vector3f::Zero() };
-    ProjectProperties                                              m_default_project_properties;
-    ProjectProperties                                              m_project_property_overrides;
     ProjectProperties                                              m_project_properties;
     // The properties read only while the scene loaded, each with the value it
     // was read with (empty: the table did not name it).
     std::map<std::string, std::optional<RuntimeScalarValue>>       m_load_only_properties;
     bool                                                           m_project_properties_changing { false };
-    std::unordered_map<std::string, std::unique_ptr<DynamicValue>> m_property_values;
     std::vector<std::unique_ptr<DynamicValue>>                     m_owned_values;
     std::unordered_map<std::string, SceneNode*>                    m_nodes;
     /// Registration order of `m_nodes`, which `SetLayerOrder` reorders to the
@@ -888,7 +815,6 @@ private:
     std::unordered_map<std::string, NodeVec3Binding>               m_node_translate;
     std::unordered_map<std::string, NodeVec3Binding>               m_node_scale;
     std::unordered_map<std::string, NodeVec3Binding>               m_node_rotation;
-    std::unordered_map<std::string, NodeEffectFinalBinding>        m_node_effect_final;
     std::vector<MaterialAlphaBinding>                              m_material_alpha;
     std::vector<MaterialColorBinding>                              m_material_colors;
     struct CameraShake {
@@ -939,13 +865,11 @@ private:
     std::vector<MaterialConstantBinding>                           m_material_constants;
     std::vector<TextValueBinding>                                  m_text_values;
     OwnTextWrite*                                                  m_own_text_write { nullptr };
-    std::vector<DynamicValueListenerBinding>                       m_dynamic_value_listeners;
     std::unordered_map<std::string, linalg::Vector2f>               m_node_size;
     std::unordered_map<std::string, NodeHitMask>                   m_node_hit_masks;
     std::unordered_map<std::string, WPPuppetLayer>                 m_puppet_layers;
     std::unordered_map<std::string, TextLayer>                     m_text_layers;
     std::unordered_map<std::string, TextEffectGate>                m_text_effect_gates;
-    std::unordered_map<std::string, uint64_t>                      m_queued_text_revisions;
     std::unordered_map<std::string, NodeAlignmentBinding>          m_node_alignment;
     // Looked up by name every frame the cursor is in the window, so the maps
     // below take a `string_view` without making a string of it.
@@ -971,12 +895,9 @@ private:
     mutable bool                                                   m_cursor_blocker_cached { false };
     mutable std::optional<std::size_t>                             m_cursor_blocker_rank;
     PresentedMargins                                               m_presented_margins {};
-    std::unordered_map<std::string, std::string>                   m_node_template_paths;
-    std::unordered_map<std::string, LayerTemplateBinding>          m_layer_templates;
     std::function<bool(std::string_view)>                          m_layer_template_loader;
     std::unordered_set<std::string>                               m_loading_layer_templates;
     std::unordered_set<std::string>                               m_failed_layer_templates;
-    std::unordered_map<std::string, std::vector<std::string>>      m_node_video_textures;
     std::unordered_map<std::string, VideoTexturePlaybackBinding, StringHash, std::equal_to<>>
         m_video_texture_playback;
     std::unordered_map<std::string, std::weak_ptr<WPSoundStream>>  m_sound_layers;
@@ -990,18 +911,12 @@ private:
     std::unordered_map<uint32_t, std::vector<ScriptedDynamicValue*>> m_scripted_value_cursor_held;
     std::unordered_map<uint32_t, std::vector<std::size_t>>           m_scene_script_cursor_held;
     std::vector<SceneScriptBinding>                                m_scene_scripts;
-    std::vector<std::string>                                       m_script_errors;
     mutable std::mutex                                             m_text_worker_mutex;
     /// Jobs the worker has taken off the queue and not yet published. Guarded by the mutex.
     int                                                            m_text_jobs_running { 0 };
-    std::condition_variable                                        m_text_worker_cv;
-    std::thread                                                    m_text_worker;
     std::deque<RuntimePendingTextLayerJob>                         m_pending_text_jobs;
-    std::vector<RuntimePreparedTextLayerImage>                     m_prepared_text_layers;
-    bool                                                           m_stop_text_worker { false };
     /// Guarded by `m_text_worker_mutex`, alongside the queues it describes.
     std::function<void()>                                          m_content_wake_handler;
-    uint64_t                                                       m_next_generated_layer_id { 1 };
     /// Names of the layers scripts created and have not destroyed.
     std::unordered_set<std::string>                                m_script_created_layers;
     /// Destroyed layers no longer in the scene graph, kept alive until
@@ -1025,7 +940,6 @@ private:
     /// audio. Guarded so installing it and marking cannot both miss.
     std::mutex            m_audio_requirement_mutex;
     std::function<void()> m_audio_requirement_listener;
-    bool m_media_integration_enabled { false };
     /// The scene has not yet been told what it is like to have no player. The
     /// first tick does, for each of the two states a widget hides itself on that
     /// no real event reported first; real events after it replace it as usual.

@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <numeric>
 
+// CLEANROOM: the stubs below leave their parameters unused until they are rewritten.
+#pragma clang diagnostic ignored "-Wunused-parameter"
+
 using namespace wallpaper;
 using micros = std::chrono::microseconds;
 using namespace std::chrono;
@@ -21,47 +24,23 @@ constexpr u16  DEFAULT_REQUIRED_FPS { 30 };
 }
 
 FrameTimer::FrameTimer(std::function<void()> cb)
-    : m_callback(cb), m_frame_busy_count(0), m_timer([this]() {
-          // Fixed-rate clock. The callback only posts CMD_DRAW to the render
-          // looper, so the tick period must be the ideal frame time; halving it
-          // when a frame runs long makes a slow scene render flat out instead of
-          // degrading to its achievable rate. Content that can prove it changes
-          // less often than that lengthens the period, never shortens it.
-          m_timer.SetInterval(ResolveInterval());
-
-          auto* counters = m_counters.load(std::memory_order_relaxed);
-          if (counters != nullptr) counters->Add(OWE_RC_TIMER_WAKEUPS);
-
-          // At most one DRAW may be in flight. A slow frame drops ticks rather
-          // than queueing work the display will never show.
-          if (m_callback && m_frame_busy_count.load() < 1) {
-              m_owed_tick.store(steady_clock::time_point {});
-              m_frame_busy_count++;
-              // Cleared before the draw is posted, so an event arriving while
-              // it runs is a new request rather than one this frame already
-              // answered.
-              m_frame_requested.store(false);
-              if (counters != nullptr) counters->Add(OWE_RC_DRAW_REQUESTS);
-              m_callback();
-          } else {
-              // The request itself is not dropped with the tick: it stays
-              // outstanding until a draw actually consumes it, and the
-              // in-flight draw re-arms the clock when it ends. The tick is
-              // owed too, if that draw ends soon enough (see FrameEnd).
-              if (m_callback) m_owed_tick.store(steady_clock::now());
-              if (counters != nullptr) counters->Add(OWE_RC_DRAW_TICKS_SUPPRESSED);
-          }
-      }) {
-    SetRequiredFps(DEFAULT_REQUIRED_FPS);
-    ResetFrameTiming();
+    : m_timer(std::function<void()> {}) {
+    // CLEANROOM RT33
+    (void)cb;
 }
 
-FrameTimer::~FrameTimer() {};
+FrameTimer::~FrameTimer() {
+    // CLEANROOM RT33
+}
 
-u16 FrameTimer::RequiredFps() const { return m_req_fps; }
+u16 FrameTimer::RequiredFps() const {
+    // CLEANROOM RT33
+    return 0;
+}
 
 double FrameTimer::FrameTime() const {
-    return duration_cast<duration<double>>(m_frametime.load()).count();
+    // CLEANROOM RT33
+    return 0;
 }
 
 double FrameTimer::IdeaTime() const {
@@ -69,20 +48,11 @@ double FrameTimer::IdeaTime() const {
 }
 
 void FrameTimer::UpdateFrametime() {
-    m_frametime.store(std::accumulate(m_frametime_queue.begin(),
-                                      m_frametime_queue.end(),
-                                      duration_cast<microseconds>(0s)) /
-                      m_frametime_queue.size());
+    // CLEANROOM RT33
 }
 
-void FrameTimer::ResetFrameTiming() {
-    m_frametime_queue.clear();
-    for (usize i = 0; i < FrameTimer::FRAMETIME_QUEUE_SIZE; i++) {
-        AddFrametime(m_ideatime.load());
-    }
-    UpdateFrametime();
-    m_elapsed_frametime.store(m_ideatime.load());
-    m_reset_frame_clock.store(true);
+void FrameTimer::AddFrametime(micros t) {
+    // CLEANROOM RT33
 }
 
 void FrameTimer::SetRequiredFps(u16 value) {
@@ -185,13 +155,6 @@ std::chrono::microseconds FrameTimer::ResolveInterval() {
     return interval;
 }
 
-void FrameTimer::AddFrametime(micros t) {
-    m_frametime_queue.push_back(t);
-    while (m_frametime_queue.size() > FrameTimer::FRAMETIME_QUEUE_SIZE) {
-        m_frametime_queue.pop_front();
-    }
-}
-
 void FrameTimer::FrameBegin() { FrameBegin(steady_clock::now()); }
 void FrameTimer::FrameBegin(steady_clock::time_point now) {
     const auto elapsed = duration_cast<microseconds>(now - m_clock);
@@ -208,56 +171,19 @@ void FrameTimer::FrameBegin(steady_clock::time_point now) {
 }
 void FrameTimer::FrameEnd() { FrameEnd(steady_clock::now()); }
 void FrameTimer::FrameEnd(steady_clock::time_point now) {
-    auto elapsed = duration_cast<microseconds>(now - m_clock);
-    if (elapsed > MAX_FRAME_DURATION) {
-        ResetFrameTiming();
-    } else {
-        AddFrametime(elapsed);
-        UpdateFrametime();
-    }
-
-    i32 expected = m_frame_busy_count.load();
-    while (expected > 0) {
-        if (m_frame_busy_count.compare_exchange_weak(expected, expected - 1)) {
-            break;
-        }
-    }
-
-    // A request that arrived while this draw was running, or one whose tick
-    // this draw suppressed, is still owed a frame. The clock is re-armed from
-    // here — the edge where the draw actually finished — rather than by a
-    // retry that wakes once per frame period to find the draw still running.
-    // This is also the only place that can cover the handover: the scene
-    // decides whether it goes idle *after* this returns, so a request left
-    // outstanding by a continuous tick would otherwise have no later tick to
-    // notice it.
-    // A frame slightly longer than the interval made the next tick find it
-    // still running. Waiting for the tick after that would halve the rate for
-    // a scene that misses by a millisecond, so a draw that ends within a
-    // quarter interval of the dropped tick runs the owed frame at once. A
-    // draw that ends later keeps the grid, so a scene that cannot keep up
-    // degrades to a steady fraction of the rate instead of running flat out.
-    const auto owed = m_owed_tick.exchange(steady_clock::time_point {});
-    if (owed != steady_clock::time_point {} && Running() && now >= owed &&
-        now - owed <= m_tick_interval.load() / 4) {
-        m_timer.FireNow();
-        return;
-    }
-
-    if (m_frame_requested.load() && Running()) m_timer.WakeOnce();
+    // CLEANROOM RT33
 }
 
 void FrameTimer::SetCallback(const std::function<void()>& cb) {
-    if (! Running()) m_callback = cb;
+    // CLEANROOM RT33
 }
 void FrameTimer::Run() {
-    if (! Running()) {
-        ResetFrameTiming();
-        m_frame_busy_count.store(0);
-        m_owed_tick.store(steady_clock::time_point {});
-        m_timer.SetInterval(ResolveInterval());
-    }
-    m_timer.Start();
+    // CLEANROOM RT33
 }
-void FrameTimer::Stop() { m_timer.Stop(); }
-bool FrameTimer::Running() const { return m_timer.Running(); }
+void FrameTimer::Stop() {
+    // CLEANROOM RT33
+}
+bool FrameTimer::Running() const {
+    // CLEANROOM RT33
+    return false;
+}

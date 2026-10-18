@@ -86,23 +86,12 @@ public:
 private:
     void propagate() const;
     mutable uint64_t m_generation { 0 };
-
-    std::shared_ptr<bool>                            m_alive_flag = std::make_shared<bool>(true);
-    std::list<std::function<void(const DynamicValue&)>> m_listeners {};
-    std::vector<std::function<void()>>              m_connections {};
-
     linalg::Vector4i m_ivec4 = linalg::Vector4i::Zero();
     linalg::Vector3i m_ivec3 = linalg::Vector3i::Zero();
     linalg::Vector2i m_ivec2 = linalg::Vector2i::Zero();
     linalg::Vector4f m_vec4  = linalg::Vector4f::Zero();
     linalg::Vector3f m_vec3  = linalg::Vector3f::Zero();
     linalg::Vector2f m_vec2  = linalg::Vector2f::Zero();
-    float           m_float = 0.0f;
-    int             m_int   = 0;
-    bool            m_bool  = false;
-    std::string     m_string {};
-    UnderlyingType  m_type = Null;
-    std::optional<ConditionInfo> m_condition = std::nullopt;
 };
 
 using DynamicValueUniquePtr = std::unique_ptr<DynamicValue>;
