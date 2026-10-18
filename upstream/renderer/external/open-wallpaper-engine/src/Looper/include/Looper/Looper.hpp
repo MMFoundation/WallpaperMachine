@@ -24,9 +24,7 @@ enum class status_t
 {
     OK                = 0,
     INVALID_OPERATION = -ENOSYS,
-    NOT_FOUND         = -ENOENT,
-    NO_MEM            = -ENOMEM,
-    BUSY              = -EBUSY
+    NOT_FOUND         = -ENOENT
 };
 using handler_id = int32_t;
 class Handler;
@@ -49,20 +47,9 @@ public:
     void                   setLogScope(uint64_t scope);
 
 private:
-    struct MessageWrapper {
-        std::shared_ptr<Message> msg;
-    };
-    bool loop();
-
     std::atomic<bool>       m_running { false };
     std::string             m_name { "unknown" };
     uint64_t                m_log_scope { 0 };
-    std::mutex              m_mutex;
-    std::condition_variable m_condition;
-
-    std::thread                                  m_thread;
-    std::list<MessageWrapper>                    m_msg_queue;
-    std::map<handler_id, std::weak_ptr<Handler>> m_reg_handler;
 };
 
 class Handler : NoCopy, public std::enable_shared_from_this<Handler> {
@@ -81,12 +68,9 @@ private:
     friend class Looper;
     friend class Message;
 
-    // compare and set
     bool setID(handler_id id, std::weak_ptr<Looper> looper);
     // Unbinds the handler again when it still carries `id`, so it may be registered anew.
     void clearID(handler_id id);
-
-    void deliverMessage(const std::shared_ptr<Message>& msg);
 
     std::atomic<handler_id> m_id;
     std::weak_ptr<Looper>   m_looper;
@@ -105,29 +89,6 @@ public:
     void                            setTarget(const std::shared_ptr<Handler>&);
     void                            setWhat(uint32_t);
     status_t                        post();
-    // status_t postAndWaitResponse(const std::shared_ptr<Message>&);
-
-private:
-    std::weak_ptr<Handler> m_handler;
-    std::weak_ptr<Looper>  m_looper;
-
-    uint32_t   m_what;
-    handler_id m_target;
-
-    void deliver();
-
-public:
-    using ItemValue =
-        std::variant<bool, int32_t, float, std::string, std::shared_ptr<void>, visitor::NoType>;
-
-    struct Item {
-        ItemValue   value { visitor::NoType() };
-        std::string name;
-        void        setName(std::string_view name);
-    };
-
-    int32_t     countEntries() const;
-    const Item* getEntryAt(int32_t index) const;
 
     bool setBool(std::string_view, bool);
     bool setInt32(std::string_view, int32_t);
@@ -143,29 +104,11 @@ public:
 
     template<typename T>
     bool findObject(std::string_view name, std::shared_ptr<T>* value) const {
-        const Item* item = findItem<std::shared_ptr<void>>(name);
-        if (item) {
-            auto* iv = std::get_if<std::shared_ptr<void>>(&(item->value));
-            if (iv == nullptr) return false;
-            *value = *(reinterpret_cast<const std::shared_ptr<T>*>(iv));
-            return true;
-        }
+        // CLEANROOM UV69
+        (void)name;
+        (void)value;
         return false;
     }
-
-    bool cleanAfterDeliver() const;
-    void setCleanAfterDeliver(bool v);
-    void cleanContent();
-
-private:
-    template<typename T>
-    const Item* findItem(std::string_view name) const;
-    Item*       allocateItem(std::string_view name);
-
-    constexpr static int32_t      MaxNumItems = 64;
-    std::array<Item, MaxNumItems> m_items;
-    int32_t                       m_num_items { 0 };
-    bool                          m_clean_after_dliver { false };
 };
 
 } // namespace looper

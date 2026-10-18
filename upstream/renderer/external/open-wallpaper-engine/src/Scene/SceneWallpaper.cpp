@@ -15,7 +15,6 @@
 #include "Looper/Looper.hpp"
 
 #include "Timer/FrameTimer.hpp"
-#include "Utils/FpsCounter.h"
 #include "WPSceneParser.hpp"
 #include "WPShaderParser.hpp"
 #include "Scene/Scene.h"
@@ -1131,7 +1130,6 @@ private:
             }
 
             m_scene->shaderValueUpdater->FrameEnd();
-            // fps_counter.RegisterFrame();
 
             // The edge the host waits on, so it is taken from a frame that
             // actually reached the surface. A tick that succeeded without
@@ -1536,7 +1534,6 @@ public:
     /// Whether the host wants this surface playing. The clock runs only while
     /// this holds and a scene is loaded; see `syncFrameClock`. Render thread.
     bool             m_clock_requested { true };
-    FpsCounter       fps_counter;
     /// Handed to every scene's runtime so its text worker can ask for the frame
     /// that shows what it produced. Declared here, after `frame_timer`, so it
     /// is destroyed before the timer it points at.

@@ -4,27 +4,14 @@
 #include <string>
 #include <span>
 
-#define __SHORT_FILE__ __FILE__
-#if 1
-
-#    undef __SHORT_FILE__
-#    define __SHORT_FILE__   past_last_slash(__FILE__)
-/*
-        ({                                                       \
-            constexpr const char* p = past_last_slash(__FILE__); \
-            p;                                                   \
-        })
-*/
+#define __SHORT_FILE__   past_last_slash(__FILE__)
 static constexpr const char* past_last_slash(const char* const path, const int pos = 0,
                                              const int last_slash = 0) {
-    if (path[pos] == '\0') return &path[last_slash];
-    if (path[pos] == '/')
-        return past_last_slash(path, pos + 1, pos + 1);
-    else
-        return past_last_slash(path, pos + 1, last_slash);
+    // CLEANROOM UV35
+    (void)pos;
+    (void)last_slash;
+    return path;
 }
-
-#endif
 
 enum
 {
@@ -46,5 +33,3 @@ void WallpaperLog(int level, const char* file, int line, const char* fmt, ...);
 /// load that produced it even with several scenes loading at once.
 void SetWallpaperLogScope(uint64_t scope);
 uint64_t WallpaperLogScope();
-
-std::string logToTmpfileWithSha1(std::span<const char>, const char* fmt, ...);

@@ -13,25 +13,26 @@ namespace wallpaper
 namespace  fs
 {
 
-/*
- * path like: /root/dir1/dir2/file
- * not resolve "." "..", empty dir name as this using full path match
- */
-
 class VFS : NoCopy,NoMove {
 public:
 	struct MountedFs {
 		std::string name;
-		std::string mountPoint; // full path of mount point in "/", last char can't be "/"
+		std::string mountPoint;
 		std::unique_ptr<Fs> fs;
 		static bool CheckMountPoint(const std::string_view mountPoint) {
 			return ! mountPoint.empty() && mountPoint.front() == '/' && mountPoint.back() != '/';
 		}
 		static bool InMountPoint(const std::string_view mountPoint, const std::string_view path) {
-			return path.compare(0, mountPoint.size() + 1, std::string(mountPoint) + '/') == 0;
+			// CLEANROOM UV7
+			(void)mountPoint;
+			(void)path;
+			return false;
 		}
 		static std::string GetPathInMount(const std::string_view mountPoint, const std::string_view path) {
-			return std::string(path.substr(mountPoint.size()));
+			// CLEANROOM UV8
+			(void)mountPoint;
+			(void)path;
+			return {};
 		}
 	};
 public:
@@ -39,52 +40,30 @@ public:
 	~VFS() = default;
 
 	bool Mount(std::string_view mountpoint, std::unique_ptr<Fs> fs, std::string_view name="") {
-		if(!MountedFs::CheckMountPoint(mountpoint) || !fs) return false;
-
-		m_mountedFss.push_back({std::string(name), std::string(mountpoint), std::move(fs)});
-		return true;
+		// CLEANROOM UV9
+		(void)mountpoint;
+		(void)fs;
+		(void)name;
+		return false;
 	}
 	bool Unmount(std::string_view mountpoint) {
-		for(auto iter = m_mountedFss.rbegin();iter < m_mountedFss.rend();iter++) {
-			if(iter->mountPoint == mountpoint) {
-				m_mountedFss.erase((++iter).base());
-				return true;
-			}
-		}
-		LOG_INFO("mount point not exist");
+		// CLEANROOM UV10
+		(void)mountpoint;
 		return false;
 	}
 	bool IsMounted(std::string_view name) {
-		if(name.empty()) return false;
-		for(const auto& el:m_mountedFss) {
-			if(el.name == name)
-				return true;
-		}
+		// CLEANROOM UV11
+		(void)name;
 		return false;
 	}
 	std::shared_ptr<IBinaryStream> Open(std::string_view path) {
-        auto find_it = std::find_if(m_mountedFss.rbegin(), m_mountedFss.rend(), [&path](const auto& mfs) {
-			return MountedFs::InMountPoint(mfs.mountPoint, path) && 
-                   mfs.fs->Contains(MountedFs::GetPathInMount(mfs.mountPoint, path));
-        });
-        if(find_it != std::rend(m_mountedFss)) 
-            return find_it->fs->Open(MountedFs::GetPathInMount(find_it->mountPoint, path));
-		LOG_ERROR("not found \"%.*s\" in vfs", static_cast<int>(path.size()), path.data());
+		// CLEANROOM UV12
+		(void)path;
 		return nullptr;
 	}
 	std::shared_ptr<IBinaryStreamW> OpenW(std::string_view path) {
-        auto find_it = std::find_if(m_mountedFss.rbegin(), m_mountedFss.rend(), [&path](const auto& mfs) {
-			return MountedFs::InMountPoint(mfs.mountPoint, path) && 
-                   mfs.fs->Contains(MountedFs::GetPathInMount(mfs.mountPoint, path));
-        });
-        if (find_it == std::rend(m_mountedFss)) {
-            find_it = std::find_if(m_mountedFss.rbegin(), m_mountedFss.rend(), [&path](const auto& mfs) {
-			    return MountedFs::InMountPoint(mfs.mountPoint, path);
-            });
-        }
-        if(find_it != std::rend(m_mountedFss))
-            return find_it->fs->OpenW(MountedFs::GetPathInMount(find_it->mountPoint, path));
-		LOG_ERROR("not found \"%.*s\" in vfs", static_cast<int>(path.size()), path.data());
+		// CLEANROOM UV13
+		(void)path;
 		return nullptr;
 	}
 	/// Publishes `from` as `to`, both of which must resolve to the same mount.
@@ -102,14 +81,8 @@ public:
 		                         MountedFs::GetPathInMount(owner->mountPoint, to));
 	}
 	bool Contains(std::string_view path) const {
-		for(auto iter = m_mountedFss.rbegin();iter < m_mountedFss.rend();iter++) {
-			auto& el = *iter;
-			if(MountedFs::InMountPoint(el.mountPoint, path)) {
-				auto mpath = MountedFs::GetPathInMount(el.mountPoint, path);
-				if(el.fs->Contains(mpath))
-					return true;
-			}
-		}
+		// CLEANROOM UV14
+		(void)path;
 		return false;
 	}
 private:
@@ -117,10 +90,11 @@ private:
 };
 
 inline std::string GetFileContent(fs::VFS& vfs, std::string_view path) {
-	auto f = vfs.Open(path);
-	if(f) return f->ReadAllStr();	
-	return "";
-} 
+	// CLEANROOM UV15
+	(void)vfs;
+	(void)path;
+	return {};
+}
 
 }
 }

@@ -135,7 +135,10 @@ inline std::vector<std::string> SpliteString(std::string text, char sep) {
 namespace StrToArray
 {
 struct WrongSizeExp : public std::exception {
-    const char* what() const throw() { return "Wrong size of the array"; }
+    const char* what() const throw() {
+        // CLEANROOM UV38
+        return "";
+    }
 };
 
 namespace detail
