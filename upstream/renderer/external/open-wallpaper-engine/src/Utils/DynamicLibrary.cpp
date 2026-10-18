@@ -1,7 +1,5 @@
 #include "Utils/DynamicLibrary.hpp"
 
-#include <dlfcn.h>
-
 namespace utils
 {
 
@@ -11,31 +9,29 @@ DynamicLibrary::DynamicLibrary(const char* filename) { Open(filename); }
 
 DynamicLibrary::~DynamicLibrary() { Close(); }
 
-DynamicLibrary::DynamicLibrary(DynamicLibrary&& o) noexcept
-    : handle(std::exchange(o.handle, nullptr)) {}
+DynamicLibrary::DynamicLibrary(DynamicLibrary&&) noexcept {
+    // CLEANROOM U14: implement from specs/engine/e7-small-units.md
+}
 
-DynamicLibrary& DynamicLibrary::operator=(DynamicLibrary&& o) noexcept {
-    Close();
-    handle = std::exchange(o.handle, nullptr);
+DynamicLibrary& DynamicLibrary::operator=(DynamicLibrary&&) noexcept {
+    // CLEANROOM U15: implement from specs/engine/e7-small-units.md
     return *this;
 }
 
-bool DynamicLibrary::Open(const char* filename) {
-    handle = dlopen(filename, RTLD_NOW);
-    return IsOpen();
+bool DynamicLibrary::Open(const char*) {
+    // CLEANROOM U16: implement from specs/engine/e7-small-units.md
+    return false;
 }
 
 bool DynamicLibrary::IsOpen() const { return handle != nullptr; }
 
 void DynamicLibrary::Close() {
-    if (IsOpen()) {
-        dlclose(handle);
-        handle = nullptr;
-    }
+    // CLEANROOM U17: implement from specs/engine/e7-small-units.md
 }
 
-void* DynamicLibrary::GetSymbolAddr(const char* name) const {
-    return reinterpret_cast<void*>(dlsym(handle, name));
+void* DynamicLibrary::GetSymbolAddr(const char*) const {
+    // CLEANROOM U18: implement from specs/engine/e7-small-units.md
+    return nullptr;
 }
 
-}; // namespace wallpaper
+} // namespace utils

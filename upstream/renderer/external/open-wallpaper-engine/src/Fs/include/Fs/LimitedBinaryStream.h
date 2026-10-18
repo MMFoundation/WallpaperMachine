@@ -17,51 +17,48 @@ public:
     virtual ~LimitedBinaryStream() = default;
 
 private:
-    bool CheckInArea(idx pos) const { return pos >= 0 && pos <= Size(); }
-
-    bool SeekInMPos(void) { return m_infs->SeekSet(m_start + m_pos); }
-    bool SeekInPos(idx pos) {
-        if (CheckInArea(pos)) {
-            m_pos = pos;
-            return SeekInMPos();
-        }
+    bool CheckInArea(idx) const {
+        // CLEANROOM U68: implement from specs/engine/e7-small-units.md
         return false;
     }
-    bool End() const { return m_pos < 0 || m_pos == Size(); };
+
+    bool SeekInMPos(void) {
+        // CLEANROOM U69: implement from specs/engine/e7-small-units.md
+        return false;
+    }
+    bool SeekInPos(idx) {
+        // CLEANROOM U70: implement from specs/engine/e7-small-units.md
+        return false;
+    }
+    bool End() const {
+        // CLEANROOM U71: implement from specs/engine/e7-small-units.md
+        return true;
+    }
 
 protected:
     virtual usize Write_impl(const void*, usize) { return 0; }
 
 public:
-    virtual usize Read(void* buffer, usize sizeInByte) {
-        if (End()) return 0;
-
-        isize isizeInByte = (isize)sizeInByte;
-
-        if (! CheckInArea(m_pos + isizeInByte)) {
-            isizeInByte = Size() - m_pos;
-        }
-        SeekInMPos();
-        m_pos += isizeInByte;
-
-        return m_infs->Read(buffer, (usize)isizeInByte);
+    virtual usize Read(void*, usize) {
+        // CLEANROOM U72: implement from specs/engine/e7-small-units.md
+        return 0;
     }
-    virtual char* Gets(char* buffer, usize sizeStr) {
-        Read(buffer, sizeStr);
+    virtual char* Gets(char* buffer, usize) {
+        // CLEANROOM U73: implement from specs/engine/e7-small-units.md
         return buffer;
     }
     virtual idx  Tell() const { return m_pos; }
-    virtual bool SeekSet(idx offset) {
-        idx pos = offset;
-        return SeekInPos(pos);
+    virtual bool SeekSet(idx) {
+        // CLEANROOM U74: implement from specs/engine/e7-small-units.md
+        return false;
     }
-    virtual bool SeekCur(idx offset) {
-        idx pos = m_pos + offset;
-        return SeekInPos(pos);
+    virtual bool SeekCur(idx) {
+        // CLEANROOM U75: implement from specs/engine/e7-small-units.md
+        return false;
     }
-    virtual bool SeekEnd(idx offset) {
-        idx pos = Size() + offset;
-        return SeekInPos(pos);
+    virtual bool SeekEnd(idx) {
+        // CLEANROOM U76: implement from specs/engine/e7-small-units.md
+        return false;
     }
     virtual isize Size() const { return m_end - m_start; }
 

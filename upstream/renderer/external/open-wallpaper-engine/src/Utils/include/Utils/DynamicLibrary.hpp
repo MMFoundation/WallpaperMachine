@@ -22,11 +22,10 @@ public:
 
     void* GetSymbolAddr(const char* name) const;
     
-    // not using func deduction
     template<typename T>
-    bool GetSymbol(const char* name, T& pfunc) const {
-        pfunc = reinterpret_cast<T>(GetSymbolAddr(name));
-        return pfunc != nullptr;
+    bool GetSymbol(const char*, T&) const {
+        // CLEANROOM U19: implement from specs/engine/e7-small-units.md
+        return false;
     }
 
 private:

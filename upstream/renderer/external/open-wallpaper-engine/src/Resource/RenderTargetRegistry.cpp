@@ -1,30 +1,7 @@
 #include "Resource/RenderTargetRegistry.hpp"
 
-#include "SpecTexs.hpp"
-
-#include <algorithm>
-
 namespace wallpaper
 {
-
-namespace
-{
-
-int scaled(int value, int divisor)
-{
-    return std::max(1, value / divisor);
-}
-
-SceneRenderTarget makeRenderTarget(int width, int height, bool allow_reuse = false)
-{
-    return SceneRenderTarget {
-        .width = width,
-        .height = height,
-        .allowReuse = allow_reuse,
-    };
-}
-
-} // namespace
 
 RenderTargetRegistry::RenderTargetRegistry(
     std::unordered_map<std::string, SceneRenderTarget>& targets,
@@ -42,59 +19,37 @@ RenderTargetRegistry::RenderTargetRegistry(
 {
 }
 
-void RenderTargetRegistry::installBuiltIns(int width, int height)
+void RenderTargetRegistry::installBuiltIns(int, int)
 {
-    (*m_targets)[std::string(SpecTex_Default)] = SceneRenderTarget {
-        .width = width,
-        .height = height,
-        .bind = { .enable = true, .screen = true },
-    };
-
-    insert("_rt_FullFrameBuffer", makeRenderTarget(width, height));
-    insert(
-        std::string(WE_MIP_MAPPED_FRAME_BUFFER),
-        SceneRenderTarget {
-            .width = width,
-            .height = height,
-            .has_mipmap = true,
-            .bind = { .enable = true, .name = std::string(SpecTex_Default) },
-        });
-
-    insert("_rt_shadowAtlas", makeRenderTarget(width, height, true));
-    insert("_rt_ParticleRefract", makeRenderTarget(width, height, true));
-    insert("_rt_4FrameBuffer", makeRenderTarget(scaled(width, 4), scaled(height, 4), true));
-    insert("_rt_8FrameBuffer", makeRenderTarget(scaled(width, 8), scaled(height, 8), true));
-    insert("_rt_Bloom", makeRenderTarget(scaled(width, 8), scaled(height, 8), true));
+    // CLEANROOM U38: implement from specs/engine/e7-small-units.md
 }
 
-void RenderTargetRegistry::insert(std::string name, SceneRenderTarget target)
+void RenderTargetRegistry::insert(std::string, SceneRenderTarget)
 {
-    (*m_targets)[std::move(name)] = std::move(target);
+    // CLEANROOM U39: implement from specs/engine/e7-small-units.md
 }
 
-void RenderTargetRegistry::alias(std::string alias_name, std::string target_name)
+void RenderTargetRegistry::alias(std::string, std::string)
 {
-    (*m_aliases)[std::move(alias_name)] = std::move(target_name);
+    // CLEANROOM U40: implement from specs/engine/e7-small-units.md
 }
 
-bool RenderTargetRegistry::contains(std::string_view name) const
+bool RenderTargetRegistry::contains(std::string_view) const
 {
-    return lookup(name) != nullptr;
+    // CLEANROOM U41: implement from specs/engine/e7-small-units.md
+    return false;
 }
 
-std::string RenderTargetRegistry::resolve(std::string_view name) const
+std::string RenderTargetRegistry::resolve(std::string_view) const
 {
-    auto it = m_aliases->find(std::string(name));
-    if (it != m_aliases->end()) return it->second;
-    return std::string(name);
+    // CLEANROOM U42: implement from specs/engine/e7-small-units.md
+    return {};
 }
 
-const SceneRenderTarget* RenderTargetRegistry::lookup(std::string_view name) const
+const SceneRenderTarget* RenderTargetRegistry::lookup(std::string_view) const
 {
-    const std::string resolved = resolve(name);
-    auto it = m_targets->find(resolved);
-    if (it == m_targets->end()) return nullptr;
-    return &it->second;
+    // CLEANROOM U43: implement from specs/engine/e7-small-units.md
+    return nullptr;
 }
 
 } // namespace wallpaper

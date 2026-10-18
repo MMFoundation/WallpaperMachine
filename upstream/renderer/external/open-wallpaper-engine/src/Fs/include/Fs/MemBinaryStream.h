@@ -15,46 +15,32 @@ namespace fs
 class MemBinaryStream : public IBinaryStream {
 public:
     MemBinaryStream(std::vector<uint8_t>&& data): m_pos(0), m_data(std::move(data)) {}
-    MemBinaryStream(IBinaryStream& f): m_pos(0) {
-        m_data = std::vector<uint8_t>((usize)f.Size());
-        f.Read(m_data.data(), m_data.size());
+    MemBinaryStream(IBinaryStream&): m_pos(0) {
+        // CLEANROOM U60: implement from specs/engine/e7-small-units.md
     }
 
     virtual ~MemBinaryStream() = default;
 
 public:
-    virtual usize Read(void* buffer, usize sizeInByte) {
-        auto start_pos = m_data.begin() + m_pos;
-        idx  moved     = moveForward((idx)sizeInByte);
-        std::copy(start_pos, start_pos + moved, (uint8_t*)buffer);
-        return (usize)moved;
+    virtual usize Read(void*, usize) {
+        // CLEANROOM U61: implement from specs/engine/e7-small-units.md
+        return 0;
     }
-    virtual char* Gets(char* buffer, usize sizeStr) {
-        Read(buffer, sizeStr);
+    virtual char* Gets(char* buffer, usize) {
+        // CLEANROOM U62: implement from specs/engine/e7-small-units.md
         return buffer;
     }
     virtual idx  Tell() const { return m_pos; }
-    virtual bool SeekSet(idx offset) {
-        if (InArea(offset)) {
-            m_pos = offset;
-            return true;
-        }
+    virtual bool SeekSet(idx) {
+        // CLEANROOM U63: implement from specs/engine/e7-small-units.md
         return false;
     }
-    virtual bool SeekCur(idx offset) {
-        idx new_pos = m_pos + offset;
-        if (InArea(new_pos)) {
-            m_pos = new_pos;
-            return true;
-        }
+    virtual bool SeekCur(idx) {
+        // CLEANROOM U64: implement from specs/engine/e7-small-units.md
         return false;
     }
-    virtual bool SeekEnd(idx offset) {
-        idx new_pos = Size() + offset;
-        if (InArea(new_pos)) {
-            m_pos = new_pos;
-            return true;
-        }
+    virtual bool SeekEnd(idx) {
+        // CLEANROOM U65: implement from specs/engine/e7-small-units.md
         return false;
     }
     virtual isize Size() const { return std::ssize(m_data); }
@@ -63,14 +49,14 @@ protected:
     virtual usize Write_impl(const void* buffer, usize sizeInByte) { return 0; }
 
 private:
-    bool InArea(idx pos) const noexcept { return pos >= 0 && pos <= Size(); }
-    idx  moveForward(idx step) noexcept {
-         idx end     = m_pos + step;
-         end         = end > Size() ? Size() : end;
-         idx stepped = end - m_pos;
-         m_pos       = end;
-         return stepped;
-    };
+    bool InArea(idx) const noexcept {
+        // CLEANROOM U66: implement from specs/engine/e7-small-units.md
+        return false;
+    }
+    idx moveForward(idx) noexcept {
+        // CLEANROOM U67: implement from specs/engine/e7-small-units.md
+        return 0;
+    }
 
     idx                  m_pos;
     std::vector<uint8_t> m_data;

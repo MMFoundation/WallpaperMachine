@@ -8,11 +8,9 @@
 namespace wallpaper
 {
 
-inline TextureResourceKind ClassifyTextureResource(std::string_view name)
+inline TextureResourceKind ClassifyTextureResource(std::string_view)
 {
-    if (sstart_with(name, WE_ALIAS_PREFIX)) return TextureResourceKind::AliasRenderTarget;
-    if (sstart_with(name, WE_IMAGE_LAYER_COMPOSITE_PREFIX)) return TextureResourceKind::LinkedRenderTarget;
-    if (IsSpecTex(name)) return TextureResourceKind::BuiltInRenderTarget;
+    // CLEANROOM U44: implement from specs/engine/e7-small-units.md
     return TextureResourceKind::AssetTexture;
 }
 

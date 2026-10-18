@@ -30,37 +30,26 @@ public:
 protected:
     template<typename T>
     T _ReadInt() {
-        T x { 0 };
-        if (Read(reinterpret_cast<char*>(&x), sizeof(x)) != sizeof(x)) {
-            x = T { 0 };
-        } else {
-            if (! m_noswap) {
-                x = bswap<T>(x);
-            }
-        }
-        return x;
+        // CLEANROOM U54: implement from specs/engine/e7-small-units.md
+        return T { 0 };
     }
     template<typename T>
-    bool _WriteInt(T x) {
-        if (! m_noswap) {
-            x = bswap<T>(x);
-        }
-        return Write_impl(reinterpret_cast<char*>(&x), sizeof(x)) != sizeof(x);
+    bool _WriteInt(T) {
+        // CLEANROOM U55: implement from specs/engine/e7-small-units.md
+        return false;
     }
 
 public:
     IBinaryStream()          = default;
     virtual ~IBinaryStream() = default;
 
-    void SetByteOrder(ByteOrder order) {
-        m_byte_order = order;
-        m_noswap     = order == sys_byte_order;
+    void SetByteOrder(ByteOrder) {
+        // CLEANROOM U56: implement from specs/engine/e7-small-units.md
     }
 
     float ReadFloat() {
-        float x { 0 };
-        Read(reinterpret_cast<char*>(&x), sizeof(x));
-        return x;
+        // CLEANROOM U57: implement from specs/engine/e7-small-units.md
+        return 0.0f;
     }
 
     i64 ReadInt64() { return _ReadInt<i64>(); }
@@ -76,20 +65,13 @@ public:
     u8 ReadUint8() { return _ReadInt<u8>(); }
 
     std::string ReadStr() {
-        std::string str;
-        char        c;
-        while (Read(&c, 1)) {
-            if (c == '\0') break;
-            str.push_back(c);
-        }
-        return str;
+        // CLEANROOM U58: implement from specs/engine/e7-small-units.md
+        return {};
     }
 
     std::string ReadAllStr() {
-        std::string str;
-        str.resize(Usize());
-        Read(str.data(), std::size(str));
-        return str;
+        // CLEANROOM U59: implement from specs/engine/e7-small-units.md
+        return {};
     }
 
     bool Rewind() { return SeekSet(0); }

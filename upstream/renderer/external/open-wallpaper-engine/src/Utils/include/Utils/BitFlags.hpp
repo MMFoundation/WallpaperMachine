@@ -14,18 +14,18 @@ public:
     constexpr BitFlags() noexcept: bits_(0u) {}
     constexpr BitFlags(UnderlyingT val) noexcept: bits_(val) {}
 
-    BitFlags& set(EnumT e, bool value = true) noexcept {
-        bits_.set(underlying(e), value);
+    BitFlags& set(EnumT, bool = true) noexcept {
+        // CLEANROOM U22: implement from specs/engine/e7-small-units.md
         return *this;
     }
 
-    BitFlags& reset(EnumT e) noexcept {
-        set(e, false);
+    BitFlags& reset(EnumT) noexcept {
+        // CLEANROOM U23: implement from specs/engine/e7-small-units.md
         return *this;
     }
 
     BitFlags& reset() noexcept {
-        bits_.reset();
+        // CLEANROOM U24: implement from specs/engine/e7-small-units.md
         return *this;
     }
 
@@ -39,14 +39,20 @@ public:
 
     [[nodiscard]] std::size_t count() const noexcept { return bits_.count(); }
 
-    constexpr bool operator[](EnumT e) const { return bits_[underlying(e)]; }
+    constexpr bool operator[](EnumT) const {
+        // CLEANROOM U25: implement from specs/engine/e7-small-units.md
+        return false;
+    }
 
     constexpr bool operator[](UnderlyingT t) const { return bits_[t]; }
 
     auto to_string() const { return bits_.to_string(); }
 
 private:
-    static constexpr UnderlyingT underlying(EnumT e) { return static_cast<UnderlyingT>(e); }
+    static constexpr UnderlyingT underlying(EnumT) {
+        // CLEANROOM U26: implement from specs/engine/e7-small-units.md
+        return 0;
+    }
 
 private:
     std::bitset<sizeof(UnderlyingT) * 8> bits_;
