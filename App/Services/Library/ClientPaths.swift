@@ -71,16 +71,16 @@ enum ClientPaths {
         guard !fileManager.fileExists(atPath: marker.path) else { return }
         if fileManager.fileExists(atPath: destination.path) {
             // An older library that has the folder but not the marker.
-            fileManager.createFile(atPath: marker.path, contents: Data())
+            try? Data().write(to: marker, options: .atomic)
             return
         }
         guard let resource = bundle.url(forResource: "StarterWallpaper", withExtension: nil) else { return }
-        let pending = libraryURL.appendingPathComponent(".starter-pending-\(UUID().uuidString)", isDirectory: true)
+        let pending = supportURL.appendingPathComponent(".starter-pending-\(UUID().uuidString)", isDirectory: true)
         defer { try? fileManager.removeItem(at: pending) }
         do {
             try fileManager.copyItem(at: resource, to: pending)
             try fileManager.moveItem(at: pending, to: destination)
-            fileManager.createFile(atPath: marker.path, contents: Data())
+            try? Data().write(to: marker, options: .atomic)
         } catch {
             AppLog.warn("could not install the starter wallpaper: \(error.localizedDescription)")
         }
