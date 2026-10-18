@@ -1,6 +1,8 @@
+// Clean-room implementation from the WallpaperMachine spec e1b-scene-model.md; written without access to the original source.
 #include "SceneCamera.h"
 #include "SceneNode.h"
 #include "Utils/Algorism.h"
+#include "Utils/Logging.h"
 #include <cmath>
 #include <optional>
 #include "Utils/Linalg.hpp"
@@ -8,43 +10,78 @@
 using namespace wallpaper;
 using namespace wallpaper::linalg;
 
+Matrix4d SceneCamera::NodeModel() const {
+	if (! m_node) return Matrix4d::Identity();
+	m_node->UpdateTrans();
+	return m_node->ModelTrans();
+}
+
+const SceneCamera::Cache& SceneCamera::Refresh() const {
+	const Matrix4d model = NodeModel();
+	const double   inputs[8] = {
+		m_perspective ? 1.0 : 0.0, m_aspect, m_fov, m_nearClip, m_farClip, m_width, m_height, m_zoom
+	};
+	bool same = m_cache.valid && m_cache.shake == m_shake;
+	for (int i = 0; same && i < 8; ++i) same = m_cache.inputs[i] == inputs[i];
+	for (int c = 0; same && c < 4; ++c) {
+		for (int r = 0; same && r < 4; ++r) same = m_cache.model.coeff(r, c) == model.coeff(r, c);
+	}
+	if (same) return m_cache;
+
+	Matrix4d eye = Matrix4d::Identity();
+	eye.block<3, 1>(0, 3) = m_shake;
+	Matrix4d projection;
+	if (m_perspective) {
+		const double far_padded = m_farClip + std::max(1.0, std::abs(m_farClip) * 0.001);
+		projection = Perspective(Radians(m_fov), m_aspect, m_nearClip, far_padded);
+	} else {
+		const double zoom = EffectiveZoom();
+		const double half_w = std::max(std::max(m_width, 1.0) / zoom, 1e-6) * 0.5;
+		const double half_h = std::max(std::max(m_height, 1.0) / zoom, 1e-6) * 0.5;
+		projection = Ortho(-half_w, half_w, -half_h, half_h, m_nearClip, m_farClip);
+	}
+	m_cache.valid          = true;
+	m_cache.model          = model;
+	m_cache.shake          = m_shake;
+	for (int i = 0; i < 8; ++i) m_cache.inputs[i] = inputs[i];
+	m_cache.view           = Matrix4d(eye * model).inverse();
+	m_cache.viewProjection = projection * m_cache.view;
+	return m_cache;
+}
+
 Vector3d SceneCamera::GetPosition() const {
-	// CLEANROOM SM11
-	return Vector3d::Zero();
+	const Matrix4d model = NodeModel();
+	return Vector3d(model.block<3, 1>(0, 3) + m_shake);
 }
 
 Vector3d SceneCamera::GetDirection() const {
-	// CLEANROOM SM11
-	return Vector3d::Zero();
+	if (! m_node) return Vector3d(0.0, 0.0, -1.0);
+	return Vector3d(-NodeModel().block<3, 1>(0, 2));
 }
 
 Vector3d SceneCamera::GetUp() const {
-	// CLEANROOM SM11
-	return Vector3d::Zero();
+	if (! m_node) return Vector3d(0.0, 1.0, 0.0);
+	return Vector3d(NodeModel().block<3, 1>(0, 1));
 }
 
 Vector3d SceneCamera::GetRight() const {
-	// CLEANROOM SM11
-	return Vector3d::Zero();
+	if (! m_node) return Vector3d(1.0, 0.0, 0.0);
+	return Vector3d(NodeModel().block<3, 1>(0, 0));
 }
 
-Matrix4d SceneCamera::GetViewMatrix() const {
-	// CLEANROOM SM11
-	return Matrix4d::Identity();
-}
+Matrix4d SceneCamera::GetViewMatrix() const { return Refresh().view; }
 
-Matrix4d SceneCamera::GetViewProjectionMatrix() const {
-	// CLEANROOM SM11
-	return Matrix4d::Identity();
-}
+Matrix4d SceneCamera::GetViewProjectionMatrix() const { return Refresh().viewProjection; }
 
-void SceneCamera::Update() {
-	// CLEANROOM SM11
-}
+void SceneCamera::Update() { (void)Refresh(); }
 
 void SceneCamera::AttatchNode(std::shared_ptr<SceneNode> node) {
-	// CLEANROOM SM10
-	(void)node;
+	if (node == nullptr) {
+		LOG_ERROR("Attach a null node to camera");
+		return;
+	}
+	m_node = std::move(node);
+	Update();
 }
 
 void wallpaper::FitCanvasPerspective(SceneCamera& perspective, const SceneCamera& canvas) {

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <algorithm>
 #include <cmath>
 #include <vector>
 #include <memory>
@@ -14,21 +15,15 @@ class SceneNode;
 
 class SceneCamera {
 public:
-    explicit SceneCamera(i32 width, i32 height, float near, float far) {
-        // CLEANROOM SM9
-        (void)width;
-        (void)height;
-        (void)near;
-        (void)far;
-    }
+    explicit SceneCamera(i32 width, i32 height, float near, float far)
+        : m_aspect(AspectOf(width, height)),
+          m_width(width),
+          m_height(height),
+          m_nearClip(near),
+          m_farClip(far) {}
 
-    explicit SceneCamera(float aspect, float near, float far, float fov) {
-        // CLEANROOM SM9
-        (void)aspect;
-        (void)near;
-        (void)far;
-        (void)fov;
-    }
+    explicit SceneCamera(float aspect, float near, float far, float fov)
+        : m_perspective(true), m_aspect(aspect), m_fov(fov), m_nearClip(near), m_farClip(far) {}
 
     SceneCamera(const SceneCamera&) = default;
 
@@ -36,51 +31,24 @@ public:
 
     void AttatchNode(std::shared_ptr<SceneNode>);
 
-    bool   IsPerspective() const {
-        // CLEANROOM SM9
-        return false;
-    }
-    double Aspect() const {
-        // CLEANROOM SM9
-        return 0.0;
-    }
-    double Width() const {
-        // CLEANROOM SM9
-        return 0.0;
-    }
-    double Height() const {
-        // CLEANROOM SM9
-        return 0.0;
-    }
-    double NearClip() const {
-        // CLEANROOM SM9
-        return 0.0;
-    }
-    double FarClip() const {
-        // CLEANROOM SM9
-        return 0.0;
-    }
-    double Fov() const {
-        // CLEANROOM SM9
-        return 0.0;
-    }
+    bool   IsPerspective() const { return m_perspective; }
+    double Aspect() const { return m_aspect; }
+    double Width() const { return m_width; }
+    double Height() const { return m_height; }
+    double NearClip() const { return m_nearClip; }
+    double FarClip() const { return m_farClip; }
+    double Fov() const { return m_fov; }
 
     void SetWidth(double value) {
-        // CLEANROOM SM9
-        (void)value;
+        m_width  = value;
+        m_aspect = AspectOf(m_width, m_height);
     }
     void SetHeight(double value) {
-        // CLEANROOM SM9
-        (void)value;
+        m_height = value;
+        m_aspect = AspectOf(m_width, m_height);
     }
-    void SetAspect(double aspect) {
-        // CLEANROOM SM9
-        (void)aspect;
-    }
-    void SetFov(double value) {
-        // CLEANROOM SM9
-        (void)value;
-    }
+    void SetAspect(double aspect) { m_aspect = aspect; }
+    void SetFov(double value) { m_fov = value; }
     /// The depth range a perspective projection keeps.
     void SetClip(double near_clip, double far_clip) {
         m_nearClip = near_clip;
@@ -98,27 +66,12 @@ public:
     double VisibleHeight() const { return m_height / EffectiveZoom(); }
 
     void  AttatchImgEffect(std::shared_ptr<SceneImageEffectLayer> eff) {
-        // CLEANROOM SM10
-        (void)eff;
+        m_imgEffect = std::move(eff);
     }
-    bool  HasImgEffect() const {
-        // CLEANROOM SM10
-        return false;
-    }
-    auto& GetImgEffect() {
-        // CLEANROOM SM10
-        static std::shared_ptr<SceneImageEffectLayer> none;
-        none.reset();
-        return none;
-    }
-    void  SetComposeLayer(bool compose) {
-        // CLEANROOM SM10
-        (void)compose;
-    }
-    bool  IsComposeLayer() const {
-        // CLEANROOM SM10
-        return false;
-    }
+    bool  HasImgEffect() const { return m_imgEffect != nullptr; }
+    auto& GetImgEffect() { return m_imgEffect; }
+    void  SetComposeLayer(bool compose) { m_isComposeLayer = compose; }
+    bool  IsComposeLayer() const { return m_isComposeLayer; }
     /// A camera that frames one layer's card in that layer's own texture space:
     /// the card fills the target and nothing about where the layer sits in the
     /// scene -- its transform, the scene camera, parallax -- reaches the image.
@@ -154,19 +107,29 @@ public:
     };
     Axes GetAxes() const;
 
-    std::shared_ptr<SceneNode> GetAttachedNode() const {
-        // CLEANROOM SM10
-        return nullptr;
-    }
+    std::shared_ptr<SceneNode> GetAttachedNode() const { return m_node; }
 
     /// Camera shake: moves the eye and what it looks at together, on top of
     /// wherever the camera's node puts them.
     void SetShakeOffset(const linalg::Vector3d& offset) { m_shake = offset; }
     const linalg::Vector3d& ShakeOffset() const { return m_shake; }
 
+    /// Takes over another camera's frame and lens; its node, shake and effect
+    /// chain stay as they are. The caller updates.
     void Clone(const SceneCamera& cam) {
-        // CLEANROOM SM10
-        (void)cam;
+        if (&cam == this) return;
+        m_width                  = cam.m_width;
+        m_height                 = cam.m_height;
+        m_aspect                 = cam.m_aspect;
+        m_nearClip               = cam.m_nearClip;
+        m_farClip                = cam.m_farClip;
+        m_perspective            = cam.m_perspective;
+        m_fov                    = cam.m_fov;
+        m_fovLocked              = cam.m_fovLocked;
+        m_zoom                   = cam.m_zoom;
+        m_isComposeLayer         = cam.m_isComposeLayer;
+        m_layerLocal             = cam.m_layerLocal;
+        m_childrenUseSceneCamera = cam.m_childrenUseSceneCamera;
     }
 
 private:
@@ -176,15 +139,40 @@ private:
         return (std::isfinite(m_zoom) && m_zoom > 0.0) ? m_zoom : 1.0;
     }
 
+    // Width over height, each taken as at least one so an empty extent cannot divide by zero.
+    static double AspectOf(double width, double height) {
+        return std::max(width, 1.0) / std::max(height, 1.0);
+    }
+
+    /// The matrices the camera last built, with the inputs they were built from, so
+    /// a read rebuilds only when one of those changed.
+    struct Cache {
+        bool             valid { false };
+        linalg::Matrix4d model { linalg::Matrix4d::Identity() };
+        linalg::Vector3d shake { linalg::Vector3d::Zero() };
+        double           inputs[8] {};
+        linalg::Matrix4d view { linalg::Matrix4d::Identity() };
+        linalg::Matrix4d viewProjection { linalg::Matrix4d::Identity() };
+    };
+    const Cache& Refresh() const;
+    // The node's world matrix as of now (identity without a node).
+    linalg::Matrix4d NodeModel() const;
+
     linalg::Vector3d m_shake { linalg::Vector3d::Zero() };
+    bool   m_perspective { false };
+    double m_aspect { 1.0 };
+    double m_fov { 45.0 };
     double m_width { 1.0f };
     double m_height { 1.0f };
     double m_nearClip { 0.01f };
     double m_farClip { 1000.0f };
     double m_zoom { 1.0 };
     bool   m_fovLocked { false };
+    bool   m_isComposeLayer { false };
 
     std::shared_ptr<SceneNode>             m_node;
+    std::shared_ptr<SceneImageEffectLayer> m_imgEffect;
+    mutable Cache                          m_cache;
     bool                                   m_layerLocal { false };
     bool                                   m_childrenUseSceneCamera { false };
 };
