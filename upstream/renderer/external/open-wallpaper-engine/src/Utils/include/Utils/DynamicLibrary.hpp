@@ -1,5 +1,6 @@
 #pragma once
 
+#include <type_traits>
 #include <utility>
 #include "Core/NoCopyMove.hpp"
 
@@ -22,10 +23,14 @@ public:
 
     void* GetSymbolAddr(const char* name) const;
     
+    // Looks `name` up and stores it in `out`, a pointer or function-pointer variable.
     template<typename T>
-    bool GetSymbol(const char*, T&) const {
-        // CLEANROOM U19: implement from specs/engine/e7-small-units.md
-        return false;
+    bool GetSymbol(const char* name, T& out) const {
+        static_assert(std::is_pointer_v<T>, "a symbol is stored in a pointer");
+        void* address = GetSymbolAddr(name);
+        if (address == nullptr) return false;
+        out = reinterpret_cast<T>(address);
+        return true;
     }
 
 private:

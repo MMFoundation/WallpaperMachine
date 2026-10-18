@@ -1,5 +1,7 @@
 #pragma once
 #include <bitset>
+#include <cstddef>
+#include <type_traits>
 
 namespace wallpaper
 {
@@ -14,18 +16,18 @@ public:
     constexpr BitFlags() noexcept: bits_(0u) {}
     constexpr BitFlags(UnderlyingT val) noexcept: bits_(val) {}
 
-    BitFlags& set(EnumT, bool = true) noexcept {
-        // CLEANROOM U22: implement from specs/engine/e7-small-units.md
+    BitFlags& set(EnumT flag, bool value = true) noexcept {
+        bits_.set(underlying(flag), value);
         return *this;
     }
 
-    BitFlags& reset(EnumT) noexcept {
-        // CLEANROOM U23: implement from specs/engine/e7-small-units.md
+    BitFlags& reset(EnumT flag) noexcept {
+        bits_.reset(underlying(flag));
         return *this;
     }
 
     BitFlags& reset() noexcept {
-        // CLEANROOM U24: implement from specs/engine/e7-small-units.md
+        bits_.reset();
         return *this;
     }
 
@@ -39,19 +41,16 @@ public:
 
     [[nodiscard]] std::size_t count() const noexcept { return bits_.count(); }
 
-    constexpr bool operator[](EnumT) const {
-        // CLEANROOM U25: implement from specs/engine/e7-small-units.md
-        return false;
-    }
+    constexpr bool operator[](EnumT flag) const { return bits_[underlying(flag)]; }
 
     constexpr bool operator[](UnderlyingT t) const { return bits_[t]; }
 
     auto to_string() const { return bits_.to_string(); }
 
 private:
-    static constexpr UnderlyingT underlying(EnumT) {
-        // CLEANROOM U26: implement from specs/engine/e7-small-units.md
-        return 0;
+    // The enumerators are bit positions, not masks.
+    static constexpr UnderlyingT underlying(EnumT flag) {
+        return static_cast<UnderlyingT>(flag);
     }
 
 private:

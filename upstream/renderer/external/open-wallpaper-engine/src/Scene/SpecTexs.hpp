@@ -127,8 +127,9 @@ inline std::string EnsureSpecTexName(const std::string_view name) {
 }
 inline bool IsSpecLinkTex(const std::string_view name) { return sstart_with(name, SpecTex_Link); }
 inline uint32_t ParseLinkTex(const std::string_view name) {
-    std::string sid { name };
-    sid = sid.substr(9);
+    // The id is the digits after the prefix; a name no longer than the prefix has none.
+    if (name.size() <= SpecTex_Link.size()) return 0;
+    std::string sid { name.substr(SpecTex_Link.size()) };
     uint32_t result { 0 };
     STRTONUM(sid, result);
     return result;
