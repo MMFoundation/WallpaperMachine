@@ -565,7 +565,8 @@ void LowerEffectCommands(const wpscene::WPImageEffect& effect,
 /// A quad of four vertices in the order left-bottom, left-top, right-bottom,
 /// right-top, drawn as the triangles (0, 1, 2) and (2, 1, 3).
 std::shared_ptr<SceneMesh> MakeQuadMesh(const std::array<float, 12>& positions,
-                                        const std::array<float, 8>&  uvs) {
+                                        const std::array<float, 8>&  uvs,
+                                        MeshUpdate update = MeshUpdate::Fixed) {
     SceneVertexArray vertices({ { std::string(WE_IN_POSITION), VertexType::FLOAT3 },
                                 { std::string(WE_IN_TEXCOORD), VertexType::FLOAT2 } },
                               4);
@@ -579,7 +580,7 @@ std::shared_ptr<SceneMesh> MakeQuadMesh(const std::array<float, 12>& positions,
     }
     vertices.SetVertexs(0, packed);
     const std::array<uint32_t, 6> indices { 0, 1, 2, 2, 1, 3 };
-    auto mesh = std::make_shared<SceneMesh>();
+    auto mesh = std::make_shared<SceneMesh>(update);
     mesh->AddVertexArray(std::move(vertices));
     mesh->AddIndexArray(SceneIndexArray(std::span<const uint32_t>(indices)));
     return mesh;
@@ -600,11 +601,12 @@ std::shared_ptr<SceneMesh> MakeCardMesh(float width, float height, float u = 1.0
 }
 
 /// A text layer's card over the box `[left, right] x [bottom, top]`, with the whole
-/// texture across it.
+/// texture across it. A text card is rewritten when the text is laid out again, and
+/// never otherwise.
 std::shared_ptr<SceneMesh> MakeTextCardMesh(float left, float bottom, float right, float top) {
     return MakeQuadMesh({ left, bottom, 0.0f, left, top, 0.0f, right, bottom, 0.0f, right, top,
                           0.0f },
-                        { 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.0f });
+                        { 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.0f }, MeshUpdate::OnEvent);
 }
 
 /// The card of a passthrough layer with effects: its four corners where the layer's
@@ -742,8 +744,6 @@ Vector3f AlignmentAnchorOffset(std::string_view align, const std::array<float, 2
     const double   rz   = turn(2, 0) * x + turn(2, 1) * y;
     return Vector3f(static_cast<float>(rx), static_cast<float>(ry), static_cast<float>(rz));
 }
-
-// CLEANROOM LS15: the file-local helpers of this group were removed; the rewrite designs its own.
 
 /// A layer another layer samples draws into a composite of its own, `extent`
 /// texels, through a camera that frames the layer's card in its own texture
@@ -956,8 +956,6 @@ void ResolveLoadTimeTextStyle(ParseContext& context, wpscene::WPTextObject& obj,
         }
     }
 }
-
-// CLEANROOM LS17: the file-local helpers of this group were removed; the rewrite designs its own.
 
 /// Gives `node` the local translation, scale and angles that make its local matrix
 /// `transform` (translation, then z, y and x rotations, then scale: the order
@@ -1344,6 +1342,10 @@ struct MaterialLoadOptions {
     /// layer composited through effects): fog stays out of it and `fog_deferred`
     /// of the shader info says the pass would have taken it.
     bool defer_fog { false };
+    /// The two stages of a program made in code; with both empty the shader's
+    /// files are read from the asset namespace.
+    std::string vertex_source;
+    std::string fragment_source;
 };
 
 struct LoadedMaterial {
@@ -1365,9 +1367,14 @@ bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, Scene
     const std::string base = "/assets/shaders/" + wpmat.shader;
     std::vector<WPShaderUnit> units(2);
     units[0].stage = ShaderType::VERTEX;
-    units[0].src   = fs::GetFileContent(*context.vfs, base + ".vert");
     units[1].stage = ShaderType::FRAGMENT;
-    units[1].src   = fs::GetFileContent(*context.vfs, base + ".frag");
+    if (! options.vertex_source.empty() && ! options.fragment_source.empty()) {
+        units[0].src = options.vertex_source;
+        units[1].src = options.fragment_source;
+    } else {
+        units[0].src = fs::GetFileContent(*context.vfs, base + ".vert");
+        units[1].src = fs::GetFileContent(*context.vfs, base + ".frag");
+    }
     if (units[0].src.empty() || units[1].src.empty()) {
         LOG_ERROR("shader '%s' is missing its source files", wpmat.shader.c_str());
         return false;
@@ -1868,7 +1875,10 @@ void ResolveLoadOnlySceneSetting(SceneRuntimeContext& runtime, const nlohmann::j
     runtime.NoteLoadOnlyProperty(UserPropertyName(setting));
 }
 
-// CLEANROOM LS28: scene wind and gravity (`windenabled`, `winddirection`, `windstrength`, `gravitydirection`, `gravitystrength`) do not reach the particle systems yet.
+// The scene's wind and gravity (`windenabled`, `winddirection`, `windstrength`,
+// `gravitydirection`, `gravitystrength`) are read into the scene description and
+// reach no one: the particle simulation takes only the gravity of its own `movement`
+// operator and has no entry for a scene-wide force (P4 asks for none).
 
 /// Wallpaper Engine composes a layer from the flags and shader of its model, not
 /// from the model's path. These are the editor's two models of that kind: the
@@ -1923,12 +1933,11 @@ void SetLayerTint(const ParseContext& context, SceneMaterial& material, const wp
 /// Hands a layer's alpha to the runtime on every material it owns (R40, R90): a
 /// property, a script that exports `update` or a timeline owns it; with none of
 /// them a script may write it.
-void RegisterLayerAlpha(ParseContext& context, const std::string& key,
-                        const wpscene::WPImageObject&                      image,
-                        const std::vector<std::shared_ptr<SceneMaterial>>& materials) {
+void RegisterAlphaSetting(ParseContext& context, const std::string& key,
+                          const nlohmann::json& setting, float authored,
+                          const std::vector<std::shared_ptr<SceneMaterial>>& materials) {
     auto* runtime = context.scene->runtime.get();
     if (runtime == nullptr || materials.empty()) return;
-    const auto& setting = image.alpha_setting;
     if (HasDynamicSetting(setting)) {
         auto value = ResolveFloatSetting(*runtime, setting, key);
         runtime->RegisterDynamicValueListener(
@@ -1942,7 +1951,13 @@ void RegisterLayerAlpha(ParseContext& context, const std::string& key,
         for (const auto& material : materials) runtime->RegisterMaterialAlphaAnimation(material, playback);
         return;
     }
-    runtime->RegisterNodeAlpha(key, materials, image.alpha);
+    runtime->RegisterNodeAlpha(key, materials, authored);
+}
+
+void RegisterLayerAlpha(ParseContext& context, const std::string& key,
+                        const wpscene::WPImageObject&                      image,
+                        const std::vector<std::shared_ptr<SceneMaterial>>& materials) {
+    RegisterAlphaSetting(context, key, image.alpha_setting, image.alpha, materials);
 }
 
 /// A layer's colour and brightness bindings (R38, R39), applied to every material
@@ -2673,8 +2688,13 @@ std::shared_ptr<SceneNode> MakePlainLayerNode(ParseContext& context, const nlohm
         auto& runtime = *runtime_ptr;
         runtime.RegisterNode(plan.key, node.get());
         runtime.RegisterLayerId(plan.id, plan.key);
-        if (const auto name = entry.find("name"); name != entry.end() && name->is_string()) {
-            const auto& authored = name->get_ref<const std::string&>();
+        {
+            // The name the file gives the layer (possibly none), which `layer.name` reads
+            // when the layer is registered under a generated key.
+            std::string authored;
+            if (const auto name = entry.find("name"); name != entry.end() && name->is_string()) {
+                authored = name->get<std::string>();
+            }
             if (authored != plan.key) {
                 runtime.RegisterLayerAuthoredName(plan.key, authored);
                 // Name lookup answers with the first declaration of a shared name.
@@ -3299,6 +3319,613 @@ bool LoadModelEntry(ParseContext& context, std::size_t at, const nlohmann::json&
 }
 
 // ---------------------------------------------------------------------------
+// Text objects (P3 R1 to R55, R65, R67 to R75, R79, R85; R112).
+// ---------------------------------------------------------------------------
+
+/// The text a setting holds: the string itself, or the `value` (else the `text`)
+/// string of a wrapper; anything else is the empty string (P3 R7).
+std::string SettingText(const nlohmann::json& setting) {
+    if (setting.is_string()) return setting.get<std::string>();
+    if (setting.is_object()) {
+        for (const char* member : { "value", "text" }) {
+            const auto found = setting.find(member);
+            if (found != setting.end() && found->is_string()) return found->get<std::string>();
+        }
+    }
+    return {};
+}
+
+/// Names the font of a text layer and finds what draws it (P3 R35): one of the eight
+/// scene keys is an installed face of the system; any other string is first tried as
+/// a file of the asset namespace (a leading `assets/` or `/` is tolerated), then,
+/// when it starts with `/`, as a path of its own; whatever cannot be found is Arial.
+/// The font the scene named stays in `font_key` for scripts to read back.
+void ResolveTextFont(fs::VFS& vfs, TextLayerState& state, const std::string& key) {
+    constexpr std::string_view kKeyPrefix = "systemfont_";
+    state.font_key = key;
+    state.resolved_font_data = SharedFontData();
+    state.resolved_font_path.clear();
+    state.resolved_font_face.clear();
+    state.resolved_font_fit = {};
+    if (! key.empty() && ! IsSceneFontKey(key)) {
+        std::string relative = key;
+        if (relative.front() == '/') relative.erase(0, 1);
+        if (relative.rfind("assets/", 0) == 0) relative.erase(0, 7);
+        std::vector<std::string> candidates { "/assets/" + relative };
+        if (key.front() == '/') candidates.push_back(key);
+        for (const auto& path : candidates) {
+            const std::string bytes = fs::GetFileContent(vfs, path);
+            if (bytes.empty()) continue;
+            state.resolved_font_kind     = "asset";
+            state.resolved_font_identity = key;
+            state.resolved_font_path     = path;
+            state.resolved_font_data     = std::vector<uint8_t>(bytes.begin(), bytes.end());
+            return;
+        }
+    }
+    const auto face = ResolveSceneFont(key);
+    state.resolved_font_kind     = "system";
+    state.resolved_font_identity = IsSceneFontKey(key) ? key.substr(kKeyPrefix.size()) : "arial";
+    state.resolved_font_path     = face.path;
+    state.resolved_font_face     = face.postscript_name;
+    state.resolved_font_fit      = face.fit;
+}
+
+/// How a text card is drawn; each combination is one generated program (P3 R85).
+struct TextCardKind {
+    bool composite { false }; // seeds its picture from the scene behind it
+    bool styled { false };    // the picture holds three coverage masks
+    bool outline { false };
+    bool filled { false };    // an opaque background lies under the glyphs
+    int  neutral { 0 };       // 1: over white, 2: over black (colour blend modes 5 and 10)
+};
+
+std::string TextProgramName(const TextCardKind& kind) {
+    std::string name = kind.composite ? "text_composite" : "text";
+    if (kind.styled) name += kind.outline ? "_styled_outline" : "_styled";
+    if (kind.filled) name += "_filled";
+    if (kind.neutral == 1) name += "_over_white";
+    if (kind.neutral == 2) name += "_over_black";
+    return name;
+}
+
+std::string TextVertexSource(const TextCardKind& kind) {
+    std::string source = "uniform mat4 g_ModelViewProjectionMatrix;\n";
+    if (kind.composite) source += "uniform mat4 g_EffectModelViewProjectionMatrix;\n";
+    source += "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\nvarying vec2 v_TexCoord;\n";
+    if (kind.composite) source += "varying vec3 v_ScreenPos;\n";
+    source += "void main() {\n"
+              "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+              "  v_TexCoord = a_TexCoord;\n";
+    if (kind.composite) {
+        // Where the vertex lies on the screen, for the picture behind it: the layer's own
+        // matrix, since the pass itself draws into the chain's buffer.
+        source += "  vec4 s = g_EffectModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
+                  "  v_ScreenPos = vec3(s.x * 0.5 + s.w * 0.5, s.w * 0.5 - s.y * 0.5, s.w);\n";
+    }
+    source += "}\n";
+    return source;
+}
+
+std::string TextFragmentSource(const TextCardKind& kind) {
+    std::string source = "uniform sampler2D g_Texture0;\n";
+    if (kind.composite) source += "uniform sampler2D g_Texture1;\nuniform float g_Composite;\n";
+    source += "uniform vec3 g_Color;\nuniform float g_Alpha;\nuniform float g_Brightness;\n";
+    if (kind.outline) source += "uniform vec3 g_OutlineColor;\n";
+    if (kind.styled) source += "uniform vec3 g_ShadowColor;\n";
+    if (kind.filled) {
+        source += "uniform vec3 g_Background;\nuniform float g_BackgroundBrightness;\n"
+                  "uniform vec2 g_CardInset;\n";
+    }
+    source += "varying vec2 v_TexCoord;\n";
+    if (kind.composite) source += "varying vec3 v_ScreenPos;\n";
+    source += "void main() {\n"
+              "  vec4 texel = texture(g_Texture0, v_TexCoord);\n"
+              "  vec3 tint = g_Color * g_Brightness;\n"
+              "  vec3 color;\n"
+              "  float cover;\n";
+    if (kind.styled) {
+        source += "  float glyph_a = texel.g * g_Alpha;\n"
+                  "  float shadow_a = texel.b * g_Alpha;\n";
+        source += kind.outline ? "  vec3 glyph = mix(g_OutlineColor, tint, texel.r);\n"
+                               : "  vec3 glyph = tint;\n";
+        source += "  cover = glyph_a + shadow_a * (1.0 - glyph_a);\n"
+                  "  color = cover > 0.0 ? (glyph * glyph_a + g_ShadowColor * shadow_a * "
+                  "(1.0 - glyph_a)) / cover : glyph;\n";
+    } else {
+        source += "  color = texel.rgb * tint;\n"
+                  "  cover = texel.a * g_Alpha;\n";
+    }
+    if (kind.filled) {
+        source += "  vec3 fill_color = g_Background * g_BackgroundBrightness;\n"
+                  "  bool inside = v_TexCoord.x >= g_CardInset.x && v_TexCoord.x <= 1.0 - g_CardInset.x "
+                  "&& v_TexCoord.y >= g_CardInset.y && v_TexCoord.y <= 1.0 - g_CardInset.y;\n"
+                  "  float fill = inside ? g_Alpha : 0.0;\n";
+    } else {
+        source += "  vec3 fill_color = vec3(0.0);\n  float fill = 0.0;\n";
+    }
+    if (kind.composite) {
+        source += "  if (g_Composite > 0.5) {\n"
+                  "    vec2 screen = v_ScreenPos.xy / v_ScreenPos.z;\n"
+                  "    vec3 behind = texture(g_Texture1, screen).rgb;\n"
+                  "    vec3 base = fill > 0.0 ? fill_color : behind;\n"
+                  "    gl_FragColor = vec4(mix(base, color, cover), clamp(cover * cover + fill, 0.0, 1.0));\n"
+                  "    return;\n"
+                  "  }\n";
+    }
+    if (kind.neutral != 0) {
+        source += kind.neutral == 1 ? "  vec3 neutral = vec3(1.0);\n" : "  vec3 neutral = vec3(0.0);\n";
+        source += "  vec3 base = fill > 0.0 ? fill_color : neutral;\n"
+                  "  gl_FragColor = vec4(mix(base, color, cover), 1.0);\n";
+    } else {
+        source += "  float total = cover + fill * (1.0 - cover);\n"
+                  "  vec3 mixed = total > 0.0 ? (color * cover + fill_color * fill * (1.0 - cover)) / total : color;\n"
+                  "  gl_FragColor = vec4(mixed, total);\n";
+    }
+    source += "}\n";
+    return source;
+}
+
+/// The card's material: the generated program of `kind`, over the layer's own raster
+/// (slot 0) and, for a composite, the scene colour buffer (slot 1).
+bool LoadTextMaterial(ParseContext& context, const TextCardKind& kind, const std::string& raster,
+                      SceneMaterial& material, LoadedMaterial& loaded) {
+    wpscene::WPMaterial authored;
+    authored.shader     = TextProgramName(kind);
+    authored.blending   = "translucent";
+    authored.cullmode   = "nocull";
+    authored.depthtest  = "disabled";
+    authored.depthwrite = "disabled";
+    authored.textures   = { raster };
+    if (kind.composite) authored.textures.push_back("_rt_FullFrameBuffer");
+    MaterialLoadOptions options;
+    options.vertex_source   = TextVertexSource(kind);
+    options.fragment_source = TextFragmentSource(kind);
+    if (! LoadMaterial(context, authored, material, loaded, options)) return false;
+    material.name = "text";
+    return true;
+}
+
+/// A raster side in whole texels, 1 to 4096.
+uint32_t TextRasterSide(float extent) {
+    if (! (extent > 1.0f)) return 1;
+    if (extent >= 4096.0f) return 4096;
+    return static_cast<uint32_t>(std::ceil(extent));
+}
+
+/// Draws the text once and hands the picture to the scene's image source, under the
+/// name the card's material reads it by.
+void PublishInitialTextRaster(Scene& scene, const TextLayerState& state, const TextLayerLayout& layout) {
+    auto* images = dynamic_cast<RuntimeImageSource*>(scene.imageParser.get());
+    if (images == nullptr) return;
+    const auto     wanted = TextLayerRasterSizeForLayout(state, layout);
+    const uint32_t width  = TextRasterSide(wanted.x());
+    const uint32_t height = TextRasterSide(wanted.y());
+    std::vector<uint8_t> rgba(static_cast<std::size_t>(width) * height * 4u, 0u);
+    RasterizeTextLayer(state, width, height, rgba);
+    images->SetRgbaImage(TextTextureName(state.layer_key), width, height, rgba.data(), rgba.size());
+}
+
+/// The brightness a text value takes: only an HDR scene applies it.
+float EffectiveTextBrightness(const Scene& scene, float authored) {
+    return scene.hdr && std::isfinite(authored) ? authored : 1.0f;
+}
+
+/// Hands a text layer's live constant to its material: `convert` turns the value into the
+/// uniform's lanes.
+void FollowTextConstant(ParseContext& context, const std::shared_ptr<SceneMaterial>& material,
+                        const nlohmann::json& entry, const char* key, const char* uniform,
+                        const std::string& layer_key,
+                        std::function<ShaderValue(const DynamicValue&)> convert,
+                        bool vec3) {
+    auto* runtime = context.scene->runtime.get();
+    if (runtime == nullptr) return;
+    const auto setting = entry.find(key);
+    if (setting == entry.end() || ! HasDynamicSetting(*setting)) return;
+    auto value = vec3 ? ResolveVec3Setting(*runtime, *setting, layer_key)
+                      : ResolveFloatSetting(*runtime, *setting, layer_key);
+    std::weak_ptr<SceneMaterial> weak = material;
+    const std::string            name = uniform;
+    runtime->RegisterDynamicValueListener(
+        std::move(value), [weak, name, convert = std::move(convert)](const DynamicValue& now) {
+            if (const auto held = weak.lock()) held->customShader.constValues[name] = convert(now);
+        });
+}
+
+/// Loads one text object (P3 R2 to R11, R17 to R26, R29 to R33, R39 to R55).
+bool LoadTextEntry(ParseContext& context, std::size_t at, const nlohmann::json& entry,
+                   const EntryPlan& plan) {
+    auto& scene = *context.scene;
+    wpscene::WPTextObject obj;
+    if (! obj.FromJson(entry, *context.vfs)) return false;
+    auto* runtime = scene.runtime.get();
+    const bool scene_fog = scene.fog_distance || scene.fog_height;
+
+    // Keys that are baked as the layer is laid out are read once, with the user's value.
+    ResolveLoadTimeTextStyle(context, obj, plan.key);
+    if (runtime != nullptr) {
+        for (const auto& [key, field] : { std::pair<const char*, float*> { "pointsize", &obj.pointsize },
+                                          { "maxwidth", &obj.maxwidth } }) {
+            const auto found = entry.find(key);
+            if (found != entry.end() && found->is_object() && found->contains("user") &&
+                ! found->contains("script")) {
+                ResolveLoadOnlySceneSetting(*runtime, *found, *field);
+            }
+        }
+    }
+
+    // The effect chain: the effects that are built (visible, or switchable by a script)
+    // and have a pass, then the colour blend's passthrough. A buffer of an effect is the
+    // card's size whatever its declared scale.
+    ResolveUserEffectVisibility(context, obj.effects, plan.key);
+    std::vector<wpscene::WPImageEffect> chain_sources;
+    chain_sources.reserve(obj.effects.size() + 1);
+    for (const auto& effect : obj.effects) {
+        if (! EffectIsBuilt(effect) || effect.materials.empty()) continue;
+        chain_sources.push_back(effect);
+        for (auto& fbo : chain_sources.back().fbos) fbo.scale = 1;
+    }
+    const std::size_t real_effects = chain_sources.size();
+    const bool        additive     = obj.colorBlendMode == kAdditiveColorBlendMode;
+    const bool        blend_pass   = obj.colorBlendMode != 0 && ! additive;
+    if (blend_pass) {
+        auto effect = MakeColorBlendEffect(*context.vfs, obj.colorBlendMode);
+        if (! effect.has_value()) return false;
+        chain_sources.push_back(std::move(*effect));
+    }
+    const bool has_chain = ! chain_sources.empty();
+
+    // What the layer says.
+    std::unique_ptr<DynamicValue> text_value;
+    std::string                   initial = SettingText(obj.text);
+    if (runtime != nullptr && wpscene::SettingIsDriven(obj.text)) {
+        nlohmann::json setting = obj.text;
+        setting["value"]       = initial;
+        text_value             = ResolveStringSetting(*runtime, setting, plan.key);
+        initial                = text_value->toString();
+    } else if (runtime != nullptr && obj.text.is_object() && obj.text.contains("script") &&
+               obj.text["script"].is_string() &&
+               ! IsSceneEventScript(obj.text["script"].get_ref<const std::string&>())) {
+        // Handlers only: the script is attached and drives nothing.
+        nlohmann::json setting = obj.text;
+        setting["value"]       = initial;
+        runtime->RegisterDynamicValueListener(ResolveStringSetting(*runtime, setting, plan.key),
+                                              [](const DynamicValue&) {});
+    }
+
+    const bool            padded = TextCardIsPadded(obj, scene_fog);
+    const auto            authored_padding = AuthoredTextCardPadding(obj);
+    const float           brightness = EffectiveTextBrightness(scene, obj.brightness);
+    TextLayerState state;
+    state.text                = initial;
+    state.layer_key           = plan.key;
+    state.point_size          = obj.pointsize;
+    state.padding             = padded ? authored_padding : linalg::Vector2f::Zero();
+    state.authored_padding    = authored_padding;
+    state.padding_applies     = padded;
+    state.spacing             = linalg::Vector2f(obj.spacing[0], obj.spacing[1]);
+    state.color               = Vector3f(obj.color.data());
+    state.alpha               = obj.alpha;
+    state.brightness          = brightness;
+    state.horizontal_align    = std::string(TextHorizontalAlignWord(ParseTextHorizontalAlign(obj.horizontalalign)));
+    state.vertical_align      = std::string(TextVerticalAlignWord(ParseTextVerticalAlign(obj.verticalalign)));
+    state.max_width           = obj.maxwidth;
+    state.max_rows            = obj.maxrows;
+    state.limit_width         = obj.limitwidth;
+    state.limit_rows          = obj.limitrows;
+    state.use_ellipsis        = obj.limituseellipsis;
+    state.block_align         = obj.blockalign;
+    state.style.outline           = obj.outline;
+    state.style.outline_thickness = obj.outlinethickness;
+    state.style.outline_color     = Vector3f(obj.outlinecolor.data());
+    state.style.blur              = obj.blur;
+    state.style.blur_size         = obj.blursize;
+    state.style.drop_shadow       = obj.dropshadow;
+    state.style.shadow_size       = obj.dropshadowsize;
+    state.style.shadow_opacity    = obj.dropshadowopacity;
+    state.style.shadow_offset     = linalg::Vector2f(obj.dropshadowoffset[0], obj.dropshadowoffset[1]);
+    state.style.shadow_color      = Vector3f(obj.dropshadowcolor.data());
+    ResolveTextFont(*context.vfs, state, SettingText(obj.font).empty() ? std::string(kDefaultSceneFontKey)
+                                                                       : SettingText(obj.font));
+
+    // Laid out and drawn once, here.
+    const TextLayerLayout layout = MeasureTextLayerLayout(state);
+    const auto            frame  = TextLayerRenderFrameForLayout(state, layout);
+    PublishInitialTextRaster(scene, state, layout);
+
+    // The card's material.
+    TextCardKind kind;
+    kind.composite = real_effects > 0 && ! blend_pass;
+    kind.styled    = TextStyleActive(state.style);
+    kind.outline   = kind.styled && state.style.outline;
+    kind.filled    = obj.opaquebackground;
+    if (blend_pass && obj.colorBlendMode == 5) kind.neutral = 1;
+    if (blend_pass && obj.colorBlendMode == 10) kind.neutral = 2;
+    SceneMaterial  card;
+    LoadedMaterial card_loaded;
+    if (! LoadTextMaterial(context, kind, TextTextureName(plan.key), card, card_loaded)) {
+        LOG_ERROR("text object %d: the card's program cannot be loaded", plan.id);
+        return false;
+    }
+    card.blenmode    = has_chain ? BlendMode::Normal : (additive ? BlendMode::Additive : BlendMode::Translucent);
+    card.depth_test  = false;
+    card.depth_write = false;
+    {
+        auto& values = card.customShader.constValues;
+        card.tint.color      = obj.color;
+        card.tint.brightness = 1.0f;
+        values["g_Color"]      = ShaderValue(obj.color.data(), 3);
+        values["g_Brightness"] = ShaderValue(brightness);
+        SetMaterialAlpha(card, obj.alpha);
+        if (kind.outline) values["g_OutlineColor"] = ShaderValue(obj.outlinecolor.data(), 3);
+        if (kind.styled) values["g_ShadowColor"] = ShaderValue(obj.dropshadowcolor.data(), 3);
+        if (kind.filled) {
+            values["g_Background"] = ShaderValue(obj.backgroundcolor.data(), 3);
+            values["g_BackgroundBrightness"] =
+                ShaderValue(EffectiveTextBrightness(scene, obj.backgroundbrightness));
+        }
+    }
+
+    // The node, the card and what the runtime keeps of the layer.
+    auto& layer = TypedLayer(context, at, entry, plan);
+    const auto node = layer.node;
+    auto mesh = MakeTextCardMesh(frame.bounds.left, frame.bounds.bottom, frame.bounds.right,
+                                 frame.bounds.top);
+    mesh->AddMaterial(std::move(card));
+    node->AddMesh(mesh);
+    node->SetSkipRenderPass(false);
+    const auto card_material = mesh->MaterialSlotPtr(0);
+    context.text_cards[plan.id] = frame;
+    if (context.shader_updater != nullptr) {
+        WPShaderValueData data;
+        data.parallaxDepth = obj.parallaxDepth;
+        data.renderTargets = card_loaded.render_targets;
+        context.shader_updater->SetNodeData(node.get(), 0, data);
+    }
+
+    DynamicValue* composite_value = nullptr;
+    DynamicValue* inset_value     = nullptr;
+    if (runtime != nullptr) {
+        runtime->RegisterTextLayer(plan.key, state, layout);
+        if (text_value != nullptr) runtime->RegisterTextValue(plan.key, std::move(text_value), false);
+        runtime->SetNodeCursorTarget(plan.key, true, obj.solid, obj.disablepropagation);
+        if (const auto anchor = ParseTextScreenAnchor(obj.anchor); anchor != TextScreenAnchor::None) {
+            runtime->SetNodeScreenAnchor(plan.key, anchor);
+        }
+        if (kind.filled) {
+            auto inset = std::make_unique<DynamicValue>(TextCardInsetInRaster(state, layout));
+            inset_value = inset.get();
+            runtime->RegisterMaterialConstant(card_material, "g_CardInset", std::move(inset));
+        }
+    } else if (kind.filled) {
+        const auto inset = TextCardInsetInRaster(state, layout);
+        card_material->customShader.constValues["g_CardInset"] =
+            ShaderValue(std::array<float, 2> { inset.x(), inset.y() });
+    }
+
+    // The effect chain, drawn in the card's own plane.
+    std::vector<std::shared_ptr<SceneMaterial>> all_materials { card_material };
+    std::vector<std::shared_ptr<SceneImageEffect>> counted_effects;
+    TextLayerRenderFrame effect_frame = TextLayerEffectFrame(frame);
+    const bool referenced = plan.id != 0 && context.referenced_layer_ids.contains(plan.id);
+    if (has_chain) {
+        // The passes read the card's alpha and nothing else of the layer: its colour is
+        // already in the picture.
+        wpscene::WPImageObject proxy;
+        proxy.id            = plan.id;
+        proxy.parallaxDepth = obj.parallaxDepth;
+        proxy.clampuvs      = obj.clampuvs;
+        proxy.color         = { 1.0f, 1.0f, 1.0f };
+        proxy.alpha         = obj.alpha;
+        proxy.brightness    = 1.0f;
+        const std::array<int32_t, 2> extent { static_cast<int32_t>(std::lround(effect_frame.size.x())),
+                                              static_cast<int32_t>(std::lround(effect_frame.size.y())) };
+        const std::string camera_name = "__effect_layer_" + std::to_string(plan.id);
+        const auto first = PingPongName(WE_EFFECT_PPONG_PREFIX_A, camera_name);
+        const auto other = PingPongName(WE_EFFECT_PPONG_PREFIX_B, camera_name);
+        const auto sample = LayerRenderTargetSample(scene, proxy);
+        for (const auto& name : { first, other }) {
+            SceneRenderTarget target;
+            target.width      = extent[0];
+            target.height     = extent[1];
+            target.allowReuse = true;
+            target.sample     = sample;
+            target.format     = scene.hdr ? TextureFormat::RGBA16F : TextureFormat::RGBA8;
+            scene.renderTargets[name] = target;
+        }
+        auto chain = std::make_shared<SceneImageEffectLayer>(
+            node.get(), static_cast<float>(extent[0]), static_cast<float>(extent[1]), first, other);
+        const auto final_card = MakeTextCardMesh(effect_frame.bounds.left, effect_frame.bounds.bottom,
+                                                 effect_frame.bounds.right, effect_frame.bounds.top);
+        chain->SetFinalMeshDynamic(MeshUpdate::OnEvent);
+        chain->FinalMesh().ChangeMeshDataFrom(*final_card);
+        // The last pass is drawn translucent by the alpha it holds, whatever the blend.
+        chain->SetFinalBlend(BlendMode::Translucent);
+        chain->SetFinalDepth(false, false);
+
+        std::vector<std::shared_ptr<SceneMaterial>> unused_tint;
+        std::size_t index     = 0;
+        bool        any_fixed = false;
+        for (const auto& source : chain_sources) {
+            const bool is_blend_pass = blend_pass && index + 1 == chain_sources.size();
+            std::shared_ptr<SceneImageEffect> built;
+            if (BuildEffect(context, proxy, source, index, node, *chain, extent, false, is_blend_pass,
+                            false, false, plan.key, camera_name, unused_tint, all_materials, &built)) {
+                if (! source.scripted_visible) any_fixed = true;
+                if (index < real_effects && built != nullptr) counted_effects.push_back(built);
+            }
+            ++index;
+        }
+        if (! any_fixed) {
+            if (auto idle = MakeColorBlendEffect(*context.vfs, 0); idle.has_value()) {
+                for (auto& material : idle->materials) material.combos.erase("BLENDMODE");
+                std::shared_ptr<SceneImageEffect> fallback;
+                if (BuildEffect(context, proxy, *idle, index++, node, *chain, extent, false, true, false,
+                                true, plan.key, camera_name, unused_tint, all_materials, &fallback) &&
+                    fallback != nullptr) {
+                    fallback->fallback = true;
+                }
+            }
+        }
+        // The buffers an effect declares without a size of its own follow the first one,
+        // which is the card: they are resized with it as the text changes.
+        {
+            std::size_t position = 0;
+            for (const auto& source : chain_sources) {
+                for (const auto& fbo : source.fbos) {
+                    const auto found = scene.renderTargets.find(fbo.name + "_" + std::to_string(plan.id) +
+                                                                "_" + std::to_string(position));
+                    if (found == scene.renderTargets.end()) continue;
+                    if (FixedEffectFboExtent(fbo, static_cast<float>(extent[0]),
+                                             static_cast<float>(extent[1])).has_value()) {
+                        continue;
+                    }
+                    found->second.bind.enable = true;
+                    found->second.bind.screen = false;
+                    found->second.bind.name   = first;
+                    found->second.bind.scale  = 1.0;
+                }
+                ++position;
+            }
+        }
+        auto camera_node = std::make_shared<SceneNode>(
+            Vector3f(effect_frame.center.x(), effect_frame.center.y(), 0.0f), Vector3f(1.0f, 1.0f, 1.0f),
+            Vector3f::Zero());
+        scene.sceneGraph->AppendChild(camera_node);
+        auto camera = std::make_shared<SceneCamera>(extent[0], extent[1], -1.0f, 1.0f);
+        camera->SetLayerLocal(true);
+        camera->AttatchNode(camera_node);
+        camera->AttatchImgEffect(chain);
+        camera->Update();
+        scene.cameras[camera_name] = camera;
+        node->SetCamera(camera_name);
+        // The own pass fills its buffer untransformed; the final card carries the placement.
+        node->SetRenderTransformOverride(Matrix4d::Identity());
+        layer.effects = chain;
+        if (runtime != nullptr) {
+            runtime->RegisterNodeEffectFinal(plan.key, node.get(), chain.get(), effect_frame);
+        }
+    }
+
+    // Another layer samples this one: its composite is the card in its own texture space.
+    if (referenced) {
+        const auto sampled = has_chain ? effect_frame : frame;
+        const std::array<int32_t, 2> extent = TextCardTexelExtent(sampled.size);
+        auto camera_node = std::make_shared<SceneNode>(
+            Vector3f(sampled.center.x(), sampled.center.y(), 0.0f), Vector3f(1.0f, 1.0f, 1.0f),
+            Vector3f::Zero());
+        scene.sceneGraph->AppendChild(camera_node);
+        wpscene::WPImageObject proxy;
+        proxy.id = plan.id;
+        RegisterLayerComposite(context, plan.id, *node,
+                               { std::min(extent[0], kTextEffectExtentLimit),
+                                 std::min(extent[1], kTextEffectExtentLimit) },
+                               obj.clampuvs, camera_node, LayerRenderTargetFilter(scene, proxy));
+    }
+
+    // What follows the layer's effects as they are switched (P3 R26, R44).
+    const bool any_counted_visible = std::any_of(counted_effects.begin(), counted_effects.end(),
+                                                 [](const auto& effect) { return effect->visible; });
+    if (kind.composite) {
+        auto composite = std::make_unique<DynamicValue>(any_counted_visible ? 1.0f : 0.0f);
+        composite_value = composite.get();
+        if (runtime != nullptr) {
+            runtime->RegisterMaterialConstant(card_material, "g_Composite", std::move(composite));
+        } else {
+            card_material->customShader.constValues["g_Composite"] =
+                ShaderValue(any_counted_visible ? 1.0f : 0.0f);
+            composite_value = nullptr;
+        }
+    }
+    if (runtime != nullptr && (! counted_effects.empty() || kind.filled || kind.composite)) {
+        SceneRuntimeContext::TextEffectGate gate;
+        gate.padded_regardless = TextCardIsPaddedRegardless(obj, scene_fog);
+        gate.effects           = counted_effects;
+        gate.composite         = composite_value;
+        gate.card_inset        = inset_value;
+        runtime->RegisterTextEffectGate(plan.key, std::move(gate));
+    }
+
+    // Alpha, colour and brightness: live, and never part of the picture (P3 R39 to R41).
+    RegisterAlphaSetting(context, plan.key,
+                         entry.contains("alpha") ? entry.at("alpha") : nlohmann::json(), obj.alpha,
+                         all_materials);
+    if (runtime != nullptr) {
+        const std::vector<std::shared_ptr<SceneMaterial>> tinted { card_material };
+        if (const auto color = entry.find("color"); color != entry.end() && color->is_object()) {
+            nlohmann::json only_color = nlohmann::json::object();
+            only_color["color"]       = *color;
+            RegisterLayerTint(context, plan.key, only_color, obj.color, tinted);
+        } else {
+            runtime->BindMaterialColor(plan.key, tinted,
+                                       std::make_unique<DynamicValue>(Vector3f(obj.color.data())));
+        }
+    }
+    const bool hdr = scene.hdr;
+    FollowTextConstant(context, card_material, entry, "brightness", "g_Brightness", plan.key,
+                       [hdr](const DynamicValue& now) {
+                           const float value = now.getFloat();
+                           return ShaderValue(hdr && std::isfinite(value) ? value : 1.0f);
+                       }, false);
+    const auto vec3_of = [](const DynamicValue& now) {
+        const auto lanes = now.getVec3();
+        return ShaderValue(std::array<float, 3> { lanes.x(), lanes.y(), lanes.z() });
+    };
+    if (kind.filled) {
+        FollowTextConstant(context, card_material, entry, "backgroundcolor", "g_Background", plan.key,
+                           vec3_of, true);
+        FollowTextConstant(context, card_material, entry, "backgroundbrightness",
+                           "g_BackgroundBrightness", plan.key,
+                           [hdr](const DynamicValue& now) {
+                               const float value = now.getFloat();
+                               return ShaderValue(hdr && std::isfinite(value) ? value : 1.0f);
+                           }, false);
+    }
+    if (kind.outline) {
+        FollowTextConstant(context, card_material, entry, "outlinecolor", "g_OutlineColor", plan.key,
+                           vec3_of, true);
+    }
+    if (kind.styled) {
+        FollowTextConstant(context, card_material, entry, "dropshadowcolor", "g_ShadowColor", plan.key,
+                           vec3_of, true);
+    }
+    return true;
+}
+
+/// The layer a script's `createLayer({ text, ... })` makes (P3 R55, R73): the keys go
+/// through the path of a scene object, with the id the runtime gives it. The layer is
+/// not attached; the runtime joins it to the scene graph.
+std::shared_ptr<SceneNode> MakeScriptTextLayer(const std::shared_ptr<Scene>& scene, fs::VFS* vfs,
+                                               const LazyParseInputs& inputs,
+                                               const std::string& config, int32_t object_id) {
+    if (scene == nullptr || scene->runtime == nullptr || vfs == nullptr) return nullptr;
+    auto entry = nlohmann::json::parse(config, nullptr, false);
+    if (! entry.is_object()) return nullptr;
+    entry["id"] = object_id;
+    // The name is the script's to give (`NameLayer`); the key is always generated.
+    entry.erase("name");
+    entry.erase("parent");
+    if (! entry.contains("text") || entry["text"].is_null()) entry["text"] = "";
+    EntryPlan plan;
+    plan.kind      = EntryKind::Text;
+    plan.admission = Admission::Object;
+    plan.id        = object_id;
+    plan.key       = "__we_text_" + std::to_string(object_id);
+
+    ParseContext lazy = MakeLazyParseContext(scene, *vfs, inputs);
+    LazyShaderParseScope scope(inputs.index);
+    if (! LoadTextEntry(lazy, 0, entry, plan) || lazy.layers.empty()) {
+        LOG_ERROR("createLayer: the text layer could not be built");
+        return nullptr;
+    }
+    FlushPendingMetalTranslations(*scene);
+    for (auto& [source, key] : lazy.scene_scripts) {
+        scene->runtime->RegisterSceneScript(std::move(source), std::move(key));
+    }
+    return lazy.layers.back().node;
+}
+
+// ---------------------------------------------------------------------------
 // Shapes (P2 R87) and the bloom post-process (R105 to R109, R114).
 // ---------------------------------------------------------------------------
 
@@ -3782,6 +4409,7 @@ void BuildLayers(ParseContext& context, const wpscene::WPSceneGeneral& general,
         case EntryKind::Light: built = LoadLightEntry(context, at, entry, plan); break;
         case EntryKind::Image: built = LoadImageEntry(context, at, entry, plan, general); break;
         case EntryKind::Model: built = LoadModelEntry(context, at, entry, plan, general); break;
+        case EntryKind::Text: built = LoadTextEntry(context, at, entry, plan); break;
         case EntryKind::Camera: built = LoadCameraEntry(context, at, entry, plan, general); break;
         default:
             LOG_ERROR("object %d (%s) is not built: its kind is not loaded by this parser yet",
@@ -4249,6 +4877,49 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
 
     FlushPendingMetalTranslations(*scene);
     scene->shader_compile_error = ShaderFailureReason();
+
+    // The registries a script may query (P3 R72): the declared order of the layers, and the
+    // scene file's objects when some script says it reads them.
+    if (scene->runtime != nullptr) {
+        std::vector<std::string> order;
+        order.reserve(context.layers.size());
+        for (const auto& layer : context.layers) order.push_back(layer.key);
+        scene->runtime->SetLayerOrder(order);
+        std::vector<const std::string*> sources;
+        CollectScriptSources(objects, sources);
+        const bool wanted = std::any_of(sources.begin(), sources.end(), [](const std::string* source) {
+            return source->find("getInitialLayerConfig") != std::string::npos;
+        });
+        if (wanted) {
+            scene->runtime->RequestInitialLayerConfig();
+            auto kept = std::make_shared<nlohmann::json>(objects);
+            scene->runtime->SetInitialLayerConfigProvider([kept](int32_t id) -> std::string {
+                for (const auto& entry : *kept) {
+                    if (entry.is_object() && EntryId(entry) == id) return entry.dump();
+                }
+                return {};
+            });
+        }
+    }
+
+    // The hooks scripts build and restyle text with (P3 R73), before any script starts.
+    if (scene->runtime != nullptr) {
+        fs::VFS* const vfs_pointer = &vfs;
+        scene->runtime->SetTextFontResolver(
+            [vfs_pointer](TextLayerState& state, const std::string& font_key) {
+                ResolveTextFont(*vfs_pointer, state, font_key);
+            });
+        LazyParseInputs inputs;
+        inputs.globals     = context.global_base_uniforms;
+        inputs.index       = index;
+        inputs.is_ortho    = context.is_ortho;
+        inputs.uses_models = context.uses_models;
+        const std::weak_ptr<Scene> weak = scene;
+        scene->runtime->SetTextLayerFactory(
+            [weak, vfs_pointer, inputs](const std::string& config, int32_t object_id) {
+                return MakeScriptTextLayer(weak.lock(), vfs_pointer, inputs, config, object_id);
+            });
+    }
 
     // Scene scripts start last, once every layer, id and hook they may use exists,
     // in the order the file declares their layers.
