@@ -1,4 +1,7 @@
+// Clean-room implementation from the WallpaperMachine spec e1a-scene-host.md; written without access to the original source.
 #pragma once
+#include <array>
+#include <string>
 #include <string_view>
 #include <cstdint>
 #include "Core/Literals.hpp"
@@ -111,13 +114,38 @@ constexpr std::string_view G_ORIENTATIONFORWARD { "g_OrientationForward" };
 constexpr std::string_view SpecTex_Default { "_rt_default" };
 constexpr std::string_view SpecTex_Link { "_rt_link_" };
 
-// CLEANROOM SH56
-inline bool IsImplicitSpecTex(const std::string_view) { return false; }
-inline bool IsSpecTex(const std::string_view) { return false; }
-inline std::string EnsureSpecTexName(const std::string_view name) { return std::string(name); }
-inline bool IsSpecLinkTex(const std::string_view) { return false; }
-inline uint32_t ParseLinkTex(const std::string_view) { return 0; }
-inline std::string GenLinkTex(idx) { return {}; }
+inline bool StartsWithText(const std::string_view text, const std::string_view prefix) {
+    return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
+}
+/// A name that starts with an underscore and names no file: no directory separator and no
+/// extension dot.
+inline bool IsImplicitSpecTex(const std::string_view name) {
+    return ! name.empty() && name.front() == '_' && name.find_first_of("/.") == std::string_view::npos;
+}
+inline bool IsSpecTex(const std::string_view name) {
+    return StartsWithText(name, WE_SPEC_PREFIX) || StartsWithText(name, WE_ALIAS_PREFIX) ||
+           IsImplicitSpecTex(name);
+}
+inline std::string EnsureSpecTexName(const std::string_view name) {
+    if (name.empty() || IsSpecTex(name)) return std::string(name);
+    return std::string(WE_SPEC_PREFIX) + std::string(name);
+}
+inline bool IsSpecLinkTex(const std::string_view name) { return StartsWithText(name, SpecTex_Link); }
+/// The layer id after the link prefix; zero for anything that is not a run of digits that fits
+/// 32 bits right behind the prefix.
+inline uint32_t ParseLinkTex(const std::string_view name) {
+    if (name.size() <= SpecTex_Link.size()) return 0;
+    uint64_t value = 0;
+    bool     any   = false;
+    for (const char c : name.substr(SpecTex_Link.size())) {
+        if (c < '0' || c > '9') break;
+        any   = true;
+        value = value * 10 + static_cast<uint64_t>(c - '0');
+        if (value > 0xFFFFFFFFull) return 0;
+    }
+    return any ? static_cast<uint32_t>(value) : 0;
+}
+inline std::string GenLinkTex(idx id) { return std::string(SpecTex_Link) + std::to_string(id); }
 inline std::string LayerCompositeTargetKey(idx id) {
     return std::string(WE_IMAGE_LAYER_COMPOSITE_PREFIX) + std::to_string(id);
 }
