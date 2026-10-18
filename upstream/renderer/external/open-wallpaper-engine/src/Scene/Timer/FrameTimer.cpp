@@ -238,19 +238,27 @@ void FrameTimer::Stop() { m_timer.Stop(); }
 bool FrameTimer::Running() const { return m_timer.Running(); }
 
 void FrameTimer::OnTick() {
-    m_timer.SetInterval(ResolveInterval());
-    auto* counters = m_counters.load(std::memory_order_relaxed);
-    if (counters != nullptr) counters->Add(OWE_RC_TIMER_WAKEUPS);
-    if (m_draw && m_frame_busy_count.load() == 0) {
-        m_owed_tick_ns.store(kNoOwedTick);
-        m_frame_busy_count.fetch_add(1);
-        m_frame_requested.store(false);
-        if (counters != nullptr) counters->Add(OWE_RC_DRAW_REQUESTS);
-        m_draw();
-        return;
+    // Claim the single draw slot first; every other effect of the tick follows from whether the
+    // claim succeeded.
+    const bool has_draw = static_cast<bool>(m_draw);
+    bool       admitted = false;
+    if (has_draw) {
+        i32 none_in_flight = 0;
+        admitted           = m_frame_busy_count.compare_exchange_strong(none_in_flight, 1);
     }
-    if (m_draw) {
+
+    if (admitted) {
+        m_frame_requested.store(false);
+        m_owed_tick_ns.store(kNoOwedTick);
+    } else if (has_draw) {
         m_owed_tick_ns.store(steady_clock::now().time_since_epoch().count());
     }
-    if (counters != nullptr) counters->Add(OWE_RC_DRAW_TICKS_SUPPRESSED);
+
+    if (auto* sink = m_counters.load(std::memory_order_relaxed); sink != nullptr) {
+        sink->Add(OWE_RC_TIMER_WAKEUPS);
+        sink->Add(admitted ? OWE_RC_DRAW_REQUESTS : OWE_RC_DRAW_TICKS_SUPPRESSED);
+    }
+    m_timer.SetInterval(ResolveInterval());
+
+    if (admitted) m_draw();
 }

@@ -546,7 +546,7 @@ private:
     SceneRuntimeContext*                                     m_runtime { nullptr };
     std::string                                              m_name;
     SceneNode*                                               m_node { nullptr };
-    std::shared_ptr<SceneRuntimeContext::NodeRegistrationSnapshot> m_previous;
+    std::shared_ptr<SceneRuntimeContext::LayerRegistrationMemo> m_previous;
     std::unordered_map<int32_t, std::shared_ptr<SceneNode>>* m_layer_nodes { nullptr };
     int32_t                                                  m_layer_id { 0 };
     std::vector<std::pair<std::string, std::string>>*        m_pending_scene_scripts { nullptr };
@@ -6713,6 +6713,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
                 // node, which ends with this call. Without taking the bindings
                 // back, the runtime would tick, show and hide a freed node.
                 if (! usable && scene->runtime != nullptr) {
+                    scene->runtime->ReportUnsupportedLayerTemplate(path);
                     if (const auto found = lazy.layer_nodes.find(image.id);
                         found != lazy.layer_nodes.end()) {
                         scene->runtime->RollbackNodeRegistration(runtime_name, found->second.get(),

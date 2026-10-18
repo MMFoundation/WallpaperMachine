@@ -39,6 +39,7 @@ class SceneScriptProgram;
 struct SceneMaterial;
 class ScriptedDynamicValue;
 class SceneNode;
+class SceneMesh;
 class SceneImageEffectLayer;
 struct SceneImageEffect;
 class Scene;
@@ -96,7 +97,7 @@ struct NodeHitMask {
 
 class SceneRuntimeContext {
 public:
-    struct NodeRegistrationSnapshot;
+    struct LayerRegistrationMemo;
 
     explicit SceneRuntimeContext(SceneRuntimeBootstrap bootstrap);
     ~SceneRuntimeContext();
@@ -223,8 +224,8 @@ public:
     void          RollbackNodeRegistration(
                      std::string_view name,
                      SceneNode* node,
-                     std::shared_ptr<const NodeRegistrationSnapshot> previous);
-    [[nodiscard]] std::shared_ptr<NodeRegistrationSnapshot>
+                     std::shared_ptr<const LayerRegistrationMemo> previous);
+    [[nodiscard]] std::shared_ptr<LayerRegistrationMemo>
                   CaptureNodeRegistration(std::string_view name) const;
     void          RegisterNodeSize(std::string name, linalg::Vector2f value);
     void          RegisterNodeHitMask(std::string name, NodeHitMask mask);
@@ -249,6 +250,10 @@ public:
     // Called synchronously on a registry miss. The loader registers the requested
     // normalized template without attaching a drawable source to the scene graph.
     void          SetLayerTemplateLoader(std::function<bool(std::string_view)> loader);
+    /// Called by the loader when the model at `template_path` exists but is of a shape that
+    /// cannot be copied (a passthrough or compose model), so the refusal that follows is
+    /// logged as that and not as a missing template.
+    void          ReportUnsupportedLayerTemplate(std::string_view template_path);
     void          RegisterNodeVisibility(std::string name, SceneNode* node,
                                          std::unique_ptr<DynamicValue> value);
     /// An effect whose `visible` a script decides, as Wallpaper Engine's
@@ -725,7 +730,7 @@ private:
     };
     /// A layer whose picture goes through an effect chain: the chain's last card follows the
     /// layer wherever the layer is.
-    struct NodeEffectFinalBinding {
+    struct EffectCardLink {
         SceneNode*             node { nullptr };
         SceneImageEffectLayer* layer { nullptr };
         TextLayerRenderFrame   target_frame {};
@@ -746,36 +751,28 @@ private:
         std::vector<uint8_t> rgba;
     };
 public:
-    /// What `CaptureNodeRegistration` keeps of one layer key, and how long every runtime-wide
-    /// list was, so a layer whose build failed can be taken back out. Opaque to the loader.
-    struct NodeRegistrationSnapshot {
-        SceneNode*                       node { nullptr };
-        std::optional<std::size_t>       order_index;
-        std::optional<NodeVisibilityBinding> visibility;
-        std::optional<NodeVec3Binding>   translate;
-        std::optional<NodeVec3Binding>   scale;
-        std::optional<NodeVec3Binding>   rotation;
-        std::optional<NodeEffectFinalBinding> effect_final;
-        std::optional<linalg::Vector2f>  size;
-        std::optional<NodeHitMask>       hit_mask;
-        std::optional<NodeCursorTarget>  cursor_target;
-        std::optional<WPPuppetLayer>     puppet;
-        std::optional<TextLayer>         text_layer;
-        std::optional<TextEffectGate>    text_gate;
-        std::vector<TextValueBinding>    text_values;
-        std::optional<NodeAlignmentBinding> alignment;
-        std::optional<std::string>       template_path;
-        std::vector<std::string>         video_textures;
-        std::weak_ptr<WPSoundStream>     sound;
-        bool                             has_sound { false };
-        std::size_t owned_values { 0 };
-        std::size_t scripted_values { 0 };
-        std::size_t scene_scripts { 0 };
-        std::size_t material_constants { 0 };
-        std::size_t material_alpha { 0 };
-        std::size_t material_colors { 0 };
-        std::size_t clocks { 0 };
-        std::size_t listeners { 0 };
+    /// The runtime-wide lists a layer build can append to, in the order a rollback cuts them
+    /// (what reads another list goes first, the live values last).
+    enum class RuntimeList : std::size_t {
+        Listeners,
+        ScriptedValues,
+        SceneScripts,
+        MaterialConstants,
+        MaterialAlpha,
+        MaterialColors,
+        Clocks,
+        OwnedValues,
+        Count,
+    };
+    /// What `CaptureNodeRegistration` remembers about one layer key so a layer whose build
+    /// failed can be taken back out: where the key stood, one closure per per-layer record that
+    /// existed (each puts its record back), and how long each runtime-wide list was. Opaque to
+    /// the loader.
+    struct LayerRegistrationMemo {
+        SceneNode*                 node { nullptr };
+        std::optional<std::size_t> rank;
+        std::vector<std::function<void(SceneRuntimeContext&)>> put_back;
+        std::array<std::size_t, static_cast<std::size_t>(RuntimeList::Count)> lengths {};
     };
 
 private:
@@ -964,6 +961,7 @@ private:
     std::function<bool(std::string_view)>                          m_layer_template_loader;
     std::unordered_set<std::string>                               m_loading_layer_templates;
     std::unordered_set<std::string>                               m_failed_layer_templates;
+    std::unordered_set<std::string>                               m_unsupported_layer_templates;
     std::unordered_map<std::string, VideoTexturePlaybackBinding, StringHash, std::equal_to<>>
         m_video_texture_playback;
     std::unordered_map<std::string, std::weak_ptr<WPSoundStream>>  m_sound_layers;
@@ -1033,7 +1031,7 @@ private:
     std::vector<std::string> m_script_errors;
     /// Ends the subscription a registered listener made, in registration order.
     std::vector<std::function<void()>> m_listener_ends;
-    std::unordered_map<std::string, NodeEffectFinalBinding> m_node_effect_final;
+    std::unordered_map<std::string, EffectCardLink> m_effect_card_links;
     std::unordered_map<std::string, LayerTemplate> m_layer_templates;
     /// Layer key -> the template path the layer was made from (or the path a template node
     /// was registered under, which is how a script in a workshop layer finds its siblings).
@@ -1056,7 +1054,7 @@ private:
     bool                                         m_text_worker_stop { false };
     std::vector<FinishedTextLayout>              m_finished_text_layouts;
     /// The revision of the job last queued for a layer.
-    std::unordered_map<std::string, uint64_t>    m_queued_text_revisions;
+    std::unordered_map<std::string, uint64_t>    m_revision_queued_for_layer;
     enum class Vec3Key
     {
         Origin,
@@ -1064,9 +1062,21 @@ private:
         Angles,
     };
     void ApplyVec3Binding(Vec3Key key, const std::string& name, NodeVec3Binding& binding);
-    void ApplyMaterialConstantBinding(MaterialConstantBinding& binding);
+    void SyncMaterialConstant(MaterialConstantBinding& binding);
     void TextWorkerLoop();
+    /// Blocks until the worker has a job to take (counting it as running) or is told to stop.
+    std::optional<RuntimePendingTextLayerJob> AwaitTextJob();
+    /// Files a finished job and tells the content wake handler; drops it once stopping.
+    void PublishFinishedText(FinishedTextLayout done);
     bool ApplyFinishedTextLayout(FinishedTextLayout& finished);
+    /// Re-fits everything that depends on a text layer's card after its card changed.
+    void ReshapeTextCard(const std::string& name, TextLayer& layer, SceneNode* node);
+    void RefitCardMesh(SceneMesh& mesh, const TextLayerRenderFrame& frame);
+    void ResizeEffectChain(EffectCardLink& link, SceneNode* node,
+                           const TextLayerRenderFrame& effect_frame);
+    void PublishTextRaster(const TextLayer& layer, const FinishedTextLayout& done);
+    std::size_t RuntimeListLength(RuntimeList list) const;
+    void TrimRuntimeLists(const std::array<std::size_t, static_cast<std::size_t>(RuntimeList::Count)>& lengths);
     void QueueTextJobs();
     void RequestShownLayerGraph();
     void AdvanceClocks(double seconds);

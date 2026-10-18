@@ -12,6 +12,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -35,35 +36,15 @@ public:
     }
 
     std::shared_ptr<Image> Parse(const std::string& name) override {
-        std::string authored_name;
-        {
-            std::lock_guard lock(m_mutex);
-            if (const auto image = m_runtime_images.find(name); image != m_runtime_images.end()) {
-                return image->second;
-            }
-            if (const auto slot = m_cover_slots.find(name); slot != m_cover_slots.end()) {
-                if (auto cover = RealCoverLocked(slot->second); cover != nullptr) return cover;
-                if (slot->second.authored != nullptr) return slot->second.authored;
-                if (slot->second.authored_failed) return PlaceholderLocked(slot->second);
-                authored_name = slot->second.authored_name;
-            }
-        }
-        if (! authored_name.empty()) return ParseAuthoredForSlot(name, authored_name);
-        return m_fallback != nullptr ? m_fallback->Parse(name) : nullptr;
+        const Resolution found = Resolve(name);
+        if (found.decode_from.has_value()) return DecodeStandInPicture(name, *found.decode_from);
+        if (found.ours) return found.image;
+        return m_fallback ? m_fallback->Parse(name) : nullptr;
     }
 
     ImageHeader ParseHeader(const std::string& name) override {
-        {
-            std::lock_guard lock(m_mutex);
-            if (const auto image = m_runtime_images.find(name); image != m_runtime_images.end()) {
-                return image->second->header;
-            }
-            // Whatever the slot shows, a material reads the authored picture's header.
-            if (const auto slot = m_cover_slots.find(name); slot != m_cover_slots.end()) {
-                return slot->second.header;
-            }
-        }
-        return m_fallback != nullptr ? m_fallback->ParseHeader(name) : ImageHeader {};
+        if (auto own = HeaderWeHold(name); own.has_value()) return std::move(*own);
+        return m_fallback ? m_fallback->ParseHeader(name) : ImageHeader {};
     }
 
     void SetTextureSurfaceSize(uint32_t width, uint32_t height) override {
@@ -72,7 +53,7 @@ public:
 
     bool IsRuntimeImage(const std::string& name) const {
         std::lock_guard lock(m_mutex);
-        return m_runtime_images.contains(name) || m_cover_slots.contains(name);
+        return m_runtime_images.contains(name) || m_stand_ins.contains(name);
     }
 
     /// Changes whenever a name joins or leaves this source (`RemoveImage`,
@@ -92,8 +73,8 @@ public:
     uint64_t Version(const std::string& name) const {
         std::lock_guard lock(m_mutex);
         // A cover slot shows the cover, so it changes when the cover does.
-        const auto slot = m_cover_slots.find(name);
-        const auto version = m_versions.find(slot != m_cover_slots.end() ? slot->second.cover : name);
+        const auto slot = m_stand_ins.find(name);
+        const auto version = m_versions.find(slot != m_stand_ins.end() ? slot->second.cover_name : name);
         return version == m_versions.end() ? 0 : version->second;
     }
 
@@ -208,51 +189,56 @@ public:
     /// here, so a texture budget set after the scene parsed still applies to
     /// it, and stays resident after that so a clear does not decode it again.
     std::string BindCoverSlot(const std::string& cover_name, const std::string& authored_name) {
-        if (m_fallback == nullptr || authored_name.empty() || ! IsCoverName(cover_name)) {
-            return cover_name;
-        }
-        const std::string slot_name = cover_name + "|" + authored_name;
-        {
-            std::lock_guard lock(m_mutex);
-            if (m_cover_slots.contains(slot_name)) return slot_name;
-        }
-        // Read outside the lock: the fallback may touch the file system.
-        const ImageHeader header = m_fallback->ParseHeader(authored_name);
-        if (header.isVideo || header.isSprite || header.width <= 0 || header.height <= 0 ||
-            ! IsColourPicture(header.format)) {
-            return cover_name;
-        }
-        std::lock_guard lock(m_mutex);
-        const bool      added = m_cover_slots
-                              .try_emplace(slot_name, CoverSlot { .cover = cover_name,
-                                                                  .authored_name = authored_name,
-                                                                  .header = header })
-                              .second;
-        if (added) m_names_generation.fetch_add(1, std::memory_order_release);
+        const bool can_stand_in = IsCoverName(cover_name) && ! authored_name.empty() &&
+                                  m_fallback != nullptr;
+        if (! can_stand_in) return cover_name;
+
+        std::string slot_name = cover_name;
+        slot_name += '|';
+        slot_name += authored_name;
+        if (HasStandIn(slot_name)) return slot_name;
+
+        // The fallback may touch the file system, so it is asked with the lock released.
+        std::optional<ImageHeader> header = ReadStandInHeader(authored_name);
+        if (! header.has_value()) return cover_name;
+
+        StandIn entry;
+        entry.cover_name    = cover_name;
+        entry.authored_name = authored_name;
+        entry.header        = std::move(*header);
+        AddStandIn(slot_name, std::move(entry));
         return slot_name;
     }
 
 private:
-    /// One slot bound by `BindCoverSlot`.
-    struct CoverSlot {
-        /// The cover name whose image the slot shows once there is one.
-        std::string            cover;
+    /// One slot made by `BindCoverSlot`.
+    struct StandIn {
+        /// The cover whose image the slot shows once a track has one.
+        std::string            cover_name;
         std::string            authored_name;
         /// The authored picture's header, read when the slot was bound.
         ImageHeader            header;
-        /// The authored picture, decoded on first need.
-        std::shared_ptr<Image> authored;
-        /// The picture could not be decoded: the slot shows the cover's own
-        /// image, transparent while idle, as it did before slots existed.
-        bool                   authored_failed { false };
+        /// The authored picture, decoded on first need and kept.
+        std::shared_ptr<Image> picture;
+        /// Decoding failed: the slot then shows the cover's own image, which is transparent
+        /// while nothing plays.
+        bool                   undecodable { false };
+    };
+
+    /// What this source knows about a name, decided under one lock.
+    struct Resolution {
+        /// The name is a published image or a slot (so the fallback is not asked).
+        bool                       ours { false };
+        std::shared_ptr<Image>     image;
+        /// Set when the slot still has to decode its authored picture; holds that picture's name.
+        std::optional<std::string> decode_from;
     };
 
     static bool IsCoverName(const std::string& name) {
         return name == "$mediaThumbnail" || name == "$mediaPreviousThumbnail";
     }
 
-    /// What the cover names hold when no track does: one transparent texel,
-    /// which is also what an explicit clear publishes.
+    /// One transparent texel: what the cover names hold when no track does.
     static bool IsEmptyCoverPixel(uint32_t width, uint32_t height, uint8_t alpha) {
         return width == 1 && height == 1 && alpha == 0;
     }
@@ -261,57 +247,99 @@ private:
         if (image.header.width != 1 || image.header.height != 1 || image.slots.empty()) {
             return false;
         }
-        const auto& mipmaps = image.slots.front().mipmaps;
-        return ! mipmaps.empty() && mipmaps.front().data != nullptr &&
-               mipmaps.front().size >= 4 &&
-               IsEmptyCoverPixel(1, 1, mipmaps.front().data.get()[3]);
+        const auto& levels = image.slots.front().mipmaps;
+        return ! levels.empty() && levels.front().data != nullptr && levels.front().size >= 4 &&
+               IsEmptyCoverPixel(1, 1, levels.front().data.get()[3]);
     }
 
-    /// The formats a cover can stand in for: colour pictures, which a shader
-    /// reads the same way whether the slot holds the art or a track's RGBA.
+    /// Colour pictures read the same way in a shader whether the slot holds the art or a track's
+    /// RGBA, so only these formats may be stood in for.
     static bool IsColourPicture(TextureFormat format) {
         return format == TextureFormat::RGBA8 || format == TextureFormat::BC1 ||
                format == TextureFormat::BC2 || format == TextureFormat::BC3;
     }
 
-    /// The image a cover name holds when it holds a track's cover, not the
-    /// empty one. Caller holds the lock.
-    std::shared_ptr<Image> RealCoverLocked(const CoverSlot& slot) const {
-        const auto cover = m_runtime_images.find(slot.cover);
-        if (cover == m_runtime_images.end() || cover->second == nullptr ||
-            IsEmptyCover(*cover->second)) {
-            return nullptr;
-        }
-        return cover->second;
-    }
-
-    std::shared_ptr<Image> PlaceholderLocked(const CoverSlot& slot) const {
-        const auto cover = m_runtime_images.find(slot.cover);
-        return cover == m_runtime_images.end() ? nullptr : cover->second;
-    }
-
-    /// Decodes a slot's authored picture the first time it is needed. Outside
-    /// the lock: it reads a file, and a renderer asks about versions every
-    /// frame. Two threads asking at once both decode and one result is kept.
-    std::shared_ptr<Image> ParseAuthoredForSlot(const std::string& slot_name,
-                                                const std::string& authored_name) {
-        auto decoded = m_fallback != nullptr ? m_fallback->Parse(authored_name) : nullptr;
-        if (decoded != nullptr &&
-            (decoded->header.isVideo || decoded->slots.empty() ||
-             decoded->slots.front().mipmaps.empty())) {
-            decoded = nullptr;
-        }
+    Resolution Resolve(const std::string& name) const {
         std::lock_guard lock(m_mutex);
-        const auto      slot = m_cover_slots.find(slot_name);
-        if (slot == m_cover_slots.end()) return decoded;
-        if (slot->second.authored == nullptr && decoded != nullptr) {
-            slot->second.authored = std::move(decoded);
+        Resolution      out;
+        if (const auto own = m_runtime_images.find(name); own != m_runtime_images.end()) {
+            out.ours  = true;
+            out.image = own->second;
+            return out;
         }
-        slot->second.authored_failed = slot->second.authored == nullptr;
-        // What the slot shows now: a cover may have arrived while this decoded.
-        if (auto cover = RealCoverLocked(slot->second); cover != nullptr) return cover;
-        return slot->second.authored != nullptr ? slot->second.authored
-                                                : PlaceholderLocked(slot->second);
+        const auto entry = m_stand_ins.find(name);
+        if (entry == m_stand_ins.end()) return out;
+        out.ours  = true;
+        out.image = ShownByLocked(entry->second);
+        if (out.image == nullptr && ! entry->second.undecodable) {
+            out.decode_from = entry->second.authored_name;
+        }
+        return out;
+    }
+
+    std::optional<ImageHeader> HeaderWeHold(const std::string& name) const {
+        std::lock_guard lock(m_mutex);
+        if (const auto own = m_runtime_images.find(name); own != m_runtime_images.end()) {
+            return own->second->header;
+        }
+        // A material always reads the authored picture's header, whatever the slot shows.
+        if (const auto entry = m_stand_ins.find(name); entry != m_stand_ins.end()) {
+            return entry->second.header;
+        }
+        return std::nullopt;
+    }
+
+    bool HasStandIn(const std::string& slot_name) const {
+        std::lock_guard lock(m_mutex);
+        return m_stand_ins.contains(slot_name);
+    }
+
+    /// The authored picture's header when it may stand in for a cover: it must be a still picture
+    /// of positive size in a colour format.
+    std::optional<ImageHeader> ReadStandInHeader(const std::string& authored_name) {
+        ImageHeader header = m_fallback->ParseHeader(authored_name);
+        const bool  usable = ! header.isVideo && ! header.isSprite && header.width > 0 &&
+                            header.height > 0 && IsColourPicture(header.format);
+        if (! usable) return std::nullopt;
+        return header;
+    }
+
+    void AddStandIn(const std::string& slot_name, StandIn entry) {
+        std::lock_guard lock(m_mutex);
+        if (m_stand_ins.try_emplace(slot_name, std::move(entry)).second) {
+            m_names_generation.fetch_add(1, std::memory_order_release);
+        }
+    }
+
+    /// What a slot shows right now: the track's cover when one is published, else the authored
+    /// picture once decoded, else (decoding having failed) the cover's own image. Caller holds
+    /// the lock.
+    std::shared_ptr<Image> ShownByLocked(const StandIn& entry) const {
+        const auto cover = m_runtime_images.find(entry.cover_name);
+        const bool has_cover = cover != m_runtime_images.end() && cover->second != nullptr;
+        if (has_cover && ! IsEmptyCover(*cover->second)) return cover->second;
+        if (entry.picture != nullptr) return entry.picture;
+        if (entry.undecodable && has_cover) return cover->second;
+        return nullptr;
+    }
+
+    /// Decodes a slot's authored picture the first time it is asked for, with the lock released
+    /// (it reads a file and a renderer polls versions every frame). Two threads may both decode;
+    /// the first result stored is kept.
+    std::shared_ptr<Image> DecodeStandInPicture(const std::string& slot_name,
+                                                const std::string& authored_name) {
+        std::shared_ptr<Image> decoded = m_fallback ? m_fallback->Parse(authored_name) : nullptr;
+        const bool             usable  = decoded != nullptr && ! decoded->header.isVideo &&
+                            ! decoded->slots.empty() && ! decoded->slots.front().mipmaps.empty();
+        if (! usable) decoded = nullptr;
+
+        std::lock_guard lock(m_mutex);
+        const auto      entry = m_stand_ins.find(slot_name);
+        if (entry == m_stand_ins.end()) return decoded;
+        if (entry->second.picture == nullptr) entry->second.picture = std::move(decoded);
+        entry->second.undecodable = entry->second.picture == nullptr;
+        // A cover may have arrived while this decoded, so answer what the slot shows now.
+        return ShownByLocked(entry->second);
     }
 
     /// A fresh immutable RGBA8 image holding a private copy of the bytes, with the next version
@@ -362,7 +390,7 @@ private:
     uint64_t                                                m_version_counter { 0 };
     std::unique_ptr<IImageParser>                           m_fallback;
     std::unordered_map<std::string, std::shared_ptr<Image>> m_runtime_images;
-    std::unordered_map<std::string, CoverSlot>              m_cover_slots;
+    std::unordered_map<std::string, StandIn>                m_stand_ins;
     std::unordered_map<std::string, uint64_t>               m_versions;
     std::atomic<uint64_t>                                   m_names_generation { 0 };
 };

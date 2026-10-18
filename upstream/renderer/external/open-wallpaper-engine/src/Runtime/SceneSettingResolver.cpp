@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iterator>
 #include <sstream>
 
 namespace wallpaper
@@ -111,65 +112,115 @@ linalg::Vector3f parse_vec3(const nlohmann::json& setting) {
     return linalg::Vector3f::Zero();
 }
 
-// The property a setting is bound to, in either authored form, and the condition that goes
-// with the object form. A condition needs a text name and a text condition.
-std::optional<ConditionInfo> parse_condition(const nlohmann::json& setting, std::string* user_name) {
-    if (user_name != nullptr) user_name->clear();
-    if (!setting.is_object()) return std::nullopt;
+// What a setting's `user` member asks for: the property to follow, in either authored form, and
+// a condition that only the object form can carry (it needs a text name and a text condition).
+struct UserLink
+{
+    std::string                  property;
+    std::optional<ConditionInfo> condition;
+};
+
+UserLink ReadUserLink(const nlohmann::json& setting) {
+    UserLink link;
+    if (!setting.is_object()) return link;
     const auto user = setting.find("user");
-    if (user == setting.end()) return std::nullopt;
+    if (user == setting.end()) return link;
     if (user->is_string()) {
-        if (user_name != nullptr) *user_name = user->get<std::string>();
-        return std::nullopt;
+        link.property = user->get<std::string>();
+        return link;
     }
-    if (!user->is_object()) return std::nullopt;
+    if (!user->is_object()) return link;
     const auto name = user->find("name");
-    if (name == user->end() || !name->is_string()) return std::nullopt;
-    if (user_name != nullptr) *user_name = name->get<std::string>();
+    if (name == user->end() || !name->is_string()) return link;
+    link.property = name->get<std::string>();
     const auto condition = user->find("condition");
-    if (condition == user->end() || !condition->is_string()) return std::nullopt;
-    return ConditionInfo { name->get<std::string>(), condition->get<std::string>() };
+    if (condition != user->end() && condition->is_string()) {
+        link.condition = ConditionInfo { link.property, condition->get<std::string>() };
+    }
+    return link;
 }
 
-// Last step of resolving: the setting follows its property. The condition is in place before
-// the value first reads the property.
-void bind_user_property(SceneRuntimeContext& context, DynamicValue& value,
-                        const nlohmann::json& setting, bool as_vec3) {
-    std::string name;
-    const auto  condition = parse_condition(setting, &name);
-    if (name.empty()) return;
-    // A property the table does not declare yet is followed once a document supplies it.
-    DynamicValue* property = context.FollowProperty(name, value);
-    if (property == nullptr) return;
-    if (condition.has_value()) value.attachCondition(*condition);
-    if (as_vec3) {
-        value.connectVec3(property);
+// How a value reads its property: as one whole value, or as the three lanes of a vector.
+enum class FollowShape { Whole, Vec3 };
+
+// Makes `value` follow the property its setting names, if any. The condition goes on before the
+// first read. A property the table does not declare yet is followed once a document supplies it.
+void FollowUserProperty(SceneRuntimeContext& context, const nlohmann::json& setting,
+                        FollowShape shape, DynamicValue& value) {
+    const UserLink link = ReadUserLink(setting);
+    if (link.property.empty()) return;
+    DynamicValue* target = context.FollowProperty(link.property, value);
+    if (target == nullptr) return;
+    if (link.condition) value.attachCondition(*link.condition);
+    if (shape == FollowShape::Vec3) {
+        value.connectVec3(target);
     } else {
-        value.connect(property);
+        value.connect(target);
     }
 }
 
 bool mentions_scene_event_registration(const std::string& script) {
-    return script.find("engine.on(") != std::string::npos ||
-           script.find("scene.on(") != std::string::npos ||
-           script.find("thisScene.on(") != std::string::npos;
+    for (const char* call : { "engine.on(", "scene.on(", "thisScene.on(" }) {
+        if (script.find(call) != std::string::npos) return true;
+    }
+    return false;
 }
 
-DynamicValueUniquePtr resolve_auto_setting(SceneRuntimeContext& context, const nlohmann::json& setting);
-DynamicValueUniquePtr resolve_auto_setting(
-    SceneRuntimeContext& context,
-    const nlohmann::json& setting,
-    std::string_view current_layer_name);
+// Where a value script lives, which the script host needs to pick its `thisObject`.
+struct ScriptSite
+{
+    std::string_view      layer_name;
+    ScriptedValueSemantic semantic { ScriptedValueSemantic::Generic };
+    int                   animation_layer { -1 };
+};
+
+DynamicValueUniquePtr resolve_auto_setting(SceneRuntimeContext& context, const nlohmann::json& setting,
+                                           std::string_view current_layer_name = {});
+
+// The scripted value for a setting that carries a value script, seeded with `seed`; null when
+// the setting has none. A script that only registers scene events is not a value script.
+DynamicValueUniquePtr MakeScriptedValue(SceneRuntimeContext& context, const nlohmann::json& setting,
+                                        const DynamicValue& seed, const ScriptSite& site) {
+    const auto* source = [&]() -> const std::string* {
+        if (!setting.is_object()) return nullptr;
+        const auto script = setting.find("script");
+        if (script == setting.end() || !script->is_string()) return nullptr;
+        return &script->get_ref<const std::string&>();
+    }();
+    if (source == nullptr) return nullptr;
+    if (!ExportsFunction(*source, "update") && mentions_scene_event_registration(*source)) {
+        return nullptr;
+    }
+
+    std::map<std::string, DynamicValueUniquePtr> owned;
+    if (const auto declared = setting.find("scriptproperties");
+        declared != setting.end() && declared->is_object()) {
+        for (const auto& [key, item] : declared->items()) {
+            owned.emplace(key, resolve_auto_setting(context, item, site.layer_name));
+        }
+    }
+    auto scripted = std::make_unique<ScriptedDynamicValue>(
+        context, *source, std::string(site.layer_name), std::move(owned), seed, site.semantic,
+        site.animation_layer);
+    context.RegisterScriptedValue(scripted.get());
+    return scripted;
+}
+
+// Finishes a resolver: lets a value script take over from the literal, then binds the property
+// last so that a property change overwrites what a script produced.
+DynamicValueUniquePtr Finish(SceneRuntimeContext& context, const nlohmann::json& setting,
+                             DynamicValueUniquePtr literal, const ScriptSite& site,
+                             FollowShape shape) {
+    if (auto scripted = MakeScriptedValue(context, setting, *literal, site)) {
+        literal = std::move(scripted);
+    }
+    FollowUserProperty(context, setting, shape, *literal);
+    return literal;
+}
 
 // A script property is resolved by the kind its authored value has.
-DynamicValueUniquePtr resolve_auto_setting(SceneRuntimeContext& context, const nlohmann::json& setting) {
-    return resolve_auto_setting(context, setting, std::string_view {});
-}
-
-DynamicValueUniquePtr resolve_auto_setting(
-    SceneRuntimeContext& context,
-    const nlohmann::json& setting,
-    std::string_view current_layer_name) {
+DynamicValueUniquePtr resolve_auto_setting(SceneRuntimeContext& context, const nlohmann::json& setting,
+                                           std::string_view current_layer_name) {
     const auto& value = Unwrapped(setting);
     if (value.is_boolean()) return ResolveBoolSetting(context, setting, current_layer_name);
     DynamicValueUniquePtr resolved;
@@ -180,33 +231,8 @@ DynamicValueUniquePtr resolve_auto_setting(
     } else {
         resolved = std::make_unique<DynamicValue>();
     }
-    bind_user_property(context, *resolved, setting, false);
+    FollowUserProperty(context, setting, FollowShape::Whole, *resolved);
     return resolved;
-}
-
-// A setting with a script of its own becomes a scripted value that starts from `plain`. A
-// script that only registers scene events is not a value script: the setting stays plain.
-DynamicValueUniquePtr wrap_in_script(SceneRuntimeContext& context, const nlohmann::json& setting,
-                                     DynamicValueUniquePtr plain, std::string_view layer_name,
-                                     ScriptedValueSemantic semantic, int animation_layer_index) {
-    if (!setting.is_object()) return plain;
-    const auto script = setting.find("script");
-    if (script == setting.end() || !script->is_string()) return plain;
-    const auto& source = script->get_ref<const std::string&>();
-    if (mentions_scene_event_registration(source) && !ExportsFunction(source, "update")) return plain;
-
-    std::map<std::string, DynamicValueUniquePtr> properties;
-    const auto declared = setting.find("scriptproperties");
-    if (declared != setting.end() && declared->is_object()) {
-        for (const auto& [key, item] : declared->items()) {
-            properties.emplace(key, resolve_auto_setting(context, item, layer_name));
-        }
-    }
-    auto scripted = std::make_unique<ScriptedDynamicValue>(context, source, std::string(layer_name),
-                                                           std::move(properties), *plain, semantic,
-                                                           animation_layer_index);
-    context.RegisterScriptedValue(scripted.get());
-    return scripted;
 }
 
 } // namespace
@@ -218,69 +244,80 @@ bool InitialBoolSetting(const nlohmann::json& setting)
 
 std::string UserPropertyName(const nlohmann::json& setting)
 {
-    std::string user_name;
-    parse_condition(setting, &user_name);
-    return user_name;
+    return ReadUserLink(setting).property;
 }
 
 namespace
 {
-// The value of the cubic Bezier through (0, a), (x1, y1), (x2, y2), (1, b) at the curve parameter
-// whose time equals `time`. The two control times are ordered inside 0..1, so time grows with
-// the parameter and bisection finds it.
-double BezierValueAtTime(double x1, double x2, double a, double y1, double y2, double b, double time) {
-    const auto blend = [](double p0, double p1, double p2, double p3, double u) {
-        const double v = 1.0 - u;
-        return v * v * v * p0 + 3.0 * v * v * u * p1 + 3.0 * v * u * u * p2 + u * u * u * p3;
-    };
-    double low  = 0.0;
-    double high = 1.0;
-    for (int step = 0; step < 24; ++step) {
-        const double middle = 0.5 * (low + high);
-        if (blend(0.0, x1, x2, 1.0, middle) < time) {
-            low = middle;
-        } else {
-            high = middle;
-        }
+// Cubic Bernstein form in power basis: p0 (1-u)^3 + 3 p1 u (1-u)^2 + 3 p2 u^2 (1-u) + p3 u^3.
+struct Cubic
+{
+    double c0, c1, c2, c3;
+    Cubic(double p0, double p1, double p2, double p3)
+        : c0(p0), c1(3.0 * (p1 - p0)), c2(3.0 * (p2 - 2.0 * p1 + p0)),
+          c3(p3 - 3.0 * p2 + 3.0 * p1 - p0) {}
+    double At(double u) const { return ((c3 * u + c2) * u + c1) * u + c0; }
+    double Slope(double u) const { return (3.0 * c3 * u + 2.0 * c2) * u + c1; }
+};
+
+// The curve parameter in 0..1 at which the time cubic (0, x1, x2, 1) reaches `time`. Time never
+// decreases with the parameter, so the root stays inside a shrinking bracket; Newton steps
+// converge fast and a step that leaves the bracket (or a flat spot) falls back to its midpoint.
+double ParameterAtTime(const Cubic& clock, double time) {
+    double lo = 0.0;
+    double hi = 1.0;
+    double u  = std::clamp(time, 0.0, 1.0);
+    for (int round = 0; round < 64; ++round) {
+        const double miss = clock.At(u) - time;
+        if (miss == 0.0) return u;
+        (miss < 0.0 ? lo : hi) = u;
+        if (hi - lo < 1e-12) break;
+        const double slope = clock.Slope(u);
+        double       next  = slope > 1e-12 ? u - miss / slope : -1.0;
+        if (!(next > lo && next < hi)) next = 0.5 * (lo + hi);
+        if (std::abs(next - u) < 1e-13) return next;
+        u = next;
     }
-    return blend(a, y1, y2, b, 0.5 * (low + high));
+    return 0.5 * (lo + hi);
 }
-} // namespace
 
-float ScalarAnimation::Evaluate(double seconds) const {
-    if (!(fps > 0.0) || keyframes.empty() || !std::isfinite(seconds) || seconds < 0.0) {
-        return initial_value;
-    }
-    double       frame  = seconds * fps;
-    const double length = FrameCount();
-    const bool   loops  = mode == ScalarAnimationMode::Loop && length > 0.0;
-    if (loops) frame = std::fmod(frame, length);
-
-    if (frame < keyframes.front().frame) return loops ? keyframes.front().value : initial_value;
-    // The first key after the playhead; the one before it holds the playhead, and of several
-    // keys on one frame the later one does.
-    const auto next = std::upper_bound(keyframes.begin(), keyframes.end(), frame,
-                                       [](double at, const ScalarAnimationKeyframe& key) {
-                                           return at < key.frame;
-                                       });
-    if (next == keyframes.end()) return keyframes.back().value;
-    const auto& from = *(next - 1);
-    const auto& to   = *next;
-    const double span = to.frame - from.frame;
-    if (!(span > 0.0)) return to.value;
-    // A playhead exactly on a key shows that key, not what the interpolation makes of it.
-    if (frame == from.frame) return from.value;
-    const double along = (frame - from.frame) / span;
-    if (!from.front.enabled && !to.back.enabled) {
-        return static_cast<float>(from.value + (static_cast<double>(to.value) - from.value) * along);
-    }
-    const double a  = from.value;
-    const double b  = to.value;
+// The value between two keys at `along` (0..1 of their interval), `span` frames apart.
+double ValueBetween(const ScalarAnimationKeyframe& from, const ScalarAnimationKeyframe& to,
+                    double span, double along) {
+    const double a = from.value;
+    const double b = to.value;
+    if (!from.front.enabled && !to.back.enabled) return a + (b - a) * along;
     const double x1 = from.front.enabled ? std::clamp(from.front.x / span, 0.0, 1.0) : 1.0 / 3.0;
     const double x2 = to.back.enabled ? std::clamp(1.0 + to.back.x / span, x1, 1.0) : 2.0 / 3.0;
     const double y1 = from.front.enabled ? a + from.front.y : a + (b - a) / 3.0;
     const double y2 = to.back.enabled ? b + to.back.y : b - (b - a) / 3.0;
-    return static_cast<float>(BezierValueAtTime(x1, x2, a, y1, y2, b, along));
+    const double u  = ParameterAtTime(Cubic(0.0, x1, x2, 1.0), along);
+    return Cubic(a, y1, y2, b).At(u);
+}
+} // namespace
+
+float ScalarAnimation::Evaluate(double seconds) const {
+    if (keyframes.empty() || std::isnan(fps) || fps <= 0.0) return initial_value;
+    if (!std::isfinite(seconds) || seconds < 0.0) return initial_value;
+
+    const double total   = FrameCount();
+    const bool   looping = mode == ScalarAnimationMode::Loop && total > 0.0;
+    double       frame   = seconds * fps;
+    if (looping) frame = std::fmod(frame, total);
+    if (frame < keyframes.front().frame) return looping ? keyframes.front().value : initial_value;
+
+    // `later` is the first key beyond the playhead (of keys sharing a frame, the last one wins).
+    const auto later = std::partition_point(keyframes.begin(), keyframes.end(),
+                                            [frame](const ScalarAnimationKeyframe& key) {
+                                                return key.frame <= frame;
+                                            });
+    if (later == keyframes.end()) return keyframes.back().value;
+    const ScalarAnimationKeyframe& to   = *later;
+    const ScalarAnimationKeyframe& from = *std::prev(later);
+    if (frame == from.frame) return from.value;
+    const double span = to.frame - from.frame;
+    if (!(span > 0.0)) return to.value;
+    return static_cast<float>(ValueBetween(from, to, span, (frame - from.frame) / span));
 }
 
 double ScalarAnimation::FrameCount() const
@@ -390,11 +427,10 @@ std::unique_ptr<DynamicValue> ResolveBoolSetting(
     const nlohmann::json& setting,
     std::string_view current_layer_name,
     int animation_layer_index) {
-    auto value = wrap_in_script(context, setting, std::make_unique<DynamicValue>(parse_bool(setting)),
-                                current_layer_name, ScriptedValueSemantic::Generic,
-                                animation_layer_index);
-    bind_user_property(context, *value, setting, false);
-    return value;
+    const ScriptSite site { current_layer_name, ScriptedValueSemantic::Generic,
+                            animation_layer_index };
+    return Finish(context, setting, std::make_unique<DynamicValue>(parse_bool(setting)), site,
+                  FollowShape::Whole);
 }
 
 std::unique_ptr<DynamicValue> ResolveFloatSetting(
@@ -402,11 +438,10 @@ std::unique_ptr<DynamicValue> ResolveFloatSetting(
     const nlohmann::json& setting,
     std::string_view current_layer_name,
     int animation_layer_index) {
-    auto value = wrap_in_script(context, setting, std::make_unique<DynamicValue>(read_number(setting)),
-                                current_layer_name, ScriptedValueSemantic::Generic,
-                                animation_layer_index);
-    bind_user_property(context, *value, setting, false);
-    return value;
+    const ScriptSite site { current_layer_name, ScriptedValueSemantic::Generic,
+                            animation_layer_index };
+    return Finish(context, setting, std::make_unique<DynamicValue>(read_number(setting)), site,
+                  FollowShape::Whole);
 }
 
 std::unique_ptr<DynamicValue> ResolveVec3Setting(
@@ -414,14 +449,13 @@ std::unique_ptr<DynamicValue> ResolveVec3Setting(
     const nlohmann::json& setting,
     std::string_view current_layer_name,
     Vec3SettingSemantic semantic) {
-    auto value = wrap_in_script(context, setting, std::make_unique<DynamicValue>(parse_vec3(setting)),
-                                current_layer_name,
-                                semantic == Vec3SettingSemantic::AnglesDegrees
-                                    ? ScriptedValueSemantic::AnglesDegrees
-                                    : ScriptedValueSemantic::Generic,
-                                -1);
-    bind_user_property(context, *value, setting, true);
-    return value;
+    ScriptSite site;
+    site.layer_name = current_layer_name;
+    if (semantic == Vec3SettingSemantic::AnglesDegrees) {
+        site.semantic = ScriptedValueSemantic::AnglesDegrees;
+    }
+    return Finish(context, setting, std::make_unique<DynamicValue>(parse_vec3(setting)), site,
+                  FollowShape::Vec3);
 }
 
 std::unique_ptr<DynamicValue> ResolveVectorSetting(
@@ -432,30 +466,28 @@ std::unique_ptr<DynamicValue> ResolveVectorSetting(
     if (components == 3) {
         return ResolveVec3Setting(context, setting, current_layer_name, Vec3SettingSemantic::Generic);
     }
-    DynamicValueUniquePtr plain;
-    if (components == 2) {
-        const auto lanes = read_lanes<2>(setting);
-        plain = std::make_unique<DynamicValue>(linalg::Vector2f(lanes[0], lanes[1]));
-    } else if (components == 4) {
-        const auto lanes = read_lanes<4>(setting);
-        plain = std::make_unique<DynamicValue>(linalg::Vector4f(lanes[0], lanes[1], lanes[2], lanes[3]));
-    } else {
-        plain = std::make_unique<DynamicValue>(read_number(setting));
-    }
-    auto value = wrap_in_script(context, setting, std::move(plain), current_layer_name,
-                                ScriptedValueSemantic::Generic, -1);
-    bind_user_property(context, *value, setting, false);
-    return value;
+    auto literal = [&]() -> DynamicValueUniquePtr {
+        if (components == 2) {
+            const auto lanes = read_lanes<2>(setting);
+            return std::make_unique<DynamicValue>(linalg::Vector2f(lanes[0], lanes[1]));
+        }
+        if (components == 4) {
+            const auto lanes = read_lanes<4>(setting);
+            return std::make_unique<DynamicValue>(
+                linalg::Vector4f(lanes[0], lanes[1], lanes[2], lanes[3]));
+        }
+        return std::make_unique<DynamicValue>(read_number(setting));
+    }();
+    return Finish(context, setting, std::move(literal), ScriptSite { current_layer_name },
+                  FollowShape::Whole);
 }
 
 std::unique_ptr<DynamicValue> ResolveStringSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& setting,
     std::string_view current_layer_name) {
-    auto value = wrap_in_script(context, setting, std::make_unique<DynamicValue>(read_text(setting)),
-                                current_layer_name, ScriptedValueSemantic::Generic, -1);
-    bind_user_property(context, *value, setting, false);
-    return value;
+    return Finish(context, setting, std::make_unique<DynamicValue>(read_text(setting)),
+                  ScriptSite { current_layer_name }, FollowShape::Whole);
 }
 
 namespace
