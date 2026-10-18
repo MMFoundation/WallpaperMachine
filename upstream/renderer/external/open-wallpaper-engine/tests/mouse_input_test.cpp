@@ -1006,6 +1006,23 @@ TEST(MouseInput, TheBlockerInFrontFollowsTheLayerOrderAndAFrameInProgress) {
     }
 }
 
+// `sortLayer` moves a layer in the same order the cursor walk reads, so a blocker found for
+// one frame no longer stands in front of what was sorted past it.
+TEST(MouseInput, SortingALayerPastABlockerLiftsItsHold) {
+    CursorStage stage;
+    stage.AddLayer("back", 100.0f);
+    stage.AddLayer("aside", 900.0f, 100.0f, false);
+    stage.AddLayer("front", 150.0f, 100.0f, false);
+    stage.runtime->SetNodeCursorTarget("front", true, true, true);
+    stage.MoveTo(125.0f);
+    EXPECT_FALSE(stage.Hovered("back")) << "behind the blocker";
+    stage.MoveTo(300.0f);
+    EXPECT_TRUE(stage.runtime->SortLayer("back", 2));
+    stage.MoveTo(125.0f);
+    EXPECT_TRUE(stage.Hovered("back")) << "sorted in front of it";
+    EXPECT_EQ(stage.runtime->scriptErrorCount(), 0u);
+}
+
 // A registration rolled back because the layer failed to load puts back what the
 // layer it replaced was to the cursor, and leaves nothing behind where there was
 // no such layer.

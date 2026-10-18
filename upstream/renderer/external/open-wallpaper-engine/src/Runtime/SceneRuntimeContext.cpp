@@ -3797,7 +3797,9 @@ bool SceneRuntimeContext::SortLayer(std::string_view name, int index) {
         auto place = std::find(m_node_order.begin(), m_node_order.end(), anchor);
         if (target > current && place != m_node_order.end()) ++place;
         m_node_order.insert(place, key);
-        changed = true;
+        m_node_rank_valid       = false;
+        m_cursor_blocker_cached = false;
+        changed                 = true;
     }
 
     // Draw order is the order among siblings. The layer goes right after the
