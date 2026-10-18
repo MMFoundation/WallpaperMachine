@@ -3145,13 +3145,17 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
             BuildEffect(context, image, *fog_pass, index++, node, *chain, geometry.extent,
                         kind.fullscreen, true, false, true, plan.key, camera_name, tinted, all_materials, nullptr);
         }
-        if (! any_fixed && ! chain_sources.empty()) {
+        // A composition with nothing to run still has its picture to put on the scene.
+        const bool bare_composition = chain_sources.empty() && (composition || kind.compose_model);
+        if (! any_fixed && (! chain_sources.empty() || bare_composition)) {
             if (auto idle = MakeColorBlendEffect(*context.vfs, 0); idle.has_value()) {
                 for (auto& material : idle->materials) material.combos.erase("BLENDMODE");
                 std::shared_ptr<SceneImageEffect> fallback;
+                // On a composition layer the idle pass carries the layer's colour and alpha.
+                const bool carries_tint = composition || kind.compose_model;
                 if (BuildEffect(context, image, *idle, index++, node, *chain, geometry.extent,
-                                kind.fullscreen, true, false, true, plan.key, camera_name, tinted, all_materials,
-                                &fallback) && fallback != nullptr) {
+                                kind.fullscreen, ! carries_tint, false, ! carries_tint, plan.key, camera_name,
+                                tinted, all_materials, &fallback) && fallback != nullptr) {
                     fallback->fallback = true;
                 }
             }
