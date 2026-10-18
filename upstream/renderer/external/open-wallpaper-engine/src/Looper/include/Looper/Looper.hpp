@@ -1,6 +1,8 @@
+// Clean-room implementation from the WallpaperMachine spec e7-small-units.md; written without access to the original source.
 #pragma once
 #include <memory>
 #include <atomic>
+#include <cerrno>
 #include <cstdint>
 #include <mutex>
 #include <condition_variable>
@@ -47,7 +49,14 @@ public:
     void                   setLogScope(uint64_t scope);
 
 private:
-    std::atomic<bool>       m_running { false };
+    // Queue, running mark and thread live in a state the worker thread shares with
+    // the looper, so a waiting thread never keeps the looper itself alive.
+    struct Shared;
+
+    // Whether the message may still be delivered by this looper, and delivery.
+    void deliver(const std::shared_ptr<Message>&);
+
+    std::shared_ptr<Shared> m_shared;
     std::string             m_name { "unknown" };
     uint64_t                m_log_scope { 0 };
 };
@@ -71,7 +80,11 @@ private:
     bool setID(handler_id id, std::weak_ptr<Looper> looper);
     // Unbinds the handler again when it still carries `id`, so it may be registered anew.
     void clearID(handler_id id);
+    // Whether the handler is bound to exactly this looper under exactly this id.
+    bool isBoundTo(const Looper* looper, handler_id id) const;
 
+    // Identifier and looper change together, under this lock.
+    mutable std::mutex      m_bind_mutex;
     std::atomic<handler_id> m_id;
     std::weak_ptr<Looper>   m_looper;
 };
@@ -102,13 +115,29 @@ public:
 
     bool setObject(std::string_view name, const std::shared_ptr<void>&);
 
+    // The object stored under `name`, as a `T` pointer: `T` has to be the type the
+    // pointer had when it was stored.
     template<typename T>
     bool findObject(std::string_view name, std::shared_ptr<T>* value) const {
-        // CLEANROOM UV69
-        (void)name;
-        (void)value;
-        return false;
+        if (value == nullptr) return false;
+        const std::shared_ptr<void>* stored = findStoredObject(name);
+        if (stored == nullptr) return false;
+        *value = std::static_pointer_cast<T>(*stored);
+        return true;
     }
+
+private:
+    using Value = std::variant<bool, int32_t, float, std::string, std::shared_ptr<void>>;
+
+    const std::shared_ptr<void>* findStoredObject(std::string_view name) const;
+    template<typename T>
+    bool findValue(std::string_view name, T* out) const;
+
+    uint32_t                        m_what { 0 };
+    std::weak_ptr<Handler>          m_target;
+    handler_id                      m_target_id { 0 };
+    std::weak_ptr<Looper>           m_target_looper;
+    std::map<std::string, Value, std::less<>> m_values;
 };
 
 } // namespace looper
