@@ -813,6 +813,124 @@ ParticleInitOp WPParticleParser::genOverrideInitOp(
     };
 }
 
+// ---------------------------------------------------------------------------
+// Operator helpers.
+// ---------------------------------------------------------------------------
+namespace
+{
+
+/// The instance override as an operator reads it each step: speed and size
+/// factors, 1 when the record is absent, disabled, or the file ignores them.
+struct OverrideReader {
+    std::shared_ptr<const wpscene::ParticleInstanceoverride> over;
+    bool       speed_applies { true };
+    bool       size_applies { true };
+    LastFinite last_speed;
+    LastFinite last_size;
+
+    double Speed() {
+        return (speed_applies && over && over->enabled) ? last_speed(over->speed) : 1.0;
+    }
+    double Size() {
+        return (size_applies && over && over->enabled) ? last_size(over->size) : 1.0;
+    }
+};
+
+/// The window over a particle's life in which an operator is in force.
+struct BlendWindow {
+    bool   used { false };
+    double in_start { 0.0 }, in_end { 0.0 }, out_start { 1.0 }, out_end { 1.0 };
+
+    static BlendWindow Read(const Json& j) {
+        BlendWindow w;
+        w.in_start  = ReadKey<double>(j, "blendinstart", 0.0);
+        w.in_end    = ReadKey<double>(j, "blendinend", 0.0);
+        w.out_start = ReadKey<double>(j, "blendoutstart", 1.0);
+        w.out_end   = ReadKey<double>(j, "blendoutend", 1.0);
+        w.in_start  = std::min(w.in_start, w.in_end - 0.0001);
+        w.out_end   = std::max(w.out_end, w.out_start + 0.0001);
+        const bool reaches = w.in_end > 0.01 || w.out_start < 0.99;
+        const bool shaped  = (w.out_start - w.in_end) > 0.01 || (w.in_end - w.in_start) > 0.01 ||
+                            (w.out_end - w.out_start) > 0.01;
+        w.used = reaches && shaped;
+        return w;
+    }
+    double At(double t) const {
+        if (! used) return 1.0;
+        const double rise = std::clamp((t - in_start) / (in_end - in_start), 0.0, 1.0);
+        const double fall = std::clamp((out_end - t) / (out_end - out_start), 0.0, 1.0);
+        return rise * fall;
+    }
+};
+
+/// The `audioprocessing*` keys of an operator.
+struct AudioGate {
+    u32         mode { 0 };
+    i32         first { 0 }, last { 1 };
+    float       low { 0.8f }, high { 1.0f }, exponent { 2.0f };
+    std::function<audio::AudioSpectrumSnapshot()> spectrum;
+
+    static AudioGate Read(const Json& j, const ParticleParseContext& ctx) {
+        AudioGate g;
+        g.mode = ReadKey<uint32_t>(j, "audioprocessingmode", 0u);
+        const auto bounds = ReadKey<std::array<float, 2>>(j, "audioprocessingbounds", { 0.8f, 1.0f });
+        g.low      = bounds[0];
+        g.high     = bounds[1];
+        g.exponent = ReadKey<float>(j, "audioprocessingexponent", 2.0f);
+        g.first    = ReadKey<int32_t>(j, "audioprocessingfrequencystart", 0);
+        g.last     = ReadKey<int32_t>(j, "audioprocessingfrequencyend", 1);
+        g.spectrum = ctx.spectrum;
+        if (g.Enabled() && ctx.requires_audio) ctx.requires_audio();
+        return g;
+    }
+    bool Enabled() const { return mode >= 1 && mode <= 3; }
+    /// Sampled once per operator call.
+    double Level() const {
+        if (! Enabled()) return 1.0;
+        if (! spectrum) return 0.0;
+        return AudioLevel(spectrum(), mode, first, last, low, high, exponent);
+    }
+};
+
+double RampValue(double t, double t_start, double t_end, double from, double to) {
+    if (t <= t_start) return from;
+    if (t > t_end || ! (t_end > t_start)) return to;
+    return from + (to - from) * (t - t_start) / (t_end - t_start);
+}
+
+/// Smallest distance from `point` to the segment `a`..`b`.
+double DistanceToSegment(const Vec3d& point, const Vec3d& a, const Vec3d& b) {
+    const Vec3d  edge = b - a;
+    const double len2 = edge.squaredNorm();
+    const double t    = len2 > 0.0 ? std::clamp((point - a).dot(edge) / len2, 0.0, 1.0) : 0.0;
+    return (a + edge * t - point).norm();
+}
+
+/// A particle an operator removes expires in the next ageing step.
+void Remove(Particle& p) { p.lifetime = std::numeric_limits<float>::min(); }
+
+enum class Collision { Bounce, Slide, Stop, Delete };
+
+Collision CollisionOf(const std::string& name) {
+    if (name == "slide") return Collision::Slide;
+    if (name == "stop") return Collision::Stop;
+    if (name == "delete") return Collision::Delete;
+    return Collision::Bounce;
+}
+
+/// What a surface does to a particle it has put back outside.
+void Respond(Particle& p, Collision how, double bounce, const Vec3d& normal) {
+    const double along = PM::GetVelocity(p).cast<double>().dot(normal);
+    switch (how) {
+    case Collision::Bounce: PM::ChangeVelocity(p, normal * (-(1.0 + bounce) * along)); break;
+    case Collision::Slide: PM::ChangeVelocity(p, normal * -along); break;
+    case Collision::Stop: p.velocity = Vector3f::Zero(); break;
+    case Collision::Delete: Remove(p); break;
+    }
+}
+
+} // namespace
+
 ParticleOperatorOp
 WPParticleParser::genParticleOperatorOp(
     const nlohmann::json&                                   wpj,
@@ -824,8 +942,332 @@ WPParticleParser::genParticleOperatorOp(
 
 ParticleOperatorOp WPParticleParser::genParticleOperatorOp(const nlohmann::json&       wpj,
                                                            const ParticleParseContext& ctx) {
-    // CLEANROOM PS29
-    return [](const ParticleInfo&) {};
+    const ParticleOperatorOp inert = [](const ParticleInfo&) {};
+    if (! wpj.is_object() || ! wpj.contains("name") || ! wpj.at("name").is_string()) {
+        LogInertOnce("operator", "");
+        return inert;
+    }
+    const std::string name  = wpj.at("name").get<std::string>();
+    const bool        pixel = ctx.ortho;
+    OverrideReader    reader { ctx.over, ctx.speed_override, ctx.size_override, {}, {} };
+
+    if (name == "movement") {
+        const double drag    = ReadKey<double>(wpj, "drag", 0.0);
+        const Vec3d  gravity = ReadVec3(wpj, "gravity", { 0, 0, 0 });
+        const int    flags   = ReadKey<int32_t>(wpj, "flags", 0);
+        return [=](const ParticleInfo& info) mutable {
+            const double dt = info.time_pass;
+            Vec3d        g  = gravity * reader.Speed();
+            if (flags & 1) g = info.world_to_local * g;
+            const double keep = 1.0 - std::min(drag * dt, 0.9999999);
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                if (info.track_previous_position) p.prev_position = p.position;
+                PM::Accelerate(p, g, dt);
+                PM::MoveByTime(p, dt);
+                if (drag != 0.0) PM::MutiplyVelocity(p, keep);
+            }
+        };
+    }
+    if (name == "angularmovement") {
+        const double drag  = ReadKey<double>(wpj, "drag", 0.0);
+        const Vec3d  force = ReadVec3(wpj, "force", { 0, 0, 0 });
+        return [=](const ParticleInfo& info) mutable {
+            const double dt   = info.time_pass;
+            const Vec3d  push = force * reader.Speed();
+            const double keep = 1.0 - std::min(drag * dt, 0.9999999);
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                PM::AngularAccelerate(p, push, dt);
+                PM::RotateByTime(p, dt);
+                if (drag != 0.0) p.angularVelocity = (p.angularVelocity.cast<double>() * keep).cast<float>();
+            }
+        };
+    }
+    if (name == "sizechange" || name == "alphachange") {
+        const double t0 = ReadKey<double>(wpj, "starttime", 0.0), t1 = ReadKey<double>(wpj, "endtime", 1.0);
+        const double from = ReadKey<double>(wpj, "startvalue", 1.0), to = ReadKey<double>(wpj, "endvalue", 0.0);
+        const bool   size = name == "sizechange";
+        // Ramps visit every slot, a particle that expired this step included.
+        return [=](const ParticleInfo& info) mutable {
+            const double factor = size ? reader.Size() : 1.0;
+            for (auto& p : info.particles) {
+                const double value = RampValue(PM::LifetimePos(p), t0, t1, from, to);
+                if (size) PM::MutiplySize(p, factor * value);
+                else PM::MutiplyAlpha(p, value);
+            }
+        };
+    }
+    if (name == "colorchange") {
+        const double t0 = ReadKey<double>(wpj, "starttime", 0.0), t1 = ReadKey<double>(wpj, "endtime", 1.0);
+        const Vec3d  from = ReadVec3(wpj, "startvalue", { 1, 1, 1 });
+        const Vec3d  to   = ReadVec3(wpj, "endvalue", { 0, 0, 0 });
+        const ParticleParseContext context = ctx;
+        return [=](const ParticleInfo& info) mutable {
+            Vec3d a = from, b = to;
+            const ColourShift shift = ShiftOf(context);
+            if (shift.active) {
+                a = Retint(a, shift.delta);
+                b = Retint(b, shift.delta);
+            }
+            for (auto& p : info.particles) {
+                const double t = PM::LifetimePos(p);
+                PM::MutiplyColor(p, RampValue(t, t0, t1, a.x(), b.x()), RampValue(t, t0, t1, a.y(), b.y()),
+                                 RampValue(t, t0, t1, a.z(), b.z()));
+            }
+        };
+    }
+    if (name == "alphafade") {
+        const double fade_in  = ReadKey<double>(wpj, "fadeintime", 0.5);
+        const double fade_out = ReadKey<double>(wpj, "fadeouttime", 0.5);
+        return [=](const ParticleInfo& info) {
+            for (auto& p : info.particles) {
+                const double t = PM::LifetimePos(p);
+                if (t <= fade_in) {
+                    if (fade_in > 0.0) PM::MutiplyAlpha(p, t / fade_in);
+                } else if (t > fade_out) {
+                    const double span = 1.0 - fade_out;
+                    PM::MutiplyAlpha(p, span > 0.0 ? 1.0 - (t - fade_out) / span : 0.0);
+                }
+            }
+        };
+    }
+    if (name == "oscillatealpha" || name == "oscillatesize" || name == "oscillateposition") {
+        const bool   position = name == "oscillateposition";
+        const bool   alpha    = name == "oscillatealpha";
+        const double f_lo = ReadKey<double>(wpj, "frequencymin", 1.0);
+        const double f_hi = ReadKey<double>(wpj, "frequencymax", position ? 5.0 : 10.0);
+        const double s_lo = ReadKey<double>(wpj, "scalemin", (position || alpha) ? 0.0 : 0.8);
+        const double s_hi = ReadKey<double>(wpj, "scalemax",
+                                            position ? (pixel ? 10.0 : 0.5) : (alpha ? 1.0 : 1.2));
+        const double ph_lo = ReadKey<double>(wpj, "phasemin", 0.0);
+        const double ph_hi = ReadKey<double>(wpj, "phasemax", 2.0 * Pi);
+        const Vec3d  mask  = ReadVec3(wpj, "mask", { 1, 1, 0 });
+        const BlendWindow blend = BlendWindow::Read(wpj);
+        return [=](const ParticleInfo& info) mutable {
+            const double dt    = info.time_pass;
+            const double speed = reader.Speed();
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                const double seed      = p.seed;
+                const double frequency = Lerp(f_lo, f_hi, seed);
+                const double phase     = Lerp(ph_lo, ph_hi, seed);
+                const double age       = PM::LifetimePassed(p);
+                const double window    = blend.At(PM::LifetimePos(p));
+                if (position) {
+                    const double amp = (s_lo + seed * (s_hi - s_lo)) * window;
+                    const double f   = frequency * speed;
+                    const double wx  = amp * (std::sin((phase + age) * f) - std::sin((phase + age - dt) * f));
+                    const double shifted = phase + 2.0 * Pi * seed;
+                    const double wy  = amp * (std::sin((shifted + age) * f) - std::sin((shifted + age - dt) * f));
+                    PM::Move(p, wx * mask.x(), wy * mask.y(), wx * mask.z());
+                } else {
+                    const double o = s_lo + 0.5 * (std::sin((phase + age) * frequency) + 1.0) * seed * (s_hi - s_lo);
+                    const double factor = 1.0 - (1.0 - o) * window;
+                    if (alpha) PM::MutiplyAlpha(p, factor);
+                    else PM::MutiplySize(p, factor);
+                }
+            }
+        };
+    }
+    if (name == "turbulence") {
+        const double s_lo = ReadKey<double>(wpj, "speedmin", pixel ? 500.0 : 1.0);
+        const double s_hi = ReadKey<double>(wpj, "speedmax", pixel ? 1000.0 : 5.0);
+        const double timescale = ReadKey<double>(wpj, "timescale", pixel ? 20.0 : 1.0);
+        const double scale     = ReadKey<double>(wpj, "scale", pixel ? 0.01 : 0.5);
+        const Vec3d  mask = ReadVec3(wpj, "mask", pixel ? Vec3d { 1, 1, 0 } : Vec3d { 1, 1, 1 });
+        const double ph_lo = ReadKey<double>(wpj, "phasemin", 0.0);
+        const double ph_hi = ReadKey<double>(wpj, "phasemax", 0.0);
+        const BlendWindow blend = BlendWindow::Read(wpj);
+        const AudioGate   gate  = AudioGate::Read(wpj, ctx);
+        return [=](const ParticleInfo& info) mutable {
+            const double dt    = info.time_pass;
+            const double level = gate.Level() * reader.Speed();
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                const double seed  = p.seed;
+                const double phase = seed * (ph_hi - ph_lo) + info.time * timescale;
+                const Vec3d  q = (PM::GetPos(p).cast<double>() + Vec3d::Constant(phase)) * scale;
+                const Vec3d  field { Noise3(q.x(), q.y(), q.z()), Noise3(q.z(), q.x(), q.y()),
+                                     Noise3(q.y(), q.z(), q.x()) };
+                const double speed = Lerp(s_lo, s_hi, seed) * level * blend.At(PM::LifetimePos(p));
+                PM::ChangeVelocity(p, field.cwiseProduct(mask) * (speed * dt));
+            }
+        };
+    }
+    if (name == "vortex") {
+        const int    index = ReadKey<int32_t>(wpj, "controlpoint", 0);
+        const double inner = ReadKey<double>(wpj, "distanceinner", pixel ? 500.0 : 1.0);
+        const double outer = ReadKey<double>(wpj, "distanceouter", pixel ? 650.0 : 2.0);
+        const double speed_in  = ReadKey<double>(wpj, "speedinner", pixel ? 2500.0 : 1.0);
+        const double speed_out = ReadKey<double>(wpj, "speedouter", 0.0);
+        const int    flags = ReadKey<int32_t>(wpj, "flags", 0);
+        const Vec3d  offset = ReadVec3(wpj, "offset", { 0, 0, 0 });
+        Vec3d        axis   = ReadVec3(wpj, "axis", { 0, 0, 1 });
+        if (axis.squaredNorm() >= 0.001) axis = axis.normalized();
+        const BlendWindow blend = BlendWindow::Read(wpj);
+        const AudioGate   gate  = AudioGate::Read(wpj, ctx);
+        return [=](const ParticleInfo& info) mutable {
+            const auto* point  = PointOf(info.controlpoints, index);
+            const Vec3d centre = (point ? point->offset : Vec3d::Zero()) + offset;
+            const double dt    = info.time_pass;
+            const double level = gate.Level() * reader.Speed();
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                Vec3d d = PM::GetPos(p).cast<double>() - centre;
+                if (flags & 1) d -= axis * d.dot(axis);
+                const double r = d.norm();
+                if (! (r > 1.0e-9)) continue;
+                const double t = outer > inner ? std::clamp((r - inner) / (outer - inner), 0.0, 1.0)
+                                               : (r >= outer ? 1.0 : 0.0);
+                const double speed = level * blend.At(PM::LifetimePos(p)) * Lerp(speed_in, speed_out, t);
+                PM::ChangeVelocity(p, d.cross(axis) / r * (speed * dt));
+            }
+        };
+    }
+    if (name == "controlpointattract") {
+        const int    index = ReadKey<int32_t>(wpj, "controlpoint", 0);
+        const double scale = ReadKey<double>(wpj, "scale", pixel ? 512.0 : 20.0);
+        double       threshold = pixel ? 512.0 : 5.0;
+        if (wpj.contains("threshold")) threshold = ReadKey<double>(wpj, "threshold", threshold);
+        else threshold = ReadKey<double>(wpj, "threadhold", threshold);
+        const double delete_at = ReadKey<double>(wpj, "deletethreshold", pixel ? 15.0 : 0.5);
+        const int    flags     = ReadKey<int32_t>(wpj, "flags", 0);
+        return [=](const ParticleInfo& info) mutable {
+            const auto* point  = PointOf(info.controlpoints, index);
+            const Vec3d centre = point ? point->offset : Vec3d::Zero();
+            const double dt    = info.time_pass;
+            const double power = scale * reader.Speed();
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                const Vec3d  pos = PM::GetPos(p).cast<double>();
+                const Vec3d  d   = pos - centre;
+                const double len = d.norm();
+                if (len > 0.0 && len < threshold) {
+                    double k = (1.0 - len / threshold) * power * dt;
+                    if ((flags & 2) && k > 0.0) k = std::min(k, len);
+                    PM::ChangeVelocity(p, d / len * -k);
+                }
+                if ((flags & 1) &&
+                    DistanceToSegment(centre, p.prev_position.cast<double>(), pos) < delete_at) {
+                    Remove(p);
+                }
+            }
+        };
+    }
+    if (name == "capvelocity") {
+        const double max_speed = ReadKey<double>(wpj, "maxspeed", pixel ? 100.0 : 1.0);
+        const BlendWindow blend = BlendWindow::Read(wpj);
+        return [=](const ParticleInfo& info) {
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                const double speed = PM::GetVelocity(p).cast<double>().norm();
+                if (speed > max_speed && speed > 0.0) {
+                    PM::MutiplyVelocity(p, 1.0 - blend.At(PM::LifetimePos(p)) * (1.0 - max_speed / speed));
+                }
+            }
+        };
+    }
+    if (name == "reducemovementnearcontrolpoint") {
+        const int    index = ReadKey<int32_t>(wpj, "controlpoint", 0);
+        const double inner = ReadKey<double>(wpj, "distanceinner", pixel ? 100.0 : 0.5);
+        const double outer = ReadKey<double>(wpj, "distanceouter", pixel ? 350.0 : 1.0);
+        const double r_in  = ReadKey<double>(wpj, "reductioninner", 100.0);
+        const double r_out = ReadKey<double>(wpj, "reductionouter", 0.0);
+        return [=](const ParticleInfo& info) {
+            const auto* point  = PointOf(info.controlpoints, index);
+            const Vec3d centre = point ? point->offset : Vec3d::Zero();
+            double      span   = r_out - r_in;
+            if (span == 0.0) span = 1.0;
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                const double dist = (PM::GetPos(p).cast<double>() - centre).norm();
+                const double s = outer > inner ? std::clamp((dist - inner) / (outer - inner), 0.0, 1.0)
+                                               : (dist > inner ? 1.0 : 0.0);
+                const double reduction = std::clamp((r_in + s * span) * info.time_pass, 0.0, 1.0);
+                PM::MutiplyVelocity(p, 1.0 - reduction);
+            }
+        };
+    }
+    if (name == "maintaindistancetocontrolpoint") {
+        const int    index    = ReadKey<int32_t>(wpj, "controlpoint", 0);
+        const double distance = ReadKey<double>(wpj, "distance", pixel ? 200.0 : 1.0);
+        const double variable = ReadKey<double>(wpj, "variablestrength", 0.0);
+        return [=](const ParticleInfo& info) {
+            const auto* point = PointOf(info.controlpoints, index);
+            if (point == nullptr) return;
+            const Vec3d ride   = point->offset - point->prev_offset;
+            const double amount = variable == 0.0 ? 1.0 : std::clamp(variable * info.time_pass, 0.0, 1.0);
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                PM::Move(p, ride);
+                const Vec3d  rel = PM::GetPos(p).cast<double>() - point->offset;
+                const double len = rel.norm();
+                if (len > 0.0) PM::Move(p, rel * ((distance / len - 1.0) * amount));
+            }
+        };
+    }
+    if (name == "maintaindistancebetweencontrolpoints") {
+        const int first = ReadKey<int32_t>(wpj, "controlpointstart", 0);
+        const int last  = ReadKey<int32_t>(wpj, "controlpointend", 1);
+        return [=](const ParticleInfo& info) {
+            const auto* a = PointOf(info.controlpoints, first);
+            const auto* b = PointOf(info.controlpoints, last);
+            if (a == nullptr || b == nullptr) return;
+            const Vec3d was = b->prev_offset - a->prev_offset;
+            const Vec3d now = b->offset - a->offset;
+            if (was.squaredNorm() < 1.4e-14 || now.squaredNorm() < 1.4e-14) return;
+            const Vec3d slide = a->offset - a->prev_offset;
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                const double along = (PM::GetPos(p).cast<double>() - a->prev_offset).dot(was) / was.squaredNorm();
+                PM::Move(p, slide + now * std::clamp(along, 0.0, 1.0) - was * along);
+            }
+        };
+    }
+    if (name == "collisionplane" || name == "collisionsphere") {
+        const bool   sphere   = name == "collisionsphere";
+        const int    index    = ReadKey<int32_t>(wpj, "controlpoint", 0);
+        const int    flags    = ReadKey<int32_t>(wpj, "flags", 0);
+        const Vec3d  origin   = ReadVec3(wpj, "origin", pixel ? Vec3d { 0, -200, 0 } : Vec3d { 0, 0, 0 });
+        const double distance = ReadKey<double>(wpj, "distance", pixel ? -150.0 : 0.0);
+        const double radius   = ReadKey<double>(wpj, "radius", pixel ? 50.0 : 1.0);
+        const double bounce   = ReadKey<double>(wpj, "bouncefactor", 0.5);
+        const Collision how   = CollisionOf(ReadKey<std::string>(wpj, "collisionbehavior", "bounce"));
+        Vec3d        plane    = ReadVec3(wpj, "plane", { 0, 1, 0 });
+        plane = plane.norm() > 0.0 ? Vec3d(plane.normalized()) : Vec3d::Zero();
+        return [=](const ParticleInfo& info) {
+            const auto* point = (flags & 1) ? PointOf(info.controlpoints, index) : nullptr;
+            if (sphere) {
+                const Vec3d centre = point ? point->offset : origin;
+                for (auto& p : info.particles) {
+                    if (! PM::LifetimeOk(p)) continue;
+                    const Vec3d  rel = PM::GetPos(p).cast<double>() - centre;
+                    const double len = rel.norm();
+                    if (! (len > 0.0) || len - radius >= 0.0) continue;
+                    const Vec3d normal = rel / len;
+                    PM::MoveTo(p, centre + normal * radius);
+                    Respond(p, how, bounce, normal);
+                }
+            } else {
+                Vec3d normal = plane;
+                double offset = distance;
+                if (point != nullptr) {
+                    if (point->has_rotation) normal = point->rotation * normal;
+                    offset = normal.dot(point->offset);
+                }
+                for (auto& p : info.particles) {
+                    if (! PM::LifetimeOk(p)) continue;
+                    const double depth = normal.dot(PM::GetPos(p).cast<double>()) - offset;
+                    if (! (depth < 0.0)) continue;
+                    PM::Move(p, normal * -depth);
+                    Respond(p, how, bounce, normal);
+                }
+            }
+        };
+    }
+    LogInertOnce("operator", name);
+    return inert;
 }
 
 ParticleEmittOp WPParticleParser::genParticleEmittOp(
