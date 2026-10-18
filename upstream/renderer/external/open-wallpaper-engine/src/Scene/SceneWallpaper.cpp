@@ -1305,7 +1305,15 @@ private:
         if (! replaceCurrentScene(std::move(incoming), takes_pointer)) return;
 
         m_failure_first_frame_sent = false;
-        clearRenderBlock();
+        // A surface the host has released stays blocked: the scene waits for the one that
+        // replaces it, and only the failure of the scene it replaces ends here.
+        const bool surface_released = m_surface_released;
+        m_scene_awaits_surface      = surface_released;
+        if (surface_released) {
+            clearFailure();
+        } else {
+            clearRenderBlock();
+        }
         syncFrameClock();
         equipSceneRuntime();
 
@@ -1316,9 +1324,11 @@ private:
         commitAudioRequirement();
         main_handler.sendPointerInputCapability(takes_pointer);
 
-        selectSceneBackend();
+        if (! surface_released) selectSceneBackend();
         publishParkedArtwork();
-        if (m_failure_stage == SceneFailureStage::None) (void)rebuildRenderGraph();
+        if (! surface_released && m_failure_stage == SceneFailureStage::None) {
+            (void)rebuildRenderGraph();
+        }
 
         publishPauseReasons();
         refreshFrameDemand();
@@ -1383,6 +1393,8 @@ private:
         if (! msg->findObject("info", &info) || info == nullptr) return;
         adoptRenderInitInfo(std::move(info));
         m_surface_handed.store(true, std::memory_order_release);
+        m_surface_released     = false;
+        m_scene_awaits_surface = false;
         clearRenderBlock();
         syncFrameClock();
         publishScreenResolution();
@@ -1426,6 +1438,7 @@ private:
     /// A host-initiated stop: no stop reason, no failure counted, nobody called back.
     MHANDLER_CMD(BEGIN_SURFACE_RECONFIGURE) {
         TicketGuard ticket(msg);
+        m_surface_released = true;
         suspendRendering();
         m_render->SetVideoPlaybackPaused(true);
         // Nothing the preview picture holds may refer to the layer that is about to go.
@@ -1441,6 +1454,9 @@ private:
         if (! msg->findObject("info", &info) || info == nullptr) return;
         adoptRenderInitInfo(std::move(info));
         m_surface_handed.store(true, std::memory_order_release);
+        m_surface_released = false;
+        // A scene that landed while the surface was out chose no renderer and built no graph.
+        const bool scene_waited = std::exchange(m_scene_awaits_surface, false) && m_scene != nullptr;
 
         if (! m_render->hasBackend()) {
             if (m_failure_stage != SceneFailureStage::None) {
@@ -1452,6 +1468,13 @@ private:
                 // description when the scene lands.
                 clearRenderBlock();
                 syncFrameClock();
+                if (scene_waited) {
+                    selectSceneBackend();
+                    if (m_failure_stage == SceneFailureStage::None && ! rebuildRenderGraph()) {
+                        publishPauseReasons();
+                        return;
+                    }
+                }
             }
             publishPauseReasons();
             ticket.succeed(true);
@@ -1462,6 +1485,15 @@ private:
             return;
         }
         m_render->InvalidatePresentedFrame();
+        if (scene_waited) {
+            selectSceneBackend();
+            if (m_failure_stage != SceneFailureStage::None) {
+                // Refused: held like any refusal, which is not a failure of the surface.
+                publishPauseReasons();
+                ticket.succeed(true);
+                return;
+            }
+        }
         if (m_scene == nullptr) {
             clearRenderBlock();
         } else if (! rebuildRenderGraph()) {
@@ -1598,6 +1630,12 @@ private:
     std::shared_ptr<RenderInitInfo>      m_render_init_info;
     std::unique_ptr<rg::RenderGraph>      m_rg { nullptr };
     bool                                m_render_blocked { false };
+    /// Between `BEGIN_SURFACE_RECONFIGURE` and the surface that follows it: the layer the
+    /// description names is the one the host gave up, so nothing may be created on it or drawn.
+    bool                                m_surface_released { false };
+    /// A scene was committed while the surface was released: its renderer choice and its graph
+    /// wait for the surface that comes back.
+    bool                                m_scene_awaits_surface { false };
     /// Whether the frame loop is alive and why it stopped. Unlike the
     /// counters, never gated: a stop nobody can see cannot be told apart from
     /// a pause.

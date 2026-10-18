@@ -270,6 +270,10 @@ public:
         return m_wallpaper.finishSurfaceReconfigure(MakeSurface(width, height));
     }
 
+    /// The two halves of that rebuild, for a host that does work between them.
+    bool Release() { return m_wallpaper.beginSurfaceReconfigure(); }
+    bool Restore() { return m_wallpaper.finishSurfaceReconfigure(MakeSurface()); }
+
     uint64_t Presented() { return m_wallpaper.surfaceHealth().frames_presented; }
     uint64_t Completed() { return m_wallpaper.surfaceHealth().frames_completed; }
 
@@ -540,6 +544,46 @@ TEST_F(SceneFailurePolicy, ARefusedReloadIsNotDrawnByTheOutgoingScenesRendererAf
     EXPECT_NE(running.wallpaper().surfaceHealth().stop_reason, SurfaceStopReason::Running);
     EXPECT_EQ(running.layer().sublayers.count, 0u) << "the last picture is held, no preview over it";
     EXPECT_EQ(LogCapture::Count(kFailureLine), 1);
+}
+
+// The host has released the surface and not yet given a new one back. A wallpaper
+// whose load finishes in between is stored, but nothing is drawn for it, and no
+// renderer is created on the layer the host gave up, until the surface returns.
+TEST_F(SceneFailurePolicy, ASceneCommittedWhileTheSurfaceIsReleasedIsDrawnOnlyOnceItReturns)
+{
+    LogCapture              log;
+    std::mutex              mutex;
+    std::condition_variable changed;
+    int                     commits = 0;
+    Running running(WriteScene(root_ / "scene"), root_ / "run");
+    ASSERT_TRUE(running.WaitForFirstFrame());
+    std::this_thread::sleep_for(300ms);
+    ASSERT_GT(running.Presented(), 0u);
+
+    // Told once on registration and once for each committed scene.
+    running.wallpaper().setPropertyObject(PROPERTY_POINTER_INPUT_CALLBACK,
+                                          std::make_shared<PointerInputCallback>([&](bool) {
+                                              std::scoped_lock lock(mutex);
+                                              ++commits;
+                                              changed.notify_all();
+                                          }));
+    ASSERT_TRUE(running.Release());
+    const auto frozen = running.Completed();
+    running.Reload(WriteScene(root_ / "scene-b"), root_ / "run");
+    {
+        std::unique_lock lock(mutex);
+        ASSERT_TRUE(changed.wait_for(lock, 30s, [&] { return commits >= 2; }));
+    }
+    std::this_thread::sleep_for(400ms);
+    EXPECT_EQ(running.Completed(), frozen) << "a frame was drawn while the surface was released";
+    EXPECT_FALSE(running.wallpaper().sceneBackendSelection().failed());
+
+    ASSERT_TRUE(running.Restore());
+    for (int i = 0; i < 600 && running.FirstFrames() < 2; ++i) std::this_thread::sleep_for(50ms);
+    EXPECT_EQ(running.FirstFrames(), 2) << "the new wallpaper never reached the new surface";
+    EXPECT_GT(running.Completed(), frozen);
+    EXPECT_EQ(running.wallpaper().surfaceHealth().stop_reason, SurfaceStopReason::Running);
+    EXPECT_FALSE(running.wallpaper().sceneBackendSelection().failed());
 }
 
 TEST_F(SceneFailurePolicy, ASurfaceTheNativeRendererCannotTakeIsHeld)
