@@ -2023,6 +2023,7 @@ void SceneRuntimeContext::RegisterSceneScript(std::string script_source, std::st
         *m_host_context);
     if (program == nullptr || ! program->Valid()) return;
     m_scene_scripts.push_back(SceneScriptBinding { .script = std::move(program) });
+    if (m_scripts_torn_down) return;
 }
 
 void SceneRuntimeContext::RegisterNodeVideoTexture(std::string name, std::string texture_key) {
