@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e7-small-units.md; written without access to the original source.
 #pragma once
 
 #include <cstdint>
@@ -7,10 +8,14 @@
 #define __SHORT_FILE__   past_last_slash(__FILE__)
 static constexpr const char* past_last_slash(const char* const path, const int pos = 0,
                                              const int last_slash = 0) {
-    // CLEANROOM UV35
-    (void)pos;
-    (void)last_slash;
-    return path;
+    // The text after the last '/' at or beyond `pos`; `last_slash` is where the
+    // name is known to start so far.
+    if (path == nullptr) return path;
+    int start = last_slash;
+    for (int i = pos; path[i] != '\0'; ++i) {
+        if (path[i] == '/') start = i + 1;
+    }
+    return path + start;
 }
 
 enum

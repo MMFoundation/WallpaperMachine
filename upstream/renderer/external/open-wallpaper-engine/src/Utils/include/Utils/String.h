@@ -136,8 +136,7 @@ namespace StrToArray
 {
 struct WrongSizeExp : public std::exception {
     const char* what() const throw() {
-        // CLEANROOM UV38
-        return "";
+        return "the text holds a different number of fields than the array has elements";
     }
 };
 
