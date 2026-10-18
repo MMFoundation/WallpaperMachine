@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e1a-scene-host.md; written without access to the original source.
 #pragma once
 #include <memory>
 #include <vector>
@@ -21,6 +22,7 @@ namespace wallpaper
 {
 
 class Scene;
+class SceneCamera;
 
 struct WPUniformInfo {
     bool has_MI { false };
@@ -73,7 +75,7 @@ struct WPUniformInfo {
         bool has_mipmap { false };
         bool has_texel { false };
     };
-    std::array<Tex, 12> texs;
+    std::array<Tex, 13> texs;
 };
 
 struct WPShaderValueData {
@@ -141,8 +143,12 @@ public:
     };
     void RegisterPuppetAttachments(WPPuppetLayer layer, std::vector<PuppetAttachment> attachments);
 
-    // CLEANROOM SH55
-    void SetScreenSize(i32, i32) override {}
+    void SetScreenSize(i32 w, i32 h) override {
+        // A raster without area would divide by zero in `g_Screen`.
+        if (w <= 0 || h <= 0) return;
+        m_screenWidth  = w;
+        m_screenHeight = h;
+    }
 
 private:
     struct PuppetAttachmentGroup {
@@ -150,6 +156,19 @@ private:
         std::vector<PuppetAttachment> attachments;
     };
     void UpdatePuppetAttachments(PuppetAttachmentGroup& group);
+    /// The reflection record of a node and slot, falling back to slot 0; null when there is none.
+    const WPUniformInfo* FindUniformInfo(const SceneNode* node, uint32_t slot) const;
+    /// The same for the per-node data the parser registered.
+    const WPShaderValueData* FindNodeData(const SceneNode* node, uint32_t slot) const;
+    /// The camera `name` names, the scene's active one for an empty name, null when it has none.
+    const SceneCamera*   CameraNamed(const std::string& name) const;
+    /// Whether camera parallax moves a draw through its model matrix, and by which depth.
+    bool ParallaxMovesDraw(const WPUniformInfo& info, const SceneNode* node,
+                           const std::string& camera_name, const WPShaderValueData* data,
+                           bool compose_first, std::array<float, 2>* depth) const;
+    /// Where the outermost layer of the tree a draw belongs to stands, which anchors its parallax.
+    linalg::Vector3d ParallaxRootOrigin(const SceneNode* node, const WPShaderValueData* data) const;
+    void UpdateSprites(SceneNode* node, sprite_map_t& sprites, const UpdateUniformOp& write);
     std::vector<PuppetAttachmentGroup> m_puppetAttachments;
 
     Scene*               m_scene;
@@ -167,7 +186,12 @@ private:
     std::array<float, 2> m_parallaxPos { 0.5f, 0.5f };
 
 
-    std::optional<ShaderValue> m_audioSpectrumPacked;
+    /// The raster the backend draws into: `g_Screen`, and the step of `g_TexelSize`.
+    i32                  m_screenWidth { 1920 };
+    i32                  m_screenHeight { 1080 };
+    std::array<float, 2> m_texelSize { 1.0f / 1920.0f, 1.0f / 1080.0f };
+    /// One buffer for the audio arrays, which are handed over as one value at a time.
+    std::vector<float>   m_audioPack;
 
     Map<void*, Map<uint32_t, WPShaderValueData>> m_nodeDataMap;
     Map<void*, Map<uint32_t, WPUniformInfo>> m_nodeUniformInfoMap;
