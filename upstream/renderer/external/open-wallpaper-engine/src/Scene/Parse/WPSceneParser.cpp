@@ -1745,10 +1745,6 @@ void BindPuppetAnimationLayerSettings(ParseContext& context, const std::string& 
     }
 }
 
-// CLEANROOM LS24: the file-local helpers of this group were removed; the rewrite designs its own.
-
-// CLEANROOM LS25: the file-local helpers of this group were removed; the rewrite designs its own.
-
 // The field of view of a scene with a perspective projection: a shot's own, else
 // the scene's `fov`. `perspectiveoverridefov` belongs to a 2D scene's perspective
 // layers (below) and plays no part here, whatever the package version.
@@ -2745,6 +2741,91 @@ void SetUnhittable(ParseContext& context, const std::string& key, bool solid = f
     }
 }
 
+// ---------------------------------------------------------------------------
+// Puppets drawn directly: one material per mesh, clipping masks (P2 R75, P5 R68, R69).
+// ---------------------------------------------------------------------------
+
+/// The render target the clipping masks are drawn into: the screen scaled by one half (R25).
+constexpr std::string_view kPuppetMaskTarget = "_rt_puppet_mask";
+
+struct PuppetSlot {
+    wpscene::WPMaterial authored;
+    LoadedMaterial      loaded;
+};
+
+/// Reads a material file for a puppet slot; the puppet's skinning combos are put in first.
+std::optional<wpscene::WPMaterial> ReadPuppetMaterial(fs::VFS& vfs, const std::string& path,
+                                                      const WPMdl& mdl, bool has_bones) {
+    nlohmann::json json;
+    if (path.empty() || ! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + path), json)) return std::nullopt;
+    wpscene::WPMaterial material;
+    if (! material.FromJson(json)) return std::nullopt;
+    material.use_puppet = true;
+    if (has_bones) WPMdlParser::AddPuppetMatInfo(material, mdl);
+    return material;
+}
+
+/// Loads every slot of a puppet drawn directly, in submesh order: the mesh's own material,
+/// then for each mask its mask material and its clipped copy. False abandons the whole set.
+bool LoadPuppetSlots(ParseContext& context, const wpscene::WPImageObject& image, const WPMdl& mdl,
+                     bool has_bones, bool additive, SceneMesh& mesh, std::vector<PuppetSlot>& slots) {
+    const auto load = [&](wpscene::WPMaterial authored, bool tint) -> bool {
+        SceneMaterial scene_material;
+        PuppetSlot    slot;
+        if (! LoadMaterial(context, authored, scene_material, slot.loaded)) return false;
+        if (tint) SetLayerTint(context, scene_material, image, false);
+        if (additive) scene_material.blenmode = BlendMode::Additive;
+        slot.authored = std::move(authored);
+        mesh.AddMaterial(std::move(scene_material));
+        slots.push_back(std::move(slot));
+        return true;
+    };
+    bool mask_target_added = false;
+    for (const auto& source : mdl.meshes) {
+        if (source.positions.empty()) continue;
+        auto base = ReadPuppetMaterial(*context.vfs, source.mat_json_file, mdl, has_bones);
+        if (! base.has_value()) {
+            LOG_ERROR("puppet mesh names no usable material ('%s')", source.mat_json_file.c_str());
+            return false;
+        }
+        if (! source.masks.empty() && ! mask_target_added) {
+            const auto* frame = context.scene->FindRenderTarget(std::string(SpecTex_Default));
+            SceneRenderTarget target;
+            target.width      = std::max(1, (frame != nullptr ? frame->width : context.ortho_w) / 2);
+            target.height     = std::max(1, (frame != nullptr ? frame->height : context.ortho_h) / 2);
+            target.allowReuse = true;
+            target.format     = context.scene->hdr ? TextureFormat::RGBA16F : TextureFormat::RGBA8;
+            target.bind       = { .enable = true, .screen = true, .scale = 0.5 };
+            context.scene->renderTargets[std::string(kPuppetMaskTarget)] = target;
+            mask_target_added = true;
+        }
+        const std::string first_texture =
+            ! base->textures.empty() && ! base->textures[0].empty()
+                ? base->textures[0]
+                : (! image.material.textures.empty() ? image.material.textures[0] : std::string());
+        if (! load(*base, true)) return false;
+        for (const auto& mask : source.masks) {
+            wpscene::WPMaterial mask_material;
+            mask_material.shader     = "clippingmaskimage4";
+            mask_material.blending   = "translucent";
+            mask_material.depthtest  = "disabled";
+            mask_material.depthwrite = "disabled";
+            mask_material.cullmode   = "nocull";
+            mask_material.textures   = { first_texture, mask.mat_json_file };
+            mask_material.use_puppet = true;
+            if (has_bones) WPMdlParser::AddPuppetMatInfo(mask_material, mdl);
+            if (! load(std::move(mask_material), true)) return false;
+            auto clipped = *base;
+            clipped.combos["CLIPPINGTARGET"] = 1;
+            clipped.combos["CLIPPINGUVS"]    = 1;
+            if (clipped.textures.size() <= 8) clipped.textures.resize(9);
+            clipped.textures[8] = std::string(kPuppetMaskTarget);
+            if (! load(std::move(clipped), true)) return false;
+        }
+    }
+    return ! slots.empty();
+}
+
 /// The model flags and the numbers that decide how an image layer is built.
 struct ImageKind {
     bool fullscreen { false };
@@ -2808,8 +2889,23 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
                                 entry.at("effects").is_array() && ! entry.at("effects").empty();
     const bool has_effects = built_effects > 0 || composition || failed_effects ||
                              (kind.compose_model && ! image.copybackground);
-    const bool is_puppet = ! image.puppet.empty();
-    if (is_puppet) LOG_ERROR("layer %d: puppets are not built by this parser yet", image.id);
+    // A puppet (R66, R75): one that cannot be read leaves the layer an ordinary card.
+    WPMdl mdl;
+    bool  puppet_ok = false;
+    if (! image.puppet.empty()) {
+        puppet_ok = WPMdlParser::Parse(image.puppet, *context.vfs, mdl) &&
+                    ((mdl.puppet != nullptr && ! mdl.puppet->bones.empty()) ||
+                     std::any_of(mdl.meshes.begin(), mdl.meshes.end(),
+                                 [](const WPMdl::Mesh& mesh) { return ! mesh.positions.empty(); }));
+        if (! puppet_ok) LOG_ERROR("layer %d: the puppet '%s' cannot be used", image.id, image.puppet.c_str());
+    }
+    const bool puppet_bones  = puppet_ok && mdl.puppet != nullptr && ! mdl.puppet->bones.empty();
+    const bool puppet_direct = puppet_ok && built_effects == 0 && ! composition &&
+                               (image.colorBlendMode == 0 || additive_blend);
+    if (puppet_ok && ! puppet_direct) {
+        LOG_ERROR("layer %d: a puppet under effects is drawn as its card", image.id);
+    }
+    if (puppet_direct && puppet_bones) WPMdlParser::AddPuppetMatInfo(image.material, mdl);
 
     // Fog on a chain (R54).
     std::optional<wpscene::WPImageEffect> fog_pass;
@@ -2885,7 +2981,18 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     // The own pass and its mesh.
     const bool passthrough_card = kind.passthrough && ! kind.compose_model && has_effects;
     std::shared_ptr<SceneMesh> mesh;
-    if (passthrough_card) {
+    std::vector<PuppetSlot>    puppet_slots;
+    if (puppet_direct) {
+        mesh = std::make_shared<SceneMesh>();
+        WPMdlParser::GenPuppetMesh(*mesh, mdl, true);
+        if (! LoadPuppetSlots(context, image, mdl, puppet_bones, additive_blend, *mesh, puppet_slots)) {
+            // The whole slot set is abandoned: every submesh draws with the layer's material.
+            puppet_slots.clear();
+            mesh = std::make_shared<SceneMesh>();
+            WPMdlParser::GenPuppetMesh(*mesh, mdl, false);
+            for (auto& submesh : mesh->Submeshes()) submesh.material_slot = 0;
+        }
+    } else if (passthrough_card) {
         // The card's corners where the layer's own local transform puts them (R78).
         const Matrix4d local = SceneNode::LocalTransOf(Vector3f(origin.data()), Vector3f(scale.data()),
                                                        Vector3f(angles.data()));
@@ -2908,19 +3015,49 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     if (has_effects) own.blenmode = BlendMode::Normal;
     else if (additive_blend) own.blenmode = BlendMode::Additive;
     SetLayerTint(context, own, image, false);
-    mesh->AddMaterial(std::move(own));
+    if (puppet_slots.empty()) mesh->AddMaterial(std::move(own));
     node->AddMesh(mesh);
     auto own_material = mesh->MaterialSlotPtr(0);
-    RegisterMaterialConstants(context, own_material, image.material, own_loaded.info, plan.key);
-    tinted.push_back(own_material);
-    all_materials.push_back(own_material);
-    if (context.shader_updater != nullptr) {
-        WPShaderValueData data;
-        data.parallaxDepth = image.parallaxDepth;
-        data.renderTargets = own_loaded.render_targets;
-        context.shader_updater->SetNodeData(node.get(), 0, data);
+    WPPuppetLayer puppet_layer;
+    if (puppet_direct && mdl.puppet != nullptr) {
+        puppet_layer = WPPuppetLayer(mdl.puppet);
+        puppet_layer.prepared(image.puppet_layers);
+        if (runtime != nullptr) {
+            runtime->RegisterPuppetLayer(plan.key, puppet_layer);
+            BindPuppetAnimationLayerSettings(context, plan.key, image, puppet_layer);
+        }
     }
-    RegisterLayerVideos(context, plan.key, own_material->textures);
+    if (puppet_slots.empty()) {
+        RegisterMaterialConstants(context, own_material, image.material, own_loaded.info, plan.key);
+        tinted.push_back(own_material);
+        all_materials.push_back(own_material);
+        if (context.shader_updater != nullptr) {
+            WPShaderValueData data;
+            data.parallaxDepth = image.parallaxDepth;
+            data.renderTargets = own_loaded.render_targets;
+            data.puppet_layer  = puppet_layer;
+            context.shader_updater->SetNodeData(node.get(), 0, data);
+        }
+        RegisterLayerVideos(context, plan.key, own_material->textures);
+    } else {
+        std::vector<std::string> textures;
+        for (std::size_t slot = 0; slot < puppet_slots.size(); ++slot) {
+            auto material = mesh->MaterialSlotPtr(slot);
+            RegisterMaterialConstants(context, material, puppet_slots[slot].authored,
+                                      puppet_slots[slot].loaded.info, plan.key);
+            tinted.push_back(material);
+            all_materials.push_back(material);
+            textures.insert(textures.end(), material->textures.begin(), material->textures.end());
+            if (context.shader_updater != nullptr) {
+                WPShaderValueData data;
+                data.parallaxDepth = image.parallaxDepth;
+                data.renderTargets = puppet_slots[slot].loaded.render_targets;
+                data.puppet_layer  = puppet_layer;
+                context.shader_updater->SetNodeData(node.get(), static_cast<uint32_t>(slot), data);
+            }
+        }
+        RegisterLayerVideos(context, plan.key, textures);
+    }
 
     if (draws_nothing) {
         node->SetSkipRenderPass(true);
