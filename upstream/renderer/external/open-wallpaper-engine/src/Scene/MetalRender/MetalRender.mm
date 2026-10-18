@@ -1129,7 +1129,7 @@ private:
         });
         for (int attempt = 0; attempt < 600; ++attempt) {
             if (m_archive_writes_pending.load(std::memory_order_relaxed) == 0) break;
-            // CLEANROOM RG22
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         dispatch_sync(m_archive_queue, ^{
         });
@@ -2379,10 +2379,18 @@ void MetalRender::Impl::resolveTargetSizes(Scene& scene)
 }
 
 static std::unordered_set<std::string> ReferencedRenderTargets(
-    const Scene&, const std::vector<ScenePassDescription>&)
+    const Scene& scene, const std::vector<ScenePassDescription>& descriptions)
 {
-    // CLEANROOM RG23
-    return {};
+    std::unordered_set<std::string> keys;
+    keys.insert(scene.ResolveRenderTargetName(SpecTex_Default));
+    for (const auto& description : descriptions) {
+        if (! description.target_key.empty()) keys.insert(description.target_key);
+        if (! description.source_key.empty()) keys.insert(description.source_key);
+        for (const auto& texture : description.texture_keys) {
+            if (! texture.empty()) keys.insert(texture);
+        }
+    }
+    return keys;
 }
 
 id<MTLTexture> MetalRender::Impl::newSceneTarget(const std::string&       name,
@@ -3968,8 +3976,9 @@ bool MetalRender::Impl::applySceneOptimizationSetting(Scene& scene, id<MTLComman
     // and starts from a defined state rather than from whatever the driver
     // last left there.
     std::vector<id<MTLTexture>> cleared;
-    // CLEANROOM RG23
+    const auto required = ReferencedRenderTargets(scene, descriptions);
     for (const auto& [name, target] : scene.renderTargets) {
+        if (! required.contains(name)) continue;
         if (target.width <= 0 || target.height <= 0) continue;
         if (target_aliases.count(name) != 0) {
             const auto root  = ResolveAliasRoot(target_aliases, target_aliases.at(name));
@@ -4305,7 +4314,12 @@ bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
     // The videos a rebuild set aside and this graph does not take back are the
     // ones it no longer uses: closed with the compile, however it ends.
     AUTO_DELETER(held_videos, [this]() { video.closeHeld(); });
-    // CLEANROOM RG24
+    // The image parser decides how many levels of a texture to keep from the size of the
+    // surface it ends up on; a display-sized scene has no surface of its own, so no cap.
+    if (scene.imageParser != nullptr) {
+        scene.imageParser->SetTextureSurfaceSize(scene.display_sized ? 0u : output_width,
+                                                 scene.display_sized ? 0u : output_height);
+    }
 
     if (auto reason = MetalGraphRejection(scene, graph); ! reason.empty()) {
         return fail(std::move(reason));

@@ -156,9 +156,7 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
 {
     out.clear();
     const auto set_error = [error](std::string message) {
-        // CLEANROOM RG29
-        (void)error;
-        (void)message;
+        if (error != nullptr) *error = std::move(message);
         return false;
     };
 
