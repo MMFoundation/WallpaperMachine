@@ -31,10 +31,13 @@ std::string NumberText(float value) { return std::to_string(value); }
 // compacted once the outermost notification has finished, so nobody is skipped or repeated.
 struct DynamicValue::Hub
 {
+    // Shared, so a notification holds the callback it is running by a reference count instead
+    // of copying the function (and whatever it captured) for every assignment.
+    using Callback = std::shared_ptr<const std::function<void(const DynamicValue&)>>;
     struct Slot
     {
-        uint64_t                                    id { 0 };
-        std::function<void(const DynamicValue&)> callback;
+        uint64_t id { 0 };
+        Callback callback;
     };
     std::vector<Slot> slots;
     uint64_t          next_id { 1 };
@@ -333,7 +336,8 @@ std::function<void()> DynamicValue::listen(const std::function<void(const Dynami
     if (!callback) return [] {};
     if (m_hub == nullptr) m_hub = std::make_shared<Hub>();
     const uint64_t id = m_hub->next_id++;
-    m_hub->slots.push_back(Hub::Slot { id, callback });
+    m_hub->slots.push_back(
+        Hub::Slot { id, std::make_shared<const std::function<void(const DynamicValue&)>>(callback) });
     return [hub = std::weak_ptr<Hub>(m_hub), id] {
         if (auto live = hub.lock()) live->remove(id);
     };
@@ -357,9 +361,9 @@ void DynamicValue::propagate() const {
         }
     } notification(*hub);
     for (std::size_t i = 0; i < count && i < hub->slots.size(); ++i) {
-        // A copy: the callback may remove itself, which empties the slot it is running from.
-        auto callback = hub->slots[i].callback;
-        if (callback) callback(*this);
+        // Held while it runs: the callback may remove itself, which empties its slot.
+        const auto callback = hub->slots[i].callback;
+        if (callback) (*callback)(*this);
     }
 }
 
