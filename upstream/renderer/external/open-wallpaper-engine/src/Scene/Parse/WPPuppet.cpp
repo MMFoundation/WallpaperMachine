@@ -427,10 +427,15 @@ WPPuppet::Animation::InterpolationInfo WPPuppet::Animation::getInterpolationInfo
         c                   = std::fmod(c, period);
         if (c < 0.0) c += period;
         if (c >= period) c = 0.0;
+        double v = c / frame_time;
+        // A time a hair below the period can still divide up to the full 2L frames: that is the
+        // wrap point, not a position past it.
+        if (v >= frames * 2.0) {
+            c = 0.0;
+            v = 0.0;
+        }
         *cur_time       = c;
-        const double v  = c / frame_time;
-        double       fl = std::floor(v);
-        if (fl >= frames * 2.0) fl = 0.0;
+        const double fl = std::floor(v);
         const auto at = [&](double k) {
             return static_cast<idx>(k <= frames ? k : frames * 2.0 - k);
         };

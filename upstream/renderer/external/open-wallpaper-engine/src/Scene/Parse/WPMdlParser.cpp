@@ -1088,7 +1088,10 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     std::vector<uint8_t> file;
     {
         const isize size = stream->Size();
-        if (size < 0) return false;
+        if (size < 0) {
+            LOG_ERROR("model %s has no readable size", name.c_str());
+            return false;
+        }
         file.resize(static_cast<size_t>(size));
         if (! file.empty() && stream->Read(file.data(), file.size()) != file.size()) {
             LOG_ERROR("model %s could not be read", name.c_str());
