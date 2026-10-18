@@ -1247,7 +1247,9 @@ private:
     /// the scene's runtime has what it needs.
     MHANDLER_CMD(SET_SCENE) {
         std::shared_ptr<Scene> scene;
-        if (! msg->findObject("scene", &scene) || scene == nullptr) return;
+        // A scene that is null is a commit of no scene at all; a payload that is missing is not a
+        // commit.
+        if (! msg->findObject("scene", &scene)) return;
         std::string cache_path;
         (void)msg->findString("cache_path", &cache_path);
 
@@ -1266,9 +1268,10 @@ private:
             m_scene->runtime->SetAudioRequirementListener({});
         }
         const bool old_takes_pointer = m_scene == nullptr || m_scene->accepts_pointer_input;
+        const bool new_takes_pointer = scene == nullptr || scene->accepts_pointer_input;
         auto       previous          = std::move(m_scene);
         m_scene                      = std::move(scene);
-        if (! old_takes_pointer || ! m_scene->accepts_pointer_input) {
+        if (! old_takes_pointer || ! new_takes_pointer) {
             // An edge that belongs to input nobody could take must not reach the next scene.
             std::scoped_lock lock(m_mouse_mutex);
             m_mouse_buttons.pressed  = 0;
@@ -1277,14 +1280,14 @@ private:
         previous.reset();
 
         commitAudioRequirement();
-        main_handler.sendPointerInputCapability(m_scene->accepts_pointer_input);
+        main_handler.sendPointerInputCapability(new_takes_pointer);
 
         m_failure_first_frame_sent = false;
         clearRenderBlock();
         syncFrameClock();
         publishPauseReasons();
 
-        if (m_scene->runtime != nullptr) {
+        if (m_scene != nullptr && m_scene->runtime != nullptr) {
             m_scene->runtime->SetMediaIntegrationEnabled(m_media_integration);
             publishScreenResolution();
             replayMediaEvents();
