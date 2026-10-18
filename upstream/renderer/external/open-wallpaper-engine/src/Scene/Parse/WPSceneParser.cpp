@@ -587,7 +587,17 @@ ParticleParseContext MakeParticleParseContext(
     }
     return ctx;
 }
-// CLEANROOM LS10: the file-local helpers of this group were removed; the rewrite designs its own.
+/// The blend mode a material's `blending` word names. `disabled` writes the
+/// fragment as it is, like `normal`; a word outside the list reads as `normal`.
+BlendMode ParseSceneBlendMode(std::string_view word) {
+    if (word == "translucent") return BlendMode::Translucent;
+    if (word == "additive") return BlendMode::Additive;
+    if (word == "alphatocoverage") return BlendMode::AlphaToCoverage;
+    if (word != "normal" && word != "disabled") {
+        LOG_ERROR("unknown blending '%s', reading it as normal", std::string(word).c_str());
+    }
+    return BlendMode::Normal;
+}
 
 // Whether Wallpaper Engine draws an image layer among the ones sorted back to
 // front, after the rest, in a scene that turns `transparentsorting` on. Its
@@ -1478,7 +1488,36 @@ void wallpaper::ApplySystemUserTextures(std::vector<std::string>&               
                                         const std::vector<wpscene::WPUserTexture>& usertextures,
                                         const ProjectProperties*                   properties,
                                         RuntimeImageSource*                        covers) {
-    // CLEANROOM LS35
+    for (std::size_t slot = 0; slot < usertextures.size(); ++slot) {
+        const auto& user = usertextures[slot];
+        if (user.name.empty() && user.type.empty()) continue;
+        // The texture the slot already has: what an unreadable choice falls back to,
+        // and what a cover slot shows until a cover arrives.
+        const std::string authored = slot < textures.size() ? textures[slot] : std::string();
+
+        if (wpscene::IsSystemUserTexture(user)) {
+            if (textures.size() <= slot) textures.resize(slot + 1);
+            textures[slot] = covers != nullptr ? covers->BindCoverSlot(user.name, authored) : user.name;
+            continue;
+        }
+        // Any other typed entry names something this renderer does not supply.
+        if (! user.type.empty()) continue;
+
+        // A bare name is a project property of kind scene texture; without a table
+        // to read it from, the authored texture stays.
+        if (properties == nullptr) continue;
+        const auto found = properties->find(user.name);
+        if (found == properties->end() ||
+            found->second.kind != RuntimeScalarValue::Kind::String) {
+            continue;
+        }
+        const auto& value = found->second.asString();
+        if (value.empty()) continue;
+        if (auto name = TexturePropertyTextureName(value); name.has_value()) {
+            if (textures.size() <= slot) textures.resize(slot + 1);
+            textures[slot] = std::move(*name);
+        }
+    }
 }
 
 void wallpaper::LoadMaterialConstantShaderValues(SceneMaterial& material,
