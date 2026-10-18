@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e7-small-units.md; written without access to the original source.
 #include "SceneSourceResolver.hpp"
 
 #include "Fs/PhysicalFs.h"
@@ -6,21 +7,85 @@
 #include "WPPkgFs.hpp"
 #include "Utils/Logging.h"
 
+#include <algorithm>
 #include <filesystem>
 
 namespace wallpaper
 {
+
+namespace
+{
+
+bool Fail(std::string* error, std::string message)
+{
+    LOG_ERROR("scene source: %s", message.c_str());
+    if (error != nullptr) *error = std::move(message);
+    return false;
+}
+
+bool LeavesFolder(const std::filesystem::path& entry)
+{
+    return std::any_of(entry.begin(), entry.end(), [](const std::filesystem::path& part) {
+        return part == "..";
+    });
+}
+
+// The four path strings of a scene whose entry name inside its folder is `entry`.
+void FillPaths(const std::filesystem::path& folder, const std::string& entry, SceneSourcePaths* out)
+{
+    std::filesystem::path pkg_name { entry };
+    pkg_name.replace_extension(".pkg");
+    std::filesystem::path json_name { entry };
+    json_name.replace_extension(".json");
+    out->pkg_path  = (folder / pkg_name).string();
+    out->pkg_entry = json_name.generic_string();
+    out->pkg_dir   = folder.string();
+    out->scene_id  = folder.filename().string();
+}
+
+} // namespace
 
 bool ResolveSceneSourcePaths(
     const std::string&     source,
     SceneSourceResolution* resolved,
     std::string*           error)
 {
-    // CLEANROOM UV19
-    (void)source;
-    (void)resolved;
-    (void)error;
-    return false;
+    if (resolved == nullptr) return Fail(error, "scene source output must not be null");
+    // Whatever happens next, a failure leaves nothing half filled.
+    *resolved = SceneSourceResolution {};
+    if (source.empty()) return Fail(error, "scene source must not be empty");
+
+    const std::filesystem::path path { source };
+    const std::filesystem::path folder = path.parent_path();
+    const std::string           file   = path.filename().string();
+
+    SceneSourceResolution result;
+    std::string           entry;
+    if (file == "project.json") {
+        std::string reason;
+        if (! ParseProjectManifest(source, &result.manifest, &reason)) return Fail(error, reason);
+        if (result.manifest.type != WallpaperProjectType::Scene) {
+            result.kind = SceneSourceResolutionKind::NotSceneProject;
+            *resolved   = std::move(result);
+            return true;
+        }
+        entry = result.manifest.file.empty() ? "scene.json" : result.manifest.file;
+    } else {
+        // Not a project file: the source is the scene entry itself.
+        result.manifest.type        = WallpaperProjectType::Scene;
+        result.manifest.file        = file;
+        result.manifest.workshop_id = folder.filename().string();
+        entry                       = file;
+    }
+
+    if (entry.empty()) return Fail(error, "scene entry must not be empty");
+    if (entry.front() == '/') return Fail(error, "scene entry must be relative: " + entry);
+    if (LeavesFolder(entry)) return Fail(error, "scene entry leaves its folder: " + entry);
+
+    result.kind = SceneSourceResolutionKind::Scene;
+    FillPaths(folder, entry, &result.scene_source);
+    *resolved = std::move(result);
+    return true;
 }
 
 bool ResolveSceneSourcePaths(
@@ -28,11 +93,16 @@ bool ResolveSceneSourcePaths(
     SceneSourcePaths*  resolved,
     std::string*       error)
 {
-    // CLEANROOM UV20
-    (void)source;
-    (void)resolved;
-    (void)error;
-    return false;
+    if (resolved == nullptr) return Fail(error, "scene source output must not be null");
+    *resolved = SceneSourcePaths {};
+
+    SceneSourceResolution resolution;
+    if (! ResolveSceneSourcePaths(source, &resolution, error)) return false;
+    if (resolution.kind != SceneSourceResolutionKind::Scene)
+        return Fail(error,
+                    std::string("project is not a scene: ") + ToString(resolution.manifest.type));
+    *resolved = std::move(resolution.scene_source);
+    return true;
 }
 
 bool MountSceneSource(fs::VFS& vfs, const SceneSourcePaths& paths, std::string* error)
