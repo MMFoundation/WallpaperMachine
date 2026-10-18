@@ -14,7 +14,7 @@ public:
         CustomShader,
         Copy,
         Clear,
-        Virtual // for mark a virual writer to update version
+        Virtual
     };
     static PassNode* addPassNode(DependencyGraph& dg, Type type);
 
@@ -23,12 +23,7 @@ public:
 
     void setName(std::string_view);
 
-    std::string ToGraphviz() const override; 
-
-
-private:
-    Type m_type;
-    std::string m_name { "unknown pass" };
+    std::string ToGraphviz() const override;
 };
 }
-} 
+}

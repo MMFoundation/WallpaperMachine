@@ -51,16 +51,10 @@ bool SetError(std::string* error, std::string message)
     return false;
 }
 
-std::string DescribePixelFormat(std::uint32_t pixel_format)
+std::string DescribePixelFormat(std::uint32_t)
 {
-    const char chars[5] {
-        static_cast<char>((pixel_format >> 24) & 0xff),
-        static_cast<char>((pixel_format >> 16) & 0xff),
-        static_cast<char>((pixel_format >> 8) & 0xff),
-        static_cast<char>(pixel_format & 0xff),
-        0,
-    };
-    return std::string(chars);
+    // CLEANROOM RG25
+    return {};
 }
 
 /// How a decoded frame reaches the shaders, decided by its pixel format.
@@ -390,11 +384,9 @@ struct MetalVideoTextures::State {
         for (auto& slot : entry.slots) {
             if (slot.busy && slot.busy->load(std::memory_order_acquire)) continue;
             if (slot.texture == nil) {
-                MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
-                    texture2DDescriptorWithPixelFormat:kVideoDestinationPixelFormat
-                                                 width:width
-                                                height:height
-                                             mipmapped:NO];
+                // CLEANROOM RG26
+                MTLTextureDescriptor* descriptor = nil;
+                if (descriptor == nil) return nil;
                 descriptor.usage           = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite;
                 descriptor.storageMode     = MTLStorageModePrivate;
                 descriptor.resourceOptions = MTLResourceStorageModePrivate;
@@ -822,7 +814,8 @@ bool MetalVideoTextures::beginFrame(Scene& scene, id<MTLCommandBuffer> command, 
                                 "video texture \"" + key + "\" changed to the unsupported pixel " +
                                     "format " + DescribePixelFormat(frame.pixel_format));
             }
-            auto pixel_buffer = reinterpret_cast<CVPixelBufferRef>(frame.pixel_buffer);
+            // CLEANROOM RG27
+            CVPixelBufferRef pixel_buffer = nullptr;
             if (pixel_buffer == nullptr) {
                 return SetError(error,
                                 "video texture \"" + key + "\" produced a frame with no pixel "
@@ -937,16 +930,8 @@ bool MetalVideoTextures::beginFrame(Scene& scene, id<MTLCommandBuffer> command, 
                                                               frame.height,
                                                               0,
                                                               &bundle->wrappers[0]);
-                const CVReturn chroma_result =
-                    CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault,
-                                                              state.texture_cache,
-                                                              pixel_buffer,
-                                                              nullptr,
-                                                              MTLPixelFormatRG8Unorm,
-                                                              frame.width / 2u,
-                                                              frame.height / 2u,
-                                                              1,
-                                                              &bundle->wrappers[1]);
+                // CLEANROOM RG28
+                const CVReturn chroma_result = kCVReturnError;
                 if (luma_result != kCVReturnSuccess || bundle->wrappers[0] == nullptr ||
                     chroma_result != kCVReturnSuccess || bundle->wrappers[1] == nullptr) {
                     return SetError(error,

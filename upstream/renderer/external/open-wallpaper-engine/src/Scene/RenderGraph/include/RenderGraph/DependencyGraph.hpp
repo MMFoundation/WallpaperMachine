@@ -20,43 +20,47 @@ typedef size_t NodeID;
 class DependencyGraph : NoCopy {
 public:
     class Node : NoCopy {
-        friend class DependencyGraph;
-
     public:
         Node()          = default;
         virtual ~Node() = default;
 
-        NodeID              ID() const { return id; }
-        std::string         GraphID() const { return "n" + std::to_string(id); }
+        NodeID ID() const {
+            // CLEANROOM RG1
+            return 0;
+        }
+        std::string GraphID() const {
+            // CLEANROOM RG1
+            return {};
+        }
         virtual std::string ToGraphviz() const {
-            auto sid = std::to_string(id);
-            return "n" + sid + "[label=" + sid + "]";
-        };
-
-    private:
-        NodeID id;
+            // CLEANROOM RG3
+            return {};
+        }
     };
 
     DependencyGraph()  = default;
     ~DependencyGraph() = default;
 
-    DependencyGraph(DependencyGraph&& o)
-        : m_nodeNext(std::move(o.m_nodeNext)), m_nodes(std::move(o.m_nodes)) {}
-    DependencyGraph& operator=(DependencyGraph&& o) {
-        m_nodeNext = std::move(o.m_nodeNext);
-        m_nodes    = std::move(o.m_nodes);
+    DependencyGraph(DependencyGraph&&) {
+        // CLEANROOM RG1
+    }
+    DependencyGraph& operator=(DependencyGraph&&) {
+        // CLEANROOM RG1
         return *this;
     }
 
-    size_t NodeNum() const { return m_nodes.size(); }
-    size_t EdgeNum() const {
-        return std::accumulate(
-            m_nodeNext.begin(), m_nodeNext.end(), 0u, [](size_t sum, const auto& v) {
-                return sum + v.size();
-            });
+    size_t NodeNum() const {
+        // CLEANROOM RG1
+        return 0;
     }
-    // const Node& GetNode(NodeID i) const { return *m_nodes[i]; }
-    Node* GetNode(NodeID i) const { return m_nodes[i].get(); }
+    size_t EdgeNum() const {
+        // CLEANROOM RG1
+        return 0;
+    }
+    Node* GetNode(NodeID) const {
+        // CLEANROOM RG1
+        return nullptr;
+    }
 
     std::vector<NodeID> GetNodeOut(NodeID) const;
     std::vector<NodeID> GetNodeIn(NodeID) const;
@@ -68,10 +72,6 @@ public:
     std::vector<NodeID> TopologicalOrder() const;
 
     void ToGraphviz(std::string_view) const;
-
-private:
-    std::vector<std::unordered_set<NodeID>> m_nodeNext;
-    std::vector<std::unique_ptr<Node>>      m_nodes;
 };
 } // namespace rg
 } // namespace wallpaper

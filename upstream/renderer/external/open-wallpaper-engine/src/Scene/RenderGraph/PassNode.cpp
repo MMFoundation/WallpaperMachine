@@ -1,24 +1,30 @@
 #include "PassNode.hpp"
 
-using namespace wallpaper::rg;
+namespace wallpaper::rg
+{
 
-PassNode* PassNode::addPassNode(DependencyGraph& dg, PassNode::Type type) {
-    std::unique_ptr<PassNode> node = std::make_unique<PassNode>();
-    node->m_type = type;
-    PassNode* pNode = node.get();
-    dg.AddNode(std::move(node));
-    return pNode;
+PassNode* PassNode::addPassNode(DependencyGraph&, PassNode::Type) {
+    // CLEANROOM RG5
+    return nullptr;
 }
 
-PassNode::Type PassNode::type() const { return m_type; }
-
-std::string_view PassNode::name() const { return m_name; }
-
-void PassNode::setName(std::string_view name) {
-    m_name = name;
+PassNode::Type PassNode::type() const {
+    // CLEANROOM RG5
+    return Type::Virtual;
 }
 
+std::string_view PassNode::name() const {
+    // CLEANROOM RG5
+    return {};
+}
+
+void PassNode::setName(std::string_view) {
+    // CLEANROOM RG5
+}
 
 std::string PassNode::ToGraphviz() const {
-    return GraphID() + "[label=\""+m_name+"\"]";
+    // CLEANROOM RG3
+    return {};
 }
+
+} // namespace wallpaper::rg

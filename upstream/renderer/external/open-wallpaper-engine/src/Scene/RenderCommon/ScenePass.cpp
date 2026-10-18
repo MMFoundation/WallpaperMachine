@@ -14,11 +14,9 @@ CopyPass::~CopyPass() = default;
 DrawPass::DrawPass(const Desc& desc): m_desc(desc) {}
 DrawPass::~DrawPass() = default;
 
-void DrawPass::setDescTex(uint32_t index, std::string_view tex_key)
+void DrawPass::setDescTex(uint32_t, std::string_view)
 {
-    assert(index < m_desc.textures.size());
-    if (index >= m_desc.textures.size()) return;
-    m_desc.textures[index] = tex_key;
+    // CLEANROOM RG13
 }
 
 uint32_t NormalizeSampleCount(uint32_t requested)

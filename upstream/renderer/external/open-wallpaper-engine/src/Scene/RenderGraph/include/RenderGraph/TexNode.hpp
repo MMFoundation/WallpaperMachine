@@ -38,17 +38,7 @@ public:
     void setKey(std::string_view);
     void setWriter(PassNode*);
 
-    std::string ToGraphviz() const override; 
-private:
-    friend class RenderGraphBuilder;
-    TexType m_type;
-    std::string m_key;
-    std::string m_name {"unknown tex"};
-
-    size_t    m_version {0};
-    TexNode*  m_pre    {nullptr};
-    TexNode*  m_next    {nullptr};
-    PassNode* m_writer  {nullptr};
+    std::string ToGraphviz() const override;
 };
 }
-} 
+}

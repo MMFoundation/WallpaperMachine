@@ -1,59 +1,74 @@
 #include "TexNode.hpp"
 #include "PassNode.hpp"
 
-using namespace wallpaper::rg;
+namespace wallpaper::rg
+{
 
-TexNode* TexNode::addTexNode(DependencyGraph& dg, const Desc& desc) {
-    std::unique_ptr<TexNode> node = std::make_unique<TexNode>();
-    node->m_type = desc.type;
-    node->m_name = desc.name;
-    node->m_key = desc.key;
-    TexNode* pNode = node.get();
-    dg.AddNode(std::move(node));
-    return pNode;
+TexNode* TexNode::addTexNode(DependencyGraph&, const Desc&) {
+    // CLEANROOM RG4
+    return nullptr;
 }
 
-
-TexNode* TexNode::addNewVersion(DependencyGraph& dg, TexNode* pre) {
-    TexNode* node = addTexNode(dg, pre->genDesc());
-    node->m_version = pre->m_version+1;
-
-    pre->m_next = node;
-    node->m_pre = pre;
-
-    return node;
+TexNode* TexNode::addNewVersion(DependencyGraph&, TexNode*) {
+    // CLEANROOM RG4
+    return nullptr;
 }
-
 
 TexNode::Desc TexNode::genDesc() const {
-    return Desc{
-        .name = m_name,
-        .key = m_key,
-        .type = m_type
-    };
+    // CLEANROOM RG4
+    return Desc { .name = {}, .key = {}, .type = TexType::Temp };
 }
 
-
-TexNode::TexType TexNode::type() const { return m_type; }
-std::string_view TexNode::name() const { return m_name; };
-std::string_view TexNode::key() const { return m_key; }
-size_t TexNode::version() const { return m_version; } ;
-PassNode* TexNode::writer() const { return m_writer; };
-TexNode* TexNode::preVer() const { return m_pre; };
-TexNode* TexNode::nextVer() const { return m_next; };
-
-
-void TexNode::setName(std::string_view in) {
-    m_name = in;
-}
-void TexNode::setKey(std::string_view in) {
-    m_key = in;
-}
-void TexNode::setWriter(PassNode* w) {
-    m_writer = w;
+TexNode::TexType TexNode::type() const {
+    // CLEANROOM RG4
+    return TexType::Temp;
 }
 
+std::string_view TexNode::name() const {
+    // CLEANROOM RG4
+    return {};
+}
+
+std::string_view TexNode::key() const {
+    // CLEANROOM RG4
+    return {};
+}
+
+size_t TexNode::version() const {
+    // CLEANROOM RG4
+    return 0;
+}
+
+PassNode* TexNode::writer() const {
+    // CLEANROOM RG4
+    return nullptr;
+}
+
+TexNode* TexNode::preVer() const {
+    // CLEANROOM RG4
+    return nullptr;
+}
+
+TexNode* TexNode::nextVer() const {
+    // CLEANROOM RG4
+    return nullptr;
+}
+
+void TexNode::setName(std::string_view) {
+    // CLEANROOM RG4
+}
+
+void TexNode::setKey(std::string_view) {
+    // CLEANROOM RG4
+}
+
+void TexNode::setWriter(PassNode*) {
+    // CLEANROOM RG4
+}
 
 std::string TexNode::ToGraphviz() const {
-    return GraphID() + "[label=\"" +m_key+ " v:" + std::to_string(m_version) + "\" shape=ellipse]";
+    // CLEANROOM RG3
+    return {};
 }
+
+} // namespace wallpaper::rg

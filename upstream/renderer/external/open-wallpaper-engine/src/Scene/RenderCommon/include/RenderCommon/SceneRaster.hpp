@@ -36,24 +36,13 @@ namespace render
 
 inline constexpr i32 kMinRenderTargetDimension = 4;
 
-inline i32 ResolveScreenBoundRenderTargetDimension(double source_dimension, double scale) {
-    if (! std::isfinite(source_dimension) || source_dimension <= 0.0) {
-        source_dimension = static_cast<double>(kMinRenderTargetDimension);
-    }
-    if (! std::isfinite(scale) || scale <= 0.0) {
-        scale = 1.0;
-    }
-    return std::max(
-        kMinRenderTargetDimension,
-        static_cast<i32>(std::lround(scale * source_dimension)));
+inline i32 ResolveScreenBoundRenderTargetDimension(double, double) {
+    // CLEANROOM RG16
+    return kMinRenderTargetDimension;
 }
 
-inline void ResolveScreenBoundRenderTargetSize(SceneRenderTarget&      target,
-                                               const Extent2D&       source_extent) {
-    target.width = ResolveScreenBoundRenderTargetDimension(
-        static_cast<double>(source_extent.width), target.bind.scale);
-    target.height = ResolveScreenBoundRenderTargetDimension(
-        static_cast<double>(source_extent.height), target.bind.scale);
+inline void ResolveScreenBoundRenderTargetSize(SceneRenderTarget&, const Extent2D&) {
+    // CLEANROOM RG17
 }
 
 /// The smallest internal render scale that still leaves a usable image. Below
@@ -88,39 +77,9 @@ inline void ResolveRenderScaledSize(SceneRenderTarget& target, double render_sca
 /// The author's canvas, in scene units. Never scaled: presentation layout and
 /// cursor mapping are computed against this, so the internal raster size
 /// cannot move the letterbox or offset the hit test.
-inline Extent2D ResolveSceneSourceExtent(const wallpaper::Scene& scene,
-                                           const Extent2D&       fallback_extent) {
-    if (scene.display_sized) {
-        return { std::max(1u, fallback_extent.width), std::max(1u, fallback_extent.height) };
-    }
-    if (scene.scene_extent[0] > 0 && scene.scene_extent[1] > 0) {
-        return {
-            static_cast<uint32_t>(scene.scene_extent[0]),
-            static_cast<uint32_t>(scene.scene_extent[1]),
-        };
-    }
-
-    auto spec_rt = scene.renderTargets.find(std::string(wallpaper::SpecTex_Default));
-    if (spec_rt != scene.renderTargets.end()) {
-        const auto& rt      = spec_rt->second;
-        const auto  width   = rt.authored_width > 0 ? rt.authored_width : rt.width;
-        const auto  height  = rt.authored_height > 0 ? rt.authored_height : rt.height;
-        if (width > 0 && height > 0) {
-            return {
-                static_cast<uint32_t>(width),
-                static_cast<uint32_t>(height),
-            };
-        }
-    }
-
-    const auto ortho_width  = static_cast<uint32_t>(std::max(0, scene.ortho[0]));
-    const auto ortho_height = static_cast<uint32_t>(std::max(0, scene.ortho[1]));
-    if (ortho_width > 2 && ortho_height > 2) return { ortho_width, ortho_height };
-
-    return {
-        std::max(1u, fallback_extent.width),
-        std::max(1u, fallback_extent.height),
-    };
+inline Extent2D ResolveSceneSourceExtent(const wallpaper::Scene&, const Extent2D&) {
+    // CLEANROOM RG18
+    return {};
 }
 
 /// The authored canvas and the internal raster it is drawn at. Equal at render
@@ -263,72 +222,11 @@ inline void RefreshScreenBoundTextureResolutions(Scene& scene) {
     }
 }
 
-inline SceneRasterExtents ResolveScreenBoundRenderTargetSizes(Scene&                    scene,
-                                                              const Extent2D&         fallback_extent,
-                                                              const SceneRasterSurface& surface = {}) {
-    const auto source_extent = ResolveSceneSourceExtent(scene, fallback_extent);
-    if (scene.display_sized) {
-        const double aspect = double(source_extent.width) / source_extent.height;
-        for (auto& [name, camera] : scene.cameras) {
-            (void)name;
-            if (camera != nullptr && camera->IsPerspective()) {
-                camera->SetAspect(aspect);
-                camera->Update();
-            }
-        }
-    }
-    const auto render_scale = ResolveSceneRenderScale(scene);
-    // The raster starts from the canvas, or from the size the canvas is
-    // presented at when the scene is asked to rasterize for the display. Only
-    // then is it bounded by the device: the canvas has always been allowed to
-    // be whatever the author made it.
-    const bool display_raster = scene.resolution == wallpaper::SceneResolution::Display &&
-                                SceneResolutionAffectsRaster(scene);
-    const auto raster_basis =
-        display_raster ? ResolveSceneDisplayExtent(source_extent, fallback_extent,
-                                                   surface.display_scale_factor)
-                       : source_extent;
-    const uint32_t max_dimension = display_raster ? surface.max_dimension : 0u;
-    const Extent2D raster_extent = CapRasterExtent(
-        {
-            static_cast<uint32_t>(
-                ResolveScreenBoundRenderTargetDimension(raster_basis.width, render_scale)),
-            static_cast<uint32_t>(
-                ResolveScreenBoundRenderTargetDimension(raster_basis.height, render_scale)),
-        },
-        max_dimension);
-
-    for (auto& item : scene.renderTargets) {
-        auto& target = item.second;
-        if (item.first == wallpaper::SpecTex_Default) {
-            // The scene's own colour buffer and the source the final blit
-            // samples. It is bound to the screen with scale 1.0, so the raster
-            // extent is exactly its size.
-            if (target.authored_width <= 0 || target.authored_height <= 0) {
-                target.authored_width  = static_cast<i32>(source_extent.width);
-                target.authored_height = static_cast<i32>(source_extent.height);
-            }
-            target.width  = static_cast<i32>(raster_extent.width);
-            target.height = static_cast<i32>(raster_extent.height);
-            continue;
-        }
-        if (target.bind.enable && target.bind.screen) {
-            if (target.authored_width <= 0 || target.authored_height <= 0) {
-                target.authored_width = ResolveScreenBoundRenderTargetDimension(
-                    source_extent.width, target.bind.scale);
-                target.authored_height = ResolveScreenBoundRenderTargetDimension(
-                    source_extent.height, target.bind.scale);
-            }
-            ResolveScreenBoundRenderTargetSize(target, raster_extent);
-            if (max_dimension > 0) {
-                const auto limit = static_cast<i32>(max_dimension);
-                target.width     = std::min(target.width, limit);
-                target.height    = std::min(target.height, limit);
-            }
-        }
-    }
-    RefreshScreenBoundTextureResolutions(scene);
-    return { source_extent, raster_extent };
+inline SceneRasterExtents ResolveScreenBoundRenderTargetSizes(Scene&,
+                                                              const Extent2D&,
+                                                              const SceneRasterSurface& = {}) {
+    // CLEANROOM RG19
+    return {};
 }
 
 /// Fits the scene's authored canvas into an output of `width` x `height`.
@@ -336,55 +234,8 @@ inline SceneRasterExtents ResolveScreenBoundRenderTargetSizes(Scene&            
 /// Purely scene-side camera arithmetic with nothing GPU-specific in it, so
 /// every caller shares this one definition. Two copies of it would drift, and
 /// the drift would show as the same wallpaper framed differently.
-inline void ApplyCameraFillMode(wallpaper::Scene& scene, wallpaper::FillMode fillmode,
-                                uint32_t width, uint32_t height) {
-    using namespace wallpaper;
-    if (width == 0 || height == 0) return;
-    const auto global = scene.cameras.find("global");
-    const auto global_perspective = scene.cameras.find("global_perspective");
-    if (global == scene.cameras.end() || global_perspective == scene.cameras.end()) return;
-    if (global->second == nullptr || global_perspective->second == nullptr) return;
-
-    double sw = scene.ortho[0], sh = scene.ortho[1];
-    double fboAspect = width / (double)height, sAspect = sw / sh;
-    auto&  gCam    = *global->second;
-    auto&  gPerCam = *global_perspective->second;
-    switch (fillmode) {
-    case FillMode::STRETCH:
-        gCam.SetWidth(sw);
-        gCam.SetHeight(sh);
-        gPerCam.SetAspect(sAspect);
-        break;
-    case FillMode::ASPECTFIT:
-        if (fboAspect < sAspect) {
-            // scale height
-            gCam.SetWidth(sw);
-            gCam.SetHeight(sw / fboAspect);
-        } else {
-            gCam.SetWidth(sh * fboAspect);
-            gCam.SetHeight(sh);
-        }
-        gPerCam.SetAspect(fboAspect);
-        break;
-    case FillMode::ASPECTCROP:
-    default:
-        if (fboAspect > sAspect) {
-            // scale height
-            gCam.SetWidth(sw);
-            gCam.SetHeight(sw / fboAspect);
-        } else {
-            gCam.SetWidth(sh * fboAspect);
-            gCam.SetHeight(sh);
-        }
-        gPerCam.SetAspect(fboAspect);
-        break;
-    }
-    // The extent the orthographic camera actually shows, so a camera layer's
-    // zoom narrows perspective layers exactly as it does the rest.
-    FitCanvasPerspective(gPerCam, gCam);
-    gCam.Update();
-    gPerCam.Update();
-    scene.UpdateLinkedCamera("global");
+inline void ApplyCameraFillMode(wallpaper::Scene&, wallpaper::FillMode, uint32_t, uint32_t) {
+    // CLEANROOM RG20
 }
 
 /// Folds into a static-reuse sample the cameras a pass depends on: the one it

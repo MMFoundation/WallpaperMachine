@@ -24,12 +24,6 @@ public:
     void            setWorkPassNode(PassNode*);
     void            markSelfWrite(TexNode*);
     void            markVirtualWrite(TexNode*);
-
-private:
-    TexNode* createNewTexNode(const TexNode::Desc&);
-
-    RenderGraph& m_rg;
-    PassNode*    m_passnode_wip { nullptr };
 };
 
 class RenderGraph {
@@ -40,55 +34,25 @@ public:
     TexNode*  getTexNode(NodeID) const;
     Pass*     getPass(NodeID) const;
 
-    // all render pass
     std::vector<NodeID>                topologicalOrder() const;
     std::vector<std::vector<TexNode*>> getLastReadTexs(std::span<const NodeID>) const;
-    // Keys of the targets a pass reads before any pass writes them and a later
-    // pass writes: what such a target holds when it is read is what the
-    // previous frame left there (an effect's history buffer).
-    std::vector<std::string> getCarriedOverKeys(std::span<const NodeID>) const;
+    std::vector<std::string>           getCarriedOverKeys(std::span<const NodeID>) const;
 
-    void ToGraphviz(std::string_view path) const { m_dg.ToGraphviz(path); };
+    void ToGraphviz(std::string_view) const {
+        // CLEANROOM RG6
+    }
 
     template<typename CB>
-    bool afterBuild(NodeID pass_node_id, CB&& callback) {
-        auto* pass_node = getPassNode(pass_node_id);
-        if (pass_node == nullptr) return false;
-        RenderGraphBuilder builder(*this);
-        builder.setWorkPassNode(pass_node);
-        return callback(builder, *m_map_pass[pass_node_id]);
+    bool afterBuild(NodeID, CB&&) {
+        // CLEANROOM RG10
+        return false;
     }
 
     template<typename TPass, typename CB>
-    PassNode* addPass(std::string_view name, PassNode::Type type, CB&& callback) {
-        using Desc = typename TPass::Desc;
-
-        auto* node = PassNode::addPassNode(m_dg, type);
-        node->setName(name);
-        markPassNode(node->ID());
-        RenderGraphBuilder builder(*this);
-        builder.setWorkPassNode(node);
-        {
-            Desc desc {};
-            callback(builder, desc);
-            m_map_pass[node->ID()] = std::make_shared<TPass>(desc);
-        }
-        if (type == PassNode::Type::Virtual) m_set_vitrual_passnode.insert(node->ID());
-        return node;
+    PassNode* addPass(std::string_view, PassNode::Type, CB&&) {
+        // CLEANROOM RG10
+        return nullptr;
     }
-
-private:
-    friend class RenderGraphBuilder;
-    void markPassNode(NodeID);
-    bool isPassNode(NodeID) const;
-
-    DependencyGraph m_dg;
-    Set<NodeID>     m_set_passnode;
-    Set<NodeID>     m_set_vitrual_passnode;
-
-    Map<std::string, NodeID> m_key_texnode;
-
-    Map<NodeID, std::shared_ptr<Pass>> m_map_pass;
 };
 
 } // namespace rg

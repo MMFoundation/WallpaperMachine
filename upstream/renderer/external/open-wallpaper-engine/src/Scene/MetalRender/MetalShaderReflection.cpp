@@ -96,8 +96,7 @@ bool ParseMetalShaderReflection(std::string_view json, MetalShaderReflection& ou
                     .offset        = member.at("offset").get<uint32_t>(),
                     .size          = member.at("size").get<uint32_t>(),
                     .element_count = member.value("element_count", 1u),
-                    .array_count   = member.value("array_count", 0u),
-                    .array_stride  = member.value("array_stride", 0u),
+                    // CLEANROOM RG30
                 };
             }
             out.blocks.push_back(std::move(block));
