@@ -3731,7 +3731,7 @@ bool LoadTextEntry(ParseContext& context, std::size_t at, const nlohmann::json& 
         proxy.parallaxDepth = obj.parallaxDepth;
         proxy.clampuvs      = obj.clampuvs;
         proxy.color         = { 1.0f, 1.0f, 1.0f };
-        proxy.alpha         = obj.alpha;
+        proxy.alpha         = 1.0f; // the card holds the layer's alpha; an opacity effect adds none
         proxy.brightness    = 1.0f;
         const std::array<int32_t, 2> extent { static_cast<int32_t>(std::lround(effect_frame.size.x())),
                                               static_cast<int32_t>(std::lround(effect_frame.size.y())) };
