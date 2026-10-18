@@ -339,6 +339,8 @@ struct ParseContext {
     std::vector<std::pair<std::string, std::string>>        scene_scripts;
     /// How many text layers carry each authored name.
     std::unordered_map<std::string, uint32_t>               text_name_counts;
+    /// The header of each file texture met so far, read once per name.
+    std::unordered_map<std::string, ImageHeader>            texture_headers;
     /// The card each text layer shows, for a composite registered only once
     /// a later consumer turns out to sample the layer.
     std::unordered_map<int32_t, TextLayerRenderFrame>       text_cards;
@@ -703,12 +705,6 @@ SceneLightConfig ParseSceneLightConfig(const nlohmann::json& config) {
     return lights;
 }
 
-// CLEANROOM LS11: the file-local helpers of this group were removed; the rewrite designs its own.
-
-// CLEANROOM LS12: the file-local helpers of this group were removed; the rewrite designs its own.
-
-// CLEANROOM LS13: the file-local helpers of this group were removed; the rewrite designs its own.
-
 bool AlignmentHasAnchorOffset(std::string_view align) {
     for (const auto edge : { "top", "bottom", "left", "right" }) {
         if (align.find(edge) != std::string_view::npos) return true;
@@ -1001,11 +997,24 @@ void SetNodeTransformFromMatrix(SceneNode& node, const Matrix4d& transform) {
 
 // CLEANROOM LS18: the file-local helpers of this group were removed; the rewrite designs its own.
 
-// CLEANROOM LS19: the file-local helpers of this group were removed; the rewrite designs its own.
+// ---------------------------------------------------------------------------
+// Materials: constants, texture slots and the shader compile (P2 R23 to R48).
+// ---------------------------------------------------------------------------
 
+/// A constant as the setting resolvers read it: the authored lanes plus the
+/// binding members, in the shape of a scene-object setting.
 nlohmann::json MaterialConstantSettingJson(const wpscene::WPConstantShaderValue& source) {
-    // CLEANROOM LS19
-    return {};
+    nlohmann::json setting = nlohmann::json::object();
+    if (source.value.size() == 1) {
+        setting["value"] = source.value.front();
+    } else if (! source.value.empty()) {
+        setting["value"] = source.value;
+    }
+    if (! source.user.empty()) setting["user"] = source.user;
+    if (! source.script.empty()) setting["script"] = source.script;
+    if (source.scriptproperties.is_object()) setting["scriptproperties"] = source.scriptproperties;
+    if (source.animation.is_object()) setting["animation"] = source.animation;
+    return setting;
 }
 
 // Vector shader constants carry one curve per component, and an author can drive
@@ -1056,6 +1065,490 @@ CollectMaterialConstantAnimations(const wpscene::WPMaterial& wpmat) {
         collected.emplace(name, std::move(source));
     }
     return collected;
+}
+
+/// The uniform a constant's key names: the shader layer's alias list (a material
+/// key, or a uniform name without its two-character prefix).
+std::optional<std::string> ConstantUniformName(const WPShaderInfo& info, const std::string& key) {
+    if (const auto found = info.alias.find(key); found != info.alias.end()) return found->second;
+    return std::nullopt;
+}
+
+/// A key with no uniform is silent when the shader declares `<key>Start` and
+/// `<key>End` and the material supplies both: the pair stands in for the key.
+bool ConstantIsSplitInTwo(const WPShaderInfo& info, const wpscene::WPMaterial& wpmat,
+                          const std::string& key) {
+    const auto supplied = [&](const std::string& part) {
+        return info.alias.contains(part) && wpmat.constantshadervalues.contains(part);
+    };
+    return supplied(key + "Start") && supplied(key + "End");
+}
+
+struct ResolvedConstant {
+    std::string                           key;
+    std::string                           uniform;
+    const wpscene::WPConstantShaderValue* constant { nullptr };
+};
+
+/// The uniform of every constant that names one, with the unmatched ones reported.
+std::vector<ResolvedConstant> ResolveConstantUniforms(const wpscene::WPMaterial& wpmat,
+                                                      const WPShaderInfo&        info) {
+    std::vector<ResolvedConstant> resolved;
+    std::vector<std::string> keys;
+    keys.reserve(wpmat.constantshadervalues.size());
+    for (const auto& entry : wpmat.constantshadervalues) keys.push_back(entry.first);
+    std::sort(keys.begin(), keys.end());
+    for (const auto& key : keys) {
+        const auto& constant = wpmat.constantshadervalues.at(key);
+        if (const auto uniform = ConstantUniformName(info, key); uniform.has_value()) {
+            resolved.push_back({ key, *uniform, &constant });
+        } else if (! ConstantIsSplitInTwo(info, wpmat, key)) {
+            LOG_ERROR("ShaderValue: %s not found in glsl", key.c_str());
+        }
+    }
+    return resolved;
+}
+
+/// Writes the authored lanes of every constant that has a uniform.
+void LoadStaticMaterialConstants(SceneMaterial& material, const wpscene::WPMaterial& wpmat,
+                                 const WPShaderInfo& info) {
+    for (const auto& entry : ResolveConstantUniforms(wpmat, info)) {
+        if (entry.constant->value.empty()) continue;
+        material.customShader.constValues[entry.uniform] =
+            ShaderValue(entry.constant->value.data(), entry.constant->value.size());
+    }
+}
+
+/// The constants of one material pass that a property, a script or a timeline
+/// drives, registered with the runtime on the material (R45, R46).
+void RegisterMaterialConstants(ParseContext& context, const std::shared_ptr<SceneMaterial>& material,
+                               const wpscene::WPMaterial& wpmat, const WPShaderInfo& info,
+                               std::string_view layer_name) {
+    auto* runtime = context.scene->runtime.get();
+    if (runtime == nullptr || material == nullptr) return;
+
+    // Constants a timeline drives, grouped by the clock they share.
+    auto sources = CollectMaterialConstantAnimations(wpmat);
+    std::unordered_map<std::string, std::shared_ptr<ScalarAnimationPlayback>> clocks; // by root key
+    std::unordered_map<std::string, std::string>                              root_of;
+    std::unordered_set<std::string>                                           frozen_roots;
+    std::unordered_set<std::string>                                           reported;
+
+    const auto animated = [&](const std::string& key) {
+        const auto found = wpmat.constantshadervalues.find(key);
+        return found != wpmat.constantshadervalues.end() &&
+               ! HasDynamicSetting(MaterialConstantSettingJson(found->second));
+    };
+    for (auto it = sources.begin(); it != sources.end();) {
+        if (animated(it->first)) ++it;
+        else it = sources.erase(it);
+    }
+    // Follow each constant to the root of its chain once; a chain that ends in a
+    // constant with no usable timeline, or loops, freezes at its first frame.
+    for (const auto& [key, source] : sources) {
+        std::vector<std::string> walk;
+        std::unordered_set<std::string> seen;
+        std::string current = key;
+        std::string root;
+        std::string broken;
+        while (true) {
+            if (const auto known = root_of.find(current); known != root_of.end()) {
+                root = known->second;
+                break;
+            }
+            if (! seen.insert(current).second) {
+                broken = "cycle:" + current;
+                root   = current;
+                break;
+            }
+            walk.push_back(current);
+            const auto& parent = sources.at(current).parent_key;
+            if (parent.empty()) {
+                root = current;
+                break;
+            }
+            if (! sources.contains(parent)) {
+                broken = "orphan:" + parent;
+                root   = broken;
+                break;
+            }
+            current = parent;
+        }
+        if (! broken.empty()) {
+            frozen_roots.insert(root);
+            if (reported.insert(broken).second) {
+                LOG_ERROR("material constant timelines of '%s' name a parent that cannot drive them (%s)",
+                          std::string(layer_name).c_str(), broken.c_str());
+            }
+        }
+        for (const auto& member : walk) root_of[member] = root;
+    }
+    std::unordered_map<std::string, double> group_last_frame;
+    for (const auto& [key, source] : sources) {
+        auto& last = group_last_frame[root_of[key]];
+        last       = std::max(last, source.last_frame);
+    }
+    for (const auto& [key, source] : sources) {
+        const auto& root = root_of[key];
+        if (clocks.contains(root)) continue;
+        // The clock is the root's first curve; an orphaned or looping chain has no
+        // root constant, so its first member lends its own.
+        const auto& origin = sources.contains(root) ? sources.at(root) : source;
+        ScalarAnimation clock = origin.components[origin.first_curve];
+        if (! (clock.length_frames > 0.0) || ! sources.contains(root)) {
+            clock.length_frames = std::max(clock.length_frames, group_last_frame[root]);
+        }
+        if (frozen_roots.contains(root)) clock.start_paused = true;
+        clocks[root] = runtime->RegisterScalarAnimation(layer_name, std::move(clock));
+    }
+
+    for (const auto& entry : ResolveConstantUniforms(wpmat, info)) {
+        const std::string* key      = &entry.key;
+        const auto&        uniform  = entry.uniform;
+        const auto*        constant = entry.constant;
+        const auto setting = MaterialConstantSettingJson(*constant);
+        if (HasDynamicSetting(setting)) {
+            auto value = constant->value.empty()
+                             ? ResolveStringSetting(*runtime, setting, layer_name)
+                             : ResolveVectorSetting(*runtime, setting, constant->value.size(),
+                                                    layer_name);
+            runtime->RegisterMaterialConstant(material, uniform, std::move(value));
+            continue;
+        }
+        const auto source = sources.find(*key);
+        if (source == sources.end()) continue;
+        auto animation              = std::make_shared<MaterialConstantAnimation>();
+        animation->playback         = clocks.at(root_of.at(*key));
+        animation->component_count  = source->second.component_count;
+        animation->components       = source->second.components;
+        // Only the clock's owner loops or restarts; the rest read its frame and play once.
+        if (root_of.at(*key) != *key || frozen_roots.contains(root_of.at(*key))) {
+            for (auto& curve : animation->components) curve.mode = ScalarAnimationMode::Single;
+        }
+        runtime->RegisterMaterialConstant(material, uniform,
+                                          std::make_unique<DynamicValue>(0.0f), animation);
+    }
+}
+
+/// The header of a file texture, read once per distinct name per parse.
+const ImageHeader& TextureHeaderOf(ParseContext& context, const std::string& name) {
+    const auto found = context.texture_headers.find(name);
+    if (found != context.texture_headers.end()) return found->second;
+    ImageHeader header;
+    if (context.scene->imageParser != nullptr) header = context.scene->imageParser->ParseHeader(name);
+    return context.texture_headers.emplace(name, std::move(header)).first->second;
+}
+
+/// Records a file texture the scene draws with: its sampling, whether it is a
+/// video or a sprite sheet. One entry exists per distinct name.
+void RegisterFileTexture(ParseContext& context, const std::string& name, const ImageHeader& header) {
+    auto& textures = context.scene->textures;
+    if (textures.contains(name)) return;
+    SceneTexture texture;
+    texture.url         = name;
+    texture.sample      = header.sample;
+    texture.isVideo     = header.isVideo;
+    texture.isSprite    = header.isSprite;
+    texture.spriteAnim  = header.spriteAnim;
+    textures[name]      = std::move(texture);
+}
+
+/// What the texture string of a slot turns into after the classification of R34:
+/// the name the draw samples (empty when the slot stays unbound), and whether it is
+/// another layer's composite.
+struct ClassifiedTexture {
+    std::string name;
+    bool        is_file { false };
+    bool        is_target { false };
+};
+
+ClassifiedTexture ClassifyTexture(ParseContext& context, const std::string& authored,
+                                  std::string_view shader, bool has_blend_combo) {
+    ClassifiedTexture result;
+    if (authored.empty()) return result;
+    auto& scene = *context.scene;
+
+    // Runtime pictures (a now-playing cover) are neither layers nor targets.
+    const auto* runtime_images = dynamic_cast<RuntimeImageSource*>(scene.imageParser.get());
+    if (runtime_images != nullptr && runtime_images->IsRuntimeImage(authored)) {
+        result.name    = authored;
+        result.is_file = true;
+        return result;
+    }
+    static const LayerObjectIndex kNoLayers;
+    const auto resolution = ResolveLayerTextureName(
+        authored, g_parse_layer_index != nullptr ? *g_parse_layer_index : kNoLayers, context.vfs);
+    if (! resolution.error.empty()) {
+        LOG_ERROR("texture '%s' cannot be resolved: %s", authored.c_str(), resolution.error.c_str());
+        return result;
+    }
+    if (resolution.is_layer) {
+        result.name = resolution.resolved;
+        return result;
+    }
+    if (! IsSpecTex(authored)) {
+        result.name    = authored;
+        result.is_file = true;
+        return result;
+    }
+    // Special names (R28, R29).
+    if (authored == "_rt_FullFrameBuffer") {
+        if (shader == "genericimage2" && ! has_blend_combo) return result;
+        result.name      = std::string(SpecTex_Default);
+        result.is_target = true;
+        return result;
+    }
+    if (! scene.HasRenderTarget(authored)) {
+        LOG_ERROR("render target '%s' is not registered, leaving the texture slot unbound",
+                  authored.c_str());
+        return result;
+    }
+    result.name      = authored;
+    result.is_target = true;
+    return result;
+}
+
+/// What the shader layer is told about each slot of a pass.
+std::vector<WPShaderTexInfo> SlotInfos(ParseContext& context, const std::vector<std::string>& slots,
+                                       const std::vector<bool>& author_supplied) {
+    std::vector<WPShaderTexInfo> infos(slots.size());
+    for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+        auto& info   = infos[slot];
+        info.present = slot < author_supplied.size() && author_supplied[slot];
+        const auto& name = slots[slot];
+        if (name.empty()) continue;
+        if (IsSpecTex(name)) {
+            // Render targets are always known to carry every component.
+            info.enabled      = true;
+            info.composEnabled = { true, true, true, true };
+            continue;
+        }
+        const auto& header = TextureHeaderOf(context, name);
+        info.format        = header.format;
+        if (header.extraHeader.contains("compo1")) {
+            info.enabled = true;
+            for (std::size_t component = 0; component < 4; ++component) {
+                const auto found = header.extraHeader.find("compo" + std::to_string(component + 1));
+                info.composEnabled[component] = found != header.extraHeader.end() && found->second.val != 0;
+            }
+        }
+    }
+    return infos;
+}
+
+/// What a loaded material leaves to its caller.
+struct MaterialLoadOptions {
+    /// The pass is drawn where the scene's fog does not belong (the card of a
+    /// layer composited through effects): fog stays out of it and `fog_deferred`
+    /// of the shader info says the pass would have taken it.
+    bool defer_fog { false };
+};
+
+struct LoadedMaterial {
+    WPShaderInfo                               info;
+    std::vector<std::pair<usize, std::string>> render_targets;
+};
+
+constexpr std::size_t kMaxTextureSlots   = 13;
+constexpr int         kMaxCompileRounds  = 8;
+
+/// Loads a material (R23 to R30, R39, R48): reads the shader, settles its combos
+/// and default textures, clears the slots the shader does not sample, and fills the
+/// material with its state, textures, shader and base constants. False when the
+/// shader cannot be read, does not compile or never settles.
+bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, SceneMaterial& material,
+                  LoadedMaterial& loaded, const MaterialLoadOptions& options = {}) {
+    auto& scene = *context.scene;
+    if (wpmat.shader.empty()) return false;
+    const std::string base = "/assets/shaders/" + wpmat.shader;
+    std::vector<WPShaderUnit> units(2);
+    units[0].stage = ShaderType::VERTEX;
+    units[0].src   = fs::GetFileContent(*context.vfs, base + ".vert");
+    units[1].stage = ShaderType::FRAGMENT;
+    units[1].src   = fs::GetFileContent(*context.vfs, base + ".frag");
+    if (units[0].src.empty() || units[1].src.empty()) {
+        LOG_ERROR("shader '%s' is missing its source files", wpmat.shader.c_str());
+        return false;
+    }
+
+    // The textures: the material's, with user textures and cover slots put in.
+    std::vector<std::string> slots = wpmat.textures;
+    const ProjectProperties* properties =
+        scene.runtime != nullptr ? &scene.runtime->projectProperties() : nullptr;
+    ApplySystemUserTextures(slots, wpmat.usertextures, properties,
+                            dynamic_cast<RuntimeImageSource*>(scene.imageParser.get()));
+    if (scene.runtime != nullptr) {
+        for (const auto& user : wpmat.usertextures) {
+            const auto property = UserTexturePropertyName(user);
+            if (! property.empty()) scene.runtime->NoteLoadOnlyProperty(property);
+        }
+    }
+    if (slots.size() > kMaxTextureSlots) slots.resize(kMaxTextureSlots);
+    std::vector<bool> author_supplied(slots.size());
+    for (std::size_t slot = 0; slot < slots.size(); ++slot) author_supplied[slot] = ! slots[slot].empty();
+
+    // The combos the request starts from: the material's, then the engine's.
+    Combos base_combos;
+    for (const auto& [name, value] : wpmat.combos) base_combos[name] = std::to_string(value);
+    base_combos["HDR"]         = scene.hdr ? "1" : "0";
+    base_combos["SCENE_ORTHO"] = context.is_ortho ? "1" : "0";
+    if (! scene.light_config.empty()) {
+        base_combos["LIGHTS_POINT"]       = std::to_string(scene.light_config.point);
+        base_combos["LIGHTS_SPOT"]        = std::to_string(scene.light_config.spot);
+        base_combos["LIGHTS_TUBE"]        = std::to_string(scene.light_config.tube);
+        base_combos["LIGHTS_DIRECTIONAL"] = std::to_string(scene.light_config.directional);
+    }
+    const BlendMode blend = ParseSceneBlendMode(wpmat.blending);
+    if (blend == BlendMode::AlphaToCoverage) base_combos["ALPHATOCOVERAGE"] = "1";
+
+    const bool has_blend_combo = wpmat.combos.contains("BLENDMODE");
+    std::vector<ClassifiedTexture> classified(slots.size());
+    const auto classify_all = [&]() {
+        for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+            classified[slot] = ClassifyTexture(context, slots[slot], wpmat.shader, has_blend_combo);
+            slots[slot]      = classified[slot].name;
+        }
+    };
+    // Classification is repeated only for slots that change; first pass handles the authored.
+    classify_all();
+
+    const auto texture_keys_of = [&]() { return slots; };
+    const auto compile = [&](WPShaderInfo& info, Combos combos, std::string* reflection,
+                             const std::shared_ptr<SceneShader>& shader) {
+        info.combos = std::move(combos);
+        for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+            if (slots[slot].empty() || IsSpecTex(slots[slot])) continue;
+            shader::ApplyTextureFormatCombo(info.combos, slot, TextureHeaderOf(context, slots[slot]).format);
+        }
+        const auto texinfos = SlotInfos(context, slots, author_supplied);
+        return CompileAndQueueMetalProgram(shader, scene.scene_id, wpmat.shader, units, *context.vfs,
+                                           &info, texinfos, texture_keys_of(), reflection);
+    };
+
+    auto shader = std::make_shared<SceneShader>();
+    shader->name = wpmat.shader;
+    shader->id   = 0;
+    WPShaderInfo info;
+    std::string  reflection;
+    Combos       combos = base_combos;
+    bool         settled = false;
+    for (int round = 0; round < kMaxCompileRounds && ! settled; ++round) {
+        info = WPShaderInfo {};
+        if (! compile(info, combos, &reflection, shader)) return false;
+        // Defaults fill only the slots nothing was put in; a slot named twice is filled once.
+        bool filled = false;
+        for (const auto& [slot, name] : info.defTexs) {
+            if (slot < 0 || static_cast<std::size_t>(slot) >= kMaxTextureSlots) continue;
+            const auto index = static_cast<std::size_t>(slot);
+            if (index >= slots.size()) {
+                slots.resize(index + 1);
+                classified.resize(index + 1);
+                author_supplied.resize(index + 1, false);
+            }
+            if (! slots[index].empty()) continue;
+            const auto result = ClassifyTexture(context, name, wpmat.shader, has_blend_combo);
+            if (result.name.empty()) continue;
+            slots[index]      = result.name;
+            classified[index] = result;
+            filled            = true;
+        }
+        settled = ! filled;
+        // The combos the settled compile reported feed the next round only through the
+        // slots; the request starts from the same base every time.
+    }
+    if (! settled) {
+        LOG_ERROR("shader '%s' never settled its default textures", wpmat.shader.c_str());
+        return false;
+    }
+
+    // Fog (R48): a pass whose effective FOG combo is on is compiled once more with the
+    // scene's fog, unless the closing pass of its chain takes it.
+    const bool scene_fog = scene.fog_distance || scene.fog_height;
+    if (scene_fog) {
+        const auto fog = info.combos.find("FOG");
+        if (fog != info.combos.end() && fog->second != "0") {
+            if (options.defer_fog) {
+                info.fog_deferred = true;
+            } else {
+                Combos with_fog = base_combos;
+                if (scene.fog_distance) with_fog["FOG_DIST"] = "1";
+                if (scene.fog_height) with_fog["FOG_HEIGHT"] = "1";
+                with_fog["FOG_COMPUTED"] = "1";
+                WPShaderInfo fogged;
+                if (! compile(fogged, with_fog, &reflection, shader)) return false;
+                fogged.fog_deferred = false;
+                info                = std::move(fogged);
+            }
+        }
+    }
+
+    // Slots the shader never samples hold nothing (R27).
+    std::unordered_set<uint> sampled;
+    for (const auto& unit : units) {
+        sampled.insert(unit.preprocess_info.active_tex_slots.begin(),
+                       unit.preprocess_info.active_tex_slots.end());
+    }
+    for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+        if (! slots[slot].empty() && ! sampled.contains(static_cast<uint>(slot))) {
+            slots[slot].clear();
+            classified[slot] = {};
+        }
+    }
+
+    // The scene's own constants first, then what each slot knows about its texture (R23).
+    auto& constants = material.customShader.constValues;
+    for (const auto& [name, value] : context.global_base_uniforms) constants[name] = value;
+    for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+        const auto& name = slots[slot];
+        if (name.empty() || IsSpecLinkTex(name)) continue;
+        std::array<float, 4> resolution {};
+        if (classified[slot].is_target) {
+            const auto* target = scene.FindRenderTarget(name);
+            if (target == nullptr) continue;
+            const float w = static_cast<float>(target->width);
+            const float h = static_cast<float>(target->height);
+            resolution    = { w, h, w, h };
+            loaded.render_targets.emplace_back(slot, scene.ResolveRenderTargetName(name));
+        } else {
+            const auto& header = TextureHeaderOf(context, name);
+            const float iw     = static_cast<float>(header.mapWidth);
+            const float ih     = static_cast<float>(header.mapHeight);
+            const bool  padded = static_cast<int64_t>(header.width) * header.height >
+                                static_cast<int64_t>(header.mapWidth) * header.mapHeight;
+            resolution = padded ? std::array<float, 4> { static_cast<float>(header.width),
+                                                         static_cast<float>(header.height), iw, ih }
+                                : std::array<float, 4> { iw, ih, iw, ih };
+            RegisterFileTexture(context, name, header);
+            if (header.isSprite) material.hasSprite = true;
+        }
+        constants[std::string(WE_GLTEX_RESOLUTION_NAMES[slot])] = ShaderValue(resolution.data(), 4);
+        if (resolution[2] != 0.0f && resolution[3] != 0.0f) {
+            const std::array<float, 4> texel { 1.0f / resolution[2], 1.0f / resolution[3],
+                                               resolution[2], resolution[3] };
+            constants[std::string(WE_GLTEX_TEXEL_NAMES[slot])] = ShaderValue(texel.data(), 4);
+        }
+    }
+
+    shader->default_uniforms = info.svs;
+    shader->rust_reflection_json = reflection;
+    material.name                  = wpmat.shader;
+    material.textures              = slots;
+    material.customShader.shader   = shader;
+    material.blenmode              = blend;
+    material.cull_mode             = ParseSceneCullMode(wpmat.cullmode);
+    ApplyMaterialDepth(material, wpmat);
+    material.defines.clear();
+    for (const auto& [name, value] : info.combos) {
+        if (value != "0") material.defines.push_back(name);
+    }
+    std::sort(material.defines.begin(), material.defines.end());
+    if (const auto audio = info.combos.find("AUDIOPROCESSING");
+        audio != info.combos.end() && audio->second != "0") {
+        MarkSceneRequiresAudioResponse(&scene);
+    }
+    LoadStaticMaterialConstants(material, wpmat, info);
+    loaded.info = std::move(info);
+    return true;
 }
 
 // CLEANROOM LS20: the file-local helpers of this group were removed; the rewrite designs its own.
@@ -1607,7 +2100,7 @@ void wallpaper::ApplySystemUserTextures(std::vector<std::string>&               
 void wallpaper::LoadMaterialConstantShaderValues(SceneMaterial& material,
                                                  const wpscene::WPMaterial& wpmat,
                                                  const WPShaderInfo& info) {
-    // CLEANROOM LS19
+    LoadStaticMaterialConstants(material, wpmat, info);
 }
 
 namespace
