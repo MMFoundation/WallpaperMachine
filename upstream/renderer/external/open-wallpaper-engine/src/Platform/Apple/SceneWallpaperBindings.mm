@@ -52,6 +52,18 @@ int fail(std::string_view text)
     return 1;
 }
 
+// Same as `fail`, for a text made of a fixed lead and a detail: building it may
+// run out of memory too, and that must not unwind out of the interface.
+int fail_detail(std::string_view lead, std::string_view detail)
+{
+    try {
+        t_last_error.assign(lead.data(), lead.size());
+        t_last_error.append(detail.data(), detail.size());
+    } catch (...) {
+    }
+    return 1;
+}
+
 // Runs a body that may allocate or call into the scene host. No exception of
 // any kind leaves the interface: it becomes status 1 with a text.
 template<class Body>
@@ -60,7 +72,7 @@ int guarded(Body&& body)
     try {
         return body();
     } catch (const std::exception& error) {
-        return fail(std::string("the scene host failed internally: ") + error.what());
+        return fail_detail("the scene host failed internally: ", error.what());
     } catch (...) {
         return fail("the scene host failed internally");
     }
@@ -450,8 +462,12 @@ int check_property_write(owe_scene_wallpaper* scene, const char* name, PropertyK
     if (name == nullptr || *name == '\0') return fail("the property name is NULL or empty");
     const PropertyKind expected = property_kind(name);
     if (expected != PropertyKind::Unknown && expected != written) {
-        return fail(std::string("the property '") + name + "' takes " + kind_word(expected) +
-                    ", not " + kind_word(written));
+        try {
+            return fail(std::string("the property '") + name + "' takes " + kind_word(expected) +
+                        ", not " + kind_word(written));
+        } catch (...) {
+            return 1;
+        }
     }
     return 0;
 }
@@ -695,7 +711,9 @@ extern "C" int owe_scene_wallpaper_set_render_scale(owe_scene_wallpaper* scene, 
     if (scene == nullptr) return fail("the scene host handle is NULL");
     if (! std::isfinite(scale) || scale <= 0.0) return fail("the render scale must be finite and above zero");
     return guarded([&] {
-        scene->scene.setPropertyFloat(wallpaper::PROPERTY_RENDER_SCALE, static_cast<float>(scale));
+        // Anything above 1 means 1; clamping first keeps the narrowing to float defined.
+        scene->scene.setPropertyFloat(wallpaper::PROPERTY_RENDER_SCALE,
+                                      static_cast<float>(std::min(scale, 1.0e6)));
         return 0;
     });
 }
