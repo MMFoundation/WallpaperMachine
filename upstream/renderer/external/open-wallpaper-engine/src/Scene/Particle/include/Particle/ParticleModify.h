@@ -12,171 +12,158 @@ namespace ParticleModify
 {
 
 inline void Move(Particle& p, const linalg::Vector3d& acc) noexcept {
-    p.position = (p.position.cast<double>() + acc).cast<float>();
+    // CLEANROOM PS1
 }
-inline void Move(Particle& p, double x, double y, double z) noexcept { Move(p, { x, y, z }); }
-
+inline void Move(Particle& p, double x, double y, double z) noexcept {
+    // CLEANROOM PS1
+}
 inline void MoveTo(Particle& p, const linalg::Vector3d& pos) noexcept {
-    p.position = pos.cast<float>();
+    // CLEANROOM PS1
 }
-inline void MoveTo(Particle& p, double x, double y, double z) noexcept { MoveTo(p, { x, y, z }); }
-
-inline void MoveToNegZ(Particle& p) noexcept { p.position.z() = -std::abs(p.position.z()); }
-
-inline void MoveByTime(Particle& p, double t) noexcept { Move(p, p.velocity.cast<double>() * t); }
-
+inline void MoveTo(Particle& p, double x, double y, double z) noexcept {
+    // CLEANROOM PS1
+}
+inline void MoveToNegZ(Particle& p) noexcept {
+    // CLEANROOM PS1
+}
+inline void MoveByTime(Particle& p, double t) noexcept {
+    // CLEANROOM PS1
+}
 inline void MoveMultiply(Particle& p, const linalg::Vector3d& para) noexcept {
-    p.position = para.cwiseProduct(p.position.cast<double>()).cast<float>();
+    // CLEANROOM PS1
 }
 inline void MoveMultiply(Particle& p, double x, double y, double z) noexcept {
-    MoveMultiply(p, { x, y, z });
+    // CLEANROOM PS1
 }
-
 inline void MoveApplySign(Particle& p, int32_t x, int32_t y, int32_t z) noexcept {
-    if (x != 0) {
-        p.position[0] = std::abs(p.position[0]) * (float)x;
-    }
-    if (y != 0) {
-        p.position[1] = std::abs(p.position[1]) * (float)y;
-    }
-    if (z != 0) {
-        p.position[2] = std::abs(p.position[2]) * (float)z;
-    }
+    // CLEANROOM PS1
 }
 inline void SphereDirectOffset(Particle& p, const linalg::Vector3d& base, double direct) noexcept {
-    using namespace wallpaper::linalg;
-    Vector3d axis  = base.cross(p.position.cast<double>()).normalized();
-    Affine3d trans = Affine3d::Identity();
-    trans.prerotate(AngleAxis<double>(direct, axis));
-    p.position = (trans * p.position.cast<double>()).cast<float>();
+    // CLEANROOM PS1
 }
-
 inline void RotatePos(Particle& p, double x, double y, double z) noexcept {
-    using namespace wallpaper::linalg;
-    Affine3d trans = Affine3d::Identity();
-
-    trans.prerotate(AngleAxis<double>(y, Vector3d::UnitY()));  // y
-    trans.prerotate(AngleAxis<double>(x, Vector3d::UnitX()));  // x
-    trans.prerotate(AngleAxis<double>(-z, Vector3d::UnitZ())); // z
-    p.position = (trans * p.position.cast<double>()).cast<float>();
+    // CLEANROOM PS1
 }
 
-inline void ChangeLifetime(Particle& p, double l) noexcept { p.lifetime += l; }
-
+inline void ChangeLifetime(Particle& p, double l) noexcept {
+    // CLEANROOM PS2
+}
 inline double LifetimePos(const Particle& p) {
-    if (p.lifetime < 0) return 1.0;
-    return 1.0 - (p.lifetime / p.init.lifetime);
+    // CLEANROOM PS2
+    return 0.0;
 }
-
-inline double LifetimePassed(const Particle& p) noexcept { return p.init.lifetime - p.lifetime; }
-
-inline bool LifetimeOk(const Particle& p) noexcept { return p.lifetime > 0.0f; }
-
-void ChangeRotation(Particle&, float x, float y, float z);
+inline double LifetimePassed(const Particle& p) noexcept {
+    // CLEANROOM PS2
+    return 0.0;
+}
+inline bool LifetimeOk(const Particle& p) noexcept {
+    // CLEANROOM PS2
+    return false;
+}
 
 inline void ChangeColor(Particle& p, const linalg::Vector3d& c) noexcept {
-    p.color = (p.color.cast<double>() + c).cast<float>();
+    // CLEANROOM PS3
 }
-inline void ChangeColor(Particle& p, double r, double g, double b) { ChangeColor(p, { r, g, b }); }
-
+inline void ChangeColor(Particle& p, double r, double g, double b) {
+    // CLEANROOM PS3
+}
 inline void ChangeRotation(Particle& p, const linalg::Vector3d& r) noexcept {
-    p.rotation = (p.rotation.cast<double>() + r).cast<float>();
+    // CLEANROOM PS3
 }
 inline void ChangeRotation(Particle& p, double x, double y, double z) {
-    ChangeRotation(p, { x, y, z });
+    // CLEANROOM PS3
 }
-
 inline void ChangeVelocity(Particle& p, const linalg::Vector3d& v) noexcept {
-    p.velocity = (p.velocity.cast<double>() + v).cast<float>();
+    // CLEANROOM PS3
 }
 inline void ChangeVelocity(Particle& p, double x, double y, double z) noexcept {
-    ChangeVelocity(p, { x, y, z });
+    // CLEANROOM PS3
 }
 inline void Accelerate(Particle& p, const linalg::Vector3d& acc, double t) noexcept {
-    ChangeVelocity(p, acc * t);
+    // CLEANROOM PS3
 }
-
 inline void ChangeAngularVelocity(Particle& p, const linalg::Vector3d& v) noexcept {
-    p.angularVelocity = (p.angularVelocity.cast<double>() + v).cast<float>();
+    // CLEANROOM PS3
 }
 inline void ChangeAngularVelocity(Particle& p, double x, double y, double z) noexcept {
-    ChangeAngularVelocity(p, { x, y, z });
+    // CLEANROOM PS3
 }
 inline void AngularAccelerate(Particle& p, const linalg::Vector3d& acc, double t) noexcept {
-    ChangeAngularVelocity(p, acc * t);
+    // CLEANROOM PS3
 }
-
 inline void Rotate(Particle& p, const linalg::Vector3d& r) noexcept {
-    p.rotation = (p.rotation.cast<double>() + r).cast<float>();
+    // CLEANROOM PS3
 }
-inline void Rotate(Particle& p, double x, double y, double z) noexcept { Rotate(p, { x, y, z }); }
-
+inline void Rotate(Particle& p, double x, double y, double z) noexcept {
+    // CLEANROOM PS3
+}
 inline void RotateByTime(Particle& p, double t) noexcept {
-    Rotate(p, p.angularVelocity.cast<double>() * t);
+    // CLEANROOM PS3
 }
 
-inline void MutiplyAlpha(Particle& p, double a) { p.alpha *= a; }
-inline void MutiplySize(Particle& p, double s) { p.size *= s; }
-
+inline void MutiplyAlpha(Particle& p, double a) {
+    // CLEANROOM PS4
+}
+inline void MutiplySize(Particle& p, double s) {
+    // CLEANROOM PS4
+}
 inline void MutiplyColor(Particle& p, const linalg::Vector3d& c) {
-    p.color = c.cwiseProduct(p.color.cast<double>()).cast<float>();
+    // CLEANROOM PS4
 }
 inline void MutiplyColor(Particle& p, double r, double g, double b) {
-    MutiplyColor(p, { r, g, b });
+    // CLEANROOM PS4
 }
-inline void MutiplyVelocity(Particle& p, double m) { p.velocity *= m; }
-
-inline void ChangeSize(Particle& p, double s) { p.size += s; }
-inline void ChangeAlpha(Particle& p, double a) { p.alpha += a; }
+inline void MutiplyVelocity(Particle& p, double m) {
+    // CLEANROOM PS4
+}
+inline void ChangeSize(Particle& p, double s) {
+    // CLEANROOM PS4
+}
+inline void ChangeAlpha(Particle& p, double a) {
+    // CLEANROOM PS4
+}
 
 inline void InitLifetime(Particle& p, float l) noexcept {
-    p.lifetime      = l;
-    p.init.lifetime = l;
+    // CLEANROOM PS5
 }
 inline void InitSize(Particle& p, double s) {
-    p.size      = s;
-    p.init.size = s;
+    // CLEANROOM PS5
 }
 inline void InitAlpha(Particle& p, double a) {
-    p.alpha      = a;
-    p.init.alpha = a;
+    // CLEANROOM PS5
 }
 inline void InitColor(Particle& p, double r, double g, double b) {
-    linalg::Vector3d c { r, g, b };
-    p.color      = c.cast<float>();
-    p.init.color = p.color;
+    // CLEANROOM PS5
 }
-
-inline void InitVelocity(Particle& p, const linalg::Vector3d& v) { p.velocity = v.cast<float>(); }
+inline void InitVelocity(Particle& p, const linalg::Vector3d& v) {
+    // CLEANROOM PS5
+}
 inline void InitVelocity(Particle& p, double x, double y, double z) {
-    InitVelocity(p, { x, y, z });
+    // CLEANROOM PS5
 }
-
 inline void MutiplyInitLifeTime(Particle& p, double m) {
-    p.lifetime *= m;
-    p.init.lifetime = p.lifetime;
+    // CLEANROOM PS5
 }
 inline void MutiplyInitAlpha(Particle& p, double m) {
-    p.alpha *= m;
-    p.init.alpha = p.alpha;
+    // CLEANROOM PS5
 }
 inline void MutiplyInitSize(Particle& p, double m) {
-    p.size *= m;
-    p.init.size = p.size;
+    // CLEANROOM PS5
 }
 inline void MutiplyInitColor(Particle& p, double r, double g, double b) {
-    MutiplyColor(p, { r, g, b });
-    p.init.color = p.color;
+    // CLEANROOM PS5
 }
 
 inline void Reset(Particle& p) {
-    p.alpha = p.init.alpha;
-    p.size  = p.init.size;
-    p.color = p.init.color;
+    // CLEANROOM PS6
 }
-
-inline void MarkOld(Particle& p) { p.mark_new = false; }
-inline bool IsNew(const Particle& p) { return p.mark_new; }
+inline void MarkOld(Particle& p) {
+    // CLEANROOM PS6
+}
+inline bool IsNew(const Particle& p) {
+    // CLEANROOM PS6
+    return false;
+}
 
 inline const linalg::Vector3f& GetPos(const Particle& p) { return p.position; }
 inline const linalg::Vector3f& GetVelocity(const Particle& p) { return p.velocity; }

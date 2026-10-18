@@ -21,11 +21,8 @@ class ParticleControlpoint {
 public:
     enum class FlagEnum
     {
-        link_mouse = 0, // 1
-        // this control point will follow the mouse cursor.
-        worldspace = 1, // 2
-        // the control point will always be at the same position in the world, independent from the
-        // position of the particle system.
+        link_mouse = 0,
+        worldspace = 1,
     };
     using EFlags = BitFlags<FlagEnum>;
 
@@ -33,7 +30,6 @@ public:
     EFlags               flags { 0 };
     i32                  id { -1 };
     std::array<float, 3> offset { 0, 0, 0 };
-    // a static offset relative to the position of the particle system.
 };
 
 class ParticleRender {
@@ -114,17 +110,17 @@ class Particle {
 public:
     enum class FlagEnum
     {
-        wordspace             = 0, // 1
-        spritenoframeblending = 1, // 2
-        perspective           = 2, // 4
+        wordspace             = 0,
+        spritenoframeblending = 1,
+        perspective           = 2,
         // The file keeps the scene object's `instanceoverride.speed` away from
         // its emitters, movement, turbulence, vortex, control point attraction
         // and position oscillation (the editor's "ignore speed override").
-        ignorespeedoverride   = 4, // 16
+        ignorespeedoverride   = 4,
         // The file keeps the scene object's `instanceoverride.size` away from its
         // `sizerandom` draws and its `sizechange` ramps (the editor's "ignore size
         // override").
-        ignoresizeoverride    = 7, // 128
+        ignoresizeoverride    = 7,
     };
     using EFlags = BitFlags<FlagEnum>;
 
@@ -170,15 +166,10 @@ class ParticleChild {
 public:
     bool FromJson(const nlohmann::json&, fs::VFS&);
 
-    // static
-    // eventfollow
-    // eventspawn
-    // eventdeath
     std::string type { "static" };
     std::string name;
     i32         maxcount { 20 };
 
-    // flags
     i32   controlpointstartindex { 0 };
     float probability { 1.0f };
 

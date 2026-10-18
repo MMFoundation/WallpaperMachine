@@ -79,7 +79,6 @@ struct ParticleSpawnContext {
 };
 
 using ParticleInitOp = std::function<void(Particle&, double)>;
-// particle index lifetime-percent passTime
 using ParticleOperatorOp = std::function<void(const ParticleInfo&)>;
 
 using ParticleEmittOp =

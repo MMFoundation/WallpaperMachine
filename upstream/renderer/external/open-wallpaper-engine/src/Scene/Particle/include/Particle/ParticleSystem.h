@@ -229,10 +229,8 @@ private:
     /// Set when `Emitt` wrote this frame's geometry. A draw that finds it
     /// clear rebuilds before uploading, without running the simulation again.
     bool m_mesh_rebuilt { true };
-    //	std::vector<std::unique_ptr<ParticleEmitter>> m_emiters;
     std::vector<ParticleEmittOp> m_emiters;
 
-    // std::vector<Particle>           m_particles;
     std::vector<ParticleInitOp>     m_initializers;
     std::vector<ParticleOperatorOp> m_operators;
     /// Bumped whenever an emitter or initializer is added, so an instance that
