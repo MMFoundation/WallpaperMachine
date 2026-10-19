@@ -3,9 +3,11 @@
 Every published version, newest first. Each section is written when its version is
 cut, by [`scripts/release_notes.py`](scripts/release_notes.py) from the commits
 between two version tags: a language model writes them up for users, where older
-sections list the commits. Each section states the same notes in English and
-Simplified Chinese. The app's What's New window offers both translations; the
-GitHub Release body repeats only the English notes. See
+sections list the commits. From 1.5.7, each section states the same notes in English,
+Simplified Chinese and Korean; earlier sections keep their original translations.
+The app's What's New window offers all three languages, with English as the fallback
+for older releases without Korean notes. The GitHub Release body repeats only the
+English notes. See
 [docs/release.md](docs/release.md) for how a version is cut.
 
 ## 1.5.6 — 2026-10-17

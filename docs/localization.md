@@ -219,7 +219,14 @@ catalogs agree.
    every shipped language in the picker (`AppearanceSettingsTests`), check that the
    Settings rows and the controller's words are translated
    (`SettingsSectionsLocalizationTests`) and lay out every page in every language.
-4. **Document.** Add the language to
+4. **Release notes.** The changelog has its own translation contract, separate
+   from the catalogs: English, Simplified Chinese and, from 1.5.7, Korean. To add
+   another notes language, update the model schema and validation in
+   `scripts/release_notes.py`, the bundled parser and What's New selector, and
+   their tests together. Keep tagged historical sections unchanged and define an
+   explicit English fallback for releases without that translation. See
+   [release notes](release.md#release-notes-and-the-changelog).
+5. **Document.** Add the language to
    [Control panel → Language](features/control-panel.md#language) and to the
    language list in both READMEs, and record the run with
    `python3 scripts/log_verification.py`.
