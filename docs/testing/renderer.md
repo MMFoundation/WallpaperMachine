@@ -566,6 +566,26 @@ mount opens the system output device even when nothing plays. Temporary files
 carry the process id, because other checkouts run the same binaries at the same
 time and share the temporary directory, and are removed when the test ends.
 
+Timer admission tests in `tests/timer/request_admission_contract_test.cpp`
+control the real timer callback before and after request-latch consumption. A
+batch whose requests all precede consumption must coalesce; requests made after
+a draw is posted must survive a suppressed tick. Post-tick barriers inspect the
+actual idle/pending state rather than sleeping to infer that no more frames will
+arrive. The recovery-window tests use real suppressed ticks and explicit render
+begin/end timestamps; they are not throughput measurements. Declaration-only
+friends give the test access to the normal linked timer objects without adding a
+production hook or changing their layout or scheduling.
+
+The wall-clock slow-draw assertion remains 42–60 completions in one second for
+18 ms draws at a 60 fps ceiling. It has produced both passing and 40–41-frame
+failing results with unchanged scheduler code; the cause is not established.
+A focused pass does not clear a failed full check. Preserve failures and do not
+retry until green or substitute controlled-timestamp tests for the cadence test.
+For timer diagnostics use `scripts/check_renderer.py`'s `run` helper and its
+existing child scheduling policy, not direct execution of the binary; avoid
+concurrent builds/benchmarks. Do not infer a particular frame count from a passing
+test whose successful output prints no count.
+
 Two registered binaries (`version_tests` and `unchanged_present_test`) and the media binaries' corpus A/B tests described above also read a local corpus when there is one; the roots
 and their defaults are in
 [wallpaper-corpus.md](wallpaper-corpus.md#pointing-the-tests-at-your-local-corpus).

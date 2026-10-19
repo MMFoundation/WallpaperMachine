@@ -96,6 +96,8 @@ public:
     void FrameEnd();
 
 private:
+    friend struct TimerAdmissionTestAccess;
+
     void AddFrametime(std::chrono::microseconds);
     void UpdateFrametime();
     void FrameBegin(std::chrono::steady_clock::time_point now);

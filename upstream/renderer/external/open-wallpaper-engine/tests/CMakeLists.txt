@@ -586,7 +586,8 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 
-add_executable(timer_tests timer/frame_timer_test.cpp)
+add_executable(timer_tests timer/frame_timer_test.cpp
+                           timer/request_admission_contract_test.cpp)
 target_link_libraries(timer_tests PRIVATE wpTimer GTest::gtest_main)
 target_include_directories(timer_tests PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(timer_tests PRIVATE cxx_std_20)

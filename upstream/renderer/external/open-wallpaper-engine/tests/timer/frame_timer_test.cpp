@@ -875,45 +875,6 @@ TEST(FrameTimerTest, ABurstOfWakeOnceAtTheCeilingDoesNotAddCallbacks)
                             << " callbacks in 1s at 30 fps";
 }
 
-/// An idle clock has no cadence. A burst of requests coalesces into the one
-/// frame the ceiling allows, and then the clock goes back to sleep.
-TEST(FrameTimerTest, AnIdleBurstOfWakeOnceProducesOneCallback)
-{
-    std::mutex              mutex;
-    std::condition_variable condition;
-    int                     draws { 0 };
-
-    FrameTimer timer([&]() {
-        {
-            std::scoped_lock lock(mutex);
-            ++draws;
-        }
-        condition.notify_all();
-        timer.FrameEnd();
-    });
-    timer.SetRequiredFps(60);
-    timer.Run();
-    WaitFor(mutex, condition, [&]() { return draws > 0; }, 500ms);
-    timer.SetFrameDemand({ .kind = FrameTimer::FrameDemand::Kind::Idle });
-    std::this_thread::sleep_for(50ms);
-    int quiescent = 0;
-    {
-        std::scoped_lock lock(mutex);
-        quiescent = draws;
-    }
-
-    for (int index = 0; index < 200; ++index) timer.RequestFrame();
-    const auto waited = WaitFor(
-        mutex, condition, [&]() { return draws > quiescent; }, 500ms);
-    std::this_thread::sleep_for(200ms);
-    timer.Stop();
-
-    std::scoped_lock lock(mutex);
-    EXPECT_LT(waited.count(), 400) << "the idle burst never produced its frame";
-    EXPECT_EQ(draws, quiescent + 1)
-        << "an idle burst produced " << (draws - quiescent) << " frames";
-}
-
 TEST(ThreadTimerTest, CadenceKeepsItsPeriodDespiteWakeSlack) {
     // Each wait wakes a few milliseconds late. Anchoring the next deadline to
     // the wake time added that slack to every period: a 10 ms cadence ran at

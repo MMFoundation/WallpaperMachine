@@ -91,6 +91,8 @@ public:
     void FireNow();
 
 private:
+    friend struct TimerAdmissionTestAccess;
+
     using Clock = std::chrono::steady_clock;
 
     void Loop();
