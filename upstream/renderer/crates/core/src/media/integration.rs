@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec r1c-core-media.md; written without access to the original source.
 use serde::{Serialize, Serializer};
 
 /// Playback state as Wallpaper Engine media scripts read it from
@@ -8,11 +9,8 @@ use serde::{Serialize, Serializer};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum MediaPlaybackState {
-    /// No active player is available.
     Stopped = 0,
-    /// Audio is currently progressing.
     Playing = 1,
-    /// A player is active but playback is paused.
     Paused = 2,
 }
 
@@ -25,7 +23,6 @@ impl Serialize for MediaPlaybackState {
     }
 }
 
-/// Song metadata exposed to Wallpaper Engine media integration callbacks.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct MediaProperties {
     #[serde(rename = "albumTitle")]
@@ -34,7 +31,6 @@ pub struct MediaProperties {
     pub title: Option<String>,
 }
 
-/// RGBA artwork texture payload for the renderer-owned `$mediaThumbnail`.
 /// A zero-by-zero image with no bytes explicitly clears both cover slots.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MediaThumbnailRgba {
@@ -43,7 +39,6 @@ pub struct MediaThumbnailRgba {
     pub rgba: Vec<u8>,
 }
 
-/// Incremental media-provider output from one system polling pass.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MediaPollResult {
     pub events: Vec<MediaIntegrationEvent>,
@@ -139,23 +134,19 @@ impl MediaThumbnailRgba {
             return Ok(Self { width, height, rgba });
         }
         if width == 0 || height == 0 {
-            return Err("media thumbnail dimensions must be non-zero");
+            return Err("media thumbnail must have both sides or neither");
         }
-        let expected = (width as usize).checked_mul(height as usize)
+        let expected = (width as usize)
+            .checked_mul(height as usize)
             .and_then(|pixels| pixels.checked_mul(4))
             .ok_or("media thumbnail dimensions exceed the supported payload size")?;
         if rgba.len() != expected {
-            return Err("media thumbnail RGBA payload length must equal width * height * 4");
+            return Err("media thumbnail byte length must equal width * height * 4");
         }
-        Ok(Self {
-            width,
-            height,
-            rgba,
-        })
+        Ok(Self { width, height, rgba })
     }
 }
 
-/// Media integration event serialized into Wallpaper Engine's JavaScript API.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type")]
 pub enum MediaIntegrationEvent {

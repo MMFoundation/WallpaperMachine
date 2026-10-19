@@ -1,7 +1,8 @@
-use objc2::rc::Retained;
-use objc2_core_graphics::{CGColor, CGColorSpace, kCGColorSpaceSRGB};
-use objc2_foundation::{NSPoint, NSRect, NSSize, NSThread};
-use objc2_quartz_core::{CAAutoresizingMask, CAMetalLayer};
+// Clean-room implementation from the WallpaperMachine spec r1b-core-display.md; written without access to the original source.
+use objc2::{MainThreadMarker, rc::Retained};
+use objc2_core_foundation::{CFRetained, CFString, CFUUID, CGPoint, CGRect, CGSize};
+use objc2_core_graphics::{CGColor, CGColorSpace, CGDisplayMode, CGError, kCGColorSpaceSRGB};
+use objc2_quartz_core::{CAAutoresizingMask, CALayer, CAMetalLayer};
 
 use crate::PlaceholderStyle;
 
@@ -9,9 +10,7 @@ pub mod callback;
 pub mod state;
 pub mod watcher;
 
-const DEFAULT_REFRESH_RATE_HZ: u32 = 60;
-
-/// Stable identity metadata for matching non-primary displays across sessions.
+/// Identifying keys of a display that can outlive a display id.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct DisplayIdentity {
     pub uuid: Option<String>,
@@ -33,33 +32,23 @@ impl DisplayIdentity {
             && self.name.is_none()
     }
 
-    /// Returns a debug-friendly label describing the identifying fields present
-    /// on this identity.
     #[must_use]
     pub fn identity_label(&self) -> String {
-        let mut parts = Vec::new();
-        if let Some(value) = self.uuid.as_deref() {
-            parts.push(format!("uuid={value}"));
-        }
-        if let Some(value) = self.vendor_id {
-            parts.push(format!("vendor={value}"));
-        }
-        if let Some(value) = self.model_id {
-            parts.push(format!("model={value}"));
-        }
-        if let Some(value) = self.serial_number {
-            parts.push(format!("serial={value}"));
-        }
-        if let Some(value) = self.unit_number {
-            parts.push(format!("unit={value}"));
-        }
-        if let Some(value) = self.name.as_deref() {
-            parts.push(format!("name={value}"));
-        }
-        if parts.is_empty() {
-            "none".to_string()
-        } else {
-            parts.join(",")
+        let named = [
+            ("uuid", self.uuid.clone()),
+            ("vendor", self.vendor_id.map(|value| value.to_string())),
+            ("model", self.model_id.map(|value| value.to_string())),
+            ("serial", self.serial_number.map(|value| value.to_string())),
+            ("unit", self.unit_number.map(|value| value.to_string())),
+            ("name", self.name.clone()),
+        ];
+        let present: Vec<String> = named
+            .into_iter()
+            .filter_map(|(field, value)| value.map(|value| format!("{field}: {value}")))
+            .collect();
+        match present.as_slice() {
+            [] => "no identity fields".to_owned(),
+            fields => format!("[{}]", fields.join("; ")),
         }
     }
 
@@ -102,33 +91,21 @@ impl DisplayIdentity {
     }
 }
 
-/// Pixel-space geometry and scale for a display target.
-///
-/// `x` and `y` are display origins in the macOS global point coordinate space.
-/// `width` and `height` are physical pixel dimensions because the renderer
-/// allocates swapchains/textures in pixels rather than logical display points.
+/// Geometry, scale and identity of one display. See the display spec for the
+/// meaning of each field.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayDesc {
-    /// Platform display identifier. On macOS this is a `CGDirectDisplayID`.
     pub display_id: u32,
-    /// Stable identity metadata for matching displays across sessions.
     pub identity: DisplayIdentity,
-    /// Display origin on the global desktop x axis.
     pub x: i32,
-    /// Display origin on the global desktop y axis.
     pub y: i32,
-    /// Display width in physical pixels.
     pub width: u32,
-    /// Display height in physical pixels.
     pub height: u32,
-    /// Ratio between physical pixels and logical display points.
     pub scale_factor: f64,
-    /// Current display refresh rate rounded to hertz.
     pub refresh_rate_hz: u32,
 }
 
 impl DisplayDesc {
-    /// Constructs a display descriptor from already-normalized geometry.
     #[must_use]
     pub fn new(
         display_id: u32,
@@ -172,49 +149,46 @@ impl DisplayDesc {
     }
 
     #[must_use]
-    pub fn with_refresh_rate(mut self, refresh_rate_hz: u32) -> Self {
-        self.refresh_rate_hz = refresh_rate_hz.max(1);
-        self
+    pub fn with_refresh_rate(self, refresh_rate_hz: u32) -> Self {
+        Self {
+            refresh_rate_hz: refresh_rate_hz.max(1),
+            ..self
+        }
     }
 
-    /// Returns the main macOS display.
+    /// The display the system calls the main one.
     ///
     /// # Errors
     ///
-    /// Returns [`crate::EngineError::Platform`] if Core Graphics cannot
-    /// enumerate active displays or reports no usable display.
+    /// `Platform` when no display can be read.
     pub fn primary() -> Result<Self, crate::EngineError> {
-        let mut metrics = sys::active_display_metrics()?;
-        if let Some(index) = metrics.iter().position(|metrics| metrics.is_primary) {
-            return Ok(DisplayDesc::from(metrics.swap_remove(index)));
-        }
-        metrics
-            .into_iter()
-            .next()
-            .map(DisplayDesc::from)
-            .ok_or_else(|| {
-                crate::EngineError::Platform("no active displays were found".to_string())
-            })
+        let mut metrics = platform::read_displays()?;
+        let main = platform::main_display_index(&metrics).ok_or_else(|| {
+            crate::EngineError::Platform("no active displays were found".to_string())
+        })?;
+        Ok(metrics.swap_remove(main).into())
     }
 
-    /// Returns a debug-friendly label describing this display's geometry and
-    /// identity.
     #[must_use]
     pub fn desc_label(&self) -> String {
-        let scale_factor = self.scale_factor.max(f64::MIN_POSITIVE);
+        // A scale of zero or less reads as the smallest positive number.
+        let divisor = self.scale_factor.max(f64::MIN_POSITIVE);
+        let points = (
+            f64::from(self.width) / divisor,
+            f64::from(self.height) / divisor,
+        );
         format!(
-            "id={} origin=({}, {}) physical={}x{} scale={:.3} logical={:.2}x{:.2} refresh={}Hz \
-             identity={}",
-            self.display_id,
-            self.x,
-            self.y,
-            self.width,
-            self.height,
-            self.scale_factor,
-            f64::from(self.width) / scale_factor,
-            f64::from(self.height) / scale_factor,
-            self.refresh_rate_hz,
-            self.identity.identity_label(),
+            "display {id} at ({x}, {y}), {w}x{h} px, scale {scale:.3}, {pw:.1}x{ph:.1} pt, {hz} Hz, {identity}",
+            id = self.display_id,
+            x = self.x,
+            y = self.y,
+            w = self.width,
+            h = self.height,
+            scale = self.scale_factor,
+            pw = points.0,
+            ph = points.1,
+            hz = self.refresh_rate_hz,
+            identity = self.identity.identity_label(),
         )
     }
 
@@ -234,64 +208,45 @@ impl DisplayDesc {
         self.width > 0 && self.height > 0
     }
 
-    /// Builds a `CAMetalLayer` matching this display's geometry and the
-    /// provided placeholder style.
-    ///
-    /// Must be called on the main thread. Does NOT attach the layer to any
-    /// view.
     #[must_use]
     pub fn build_metal_layer(&self, style: &PlaceholderStyle) -> Retained<CAMetalLayer> {
-        debug_assert!(NSThread::isMainThread_class());
-
-        let scale_factor = if self.scale_factor > 0.0 {
-            self.scale_factor
-        } else {
-            1.0
-        };
-        let point_width = f64::from(self.width) / scale_factor;
-        let point_height = f64::from(self.height) / scale_factor;
-        let content_frame = NSRect::new(NSPoint::ZERO, NSSize::new(point_width, point_height));
-        let drawable_size = NSSize::new(f64::from(self.width), f64::from(self.height));
-
-        let metal_layer = CAMetalLayer::layer();
-        let layer_color = CGColor::new_generic_rgb(style.red, style.green, style.blue, style.alpha);
-
-        metal_layer.setFrame(content_frame);
-        metal_layer.setAutoresizingMask(
+        debug_assert!(
+            MainThreadMarker::new().is_some(),
+            "Metal layers are built on the main thread"
+        );
+        let scale = sanitized_scale(self.scale_factor);
+        let layer = CAMetalLayer::layer();
+        layer.setFrame(CGRect::new(
+            CGPoint::new(0.0, 0.0),
+            CGSize::new(
+                f64::from(self.width) / scale,
+                f64::from(self.height) / scale,
+            ),
+        ));
+        layer.setAutoresizingMask(
             CAAutoresizingMask::LayerWidthSizable | CAAutoresizingMask::LayerHeightSizable,
         );
-        metal_layer.setContentsScale(scale_factor);
-        metal_layer.setDrawableSize(drawable_size);
-        // Match the sRGB native desktop poster instead of interpreting the
-        // same final pixels in the display's (possibly wide-gamut) color space.
-        if let Some(color_space) = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB })) {
-            metal_layer.setColorspace(Some(&color_space));
-        }
-        metal_layer.setBackgroundColor(Some(&layer_color));
-
-        metal_layer
+        layer.setContentsScale(scale);
+        layer.setDrawableSize(CGSize::new(
+            f64::from(self.width),
+            f64::from(self.height),
+        ));
+        // SAFETY: the constant is a valid colour space name owned by CoreGraphics.
+        let srgb = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB }));
+        layer.setColorspace(srgb.as_deref());
+        let background = CGColor::new_srgb(style.red, style.green, style.blue, style.alpha);
+        CALayer::setBackgroundColor(&layer, Some(&background));
+        layer
     }
 
-    /// Returns true iff the geometry fields (id, origin, size, `scale_factor`)
-    /// match `other`. `identity` is intentionally excluded — this is used
-    /// for detecting geometry changes in the display-change event stream,
-    /// where identity changes are surfaced as a separate event.
     #[must_use]
     pub fn has_same_geometry(&self, other: &DisplayDesc) -> bool {
         self.display_id == other.display_id
             && self.x == other.x
             && self.y == other.y
-            && self.width == other.width
-            && self.height == other.height
-            && (self.scale_factor - other.scale_factor).abs() <= f64::EPSILON
+            && self.has_same_render_surface(other)
     }
 
-    /// Returns true iff fields that determine renderer surface allocation
-    /// match.
-    ///
-    /// Window origin and display id can change independently from pixel size
-    /// and scale during desktop topology churn. Those cases should move the
-    /// window without forcing a renderer surface reconfigure.
     #[must_use]
     pub fn has_same_render_surface(&self, other: &DisplayDesc) -> bool {
         self.width == other.width
@@ -299,20 +254,28 @@ impl DisplayDesc {
             && (self.scale_factor - other.scale_factor).abs() <= f64::EPSILON
     }
 
-    /// Returns all active macOS displays.
+    /// Every active display in system order.
     ///
     /// # Errors
     ///
-    /// Returns [`crate::EngineError::Platform`] if Core Graphics cannot
-    /// enumerate active displays or if display geometry overflows
-    /// wallpaper-core's numeric representation.
+    /// `Platform` when the display list cannot be read.
     pub fn all() -> Result<Vec<Self>, crate::EngineError> {
-        sys::active_display_metrics().map(|metrics| {
-            metrics
-                .into_iter()
-                .map(DisplayDesc::from)
-                .collect::<Vec<_>>()
-        })
+        Ok(platform::read_displays()?
+            .into_iter()
+            .map(Self::from)
+            .collect())
+    }
+}
+
+/// Refresh rate a descriptor reports when no mode says otherwise.
+const DEFAULT_REFRESH_RATE_HZ: u32 = 60;
+
+/// A scale of 0 or less, or one that is not a number, reads as 1.
+pub(crate) fn sanitized_scale(scale: f64) -> f64 {
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
     }
 }
 
@@ -410,48 +373,44 @@ impl RefreshReportLog {
 }
 
 impl From<DisplayMetrics> for DisplayDesc {
-    #[allow(clippy::cast_possible_truncation)]
     fn from(metrics: DisplayMetrics) -> Self {
-        let scale_factor = [
-            (f64::from(metrics.pixel_width), metrics.logical_width),
-            (f64::from(metrics.pixel_height), metrics.logical_height),
-        ]
-        .into_iter()
-        .find_map(|(pixels, points)| {
-            if points > 0.0 {
-                let computed = pixels / points;
-                if computed.is_finite() && computed >= 1.0 {
-                    return Some(computed);
-                }
-            }
-            None
-        })
-        .unwrap_or(1.0);
-
-        let appkit_origin_y = if metrics.primary_logical_height.is_finite()
+        let ratio = |pixels: u32, logical: f64| {
+            let ratio = f64::from(pixels) / logical;
+            (logical > 0.0 && ratio.is_finite() && ratio >= 1.0).then_some(ratio)
+        };
+        let scale_factor = ratio(metrics.pixel_width, metrics.logical_width)
+            .or_else(|| ratio(metrics.pixel_height, metrics.logical_height))
+            .unwrap_or(1.0);
+        let heights_usable = metrics.primary_logical_height.is_finite()
             && metrics.primary_logical_height > 0.0
             && metrics.logical_height.is_finite()
-            && metrics.logical_height > 0.0
-        {
+            && metrics.logical_height > 0.0;
+        let appkit_y = if heights_usable {
             metrics.primary_logical_height - metrics.origin_y - metrics.logical_height
         } else {
             metrics.origin_y
         };
-
-        DisplayDesc::with_identity(
-            metrics.display_id,
-            metrics.identity,
-            metrics.origin_x.round() as i32,
-            appkit_origin_y.round() as i32,
-            metrics.pixel_width,
-            metrics.pixel_height,
+        // `as` saturates, which is the wanted behaviour for absurd origins.
+        #[allow(clippy::cast_possible_truncation)]
+        let (x, y) = (metrics.origin_x.round() as i32, appkit_y.round() as i32);
+        DisplayDesc {
+            display_id: metrics.display_id,
+            identity: metrics.identity,
+            x,
+            y,
+            width: metrics.pixel_width,
+            height: metrics.pixel_height,
             scale_factor,
-        )
-        .with_refresh_rate(metrics.refresh_rate_hz)
+            refresh_rate_hz: metrics.refresh_rate_hz,
+        }
     }
 }
 
+/// One display as the platform reports it, before conversion to a
+/// [`DisplayDesc`]: origin and sizes in points (Quartz space), pixel size,
+/// the primary display's point height and the mode's refresh rate.
 #[derive(Clone, Debug, PartialEq)]
+#[allow(dead_code)]
 struct DisplayMetrics {
     display_id: u32,
     identity: DisplayIdentity,
@@ -466,170 +425,193 @@ struct DisplayMetrics {
     is_primary: bool,
 }
 
-mod sys {
-    use objc2_core_foundation::{CFRetained, CFUUID};
-    use objc2_core_graphics::{
-        CGDirectDisplayID, CGDisplayBounds, CGDisplayCopyDisplayMode, CGDisplayMode,
-        CGDisplayModelNumber, CGDisplayPixelsHigh, CGDisplayPixelsWide, CGDisplaySerialNumber,
-        CGDisplayUnitNumber, CGDisplayVendorNumber, CGError, CGGetActiveDisplayList,
-        CGMainDisplayID,
+/// Reads the active display list from CoreGraphics. Everything here is
+/// callable from any thread.
+mod platform {
+    use std::ptr;
+
+    use super::{
+        CFRetained, CFString, CFUUID, CGDisplayMode, CGError, DEFAULT_REFRESH_RATE_HZ,
+        DisplayIdentity, DisplayMetrics,
     };
-
-    use super::{DEFAULT_REFRESH_RATE_HZ, DisplayMetrics};
-
-    fn non_zero(value: u32) -> Option<u32> {
-        if value == 0 { None } else { Some(value) }
-    }
+    use crate::EngineError;
 
     unsafe extern "C-unwind" {
-        fn CGDisplayCreateUUIDFromDisplayID(
-            display: CGDirectDisplayID,
-        ) -> Option<CFRetained<CFUUID>>;
+        // Exported by the system frameworks the crate already links; the
+        // returned UUID follows the Create rule.
+        fn CGDisplayCreateUUIDFromDisplayID(display: u32) -> *const CFUUID;
     }
 
-    pub fn active_display_metrics() -> Result<Vec<DisplayMetrics>, crate::EngineError> {
-        let mut display_count = 0;
-        let error =
-            unsafe { CGGetActiveDisplayList(0, std::ptr::null_mut(), &raw mut display_count) };
-        if error != CGError::Success {
-            return Err(platform_error(format!(
-                "CGGetActiveDisplayList failed while counting displays: {error:?}"
-            )));
-        }
-
-        if display_count == 0 {
-            return Ok(Vec::new());
-        }
-
-        let mut display_ids = vec![0; display_count as usize];
-        let error = unsafe {
-            CGGetActiveDisplayList(
-                display_count,
-                display_ids.as_mut_ptr(),
-                &raw mut display_count,
-            )
+    /// Every active display, in system order. The list is empty when the
+    /// system reports no active display.
+    pub(super) fn read_displays() -> Result<Vec<DisplayMetrics>, EngineError> {
+        let ids = active_display_ids()?;
+        let main_id = objc2_core_graphics::CGMainDisplayID();
+        let main_id = if main_id == 0 {
+            ids.first().copied().unwrap_or(0)
+        } else {
+            main_id
         };
-        if error != CGError::Success {
-            return Err(platform_error(format!(
-                "CGGetActiveDisplayList failed while reading displays: {error:?}"
-            )));
-        }
-
-        display_ids.truncate(display_count as usize);
-        let main_display_id = CGMainDisplayID();
-        let primary_logical_height = {
-            let reference_display_id = if main_display_id == 0 {
-                display_ids[0]
-            } else {
-                main_display_id
-            };
-            CGDisplayBounds(reference_display_id).size.height
+        let primary_logical_height = if main_id == 0 {
+            0.0
+        } else {
+            logical_size(main_id).1
         };
-
-        display_ids
-            .into_iter()
+        ids.iter()
             .enumerate()
-            .map(|(index, display_id)| {
-                display_metrics(
-                    display_id,
-                    &format!("display {index}"),
-                    primary_logical_height,
-                    if main_display_id == 0 {
-                        index == 0
-                    } else {
-                        display_id == main_display_id
-                    },
-                )
-            })
+            .map(|(position, id)| read_one(position, *id, main_id, primary_logical_height))
             .collect()
     }
 
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_precision_loss,
-        clippy::cast_sign_loss,
-        clippy::single_call_fn
-    )]
-    fn display_metrics(
-        display_id: CGDirectDisplayID,
-        label: &str,
-        primary_logical_height: f64,
-        is_primary: bool,
-    ) -> Result<DisplayMetrics, crate::EngineError> {
-        if display_id == 0 {
-            return Err(platform_error(format!("{label} id was 0")));
+    /// The index of the display the system calls main; the first listed one
+    /// when the system names none.
+    pub(super) fn main_display_index(displays: &[DisplayMetrics]) -> Option<usize> {
+        if displays.is_empty() {
+            return None;
         }
+        let main_id = objc2_core_graphics::CGMainDisplayID();
+        Some(
+            displays
+                .iter()
+                .position(|display| main_id != 0 && display.display_id == main_id)
+                .unwrap_or(0),
+        )
+    }
 
-        let bounds = CGDisplayBounds(display_id);
-        let (logical_width, logical_height, pixel_width, pixel_height, refresh_rate_hz) =
-            if let Some(mode) = CGDisplayCopyDisplayMode(display_id) {
-                let logical_width = CGDisplayMode::width(Some(&mode)) as f64;
-                let logical_height = CGDisplayMode::height(Some(&mode)) as f64;
-                let pixel_width = u32::try_from(CGDisplayMode::pixel_width(Some(&mode)))
-                    .map_err(|_| platform_error(format!("{label} pixel width overflowed u32")))?;
-                let pixel_height = u32::try_from(CGDisplayMode::pixel_height(Some(&mode)))
-                    .map_err(|_| platform_error(format!("{label} pixel height overflowed u32")))?;
-                let refresh_rate = CGDisplayMode::refresh_rate(Some(&mode));
-                let refresh_rate_hz = if refresh_rate.is_finite() && refresh_rate > 0.0 {
-                    refresh_rate.round().clamp(1.0, f64::from(u32::MAX)) as u32
-                } else {
-                    DEFAULT_REFRESH_RATE_HZ
-                };
+    fn active_display_ids() -> Result<Vec<u32>, EngineError> {
+        let mut count = 0_u32;
+        // SAFETY: a zero capacity with a null list only asks for the count.
+        let status =
+            unsafe { objc2_core_graphics::CGGetActiveDisplayList(0, ptr::null_mut(), &raw mut count) };
+        if status != CGError::Success {
+            return Err(EngineError::Platform(format!(
+                "failed to count active displays: CoreGraphics error {}",
+                status.0
+            )));
+        }
+        let mut ids = vec![0_u32; count as usize];
+        if count == 0 {
+            return Ok(ids);
+        }
+        let mut written = 0_u32;
+        // SAFETY: `ids` has room for `count` entries.
+        let status = unsafe {
+            objc2_core_graphics::CGGetActiveDisplayList(count, ids.as_mut_ptr(), &raw mut written)
+        };
+        if status != CGError::Success {
+            return Err(EngineError::Platform(format!(
+                "failed to list active displays: CoreGraphics error {}",
+                status.0
+            )));
+        }
+        ids.truncate(written as usize);
+        if ids.contains(&0) {
+            return Err(EngineError::Platform(
+                "the active display list contains display id 0".to_string(),
+            ));
+        }
+        Ok(ids)
+    }
+
+    /// Point size of a display: its mode's, or its bounds without a mode.
+    fn logical_size(id: u32) -> (f64, f64) {
+        let mode = objc2_core_graphics::CGDisplayCopyDisplayMode(id);
+        if mode.is_some() {
+            #[allow(clippy::cast_precision_loss)]
+            return (
+                CGDisplayMode::width(mode.as_deref()) as f64,
+                CGDisplayMode::height(mode.as_deref()) as f64,
+            );
+        }
+        let bounds = objc2_core_graphics::CGDisplayBounds(id);
+        (bounds.size.width, bounds.size.height)
+    }
+
+    fn pixel_dimension(
+        position: usize,
+        what: &str,
+        value: usize,
+    ) -> Result<u32, EngineError> {
+        u32::try_from(value).map_err(|_| {
+            EngineError::Platform(format!(
+                "display #{position} reports a {what} of {value} pixels, which does not fit 32 bits"
+            ))
+        })
+    }
+
+    fn read_one(
+        position: usize,
+        id: u32,
+        main_id: u32,
+        primary_logical_height: f64,
+    ) -> Result<DisplayMetrics, EngineError> {
+        let mode = objc2_core_graphics::CGDisplayCopyDisplayMode(id);
+        let bounds = objc2_core_graphics::CGDisplayBounds(id);
+        let (pixel_width, pixel_height, logical_width, logical_height, refresh) =
+            if mode.is_some() {
+                let mode = mode.as_deref();
+                #[allow(clippy::cast_precision_loss)]
                 (
-                    logical_width,
-                    logical_height,
-                    pixel_width,
-                    pixel_height,
-                    refresh_rate_hz,
+                    CGDisplayMode::pixel_width(mode),
+                    CGDisplayMode::pixel_height(mode),
+                    CGDisplayMode::width(mode) as f64,
+                    CGDisplayMode::height(mode) as f64,
+                    CGDisplayMode::refresh_rate(mode),
                 )
             } else {
-                let pixel_width = u32::try_from(CGDisplayPixelsWide(display_id))
-                    .map_err(|_| platform_error(format!("{label} width overflowed u32")))?;
-                let pixel_height = u32::try_from(CGDisplayPixelsHigh(display_id))
-                    .map_err(|_| platform_error(format!("{label} height overflowed u32")))?;
                 (
+                    objc2_core_graphics::CGDisplayPixelsWide(id),
+                    objc2_core_graphics::CGDisplayPixelsHigh(id),
                     bounds.size.width,
                     bounds.size.height,
-                    pixel_width,
-                    pixel_height,
-                    DEFAULT_REFRESH_RATE_HZ,
+                    0.0,
                 )
             };
-
         Ok(DisplayMetrics {
-            display_id,
-            identity: super::DisplayIdentity::from(display_id),
+            display_id: id,
+            identity: identity_of(id),
             origin_x: bounds.origin.x,
             origin_y: bounds.origin.y,
             logical_width,
             logical_height,
-            pixel_width,
-            pixel_height,
+            pixel_width: pixel_dimension(position, "width", pixel_width)?,
+            pixel_height: pixel_dimension(position, "height", pixel_height)?,
             primary_logical_height,
-            refresh_rate_hz,
-            is_primary,
+            refresh_rate_hz: refresh_rate_to_hz(refresh),
+            is_primary: id == main_id,
         })
     }
 
-    impl From<CGDirectDisplayID> for super::DisplayIdentity {
-        fn from(display_id: CGDirectDisplayID) -> Self {
-            let uuid = unsafe { CGDisplayCreateUUIDFromDisplayID(display_id) }
-                .and_then(|uuid| CFUUID::new_string(None, Some(&uuid)))
-                .map(|value| value.to_string());
+    pub(super) fn refresh_rate_to_hz(rate: f64) -> u32 {
+        if rate.is_finite() && rate > 0.0 {
+            // `as` saturates for absurd rates.
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            return (rate.round() as u32).max(1);
+        }
+        DEFAULT_REFRESH_RATE_HZ
+    }
 
-            Self {
-                uuid,
-                vendor_id: non_zero(CGDisplayVendorNumber(display_id)),
-                model_id: non_zero(CGDisplayModelNumber(display_id)),
-                serial_number: non_zero(CGDisplaySerialNumber(display_id)),
-                unit_number: non_zero(CGDisplayUnitNumber(display_id)),
-                name: None,
-            }
+    fn identity_of(id: u32) -> DisplayIdentity {
+        let known = |value: u32| (value != 0).then_some(value);
+        DisplayIdentity {
+            uuid: uuid_text(id),
+            vendor_id: known(objc2_core_graphics::CGDisplayVendorNumber(id)),
+            model_id: known(objc2_core_graphics::CGDisplayModelNumber(id)),
+            serial_number: known(objc2_core_graphics::CGDisplaySerialNumber(id)),
+            unit_number: known(objc2_core_graphics::CGDisplayUnitNumber(id)),
+            name: None,
         }
     }
 
-    fn platform_error(message: impl Into<String>) -> crate::EngineError {
-        crate::EngineError::Platform(message.into())
+    /// The canonical 36-character UUID text of a display, if the system has one.
+    fn uuid_text(id: u32) -> Option<String> {
+        // SAFETY: plain call; a non-null result is owned by us (Create rule).
+        let raw = unsafe { CGDisplayCreateUUIDFromDisplayID(id) };
+        let uuid = ptr::NonNull::new(raw.cast_mut())?;
+        // SAFETY: the pointer is a +1 CFUUID.
+        let uuid: CFRetained<CFUUID> = unsafe { CFRetained::from_raw(uuid) };
+        let text: CFRetained<CFString> = CFUUID::new_string(None, Some(&uuid))?;
+        Some(text.to_string())
     }
 }
 
@@ -927,6 +909,108 @@ mod tests {
         assert_eq!(display.identity, identity);
         assert_f64_close(display.scale_factor, 2.0);
         assert_eq!(display.refresh_rate_hz, 120);
+    }
+
+    #[test]
+    fn identity_that_only_has_a_name_is_not_empty() {
+        let named = DisplayIdentity {
+            name: Some("Studio".to_string()),
+            ..DisplayIdentity::default()
+        };
+        assert!(DisplayIdentity::default().is_empty());
+        assert!(!named.is_empty());
+        let empty_uuid = DisplayIdentity {
+            uuid: Some(String::new()),
+            ..DisplayIdentity::default()
+        };
+        assert!(!empty_uuid.is_empty());
+    }
+
+    #[test]
+    fn labels_name_every_present_field_in_order() {
+        let identity = DisplayIdentity {
+            uuid: Some("U".to_string()),
+            vendor_id: Some(1),
+            model_id: Some(2),
+            serial_number: Some(3),
+            unit_number: Some(4),
+            name: Some("N".to_string()),
+        };
+        let identity_label = identity.identity_label();
+        for part in ["uuid", "U", "vendor", "1", "model", "2", "serial", "3", "unit", "4", "name", "N"] {
+            assert!(identity_label.contains(part), "{part} missing from {identity_label}");
+        }
+        let empty = DisplayIdentity::default().identity_label();
+        assert!(empty.contains("no identity"), "{empty}");
+
+        let label = DisplayDesc::with_identity(9, identity, -5, 7, 2880, 1800, 2.0)
+            .with_refresh_rate(120)
+            .desc_label();
+        for part in ["display 9", "(-5, 7)", "2880x1800", "2.000", "1440.0x900.0", "120 Hz", "uuid"] {
+            assert!(label.contains(part), "{part} missing from {label}");
+        }
+    }
+
+    #[test]
+    fn refresh_rate_is_clamped_and_geometry_compares_the_documented_fields() {
+        let base = DisplayDesc::new(1, 0, 0, 100, 50, 2.0);
+        assert_eq!(base.clone().with_refresh_rate(0).refresh_rate_hz, 1);
+        assert_eq!(base.clone().with_refresh_rate(144).refresh_rate_hz, 144);
+
+        let other_rate = base.clone().with_refresh_rate(120);
+        assert!(base.has_same_geometry(&other_rate));
+        assert!(!base.has_same_geometry(&DisplayDesc::new(2, 0, 0, 100, 50, 2.0)));
+        assert!(!base.has_same_geometry(&DisplayDesc::new(1, 1, 0, 100, 50, 2.0)));
+        let moved = DisplayDesc::new(1, 1, 0, 100, 50, 2.0);
+        assert!(base.has_same_render_surface(&moved));
+        assert!(!base.has_same_render_surface(&DisplayDesc::new(1, 0, 0, 100, 50, 1.0)));
+        assert!(!base.has_same_render_surface(&DisplayDesc::new(1, 0, 0, 100, 51, 2.0)));
+    }
+
+    #[test]
+    fn refresh_rates_round_clamp_and_default() {
+        use super::platform::refresh_rate_to_hz;
+        assert_eq!(refresh_rate_to_hz(59.94), 60);
+        assert_eq!(refresh_rate_to_hz(120.0), 120);
+        assert_eq!(refresh_rate_to_hz(0.2), 1);
+        for unusable in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(refresh_rate_to_hz(unusable), 60);
+        }
+    }
+
+    fn metrics(
+        pixels: (u32, u32),
+        logical: (f64, f64),
+        origin_y: f64,
+        primary_height: f64,
+    ) -> DisplayDesc {
+        DisplayDesc::from(DisplayMetrics {
+            display_id: 5,
+            identity: DisplayIdentity::default(),
+            origin_x: 0.4,
+            origin_y,
+            logical_width: logical.0,
+            logical_height: logical.1,
+            pixel_width: pixels.0,
+            pixel_height: pixels.1,
+            primary_logical_height: primary_height,
+            refresh_rate_hz: 60,
+            is_primary: false,
+        })
+    }
+
+    #[test]
+    fn metrics_scale_falls_back_to_the_height_and_y_to_quartz() {
+        let by_height = metrics((1920, 1080), (0.0, 540.0), 0.0, 0.0);
+        assert_f64_close(by_height.scale_factor, 2.0);
+        let secondary = metrics((1280, 1024), (1280.0, 1024.0), 0.0, 900.0);
+        assert_eq!(secondary.y, -124);
+        let beside_taller = metrics((1280, 1024), (1280.0, 1024.0), 0.0, 1200.0);
+        assert_eq!(beside_taller.y, 176);
+        for bad in [0.0, f64::NAN] {
+            assert_eq!(metrics((1280, 1024), (1280.0, 1024.0), 12.6, bad).y, 13);
+        }
+        assert_eq!(by_height.x, 0);
     }
 
     fn apply_parts(plan: RefreshPlan) -> (DisplayDesc, Vec<u32>, Vec<u32>) {

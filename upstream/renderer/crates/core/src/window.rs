@@ -1,5 +1,6 @@
+// Clean-room implementation from the WallpaperMachine spec r1b-core-display.md; written without access to the original source.
 use objc2::{
-    ClassType, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, rc::Retained,
+    MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, rc::Retained,
     runtime::AnyObject,
 };
 use objc2_app_kit::{
@@ -7,22 +8,19 @@ use objc2_app_kit::{
     NSWindowAnimationBehavior, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 #[cfg(not(test))]
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
+use objc2_app_kit::{NSEvent, NSEventMask};
 use objc2_core_graphics::{CGWindowLevelForKey, CGWindowLevelKey};
 use objc2_foundation::{
     NSDictionary, NSInteger, NSNotificationCenter, NSNumber, NSPoint, NSRect, NSSize, NSString,
-    NSThread, ns_string,
+    ns_string,
 };
 use objc2_quartz_core::{CAMetalLayer, CATransaction};
 
 use crate::{DisplayDesc, EngineError};
 
 define_class!(
-    // SAFETY: The subclass only overrides frame constraint behavior and does
-    // not add ivars or custom memory management.
     #[unsafe(super = NSWindow)]
     #[thread_kind = MainThreadOnly]
-    // Stable Objective-C identity used by Swift's native desktop-poster sync.
     #[name = "MWEWallpaperDesktopWindow"]
     struct WallpaperDesktopWindow;
 
@@ -38,42 +36,13 @@ define_class!(
     }
 );
 
-impl WallpaperDesktopWindow {
-    #[allow(clippy::single_call_fn)]
-    unsafe fn init_with_content_rect(
-        mtm: MainThreadMarker,
-        frame: NSRect,
-        style_mask: NSWindowStyleMask,
-        backing: NSBackingStoreType,
-        defer: bool,
-    ) -> Retained<Self> {
-        unsafe {
-            msg_send![
-                Self::alloc(mtm),
-                initWithContentRect: frame,
-                styleMask: style_mask,
-                backing: backing,
-                defer: defer
-            ]
-        }
-    }
-}
-
 /// Background exposed before the first frame or while a drawable is unavailable.
 /// Default to black so display wake and surface recreation cannot flash white.
 #[derive(Clone, Copy, Debug)]
 pub struct PlaceholderStyle {
-    /// Red channel in the range AppKit accepts for sRGB colors.
-    #[allow(clippy::doc_markdown)]
     pub red: f64,
-    /// Green channel in the range AppKit accepts for sRGB colors.
-    #[allow(clippy::doc_markdown)]
     pub green: f64,
-    /// Blue channel in the range AppKit accepts for sRGB colors.
-    #[allow(clippy::doc_markdown)]
     pub blue: f64,
-    /// Alpha channel in the range AppKit accepts for sRGB colors.
-    #[allow(clippy::doc_markdown)]
     pub alpha: f64,
 }
 
@@ -150,10 +119,260 @@ fn announce_layer_installed(
     unsafe { center.postNotificationName_object_userInfo(&name, Some(layer), Some(&user_info)) };
 }
 
-/// Borderless desktop-level window that hosts a `CAMetalLayer`.
+/// A desktop-level wallpaper window owning one Metal content layer.
 pub struct WallpaperWindow {
+    native: Option<NativeWindow>,
+}
+
+/// The retained AppKit objects of an open window. Each pointer holds one
+/// retain owned by this value and is dereferenced on the main thread only.
+struct NativeWindow {
+    window: SendPtr,
+    view: SendPtr,
+    /// The layer under the view, which the renderer draws into.
+    layer: SendPtr,
+    /// The display the window and the layer are currently shaped for.
     display: DisplayDesc,
-    handle: Option<WindowHandle>,
+}
+
+impl WallpaperDesktopWindow {
+    fn new(mtm: MainThreadMarker, frame: NSRect) -> Option<Retained<Self>> {
+        let this = mtm.alloc::<Self>().set_ivars(());
+        // SAFETY: the designated initialiser of NSWindow with valid arguments.
+        unsafe {
+            msg_send![
+                super(this),
+                initWithContentRect: frame,
+                styleMask: NSWindowStyleMask::Borderless,
+                backing: NSBackingStoreType::Buffered,
+                defer: false
+            ]
+        }
+    }
+}
+
+fn closed_window_error() -> EngineError {
+    EngineError::Platform("wallpaper window is already closed".to_string())
+}
+
+/// The checks every window operation makes before it touches the main thread.
+fn validate_window_display(display: &DisplayDesc) -> Result<(), EngineError> {
+    if display.display_id == 0 {
+        return Err(EngineError::InvalidInput(
+            "display_id must be non-zero".to_string(),
+        ));
+    }
+    if display.width == 0 || display.height == 0 {
+        return Err(EngineError::InvalidInput(
+            "display dimensions must be non-zero".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// The window frame for a display, in AppKit points.
+fn window_frame(display: &DisplayDesc) -> NSRect {
+    let scale = crate::display::sanitized_scale(display.scale_factor);
+    NSRect::new(
+        NSPoint::new(f64::from(display.x), f64::from(display.y)),
+        NSSize::new(
+            f64::from(display.width) / scale,
+            f64::from(display.height) / scale,
+        ),
+    )
+}
+
+/// The frame of the content view and of its layer: the window's size at the
+/// origin.
+fn content_frame(display: &DisplayDesc) -> NSRect {
+    NSRect::new(NSPoint::new(0.0, 0.0), window_frame(display).size)
+}
+
+fn drawable_size(display: &DisplayDesc) -> NSSize {
+    NSSize::new(f64::from(display.width), f64::from(display.height))
+}
+
+fn as_any_object(layer: &CAMetalLayer) -> &AnyObject {
+    layer
+}
+
+/// Borrows an object a [`NativeWindow`] or a [`MainThread`] token retains.
+///
+/// # Safety
+///
+/// `pointer` must point at a live object of type `T` that stays alive for `'a`,
+/// and the call must be on the main thread.
+unsafe fn borrow<'a, T>(pointer: SendPtr) -> &'a T {
+    // SAFETY: promised by the caller.
+    unsafe { &*pointer.get().cast::<T>() }
+}
+
+/// Writes the geometry of `display` to the window, view and layer, touching
+/// only what differs from it, inside a transaction without implicit
+/// animations.
+///
+/// # Safety
+///
+/// The pointers must be a live window, its content view and a live layer, and
+/// the call must be on the main thread.
+unsafe fn reshape_changed(window: SendPtr, view: SendPtr, layer: SendPtr, display: &DisplayDesc) {
+    // SAFETY: promised by the caller.
+    let (window, view, layer) = unsafe {
+        (
+            borrow::<NSWindow>(window),
+            borrow::<NSView>(view),
+            borrow::<CAMetalLayer>(layer),
+        )
+    };
+    let scale = crate::display::sanitized_scale(display.scale_factor);
+    CATransaction::begin();
+    CATransaction::setDisableActions(true);
+    if window.frame() != window_frame(display) {
+        window.setFrame_display(window_frame(display), false);
+    }
+    if view.frame() != content_frame(display) {
+        view.setFrame(content_frame(display));
+    }
+    if layer.frame() != content_frame(display) {
+        layer.setFrame(content_frame(display));
+    }
+    if layer.contentsScale() != scale {
+        layer.setContentsScale(scale);
+    }
+    if layer.drawableSize() != drawable_size(display) {
+        layer.setDrawableSize(drawable_size(display));
+    }
+    CATransaction::commit();
+}
+
+/// Builds a fresh layer for `display`, puts it under the view, shapes
+/// everything to the display and announces the layer. Returns the new
+/// layer, retained once for the caller.
+///
+/// # Safety
+///
+/// `window` and `view` must be a live window and its content view, and the
+/// call must be on the main thread.
+unsafe fn install_fresh_layer(
+    window: SendPtr,
+    view: SendPtr,
+    display: &DisplayDesc,
+    install: LayerInstall,
+) -> SendPtr {
+    // SAFETY: promised by the caller.
+    let (window, view) = unsafe { (borrow::<NSWindow>(window), borrow::<NSView>(view)) };
+    let layer = display.build_metal_layer(&PlaceholderStyle::default());
+    let scale = crate::display::sanitized_scale(display.scale_factor);
+    CATransaction::begin();
+    CATransaction::setDisableActions(true);
+    window.setFrame_display(window_frame(display), true);
+    view.setFrame(content_frame(display));
+    view.setLayer(Some(layer.as_ref()));
+    layer.setFrame(content_frame(display));
+    layer.setContentsScale(scale);
+    layer.setDrawableSize(drawable_size(display));
+    CATransaction::commit();
+    announce_layer_installed(
+        &NSNotificationCenter::defaultCenter(),
+        as_any_object(&layer),
+        display.display_id,
+        install,
+    );
+    SendPtr::from_retained(layer)
+}
+
+/// Creates the native window for `display`. Main thread only.
+fn open_native(display: &DisplayDesc, style: PlaceholderStyle) -> Result<NativeWindow, EngineError> {
+    let mtm = MainThreadMarker::new().ok_or_else(|| {
+        EngineError::Platform("wallpaper windows can only be created on the main thread".to_string())
+    })?;
+    NSApplication::sharedApplication(mtm).finishLaunching();
+
+    let window = WallpaperDesktopWindow::new(mtm, window_frame(display)).ok_or_else(|| {
+        EngineError::Platform("failed to create the wallpaper window".to_string())
+    })?;
+    let layer = display.build_metal_layer(&style);
+    // SAFETY: plain configuration calls on a window this function just made.
+    unsafe {
+        window.setReleasedWhenClosed(false);
+        window.setLevel(CGWindowLevelForKey(CGWindowLevelKey::DesktopWindowLevelKey) as isize);
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::Stationary
+                | NSWindowCollectionBehavior::FullScreenAuxiliary
+                | NSWindowCollectionBehavior::IgnoresCycle,
+        );
+        window.setCanHide(false);
+    }
+    window.setOpaque(true);
+    window.setHasShadow(false);
+    window.setMovable(false);
+    window.setRestorable(false);
+    window.setIgnoresMouseEvents(true);
+    window.setHidesOnDeactivate(false);
+    window.setExcludedFromWindowsMenu(true);
+    window.setAnimationBehavior(NSWindowAnimationBehavior::None);
+    window.setBackgroundColor(Some(&NSColor::colorWithSRGBRed_green_blue_alpha(
+        style.red, style.green, style.blue, style.alpha,
+    )));
+
+    let view = window.contentView().ok_or_else(|| {
+        EngineError::Platform("the wallpaper window has no content view".to_string())
+    })?;
+    view.setFrame(content_frame(display));
+    // A layer-hosting view: the layer is assigned before layers are enabled.
+    view.setLayer(Some(layer.as_ref()));
+    view.setWantsLayer(true);
+
+    announce_layer_installed(
+        &NSNotificationCenter::defaultCenter(),
+        as_any_object(&layer),
+        display.display_id,
+        LayerInstall::Open,
+    );
+    window.orderFrontRegardless();
+
+    Ok(NativeWindow {
+        window: SendPtr::from_retained(window),
+        view: SendPtr::from_retained(view),
+        layer: SendPtr::from_retained(layer),
+        display: display.clone(),
+    })
+}
+
+/// Puts `layer` back under the view as its hosted layer.
+///
+/// # Safety
+///
+/// `view` must be a live content view, and the call must be on the main thread.
+unsafe fn view_layer_swap_back(view: SendPtr, layer: &CAMetalLayer) {
+    // SAFETY: promised by the caller.
+    let view = unsafe { borrow::<NSView>(view) };
+    CATransaction::begin();
+    CATransaction::setDisableActions(true);
+    view.setLayer(Some(layer.as_ref()));
+    CATransaction::commit();
+}
+
+impl NativeWindow {
+    /// Orders the window out, closes it and drops every retain this value
+    /// owned. Main thread only.
+    ///
+    /// # Safety
+    ///
+    /// Each pointer must still own the retain it was created with.
+    unsafe fn tear_down(self) {
+        // SAFETY: promised by the caller; each pointer came from `into_raw`.
+        unsafe {
+            let window = Retained::<NSWindow>::from_raw(self.window.get().cast())
+                .expect("window pointer is never null");
+            window.orderOut(None);
+            window.close();
+            drop(Retained::<NSView>::from_raw(self.view.get().cast()));
+            drop(Retained::<CAMetalLayer>::from_raw(self.layer.get().cast()));
+            drop(window);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,7 +399,7 @@ impl MouseButtons {
         (0..32)
             .map(|button| MouseButtonState {
                 button,
-                pressed: (self.mask & (1u64 << button)) != 0,
+                pressed: self.mask >> button & 1 != 0,
             })
             .collect()
     }
@@ -218,6 +437,7 @@ impl MouseButtonEdges {
         }
     }
 
+
     /// Restores the level immediately before our press-then-release transitions.
     #[must_use]
     pub(crate) fn pre_transition_down_mask(self) -> u32 {
@@ -233,37 +453,28 @@ impl MouseButtonEdges {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn states(self) -> Vec<MouseButtonState> {
-        let transitions = self.pressed.mask | self.released.mask;
-        if transitions == 0 {
-            return self.down.states();
+        let mut states = Vec::new();
+        for button in 0..32_u32 {
+            let bit = 1_u64 << button;
+            let pressed = self.pressed.mask & bit != 0;
+            let released = self.released.mask & bit != 0;
+            if pressed {
+                states.push(MouseButtonState { button, pressed: true });
+            }
+            if released {
+                states.push(MouseButtonState { button, pressed: false });
+            }
+            if !pressed && !released {
+                states.push(MouseButtonState {
+                    button,
+                    pressed: self.down.mask & bit != 0,
+                });
+            }
         }
-
-        (0..32)
-            .flat_map(|button| {
-                let mask = 1u64 << button;
-                let mut states = Vec::with_capacity(2);
-                if (self.pressed.mask & mask) != 0 {
-                    states.push(MouseButtonState {
-                        button,
-                        pressed: true,
-                    });
-                }
-                if (self.released.mask & mask) != 0 {
-                    states.push(MouseButtonState {
-                        button,
-                        pressed: false,
-                    });
-                }
-                if states.is_empty() {
-                    states.push(MouseButtonState {
-                        button,
-                        pressed: (self.down.mask & mask) != 0,
-                    });
-                }
-                states
-            })
-            .collect()
+        states
     }
+
+
 
     #[must_use]
     pub(crate) fn transitions(self) -> impl Iterator<Item = MouseButtonState> {
@@ -300,8 +511,7 @@ pub(crate) type PressHitTest = Box<dyn FnMut() -> bool + Send>;
 /// Like Wallpaper Engine, which counts a press only while the window under
 /// the cursor is the desktop or its own wallpaper, a press over another
 /// application's window is withheld: the wallpapers see neither it, nor its
-/// held level, nor its release. A press they did receive is always released,
-/// wherever the pointer is by then, so a held state never sticks.
+/// held level, nor its release. A press they did receive is always released.
 pub(crate) struct MouseButtonTracker {
     down: u64,
     /// Held buttons whose press landed on another application's window.
@@ -332,18 +542,17 @@ impl MouseButtonTracker {
         if button > 31 {
             return;
         }
-        let mask = 1u64 << button;
-        if pressed {
-            if (self.down & mask) == 0 {
-                self.down |= mask;
-                self.press(mask);
-            }
+        let bit = 1_u64 << button;
+        let held = self.down & bit != 0;
+        if pressed == held {
             return;
         }
-
-        if (self.down & mask) != 0 {
-            self.down &= !mask;
-            self.release(mask);
+        if pressed {
+            self.down |= bit;
+            self.press(bit);
+        } else {
+            self.down &= !bit;
+            self.release(bit);
         }
     }
 
@@ -369,34 +578,27 @@ impl MouseButtonTracker {
     }
 
     pub(crate) fn sync_down_mask(&mut self, mask: u64) {
-        let next = mask & u64::from(u32::MAX);
-        if self.levels_unknown {
-            // A button held since before the monitors came back is not a new
-            // press; edges the monitors did record meanwhile are kept. A held
-            // button this tracker never saw go down could have been pressed
-            // anywhere, so its level is adopted only if the pointer is over
-            // the desktop now. One it did see keeps its verdict.
-            self.levels_unknown = false;
-            let unseen = next & !self.down;
-            self.withheld &= next;
-            if unseen != 0 && !(self.press_on_desktop)() {
-                self.withheld |= unseen;
-            }
-            self.down = next;
-            return;
-        }
-        let pressed = next & !self.down;
-        let released = self.down & !next;
-        self.down = next;
-        if pressed != 0 {
-            self.press(pressed);
-        }
-        self.release(released);
+        let now = mask & u64::from(u32::MAX);
+        // Buttons held now that were not held before, and the reverse.
+        let fresh = now & !self.down;
+        let dropped = self.down & !now;
+        // One hit-test question covers every fresh button, and only when
+        // there is one. Whether the fresh buttons count as presses (watched
+        // levels) or are adopted (unwatched levels), the verdict is the same.
+        let fresh_hidden = if fresh != 0 && !(self.press_on_desktop)() { fresh } else { 0 };
+        // Edges are only real for levels somebody watched.
+        let edge_gate = if std::mem::replace(&mut self.levels_unknown, false) { 0 } else { u64::MAX };
+
+        self.pressed |= (fresh & !fresh_hidden) & edge_gate;
+        self.released |= (dropped & !self.withheld) & edge_gate;
+        self.withheld = (self.withheld | fresh_hidden) & now;
+        self.down = now;
     }
 
     #[must_use]
     pub(crate) fn consume_edges(&mut self) -> MouseButtonEdges {
-        let edges = MouseButtonEdges::from_masks(self.down & !self.withheld, self.pressed, self.released);
+        let edges =
+            MouseButtonEdges::from_masks(self.down & !self.withheld, self.pressed, self.released);
         self.pressed = 0;
         self.released = 0;
         edges
@@ -448,10 +650,8 @@ impl MouseEventMonitor {
 
         let global_handler = std::rc::Rc::clone(&handler);
         let global_block = block2::RcBlock::new(move |event: std::ptr::NonNull<NSEvent>| {
-            // SAFETY: AppKit invokes the monitor block with a valid NSEvent for
-            // the event mask supplied when registering the monitor.
-            let event = unsafe { event.as_ref() };
-            global_handler(mouse_button_state_from_event(event)
+            // SAFETY: the monitor block is only called with a live event.
+            global_handler(mouse_button_state_from_event(unsafe { event.as_ref() })
                 .map_or(MouseMonitorEvent::Motion, MouseMonitorEvent::Button));
         });
         let global = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(
@@ -559,8 +759,8 @@ impl Drop for MouseEventMonitor {
 // callbacks, but they are not invoked by Rust after construction.
 #[cfg(not(test))]
 unsafe impl Send for MouseEventMonitor {}
-// SAFETY: The wrapper stores Objective-C tokens opaquely and all Objective-C
-// interaction is dispatched to the main thread.
+// SAFETY: The wrapper only stores the opaque tokens, and every Objective-C
+// call that touches them runs on the main thread.
 #[cfg(not(test))]
 unsafe impl Sync for MouseEventMonitor {}
 
@@ -574,10 +774,10 @@ fn pointer_event_mask() -> NSEventMask {
         | NSEventMask::RightMouseUp
         | NSEventMask::OtherMouseDown
         | NSEventMask::OtherMouseUp
-        | NSEventMask::MouseMoved
         | NSEventMask::LeftMouseDragged
         | NSEventMask::RightMouseDragged
         | NSEventMask::OtherMouseDragged
+        | NSEventMask::MouseMoved
 }
 
 /// Reads the cursor location and the three primary buttons without the main
@@ -605,29 +805,19 @@ pub(crate) fn probe_pointer() -> crate::engine::PointerProbe {
 #[must_use]
 #[allow(clippy::single_call_fn)]
 fn mouse_button_state_from_event(event: &NSEvent) -> Option<MouseButtonState> {
-    let event_type = event.r#type();
-    let pressed = if event_type == NSEventType::LeftMouseDown
-        || event_type == NSEventType::RightMouseDown
-        || event_type == NSEventType::OtherMouseDown
-    {
-        true
-    } else if event_type == NSEventType::LeftMouseUp
-        || event_type == NSEventType::RightMouseUp
-        || event_type == NSEventType::OtherMouseUp
-    {
-        false
-    } else {
-        return None;
+    use objc2_app_kit::NSEventType;
+    let (button, pressed) = match event.r#type() {
+        NSEventType::LeftMouseDown => (0, true),
+        NSEventType::LeftMouseUp => (0, false),
+        NSEventType::RightMouseDown => (1, true),
+        NSEventType::RightMouseUp => (1, false),
+        NSEventType::OtherMouseDown => (u32::try_from(event.buttonNumber()).ok()?, true),
+        NSEventType::OtherMouseUp => (u32::try_from(event.buttonNumber()).ok()?, false),
+        _ => return None,
     };
-
-    let button = match event_type {
-        NSEventType::LeftMouseDown | NSEventType::LeftMouseUp => 0,
-        NSEventType::RightMouseDown | NSEventType::RightMouseUp => 1,
-        _ => u32::try_from(event.buttonNumber()).ok()?,
-    };
-
     Some(MouseButtonState { button, pressed })
 }
+
 
 /// Whether a press at the cursor lands on the desktop: the [`PressHitTest`]
 /// the engine's tracker uses. The window server names the window a mouse-down
@@ -683,22 +873,18 @@ impl NormalizedMousePosition {
     #[must_use]
     #[allow(clippy::single_call_fn)]
     pub fn from_window_point(x: f64, y: f64, width: f64, height: f64) -> Option<Self> {
-        if !x.is_finite() || !y.is_finite() || !width.is_finite() || !height.is_finite() {
+        if ![x, y, width, height].iter().all(|value| value.is_finite()) || width <= 0.0 || height <= 0.0
+        {
             return None;
         }
-        if width <= 0.0 || height <= 0.0 {
-            return None;
-        }
-
         Some(Self {
             x: (x / width).clamp(0.0, 1.0),
-            y: (1.0 - (y / height)).clamp(0.0, 1.0),
+            y: (1.0 - y / height).clamp(0.0, 1.0),
         })
     }
 }
 
 impl WallpaperWindow {
-    /// Starts building a wallpaper window for `display`.
     #[must_use]
     pub fn builder(display: DisplayDesc) -> WallpaperWindowBuilder {
         WallpaperWindowBuilder {
@@ -707,69 +893,44 @@ impl WallpaperWindow {
         }
     }
 
-    /// Closes the native window if it is still open.
     pub fn close(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            MainThread::dispatch(move || unsafe {
-                handle.close_on_main();
-            });
-        }
+        let Some(native) = self.native.take() else {
+            return;
+        };
+        // SAFETY: `native` still owns its retains and is torn down once.
+        MainThread::dispatch(move || unsafe { native.tear_down() });
     }
 
-    /// Updates the native window, content view, and Metal layer to match
-    /// `display`.
+    /// Moves and re-fits the open window to `display`.
     ///
     /// # Errors
     ///
-    /// Returns an error if the display geometry is invalid or the window has
-    /// been closed.
+    /// `InvalidInput` for a zero display id or size, `Platform` once closed.
     pub fn update_display(&mut self, display: DisplayDesc) -> Result<(), EngineError> {
-        if display.display_id == 0 {
-            return Err(EngineError::InvalidInput(
-                "display_id must be non-zero".to_string(),
-            ));
-        }
-        if display.width == 0 || display.height == 0 {
-            return Err(EngineError::InvalidInput(
-                "display dimensions must be non-zero".to_string(),
-            ));
-        }
-        let Some(handle) = self.handle.as_ref() else {
-            return Err(EngineError::Platform(
-                "wallpaper window is already closed".to_string(),
-            ));
-        };
-
-        let display_for_update = display.clone();
-        let handle = handle.clone_for_main_thread();
-        MainThread::dispatch(move || unsafe {
-            handle.update_display(&display_for_update);
-        });
-        self.display = display;
+        validate_window_display(&display)?;
+        let native = self.native.as_mut().ok_or_else(closed_window_error)?;
+        let (window, view, layer) = (native.window, native.view, native.layer);
+        let target = display.clone();
+        // SAFETY: the pointers are the open window's own objects.
+        MainThread::dispatch(move || unsafe { reshape_changed(window, view, layer, &target) });
+        native.display = display;
         Ok(())
     }
 
-    /// Returns whether this Rust-owned window still has a native handle.
     #[must_use]
     pub fn is_open(&self) -> bool {
-        self.handle.is_some()
+        self.native.is_some()
     }
 
-    /// Replaces the `CAMetalLayer` under the existing `NSView` and returns the
-    /// new layer's raw pointer, cast to `*mut c_void`. Used during
-    /// display-reconfigure transactions: the returned pointer is passed to
-    /// `OweScene::finish_surface_reconfigure`.
+    /// Replaces the layer under the existing view with a fresh one for
+    /// `display` and returns the new layer's raw pointer. The replaced layer
+    /// is released at once, so this cannot be undone; a caller that may have
+    /// to put it back uses `begin_layer_swap`. The new layer is announced with
+    /// [`LAYER_INSTALLED_NOTIFICATION`] as a `reconfigure`.
     ///
     /// # Errors
     ///
-    /// Returns an error if the display geometry is invalid or the window has
-    /// been closed.
-    ///
-    /// The `NSWindow` and `NSView` are retained. The old `CAMetalLayer` is
-    /// released after the new layer is installed, so this replacement cannot be
-    /// undone; a caller that might have to put the old layer back uses
-    /// `begin_layer_swap`. The new layer is announced with
-    /// [`LAYER_INSTALLED_NOTIFICATION`] as a `reconfigure`.
+    /// Fails exactly when [`Self::begin_layer_swap`] does.
     pub fn update_layer(
         &mut self,
         display: DisplayDesc,
@@ -794,64 +955,38 @@ impl WallpaperWindow {
     ///
     /// # Errors
     ///
-    /// Returns an error if the display geometry is invalid or the window has
-    /// been closed.
+    /// `InvalidInput` for a zero display id or size, `Platform` once closed.
     pub(crate) fn begin_layer_swap(
         &mut self,
         display: DisplayDesc,
         install: LayerInstall,
     ) -> Result<LayerSwap, EngineError> {
-        if display.display_id == 0 {
-            return Err(EngineError::InvalidInput(
-                "display_id must be non-zero".to_string(),
-            ));
-        }
-        if display.width == 0 || display.height == 0 {
-            return Err(EngineError::InvalidInput(
-                "display dimensions must be non-zero".to_string(),
-            ));
-        }
-        let previous_display = self.display.clone();
-        let Some(handle) = self.handle.as_mut() else {
-            return Err(EngineError::Platform(
-                "wallpaper window is already closed".to_string(),
-            ));
-        };
-
-        let handle_ref = handle.clone_for_main_thread();
-        let display_clone = display.clone();
-        let SendPtr(new_layer_ptr) = MainThread::dispatch(move || unsafe {
-            handle_ref.replace_metal_layer(&display_clone, install)
-        })?;
-
-        // Track the new layer in the window and hold on to the old wrapper
-        // instead of releasing it.
-        let ptr_for_retain = SendPtr(new_layer_ptr);
-        let previous = std::mem::replace(
-            &mut handle.metal_layer,
-            MainThread::dispatch(move || unsafe { MainThread::retain_from_ptr(ptr_for_retain) })?,
-        );
-
-        self.display = display;
+        validate_window_display(&display)?;
+        let native = self.native.as_mut().ok_or_else(closed_window_error)?;
+        let (window, view) = (native.window, native.view);
+        let target = display.clone();
+        // SAFETY: the pointers are the open window's own objects.
+        let layer = MainThread::dispatch(move || unsafe {
+            install_fresh_layer(window, view, &target, install)
+        });
+        let previous = MainThread::own(native.layer);
+        let previous_display = std::mem::replace(&mut native.display, display);
+        native.layer = layer;
         Ok(LayerSwap {
-            layer: SendPtr(new_layer_ptr),
+            layer,
             previous,
             previous_display,
         })
     }
 
-    /// Undoes [`Self::begin_layer_swap`]: puts the previous `CAMetalLayer`
-    /// back under the `NSView`, restores the window, view and layer geometry
-    /// of the display it was installed for, and releases the layer that
-    /// replaced it.
-    ///
-    /// Call it only after whatever was opened on the new layer is closed, so
-    /// nothing else holds on to that layer.
+    /// Undoes [`Self::begin_layer_swap`]: puts the previous layer back under
+    /// the view with the geometry of the display it was installed for and
+    /// releases the layer that replaced it. Call it only after whatever was
+    /// opened on the new layer is closed.
     ///
     /// # Errors
     ///
-    /// Returns an error if the window has been closed; the previous layer is
-    /// released with the window in that case.
+    /// `Platform` when the window was closed meanwhile.
     #[allow(clippy::single_call_fn)]
     pub(crate) fn revert_layer_swap(&mut self, swap: LayerSwap) -> Result<(), EngineError> {
         let LayerSwap {
@@ -859,51 +994,72 @@ impl WallpaperWindow {
             previous_display,
             ..
         } = swap;
-        let Some(handle) = self.handle.as_mut() else {
+        let Some(native) = self.native.as_mut() else {
+            // SAFETY: the token owns the retain on the previous layer.
             MainThread::dispatch(move || unsafe { previous.release() });
-            return Err(EngineError::Platform(
-                "wallpaper window is already closed".to_string(),
-            ));
+            return Err(closed_window_error());
         };
-
-        let handle_ref = handle.clone_for_main_thread();
-        let previous_ptr = SendPtr(previous.as_ptr().cast::<std::ffi::c_void>());
-        let abandoned = std::mem::replace(&mut handle.metal_layer, previous);
-        let display_for_main = previous_display.clone();
+        let (window, view, abandoned) = (native.window, native.view, native.layer);
+        let restored = previous.into_ptr();
+        let target = previous_display.clone();
+        // SAFETY: the pointers are live objects of this window; the abandoned
+        // layer's retain is the window's own and is dropped exactly once.
         MainThread::dispatch(move || unsafe {
-            handle_ref.restore_metal_layer(previous_ptr, &display_for_main);
-            abandoned.release();
+            let previous_layer = borrow::<CAMetalLayer>(restored);
+            view_layer_swap_back(view, previous_layer);
+            reshape_changed(window, view, restored, &target);
+            drop(Retained::<CAMetalLayer>::from_raw(abandoned.get().cast()));
         });
-
-        self.display = previous_display;
+        native.layer = restored;
+        native.display = previous_display;
         Ok(())
     }
 
-    /// Returns the retained `CAMetalLayer` pointer the renderer draws into.
-    ///
-    /// The pointer is null after close. Callers must not outlive the returned
-    /// pointer beyond the `WallpaperWindow` that owns it.
+    /// The raw pointer of the layer the renderer draws into; null when the
+    /// window is closed.
     #[must_use]
     pub fn metal_layer_ptr(&self) -> *mut std::ffi::c_void {
-        self.handle.as_ref().map_or(std::ptr::null_mut(), |handle| {
-            handle.metal_layer.as_ptr().cast::<std::ffi::c_void>()
-        })
+        self.native
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |native| native.layer.get())
     }
 
-    #[cfg(test)]
+    /// Reads back the native geometry; only the desktop test cases call it.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the window has been closed.
+    /// `Platform` when the window is closed.
+    #[cfg(test)]
     pub fn native_state_for_tests(&self) -> Result<WallpaperWindowNativeState, EngineError> {
-        let Some(handle) = self.handle.as_ref() else {
-            return Err(EngineError::Platform(
-                "wallpaper window is already closed".to_string(),
-            ));
-        };
-
-        let handle = handle.clone_for_main_thread();
+        let native = self.native.as_ref().ok_or_else(closed_window_error)?;
+        let (window, view, layer) = (native.window, native.view, native.layer);
+        // SAFETY: the pointers are the open window's own objects.
         Ok(MainThread::dispatch(move || unsafe {
-            handle.native_state()
+            let (window, view, layer) = (
+                borrow::<NSWindow>(window),
+                borrow::<NSView>(view),
+                borrow::<CAMetalLayer>(layer),
+            );
+            let (window_frame, view_frame, layer_frame) =
+                (window.frame(), view.frame(), layer.frame());
+            let drawable = layer.drawableSize();
+            WallpaperWindowNativeState {
+                window_x: window_frame.origin.x,
+                window_y: window_frame.origin.y,
+                window_width: window_frame.size.width,
+                window_height: window_frame.size.height,
+                content_view_x: view_frame.origin.x,
+                content_view_y: view_frame.origin.y,
+                content_view_width: view_frame.size.width,
+                content_view_height: view_frame.size.height,
+                metal_layer_x: layer_frame.origin.x,
+                metal_layer_y: layer_frame.origin.y,
+                metal_layer_width: layer_frame.size.width,
+                metal_layer_height: layer_frame.size.height,
+                metal_layer_contents_scale: layer.contentsScale(),
+                metal_layer_drawable_width: drawable.width,
+                metal_layer_drawable_height: drawable.height,
+            }
         }))
     }
 }
@@ -964,406 +1120,72 @@ impl Drop for WallpaperWindow {
     }
 }
 
-/// Builder for a Rust-owned wallpaper window.
+/// Collects what a wallpaper window needs before it is opened.
 pub struct WallpaperWindowBuilder {
     display: DisplayDesc,
     style: PlaceholderStyle,
 }
 
 impl WallpaperWindowBuilder {
-    /// Sets the placeholder color used before content is presented.
     #[must_use]
-    pub fn placeholder_style(mut self, style: PlaceholderStyle) -> Self {
-        self.style = style;
-        self
+    pub fn placeholder_style(self, style: PlaceholderStyle) -> Self {
+        Self { style, ..self }
     }
 
-    /// Opens the native window.
+    /// Creates and shows the native window.
     ///
     /// # Errors
     ///
-    /// Returns an error if the display geometry is invalid or `AppKit` window
-    /// creation fails.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if main-thread dispatch does not return a result.
+    /// `InvalidInput` for a zero display id or size, `Platform` when the
+    /// window cannot be created.
     pub fn open(self) -> Result<WallpaperWindow, EngineError> {
-        if self.display.display_id == 0 {
-            return Err(EngineError::InvalidInput(
-                "display_id must be non-zero".to_string(),
-            ));
-        }
-        if self.display.width == 0 || self.display.height == 0 {
-            return Err(EngineError::InvalidInput(
-                "display dimensions must be non-zero".to_string(),
-            ));
-        }
-
-        MainThread::dispatch(|| unsafe {
-            objc2::rc::autoreleasepool(|_| {
-                let maker = MainThreadMarker::new().unwrap();
-                let scale_factor = if self.display.scale_factor > 0.0 {
-                    self.display.scale_factor
-                } else {
-                    1.0
-                };
-                let point_width = f64::from(self.display.width) / scale_factor;
-                let point_height = f64::from(self.display.height) / scale_factor;
-                let frame = NSRect::new(
-                    NSPoint::new(f64::from(self.display.x), f64::from(self.display.y)),
-                    NSSize::new(point_width, point_height),
-                );
-                let content_frame =
-                    NSRect::new(NSPoint::ZERO, NSSize::new(point_width, point_height));
-
-                let application = NSApplication::sharedApplication(maker);
-                application.finishLaunching();
-
-                let wallpaper_window = WallpaperDesktopWindow::init_with_content_rect(
-                    maker,
-                    frame,
-                    NSWindowStyleMask::Borderless,
-                    NSBackingStoreType::Buffered,
-                    false,
-                );
-                let window = wallpaper_window.as_super();
-                window.setReleasedWhenClosed(false);
-
-                let window_level =
-                    CGWindowLevelForKey(CGWindowLevelKey::DesktopWindowLevelKey) as NSInteger;
-                let window_color = NSColor::colorWithSRGBRed_green_blue_alpha(
-                    self.style.red,
-                    self.style.green,
-                    self.style.blue,
-                    self.style.alpha,
-                );
-
-                window.setLevel(window_level);
-                window.setCollectionBehavior(
-                    NSWindowCollectionBehavior::CanJoinAllSpaces
-                        | NSWindowCollectionBehavior::Stationary
-                        | NSWindowCollectionBehavior::FullScreenAuxiliary
-                        | NSWindowCollectionBehavior::IgnoresCycle,
-                );
-                window.setOpaque(true);
-                window.setHasShadow(false);
-                window.setMovable(false);
-                window.setRestorable(false);
-                window.setIgnoresMouseEvents(true);
-                window.setHidesOnDeactivate(false);
-                // The desktop belongs to the wallpaper, not to the app: hiding
-                // the app (Cmd-H, or hiding the panel after an apply) must not
-                // take every display's wallpaper off screen with it.
-                window.setCanHide(false);
-                window.setExcludedFromWindowsMenu(true);
-                window.setAnimationBehavior(NSWindowAnimationBehavior::None);
-                window.setBackgroundColor(Some(&window_color));
-
-                let content_view = NSView::initWithFrame(NSView::alloc(maker), content_frame);
-                content_view.setWantsLayer(true);
-
-                let metal_layer = self.display.build_metal_layer(&self.style);
-
-                content_view.setLayer(Some(&metal_layer));
-                window.setContentView(Some(&content_view));
-
-                let window_handle = MainThread::retain(window, "NSWindow")?;
-                let metal_layer_handle = match MainThread::retain(&metal_layer, "CAMetalLayer") {
-                    Ok(handle) => handle,
-                    Err(error) => {
-                        window_handle.release();
-                        return Err(error);
-                    }
-                };
-                let content_view_handle = match MainThread::retain(&content_view, "NSView") {
-                    Ok(handle) => handle,
-                    Err(error) => {
-                        window_handle.release();
-                        metal_layer_handle.release();
-                        return Err(error);
-                    }
-                };
-
-                // The layer is announced before the window is ordered front,
-                // so an observer can put content on it before the first
-                // composite.
-                announce_layer_installed(
-                    &NSNotificationCenter::defaultCenter(),
-                    &metal_layer,
-                    self.display.display_id,
-                    LayerInstall::Open,
-                );
-                window.orderFrontRegardless();
-
-                Ok(WallpaperWindow {
-                    display: self.display,
-                    handle: Some(WindowHandle {
-                        window: window_handle,
-                        content_view: content_view_handle,
-                        metal_layer: metal_layer_handle,
-                    }),
-                })
-            })
+        validate_window_display(&self.display)?;
+        let Self { display, style } = self;
+        let native = MainThread::dispatch(move || open_native(&display, style))?;
+        Ok(WallpaperWindow {
+            native: Some(native),
         })
     }
 }
 
-/// A raw pointer wrapper that is `Send`.
-///
-/// SAFETY: The pointer originates from an Objective-C object that is
-/// reference-counted and thread-safe at the ARC level. We only transport the
-/// pointer value across the dispatch boundary; actual dereferences happen
-/// exclusively on the main thread.
+/// A raw pointer that may cross threads; it is only dereferenced on the main
+/// thread.
 #[derive(Clone, Copy)]
 struct SendPtr(*mut std::ffi::c_void);
 unsafe impl Send for SendPtr {}
 
-struct MainThreadDispatchContext<F, R> {
-    body: Option<F>,
-    result: Option<std::thread::Result<R>>,
-}
-
-#[allow(clippy::single_call_fn)]
-extern "C" fn invoke_main_thread_body<F, R>(context: *mut std::ffi::c_void)
-where
-    F: FnOnce() -> R + Send,
-    R: Send,
-{
-    let context = unsafe { &mut *context.cast::<MainThreadDispatchContext<F, R>>() };
-    let body = context
-        .body
-        .take()
-        .expect("main-thread body should run exactly once");
-    context.result = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)));
-}
-
-struct WindowHandle {
-    window: MainThread,
-    content_view: MainThread,
-    metal_layer: MainThread,
-}
-
-impl WindowHandle {
-    fn clone_for_main_thread(&self) -> WindowHandleRef {
-        WindowHandleRef {
-            window: self.window.as_ptr(),
-            content_view: self.content_view.as_ptr(),
-            metal_layer: self.metal_layer.as_ptr(),
-        }
+impl SendPtr {
+    /// Reads the pointer through a method so a closure captures the whole
+    /// (sendable) wrapper rather than its raw field.
+    fn get(self) -> *mut std::ffi::c_void {
+        self.0
     }
 
-    unsafe fn close_on_main(self) {
-        debug_assert!(NSThread::isMainThread_class());
-        let window = unsafe { &*(self.window.as_ptr().cast::<NSWindow>()) };
-        window.orderOut(None);
-        window.close();
-        unsafe {
-            self.window.release();
-            self.content_view.release();
-            self.metal_layer.release();
-        }
+    /// Takes over the retain `object` holds.
+    fn from_retained<T: Message>(object: Retained<T>) -> Self {
+        Self(Retained::into_raw(object).cast())
     }
 }
 
-struct WindowHandleRef {
-    window: *mut AnyObject,
-    content_view: *mut AnyObject,
-    metal_layer: *mut AnyObject,
-}
-
-// SAFETY: These raw pointers are borrowed from an open `WallpaperWindow` and
-// are only used inside synchronous `run_on_main_sync` operations. Safe Rust
-// borrowing prevents the owner from being closed or dropped while the borrowed
-// pointers are in flight.
-unsafe impl Send for WindowHandleRef {}
-
-impl WindowHandleRef {
-    #[cfg(test)]
-    unsafe fn native_state(self) -> WallpaperWindowNativeState {
-        debug_assert!(NSThread::isMainThread_class());
-        let window = unsafe { &*(self.window.cast::<NSWindow>()) };
-        let content_view = unsafe { &*(self.content_view.cast::<NSView>()) };
-        let metal_layer = unsafe { &*(self.metal_layer.cast::<CAMetalLayer>()) };
-
-        let window_frame = window.frame();
-        let content_view_frame = content_view.frame();
-        let metal_layer_frame = metal_layer.frame();
-        let drawable_size = metal_layer.drawableSize();
-
-        WallpaperWindowNativeState {
-            window_x: window_frame.origin.x,
-            window_y: window_frame.origin.y,
-            window_width: window_frame.size.width,
-            window_height: window_frame.size.height,
-            content_view_x: content_view_frame.origin.x,
-            content_view_y: content_view_frame.origin.y,
-            content_view_width: content_view_frame.size.width,
-            content_view_height: content_view_frame.size.height,
-            metal_layer_x: metal_layer_frame.origin.x,
-            metal_layer_y: metal_layer_frame.origin.y,
-            metal_layer_width: metal_layer_frame.size.width,
-            metal_layer_height: metal_layer_frame.size.height,
-            metal_layer_contents_scale: metal_layer.contentsScale(),
-            metal_layer_drawable_width: drawable_size.width,
-            metal_layer_drawable_height: drawable_size.height,
-        }
-    }
-
-    unsafe fn update_display(self, display: &DisplayDesc) {
-        debug_assert!(NSThread::isMainThread_class());
-        let scale_factor = if display.scale_factor > 0.0 {
-            display.scale_factor
-        } else {
-            1.0
-        };
-        let point_width = f64::from(display.width) / scale_factor;
-        let point_height = f64::from(display.height) / scale_factor;
-        let frame = NSRect::new(
-            NSPoint::new(f64::from(display.x), f64::from(display.y)),
-            NSSize::new(point_width, point_height),
-        );
-        let content_frame = NSRect::new(NSPoint::ZERO, NSSize::new(point_width, point_height));
-        let drawable_size = NSSize::new(f64::from(display.width), f64::from(display.height));
-
-        let window = unsafe { &*(self.window.cast::<NSWindow>()) };
-        let content_view = unsafe { &*(self.content_view.cast::<NSView>()) };
-        let metal_layer = unsafe { &*(self.metal_layer.cast::<CAMetalLayer>()) };
-
-        // A primary-display or origin change is not a new render surface.
-        // Redrawing the window or resetting its drawable during wake exposes
-        // the placeholder before the suspended renderer can present again.
-        CATransaction::begin();
-        CATransaction::setDisableActions(true);
-        if window.frame() != frame {
-            window.setFrame_display(frame, false);
-        }
-        if content_view.frame() != content_frame {
-            content_view.setFrame(content_frame);
-        }
-        if metal_layer.frame() != content_frame {
-            metal_layer.setFrame(content_frame);
-        }
-        if metal_layer.contentsScale() != scale_factor {
-            metal_layer.setContentsScale(scale_factor);
-        }
-        if metal_layer.drawableSize() != drawable_size {
-            metal_layer.setDrawableSize(drawable_size);
-        }
-        CATransaction::commit();
-    }
-
-    /// Puts `previous` back under the view in place of the layer installed by
-    /// `replace_metal_layer`, then restores the geometry of `display`.
-    ///
-    /// The geometry goes through `update_display` aimed at the previous layer,
-    /// so values that already match are not written again: an untouched
-    /// layer keeps its drawables.
-    unsafe fn restore_metal_layer(self, previous: SendPtr, display: &DisplayDesc) {
-        debug_assert!(NSThread::isMainThread_class());
-        let content_view = unsafe { &*(self.content_view.cast::<NSView>()) };
-        let previous_layer = unsafe { &*(previous.0.cast::<CAMetalLayer>()) };
-
-        CATransaction::begin();
-        CATransaction::setDisableActions(true);
-        content_view.setLayer(Some(previous_layer));
-        content_view.setWantsLayer(true);
-        unsafe {
-            Self {
-                metal_layer: previous.0.cast::<AnyObject>(),
-                ..self
-            }
-            .update_display(display);
-        }
-        CATransaction::commit();
-    }
-
-    /// Installs a fresh layer under the view, shapes the window for `display`
-    /// and announces the layer as `install`.
-    #[allow(clippy::unnecessary_wraps)]
-    unsafe fn replace_metal_layer(
-        self,
-        display: &DisplayDesc,
-        install: LayerInstall,
-    ) -> Result<SendPtr, EngineError> {
-        debug_assert!(NSThread::isMainThread_class());
-
-        let new_layer = display.build_metal_layer(&PlaceholderStyle::default());
-
-        // Install on the NSView.
-        let content_view = unsafe { &*(self.content_view.cast::<NSView>()) };
-        content_view.setLayer(Some(&new_layer));
-        content_view.setWantsLayer(true);
-
-        // Reshape window/view geometry.
-        let scale_factor = if display.scale_factor > 0.0 {
-            display.scale_factor
-        } else {
-            1.0
-        };
-        let point_width = f64::from(display.width) / scale_factor;
-        let point_height = f64::from(display.height) / scale_factor;
-        let frame = NSRect::new(
-            NSPoint::new(f64::from(display.x), f64::from(display.y)),
-            NSSize::new(point_width, point_height),
-        );
-        let content_frame = NSRect::new(NSPoint::ZERO, NSSize::new(point_width, point_height));
-        let drawable_size = NSSize::new(f64::from(display.width), f64::from(display.height));
-
-        let window = unsafe { &*(self.window.cast::<NSWindow>()) };
-        window.setFrame_display(frame, true);
-        content_view.setFrame(content_frame);
-        new_layer.setFrame(content_frame);
-        new_layer.setContentsScale(scale_factor);
-        new_layer.setDrawableSize(drawable_size);
-
-        announce_layer_installed(
-            &NSNotificationCenter::defaultCenter(),
-            &new_layer,
-            display.display_id,
-            install,
-        );
-
-        let ptr: *mut std::ffi::c_void = Retained::as_ptr(&new_layer).cast_mut().cast();
-        Ok(SendPtr(ptr))
-    }
-}
-
-pub struct MainThread {
-    object: std::mem::ManuallyDrop<Retained<AnyObject>>,
-}
+/// An owned Objective-C object token that is retained and released on the
+/// main thread only.
+pub struct MainThread(SendPtr);
 
 impl MainThread {
-    #[allow(clippy::unnecessary_wraps)]
-    unsafe fn retain(object: &AnyObject, _label: &str) -> Result<Self, EngineError> {
-        debug_assert!(objc2_foundation::NSThread::isMainThread_class());
-        Ok(Self {
-            object: std::mem::ManuallyDrop::new(object.retain()),
-        })
+    /// Takes ownership of the retain `pointer` carries.
+    fn own(pointer: SendPtr) -> Self {
+        Self(pointer)
     }
 
-    #[allow(clippy::needless_pass_by_value, clippy::single_call_fn)]
-    unsafe fn retain_from_ptr(ptr: SendPtr) -> Result<Self, EngineError> {
-        debug_assert!(objc2_foundation::NSThread::isMainThread_class());
-        if ptr.0.is_null() {
-            return Err(EngineError::Platform(
-                "MainThread::retain_from_ptr received null".to_string(),
-            ));
-        }
-
-        unsafe {
-            let object = &*(ptr.0.cast::<AnyObject>());
-            Self::retain(object, "CAMetalLayer (replaced)")
-        }
+    /// Hands the retain back as a plain pointer without releasing it.
+    fn into_ptr(self) -> SendPtr {
+        self.0
     }
 
-    fn as_ptr(&self) -> *mut AnyObject {
-        Retained::as_ptr(&self.object).cast_mut()
-    }
-
-    unsafe fn release(mut self) {
-        debug_assert!(objc2_foundation::NSThread::isMainThread_class());
-        unsafe { std::mem::ManuallyDrop::drop(&mut self.object) };
+    /// Releases the object. Main thread only.
+    unsafe fn release(self) {
+        // SAFETY: the token owns one retain; the caller is on the main thread.
+        drop(unsafe { Retained::<AnyObject>::from_raw(self.0.get().cast()) });
     }
 
     pub fn dispatch<F, R>(body: F) -> R
@@ -1371,27 +1193,18 @@ impl MainThread {
         F: FnOnce() -> R + Send,
         R: Send,
     {
-        if objc2_foundation::NSThread::isMainThread_class() {
+        if MainThreadMarker::new().is_some() {
             return body();
         }
-
-        let mut context = MainThreadDispatchContext {
-            body: Some(body),
-            result: None,
-        };
-
-        // The stack context is valid for the duration of dispatch_sync_f because
-        // the call blocks until the main queue has executed `invoke`.
-        unsafe {
-            dispatch2::DispatchQueue::main()
-                .exec_sync_f((&raw mut context).cast(), invoke_main_thread_body::<F, R>);
-        }
-
-        match context
-            .result
-            .expect("main-thread body should complete before dispatch_sync_f returns")
+        let mut outcome: Option<std::thread::Result<R>> = None;
         {
-            Ok(result) => result,
+            let slot = &mut outcome;
+            dispatch2::DispatchQueue::main().exec_sync(move || {
+                *slot = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)));
+            });
+        }
+        match outcome.expect("the main queue runs the body before exec_sync returns") {
+            Ok(value) => value,
             Err(payload) => std::panic::resume_unwind(payload),
         }
     }
@@ -1406,18 +1219,18 @@ where
     MainThread::dispatch(body)
 }
 
-// SAFETY: This is an owned Objective-C pointer token, not a native facade. It
-// may move between Rust threads, but retains, releases, and Objective-C message
-// sends are only performed by the main-thread window path above.
+// SAFETY: The token is only ever touched by the main-thread window path.
 unsafe impl Send for MainThread {}
 
 #[cfg(test)]
 mod tests {
     use super::{
         LAYER_INSTALLED_NOTIFICATION, LayerInstall, MouseButtonEdges, MouseButtonState,
-        MouseButtonTracker, MouseButtons, NormalizedMousePosition, announce_layer_installed,
-        window_counts_as_desktop,
+        MouseButtonTracker, MouseButtons, NormalizedMousePosition, PlaceholderStyle,
+        WallpaperWindow, announce_layer_installed, content_frame, window_counts_as_desktop,
+        window_frame,
     };
+    use crate::{DisplayDesc, EngineError};
     use objc2::{rc::Retained, runtime::AnyObject};
     use objc2_core_graphics::{CGWindowLevelForKey, CGWindowLevelKey};
     use objc2_foundation::{
@@ -1828,6 +1641,88 @@ mod tests {
         }
         assert!(window_counts_as_desktop(0, |_| panic!("no window to look up")));
         assert!(window_counts_as_desktop(42, |_| None), "a window gone before its layer was read");
+    }
+
+    fn closed_window() -> WallpaperWindow {
+        WallpaperWindow { native: None }
+    }
+
+    fn engine_error_text(error: EngineError) -> (&'static str, String) {
+        match error {
+            EngineError::InvalidInput(text) => ("invalid", text),
+            EngineError::Platform(text) => ("platform", text),
+            other => panic!("unexpected error {other:?}"),
+        }
+    }
+
+    #[test]
+    fn window_operations_check_the_display_before_the_window_state() {
+        let good = DisplayDesc::new(1, 0, 0, 1920, 1080, 2.0);
+        let no_id = DisplayDesc::new(0, 0, 0, 1920, 1080, 2.0);
+        let no_width = DisplayDesc::new(1, 0, 0, 0, 1080, 2.0);
+        let no_height = DisplayDesc::new(1, 0, 0, 1920, 0, 2.0);
+
+        let mut window = closed_window();
+        for (display, text) in [
+            (no_id.clone(), "display_id must be non-zero"),
+            (no_width.clone(), "display dimensions must be non-zero"),
+            (no_height.clone(), "display dimensions must be non-zero"),
+        ] {
+            let (kind, message) = engine_error_text(window.update_display(display.clone()).unwrap_err());
+            assert_eq!((kind, message.as_str()), ("invalid", text));
+            let swap = window.begin_layer_swap(display.clone(), LayerInstall::Replace);
+            assert_eq!(engine_error_text(swap.err().unwrap()).0, "invalid");
+            let opened = WallpaperWindow::builder(display).open();
+            assert_eq!(engine_error_text(opened.err().unwrap()).1, text);
+        }
+        assert_eq!(
+            engine_error_text(window.update_display(good.clone()).unwrap_err()),
+            ("platform", "wallpaper window is already closed".to_string())
+        );
+        assert_eq!(
+            engine_error_text(window.update_layer(good).unwrap_err()),
+            ("platform", "wallpaper window is already closed".to_string())
+        );
+    }
+
+    #[test]
+    fn a_closed_window_has_no_layer_and_closing_again_is_harmless() {
+        let mut window = closed_window();
+        assert!(!window.is_open());
+        assert!(window.metal_layer_ptr().is_null());
+        window.close();
+        window.close();
+        assert!(!window.is_open());
+    }
+
+    #[test]
+    fn the_default_placeholder_is_opaque_black() {
+        let style = PlaceholderStyle::default();
+        assert_eq!((style.red, style.green, style.blue, style.alpha), (0.0, 0.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn window_frames_follow_the_display_in_points() {
+        let display = DisplayDesc::new(1, -1440, 25, 2880, 1800, 2.0);
+        let frame = window_frame(&display);
+        assert_eq!((frame.origin.x, frame.origin.y), (-1440.0, 25.0));
+        assert_eq!((frame.size.width, frame.size.height), (1440.0, 900.0));
+        let unscaled = window_frame(&DisplayDesc::new(1, 0, 0, 100, 50, 0.0));
+        assert_eq!((unscaled.size.width, unscaled.size.height), (100.0, 50.0));
+        assert_eq!(content_frame(&display).origin.x, 0.0);
+    }
+
+    #[test]
+    fn mouse_buttons_above_the_window_range_are_ignored_by_the_tracker() {
+        let mut tracker = MouseButtonTracker::new();
+        tracker.set_button(32, true);
+        tracker.set_button(40, true);
+        tracker.sync_down_mask(1 << 40);
+        assert_eq!(tracker.consume_edges(), MouseButtonEdges::from_masks(0, 0, 0));
+        assert_eq!(
+            MouseButtonEdges::from_level_state(MouseButtons::from_mask(0b10)),
+            MouseButtonEdges::from_masks(0b10, 0b10, 0)
+        );
     }
 
     #[test]

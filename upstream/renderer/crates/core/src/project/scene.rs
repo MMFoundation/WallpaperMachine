@@ -1,7 +1,7 @@
+// Clean-room implementation from the WallpaperMachine spec r1c-core-media.md; written without access to the original source.
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt::Display,
-    fs,
     path::{Path, PathBuf},
 };
 
@@ -15,112 +15,126 @@ use crate::{
     render::{ShaderCacheDecision, ShaderCacheInputs},
 };
 
-const DEFAULT_RENDER_TARGET: &str = "_rt_default";
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct SceneFile {
     objects: Vec<Value>,
     scene: SceneIr,
 }
 
+/// Keys of a scene object that may name an asset file, in the order they are read.
+const ASSET_KEYS: [&str; 4] = ["image", "particle", "sound", "light"];
+
+type AssetLoader<'a> = dyn FnMut(&str) -> Result<Option<String>, crate::EngineError> + 'a;
+
 impl SceneFile {
-    /// Parses a scene JSON document without loading referenced assets.
-    ///
     /// # Errors
     ///
-    /// Returns an error if the document is malformed or references invalid
-    /// relative asset paths.
+    /// Returns `InvalidInput` for invalid JSON, a root that is not an object or an
+    /// unsafe asset reference.
     pub fn parse<T: AsRef<str>>(json: T) -> Result<Self, crate::EngineError> {
         Self::parse_with_assets(json, |_| Ok(None))
     }
 
-    /// Parses a scene JSON document and validates loadable asset references.
-    ///
     /// # Errors
     ///
-    /// Returns an error if the document is malformed, an asset path is invalid,
-    /// the loader fails, or a loaded asset is not valid JSON.
+    /// Returns `InvalidInput` for invalid JSON, a root that is not an object, an
+    /// unsafe asset reference or an asset that is not JSON; a loader error is returned as is.
     pub fn parse_with_assets<T, F>(json: T, mut loader: F) -> Result<Self, crate::EngineError>
     where
         T: AsRef<str>,
         F: FnMut(&str) -> Result<Option<String>, crate::EngineError>,
     {
-        let raw: Value = serde_json::from_str(json.as_ref()).map_err(|error| {
-            crate::EngineError::InvalidInput(format!("failed to parse scene file: {error}"))
-        })?;
-        let object = raw.as_object().ok_or_else(|| {
-            crate::EngineError::InvalidInput("scene file root must be an object".to_string())
-        })?;
+        Self::parse_checked(json.as_ref(), &mut loader)
+    }
 
-        let objects = object
-            .get("objects")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+    fn parse_checked(json: &str, loader: &mut AssetLoader<'_>) -> Result<Self, EngineError> {
+        let root: Value = serde_json::from_str(json)
+            .map_err(|error| invalid_scene(format!("failed to parse scene file: {error}")))?;
+        if !root.is_object() {
+            return Err(invalid_scene("scene file root must be an object"));
+        }
 
-        let asset_paths = objects.iter().flat_map(|object| {
-            ["image", "particle", "sound", "light"]
-                .into_iter()
-                .filter_map(move |key| object.get(key).and_then(Value::as_str))
-        });
-        for asset_path in asset_paths {
-            validate_relative_normal_path(Path::new(asset_path), "scene asset path")?;
-            if let Some(asset_json) = loader(asset_path)? {
-                serde_json::from_str::<Value>(&asset_json).map_err(|error| {
-                    crate::EngineError::InvalidInput(format!(
-                        "failed to parse scene asset `{asset_path}`: {error}"
-                    ))
-                })?;
+        let objects = match root.get("objects") {
+            Some(Value::Array(items)) => items.clone(),
+            _ => Vec::new(),
+        };
+
+        for object in &objects {
+            for key in ASSET_KEYS {
+                let Some(reference) = object.get(key).and_then(Value::as_str) else {
+                    continue;
+                };
+                validate_relative_normal_path(Path::new(reference), "scene asset path")?;
+                if let Some(text) = loader(reference)? {
+                    serde_json::from_str::<Value>(&text).map_err(|error| {
+                        invalid_scene(format!("failed to parse scene asset `{reference}`: {error}"))
+                    })?;
+                }
             }
         }
 
-        let scene = SceneIr::from(&raw);
-        Ok(Self { objects, scene })
+        Ok(Self {
+            objects,
+            scene: SceneIr::from(&root),
+        })
     }
 
-    /// Loads a scene file from a project or direct scene path.
-    ///
     /// # Errors
     ///
-    /// Returns an error if the project cannot be resolved, files cannot be
-    /// read, or the scene/asset JSON is invalid.
+    /// Returns `InvalidInput` when the project is not a scene, an entry or asset leaves
+    /// its folder, a file cannot be read or the scene does not parse.
     pub fn load_project<P, A>(project_path: P, assets_path: A) -> Result<Self, crate::EngineError>
     where
         P: AsRef<Path>,
         A: AsRef<Path>,
     {
         let project_path = project_path.as_ref();
-        let assets_path = assets_path.as_ref();
+        let assets_root = assets_path.as_ref();
 
-        if project_path.file_name().and_then(|name| name.to_str()) != Some("project.json") {
-            let content = fs::read_to_string(project_path).map_err(|error| {
-                crate::EngineError::InvalidInput(format!("failed to read scene file: {error}"))
-            })?;
-            return Self::parse_with_assets(content, |asset| {
-                read_optional_asset(
-                    project_path.parent().unwrap_or_else(|| Path::new("")),
-                    assets_path,
-                    asset,
-                )
-            });
-        }
+        let (scene_text, project_root) =
+            if project_path.file_name().is_some_and(|name| name == "project.json") {
+                let SceneSourceResolution::Scene { scene_source, .. } =
+                    SceneSourceResolution::load(project_path)?
+                else {
+                    return Err(invalid_scene("project is not a scene wallpaper"));
+                };
+                let entry = Path::new(&scene_source.pkg_entry);
+                validate_relative_normal_path(entry, "scene file")?;
+                let folder = folder_or_here(&scene_source.pkg_dir);
+                let file = read_contained(&folder, entry, "scene file").map_err(|error| match error {
+                    ContainedError::Escapes(message) => invalid_scene(message),
+                    ContainedError::Io(error) => {
+                        invalid_scene(format!("failed to read scene file: {error}"))
+                    }
+                })?;
+                (file, folder)
+            } else {
+                let text = std::fs::read_to_string(project_path)
+                    .map_err(|error| invalid_scene(format!("failed to read scene file: {error}")))?;
+                let folder = folder_or_here(project_path.parent().unwrap_or_else(|| Path::new("")));
+                (text, folder)
+            };
 
-        let resolution = SceneSourceResolution::load(project_path)?;
-        let Some(scene_source) = resolution.scene_source() else {
-            return Err(crate::EngineError::InvalidInput(
-                "project is not a scene wallpaper".to_string(),
-            ));
+        let mut loader = |reference: &str| -> Result<Option<String>, EngineError> {
+            validate_relative_normal_path(Path::new(reference), "scene asset path")?;
+            for root in [project_root.as_path(), assets_root] {
+                if root.as_os_str().is_empty() {
+                    continue;
+                }
+                if !root.join(reference).exists() {
+                    continue;
+                }
+                return match read_contained(root, Path::new(reference), "scene asset") {
+                    Ok(text) => Ok(Some(text)),
+                    Err(ContainedError::Escapes(message)) => Err(invalid_scene(message)),
+                    Err(ContainedError::Io(error)) => Err(invalid_scene(format!(
+                        "failed to read scene asset `{reference}`: {error}"
+                    ))),
+                };
+            }
+            Ok(None)
         };
-        let scene_entry = Path::new(&scene_source.pkg_entry);
-        validate_relative_normal_path(scene_entry, "scene file")?;
-        let scene_path = path_under_root(&scene_source.pkg_dir, scene_entry, "scene file")?;
-        let content = fs::read_to_string(&scene_path).map_err(|error| {
-            crate::EngineError::InvalidInput(format!("failed to read scene file: {error}"))
-        })?;
-
-        Self::parse_with_assets(content, |asset| {
-            read_optional_asset(&scene_source.pkg_dir, assets_path, asset)
-        })
+        Self::parse_checked(&scene_text, &mut loader)
     }
 
     #[must_use]
@@ -148,79 +162,93 @@ impl SceneIr {
 
 impl From<&Value> for SceneIr {
     fn from(value: &Value) -> Self {
-        let (width, height) = value
+        let projection = value
             .get("general")
-            .and_then(|general| general.get("orthogonalprojection"))
-            .map_or((1920, 1080), |value| {
-                if value.is_null() {
-                    return (1920, 1080);
-                }
-
-                let width = value
-                    .get("width")
-                    .and_then(Value::as_u64)
-                    .and_then(|value| u32::try_from(value).ok())
-                    .unwrap_or(1920);
-                let height = value
-                    .get("height")
-                    .and_then(Value::as_u64)
-                    .and_then(|value| u32::try_from(value).ok())
-                    .unwrap_or(1080);
-
-                (width, height)
-            });
-
-        let mut render_targets = BTreeMap::new();
-        render_targets.insert(
-            DEFAULT_RENDER_TARGET.to_string(),
-            SceneRenderTargetIr { width, height },
-        );
-
-        Self { render_targets }
+            .and_then(|general| general.get("orthogonalprojection"));
+        let side = |name: &str, default: u32| {
+            projection
+                .and_then(|projection| projection.get(name))
+                .and_then(Value::as_u64)
+                .and_then(|number| u32::try_from(number).ok())
+                .unwrap_or(default)
+        };
+        let target = SceneRenderTargetIr {
+            width: side("width", DEFAULT_CANVAS_WIDTH),
+            height: side("height", DEFAULT_CANVAS_HEIGHT),
+        };
+        Self {
+            render_targets: BTreeMap::from([(DEFAULT_RENDER_TARGET.to_owned(), target)]),
+        }
     }
 }
 
-/// Opaque identifier returned by the renderer for an open scene.
+const DEFAULT_RENDER_TARGET: &str = "_rt_default";
+const DEFAULT_CANVAS_WIDTH: u32 = 1920;
+const DEFAULT_CANVAS_HEIGHT: u32 = 1080;
+
+fn invalid_scene(message: impl Into<String>) -> EngineError {
+    EngineError::InvalidInput(message.into())
+}
+
+/// An empty folder path means the current folder.
+fn folder_or_here(folder: &Path) -> PathBuf {
+    if folder.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        folder.to_path_buf()
+    }
+}
+
+enum ContainedError {
+    Escapes(String),
+    Io(std::io::Error),
+}
+
+/// Reads `relative` below `root` after resolving links, refusing a file whose real
+/// location is outside the real `root`.
+fn read_contained(root: &Path, relative: &Path, label: &str) -> Result<String, ContainedError> {
+    let real_root = root.canonicalize().map_err(ContainedError::Io)?;
+    let real_file = root.join(relative).canonicalize().map_err(ContainedError::Io)?;
+    if !real_file.starts_with(&real_root) {
+        return Err(ContainedError::Escapes(format!(
+            "{label} must stay under its root"
+        )));
+    }
+    std::fs::read_to_string(real_file).map_err(ContainedError::Io)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SceneHandle(u64);
 
 impl SceneHandle {
-    /// Wraps a raw renderer handle.
     #[must_use]
     pub fn new(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Returns the raw renderer handle value.
     #[must_use]
     pub fn raw(self) -> u64 {
         self.0
     }
 }
 
-/// How wallpaper content is mapped into the target display rectangle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum ScalingMode {
-    /// Do not scale; render at source size.
     None,
-    /// Stretch content to exactly match the output rectangle.
     Stretch,
-    /// Preserve aspect ratio and fit all content inside the output rectangle.
     Fit,
-    /// Preserve aspect ratio and fill the output rectangle, cropping overflow.
     #[default]
     Fill,
 }
 
 impl Display for ScalingMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            ScalingMode::None => "none",
-            ScalingMode::Stretch => "stretch",
-            ScalingMode::Fit => "fit",
-            ScalingMode::Fill => "fill",
-        };
-        write!(f, "{name}")
+        f.write_str(match self {
+            Self::None => "none",
+            Self::Stretch => "stretch",
+            Self::Fit => "fit",
+            Self::Fill => "fill",
+        })
     }
 }
 
@@ -277,49 +305,63 @@ impl Default for SceneFraming {
     }
 }
 
-/// Desired wallpaper scene configuration for one display.
+
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SceneDesc {
-    /// Display where the scene should be shown.
     pub display: DisplayDesc,
-    /// Path to the workshop `project.json` or scene source file.
     pub scene_path: String,
-    /// Path to Wallpaper Engine's shared assets directory.
     pub assets_path: String,
-    /// Target frame rate requested from the renderer.
     pub fps: u32,
-    /// Initial wallpaper scaling mode.
     pub scaling_mode: ScalingMode,
-    /// Initial positive wallpaper scaling factor.
     pub scaling_factor: f64,
     /// Initial position of the wallpaper inside the room its display leaves.
     pub framing: SceneFraming,
-    /// Whether the renderer should start in a paused state.
     pub paused: bool,
-    /// Whether scene audio-response properties should be enabled.
     pub audio_response_enabled: bool,
     /// Whether this desktop scene should receive now-playing events.
     pub media_integration_enabled: bool,
-    /// Scene-wide audio volume multiplier.
     pub audio_volume: AudioVolume,
-    /// Scene-wide audio mute flag.
     pub audio_muted: bool,
-    /// Optional project property override JSON before flattening.
     pub property_override_json: Option<String>,
-    /// Optional shader cache root for this scene.
     pub shader_cache_path: Option<String>,
-    /// Whether shader cache entries should be regenerated.
     pub force_shader_refresh: bool,
+    /// Set when `with_audio_volume` was given a value the volume type refuses;
+    /// `validate` reports it.
+    rejected_audio_volume: bool,
+}
+
+const AUDIO_VOLUME_MESSAGE: &str = "audio_volume must be finite and within [0.0, 1.0]";
+
+fn invalid(message: &str) -> EngineError {
+    EngineError::InvalidInput(message.to_owned())
+}
+
+/// The checks every entry point shares once the display is out of the picture, in
+/// the order they are reported.
+fn check_wallpaper_fields(
+    scene_path: &str,
+    fps: u32,
+    scaling_factor: f64,
+    framing: SceneFraming,
+) -> Result<(), EngineError> {
+    if scene_path.is_empty() {
+        return Err(invalid("scene_path must not be empty"));
+    }
+    if fps == 0 {
+        return Err(invalid("fps must be greater than zero"));
+    }
+    if !scaling_factor.is_finite() || scaling_factor <= 0.0 {
+        return Err(invalid("scaling factor must be finite and greater than zero"));
+    }
+    framing.validate()
+}
+
+fn full_volume() -> AudioVolume {
+    AudioVolume::try_from(1.0).expect("1.0 is a valid volume")
 }
 
 impl SceneDesc {
-    /// Starts building a scene descriptor with conservative defaults.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the built-in default audio volume falls outside the valid
-    /// [`AudioVolume`] range.
     #[must_use]
     pub fn builder(display: DisplayDesc, scene_path: impl Into<String>) -> SceneDescBuilder {
         SceneDescBuilder {
@@ -333,7 +375,7 @@ impl SceneDesc {
             paused: false,
             audio_response_enabled: false,
             media_integration_enabled: false,
-            audio_volume: AudioVolume::try_from(1.0).unwrap(),
+            audio_volume: 1.0,
             audio_muted: false,
             property_override_json: None,
             shader_cache_path: None,
@@ -341,15 +383,6 @@ impl SceneDesc {
         }
     }
 
-    /// Constructs a scene descriptor without validation.
-    ///
-    /// Prefer [`SceneDesc::builder`] for new call sites that should validate
-    /// required fields before handing the descriptor to the renderer.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the built-in default audio volume falls outside the valid
-    /// [`AudioVolume`] range.
     #[must_use]
     pub fn new(
         display: DisplayDesc,
@@ -369,51 +402,37 @@ impl SceneDesc {
             paused,
             audio_response_enabled: false,
             media_integration_enabled: false,
-            audio_volume: AudioVolume::try_from(1.0).unwrap(),
+            audio_volume: full_volume(),
             audio_muted: false,
             property_override_json: None,
             shader_cache_path: None,
             force_shader_refresh: false,
+            rejected_audio_volume: false,
         }
     }
 
-    /// Validates that the descriptor can be handed to the renderer.
-    ///
     /// # Errors
     ///
-    /// Returns an error if required display, path, FPS, or scaling fields are
-    /// invalid.
+    /// Returns `InvalidInput` naming the first field the renderer could not take.
     pub fn validate(&self) -> Result<(), EngineError> {
         if self.display.display_id == 0 {
-            return Err(EngineError::InvalidInput(
-                "display_id must be non-zero".to_string(),
-            ));
+            return Err(invalid("display_id must be non-zero"));
         }
         if self.display.width == 0 || self.display.height == 0 {
-            return Err(EngineError::InvalidInput(
-                "display dimensions must be non-zero".to_string(),
-            ));
+            return Err(invalid("display dimensions must be non-zero"));
         }
-        if self.scene_path.is_empty() {
-            return Err(EngineError::InvalidInput(
-                "scene_path must not be empty".to_string(),
-            ));
+        check_wallpaper_fields(
+            &self.scene_path,
+            self.fps,
+            self.scaling_factor,
+            self.framing,
+        )?;
+        if self.rejected_audio_volume {
+            return Err(invalid(AUDIO_VOLUME_MESSAGE));
         }
-        if self.fps == 0 {
-            return Err(EngineError::InvalidInput(
-                "fps must be greater than zero".to_string(),
-            ));
-        }
-        if !valid_scaling_factor(self.scaling_factor) {
-            return Err(EngineError::InvalidInput(
-                "scaling factor must be finite and greater than zero".to_string(),
-            ));
-        }
-        self.framing.validate()?;
         Ok(())
     }
 
-    /// Sets the initial audio-response state.
     #[must_use]
     pub fn with_audio_response_enabled(mut self, enabled: bool) -> Self {
         self.audio_response_enabled = enabled;
@@ -427,14 +446,12 @@ impl SceneDesc {
         self
     }
 
-    /// Sets the initial scaling mode.
     #[must_use]
     pub fn with_scaling_mode(mut self, scaling_mode: ScalingMode) -> Self {
         self.scaling_mode = scaling_mode;
         self
     }
 
-    /// Sets the initial scaling factor.
     #[must_use]
     pub fn with_scaling_factor(mut self, scaling_factor: f64) -> Self {
         self.scaling_factor = scaling_factor;
@@ -448,80 +465,72 @@ impl SceneDesc {
         self
     }
 
-    /// Sets the scene-wide audio volume multiplier.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `audio_volume` is outside the valid [`AudioVolume`] range.
     #[must_use]
     pub fn with_audio_volume(mut self, audio_volume: f32) -> Self {
-        self.audio_volume = AudioVolume::try_from(audio_volume).unwrap();
+        match AudioVolume::try_from(audio_volume) {
+            Ok(volume) => {
+                self.audio_volume = volume;
+                self.rejected_audio_volume = false;
+            }
+            Err(_) => self.rejected_audio_volume = true,
+        }
         self
     }
 
-    /// Sets the scene-wide audio mute flag.
     #[must_use]
     pub fn with_audio_muted(mut self, audio_muted: bool) -> Self {
         self.audio_muted = audio_muted;
         self
     }
 
-    /// Sets project property override JSON for the scene.
     #[must_use]
-    pub fn with_property_override_json(
-        mut self,
-        property_override_json: impl Into<String>,
-    ) -> Self {
+    pub fn with_property_override_json(mut self, property_override_json: impl Into<String>) -> Self {
         self.property_override_json = Some(property_override_json.into());
         self
     }
 
-    /// Sets the shader cache root for the scene.
     #[must_use]
     pub fn with_shader_cache_path(mut self, shader_cache_path: impl Into<String>) -> Self {
         self.shader_cache_path = Some(shader_cache_path.into());
         self
     }
 
-    /// Controls whether shader cache entries should be regenerated.
     #[must_use]
     pub fn with_force_shader_refresh(mut self, force_shader_refresh: bool) -> Self {
         self.force_shader_refresh = force_shader_refresh;
         self
     }
 
-    /// Resolves the effective shader cache directory for this scene.
+    /// The prepared shader cache directory of this scene, or `None` when no cache root
+    /// is set or the project is not a scene.
     ///
     /// # Errors
     ///
-    /// Returns an error if the project source cannot be resolved or shader
-    /// cache inputs cannot be validated.
+    /// Returns an error when the scene path is unsafe or the cache cannot be prepared.
     pub fn shader_cache_path(&self) -> Result<Option<String>, EngineError> {
-        let Some(cache_root) = self.shader_cache_path.as_deref() else {
+        let Some(cache_root) = self.shader_cache_path.as_deref().filter(|root| !root.is_empty())
+        else {
             return Ok(None);
         };
-        let scene_path = Path::new(&self.scene_path);
-        let resolution = SceneSourceResolution::load(scene_path)?;
-        let Some(scene_source) = resolution.scene_source() else {
+        let source = SceneSourceResolution::load(&self.scene_path)?;
+        let SceneSourceResolution::Scene { scene_source, .. } = &source else {
             return Ok(None);
         };
+
         let inputs = ShaderCacheInputs::builder(&scene_source.scene_id, cache_root)
-            .project_json_path(scene_path)
+            .project_json_path(&self.scene_path)
             .scene_pkg_path(&scene_source.pkg_path)
-            .unpacked_source(scene_source.pkg_dir.join(&scene_source.pkg_entry), &scene_source.pkg_dir)
+            .unpacked_source(
+                scene_source.pkg_dir.join(&scene_source.pkg_entry),
+                &scene_source.pkg_dir,
+            )
             .property_override_json(self.property_override_json.clone())
             .force_refresh(self.force_shader_refresh)
             .build()?;
-        let decision = ShaderCacheDecision::prepare(inputs)?;
-        Ok(Some(
-            decision.scene_cache_path().to_string_lossy().into_owned(),
-        ))
+        let decision = ShaderCacheDecision::prepare(&inputs)?;
+        Ok(Some(decision.scene_cache_path().to_string_lossy().into_owned()))
     }
 
-    /// Returns true iff all wallpaper-defining fields are equal, intentionally
-    /// ignoring `display` and the initial `paused` seed. Used to detect whether
-    /// the scene descriptor changed in a way that requires rebuilding the
-    /// renderer rather than just moving the window to a new display.
     #[must_use]
     pub fn same_wallpaper(&self, other: &SceneDesc) -> bool {
         self.scene_path == other.scene_path
@@ -539,54 +548,33 @@ impl SceneDesc {
             && self.force_shader_refresh == other.force_shader_refresh
     }
 
-    /// Marks a one-shot shader refresh request as consumed after the renderer
-    /// has been opened or rebuilt with that descriptor.
     pub fn mark_shader_refresh_complete(&mut self) {
         self.force_shader_refresh = false;
     }
 }
 
-/// Display-independent wallpaper scene configuration.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SceneTemplate {
-    /// Path to the workshop `project.json` or scene source file.
     pub scene_path: String,
-    /// Path to Wallpaper Engine's shared assets directory.
     pub assets_path: String,
-    /// Target frame rate requested from the renderer.
     pub fps: u32,
-    /// Initial wallpaper scaling mode.
     pub scaling_mode: ScalingMode,
-    /// Initial positive wallpaper scaling factor.
     pub scaling_factor: f64,
     /// Initial position of the wallpaper inside the room its display leaves.
     pub framing: SceneFraming,
-    /// Whether the renderer should start in a paused state.
     pub paused: bool,
-    /// Whether scene audio-response properties should be enabled.
     pub audio_response_enabled: bool,
     /// Whether this desktop scene should receive now-playing events.
     pub media_integration_enabled: bool,
-    /// Scene-wide audio volume multiplier.
     pub audio_volume: AudioVolume,
-    /// Scene-wide audio mute flag.
     pub audio_muted: bool,
-    /// Optional project property override JSON before flattening.
     pub property_override_json: Option<String>,
-    /// Optional shader cache root for this scene.
     pub shader_cache_path: Option<String>,
-    /// Whether shader cache entries should be regenerated.
     pub force_shader_refresh: bool,
 }
 
 impl SceneTemplate {
-    /// Starts building a display-independent scene template.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the built-in default audio volume falls outside the valid
-    /// [`AudioVolume`] range.
     #[must_use]
     pub fn builder(scene_path: impl Into<String>) -> SceneTemplateBuilder {
         SceneTemplateBuilder {
@@ -599,7 +587,7 @@ impl SceneTemplate {
             paused: false,
             audio_response_enabled: false,
             media_integration_enabled: false,
-            audio_volume: AudioVolume::try_from(1.0).unwrap(),
+            audio_volume: 1.0,
             audio_muted: false,
             property_override_json: None,
             shader_cache_path: None,
@@ -607,7 +595,6 @@ impl SceneTemplate {
         }
     }
 
-    /// Copies display-independent scene settings from a scene descriptor.
     #[must_use]
     pub fn from_scene_desc(scene: &SceneDesc) -> Self {
         Self {
@@ -628,7 +615,6 @@ impl SceneTemplate {
         }
     }
 
-    /// Creates a concrete scene descriptor for one display.
     #[must_use]
     pub fn for_display(&self, display: DisplayDesc) -> SceneDesc {
         SceneDesc {
@@ -647,36 +633,23 @@ impl SceneTemplate {
             property_override_json: self.property_override_json.clone(),
             shader_cache_path: self.shader_cache_path.clone(),
             force_shader_refresh: self.force_shader_refresh,
+            rejected_audio_volume: false,
         }
     }
 
-    /// Validates that the template can be applied to a display.
-    ///
     /// # Errors
     ///
-    /// Returns an error if required path, FPS, or scaling fields are invalid.
+    /// Returns `InvalidInput` naming the first field the renderer could not take.
     pub fn validate(&self) -> Result<(), EngineError> {
-        if self.scene_path.is_empty() {
-            return Err(EngineError::InvalidInput(
-                "scene_path must not be empty".to_string(),
-            ));
-        }
-        if self.fps == 0 {
-            return Err(EngineError::InvalidInput(
-                "fps must be greater than zero".to_string(),
-            ));
-        }
-        if !valid_scaling_factor(self.scaling_factor) {
-            return Err(EngineError::InvalidInput(
-                "scaling factor must be finite and greater than zero".to_string(),
-            ));
-        }
-        self.framing.validate()?;
-        Ok(())
+        check_wallpaper_fields(
+            &self.scene_path,
+            self.fps,
+            self.scaling_factor,
+            self.framing,
+        )
     }
 }
 
-/// Builder for [`SceneTemplate`].
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SceneTemplateBuilder {
@@ -689,7 +662,7 @@ pub struct SceneTemplateBuilder {
     paused: bool,
     audio_response_enabled: bool,
     media_integration_enabled: bool,
-    audio_volume: AudioVolume,
+    audio_volume: f32,
     audio_muted: bool,
     property_override_json: Option<String>,
     shader_cache_path: Option<String>,
@@ -697,28 +670,24 @@ pub struct SceneTemplateBuilder {
 }
 
 impl SceneTemplateBuilder {
-    /// Sets the shared assets path.
     #[must_use]
     pub fn assets_path(mut self, assets_path: impl Into<String>) -> Self {
         self.assets_path = assets_path.into();
         self
     }
 
-    /// Sets the target frame rate.
     #[must_use]
     pub fn fps(mut self, fps: u32) -> Self {
         self.fps = fps;
         self
     }
 
-    /// Sets the initial scaling mode.
     #[must_use]
     pub fn scaling_mode(mut self, scaling_mode: ScalingMode) -> Self {
         self.scaling_mode = scaling_mode;
         self
     }
 
-    /// Sets the initial scaling factor.
     #[must_use]
     pub fn scaling_factor(mut self, scaling_factor: f64) -> Self {
         self.scaling_factor = scaling_factor;
@@ -732,14 +701,12 @@ impl SceneTemplateBuilder {
         self
     }
 
-    /// Sets the initial pause state.
     #[must_use]
     pub fn paused(mut self, paused: bool) -> Self {
         self.paused = paused;
         self
     }
 
-    /// Sets the initial audio-response state.
     #[must_use]
     pub fn audio_response_enabled(mut self, enabled: bool) -> Self {
         self.audio_response_enabled = enabled;
@@ -753,47 +720,41 @@ impl SceneTemplateBuilder {
         self
     }
 
-    /// Sets the scene-wide audio volume multiplier.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `audio_volume` is outside the valid [`AudioVolume`] range.
     #[must_use]
     pub fn audio_volume(mut self, audio_volume: f32) -> Self {
-        self.audio_volume = AudioVolume::try_from(audio_volume).unwrap();
+        self.audio_volume = audio_volume;
         self
     }
 
-    /// Sets the scene-wide audio mute flag.
     #[must_use]
     pub fn audio_muted(mut self, audio_muted: bool) -> Self {
         self.audio_muted = audio_muted;
         self
     }
 
-    /// Sets project property override JSON.
     #[must_use]
     pub fn property_override_json(mut self, json: impl Into<String>) -> Self {
         self.property_override_json = Some(json.into());
         self
     }
 
-    /// Sets the shader cache root.
     #[must_use]
     pub fn shader_cache_path(mut self, path: impl Into<String>) -> Self {
         self.shader_cache_path = Some(path.into());
         self
     }
 
-    /// Controls whether shader cache entries should be regenerated.
     #[must_use]
     pub fn force_shader_refresh(mut self, refresh: bool) -> Self {
         self.force_shader_refresh = refresh;
         self
     }
 
-    /// Validates and returns the scene template.
+    /// # Errors
+    ///
+    /// Returns `InvalidInput` naming the first field the renderer could not take.
     pub fn build(self) -> Result<SceneTemplate, EngineError> {
+        let audio_volume = AudioVolume::try_from(self.audio_volume);
         let template = SceneTemplate {
             scene_path: self.scene_path,
             assets_path: self.assets_path,
@@ -804,28 +765,24 @@ impl SceneTemplateBuilder {
             paused: self.paused,
             audio_response_enabled: self.audio_response_enabled,
             media_integration_enabled: self.media_integration_enabled,
-            audio_volume: self.audio_volume,
+            audio_volume: audio_volume.unwrap_or_else(|_| full_volume()),
             audio_muted: self.audio_muted,
             property_override_json: self.property_override_json,
             shader_cache_path: self.shader_cache_path,
             force_shader_refresh: self.force_shader_refresh,
         };
         template.validate()?;
+        audio_volume.map_err(|_| invalid(AUDIO_VOLUME_MESSAGE))?;
         Ok(template)
     }
 }
 
 pub trait SceneDescSliceExt {
-    /// Asserts that the slice contains at most one scene per display.
-    ///
     /// # Errors
     ///
     /// Returns an error if multiple scenes target the same display.
     fn assert_unique(&self) -> Result<(), EngineError>;
 
-    /// Produces a [`SceneResult`] for each scene by looking up its handle in
-    /// the provided map.
-    ///
     /// # Errors
     ///
     /// Returns an error if a scene cannot be mapped to a display key or handle.
@@ -838,9 +795,9 @@ pub trait SceneDescSliceExt {
 
 impl SceneDescSliceExt for [SceneDesc] {
     fn assert_unique(&self) -> Result<(), EngineError> {
-        let mut display_ids = HashSet::with_capacity(self.len());
+        let mut seen = HashSet::with_capacity(self.len());
         for scene in self {
-            if !display_ids.insert(scene.display.display_id) {
+            if !seen.insert(scene.display.display_id) {
                 return Err(EngineError::InvalidInput(format!(
                     "desired scene list contains duplicate display_id {}",
                     scene.display.display_id
@@ -855,22 +812,21 @@ impl SceneDescSliceExt for [SceneDesc] {
         display_state: &DisplayStateModel,
         handles_by_display: &HashMap<DisplayKey, SceneHandle>,
     ) -> Result<Vec<SceneResult>, EngineError> {
-        let mut results = Vec::with_capacity(self.len());
-        for scene in self {
-            let key = display_state.reconcile_key(scene)?;
-            let handle = handles_by_display.get(&key).copied().ok_or_else(|| {
-                EngineError::Platform(format!(
-                    "missing scene handle for requested display {}",
-                    scene.display.display_id
-                ))
-            })?;
-            results.push(SceneResult::new(scene.display.display_id, handle, 0));
-        }
-        Ok(results)
+        self.iter()
+            .map(|scene| {
+                let key = display_state.reconcile_key(scene)?;
+                let handle = handles_by_display.get(&key).copied().ok_or_else(|| {
+                    EngineError::Platform(format!(
+                        "missing scene handle for requested display {}",
+                        scene.display.display_id
+                    ))
+                })?;
+                Ok(SceneResult::new(scene.display.display_id, handle, 0))
+            })
+            .collect()
     }
 }
 
-/// Builder for [`SceneDesc`].
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SceneDescBuilder {
@@ -884,7 +840,7 @@ pub struct SceneDescBuilder {
     paused: bool,
     audio_response_enabled: bool,
     media_integration_enabled: bool,
-    audio_volume: AudioVolume,
+    audio_volume: f32,
     audio_muted: bool,
     property_override_json: Option<String>,
     shader_cache_path: Option<String>,
@@ -892,28 +848,24 @@ pub struct SceneDescBuilder {
 }
 
 impl SceneDescBuilder {
-    /// Sets the shared assets path.
     #[must_use]
     pub fn assets_path(mut self, assets_path: impl Into<String>) -> Self {
         self.assets_path = assets_path.into();
         self
     }
 
-    /// Sets the target frame rate.
     #[must_use]
     pub fn fps(mut self, fps: u32) -> Self {
         self.fps = fps;
         self
     }
 
-    /// Sets the initial scaling mode.
     #[must_use]
     pub fn scaling_mode(mut self, scaling_mode: ScalingMode) -> Self {
         self.scaling_mode = scaling_mode;
         self
     }
 
-    /// Sets the initial scaling factor.
     #[must_use]
     pub fn scaling_factor(mut self, scaling_factor: f64) -> Self {
         self.scaling_factor = scaling_factor;
@@ -927,14 +879,12 @@ impl SceneDescBuilder {
         self
     }
 
-    /// Sets the initial pause state.
     #[must_use]
     pub fn paused(mut self, paused: bool) -> Self {
         self.paused = paused;
         self
     }
 
-    /// Sets the initial audio-response state.
     #[must_use]
     pub fn audio_response_enabled(mut self, enabled: bool) -> Self {
         self.audio_response_enabled = enabled;
@@ -948,70 +898,43 @@ impl SceneDescBuilder {
         self
     }
 
-    /// Sets the scene-wide audio volume multiplier.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `audio_volume` is outside the valid [`AudioVolume`] range.
     #[must_use]
     pub fn audio_volume(mut self, audio_volume: f32) -> Self {
-        self.audio_volume = AudioVolume::try_from(audio_volume).unwrap();
+        self.audio_volume = audio_volume;
         self
     }
 
-    /// Sets the scene-wide audio mute flag.
     #[must_use]
     pub fn audio_muted(mut self, audio_muted: bool) -> Self {
         self.audio_muted = audio_muted;
         self
     }
 
-    /// Sets project property override JSON.
     #[must_use]
     pub fn property_override_json(mut self, json: impl Into<String>) -> Self {
         self.property_override_json = Some(json.into());
         self
     }
 
-    /// Sets the shader cache root.
     #[must_use]
     pub fn shader_cache_path(mut self, path: impl Into<String>) -> Self {
         self.shader_cache_path = Some(path.into());
         self
     }
 
-    /// Controls whether shader cache entries should be regenerated.
     #[must_use]
     pub fn force_shader_refresh(mut self, refresh: bool) -> Self {
         self.force_shader_refresh = refresh;
         self
     }
 
-    /// Validates and returns the scene descriptor.
-    ///
     /// # Errors
     ///
-    /// Returns an error if required path, FPS, or scaling fields are invalid.
+    /// Returns `InvalidInput` naming the first field the renderer could not take;
+    /// the display is not checked here.
     pub fn build(self) -> Result<SceneDesc, EngineError> {
-        if self.scene_path.is_empty() {
-            return Err(EngineError::InvalidInput(
-                "scene_path must not be empty".to_string(),
-            ));
-        }
-
-        if self.fps == 0 {
-            return Err(EngineError::InvalidInput(
-                "fps must be greater than zero".to_string(),
-            ));
-        }
-        if !valid_scaling_factor(self.scaling_factor) {
-            return Err(EngineError::InvalidInput(
-                "scaling factor must be finite and greater than zero".to_string(),
-            ));
-        }
-        self.framing.validate()?;
-
-        Ok(SceneDesc {
+        let audio_volume = AudioVolume::try_from(self.audio_volume);
+        let scene = SceneDesc {
             display: self.display,
             scene_path: self.scene_path,
             assets_path: self.assets_path,
@@ -1022,32 +945,32 @@ impl SceneDescBuilder {
             paused: self.paused,
             audio_response_enabled: self.audio_response_enabled,
             media_integration_enabled: self.media_integration_enabled,
-            audio_volume: self.audio_volume,
+            audio_volume: audio_volume.unwrap_or_else(|_| full_volume()),
             audio_muted: self.audio_muted,
             property_override_json: self.property_override_json,
             shader_cache_path: self.shader_cache_path,
             force_shader_refresh: self.force_shader_refresh,
-        })
+            rejected_audio_volume: false,
+        };
+        check_wallpaper_fields(
+            &scene.scene_path,
+            scene.fps,
+            scene.scaling_factor,
+            scene.framing,
+        )?;
+        audio_volume.map_err(|_| invalid(AUDIO_VOLUME_MESSAGE))?;
+        Ok(scene)
     }
 }
 
-fn valid_scaling_factor(factor: f64) -> bool {
-    factor.is_finite() && factor > 0.0
-}
-
-/// Result for one scene reconciliation request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SceneResult {
-    /// Display associated with the reconciled scene.
     pub display_id: u32,
-    /// Renderer handle for the scene.
     pub handle: SceneHandle,
-    /// Renderer status code. Zero means success.
     pub status: i32,
 }
 
 impl SceneResult {
-    /// Constructs a reconciliation result from renderer values.
     #[must_use]
     pub fn new(display_id: u32, handle: SceneHandle, status: i32) -> Self {
         Self {
@@ -1348,65 +1271,4 @@ mod tests {
 pub struct SceneRenderTargetIr {
     pub width: u32,
     pub height: u32,
-}
-
-fn read_optional_asset(
-    project_root: &Path,
-    assets_path: &Path,
-    asset: &str,
-) -> Result<Option<String>, crate::EngineError> {
-    let asset_path = Path::new(asset);
-    validate_relative_normal_path(asset_path, "scene asset path")?;
-
-    for root in [project_root, assets_path] {
-        if root.as_os_str().is_empty() {
-            continue;
-        }
-        let path = root.join(asset_path);
-        if !path.exists() {
-            continue;
-        }
-
-        let path = path_under_root(root, asset_path, "scene asset")?;
-        let content = fs::read_to_string(&path).map_err(|error| {
-            crate::EngineError::InvalidInput(format!(
-                "failed to read scene asset `{}`: {error}",
-                path.display()
-            ))
-        })?;
-        return Ok(Some(content));
-    }
-
-    Ok(None)
-}
-
-fn path_under_root(
-    root: &Path,
-    relative: &Path,
-    label: &str,
-) -> Result<PathBuf, crate::EngineError> {
-    validate_relative_normal_path(relative, label)?;
-
-    let root = if root.as_os_str().is_empty() {
-        std::env::current_dir().map_err(|error| {
-            crate::EngineError::InvalidInput(format!("failed to resolve {label} root: {error}"))
-        })?
-    } else {
-        root.to_path_buf()
-    };
-    let path = root.join(relative);
-    let canonical_root = fs::canonicalize(&root).map_err(|error| {
-        crate::EngineError::InvalidInput(format!("failed to resolve {label} root: {error}"))
-    })?;
-    let canonical_path = fs::canonicalize(&path).map_err(|error| {
-        crate::EngineError::InvalidInput(format!("failed to resolve {label}: {error}"))
-    })?;
-
-    if !canonical_path.starts_with(&canonical_root) {
-        return Err(crate::EngineError::InvalidInput(format!(
-            "{label} must stay under its root"
-        )));
-    }
-
-    Ok(canonical_path)
 }

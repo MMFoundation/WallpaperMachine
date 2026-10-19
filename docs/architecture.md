@@ -577,6 +577,29 @@ macOS renumbers displays and renames identical models ("Name (1)", "Name (2)") a
 and reconnects, so display sync (`AppConfig::sync_known_monitors`) keeps one block per display,
 renamed to its current selector, and settings entries and mirror targets follow.
 
+Display-change callbacks fan out through an immutable snapshot of live subscriber senders;
+only registration and removal take the subscriber-writer mutex. Each receiver clone carries
+the subscription lifetime, so closing its queue or dropping the last receiver removes it
+without waiting for another display event. Refresh admission and registration retirement
+share one atomic state: dropping a registration cancels queued and trailing work and wakes
+its consumer, without joining a target call admitted before retirement. Such an admitted
+call may finish after drop. Events during active work coalesce into one trailing refresh.
+
+Once a display model is accepted, a slot that needs opening reserves its stable handle
+before fallible initial or carried-state preparation. Refusal retains both handle indexes;
+without a live runtime the reservation is inactive, not unknown, and snapshots hide its
+handle. Reconciliation attempts every eligible slot and reports the earliest failing slot,
+not whichever preparation phase happened first. Retirement errors retain precedence even
+though the opening pass still runs.
+
+A replacement is prepared without publishing a registry row. Its fallible state and render
+scale restoration finish before it takes over the old runtime's registration, so a refused
+candidate cannot erase the old row and a delayed old close cannot withdraw its successor.
+Surface reconfiguration uses one statically dispatched begin, layer-update, finish, optional
+pause-restore and metadata-commit sequence, shared with device-free failure tests. Native
+release can already have destroyed a surface when a later stage fails: preserving the old
+logical descriptor, registration and closability is not a promise of drawable rollback.
+
 The bridge also keeps a load journal (`engine/load_journal.rs`, `load-journal.json` beside
 `config.toml`) of the scenes `reconcile_with` is about to open. A wallpaper that was being
 opened when the process died in two launches in a row is left out of every activation plan

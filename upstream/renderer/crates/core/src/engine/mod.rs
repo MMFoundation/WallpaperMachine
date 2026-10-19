@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec r1a-core-engine.md; written without access to the original source.
 mod actor;
 mod audio_requirement;
 mod config;
@@ -9,33 +10,23 @@ mod surface_recovery;
 
 pub use audio_requirement::AudioRequirementCallback;
 pub use surface_recovery::{RecoveryOutcome, RecoveryReason, RecoveryStep};
-use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
+
+use serde_json::Value;
 
 use actor::{EngineActor, EngineActorHandle};
-use arc_swap::ArcSwap;
+use state::EngineState;
 pub use config::{DisplayConfig, DisplaySelector, WallpaperAssignment, WallpaperEngineConfig};
-use objc2_app_kit::NSEvent;
 use objc2_foundation::NSPoint;
-use serde_json::Value;
 pub use snapshot::EngineSnapshotPublisher;
 
-#[cfg(test)]
-use crate::engine::runtime::{RuntimeRefreshMode, SceneRuntimeState};
-#[cfg(test)]
-use crate::engine::state::StoredSceneRuntimeState;
-#[cfg(test)]
-use crate::project::SceneDescSliceExt;
 use crate::{
     DisplayDesc, DisplayIdentity, EngineError,
-    render::RendererSurfaceCounters,
     display::{
         callback::{DisplayChangeRegistration, DisplayRefreshTarget},
         state::DisplayStateModel,
     },
-    engine::state::EngineState,
+    render::RendererSurfaceCounters,
     media::audio::{
         AudioCaptureError, AudioFrameConsumer, AudioResponseBlock, AudioResponseResampler,
         AudioVolume, InterleavedStereoF32, MonoPcmF32,
@@ -45,16 +36,10 @@ use crate::{
     window::{MouseButtonEdges, MouseButtonTracker, MouseButtons, NormalizedMousePosition},
 };
 
-/// Public snapshot of one display's engine-side state. Returned by
-/// [`WallpaperEngine::display_snapshot`] for UI consumers that mirror the
-/// engine's view of attached monitors.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplaySnapshotEntry {
-    /// Stable identity metadata for matching this display across sessions.
     pub identity: DisplayIdentity,
-    /// Physical display descriptor.
     pub desc: DisplayDesc,
-    /// Live scene handle for this display, if the engine has opened one.
     pub handle: Option<SceneHandle>,
     /// Capability committed by the currently live native renderer.
     pub accepts_pointer_input: bool,
@@ -62,9 +47,7 @@ pub struct DisplaySnapshotEntry {
     /// user's choice, power policy, or this display being covered. A paused
     /// scene does not consume pointer input. False without a live scene.
     pub paused: bool,
-    /// Whether this display currently has a wallpaper window.
     pub window_active: bool,
-    /// The wallpaper assigned to this display, if any.
     pub assignment: Option<WallpaperAssignment>,
 }
 
@@ -81,12 +64,6 @@ pub enum PropertyPreview {
     OtherWallpaper,
 }
 
-/// Rust entry point for controlling wallpaper scenes.
-///
-/// The type is cloneable so UI, audio, and smoke-test code can share the same
-/// engine handle. On macOS it owns the Rust-managed scene/window state
-/// directly; on unsupported platforms construction returns
-/// [`EngineError::UnsupportedPlatform`].
 #[derive(Clone)]
 pub struct WallpaperEngine {
     backend: OweBackend,
@@ -100,7 +77,6 @@ pub struct WallpaperEngine {
     mouse_event_monitor: Arc<Mutex<Option<crate::window::MouseEventMonitor>>>,
     #[allow(dead_code)]
     actor: EngineActorHandle,
-    /// Owns callback registration and its target for the engine lifetime.
     #[allow(dead_code)]
     lifecycle: Arc<EngineLifecycle>,
 }
@@ -144,141 +120,132 @@ pub struct PointerProbe {
 pub type UserShortcutObserverCallback =
     Arc<dyn Fn(crate::project::SceneHandle, String, String) + Send + Sync + 'static>;
 
+/// The first-frame callback the host installed last. Shared by the engine
+/// handle and by every renderer the engine thread opens, so installing a new
+/// callback also applies to scenes that are already running.
 #[derive(Clone)]
 struct FirstFrameCallbackCell {
-    callback: Arc<ArcSwap<FirstFrameCallback>>,
-}
-
-impl FirstFrameCallbackCell {
-    fn set(&self, callback: FirstFrameCallback) {
-        self.callback.store(Arc::new(callback));
-    }
-
-    fn callback(&self) -> FirstFrameCallback {
-        let cell = self.clone();
-        Arc::new(move |handle| {
-            let callback = cell.callback.load_full();
-            callback(handle);
-        })
-    }
+    installed: Arc<arc_swap::ArcSwap<FirstFrameCallback>>,
 }
 
 impl Default for FirstFrameCallbackCell {
     fn default() -> Self {
-        Self {
-            callback: Arc::new(ArcSwap::from_pointee(Arc::new(|_handle| {}))),
-        }
+        let nothing: FirstFrameCallback = Arc::new(|_handle| {});
+        Self { installed: Arc::new(arc_swap::ArcSwap::from_pointee(nothing)) }
     }
 }
 
-struct EngineLifecycle {
-    #[allow(dead_code)]
-    refresh_target: Arc<EngineRefreshTarget>,
-    #[allow(dead_code)]
-    display_callback: Option<DisplayChangeRegistration<EngineRefreshTarget>>,
+impl FirstFrameCallbackCell {
+    fn set(&self, callback: FirstFrameCallback) {
+        self.installed.store(Arc::new(callback));
+    }
+
+    /// The closure a renderer is given. It stays the same for the renderer's
+    /// life and looks up whatever is installed each time a frame is presented.
+    fn callback(&self) -> FirstFrameCallback {
+        let cell = self.clone();
+        Arc::new(move |handle| {
+            let installed = cell.installed.load_full();
+            (*installed)(handle);
+        })
+    }
 }
 
-struct EngineRefreshTarget {
+/// What a display reconfiguration event asks of the engine: a refresh, on the
+/// short-lived thread the registration starts for it.
+struct RefreshOnDisplayChange {
     actor: kameo::actor::ActorRef<EngineActor>,
 }
 
-impl DisplayRefreshTarget for EngineRefreshTarget {
+impl DisplayRefreshTarget for RefreshOnDisplayChange {
+    /// Blocks until the engine thread has handled the refresh, which is why the
+    /// registration keeps later events absorbed while it waits.
     fn schedule(&self) {
         match self.actor.ask(messages::RefreshDisplays).blocking_send() {
             Ok(()) => {}
             Err(kameo::error::SendError::HandlerError(error)) => {
                 log::warn!("[wallpaper-core display] display refresh failed: {error}");
             }
-            Err(error) => {
-                log::warn!(
-                    "[wallpaper-core display] skipped display refresh because actor mailbox \
-                     failed: {error}"
-                );
-            }
+            Err(error) => log::warn!(
+                "[wallpaper-core display] skipped display refresh because actor mailbox failed: {error}"
+            ),
         }
     }
 }
 
-impl EngineLifecycle {
-    #[allow(clippy::single_call_fn)]
-    fn new(actor: &EngineActorHandle) -> Result<Self, EngineError> {
-        let refresh_target = Arc::new(EngineRefreshTarget {
-            actor: actor.actor().clone(),
-        });
-        #[cfg(not(test))]
-        let display_callback = Some(DisplayChangeRegistration::register(&refresh_target)?);
-        #[cfg(test)]
-        let display_callback = match tokio::runtime::Handle::try_current() {
-            Ok(handle)
-                if matches!(
-                    handle.runtime_flavor(),
-                    tokio::runtime::RuntimeFlavor::CurrentThread
-                ) =>
-            {
-                None
-            }
-            _ => Some(DisplayChangeRegistration::register(&refresh_target)?),
-        };
+/// What lives as long as the engine handle: the object display events call
+/// and the registration that makes them call it. Both are held for their drop.
+#[allow(dead_code)]
+struct EngineLifecycle {
+    on_change: Arc<RefreshOnDisplayChange>,
+    subscription: Option<DisplayChangeRegistration<RefreshOnDisplayChange>>,
+}
 
-        Ok(Self {
-            refresh_target,
-            display_callback,
-        })
+impl EngineLifecycle {
+    fn new(actor: &EngineActorHandle) -> Result<Self, EngineError> {
+        let on_change = Arc::new(RefreshOnDisplayChange { actor: actor.actor().clone() });
+        // The refresh thread waits for the engine's reply, which a single
+        // thread running the engine as a task could never give.
+        let single_thread = tokio::runtime::Handle::try_current().is_ok_and(|handle| {
+            handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread
+        });
+        let subscription = if cfg!(test) && single_thread {
+            None
+        } else {
+            Some(DisplayChangeRegistration::register(&on_change)?)
+        };
+        Ok(Self { on_change, subscription })
+    }
+
+    /// A lifecycle that listens to nothing, for engines a test builds around
+    /// an actor it controls itself.
+    #[cfg(test)]
+    fn unsubscribed(actor: &EngineActorHandle) -> Self {
+        Self {
+            on_change: Arc::new(RefreshOnDisplayChange { actor: actor.actor().clone() }),
+            subscription: None,
+        }
     }
 }
 
 impl WallpaperEngine {
-    /// Creates a wallpaper engine instance for the current platform.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the native renderer backend, display model, actor,
-    /// or platform display callback cannot be initialized.
     pub fn new() -> Result<Self, EngineError> {
         Self::with_config(WallpaperEngineConfig::default())
     }
 
-    /// Creates a wallpaper engine instance using an explicit startup
-    /// configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the native renderer backend, display model, actor,
-    /// or platform display callback cannot be initialized.
     pub fn with_config(config: WallpaperEngineConfig) -> Result<Self, EngineError> {
         let backend = OweBackend::initialize()?;
-        let first_frame_callback = FirstFrameCallbackCell::default();
-        let model = DisplayStateModel::from_config(config)?;
-        let actor_state = EngineState::with_display_model(model);
-        let initial_snapshot = actor_state.snapshot();
+        // An invalid configuration fails here, before anything starts.
+        let state = EngineState::with_display_model(DisplayStateModel::from_config(config)?);
+        let snapshot = state.snapshot();
         let mouse_buttons = Arc::new(Mutex::new(MouseButtonTracker::with_press_test(Box::new(
             crate::window::press_lands_on_desktop,
         ))));
-        let snapshots = Arc::new(EngineSnapshotPublisher::new(initial_snapshot, mouse_buttons.clone()));
+        let snapshots = Arc::new(EngineSnapshotPublisher::new(snapshot, Arc::clone(&mouse_buttons)));
+        let first_frame_callback = FirstFrameCallbackCell::default();
         let actor = EngineActorHandle::spawn(
             backend,
             first_frame_callback.callback(),
-            actor_state,
+            state,
             Arc::clone(&snapshots),
         )?;
         let mouse_event_monitor = Arc::new(Mutex::new(None));
         Self::install_pointer_monitor_hook(&mouse_event_monitor, &mouse_buttons, &snapshots);
         let lifecycle = Arc::new(EngineLifecycle::new(&actor)?);
-        let engine = Self {
+        Ok(Self {
             backend,
             first_frame_callback,
             snapshots,
-            audio_response_resampler: Arc::new(
-                std::sync::Mutex::new(AudioResponseResampler::new()),
-            ),
+            audio_response_resampler: Arc::new(Mutex::new(AudioResponseResampler::new())),
             mouse_buttons,
             mouse_event_monitor,
             actor,
             lifecycle,
-        };
-        Ok(engine)
+        })
     }
 
+    /// Installs the callback told when a scene presents its first frame. It
+    /// replaces the earlier one, also for scenes that are already open.
     pub fn set_first_frame_callback(&self, callback: FirstFrameCallback) {
         self.first_frame_callback.set(callback);
     }
@@ -406,13 +373,6 @@ impl WallpaperEngine {
         })
     }
 
-    /// Alias for [`WallpaperEngine::new`] retained for call sites that model an
-    /// explicit startup phase.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if [`WallpaperEngine::new`] cannot initialize the
-    /// engine.
     pub fn initialize() -> Result<Self, EngineError> {
         Self::new()
     }
@@ -425,143 +385,95 @@ impl WallpaperEngine {
         M: Send + 'static,
         T: Send + 'static,
     {
-        self.actor
-            .actor()
-            .ask(message)
-            .await
-            .map_err(EngineError::from)
+        // A handler's own error comes back unchanged; a dead channel becomes
+        // the mailbox error of `From`.
+        self.actor.actor().ask(message).send().await.map_err(EngineError::from)
     }
 
-    /// Refreshes the platform display list.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the platform display query or actor request fails.
     pub async fn refresh_displays(&self) -> Result<(), EngineError> {
         self.ask_actor(messages::RefreshDisplays).await
     }
 
+    /// One entry per display slot that has a live display, as of the last
+    /// publication. Read without waiting for the engine thread.
     #[must_use]
     pub fn display_snapshot(&self) -> Vec<DisplaySnapshotEntry> {
         self.snapshots.load().displays.clone()
     }
 
     #[cfg(test)]
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails.
     pub async fn actor_ping_for_test(&self) -> Result<(), EngineError> {
-        self.actor
-            .actor()
-            .ask(messages::Ping)
-            .await
-            .map_err(EngineError::from)?;
-        Ok(())
+        self.ask_actor(messages::Ping).await
     }
 
     #[cfg(test)]
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails.
     pub async fn actor_display_record_count_for_test(&self) -> Result<usize, EngineError> {
-        self.actor
-            .actor()
-            .ask(messages::DisplayRecordCountForTest)
-            .await
-            .map_err(EngineError::from)
+        self.ask_actor(messages::DisplayRecordCountForTest).await
     }
 
     #[cfg(test)]
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails.
     pub async fn actor_sequence_for_test(&self, expected: u64) -> Result<u64, EngineError> {
         self.ask_actor(messages::SequenceForTest { expected }).await
     }
 
+    /// Starts an engine shell with the default state, stops it and sends it one
+    /// message, returning the error that gives.
     #[cfg(test)]
-    /// # Panics
-    ///
-    /// Panics if the test-only actor shell cannot be started.
     pub async fn actor_closed_error_for_test() -> EngineError {
-        let snapshots = Arc::new(EngineSnapshotPublisher::new(
-            EngineState::default().snapshot(),
-            Arc::new(Mutex::new(MouseButtonTracker::new())),
-        ));
-        let actor_handle = EngineActorHandle::spawn(
+        let state = EngineState::default();
+        let mouse_buttons = Arc::new(Mutex::new(MouseButtonTracker::new()));
+        let snapshots =
+            Arc::new(EngineSnapshotPublisher::new(state.snapshot(), Arc::clone(&mouse_buttons)));
+        let first_frame_callback = FirstFrameCallbackCell::default();
+        let actor = EngineActorHandle::spawn(
             OweBackend,
-            Arc::new(|_handle| {}),
-            EngineState::default(),
-            snapshots,
+            first_frame_callback.callback(),
+            state,
+            Arc::clone(&snapshots),
         )
         .expect("test actor shell should start");
-        let actor = actor_handle.actor().clone();
-        let _ = actor.stop_gracefully().await;
-        actor.wait_for_shutdown().await;
-
-        let error = actor
-            .ask(messages::Ping)
+        let stopped = actor.actor().stop_gracefully().await;
+        assert!(stopped.is_ok(), "the test actor shell should accept a stop");
+        actor.actor().wait_for_shutdown().await;
+        let lifecycle = Arc::new(EngineLifecycle::unsubscribed(&actor));
+        let engine = WallpaperEngine {
+            backend: OweBackend,
+            first_frame_callback,
+            snapshots,
+            audio_response_resampler: Arc::new(Mutex::new(AudioResponseResampler::new())),
+            mouse_buttons,
+            mouse_event_monitor: Arc::new(Mutex::new(None)),
+            actor,
+            lifecycle,
+        };
+        engine
+            .actor_ping_for_test()
             .await
-            .expect_err("stopped actor ask should fail");
-        EngineError::from(error)
+            .expect_err("a stopped engine must refuse every message")
     }
 
-    /// Sets or clears the wallpaper assignment for one display selector.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the selector is invalid, actor communication fails,
-    /// or the renderer rejects the requested assignment.
     pub async fn set_wallpaper_for_display(
         &self,
         selector: DisplaySelector,
         wallpaper: WallpaperAssignment,
     ) -> Result<Option<SceneHandle>, EngineError> {
-        self.ask_actor(messages::SetWallpaperForDisplay {
-            selector,
-            wallpaper,
-        })
-        .await
+        self.ask_actor(messages::SetWallpaperForDisplay { selector, wallpaper }).await
     }
 
-    /// Creates a window for one display selector.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the selector is invalid, actor communication fails,
-    /// or the platform window cannot be created.
     pub async fn create_window_for_display(
         &self,
         selector: DisplaySelector,
     ) -> Result<Option<SceneHandle>, EngineError> {
-        self.ask_actor(messages::CreateWindowForDisplay { selector })
-            .await
+        self.ask_actor(messages::CreateWindowForDisplay { selector }).await
     }
 
-    /// Destroys the window for one display selector.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the selector is invalid, actor communication fails,
-    /// or the platform window cannot be closed.
     pub async fn destroy_window_for_display(
         &self,
         selector: DisplaySelector,
     ) -> Result<(), EngineError> {
-        self.ask_actor(messages::DestroyWindowForDisplay { selector })
-            .await
+        self.ask_actor(messages::DestroyWindowForDisplay { selector }).await
     }
 
-    /// Makes the active renderer scene set match `scenes`.
-    ///
-    /// Each input item describes the desired wallpaper for one display. The
-    /// returned handles are stable identifiers for later per-scene operations
-    /// such as scaling or audio-response toggles.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if scene descriptors are invalid, actor communication
-    /// fails, or the renderer cannot open/reconfigure the requested scenes.
     pub async fn reconcile_scenes(
         &self,
         scenes: Vec<SceneDesc>,
@@ -569,37 +481,18 @@ impl WallpaperEngine {
         self.ask_actor(messages::ReconcileScenes { scenes }).await
     }
 
-    /// Closes all scenes currently owned by this engine instance.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails or the renderer cannot
-    /// close one of the open scenes.
     pub async fn close_all_scenes(&self) -> Result<(), EngineError> {
         self.ask_actor(messages::CloseAllScenes).await
     }
 
-    /// Sets how a scene is fit into its display/output rectangle.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails or the renderer rejects
-    /// the update.
     pub async fn set_scaling_mode(
         &self,
         handle: SceneHandle,
         mode: ScalingMode,
     ) -> Result<(), EngineError> {
-        self.ask_actor(messages::SetScalingMode { handle, mode })
-            .await
+        self.ask_actor(messages::SetScalingMode { handle, mode }).await
     }
 
-    /// Sets an additional positive scale factor for a scene.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `factor` is not finite/positive, actor communication
-    /// fails, or the renderer rejects the update.
     pub async fn set_scaling_factor(
         &self,
         handle: SceneHandle,
@@ -610,9 +503,7 @@ impl WallpaperEngine {
                 "scaling factor must be finite and greater than zero".to_string(),
             ));
         }
-
-        self.ask_actor(messages::SetScalingFactor { handle, factor })
-            .await
+        self.ask_actor(messages::SetScalingFactor { handle, factor }).await
     }
 
     /// Sets where a scene's presented wallpaper sits inside the room its
@@ -665,19 +556,10 @@ impl WallpaperEngine {
             .await
     }
 
-    /// Live-updates the target FPS for one scene.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `fps` is zero, actor communication fails, or the
-    /// renderer rejects the update.
     pub async fn set_fps(&self, handle: SceneHandle, fps: u32) -> Result<(), EngineError> {
         if fps == 0 {
-            return Err(EngineError::InvalidInput(
-                "fps must be greater than zero".to_string(),
-            ));
+            return Err(EngineError::InvalidInput("fps must be greater than zero".to_string()));
         }
-
         self.ask_actor(messages::SetFps { handle, fps }).await
     }
 
@@ -707,12 +589,6 @@ impl WallpaperEngine {
         .await
     }
 
-    /// Live-updates the paused state for one open scene.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails or the renderer rejects
-    /// the update.
     pub async fn set_paused(&self, handle: SceneHandle, paused: bool) -> Result<(), EngineError> {
         self.ask_actor(messages::SetPaused { handle, paused }).await
     }
@@ -721,11 +597,6 @@ impl WallpaperEngine {
     /// scene is paused when `paused` is set or its display is in
     /// `suspended_displays`, and resumed otherwise. A covered display therefore
     /// never runs during a global resume.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails or the renderer rejects
-    /// the update.
     pub async fn set_all_paused(
         &self,
         paused: bool,
@@ -857,11 +728,6 @@ impl WallpaperEngine {
 
     /// Reads renderer work counters for every open scene, plus the process-wide
     /// counters that belong to no single surface.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails or the renderer rejects
-    /// the call.
     pub async fn renderer_counters(
         &self,
     ) -> Result<(Vec<RendererSurfaceCounters>, Vec<u64>), EngineError> {
@@ -869,12 +735,6 @@ impl WallpaperEngine {
         Ok((surfaces, self.backend.shared_counters()?))
     }
 
-    /// Sends normalized mouse coordinates to one open scene.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if coordinates are non-finite, actor communication
-    /// fails, or the renderer rejects the update.
     pub async fn set_mouse_position(
         &self,
         handle: SceneHandle,
@@ -882,21 +742,11 @@ impl WallpaperEngine {
         y: f64,
     ) -> Result<(), EngineError> {
         if !x.is_finite() || !y.is_finite() {
-            return Err(EngineError::InvalidInput(
-                "mouse coordinates must be finite".to_string(),
-            ));
+            return Err(EngineError::InvalidInput("mouse coordinates must be finite".to_string()));
         }
-
-        self.ask_actor(messages::SetMousePosition { handle, x, y })
-            .await
+        self.ask_actor(messages::SetMousePosition { handle, x, y }).await
     }
 
-    /// Sends a mouse button state transition to one open scene.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the button is out of range, actor communication
-    /// fails, or the renderer rejects the update.
     pub async fn set_mouse_button(
         &self,
         handle: SceneHandle,
@@ -908,67 +758,46 @@ impl WallpaperEngine {
                 "mouse button must be in range 0..31".to_string(),
             ));
         }
-
-        self.ask_actor(messages::SetMouseButton {
-            handle,
-            button,
-            pressed,
-        })
-        .await
+        self.ask_actor(messages::SetMouseButton { handle, button, pressed }).await
     }
 
-    /// Sends mouse enter/leave state to one open scene.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails or the renderer rejects
-    /// the update.
     pub async fn set_mouse_entered(
         &self,
         handle: SceneHandle,
         entered: bool,
     ) -> Result<(), EngineError> {
-        self.ask_actor(messages::SetMouseEntered { handle, entered })
-            .await
+        self.ask_actor(messages::SetMouseEntered { handle, entered }).await
     }
 
-    /// Polls the global macOS mouse location and forwards normalized
-    /// coordinates to every active scene under that point.
+    /// Samples the pointer once and delivers it to every scene that reads it.
     ///
-    /// Wallpaper windows ignore mouse events so they do not steal desktop
-    /// clicks. Polling global coordinates keeps mouse-tracking wallpapers
-    /// updated without changing the window hit-testing behavior.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if forwarding to the renderer fails.
+    /// With no scene reading the pointer this is success without a message, also
+    /// when the engine thread is gone. Otherwise the cursor and the buttons are
+    /// read on the main thread, under the tracker's lock, and one message
+    /// carries them to the engine thread.
     pub async fn poll_mouse_position(&self) -> Result<(), EngineError> {
         if !self.snapshots.load().has_pointer_consumers() {
             return Ok(());
         }
-        let state = crate::window::run_on_main_thread(|| {
-            let mut tracker = self.mouse_buttons.lock().unwrap_or_else(|error| error.into_inner());
-            if !self.snapshots.load().has_pointer_consumers() {
+        let tracker = Arc::clone(&self.mouse_buttons);
+        let snapshots = Arc::clone(&self.snapshots);
+        let sample = crate::window::MainThread::dispatch(move || {
+            let mut tracker = tracker.lock().unwrap_or_else(|error| error.into_inner());
+            // The last consumer may have left since the check above.
+            if !snapshots.load().has_pointer_consumers() {
                 return None;
             }
-            let point = NSEvent::mouseLocation();
-            tracker.sync_down_mask(NSEvent::pressedMouseButtons() as u64);
-            let buttons = tracker.consume_edges();
-            Some(MousePollState { point, buttons })
+            let point = objc2_app_kit::NSEvent::mouseLocation();
+            let pressed = objc2_app_kit::NSEvent::pressedMouseButtons() as u64;
+            tracker.sync_down_mask(pressed);
+            Some(MousePollState { point, buttons: tracker.consume_edges() })
         });
-        if let Some(state) = state { self.poll_mouse_state(state).await?; }
-        Ok(())
+        match sample {
+            Some(state) => self.poll_mouse_state(state).await,
+            None => Ok(()),
+        }
     }
 
-    /// Overrides the scene render resolution.
-    ///
-    /// The dimensions must be non-zero. Use the scene/display default instead
-    /// of calling this method when no explicit override is wanted.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if either dimension is zero, actor communication fails,
-    /// or the renderer cannot apply the new resolution.
     pub async fn set_render_resolution(
         &self,
         handle: SceneHandle,
@@ -980,28 +809,15 @@ impl WallpaperEngine {
                 "render resolution dimensions must be non-zero".to_string(),
             ));
         }
-
-        self.ask_actor(messages::SetRenderResolution {
-            handle,
-            width,
-            height,
-        })
-        .await
+        self.ask_actor(messages::SetRenderResolution { handle, width, height }).await
     }
 
-    /// Enables or disables audio-responsive scene behavior.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails or the renderer rejects
-    /// the update.
     pub async fn set_audio_response_enabled(
         &self,
         handle: SceneHandle,
         enabled: bool,
     ) -> Result<(), EngineError> {
-        self.ask_actor(messages::SetAudioResponseEnabled { handle, enabled })
-            .await
+        self.ask_actor(messages::SetAudioResponseEnabled { handle, enabled }).await
     }
 
     /// Delivers the host's current player state to one scene.
@@ -1011,11 +827,6 @@ impl WallpaperEngine {
     }
 
     /// Enables or disables now-playing events for one scene.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails or the renderer rejects
-    /// the update.
     pub async fn set_media_integration_enabled(
         &self,
         handle: SceneHandle,
@@ -1026,11 +837,6 @@ impl WallpaperEngine {
     }
 
     /// Delivers one SceneScript media event as already-serialized JSON.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails or the renderer rejects
-    /// the event.
     pub async fn submit_media_event_json(
         &self,
         handle: SceneHandle,
@@ -1044,11 +850,6 @@ impl WallpaperEngine {
     }
 
     /// Uploads `$mediaThumbnail` RGBA for one scene.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails or the renderer rejects
-    /// the artwork.
     pub async fn apply_system_media_artwork(
         &self,
         handle: SceneHandle,
@@ -1065,51 +866,29 @@ impl WallpaperEngine {
         .await
     }
 
-    /// Sets the scene-wide audio volume multiplier.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails or the renderer rejects
-    /// the update.
     pub async fn set_audio_volume(
         &self,
         handle: SceneHandle,
         volume: AudioVolume,
     ) -> Result<(), EngineError> {
-        self.ask_actor(messages::SetAudioVolume { handle, volume })
-            .await
+        self.ask_actor(messages::SetAudioVolume { handle, volume }).await
     }
 
-    /// Sets the scene-wide audio mute flag.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails or the renderer rejects
-    /// the update.
     pub async fn set_audio_muted(
         &self,
         handle: SceneHandle,
         muted: bool,
     ) -> Result<(), EngineError> {
-        self.ask_actor(messages::SetAudioMuted { handle, muted })
-            .await
+        self.ask_actor(messages::SetAudioMuted { handle, muted }).await
     }
 
-    /// Applies a project property override JSON document to an open scene.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the JSON cannot be parsed/flattened, actor
-    /// communication fails, or the renderer rejects the override.
     pub async fn set_property_override<T: Into<String> + Send>(
         &self,
         handle: SceneHandle,
         json: T,
     ) -> Result<(), EngineError> {
         let flat_json = flat_property_document(&json.into())?;
-
-        self.ask_actor(messages::SetPropertyOverride { handle, flat_json })
-            .await
+        self.ask_actor(messages::SetPropertyOverride { handle, flat_json }).await
     }
 
     /// Shows a project property document on an open scene without keeping it.
@@ -1140,12 +919,6 @@ impl WallpaperEngine {
     /// any reason, is, so a caller can ask after every edit without tracking
     /// which scenes were rebuilt.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if the JSON cannot be parsed/flattened, actor
-    /// communication fails, or the renderer rejects the document. The document
-    /// is checked before the actor is asked, so a malformed one never reaches
-    /// the renderer.
     pub async fn preview_property_override<S, T>(
         &self,
         handle: SceneHandle,
@@ -1166,15 +939,8 @@ impl WallpaperEngine {
         .await
     }
 
-    /// Clears project property overrides for an open scene.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if actor communication fails or the renderer rejects
-    /// the reset.
     pub async fn reset_property_override(&self, handle: SceneHandle) -> Result<(), EngineError> {
-        self.ask_actor(messages::ResetPropertyOverride { handle })
-            .await
+        self.ask_actor(messages::ResetPropertyOverride { handle }).await
     }
 
     async fn poll_mouse_state(&self, state: MousePollState) -> Result<(), EngineError> {
@@ -1185,10 +951,12 @@ impl WallpaperEngine {
 /// Parses a property document and flattens it into the one-level JSON object
 /// the renderer reads, the same way for every call that hands the renderer one.
 fn flat_property_document(json: &str) -> Result<String, EngineError> {
-    let flat = serde_json::from_str::<Value>(json)
-        .map_err(|e| EngineError::InvalidInput(e.to_string()))?
-        .flatten()?;
-    serde_json::to_string(&flat).map_err(|e| EngineError::InvalidInput(e.to_string()))
+    let document: Value = serde_json::from_str(json)
+        .map_err(|error| EngineError::InvalidInput(error.to_string()))?;
+    // The flat form is a sorted map, so the text is compact with keys in
+    // ascending order whatever the caller wrote.
+    let flat = document.flatten()?;
+    serde_json::to_string(&flat).map_err(|error| EngineError::InvalidInput(error.to_string()))
 }
 
 struct DisplaySnapshot<'a> {
@@ -1201,55 +969,110 @@ impl<'a> DisplaySnapshot<'a> {
         state: MousePollState,
         entry: &DisplaySnapshotEntry,
     ) -> MouseDisplayUpdate {
-        match &entry.assignment {
-            Some(WallpaperAssignment::Mirror(selector)) => {
-                let mirror_update = mouse_update_for_display(state, &entry.desc);
-                if mirror_update.entered {
-                    return mirror_update;
-                }
-                self.source_display(selector)
-                    .map_or(mirror_update, |source| {
-                        mouse_update_for_display(state, &source.desc)
-                    })
+        DisplayPlane::of(self.display_reacting_to(state, entry)).read(state)
+    }
+
+    /// The display whose geometry decides what a scene sees of the cursor. A
+    /// mirror follows the cursor on its own display, else on the display of
+    /// the slot it ultimately mirrors; with no resolvable source its own
+    /// display applies.
+    fn display_reacting_to(&self, state: MousePollState, entry: &'a DisplaySnapshotEntry) -> &'a DisplayDesc {
+        if !matches!(entry.assignment, Some(WallpaperAssignment::Mirror(_)))
+            || DisplayPlane::of(&entry.desc).contains(state.point)
+        {
+            return &entry.desc;
+        }
+        self.mirror_source(entry).map_or(&entry.desc, |source| &source.desc)
+    }
+
+    /// The entry a chain of mirrors ends at. A cycle or a selector naming no
+    /// entry leaves no source.
+    fn mirror_source(&self, entry: &'a DisplaySnapshotEntry) -> Option<&'a DisplaySnapshotEntry> {
+        let mut visited = vec![std::ptr::from_ref(entry)];
+        let mut current = entry;
+        while let Some(WallpaperAssignment::Mirror(selector)) = &current.assignment {
+            let next = self.entry_for_selector(selector)?;
+            let address = std::ptr::from_ref(next);
+            if visited.contains(&address) {
+                return None;
             }
-            _ => mouse_update_for_display(state, &entry.desc),
+            visited.push(address);
+            current = next;
         }
+        Some(current)
     }
 
-    fn source_display(&self, selector: &DisplaySelector) -> Option<&'a DisplaySnapshotEntry> {
-        let mut seen = HashSet::new();
-        self.source_display_inner(selector, &mut seen)
-    }
-
-    fn source_display_inner(
-        &self,
-        selector: &DisplaySelector,
-        seen: &mut HashSet<DisplaySelector>,
-    ) -> Option<&'a DisplaySnapshotEntry> {
-        if !seen.insert(selector.clone()) {
-            return None;
-        }
-
-        let entry = self.selected_display(selector)?;
-        match &entry.assignment {
-            Some(WallpaperAssignment::Mirror(source_selector)) => {
-                self.source_display_inner(source_selector, seen)
-            }
-            _ => Some(entry),
-        }
-    }
-
-    fn selected_display(&self, selector: &DisplaySelector) -> Option<&'a DisplaySnapshotEntry> {
+    /// The entry a selector names. The primary slot is the first entry: the
+    /// snapshot lists slots in order and the primary comes first.
+    fn entry_for_selector(&self, selector: &DisplaySelector) -> Option<&'a DisplaySnapshotEntry> {
+        let entries = self.entries;
         match selector {
-            DisplaySelector::Primary => self.entries.first(),
-            DisplaySelector::Identity(identity) => self
-                .entries
+            DisplaySelector::Primary => entries.first(),
+            DisplaySelector::Identity(identity) => entries
                 .iter()
-                .find(|entry| entry.identity.match_score(identity).is_some()),
-            DisplaySelector::LiveDisplayId(display_id) => self
-                .entries
-                .iter()
-                .find(|entry| entry.desc.display_id == *display_id),
+                .find(|candidate| identity.match_score(&candidate.identity).is_some()),
+            DisplaySelector::LiveDisplayId(display_id) => {
+                entries.iter().find(|candidate| candidate.desc.display_id == *display_id)
+            }
+        }
+    }
+}
+
+/// A display as a rectangle of AppKit global points: its origin in the lower
+/// left and its pixel size over its scale (a scale of zero or less is read as
+/// the smallest positive number).
+struct DisplayPlane {
+    left: f64,
+    bottom: f64,
+    width: f64,
+    height: f64,
+}
+
+impl DisplayPlane {
+    fn of(display: &DisplayDesc) -> Self {
+        let scale =
+            if display.scale_factor > 0.0 { display.scale_factor } else { f64::MIN_POSITIVE };
+        Self {
+            left: f64::from(display.x),
+            bottom: f64::from(display.y),
+            width: f64::from(display.width) / scale,
+            height: f64::from(display.height) / scale,
+        }
+    }
+
+    /// The point measured from the plane's origin, or none outside the plane
+    /// (the far edges are outside).
+    fn offset_of(&self, point: NSPoint) -> Option<(f64, f64)> {
+        let (dx, dy) = (point.x - self.left, point.y - self.bottom);
+        ((0.0..self.width).contains(&dx) && (0.0..self.height).contains(&dy)).then_some((dx, dy))
+    }
+
+    fn contains(&self, point: NSPoint) -> bool {
+        self.offset_of(point).is_some()
+    }
+
+    /// Where the point lies as a scene reads it: x from the left edge, y from
+    /// the top (AppKit's grows upward). None outside the plane or for
+    /// geometry that cannot be normalised.
+    fn scene_position(&self, point: NSPoint) -> Option<NormalizedMousePosition> {
+        let (dx, dy) = self.offset_of(point)?;
+        NormalizedMousePosition::from_window_point(dx, dy, self.width, self.height)
+    }
+
+    /// What one sample means for a scene on this plane: inside, the position
+    /// and the sample's edges; outside, not entered and every button released.
+    fn read(&self, sample: MousePollState) -> MouseDisplayUpdate {
+        match self.offset_of(sample.point) {
+            Some(_) => MouseDisplayUpdate {
+                entered: true,
+                position: self.scene_position(sample.point),
+                buttons: sample.buttons,
+            },
+            None => MouseDisplayUpdate {
+                entered: false,
+                position: None,
+                buttons: MouseButtonEdges::from_level_state(MouseButtons::default()),
+            },
         }
     }
 }
@@ -1267,57 +1090,26 @@ struct MouseDisplayUpdate {
     buttons: MouseButtonEdges,
 }
 
-#[allow(clippy::single_call_fn)]
-fn mouse_update_for_display(state: MousePollState, display: &DisplayDesc) -> MouseDisplayUpdate {
-    let position = normalized_mouse_for_display(state.point, display);
-    MouseDisplayUpdate {
-        entered: position.is_some(),
-        position,
-        buttons: position.map_or_else(
-            || MouseButtonEdges::from_level_state(MouseButtons::default()),
-            |_| state.buttons,
-        ),
-    }
-}
-
-#[allow(clippy::cast_possible_truncation)]
-#[allow(clippy::single_call_fn)]
-fn normalized_mouse_for_display(
-    point: NSPoint,
-    display: &DisplayDesc,
-) -> Option<NormalizedMousePosition> {
-    let scale_factor = display.scale_factor.max(f64::MIN_POSITIVE);
-    let display_x = f64::from(display.x);
-    let display_y = f64::from(display.y);
-    let width = f64::from(display.width) / scale_factor;
-    let height = f64::from(display.height) / scale_factor;
-
-    if point.x < display_x
-        || point.y < display_y
-        || point.x >= display_x + width
-        || point.y >= display_y + height
-    {
-        return None;
-    }
-
-    NormalizedMousePosition::from_window_point(
-        point.x - display_x,
-        point.y - display_y,
-        width,
-        height,
-    )
-}
-
 impl<M> From<kameo::error::SendError<M, EngineError>> for EngineError {
     fn from(error: kameo::error::SendError<M, EngineError>) -> Self {
         match error {
             kameo::error::SendError::HandlerError(error) => error,
-            error => Self::Platform(format!("engine actor mailbox failed: {error}")),
+            other => Self::Platform(format!("engine actor mailbox failed: {other}")),
         }
     }
 }
 
 impl WallpaperEngine {
+    /// The resampler if nobody else is using it; a lock a panic poisoned still
+    /// holds a usable resampler.
+    fn try_resampler(&self) -> Option<std::sync::MutexGuard<'_, AudioResponseResampler>> {
+        match self.audio_response_resampler.try_lock() {
+            Ok(guard) => Some(guard),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        }
+    }
+
     fn submit_audio_response_block(
         &self,
         block: &AudioResponseBlock<'_>,
@@ -1330,51 +1122,91 @@ impl WallpaperEngine {
     }
 }
 
+impl WallpaperEngine {
+    /// Runs one submission through the resampler. `feed` pushes the caller's
+    /// frames into it and hands every block it yields to the function it is
+    /// given; blocks reach the renderer in order and the first renderer error
+    /// ends the delivery of the rest and is the result.
+    fn deliver_through_resampler(
+        &self,
+        feed: impl FnOnce(&mut AudioResponseResampler, &mut dyn FnMut(AudioResponseBlock<'_>)),
+    ) -> Result<(), AudioCaptureError> {
+        // A real-time thread calls this: a resampler somebody else is inside
+        // means this submission is dropped, never waited for.
+        let Some(mut resampler) = self.try_resampler() else {
+            return Ok(());
+        };
+        let mut first_error = None;
+        feed(&mut resampler, &mut |block| {
+            first_error = first_error.take().or_else(|| self.submit_audio_response_block(&block).err());
+        });
+        first_error.map_or(Ok(()), Err)
+    }
+}
+
 impl AudioFrameConsumer for WallpaperEngine {
     fn submit_audio_frames(
         &self,
         frames: InterleavedStereoF32<'_>,
     ) -> Result<(), AudioCaptureError> {
-        let Ok(mut resampler) = self.audio_response_resampler.try_lock() else {
-            return Ok(());
-        };
-
-        let mut result = Ok(());
-        resampler.push_stereo(&frames, |block| {
-            if result.is_ok() {
-                result = self.submit_audio_response_block(&block);
-            }
-        });
-        result
+        self.deliver_through_resampler(|resampler, deliver| {
+            resampler.push_stereo(&frames, deliver);
+        })
     }
 
     fn submit_mono_audio_frames(&self, frames: MonoPcmF32<'_>) -> Result<(), AudioCaptureError> {
-        let Ok(mut resampler) = self.audio_response_resampler.try_lock() else {
-            return Ok(());
-        };
-
-        let mut result = Ok(());
-        resampler.push_mono(&frames, |block| {
-            if result.is_ok() {
-                result = self.submit_audio_response_block(&block);
-            }
-        });
-        result
+        self.deliver_through_resampler(|resampler, deliver| {
+            resampler.push_mono(&frames, deliver);
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        display::state::{DisplayAction, DisplayKey, DisplayRecord},
-        engine::state::DisplayRuntimeRecord,
-        window::MouseButtonState,
-    };
+    use crate::display::state::{DisplayKey, DisplayRecord};
+    use crate::engine::runtime::{RuntimeRefreshMode, SceneRuntime, SceneRuntimeState};
+    use crate::project::{SceneDescSliceExt, SceneTemplate};
+
+    fn fixture_desc() -> SceneDesc {
+        SceneDesc::builder(DisplayDesc::new(87, -613, 137, 2496, 1408, 2.0), "/virtual/orchid/scene.json")
+            .fps(53).build().unwrap()
+    }
+
+    fn fixture_record(desc: Option<&SceneDesc>, active: bool) -> DisplayRecord {
+        DisplayRecord {
+            key: DisplayKey::Primary,
+            live_display: desc.map(|d| d.display.clone()),
+            assignment: desc.map(|d| WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(d))),
+            window_active: active,
+            runtime_open: false,
+            primary_inheritance_consumed: true,
+        }
+    }
+
+    fn run_async<T>(body: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(body)
+    }
+
+    fn make_actor(state: EngineState) -> EngineActor {
+        use kameo::actor::Spawn;
+        let prepared = EngineActor::prepare();
+        let tracker = Arc::new(Mutex::new(MouseButtonTracker::with_press_test(Box::new(|| true))));
+        let snapshots = Arc::new(EngineSnapshotPublisher::new(state.snapshot(), tracker));
+        EngineActor::new(OweBackend, Arc::new(|_| {}), state, snapshots, prepared.actor_ref().downgrade())
+    }
+
+    fn snapshot_entry(display: DisplayDesc, assignment: Option<WallpaperAssignment>) -> DisplaySnapshotEntry {
+        DisplaySnapshotEntry { identity: display.identity.clone(), desc: display, handle: None, accepts_pointer_input: false, paused: false, window_active: true, assignment }
+    }
+
+    fn pointer_sample(x: f64, y: f64, down: u64, pressed: u64, released: u64) -> MousePollState {
+        MousePollState { point: NSPoint::new(x, y), buttons: MouseButtonEdges::from_masks(down, pressed, released) }
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn polling_without_consumers_never_asks_even_a_closed_actor() {
-        let engine = engine_with_display_records(Vec::new());
+        let engine = cleanroom_et1(Vec::new());
         engine.mouse_buttons.lock().unwrap().set_button(0, true);
         engine.actor.actor().stop_gracefully().await.unwrap();
         engine.actor.actor().wait_for_shutdown().await;
@@ -1394,1375 +1226,676 @@ mod tests {
         assert_eq!(edges.transitions().map(|edge| (edge.button, edge.pressed)).collect::<Vec<_>>(), vec![(0, true)]);
     }
 
-    fn engine_with_display_records(records: Vec<DisplayRecord>) -> WallpaperEngine {
+    fn cleanroom_et1(records: Vec<DisplayRecord>) -> WallpaperEngine {
+        // CLEANROOM ET1: no display registration, monitors or native windows.
+        let backend = OweBackend;
         let state = EngineState::with_display_model(DisplayStateModel { records });
-        let snapshot = state.snapshot();
-        let mouse_buttons = Arc::new(Mutex::new(MouseButtonTracker::new()));
-        let snapshots = Arc::new(EngineSnapshotPublisher::new(snapshot, mouse_buttons.clone()));
+        let mouse_buttons = Arc::new(Mutex::new(MouseButtonTracker::with_press_test(Box::new(|| true))));
+        let snapshots = Arc::new(EngineSnapshotPublisher::new(state.snapshot(), mouse_buttons.clone()));
         let first_frame_callback = FirstFrameCallbackCell::default();
-        let actor = EngineActorHandle::spawn(
-            OweBackend,
-            first_frame_callback.callback(),
-            state,
-            Arc::clone(&snapshots),
-        )
-        .expect("test actor shell should start");
-        let refresh_target = Arc::new(EngineRefreshTarget {
-            actor: actor.actor().clone(),
-        });
-        let lifecycle = Arc::new(EngineLifecycle {
-            refresh_target,
-            display_callback: None,
-        });
-        WallpaperEngine {
-            backend: OweBackend,
-            first_frame_callback,
-            snapshots,
-            audio_response_resampler: Arc::new(
-                std::sync::Mutex::new(AudioResponseResampler::new()),
-            ),
-            mouse_buttons,
-            mouse_event_monitor: Arc::new(Mutex::new(None)),
-            actor,
-            lifecycle,
-        }
+        let actor = EngineActorHandle::spawn(backend, first_frame_callback.callback(), state, snapshots.clone()).unwrap();
+        let lifecycle = Arc::new(EngineLifecycle::unsubscribed(&actor));
+        WallpaperEngine { backend, first_frame_callback, snapshots,
+            audio_response_resampler: Arc::new(Mutex::new(AudioResponseResampler::new())),
+            mouse_buttons, mouse_event_monitor: Arc::new(Mutex::new(None)), actor, lifecycle }
     }
 
     #[test]
     fn default_engine_state_has_active_primary_record() {
-        let state = EngineState::with_display_model(
-            DisplayStateModel::from_config(crate::WallpaperEngineConfig::default()).unwrap(),
-        );
-
-        let primary = state
-            .display_records
-            .iter()
-            .find(|record| record.model.key == DisplayKey::Primary)
-            .expect("primary record should exist");
-        assert!(primary.model.window_active);
-        assert!(primary.runtime.is_none());
+        // CLEANROOM ET2
+        let state = EngineState::default();
+        assert_eq!(state.display_records.len(), 1);
+        let slot = &state.display_records[0];
+        assert_eq!(slot.model.key, DisplayKey::Primary);
+        assert!(slot.model.window_active);
+        assert!(!slot.model.runtime_open);
+        assert!(slot.model.assignment.is_none());
+        assert!(slot.model.live_display.is_none());
+        assert!(slot.handle.is_none());
+        assert!(slot.runtime.is_none());
+        assert!(slot.last_runtime_state.is_none());
+        assert!(state.snapshot().displays.is_empty());
+        assert!(state.handles_by_display.is_empty());
+        assert!(state.displays_by_handle.is_empty());
+        assert_eq!(state.next_handle, 1);
     }
 
     #[test]
     fn with_config_seeds_display_records() {
-        let external = crate::DisplayIdentity {
-            uuid: Some("external".to_string()),
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: Some(3),
-            unit_number: Some(4),
-            name: None,
-        };
-        let model = DisplayStateModel::from_config(crate::WallpaperEngineConfig {
-            displays: vec![crate::DisplayConfig {
-                selector: crate::DisplaySelector::Identity(external.clone()),
-                window_active: true,
-                wallpaper: None,
-            }],
-        })
-        .unwrap();
-        let state = EngineState::with_display_model(model);
-
-        assert!(state.display_records.iter().any(|record| {
-            record.model.key == DisplayKey::Identity(external.clone()) && record.model.window_active
-        }));
+        // CLEANROOM ET3
+        let identity = DisplayIdentity { uuid: Some("future-amber-57".into()), ..Default::default() };
+        let assignment = WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(&fixture_desc()));
+        let config = WallpaperEngineConfig { displays: vec![
+            DisplayConfig { selector: DisplaySelector::Primary, window_active: true, wallpaper: Some(assignment.clone()) },
+            DisplayConfig { selector: DisplaySelector::Identity(identity.clone()), window_active: false, wallpaper: None },
+            DisplayConfig { selector: DisplaySelector::LiveDisplayId(203), window_active: true, wallpaper: Some(WallpaperAssignment::Mirror(DisplaySelector::Primary)) },
+        ] };
+        let state = EngineState::with_display_model(DisplayStateModel::from_config(config).unwrap());
+        assert_eq!(state.display_records.iter().map(|r| r.model.key.clone()).collect::<Vec<_>>(), vec![DisplayKey::Primary, DisplayKey::Identity(identity), DisplayKey::LiveDisplayId(203)]);
+        assert_eq!(state.display_records[0].model.assignment, Some(assignment));
+        assert!(!state.display_records[1].model.window_active);
+        assert!(matches!(state.display_records[2].model.assignment, Some(WallpaperAssignment::Mirror(DisplaySelector::Primary))));
+        for record in &state.display_records {
+            assert!(record.runtime.is_none());
+            assert!(record.handle.is_none());
+            assert!(record.last_runtime_state.is_none());
+        }
+        assert!(state.handles_by_display.is_empty());
+        assert!(state.snapshot().displays.is_empty());
     }
 
     #[test]
     fn display_callback_refresh_error_does_not_stop_actor() {
-        let engine = engine_with_display_records(Vec::new());
-
-        engine
-            .actor
-            .actor()
-            .ask(messages::FailNextRefreshDisplaysForTest)
-            .blocking_send()
-            .expect("test refresh failure should be armed");
-
-        engine.lifecycle.refresh_target.schedule();
-
-        let sequence = engine
-            .actor
-            .actor()
-            .ask(messages::SequenceForTest { expected: 1 })
-            .blocking_send()
-            .expect("actor should keep processing after callback refresh failure");
-        assert_eq!(sequence, 1);
+        // CLEANROOM ET4
+        run_async(async {
+            let engine = cleanroom_et1(vec![fixture_record(None, true)]);
+            engine.actor.actor().ask(messages::FailNextRefreshDisplaysForTest).await.unwrap();
+            assert!(engine.actor.actor().ask(actor::RefreshFailurePendingForTest).await.unwrap());
+            let on_change = engine.lifecycle.on_change.clone();
+            tokio::task::spawn_blocking(move || on_change.schedule()).await.unwrap();
+            assert!(!engine.actor.actor().ask(actor::RefreshFailurePendingForTest).await.unwrap(), "the callback consumed the one-shot failure");
+            engine.actor_ping_for_test().await.unwrap();
+            // A later synthetic descriptor refresh uses the same handler/model
+            // pipeline without querying the actual desktop.
+            let display = fixture_desc().display;
+            engine.actor.actor().ask(messages::RefreshDisplayDescriptors { primary: display.clone(), displays: vec![display] }).await.unwrap();
+            assert_eq!(engine.display_snapshot().len(), 1);
+            assert_eq!(engine.actor_sequence_for_test(1).await.unwrap(), 1);
+        });
     }
 
     #[test]
     fn scene_runtime_state_survives_snapshot_round_trip() {
-        let desc = crate::project::SceneDesc::new(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-            "/tmp/assets",
-            60,
-            false,
-        );
-        let state = SceneRuntimeState::try_from(&desc).expect("state should build");
-
-        assert_eq!(state.scaling_mode, ScalingMode::default());
-        assert!(
-            (state.scaling_factor - 1.0).abs() <= f64::EPSILON,
-            "expected scaling factor {} to be within f64::EPSILON of 1.0",
-            state.scaling_factor
-        );
-        assert_eq!(state.render_resolution, None);
-        assert!(!state.paused);
+        // CLEANROOM ET5
+        run_async(async {
+            use kameo::actor::Spawn;
+            let desc = fixture_desc();
+            let mut state = EngineState::with_display_model(DisplayStateModel { records: vec![fixture_record(Some(&desc), true)] });
+            let handle = state.reserve_handle_for_key(DisplayKey::Primary);
+            let mut carried = SceneRuntimeState::try_from(&desc).unwrap();
+            carried.scaling_mode = ScalingMode::Stretch;
+            carried.scaling_factor = 1.65;
+            carried.framing = SceneFraming { pan_x: 0.37, pan_y: 0.64 };
+            carried.render_resolution = Some((824, 472));
+            carried.audio_response_enabled = true;
+            carried.media_integration_enabled = true;
+            carried.audio_volume = AudioVolume::try_from(0.43).unwrap();
+            carried.audio_muted = true;
+            carried.paused = true;
+            carried.property_override_json = Some(flat_property_document(r#"{"lighting":{"gain":0.72},"caption":null}"#).unwrap());
+            let prepared = EngineActor::prepare();
+            state.display_records[0].handle = Some(handle);
+            state.display_records[0].runtime = Some(SceneRuntime::windowless_for_test(handle, &desc, &carried, prepared.actor_ref().downgrade()).unwrap());
+            state.close_all().unwrap();
+            assert!(state.display_records[0].runtime.is_none());
+            let restored = state.display_records[0].runtime_state_for_desc(&desc).unwrap();
+            assert_eq!(restored.scaling_mode, carried.scaling_mode);
+            assert_eq!(restored.scaling_factor, carried.scaling_factor);
+            assert_eq!(restored.framing, carried.framing);
+            assert_eq!(restored.render_resolution, carried.render_resolution);
+            assert_eq!(restored.audio_response_enabled, carried.audio_response_enabled);
+            assert_eq!(restored.media_integration_enabled, carried.media_integration_enabled);
+            assert_eq!(restored.audio_volume, carried.audio_volume);
+            assert_eq!(restored.audio_muted, carried.audio_muted);
+            assert_eq!(restored.paused, carried.paused);
+            assert_eq!(restored.property_override_json, carried.property_override_json);
+        });
     }
 
     #[test]
     fn scene_runtime_state_initial_uses_descriptor_scaling() {
-        let desc = crate::project::SceneDesc::builder(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-        )
-        .assets_path("/tmp/assets")
-        .scaling_mode(ScalingMode::Fill)
-        .scaling_factor(1.25)
-        .build()
-        .expect("scene should build");
-
-        let state = SceneRuntimeState::try_from(&desc).expect("state should build");
-
-        assert_eq!(state.scaling_mode, ScalingMode::Fill);
-        assert!(
-            (state.scaling_factor - 1.25).abs() <= f64::EPSILON,
-            "expected scaling factor {} to be within f64::EPSILON of 1.25",
-            state.scaling_factor
-        );
+        // CLEANROOM ET6
+        let mut desc = fixture_desc();
+        desc.scaling_mode = ScalingMode::Stretch;
+        desc.scaling_factor = 1.65;
+        let state = SceneRuntimeState::try_from(&desc).unwrap();
+        assert_eq!(state.scaling_mode, ScalingMode::Stretch);
+        assert_eq!(state.scaling_factor, 1.65);
+        desc.scaling_factor = 0.85;
+        assert_eq!(SceneRuntimeState::try_from(&desc).unwrap().scaling_factor, 0.85);
     }
 
     #[test]
     fn scene_runtime_state_initial_uses_descriptor_framing() {
-        let default_state = SceneRuntimeState::try_from(&crate::project::SceneDesc::new(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-            "/tmp/assets",
-            60,
-            false,
-        ))
-        .expect("state should build");
-        assert_eq!(default_state.framing, SceneFraming::default());
-
-        let framing = SceneFraming {
-            pan_x: 0.1,
-            pan_y: 0.9,
-        };
-        let desc = crate::project::SceneDesc::builder(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-        )
-        .assets_path("/tmp/assets")
-        .framing(framing)
-        .build()
-        .expect("scene should build");
-
-        let state = SceneRuntimeState::try_from(&desc).expect("state should build");
-
-        assert_eq!(state.framing, framing);
-    }
-
-    #[test]
-    fn runtime_refresh_required_only_when_descriptor_changes() {
-        let desc = crate::project::SceneDesc::new(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-            "/tmp/assets",
-            60,
-            false,
-        );
-        let mut resized = desc.clone();
-        resized.display.width = 2560;
-        let mut different_wallpaper = desc.clone();
-        different_wallpaper.scene_path = "/tmp/other.json".to_string();
-
-        assert!(!RuntimeRefreshMode::from_transition(Some(&desc), &desc).is_required());
-        assert!(RuntimeRefreshMode::from_transition(Some(&desc), &resized).is_required());
-        assert!(
-            RuntimeRefreshMode::from_transition(Some(&desc), &different_wallpaper).is_required()
-        );
-        assert!(RuntimeRefreshMode::from_transition(None, &desc).is_required());
-    }
-
-    #[test]
-    fn runtime_refresh_mode_reopens_runtime_when_display_descriptor_changes() {
-        let desc = crate::project::SceneDesc::new(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-            "/tmp/assets",
-            60,
-            false,
-        );
-        let mut resized = desc.clone();
-        resized.display.width = 2560;
-        let mut different_wallpaper = desc.clone();
-        different_wallpaper.scene_path = "/tmp/other.json".to_string();
-
-        assert_eq!(
-            RuntimeRefreshMode::from_transition(Some(&desc), &desc),
-            RuntimeRefreshMode::Unchanged
-        );
-        assert_eq!(
-            RuntimeRefreshMode::from_transition(Some(&desc), &resized),
-            RuntimeRefreshMode::ReopenRuntime
-        );
-        assert_eq!(
-            RuntimeRefreshMode::from_transition(Some(&desc), &different_wallpaper),
-            RuntimeRefreshMode::RebuildExistingRuntime
-        );
-        assert_eq!(
-            RuntimeRefreshMode::from_transition(None, &desc),
-            RuntimeRefreshMode::OpenRuntime
-        );
-    }
-
-    #[test]
-    fn runtime_refresh_mode_rebuilds_when_shader_refresh_is_forced() {
-        let current = crate::project::SceneDesc::builder(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-        )
-        .assets_path("/tmp/assets")
-        .shader_cache_path("/tmp/cache")
-        .build()
-        .expect("scene should build");
-        let mut desired = current.clone();
-        desired.force_shader_refresh = true;
-
-        assert_eq!(
-            RuntimeRefreshMode::from_transition(Some(&current), &desired),
-            RuntimeRefreshMode::RebuildExistingRuntime
-        );
-    }
-
-    #[test]
-    fn runtime_refresh_mode_treats_completed_shader_refresh_as_unchanged() {
-        let mut current = crate::project::SceneDesc::builder(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-        )
-        .assets_path("/tmp/assets")
-        .shader_cache_path("/tmp/cache")
-        .force_shader_refresh(true)
-        .build()
-        .expect("scene should build");
-        current.mark_shader_refresh_complete();
-        let mut desired = current.clone();
-        desired.force_shader_refresh = false;
-
-        assert_eq!(
-            RuntimeRefreshMode::from_transition(Some(&current), &desired),
-            RuntimeRefreshMode::Unchanged
-        );
-    }
-
-    #[test]
-    fn runtime_refresh_mode_updates_window_only_when_origin_changes() {
-        let desc = crate::project::SceneDesc::new(
-            crate::DisplayDesc::new(3, 1920, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-            "/tmp/assets",
-            60,
-            false,
-        );
-        let mut moved = desc.clone();
-        moved.display.x = -1920;
-
-        assert_eq!(
-            RuntimeRefreshMode::from_transition(Some(&desc), &moved),
-            RuntimeRefreshMode::UpdateWindowOnly
-        );
-    }
-
-    #[test]
-    fn runtime_refresh_mode_reopens_display_change_after_runtime_pause() {
-        let mut current = crate::project::SceneDesc::new(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-            "/tmp/assets",
-            60,
-            false,
-        );
-        let mut desired = current.clone();
-        current.paused = true;
-        desired.display.width = 2560;
-
-        assert_eq!(
-            RuntimeRefreshMode::from_transition(Some(&current), &desired),
-            RuntimeRefreshMode::ReopenRuntime
-        );
-    }
-
-    #[test]
-    fn runtime_refresh_mode_ignores_initial_pause_change_after_open() {
-        let current = crate::project::SceneDesc::new(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-            "/tmp/assets",
-            60,
-            false,
-        );
-        let mut desired = current.clone();
-        desired.paused = true;
-
-        assert_eq!(
-            RuntimeRefreshMode::from_transition(Some(&current), &desired),
-            RuntimeRefreshMode::Unchanged
-        );
-    }
-
-    #[test]
-    fn runtime_refresh_mode_treats_live_audio_response_change_as_unchanged_after_snapshot_sync() {
-        let mut current = crate::project::SceneDesc::new(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-            "/tmp/assets",
-            60,
-            false,
-        );
-        current.audio_response_enabled = true;
-        let desired = current.clone();
-
-        assert_eq!(
-            RuntimeRefreshMode::from_transition(Some(&current), &desired),
-            RuntimeRefreshMode::Unchanged
-        );
-    }
-
-    #[test]
-    fn close_all_preserves_display_model_records() {
-        let identity = crate::DisplayIdentity {
-            uuid: Some("external-display".to_string()),
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: Some(3),
-            unit_number: Some(4),
-            name: None,
-        };
-        let mut state = EngineState::with_display_model(
-            DisplayStateModel::from_config(crate::WallpaperEngineConfig {
-                displays: vec![crate::DisplayConfig {
-                    selector: crate::DisplaySelector::Identity(identity.clone()),
-                    window_active: true,
-                    wallpaper: None,
-                }],
-            })
-            .unwrap(),
-        );
-        let live_key = DisplayKey::LiveDisplayId(42);
-        let handle = state.reserve_handle_for_key(live_key.clone());
-        let desc = crate::project::SceneDesc::new(
-            crate::DisplayDesc::new(42, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-            "/tmp/assets",
-            60,
-            false,
-        );
-        let last_runtime_state = SceneRuntimeState::try_from(&desc).unwrap();
-        let record = state.ensure_record(DisplayRecord {
-            key: live_key.clone(),
-            live_display: Some(desc.display.clone()),
-            assignment: None,
-            window_active: true,
-            runtime_open: true,
-            primary_inheritance_consumed: false,
-        });
-        record.handle = Some(handle);
-        record.last_runtime_state = Some(StoredSceneRuntimeState::new(
-            desc.clone(),
-            last_runtime_state.clone(),
-        ));
-
-        state.close_all().unwrap();
-
-        assert_eq!(state.next_handle, 2);
-        assert!(state.handles_by_display.is_empty());
-        assert!(state.displays_by_handle.is_empty());
-        assert!(state.display_records.iter().any(|record| {
-            record.model.key == DisplayKey::Primary
-                && record.model.window_active
-                && !record.model.runtime_open
-        }));
-        assert!(state.display_records.iter().any(|record| {
-            record.model.key == DisplayKey::Identity(identity.clone())
-                && record.model.window_active
-                && !record.model.runtime_open
-        }));
-        let live_record = state
-            .display_records
-            .iter()
-            .find(|record| record.model.key == live_key)
-            .expect("live display record should be preserved");
-        assert!(live_record.handle.is_none());
-        assert!(live_record.runtime.is_none());
-        assert!(!live_record.model.runtime_open);
-        assert!(live_record.last_runtime_state.is_some());
-    }
-
-    #[test]
-    fn reconcile_scene_configs_make_inputs_active_direct_assignments() {
-        let display = crate::DisplayDesc::new(9, 0, 0, 1920, 1080, 1.0);
-        let scene = crate::project::SceneDesc::new(
-            display.clone(),
-            "/tmp/project.json",
-            "/tmp/assets",
-            60,
-            false,
-        );
-        let mut model =
-            DisplayStateModel::from_config(crate::WallpaperEngineConfig::default()).unwrap();
-
-        model.apply_reconcile(&[scene]).unwrap();
-
-        let key = DisplayKey::LiveDisplayId(display.display_id);
-        let record = model
-            .records
-            .iter()
-            .find(|record| record.key == key)
-            .expect("display record should exist");
-        assert!(record.window_active);
-        assert!(matches!(
-            record.assignment,
-            Some(crate::WallpaperAssignment::Direct(_))
-        ));
-    }
-
-    #[test]
-    fn empty_reconcile_deactivates_active_connected_records() {
-        let identity = crate::DisplayIdentity {
-            uuid: Some("external-display".to_string()),
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: Some(3),
-            unit_number: Some(4),
-            name: None,
-        };
-        let primary = crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0);
-        let external =
-            crate::DisplayDesc::with_identity(2, identity.clone(), 1920, 0, 1920, 1080, 1.0);
-        let live = crate::DisplayDesc::new(3, 3840, 0, 1920, 1080, 1.0);
-        let template = crate::project::SceneTemplate::builder("/tmp/project.json")
-            .build()
-            .unwrap();
-        let mut model = DisplayStateModel {
-            records: vec![
-                DisplayRecord {
-                    key: DisplayKey::Primary,
-                    live_display: Some(primary),
-                    assignment: Some(crate::WallpaperAssignment::Direct(template.clone())),
-                    window_active: true,
-                    runtime_open: true,
-                    primary_inheritance_consumed: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::Identity(identity),
-                    live_display: Some(external),
-                    assignment: Some(crate::WallpaperAssignment::Direct(template.clone())),
-                    window_active: true,
-                    runtime_open: true,
-                    primary_inheritance_consumed: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::LiveDisplayId(live.display_id),
-                    live_display: Some(live),
-                    assignment: Some(crate::WallpaperAssignment::Direct(template)),
-                    window_active: true,
-                    runtime_open: true,
-                    primary_inheritance_consumed: false,
-                },
-            ],
-        };
-
-        model.apply_reconcile(&[]).unwrap();
-
-        assert!(model.records.iter().all(|record| !record.window_active));
-        assert!(model.records.iter().all(|record| !record.runtime_open));
-    }
-
-    #[test]
-    fn reconcile_scene_deactivates_existing_connected_alias_records() {
-        let identity = crate::DisplayIdentity {
-            uuid: Some("requested-display".to_string()),
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: Some(3),
-            unit_number: Some(4),
-            name: None,
-        };
-        let display = crate::DisplayDesc::with_identity(7, identity.clone(), 0, 0, 1920, 1080, 1.0);
-        let scene = crate::project::SceneDesc::new(
-            display.clone(),
-            "/tmp/requested.json",
-            "/tmp/assets",
-            60,
-            false,
-        );
-        let template = crate::project::SceneTemplate::builder("/tmp/old.json")
-            .build()
-            .unwrap();
-        let mut model = DisplayStateModel {
-            records: vec![
-                DisplayRecord {
-                    key: DisplayKey::Primary,
-                    live_display: Some(display.clone()),
-                    assignment: Some(crate::WallpaperAssignment::Direct(template.clone())),
-                    window_active: true,
-                    runtime_open: true,
-                    primary_inheritance_consumed: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::Identity(identity),
-                    live_display: Some(display.clone()),
-                    assignment: Some(crate::WallpaperAssignment::Direct(template)),
-                    window_active: true,
-                    runtime_open: true,
-                    primary_inheritance_consumed: false,
-                },
-            ],
-        };
-
-        model.apply_reconcile(&[scene]).unwrap();
-
-        let active_records: Vec<_> = model
-            .records
-            .iter()
-            .filter(|record| record.window_active && record.live_display.as_ref() == Some(&display))
-            .collect();
-        assert_eq!(active_records.len(), 1);
-        assert_eq!(active_records[0].key, DisplayKey::Primary);
-        assert!(matches!(
-            active_records[0].assignment,
-            Some(crate::WallpaperAssignment::Direct(_))
-        ));
-    }
-
-    #[test]
-    fn reconcile_scene_for_current_primary_follows_primary_after_display_switch() {
-        let old_primary = crate::DisplayDesc::with_identity(
-            1,
-            crate::DisplayIdentity {
-                uuid: Some("old-primary".to_string()),
-                vendor_id: Some(1),
-                model_id: Some(2),
-                serial_number: Some(3),
-                unit_number: None,
-                name: None,
-            },
-            0,
-            0,
-            3420,
-            2214,
-            2.0,
-        );
-        let new_primary = crate::DisplayDesc::with_identity(
-            2,
-            crate::DisplayIdentity {
-                uuid: Some("new-primary".to_string()),
-                vendor_id: Some(4),
-                model_id: Some(5),
-                serial_number: Some(6),
-                unit_number: None,
-                name: None,
-            },
-            0,
-            0,
-            1920,
-            1080,
-            1.0,
-        );
-        let old_primary_shifted = crate::DisplayDesc::with_identity(
-            1,
-            old_primary.identity.clone(),
-            -1710,
-            0,
-            3420,
-            2214,
-            2.0,
-        );
-        let scene = crate::project::SceneDesc::new(
-            old_primary.clone(),
-            "/tmp/requested.json",
-            "/tmp/assets",
-            60,
-            false,
-        );
-        let mut model = DisplayStateModel {
-            records: vec![DisplayRecord {
-                key: DisplayKey::Primary,
-                live_display: Some(old_primary.clone()),
-                assignment: None,
-                window_active: true,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
-            }],
-        };
-
-        model.apply_reconcile(&[scene]).unwrap();
-
-        let primary = model
-            .records
-            .iter_mut()
-            .find(|record| record.key == DisplayKey::Primary)
-            .expect("primary record should remain");
-        assert!(primary.window_active);
-        assert!(primary.assignment.is_some());
-        primary.runtime_open = true;
-        assert!(!model.records.iter().any(|record| {
-            record.key == DisplayKey::LiveDisplayId(old_primary.display_id) && record.window_active
-        }));
-
-        let actions = model
-            .refresh_connected(
-                new_primary.clone(),
-                vec![old_primary_shifted, new_primary.clone()],
-            )
-            .unwrap();
-
-        let primary = model
-            .records
-            .iter()
-            .find(|record| record.key == DisplayKey::Primary)
-            .expect("primary record should remain after display switch");
-        assert!(primary.window_active);
-        assert_eq!(primary.live_display, Some(new_primary));
-        assert!(primary.assignment.is_some());
-        assert_eq!(actions, vec![DisplayAction::Rebuild(DisplayKey::Primary)]);
-    }
-
-    #[test]
-    fn reconcile_keeps_disconnected_future_identity_records_untouched() {
-        let identity = crate::DisplayIdentity {
-            uuid: Some("future-display".to_string()),
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: Some(3),
-            unit_number: Some(4),
-            name: None,
-        };
-        let template = crate::project::SceneTemplate::builder("/tmp/future.json")
-            .build()
-            .unwrap();
-        let future_record = DisplayRecord {
-            key: DisplayKey::Identity(identity),
-            live_display: None,
-            assignment: Some(crate::WallpaperAssignment::Direct(template)),
-            window_active: true,
-            runtime_open: false,
-            primary_inheritance_consumed: false,
-        };
-        let mut model = DisplayStateModel {
-            records: vec![future_record.clone()],
-        };
-
-        model.apply_reconcile(&[]).unwrap();
-
-        assert_eq!(model.records, vec![future_record]);
-    }
-
-    #[test]
-    fn reconcile_results_error_when_requested_handle_is_missing() {
-        let scene = crate::project::SceneDesc::new(
-            crate::DisplayDesc::new(11, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-            "/tmp/assets",
-            60,
-            false,
-        );
-        let state = EngineState::with_display_model(
-            DisplayStateModel::from_config(crate::WallpaperEngineConfig::default()).unwrap(),
-        );
-
-        let scenes = [scene];
-        let model = DisplayStateModel {
-            records: state
-                .display_records
-                .iter()
-                .map(|record| record.model.clone())
-                .collect(),
-        };
-        let error = scenes
-            .reconcile_results(&model, &state.handles_by_display)
-            .expect_err("missing requested handle should be an error");
-
-        match error {
-            EngineError::Platform(message) => {
-                assert!(message.contains("missing scene handle for requested display 11"));
-            }
-            other => panic!("expected platform error, got {other:?}"),
+        // CLEANROOM ET7
+        let mut desc = fixture_desc();
+        for framing in [SceneFraming { pan_x: 0.37, pan_y: 0.64 }, SceneFraming { pan_x: 0.0, pan_y: 1.0 }, SceneFraming { pan_x: 1.0, pan_y: 0.0 }] {
+            desc.framing = framing;
+            assert_eq!(SceneRuntimeState::try_from(&desc).unwrap().framing, framing);
         }
     }
 
     #[test]
-    fn reconcile_preserves_handle_reservation_when_runtime_no_longer_needed() {
-        let primary = crate::DisplayDesc::with_identity(
-            1,
-            crate::DisplayIdentity {
-                uuid: Some("primary".to_string()),
-                vendor_id: Some(1),
-                model_id: Some(2),
-                serial_number: Some(3),
-                unit_number: Some(4),
-                name: None,
-            },
-            0,
-            0,
-            1920,
-            1080,
-            1.0,
-        );
-        let mut state = EngineState::with_display_model(
-            DisplayStateModel::from_config(crate::WallpaperEngineConfig::default()).unwrap(),
-        );
-        let key = DisplayKey::Primary;
-        let handle = {
-            let handle = state.reserve_handle_for_key(key.clone());
-            let record = state
-                .display_records
-                .iter_mut()
-                .find(|record| record.model.key == key)
-                .expect("primary record should exist");
-            record.handle = Some(handle);
-            record.model.live_display = Some(primary.clone());
-            record.model.runtime_open = true;
-            handle
-        };
-
-        let snapshots = Arc::new(EngineSnapshotPublisher::new(state.snapshot(), Arc::new(Mutex::new(MouseButtonTracker::new()))));
-        let prepared = <EngineActor as kameo::actor::Spawn>::prepare();
-        let mut actor = EngineActor::new(OweBackend, Arc::new(|_handle| {}), state, snapshots, prepared.actor_ref().downgrade());
-
-        actor
-            .reconcile_display_descriptors(primary.clone(), vec![primary])
-            .unwrap();
-
-        let record = actor
-            .state
-            .display_records
-            .iter()
-            .find(|record| record.model.key == key)
-            .expect("primary record should remain");
-        assert_eq!(record.handle, Some(handle));
-        assert!(!record.model.runtime_open);
-        assert!(record.runtime.is_none());
-        assert_eq!(actor.state.handles_by_display.get(&key), Some(&handle));
-        assert_eq!(actor.state.displays_by_handle.get(&handle), Some(&key));
-    }
-
-    fn actor_for_display_reports(model: DisplayStateModel) -> EngineActor {
-        let state = EngineState::with_display_model(model);
-        let snapshots = Arc::new(EngineSnapshotPublisher::new(
-            state.snapshot(),
-            Arc::new(Mutex::new(MouseButtonTracker::new())),
-        ));
-        let prepared = <EngineActor as kameo::actor::Spawn>::prepare();
-        EngineActor::new(
-            OweBackend,
-            Arc::new(|_handle| {}),
-            state,
-            snapshots,
-            prepared.actor_ref().downgrade(),
-        )
+    fn runtime_refresh_required_only_when_descriptor_changes() {
+        // CLEANROOM ET8
+        let desc = fixture_desc();
+        assert_eq!(RuntimeRefreshMode::from_transition(None, &desc), RuntimeRefreshMode::OpenRuntime);
+        assert_eq!(RuntimeRefreshMode::from_transition(Some(&desc), &desc), RuntimeRefreshMode::Unchanged);
+        assert!(!RuntimeRefreshMode::Unchanged.is_required());
+        for mode in [RuntimeRefreshMode::OpenRuntime, RuntimeRefreshMode::RebuildExistingRuntime, RuntimeRefreshMode::UpdateWindowOnly, RuntimeRefreshMode::ReopenRuntime] { assert!(mode.is_required()); }
+        let mut next = desc.clone();
+        next.fps = 47;
+        assert_eq!(RuntimeRefreshMode::from_transition(Some(&desc), &next), RuntimeRefreshMode::RebuildExistingRuntime);
     }
 
     #[test]
+    fn runtime_refresh_mode_reopens_runtime_when_display_descriptor_changes() {
+        // CLEANROOM ET9
+        let desc = fixture_desc();
+        for surface in [DisplayDesc::new(87, -613, 137, 2624, 1472, 2.0), DisplayDesc::new(87, -613, 137, 2496, 1408, 1.5)] {
+            let mut next = desc.clone();
+            next.display = surface;
+            assert_eq!(RuntimeRefreshMode::from_transition(Some(&desc), &next), RuntimeRefreshMode::ReopenRuntime);
+        }
+    }
+
+    #[test]
+    fn runtime_refresh_mode_rebuilds_when_shader_refresh_is_forced() {
+        // CLEANROOM ET10
+        let current = fixture_desc();
+        let mut desired = current.clone();
+        desired.force_shader_refresh = true;
+        assert_eq!(RuntimeRefreshMode::from_transition(Some(&current), &desired), RuntimeRefreshMode::RebuildExistingRuntime);
+    }
+
+    #[test]
+    fn runtime_refresh_mode_treats_completed_shader_refresh_as_unchanged() {
+        // CLEANROOM ET11
+        let desired = fixture_desc();
+        let mut completed = desired.clone();
+        completed.force_shader_refresh = true;
+        completed.mark_shader_refresh_complete();
+        assert!(!completed.force_shader_refresh);
+        assert_eq!(RuntimeRefreshMode::from_transition(Some(&completed), &desired), RuntimeRefreshMode::Unchanged);
+    }
+
+    #[test]
+    fn runtime_refresh_mode_updates_window_only_when_origin_changes() {
+        // CLEANROOM ET12: classification promises no renderer work.
+        let current = fixture_desc();
+        let mut desired = current.clone();
+        desired.display.x = 101;
+        desired.display.y = -209;
+        assert_eq!(RuntimeRefreshMode::from_transition(Some(&current), &desired), RuntimeRefreshMode::UpdateWindowOnly);
+    }
+
+    #[test]
+    fn runtime_refresh_mode_reopens_display_change_after_runtime_pause() {
+        // CLEANROOM ET13
+        let mut current = fixture_desc();
+        current.paused = true;
+        let mut desired = current.clone();
+        desired.display.scale_factor = 1.5;
+        assert_eq!(RuntimeRefreshMode::from_transition(Some(&current), &desired), RuntimeRefreshMode::ReopenRuntime);
+        let mut state = SceneRuntimeState::try_from(&current).unwrap();
+        state.inherit_descriptor_transition(&current, &desired).unwrap();
+        assert!(state.paused);
+    }
+
+    #[test]
+    fn runtime_refresh_mode_ignores_initial_pause_change_after_open() {
+        // CLEANROOM ET14
+        let current = fixture_desc();
+        let mut desired = current.clone();
+        desired.paused = !current.paused;
+        assert_eq!(RuntimeRefreshMode::from_transition(Some(&current), &desired), RuntimeRefreshMode::Unchanged);
+        let mut state = SceneRuntimeState::try_from(&current).unwrap();
+        state.inherit_descriptor_transition(&current, &desired).unwrap();
+        assert_eq!(state.paused, current.paused);
+    }
+
+    #[test]
+    fn runtime_refresh_mode_treats_live_audio_response_change_as_unchanged_after_snapshot_sync() {
+        // CLEANROOM ET15
+        run_async(async {
+            use kameo::actor::Spawn;
+            let mut desc = fixture_desc();
+            desc.audio_response_enabled = true;
+            let prepared = EngineActor::prepare();
+            let mut live = SceneRuntime::windowless_for_test(SceneHandle::new(9), &desc, &SceneRuntimeState::try_from(&desc).unwrap(), prepared.actor_ref().downgrade()).unwrap();
+            live.set_audio_response_enabled(false).unwrap();
+            let mut desired = desc;
+            desired.audio_response_enabled = false;
+            assert!(!live.desc.audio_response_enabled);
+            assert_eq!(RuntimeRefreshMode::from_transition(Some(&live.desc), &desired), RuntimeRefreshMode::Unchanged);
+        });
+    }
+
+    #[test]
+    fn close_all_preserves_display_model_records() {
+        // CLEANROOM ET16
+        run_async(async {
+            use kameo::actor::Spawn;
+            let desc = fixture_desc();
+            let mut blank = fixture_record(None, false);
+            blank.key = DisplayKey::LiveDisplayId(126);
+            blank.live_display = Some(DisplayDesc::new(126, 1800, -71, 1872, 1248, 2.0));
+            let mut future = fixture_record(None, true);
+            future.key = DisplayKey::Identity(DisplayIdentity { uuid: Some("future-amber-57".into()), ..Default::default() });
+            future.assignment = Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(&desc)));
+            let models = vec![fixture_record(Some(&desc), true), blank, future];
+            let mut state = EngineState::with_display_model(DisplayStateModel { records: models.clone() });
+            let prepared = EngineActor::prepare();
+            let handle = state.reserve_handle_for_key(DisplayKey::Primary);
+            state.display_records[0].handle = Some(handle);
+            state.display_records[0].runtime = Some(SceneRuntime::windowless_for_test(handle, &desc, &SceneRuntimeState::try_from(&desc).unwrap(), prepared.actor_ref().downgrade()).unwrap());
+            for id in 301..307 { state.reserve_handle_for_key(DisplayKey::LiveDisplayId(id)); }
+            assert_eq!(state.next_handle, 8);
+            state.close_all().unwrap();
+            assert!(state.handles_by_display.is_empty());
+            assert!(state.displays_by_handle.is_empty());
+            assert_eq!(state.display_records.len(), 3);
+            for (record, original) in state.display_records.iter().zip(models) {
+                assert_eq!(record.model.key, original.key);
+                assert_eq!(record.model.assignment, original.assignment);
+                assert_eq!(record.model.window_active, original.window_active);
+                assert!(record.runtime.is_none());
+                assert!(record.handle.is_none());
+                assert!(!record.model.runtime_open);
+            }
+            assert!(state.display_records[0].last_runtime_state.is_some());
+            assert_eq!(state.reserve_handle_for_key(DisplayKey::Primary).raw(), 8);
+        });
+    }
+
+    #[test]
+    fn reconcile_scene_configs_make_inputs_active_direct_assignments() {
+        // CLEANROOM ET17
+        let first = fixture_desc();
+        let mut second = first.clone();
+        second.display.display_id = 126;
+        let mut model = DisplayStateModel { records: vec![fixture_record(Some(&first), false)] };
+        model.records[0].assignment = Some(WallpaperAssignment::Mirror(DisplaySelector::LiveDisplayId(126)));
+        let mut other = fixture_record(Some(&second), false);
+        other.key = DisplayKey::LiveDisplayId(126);
+        model.records.push(other);
+        let desired = [second.clone(), first.clone()];
+        desired.as_slice().assert_unique().unwrap();
+        model.apply_reconcile(&desired).unwrap();
+        assert!(model.records.iter().all(|r| r.window_active && matches!(r.assignment, Some(WallpaperAssignment::Direct(_)))));
+        assert_eq!(model.records[0].scene_desc().unwrap().unwrap(), first);
+        let handles = std::collections::HashMap::from([(DisplayKey::Primary, SceneHandle::new(4)), (DisplayKey::LiveDisplayId(126), SceneHandle::new(7))]);
+        let results = desired.as_slice().reconcile_results(&model, &handles).unwrap();
+        assert_eq!(results.iter().map(|r| (r.display_id, r.handle.raw(), r.status)).collect::<Vec<_>>(), vec![(126, 7, 0), (87, 4, 0)]);
+    }
+
+    #[test]
+    fn empty_reconcile_deactivates_active_connected_records() {
+        // CLEANROOM ET18
+        let desc = fixture_desc();
+        let mut future = fixture_record(None, true);
+        future.key = DisplayKey::Identity(DisplayIdentity { uuid: Some("future-amber-57".into()), ..Default::default() });
+        future.assignment = Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(&desc)));
+        let mut model = DisplayStateModel { records: vec![fixture_record(Some(&desc), true), future.clone()] };
+        let assignment = model.records[0].assignment.clone();
+        model.apply_reconcile(&[]).unwrap();
+        assert!(!model.records[0].window_active);
+        assert_eq!(model.records[0].assignment, assignment);
+        assert!(model.records[1].window_active);
+        assert_eq!(model.records[1].assignment, future.assignment);
+        assert!(model.records[1].live_display.is_none());
+    }
+
+    #[test]
+    fn reconcile_scene_deactivates_existing_connected_alias_records() {
+        // CLEANROOM ET19
+        let desc = fixture_desc();
+        let mut alias = fixture_record(Some(&desc), true);
+        alias.key = DisplayKey::LiveDisplayId(desc.display.display_id);
+        let assignment = alias.assignment.clone();
+        let mut model = DisplayStateModel { records: vec![fixture_record(Some(&desc), true), alias] };
+        model.apply_reconcile(std::slice::from_ref(&desc)).unwrap();
+        assert!(model.records[0].window_active);
+        assert!(!model.records[1].window_active);
+        assert_eq!(model.records[1].assignment, assignment);
+        assert_eq!(model.records.iter().filter(|r| r.window_active).count(), 1);
+    }
+
+    #[test]
+    fn reconcile_scene_for_current_primary_follows_primary_after_display_switch() {
+        // CLEANROOM ET20: reservations migrate by physical display, not key.
+        let mut a = fixture_desc();
+        a.display.identity.uuid = Some("physical-orchid".into());
+        let mut b = a.clone();
+        b.display.display_id = 126;
+        b.display.identity.uuid = Some("physical-cobalt".into());
+        let mut other = fixture_record(Some(&b), true);
+        other.key = DisplayKey::LiveDisplayId(126);
+        let mut state = EngineState::with_display_model(DisplayStateModel { records: vec![fixture_record(Some(&a), true), other] });
+        let ha = state.reserve_handle_for_key(DisplayKey::Primary);
+        let hb = state.reserve_handle_for_key(DisplayKey::LiveDisplayId(126));
+        state.display_records[0].handle = Some(ha);
+        state.display_records[1].handle = Some(hb);
+        let mut swapped = state.display_records[1].model.clone();
+        swapped.key = DisplayKey::Primary;
+        let mut old_primary = state.display_records[0].model.clone();
+        old_primary.key = DisplayKey::LiveDisplayId(87);
+        let mut model = DisplayStateModel { records: vec![swapped, old_primary] };
+        // A display refresh migrates both live selections before a later
+        // reconcile deactivates the now-unrequested secondary.
+        state.apply_display_model(&model).unwrap();
+        model.apply_reconcile(std::slice::from_ref(&b)).unwrap();
+        state.apply_display_model(&model).unwrap();
+        assert_eq!(state.display_records[0].handle, Some(hb));
+        assert_eq!(state.display_records[0].model.live_display.as_ref().unwrap().display_id, 126);
+        assert!(state.display_records[0].model.window_active);
+        assert!(!state.display_records[1].model.window_active);
+        assert_eq!(state.display_records[1].handle, Some(ha));
+        assert_eq!(state.displays_by_handle.get(&hb), Some(&DisplayKey::Primary));
+    }
+
+    #[test]
+    fn reconcile_keeps_disconnected_future_identity_records_untouched() {
+        // CLEANROOM ET21
+        let desc = fixture_desc();
+        let future = DisplayRecord { key: DisplayKey::Identity(DisplayIdentity { uuid: Some("future-amber-57".into()), ..Default::default() }), live_display: None, assignment: Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(&desc))), window_active: true, runtime_open: false, primary_inheritance_consumed: true };
+        let mut model = DisplayStateModel { records: vec![fixture_record(Some(&desc), true), future.clone()] };
+        let mut next = desc;
+        next.fps = 47;
+        model.apply_reconcile(&[next]).unwrap();
+        let after = &model.records[1];
+        assert_eq!(after.key, future.key);
+        assert_eq!(after.live_display, future.live_display);
+        assert_eq!(after.assignment, future.assignment);
+        assert_eq!(after.window_active, future.window_active);
+        assert_eq!(after.runtime_open, future.runtime_open);
+        assert_eq!(after.primary_inheritance_consumed, future.primary_inheritance_consumed);
+    }
+
+    #[test]
+    fn reconcile_results_error_when_requested_handle_is_missing() {
+        // CLEANROOM ET22
+        let mut desc = fixture_desc();
+        desc.display.display_id = 203;
+        let model = DisplayStateModel { records: vec![fixture_record(Some(&desc), true)] };
+        let error = [desc].as_slice().reconcile_results(&model, &std::collections::HashMap::new()).unwrap_err();
+        assert!(matches!(error, EngineError::Platform(text) if text.contains("missing scene handle for requested display 203")));
+    }
+
+    #[test]
+    fn reconcile_preserves_handle_reservation_when_runtime_no_longer_needed() {
+        // CLEANROOM ET23
+        run_async(async {
+            use kameo::actor::Spawn;
+            let desc = fixture_desc();
+            let mut actor = make_actor(EngineState::with_display_model(DisplayStateModel { records: vec![fixture_record(Some(&desc), true)] }));
+            let handle = actor.state.reserve_handle_for_key(DisplayKey::Primary);
+            let prepared = EngineActor::prepare();
+            actor.state.display_records[0].handle = Some(handle);
+            actor.state.display_records[0].runtime = Some(SceneRuntime::windowless_for_test(handle, &desc, &SceneRuntimeState::try_from(&desc).unwrap(), prepared.actor_ref().downgrade()).unwrap());
+            actor.destroy_window_for(DisplaySelector::Primary).unwrap();
+            let slot = &actor.state.display_records[0];
+            assert!(slot.runtime.is_none());
+            assert_eq!(slot.handle, Some(handle));
+            assert!(slot.last_runtime_state.is_some());
+            assert_eq!(actor.state.snapshot().displays[0].handle, None);
+            assert_eq!(actor.state.reserve_handle_for_key(DisplayKey::Primary), handle);
+        });
+    }
+
+
+
+    #[test]
     fn a_display_report_where_the_primary_has_no_pixels_leaves_a_running_scene_alone() {
-        let template = crate::project::SceneTemplate::builder("/tmp/primary.json")
-            .build()
-            .unwrap();
-        let mut model = DisplayStateModel::from_config(crate::WallpaperEngineConfig {
-            displays: vec![crate::DisplayConfig {
-                selector: crate::DisplaySelector::Primary,
-                window_active: true,
-                wallpaper: Some(crate::WallpaperAssignment::Direct(template)),
-            }],
-        })
-        .unwrap();
-        model.records[0].live_display = Some(crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0));
-        model.records[0].runtime_open = true;
-        let mut actor = actor_for_display_reports(model);
-        let before = actor.state.display_records[0].model.clone();
-
-        let in_flux = crate::DisplayDesc::new(1, 0, 0, 0, 0, 1.0);
-        actor
-            .apply_display_report(in_flux.clone(), vec![in_flux])
-            .expect("a report in flux is not an error");
-
-        assert_eq!(actor.state.display_records[0].model, before);
+        // CLEANROOM ET24
+        run_async(async {
+            use kameo::actor::Spawn;
+            let desc = fixture_desc();
+            let mut actor = make_actor(EngineState::with_display_model(DisplayStateModel { records: vec![fixture_record(Some(&desc), true)] }));
+            let prepared = EngineActor::prepare();
+            let handle = actor.state.reserve_handle_for_key(DisplayKey::Primary);
+            actor.state.display_records[0].handle = Some(handle);
+            actor.state.display_records[0].runtime = Some(SceneRuntime::windowless_for_test(handle, &desc, &SceneRuntimeState::try_from(&desc).unwrap(), prepared.actor_ref().downgrade()).unwrap());
+            actor.state.record_runtime_state(handle).unwrap();
+            let token = actor.state.display_records[0].runtime.as_ref().unwrap().renderer_instance();
+            let mut unusable = desc.display.clone();
+            unusable.width = 0;
+            actor.apply_display_report(unusable.clone(), vec![unusable]).unwrap();
+            assert_eq!(actor.state.display_records[0].model.live_display.as_ref(), Some(&desc.display));
+            assert!(Arc::ptr_eq(&token, &actor.state.display_records[0].runtime.as_ref().unwrap().renderer_instance()));
+            actor.apply_display_report(desc.display.clone(), vec![desc.display.clone()]).unwrap();
+            assert_eq!(actor.state.display_records[0].handle, Some(handle));
+            assert!(Arc::ptr_eq(&token, &actor.state.display_records[0].runtime.as_ref().unwrap().renderer_instance()));
+        });
     }
 
     #[test]
     fn a_secondary_display_without_pixels_is_left_out_until_it_reports_a_size() {
-        let mut actor = actor_for_display_reports(
-            DisplayStateModel::from_config(crate::WallpaperEngineConfig::default()).unwrap(),
-        );
-        let primary = crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0);
-        let connecting = |width, height| {
-            crate::DisplayDesc::with_identity(
-                7,
-                crate::DisplayIdentity {
-                    uuid: Some("external".to_string()),
-                    ..crate::DisplayIdentity::default()
-                },
-                1920,
-                0,
-                width,
-                height,
-                1.0,
-            )
-        };
-
-        actor
-            .apply_display_report(primary.clone(), vec![primary.clone(), connecting(0, 0)])
-            .expect("a connecting display must not fail the refresh");
-        assert_eq!(actor.state.display_records.len(), 1);
-        assert_eq!(
-            actor.state.display_records[0].model.live_display,
-            Some(primary.clone())
-        );
-
-        actor
-            .apply_display_report(primary.clone(), vec![primary, connecting(2560, 1440)])
-            .unwrap();
-        assert_eq!(actor.state.display_records.len(), 2);
-        assert!(
-            actor
-                .state
-                .display_records
-                .iter()
-                .any(|record| record.model.live_display == Some(connecting(2560, 1440)))
-        );
+        // CLEANROOM ET25
+        let primary = fixture_desc().display;
+        let mut secondary = DisplayDesc::new(203, 1800, -71, 2192, 0, 2.0);
+        secondary.identity.uuid = Some("physical-secondary".into());
+        let mut actor = make_actor(EngineState::default());
+        actor.apply_display_report(primary.clone(), vec![primary.clone(), secondary.clone()]).unwrap();
+        assert_eq!(actor.state.snapshot().displays.iter().map(|e| e.desc.display_id).collect::<Vec<_>>(), vec![87]);
+        secondary.height = 1232;
+        actor.apply_display_report(primary.clone(), vec![primary, secondary.clone()]).unwrap();
+        let entries = actor.state.snapshot().displays;
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].desc, secondary);
+        assert!(entries.iter().all(|e| e.handle.is_none()));
     }
 
     #[test]
     fn display_record_blank_when_active_without_assignment() {
-        let record = DisplayRuntimeRecord {
-            model: DisplayRecord {
-                key: DisplayKey::Primary,
-                live_display: Some(crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0)),
-                assignment: None,
-                window_active: true,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
-            },
-            handle: None,
-            runtime: None,
-            last_runtime_state: None,
-        };
-
+        // CLEANROOM ET26
+        let mut record = fixture_record(Some(&fixture_desc()), true);
+        record.assignment = None;
         assert!(!record.should_have_runtime());
+        assert!(record.scene_desc().unwrap().is_none());
+        let state = EngineState::with_display_model(DisplayStateModel { records: vec![record] });
+        assert_eq!(state.snapshot().displays.len(), 1);
+        assert!(state.snapshot().displays[0].window_active);
+        assert!(state.snapshot().displays[0].handle.is_none());
     }
 
     #[test]
     fn display_record_needs_runtime_when_active_connected_and_assigned() {
-        let template = crate::project::SceneTemplate::builder("/tmp/project.json")
-            .build()
-            .unwrap();
-        let record = DisplayRuntimeRecord {
-            model: DisplayRecord {
-                key: DisplayKey::Primary,
-                live_display: Some(crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0)),
-                assignment: Some(crate::WallpaperAssignment::Direct(template)),
-                window_active: true,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
-            },
-            handle: None,
-            runtime: None,
-            last_runtime_state: None,
-        };
-
+        // CLEANROOM ET27
+        let record = fixture_record(Some(&fixture_desc()), true);
         assert!(record.should_have_runtime());
+        for gate in 0..3 {
+            let mut missing = record.clone();
+            match gate { 0 => missing.assignment = None, 1 => missing.window_active = false, _ => missing.live_display = None }
+            assert!(!missing.should_have_runtime(), "gate {gate}");
+        }
+        let mut already_open = record;
+        already_open.window_active = false;
+        already_open.runtime_open = true;
+        assert!(already_open.should_have_runtime());
     }
 
     #[test]
     fn display_record_needs_runtime_for_connected_mirror_assignment() {
-        let record = DisplayRuntimeRecord {
-            model: DisplayRecord {
-                key: DisplayKey::LiveDisplayId(2),
-                live_display: Some(crate::DisplayDesc::new(2, 1920, 0, 1920, 1080, 1.0)),
-                assignment: Some(crate::WallpaperAssignment::Mirror(
-                    crate::DisplaySelector::Primary,
-                )),
-                window_active: true,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
-            },
-            handle: None,
-            runtime: None,
-            last_runtime_state: None,
-        };
-
-        assert!(record.should_have_runtime());
+        // CLEANROOM ET28
+        let source = fixture_record(Some(&fixture_desc()), true);
+        let mut mirror = source.clone();
+        mirror.key = DisplayKey::LiveDisplayId(126);
+        mirror.live_display.as_mut().unwrap().display_id = 126;
+        mirror.assignment = Some(WallpaperAssignment::Mirror(DisplaySelector::Primary));
+        assert!(mirror.should_have_runtime());
+        let model = DisplayStateModel { records: vec![source, mirror.clone()] };
+        let resolved = model.resolved_assignment(&mirror.key).unwrap();
+        let Some(WallpaperAssignment::Direct(template)) = resolved else { panic!("resolvable mirror") };
+        assert_eq!(template.for_display(mirror.live_display.unwrap()).display.display_id, 126);
     }
 
     #[test]
     fn mirror_mouse_update_uses_source_display_geometry() {
-        let source = DisplaySnapshotEntry {
-            identity: crate::DisplayIdentity::default(),
-            desc: crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            handle: Some(crate::project::SceneHandle::new(1)),
-            accepts_pointer_input: true,
-            paused: false,
-            window_active: true,
-            assignment: Some(crate::WallpaperAssignment::Direct(
-                crate::project::SceneTemplate::builder("/tmp/project.json")
-                    .build()
-                    .expect("source template should build"),
-            )),
-        };
-        let mirror = DisplaySnapshotEntry {
-            identity: crate::DisplayIdentity::default(),
-            desc: crate::DisplayDesc::new(2, 1920, 0, 1920, 1080, 1.0),
-            handle: Some(crate::project::SceneHandle::new(2)),
-            accepts_pointer_input: true,
-            paused: false,
-            window_active: true,
-            assignment: Some(crate::WallpaperAssignment::Mirror(
-                crate::DisplaySelector::Primary,
-            )),
-        };
-        let state = MousePollState {
-            point: NSPoint::new(960.0, 540.0),
-            buttons: MouseButtonEdges::from_masks(1, 1, 0),
-        };
-        let snapshot = vec![source, mirror];
-        let snapshot = DisplaySnapshot { entries: &snapshot };
-
-        let update = snapshot.mouse_update_for_entry(state, &snapshot.entries[1]);
-
-        assert!(update.entered);
-        assert_eq!(
-            update.position,
-            Some(
-                NormalizedMousePosition::from_window_point(960.0, 540.0, 1920.0, 1080.0)
-                    .expect("source point should normalize")
-            )
-        );
-        assert_eq!(
-            update.buttons.transitions().collect::<Vec<_>>(),
-            vec![MouseButtonState {
-                button: 0,
-                pressed: true,
-            }]
-        );
+        // CLEANROOM ET29
+        let source = snapshot_entry(fixture_desc().display, None);
+        let mirror = snapshot_entry(DisplayDesc::new(126, 1800, -71, 1872, 1248, 2.0), Some(WallpaperAssignment::Mirror(DisplaySelector::Primary)));
+        let entries = [source, mirror];
+        let result = DisplaySnapshot { entries: &entries }.mouse_update_for_entry(pointer_sample(-145.0, 577.0, 1 << 5, 1 << 5, 0), &entries[1]);
+        assert!(result.entered);
+        assert_eq!(result.position, Some(NormalizedMousePosition { x: 0.375, y: 0.375 }));
+        assert_eq!(result.buttons.transitions().map(|b| (b.button, b.pressed)).collect::<Vec<_>>(), vec![(5, true)]);
     }
 
     #[test]
     fn mirror_mouse_update_uses_mirror_display_geometry_for_local_cursor() {
-        let source = DisplaySnapshotEntry {
-            identity: crate::DisplayIdentity::default(),
-            desc: crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            handle: Some(crate::project::SceneHandle::new(1)),
-            accepts_pointer_input: true,
-            paused: false,
-            window_active: true,
-            assignment: Some(crate::WallpaperAssignment::Direct(
-                crate::project::SceneTemplate::builder("/tmp/project.json")
-                    .build()
-                    .expect("source template should build"),
-            )),
-        };
-        let mirror = DisplaySnapshotEntry {
-            identity: crate::DisplayIdentity::default(),
-            desc: crate::DisplayDesc::new(2, 1920, 0, 2560, 1440, 1.0),
-            handle: Some(crate::project::SceneHandle::new(2)),
-            accepts_pointer_input: true,
-            paused: false,
-            window_active: true,
-            assignment: Some(crate::WallpaperAssignment::Mirror(
-                crate::DisplaySelector::Primary,
-            )),
-        };
-        let state = MousePollState {
-            point: NSPoint::new(2560.0, 360.0),
-            buttons: MouseButtonEdges::from_masks(1, 1, 0),
-        };
-        let snapshot = vec![source, mirror];
-        let snapshot = DisplaySnapshot { entries: &snapshot };
-
-        let update = snapshot.mouse_update_for_entry(state, &snapshot.entries[1]);
-
-        assert!(update.entered);
-        assert_eq!(
-            update.position,
-            Some(
-                NormalizedMousePosition::from_window_point(640.0, 360.0, 2560.0, 1440.0)
-                    .expect("mirror point should normalize")
-            )
-        );
-        assert_eq!(
-            update.buttons.transitions().collect::<Vec<_>>(),
-            vec![MouseButtonState {
-                button: 0,
-                pressed: true,
-            }]
-        );
+        // CLEANROOM ET30
+        let entries = [snapshot_entry(fixture_desc().display, None), snapshot_entry(DisplayDesc::new(126, 1800, -71, 1872, 1248, 2.0), Some(WallpaperAssignment::Mirror(DisplaySelector::Primary)))];
+        let result = DisplaySnapshot { entries: &entries }.mouse_update_for_entry(pointer_sample(2034.0, 397.0, 0, 0, 0), &entries[1]);
+        assert!(result.entered);
+        assert_eq!(result.position, Some(NormalizedMousePosition { x: 0.25, y: 0.25 }));
     }
 
     #[test]
     fn mirror_mouse_update_resolves_source_display_through_mirror_chain() {
-        let source = DisplaySnapshotEntry {
-            identity: crate::DisplayIdentity::default(),
-            desc: crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            handle: Some(crate::project::SceneHandle::new(1)),
-            accepts_pointer_input: true,
-            paused: false,
-            window_active: true,
-            assignment: Some(crate::WallpaperAssignment::Direct(
-                crate::project::SceneTemplate::builder("/tmp/project.json")
-                    .build()
-                    .expect("source template should build"),
-            )),
-        };
-        let intermediate = DisplaySnapshotEntry {
-            identity: crate::DisplayIdentity::default(),
-            desc: crate::DisplayDesc::new(2, 1920, 0, 1920, 1080, 1.0),
-            handle: Some(crate::project::SceneHandle::new(2)),
-            accepts_pointer_input: true,
-            paused: false,
-            window_active: true,
-            assignment: Some(crate::WallpaperAssignment::Mirror(
-                crate::DisplaySelector::Primary,
-            )),
-        };
-        let final_mirror = DisplaySnapshotEntry {
-            identity: crate::DisplayIdentity::default(),
-            desc: crate::DisplayDesc::new(3, 3840, 0, 1920, 1080, 1.0),
-            handle: Some(crate::project::SceneHandle::new(3)),
-            accepts_pointer_input: true,
-            paused: false,
-            window_active: true,
-            assignment: Some(crate::WallpaperAssignment::Mirror(
-                crate::DisplaySelector::LiveDisplayId(2),
-            )),
-        };
-        let state = MousePollState {
-            point: NSPoint::new(960.0, 540.0),
-            buttons: MouseButtonEdges::from_masks(1, 1, 0),
-        };
-        let snapshot = vec![source, intermediate, final_mirror];
-        let snapshot = DisplaySnapshot { entries: &snapshot };
-
-        let update = snapshot.mouse_update_for_entry(state, &snapshot.entries[2]);
-
-        assert!(update.entered);
-        assert_eq!(
-            update.position,
-            Some(
-                NormalizedMousePosition::from_window_point(960.0, 540.0, 1920.0, 1080.0)
-                    .expect("source point should normalize")
-            )
-        );
-        assert_eq!(
-            update.buttons.transitions().collect::<Vec<_>>(),
-            vec![MouseButtonState {
-                button: 0,
-                pressed: true,
-            }]
-        );
+        // CLEANROOM ET31
+        let mut source = fixture_desc().display;
+        source.identity.uuid = Some("source-orchid".into());
+        for selector in [DisplaySelector::Primary, DisplaySelector::LiveDisplayId(87), DisplaySelector::Identity(source.identity.clone())] {
+            let mut entries = vec![snapshot_entry(source.clone(), None), snapshot_entry(DisplayDesc::new(126, 1800, 0, 1872, 1248, 2.0), Some(WallpaperAssignment::Mirror(selector))), snapshot_entry(DisplayDesc::new(203, 3000, 0, 1600, 900, 1.0), Some(WallpaperAssignment::Mirror(DisplaySelector::LiveDisplayId(126))))];
+            let sample = pointer_sample(-145.0, 577.0, 0, 0, 0);
+            let result = DisplaySnapshot { entries: &entries }.mouse_update_for_entry(sample, &entries[2]);
+            assert_eq!(result.position, Some(NormalizedMousePosition { x: 0.375, y: 0.375 }));
+            for bad in [DisplaySelector::LiveDisplayId(203), DisplaySelector::LiveDisplayId(900)] {
+                entries[1].assignment = Some(WallpaperAssignment::Mirror(bad));
+                let result = DisplaySnapshot { entries: &entries }.mouse_update_for_entry(sample, &entries[2]);
+                assert!(!result.entered);
+                assert!(result.position.is_none());
+            }
+        }
     }
 
     #[test]
     fn display_record_scene_desc_converts_direct_assignment() {
-        let template = crate::project::SceneTemplate::builder("/tmp/project.json")
-            .assets_path("/tmp/assets")
-            .fps(30)
-            .build()
-            .unwrap();
-        let display = crate::DisplayDesc::new(3, 0, 0, 1280, 720, 1.0);
-        let record = DisplayRuntimeRecord {
-            model: DisplayRecord {
-                key: DisplayKey::LiveDisplayId(3),
-                live_display: Some(display.clone()),
-                assignment: Some(crate::WallpaperAssignment::Direct(template)),
-                window_active: true,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
-            },
-            handle: None,
-            runtime: None,
-            last_runtime_state: None,
-        };
-
-        let desc = record
-            .scene_desc()
-            .expect("direct scene should convert")
-            .expect("direct assignment should produce a scene");
-
-        assert_eq!(desc.display, display);
-        assert_eq!(desc.scene_path, "/tmp/project.json");
-        assert_eq!(desc.assets_path, "/tmp/assets");
-        assert_eq!(desc.fps, 30);
+        // CLEANROOM ET32
+        let mut desc = fixture_desc();
+        desc.display.display_id = 126;
+        desc.framing = SceneFraming { pan_x: 0.37, pan_y: 0.64 };
+        desc.scaling_mode = ScalingMode::Stretch;
+        desc.scaling_factor = 1.65;
+        let record = fixture_record(Some(&desc), true);
+        assert_eq!(record.scene_desc().unwrap(), Some(desc));
     }
 
     #[test]
     fn display_record_scene_desc_returns_none_when_disconnected() {
-        let template = crate::project::SceneTemplate::builder("/tmp/project.json")
-            .build()
-            .unwrap();
-        let record = DisplayRuntimeRecord {
-            model: DisplayRecord {
-                key: DisplayKey::LiveDisplayId(4),
-                live_display: None,
-                assignment: Some(crate::WallpaperAssignment::Direct(template)),
-                window_active: true,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
-            },
-            handle: None,
-            runtime: None,
-            last_runtime_state: None,
-        };
-
+        // CLEANROOM ET33
+        let mut record = fixture_record(Some(&fixture_desc()), true);
+        record.live_display = None;
+        record.key = DisplayKey::Identity(DisplayIdentity { uuid: Some("future-amber-57".into()), ..Default::default() });
+        assert!(record.assignment.is_some());
         assert!(record.scene_desc().unwrap().is_none());
     }
 
     #[test]
     fn display_record_scene_desc_errors_for_unresolved_mirror() {
-        let record = DisplayRuntimeRecord {
-            model: DisplayRecord {
-                key: DisplayKey::LiveDisplayId(5),
-                live_display: Some(crate::DisplayDesc::new(5, 0, 1080, 1920, 1080, 1.0)),
-                assignment: Some(crate::WallpaperAssignment::Mirror(
-                    crate::DisplaySelector::Primary,
-                )),
-                window_active: true,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
-            },
-            handle: None,
-            runtime: None,
-            last_runtime_state: None,
-        };
-
-        let error = record
-            .scene_desc()
-            .expect_err("unresolved mirror should error");
-        match error {
-            EngineError::Platform(message) => assert_eq!(
-                message,
-                "mirror assignments must be resolved before runtime creation"
-            ),
-            other => panic!("expected platform error, got {other:?}"),
-        }
+        // CLEANROOM ET34
+        let mut record = fixture_record(Some(&fixture_desc()), true);
+        record.assignment = Some(WallpaperAssignment::Mirror(DisplaySelector::Identity(DisplayIdentity { uuid: Some("absent-orchid".into()), ..Default::default() })));
+        assert!(matches!(record.scene_desc(), Err(EngineError::Platform(_))));
+        record.live_display = None;
+        assert!(record.scene_desc().unwrap().is_none());
     }
 
     #[test]
     fn display_snapshot_returns_entries_for_configured_displays() {
-        let primary_identity = crate::DisplayIdentity {
-            uuid: Some("primary".to_string()),
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: Some(3),
-            unit_number: Some(4),
-            name: None,
-        };
-        let external_identity = crate::DisplayIdentity {
-            uuid: Some("external".to_string()),
-            vendor_id: Some(5),
-            model_id: Some(6),
-            serial_number: Some(7),
-            unit_number: Some(8),
-            name: None,
-        };
-        let disconnected_identity = crate::DisplayIdentity {
-            uuid: Some("disconnected".to_string()),
-            vendor_id: Some(9),
-            model_id: Some(10),
-            serial_number: Some(11),
-            unit_number: Some(12),
-            name: None,
-        };
-        let primary_display =
-            crate::DisplayDesc::with_identity(1, primary_identity.clone(), 0, 0, 1920, 1080, 1.0);
-        let external_display = crate::DisplayDesc::with_identity(
-            2,
-            external_identity.clone(),
-            1920,
-            0,
-            1920,
-            1080,
-            1.0,
-        );
-        let primary_assignment = WallpaperAssignment::Direct(
-            crate::project::SceneTemplate::builder("/tmp/primary.json")
-                .build()
-                .unwrap(),
-        );
-        let engine = engine_with_display_records(vec![
-            DisplayRecord {
-                key: DisplayKey::Primary,
-                live_display: Some(primary_display.clone()),
-                assignment: Some(primary_assignment.clone()),
-                window_active: true,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
-            },
-            DisplayRecord {
-                key: DisplayKey::Identity(external_identity.clone()),
-                live_display: Some(external_display.clone()),
-                assignment: None,
-                window_active: false,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
-            },
-            DisplayRecord {
-                key: DisplayKey::Identity(disconnected_identity),
-                live_display: None,
-                assignment: Some(WallpaperAssignment::Mirror(DisplaySelector::Primary)),
-                window_active: true,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
-            },
-        ]);
-
-        let snapshot = engine.display_snapshot();
-
-        assert_eq!(snapshot.len(), 2);
-        let primary_entry = snapshot
-            .iter()
-            .find(|entry| entry.identity == primary_identity)
-            .expect("primary entry should be included");
-        assert_eq!(primary_entry.desc, primary_display);
-        assert_eq!(primary_entry.identity, primary_entry.desc.identity);
-        assert!(primary_entry.handle.is_none());
-        assert!(primary_entry.window_active);
-        assert_eq!(primary_entry.assignment, Some(primary_assignment));
-
-        let external_entry = snapshot
-            .iter()
-            .find(|entry| entry.identity == external_identity)
-            .expect("external entry should be included");
-        assert_eq!(external_entry.desc, external_display);
-        assert_eq!(external_entry.identity, external_entry.desc.identity);
-        assert!(external_entry.handle.is_none());
-        assert!(!external_entry.window_active);
-        assert!(external_entry.assignment.is_none());
-        assert!(
-            snapshot
-                .iter()
-                .all(|entry| entry.desc.display_id == 1 || entry.desc.display_id == 2)
-        );
+        // CLEANROOM ET35
+        let desc = fixture_desc();
+        let mut other = fixture_record(Some(&desc), false);
+        other.key = DisplayKey::LiveDisplayId(126);
+        other.live_display.as_mut().unwrap().display_id = 126;
+        other.assignment = Some(WallpaperAssignment::Mirror(DisplaySelector::Primary));
+        let mut third = fixture_record(Some(&desc), true);
+        third.key = DisplayKey::LiveDisplayId(203);
+        third.live_display.as_mut().unwrap().display_id = 203;
+        third.assignment = None;
+        let mut future = fixture_record(None, true);
+        future.key = DisplayKey::Identity(DisplayIdentity { uuid: Some("future-amber-57".into()), ..Default::default() });
+        let records = vec![fixture_record(Some(&desc), true), other, third, future];
+        let state = EngineState::with_display_model(DisplayStateModel { records: records.clone() });
+        let entries = state.snapshot().displays;
+        assert_eq!(entries.len(), 3);
+        for (entry, record) in entries.iter().zip(&records) {
+            assert_eq!(Some(&entry.desc), record.live_display.as_ref());
+            assert_eq!(entry.identity, entry.desc.identity);
+            assert_eq!(entry.window_active, record.window_active);
+            assert_eq!(entry.assignment, record.assignment);
+            assert!(entry.handle.is_none());
+            assert!(!entry.paused && !entry.accepts_pointer_input);
+        }
     }
 
     #[test]
-    fn normalized_mouse_for_display_maps_appkit_global_point_to_owe_coordinates() {
-        let display = crate::DisplayDesc::new(7, 1920, 120, 3840, 2160, 2.0);
-        let lower_point = NSPoint::new(2160.0, 390.0);
-
-        let lower_position = normalized_mouse_for_display(lower_point, &display)
-            .expect("point should be inside display");
-
-        assert_eq!(
-            lower_position,
-            NormalizedMousePosition { x: 0.125, y: 0.75 }
-        );
-
-        let higher_point = NSPoint::new(2160.0, 930.0);
-        let higher_position = normalized_mouse_for_display(higher_point, &display)
-            .expect("point should be inside display");
-
-        assert_eq!(
-            higher_position,
-            NormalizedMousePosition { x: 0.125, y: 0.25 }
-        );
+    fn display_plane_maps_appkit_global_point_to_owe_coordinates() {
+        // CLEANROOM ET36
+        let plane = DisplayPlane::of(&fixture_desc().display);
+        for (x, y, expected) in [(-145.0, 577.0, (0.375, 0.375)), (-613.0, 137.0, (0.0, 1.0)), (11.0, 489.0, (0.5, 0.5))] {
+            assert_eq!(plane.scene_position(NSPoint::new(x, y)), Some(NormalizedMousePosition { x: expected.0, y: expected.1 }));
+        }
     }
 
     #[test]
-    fn normalized_mouse_for_display_rejects_points_outside_display() {
-        let display = crate::DisplayDesc::new(7, 1920, 120, 3840, 2160, 2.0);
-
-        assert_eq!(
-            normalized_mouse_for_display(NSPoint::new(1919.0, 390.0), &display),
-            None
-        );
-        assert_eq!(
-            normalized_mouse_for_display(NSPoint::new(2160.0, 1200.0), &display),
-            None
-        );
+    fn display_plane_rejects_points_outside_display() {
+        // CLEANROOM ET37
+        let desc = fixture_desc().display;
+        let plane = DisplayPlane::of(&desc);
+        assert!(plane.contains(NSPoint::new(-613.0, 137.0)));
+        for (x, y) in [(635.0, 577.0), (-145.0, 841.0), (-614.0, 577.0), (-145.0, 136.0), (f64::NAN, 577.0), (-145.0, f64::INFINITY)] {
+            assert!(!plane.contains(NSPoint::new(x, y)));
+            assert!(plane.scene_position(NSPoint::new(x, y)).is_none());
+        }
+        for (width, height, scale) in [(0, 1408, 2.0), (2496, 0, 2.0), (2496, 1408, f64::INFINITY)] {
+            let mut invalid = desc.clone();
+            invalid.width = width;
+            invalid.height = height;
+            invalid.scale_factor = scale;
+            assert!(DisplayPlane::of(&invalid).scene_position(NSPoint::new(-145.0, 577.0)).is_none());
+        }
     }
 
     #[test]
-    fn mouse_update_for_display_releases_buttons_after_cursor_leaves_display() {
-        let display = crate::DisplayDesc::new(7, 0, 0, 1920, 1080, 1.0);
-        let state = MousePollState {
-            point: NSPoint::new(1921.0, 540.0),
-            buttons: MouseButtonEdges::from_level_state(MouseButtons::default()),
-        };
-
-        let update = mouse_update_for_display(state, &display);
-
-        assert_eq!(
-            update,
-            MouseDisplayUpdate {
-                entered: false,
-                position: None,
-                buttons: MouseButtonEdges::from_level_state(MouseButtons::default()),
-            }
-        );
+    fn display_plane_read_releases_buttons_after_cursor_leaves_display() {
+        // CLEANROOM ET38
+        let plane = DisplayPlane::of(&fixture_desc().display);
+        assert_eq!(plane.read(pointer_sample(-145.0, 577.0, 1 << 5, 0, 0)).buttons.down().mask(), 1 << 5);
+        for (down, pressed, released) in [(1 << 5, 0, 0), (1 << 5, 1 << 5, 0), (0, 1 << 5, 1 << 5)] {
+            let outside = plane.read(pointer_sample(636.0, 577.0, down, pressed, released));
+            assert!(!outside.entered);
+            assert!(outside.position.is_none());
+            assert_eq!(outside.buttons.down().mask(), 0);
+            assert_eq!(outside.buttons.transitions().count(), 0);
+        }
     }
 
     #[test]
-    fn mouse_update_for_display_preserves_tap_transitions_inside_display() {
-        let display = crate::DisplayDesc::new(7, 0, 0, 1920, 1080, 1.0);
-        let state = MousePollState {
-            point: NSPoint::new(960.0, 540.0),
-            buttons: MouseButtonEdges::from_masks(0, 1, 1),
-        };
-
-        let update = mouse_update_for_display(state, &display);
-        let states = update.buttons.states();
-
-        assert!(update.entered);
-        assert_eq!(
-            update.position,
-            Some(NormalizedMousePosition { x: 0.5, y: 0.5 })
-        );
-        assert_eq!(states[0].button, 0);
-        assert!(states[0].pressed);
-        assert_eq!(states[1].button, 0);
-        assert!(!states[1].pressed);
+    fn display_plane_read_preserves_tap_transitions_inside_display() {
+        // CLEANROOM ET39
+        let plane = DisplayPlane::of(&fixture_desc().display);
+        let result = plane.read(pointer_sample(-145.0, 577.0, 0, (1 << 5) | (1 << 11), (1 << 5) | (1 << 11)));
+        assert!(result.entered);
+        assert_eq!(result.buttons.down().mask(), 0);
+        assert_eq!(result.buttons.transitions().map(|b| (b.button, b.pressed)).collect::<Vec<_>>(), vec![(5, true), (5, false), (11, true), (11, false)]);
     }
 
     #[test]
-    fn mouse_update_for_display_does_not_forward_held_level_state_as_press() {
-        let display = crate::DisplayDesc::new(7, 0, 0, 1920, 1080, 1.0);
-        let state = MousePollState {
-            point: NSPoint::new(960.0, 540.0),
-            buttons: MouseButtonEdges::from_masks(1, 0, 0),
-        };
-
-        let update = mouse_update_for_display(state, &display);
-
-        assert!(update.entered);
-        assert!(update.buttons.transitions().next().is_none());
-        assert_eq!(
-            update.buttons.states()[0],
-            MouseButtonState {
-                button: 0,
-                pressed: true,
-            }
-        );
+    fn display_plane_read_does_not_forward_held_level_state_as_press() {
+        // CLEANROOM ET40
+        let plane = DisplayPlane::of(&fixture_desc().display);
+        let held = plane.read(pointer_sample(-145.0, 577.0, 1 << 9, 0, 0));
+        assert_eq!(held.buttons.pre_transition_down_mask(), 1 << 9);
+        assert_eq!(held.buttons.transitions().count(), 0);
+        let released = plane.read(pointer_sample(-145.0, 577.0, 0, 0, 1 << 9));
+        assert_eq!(released.buttons.transitions().map(|b| (b.button, b.pressed)).collect::<Vec<_>>(), vec![(9, false)]);
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn set_fps_returns_err_for_unknown_handle() {
-        let engine = engine_with_display_records(Vec::new());
-
-        let err = engine
-            .set_fps(SceneHandle::new(u64::MAX), 60)
-            .await
-            .expect_err("unknown handle should fail");
-        assert!(matches!(
-            err,
-            EngineError::InvalidInput(_) | EngineError::Platform(_)
-        ));
+        // CLEANROOM ET41
+        let engine = cleanroom_et1(Vec::new());
+        let error = engine.set_fps(SceneHandle::new(7401), 53).await.unwrap_err();
+        assert!(matches!(error, EngineError::InvalidInput(text) if text.contains("unknown scene handle") && text.contains("7401")));
+        let error = engine.set_fps(SceneHandle::new(7401), 0).await.unwrap_err();
+        assert!(matches!(error, EngineError::InvalidInput(text) if text == "fps must be greater than zero"));
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn set_framing_refuses_a_position_off_the_display_before_asking_the_actor() {
-        let engine = engine_with_display_records(Vec::new());
+        let engine = cleanroom_et1(Vec::new());
         let handle = SceneHandle::new(u64::MAX);
 
         for (pan_x, pan_y) in [
@@ -2789,7 +1922,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn set_framing_forwards_a_valid_position_to_the_actor() {
-        let engine = engine_with_display_records(Vec::new());
+        let engine = cleanroom_et1(Vec::new());
 
         for framing in [
             SceneFraming::default(),
@@ -2812,7 +1945,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn preview_framing_refuses_a_position_off_the_display_before_asking_the_actor() {
-        let engine = engine_with_display_records(Vec::new());
+        let engine = cleanroom_et1(Vec::new());
         let handle = SceneHandle::new(u64::MAX);
 
         for (pan_x, pan_y) in [
@@ -2839,7 +1972,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn preview_framing_forwards_a_valid_position_to_the_actor() {
-        let engine = engine_with_display_records(Vec::new());
+        let engine = cleanroom_et1(Vec::new());
 
         for framing in [
             SceneFraming::default(),
@@ -2887,7 +2020,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn preview_property_override_refuses_a_document_that_is_not_an_object_before_asking_the_actor(
     ) {
-        let engine = engine_with_display_records(Vec::new());
+        let engine = cleanroom_et1(Vec::new());
         let handle = SceneHandle::new(u64::MAX);
 
         for document in [
@@ -2933,7 +2066,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn preview_property_override_flattens_nested_documents_and_forwards_a_valid_one_to_the_actor(
     ) {
-        let engine = engine_with_display_records(Vec::new());
+        let engine = cleanroom_et1(Vec::new());
 
         for document in [
             "{}",
@@ -2958,50 +2091,97 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn set_paused_returns_err_for_unknown_handle() {
-        let engine = engine_with_display_records(Vec::new());
-
-        let err = engine
-            .set_paused(SceneHandle::new(u64::MAX), true)
-            .await
-            .expect_err("unknown handle should fail");
-        assert!(matches!(
-            err,
-            EngineError::InvalidInput(_) | EngineError::Platform(_)
-        ));
+        // CLEANROOM ET42
+        let engine = cleanroom_et1(Vec::new());
+        let error = engine.set_paused(SceneHandle::new(7403), true).await.unwrap_err();
+        assert!(matches!(error, EngineError::InvalidInput(text) if text.contains("unknown scene handle") && text.contains("7403")));
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn set_all_paused_allows_empty_runtime_set() {
-        let engine = engine_with_display_records(Vec::new());
+        // CLEANROOM ET43
+        let mut actor = make_actor(EngineState::default());
+        actor.set_all_paused(true, &[]).unwrap();
+        use kameo::actor::Spawn;
+        let desc = fixture_desc();
+        actor.state.display_records[0].model = fixture_record(Some(&desc), true);
+        let handle = actor.state.reserve_handle_for_key(DisplayKey::Primary);
+        let prepared = EngineActor::prepare();
+        actor.state.display_records[0].handle = Some(handle);
+        actor.state.display_records[0].runtime = Some(SceneRuntime::windowless_for_test(handle, &desc, &SceneRuntimeState::try_from(&desc).unwrap(), prepared.actor_ref().downgrade()).unwrap());
+        actor.close_all_scenes().unwrap();
+        actor.set_all_paused(false, &[]).unwrap();
+        assert!(actor.state.handles_by_display.is_empty());
+        assert!(actor.state.display_records.iter().all(|r| r.runtime.is_none() && r.handle.is_none()));
+    }
 
-        engine
-            .set_all_paused(true, Vec::new())
-            .await
-            .expect("empty runtime set should be a no-op");
+    #[tokio::test(flavor = "current_thread")]
+    async fn set_all_paused_skips_preserved_handles_without_runtime() {
+        // CLEANROOM ET44
+        use kameo::actor::Spawn;
+        let desc = fixture_desc();
+        let mut actor = make_actor(EngineState::with_display_model(DisplayStateModel { records: vec![fixture_record(Some(&desc), true)] }));
+        let handle = actor.state.reserve_handle_for_key(DisplayKey::Primary);
+        let prepared = EngineActor::prepare();
+        actor.state.display_records[0].handle = Some(handle);
+        actor.state.display_records[0].runtime = Some(SceneRuntime::windowless_for_test(handle, &desc, &SceneRuntimeState::try_from(&desc).unwrap(), prepared.actor_ref().downgrade()).unwrap());
+        actor.destroy_window_for(DisplaySelector::Primary).unwrap();
+        assert!(actor.state.display_records[0].last_runtime_state.is_some());
+        actor.set_all_paused(true, &[]).unwrap();
+        actor.set_all_paused(false, &[87]).unwrap();
+        assert_eq!(actor.state.display_records[0].handle, Some(handle));
+        let entry = &actor.state.snapshot().displays[0];
+        assert!(entry.handle.is_none());
+        assert!(!entry.paused && !entry.accepts_pointer_input);
+        assert!(matches!(actor.state.scene_mut(handle), Err(EngineError::InvalidInput(text)) if text.contains("is not active")));
     }
 
     #[test]
-    fn set_all_paused_skips_preserved_handles_without_runtime() {
-        let mut state = EngineState::with_display_model(
-            DisplayStateModel::from_config(crate::WallpaperEngineConfig::default()).unwrap(),
-        );
-        let key = DisplayKey::Primary;
-        let handle = state.reserve_handle_for_key(key.clone());
-        let record = state
-            .display_records
-            .iter_mut()
-            .find(|record| record.model.key == key)
-            .expect("primary record should exist");
-        record.handle = Some(handle);
-        record.runtime = None;
-        record.model.runtime_open = false;
+    fn a_first_frame_callback_installed_later_reaches_the_closure_a_renderer_holds() {
+        let cell = FirstFrameCallbackCell::default();
+        let held = cell.callback();
+        held(SceneHandle::new(1));
 
-        let snapshots = Arc::new(EngineSnapshotPublisher::new(state.snapshot(), Arc::new(Mutex::new(MouseButtonTracker::new()))));
-        let prepared = <EngineActor as kameo::actor::Spawn>::prepare();
-        let mut actor = EngineActor::new(OweBackend, Arc::new(|_handle| {}), state, snapshots, prepared.actor_ref().downgrade());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&seen);
+        cell.set(Arc::new(move |handle| sink.lock().unwrap().push(handle.raw())));
+        held(SceneHandle::new(7));
+        let sink = Arc::clone(&seen);
+        cell.set(Arc::new(move |handle| sink.lock().unwrap().push(handle.raw() + 100)));
+        held(SceneHandle::new(8));
 
-        actor
-            .set_all_paused(true, &[])
-            .expect("inactive preserved handles should be ignored");
+        assert_eq!(*seen.lock().unwrap(), vec![7, 108]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_bad_argument_is_refused_before_the_engine_thread_is_reached() {
+        let engine = cleanroom_et1(Vec::new());
+        engine.actor.actor().stop_gracefully().await.unwrap();
+        engine.actor.actor().wait_for_shutdown().await;
+        let handle = SceneHandle::new(1);
+
+        let refusals = [
+            engine.set_scaling_factor(handle, 0.0).await,
+            engine.set_scaling_factor(handle, f64::NAN).await,
+            engine.set_scaling_factor(handle, f64::INFINITY).await,
+            engine.set_fps(handle, 0).await,
+            engine.set_render_scale(handle, 0.0).await,
+            engine.set_render_scale(handle, f32::NAN).await,
+            engine.set_render_resolution(handle, 0, 1080).await,
+            engine.set_render_resolution(handle, 1920, 0).await,
+            engine.set_mouse_position(handle, f64::NAN, 0.5).await,
+            engine.set_mouse_position(handle, 0.5, f64::INFINITY).await,
+            engine.set_mouse_button(handle, 32, true).await,
+        ];
+        for refusal in refusals {
+            let error = refusal.expect_err("a bad argument must be refused");
+            assert!(
+                matches!(&error, EngineError::InvalidInput(text) if !text.contains("engine actor")),
+                "{error:?}"
+            );
+        }
+
+        let valid = engine.set_fps(handle, 30).await.expect_err("the engine is stopped");
+        assert!(matches!(&valid, EngineError::Platform(text) if text.contains("engine actor")));
     }
 }

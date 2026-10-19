@@ -77,7 +77,6 @@ fn scene_desc_keeps_override_and_shader_cache_configuration() {
 }
 
 #[test]
-#[should_panic]
 fn scene_desc_rejects_invalid_audio_volume() {
     for volume in [f32::NAN, -0.01, 1.01, f32::INFINITY, f32::NEG_INFINITY] {
         let error = SceneDesc::builder(

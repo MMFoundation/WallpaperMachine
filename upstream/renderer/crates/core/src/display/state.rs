@@ -1,11 +1,15 @@
+// Clean-room implementation from the WallpaperMachine spec r1b-core-display.md; written without access to the original source.
+use std::collections::HashSet;
+
 #[cfg(test)]
-use crate::DisplayConfig;
+use crate::{DisplayConfig, project::SceneTemplate};
 use crate::{
     DisplayDesc, DisplayIdentity, DisplaySelector, EngineError, WallpaperAssignment,
     WallpaperEngineConfig,
-    project::{SceneDesc, SceneDescSliceExt, SceneTemplate},
+    project::{SceneDesc, SceneTemplate as Template},
 };
 
+/// The name of a display slot in the model.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DisplayKey {
     Primary,
@@ -13,6 +17,7 @@ pub enum DisplayKey {
     LiveDisplayId(u32),
 }
 
+/// What the engine must do with the scene of one slot after a model change.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DisplayAction {
     Open(DisplayKey),
@@ -20,6 +25,7 @@ pub enum DisplayAction {
     Rebuild(DisplayKey),
 }
 
+/// One display slot: its key, live display, assignment and flags.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayRecord {
     pub key: DisplayKey,
@@ -31,6 +37,9 @@ pub struct DisplayRecord {
 }
 
 impl DisplayRecord {
+    /// Whether a scene should exist for this slot: its window is active or
+    /// a scene is already open, a display is connected and something is
+    /// assigned (a mirror counts; the engine resolves mirrors first).
     pub fn should_have_runtime(&self) -> bool {
         (self.window_active || self.runtime_open)
             && self.live_display.is_some()
@@ -38,22 +47,42 @@ impl DisplayRecord {
     }
 
     pub fn scene_desc(&self) -> Result<Option<SceneDesc>, EngineError> {
-        let Some(display) = self.live_display.clone() else {
+        let Some(display) = &self.live_display else {
             return Ok(None);
         };
-        match self.assignment.as_ref() {
+        match &self.assignment {
+            None => Ok(None),
             Some(WallpaperAssignment::Direct(template)) => {
                 template.validate()?;
-                Ok(Some(template.for_display(display)))
+                Ok(Some(template.for_display(display.clone())))
             }
             Some(WallpaperAssignment::Mirror(_)) => Err(EngineError::Platform(
                 "mirror assignments must be resolved before runtime creation".to_string(),
             )),
-            None => Ok(None),
         }
+    }
+
+    /// A slot that came into being without any configuration: inactive,
+    /// disconnected and blank.
+    fn blank(key: DisplayKey) -> Self {
+        Self {
+            key,
+            live_display: None,
+            assignment: None,
+            window_active: false,
+            runtime_open: false,
+            primary_inheritance_consumed: false,
+        }
+    }
+
+    /// Whether the slot's wallpaper claims its display for a scene to run
+    /// on it right now (before mirrors are resolved).
+    fn is_claimed(&self) -> bool {
+        self.window_active || self.runtime_open
     }
 }
 
+/// A display transition worth a debug line.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DisplayDebugEvent {
     Connected {
@@ -71,78 +100,71 @@ pub enum DisplayDebugEvent {
     },
 }
 
+/// All display slots, primary first, then in order of creation.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DisplayStateModel {
     pub records: Vec<DisplayRecord>,
 }
 
 impl DisplayKey {
-    /// Returns a debug-friendly label describing this key variant.
     pub fn key_label(&self) -> String {
         match self {
-            DisplayKey::Primary => "primary".to_string(),
-            DisplayKey::Identity(identity) => format!("identity({})", identity.identity_label()),
-            DisplayKey::LiveDisplayId(display_id) => format!("live-display-id({display_id})"),
+            Self::Primary => "the primary slot".to_owned(),
+            Self::Identity(identity) => format!("slot for {}", identity.identity_label()),
+            Self::LiveDisplayId(id) => format!("slot for live display #{id}"),
         }
     }
 
     pub fn from_selector(selector: &DisplaySelector) -> Result<Self, EngineError> {
         match selector {
             DisplaySelector::Primary => Ok(Self::Primary),
-            DisplaySelector::Identity(identity) if !identity.is_empty() => {
-                Ok(Self::Identity(identity.clone()))
+            DisplaySelector::Identity(identity) if identity.is_empty() => {
+                Err(EngineError::InvalidInput(
+                    "display identity selector must not be empty".to_string(),
+                ))
             }
-            DisplaySelector::Identity(_) => Err(EngineError::InvalidInput(
-                "display identity selector must not be empty".to_string(),
-            )),
+            DisplaySelector::Identity(identity) => Ok(Self::Identity(identity.clone())),
             DisplaySelector::LiveDisplayId(0) => Err(EngineError::InvalidInput(
                 "display_id must be non-zero".to_string(),
             )),
-            DisplaySelector::LiveDisplayId(display_id) => Ok(Self::LiveDisplayId(*display_id)),
+            DisplaySelector::LiveDisplayId(id) => Ok(Self::LiveDisplayId(*id)),
         }
     }
 }
 
+fn mirror_cycle_error() -> EngineError {
+    EngineError::InvalidInput("wallpaper mirror cycle detected".to_string())
+}
+
 impl DisplayStateModel {
     pub fn from_config(config: WallpaperEngineConfig) -> Result<Self, EngineError> {
+        // Read every entry first, so a mirror loop spanning two entries is
+        // judged on the complete configuration.
+        let entries = config
+            .displays
+            .into_iter()
+            .map(|entry| {
+                if let Some(WallpaperAssignment::Direct(template)) = &entry.wallpaper {
+                    template.validate()?;
+                }
+                let key = DisplayKey::from_selector(&entry.selector)?;
+                Ok((key, entry.window_active, entry.wallpaper))
+            })
+            .collect::<Result<Vec<_>, EngineError>>()?;
+
         let mut model = Self {
             records: vec![DisplayRecord {
-                key: DisplayKey::Primary,
-                live_display: None,
-                assignment: None,
                 window_active: true,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
+                ..DisplayRecord::blank(DisplayKey::Primary)
             }],
         };
-
-        for display in config.displays {
-            if let Some(WallpaperAssignment::Direct(template)) = display.wallpaper.as_ref() {
-                template.validate()?;
-            }
-            let key = DisplayKey::from_selector(&display.selector)?;
-            let record = model.ensure_record(key);
-            record.window_active = display.window_active;
-            record.assignment = display.wallpaper;
+        for (key, window_active, assignment) in entries {
+            let slot = model.slot_or_insert(key);
+            slot.window_active = window_active;
+            slot.assignment = assignment;
         }
-
-        model.reject_mirror_cycles()?;
+        model.check_mirror_cycles()?;
         Ok(model)
-    }
-
-    fn ensure_record(&mut self, key: DisplayKey) -> &mut DisplayRecord {
-        if let Some(index) = self.records.iter().position(|record| record.key == key) {
-            return &mut self.records[index];
-        }
-        self.records.push(DisplayRecord {
-            key,
-            live_display: None,
-            assignment: None,
-            window_active: false,
-            runtime_open: false,
-            primary_inheritance_consumed: false,
-        });
-        self.records.last_mut().expect("record was just pushed")
     }
 
     pub fn set_assignment(
@@ -154,10 +176,15 @@ impl DisplayStateModel {
             template.validate()?;
         }
         let key = DisplayKey::from_selector(selector)?;
-        let mut candidate = self.clone();
-        candidate.ensure_record(key).assignment = Some(assignment);
-        candidate.reject_mirror_cycles()?;
-        *self = candidate;
+        let slots_before = self.records.len();
+        let index = self.index_or_insert(key);
+        let replaced = self.records[index].assignment.replace(assignment);
+        if let Err(error) = self.check_mirror_cycles() {
+            // Undo: a slot made for this call is the last one.
+            self.records[index].assignment = replaced;
+            self.records.truncate(slots_before);
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -181,36 +208,11 @@ impl DisplayStateModel {
         displays: Vec<DisplayDesc>,
         transitional: &[DisplayDesc],
     ) -> Result<Vec<DisplayAction>, EngineError> {
-        let mut candidate = self.clone();
-        let primary_id = primary.display_id;
-        let primary_assignment_before = candidate
-            .record(&DisplayKey::Primary)
-            .and_then(|record| record.assignment.clone());
-        let connected = candidate.connected_display_keys(primary_id, primary, displays)?;
-
-        for record in &mut candidate.records {
-            record.live_display = None;
-        }
-
-        for (key, display) in connected {
-            let record = candidate.ensure_record(key);
-            record.live_display = Some(display);
-            if record.live_display.as_ref().unwrap().display_id != primary_id
-                && record.assignment.is_none()
-                && !record.primary_inheritance_consumed
-            {
-                record.assignment.clone_from(&primary_assignment_before);
-                record.primary_inheritance_consumed = true;
-            }
-        }
-
-        candidate.keep_descriptors_of_transitional_displays(self, transitional);
-        candidate.reject_mirror_cycles()?;
-        candidate.transfer_runtime_open_flags_from(self);
-        let actions = candidate.plan_actions()?;
-        candidate.log_debug_transition(self);
-        *self = candidate;
-        Ok(actions)
+        let target = self.model_after_report(&primary, displays, transitional)?;
+        let plan = target.scene_plan()?;
+        target.log_debug_transition(self);
+        *self = target;
+        Ok(plan)
     }
 
     pub fn set_window_active(
@@ -219,8 +221,11 @@ impl DisplayStateModel {
         active: bool,
     ) -> Result<Vec<DisplayAction>, EngineError> {
         let key = DisplayKey::from_selector(selector)?;
-        self.ensure_record(key).window_active = active;
-        self.plan_actions()
+        let mut next = self.clone();
+        next.slot_or_insert(key).window_active = active;
+        let actions = next.scene_plan()?;
+        *self = next;
+        Ok(actions)
     }
 
     pub fn destroy_window(
@@ -228,352 +233,91 @@ impl DisplayStateModel {
         selector: &DisplaySelector,
     ) -> Result<Vec<DisplayAction>, EngineError> {
         let key = DisplayKey::from_selector(selector)?;
-        let record = self.ensure_record(key.clone());
-        let was_open = record.runtime_open;
-        record.window_active = false;
-        record.runtime_open = false;
-        if was_open {
-            Ok(vec![DisplayAction::Close(key)])
-        } else {
-            Ok(Vec::new())
-        }
+        let slot = self.slot_or_insert(key.clone());
+        slot.window_active = false;
+        let had_scene = std::mem::take(&mut slot.runtime_open);
+        Ok(had_scene
+            .then_some(DisplayAction::Close(key))
+            .into_iter()
+            .collect())
     }
 
     pub fn resolved_assignment(
         &self,
         key: &DisplayKey,
     ) -> Result<Option<WallpaperAssignment>, EngineError> {
-        self.resolve_assignment_inner(key, &mut Vec::new())
-    }
-
-    fn resolve_assignment_inner(
-        &self,
-        key: &DisplayKey,
-        stack: &mut Vec<DisplayKey>,
-    ) -> Result<Option<WallpaperAssignment>, EngineError> {
-        if stack.contains(key) {
-            return Err(EngineError::InvalidInput(
-                "wallpaper mirror cycle detected".to_string(),
-            ));
-        }
-        stack.push(key.clone());
-        let result = match self
-            .record(key)
-            .and_then(|record| record.assignment.as_ref())
-        {
-            Some(WallpaperAssignment::Direct(template)) => {
-                Some(WallpaperAssignment::Direct(template.clone()))
-            }
-            Some(WallpaperAssignment::Mirror(selector)) => {
-                let source = DisplayKey::from_selector(selector)?;
-                self.resolve_assignment_inner(&source, stack)?
-            }
-            None => None,
-        };
-        stack.pop();
-        Ok(result)
-    }
-
-    fn reject_mirror_cycles(&self) -> Result<(), EngineError> {
-        for record in &self.records {
-            self.resolved_assignment(&record.key)?;
-        }
-        Ok(())
-    }
-
-    fn plan_actions(&self) -> Result<Vec<DisplayAction>, EngineError> {
-        let mut actions = Vec::new();
-        for record in &self.records {
-            let has_assignment = self.resolved_assignment(&record.key)?.is_some();
-            let should_be_open = (record.window_active || record.runtime_open)
-                && record.live_display.is_some()
-                && has_assignment;
-            match (record.runtime_open, should_be_open) {
-                (false, true) => actions.push(DisplayAction::Open(record.key.clone())),
-                (true, false) => actions.push(DisplayAction::Close(record.key.clone())),
-                (true, true) => actions.push(DisplayAction::Rebuild(record.key.clone())),
-                (false, false) => {}
-            }
-        }
-        Ok(actions)
-    }
-
-    fn connected_display_keys(
-        &self,
-        primary_id: u32,
-        primary: DisplayDesc,
-        displays: Vec<DisplayDesc>,
-    ) -> Result<Vec<(DisplayKey, DisplayDesc)>, EngineError> {
-        let mut connected = Vec::with_capacity(displays.len() + 1);
-        let primary_key = self.key_for_connected_display(primary_id, &primary)?;
-        let primary_for_dedupe = primary.clone();
-        connected.push((primary_key, primary));
-
-        for display in displays {
-            if display.display_id == primary_id
-                || primary_for_dedupe
-                    .identity
-                    .match_score(&display.identity)
-                    .is_some()
-            {
-                continue;
-            }
-            let key = self.key_for_connected_display(primary_id, &display)?;
-            connected.push((key, display));
-        }
-
-        let mut keys = std::collections::HashSet::with_capacity(connected.len());
-        if connected.iter().any(|(key, _)| !keys.insert(key.clone())) {
-            return Err(EngineError::InvalidInput(
-                "multiple connected displays matched the same display configuration".to_string(),
-            ));
-        }
-
-        Ok(connected)
-    }
-
-    fn keep_descriptors_of_transitional_displays(
-        &mut self,
-        before: &DisplayStateModel,
-        transitional: &[DisplayDesc],
-    ) {
-        if transitional.is_empty() {
-            return;
-        }
-        for record in &mut self.records {
-            if record.live_display.is_some() {
-                continue;
-            }
-            let Some(previous) = before
-                .record(&record.key)
-                .and_then(|source| source.live_display.as_ref())
-            else {
-                continue;
-            };
-            if transitional
-                .iter()
-                .any(|display| previous.is_same_physical_display_as(display))
-            {
-                record.live_display = Some(previous.clone());
-            }
-        }
-    }
-
-    fn transfer_runtime_open_flags_from(&mut self, before: &DisplayStateModel) {
-        let mut consumed = vec![false; before.records.len()];
-
-        for record in &mut self.records {
-            if !record.should_have_runtime() {
-                record.runtime_open = false;
-                continue;
-            }
-            let display = record
-                .live_display
-                .as_ref()
-                .expect("runtime target records have live displays");
-            let source_index = before
-                .records
-                .iter()
-                .enumerate()
-                .position(|(index, source)| {
-                    !consumed[index]
-                        && source.runtime_open
-                        && source.live_display.as_ref().is_some_and(|source_display| {
-                            source_display.is_same_physical_display_as(display)
-                        })
-                })
-                .or_else(|| {
-                    before
-                        .records
-                        .iter()
-                        .enumerate()
-                        .position(|(index, source)| {
-                            !consumed[index] && source.runtime_open && source.key == record.key
-                        })
-                });
-
-            let Some(source_index) = source_index else {
-                record.runtime_open = false;
-                continue;
-            };
-
-            record.runtime_open = true;
-            consumed[source_index] = true;
-        }
-    }
-
-    fn key_for_connected_display(
-        &self,
-        primary_id: u32,
-        display: &DisplayDesc,
-    ) -> Result<DisplayKey, EngineError> {
-        if display.display_id == primary_id {
-            return Ok(self.primary_or_active_live_display_key(display.display_id));
-        }
-
-        if let Some(key) = self.active_live_display_id_key(display.display_id) {
-            return Ok(key);
-        }
-
-        if !display.identity.is_empty()
-            && let Some(key) = self.matching_identity_key(&display.identity)?
-        {
-            return Ok(key);
-        }
-
-        Ok(self
-            .assigned_live_display_id_key(display.display_id)
-            .unwrap_or_else(|| {
-                if display.identity.is_empty() {
-                    DisplayKey::LiveDisplayId(display.display_id)
-                } else {
-                    DisplayKey::Identity(display.identity.clone())
-                }
-            }))
-    }
-
-    fn primary_or_active_live_display_key(&self, display_id: u32) -> DisplayKey {
-        let primary_is_configured = self
-            .record(&DisplayKey::Primary)
-            .is_some_and(|record| record.window_active || record.runtime_open);
-        if primary_is_configured {
-            return DisplayKey::Primary;
-        }
-        self.active_live_display_id_key(display_id)
-            .unwrap_or(DisplayKey::Primary)
-    }
-
-    fn active_live_display_id_key(&self, display_id: u32) -> Option<DisplayKey> {
-        self.records.iter().find_map(|record| match record.key {
-            DisplayKey::LiveDisplayId(record_display_id)
-                if record_display_id == display_id
-                    && (record.window_active || record.runtime_open) =>
-            {
-                Some(record.key.clone())
-            }
-            _ => None,
-        })
-    }
-
-    fn assigned_live_display_id_key(&self, display_id: u32) -> Option<DisplayKey> {
-        self.records.iter().find_map(|record| match record.key {
-            DisplayKey::LiveDisplayId(record_display_id)
-                if record_display_id == display_id && record.assignment.is_some() =>
-            {
-                Some(record.key.clone())
-            }
-            _ => None,
-        })
-    }
-
-    fn matching_identity_key(
-        &self,
-        live_identity: &DisplayIdentity,
-    ) -> Result<Option<DisplayKey>, EngineError> {
-        let mut matches = Vec::new();
-        for record in &self.records {
-            let DisplayKey::Identity(existing_identity) = &record.key else {
-                continue;
-            };
-            let Some(score) = existing_identity.match_score(live_identity) else {
-                continue;
-            };
-            matches.push((score, record.key.clone()));
-        }
-
-        let Some(max_score) = matches.iter().map(|(score, _)| *score).max() else {
+        let Some(mut record) = self.slot(key) else {
             return Ok(None);
         };
-        let mut best_matches = matches
-            .into_iter()
-            .filter(|(score, _)| *score == max_score)
-            .map(|(_, key)| key);
-        let best = best_matches
-            .next()
-            .expect("max score implies at least one match");
-        if best_matches.next().is_some() {
-            return Err(EngineError::InvalidInput(
-                "ambiguous display identity match".to_string(),
-            ));
+        let mut visited = vec![&record.key];
+        loop {
+            match &record.assignment {
+                None => return Ok(None),
+                Some(direct @ WallpaperAssignment::Direct(_)) => return Ok(Some(direct.clone())),
+                Some(WallpaperAssignment::Mirror(source)) => {
+                    let source_key = DisplayKey::from_selector(source)?;
+                    let Some(source_record) = self.slot(&source_key) else {
+                        return Ok(None);
+                    };
+                    if visited.contains(&&source_record.key) {
+                        return Err(mirror_cycle_error());
+                    }
+                    visited.push(&source_record.key);
+                    record = source_record;
+                }
+            }
         }
-
-        Ok(Some(best))
-    }
-
-    fn record(&self, key: &DisplayKey) -> Option<&DisplayRecord> {
-        self.records.iter().find(|record| &record.key == key)
     }
 
     pub fn apply_reconcile(&mut self, scenes: &[SceneDesc]) -> Result<(), EngineError> {
-        for scene in scenes {
-            scene.validate()?;
-        }
-        scenes.assert_unique()?;
-
-        let requested = scenes
+        // Every placement is decided against the model as it is now.
+        let keys = scenes
             .iter()
             .map(|scene| self.reconcile_key(scene))
-            .collect::<Result<std::collections::HashSet<_>, _>>()?;
-
-        for record in &mut self.records {
-            if record.live_display.is_some() && !requested.contains(&record.key) {
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut next = self.clone();
+        for record in &mut next.records {
+            if record.live_display.is_some() && !keys.contains(&record.key) {
                 record.window_active = false;
                 record.runtime_open = false;
             }
         }
-
-        for scene in scenes {
-            let key = self.reconcile_key(scene)?;
-            let record =
-                if let Some(index) = self.records.iter().position(|record| record.key == key) {
-                    &mut self.records[index]
-                } else {
-                    self.records.push(DisplayRecord {
-                        key,
-                        live_display: None,
-                        assignment: None,
-                        window_active: false,
-                        runtime_open: false,
-                        primary_inheritance_consumed: false,
-                    });
-                    self.records.last_mut().expect("record was just pushed")
-                };
+        for (scene, key) in scenes.iter().zip(keys) {
+            let record = next.slot_or_insert(key);
             record.live_display = Some(scene.display.clone());
             record.window_active = true;
-            record.assignment = Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(
+            record.assignment = Some(WallpaperAssignment::Direct(Template::from_scene_desc(
                 scene,
             )));
         }
-
+        *self = next;
         Ok(())
     }
 
     pub fn reconcile_key(&self, scene: &SceneDesc) -> Result<DisplayKey, EngineError> {
-        if self.records.iter().any(|record| {
-            record.key == DisplayKey::Primary
-                && record
-                    .live_display
-                    .as_ref()
-                    .is_some_and(|display| display.display_id == scene.display.display_id)
-        }) {
+        let display = &scene.display;
+        let shows_display = |record: &&DisplayRecord| {
+            record
+                .live_display
+                .as_ref()
+                .is_some_and(|live| live.display_id == display.display_id)
+        };
+        let primary_shows = self
+            .slot(&DisplayKey::Primary)
+            .iter()
+            .any(|record| shows_display(record));
+        if primary_shows {
             return Ok(DisplayKey::Primary);
         }
-
-        if let Some(key) = self.records.iter().find_map(|record| {
-            record.live_display.as_ref().and_then(|display| {
-                (display.display_id == scene.display.display_id).then(|| record.key.clone())
-            })
-        }) {
-            return Ok(key);
+        if let Some(record) = self.records.iter().find(shows_display) {
+            return Ok(record.key.clone());
         }
-
-        if !scene.display.identity.is_empty()
-            && let Some(key) = self.matching_identity_key(&scene.display.identity)?
+        if !display.identity.is_empty()
+            && let Some(key) = self.best_identity_slot(&display.identity, display.display_id)?
         {
             return Ok(key);
         }
-
-        Ok(DisplayKey::LiveDisplayId(scene.display.display_id))
+        Ok(DisplayKey::LiveDisplayId(display.display_id))
     }
 
     pub fn has_live_id(&self, display_id: u32) -> bool {
@@ -581,105 +325,367 @@ impl DisplayStateModel {
             record
                 .live_display
                 .as_ref()
-                .is_some_and(|display| display.display_id == display_id)
+                .is_some_and(|live| live.display_id == display_id)
         })
     }
 
     pub fn debug_events_since(&self, before: &DisplayStateModel) -> Vec<DisplayDebugEvent> {
         let mut events = Vec::new();
-
-        for record in self
-            .records
-            .iter()
-            .filter(|record| record.live_display.is_some())
-        {
-            let display = record
-                .live_display
-                .as_ref()
-                .expect("filtered to records with live displays");
-            if !before.has_live_id(display.display_id) {
+        for record in &self.records {
+            if let Some(display) = &record.live_display
+                && !before.has_live_id(display.display_id)
+            {
                 events.push(DisplayDebugEvent::Connected {
                     key: record.key.clone(),
                     display: display.clone(),
                 });
             }
         }
-
-        for record in before
-            .records
-            .iter()
-            .filter(|record| record.live_display.is_some())
-        {
-            let display = record
-                .live_display
-                .as_ref()
-                .expect("filtered to records with live displays");
-            if !self.has_live_id(display.display_id) {
+        for record in &before.records {
+            if let Some(display) = &record.live_display
+                && !self.has_live_id(display.display_id)
+            {
                 events.push(DisplayDebugEvent::Disconnected {
                     key: record.key.clone(),
                     display: display.clone(),
                 });
             }
         }
-
-        for after_record in self
-            .records
-            .iter()
-            .filter(|record| record.live_display.is_some())
-        {
-            let Some(before_display) = before
-                .record(&after_record.key)
-                .and_then(|record| record.live_display.as_ref())
-            else {
+        for record in &self.records {
+            let (Some(after), Some(old)) = (
+                &record.live_display,
+                before
+                    .slot(&record.key)
+                    .and_then(|old| old.live_display.as_ref()),
+            ) else {
                 continue;
             };
-            let after_display = after_record
-                .live_display
-                .as_ref()
-                .expect("filtered to records with live displays");
-            if !before_display.has_same_geometry(after_display) {
+            if !old.has_same_geometry(after) {
                 events.push(DisplayDebugEvent::Changed {
-                    key: after_record.key.clone(),
-                    before: before_display.clone(),
-                    after: after_display.clone(),
+                    key: record.key.clone(),
+                    before: old.clone(),
+                    after: after.clone(),
                 });
             }
         }
-
         events
     }
 
     pub fn log_debug_transition(&self, before: &DisplayStateModel) {
         for event in self.debug_events_since(before) {
-            log::debug!("{}", event.debug_message());
+            match event {
+                DisplayDebugEvent::Connected { key, display } => log::debug!(
+                    "[wallpaper-core display] connected {} on {}",
+                    display.desc_label(),
+                    key.key_label()
+                ),
+                DisplayDebugEvent::Disconnected { key, display } => log::debug!(
+                    "[wallpaper-core display] disconnected {} from {}",
+                    display.desc_label(),
+                    key.key_label()
+                ),
+                DisplayDebugEvent::Changed { key, before, after } => log::debug!(
+                    "[wallpaper-core display] changed {}: {} -> {}",
+                    key.key_label(),
+                    before.desc_label(),
+                    after.desc_label()
+                ),
+            }
         }
+    }
+
+    // ---- private helpers -------------------------------------------------
+
+    fn slot(&self, key: &DisplayKey) -> Option<&DisplayRecord> {
+        self.records.iter().find(|record| &record.key == key)
+    }
+
+    /// Position of the slot named `key`; a blank inactive slot is appended
+    /// first when there is none.
+    fn index_or_insert(&mut self, key: DisplayKey) -> usize {
+        self.records
+            .iter()
+            .position(|record| record.key == key)
+            .unwrap_or_else(|| {
+                self.records.push(DisplayRecord::blank(key));
+                self.records.len() - 1
+            })
+    }
+
+    fn slot_or_insert(&mut self, key: DisplayKey) -> &mut DisplayRecord {
+        let index = self.index_or_insert(key);
+        &mut self.records[index]
+    }
+
+    #[cfg(test)]
+    fn record(&self, key: &DisplayKey) -> Option<&DisplayRecord> {
+        self.slot(key)
+    }
+
+    #[cfg(test)]
+    fn ensure_record(&mut self, key: DisplayKey) -> &mut DisplayRecord {
+        self.slot_or_insert(key)
+    }
+
+    #[cfg(test)]
+    fn plan_actions(&self) -> Result<Vec<DisplayAction>, EngineError> {
+        self.scene_plan()
+    }
+
+    /// The model a display report leads to, computed without touching
+    /// `self`: every key decision reads the slots as they stand now.
+    fn model_after_report(
+        &self,
+        primary: &DisplayDesc,
+        displays: Vec<DisplayDesc>,
+        transitional: &[DisplayDesc],
+    ) -> Result<Self, EngineError> {
+        let landings = self.landings(primary, displays)?;
+        let primary_assignment = self
+            .slot(&DisplayKey::Primary)
+            .and_then(|record| record.assignment.clone());
+
+        // Existing slots keep their place; slots born in this report follow
+        // in the order their displays were listed.
+        let mut keys: Vec<&DisplayKey> = self.records.iter().map(|record| &record.key).collect();
+        keys.extend(
+            landings
+                .iter()
+                .map(|(key, _)| key)
+                .filter(|key| self.slot(key).is_none()),
+        );
+
+        let records = keys
+            .into_iter()
+            .map(|key| {
+                let before = self.slot(key);
+                let landed = landings
+                    .iter()
+                    .find(|(landing_key, _)| landing_key == key)
+                    .map(|(_, display)| display);
+                let mut record = before
+                    .cloned()
+                    .unwrap_or_else(|| DisplayRecord::blank(key.clone()));
+                // A display that still reports no pixels keeps the slot it
+                // ran on.
+                record.live_display = landed.cloned().or_else(|| {
+                    before
+                        .and_then(|old| old.live_display.as_ref())
+                        .filter(|previous| {
+                            transitional
+                                .iter()
+                                .any(|display| previous.is_same_physical_display_as(display))
+                        })
+                        .cloned()
+                });
+                if let Some(display) = landed {
+                    let eligible = !record.primary_inheritance_consumed
+                        && record.assignment.is_none()
+                        && display.display_id != primary.display_id;
+                    if eligible {
+                        record.assignment.clone_from(&primary_assignment);
+                        record.primary_inheritance_consumed = true;
+                    }
+                }
+                record
+            })
+            .collect();
+
+        let mut candidate = Self { records };
+        candidate.check_mirror_cycles()?;
+        candidate.carry_scene_marks_from(self)?;
+        Ok(candidate)
+    }
+
+    /// The slot every connected display of a report lands on, primary first.
+    fn landings(
+        &self,
+        primary: &DisplayDesc,
+        displays: Vec<DisplayDesc>,
+    ) -> Result<Vec<(DisplayKey, DisplayDesc)>, EngineError> {
+        let mut landings = vec![(self.slot_for_primary(primary), primary.clone())];
+        for display in displays {
+            // A mirrored or duplicated listing of the primary is not a
+            // second display.
+            if display.display_id == primary.display_id
+                || primary.identity.match_score(&display.identity).is_some()
+            {
+                continue;
+            }
+            landings.push((self.slot_for_display(&display)?, display));
+        }
+        let mut seen = HashSet::new();
+        if let Some((key, _)) = landings.iter().find(|(key, _)| !seen.insert(key)) {
+            return Err(EngineError::InvalidInput(format!(
+                "multiple connected displays matched the display slot {}",
+                key.key_label()
+            )));
+        }
+        Ok(landings)
+    }
+
+    /// The identity slot whose key names `identity` best (its own identity
+    /// is the matcher), `None` without any match; a tie at the top is an
+    /// error.
+    fn best_identity_slot(
+        &self,
+        identity: &DisplayIdentity,
+        display_id: u32,
+    ) -> Result<Option<DisplayKey>, EngineError> {
+        let mut best: Option<(u8, &DisplayKey)> = None;
+        let mut tied = false;
+        for record in &self.records {
+            let DisplayKey::Identity(configured) = &record.key else {
+                continue;
+            };
+            let Some(score) = configured.match_score(identity) else {
+                continue;
+            };
+            match best {
+                Some((top, _)) if score < top => {}
+                Some((top, _)) if score == top => tied = true,
+                _ => {
+                    best = Some((score, &record.key));
+                    tied = false;
+                }
+            }
+        }
+        if tied {
+            return Err(EngineError::InvalidInput(format!(
+                "ambiguous display identity match for display {display_id}"
+            )));
+        }
+        Ok(best.map(|(_, key)| key.clone()))
+    }
+
+    /// The slot the primary display lands on.
+    fn slot_for_primary(&self, primary: &DisplayDesc) -> DisplayKey {
+        if self.slot(&DisplayKey::Primary).is_some_and(DisplayRecord::is_claimed) {
+            return DisplayKey::Primary;
+        }
+        let live_id = DisplayKey::LiveDisplayId(primary.display_id);
+        if self.slot(&live_id).is_some_and(DisplayRecord::is_claimed) {
+            return live_id;
+        }
+        DisplayKey::Primary
+    }
+
+    /// The slot a non-primary display lands on.
+    fn slot_for_display(&self, display: &DisplayDesc) -> Result<DisplayKey, EngineError> {
+        let live_id = DisplayKey::LiveDisplayId(display.display_id);
+        if self.slot(&live_id).is_some_and(DisplayRecord::is_claimed) {
+            return Ok(live_id);
+        }
+        if !display.identity.is_empty()
+            && let Some(key) = self.best_identity_slot(&display.identity, display.display_id)?
+        {
+            return Ok(key);
+        }
+        if self
+            .slot(&live_id)
+            .is_some_and(|record| record.assignment.is_some())
+        {
+            return Ok(live_id);
+        }
+        Ok(if display.identity.is_empty() {
+            live_id
+        } else {
+            DisplayKey::Identity(display.identity.clone())
+        })
+    }
+
+    /// Fails when any chain of mirrors loops back on itself.
+    fn check_mirror_cycles(&self) -> Result<(), EngineError> {
+        for start in &self.records {
+            let mut visited = vec![&start.key];
+            let mut current = start;
+            while let Some(WallpaperAssignment::Mirror(source)) = &current.assignment {
+                // A source nobody can name ends the chain; resolving it
+                // reports the problem.
+                let Ok(source_key) = DisplayKey::from_selector(source) else {
+                    break;
+                };
+                let Some(next) = self.slot(&source_key) else {
+                    break;
+                };
+                if visited.contains(&&next.key) {
+                    return Err(mirror_cycle_error());
+                }
+                visited.push(&next.key);
+                current = next;
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether a scene should run on the slot: it is claimed, connected and
+    /// its assignment ends in a direct template.
+    fn wants_scene(&self, record: &DisplayRecord) -> Result<bool, EngineError> {
+        if !record.is_claimed() || record.live_display.is_none() {
+            return Ok(false);
+        }
+        let resolved = self.resolved_assignment(&record.key)?;
+        Ok(matches!(resolved, Some(WallpaperAssignment::Direct(_))))
+    }
+
+    /// Lets each open scene of `earlier` follow its physical display to the
+    /// slot that names it in `self`, the freshly refreshed model. A slot
+    /// that does not want a scene ends up with no mark.
+    fn carry_scene_marks_from(&mut self, earlier: &Self) -> Result<(), EngineError> {
+        let mut used = vec![false; earlier.records.len()];
+        let mut marks = Vec::with_capacity(self.records.len());
+        for record in &self.records {
+            if !self.wants_scene(record)? {
+                marks.push(false);
+                continue;
+            }
+            let same_display = |index: usize, old: &DisplayRecord| {
+                !used[index]
+                    && old.runtime_open
+                    && matches!(
+                        (&old.live_display, &record.live_display),
+                        (Some(before), Some(now)) if before.is_same_physical_display_as(now)
+                    )
+            };
+            let donor = earlier
+                .records
+                .iter()
+                .enumerate()
+                .find(|&(index, old)| same_display(index, old))
+                .or_else(|| {
+                    earlier
+                        .records
+                        .iter()
+                        .enumerate()
+                        .find(|&(index, old)| !used[index] && old.key == record.key)
+                });
+            marks.push(donor.is_some_and(|(index, old)| {
+                used[index] = true;
+                old.runtime_open
+            }));
+        }
+        for (record, mark) in self.records.iter_mut().zip(marks) {
+            record.runtime_open = mark;
+        }
+        Ok(())
+    }
+
+    /// What each slot's scene must do, in slot order.
+    fn scene_plan(&self) -> Result<Vec<DisplayAction>, EngineError> {
+        let mut plan = Vec::new();
+        for record in &self.records {
+            let key = record.key.clone();
+            plan.extend(match (self.wants_scene(record)?, record.runtime_open) {
+                (true, false) => Some(DisplayAction::Open(key)),
+                (true, true) => Some(DisplayAction::Rebuild(key)),
+                (false, true) => Some(DisplayAction::Close(key)),
+                (false, false) => None,
+            });
+        }
+        Ok(plan)
     }
 }
 
-impl DisplayDebugEvent {
-    fn debug_message(&self) -> String {
-        match self {
-            Self::Connected { key, display } => format!(
-                "[wallpaper-core display] monitor connected: key={} {}",
-                key.key_label(),
-                display.desc_label()
-            ),
-            Self::Disconnected { key, display } => format!(
-                "[wallpaper-core display] monitor disconnected: key={} {}",
-                key.key_label(),
-                display.desc_label()
-            ),
-            Self::Changed { key, before, after } => format!(
-                "[wallpaper-core display] display geometry changed: key={} before=[{}] after=[{}]",
-                key.key_label(),
-                before.desc_label(),
-                after.desc_label()
-            ),
-        }
-    }
-}
-
-#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
