@@ -14602,6 +14602,52 @@ TEST_F(MetalSceneDraw, ASceneLightReachesTheAuthorsLightingUniforms)
     }
 }
 
+TEST_F(MetalSceneDraw, UnboundTextureSlotsSampleZeroOnBothRenderers)
+{
+    // D3D null resources return zero, including alpha. An absent optional
+    // texture must not discard the rest of the shader's contribution.
+    for (const std::string textures : { "", R"(,"textures":[null,null,null])",
+                                       R"(,"textures":["$mediaThumbnail",null,"$mediaThumbnail"])" }) {
+        const bool bound = textures.find("$mediaThumbnail") != std::string::npos;
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(textures + (native ? " native" : " compatibility"));
+            const auto project = WriteFixture(root_ / "null-sampler");
+            std::ofstream(project.parent_path() / "materials/tile.json")
+                << R"({"passes":[{"shader":"metal_probe","blending":"normal","cullmode":"nocull",)"
+                   R"("depthtest":"disabled","depthwrite":"disabled")" << textures << "}]}";
+            std::ofstream(project.parent_path() / "shaders/metal_probe.frag")
+                << "uniform sampler2D g_Texture0;\n"
+                   "uniform sampler2D g_Texture2; // {\"combo\":\"OPTIONAL\"}\n"
+                   "varying vec2 v_TexCoord;\n"
+                   "void main() {\n"
+                   "  vec4 first = texture(g_Texture0, v_TexCoord);\n"
+                   "  vec4 last = texture(g_Texture2, v_TexCoord);\n"
+                   "  gl_FragColor = vec4(vec3(0.2, 0.4, 0.6) + "
+                   "vec3(first.r, last.g, last.a) * 0.25, 1.0);\n"
+                   "#if OPTIONAL\n"
+                   "  gl_FragColor.r += 0.1;\n"
+                   "#endif\n"
+                   "}\n";
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / "null-sampler-cache", loaded, error)) << error;
+            if (bound) {
+                const std::array<uint8_t, 4> pixel { 64, 128, 192, 255 };
+                auto* images = dynamic_cast<RuntimeImageSource*>(loaded.scene->imageParser.get());
+                ASSERT_NE(images, nullptr);
+                images->SetRgbaImage("$mediaThumbnail", 1, 1, pixel.data(), pixel.size());
+            }
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 384, 256, 2, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            const std::size_t centre = (128u * 384u + 192u) * 3u;
+            EXPECT_NEAR(picture.rgb[centre], bound ? 93 : 51, 2);
+            EXPECT_NEAR(picture.rgb[centre + 1], bound ? 134 : 102, 2);
+            EXPECT_NEAR(picture.rgb[centre + 2], bound ? 217 : 153, 2);
+        }
+    }
+}
+
 TEST_F(MetalSceneDraw, AStepSamplingAnImageNothingProducesIsSkippedLikeOnCompatibility)
 {
     // The overlay samples the composite of an object that is a layer by id

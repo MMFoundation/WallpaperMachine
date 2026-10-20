@@ -1539,6 +1539,16 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
     ApplyMaterialDepth(material, wpmat);
     material.cull_mode = ParseSceneCullMode(wpmat.cullmode);
 
+    // Rust stores the program-wide reflected sampler union in the fragment
+    // preprocessor info. Fill only genuinely unbound active slots, after defaults
+    // and texture-presence combos have settled. Named missing assets and layer
+    // links retain their existing failure/skip behavior on both backends.
+    for (const auto slot : sd_units[1].preprocess_info.active_tex_slots) {
+        if (slot < textures.size() && ! textures[slot].empty()) continue;
+        RegisterMaterialTexture(*pScene, vfs, material, materialShader, svData, wpmat,
+                                *pWPShaderInfo, texHeaders, WPTexImageParser::kNullTexture, slot);
+    }
+
     for (uint i = 0; i < material.textures.size(); i++) {
         if (! exists(sd_units[1].preprocess_info.active_tex_slots, i)) material.textures[i].clear();
     }

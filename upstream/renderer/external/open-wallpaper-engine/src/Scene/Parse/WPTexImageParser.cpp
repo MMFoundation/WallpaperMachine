@@ -494,6 +494,20 @@ uint64_t NextLevelLongestSide(fs::IBinaryStream& file, i32 payload_size) {
 bool wallpaper::HostLooseAssetIsReadable(std::string_view name) { return IsHostAssetPath(name); }
 
 std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
+    if (name == kNullTexture) {
+        auto image = std::make_shared<Image>();
+        image->key = name;
+        image->header = ParseHeader(name);
+        image->slots.resize(1);
+        auto& slot = image->slots.front();
+        slot.width = slot.height = 1;
+        slot.mipmaps.resize(1);
+        auto& mip = slot.mipmaps.front();
+        mip.width = mip.height = 1;
+        mip.size = 4;
+        mip.data = ImageDataPtr(new uint8_t[4] {}, [](uint8_t* data) { delete[] data; });
+        return image;
+    }
     // A picture of the user's own is not in the package, and probing the mount
     // for it logs a missing-file error for every slot on every load.
     if (IsHostAssetPath(name)) return ParseLooseAsset(name);
@@ -638,6 +652,7 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
 }
 
 ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
+    if (name == kNullTexture) return BuildLooseAssetHeader(1, 1, false, ImageType::UNKNOWN);
     if (IsHostAssetPath(name)) return ParseLooseAssetHeader(name);
     ImageHeader header;
     std::string path  = "/assets/materials/" + name + ".tex";

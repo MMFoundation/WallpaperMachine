@@ -17,6 +17,9 @@ bool HostLooseAssetIsReadable(std::string_view name);
 
 class WPTexImageParser : public IImageParser {
 public:
+    // Immutable RGBA zero for D3D-style null sampler bindings, not a missing-asset fallback.
+    static constexpr const char* kNullTexture = "$nullTexture";
+
     WPTexImageParser(fs::VFS* vfs): m_vfs(vfs) {}
     virtual ~WPTexImageParser() = default;
 
