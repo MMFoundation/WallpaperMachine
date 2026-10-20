@@ -542,8 +542,9 @@ narrow window shows the icon alone and the help names the display. Disabled and 
 `(disabled)` or `(mirrored)`; the menu waits while a wallpaper command runs. A target that
 can no longer be chosen stays stored (the menu bar and automation read it) and the menu reads
 **Target display** until another is picked.
-Per-display enablement, independent/mirror mode, mirror source, scaling, scale
-factor, frame rate, mute and volume live in **Settings → Displays**, beside each
+Per-display enablement, independent/mirror mode, mirror source, scaling (No scaling,
+Stretch, Match, Match with blurred backdrop, Fill), scale factor, frame rate, mute and
+volume live in **Settings → Displays**, beside each
 independent display's **Playlist** (see [playlists](playlists.md)). When the frame-rate
 ceiling in force is below the saved frame rate, the field notes it and names what set
 it: `Limited to N fps by Performance settings` with a button to Settings → Performance

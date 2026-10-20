@@ -874,7 +874,9 @@ need an authorized runtime check
   pixel per point; an unusable factor is 1; rounding ties fall on the renderer's
   side), degenerate sizes and absurd factors stay valid, and the plain modes at
   factor 1 stay AVFoundation's gravity while Original size and a factor wait for the
-  picture's size. The host suite checks the user's mode and factor reach a running
+  picture's size; Fit with blurred backdrop is laid out exactly as Fit, black bars
+  and all, since the player has no blurred fill. The host suite checks the user's mode
+  and factor reach a running
   surface without reopening or re-probing it, and the desktop-picture poster is drawn
   with the same layout (Fit leaves black bars, Original size is not scaled to the
   display, a factor zooms). To regenerate or extend the expected rectangles, compile
@@ -1048,7 +1050,9 @@ never to `.shared`.
   `PanelPresetsTests`, `PanelImagePlacementTests`, `PanelLetterboxTests` (the Black bars card for
   an installed video only, the suggestion following the target display without a second probe,
   staging the recomputed factor and refusing a stale card, file or selection),
-  `PanelCompatibilityTests`, `PanelWallpaperSettingsTests`, `PanelSceneRetryTests`,
+  `PanelCompatibilityTests`, `PanelWallpaperSettingsTests` (each setting a typed call; Fit with
+  blurred backdrop saved for the one display it was chosen for, offered for scenes and videos,
+  and noted only where the native video player draws it), `PanelSceneRetryTests`,
   `SceneReportsTests` and `WallpaperEditorStateTests` (locale scaling, invalid raw text,
   independent drafts, held drag steps).
 - Steam Workshop and downloads: `PanelWorkshopActionsTests`, `PanelWorkshopSubscriptionsTests`,

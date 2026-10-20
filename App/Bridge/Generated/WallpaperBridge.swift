@@ -9350,6 +9350,11 @@ public enum BridgeScalingMode {
     case stretch
     case match
     case fill
+    /**
+     * `Match`'s picture, with the room around it filled by a blurred,
+     * darkened copy of the same picture.
+     */
+    case matchBlurred
 }
 
 
@@ -9370,6 +9375,8 @@ public struct FfiConverterTypeBridgeScalingMode: FfiConverterRustBuffer {
         case 3: return .match
         
         case 4: return .fill
+        
+        case 5: return .matchBlurred
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -9393,6 +9400,10 @@ public struct FfiConverterTypeBridgeScalingMode: FfiConverterRustBuffer {
         
         case .fill:
             writeInt(&buf, Int32(4))
+        
+        
+        case .matchBlurred:
+            writeInt(&buf, Int32(5))
         
         }
     }

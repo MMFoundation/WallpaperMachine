@@ -59,7 +59,11 @@ the checks still pending, and a surface whose state did not change does nothing.
 A scene or video sits on the lock screen and as the screen saver where it sits on the
 desktop: the display's position decides how the room a Fit, Original size or small
 Scale factor leaves, or the overflow of Fill or a large one, is divided (see [scene
-rendering](scene-rendering.md)). The app publishes it with each scene in
+rendering](scene-rendering.md)). Under Fit with blurred backdrop the extension, which
+always draws through the scene engine, fills that room with the blurred copy, a video
+included; a video the native player draws on the desktop shows black bars there and the
+copy here (scaling mode 4 in `configuration.json`; an extension that predates it refuses
+the configuration as invalid, and both ship in one app). The app publishes it with each scene in
 `configuration.json` as an optional `framing` (`panX` and `panY`, fractions from 0 to
 1). A file without it, such as one an older app wrote, reads as centred, and a copy of
 the extension that predates the key ignores it and draws the picture centred; the

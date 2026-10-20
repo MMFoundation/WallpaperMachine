@@ -6,6 +6,7 @@
 #import <QuartzCore/CAMetalLayer.h>
 
 #include "MetalPosterCapture.hpp"
+#include "MetalWallpaperBackdrop.hpp"
 #include "MetalVideoTextures.hpp"
 
 #include "MetalRender/MetalBlend.hpp"
@@ -1253,6 +1254,10 @@ struct MetalRender::Impl
 
     // ---- host services
     MetalPosterCapture poster;
+    /// The blurred fill of a FIT_BLURRED layout. Its pipelines are built when
+    /// the mode is chosen and its images while a composition needs them.
+    MetalWallpaperBackdrop backdrop;
+    bool                   backdrop_failure_logged { false };
     MetalVideoTextures video;
     /// Whether the graph currently compiled has produced a frame. A poster
     /// composed before that would publish an empty image as the wallpaper.
@@ -1836,6 +1841,9 @@ struct MetalRender::Impl
                        uint8_t* destination);
     WallpaperScalingLayout scalingLayout(const Scene& scene, uint32_t width,
                                          uint32_t height) const;
+    /// Builds the blurred fill's pipelines once its mode is chosen and the
+    /// drawable's format is known; anything else releases its images.
+    void prepareBackdrop();
 };
 
 void MetalRender::Impl::releaseSceneOptimization()
@@ -1901,6 +1909,7 @@ void MetalRender::Impl::releasePresentation()
     // on the layer, and a scaled copy still needs its own one after a display
     // reconfiguration has released the surface.
     poster.invalidate();
+    backdrop.release();
     frame_drawn              = false;
     present_gate.Invalidate();
     present_library          = nil;
@@ -1944,6 +1953,7 @@ bool MetalRender::Impl::buildPresentation()
     sampler_descriptor.tAddressMode = MTLSamplerAddressModeClampToEdge;
     present_sampler = [device newSamplerStateWithDescriptor:sampler_descriptor];
     if (present_sampler == nil) return fail("presentation sampler could not be created");
+    prepareBackdrop();
     return true;
 }
 
@@ -2030,6 +2040,20 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
 
     const auto layout =
         scalingLayout(scene, (uint32_t)destination.width, (uint32_t)destination.height);
+    // The blurred copy is drawn first, into images of its own, so the room
+    // around the picture can be filled from it below. Without room it costs
+    // nothing and holds nothing.
+    bool backdrop_ready = false;
+    if (layout.backdrop) {
+        backdrop_ready = backdrop.encodeBlur(device, command, output->second, present_sampler);
+        if (! backdrop_ready && ! backdrop_failure_logged) {
+            // The picture is still drawn, with plain bars around it.
+            LOG_ERROR("the blurred fill could not be drawn: %s", backdrop.lastError().c_str());
+            backdrop_failure_logged = true;
+        }
+    } else {
+        backdrop.release();
+    }
     MTLRenderPassDescriptor* present = [MTLRenderPassDescriptor renderPassDescriptor];
     present.colorAttachments[0].texture     = destination;
     // Cleared, so the letterbox around a fitted image is black rather than
@@ -2040,6 +2064,12 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
 
     id<MTLRenderCommandEncoder> encoder = [command renderCommandEncoderWithDescriptor:present];
     if (encoder == nil) return false;
+    encoder.label = @"wallpaper composition";
+    if (backdrop_ready) {
+        (void)backdrop.drawBands(device, encoder, destination.pixelFormat,
+                                 (uint32_t)destination.width, (uint32_t)destination.height, layout,
+                                 horizontal_flip, present_sampler);
+    }
     const VulkanViewportBox viewport {
         .x      = (double)layout.viewport_px.x,
         .y      = (double)(layout.viewport_px.y + std::max(1, layout.viewport_px.height)),
@@ -4483,6 +4513,19 @@ bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
     return true;
 }
 
+void MetalRender::Impl::prepareBackdrop()
+{
+    if (scaling_mode != WallpaperScalingMode::FIT_BLURRED) {
+        backdrop.release();
+        return;
+    }
+    if (device == nil || present_library == nil) return;
+    if (! backdrop.prepare(device, drawable_format) && ! backdrop_failure_logged) {
+        LOG_ERROR("the blurred fill could not be prepared: %s", backdrop.lastError().c_str());
+        backdrop_failure_logged = true;
+    }
+}
+
 WallpaperScalingLayout MetalRender::Impl::scalingLayout(const Scene& scene, uint32_t width,
                                                         uint32_t height) const
 {
@@ -4680,6 +4723,7 @@ void MetalRender::SetWallpaperScalingMode(WallpaperScalingMode mode)
 {
     pImpl->scaling_mode = mode;
     pImpl->present_gate.Invalidate();
+    pImpl->prepareBackdrop();
 }
 
 void MetalRender::SetWallpaperScalingFactor(double factor)
@@ -5353,6 +5397,13 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         impl.present_key.Add(static_cast<uint64_t>(static_cast<uint32_t>(layout.scissor_px.width)));
         impl.present_key.Add(static_cast<uint64_t>(static_cast<uint32_t>(layout.scissor_px.height)));
         impl.present_key.Add(impl.horizontal_flip ? 1u : 0u);
+        // Fit and its blurred variant place the picture identically.
+        impl.present_key.Add(layout.backdrop ? 1u : 0u);
+        if (layout.backdrop) {
+            const auto& rect = layout.backdrop_px;
+            impl.present_key.Add((uint64_t(uint32_t(rect.x)) << 32) | uint32_t(rect.y));
+            impl.present_key.Add((uint64_t(uint32_t(rect.width)) << 32) | uint32_t(rect.height));
+        }
 
         // Every pass reused or drawing nothing, no feedback trade and no video
         // to import: the scene output holds exactly the pixels the last
@@ -5566,7 +5617,7 @@ uint64_t MetalRender::RenderTargetBytesForTests() const
             bytes += texture.allocatedSize;
         }
     }
-    return bytes;
+    return bytes + pImpl->backdrop.allocatedBytes();
 }
 
 uint64_t MetalRender::ProgramCompilesForTests() { return MetalProgramCache::shared().compileCount(); }

@@ -3329,7 +3329,72 @@ TEST_F(PlaybackGPU, PlainVideoPresentsThroughTheFinalViewportByteForByte) {
         compare(c.w == kWidth && c.h == kHeight && c.display_scale == 1.0 && c.user_scale == 1.0);
         video.desc().presents_through_final_viewport = true;
     }
-    rr.wallpaper_viewport = {}; rr.wallpaper_scissor = {};
+    // Fit with blur places the picture as Fit does and fills the room around it
+    // from the composed picture, so it is never presented directly. The
+    // picture is Fit's to the byte, the room is no longer the clear colour, the
+    // poster is what the target received, and going back to Fit puts the plain
+    // bars back and lets the blurred fill's images go.
+    {
+        SCOPED_TRACE("fit with blur");
+        constexpr uint32_t kTargetWidth = 96, kTargetHeight = 32;
+        Bind(video, as_frame(decoded.desc().vk_output, *linear));
+        const auto fit = ComputeWallpaperScalingLayout(WallpaperScalingMode::FIT, kWidth, kHeight,
+                                                       kTargetWidth, kTargetHeight, 1.0, 1.0);
+        const auto blurred = ComputeWallpaperScalingLayout(WallpaperScalingMode::FIT_BLURRED,
+                                                           kWidth, kHeight, kTargetWidth,
+                                                           kTargetHeight, 1.0, 1.0);
+        ASSERT_TRUE(blurred.backdrop);
+        const auto target = PrivateTarget(kTargetWidth, kTargetHeight, format);
+        auto& final = Final(target, format); ASSERT_TRUE(final.prepared());
+        final.setBackdropWanted(true);
+        rr.wallpaper_viewport = MakeWallpaperViewport(fit);
+        rr.wallpaper_scissor = MakeWallpaperScissor(fit);
+        SetWallpaperBackdrop(rr, fit);
+        EXPECT_TRUE(PresentFrame(video, final, pre, target, format));
+        const auto plain = Read(target);
+        SetWallpaperBackdrop(rr, blurred);
+        ASSERT_TRUE(rr.wallpaper_backdrop);
+        Poison(target, {1,0,1,1});
+        EXPECT_FALSE(PresentFrame(video, final, pre, target, format));
+        const auto filled = Read(target);
+        EXPECT_GT(final.backdropBytes(), 0u);
+        EXPECT_EQ(ComposePoster(video, final, pre, {kTargetWidth, kTargetHeight}, format, false),
+                  filled);
+        const auto& v = fit.viewport_px;
+        size_t picture_changed = 0, room_changed = 0, room = 0;
+        for (uint32_t y = 0; y < kTargetHeight; ++y) for (uint32_t x = 0; x < kTargetWidth; ++x) {
+            const auto at = (static_cast<size_t>(y) * kTargetWidth + x) * 4;
+            const bool inside = int32_t(x) >= v.x && int32_t(x) < v.x + v.width &&
+                                int32_t(y) >= v.y && int32_t(y) < v.y + v.height;
+            const bool same = std::equal(plain.begin() + at, plain.begin() + at + 3,
+                                         filled.begin() + at);
+            if (inside) { picture_changed += same ? 0 : 1; continue; }
+            ++room; room_changed += same ? 0 : 1;
+        }
+        EXPECT_EQ(picture_changed, 0u);
+        ASSERT_GT(room, 0u);
+        EXPECT_EQ(room_changed, room);
+        // With the composition's fill to borrow, the plain video presents
+        // directly again and makes the fill from its own source, which the
+        // copy would only have repeated: the same picture, poster included.
+        rr.wallpaper_backdrop_pass = &final.backdrop();
+        Poison(target, {1,0,1,1});
+        EXPECT_TRUE(PresentFrame(video, final, pre, target, format));
+        EXPECT_EQ(Read(target), filled);
+        EXPECT_EQ(ComposePoster(video, final, pre, {kTargetWidth, kTargetHeight}, format, true),
+                  filled);
+        // A mirrored picture still takes the copy, fill and all.
+        rr.wallpaper_horizontal_flip = true;
+        EXPECT_FALSE(PresentFrame(video, final, pre, target, format));
+        rr.wallpaper_horizontal_flip = false;
+        SetWallpaperBackdrop(rr, fit);
+        EXPECT_TRUE(PresentFrame(video, final, pre, target, format));
+        EXPECT_EQ(Read(target), plain);
+        EXPECT_EQ(final.backdropBytes(), 0u);
+        rr.wallpaper_backdrop_pass = nullptr;
+    }
+    rr.wallpaper_viewport = {}; rr.wallpaper_scissor = {}; rr.wallpaper_backdrop = false;
+    rr.wallpaper_backdrop_pass = nullptr;
 }
 
 TEST_F(PlaybackGPU, DirectRecordingFailuresDoNotSubmitAndRecoverWithFreshTargets) {

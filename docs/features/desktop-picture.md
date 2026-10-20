@@ -20,7 +20,9 @@ restoration) and `DesktopSpaceWallpaperAPI` (the private per-Space calls), all i
 
 Mission Control thumbnails are sampled still frames, not live animation. A poster is
 the renderer's real final pixels, not a screen capture and not a Workshop cover, so
-scaling and cropping match the live wallpaper. Rendering, JPEG encoding and the
+scaling and cropping match the live wallpaper, including the blurred copy of Fit with
+blurred backdrop (a video the native player draws has black bars there, as on the
+desktop). Rendering, JPEG encoding and the
 system's thumbnail compositor still take time, so an update is not instant.
 
 **Settings › Desktop & Lock Screen › Desktop › Update the Mission Control picture every 5

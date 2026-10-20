@@ -160,6 +160,7 @@ impl MonitorRender {
             "stretch" => ScalingMode::Stretch,
             "fill" => ScalingMode::Fill,
             "fit" => ScalingMode::Fit,
+            "fit_blurred" => ScalingMode::FitBlurred,
             _ => ScalingMode::default(),
         }
     }
@@ -305,6 +306,7 @@ mod tests {
             (r#"{"scaling_mode":"fill"}"#, ScalingMode::Fill),
             (r#"{"scaling_mode":"stretch"}"#, ScalingMode::Stretch),
             (r#"{"scaling_mode":"none"}"#, ScalingMode::None),
+            (r#"{"scaling_mode":"fit_blurred"}"#, ScalingMode::FitBlurred),
             (r#"{"scaling_mode":"unknown"}"#, ScalingMode::Fill),
         ] {
             let wallpaper: MonitorRender = serde_json::from_str(json).unwrap();

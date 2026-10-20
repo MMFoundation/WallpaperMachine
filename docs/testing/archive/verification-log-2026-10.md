@@ -9,6 +9,14 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-17 — Steam Community sign-in kept and subscriptions import
+
+- python3 scripts/test.py: 3843 passed, 0 failed, 45 skipped (Python, XcodeGen, native).
+- New: SteamWebSessionTests, WorkshopSourceTests (keychain round trip with a memory store, renewal before a read, refused renewal), SupportPromptStoreTests (subscriptions offer), PanelWorkshopSubscriptionsTests (import, guide card, offer).
+- Renewal endpoint shape probed once with a dummy token: form-encoded POST accepted, refusal is an empty response with x-eresult 15.
+- Gap: no live Steam Community sign-in; that WebKit exposes steamRefresh_steam and that GenerateAccessTokenForApp accepts a browser token are unverified. Without the refresh cookie the saved session lasts as long as steamLoginSecure.
+- Gap: guide card and offer sheet not checked visually; the real keychain store is not exercised by tests.
+
 ## 2026-10-17 — Wallpaper Engine reference frames from the Parallels VM
 
 New scripts/we_reference.py (capture, render, compare) and the rule that a wallpaper fix is judged against Wallpaper Engine's own frame. Checked end to end on the developer's Parallels Desktop Standard VM (Windows 11, arm64) on 2026-10-17.

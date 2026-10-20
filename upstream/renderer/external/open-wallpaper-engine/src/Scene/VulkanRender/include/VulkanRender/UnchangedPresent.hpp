@@ -38,7 +38,9 @@ struct PresentedVideoFrame
 /// rather than gaining a false one.
 class PresentationKey {
 public:
-    static constexpr std::size_t kCapacity = 24;
+    /// Room for every input either backend adds, with some to spare: a key
+    /// that overflows never matches, so the skip silently stops working.
+    static constexpr std::size_t kCapacity = 32;
 
     void Clear() noexcept
     {

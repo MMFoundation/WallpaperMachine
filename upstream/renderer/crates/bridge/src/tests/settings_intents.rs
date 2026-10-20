@@ -2283,6 +2283,75 @@ async fn running_scene_bridge(engine: &FakeEngineFacade) -> (WallpaperBridge, te
     (bridge, root)
 }
 
+#[tokio::test]
+async fn a_blurred_fit_is_kept_per_display_and_moves_the_running_scene_in_place() {
+    let engine = FakeEngineFacade::default();
+    let (bridge, root) = running_scene_bridge(&engine).await;
+    let calls_before = engine.calls().len();
+
+    bridge
+        .set_scaling_mode("100".into(), "primary".into(), BridgeScalingMode::MatchBlurred)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        engine.calls().len(),
+        calls_before,
+        "a scaling change redraws the running scene, it does not reload it"
+    );
+    assert_eq!(
+        engine.scaling_mode_calls().last(),
+        Some(&(
+            SceneHandle::new(1),
+            wallpaper_core::project::ScalingMode::FitBlurred
+        ))
+    );
+    let row = bridge
+        .wallpaper_options_snapshot("100".into())
+        .await
+        .unwrap()
+        .display_configurations
+        .into_iter()
+        .find(|row| row.display_id == "primary")
+        .expect("primary display row");
+    assert_eq!(row.scaling_mode, BridgeScalingMode::MatchBlurred);
+    // Saved with the display's other settings, under a name an older build
+    // reads as Fill.
+    let saved = ConfigStore::open(root.path().to_path_buf())
+        .load_wallpaper("100")
+        .unwrap();
+    let render = saved
+        .monitors
+        .iter()
+        .find(|render| render.selector == SerializedSelector::Primary)
+        .expect("the display's entry");
+    assert_eq!(render.scaling_mode, "fit_blurred");
+    assert_eq!(
+        render.parse_scaling_mode(),
+        wallpaper_core::project::ScalingMode::FitBlurred
+    );
+}
+
+#[tokio::test]
+async fn a_mirror_display_can_show_its_source_with_a_blurred_fit() {
+    let (bridge, engine, secondary_display_id) = mirrored_wallpaper_bridge().await;
+    let calls_before = engine.calls().len();
+    bridge
+        .set_mirror_scaling_mode(secondary_display_id.clone(), BridgeScalingMode::MatchBlurred)
+        .await
+        .unwrap();
+    assert_eq!(engine.calls().len(), calls_before);
+    assert_eq!(
+        engine.scaling_mode_calls().last(),
+        Some(&(
+            SceneHandle::new(2),
+            wallpaper_core::project::ScalingMode::FitBlurred
+        ))
+    );
+    let row = settings_row(&bridge, &secondary_display_id).await;
+    assert_eq!(row.scaling_mode, BridgeScalingMode::MatchBlurred);
+}
+
 async fn assert_refresh_keeps_the_scene(bridge: &WallpaperBridge, engine: &FakeEngineFacade) {
     let calls_before = engine.calls().len();
     bridge.refresh_displays().await.unwrap();

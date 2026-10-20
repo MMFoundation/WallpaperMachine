@@ -12,6 +12,7 @@ SceneDemandMapping.cpp
 SceneToRenderGraph.cpp
 TexturePrefetch.cpp
 VulkanRender.cpp
+WallpaperBackdropPass.cpp
 # Presentation layout is shared by both render backends and is written in
 # Vulkan's viewport types, so it lives with the Vulkan-typed render code rather
 # than in the top-level renderer target. Putting it there would make the native

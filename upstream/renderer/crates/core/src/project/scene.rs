@@ -210,6 +210,9 @@ pub enum ScalingMode {
     /// Preserve aspect ratio and fill the output rectangle, cropping overflow.
     #[default]
     Fill,
+    /// Fit's picture, with the room around it filled by a blurred, darkened
+    /// copy of the same picture as Fill would place it.
+    FitBlurred,
 }
 
 impl Display for ScalingMode {
@@ -219,6 +222,7 @@ impl Display for ScalingMode {
             ScalingMode::Stretch => "stretch",
             ScalingMode::Fit => "fit",
             ScalingMode::Fill => "fill",
+            ScalingMode::FitBlurred => "fit_blurred",
         };
         write!(f, "{name}")
     }

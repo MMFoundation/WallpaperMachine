@@ -51,6 +51,7 @@ public:
     GraphicsPipeline& addInputAttributeDescription(std::span<const VkVertexInputAttributeDescription>);
     GraphicsPipeline& addInputBindingDescription(std::span<const VkVertexInputBindingDescription>);
     GraphicsPipeline& setTopology(VkPrimitiveTopology);
+    GraphicsPipeline& addPushConstantRange(VkPushConstantRange);
     GraphicsPipeline& setSampleCount(VkSampleCountFlagBits);
     VkSampleCountFlagBits sampleCount() const { return multisample.rasterizationSamples; }
 
@@ -66,6 +67,7 @@ private:
     std::vector<VkDynamicState>                      m_dynamic_states;
     std::vector<VkPipelineColorBlendAttachmentState> m_color_attachments;
     std::vector<DescriptorSetInfo>                   m_descriptor_set_infos;
+    std::vector<VkPushConstantRange>                 m_push_constant_ranges;
     Map<VkShaderStageFlagBits, Uni_ShaderSpv>        m_stage_spv_map;
 };
 

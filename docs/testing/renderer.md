@@ -157,6 +157,7 @@ Frames, time and surfaces:
 | `WE_TEST_COMPARE_NATIVE_ONLY` | the same test | Set (any value) to draw only the Native Metal picture of each project and compare nothing: only `<scene>-native.ppm` is written, for a comparison with a reference from outside the harness such as Wallpaper Engine's own frames ([wallpaper-engine-reference.md](wallpaper-engine-reference.md)) |
 | `WE_TEST_COMPARE_RESOLUTION` | the same test | `display` rasterizes a 2D scene at the size it is presented at on the layer; `canvas`, the default, at the size it was authored at. Perspective scenes and videos ignore it |
 | `WE_TEST_COMPARE_SCALE_FACTOR` | the same test | The layer's backing scale, `1`–`4` (default `1`); with `WE_TEST_COMPARE_SURFACE` it makes a laptop-panel-sized layer |
+| `WE_TEST_COMPARE_SCALING` | the same test | The scaling mode the host pushes: `fill` (the default), `fit`, `fit_blurred`, `stretch` or `none`; anything else fails the test |
 | `WE_TEST_COMPARE_REALTIME` | the same test | Set (any value) to pace the frames in real time, so a script that reads the wall clock (`Date.now()`) sees as much time pass as the scene does on a desktop; unset, the frames run as fast as they draw |
 | `WE_TEST_COMPARE_STOP_AFTER_REBUILD` | the same test | `<n>`: the run ends `n` draws after the first time the host would build the graph again (a clock under an effect does when its digits change size), `WE_TEST_METAL_FRAMES` bounding the wait, and prints the draw the rebuild came before, so a run without one can be drawn to the same scene time. A scene's own scripts cause rebuilds as it starts; `WE_TEST_COMPARE_REBUILD_FROM=<m>` leaves out those before draw `m` |
 | `WE_TEST_COMPARE_REBUILD_AT` | the same test | `<k>`: builds the graph again before draw `k` whether or not the scene asked, as the host does for any change of the graph, so what a rebuild leaves behind (a video's frame, the draw's length) is looked at on a scene that would not rebuild by itself at a draw of your choosing |
@@ -659,7 +660,34 @@ function: the default position reproduces an in-test copy of the old centring
 arithmetic bit for bit in every scaling mode, a position of 0 and 1 puts the picture
 against the leading and trailing edges for an overflowing and a letterboxed picture
 alike, non-finite values fall back to the centre and out-of-range ones clamp, and the
-pointer mapping follows the position.
+pointer mapping follows the position. For Fit with blurred backdrop it pins that the
+picture and the pointer mapping are Fit's for every factor and position, that the copy
+covers the display as a centred Fill whatever the position, that the copy's bands cover
+exactly the room around the picture and never the picture, that a one-pixel rounding
+gap and every other mode draw no copy, how the picture is reduced (taps at most four
+texels apart, two steps for a picture longer than 1024) and that a scaling-mode value
+past the last mode is refused.
+
+`metal_scene_draw_smoke`'s `ABlurredFitFillsItsBarsWithTheBlurredPictureOnBothRenderers`
+draws a canvas-filling gradient as Fit and as Fit with blurred backdrop on both
+renderers, with bars either side, mirrored, above and below, and for a picture long
+enough to take the two-step reduction: the picture is Fit's byte for byte, Fit's bars
+are black, the filled ones are not, neighbouring pixels differ by at most four steps, each
+side takes after the picture's nearer edge and is darker than it, and the two renderers'
+fills differ by less than 1.5 on average. `WE_TEST_OUTPUT` keeps the pictures.
+`ABlurredFitHoldsItsImagesOnlyWhileItHasRoomToFill` checks on the native backend that
+Fit and Fill hold the same render-target bytes, that the fill's images (with the 8-bit
+reduction for a large picture) appear in its mode and go with Fit or with a display of
+the picture's own shape, and prints what they hold. `playback_gpu_test`'s
+`PlainVideoPresentsThroughTheFinalViewportByteForByte` checks the Compatibility side for
+a plain video: without the composition's fill to borrow it takes the copy path, with it
+it presents directly, and both give the same picture and poster, Fit's picture inside
+the room, the fill in all of it; a mirrored picture takes the copy, and going back to
+Fit restores the plain bars and frees the images. `unchanged_present_test`'s
+`ABlurredBackdropStillLetsAPlainVideoSkipItsRepeats` runs a plain video in this mode on a
+surface wider than the clip and checks that ticks repeating a frame are still skipped and
+every new frame presented: the fill's rectangle is part of the presentation key, whose
+capacity (32 words) a key must stay within, or it never matches and nothing is skipped.
 
 `project_property_preview_test` (CPU only, in the check) pins what a property
 document means to a running scene: the project's declared defaults with exactly the
@@ -706,7 +734,9 @@ of `WE_TEST_ENERGY_WIDTH` x `WE_TEST_ENERGY_HEIGHT` (default 1920x1080), waits
 `WE_TEST_ENERGY_SECONDS` window (default 20). `WE_TEST_ENERGY_RESOLUTION`
 (`canvas`, the default, or `display`) picks the 2D scene resolution the run draws
 at and `WE_TEST_ENERGY_SCALE_FACTOR` (default 1) the surface's backing scale, so a
-3456 x 2234 surface at 2 is a laptop panel. It prints one `ENERGY {...}` line:
+3456 x 2234 surface at 2 is a laptop panel. `WE_TEST_ENERGY_SCALING` (`fill`, `fit`,
+`fit_blurred`, `stretch` or `none`) is pushed as the host's scaling mode; unset, none is
+pushed and the scene keeps the renderer's own (Fit), as before the variable existed. It prints one `ENERGY {...}` line:
 the backend actually used, this process's CPU seconds and CPU energy
 (`ri_energy_nj`), the GPU time of this process's own Metal command buffers and
 how many there were (`gpu_own_s`, `command_buffers`: the test wraps the device's

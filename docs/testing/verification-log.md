@@ -25,6 +25,39 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-20 — Fit with blurred backdrop
+
+Fit with blurred backdrop: a scaling mode (`FIT_BLURRED`, `fit_blurred`, `MatchBlurred`) that
+places the picture as Fit and fills the room around it with a blurred, darker copy, on both
+renderers, Compatibility video, the lock screen and posters; the native video player keeps black
+bars and says so. Fill stays the default. Uncommitted, pending the user's approval of the cost.
+
+- `wallpaper_scaling_test` — 14 passed (layout identical to Fit, copy as centred Fill, bands,
+  two-step reduction plan, refused values).
+- `metal_scene_draw_smoke --gtest_filter='*ABlurredFit*'` — 2 passed on both renderers, including
+  a 1536x1024 picture through the two-step reduction; images 0.23–0.34 MB.
+- `playback_gpu_test` — 73 passed, 1 skipped (`WE_TEST_VIDEO` corpus); plain video with and
+  without direct presentation, poster equal to the drawable.
+- `unchanged_present_test` — 12 passed, 1 skipped (energy probe). The change's first version
+  overflowed Compatibility's presentation key (about 20 words plus the fill's 5, capacity 24),
+  which stopped repeat skipping in every mode; `APlainVideoPresentsEveryNewFrameAndNothingElse`
+  and `TheSkipPresentsTheSameVideoFramesInTheSameOrder` caught it. The key now packs the fill
+  into at most 3 words and holds 32, and a new test checks the skip in this mode.
+- Cost, headless energy harness, 3–4 alternating 15 s rounds, M3 Max, another app build drawing
+  the desktop throughout: GPU time per 60 Hz tick, Fit → this mode: 3840x2160 scene at display
+  resolution, Native Metal 5.96 → 6.50 ms at 6880x2880@2 (4112x2658@2 within noise),
+  Compatibility 5.81 → 6.11 / 4.90 → 5.35 ms; 4K 30 FPS clip on Compatibility 0.25 → 0.54 /
+  0.26 → 0.32 ms; whole GPU +0.1–0.2 W, CPU +~8 mW; images 2.0 / 1.2 / 0.86 MB. Runs of one case
+  vary up to 2x, so sub-0.5 ms differences are not resolved. Fit records the same commands as
+  before (traced: same 37 passes a frame); the harness's Fit timings old vs new disagreed in sign
+  between sets.
+- `python3 scripts/check_rust.py` — exit 0, 1,527 passed; asset/corpus tests skipped (no assets).
+- `python3 scripts/check_renderer.py` — exit 0, every binary 0 (metal_scene_draw_smoke 157 passed, 2 env-gated skips; AnEffectsSwappedBuffers… passed), 12 generated cases pooled = isolated with expected pixels, reload probe 0.
+- `python3 scripts/test.py` — exit 0, 3,905 passed, 0 failed, 45 skipped in 146 s.
+- Not checked: any desktop run (no visual check on a real display, Settings menu widened to
+  210 pt unseen); shimmer from sparse taps is an estimate; no Wallpaper Engine reference (no such
+  mode in Wallpaper Engine, VM expired). App not rebuilt.
+
 ## 2026-10-20 — Image layers honour the perspective flag
 
 A media-player scene laid its cover and shadow cards on 3D models under a cursor-turned group; the models drew through the 2D scene's perspective camera and the cards drew flat, so the cover and shadows slid off the models as slabs. Image layers with the perspective flag now draw through that camera too.
@@ -129,11 +162,3 @@ The presentation policy reconciles per-display visibility during global transiti
 - `python3 scripts/check_rust.py --output artifacts/multi-display-playback/rust` — exit 0: core 315, bridge 604, integrations 16, shader 580; nine desktop/corpus exclusions and five emitted shader-asset skips remain unverified.
 - `python3 scripts/check_renderer.py` — exit 0: 47 registered binaries passed, 12 pooled/isolated pixel cases matched with expected pixels and no diagnostics, 8 projects × 2 reload cycles passed; GPU and realtime checks executed. Nine external-corpus cases skipped.
 - Changed documentation links, provenance JSON and `git diff --check` passed. No desktop control, real multi-monitor playback check, Wallpaper Engine frame comparison, installation or app restart; task logs, result bundles and generated probe output removed after review.
-
-## 2026-10-17 — Steam Community sign-in kept and subscriptions import
-
-- python3 scripts/test.py: 3843 passed, 0 failed, 45 skipped (Python, XcodeGen, native).
-- New: SteamWebSessionTests, WorkshopSourceTests (keychain round trip with a memory store, renewal before a read, refused renewal), SupportPromptStoreTests (subscriptions offer), PanelWorkshopSubscriptionsTests (import, guide card, offer).
-- Renewal endpoint shape probed once with a dummy token: form-encoded POST accepted, refusal is an empty response with x-eresult 15.
-- Gap: no live Steam Community sign-in; that WebKit exposes steamRefresh_steam and that GenerateAccessTokenForApp accepts a browser token are unverified. Without the refresh cookie the saved session lasts as long as steamLoginSecure.
-- Gap: guide card and offer sheet not checked visually; the real keychain store is not exercised by tests.

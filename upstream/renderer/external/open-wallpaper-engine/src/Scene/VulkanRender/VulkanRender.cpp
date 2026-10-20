@@ -78,6 +78,7 @@ const char* WallpaperScalingModeName(wallpaper::WallpaperScalingMode mode) {
     case wallpaper::WallpaperScalingMode::STRETCH: return "stretch";
     case wallpaper::WallpaperScalingMode::FIT: return "fit";
     case wallpaper::WallpaperScalingMode::FILL: return "fill";
+    case wallpaper::WallpaperScalingMode::FIT_BLURRED: return "fit_blurred";
     }
 
     return "unknown";
@@ -668,6 +669,7 @@ bool VulkanRender::Impl::releasePresentation() {
     }
     m_pass_loaded = false;
     DestroyRenderingResource(m_rendering_resources);
+    m_rendering_resources.wallpaper_backdrop_pass = nullptr;
     m_finpass.reset();
     m_prepass.reset();
     m_ex_swapchain.reset();
@@ -681,6 +683,8 @@ bool VulkanRender::Impl::initRes() {
     // Presentation-scoped: always recreated.
     m_prepass = std::make_unique<PrePass>(PrePass::Desc {});
     m_finpass = std::make_unique<FinPass>(FinPass::Desc {});
+    m_finpass->setBackdropWanted(m_scaling_mode == WallpaperScalingMode::FIT_BLURRED);
+    m_rendering_resources.wallpaper_backdrop_pass = &m_finpass->backdrop();
     if (m_with_surface) {
         m_finpass->setPresentFormat(m_device->swapchain().format());
         m_finpass->setPresentQueueIndex(m_device->present_queue().family_index);
@@ -748,6 +752,7 @@ void VulkanRender::Impl::destroy() {
     m_pass_scratch.candidates.clear();
     m_pass_scratch.plan.entries.clear();
     m_prepass.reset();
+    m_rendering_resources.wallpaper_backdrop_pass = nullptr;
     m_finpass.reset();
     m_testpass.reset();
     m_ex_swapchain.reset();
@@ -822,6 +827,7 @@ bool VulkanRender::Impl::drawFrame(Scene& scene, bool* presented) {
     m_rendering_resources.wallpaper_viewport = MakeWallpaperViewport(m_scaling_layout);
     m_rendering_resources.wallpaper_scissor  = MakeWallpaperScissor(m_scaling_layout);
     m_rendering_resources.wallpaper_horizontal_flip = m_horizontal_flip;
+    SetWallpaperBackdrop(m_rendering_resources, m_scaling_layout);
 
     std::string error;
     if (! m_device->tex_cache().BeginVideoFrameRecording(&error)) {
@@ -1247,6 +1253,8 @@ void VulkanRender::Impl::UpdateCameraFillMode(wallpaper::Scene&   scene,
 void VulkanRender::Impl::SetWallpaperScalingMode(wallpaper::WallpaperScalingMode mode) {
     m_scaling_mode = mode;
     m_present_gate.Invalidate();
+    // Built here, between frames, so no frame waits for the fill's shaders.
+    if (m_finpass) m_finpass->setBackdropWanted(mode == WallpaperScalingMode::FIT_BLURRED);
     LOG_INFO("wallpaper scaling mode: %s", WallpaperScalingModeName(m_scaling_mode));
 }
 
@@ -1744,6 +1752,13 @@ bool VulkanRender::Impl::frameRepeatsLastPresent(const Scene& scene) {
     m_present_key.Add(rr.wallpaper_scissor.extent.width);
     m_present_key.Add(rr.wallpaper_scissor.extent.height);
     m_present_key.Add(rr.wallpaper_horizontal_flip ? 1u : 0u);
+    // Fit and its blurred variant place the picture identically.
+    m_present_key.Add(rr.wallpaper_backdrop ? 1u : 0u);
+    if (rr.wallpaper_backdrop) {
+        const auto& rect = rr.wallpaper_backdrop_rect;
+        m_present_key.Add((uint64_t(uint32_t(rect.offset.x)) << 32) | uint32_t(rect.offset.y));
+        m_present_key.Add((uint64_t(rect.extent.width) << 32) | rect.extent.height);
+    }
     m_present_key.AddFloat(scene.clearColor[0]);
     m_present_key.AddFloat(scene.clearColor[1]);
     m_present_key.AddFloat(scene.clearColor[2]);

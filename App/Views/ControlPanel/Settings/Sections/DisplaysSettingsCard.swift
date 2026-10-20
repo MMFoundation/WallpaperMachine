@@ -193,12 +193,14 @@ struct DisplaysPlaybackDisclosure: View {
             case .stretch: L("Stretch")
             case .match: L("Match")
             case .fill: L("Fill")
+            case .matchBlurred: L("Match with blurred backdrop")
             }
-          }(), width: 150
+          }(), width: 210
         ) {
           Text("No scaling").tag(BridgeScalingMode.none)
           Text("Stretch").tag(BridgeScalingMode.stretch)
           Text("Match").tag(BridgeScalingMode.match)
+          Text("Match with blurred backdrop").tag(BridgeScalingMode.matchBlurred)
           Text("Fill").tag(BridgeScalingMode.fill)
         }
         .disabled(playbackOff)

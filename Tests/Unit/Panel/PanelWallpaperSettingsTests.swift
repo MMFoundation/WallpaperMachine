@@ -74,6 +74,22 @@ final class PanelWallpaperSettingsTests: PanelTestCase {
     }
   }
 
+  func testFitWithBlurredBackdropIsKeptForTheOneDisplayItWasChosenFor() async throws {
+    try await withSettings { panel, bridge in
+      let controller = panel.controller
+      try await controller.setScalingMode(.matchBlurred, on: "slow", for: "wp")
+
+      XCTAssertEqual(bridge.calls, ["scalingMode wp slow matchBlurred"])
+      let options = try XCTUnwrap(controller.inspectorOptions(for: "wp"))
+      XCTAssertEqual(options.displays.map(\.scalingMode), [.fill, .matchBlurred])
+      XCTAssertFalse(options.isDirty, "a scaling mode is saved at once, not drafted")
+      for display in options.displays {
+        XCTAssertTrue(InspectorPolicy.offersBlurredFit(options, display: display))
+        XCTAssertEqual(InspectorPolicy.blurredFitNote(for: display), .none)
+      }
+    }
+  }
+
   func testAValueNoControlOffersIsRefusedWithoutABridgeCall() async throws {
     try await withSettings { panel, bridge in
       let controller = panel.controller
@@ -273,6 +289,7 @@ extension BridgeScalingMode {
     case .stretch: "stretch"
     case .match: "match"
     case .fill: "fill"
+    case .matchBlurred: "matchBlurred"
     }
   }
 }

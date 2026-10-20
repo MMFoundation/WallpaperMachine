@@ -52,6 +52,7 @@ void GraphicsPipeline::toDefault() {
     m_input_bind_descriptions.clear();
     m_input_attr_descriptions.clear();
     m_descriptor_set_infos.clear();
+    m_push_constant_ranges.clear();
     m_stage_spv_map.clear();
     m_view = VkPipelineViewportStateCreateInfo {
         .sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
@@ -110,6 +111,11 @@ void GraphicsPipeline::toDefault() {
 ShaderSpv* GraphicsPipeline::getShaderSpv(VkShaderStageFlagBits stage) const {
     if (exists(m_stage_spv_map, stage)) return m_stage_spv_map.at(stage).get();
     return nullptr;
+}
+
+GraphicsPipeline& GraphicsPipeline::addPushConstantRange(VkPushConstantRange range) {
+    m_push_constant_ranges.push_back(range);
+    return *this;
 }
 
 GraphicsPipeline&
@@ -201,6 +207,9 @@ bool GraphicsPipeline::create(const Device& device, vvk::RenderPass& pass,
             .pNext          = nullptr,
             .setLayoutCount = (uint32_t)layouts.size(),
             .pSetLayouts    = layouts.empty() ? nullptr : layouts.data(),
+            .pushConstantRangeCount = (uint32_t)m_push_constant_ranges.size(),
+            .pPushConstantRanges =
+                m_push_constant_ranges.empty() ? nullptr : m_push_constant_ranges.data(),
         };
         VVK_CHECK_BOOL_RE(device.handle().CreatePipelineLayout(ci, pipeline.layout));
     }

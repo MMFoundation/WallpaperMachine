@@ -307,6 +307,7 @@ impl BridgeActorState {
                         ScalingMode::None => BridgeScalingMode::None,
                         ScalingMode::Stretch => BridgeScalingMode::Stretch,
                         ScalingMode::Fit => BridgeScalingMode::Match,
+                        ScalingMode::FitBlurred => BridgeScalingMode::MatchBlurred,
                         ScalingMode::Fill => BridgeScalingMode::Fill,
                     },
                     scaling_factor: render.scaling_factor,
@@ -402,6 +403,7 @@ impl BridgeActorState {
                     ScalingMode::Stretch => "Stretch",
                     ScalingMode::Fit => "Match",
                     ScalingMode::Fill => "Fill",
+                    ScalingMode::FitBlurred => "Match, blurred",
                 };
 
                 Some(BridgeMonitorInfoRow {

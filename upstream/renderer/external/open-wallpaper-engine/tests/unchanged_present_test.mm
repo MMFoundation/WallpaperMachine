@@ -9,6 +9,7 @@
 // playback timeline is the one the unskipped path produces.
 
 #include "Core/RendererCounters.hpp"
+#include "Presentation/WallpaperScaling.hpp"
 #include "Scene/SceneResolution.hpp"
 #include "Scene/SceneWallpaper.hpp"
 #include "Scene/SceneWallpaperSurface.hpp"
@@ -34,6 +35,8 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <map>
+#include <optional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -321,7 +324,8 @@ std::vector<PresentedFrame> DistinctSequence(const std::vector<PresentedFrame>& 
 /// A running wallpaper on a layer no window owns.
 class RunningWallpaper {
 public:
-    RunningWallpaper(const std::filesystem::path& project, const std::filesystem::path& scratch)
+    RunningWallpaper(const std::filesystem::path& project, const std::filesystem::path& scratch,
+                     std::optional<WallpaperScalingMode> scaling = std::nullopt)
     {
         m_layer                 = [CAMetalLayer layer];
         m_layer.device          = MTLCreateSystemDefaultDevice();
@@ -338,6 +342,9 @@ public:
                                           m_changed.notify_all();
                                       }));
         m_wallpaper.initVulkan(MakeSurface());
+        if (scaling) {
+            m_wallpaper.setPropertyInt32(PROPERTY_SCALINGMODE, static_cast<int32_t>(*scaling));
+        }
 
         std::filesystem::create_directories(scratch / "assets");
         SceneWallpaperConfig config;
@@ -506,6 +513,32 @@ TEST_F(UnchangedPresent, PinnedTargetAccountingReturnsToBaselineWhenScenesClose)
         }
         EXPECT_EQ(vulkan::CurrentSceneOptimizationTotals().pinned_bytes, baseline);
     }
+}
+
+// Fit with blurred backdrop keeps a plain video's repeats skipped: the fill is
+// made from the picture, so a frame that repeats the picture repeats the fill,
+// and its rectangle fits in the presentation key beside everything else.
+TEST_F(UnchangedPresent, ABlurredBackdropStillLetsAPlainVideoSkipItsRepeats)
+{
+    ASSERT_FALSE(testing_media::SharedGop().packets.empty())
+        << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
+    const auto project = WriteVideoProject(root_ / "video");
+    vulkan::SetSceneOptimizationEnabled(true);
+    RunningWallpaper running(project, root_ / "blurred", WallpaperScalingMode::FIT_BLURRED);
+    ASSERT_TRUE(running.WaitForFirstFrame()) << "the video never reached the surface";
+    // Wider than the 16:9 clip, so there is room either side to fill.
+    ASSERT_TRUE(running.Resize(1280, 480));
+    std::this_thread::sleep_for(500ms);
+    const auto before = running.Read();
+    std::this_thread::sleep_for(2000ms);
+    const auto counts = Delta(before, running.Read());
+    Print("blurred backdrop, skip on:  ", counts);
+
+    EXPECT_GT(counts[OWE_RC_PRESENTS_SKIPPED_UNCHANGED], 0u);
+    EXPECT_EQ(counts[OWE_RC_RENDER_FAILURES], 0u);
+    EXPECT_LE(counts[OWE_RC_RENDER_SUBMISSIONS], counts[OWE_RC_VIDEO_FRAMES_SELECTED] + 1)
+        << "a repeated frame was drawn again";
+    EXPECT_GE(counts[OWE_RC_RENDER_SUBMISSIONS] + 1, counts[OWE_RC_VIDEO_FRAMES_SELECTED]);
 }
 
 TEST_F(UnchangedPresent, APlainVideoPresentsEveryNewFrameAndNothingElse)
@@ -1195,6 +1228,20 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
     const bool  display =
         resolution_name != nullptr && std::string_view(resolution_name) == "display";
     const double scale_factor = number("WE_TEST_ENERGY_SCALE_FACTOR", 1.0);
+    // The scaling mode the host pushes: `fill`, `fit`, `fit_blurred`,
+    // `stretch` or `none`. Unset, none is pushed and the scene keeps its own.
+    const std::string_view scaling_name = std::getenv("WE_TEST_ENERGY_SCALING") != nullptr
+                                              ? std::getenv("WE_TEST_ENERGY_SCALING")
+                                              : "default";
+    const std::map<std::string_view, WallpaperScalingMode> scaling_modes {
+        { "none", WallpaperScalingMode::NONE },
+        { "stretch", WallpaperScalingMode::STRETCH },
+        { "fit", WallpaperScalingMode::FIT },
+        { "fill", WallpaperScalingMode::FILL },
+        { "fit_blurred", WallpaperScalingMode::FIT_BLURRED },
+    };
+    ASSERT_TRUE(scaling_name == "default" || scaling_modes.contains(scaling_name))
+        << "no scaling mode " << scaling_name;
     const double warmup  = number("WE_TEST_ENERGY_WARMUP", 5.0);
     const double window  = number("WE_TEST_ENERGY_SECONDS", 20.0);
     const auto   width   = static_cast<uint16_t>(number("WE_TEST_ENERGY_WIDTH", 1920));
@@ -1257,6 +1304,10 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
         return create(instance, &create_info, nullptr, surface);
     };
     wallpaper.initVulkan(info);
+    if (scaling_name != "default") {
+        wallpaper.setPropertyInt32(PROPERTY_SCALINGMODE,
+                                   static_cast<int32_t>(scaling_modes.at(scaling_name)));
+    }
     SceneWallpaperConfig config;
     config.source     = project;
     config.assets     = assets;
@@ -1280,7 +1331,8 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
     const double seconds = std::chrono::duration<double>(after.at - before.at).count();
     const uint64_t completed = after.health.frames_completed - before.health.frames_completed;
     const uint64_t presented = after.health.frames_presented - before.health.frames_presented;
-    std::cout << "ENERGY {\"renderer\":\"" << renderer << "\",\"resolution\":\""
+    std::cout << "ENERGY {\"renderer\":\"" << renderer << "\",\"scaling\":\"" << scaling_name
+              << "\",\"resolution\":\""
               << (display ? "display" : "canvas") << "\",\"backend\":\""
               << (selection.backend == SceneBackend::NativeMetal ? "native" : "compatibility")
               << "\",\"seconds\":" << seconds

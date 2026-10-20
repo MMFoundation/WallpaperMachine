@@ -536,6 +536,7 @@ impl MonitorSettingsCfg {
             "stretch" => ScalingMode::Stretch,
             "fill" => ScalingMode::Fill,
             "fit" => ScalingMode::Fit,
+            "fit_blurred" => ScalingMode::FitBlurred,
             _ => ScalingMode::default(),
         }
     }

@@ -267,6 +267,37 @@ final class InspectorPolicyTests: InspectorTestCase {
     XCTAssertEqual(displays.map(InspectorPolicy.positionNote(for:)), [.nativePlayer, .explains])
   }
 
+  func testFitWithBlurredBackdropIsOfferedWhereAScalingModeMovesThePicture() {
+    let configurations = [
+      InspectorRenderFixture.config("primary", "Studio Display (1 - Primary)", mode: .fill, factor: 1, pan: (0.5, 0.5)),
+      InspectorRenderFixture.config("second", "LG UltraFine (2 - Secondary)", mode: .matchBlurred, factor: 1, pan: (0.5, 0.5)),
+    ]
+    for kind in [BridgeWallpaperKind.projectScene, .video] {
+      let options = InspectorOptions.make(
+        BridgeSnapshotFixtures.options(wallpaperId: "w", kind: kind, displayConfigurations: configurations))
+      XCTAssertEqual(
+        options.displays.map { InspectorPolicy.offersBlurredFit(options, display: $0) }, [true, true], "\(kind)")
+    }
+    // A web page fills its window whatever the mode; a display already set to it keeps it shown.
+    let web = InspectorOptions.make(
+      BridgeSnapshotFixtures.options(wallpaperId: "w", kind: .webpage, displayConfigurations: configurations))
+    XCTAssertEqual(web.displays.map { InspectorPolicy.offersBlurredFit(web, display: $0) }, [false, true])
+  }
+
+  func testOnlyANativelyPlayedVideoWithABlurredBackdropIsToldItsBarsStayBlack() {
+    let snapshot = BridgeSnapshotFixtures.options(
+      wallpaperId: "clip", kind: .video,
+      displayConfigurations: [
+        InspectorRenderFixture.config("primary", "Studio Display (1 - Primary)", mode: .matchBlurred, factor: 1, pan: (0.5, 0.5)),
+        InspectorRenderFixture.config("second", "LG UltraFine (2 - Secondary)", mode: .matchBlurred, factor: 1, pan: (0.5, 0.5)),
+        InspectorRenderFixture.config("third", "Built-in (3 - Secondary)", mode: .match, factor: 1, pan: (0.5, 0.5)),
+      ])
+    var inputs = InspectorOptions.Inputs()
+    inputs.nativePlayerDisplays = [1, 3]
+    let displays = InspectorOptions.make(snapshot, inputs: inputs).displays
+    XCTAssertEqual(displays.map(InspectorPolicy.blurredFitNote(for:)), [.nativePlayer, .none, .none])
+  }
+
   func testAStillTheAppPackagedIsToldByItsIdAndTheArtworkIdIsRead() {
     XCTAssertTrue(InspectorPolicy.isPackagedStill("pixiv-12345-p0"))
     XCTAssertTrue(InspectorPolicy.isPackagedStill("image-3F.png"))

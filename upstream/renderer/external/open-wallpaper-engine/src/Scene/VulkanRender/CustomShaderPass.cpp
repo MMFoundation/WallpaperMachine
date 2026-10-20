@@ -1,4 +1,5 @@
 #include "CustomShaderPass.hpp"
+#include "WallpaperBackdropPass.hpp"
 #include "PrePass.hpp"
 #include "CopyPass.hpp"
 #include "FinPass.hpp"
@@ -1474,6 +1475,11 @@ bool CustomShaderPass::canPresentDirectly(const RenderingResources& rr, VkExtent
         ! m_presentation_pipeline.layout || target_format != m_desc.presentation_format ||
         rr.wallpaper_horizontal_flip || target_extent.width == 0 || target_extent.height == 0)
         return false;
+    // The blurred fill is made from the picture, which only a source standing
+    // in for the output (a plain video's) can supply.
+    if (rr.wallpaper_backdrop &&
+        (! m_desc.presents_through_final_viewport || rr.wallpaper_backdrop_pass == nullptr))
+        return false;
     const auto candidate = batchCandidate();
     const auto& output = m_desc.vk_output;
     const bool through_final = m_desc.presents_through_final_viewport;
@@ -1547,6 +1553,21 @@ VkResult CustomShaderPass::recordPresentation(const Device& device, RenderingRes
         ! canPresentDirectly(rr, extent, m_desc.presentation_format))
         return VK_ERROR_INITIALIZATION_FAILED;
     recordTextureBarriers(device, rr);
+    // FIT_BLURRED's fill, made from the source the copy would have held.
+    bool backdrop = false;
+    if (rr.wallpaper_backdrop && rr.wallpaper_backdrop_pass != nullptr) {
+        const ImageParameters* source = nullptr;
+        for (size_t i = 0; i < m_desc.vk_texture_bindings.size() && source == nullptr; ++i) {
+            if (m_desc.vk_texture_bindings[i].image_binding >= 0 && i < m_desc.vk_textures.size() &&
+                ! m_desc.vk_textures[i].slots.empty())
+                source = &m_desc.vk_textures[i].getActive();
+        }
+        backdrop = source != nullptr &&
+                   rr.wallpaper_backdrop_pass->recordBlur(device, rr.command, *source) == VK_SUCCESS;
+    } else if (rr.wallpaper_backdrop_pass != nullptr) {
+        // Without room it holds nothing, as in the final composition.
+        rr.wallpaper_backdrop_pass->release();
+    }
     VkRenderPassBeginInfo begin {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .renderPass = render_pass,
@@ -1556,6 +1577,7 @@ VkResult CustomShaderPass::recordPresentation(const Device& device, RenderingRes
         .pClearValues = &m_desc.clear_value,
     };
     rr.command.BeginRenderPass(begin, VK_SUBPASS_CONTENTS_INLINE);
+    if (backdrop) rr.wallpaper_backdrop_pass->drawBands(rr.command, rr, extent);
     if (m_desc.presents_through_final_viewport) {
         // The final composition's own viewport, scissor and sampler, so each
         // target pixel receives the texel it would have read from the copy.

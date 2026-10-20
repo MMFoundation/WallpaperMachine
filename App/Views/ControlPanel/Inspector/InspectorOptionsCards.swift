@@ -179,6 +179,9 @@ struct DisplayCard: View {
           Text("Original size").tag(BridgeScalingMode.none)
           Text("Stretch").tag(BridgeScalingMode.stretch)
           Text("Fit").tag(BridgeScalingMode.match)
+          if InspectorPolicy.offersBlurredFit(options, display: display) {
+            Text("Fit with blurred backdrop").tag(BridgeScalingMode.matchBlurred)
+          }
           Text("Fill").tag(BridgeScalingMode.fill)
         }
         .labelsHidden()
@@ -187,6 +190,19 @@ struct DisplayCard: View {
         .accessibilityLabel("Scaling mode")
       }
       .disabled(controller.isInspectorControlDisabled(options, key: modeKey))
+      if InspectorPolicy.blurredFitNote(for: display) == .nativePlayer {
+        InspectorCardRow {
+          VStack(alignment: .leading, spacing: 4) {
+            InspectorNote(
+              "This video is drawn by the native video player, which leaves the bars black. Choose Compatibility for Video playback in Performance settings to blur them."
+            )
+            Button("Open Performance") {
+              controller.launch("openSettings") { try await controller.openSettings(.performance) }
+            }
+            .buttonStyle(.inspectorLink)
+          }
+        }
+      }
       ScaleFactorRow(options: options, display: display)
       FrameRateRow(options: options, display: display)
       if let limit = display.frameRateLimit {

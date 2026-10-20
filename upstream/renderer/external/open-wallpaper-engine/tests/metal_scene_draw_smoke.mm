@@ -146,6 +146,26 @@ std::filesystem::path WriteFixture(const std::filesystem::path& root,
     return root / "project.json";
 }
 
+/// The fixture's card over a whole `width` x `height` canvas: red runs across
+/// it, green down it.
+std::filesystem::path WriteCanvasGradientFixture(const std::filesystem::path& root,
+                                                 uint32_t width = 384, uint32_t height = 256)
+{
+    const auto project = WriteFixture(root);
+    const auto w = std::to_string(width);
+    const auto h = std::to_string(height);
+    std::ofstream(root / "models/tile.json")
+        << R"({"width":)" << w << R"(,"height":)" << h << R"(,"material":"materials/tile.json"})";
+    std::ofstream(root / "layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+        << R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+        << R"("cameraparallax":false,"orthogonalprojection":{"width":)" << w << R"(,"height":)" << h
+        << R"(}},"objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[)"
+        << std::to_string(width / 2) << "," << std::to_string(height / 2)
+        << R"(,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true}]})";
+    return project;
+}
+
 /// Three of the fixture's cards over one another, left to right, all drawn
 /// straight into the scene's own image. The middle card's `visible` is
 /// `middle_visibility_json` verbatim: a literal, or a binding to the project's
@@ -377,7 +397,9 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
                                  double display_scale_factor = 1.0,
                                  tests::SceneProbeControls* input = nullptr,
                                  RendererCounters* counters = nullptr,
-                                 RebuildWatch* watch = nullptr)
+                                 RebuildWatch* watch = nullptr,
+                                 WallpaperScalingMode scaling = WallpaperScalingMode::FILL,
+                                 bool horizontal_flip = false)
 {
     RendererPicture picture;
     @autoreleasepool {
@@ -450,10 +472,10 @@ RendererPicture DrawWithRenderer(Scene& scene, bool native, uint32_t width, uint
         // finished picture to the surface; the camera keeps the canvas's shape,
         // since the host changes it only for an explicit fill mode, which the
         // app never sends. Narrowing it too would crop twice.
-        render.SetWallpaperScalingMode(WallpaperScalingMode::FILL);
+        render.SetWallpaperScalingMode(scaling);
         render.SetWallpaperScalingFactor(1.0);
         render.SetWallpaperFraming(WallpaperFraming {});
-        render.SetWallpaperHorizontalFlip(false);
+        render.SetWallpaperHorizontalFlip(horizontal_flip);
         if (scene.runtime != nullptr) {
             scene.runtime->SetScreenResolution(Eigen::Vector2f(width, height));
         }
@@ -13890,7 +13912,8 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
     // is presented at (`canvas`, the default, at the size it was authored at) and
     // `WE_TEST_COMPARE_SCALE_FACTOR` is the layer's backing scale (1), so a
     // display-resolution picture can be compared across renderers and with the
-    // canvas one. `WE_TEST_INPUT_JSON` feeds synthetic pointer events (the
+    // canvas one; `WE_TEST_COMPARE_SCALING` is the scaling mode the host pushes
+    // (`fill`, the default, `fit`, `fit_blurred`, `stretch` or `none`). `WE_TEST_INPUT_JSON` feeds synthetic pointer events (the
     // cursor at the centre of the screen is `[{"frame":0,"x":0.5,"y":0.5}]`),
     // and `WE_TEST_COMPARE_REALTIME` paces the frames in real time, so a
     // script reading the wall clock (`Date.now()`) sees the scene's time pass as
@@ -13952,6 +13975,19 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
     if (const char* value = std::getenv("WE_TEST_COMPARE_SCALE_FACTOR")) {
         scale_factor = std::strtod(value, nullptr);
         ASSERT_TRUE(scale_factor >= 1.0 && scale_factor <= 4.0);
+    }
+    auto scaling = WallpaperScalingMode::FILL;
+    if (const char* value = std::getenv("WE_TEST_COMPARE_SCALING")) {
+        const std::map<std::string_view, WallpaperScalingMode> modes {
+            { "none", WallpaperScalingMode::NONE },
+            { "stretch", WallpaperScalingMode::STRETCH },
+            { "fit", WallpaperScalingMode::FIT },
+            { "fill", WallpaperScalingMode::FILL },
+            { "fit_blurred", WallpaperScalingMode::FIT_BLURRED },
+        };
+        const auto found = modes.find(value);
+        ASSERT_NE(found, modes.end()) << "WE_TEST_COMPARE_SCALING names no scaling mode: " << value;
+        scaling = found->second;
     }
 
     std::vector<std::string> projects;
@@ -14037,7 +14073,7 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
             watch.from       = rebuild_from;
             watch.force_at   = rebuild_at;
             auto picture = DrawWithRenderer(scene, native, width, height, frame_count, frame_step,
-                                            pace, scale_factor, &input, nullptr, &watch);
+                                            pace, scale_factor, &input, nullptr, &watch, scaling);
             if (stop_after_rebuild >= 0) {
                 const std::string rebuilt =
                     watch.rebuilt_at < 0
@@ -14090,6 +14126,250 @@ TEST_F(MetalSceneDraw, LocalProjectsDrawTheSamePictureOnBothRenderers)
         }
     }
     SetSceneRendererPreference(SceneRendererPreference::Compatibility);
+}
+
+namespace
+{
+
+struct GradientPictures
+{
+    RendererPicture fit;
+    RendererPicture blurred;
+};
+
+/// The canvas-gradient fixture drawn by one renderer on a `width`x`height`
+/// layer as Fit and as its blurred variant, each from a fresh parse.
+GradientPictures DrawGradient(const std::filesystem::path& root, bool native, uint32_t canvas_width,
+                              uint32_t canvas_height, uint32_t width, uint32_t height, bool flip)
+{
+    GradientPictures pictures;
+    for (const auto mode : { WallpaperScalingMode::FIT, WallpaperScalingMode::FIT_BLURRED }) {
+        SetSceneRendererPreference(native ? SceneRendererPreference::NativeMetalPreferred
+                                          : SceneRendererPreference::Compatibility);
+        const std::string name = std::string(native ? "native" : "compat") +
+                                 (mode == WallpaperScalingMode::FIT ? "-fit" : "-blurred") +
+                                 (flip ? "-flip" : "") + "-" + std::to_string(canvas_width) +
+                                 "-on-" + std::to_string(width) + "x" + std::to_string(height);
+        const auto  project = WriteCanvasGradientFixture(root / name, canvas_width, canvas_height);
+        LoadedScene loaded;
+        std::string error;
+        EXPECT_TRUE(LoadScene(project, root / (name + "-cache"), loaded, error)) << error;
+        if (loaded.scene == nullptr) break;
+        auto picture = DrawWithRenderer(*loaded.scene, native, width, height, 3, 1.0 / 60.0, {},
+                                        1.0, nullptr, nullptr, nullptr, mode, flip);
+        EXPECT_TRUE(picture.error.empty()) << picture.error;
+        // `WE_TEST_OUTPUT` keeps the pictures, to look at.
+        if (const char* output = std::getenv("WE_TEST_OUTPUT"); output != nullptr && *output) {
+            std::filesystem::create_directories(output);
+            std::ofstream image(std::filesystem::path(output) / ("blurred-fit-" + name + ".ppm"),
+                                std::ios::binary);
+            image << "P6\n" << picture.width << " " << picture.height << "\n255\n";
+            image.write(reinterpret_cast<const char*>(picture.rgb.data()),
+                        std::streamsize(picture.rgb.size()));
+        }
+        (mode == WallpaperScalingMode::FIT ? pictures.fit : pictures.blurred) = std::move(picture);
+    }
+    SetSceneRendererPreference(SceneRendererPreference::Compatibility);
+    return pictures;
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, ABlurredFitFillsItsBarsWithTheBlurredPictureOnBothRenderers)
+{
+    // The picture is exactly Fit's, where Fit puts it; the room around it, black
+    // under Fit, holds a darker, smooth copy of the same picture, coloured like
+    // the part of the picture nearest it, mirrored with it, and alike on both
+    // renderers.
+    struct Surface
+    {
+        const char* name;
+        uint32_t    canvas_width, canvas_height, width, height;
+        bool        flip;
+    };
+    const Surface surfaces[] = {
+        { "bars either side", 384, 256, 768, 256, false },
+        { "bars either side, mirrored", 384, 256, 768, 256, true },
+        { "bars above and below", 384, 256, 384, 512, false },
+        // Longer than 1024: reduced to an eighth before the small image.
+        { "a large picture, reduced in two steps", 1536, 1024, 3072, 1024, false },
+    };
+    for (const auto& surface : surfaces) {
+        SCOPED_TRACE(surface.name);
+        const auto layout = ComputeWallpaperScalingLayout(
+            WallpaperScalingMode::FIT_BLURRED, surface.canvas_width, surface.canvas_height,
+            surface.width, surface.height, 1.0, 1.0);
+        ASSERT_TRUE(layout.backdrop);
+        const auto& v = layout.viewport_px;
+        const auto inside = [&](uint32_t x, uint32_t y) {
+            return int32_t(x) >= v.x && int32_t(x) < v.x + v.width && int32_t(y) >= v.y &&
+                   int32_t(y) < v.y + v.height;
+        };
+        const bool sides = surface.width > surface.height * 2;
+        std::map<bool, RendererPicture> blurred;
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            const auto pictures =
+                DrawGradient(root_ / "blurred-fit", native, surface.canvas_width,
+                             surface.canvas_height, surface.width, surface.height, surface.flip);
+            const auto& fit = pictures.fit;
+            const auto& blur = pictures.blurred;
+            ASSERT_EQ(fit.width, surface.width);
+            ASSERT_EQ(blur.width, surface.width);
+            ASSERT_EQ(fit.height, surface.height);
+            ASSERT_EQ(blur.height, surface.height);
+            const auto at = [&](const RendererPicture& p, uint32_t x, uint32_t y, int c) {
+                return int(p.rgb[(std::size_t(y) * p.width + x) * 3 + c]);
+            };
+
+            std::size_t picture_differences = 0, black_bars = 0, bar_pixels = 0, rough = 0;
+            double      bar_light = 0.0;
+            // The channel that runs along the bars' axis, summed per side.
+            const int   channel = sides ? 0 : 1;
+            double      first_side = 0.0, second_side = 0.0;
+            std::size_t first_count = 0, second_count = 0;
+            for (uint32_t y = 0; y < surface.height; ++y) {
+                for (uint32_t x = 0; x < surface.width; ++x) {
+                    if (inside(x, y)) {
+                        for (int c = 0; c < 3; ++c) {
+                            if (at(fit, x, y, c) != at(blur, x, y, c)) ++picture_differences;
+                        }
+                        continue;
+                    }
+                    ++bar_pixels;
+                    for (int c = 0; c < 3; ++c) {
+                        if (at(fit, x, y, c) != 0) ++black_bars;
+                        bar_light += at(blur, x, y, c) / 3.0;
+                        // Neighbours in the same bar differ by the gradient and
+                        // the dither at most: no edge, block or grid.
+                        if (x + 1 < surface.width && ! inside(x + 1, y) &&
+                            std::abs(at(blur, x, y, c) - at(blur, x + 1, y, c)) > 4)
+                            ++rough;
+                        if (y + 1 < surface.height && ! inside(x, y + 1) &&
+                            std::abs(at(blur, x, y, c) - at(blur, x, y + 1, c)) > 4)
+                            ++rough;
+                    }
+                    const bool first = sides ? int32_t(x) < v.x : int32_t(y) < v.y;
+                    (first ? first_side : second_side) += at(blur, x, y, channel);
+                    ++(first ? first_count : second_count);
+                }
+            }
+            ASSERT_GT(bar_pixels, 0u);
+            EXPECT_EQ(picture_differences, 0u) << "the picture is not Fit's";
+            EXPECT_EQ(black_bars, 0u) << "Fit's bars are not black";
+            EXPECT_GT(bar_light / double(bar_pixels), 8.0) << "the room is still black";
+            EXPECT_EQ(rough, 0u) << "the blurred copy is not smooth";
+
+            // The picture's own first and last column (or row) along that axis.
+            double first_edge = 0.0, second_edge = 0.0;
+            const uint32_t length = sides ? uint32_t(v.height) : uint32_t(v.width);
+            for (uint32_t i = 0; i < length; ++i) {
+                const uint32_t x0 = sides ? uint32_t(v.x) : uint32_t(v.x) + i;
+                const uint32_t y0 = sides ? uint32_t(v.y) + i : uint32_t(v.y);
+                const uint32_t x1 = sides ? uint32_t(v.x + v.width - 1) : x0;
+                const uint32_t y1 = sides ? y0 : uint32_t(v.y + v.height - 1);
+                first_edge += at(blur, x0, y0, channel);
+                second_edge += at(blur, x1, y1, channel);
+            }
+            first_side /= double(first_count);
+            second_side /= double(second_count);
+            first_edge /= double(length);
+            second_edge /= double(length);
+            // Each side takes after the picture's nearer edge, darker than it.
+            EXPECT_GT(std::abs(second_side - first_side), 60.0);
+            EXPECT_EQ(second_side > first_side, second_edge > first_edge);
+            EXPECT_LT(std::max(first_side, second_side), std::max(first_edge, second_edge));
+            blurred[native] = blur;
+        }
+        ASSERT_EQ(blurred.size(), 2u);
+        double      total = 0.0;
+        std::size_t count = 0;
+        for (uint32_t y = 0; y < surface.height; ++y) {
+            for (uint32_t x = 0; x < surface.width; ++x) {
+                if (inside(x, y)) continue;
+                for (int c = 0; c < 3; ++c) {
+                    const auto i = (std::size_t(y) * surface.width + x) * 3 + c;
+                    total += std::abs(int(blurred[false].rgb[i]) - int(blurred[true].rgb[i]));
+                    ++count;
+                }
+            }
+        }
+        EXPECT_LT(total / double(count), 1.5) << "the renderers fill the room differently";
+    }
+}
+
+TEST_F(MetalSceneDraw, ABlurredFitHoldsItsImagesOnlyWhileItHasRoomToFill)
+{
+    // Fit and Fill cost the blurred fill nothing; its images exist while a
+    // composition draws it and go when the mode, or a shape that leaves no
+    // room, no longer needs them. A picture longer than 1024 also holds the
+    // 8-bit image it is first reduced to.
+    struct Canvas
+    {
+        uint32_t width, height;
+        uint64_t least, most;
+    };
+    const Canvas canvases[] = {
+        // Two half-float images of 128 x 85 texels, rounded up to the GPU's pages.
+        { 384, 256, 2u * 128u * 85u * 8u, 512u * 1024u },
+        // The same, after an 8-bit image of 192 x 128.
+        { 1536, 1024, 2u * 128u * 85u * 8u + 192u * 128u * 4u, 768u * 1024u },
+    };
+    for (const auto& canvas : canvases) {
+        SCOPED_TRACE(std::to_string(canvas.width) + "x" + std::to_string(canvas.height));
+        const auto name    = "blurred-fit-memory-" + std::to_string(canvas.width);
+        const auto project = WriteCanvasGradientFixture(root_ / name, canvas.width, canvas.height);
+        LoadedScene loaded;
+        std::string error;
+        ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+        ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+
+        @autoreleasepool {
+            const auto    wide    = canvas.width * 2;
+            id<MTLDevice> device  = MTLCreateSystemDefaultDevice();
+            CAMetalLayer* layer   = [CAMetalLayer layer];
+            layer.device          = device;
+            layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+            layer.drawableSize    = CGSizeMake(wide, canvas.height);
+            layer.framebufferOnly = NO;
+
+            MetalRender         render;
+            MetalRenderInitInfo info {
+                .metal_layer          = (__bridge void*)layer,
+                .width                = static_cast<uint16_t>(wide),
+                .height               = static_cast<uint16_t>(canvas.height),
+                .render_width         = static_cast<uint16_t>(wide),
+                .render_height        = static_cast<uint16_t>(canvas.height),
+                .display_scale_factor = 1.0,
+            };
+            ASSERT_TRUE(render.init(info)) << render.lastError();
+            auto graph = sceneToRenderGraph(*loaded.scene);
+            ASSERT_NE(graph, nullptr);
+            ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+
+            const auto bytes_after = [&](WallpaperScalingMode mode) {
+                render.SetWallpaperScalingMode(mode);
+                AdvanceSceneFrame(render, *loaded.scene);
+                return render.RenderTargetBytesForTests();
+            };
+            const auto fill = bytes_after(WallpaperScalingMode::FILL);
+            const auto fit  = bytes_after(WallpaperScalingMode::FIT);
+            EXPECT_EQ(fit, fill);
+            const auto blurred = bytes_after(WallpaperScalingMode::FIT_BLURRED);
+            std::printf("[ BACKDROP ] %ux%u picture: the blurred fill holds %llu bytes\n",
+                        canvas.width, canvas.height,
+                        static_cast<unsigned long long>(blurred - fit));
+            EXPECT_GE(blurred - fit, canvas.least);
+            EXPECT_LE(blurred - fit, canvas.most);
+            EXPECT_EQ(bytes_after(WallpaperScalingMode::FIT), fit);
+            EXPECT_EQ(bytes_after(WallpaperScalingMode::FIT_BLURRED), blurred);
+            // A shape the picture fills exactly leaves nothing to blur.
+            layer.drawableSize = CGSizeMake(canvas.width, canvas.height);
+            AdvanceSceneFrame(render, *loaded.scene);
+            EXPECT_EQ(render.RenderTargetBytesForTests(), fit);
+            render.destroy();
+        }
+    }
 }
 
 TEST_F(MetalSceneDraw, LayersSharingATargetShareOneRenderPassAndHiddenLayersCostNone)

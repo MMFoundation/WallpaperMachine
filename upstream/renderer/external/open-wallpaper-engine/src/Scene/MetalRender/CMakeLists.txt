@@ -17,7 +17,8 @@ if(APPLE)
   list(APPEND METAL_RENDER_SOURCES
     MetalRender.mm
     MetalPosterCapture.mm
-    MetalVideoTextures.mm)
+    MetalVideoTextures.mm
+    MetalWallpaperBackdrop.mm)
 endif()
 
 add_library(${LIB_NAME} STATIC ${METAL_RENDER_SOURCES})

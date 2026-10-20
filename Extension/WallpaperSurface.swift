@@ -87,7 +87,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
         try startWeb(project: project, entry: entry, completion: completion)
         return
       }
-      guard scene.fps > 0, (0...3).contains(scene.scalingMode), scene.scalingFactor.isFinite,
+      guard scene.fps > 0, (0...4).contains(scene.scalingMode), scene.scalingFactor.isFinite,
         scene.scalingFactor > 0, scene.framing?.isValid ?? true
       else {
         throw WallpaperRuntime.failure("Invalid lock-screen playback configuration.")

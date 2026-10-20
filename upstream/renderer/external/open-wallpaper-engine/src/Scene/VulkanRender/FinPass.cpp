@@ -111,8 +111,17 @@ void FinPass::setPresentLayout(VkImageLayout layout) { m_desc.present_layout = l
 void FinPass::setPresentFormat(VkFormat format) { m_desc.present_format = format; }
 void FinPass::setPresentQueueIndex(uint32_t i) { m_desc.present_queue_index = i; }
 
+void FinPass::setBackdropWanted(bool wanted) {
+    m_backdrop_wanted = wanted;
+    // Its images go with the next composition that has no room for them, after
+    // the frame that may still be reading them has been waited for.
+    if (wanted && prepared() && m_device != nullptr)
+        (void)m_backdrop.prepare(*m_device, m_desc.present_format);
+}
+
 void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& rr) {
-    m_scene = &scene;
+    m_scene  = &scene;
+    m_device = &device;
     setPrepared(false);
     {
         auto tex_name = scene.ResolveRenderTargetName(std::string(m_desc.result));
@@ -213,6 +222,7 @@ void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& rr
         auto& sc           = scene.clearColor;
         m_desc.clear_value = VkClearValue { { sc[0], sc[1], sc[2], 1.0f } };
     }
+    if (m_backdrop_wanted) (void)m_backdrop.prepare(device, m_desc.present_format);
     setPrepared();
 }
 
@@ -285,13 +295,22 @@ VkResult FinPass::execute(const Device& device, RenderingResources& rr) {
 }
 
 VkResult FinPass::recordComposition(RenderingResources& rr, VkRenderPass render_pass,
-                                    VkFramebuffer framebuffer, VkExtent2D extent) const {
+                                    VkFramebuffer framebuffer, VkExtent2D extent) {
     if (! prepared() || render_pass == VK_NULL_HANDLE || framebuffer == VK_NULL_HANDLE ||
         m_desc.vk_result.handle == VK_NULL_HANDLE || m_desc.vk_result.view == VK_NULL_HANDLE)
         return VK_ERROR_INITIALIZATION_FAILED;
     auto& cmd = rr.command;
     RecordShaderReadBarrier(cmd, m_desc.vk_result, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-    {
+    // The blurred copy is drawn first, into images of its own, so the room
+    // around the picture can be filled from it below. Without room it costs
+    // nothing and holds nothing; if it cannot be drawn the room stays plain.
+    bool backdrop = false;
+    if (rr.wallpaper_backdrop && m_device != nullptr) {
+        backdrop = m_backdrop.recordBlur(*m_device, cmd, m_desc.vk_result) == VK_SUCCESS;
+    } else {
+        m_backdrop.release();
+    }
+    const auto push_source = [&] {
         VkDescriptorImageInfo desc_img {
             .sampler     = m_desc.vk_result.sampler,
             .imageView   = m_desc.vk_result.view,
@@ -307,7 +326,9 @@ VkResult FinPass::recordComposition(RenderingResources& rr, VkRenderPass render_
             .pImageInfo      = &desc_img,
         };
         cmd.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.layout, 0, wset);
-    }
+    };
+    // Without the fill the composition records exactly what it always has.
+    if (! backdrop) push_source();
     VkRenderPassBeginInfo pass_begin_info {
         .sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .pNext       = nullptr,
@@ -322,8 +343,11 @@ VkResult FinPass::recordComposition(RenderingResources& rr, VkRenderPass render_
         .pClearValues    = &m_desc.clear_value,
     };
     cmd.BeginRenderPass(pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+    if (backdrop) m_backdrop.drawBands(cmd, rr, extent);
 
     cmd.BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.handle);
+    // After the fill's own push, which uses set 0 of another layout.
+    if (backdrop) push_source();
     auto viewport = ResolvePresentationViewport(rr, extent);
     auto scissor = ResolvePresentationScissor(rr, extent);
     cmd.SetViewport(0, viewport);
@@ -347,6 +371,7 @@ bool FinPass::updateFrame(const Device&, RenderingResources&) {
 void FinPass::resetPreparedState(RenderingResources& rr) {
     setPrepared(false);
     m_scene = nullptr;
+    m_backdrop.destroy();
     m_framebuffers.clear();
     m_copy_source_pass = {};
     ResetPipelineParameters(m_desc.pipeline);

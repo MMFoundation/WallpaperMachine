@@ -1331,7 +1331,9 @@ private:
     }
     MHANDLER_CMD(SET_SCALINGMODE) {
         int32_t value;
-        if (msg->findInt32("value", &value)) {
+        // A value this build has no mode for keeps the one in force: casting it
+        // would leave the layout unscaled, as Original size.
+        if (msg->findInt32("value", &value) && IsWallpaperScalingMode(value)) {
             m_scalingmode = static_cast<WallpaperScalingMode>(value);
             if (renderInited()) {
                 m_render->SetWallpaperScalingMode(m_scalingmode);

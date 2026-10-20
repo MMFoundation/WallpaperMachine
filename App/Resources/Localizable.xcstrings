@@ -5333,6 +5333,9 @@
     "Limited to %lld fps on battery" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "배터리 사용 중 %lld fps로 제한됨"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "バッテリー駆動中のため%lld fpsに制限されています"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "使用电池时限制为 %lld fps"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "使用電池時限制為 %lld fps"}}}
     },
+    "This video is drawn by the native video player, which leaves the bars black. Choose Compatibility for Video playback in Performance settings to blur them." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "이 동영상은 네이티브 동영상 플레이어로 표시되므로 여백이 검은색으로 남습니다. 여백을 흐리게 채우려면 성능 설정의 ‘동영상 재생’에서 ‘호환성’을 선택하세요."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このビデオはネイティブのビデオプレーヤーで描画されるため、余白は黒のままです。余白をぼかすには、パフォーマンス設定の「ビデオ再生」で「互換モード」を選んでください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "此视频由原生视频播放器绘制，空白处保持黑色。要用模糊画面填充，请在“性能”设置中将“视频播放”选为“兼容模式”。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "此影片由原生影片播放器繪製，空白處維持黑色。若要以模糊畫面填滿，請在「效能」設定中將「影片播放」選為「相容模式」。"}}}
+    },
     "Open Performance" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "성능 설정 열기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "パフォーマンス設定を開く"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "打开性能设置"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "開啟效能設定"}}}
     },
@@ -5854,6 +5857,9 @@
     },
     "No scaling" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "크기 조절 안 함"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "拡大縮小なし"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "不缩放"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "不縮放"}}}
+    },
+    "Match with blurred backdrop" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "맞추기, 흐린 배경"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "画面に合わせる（背景をぼかす）"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "匹配（模糊背景）"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "符合（模糊背景）"}}}
     },
     "Match" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "맞추기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "画面に合わせる"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "匹配"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "符合"}}}

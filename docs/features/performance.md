@@ -687,7 +687,10 @@ decoder failures still go through the engine's apply recovery.
 
 Native playback honours the wallpaper's scaling mode and scale factor the way
 Compatibility does, so switching backends does not move the picture: **Fill**,
-**Fit** and **Stretch** scale it to the display, **Original size** shows one video
+**Fit** and **Stretch** scale it to the display, **Fit with blurred backdrop** places
+it as Fit but keeps Fit's black bars, because the native player has no blurred fill
+(the inspector says so; a mirror of a natively played display gets the same bars and
+no note), **Original size** shows one video
 pixel per point (a 1920x1080 clip covers 1920x1080 points of a Retina display, not
 1920x1080 device pixels), and the scale factor multiplies whichever applies, with
 the picture centred and anything outside the display cropped. A factor that is not a

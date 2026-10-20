@@ -9,6 +9,7 @@
 #include "SpecTexs.hpp"
 #include "Scene/Scene.h"
 #include "Scene/SceneRenderTarget.h"
+#include "Presentation/WallpaperBackdrop.hpp"
 #include "Presentation/WallpaperScaling.hpp"
 #include "Utils/Algorism.h"
 #include "VulkanRender/StaticSubgraphCache.hpp"
@@ -110,6 +111,21 @@ inline VkRect2D ResolvePresentationScissor(const RenderingResources& rr, VkExten
     if (rr.wallpaper_scissor.extent.width > 0 && rr.wallpaper_scissor.extent.height > 0)
         return rr.wallpaper_scissor;
     return VkRect2D { { 0, 0 }, extent };
+}
+
+/// Hands the final composition FIT_BLURRED's fill as `layout` places it.
+inline void SetWallpaperBackdrop(RenderingResources& rr, const WallpaperScalingLayout& layout) {
+    const auto bands                 = ComputeWallpaperBackdropBands(layout);
+    rr.wallpaper_backdrop            = layout.backdrop && bands.count > 0;
+    rr.wallpaper_backdrop_band_count = bands.count;
+    const auto to_rect               = [](const PixelRect& rect) {
+        return VkRect2D { { rect.x, rect.y },
+                          { static_cast<uint32_t>(std::max(0, rect.width)),
+                            static_cast<uint32_t>(std::max(0, rect.height)) } };
+    };
+    rr.wallpaper_backdrop_rect = to_rect(layout.backdrop_px);
+    for (uint32_t i = 0; i < bands.count; ++i)
+        rr.wallpaper_backdrop_bands[i] = to_rect(bands.rects[i]);
 }
 
 inline void SetBlend(BlendMode bm, VkPipelineColorBlendAttachmentState& state,

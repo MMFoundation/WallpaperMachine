@@ -682,6 +682,7 @@ impl OweScene {
             ScalingMode::Stretch => 1,
             ScalingMode::Fit => 2,
             ScalingMode::Fill => 3,
+            ScalingMode::FitBlurred => 4,
         };
         self.set_property_int32(Self::scaling_mode()?, value)
     }

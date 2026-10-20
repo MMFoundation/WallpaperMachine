@@ -1,4 +1,5 @@
 #include "Presentation/WallpaperScaling.hpp"
+#include "Presentation/WallpaperBackdrop.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -51,7 +52,8 @@ WallpaperScalingLayout ComputeWallpaperScalingLayout(
         layout.scale_x = sx;
         layout.scale_y = sy;
         break;
-    case WallpaperScalingMode::FIT: {
+    case WallpaperScalingMode::FIT:
+    case WallpaperScalingMode::FIT_BLURRED: {
         const double scale = std::min(sx, sy);
         layout.scale_x = scale;
         layout.scale_y = scale;
@@ -93,7 +95,101 @@ WallpaperScalingLayout ComputeWallpaperScalingLayout(
         round_px(layout.display_logical_width * display_scale_factor),
         round_px(layout.display_logical_height * display_scale_factor),
     };
+    if (mode == WallpaperScalingMode::FIT_BLURRED) {
+        const double fill   = std::max(sx, sy);
+        const double width  = layout.scene_width * fill;
+        const double height = layout.scene_height * fill;
+        layout.backdrop_px  = PixelRect {
+            round_px((layout.display_logical_width - width) * 0.5 * display_scale_factor),
+            round_px((layout.display_logical_height - height) * 0.5 * display_scale_factor),
+            round_px(width * display_scale_factor),
+            round_px(height * display_scale_factor),
+        };
+        const auto& picture = layout.viewport_px;
+        const auto& window  = layout.scissor_px;
+        layout.backdrop     = picture.x > window.x + 1 || picture.y > window.y + 1 ||
+                          picture.x + picture.width < window.x + window.width - 1 ||
+                          picture.y + picture.height < window.y + window.height - 1;
+    }
     return layout;
+}
+
+WallpaperBackdropExtent ComputeWallpaperBackdropExtent(uint32_t source_width,
+                                                       uint32_t source_height)
+{
+    const uint32_t width   = std::max<uint32_t>(1, source_width);
+    const uint32_t height  = std::max<uint32_t>(1, source_height);
+    const uint32_t longest = std::max(width, height);
+    if (longest <= kWallpaperBackdropLongSide) return { width, height };
+    const double shrink = static_cast<double>(kWallpaperBackdropLongSide) / longest;
+    return {
+        static_cast<uint32_t>(std::max(1L, std::lround(width * shrink))),
+        static_cast<uint32_t>(std::max(1L, std::lround(height * shrink))),
+    };
+}
+
+WallpaperBackdropDownsample ComputeWallpaperBackdropDownsample(uint32_t source_width,
+                                                               uint32_t source_height,
+                                                               WallpaperBackdropExtent extent)
+{
+    WallpaperBackdropDownsample downsample;
+    downsample.block_x = static_cast<float>(std::max<uint32_t>(1, source_width)) /
+                         static_cast<float>(std::max<uint32_t>(1, extent.width));
+    downsample.block_y = static_cast<float>(std::max<uint32_t>(1, source_height)) /
+                         static_cast<float>(std::max<uint32_t>(1, extent.height));
+    // A bilinear tap averages two texels a side; taps at most four texels
+    // apart read at least every other pair on each axis. See
+    // kWallpaperBackdropTapSpacing.
+    const float spacing = static_cast<float>(kWallpaperBackdropTapSpacing);
+    downsample.taps_x =
+        static_cast<uint32_t>(std::max(1.0f, std::ceil(downsample.block_x / spacing)));
+    downsample.taps_y =
+        static_cast<uint32_t>(std::max(1.0f, std::ceil(downsample.block_y / spacing)));
+    return downsample;
+}
+
+WallpaperBackdropPlan ComputeWallpaperBackdropPlan(uint32_t source_width, uint32_t source_height)
+{
+    WallpaperBackdropPlan plan;
+    const uint32_t width  = std::max<uint32_t>(1, source_width);
+    const uint32_t height = std::max<uint32_t>(1, source_height);
+    plan.extent = ComputeWallpaperBackdropExtent(width, height);
+    const auto eighth = [](uint32_t size) {
+        return (size + kWallpaperBackdropFirstStep - 1) / kWallpaperBackdropFirstStep;
+    };
+    plan.reduced = { std::max(plan.extent.width, eighth(width)),
+                     std::max(plan.extent.height, eighth(height)) };
+    plan.two_steps = width > plan.extent.width * kWallpaperBackdropFirstStep ||
+                     height > plan.extent.height * kWallpaperBackdropFirstStep;
+    if (! plan.two_steps) {
+        plan.reduced = plan.extent;
+        plan.second  = ComputeWallpaperBackdropDownsample(width, height, plan.extent);
+        return plan;
+    }
+    plan.first  = ComputeWallpaperBackdropDownsample(width, height, plan.reduced);
+    plan.second = ComputeWallpaperBackdropDownsample(plan.reduced.width, plan.reduced.height,
+                                                     plan.extent);
+    return plan;
+}
+
+WallpaperBackdropBands ComputeWallpaperBackdropBands(const WallpaperScalingLayout& layout)
+{
+    WallpaperBackdropBands bands;
+    if (! layout.backdrop) return bands;
+    const auto& window = layout.scissor_px;
+    const auto& vp     = layout.viewport_px;
+    const int32_t left   = std::clamp(vp.x, window.x, window.x + window.width);
+    const int32_t right  = std::clamp(vp.x + vp.width, window.x, window.x + window.width);
+    const int32_t top    = std::clamp(vp.y, window.y, window.y + window.height);
+    const int32_t bottom = std::clamp(vp.y + vp.height, window.y, window.y + window.height);
+    const auto add = [&bands](int32_t x, int32_t y, int32_t width, int32_t height) {
+        if (width > 0 && height > 0) bands.rects[bands.count++] = PixelRect { x, y, width, height };
+    };
+    add(window.x, window.y, window.width, top - window.y);
+    add(window.x, bottom, window.width, window.y + window.height - bottom);
+    add(window.x, top, left - window.x, bottom - top);
+    add(right, top, window.x + window.width - right, bottom - top);
+    return bands;
 }
 
 WallpaperCursorMapping ComputeWallpaperCursorMapping(const WallpaperScalingLayout& layout,

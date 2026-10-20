@@ -156,6 +156,29 @@ enum InspectorPolicy {
     display.isDrawnByNativePlayer ? .nativePlayer : .explains
   }
 
+  // MARK: Fit with blurred backdrop
+
+  /// Fit with blurred backdrop is offered where the scaling mode moves a picture: scene and video wallpapers. A
+  /// web page always fills its window. A display already set to it keeps it in the menu.
+  static func offersBlurredFit(_ options: InspectorOptions, display: InspectorOptions.DisplayRow)
+    -> Bool
+  {
+    options.offersPosition || display.scalingMode == .matchBlurred
+  }
+
+  /// What is said under Fit with blurred backdrop.
+  enum BlurredFitNote: Equatable {
+    /// The native video player draws this display and has no blurred fill: its bars stay black,
+    /// with **Open Performance** to choose Compatibility instead.
+    case nativePlayer
+    /// Nothing: the blurred fill is drawn, or the mode is another one.
+    case none
+  }
+
+  static func blurredFitNote(for display: InspectorOptions.DisplayRow) -> BlurredFitNote {
+    display.scalingMode == .matchBlurred && display.isDrawnByNativePlayer ? .nativePlayer : .none
+  }
+
   // MARK: Sections
 
   /// Displays opens by itself once the wallpaper is on a display. The state is the person's from the
