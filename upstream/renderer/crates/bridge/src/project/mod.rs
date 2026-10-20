@@ -1,5 +1,3 @@
-//! Extended project.json parser.
-
 pub mod condition;
 pub mod localization;
 pub mod manifest;
@@ -14,3 +12,6 @@ pub use property::{
     ComboOption, DirectoryMode, FileFilter, FileMedia, PropertyKind, PropertyMetadata,
     PropertyValue,
 };
+
+#[cfg(test)]
+mod contract_tests;

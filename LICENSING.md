@@ -554,6 +554,19 @@ prefix is `app.wallpapermachine`.
   GPL-2.0-only. The only third-party dependency of the new crate is the vendored naga; the crates
   the retired one used for tokens, string storage and static registration (`logos`, `smol_str`,
   `linkme`) are no longer linked.
+- The Rust bridge's configuration and project-data domains
+  (`upstream/renderer/crates/bridge/src/config` and `src/project`) and their local
+  contract tests were independently reimplemented from physically separated
+  behavior/declaration inputs. Separate reviews examined the source, the test
+  obligations and the implementation agents' actual tool records; no original
+  implementation or protected-test input was found in those recorded authoring
+  sessions. Existing serialized formats and public interfaces are preserved.
+  This bounded replacement does not establish independence of the remaining
+  bridge, renderer, application interfaces or retained tests, and does not supply
+  contributor grants or legal clearance. Its contract identities and verification
+  scope are recorded under `renderer.bridgeConfigurationReplacement` and
+  `renderer.bridgeProjectReplacement` in `upstream/provenance.json`. The interim
+  GPL-2.0-only license and third-party notices remain unchanged.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
   at revision `73f14ab1568371e6e3c44063f21c34c5e2712c4d`, BSD-3-Clause, vendored
   under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes

@@ -1,39 +1,24 @@
 use serde::{Deserialize, Serialize};
-use wallpaper_core::{DisplayIdentity, DisplaySelector, project::ScalingMode};
+use wallpaper_core::project::ScalingMode;
+use wallpaper_core::{DisplayIdentity, DisplaySelector};
+
+use super::{Presence, read_frame_rate, resolve_frame_rate};
 
 pub const SCHEMA_VERSION: u32 = 1;
-const DEFAULT_MONITOR_VOLUME: f32 = 1.0;
-/// Lowest internal rasterization scale the renderer will honour. Below this a
-/// wallpaper stops being a quality tier and becomes a visibly broken image.
 pub const MIN_RENDER_SCALE: f32 = 0.25;
 pub const MAX_RENDER_SCALE: f32 = 1.0;
-const DEFAULT_BATTERY_RENDER_SCALE: f32 = 0.75;
-const DEFAULT_BATTERY_TARGET_FPS: u32 = 30;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppConfig {
-    #[serde(default = "default_schema_version")]
     pub schema_version: u32,
-    #[serde(default)]
     pub general: GeneralCfg,
-    #[serde(default)]
     pub power: PowerCfg,
-    #[serde(default)]
     pub ui: UiCfg,
-    #[serde(default)]
     pub experimental: ExperimentalCfg,
-    // There is no renderer choice. Native Metal draws every scene and the host's own player
-    // plays every plain video. Config files written by an earlier build may still carry
-    // `scene_renderer` (`compatibility`, `native_metal_preferred` or `native_metal_only`) and
-    // its one-time marker `native_metal_default_applied`, a `video_backend` key and its marker,
-    // or the older `experimental.native_video_backend`; they are read past and not written back.
-    #[serde(default)]
     pub quality: QualityCfg,
-    #[serde(default)]
     pub monitors: Vec<MonitorCfg>,
-    #[serde(default)]
     pub monitor_settings: Vec<MonitorSettingsCfg>,
-    #[serde(default)]
     pub diagnostics: DiagnosticsCfg,
 }
 
@@ -54,18 +39,12 @@ impl Default for AppConfig {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GeneralCfg {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_selected_wallpaper: Option<String>,
 }
 
-/// How many pixels a 2D scene is rasterized with, before the internal render
-/// scale divides them.
-///
-/// `Display`, the default, rasterizes the canvas at the size it is presented at
-/// on the display, which is what Wallpaper Engine does and what keeps a
-/// high-resolution display sharp. `Canvas` rasterizes at the size the author
-/// made it and stretches the result, which costs the least. A perspective
-/// scene and a plain video are unaffected by either.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SceneResolutionCfg {
@@ -74,98 +53,56 @@ pub enum SceneResolutionCfg {
     Display,
 }
 
-/// Internal rasterization size and frame rate the renderer targets.
-///
-/// This is the reduced-quality profile. The battery mode applies it while the
-/// Mac is on battery, and a quality throttle the host asks for applies it too;
-/// both lower what runs without touching what the user saved.
-///
-/// `render_scale` is the fraction of the display's native pixel grid the scene
-/// is actually rasterized at. It is not window scaling and not wallpaper
-/// scaling: at 0.5 the renderer does a quarter of the pixel work.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct QualityProfileCfg {
-    #[serde(default = "default_battery_render_scale")]
     pub render_scale: f32,
-    #[serde(default = "default_battery_target_fps")]
     pub target_fps: u32,
 }
 
 impl Default for QualityProfileCfg {
     fn default() -> Self {
         Self {
-            render_scale: DEFAULT_BATTERY_RENDER_SCALE,
-            target_fps: DEFAULT_BATTERY_TARGET_FPS,
+            render_scale: 0.75,
+            target_fps: 30,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct QualityCfg {
-    /// The scale the user chose. Always the preference, never the value in
-    /// force: a power profile can lower what the renderer runs at without
-    /// overwriting what the user asked for.
-    #[serde(default = "default_render_scale")]
     pub render_scale: f32,
-    /// Global frame-rate ceiling. Absent means no limit. Never written when
-    /// absent, so a saved file round-trips `None` rather than a null.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub frame_rate_cap: Option<u32>,
-    /// Where the battery quality-profile switch used to live. Read so an
-    /// existing opt-in survives the move to [`PowerCfg::on_battery`], and
-    /// never written again.
-    #[serde(default, rename = "battery_profile_enabled", skip_serializing)]
+    #[serde(rename = "battery_profile_enabled", skip_serializing)]
     pub legacy_battery_profile_enabled: Option<bool>,
-    #[serde(default)]
     pub battery: QualityProfileCfg,
-    /// Scene-renderer static-subgraph caching and redundant copy-pass
-    /// elimination. On by default: it is a rendering optimization with no
-    /// intended visual difference, so the switch exists to take it away when
-    /// a wallpaper disagrees, not to opt in.
-    #[serde(default = "default_true")]
     pub scene_optimization_enabled: bool,
-    /// Stop the scene's periodic tick when the scene has no continuing reason
-    /// to redraw, waking it on events instead. Off by default: unlike
-    /// `scene_optimization_enabled` this changes when a scene runs at all, so
-    /// it is opted into rather than taken away.
-    #[serde(default)]
     pub scene_on_demand_enabled: bool,
-    /// How many pixels a 2D scene is rasterized with before `render_scale`
-    /// divides them. A preference over every scene, applied live.
-    #[serde(default)]
     pub scene_resolution: SceneResolutionCfg,
 }
 
 impl Default for QualityCfg {
     fn default() -> Self {
         Self {
-            render_scale: MAX_RENDER_SCALE,
+            render_scale: 1.0,
             frame_rate_cap: None,
             legacy_battery_profile_enabled: None,
             battery: QualityProfileCfg::default(),
-            scene_optimization_enabled: default_true(),
+            scene_optimization_enabled: true,
             scene_on_demand_enabled: false,
             scene_resolution: SceneResolutionCfg::default(),
         }
     }
 }
 
-/// Opt-in behaviour that is not ready to be a default.
-///
-/// Anything here is off unless the user turns it on, survives a restart, and is
-/// expected to be reported as experimental wherever it is surfaced.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ExperimentalCfg {
-    /// Let a native Metal scene's materials sample a video's NV12 planes
-    /// directly instead of one pre-converted colour image. Off by default: the
-    /// pre-converted path is what every Metal scene has been drawing, and the
-    /// two are not unconditionally identical once clamping and the chroma
-    /// resolution are involved.
-    #[serde(default)]
     pub scene_video_plane_sampling: bool,
 }
 
-/// What the machine does with wallpapers while it is on battery.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BatteryModeCfg {
@@ -177,15 +114,10 @@ pub enum BatteryModeCfg {
 
 #[derive(Clone, Copy, Debug, Default, Serialize)]
 pub struct PowerCfg {
-    #[serde(default)]
     pub on_battery: BatteryModeCfg,
-    /// Where pause-on-battery used to live. Read so an existing opt-in
-    /// survives the move to [`PowerCfg::on_battery`], and never written again.
-    #[serde(default, rename = "pause_on_battery_power", skip_serializing)]
+    #[serde(skip_serializing)]
     pub legacy_pause_on_battery_power: Option<bool>,
-    /// Set when the file named `on_battery`. Not a setting: migration must
-    /// not overwrite an explicit choice, including the default value.
-    #[serde(skip)]
+    #[serde(skip_serializing)]
     pub on_battery_explicit: bool,
 }
 
@@ -201,46 +133,54 @@ impl Eq for PowerCfg {}
 impl<'de> Deserialize<'de> for PowerCfg {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
-        struct Raw {
+        struct Fields {
             #[serde(default)]
-            on_battery: Option<BatteryModeCfg>,
+            on_battery: Presence<BatteryModeCfg>,
             #[serde(default, rename = "pause_on_battery_power")]
             legacy_pause_on_battery_power: Option<bool>,
         }
-
-        let raw = Raw::deserialize(deserializer)?;
+        let fields = Fields::deserialize(deserializer)?;
+        let (on_battery, on_battery_explicit) = match fields.on_battery {
+            Presence::Missing => (BatteryModeCfg::default(), false),
+            Presence::Present(mode) => (mode, true),
+        };
         Ok(Self {
-            on_battery: raw.on_battery.unwrap_or_default(),
-            legacy_pause_on_battery_power: raw.legacy_pause_on_battery_power,
-            on_battery_explicit: raw.on_battery.is_some(),
+            on_battery,
+            legacy_pause_on_battery_power: fields.legacy_pause_on_battery_power,
+            on_battery_explicit,
         })
     }
 }
 
-/// How much the application log records.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DiagnosticsCfg {
-    /// Debug-level lines on top of the default informational ones. Persisted,
-    /// so a problem that shows up at launch is captured on the next launch.
-    #[serde(default)]
     pub verbose_logging: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct UiCfg {
-    #[serde(default = "default_selector_window")]
     pub selector_window: WindowGeom,
-    #[serde(default = "default_settings_window")]
     pub settings_window: WindowGeom,
-    #[serde(default)]
     pub filter: FilterCfg,
 }
 
 impl Default for UiCfg {
     fn default() -> Self {
         Self {
-            selector_window: default_selector_window(),
-            settings_window: default_settings_window(),
+            selector_window: WindowGeom {
+                x: 200,
+                y: 200,
+                width: 1100,
+                height: 720,
+            },
+            settings_window: WindowGeom {
+                x: 520,
+                y: 260,
+                width: 520,
+                height: 440,
+            },
             filter: FilterCfg::default(),
         }
     }
@@ -254,7 +194,6 @@ pub struct WindowGeom {
     pub height: u32,
 }
 
-#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FilterCfg {
     pub scene: bool,
@@ -275,7 +214,7 @@ impl Default for FilterCfg {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "lowercase")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SerializedSelector {
     #[default]
     Primary,
@@ -293,12 +232,12 @@ pub enum SerializedSelector {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
     },
-    #[serde(rename = "live_display_id")]
-    LiveDisplayId { display_id: u32 },
+    LiveDisplayId {
+        display_id: u32,
+    },
 }
 
 impl SerializedSelector {
-    #[must_use]
     pub fn to_selector(&self) -> DisplaySelector {
         match self {
             Self::Primary => DisplaySelector::Primary,
@@ -321,7 +260,6 @@ impl SerializedSelector {
         }
     }
 
-    #[must_use]
     pub fn from_selector(sel: &DisplaySelector) -> Self {
         match sel {
             DisplaySelector::Primary => Self::Primary,
@@ -339,26 +277,42 @@ impl SerializedSelector {
         }
     }
 
-    #[must_use]
-    /// # Panics
-    ///
-    /// Panics if a display identity selector cannot be serialized to JSON.
     pub fn id(&self) -> String {
-        const PRIMARY_DISPLAY_ID: &str = "primary";
-        const IDENTITY_DISPLAY_ID_PREFIX: &str = "identity:";
-
         match self {
-            SerializedSelector::Primary => PRIMARY_DISPLAY_ID.to_string(),
-            SerializedSelector::LiveDisplayId { display_id } => display_id.to_string(),
-            SerializedSelector::Identity { .. } => {
-                let DisplaySelector::Identity(identity) = self.to_selector() else {
-                    unreachable!("identity selector must convert to identity")
-                };
-                format!(
-                    "{IDENTITY_DISPLAY_ID_PREFIX}{}",
-                    serde_json::to_string(&identity)
-                        .expect("display identity selector should serialize")
+            Self::Primary => "primary".to_owned(),
+            Self::LiveDisplayId { display_id } => display_id.to_string(),
+            Self::Identity {
+                uuid,
+                vendor_id,
+                model_id,
+                serial_number,
+                unit_number,
+                name,
+            } => {
+                // Borrow the core identity record's wire fields without cloning its strings.
+                #[derive(Serialize)]
+                struct IdentityRecord<'a> {
+                    uuid: &'a Option<String>,
+                    vendor_id: &'a Option<u32>,
+                    model_id: &'a Option<u32>,
+                    serial_number: &'a Option<u32>,
+                    unit_number: &'a Option<u32>,
+                    name: &'a Option<String>,
+                }
+                let mut bytes = b"identity:".to_vec();
+                serde_json::to_writer(
+                    &mut bytes,
+                    &IdentityRecord {
+                        uuid,
+                        vendor_id,
+                        model_id,
+                        serial_number,
+                        unit_number,
+                        name,
+                    },
                 )
+                .expect("identity fields are JSON-serializable");
+                String::from_utf8(bytes).expect("JSON serialization produces UTF-8")
             }
         }
     }
@@ -366,11 +320,11 @@ impl SerializedSelector {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MonitorCfg {
-    #[serde(flatten, default)]
+    #[serde(flatten)]
     pub selector: SerializedSelector,
-    #[serde(default = "default_true")]
+    #[serde(default = "enabled_default")]
     pub enabled: bool,
-    #[serde(default = "default_monitor_mode")]
+    #[serde(default = "assignment_mode_default")]
     pub mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wallpaper: Option<String>,
@@ -378,233 +332,136 @@ pub struct MonitorCfg {
     pub mirror_target: Option<SerializedSelector>,
 }
 
+fn enabled_default() -> bool {
+    true
+}
+fn assignment_mode_default() -> String {
+    "independent".to_owned()
+}
+fn scaling_mode_default() -> String {
+    "fill".to_owned()
+}
+fn scaling_factor_default() -> f64 {
+    1.0
+}
+fn volume_default() -> f32 {
+    1.0
+}
+
 impl Default for MonitorCfg {
     fn default() -> Self {
         Self {
             selector: SerializedSelector::default(),
             enabled: true,
-            mode: default_monitor_mode(),
+            mode: assignment_mode_default(),
             wallpaper: None,
             mirror_target: None,
         }
     }
 }
 
-/// Presentation settings stored on the app config, used by mirror displays.
-///
-/// `frame_rate` absent means follow that display's native refresh. Older
-/// files stored `target_fps = 60` as the untouched default; that value loads
-/// as absent and is never written again.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(from = "MonitorSettingsCfgRaw")]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MonitorSettingsCfg {
-    #[serde(flatten, default)]
+    #[serde(flatten)]
     pub selector: SerializedSelector,
-    #[serde(default = "default_scaling_mode")]
     pub scaling_mode: String,
-    #[serde(default = "default_scaling_factor")]
     pub scaling_factor: f64,
-    /// `None` follows the display's native refresh. A number is an explicit
-    /// cap below that refresh and is omitted when absent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub frame_rate: Option<u32>,
-    #[serde(default = "default_monitor_volume")]
     pub volume: f32,
-    #[serde(default)]
     pub muted: bool,
-}
-
-#[derive(Deserialize)]
-struct MonitorSettingsCfgRaw {
-    #[serde(flatten, default)]
-    selector: SerializedSelector,
-    #[serde(default = "default_scaling_mode")]
-    scaling_mode: String,
-    #[serde(default = "default_scaling_factor")]
-    scaling_factor: f64,
-    /// Outer `Some` means the key was present, so it wins over legacy
-    /// `target_fps` even when the value is null.
-    #[serde(default, deserialize_with = "super::deserialize_present")]
-    frame_rate: Option<Option<u32>>,
-    #[serde(default)]
-    target_fps: Option<u32>,
-    #[serde(default = "default_monitor_volume")]
-    volume: f32,
-    #[serde(default)]
-    muted: bool,
-}
-
-impl From<MonitorSettingsCfgRaw> for MonitorSettingsCfg {
-    fn from(raw: MonitorSettingsCfgRaw) -> Self {
-        Self {
-            selector: raw.selector,
-            scaling_mode: raw.scaling_mode,
-            scaling_factor: raw.scaling_factor,
-            frame_rate: super::frame_rate_from_legacy(raw.frame_rate, raw.target_fps),
-            volume: raw.volume,
-            muted: raw.muted,
-        }
-    }
 }
 
 impl Default for MonitorSettingsCfg {
     fn default() -> Self {
         Self {
             selector: SerializedSelector::default(),
-            scaling_mode: default_scaling_mode(),
-            scaling_factor: default_scaling_factor(),
+            scaling_mode: scaling_mode_default(),
+            scaling_factor: 1.0,
             frame_rate: None,
-            volume: default_monitor_volume(),
+            volume: 1.0,
             muted: false,
         }
     }
 }
 
-impl MonitorSettingsCfg {
-    #[must_use]
-    pub fn parse_scaling_mode(&self) -> ScalingMode {
-        match self.scaling_mode.to_ascii_lowercase().as_str() {
-            "none" => ScalingMode::None,
-            "stretch" => ScalingMode::Stretch,
-            "fill" => ScalingMode::Fill,
-            "fit" => ScalingMode::Fit,
-            _ => ScalingMode::default(),
+impl<'de> Deserialize<'de> for MonitorSettingsCfg {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Fields {
+            #[serde(flatten)]
+            selector: SerializedSelector,
+            #[serde(default = "scaling_mode_default")]
+            scaling_mode: String,
+            #[serde(default = "scaling_factor_default")]
+            scaling_factor: f64,
+            #[serde(default)]
+            frame_rate: Presence<Option<u32>>,
+            #[serde(default)]
+            target_fps: Option<u32>,
+            #[serde(default = "volume_default")]
+            volume: f32,
+            #[serde(default)]
+            muted: bool,
         }
+        let fields = Fields::deserialize(deserializer)?;
+        Ok(Self {
+            selector: fields.selector,
+            scaling_mode: fields.scaling_mode,
+            scaling_factor: fields.scaling_factor,
+            frame_rate: read_frame_rate(fields.frame_rate, fields.target_fps),
+            volume: fields.volume,
+            muted: fields.muted,
+        })
+    }
+}
+
+impl MonitorSettingsCfg {
+    pub fn parse_scaling_mode(&self) -> ScalingMode {
+        super::scaling_mode(&self.scaling_mode)
     }
 
-    /// The rate this display should run at: the saved cap, or the display's
-    /// own refresh when the user has not chosen one.
-    #[must_use]
     pub fn fps_on(&self, refresh_hz: u32) -> u32 {
-        super::resolve_frame_rate(self.frame_rate, refresh_hz)
+        resolve_frame_rate(self.frame_rate, refresh_hz)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct QualityInForce {
+    pub battery_profile: bool,
+    pub throttled: bool,
+}
+
+pub fn clamp_render_scale(scale: f32) -> f32 {
+    if scale.is_finite() {
+        scale.clamp(MIN_RENDER_SCALE, MAX_RENDER_SCALE)
+    } else {
+        MAX_RENDER_SCALE
     }
 }
 
 impl AppConfig {
-    /// Folds keys this build no longer writes into their replacements.
-    ///
-    /// Called once on load.
-    ///
-    /// Pause-on-battery and the battery quality-profile switch folded into
-    /// [`PowerCfg::on_battery`]. Pause wins when both legacy flags are set.
-    /// An explicit `on_battery`, including `keep_running`, wins over either.
-    ///
-    /// The Scene renderer and Video backend settings are gone. A saved
-    /// `scene_renderer` of any value (`compatibility`, `native_metal_preferred` or
-    /// `native_metal_only`) maps to the one behaviour there is, which needs no field, so those
-    /// keys, their one-time markers and the older `experimental.native_video_backend` are not
-    /// read, and a config this build saves does not carry them.
     pub fn migrate_legacy_keys(&mut self) {
-        let legacy_pause = self.power.legacy_pause_on_battery_power.take();
-        let legacy_profile = self.quality.legacy_battery_profile_enabled.take();
+        let pause = self.power.legacy_pause_on_battery_power.take();
+        let profile = self.quality.legacy_battery_profile_enabled.take();
         if !self.power.on_battery_explicit {
-            if legacy_pause == Some(true) {
+            if pause == Some(true) {
                 self.power.on_battery = BatteryModeCfg::Pause;
-            } else if legacy_profile == Some(true) {
+            } else if profile == Some(true) {
                 self.power.on_battery = BatteryModeCfg::ReducedQuality;
             }
         }
     }
 
-    /// The render scale in force right now.
-    ///
-    /// A throttle takes the lower of the user's scale and the profile's, so
-    /// asking for less work can never raise quality above what the user
-    /// chose, and adding a throttle to the battery profile never raises it
-    /// either. The battery profile alone keeps the profile's scale as is, even
-    /// when that is higher than a lower saved scale; with neither held the
-    /// user's scale runs.
-    #[must_use]
     pub fn effective_render_scale(&self, in_force: QualityInForce) -> f32 {
         let preferred = clamp_render_scale(self.quality.render_scale);
         let profile = clamp_render_scale(self.quality.battery.render_scale);
-        let scale = if in_force.throttled {
+        if in_force.throttled {
             preferred.min(profile)
         } else if in_force.battery_profile {
             profile
         } else {
             preferred
-        };
-        clamp_render_scale(scale)
-    }
-}
-
-/// Which reasons for the reduced-quality profile hold right now.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct QualityInForce {
-    /// Reduced quality is the saved battery mode and the Mac is on battery.
-    pub battery_profile: bool,
-    /// The host asked for less work, whatever the power source.
-    pub throttled: bool,
-}
-
-/// Confines a render scale to the range the renderer honours.
-///
-/// A non-finite value is not a scale at all and falls back to native rather
-/// than to the low end, because the failure mode of guessing wrong here is a
-/// permanently blurry desktop.
-#[must_use]
-pub fn clamp_render_scale(scale: f32) -> f32 {
-    if !scale.is_finite() {
-        return MAX_RENDER_SCALE;
-    }
-    scale.clamp(MIN_RENDER_SCALE, MAX_RENDER_SCALE)
-}
-
-#[allow(clippy::single_call_fn)]
-fn default_schema_version() -> u32 {
-    SCHEMA_VERSION
-}
-
-fn default_true() -> bool {
-    true
-}
-
-#[allow(clippy::single_call_fn)]
-fn default_render_scale() -> f32 {
-    MAX_RENDER_SCALE
-}
-
-#[allow(clippy::single_call_fn)]
-fn default_battery_render_scale() -> f32 {
-    DEFAULT_BATTERY_RENDER_SCALE
-}
-
-#[allow(clippy::single_call_fn)]
-fn default_battery_target_fps() -> u32 {
-    DEFAULT_BATTERY_TARGET_FPS
-}
-
-fn default_monitor_mode() -> String {
-    "independent".to_string()
-}
-
-fn default_scaling_mode() -> String {
-    ScalingMode::default().to_string()
-}
-
-fn default_scaling_factor() -> f64 {
-    1.0
-}
-
-fn default_monitor_volume() -> f32 {
-    DEFAULT_MONITOR_VOLUME
-}
-
-fn default_selector_window() -> WindowGeom {
-    WindowGeom {
-        x: 200,
-        y: 200,
-        width: 1100,
-        height: 720,
-    }
-}
-
-fn default_settings_window() -> WindowGeom {
-    WindowGeom {
-        x: 520,
-        y: 260,
-        width: 520,
-        height: 440,
+        }
     }
 }
