@@ -2,6 +2,7 @@ mod activation;
 mod facade;
 mod load_journal;
 pub(crate) mod revalidate;
+mod render_settings;
 
 pub use activation::{
     ActivationInputs, RenderBackendSurvey,

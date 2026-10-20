@@ -567,6 +567,17 @@ prefix is `app.wallpapermachine`.
   scope are recorded under `renderer.bridgeConfigurationReplacement` and
   `renderer.bridgeProjectReplacement` in `upstream/provenance.json`. The interim
   GPL-2.0-only license and third-party notices remain unchanged.
+- The bridge path-value module, render-settings lookup and mesh contract tests
+  now use independently authored replacements from separate behavior/declaration
+  inputs. The lookup's three activation callers migrated together; the old
+  private helper and imported mesh-test bodies were removed while retained
+  project-side coverage stayed in place. Path tests assert returned values and
+  transitions rather than environment-query counts. Scope and procedural
+  qualifications are recorded under `renderer.bridgePathsReplacement`,
+  `renderer.renderSettingsLookupReplacement` and
+  `renderer.sceneMeshContractTestsReplacement` in `upstream/provenance.json`.
+  These are bounded source replacements, not a whole-project independence,
+  native-parity, contributor-rights or GPL-3.0-only publication clearance.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
   at revision `73f14ab1568371e6e3c44063f21c34c5e2712c4d`, BSD-3-Clause, vendored
   under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes

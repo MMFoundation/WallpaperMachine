@@ -18,8 +18,8 @@ use wallpaper_core::{
 
 use crate::{
     api::{BridgeError, BridgeErrorKind, BridgeWallpaperEntry},
-    config::{AppConfig, MonitorCfg, MonitorRender, MonitorSettingsCfg, WallpaperConfig},
-    display::{DisplayDescExt, DisplaySelectorExt, DisplaySnapshotExt},
+    config::{AppConfig, MonitorCfg, MonitorSettingsCfg, WallpaperConfig},
+    display::{DisplayDescExt, DisplaySelectorExt},
     paths::BridgePaths,
     project::{ProjectModel, PropertyKind, PropertyValue, scene_property_override_json},
 };
@@ -547,13 +547,12 @@ impl ActivationInputs<'_> {
         // gives a default render, without allocating that default on the
         // common unsaved path.
         let fps = crate::config::resolve_frame_rate(
-            RenderOverrideResolver {
-                wallpaper: slot.wallpaper,
-                monitor: slot.monitor,
-                display: &slot.display,
-                displays: self.displays,
-            }
-            .resolve()
+            super::render_settings::select_render_setting(
+                &slot.wallpaper.monitors,
+                &slot.monitor.selector,
+                &slot.display,
+                self.displays,
+            )
             .and_then(|render| render.frame_rate),
             refresh,
         );
@@ -585,13 +584,12 @@ impl ActivationInputs<'_> {
             let Some(admission) = self.native_video_candidate(slot.wallpaper_id) else {
                 continue;
             };
-            let render = RenderOverrideResolver {
-                wallpaper: slot.wallpaper,
-                monitor: slot.monitor,
-                display: &slot.display,
-                displays: self.displays,
-            }
-            .resolve();
+            let render = super::render_settings::select_render_setting(
+                &slot.wallpaper.monitors,
+                &slot.monitor.selector,
+                &slot.display,
+                self.displays,
+            );
             videos.push(NativeVideoWallpaperDesc {
                 wallpaper_id: slot.wallpaper_id.to_string(),
                 media_path: admission.media_path,
@@ -862,13 +860,12 @@ impl SceneDescBuilderExt for SceneDescBuilder {
                     message: EngineError::InvalidInput(error.to_string()).to_string(),
                 }
             })?;
-        let render_override = RenderOverrideResolver {
-            wallpaper: context.wallpaper,
-            monitor: context.monitor,
-            display: &context.display,
-            displays: context.displays,
-        }
-        .resolve();
+        let render_override = super::render_settings::select_render_setting(
+            &context.wallpaper.monitors,
+            &context.monitor.selector,
+            &context.display,
+            context.displays,
+        );
         let fps = crate::config::resolve_frame_rate(
             render_override.and_then(|render| render.frame_rate),
             context.display.refresh_rate_hz,
@@ -932,46 +929,3 @@ pub struct SceneBuildContext<'a> {
     force_shader_refresh: bool,
 }
 
-struct RenderOverrideResolver<'a> {
-    wallpaper: &'a WallpaperConfig,
-    monitor: &'a MonitorCfg,
-    display: &'a DisplayDesc,
-    displays: &'a [DisplaySnapshotEntry],
-}
-
-impl<'a> RenderOverrideResolver<'a> {
-    fn resolve(&self) -> Option<&'a MonitorRender> {
-        self.wallpaper
-            .monitors
-            .iter()
-            .find(|render| render.selector == self.monitor.selector)
-            .or_else(|| {
-                self.wallpaper
-                    .monitors
-                    .iter()
-                    .find(|render| self.matches(render))
-            })
-    }
-
-    fn matches(&self, render: &MonitorRender) -> bool {
-        let Some(display_snapshot) = self.display_snapshot() else {
-            return false;
-        };
-
-        if render.selector == crate::config::SerializedSelector::Primary {
-            return self
-                .displays
-                .first()
-                .is_some_and(|primary| display_snapshot.matches_primary(primary));
-        }
-
-        let render_selector = render.selector.to_selector();
-        render_selector.matches_display(display_snapshot)
-    }
-
-    fn display_snapshot(&self) -> Option<&'a DisplaySnapshotEntry> {
-        self.displays
-            .iter()
-            .find(|display| display.desc.same_physical_display(self.display))
-    }
-}
