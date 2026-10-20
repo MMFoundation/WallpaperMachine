@@ -585,6 +585,15 @@ Rust tests in `wallpaper-bridge` and `wallpaper-core`, and Swift tests under
 `Tests/Unit/`. They guard the host's half of rendering: what the app asks the
 engine to redo, and when.
 
+- **Project and cache boundaries** — core's
+  `tests::general::independent_project_contract` exercises typed descriptor rejection,
+  real manifest/property loading with immutable edits, successful resolver/loader
+  controls followed by existing-target path rejection, artifact-backed cache reuse
+  and override invalidation, invalid cache-ID isolation and non-scene bypass.
+  `project_override_json` separately covers ordered scalar flattening, null
+  normalization, nested-array path errors and the retained empty-parent regression.
+  The independent unpacked-cache, framing and recovery cases remain in place.
+  These are owned-temporary-file and value tests, not native rendering or corpus proof.
 - **Download-speed sampling** — `DownloadTelemetryTests` in `Tests/Unit/Workshop/`:
   real `nettop` streaming over a private PTY with local-socket traffic; CRLF and
   split line endings. LF-only fixtures do not verify live delivery.

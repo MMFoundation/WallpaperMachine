@@ -1,8 +1,6 @@
-pub mod api;
 pub mod audio_capture;
 pub mod engine_actor;
 pub mod platform;
-pub mod project;
 #[path = "project_smoke.rs"]
 mod project_smoke_cases;
 crate::tests::macros::general_smoke_cases!(project_smoke, {
@@ -43,6 +41,5 @@ crate::tests::macros::general_smoke_cases!(runtime_smoke, {
         id: "3554183341",
     },
 });
-pub mod scene;
+mod independent_project_contract;
 pub mod shader_cache;
-pub mod video_codec;
