@@ -579,7 +579,11 @@ an identity names a display. A UUID both sides carry decides on its own, then ve
 serial; the unit number is a last resort that never overrides a UUID or serial that disagrees.
 macOS renumbers displays and renames identical models ("Name (1)", "Name (2)") across reboots
 and reconnects, so display sync (`AppConfig::sync_known_monitors`) keeps one block per display,
-renamed to its current selector, and settings entries and mirror targets follow.
+renamed to its current selector, and settings entries and mirror targets follow. The `primary`
+block is a role: sync records the display it describes (`primary_display`), and when macOS
+makes another display the main one it writes the block's wallpaper back to the previous main
+display's own block and loads the new main display's own block into it, so a wallpaper stays
+on its display and a display switched off stays off.
 
 The bridge also keeps a load journal (`engine/load_journal.rs`, `load-journal.json` beside
 `config.toml`) of the scenes `reconcile_with` is about to open. A wallpaper that was being
