@@ -5723,6 +5723,12 @@ void ParseModelObj(ParseContext& context, wpscene::WPModelObject& obj) {
         context.layer_puppet_animations.emplace(obj.id, layer);
         svData.puppet_layer = layer;
     }
+    // Camera parallax moves a model by its depth, as it moves every other layer:
+    // a model under a group rides the group's (ResolveLayerParallax), so the
+    // cards laid on its faces, which ride it too, stay on them as the cursor
+    // moves. Without a depth the model stood still while they slid.
+    svData.parallaxDepth  = { obj.parallaxDepth[0], obj.parallaxDepth[1] };
+    svData.parallax_layer = node.get();
     std::vector<LoadedMaterialSlot> slots;
     auto load_material = [&](const std::string& path) {
         if (path.empty()) return false;

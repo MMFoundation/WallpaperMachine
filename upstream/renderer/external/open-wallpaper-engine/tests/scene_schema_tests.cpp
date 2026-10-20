@@ -1270,6 +1270,73 @@ TEST(SceneSchema, ParserInstantiatesLeafModel) {
     EXPECT_TRUE(default_rt->withDepth);
 }
 
+// Camera parallax moves a model by its depth, as it moves every other layer: a
+// model under a group rides the group's depth, whatever stale depth the file
+// keeps for it, so the cards laid on its faces, which ride the group too, stay
+// on them as the cursor moves. A model had no depth at all, stood still, and the
+// cards slid off it.
+TEST(SceneSchema, AModelUnderAGroupRidesTheGroupsParallax) {
+    auto files = std::map<std::string, std::string> {};
+    AddLeafModelSceneFiles(files);
+    fs::VFS vfs;
+    EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager { audio::SoundManager::OutputBackend::Null };
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    auto scene = parser.Parse(
+        SceneParseRequest { .scene_id = "model-parallax-group", .project_properties = &properties },
+        R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0,0,0], "skylightcolor":[0,0,0],
+        "clearcolor":[0,0,0], "cameraparallax":true,
+        "cameraparallaxamount":0.5, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":1,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [
+        {"id":1,"name":"group","origin":[320,180,0],"parallaxDepth":[0.5,0.5]},
+        {"id":2,"name":"planet","parent":1,"model":"planet.mdl","perspective":true,
+         "origin":[100,80,0],"parallaxDepth":[0,0],"visible":true}
+      ]
+    })",
+        vfs,
+        sound_manager);
+    ASSERT_NE(scene, nullptr);
+    auto  group   = FindRootChildByName(*scene, "group");
+    auto* updater = dynamic_cast<WPShaderValueUpdater*>(scene->shaderValueUpdater.get());
+    ASSERT_NE(group, nullptr);
+    ASSERT_NE(updater, nullptr);
+    auto* model = FindFirstChildByName(*group, "planet");
+    ASSERT_NE(model, nullptr);
+    updater->InitUniforms(model, 0, [](std::string_view name) { return name == "g_ModelMatrix"; });
+    const auto displacement = [&]() {
+        sprite_map_t sprites;
+        ShaderValue  matrix;
+        updater->UpdateUniforms(model, sprites, [&](std::string_view name, const ShaderValue& value) {
+            if (name == "g_ModelMatrix") matrix = value;
+        });
+        model->UpdateTrans();
+        return Eigen::Vector2f(matrix[12] - static_cast<float>(model->ModelTrans()(0, 3)),
+                               matrix[13] - static_cast<float>(model->ModelTrans()(1, 3)));
+    };
+
+    // The group sits at the centre of the view, so the cursor centred leaves the tree alone.
+    updater->FrameBegin();
+    EXPECT_LT(displacement().norm(), 1e-3f);
+    // The cursor against the right edge moves the whole tree by the group's distance
+    // from it, at the group's depth.
+    updater->MouseInput(1.0, 0.5);
+    scene->frameTime = 1.0;
+    updater->FrameBegin();
+    const auto moved = displacement();
+    EXPECT_NEAR(moved.x(), (320.0f - 640.0f) * 0.5f * 0.5f, 1e-3f) << "the model stood still";
+    EXPECT_NEAR(moved.y(), 0.0f, 1e-3f);
+    // The static-reuse cache and the on-demand clock learn of it from the pass, so a
+    // still scene redraws the model as the cursor moves, as it redraws the cards.
+    EXPECT_NE(updater->FrameVaryingUniforms(model, 0, "") & frame_varying_uniform::kParallax, 0u);
+}
+
 TEST(SceneSchema, ParserRegistersWhatTheCursorMakesOfAModelLayer) {
     // A model is one of the three kinds the cursor is tested against, solid
     // unless the scene says otherwise, and a model can stop the walk too.

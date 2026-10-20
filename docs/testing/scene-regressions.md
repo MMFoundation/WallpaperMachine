@@ -125,7 +125,8 @@ Playback, backend, host and startup areas are in
   `.ParallaxLayersAreReportedAsFollowingTheCursor` in `script_runtime_compat_test`;
   `ScriptRuntimeCompat.AComposeLayersFirstPassReadsTheScreenWhereParallaxDrawsItsCard`
   in `script_runtime_compat_test`;
-  `SceneSchema.ParserCopiesImageParallaxDepthToPuppetMaterialSlots` in
+  `SceneSchema.ParserCopiesImageParallaxDepthToPuppetMaterialSlots` and
+  `.AModelUnderAGroupRidesTheGroupsParallax` in
   `scene_schema_tests`; `TextObjectRuntime.CameraParallaxMovesAPlainTextLayerByItsDepth`
   and `.ATextLayerUnderAGroupRidesTheGroupsParallax` in `text_object_runtime_test`;
   `MetalSceneDraw.CameraParallaxMovesATextLayerAsItMovesAnImageOnBothRenderers` and
@@ -160,6 +161,12 @@ Playback, backend, host and startup areas are in
     from the centre on both renderers and measures how far their ink moves against
     the same scene at depth 0, with the cursor centred and away from the centre, and
     for a text drawn through a copy effect (moved once, not twice).
+  - A model is a parallax layer too, and its value updater record holds its
+    `parallaxDepth`; under a group it rides the group's depth and anchor, as text
+    does. Without it the model stood still while the image layers laid on its
+    faces, under the same group, moved, so a cover slid off the box it sits on and
+    the box showed as a dark slab beside it. The unit test reads the model's
+    matrix with the cursor centred and at the edge, and its `kParallax` report.
   - A compose layer with effects holds the screen behind the place its card is
     drawn. Its first pass maps the card onto the screen through the layer's
     model-view-projection (`composelayer.vert`) and its last pass draws the card,

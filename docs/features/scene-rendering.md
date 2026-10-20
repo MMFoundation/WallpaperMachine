@@ -74,7 +74,9 @@ In a 2D scene, a particle system, 3D model or image layer with the `perspective`
 is drawn through a perspective camera seated as Wallpaper Engine seats it (an image
 layer's effects still run in its own card; the pass that puts the result onto the
 scene is the one seen through it, and a fullscreen layer ignores the flag), so a
-cover laid on a model's face stays on it however a group turns them. Its field of view is
+cover laid on a model's face stays on it however a group turns them. Camera parallax
+moves a model by its depth as it moves every other layer, a model under a group by the
+group's, so the cover stays on its face as the cursor moves too. Its field of view is
 the scene's `perspectiveoverridefov` (95 degrees when the file leaves it out, read from
 a file of any package version; `fov` belongs to scenes with a perspective projection,
 which read it and ignore `perspectiveoverridefov`), its eye is
