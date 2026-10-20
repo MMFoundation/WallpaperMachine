@@ -1375,12 +1375,14 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
     const ProjectProperties* properties =
         pScene != nullptr && pScene->runtime != nullptr ? &pScene->runtime->projectProperties()
                                                         : nullptr;
+    std::vector<std::string> texture_covers;
     ApplySystemUserTextures(base_textures,
                             wpmat.usertextures,
                             properties,
                             pScene != nullptr
                                 ? dynamic_cast<RuntimeImageSource*>(pScene->imageParser.get())
-                                : nullptr);
+                                : nullptr,
+                            &texture_covers);
     // The slot is decided here and a built material is not rebuilt, so a running
     // scene holds the property at this value.
     if (pScene != nullptr && pScene->runtime != nullptr) {
@@ -1539,6 +1541,15 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
 
     for (uint i = 0; i < material.textures.size(); i++) {
         if (! exists(sd_units[1].preprocess_info.active_tex_slots, i)) material.textures[i].clear();
+    }
+    // Only a slot that still samples its render target can show a cover over it.
+    texture_covers.resize(material.textures.size());
+    for (usize i = 0; i < texture_covers.size(); ++i) {
+        if (material.textures[i].empty()) texture_covers[i].clear();
+    }
+    if (std::any_of(texture_covers.begin(), texture_covers.end(),
+                    [](const std::string& cover) { return ! cover.empty(); })) {
+        material.texture_covers = std::move(texture_covers);
     }
 
     for (const auto& el : pWPShaderInfo->baseConstSvs) {
@@ -6151,7 +6162,8 @@ std::string_view wallpaper::UserTexturePropertyName(const wpscene::WPUserTexture
 void wallpaper::ApplySystemUserTextures(std::vector<std::string>&                  textures,
                                         const std::vector<wpscene::WPUserTexture>& usertextures,
                                         const ProjectProperties*                   properties,
-                                        RuntimeImageSource*                        covers) {
+                                        RuntimeImageSource*                        covers,
+                                        std::vector<std::string>* target_covers) {
     // Anything neither the runtime nor the wallpaper's own properties supply is
     // left on the authored texture in that position rather than replaced by a
     // blank one.
@@ -6163,9 +6175,15 @@ void wallpaper::ApplySystemUserTextures(std::vector<std::string>&               
             // The authored texture stays in the slot until the runtime has a
             // cover to put there: a cover layer shows its own art while nothing
             // plays. A render target or another layer's composite is not a
-            // picture the source can hold, so such a slot samples the cover alone.
-            if (covers != nullptr && index < textures.size() && ! textures[index].empty() &&
-                ! IsSpecTex(textures[index])) {
+            // picture the source can hold, so the slot keeps the target and the
+            // renderer binds the cover over it while one is published.
+            const bool authored = index < textures.size() && ! textures[index].empty();
+            if (authored && IsSpecTex(textures[index]) && target_covers != nullptr) {
+                if (target_covers->size() <= index) target_covers->resize(index + 1);
+                (*target_covers)[index] = std::move(replacement);
+                continue;
+            }
+            if (covers != nullptr && authored && ! IsSpecTex(textures[index])) {
                 replacement = covers->BindCoverSlot(replacement, textures[index]);
             }
         } else if (properties != nullptr && ! UserTexturePropertyName(user_texture).empty()) {

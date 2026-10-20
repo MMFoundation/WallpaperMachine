@@ -274,6 +274,7 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
                                                 ? std::string {}
                                                 : scene.ResolveRenderTargetName(texture));
             }
+            desc.cover_keys = src.texture_covers;
             out.push_back(std::move(desc));
             continue;
         }

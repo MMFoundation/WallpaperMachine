@@ -297,6 +297,7 @@ static void AddCustomShaderGraphPass(
             pdesc.submesh_index   = submesh_index;
             pdesc.material_slot   = material_slot;
             pdesc.blend_override  = blend_override;
+            pdesc.texture_covers  = material.texture_covers;
             CheckAndSetSprite(scene, pdesc, material.textures);
             for (usize i = 0; i < material.textures.size(); i++) {
                 const auto& texture_name = material.textures[i];

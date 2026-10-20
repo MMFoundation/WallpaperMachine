@@ -40,6 +40,10 @@ public:
         SceneNode*               node { nullptr };
         SceneNode*               visibility_node { nullptr };
         std::vector<std::string> textures;
+        /// `SceneMaterial::texture_covers`: per slot, the cover bound in place
+        /// of that slot's render target while one is published; empty for a
+        /// slot that always samples what `textures` names.
+        std::vector<std::string> texture_covers;
         std::string              output;
         std::string              camera_override;
         std::size_t              submesh_index { 0 };
@@ -70,6 +74,12 @@ public:
         // vulkan texs
         std::vector<ImageSlotsRef> vk_textures;
         std::vector<std::string>   vk_texture_image_keys;
+        /// For a slot with a cover (`texture_covers`): its render target, which
+        /// `vk_textures` holds again whenever no cover is published, and the
+        /// cover last uploaded for it, kept while the target is bound so the
+        /// next cover retires it.
+        std::vector<ImageSlotsRef> vk_cover_targets;
+        std::vector<ImageSlotsRef> vk_cover_images;
         std::vector<TextureBinding> vk_texture_bindings;
         std::vector<bool>          video_textures;
         /// One log per import-failure transition, not one per tick. Cleared

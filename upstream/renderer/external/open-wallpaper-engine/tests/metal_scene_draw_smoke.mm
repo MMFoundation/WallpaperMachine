@@ -11068,6 +11068,125 @@ TEST_F(MetalSceneDraw, AnIdleCoverSlotUploadsItsPictureOnceAndACoverChangeCostsO
 namespace
 {
 
+/// A cover layer whose default art is another layer's picture: a hidden layer
+/// draws the art (red) into its composite, and the cover layer's one slot is
+/// that composite with `cover` (`$mediaThumbnail` or `$mediaPreviousThumbnail`)
+/// bound over it.
+std::filesystem::path WriteCoverOverCompositeFixture(const std::filesystem::path& root,
+                                                     std::string_view              cover)
+{
+    const auto project = WriteCoverSlotFixture(root, "");
+    std::ofstream(root / "models/art.json")
+        << R"({"width":256,"height":192,"material":"materials/art.json"})";
+    std::ofstream(root / "materials/art.json")
+        << R"({"passes":[{"shader":"cover_probe","blending":"translucent","cullmode":"nocull",)"
+           R"("depthtest":"disabled","depthwrite":"disabled","textures":["red"]}]})";
+    const nlohmann::json instance {
+        { "id", 3 },
+        { "textures", nlohmann::json::array({ "_rt_imageLayerComposite_1_a" }) },
+        { "usertextures",
+          nlohmann::json::array({ { { "name", std::string(cover) }, { "type", "system" } } }) },
+    };
+    std::ofstream(root / "layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+           R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+           R"("cameraparallax":false,"orthogonalprojection":{"width":384,"height":256}},)"
+           R"("objects":[{"id":1,"name":"art","image":"models/art.json","origin":[192,128,0],)"
+           R"("scale":[1,1,1],"angles":[0,0,0],"visible":false},)"
+           R"({"id":2,"name":"cover","image":"models/cover.json","origin":[192,128,0],)"
+           R"("scale":[1,1,1],"angles":[0,0,0],"visible":true,"dependencies":[1],"instance":)"
+        << instance.dump() << "}]}";
+    return project;
+}
+
+} // namespace
+
+TEST_F(MetalSceneDraw, ACoverOverAnotherLayersPictureShowsThatPictureUntilACoverArrivesOnBothRenderers)
+{
+    // Where a cover layer's default art is drawn by a layer of its own, the slot
+    // the cover is bound to holds that layer's composite. Wallpaper Engine shows
+    // the composite there until a track brings a cover, and again once it is
+    // cleared; the previous-cover slot shows it until a track has a predecessor.
+    // The slot was the transparent texel the cover names start as, so a
+    // cross-fade that writes the previous cover's alpha drew nothing at all. The
+    // cover arrives a few frames in, after an unchanged picture could have been
+    // kept by the reuse of still targets, so that is tested too.
+    using Rgb = std::array<int, 3>;
+    constexpr Rgb kRed { 255, 0, 0 };
+    constexpr Rgb kGreen { 0, 255, 0 };
+    enum class Event { Green, Blue, Clear };
+    struct Case
+    {
+        const char*                        name;
+        const char*                        cover;
+        std::vector<std::pair<int, Event>> live;
+        int                                frames;
+        Rgb                                expected;
+    };
+    const std::vector<Case> cases {
+        { "idle", "$mediaThumbnail", {}, 4, kRed },
+        { "cover-while-running", "$mediaThumbnail", { { 3, Event::Green } }, 8, kGreen },
+        { "cover-then-clear", "$mediaThumbnail", { { 2, Event::Green }, { 5, Event::Clear } }, 9,
+          kRed },
+        { "previous-idle", "$mediaPreviousThumbnail", {}, 4, kRed },
+        { "previous-first-track", "$mediaPreviousThumbnail", { { 3, Event::Green } }, 8, kRed },
+        { "previous-second-track", "$mediaPreviousThumbnail",
+          { { 2, Event::Green }, { 4, Event::Blue } }, 8, kGreen },
+    };
+    const auto solid = [](uint8_t r, uint8_t g, uint8_t b) {
+        std::vector<uint8_t> rgba(4 * 4 * 4);
+        for (std::size_t i = 0; i < rgba.size(); i += 4) {
+            rgba[i] = r;
+            rgba[i + 1] = g;
+            rgba[i + 2] = b;
+            rgba[i + 3] = 255;
+        }
+        return rgba;
+    };
+    const auto green = solid(0, 255, 0);
+    const auto blue  = solid(0, 0, 255);
+
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.name);
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            const std::string name    = std::string("cover-composite-") + c.name + (native ? "-n" : "-c");
+            const auto        project = WriteCoverOverCompositeFixture(root_ / name, c.cover);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / (name + "-cache"), loaded, error)) << error;
+            if (native) {
+                const auto selection = SelectSceneBackend(*loaded.scene);
+                ASSERT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+            }
+            auto* images = dynamic_cast<RuntimeImageSource*>(loaded.scene->imageParser.get());
+            ASSERT_NE(images, nullptr);
+            const auto picture = DrawWithRenderer(
+                *loaded.scene, native, 384, 256, c.frames, 1.0 / 60.0, [&](int frame) {
+                    for (const auto& [at, event] : c.live) {
+                        if (at != frame) continue;
+                        if (event == Event::Clear) {
+                            PublishSystemMediaArtwork(*images, 0, 0, nullptr, 0);
+                        } else {
+                            const auto& rgba = event == Event::Green ? green : blue;
+                            PublishSystemMediaArtwork(*images, 4, 4, rgba.data(), rgba.size());
+                        }
+                    }
+                });
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+            ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+            const std::size_t at = (std::size_t(128) * 384 + 192) * 3;
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                EXPECT_NEAR(int(picture.rgb[at + channel]), c.expected[channel], 8)
+                    << "channel " << channel << " of the cover layer's centre";
+            }
+        }
+    }
+}
+
+namespace
+{
+
 /// A hidden text layer another layer samples: the marquee's card covers the
 /// canvas and shows the title's composite across all of it. The title sits in
 /// a corner of the canvas, so a composite that held it where it sits on screen

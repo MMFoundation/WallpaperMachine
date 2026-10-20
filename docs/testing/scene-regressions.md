@@ -1459,6 +1459,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   block-compressed art, a slot with nothing authored; both renderers),
   `.ACoverIsSampledClampedWhateverItsAuthoredPictureAskedForOnBothRenderers` and
   `.AnIdleCoverSlotUploadsItsPictureOnceAndACoverChangeCostsOneUploadPerFrameInFlight`
+  and `.ACoverOverAnotherLayersPictureShowsThatPictureUntilACoverArrivesOnBothRenderers`
   in `metal_scene_draw_smoke`; `CoverSlot.*` in `media_thumbnail_texture_smoke`. A
   `usertextures` cover slot (`$mediaThumbnail`, `$mediaPreviousThumbnail`) is the
   picture its author left in that position until a cover is published, and again
@@ -1469,9 +1470,16 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   version check a cover already had: no graph rebuild, an idle layer uploads its art
   once per frame in flight and a cover change once per frame in flight again. The
   picture is decoded when a renderer first asks, once, so the texture budget set after
-  the parse applies to it. Not substituted: a video, a sprite sheet, a render target
-  or composite, a mask or normal map (one or two channels), a missing file. A cover
-  keeps its own clamped sampler whatever the art's flags say.
+  the parse applies to it. Not substituted: a video, a sprite sheet, a mask or normal
+  map (one or two channels), a missing file. A cover keeps its own clamped sampler
+  whatever the art's flags say. Art that is another layer's composite stays a render
+  target in the slot, with the cover beside it (`SceneMaterial::texture_covers`), and
+  each renderer binds the cover there while the image it uploaded is one; the new test
+  draws a hidden layer's composite under both cover names, idle, with a cover a few
+  frames in (after a still target could have been reused), cleared, and with one and
+  two tracks for the previous cover. Before, the slot was the transparent texel: the
+  idle, cleared and first-track cases drew nothing on either renderer, and without the
+  pass marked as reading a runtime image a cover published mid-run was never shown.
 - **JPEG/EXIF orientation** — `tex_schema_tests`: all eight EXIF display
   transforms on asymmetric RGBA pixels, both TIFF byte orders, truncated
   JPEG/EXIF data, invalid IFD offsets.

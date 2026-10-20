@@ -766,12 +766,25 @@ authored texture, whatever the number of layers that share them). The native
 renderer uploads it as the file holds it, block-compressed and mipmapped, and both
 renderers sample it as the file says and a cover clamped, as before. Nothing is
 substituted, and the slot stays the transparent texel the cover starts as, when no
-texture is authored in it, or when the authored one is a video, a sprite sheet, a
-render target or another layer's composite, or a one- or two-channel picture (a mask
-or a normal map: the material's shader reads those through other channels than a
-cover's). The layer colour stays white on a layer that binds a cover, as it was, so
-the art is drawn untinted: whether Wallpaper Engine tints it with the layer's colour
-while nothing plays is not established.
+texture is authored in it, or when the authored one is a video, a sprite sheet, or a
+one- or two-channel picture (a mask or a normal map: the material's shader reads
+those through other channels than a cover's). The layer colour stays white on a layer
+that binds a cover, as it was, so the art is drawn untinted: whether Wallpaper Engine
+tints it with the layer's colour while nothing plays is not established.
+
+Where the texture authored in a cover slot is a render target, another layer's
+composite (a default cover a layer of its own draws, which a cover layer, a blurred
+background and a cross-fade all sample), the slot keeps sampling that target until a
+cover is published, again after the clear, and in the previous-cover slot until a
+track has a predecessor; the slot was the transparent texel instead, so a cross-fade
+that writes the previous cover's alpha drew nothing at all and a background built on
+it was the clear colour. A target is not a picture the image source can hold, so the
+material keeps the target in the slot, which keeps the graph drawing it first, and
+carries the cover's name beside it (`SceneMaterial::texture_covers`); each renderer
+binds the cover's image there instead while the image it uploaded for that frame is a
+cover and not the empty texel. Such a pass reads an image the runtime replaces, so it
+is never reused as a still target. The slot's size uniforms stay the target's, as a
+picture slot's stay its art's.
 
 An image layer's own render targets, the pair its effects run through and the
 composite another layer reads, are point-sampled when the layer says
