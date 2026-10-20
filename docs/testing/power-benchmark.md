@@ -125,14 +125,26 @@ comparison across a clock change reports throughput separately from power.
   period. A tick more than one whole interval late restarts the cadence instead
   of bursting to catch up
   (`ThreadTimerTest.CadenceKeepsItsPeriodDespiteWakeSlack`).
-- `FrameTimer` drops any tick that finds the previous DRAW still running; on
-  Compatibility a DRAW includes the GPU frame (the fence wait follows the
-  present). A DRAW that ends within a quarter interval of the tick it made the
-  clock drop runs that frame at once and restarts the cadence from it
-  (`FrameTimerTest.ADrawSlightlyLongerThanTheIntervalDoesNotHalveTheRate`); one
-  that ends later loses the whole period, so a scene that cannot keep up settles
-  at a steady fraction of the rate instead of drawing back to back. Otherwise
-  `FrameEnd` re-arms the clock only for an outstanding update request.
+- `FrameTimer` suppresses a tick while the previous admitted draw has not reached
+  `FrameEnd`. A completion within one quarter interval of the **observed suppressed
+  tick**, including the boundary, requests immediate recovery and restarts cadence.
+  A later completion loses that period; otherwise only an outstanding request
+  re-arms delivery. Posting delay is not subtracted, and scheduled due time is not
+  substituted for the suppression observation. The admission-contract tests cover
+  the inclusive boundary, one nanosecond beyond it, and actual observation-time
+  anchoring; other real-thread integration checks remain.
+
+`timer_delivery_benchmark`, run by `scripts/check_renderer.py`, reports a separate
+single-consumer measurement: requested 60 Hz ceiling, 18 ms of steady-clock busy
+work, 200 ms warmup and a nominal one-second sample. Raw counter loads lie within
+the recorded outer clock window; count divided by that actual duration is a
+diagnostic, not a simultaneous clock/counter observation or throughput guarantee.
+No delivered-count/rate threshold gates this measurement. Invocation, timeout and
+invalid-report failures still fail the tooling rather than fabricate a zero.
+
+This acceptance change leaves production scheduling, recovery, backpressure,
+atomics and process policy unchanged. It does not diagnose or retroactively pass
+the historical 42–60 throughput-check failures, nor establish an energy improvement.
 
 This is measured delivery, not presentation: whether and when those frames were
 displayed is not observable. Measurements recorded before 2026-09-28, when the

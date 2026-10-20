@@ -23,17 +23,19 @@ It assembles the Homebrew environment from `scripts/build.py`, then:
 2. configures CMake over `upstream/renderer/external/open-wallpaper-engine` with
    `CMAKE_BUILD_TYPE=Release`, `BUILD_TESTS=ON`, `RUST_SHADER_FFI=ON`, and
    `RUST_SHADER_STATICLIB` pointing at `Renderer/target/release/libwm_shader.a`,
-3. builds `offscreen_scene_probe`, `scene_reload_cycle_probe` and every target
-   in the script's `REGRESSION_BINARIES` registry, the one list that drives
-   build, run and verdict,
+3. builds `offscreen_scene_probe`, `scene_reload_cycle_probe`, the separately
+   reported `timer_delivery_benchmark`, and every target in `REGRESSION_BINARIES`,
+   the registry that drives regression build, run and verdict,
 4. runs the registered binaries, recording failures, timeouts and explicit skips,
-5. renders every generated case and every `--project` twice through
+5. runs the timer-delivery diagnostic once, preserving its raw measurements and
+   reporting tooling failures without a numeric throughput acceptance threshold,
+6. renders every generated case and every `--project` twice through
    `offscreen_scene_probe` — once pooled, once isolated (`WE_TEST_NO_REUSE=1`) —
    and compares `frame-2` byte for byte,
-6. scans both logs for `ERROR` diagnostics (ignoring shader-cache misses),
-7. checks independent known-pixel assertions for the generated cases, so two
+7. scans both logs for `ERROR` diagnostics (ignoring shader-cache misses),
+8. checks independent known-pixel assertions for the generated cases, so two
    equally blank or corrupt outputs cannot both pass,
-8. runs `scene_reload_cycle_probe` over the selected projects (the `--project`
+9. runs `scene_reload_cycle_probe` over the selected projects (the `--project`
    inputs, or the generated cases without any) twice each.
 
 | Flag | Effect |
@@ -49,10 +51,23 @@ output go under a fresh `artifacts/renderer/adaptive-<timestamp>/` directory,
 with `report.json` as the summary; check binaries live in
 `artifacts/renderer/bin/`. Imported wallpapers are read only. A nonzero exit
 means a test binary or the reload probe failed, a pooled/isolated pair diverged,
-a generated case emitted diagnostics, or a generated pixel assertion failed.
+a generated case emitted diagnostics, a generated pixel assertion failed, or the
+timer measurement could not be collected/validated. A low or high measured frame
+count alone does not fail the check.
 `report.json` records `full_compatibility_verified: false` on every case: there
 is no authored-reference comparison, so rendering without a crash does not prove
 all authored effects loaded.
+
+The timer benchmark is not a GoogleTest case or regression-registry entry. Its
+combined log is `timer_delivery_benchmark.log`; the corresponding report entry
+retains schema-1 `measurement` fields, `actual_outer_duration_ns`,
+`delivered_per_second` and `diagnostic_only: true`. It uses the existing taskpolicy
+wrapper and child-only Darwin resets, with a 30-second collection timeout and no
+retry. GPU/cadence allowances do not skip it. Missing, duplicate, malformed or
+inconsistent data and nonzero/timeout exits remain explicit tooling failures.
+The deterministic acceptance contract and measurement definition are described in
+[frame delivery](power-benchmark.md#frame-delivery); runtime timer policy is not
+changed by replacing the old unconditional throughput gate.
 
 The twelve generated cases are original synthetic scenes with no workshop
 identifiers; they use private synthetic compose-layer assets plus the probes'

@@ -131,6 +131,10 @@ public:
         // before Stop can join a worker that is waiting in our callback wrapper.
         barrier.Open();
         timer.Stop();
+        // Only the first draw can defer completion. Inspect its slot only after
+        // callbacks are quiescent, then balance an outstanding FrameBegin with a
+        // real FrameEnd. Successful controlled completions already leave it free.
+        if (Access::Read(timer).busy > 0) timer.FrameEnd();
     }
     int draws() {
         std::lock_guard lock(draw_mutex_);
@@ -326,4 +330,48 @@ TEST(RequestAdmissionContractTest, RecoveryAtExactlyOneQuarterIntervalFiresNow) 
 
 TEST(RequestAdmissionContractTest, RecoveryOneNanosecondBeyondQuarterRearmsRequest) {
     CheckRecoveryBoundary(false);
+}
+
+TEST(RequestAdmissionContractTest, SuppressedTickUsesObservationTime) {
+    AdmissionHarness harness(true);
+    harness.timer.RequestFrame();
+    ASSERT_TRUE(harness.barrier.Wait(1));
+    harness.barrier.Release(1);
+    ASSERT_TRUE(harness.barrier.Wait(2));
+    ASSERT_EQ(harness.draws(), 1);
+    ASSERT_EQ(Access::Read(harness.timer).busy, 1);
+
+    harness.Batch();
+    harness.barrier.Release(2);
+    ASSERT_TRUE(harness.barrier.Wait(3));
+    const auto consumed = Access::Read(harness.timer);
+    ASSERT_FALSE(consumed.request);
+    ASSERT_TRUE(consumed.frame_requested);
+    ASSERT_EQ(consumed.busy, 1);
+    ASSERT_FALSE(consumed.owed.has_value());
+
+    // Hold the actual second callback before OnTick until its due time is past.
+    // This is positive ordering, not a bound on OS callback delivery latency.
+    std::this_thread::sleep_until(consumed.due + 1ms);
+    const auto before_observation = Clock::now();
+    ASSERT_GT(before_observation, consumed.due);
+    harness.barrier.Release(3);
+    ASSERT_TRUE(harness.barrier.Wait(4));
+    const auto after_observation = Clock::now();
+    const auto suppressed = Access::Read(harness.timer);
+    ASSERT_TRUE(suppressed.owed.has_value());
+    EXPECT_GE(*suppressed.owed, before_observation);
+    EXPECT_LE(*suppressed.owed, after_observation);
+    EXPECT_GT(*suppressed.owed, consumed.due);
+    EXPECT_EQ(suppressed.busy, 1);
+    EXPECT_TRUE(suppressed.frame_requested);
+    EXPECT_FALSE(suppressed.request);
+    EXPECT_FALSE(suppressed.fire_now);
+    EXPECT_EQ(harness.draws(), 1);
+    EXPECT_EQ(harness.attempts(), 2);
+
+    // Complete real work while the suppressed callback remains at its post-tick
+    // barrier. The existing boundary cases, not this case, select recovery timing.
+    harness.timer.FrameEnd();
+    ASSERT_NO_FATAL_FAILURE(FinishTrailingDraw(harness));
 }

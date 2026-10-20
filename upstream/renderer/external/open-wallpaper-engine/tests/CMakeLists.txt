@@ -596,6 +596,12 @@ gtest_discover_tests(
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )
+
+add_executable(timer_delivery_benchmark timer/timer_delivery_benchmark.cpp)
+target_link_libraries(timer_delivery_benchmark PRIVATE wpTimer)
+target_include_directories(timer_delivery_benchmark PRIVATE . ${CMAKE_SOURCE_DIR}/src)
+target_compile_features(timer_delivery_benchmark PRIVATE cxx_std_20)
+
 #gtest_discover_tests(
 #    version_tests
 #    PROPERTIES TIMEOUT 30

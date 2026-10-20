@@ -53,20 +53,20 @@ REGRESSION_BINARIES = {
     "surface_path_tests": False, "surface_still_tests": False,
 }
 # Executables in tests/CMakeLists.txt that the check neither builds nor runs, and
-# why. Every other one is registered above or is one of the two probes below.
+# why. Every other one is registered above, a probe, or the diagnostic benchmark below.
 MANUAL_BINARIES = {
     "wpdump": "inspection tool, not a test: dumps one workshop item's parse to JSON",
 }
 OFFSCREEN_PROBE = "offscreen_scene_probe"
 RELOAD_PROBE = "scene_reload_cycle_probe"
 TIMER_PROBE = "timer-precision"
+TIMER_DELIVERY_BENCHMARK = "timer_delivery_benchmark"
 # Tests whose assertions count frames, ticks or expiries against short
 # wall-clock waits. Hosted macOS VMs deliver a 10 ms wait 50-100 ms late, so
 # these are skipped by name only when the timer probe proves that host.
 REALTIME_TESTS = {
     "timer_tests": (
         "FrameTimerTest.ABurstOfWakeOnceAtTheCeilingDoesNotAddCallbacks",
-        "FrameTimerTest.ADrawSlightlyLongerThanTheIntervalDoesNotHalveTheRate",
         "ThreadTimerTest.CadenceKeepsItsPeriodDespiteWakeSlack",
         "ThreadTimerTest.RequestsAfterALongWaitStillRespectTheCeiling",
     ),
@@ -114,7 +114,7 @@ def foreground_test_process():
 
 def run(command, log, env, timeout=180, cwd=ROOT):
     command = list(map(str, command))
-    is_test = Path(command[0]).name in (*REGRESSION_BINARIES, OFFSCREEN_PROBE, RELOAD_PROBE, TIMER_PROBE)
+    is_test = Path(command[0]).name in (*REGRESSION_BINARIES, OFFSCREEN_PROBE, RELOAD_PROBE, TIMER_PROBE, TIMER_DELIVERY_BENCHMARK)
     if is_test:
         # Match application scheduling for real-time assertions, even when the
         # invoking CI agent inherited background/latency throttling.
@@ -124,6 +124,76 @@ def run(command, log, env, timeout=180, cwd=ROOT):
                               stdout=stream, stderr=subprocess.STDOUT,
                               preexec_fn=foreground_test_process if is_test else None,
                               timeout=timeout, check=False).returncode
+
+
+def parse_timer_delivery_benchmark(text):
+    """Validate one measurement, without imposing a delivery-rate threshold."""
+    marker = "TIMER_DELIVERY_BENCHMARK"
+    lines = [line for line in text.splitlines() if line.startswith(marker)]
+    if len(lines) != 1:
+        raise ValueError(f"expected one {marker} line, found {len(lines)}")
+    if not lines[0].startswith(marker + " "):
+        raise ValueError(f"missing space after {marker}")
+
+    def unique_fields(pairs):
+        result = {}
+        for name, value in pairs:
+            if name in result:
+                raise ValueError(f"duplicate benchmark field: {name}")
+            result[name] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError(f"invalid JSON constant: {value}")
+
+    payload = json.loads(lines[0][len(marker) + 1:], object_pairs_hook=unique_fields,
+                         parse_constant=invalid_constant)
+    if not isinstance(payload, dict):
+        raise ValueError("benchmark payload must be a JSON object")
+    expected = {"schema": 1, "requested_fps": 60, "busy_work_ns": 18_000_000,
+                "requested_warmup_ns": 200_000_000, "requested_window_ns": 1_000_000_000}
+    for name in (*expected, "window_start_ns", "window_end_ns", "count_before", "count_after", "delivered"):
+        if name not in payload:
+            raise ValueError(f"missing benchmark field: {name}")
+        if type(payload[name]) is not int:
+            raise ValueError(f"benchmark field must be an integer, not a boolean: {name}")
+    for name, value in expected.items():
+        if payload[name] != value:
+            raise ValueError(f"unexpected benchmark {name}: {payload[name]}")
+    if payload["window_end_ns"] <= payload["window_start_ns"]:
+        raise ValueError("benchmark outer window must have positive duration")
+    if payload["count_before"] < 0 or payload["count_after"] < payload["count_before"]:
+        raise ValueError("benchmark counters must be nonnegative and nondecreasing")
+    if payload["delivered"] != payload["count_after"] - payload["count_before"]:
+        raise ValueError("benchmark delivered count does not match the counter difference")
+    return payload
+
+
+def collect_timer_delivery_benchmark(build, out, env):
+    """Run the diagnostic once; collection errors remain gate tooling failures."""
+    log = out / (TIMER_DELIVERY_BENCHMARK + ".log")
+    result = {"exit": None, "status": "tooling-failure", "diagnostic_only": True, "log": str(log)}
+    try:
+        result["exit"] = run([build / "tests" / TIMER_DELIVERY_BENCHMARK], log, env, 30)
+    except subprocess.TimeoutExpired:
+        result.update(exit="timeout", error="benchmark exceeded its 30 second timeout")
+        return result
+    except OSError as error:
+        result.update(exit="error", error=f"benchmark invocation failed: {error}")
+        return result
+    if result["exit"] != 0:
+        result["error"] = f"benchmark exited with status {result['exit']}"
+        return result
+    try:
+        payload = parse_timer_delivery_benchmark(log.read_text())
+        duration_ns = payload["window_end_ns"] - payload["window_start_ns"]
+        rate = payload["delivered"] * 1_000_000_000 / duration_ns
+    except (OSError, ValueError, OverflowError) as error:
+        result["error"] = f"benchmark measurement unavailable: {error}"
+        return result
+    result.update(status="collected", measurement=payload, actual_outer_duration_ns=duration_ns,
+                  delivered_per_second=rate)
+    return result
 
 
 def record_skips(report, name, log):
@@ -495,7 +565,7 @@ def main(argv=None):
         steps = [
             (["cargo", "build", "-p", "wm-shader", "--features", "ffi", "--release", "--locked"], "shader-build", OWN_RENDERER),
             (["cmake", "-S", RENDERER / "external/open-wallpaper-engine", "-B", build, "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_TESTS=ON", "-DRUST_SHADER_FFI=ON", "-DRUST_SHADER_STATICLIB=" + str(OWN_RENDERER / "target/release/libwm_shader.a")], "configure", ROOT),
-            (["cmake", "--build", build, "--target", OFFSCREEN_PROBE, RELOAD_PROBE, *REGRESSION_BINARIES, "-j", "6"], "build", ROOT),
+            (["cmake", "--build", build, "--target", OFFSCREEN_PROBE, RELOAD_PROBE, TIMER_DELIVERY_BENCHMARK, *REGRESSION_BINARIES, "-j", "6"], "build", ROOT),
         ]
         for command, name, cwd in steps:
             # Cargo gets the environment without the deployment-target pin:
@@ -553,6 +623,14 @@ def main(argv=None):
         record_skips(report, binary, out / (binary + ".log"))
         report_skips(report, binary, [f"{name}: timer probe exit 77, 10 ms waits overshoot a period ({timer_evidence})"
                                       for name in realtime])
+    benchmark = collect_timer_delivery_benchmark(build, out, env)
+    report[TIMER_DELIVERY_BENCHMARK] = benchmark
+    if benchmark["status"] == "collected":
+        print(f"{TIMER_DELIVERY_BENCHMARK} (diagnostic only): delivered={benchmark['measurement']['delivered']}; "
+              f"actual_outer_duration_ns={benchmark['actual_outer_duration_ns']}; "
+              f"delivered_per_second={benchmark['delivered_per_second']:.3f}", flush=True)
+    else:
+        print(f"{TIMER_DELIVERY_BENCHMARK} tooling failure: {benchmark['error']}; see {benchmark['log']}", flush=True)
     generated_projects = ([*fixtures(out / "fixtures"), alpha_composite_fixture(out / "fixtures"),
                  perspective_animation_fixture(out / "fixtures"),
                  origin_animation_fixture(out / "fixtures"),
@@ -624,6 +702,7 @@ def main(argv=None):
     print(f"reload cycles ({len(reload_projects)} projects x2): {report['scene_reload_cycle_probe']}", flush=True)
     print(f"Evidence: {out}")
     return int(any(report[k] not in (0, "skipped-no-gpu") for k in (*REGRESSION_BINARIES, RELOAD_PROBE))
+               or report[TIMER_DELIVERY_BENCHMARK]["status"] != "collected"
                or any(not c["pixels_equal"] for c in report["cases"])
                or any(c["diagnostics"] or not c.get("expected_pixels", False)
                       for c in report["cases"][:GENERATED_CASE_COUNT]))
