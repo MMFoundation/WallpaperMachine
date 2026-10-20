@@ -588,6 +588,15 @@ prefix is `app.wallpapermachine`.
   and `renderer.bridgePowerBoundaryReplacement` in `upstream/provenance.json`.
   Existing interface/ordinary-expression treatment, native acceptance and written
   contributor-record review remain separate; the interim license is unchanged.
+- The library scanner/filter/thumbnail unit and inherited options-draft operations
+  also use separately authored replacements. Web support, retained position/media/
+  property features and their regression coverage remain. The thumbnail comparison
+  uses independently generated synthetic inputs and complete original/replacement
+  returned bytes, not private wallpapers or the transform as its own oracle.
+  Scope, retained-code integration and filesystem/reference limitations are under
+  `renderer.bridgeLibraryReplacement` and `renderer.bridgeOptionsDraftReplacement`
+  in `upstream/provenance.json`. These records do not clear remaining actor/facade,
+  interface, contributor or distribution requirements and do not change the license.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
   at revision `73f14ab1568371e6e3c44063f21c34c5e2712c4d`, BSD-3-Clause, vendored
   under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes

@@ -1,8 +1,9 @@
 use wallpaper_core::project::WallpaperProjectType;
 
-use crate::{config::FilterCfg, library::WallpaperEntry};
+use crate::config::FilterCfg;
 
-#[allow(clippy::struct_excessive_bools)]
+use super::entry::WallpaperEntry;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypeFilter {
     pub scene: bool,
@@ -13,7 +14,12 @@ pub struct TypeFilter {
 
 impl Default for TypeFilter {
     fn default() -> Self {
-        Self::from_config(&FilterCfg::default())
+        Self {
+            scene: true,
+            video: true,
+            web: true,
+            unknown: true,
+        }
     }
 }
 
@@ -46,68 +52,5 @@ impl TypeFilter {
             WallpaperProjectType::Web => self.web,
             WallpaperProjectType::Unknown => self.unknown,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use wallpaper_core::project::WallpaperProjectType;
-
-    use crate::{
-        config::FilterCfg,
-        library::{TypeFilter, WallpaperEntry},
-    };
-
-    fn entry(project_type: WallpaperProjectType) -> WallpaperEntry {
-        WallpaperEntry {
-            workshop_id: String::new(),
-            title: String::new(),
-            project_type,
-            preview_path: Some(PathBuf::new()),
-            preview_mtime: None,
-            project_json_mtime: None,
-            supported: true,
-        }
-    }
-
-    #[test]
-    fn default_accepts_all_types() {
-        let filter = TypeFilter::default();
-
-        assert!(filter.accepts(&entry(WallpaperProjectType::Scene)));
-        assert!(filter.accepts(&entry(WallpaperProjectType::Video)));
-        assert!(filter.accepts(&entry(WallpaperProjectType::Web)));
-        assert!(filter.accepts(&entry(WallpaperProjectType::Unknown)));
-    }
-
-    #[test]
-    fn scene_only_filter_accepts_only_scene() {
-        let filter = TypeFilter {
-            scene: true,
-            video: false,
-            web: false,
-            unknown: false,
-        };
-
-        assert!(filter.accepts(&entry(WallpaperProjectType::Scene)));
-        assert!(!filter.accepts(&entry(WallpaperProjectType::Video)));
-        assert!(!filter.accepts(&entry(WallpaperProjectType::Web)));
-        assert!(!filter.accepts(&entry(WallpaperProjectType::Unknown)));
-    }
-
-    #[test]
-    fn round_trips_config_shape() {
-        let config = FilterCfg {
-            scene: false,
-            video: true,
-            web: false,
-            unknown: true,
-        };
-
-        let filter = TypeFilter::from_config(&config);
-
-        assert_eq!(filter.to_config(), config);
     }
 }

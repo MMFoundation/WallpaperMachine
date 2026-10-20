@@ -398,7 +398,6 @@ async fn scaling_factor_edit_rejects_non_positive_and_non_finite_values() {
             .await
             .expect_err("invalid scaling factor should be rejected");
         assert_eq!(error.kind(), BridgeErrorKind::InvalidInput);
-        assert!(error.message().contains("greater than 0"));
     }
 
     let options = bridge

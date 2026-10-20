@@ -1,10 +1,12 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 
 use wallpaper_core::project::ScalingMode;
 
 use crate::{
     api::BridgeError,
-    config::{FramingCfg, MonitorRender, SerializedSelector, WallpaperConfig},
+    config::{stored_frame_rate, FramingCfg, MonitorRender, SerializedSelector, WallpaperConfig},
     project::{ProjectModel, PropertyValue, scene_property_override_json},
 };
 
@@ -100,10 +102,10 @@ pub fn property_documents(
 
 #[derive(Clone, Debug)]
 pub struct WallpaperOptionsDraft {
-    committed: WallpaperConfig,
-    current: WallpaperConfig,
-    committed_enabled_displays: Vec<SerializedSelector>,
-    current_enabled_displays: Vec<SerializedSelector>,
+    saved_config: WallpaperConfig,
+    pending_config: WallpaperConfig,
+    saved_assignment: Vec<SerializedSelector>,
+    pending_assignment: Vec<SerializedSelector>,
 }
 
 impl WallpaperOptionsDraft {
@@ -118,115 +120,131 @@ impl WallpaperOptionsDraft {
         enabled_displays: Vec<SerializedSelector>,
     ) -> Self {
         Self {
-            current: committed.clone(),
-            committed,
-            committed_enabled_displays: enabled_displays.clone(),
-            current_enabled_displays: enabled_displays,
+            pending_config: committed.clone(),
+            saved_config: committed,
+            pending_assignment: enabled_displays.clone(),
+            saved_assignment: enabled_displays,
         }
     }
 
     #[must_use]
     pub fn current(&self) -> &WallpaperConfig {
-        &self.current
+        &self.pending_config
     }
 
     /// What is saved, as opposed to the pending edits in [`Self::current`].
     #[must_use]
     pub fn committed(&self) -> &WallpaperConfig {
-        &self.committed
+        &self.saved_config
     }
 
     /// The documents of this draft, for showing its property edits on a
     /// running scene.
     #[must_use]
     pub fn property_documents(&self, model: &ProjectModel) -> PropertyDocuments {
-        property_documents(model, &self.committed, &self.current)
+        property_documents(model, &self.saved_config, &self.pending_config)
     }
 
     #[must_use]
     pub fn is_dirty(&self, active_enabled_displays: &[SerializedSelector]) -> bool {
-        self.current != self.committed || self.enabled_dirty(active_enabled_displays)
+        self.pending_config != self.saved_config
+            || self.assignment_discrepancy(active_enabled_displays)
     }
 
     #[must_use]
     pub fn requires_reconcile(&self, active_enabled_displays: &[SerializedSelector]) -> bool {
-        self.enabled_dirty(active_enabled_displays) || {
-            let mut current = self.current.clone();
-            let mut committed = self.committed.clone();
-            current.audio = committed.audio.clone();
-            for current_render in &mut current.monitors {
-                if let Some(committed_render) = committed
-                    .monitors
-                    .iter_mut()
-                    .find(|render| render.selector == current_render.selector)
-                {
-                    current_render.scaling_factor = committed_render.scaling_factor;
-                } else if current_render.scaling_mode == MonitorRender::default().scaling_mode
-                    && current_render.frame_rate == MonitorRender::default().frame_rate
-                    && current_render.framing == MonitorRender::default().framing
-                {
-                    current_render.scaling_factor = MonitorRender::default().scaling_factor;
-                    committed.monitors.push(current_render.clone());
-                }
-            }
-            current != committed
+        if self.assignment_discrepancy(active_enabled_displays) {
+            return true;
         }
+
+        let saved = &self.saved_config;
+        let pending = &self.pending_config;
+        if pending.schema_version != saved.schema_version
+            || pending.workshop_id != saved.workshop_id
+            || pending.r#type != saved.r#type
+            || pending.media_integration_enabled != saved.media_integration_enabled
+            || pending.property_overrides != saved.property_overrides
+            || !PartialEq::eq(&saved.audio, &saved.audio)
+            || pending.monitors.len() < saved.monitors.len()
+        {
+            return true;
+        }
+
+        for (saved_row, pending_row) in saved.monitors.iter().zip(&pending.monitors) {
+            if pending_row.selector != saved_row.selector
+                || pending_row.scaling_mode != saved_row.scaling_mode
+                || pending_row.frame_rate != saved_row.frame_rate
+                || pending_row.framing != saved_row.framing
+            {
+                return true;
+            }
+            // Saved duplicate rows retain the first-row scale comparison, including NaN.
+            let first = saved.monitors.iter().find(|row| row.selector == saved_row.selector);
+            if !first.is_some_and(|row| row.scaling_factor == saved_row.scaling_factor) {
+                return true;
+            }
+        }
+
+        let saved_count = saved.monitors.len();
+        for index in saved_count..pending.monitors.len() {
+            let row = &pending.monitors[index];
+            if saved.monitors.iter().any(|saved_row| saved_row.selector == row.selector)
+                || pending.monitors[saved_count..index]
+                    .iter()
+                    .any(|previous| previous.selector == row.selector)
+                || row.scaling_mode != "fill"
+                || row.frame_rate.is_some()
+                || row.framing != FramingCfg::default()
+            {
+                return true;
+            }
+        }
+        false
     }
 
-    /// # Errors
-    ///
-    /// Returns an error when `volume` is outside the inclusive `0.0..=1.0`
-    /// range.
     pub fn set_volume(&mut self, volume: f32) -> Result<(), BridgeError> {
-        if !(0.0..=1.0).contains(&volume) {
-            return Err(BridgeError::invalid_input(
-                "wallpaper volume must be between 0 and 1",
-            ));
-        }
-
-        self.current.audio.volume = volume;
+        Self::check_volume(volume)?;
+        self.pending_config.audio.volume = volume;
         Ok(())
     }
 
-    /// # Errors
-    ///
-    /// Returns an error when `volume` is outside the inclusive `0.0..=1.0`
-    /// range.
+    #[must_use]
     pub fn set_volume_immediate(&mut self, volume: f32) -> Result<WallpaperConfig, BridgeError> {
-        self.set_volume(volume)?;
-        self.committed.audio.volume = volume;
-        Ok(self.committed.clone())
+        Self::check_volume(volume)?;
+        self.saved_config.audio.volume = volume;
+        self.pending_config.audio.volume = volume;
+        Ok(self.saved_config.clone())
     }
 
     pub fn set_muted(&mut self, muted: bool) {
-        self.current.audio.muted = muted;
+        self.pending_config.audio.muted = muted;
     }
 
     #[must_use]
     pub fn set_muted_immediate(&mut self, muted: bool) -> WallpaperConfig {
-        self.set_muted(muted);
-        self.committed.audio.muted = muted;
-        self.committed.clone()
+        self.saved_config.audio.muted = muted;
+        self.pending_config.audio.muted = muted;
+        self.saved_config.clone()
     }
 
     pub fn set_audio_response_enabled(&mut self, enabled: bool) {
-        self.current.audio.response_enabled = enabled;
+        self.pending_config.audio.response_enabled = enabled;
     }
 
     #[must_use]
     pub fn set_audio_response_enabled_immediate(&mut self, enabled: bool) -> WallpaperConfig {
-        self.set_audio_response_enabled(enabled);
-        self.committed.audio.response_enabled = enabled;
-        self.committed.clone()
+        self.saved_config.audio.response_enabled = enabled;
+        self.pending_config.audio.response_enabled = enabled;
+        self.saved_config.clone()
     }
 
     /// Media integration is applied immediately, like audio response: it is a
     /// switch the user flips, not an option staged behind Apply.
     #[must_use]
     pub fn set_media_integration_enabled_immediate(&mut self, enabled: bool) -> WallpaperConfig {
-        self.current.media_integration_enabled = enabled;
-        self.committed.media_integration_enabled = enabled;
-        self.committed.clone()
+        self.pending_config.media_integration_enabled = enabled;
+        self.saved_config.media_integration_enabled = enabled;
+        self.saved_config.clone()
     }
 
     /// Stores or clears a file or directory property's path immediately.
@@ -244,9 +262,9 @@ impl WallpaperOptionsDraft {
         path: Option<String>,
     ) -> WallpaperConfig {
         let value = PropertyValue::String(path.unwrap_or_default());
-        model.edit_overrides(&mut self.current.property_overrides, id, value.clone());
-        model.edit_overrides(&mut self.committed.property_overrides, id, value);
-        self.committed.clone()
+        model.edit_overrides(&mut self.pending_config.property_overrides, id, value.clone());
+        model.edit_overrides(&mut self.saved_config.property_overrides, id, value);
+        self.saved_config.clone()
     }
 
     pub fn set_display_enabled(
@@ -255,7 +273,11 @@ impl WallpaperOptionsDraft {
         enabled: bool,
         active_enabled_displays: &[SerializedSelector],
     ) {
-        self.set_display_aliases_enabled(&[selector], enabled, active_enabled_displays);
+        self.set_display_aliases_enabled(
+            std::slice::from_ref(&selector),
+            enabled,
+            active_enabled_displays,
+        );
     }
 
     pub fn set_display_aliases_enabled(
@@ -264,26 +286,24 @@ impl WallpaperOptionsDraft {
         enabled: bool,
         active_enabled_displays: &[SerializedSelector],
     ) {
-        if !self.enabled_displays_dirty() {
-            self.current_enabled_displays = active_enabled_displays.to_vec();
-            self.committed_enabled_displays = active_enabled_displays.to_vec();
+        if !self.assignment_intent_changed() {
+            active_enabled_displays.clone_into(&mut self.saved_assignment);
+            active_enabled_displays.clone_into(&mut self.pending_assignment);
         }
-
         if enabled {
             for selector in selectors {
-                if !self.current_enabled_displays.contains(selector) {
-                    self.current_enabled_displays.push(selector.clone());
+                if !self.pending_assignment.contains(selector) {
+                    self.pending_assignment.push(selector.clone());
                 }
             }
         } else {
-            self.current_enabled_displays
-                .retain(|candidate| !selectors.contains(candidate));
+            self.pending_assignment.retain(|selector| !selectors.contains(selector));
         }
     }
 
     #[must_use]
     pub fn display_enabled(&self, selector: &SerializedSelector) -> bool {
-        self.current_enabled_displays.contains(selector)
+        self.pending_assignment.contains(selector)
     }
 
     #[must_use]
@@ -292,20 +312,18 @@ impl WallpaperOptionsDraft {
         selector: &SerializedSelector,
         active_enabled_displays: &[SerializedSelector],
     ) -> bool {
-        self.enabled_displays_dirty()
-            && self.current_enabled_displays.contains(selector)
-                != active_enabled_displays.contains(selector)
+        self.assignment_intent_changed()
+            && self.pending_assignment.contains(selector) != active_enabled_displays.contains(selector)
     }
 
     #[must_use]
     pub fn enabled_displays(&self) -> &[SerializedSelector] {
-        &self.current_enabled_displays
+        &self.pending_assignment
     }
 
     pub fn rebase_enabled_displays(&mut self, enabled_displays: Vec<SerializedSelector>) {
-        self.committed_enabled_displays
-            .clone_from(&enabled_displays);
-        self.current_enabled_displays = enabled_displays;
+        self.saved_assignment.clone_from(&enabled_displays);
+        self.pending_assignment = enabled_displays;
     }
 
     #[must_use]
@@ -314,10 +332,11 @@ impl WallpaperOptionsDraft {
         selector: &SerializedSelector,
         active_enabled_displays: &[SerializedSelector],
     ) -> bool {
-        if self.display_dirty(selector, active_enabled_displays) {
-            return self.display_enabled(selector);
+        if self.assignment_intent_changed() {
+            self.pending_assignment.contains(selector)
+        } else {
+            active_enabled_displays.contains(selector)
         }
-        active_enabled_displays.contains(selector)
     }
 
     #[must_use]
@@ -325,36 +344,33 @@ impl WallpaperOptionsDraft {
         &self,
         active_enabled_displays: &[SerializedSelector],
     ) -> Vec<SerializedSelector> {
-        let mut selectors = self.current_enabled_displays.clone();
-        for selector in &self.committed_enabled_displays {
-            if !selectors.contains(selector) {
-                selectors.push(selector.clone());
+        if self.assignment_intent_changed() {
+            return self.pending_assignment.clone();
+        }
+        let mut enabled: Vec<_> = self.pending_assignment
+            .iter()
+            .filter(|selector| active_enabled_displays.contains(selector))
+            .cloned()
+            .collect();
+        for selector in self.saved_assignment.iter().chain(active_enabled_displays) {
+            if active_enabled_displays.contains(selector) && !enabled.contains(selector) {
+                enabled.push(selector.clone());
             }
         }
-        for selector in active_enabled_displays {
-            if !selectors.contains(selector) {
-                selectors.push(selector.clone());
-            }
-        }
-
-        selectors
-            .into_iter()
-            .filter(|selector| self.effective_display_enabled(selector, active_enabled_displays))
-            .collect()
+        enabled
     }
 
     pub fn set_display_render_enabled(&mut self, selector: SerializedSelector, enabled: bool) {
         if enabled {
-            let _ = self.ensure_monitor_render(selector);
+            Self::monitor_for_edit(&mut self.pending_config, Cow::Owned(selector));
         } else {
-            self.current
-                .monitors
-                .retain(|render| render.selector != selector);
+            self.pending_config.monitors.retain(|row| row.selector != selector);
         }
     }
 
     pub fn set_scaling_mode(&mut self, selector: SerializedSelector, mode: ScalingMode) {
-        self.ensure_monitor_render(selector).scaling_mode = mode.to_string();
+        let row = Self::monitor_for_edit(&mut self.pending_config, Cow::Owned(selector));
+        Self::store_scaling_mode(row, mode);
     }
 
     #[must_use]
@@ -363,37 +379,22 @@ impl WallpaperOptionsDraft {
         selector: SerializedSelector,
         mode: ScalingMode,
     ) -> WallpaperConfig {
-        self.set_scaling_mode(selector.clone(), mode);
-        self.committed
-            .monitors
-            .iter_mut()
-            .find(|render| render.selector == selector)
-            .map(|render| render.scaling_mode = mode.to_string())
-            .unwrap_or_else(|| {
-                self.committed.monitors.push(MonitorRender {
-                    selector,
-                    scaling_mode: mode.to_string(),
-                    ..MonitorRender::default()
-                });
-            });
-        self.committed.clone()
+        let saved_row = Self::monitor_for_edit(&mut self.saved_config, Cow::Borrowed(&selector));
+        Self::store_scaling_mode(saved_row, mode);
+        let pending_row = Self::monitor_for_edit(&mut self.pending_config, Cow::Owned(selector));
+        Self::store_scaling_mode(pending_row, mode);
+        self.saved_config.clone()
     }
 
-    /// # Errors
-    ///
-    /// Returns an error when `factor` is not finite and greater than 0.
     pub fn set_scaling_factor(
         &mut self,
         selector: SerializedSelector,
         factor: f64,
     ) -> Result<(), BridgeError> {
         if !factor.is_finite() || factor <= 0.0 {
-            return Err(BridgeError::invalid_input(
-                "scaling factor must be finite and greater than 0",
-            ));
+            return Err(BridgeError::invalid_input("Scaling factor must be finite and positive"));
         }
-
-        self.ensure_monitor_render(selector).scaling_factor = factor;
+        Self::monitor_for_edit(&mut self.pending_config, Cow::Owned(selector)).scaling_factor = factor;
         Ok(())
     }
 
@@ -420,33 +421,21 @@ impl WallpaperOptionsDraft {
         pan_x: Option<f64>,
         pan_y: Option<f64>,
     ) -> Result<PositionUpdate, BridgeError> {
-        let saved = saved_framing(&self.committed, &selector);
+        let saved = saved_framing(&self.saved_config, &selector);
         let framing = moved_framing(saved, pan_x, pan_y)?;
         if framing == saved {
             return Ok(PositionUpdate {
-                config: self.committed.clone(),
+                config: self.saved_config.clone(),
                 framing,
                 previous: saved,
                 changed: false,
             });
         }
 
-        self.ensure_monitor_render(selector.clone()).framing = framing;
-        match self
-            .committed
-            .monitors
-            .iter_mut()
-            .find(|render| render.selector == selector)
-        {
-            Some(render) => render.framing = framing,
-            None => self.committed.monitors.push(MonitorRender {
-                selector,
-                framing,
-                ..MonitorRender::default()
-            }),
-        }
+        Self::monitor_for_edit(&mut self.saved_config, Cow::Borrowed(&selector)).framing = framing;
+        Self::monitor_for_edit(&mut self.pending_config, Cow::Owned(selector)).framing = framing;
         Ok(PositionUpdate {
-            config: self.committed.clone(),
+            config: self.saved_config.clone(),
             framing,
             previous: saved,
             changed: true,
@@ -454,8 +443,8 @@ impl WallpaperOptionsDraft {
     }
 
     pub fn set_target_fps(&mut self, selector: SerializedSelector, fps: u32, max_fps: u32) {
-        self.ensure_monitor_render(selector).frame_rate =
-            crate::config::stored_frame_rate(fps, max_fps);
+        Self::monitor_for_edit(&mut self.pending_config, Cow::Owned(selector)).frame_rate =
+            stored_frame_rate(fps, max_fps);
     }
 
     #[must_use]
@@ -465,30 +454,14 @@ impl WallpaperOptionsDraft {
         fps: u32,
         max_fps: u32,
     ) -> WallpaperConfig {
-        self.set_target_fps(selector.clone(), fps, max_fps);
-        let frame_rate = self
-            .current
-            .monitors
-            .iter()
-            .find(|render| render.selector == selector)
-            .and_then(|render| render.frame_rate);
-        self.committed
-            .monitors
-            .iter_mut()
-            .find(|render| render.selector == selector)
-            .map(|render| render.frame_rate = frame_rate)
-            .unwrap_or_else(|| {
-                self.committed.monitors.push(MonitorRender {
-                    selector,
-                    frame_rate,
-                    ..MonitorRender::default()
-                });
-            });
-        self.committed.clone()
+        let rate = stored_frame_rate(fps, max_fps);
+        Self::monitor_for_edit(&mut self.saved_config, Cow::Borrowed(&selector)).frame_rate = rate;
+        Self::monitor_for_edit(&mut self.pending_config, Cow::Owned(selector)).frame_rate = rate;
+        self.saved_config.clone()
     }
 
     pub fn edit_property(&mut self, model: &ProjectModel, id: &str, value: PropertyValue) {
-        model.edit_overrides(&mut self.current.property_overrides, id, value);
+        model.edit_overrides(&mut self.pending_config.property_overrides, id, value);
     }
 
     /// This draft with `edits` made to it one after another, as
@@ -500,13 +473,13 @@ impl WallpaperOptionsDraft {
     #[must_use]
     pub fn with_edits(&self, model: &ProjectModel, edits: &[(String, PropertyValue)]) -> Self {
         let mut edited = self.clone();
-        edited.current.property_overrides =
-            model.edited_overrides(&self.current.property_overrides, edits);
+        edited.pending_config.property_overrides =
+            model.edited_overrides(&self.pending_config.property_overrides, edits);
         edited
     }
 
     pub fn restore_property_default(&mut self, id: &str) {
-        self.current.property_overrides.remove(id);
+        self.pending_config.property_overrides.remove(id);
     }
 
     /// Stages the authored default for every property except those in `keep`,
@@ -519,67 +492,62 @@ impl WallpaperOptionsDraft {
     /// keeps of it, so dropping it from a draft alone would leave the two out of
     /// step. Clearing one stays its own action.
     pub fn restore_all_property_defaults(&mut self, keep: &BTreeSet<String>) {
-        self.current
+        self.pending_config
             .property_overrides
             .retain(|id, _| keep.contains(id));
     }
 
     pub fn cancel(&mut self) {
-        self.current = self.committed.clone();
-        self.current_enabled_displays = self.committed_enabled_displays.clone();
+        self.pending_config.clone_from(&self.saved_config);
+        self.pending_assignment.clone_from(&self.saved_assignment);
     }
 
     #[must_use]
     pub fn apply(&mut self) -> WallpaperConfig {
-        self.committed = self.current.clone();
-        self.committed_enabled_displays = self.current_enabled_displays.clone();
-        self.committed.clone()
+        self.saved_config.clone_from(&self.pending_config);
+        self.saved_assignment.clone_from(&self.pending_assignment);
+        self.saved_config.clone()
     }
 
-    fn ensure_monitor_render(&mut self, selector: SerializedSelector) -> &mut MonitorRender {
-        if let Some(index) = self
-            .current
-            .monitors
-            .iter()
-            .position(|render| render.selector == selector)
-        {
-            return &mut self.current.monitors[index];
+    fn check_volume(volume: f32) -> Result<(), BridgeError> {
+        if !(0.0..=1.0).contains(&volume) {
+            return Err(BridgeError::invalid_input("Volume must be between 0 and 1 inclusive"));
         }
-
-        self.current.monitors.push(MonitorRender {
-            selector,
-            ..MonitorRender::default()
-        });
-        self.current
-            .monitors
-            .last_mut()
-            .expect("monitor render was just inserted")
+        Ok(())
     }
 
-    fn enabled_displays_dirty(&self) -> bool {
-        self.current_enabled_displays.len() != self.committed_enabled_displays.len()
-            || !self
-                .current_enabled_displays
-                .iter()
-                .all(|selector| self.committed_enabled_displays.contains(selector))
+    fn assignment_intent_changed(&self) -> bool {
+        self.pending_assignment.len() != self.saved_assignment.len()
+            || self.pending_assignment.iter().any(|selector| !self.saved_assignment.contains(selector))
     }
 
-    fn enabled_dirty(&self, active_enabled_displays: &[SerializedSelector]) -> bool {
-        let mut selectors = self.current_enabled_displays.clone();
-        for selector in &self.committed_enabled_displays {
-            if !selectors.contains(selector) {
-                selectors.push(selector.clone());
+    fn assignment_discrepancy(&self, active: &[SerializedSelector]) -> bool {
+        self.assignment_intent_changed()
+            && (self.pending_assignment.iter().any(|selector| !active.contains(selector))
+                || active.iter().any(|selector| !self.pending_assignment.contains(selector)))
+    }
+
+    fn monitor_for_edit<'a>(
+        config: &'a mut WallpaperConfig,
+        selector: Cow<'_, SerializedSelector>,
+    ) -> &'a mut MonitorRender {
+        let index = match config.monitors.iter().position(|row| row.selector == *selector) {
+            Some(index) => index,
+            None => {
+                let index = config.monitors.len();
+                config.monitors.push(MonitorRender {
+                    selector: selector.into_owned(),
+                    ..MonitorRender::default()
+                });
+                index
             }
-        }
-        for selector in active_enabled_displays {
-            if !selectors.contains(selector) {
-                selectors.push(selector.clone());
-            }
-        }
+        };
+        &mut config.monitors[index]
+    }
 
-        selectors
-            .iter()
-            .any(|selector| self.display_dirty(selector, active_enabled_displays))
+    fn store_scaling_mode(row: &mut MonitorRender, mode: ScalingMode) {
+        row.scaling_mode.clear();
+        write!(&mut row.scaling_mode, "{mode}").expect("writing a scaling mode to a String cannot fail");
     }
 }
 
@@ -596,7 +564,7 @@ mod tests {
         draft.set_display_render_enabled(SerializedSelector::Primary, true);
         assert!(!draft.requires_reconcile(&[]));
 
-        draft.current.monitors[0].framing = FramingCfg {
+        draft.pending_config.monitors[0].framing = FramingCfg {
             pan_x: 0.2,
             pan_y: 0.8,
         };
@@ -707,3 +675,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod contract_tests;
