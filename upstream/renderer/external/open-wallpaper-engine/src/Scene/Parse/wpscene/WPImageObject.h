@@ -90,6 +90,9 @@ public:
     float                      alpha { 1.0f };
     float                      brightness { 1.0f };
     bool                       fullscreen { false };
+    /// Drawn through the scene's perspective camera, as a 3D model or a
+    /// particle system with the flag is, instead of flat.
+    bool                       perspective { false };
     bool                       nopadding { false };
     // How the layer's texture (`_rt_imageLayerComposite_<id>`) is addressed
     // outside 0..1. Unspecified keeps the historical clamp.

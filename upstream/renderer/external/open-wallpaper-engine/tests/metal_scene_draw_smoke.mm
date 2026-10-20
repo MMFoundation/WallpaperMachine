@@ -2680,6 +2680,86 @@ TEST_F(MetalSceneDraw, APerspectiveLayerIsSeenFromTheEyeDistanceOfTheScenesField
     }
 }
 
+/// `WriteDeepCardFixture`'s card with the `perspective` flag of its own instead
+/// of a camera bound to it by hand, drawn as it is or through one effect that
+/// copies it.
+std::filesystem::path WritePerspectiveFlagFixture(const std::filesystem::path& root, int z,
+                                                  bool through_effect)
+{
+    const auto project = WriteDeepCardFixture(root, z);
+    const std::string vertex =
+        "uniform mat4 g_ModelViewProjectionMatrix;\n"
+        "attribute vec3 a_Position;\nattribute vec2 a_TexCoord;\n"
+        "varying vec2 v_TexCoord;\n"
+        "void main(){ gl_Position=g_ModelViewProjectionMatrix*vec4(a_Position,1.0);"
+        "v_TexCoord=a_TexCoord; }\n";
+    std::filesystem::create_directories(root / "effects/copy");
+    std::ofstream(root / "effects/copy/effect.json")
+        << R"({"name":"copy","passes":[{"material":"materials/copy.json"}]})";
+    std::ofstream(root / "materials/copy.json")
+        << R"({"passes":[{"shader":"perspective_copy","blending":"normal","cullmode":"nocull",)"
+        << R"("depthtest":"disabled","depthwrite":"disabled","textures":[null]}]})";
+    std::ofstream(root / "shaders/perspective_copy.vert") << vertex;
+    std::ofstream(root / "shaders/perspective_copy.frag")
+        << "uniform sampler2D g_Texture0;\nvarying vec2 v_TexCoord;\n"
+           "void main(){ gl_FragColor=texture(g_Texture0,v_TexCoord); }\n";
+    std::ofstream(root / "layout.json")
+        << R"({"camera":{"center":[0,0,0],"eye":[0,0,1],"up":[0,1,0]},)"
+        << R"("general":{"ambientcolor":[0,0,0],"skylightcolor":[0,0,0],"clearcolor":[0.0,0.0,0.0],)"
+        << R"("cameraparallax":false,"fov":50,"perspectiveoverridefov":20,)"
+        << R"("orthogonalprojection":{"width":960,"height":540}},)"
+        << R"("objects":[{"id":1,"name":"tile","image":"models/tile.json","origin":[480,270,)"
+        << z << R"(],"scale":[1,1,1],"angles":[0,0,0],"perspective":true,"visible":true)"
+        << (through_effect ? R"(,"effects":[{"file":"effects/copy/effect.json","visible":true}])" : "")
+        << "}]}";
+    return project;
+}
+
+// An image layer with the `perspective` flag is drawn through the scene's
+// perspective camera, as a model or a particle system with it is, whether it
+// is drawn as it is or through its effects (the pass that puts the result
+// onto the scene is the one seen through that camera). It was always drawn
+// flat, so a cover laid on a model's face slid off it as soon as a group
+// turned the two: the model was seen in perspective and the cover was not.
+TEST_F(MetalSceneDraw, AnImageLayerWithThePerspectiveFlagIsSeenThroughThePerspectiveCamera)
+{
+    constexpr double kDistance = 270.0 / 0.17632698070846498;
+    constexpr double kPixelsPerUnit = 0.5;
+    constexpr int    kDepth = 500;
+    const double     expected = 60.0 * kPixelsPerUnit * kDistance / (kDistance - kDepth);
+    for (const bool through_effect : { false, true }) {
+        SCOPED_TRACE(through_effect ? "through an effect" : "as it is");
+        for (const bool native : { false, true }) {
+            SCOPED_TRACE(native ? "native" : "compatibility");
+            const std::string name =
+                std::string(through_effect ? "effect" : "plain") + (native ? "-native" : "-compat");
+            const auto project =
+                WritePerspectiveFlagFixture(root_ / ("perspective-flag-" + name), kDepth, through_effect);
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / ("perspective-flag-cache-" + name), loaded, error))
+                << error;
+            if (native) {
+                ASSERT_EQ(SelectSceneBackend(*loaded.scene).backend, SceneBackend::NativeMetal);
+            }
+            const auto picture = DrawWithRenderer(*loaded.scene, native, 480, 270, 1, 1.0 / 60.0);
+            ASSERT_TRUE(picture.error.empty()) << picture.error;
+
+            int left = -1, right = -1;
+            for (uint32_t x = 0; x < picture.width; ++x) {
+                const auto i = (std::size_t(picture.height / 2) * picture.width + x) * 3;
+                if (picture.rgb[i + 2] >= 65 && picture.rgb[i + 2] <= 90) {
+                    if (left < 0) left = static_cast<int>(x);
+                    right = static_cast<int>(x);
+                }
+            }
+            ASSERT_GE(left, 0) << "the card was not drawn";
+            EXPECT_NEAR(right - left + 1, expected, 2.5)
+                << "flat, the card would be " << 60.0 * kPixelsPerUnit << " pixels wide";
+        }
+    }
+}
+
 /// Two overlapping cards, drawn in order: a half-transparent red card nearer
 /// the camera, whose `blending`, `depthtest` and `depthwrite` are the given
 /// authored strings, then an opaque blue card further away that depth-tests

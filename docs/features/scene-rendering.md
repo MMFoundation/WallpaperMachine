@@ -70,8 +70,11 @@ plane). The camera is read as it stood when the cursor was sampled. Layers are s
 where the cursor ray meets their own plane, and a particle control point still follows
 the cursor in canvas units.
 
-In a 2D scene, a particle system or 3D model with the `perspective` flag is drawn
-through a perspective camera seated as Wallpaper Engine seats it. Its field of view is
+In a 2D scene, a particle system, 3D model or image layer with the `perspective` flag
+is drawn through a perspective camera seated as Wallpaper Engine seats it (an image
+layer's effects still run in its own card; the pass that puts the result onto the
+scene is the one seen through it, and a fullscreen layer ignores the flag), so a
+cover laid on a model's face stays on it however a group turns them. Its field of view is
 the scene's `perspectiveoverridefov` (95 degrees when the file leaves it out, read from
 a file of any package version; `fov` belongs to scenes with a perspective projection,
 which read it and ignore `perspectiveoverridefov`), its eye is

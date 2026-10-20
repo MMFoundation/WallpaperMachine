@@ -92,7 +92,10 @@ Playback, backend, host and startup areas are in
   (every fill mode, `FrameCanvas`); in `metal_scene_draw_smoke`:
   `MetalSceneDraw.APerspectiveLayerIsSeenFromTheEyeDistanceOfTheScenesFieldOfViewOnBothRenderers`
   (a card 500, 1100 and 1400 units out is the width the eye distance gives on both
-  renderers). The eye sat at 1000 units with a field of view derived from it, so a
+  renderers) and `.AnImageLayerWithThePerspectiveFlagIsSeenThroughThePerspectiveCamera`
+  (the card's own `perspective` flag, drawn as it is and through an effect, on both
+  renderers: it was drawn flat, 30 pixels where the camera gives 44.5, and a cover
+  laid on a model's face slid off it once a group turned them). The eye sat at 1000 units with a field of view derived from it, so a
   particle 500 units out was twice its size and one past 1000 units was cut; the
   distance is the scene's own, in one helper (`FitCanvasPerspective`) that the
   parser, `Scene::FrameCanvas`, the scene zoom and `ApplyCameraFillMode` share.

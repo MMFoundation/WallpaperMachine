@@ -4375,6 +4375,15 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     // Wallpaper Engine lays a fullscreen layer over the whole screen, whichever
     // group it sits in: the group decides whether it shows, never where.
     spImgNode->SetIgnoreParentTransform(wpimgobj.fullscreen);
+    // A layer with the `perspective` flag is drawn through the scene's
+    // perspective camera, as a model or a particle system with it is, so a
+    // card laid on a model's face stays on it however a group turns them. Its
+    // effects still run in its own card; the pass that puts the result onto the
+    // scene is the one seen through that camera. A fullscreen layer covers the
+    // screen whatever it says.
+    const bool through_perspective_camera = wpimgobj.perspective && ! wpimgobj.fullscreen &&
+                                            context.scene->cameras.contains("global_perspective");
+    if (through_perspective_camera) spImgNode->SetCamera("global_perspective");
     // The layers below it are placed from the transform saved for the layer
     // (none saved, none added), under the groups it sits in: a picture saved at
     // the middle of the canvas under a post-processing layer with no origin is
@@ -4760,6 +4769,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             imgEffectLayer->SetFinalDepth(imgDepthTest, imgDepthWrite);
             if (wpimgobj.fullscreen) {
                 imgEffectLayer->SetFinalCamera(std::string(FullscreenLayerCamera));
+            } else if (through_perspective_camera) {
+                imgEffectLayer->SetFinalCamera("global_perspective");
             }
             imgEffectLayer->FinalMesh().ChangeMeshDataFrom(effct_final_mesh);
             imgEffectLayer->FinalNode().CopyTrans(*spImgNode);

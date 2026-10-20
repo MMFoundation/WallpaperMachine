@@ -25,6 +25,19 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-20 — Image layers honour the perspective flag
+
+A media-player scene laid its cover and shadow cards on 3D models under a cursor-turned group; the models drew through the 2D scene's perspective camera and the cards drew flat, so the cover and shadows slid off the models as slabs. Image layers with the perspective flag now draw through that camera too.
+
+- `metal_scene_draw_smoke --gtest_filter=*PerspectiveFlag*` — new case fails with the change removed (30 px flat in all four variants, 44.5 expected), passes with it
+- `python3 scripts/check_renderer.py` — exit 0 at load average about 3; 24 asset or environment skips
+- `python3 scripts/build.py --renderer-only` — exit 0; bindings unchanged
+- `python3 scripts/test.py` — exit 0; 3899 passed, 0 failed, 45 skipped of 3944
+- Local media-player scene, 240 frames at 1720x720, cursor centred and in a corner, and with the group turned to fixed angles: cover and vinyl cards stay on the models' faces; untilted the frame is unchanged apart from the cards' perspective magnification
+- The one other local scene with a flagged image layer: before and after frames identical (no pixel off by more than 16)
+- Not compared with Wallpaper Engine's frame: the Parallels reference VM could not be resumed (activation expired)
+- Gap: text layers with the flag still draw flat; no desktop run; the app was not rebuilt for Release
+
 ## 2026-10-20 — Cover slots over another layer's picture; effect and keyed-constant script objects
 
 A cover slot whose authored texture is another layer's composite now shows that composite until a cover is published, on both renderers, and property scripts get Wallpaper Engine's thisObject for an effect's visibility and for a keyed shader constant's own timeline. Found on a local music-player wallpaper whose blurred cover background rendered as the clear colour.
@@ -124,13 +137,3 @@ The presentation policy reconciles per-display visibility during global transiti
 - Renewal endpoint shape probed once with a dummy token: form-encoded POST accepted, refusal is an empty response with x-eresult 15.
 - Gap: no live Steam Community sign-in; that WebKit exposes steamRefresh_steam and that GenerateAccessTokenForApp accepts a browser token are unverified. Without the refresh cookie the saved session lasts as long as steamLoginSecure.
 - Gap: guide card and offer sheet not checked visually; the real keychain store is not exercised by tests.
-
-## 2026-10-17 — Wallpaper Engine reference frames from the Parallels VM
-
-New scripts/we_reference.py (capture, render, compare) and the rule that a wallpaper fix is judged against Wallpaper Engine's own frame. Checked end to end on the developer's Parallels Desktop Standard VM (Windows 11, arm64) on 2026-10-17.
-
-- `python3 scripts/test.py` — exit 0; 3877 tests: 3832 passed, 45 skipped, 0 failed (10 new in `scripts/tests/test_we_reference.py`)
-- `we_reference.py capture 2850003448 2440387496` in the VM — both captured: Wallpaper Engine started and muted by the worker, two 3456x2024 shots each with recorded times (10.2/30.0 s and 8.0/15.3 s after opening)
-- `render` + `compare` with a freshly built `metal_scene_draw_smoke` — mean difference 1.0 (2850003448) and 2.7 (2440387496, whose monitor screen we draw smaller than Wallpaper Engine; not fixed here)
-- Same scenes, Wallpaper Engine frames of 2026-10-14 vs 2026-10-17 — mean difference 0.2 to 1.0, brightness correlation 0.98 to 0.99 (the noise floor in the doc)
-- Not run: `check_renderer.py`, `check_rust.py` (no renderer or crate change); no Release build (no app change)
