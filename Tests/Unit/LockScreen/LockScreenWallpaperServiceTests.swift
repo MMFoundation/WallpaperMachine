@@ -20,11 +20,10 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
 
   override func setUpWithError() throws {
     (defaults, defaultsSuite) = try TemporaryDefaults.make(for: self)
-    // Asset snapshots derive relative paths from a resolved enumeration root;
-    // the temporary directory is under /var, a symlink that enumeration
-    // resolves but standardizedFileURL restores, so stage under Caches instead.
-    root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
-      "Library/Caches/lock-screen-service-tests-" + UUID().uuidString, isDirectory: true)
+    // Keep the system-temp alias in play so asset publication cannot regress
+    // to subtracting differently resolved absolute path spellings.
+    root = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "lock-screen-service-tests-" + UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: exchange, withIntermediateDirectories: true)
     // The managed user-asset store lives under the support root; every test that

@@ -531,6 +531,12 @@ directory (see [User-selected files](user-files.md)
 for chosen files); web projects receive a separate read-grant root containing only
 that project's referenced managed files.
 
+Snapshot paths are relative to enumeration depth, not the textual spelling of
+the source root. System directory aliases and linked ancestors therefore keep
+nested asset names intact instead of duplicating part of the project path.
+The source directory itself and enumerated assets still cannot be symbolic
+links or special files; this does not broaden the extension's read grant.
+
 ## Verification
 
 The offscreen suites (service, selection journal, extension registration, frame

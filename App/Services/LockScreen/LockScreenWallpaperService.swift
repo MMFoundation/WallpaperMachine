@@ -1119,9 +1119,21 @@ private enum LockScreenAssetPublisher {
           message: String(localized: "Native wallpaper assets cannot contain symbolic links or special files: \(file.path)")
         )
       }
+      // Enumeration may resolve an ancestor alias differently from source.path.
+      // Depth identifies the relative suffix without copying path-component arrays.
+      let path = file.path
+      var relativeStart = path.endIndex
+      for _ in 0..<enumerator.level {
+        guard let separator = path[..<relativeStart].lastIndex(of: "/") else {
+          throw LockScreenWallpaperFailure(
+            message: String(localized: "Cannot enumerate wallpaper assets: \(source.path)"))
+        }
+        relativeStart = separator
+      }
+      let relative = String(path[path.index(after: relativeStart)...])
       result.append(
         Item(
-          relative: String(file.path.dropFirst(source.path.count + 1)),
+          relative: relative,
           directory: values.isDirectory == true, size: values.fileSize ?? 0,
           modified: values.contentModificationDate ?? .distantPast))
     }
