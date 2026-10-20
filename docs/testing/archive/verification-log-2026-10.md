@@ -9,6 +9,12 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-17 — Settings: Reset all settings
+
+- python3 scripts/test.py --only PanelSettingsResetTests: 2 passed (confirm/cancel; defaults restored, content kept, unchanged engine settings not sent).
+- python3 scripts/test.py: 3837 passed, 0 failed, 45 skipped.
+- Not checked: the confirmation sheet and button on a real window (no desktop run); lock screen/screen saver turn-off and launch-at-login reset are exercised only through their existing services.
+
 ## 2026-10-16 — Per-language release banners, bulleted What's New
 
 Each language block opens with its own banner (x.y.z.jpg, x.y.z.zh-Hans.jpg; Chinese falls back to English); What's New swaps the banner with the language tab, bullets list entries with a hanging indent and shows Highlights in the accent colour with ✦ markers. 1.5.0 now has English and Chinese banners.

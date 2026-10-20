@@ -25,6 +25,18 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-20 — Cover slots over another layer's picture; effect and keyed-constant script objects
+
+A cover slot whose authored texture is another layer's composite now shows that composite until a cover is published, on both renderers, and property scripts get Wallpaper Engine's thisObject for an effect's visibility and for a keyed shader constant's own timeline. Found on a local music-player wallpaper whose blurred cover background rendered as the clear colour.
+
+- `python3 scripts/check_renderer.py` — exit 0; every registered binary exit 0, the new MetalSceneDraw.ACoverOverAnotherLayersPictureShowsThatPictureUntilACoverArrivesOnBothRenderers, SceneSchema.AnEffectsVisibilityScriptSwitchesTheEffectAndNotItsLayer and .AKeyedConstantsScriptPlaysTheConstantsOwnTimeline included; generated cases pixel-equal pooled and isolated; reload probe 0
+- `python3 scripts/build.py --renderer-only` — exit 0; App/Bridge/Generated unchanged
+- `python3 scripts/test.py` — exit 0; 3944 tests: 3899 passed, 45 skipped
+- The three new tests fail with the fixes reverted: the idle, cleared and first-track cover cases draw nothing on both renderers, a cover published mid-run is never shown without the pass marked as reading a runtime image, the effect's script hides its layer, and the keyed constant stays on its first key
+- Headless Native Metal probe of the wallpaper at 1720x720, display resolution, with media events and a published cover: the background is a blurred, darkened copy of the cover; with nothing playing it is the default art blurred and the player shows that art; the 21:9 layout option fills the width; the 16:9 option leaves dark side bars on a 21:9 surface, as authored
+- Local library: the 14 effect-visibility scripts in 16 scenes use thisObject only for visible
+- Not compared with Wallpaper Engine's own frame: the reference VM is unavailable
+
 ## 2026-10-20 — Layer composites carry what their effects made
 
 Fixes an audio-visualizer media player whose bars never moved: its spectrum buffer is a hidden layer 64 wide and 0 high whose composite stayed empty. A card with no area that draws into targets of its own now fills them and draws only there, and a chain's last pass writes into its layer's own composite instead of blending into it.
@@ -122,9 +134,3 @@ New scripts/we_reference.py (capture, render, compare) and the rule that a wallp
 - `render` + `compare` with a freshly built `metal_scene_draw_smoke` — mean difference 1.0 (2850003448) and 2.7 (2440387496, whose monitor screen we draw smaller than Wallpaper Engine; not fixed here)
 - Same scenes, Wallpaper Engine frames of 2026-10-14 vs 2026-10-17 — mean difference 0.2 to 1.0, brightness correlation 0.98 to 0.99 (the noise floor in the doc)
 - Not run: `check_renderer.py`, `check_rust.py` (no renderer or crate change); no Release build (no app change)
-
-## 2026-10-17 — Settings: Reset all settings
-
-- python3 scripts/test.py --only PanelSettingsResetTests: 2 passed (confirm/cancel; defaults restored, content kept, unchanged engine settings not sent).
-- python3 scripts/test.py: 3837 passed, 0 failed, 45 skipped.
-- Not checked: the confirmation sheet and button on a real window (no desktop run); lock screen/screen saver turn-off and launch-at-login reset are exercised only through their existing services.

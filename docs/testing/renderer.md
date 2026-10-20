@@ -886,9 +886,10 @@ into private textures; the three that draw skip visibly without a Metal device.
   `color` timeline holds the authored colour, and a timeline on a setting that also has
   a script or a user property is dropped (the script or property is its only writer),
   even when the script is only an event handler that calls `getAnimation().play()`: that
-  start-paused timeline is neither shown at its first frame nor played, because the
-  script's no-name `getAnimation()` resolves the layer's unnamed alpha clock, not the
-  setting's (it needs a `getAnimation` scoped to the property).
+  start-paused timeline is neither shown at its first frame nor played, and with no
+  timeline of its own the script's no-name `getAnimation()` finds the layer's first
+  unnamed clock. A shader constant keeps its timeline beside its script, and there the
+  no-name call is the constant's own timeline.
   That a start-paused timeline shows its first frame before anything plays follows the
   origin and shader-constant timelines here and the editor's start-paused flag being a
   play state beside the curves; no frame of Wallpaper Engine showing a paused scale or

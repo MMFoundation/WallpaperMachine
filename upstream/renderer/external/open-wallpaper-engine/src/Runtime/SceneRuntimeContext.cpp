@@ -2061,6 +2061,19 @@ ScalarAnimationPlayback* SceneRuntimeContext::FindScalarAnimation(
     return nullptr;
 }
 
+uint64_t SceneRuntimeContext::RegisterPropertyAnimation(
+    std::shared_ptr<ScalarAnimationPlayback> playback) {
+    m_property_animations.push_back(std::move(playback));
+    return m_property_animations.size();
+}
+
+ScalarAnimationPlayback* SceneRuntimeContext::FindPropertyAnimation(uint64_t handle) const {
+    if (handle == 0 || handle > m_property_animations.size()) return nullptr;
+    // The timeline is held by `m_scalar_animations`, which a rolled-back layer
+    // load may shorten; a handle to one that went finds nothing.
+    return m_property_animations[handle - 1].lock().get();
+}
+
 ScalarAnimationPlayback* SceneRuntimeContext::FindAnimationByName(
     std::string_view animation_name) const {
     if (animation_name.empty()) return nullptr;

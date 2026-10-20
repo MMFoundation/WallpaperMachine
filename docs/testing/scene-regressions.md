@@ -1034,6 +1034,14 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     layer's authored name; `addEndedCallback` listeners (one set per layer,
     however it was asked for) run once per finish of a single-shot layer, from
     the puppet state the renderer advances, and never for a looping one.
+  - *A property script's own object.* `SceneSchema.AnEffectsVisibilityScriptSwitchesTheEffectAndNotItsLayer`
+    and `SceneSchema.AKeyedConstantsScriptPlaysTheConstantsOwnTimeline`: a script
+    deciding an effect's visibility has the effect as `thisObject`, so writing
+    `thisObject.visible` from `init` or a media handler switches the effect and leaves
+    the layer shown (it hid the layer and left the effect on); a script on a keyed
+    shader constant gets the constant's own timeline from `getAnimation()` with no
+    name on a layer whose origin also has an unnamed timeline (it got the origin's,
+    and the constant stayed on its first key).
   - *Sprite sheets.* `.PausedSpriteSheetHoldsItsFrameAndPlayResumesIt`,
     `.StoppedSpriteSheetReturnsToItsFirstFrameAndSetFrameStillPins`,
     `.SpriteSheetRateScalesPlaybackAndTheSheetDescribesItself`,

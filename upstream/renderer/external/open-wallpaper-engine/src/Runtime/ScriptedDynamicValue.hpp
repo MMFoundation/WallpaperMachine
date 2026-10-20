@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Runtime/DynamicValue.hpp"
+#include "Runtime/PropertyScriptObject.hpp"
 #include "Project/ProjectProperties.hpp"
 
 #include <map>
@@ -28,7 +29,7 @@ public:
                          std::map<std::string, DynamicValueUniquePtr> script_properties,
                          DynamicValue                                 base_value,
                          ScriptedValueSemantic semantic = ScriptedValueSemantic::Generic,
-                         int animation_layer_index = -1);
+                         PropertyScriptObject object = {});
     ~ScriptedDynamicValue() override;
 
     const std::string& LayerName() const { return m_current_layer_name; }
@@ -60,6 +61,10 @@ public:
     void Destroy();
 
 private:
+    /// Takes what the script wrote to its effect's `visible` as this value
+    /// (`PropertyScriptObject::effect_visibility`), after anything that ran it.
+    void applyOwnWrite();
+
     SceneRuntimeContext*                         m_runtime = nullptr;
     std::weak_ptr<void>                          m_registry;
     std::string                                  m_current_layer_name;

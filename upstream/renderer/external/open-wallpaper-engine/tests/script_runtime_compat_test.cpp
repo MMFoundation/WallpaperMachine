@@ -5756,7 +5756,8 @@ export function init(value) {
 }
 )JS";
     runtime->RegisterNodeVisibility("character", node.get(), ResolveBoolSetting(*runtime, {
-        { "value", true }, { "script", script } }, "character", 1));
+        { "value", true }, { "script", script } }, "character",
+        PropertyScriptObject { .animation_layer_index = 1 }));
     runtime->Tick(0.01);
     EXPECT_DOUBLE_EQ(layer.frame(1), 3.0) << "the bound animation layer started at its offset";
     EXPECT_DOUBLE_EQ(layer.frame(0), 0.0) << "its sibling was left alone";
@@ -6925,7 +6926,8 @@ export function init(value) {
   check('a name no layer has', ghost.name === 'nothing' && ghost === thisLayer.getAnimationLayer('nothing'));
   return value;
 }
-)JS" } }, "character", 1));
+)JS" } }, "character",
+        PropertyScriptObject { .animation_layer_index = 1 }));
     runtime->Tick(0.01);
     for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
 }

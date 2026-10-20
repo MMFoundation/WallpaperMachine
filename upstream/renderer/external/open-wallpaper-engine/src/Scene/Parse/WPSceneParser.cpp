@@ -2159,8 +2159,11 @@ void RegisterScriptedEffectVisibility(ParseContext& context,
     effect->visible = source.visible;
     if (! source.scripted_visible || context.scene->runtime == nullptr) return;
     auto& runtime = *context.scene->runtime;
+    // The script's `thisObject` is the effect: the `visible` it writes is this
+    // effect's, not its layer's.
     runtime.RegisterEffectVisibility(
-        effect, ResolveBoolSetting(runtime, source.visible_setting, runtime_name));
+        effect, ResolveBoolSetting(runtime, source.visible_setting, runtime_name,
+                                   PropertyScriptObject { .effect_visibility = true }));
 }
 
 // The keys of a text object that are baked into the card's pixels when the layer
@@ -2612,14 +2615,15 @@ nlohmann::json MaterialConstantSettingJson(const wpscene::WPConstantShaderValue&
 std::unique_ptr<DynamicValue>
 MakeMaterialConstantDynamicValue(SceneRuntimeContext& context,
                                  const wpscene::WPConstantShaderValue& source,
-                                 std::string_view current_layer_name) {
+                                 std::string_view current_layer_name,
+                                 PropertyScriptObject object = {}) {
     if (source.script.empty()) return MakeMaterialConstantValue(source);
     const auto setting = MaterialConstantSettingJson(source);
     // Without an authored value there is no component count to preserve.
     if (source.value.empty()) {
-        return ResolveStringSetting(context, setting, current_layer_name);
+        return ResolveStringSetting(context, setting, current_layer_name, object);
     }
-    return ResolveVectorSetting(context, setting, source.value.size(), current_layer_name);
+    return ResolveVectorSetting(context, setting, source.value.size(), current_layer_name, object);
 }
 
 void LoadMaterialConstantShaderValuesImpl(SceneMaterial& material, const wpscene::WPMaterial& wpmat,
@@ -2768,14 +2772,6 @@ void RegisterMaterialConstants(ParseContext& context, std::shared_ptr<SceneMater
         const auto glname = ResolveConstvalueGlName(name, info);
         if (glname.empty()) continue;
 
-        auto dynamic_value =
-            MakeMaterialConstantDynamicValue(*context.scene->runtime, value, runtime_name);
-        if (value.script.empty()) {
-            if (auto* property_value = context.scene->runtime->FindPropertyValue(value.user);
-                property_value != nullptr) {
-                dynamic_value->connect(property_value);
-            }
-        }
         std::shared_ptr<const MaterialConstantAnimation> animation;
         if (const auto source = animations.find(name); source != animations.end()) {
             auto resolved             = std::make_shared<MaterialConstantAnimation>();
@@ -2792,6 +2788,22 @@ void RegisterMaterialConstants(ParseContext& context, std::shared_ptr<SceneMater
                 }
             }
             animation = std::move(resolved);
+        }
+        // A script on a keyed constant reaches the constant's own timeline as
+        // `thisObject.getAnimation()`, not the first unnamed one of its layer
+        // (an origin or another constant).
+        PropertyScriptObject object;
+        if (animation != nullptr && animation->playback != nullptr && ! value.script.empty()) {
+            object.property_animation =
+                context.scene->runtime->RegisterPropertyAnimation(animation->playback);
+        }
+        auto dynamic_value = MakeMaterialConstantDynamicValue(*context.scene->runtime, value,
+                                                              runtime_name, object);
+        if (value.script.empty()) {
+            if (auto* property_value = context.scene->runtime->FindPropertyValue(value.user);
+                property_value != nullptr) {
+                dynamic_value->connect(property_value);
+            }
         }
         context.scene->runtime->RegisterMaterialConstant(
             material, glname, std::move(dynamic_value), std::move(animation));
@@ -3309,26 +3321,27 @@ void BindPuppetAnimationLayerSettings(ParseContext& context, const std::string& 
         const auto& setting = wpimgobj.puppet_layer_settings[index];
         if (! setting.is_object()) continue;
         const i32 layer_index = static_cast<i32>(index);
+        const PropertyScriptObject animation_layer { .animation_layer_index = layer_index };
         const auto is_dynamic = [](const nlohmann::json& value) {
             return value.is_object() && (value.contains("user") || value.contains("script"));
         };
         if (setting.contains("visible") && is_dynamic(setting.at("visible"))) {
             runtime.RegisterDynamicValueListener(
-                ResolveBoolSetting(runtime, setting.at("visible"), runtime_name, layer_index),
+                ResolveBoolSetting(runtime, setting.at("visible"), runtime_name, animation_layer),
                 [layer, layer_index](const DynamicValue& value) mutable {
                     layer.setVisible(layer_index, value.getBool());
                 });
         }
         if (setting.contains("rate") && is_dynamic(setting.at("rate"))) {
             runtime.RegisterDynamicValueListener(
-                ResolveFloatSetting(runtime, setting.at("rate"), runtime_name, layer_index),
+                ResolveFloatSetting(runtime, setting.at("rate"), runtime_name, animation_layer),
                 [layer, layer_index](const DynamicValue& value) mutable {
                     layer.setRate(layer_index, value.getFloat());
                 });
         }
         if (setting.contains("blend") && is_dynamic(setting.at("blend"))) {
             runtime.RegisterDynamicValueListener(
-                ResolveFloatSetting(runtime, setting.at("blend"), runtime_name, layer_index),
+                ResolveFloatSetting(runtime, setting.at("blend"), runtime_name, animation_layer),
                 [layer, layer_index](const DynamicValue& value) mutable {
                     layer.setBlend(layer_index, value.getFloat());
                 });

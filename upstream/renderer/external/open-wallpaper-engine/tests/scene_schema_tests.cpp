@@ -3899,6 +3899,89 @@ void main() {
     EXPECT_EQ(layer.GetEffect(0)->nodes.size(), 1u);
 }
 
+// A script that decides an effect's visibility has that effect as `thisObject`
+// (Wallpaper Engine's `IEffect`): writing `thisObject.visible` switches the
+// effect. It was the layer, so a cover effect that shows itself once a track
+// has a thumbnail showed its whole layer instead, over a property that hid it.
+TEST(SceneSchema, AnEffectsVisibilityScriptSwitchesTheEffectAndNotItsLayer) {
+    fs::VFS vfs;
+    auto files = std::map<std::string, std::string> {
+        { "/image.json", R"({"width":64,"height":32,"material":"mat.json"})" },
+        { "/mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":["a.tex"]}]})" },
+        { "/effects/copy/effect.json",
+          R"({"name":"copy","passes":[{"material":"effect_mat.json"}]})" },
+        { "/effect_mat.json",
+          R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":[null]}]})" },
+        { "/shaders/genericimage.vert",
+          R"(attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+void main() {
+  gl_Position = vec4(a_Position, 1.0);
+  v_TexCoord = a_TexCoord;
+}
+)" },
+        { "/shaders/genericimage.frag",
+          R"(uniform sampler2D g_Texture0;
+varying vec2 v_TexCoord;
+void main() {
+  gl_FragColor = texture(g_Texture0, v_TexCoord);
+}
+)" },
+        { "/materials/a.tex.tex", "" },
+    };
+    ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
+    const nlohmann::json script {
+        { "value", true },
+        { "script",
+          "export function init() {\n"
+          "  if (thisObject.visible !== true) throw new Error('the effect did not start shown');\n"
+          "  thisObject.visible = false;\n"
+          "}\n"
+          "export function mediaThumbnailChanged(event) { thisObject.visible = event.hasThumbnail; }\n" },
+    };
+    auto scene = nlohmann::json::parse(R"({
+      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
+      "general": {
+        "ambientcolor":[0.2,0.2,0.2], "skylightcolor":[0.3,0.3,0.3],
+        "clearcolor":[0,0,0], "cameraparallax":false,
+        "cameraparallaxamount":0, "cameraparallaxdelay":0,
+        "cameraparallaxmouseinfluence":0,
+        "orthogonalprojection":{"width":640,"height":360}
+      },
+      "objects": [
+        {"id":2,"name":"cover","image":"image.json",
+         "origin":[0,0,0],"scale":[1,1,1],"angles":[0,0,0],"visible":true,
+         "effects":[{"file":"effects/copy/effect.json","id":3}]}
+      ]
+    })");
+    scene["objects"][0]["effects"][0]["visible"] = script;
+    ProjectProperties properties;
+    auto parsed = WPSceneParser().Parse(
+        SceneParseRequest { .scene_id = "effect-visibility-object", .project_properties = &properties },
+        scene.dump(), vfs, sound_manager);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+    auto node = FindRootChildByName(*parsed, "cover");
+    ASSERT_NE(node, nullptr);
+    const auto camera = parsed->cameras.find(node->Camera());
+    ASSERT_NE(camera, parsed->cameras.end());
+    ASSERT_TRUE(camera->second->HasImgEffect());
+    const auto effect = camera->second->GetImgEffect()->GetEffect(0);
+
+    parsed->runtime->Tick(1.0 / 60.0);
+    EXPECT_FALSE(effect->visible) << "the script's write did not reach its effect";
+    EXPECT_TRUE(node->Visible()) << "the script's write hid the layer";
+    parsed->runtime->SetMediaIntegrationEnabled(true);
+    parsed->runtime->DispatchMediaEventJson(R"({"type":"mediaThumbnailChanged","hasThumbnail":true})");
+    parsed->runtime->Tick(1.0 / 60.0);
+    EXPECT_TRUE(effect->visible);
+    EXPECT_TRUE(node->Visible());
+    EXPECT_EQ(parsed->runtime->scriptErrorCount(), 0u);
+}
+
 TEST(SceneSchema, EffectBuffersTakeWallpaperEnginesSizesFormatsAndSwaps) {
     fs::VFS vfs;
     auto files = std::map<std::string, std::string> {
@@ -6784,7 +6867,8 @@ nlohmann::json VectorConstant(std::vector<float> value, const char* animation = 
 }
 
 std::shared_ptr<Scene> ParseVectorTimelineScene(
-    const std::vector<std::pair<std::string, nlohmann::json>>& layers) {
+    const std::vector<std::pair<std::string, nlohmann::json>>& layers,
+    const nlohmann::json& origin = nlohmann::json::array({ 0, 0, 0 })) {
     std::map<std::string, std::string> files;
     files["/shaders/foldpage.vert"] = R"(
 attribute vec3 a_Position;
@@ -6820,7 +6904,7 @@ void main() { gl_FragColor = vec4(u_Point1 * v_TexCoord, u_Point2); }
         }.dump();
         source["objects"].push_back(nlohmann::json {
             { "id", id++ }, { "name", name }, { "image", name + ".json" },
-            { "origin", { 0, 0, 0 } }, { "scale", { 1, 1, 1 } },
+            { "origin", origin }, { "scale", { 1, 1, 1 } },
             { "angles", { 0, 0, 0 } }, { "visible", true } });
     }
     fs::VFS vfs;
@@ -6919,6 +7003,42 @@ TEST(SceneSchema, ScriptedVectorTimelineMovesParentAndChildOnTheSameFrame) {
     runtime.Tick(0.0);
     EXPECT_FLOAT_EQ(values->at("u_Point1")[0], 0.875f);
     EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+}
+
+// `thisObject.getAnimation()` with no name, in the script of a keyed setting,
+// is the timeline bound to that setting. It was the first unnamed timeline of
+// the layer, which for a layer whose origin also moves is the origin's: a
+// cross-fade that restarts its constant's timeline on a new cover restarted
+// the layer's slide instead, and the fade never ran.
+TEST(SceneSchema, AKeyedConstantsScriptPlaysTheConstantsOwnTimeline) {
+    auto constant = VectorConstant({ 0.75f, 0.375f }, R"({
+        "options":{"fps":30,"length":3,"mode":"single","startpaused":true},
+        "c0":[{"frame":0,"value":0.75},{"frame":3,"value":0.25}],
+        "c1":[{"frame":0,"value":0.375},{"frame":3,"value":0.375}]
+    })");
+    constant["script"] =
+        "export function init(value) { var a = thisObject.getAnimation(); a.stop(); a.play(); "
+        "return value; }";
+    const auto origin = nlohmann::json::parse(R"({
+        "value":"0 0 0",
+        "animation":{"relative":true,
+                     "options":{"fps":30,"length":60,"mode":"loop","wraploop":true},
+                     "c0":[{"frame":0,"value":0},{"frame":60,"value":10}],
+                     "c1":[{"frame":0,"value":0},{"frame":60,"value":0}],
+                     "c2":[{"frame":0,"value":0},{"frame":60,"value":0}]}
+    })");
+    auto parsed = ParseVectorTimelineScene(
+        { { "fading cover", nlohmann::json { { "point2", constant } } } }, origin);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_NE(parsed->runtime, nullptr);
+    const auto* values = LayerConstants(*parsed, "fading cover");
+    ASSERT_NE(values, nullptr);
+    ASSERT_TRUE(values->contains("u_Point2"));
+    EXPECT_FLOAT_EQ(values->at("u_Point2")[0], 0.75f);
+    parsed->runtime->Tick(1.0 / 60.0);
+    parsed->runtime->Tick(1.0);
+    EXPECT_FLOAT_EQ(values->at("u_Point2")[0], 0.25f) << "the constant's own timeline never played";
+    EXPECT_EQ(parsed->runtime->scriptErrorCount(), 0u);
 }
 
 nlohmann::json SharedClockConstants(const char* root_mode) {

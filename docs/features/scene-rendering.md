@@ -137,7 +137,11 @@ animated setting, shader constants and light intensity included); `single` stops
 for frames, so a scene whose only motion it was can go idle. A timeline with
 `startpaused` shows its first frame from the first frame of the scene, not the
 authored value, until a script plays it, and `getAnimation(name)` finds it by its
-`name`. Settings the editor keyed together (`options.parent`: an origin and the angles
+`name`. The script of a setting that keeps its timeline beside it (a shader constant)
+gets that timeline from `thisObject.getAnimation()` with no name, as Wallpaper
+Engine's `IThisPropertyObject` does; it got the layer's first unnamed timeline, which
+on a layer that also slides is its origin's, so a cross-fade a new cover restarts
+restarted the slide and never faded. Settings the editor keyed together (`options.parent`: an origin and the angles
 that turn with it) are one animation on the first one's clock, so playing or holding
 it moves them all. A script or a property bound to the same setting is its only
 writer. A colour timeline tints the layer's own material and each of its effect passes
@@ -947,7 +951,10 @@ property loads with the property's current value, saved choices included. A prev
 load-only property at the value the scene read, for every layer that uses it, and
 reports it as deferred; only loading the scene applies it. An effect whose
 `visible` a script decides is different: it is built with its layer and
-follows the script, as Wallpaper Engine's effect object does. A switch resolves
+follows the script, as Wallpaper Engine's effect object does. That script's
+`thisObject` is the effect: writing `thisObject.visible`, from an event handler
+as from `init` or `update`, switches the effect and leaves its layer as it is (it
+showed or hid the whole layer, over a property that had hidden it). A switch resolves
 the layer's effect chain again over the effects that run and rebuilds the render
 graph before the next frame, so nothing is paid per frame. While a script has
 every effect of a layer off, the chain ends in a passthrough: Wallpaper Engine
