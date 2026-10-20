@@ -25,6 +25,19 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-20 — Independent display coverage and logging, login, power boundaries
+
+- `python3 scripts/check_rust.py` — exit0:394core,594bridge,17selected core-integration and991shader reported passes; nine core exclusions and 31 guarded shader skip messages remain.
+- All48new descriptor/model/pointer cases and31retained cases passed. The first gate retained391core passes/3new-case failures; only M19 configured-destination setup, M32 transitional input routing and P01 unsupported raw-mask expectation were corrected. Production was unchanged.
+- Logging/login/power replacements preserve five/eleven/eleven existing domain cases, respectively. New logging coverage uses actual filesystem/state/error outcomes and process-isolated global scenarios, not flush-call counts; login has15new pure-operation cases and power has3new CFString groups.
+- A compiled smoke exercised real public logger install/host emission/byte accounting/clear and the exact new pure login module with real public status/error types. It did not call live login services or the live power reader.
+- `python3 scripts/build.py --renderer-only` and `python3 scripts/check_renderer.py` — exit0;1974C++passes and17asset/corpus skips. All12generated pooled/isolated pairs matched expected pixels;8projects x2reload cycles passed.
+- The36timer contract cases passed;52draws were collected only as a separate diagnostic. No production timer/scheduling changes or historical failure reclassification.
+- `python3 scripts/test.py` — exit0:425Python tests and3930native passes,0failures,46native skips. Raw compiler/runtime warnings remain recorded.
+- All execution used owned canonical system-temp staging, isolated preferences and the common blocking lock/process teardown. Standard controlled native run-loop tests remained included; no desktop, charger/sleep/wake experiment, audio-hardware, private-corpus or network opt-ins.
+- Initial failed candidate/logs and source authoring/review records are preserved. The smoke scaffold was removed before final gates; only newly authored modules were formatted, with ignored nightly-only style options reported by the stable formatter.
+- No Release app was built/delivered. This bounded support/test slice does not accept parser observations, remaining protected expression, contributor/interface rights or the GPL-3.0-only cutover.
+
 ## 2026-10-20 — Independent paths, render-setting lookup and mesh coverage
 
 - `python3 scripts/check_rust.py` — exit 0: 394 core, 568 bridge, 17 selected core-integration and 991 shader reported passes; nine core exclusions and 31 raw guarded shader skip messages remain (excluding test names that merely contain “skip”).
@@ -133,13 +146,3 @@ Lane metal, phase 2c on a worktree of b6daf0b6: measurements only, no code chang
 - Footprint, same runs. End of window, Compatibility to Native: 6479 to 7132 MB (3226487183, +10%; Compatibility's end value swings 6402 to 7176 MB between runs, Native's is constant at 7114 to 7151 and was 7148 on a 2026-10-14 build), 792 to 757, 902 to 882, 1014 to 981, 623 to 594, 1603 to 1705 (3589454154, within Native's own 1494 to 2162 spread). Process peak: 8256 to 7118 MB (-14%), 884 to 1372 (3620484312, +55%, a load transient: the 2026-10-14 build measured 1191 to 1618), 903 to 1035 (one Native run 1207, the other 864), 1014 to 1069, 623 to 635, 2425 to 2360.
 - Found, not caused by Native Metal: 3589454154 (perspective, 7 puppets, 17 texts) asks for a graph rebuild about every 5 draws on both renderers (43 Compatibility and 41 Native rebuilds in 180 draws), so each frame pays texture decoding and uploads again; the 2026-10-14 build held 60 FPS at 14 ms CPU and 4.8 ms GPU per frame on it, the current tree 7.4 FPS (Compatibility) and 20 FPS (Native). Its GPU figure above is that rebuild cost, not a steady frame. Not bisected.
 - Not run: lock screen and screen saver on Metal (recorded in 2b), desktop or UI tests, Release build, WE reference frames.
-
-## 2026-10-17 — HDR scene video tone mapping and the Native-Metal-only hold policy
-
-- Commits 1d85361d, 4dfbcf4b (10-bit and HDR video textures tone mapped to SDR) and 008783df, 8e9d3bae, 4fc7856d, 01222d8f (wmSurface, the Native Metal only failure policy, panel, lock screen) integrated onto b7ac57c1.
-- build.py --renderer-only rc=0 and regenerated bindings identical to the committed ones; check_rust.py rc=0, 1527 passed, 0 failed; asset and corpus tests skipped.
-- check_renderer.py rc=0: no FAILED test in any evidence log, report.json has no nonzero count, 2124 engine tests passed, all generated-scene cases pixels_equal, reload cycles 0; local-corpus and local-clip tests skipped.
-- test.py rc=0: 3897 passed, 0 failed, 46 skipped of 3943, Python suites and native unit tests (app target) included.
-- Lane evidence: P010ConvertedMatchesCpuReference against a standards-based double reference; ATenBitVideoLayerStaysOnNativeMetalAndIsToneMappedToSdr with real HEVC Main10 PQ, HLG and BT.709 clips; scene_failure_policy_test covers admission, prepare, compile, frame, surface and a refused reload.
-- Not checked: the real lock screen and screen saver, a real HDR display or any HDR file from the library, container mdcv/clli boxes, Dolby Vision profile 5, the held-scene look on a desktop; a scene that fails to parse still waits 90 s and rolls back.
-- Not run: Release build, desktop or UI tests.

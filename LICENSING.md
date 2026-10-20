@@ -578,6 +578,16 @@ prefix is `app.wallpapermachine`.
   `renderer.sceneMeshContractTestsReplacement` in `upstream/provenance.json`.
   These are bounded source replacements, not a whole-project independence,
   native-parity, contributor-rights or GPL-3.0-only publication clearance.
+- Bounded independent replacements also cover the core descriptor/model/pointer
+  tests and the bridge's inherited logging lifecycle, login operations and power
+  reader/callback boundaries. Project-side formatting/retention, login cache and
+  approval behavior, event-driven power supervision and their existing regression
+  coverage remain. The separate source-only writer and integration scopes are
+  recorded under `renderer.coreDisplayContractTestsReplacement`,
+  `renderer.bridgeLoggingLifecycleReplacement`, `renderer.bridgeLoginOperationsReplacement`
+  and `renderer.bridgePowerBoundaryReplacement` in `upstream/provenance.json`.
+  Existing interface/ordinary-expression treatment, native acceptance and written
+  contributor-record review remain separate; the interim license is unchanged.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
   at revision `73f14ab1568371e6e3c44063f21c34c5e2712c4d`, BSD-3-Clause, vendored
   under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes

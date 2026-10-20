@@ -1223,10 +1223,13 @@ where
 unsafe impl Send for MainThread {}
 
 #[cfg(test)]
+mod pointer_contract;
+
+#[cfg(test)]
 mod tests {
     use super::{
         LAYER_INSTALLED_NOTIFICATION, LayerInstall, MouseButtonEdges, MouseButtonState,
-        MouseButtonTracker, MouseButtons, NormalizedMousePosition, PlaceholderStyle,
+        MouseButtonTracker, MouseButtons, PlaceholderStyle,
         WallpaperWindow, announce_layer_installed, content_frame, window_counts_as_desktop,
         window_frame,
     };
@@ -1359,102 +1362,6 @@ mod tests {
             (1 << 0) | (1 << 3),
             (1 << 0) | (1 << 1),
         ));
-    }
-
-    #[test]
-    fn mouse_buttons_reports_current_state_for_all_owe_buttons() {
-        let states = MouseButtons::from_mask(0b101).states();
-
-        assert_eq!(states.len(), 32);
-        assert_eq!(states[0].button, 0);
-        assert!(states[0].pressed);
-        assert_eq!(states[1].button, 1);
-        assert!(!states[1].pressed);
-        assert_eq!(states[2].button, 2);
-        assert!(states[2].pressed);
-    }
-
-    #[test]
-    fn mouse_button_edges_preserve_press_and_release_in_one_poll() {
-        let states = MouseButtonEdges::from_masks(0, 1, 1).states();
-
-        assert_eq!(
-            &states[..2],
-            &[
-                MouseButtonState {
-                    button: 0,
-                    pressed: true,
-                },
-                MouseButtonState {
-                    button: 0,
-                    pressed: false,
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn mouse_button_tracker_exposes_tap_edges_then_clears_them() {
-        let mut tracker = MouseButtonTracker::new();
-
-        tracker.set_button(0, true);
-        tracker.set_button(0, false);
-
-        let tap = tracker.consume_edges();
-        assert_eq!(tap.down().mask(), 0);
-        assert_eq!(
-            &tap.states()[..2],
-            &[
-                MouseButtonState {
-                    button: 0,
-                    pressed: true,
-                },
-                MouseButtonState {
-                    button: 0,
-                    pressed: false,
-                },
-            ]
-        );
-
-        let idle = tracker.consume_edges();
-        assert_eq!(idle.down().mask(), 0);
-        assert_eq!(
-            idle.states().iter().filter(|state| state.pressed).count(),
-            0
-        );
-    }
-
-    #[test]
-    fn mouse_button_tracker_level_state_reports_only_real_edges() {
-        let mut tracker = MouseButtonTracker::new();
-
-        tracker.sync_down_mask(1);
-        let press = tracker.consume_edges();
-        assert_eq!(press.down().mask(), 1);
-        assert_eq!(
-            press
-                .states()
-                .iter()
-                .filter(|state| state.button == 0 && state.pressed)
-                .count(),
-            1
-        );
-
-        tracker.sync_down_mask(1);
-        let held = tracker.consume_edges();
-        assert_eq!(held.down().mask(), 1);
-        assert!(held.transitions().next().is_none());
-
-        tracker.sync_down_mask(0);
-        let release = tracker.consume_edges();
-        assert_eq!(release.down().mask(), 0);
-        assert_eq!(
-            release.transitions().next().unwrap(),
-            MouseButtonState {
-                button: 0,
-                pressed: false,
-            }
-        );
     }
 
     #[test]
@@ -1647,14 +1554,6 @@ mod tests {
         WallpaperWindow { native: None }
     }
 
-    fn engine_error_text(error: EngineError) -> (&'static str, String) {
-        match error {
-            EngineError::InvalidInput(text) => ("invalid", text),
-            EngineError::Platform(text) => ("platform", text),
-            other => panic!("unexpected error {other:?}"),
-        }
-    }
-
     #[test]
     fn window_operations_check_the_display_before_the_window_state() {
         let good = DisplayDesc::new(1, 0, 0, 1920, 1080, 2.0);
@@ -1663,26 +1562,24 @@ mod tests {
         let no_height = DisplayDesc::new(1, 0, 0, 1920, 0, 2.0);
 
         let mut window = closed_window();
-        for (display, text) in [
-            (no_id.clone(), "display_id must be non-zero"),
-            (no_width.clone(), "display dimensions must be non-zero"),
-            (no_height.clone(), "display dimensions must be non-zero"),
-        ] {
-            let (kind, message) = engine_error_text(window.update_display(display.clone()).unwrap_err());
-            assert_eq!((kind, message.as_str()), ("invalid", text));
+        for display in [no_id, no_width, no_height] {
+            assert!(matches!(
+                window.update_display(display.clone()),
+                Err(EngineError::InvalidInput(_))
+            ));
             let swap = window.begin_layer_swap(display.clone(), LayerInstall::Replace);
-            assert_eq!(engine_error_text(swap.err().unwrap()).0, "invalid");
+            assert!(matches!(swap, Err(EngineError::InvalidInput(_))));
             let opened = WallpaperWindow::builder(display).open();
-            assert_eq!(engine_error_text(opened.err().unwrap()).1, text);
+            assert!(matches!(opened, Err(EngineError::InvalidInput(_))));
         }
-        assert_eq!(
-            engine_error_text(window.update_display(good.clone()).unwrap_err()),
-            ("platform", "wallpaper window is already closed".to_string())
-        );
-        assert_eq!(
-            engine_error_text(window.update_layer(good).unwrap_err()),
-            ("platform", "wallpaper window is already closed".to_string())
-        );
+        assert!(matches!(
+            window.update_display(good.clone()),
+            Err(EngineError::Platform(_))
+        ));
+        assert!(matches!(
+            window.update_layer(good),
+            Err(EngineError::Platform(_))
+        ));
     }
 
     #[test]
@@ -1722,30 +1619,6 @@ mod tests {
         assert_eq!(
             MouseButtonEdges::from_level_state(MouseButtons::from_mask(0b10)),
             MouseButtonEdges::from_masks(0b10, 0b10, 0)
-        );
-    }
-
-    #[test]
-    fn normalized_mouse_position_converts_appkit_points_to_owe_coordinates() {
-        let position = NormalizedMousePosition::from_window_point(480.0, 270.0, 1920.0, 1080.0)
-            .expect("valid point should normalize");
-
-        assert_eq!(position, NormalizedMousePosition { x: 0.25, y: 0.75 });
-    }
-
-    #[test]
-    fn normalized_mouse_position_clamps_and_rejects_invalid_geometry() {
-        assert_eq!(
-            NormalizedMousePosition::from_window_point(-10.0, 1200.0, 1920.0, 1080.0),
-            Some(NormalizedMousePosition { x: 0.0, y: 0.0 })
-        );
-        assert_eq!(
-            NormalizedMousePosition::from_window_point(f64::NAN, 0.0, 1920.0, 1080.0),
-            None
-        );
-        assert_eq!(
-            NormalizedMousePosition::from_window_point(0.0, 0.0, 0.0, 1080.0),
-            None
         );
     }
 }

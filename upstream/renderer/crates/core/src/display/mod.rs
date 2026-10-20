@@ -616,200 +616,13 @@ mod platform {
 }
 
 #[cfg(test)]
+mod descriptor_contract;
+
+#[cfg(test)]
 mod tests {
     use super::{
         DisplayDesc, DisplayIdentity, DisplayMetrics, RefreshPlan, RefreshReportLog, plan_refresh,
     };
-
-    fn assert_f64_close(actual: f64, expected: f64) {
-        assert!(
-            (actual - expected).abs() <= f64::EPSILON,
-            "expected {actual} to be within f64::EPSILON of {expected}"
-        );
-    }
-
-    #[test]
-    fn display_descriptor_keeps_geometry() {
-        let display = DisplayDesc::new(42, -1920, 0, 1920, 1080, 2.0);
-
-        assert_eq!(display.display_id, 42);
-        assert!(display.identity.is_empty());
-        assert_eq!(display.x, -1920);
-        assert_eq!(display.y, 0);
-        assert_eq!(display.width, 1920);
-        assert_eq!(display.height, 1080);
-        assert_f64_close(display.scale_factor, 2.0);
-        assert_eq!(display.refresh_rate_hz, 60);
-    }
-
-    #[test]
-    fn metrics_to_display_desc_derives_scale_factor_from_bounds() {
-        let display = DisplayDesc::from(DisplayMetrics {
-            display_id: 7,
-            identity: DisplayIdentity {
-                uuid: Some("test-display".to_string()),
-                ..DisplayIdentity::default()
-            },
-            origin_x: -1280.0,
-            origin_y: 0.0,
-            logical_width: 1280.0,
-            logical_height: 720.0,
-            pixel_width: 2560,
-            pixel_height: 1440,
-            primary_logical_height: 720.0,
-            refresh_rate_hz: 75,
-            is_primary: false,
-        });
-
-        assert_eq!(display.display_id, 7);
-        assert_eq!(display.identity.uuid.as_deref(), Some("test-display"));
-        assert_eq!(display.x, -1280);
-        assert_eq!(display.y, 0);
-        assert_eq!(display.width, 2560);
-        assert_eq!(display.height, 1440);
-        assert_f64_close(display.scale_factor, 2.0);
-        assert_eq!(display.refresh_rate_hz, 75);
-    }
-
-    #[test]
-    fn metrics_to_display_desc_converts_quartz_y_to_appkit_y() {
-        let shorter_secondary = DisplayDesc::from(DisplayMetrics {
-            display_id: 2,
-            identity: DisplayIdentity::default(),
-            origin_x: 1710.0,
-            origin_y: 0.0,
-            logical_width: 1920.0,
-            logical_height: 1080.0,
-            pixel_width: 1920,
-            pixel_height: 1080,
-            primary_logical_height: 1107.0,
-            refresh_rate_hz: 60,
-            is_primary: false,
-        });
-        let taller_secondary = DisplayDesc::from(DisplayMetrics {
-            display_id: 3,
-            identity: DisplayIdentity::default(),
-            origin_x: 1920.0,
-            origin_y: 0.0,
-            logical_width: 1710.0,
-            logical_height: 1107.0,
-            pixel_width: 3420,
-            pixel_height: 2214,
-            primary_logical_height: 1080.0,
-            refresh_rate_hz: 60,
-            is_primary: false,
-        });
-
-        assert_eq!(shorter_secondary.y, 27);
-        assert_eq!(taller_secondary.y, -27);
-    }
-
-    #[test]
-    fn metrics_to_display_desc_falls_back_to_unit_scale_when_bounds_are_invalid() {
-        let display = DisplayDesc::from(DisplayMetrics {
-            display_id: 1,
-            identity: DisplayIdentity::default(),
-            origin_x: 0.0,
-            origin_y: 0.0,
-            logical_width: 0.0,
-            logical_height: 0.0,
-            pixel_width: 1920,
-            pixel_height: 1080,
-            primary_logical_height: 0.0,
-            refresh_rate_hz: 60,
-            is_primary: false,
-        });
-
-        assert_f64_close(display.scale_factor, 1.0);
-    }
-
-    #[test]
-    fn display_identity_scores_uuid_first() {
-        let left = DisplayIdentity {
-            uuid: Some("A".to_string()),
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: Some(3),
-            unit_number: Some(4),
-            name: None,
-        };
-        let right = DisplayIdentity {
-            uuid: Some("A".to_string()),
-            vendor_id: Some(9),
-            model_id: Some(9),
-            serial_number: Some(9),
-            unit_number: Some(9),
-            name: None,
-        };
-
-        assert_eq!(left.match_score(&right), Some(4));
-    }
-
-    #[test]
-    fn display_identity_scores_vendor_model_serial() {
-        let left = DisplayIdentity {
-            uuid: None,
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: Some(3),
-            unit_number: Some(7),
-            name: None,
-        };
-        let right = DisplayIdentity {
-            uuid: None,
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: Some(3),
-            unit_number: Some(8),
-            name: None,
-        };
-
-        assert_eq!(left.match_score(&right), Some(3));
-    }
-
-    #[test]
-    fn display_identity_scores_vendor_model_unit() {
-        let left = DisplayIdentity {
-            uuid: None,
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: None,
-            unit_number: Some(7),
-            name: None,
-        };
-        let right = DisplayIdentity {
-            uuid: None,
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: None,
-            unit_number: Some(7),
-            name: None,
-        };
-
-        assert_eq!(left.match_score(&right), Some(2));
-    }
-
-    #[test]
-    fn display_identity_scores_no_match() {
-        let left = DisplayIdentity {
-            uuid: None,
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: Some(3),
-            unit_number: Some(7),
-            name: None,
-        };
-        let right = DisplayIdentity {
-            uuid: None,
-            vendor_id: Some(1),
-            model_id: Some(9),
-            serial_number: Some(3),
-            unit_number: Some(7),
-            name: None,
-        };
-
-        assert_eq!(left.match_score(&right), None);
-    }
 
     /// Two monitors of the same model trade unit numbers when macOS
     /// renumbers displays; their UUIDs and serials still tell them apart.
@@ -865,50 +678,6 @@ mod tests {
             without_uuids(&left).match_score(&without_uuids(&renumbered)),
             Some(3)
         );
-    }
-
-    #[test]
-    fn a_unit_number_match_is_not_stable() {
-        let left = DisplayIdentity {
-            uuid: None,
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: None,
-            unit_number: Some(7),
-            name: None,
-        };
-
-        assert_eq!(left.match_score(&left), Some(2));
-        assert!(!left.has_stable_match(&left));
-    }
-
-    #[test]
-    fn metrics_to_display_desc_keeps_identity() {
-        let identity = DisplayIdentity {
-            uuid: Some("display-uuid".to_string()),
-            vendor_id: Some(10),
-            model_id: Some(20),
-            serial_number: Some(30),
-            unit_number: Some(40),
-            name: None,
-        };
-        let display = DisplayDesc::from(DisplayMetrics {
-            display_id: 7,
-            identity: identity.clone(),
-            origin_x: 0.0,
-            origin_y: 0.0,
-            logical_width: 1920.0,
-            logical_height: 1080.0,
-            pixel_width: 3840,
-            pixel_height: 2160,
-            primary_logical_height: 1080.0,
-            refresh_rate_hz: 120,
-            is_primary: false,
-        });
-
-        assert_eq!(display.identity, identity);
-        assert_f64_close(display.scale_factor, 2.0);
-        assert_eq!(display.refresh_rate_hz, 120);
     }
 
     #[test]
@@ -1002,7 +771,7 @@ mod tests {
     #[test]
     fn metrics_scale_falls_back_to_the_height_and_y_to_quartz() {
         let by_height = metrics((1920, 1080), (0.0, 540.0), 0.0, 0.0);
-        assert_f64_close(by_height.scale_factor, 2.0);
+        assert!((by_height.scale_factor - 2.0).abs() <= f64::EPSILON);
         let secondary = metrics((1280, 1024), (1280.0, 1024.0), 0.0, 900.0);
         assert_eq!(secondary.y, -124);
         let beside_taller = metrics((1280, 1024), (1280.0, 1024.0), 0.0, 1200.0);

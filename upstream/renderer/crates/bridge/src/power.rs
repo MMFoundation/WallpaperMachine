@@ -9,13 +9,10 @@ use std::{
 };
 
 use objc2_core_foundation::{
-    CFRetained, CFRunLoop, CFRunLoopRunResult, CFRunLoopSource, CFRunLoopSourceContext, CFString,
-    CFTimeInterval, CFType, kCFRunLoopDefaultMode,
+    CFRetained, CFRunLoop, CFRunLoopRunResult, CFRunLoopSource, CFRunLoopSourceContext,
+    CFTimeInterval,
 };
-use objc2_io_kit::{
-    IOPSCopyPowerSourcesInfo, IOPSGetProvidingPowerSourceType, IOPSNotificationCreateRunLoopSource,
-    kIOPMACPowerKey, kIOPMBatteryPowerKey, kIOPMUPSPowerKey,
-};
+use objc2_io_kit::IOPSNotificationCreateRunLoopSource;
 
 use crate::{
     actor::{BridgeActorHandle, messages::SetPowerSource},
@@ -215,57 +212,54 @@ fn create_wake_source() -> Option<CFRetained<CFRunLoopSource>> {
 #[derive(Debug)]
 pub(crate) struct SystemPowerSource;
 
+impl From<&objc2_core_foundation::CFString> for PowerSource {
+    fn from(source: &objc2_core_foundation::CFString) -> Self {
+        let length = source.length();
+        let (label, category): (&[u8], Self) = match length {
+            n if n == b"AC Power".len() as objc2_core_foundation::CFIndex => {
+                (b"AC Power", Self::External)
+            }
+            n if n == b"Battery Power".len() as objc2_core_foundation::CFIndex => {
+                (b"Battery Power", Self::Battery)
+            }
+            n if n == b"UPS Power".len() as objc2_core_foundation::CFIndex => {
+                (b"UPS Power", Self::Battery)
+            }
+            _ => return Self::Unknown,
+        };
+
+        // Every recognized label is ASCII, so each byte is one UTF-16 code unit.
+        for (index, expected) in label.iter().copied().enumerate() {
+            // SAFETY: The length match proves index < source.length(), and these
+            // short label indices fit CFIndex. The shared source borrow remains
+            // valid and unmodified throughout the checked accesses.
+            let actual = unsafe {
+                source.character_at_index(index as objc2_core_foundation::CFIndex)
+            };
+            if actual != u16::from(expected) {
+                return Self::Unknown;
+            }
+        }
+
+        category
+    }
+}
+
 impl SystemPowerSource {
     pub(crate) fn current() -> PowerSource {
-        IOPSCopyPowerSourcesInfo()
-            .map(|snapshot| PowerSourceSnapshot { snapshot })
-            .map_or(PowerSource::Unknown, |snapshot| snapshot.current())
-    }
-}
-
-#[derive(Debug)]
-struct PowerSourceSnapshot {
-    snapshot: CFRetained<CFType>,
-}
-
-impl PowerSourceSnapshot {
-    fn current(&self) -> PowerSource {
-        let Some(source) = self.providing_source_type() else {
+        let Some(snapshot) = objc2_io_kit::IOPSCopyPowerSourcesInfo() else {
             return PowerSource::Unknown;
         };
-        PowerSource::from(source.as_ref())
-    }
 
-    fn providing_source_type(&self) -> Option<CFRetained<CFString>> {
-        // SAFETY: `snapshot` is the opaque value returned by
-        // `IOPSCopyPowerSourcesInfo`, which is exactly the input contract for
-        // `IOPSGetProvidingPowerSourceType`.
-        unsafe { IOPSGetProvidingPowerSourceType(Some(&self.snapshot)) }
-    }
-}
+        // SAFETY: This is the live opaque snapshot returned by the Copy operation.
+        // Its owner remains in scope throughout access and classification.
+        let Some(source) = (unsafe {
+            objc2_io_kit::IOPSGetProvidingPowerSourceType(Some(&*snapshot))
+        }) else {
+            return PowerSource::Unknown;
+        };
 
-impl From<&CFString> for PowerSource {
-    fn from(source: &CFString) -> Self {
-        if Self::source_matches(source, kIOPMACPowerKey) {
-            Self::External
-        } else if Self::source_matches(source, kIOPMBatteryPowerKey)
-            || Self::source_matches(source, kIOPMUPSPowerKey)
-        {
-            Self::Battery
-        } else {
-            Self::Unknown
-        }
-    }
-}
-
-impl PowerSource {
-    fn source_matches(source: &CFString, expected: &std::ffi::CStr) -> bool {
-        let expected = CFString::from_str(
-            expected
-                .to_str()
-                .expect("IOKit power source constants are valid UTF-8"),
-        );
-        source == expected.as_ref()
+        PowerSource::from(&*source)
     }
 }
 
@@ -276,13 +270,13 @@ struct PowerEventLoop {
 
 impl PowerEventLoop {
     fn run(mut self) {
-        let Some(run_loop) = CFRunLoop::current() else {
-            log::debug!("power source watcher skipped: current run loop unavailable");
+        let Some(run_loop) = objc2_core_foundation::CFRunLoop::current() else {
+            log::debug!("Power watcher startup ended: the current run loop is unavailable");
             return;
         };
-        // SAFETY: CoreFoundation exposes this immutable process-wide constant.
-        let Some(mode) = (unsafe { kCFRunLoopDefaultMode }) else {
-            log::debug!("power source watcher skipped: default run loop mode unavailable");
+        // SAFETY: This immutable foreign constant is borrowed for the process lifetime.
+        let Some(mode) = (unsafe { objc2_core_foundation::kCFRunLoopDefaultMode }) else {
+            log::debug!("Power watcher startup ended: the default run-loop mode is unavailable");
             return;
         };
         let Some(wake_source) = create_wake_source() else {
@@ -293,7 +287,7 @@ impl PowerEventLoop {
         // below. Taking a second one from `self.context` would invalidate this one.
         let context = ptr::from_mut(&mut *self.context);
         let Some(power_source) = PowerNotificationContext::create_run_loop_source(context) else {
-            log::debug!("power source watcher skipped: IOKit notification source unavailable");
+            log::debug!("Power watcher startup ended: the power notification source is unavailable");
             return;
         };
 
@@ -386,21 +380,32 @@ impl PowerNotificationContext {
     }
 }
 
-/// Receives `IOKit` power-source change callbacks for [`PowerWatcher`].
+/// Dispatches a native power notification through the retained host reconciler.
 ///
 /// # Safety
-///
-/// `context` must be the pointer created by
-/// [`PowerNotificationContext::create_run_loop_source`].
-pub unsafe extern "C-unwind" fn handle_power_change(context: *mut c_void) {
-    // SAFETY: The run-loop source was created with a pointer to a live
-    // `PowerNotificationContext`, and `PowerEventLoop::run` keeps that box
-    // pinned in place until after the source is removed and invalidated.
-    let Some(context) = (unsafe { context.cast::<PowerNotificationContext>().as_mut() }) else {
+/// A non-null context must point to a correctly aligned, initialized, live
+/// `PowerNotificationContext` in stable storage. The caller must provide exclusive
+/// mutable access for this dispatch and prevent conflicting or reentrant access.
+/// The registration owner must keep that storage alive throughout registration
+/// and all in-flight callbacks, preventing further dispatch and completing active
+/// dispatch before destroying it. This callback borrows, but never owns, the
+/// context. Its ABI alone does not establish that unwinding through native frames
+/// is safe.
+pub unsafe extern "C-unwind" fn handle_power_change(context: *mut core::ffi::c_void) {
+    if context.is_null() {
         return;
-    };
+    }
+
+    // SAFETY: The caller supplies the type, alignment, initialization, lifetime,
+    // and exclusive-access guarantees documented above; non-null alone is not
+    // evidence that an arbitrary pointer is valid.
+    let context = unsafe { &mut *context.cast::<PowerNotificationContext>() };
     context.reconcile(SampleOrigin::Notification);
 }
+
+#[cfg(test)]
+#[path = "power/classifier_contract.rs"]
+mod classifier_contract;
 
 #[cfg(test)]
 mod tests {
@@ -416,8 +421,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use objc2_core_foundation::{CFRunLoop, CFRunLoopRunResult, CFString, kCFRunLoopDefaultMode};
-    use objc2_io_kit::{kIOPMACPowerKey, kIOPMBatteryPowerKey, kIOPMUPSPowerKey};
+    use objc2_core_foundation::{CFRunLoop, CFRunLoopRunResult, kCFRunLoopDefaultMode};
 
     use super::{
         PowerNotificationContext, PowerSource, PowerWatcher, RunLoopWake, SampleOrigin,
@@ -432,28 +436,6 @@ mod tests {
     /// long, and one that does come is seen as soon as it is made.
     const GIVE_UP: Duration = Duration::from_secs(10);
 
-    #[test]
-    fn power_source_classifier_maps_ac_to_external_power() {
-        let source = TestPowerSource::from_iokit_constant(kIOPMACPowerKey);
-
-        assert_eq!(PowerSource::from(source.as_ref()), PowerSource::External);
-    }
-
-    #[test]
-    fn power_source_classifier_maps_battery_and_ups_to_battery_power() {
-        let battery = TestPowerSource::from_iokit_constant(kIOPMBatteryPowerKey);
-        let ups = TestPowerSource::from_iokit_constant(kIOPMUPSPowerKey);
-
-        assert_eq!(PowerSource::from(battery.as_ref()), PowerSource::Battery);
-        assert_eq!(PowerSource::from(ups.as_ref()), PowerSource::Battery);
-    }
-
-    #[test]
-    fn power_source_classifier_preserves_unknown_source() {
-        let source = CFString::from_static_str("unexpected source");
-
-        assert_eq!(PowerSource::from(source.as_ref()), PowerSource::Unknown);
-    }
 
     #[test]
     fn dropping_the_watcher_does_not_wait_for_a_timeout() {
@@ -756,13 +738,4 @@ mod tests {
         finished.recv_timeout(limit).is_ok()
     }
 
-    struct TestPowerSource;
-
-    impl TestPowerSource {
-        fn from_iokit_constant(
-            value: &'static std::ffi::CStr,
-        ) -> objc2_core_foundation::CFRetained<CFString> {
-            CFString::from_str(value.to_str().expect("IOKit constants are UTF-8"))
-        }
-    }
 }
