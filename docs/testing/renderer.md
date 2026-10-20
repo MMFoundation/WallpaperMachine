@@ -847,9 +847,10 @@ into private textures; the three that draw skip visibly without a Metal device.
   MSAA by default, from its `msaa` setting); a camera path's `camerafade` fade,
   the planar `_rt_Reflection` pass and `customsortorder` are not implemented
   (the model flags are under their own entry below); and
-  `general` fog keys bound to user properties keep the value the scene loaded
-  with. Wallpaper Engine's user-level post-processing quality (off, LDR, HDR,
-  display HDR) is fixed at its highest SDR level.
+  `general` distance-fog keys bound to user properties keep their authored values.
+  Height fog and ambient/skylight colours resolve property values at load; preview
+  edits are deferred to the existing apply/reload path. Wallpaper Engine's user-level
+  post-processing quality (off, LDR, HDR, display HDR) is fixed at its highest SDR level.
 - **Fog reaches an effect layer only where its own material takes fog.** The pass
   that fogs an effect layer where it sits (`effectpassthrough_4`, ending the chain)
   stands in for the fog the layer's own material (its `FOG` combo) would have taken,

@@ -298,6 +298,13 @@ local fogged scene has no such layer. Compose, fullscreen and puppet layers, a l
 that blends onto the screen by colour blend mode, text layers, and a layer whose
 material takes no fog keep what they drew.
 
+Height fog is read whenever its JSON fields are present, including older package
+containers. Ambient/skylight colours and height-fog settings resolve user-property
+values at scene load; preview edits are deferred to the existing apply/reload path
+rather than adding per-frame uniform work. SceneScript `rotateObjectSpace(Vec3)` composes a
+radians Euler increment around the layer's local axes; the `angles` property
+continues to read and write degrees.
+
 Shadow maps, spot cookies and
 volumetric light shafts are not drawn: a light that casts a shadow lights as if
 nothing did, which is also what Wallpaper Engine shows when nothing in the scene

@@ -6,6 +6,8 @@
 #include "Utils/Logging.h"
 #include "Utils/TimeOfDay.hpp"
 
+#include <Eigen/Geometry>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -1923,6 +1925,7 @@ void AppendCommonHostBootstrap(std::ostringstream& wrapper) {
            "__layerSetAlignment(name, state.alignment); },\n"
         << "      get angles() { return __layerGetAngles(name); },\n"
         << "      set angles(v) { __layerSetAngles(name, v); },\n"
+        << "      rotateObjectSpace: function(angles) { __layerRotateObjectSpace(name, angles); },\n"
         << "      get size() { return __layerGetSize(name); },\n"
         << "      get text() { return __layerGetText(name); },\n"
         << "      set text(v) { __layerSetText(name, v); },\n"
@@ -2859,6 +2862,31 @@ JSValue JsLayerSetAngles(JSContext* context, JSValueConst, int argc, JSValueCons
 
     if (layer_name != nullptr && value != nullptr) {
         bridge->runtime->SetNodeRotation(layer_name, DegreesToRadians(value->getVec3()));
+    }
+    if (layer_name != nullptr) JS_FreeCString(context, layer_name);
+    return JS_UNDEFINED;
+}
+
+JSValue JsLayerRotateObjectSpace(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
+    auto* bridge = GetBridgeState(context);
+    if (argc < 2 || bridge == nullptr || bridge->runtime == nullptr) return JS_UNDEFINED;
+    const char* layer_name = JS_ToCString(context, argv[0]);
+    DynamicValue increment;
+    FillDynamicValueFromJS(context, argv[1], DynamicValue::Vec3, increment);
+    if (layer_name != nullptr && increment.getType() == DynamicValue::Vec3) {
+        // Unlike the degree-valued `angles` property, this increment is radians.
+        // Rz * Ry * Rx is the node's Euler convention; a local turn composes on
+        // the right of its current orientation, not as component-wise addition.
+        const auto rotation = [](const Eigen::Vector3f& angles) {
+            return Eigen::AngleAxisf(angles.z(), Eigen::Vector3f::UnitZ()) *
+                   Eigen::AngleAxisf(angles.y(), Eigen::Vector3f::UnitY()) *
+                   Eigen::AngleAxisf(angles.x(), Eigen::Vector3f::UnitX());
+        };
+        const Eigen::Matrix3f rotated =
+            (rotation(bridge->runtime->NodeRotation(layer_name)) * rotation(increment.getVec3()))
+                .toRotationMatrix();
+        const Eigen::Vector3f zyx = rotated.eulerAngles(2, 1, 0);
+        bridge->runtime->SetNodeRotation(layer_name, Eigen::Vector3f(zyx.z(), zyx.y(), zyx.x()));
     }
     if (layer_name != nullptr) JS_FreeCString(context, layer_name);
     return JS_UNDEFINED;
@@ -3830,6 +3858,9 @@ bool EnsureSharedHostBindings(JSContext* context, SceneRuntimeContext* runtime,
                           global_object,
                           "__layerSetAngles",
                           JS_NewCFunction(context, JsLayerSetAngles, "__layerSetAngles", 2));
+        JS_SetPropertyStr(context, global_object, "__layerRotateObjectSpace",
+                          JS_NewCFunction(context, JsLayerRotateObjectSpace,
+                                          "__layerRotateObjectSpace", 2));
         JS_SetPropertyStr(context,
                           global_object,
                           "__layerGetSize",

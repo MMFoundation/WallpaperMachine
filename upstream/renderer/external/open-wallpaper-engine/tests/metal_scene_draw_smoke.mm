@@ -5886,6 +5886,59 @@ void ExpectFoggedLikeThePlainLayer(const RendererPicture& plain, const RendererP
     }
 }
 
+TEST_F(MetalSceneDraw, OlderPackagesApplyPropertyBoundHeightFog)
+{
+    const auto project = WriteFoggedLayerFixture(
+        root_ / "bound-fog",
+        R"("fogheight":true,"fogheightstart":{"value":-100,"user":"start"},)"
+        R"("fogheightend":{"value":100,"user":"end"},)"
+        R"("fogheightcolor":{"value":"0 1 0","user":"tint"})", "[]", true, {});
+    std::ofstream(project) << R"({"type":"scene","file":"layout.json","general":{"properties":{)"
+        R"("start":{"type":"slider","value":-10},"end":{"type":"slider","value":10},)"
+        R"("tint":{"type":"color","value":"1 0 0"}}}})";
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "bound-fog-cache", loaded, error)) << error;
+    WPSceneParser parser;
+    loaded.scene = parser.Parse(SceneParseRequest {
+        .scene_id = "bound-fog", .project_path = project.string(),
+        .project_properties = &loaded.properties, .pkg_version = 22,
+    }, loaded.vfs.Open("/assets/layout.json")->ReadAllStr(), loaded.vfs, loaded.sound);
+    ASSERT_NE(loaded.scene, nullptr);
+    const auto picture = DrawWithRenderer(*loaded.scene, true, 384, 256, 1, 1.0 / 60.0);
+    ASSERT_TRUE(picture.error.empty()) << picture.error;
+    ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+    // At world height zero, squared fog density is 1/4. Red fog over white
+    // leaves red intact and attenuates both other channels to 3/4.
+    EXPECT_NEAR(FoggedChannel(picture, 192, 128, 0), 255, 2);
+    EXPECT_NEAR(FoggedChannel(picture, 192, 128, 1), 191, 3);
+    EXPECT_NEAR(FoggedChannel(picture, 192, 128, 2), 191, 3);
+}
+
+TEST_F(MetalSceneDraw, LightingColorsUseProjectPropertyValues)
+{
+    const auto directory = root_ / "bound-light";
+    const auto project = WriteFoggedLayerFixture(directory,
+        R"("ambientcolor":{"value":"1 0 0","user":"ambient"},)"
+        R"("skylightcolor":{"value":"0 1 0","user":"sky"})", "[]", true, {});
+    std::ofstream(project) << R"({"type":"scene","file":"layout.json","general":{"properties":{)"
+        R"("ambient":{"type":"color","value":"0.2 0.4 0.6"},)"
+        R"("sky":{"type":"color","value":"0.6 0.4 0.2"}}}})";
+    std::ofstream(directory / "shaders/metal_probe.frag") <<
+        "uniform vec3 g_LightAmbientColor;\nuniform vec3 g_LightSkylightColor;\n"
+        "void main() { gl_FragColor = vec4(0.25 * g_LightAmbientColor + "
+        "0.75 * g_LightSkylightColor, 1.0); }\n";
+    LoadedScene loaded;
+    std::string error;
+    ASSERT_TRUE(LoadScene(project, root_ / "bound-light-cache", loaded, error)) << error;
+    const auto picture = DrawWithRenderer(*loaded.scene, true, 384, 256, 1, 1.0 / 60.0);
+    ASSERT_TRUE(picture.error.empty()) << picture.error;
+    ASSERT_EQ(picture.rgb.size(), 384u * 256u * 3u);
+    EXPECT_NEAR(FoggedChannel(picture, 192, 128, 0), 128, 2);
+    EXPECT_NEAR(FoggedChannel(picture, 192, 128, 1), 102, 2);
+    EXPECT_NEAR(FoggedChannel(picture, 192, 128, 2), 77, 2);
+}
+
 TEST_F(MetalSceneDraw, AnEffectLayerIsFoggedWhereItSitsAsAPlainLayerIsOnBothRenderers)
 {
     // Fog is the distance, or height, of a point of the layer from the eye. An

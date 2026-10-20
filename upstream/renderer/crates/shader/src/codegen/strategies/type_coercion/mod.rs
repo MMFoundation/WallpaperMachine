@@ -12,6 +12,8 @@ mod calls;
 mod initializer;
 /// Returned value conversions to the declared return type.
 mod returns;
+/// Scalar component selection and broadcast coercions.
+mod scalar_swizzle;
 /// Texture sample initializer coercions.
 mod texture;
 /// Shared vector type facts for type coercion strategies.
@@ -205,6 +207,8 @@ impl Emitable for TypeCoercionStrategy {
         for operand in boolean_operands.items {
             operand.emit(context);
         }
+        // Scalar constructors nest inside any enclosing width conversions.
+        scalar_swizzle::emit(context, tokens, &scoped_facts)?;
         Ok(())
     }
 }

@@ -4040,6 +4040,9 @@ void ResolveLoadOnlySceneSetting(SceneRuntimeContext& runtime, const nlohmann::j
     if (! HasDynamicSetting(setting)) return;
     if constexpr (std::is_same_v<T, bool>) {
         value = ResolveBoolSetting(runtime, setting)->getBool();
+    } else if constexpr (std::is_same_v<T, std::array<float, 3>>) {
+        const auto vector = ResolveVec3Setting(runtime, setting)->getVec3();
+        value = { vector.x(), vector.y(), vector.z() };
     } else {
         value = ResolveFloatSetting(runtime, setting)->getFloat();
     }
@@ -4065,7 +4068,6 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
     scene.opaque_first = ! sc.general.isOrtho && sc.general.transparentsorting;
     scene.light_config = ParseSceneLightConfig(sc.general.lightconfig);
     scene.fog_distance = sc.general.fogdistance;
-    scene.fog_height   = sc.general.fogheight;
     if (context.request != nullptr && context.request->project_properties != nullptr) {
         SceneRuntimeBootstrap bootstrap {
             .canvas_width       = scene.ortho[0],
@@ -4082,6 +4084,20 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
                 *scene.runtime, sc.general.clearcolor_setting, {}, Vec3SettingSemantic::Generic));
         }
         auto& g = sc.general;
+        const auto lighting = [&](const char* key, auto& value) {
+            const auto setting = g.lighting_settings.find(key);
+            if (setting != g.lighting_settings.end()) {
+                ResolveLoadOnlySceneSetting(*scene.runtime, *setting, value);
+            }
+        };
+        lighting("ambientcolor", g.ambientcolor);
+        lighting("skylightcolor", g.skylightcolor);
+        lighting("fogheight", g.fogheight);
+        lighting("fogheightstart", g.fogheightstart);
+        lighting("fogheightend", g.fogheightend);
+        lighting("fogheightcolor", g.fogheightcolor);
+        lighting("fogheightstartdensity", g.fogheightstartdensity);
+        lighting("fogheightenddensity", g.fogheightenddensity);
         ResolveLoadOnlySceneSetting(*scene.runtime, g.bloom_setting, g.bloom);
         ResolveLoadOnlySceneSetting(*scene.runtime, g.cameraparallax_setting, g.cameraparallax);
         ResolveLoadOnlySceneSetting(*scene.runtime, g.cameraparallaxamount_setting,
@@ -4106,6 +4122,7 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
                                     setting(g.camerashakeroughness_setting, g.camerashakeroughness)));
         }
     }
+    scene.fog_height = sc.general.fogheight;
     // Wallpaper Engine renders in HDR only when the scene asks for HDR and has
     // bloom on (its bloom switch read above, a bound one at its property's
     // value); an HDR scene without bloom is drawn as an ordinary one.

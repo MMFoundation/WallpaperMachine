@@ -409,6 +409,14 @@ Playback, backend, host and startup areas are in
 
 All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 
+- **Local-axis rotation** — `ScriptRuntimeCompat.RotateObjectSpace*` checks radians
+  increments composed with an existing orientation, degree-valued angles readback,
+  repeated updates, transformed parents, mirrored scale and anchored pivots.
+- **Property-bound scene shading** — `MetalSceneDraw.OlderPackagesApplyPropertyBoundHeightFog`
+  draws a known squared-density gradient from a version-22 scene with property-selected
+  endpoints and colour; `.LightingColorsUseProjectPropertyValues` checks ambient and
+  skylight contributions independently in the resulting pixels.
+
 - **Callback-only property scripts** — `*CallbackOnly*` in both binaries.
   Callback-only scripts keep their no-writeback behavior.
 - **Script property load order** — `ScriptRuntimeCompat.ModuleCodeSeesDeclaredDefaultsAndInitSeesTheBoundValue`.
@@ -1077,7 +1085,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     not change what the host builds. Each call answers a matrix of its own.
   - Not covered here: `localStorage` persistence, effects, bones, particles,
     scene properties, the camera, `Intl`, and the other layer transform calls
-    (`getChildren`, `setParent`, `rotateObjectSpace`, `lookAt`, `lookAtYaw`,
+    (`getChildren`, `setParent`, `lookAt`, `lookAtYaw`,
     `getAttachment*`: a script that calls one still stops at `not a function`);
     host plumbing for `SetLanguage` (scripts are told `en-us` until the host calls
     it).
@@ -2542,6 +2550,17 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
 `video_planes`, `pipeline`) cover these paths with synthetic shader sources;
 `pipeline` skips asset-dependent cases with a printed reason.
+
+- **Scalar component swizzles** — `legalize_type_coercion::scalar_swizzles_*`
+  compiles scalar splats through both backends and checks Naga IR component types,
+  widths, vector selection, lexical shadowing and downstream width conversions.
+  A scalar's repeated component zero broadcasts; a genuine vector swizzle keeps
+  its authored component mapping. Shader pipeline revision 18 invalidates older
+  cached programs.
+  `scalar_initializer_selects_first_component_of_nested_texture_arithmetic`
+  also covers scalar initialization from a sampled vector inside arithmetic and
+  component-wise builtins: narrowing selects the completed expression's first
+  component, not the sample before its consumers run.
 
 - **Built-in simulation uniforms** —
   `ShaderValueUpdaterCompat.SimulationEffectsSeeFrameTimeCursorTravelAndButtons`

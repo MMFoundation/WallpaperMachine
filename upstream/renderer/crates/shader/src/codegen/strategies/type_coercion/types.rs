@@ -46,6 +46,12 @@ impl VectorTypeBindings<'_> {
                 scope_end: usize::MAX,
             })
             .collect::<Vec<_>>();
+        bindings.extend(declarations.texture_samplers().map(|sampler| TypeBinding {
+            name: SmolStr::new(sampler.texture_name),
+            ty: BindingType::Sampler2D,
+            visible_start: 0,
+            scope_end: usize::MAX,
+        }));
         // Rewritten globals already have their emitted types above. Their
         // original source types must not shadow interface width overrides,
         // while function parameters and local declarations still must.
@@ -105,7 +111,7 @@ impl VectorTypeBindings<'_> {
                             .argument_vector_width(tokens, argument)
                                 == Some(*width)
                         }
-                        BindingType::Blocker => false,
+                        BindingType::Blocker | BindingType::Sampler2D => false,
                     },
                 )
             })
@@ -164,7 +170,7 @@ impl FunctionTypeBindings {
     pub(super) fn collect(&mut self, signatures: &[FunctionSignatureFact]) {
         self.items.extend(signatures.iter().filter_map(|fact| {
             let ty = BindingType::classify(fact.return_type().as_str());
-            if matches!(ty, BindingType::Blocker) {
+            if matches!(ty, BindingType::Blocker | BindingType::Sampler2D) {
                 return None;
             }
             Some(FunctionTypeBinding {
@@ -193,6 +199,8 @@ pub(super) enum BindingType {
     Scalar,
     /// Vector declaration width.
     Vector(VectorWidth),
+    /// A non-comparison 2D sampler whose sampled value has four components.
+    Sampler2D,
     /// Aggregate declaration that shadows an outer scalar/vector name.
     Blocker,
 }
@@ -207,6 +215,8 @@ impl BindingType {
             b"bool" | b"int" | b"uint" | b"float" | b"float1"
         ) {
             Self::Scalar
+        } else if name == "sampler2D" {
+            Self::Sampler2D
         } else {
             Self::Blocker
         }
@@ -218,7 +228,7 @@ impl VectorExpressionFacts for VectorTypeBindings<'_> {
         match self.lookup(name, index) {
             Some(BindingType::Scalar) => Some(VectorExpressionType::Scalar),
             Some(BindingType::Vector(width)) => Some(VectorExpressionType::Vector(width)),
-            Some(BindingType::Blocker) => Some(VectorExpressionType::Blocker),
+            Some(BindingType::Blocker | BindingType::Sampler2D) => Some(VectorExpressionType::Blocker),
             None => None,
         }
     }
@@ -229,10 +239,19 @@ impl VectorExpressionFacts for VectorTypeBindings<'_> {
         token_facts: &TypedTokenFacts,
         call: &FunctionCallRange,
     ) -> Option<VectorExpressionType> {
+        if !self.functions.iter().any(|function| function.name == call.name)
+            && super::super::texture_sampling::TextureSamplingFunction::classify_name(&call.name).is_some()
+            && let Some(sampler) = call.arguments.iter().next()
+            && sampler.is_single_token()
+            && let Some(name) = tokens[sampler.start()].kind().identifier_text()
+            && self.lookup(name, sampler.start()) == Some(BindingType::Sampler2D)
+        {
+            return Some(VectorExpressionType::Vector(VectorWidth::Four));
+        }
         match self.resolve_function_return(tokens, token_facts, call)? {
             BindingType::Scalar => Some(VectorExpressionType::Scalar),
             BindingType::Vector(width) => Some(VectorExpressionType::Vector(width)),
-            BindingType::Blocker => Some(VectorExpressionType::Blocker),
+            BindingType::Blocker | BindingType::Sampler2D => Some(VectorExpressionType::Blocker),
         }
     }
 }
