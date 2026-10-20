@@ -41,7 +41,7 @@ dialogs and menus change after quit/reopen.
 | --- | --- | --- |
 | Control panel (`App/Views/ControlPanel/`) | `App/Resources/Localizable.xcstrings` | Follows the effective language live, without a relaunch ([below](#the-panels-live-language)) |
 | Native AppKit (menus, alerts, What's New, preview and sign-in windows) | `App/Resources/Localizable.xcstrings` | `String(localized:)`; the bundle resolves at launch from the `AppleLanguages` override above |
-| Info.plist usage text | `App/Resources/InfoPlist.xcstrings` | Excluded from the app target in `project.yml`, because `Info.plist` supplies `NSAudioCaptureUsageDescription` itself; kept complete in every shipped language, which the Python check requires |
+| Info.plist usage text | `App/Resources/Info.plist` | Permission-purpose text comes directly from the plist; the app does not bundle a localized InfoPlist catalog |
 | Import file picker | `App/Resources/Localizable.xcstrings` plus macOS's native file-browser strings | Same-language sheet, or a short-lived helper whose launch language is the current effective app language |
 | Lock-screen extension (`Extension/`) | `Extension/Localizable.xcstrings` | `String(localized:)` against the extension's own bundle, which follows the macOS language list; literals reach it through `WallpaperRuntime.failure(_:)`, and text that is already final (the renderer's own errors) goes through `failure(detail:)` |
 | Language picker | `AppLanguage.supported` | Each language is listed under its own name, untranslated, so it can be found from any interface language |
@@ -177,9 +177,9 @@ Use the BCP 47 tag Xcode uses for the locale (`zh-Hant`, `ja`, `de`, `pt-BR`…)
 `scripts/tests/test_localization_catalogs.py` fails until the registry and the
 catalogs agree.
 
-1. **Catalogs.** In Xcode, open `App/Resources/Localizable.xcstrings`,
-   `App/Resources/InfoPlist.xcstrings` and `Extension/Localizable.xcstrings`, add
-   the language and translate every key, panel strings included; each unit must
+1. **Catalogs.** In Xcode, open `App/Resources/Localizable.xcstrings` and
+   `Extension/Localizable.xcstrings`, add the language and translate every key,
+   panel strings included; each unit must
    end in the `translated` state. The catalogs need no project change; Xcode
    compiles each into a `<tag>.lproj` folder, which is what `PanelLocale` reads.
 2. **Registry.** Append
