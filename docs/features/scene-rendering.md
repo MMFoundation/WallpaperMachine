@@ -780,7 +780,19 @@ file, not from what an earlier layer happened to load), wrapped when the layer s
 `clampuvs` is off, and clamped and linear otherwise. A texture file whose header asks
 for point sampling is also sampled with its mip level picked by point, as the
 reference's sampler for that flag does; a texture without the flag, and a render
-target, keep the blend of mip levels they always had. Whether the cursor reaches a layer follows Wallpaper
+target, keep the blend of mip levels they always had. What a layer drawn through
+effects leaves in that composite is its chain's result as the chain wrote it, the way
+every pass of a chain writes into its buffers: the chain's last pass also puts the
+layer onto the scene with the layer's own blending, but drawn into the composite it
+replaces, so a translucent result keeps its colour instead of coming out multiplied by
+its alpha, and a data buffer that keeps numbers in all four channels (an audio widget's
+spectrum, which other layers read as bars) keeps them. A layer whose saved size is 0 on
+one axis has a card with no area, which draws nothing on screen; its render targets are
+made at the size an invalid axis takes from the scene's canvas, and when it draws into
+targets of its own (through effects, or into the composite another layer reads) its card
+takes that size too and is drawn only there, so what its effects made reaches the layer
+that reads it. A layer only 1 or 2 units thin is not such a card and keeps its size.
+Whether the cursor reaches a layer follows Wallpaper
 Engine's walk: only image, text and model layers that are `solid` (the default) are
 tested, a plain group or a particle layer is not, and a visible layer under the cursor
 with `disablepropagation` hides every layer behind it, which hears no enter, leave or

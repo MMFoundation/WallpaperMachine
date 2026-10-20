@@ -140,6 +140,7 @@ CustomShaderPass::CustomShaderPass(const Desc& desc) {
     m_desc.camera_override = desc.camera_override;
     m_desc.submesh_index   = desc.submesh_index;
     m_desc.material_slot   = desc.material_slot;
+    m_desc.blend_override  = desc.blend_override;
     m_desc.sample_count    = desc.sample_count;
     m_desc.presentation_format = desc.presentation_format;
     m_desc.presents_through_final_viewport = desc.presents_through_final_viewport;
@@ -641,7 +642,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             if (m_desc.write_alpha) colorMask |= VK_COLOR_COMPONENT_A_BIT;
             color_blend.colorWriteMask = colorMask;
 
-            auto blendmode = material->blenmode;
+            auto blendmode = m_desc.blend_override.value_or(material->blenmode);
             SetBlend(blendmode, color_blend, m_desc.sample_count);
             m_desc.blending          = color_blend.blendEnable;
             m_desc.alpha_to_coverage = blendmode == BlendMode::AlphaToCoverage &&
@@ -698,7 +699,8 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             if (! presentation_pass.has_value()) return;
             pipeline.setSampleCount(VK_SAMPLE_COUNT_1_BIT);
             // Presentation may be single-sample even when the offscreen pass is not.
-            SetBlend(material->blenmode, color_blend, VK_SAMPLE_COUNT_1_BIT);
+            SetBlend(m_desc.blend_override.value_or(material->blenmode), color_blend,
+                     VK_SAMPLE_COUNT_1_BIT);
             pipeline.setColorBlendStates(spanone { color_blend });
             pipeline.multisample.alphaToCoverageEnable = VK_FALSE;
             if (! pipeline.create(device, *presentation_pass, m_presentation_pipeline)) return;

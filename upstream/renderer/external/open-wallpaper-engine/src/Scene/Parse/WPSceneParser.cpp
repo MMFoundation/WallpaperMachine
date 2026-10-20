@@ -4449,11 +4449,22 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         RegisterImageComposite(context, wpimgobj, *spImgNode);
     }
 
+    // A card with no area (a size of 0 on one axis) draws nothing on screen.
+    // A layer that draws into targets of its own -- its effects' buffers, the
+    // composite another layer samples -- fills them all the same, as any card
+    // fills the targets made at its render extent: an audio widget's spectrum
+    // buffer, 64 wide and 0 high, carried nothing into the composite its bars
+    // read. Such a card takes the render extent and is drawn only there.
+    const bool card_has_no_area = ! (wpimgobj.size[0] > 0.0f) || ! (wpimgobj.size[1] > 0.0f);
+    const bool card_fills_own_targets =
+        card_has_no_area && (hasEffect || context.referenced_layer_ids.contains(wpimgobj.id));
     // A compose layer that only copies the background behind it adds nothing on
     // screen. Sampled by another layer, though, its card is that background --
     // a mask over later layers paints it back -- so it is drawn there alone.
+    // With effects, it is the chain's last pass that is drawn there alone.
     const bool composite_only =
-        isCompose && ! hasEffect && context.referenced_layer_ids.contains(wpimgobj.id);
+        ! hasEffect && ((isCompose && context.referenced_layer_ids.contains(wpimgobj.id)) ||
+                        card_fills_own_targets);
     spImgNode->SetCompositeOnly(composite_only);
     const bool skipComposeRender = isCompose && ! hasEffect && ! composite_only;
     if (skipComposeRender) {
@@ -4622,6 +4633,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     context, spImgNode.get(), wpimgobj, *puppet, baseConstSvs, svData);
             }
         }
+        std::array<uint16_t, 2> card { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] };
+        if (card_fills_own_targets) {
+            const auto extent = ResolveImageRenderExtent(wpimgobj, context);
+            card = { (uint16_t)extent[0], (uint16_t)extent[1] };
+        }
         if (! puppet) {
             if (passthrough_card != nullptr) {
                 // Laid out from the layer's own transform for now, and again from
@@ -4634,11 +4650,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     .card = passthrough_card,
                 });
             } else {
-                GenCardMesh(
-                    mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
+                GenCardMesh(mesh, card, mapRate);
             }
-            GenCardMesh(effct_final_mesh,
-                        { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] });
+            GenCardMesh(effct_final_mesh, card);
         }
     }
     // material blendmode for last step to use
@@ -4725,6 +4739,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             }
             imgEffectLayer->FinalMesh().ChangeMeshDataFrom(effct_final_mesh);
             imgEffectLayer->FinalNode().CopyTrans(*spImgNode);
+            imgEffectLayer->SetFinalCompositeOnly(card_fills_own_targets);
             if (! render_as_compose) {
                 spImgNode->SetRenderTransformOverride(Eigen::Matrix4d::Identity());
             } else {

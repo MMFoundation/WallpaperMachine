@@ -1196,6 +1196,16 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   the source layer says `"clampuvs": false` and clamps when it is true or absent;
   otherwise a model whose UVs run far outside 0..1 smears the composite's edge
   texels into solid bands.
+- **A composite holds the chain's result as written** —
+  `MetalSceneDraw.ALayerWithNoAreaFillsTheCompositeAnotherLayerSamples` in
+  `metal_scene_draw_smoke`: a translucent solid layer 64 wide and 0 high, hidden at
+  zero scale or shown, whose effect writes a colour of alpha 0.25 through the
+  model-view-projection matrix; a second layer shows that composite's colour and
+  alpha, and the buffer itself draws nothing on screen. Before the change the card
+  that carries the chain into the composite was 0 high, so the composite stayed
+  empty (an audio widget's bars, which read their spectrum from such a buffer,
+  never moved), and once filled, the chain's last pass blended into it with the
+  layer's translucency, multiplying the colour by an alpha the buffer uses for data.
 - **Layer targets: point sampling and wrap** — `LayerTextureReference.LayerTargetsFollowNointerpolationClampuvsAndTheTextureHeader`
   and `.ACompositeFollowsItsLayersTextureHeaderWhateverIsParsedFirst` in
   `layer_texture_reference_test` and

@@ -25,6 +25,18 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-20 — Layer composites carry what their effects made
+
+Fixes an audio-visualizer media player whose bars never moved: its spectrum buffer is a hidden layer 64 wide and 0 high whose composite stayed empty. A card with no area that draws into targets of its own now fills them and draws only there, and a chain's last pass writes into its layer's own composite instead of blending into it.
+
+- `metal_scene_draw_smoke --gtest_filter=*NoAreaFills*` — new case fails with either change removed (empty composite, then colour times 0.25), passes with both
+- `python3 scripts/check_renderer.py` — first run exit 1: `UnchangedPresent.APlainVideoPresentsEveryNewFrameAndNothingElse` at load average 108; the case alone passed 3/3 at load 12; `--skip-build` rerun exit 0, 24 asset or environment skips
+- `python3 scripts/build.py --renderer-only` — exit 0; bindings unchanged
+- `python3 scripts/test.py` — exit 0; 3899 passed, 0 failed, 45 skipped of 3944
+- Local audio-visualizer scene, 240 frames at 1720x720 with synthetic noise and the app's media events: the buffer layer's composite went from empty to the accumulated spectrum; the bars on the cover now move with audio; nothing else on the frame changed under the same input
+- Not compared with Wallpaper Engine's frame: the Parallels reference VM could not be resumed (activation expired)
+- Gap: the scene's blurred cover background still draws as the clear colour in the probe; not investigated further. Gap: no desktop run; the app was not rebuilt for Release
+
 ## 2026-10-20 — SceneScript start-up order, init values and sound layers
 
 Fixes a music-player widget that sat misaligned and then faded out. Four general script mechanisms: authored names of layers under generated keys are recorded before any script compiles; every property script runs init before any is told the user properties; what init returns becomes the property's value (same kind only); sound objects are layers scripts list and play.
@@ -116,11 +128,3 @@ New scripts/we_reference.py (capture, render, compare) and the rule that a wallp
 - python3 scripts/test.py --only PanelSettingsResetTests: 2 passed (confirm/cancel; defaults restored, content kept, unchanged engine settings not sent).
 - python3 scripts/test.py: 3837 passed, 0 failed, 45 skipped.
 - Not checked: the confirmation sheet and button on a real window (no desktop run); lock screen/screen saver turn-off and launch-at-login reset are exercised only through their existing services.
-
-## 2026-10-16 — Per-language release banners, bulleted What's New
-
-Each language block opens with its own banner (x.y.z.jpg, x.y.z.zh-Hans.jpg; Chinese falls back to English); What's New swaps the banner with the language tab, bullets list entries with a hanging indent and shows Highlights in the accent colour with ✦ markers. 1.5.0 now has English and Chinese banners.
-
-- `python3 scripts/test.py` — exit 0; 3873 tests: 3828 passed, 45 skipped; test_release_notes.py 62 tests OK
-- Visual: temporary on-screen XCTest window with a draft 1.5.0 section, captured in English and Chinese; probe deleted
-- Skipped: live --ai model run (no key locally); the draft section was hand-written to preview layout only

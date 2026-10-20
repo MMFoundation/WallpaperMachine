@@ -47,6 +47,12 @@ public:
         bool                     clear_on_first_use { false };
         bool                     preserve_target_contents { false };
         bool                     write_alpha { true };
+        /// How this draw blends instead of its material's blending. The last
+        /// pass of an effect chain is also the draw that puts the layer onto
+        /// the scene with the layer's blending; drawn into the layer's own
+        /// composite it writes its result as every other pass of the chain
+        /// does (`BlendMode::Normal`, a replace).
+        std::optional<BlendMode> blend_override;
         bool                     alpha_to_coverage { false };
         VkSampleCountFlagBits    sample_count { VK_SAMPLE_COUNT_1_BIT };
         VkFormat                 presentation_format { VK_FORMAT_UNDEFINED };
