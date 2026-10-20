@@ -1,10 +1,10 @@
 use std::{
     collections::BTreeMap,
-    fs,
-    path::Path,
     sync::PoisonError,
     time::{Duration, Instant},
 };
+
+use super::projection_values::directory_size;
 
 use wallpaper_core::{
     DisplaySnapshotEntry, SceneBackend, SceneUpdateMode, WallpaperAssignment, project::ScalingMode,
@@ -73,24 +73,6 @@ fn bridge_file_filter(filter: &FileFilter) -> Option<BridgeFileFilter> {
     })
 }
 
-fn directory_size(path: &Path) -> u64 {
-    let Ok(metadata) = fs::metadata(path) else {
-        return 0;
-    };
-    if metadata.is_file() {
-        return metadata.len();
-    }
-    if !metadata.is_dir() {
-        return 0;
-    }
-
-    fs::read_dir(path)
-        .ok()
-        .into_iter()
-        .flat_map(|entries| entries.filter_map(Result::ok))
-        .map(|entry| directory_size(&entry.path()))
-        .sum()
-}
 
 impl BridgeActorState {
     pub(crate) fn invalidate_shader_cache_size(&self) {
@@ -838,16 +820,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn directory_size_sums_nested_files() {
-        let root = tempfile::tempdir().unwrap();
-        let nested = root.path().join("nested");
-        fs::create_dir_all(&nested).unwrap();
-        fs::write(root.path().join("a.bin"), [1, 2, 3]).unwrap();
-        fs::write(nested.join("b.bin"), [4, 5]).unwrap();
-
-        assert_eq!(directory_size(root.path()), 5);
-    }
 
     #[test]
     fn settings_snapshot_reports_storage_status() {

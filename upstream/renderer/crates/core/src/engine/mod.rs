@@ -7,6 +7,9 @@ mod runtime;
 mod snapshot;
 mod state;
 mod surface_recovery;
+#[cfg(feature = "bridge-contract-tests")]
+#[doc(hidden)]
+pub mod contract_testing;
 
 pub use audio_requirement::AudioRequirementCallback;
 pub use surface_recovery::{RecoveryOutcome, RecoveryReason, RecoveryStep};

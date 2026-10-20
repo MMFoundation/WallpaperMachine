@@ -1,14 +1,11 @@
-pub mod drafts {
-    pub use crate::state::drafts::*;
-}
-
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{Arc, Mutex},
     time::Instant,
 };
 
-use drafts::WallpaperOptionsDraft;
+use super::state_values::{self, PreparedApply};
+use crate::state::drafts::{self, WallpaperOptionsDraft};
 use wallpaper_core::project::{SceneDesc, WallpaperProjectType};
 
 use crate::{
@@ -127,18 +124,10 @@ impl Default for BridgeActorState {
     }
 }
 
-pub struct ApplyCandidates {
-    pub app_config: AppConfig,
-    pub wallpaper_config: WallpaperConfig,
-    pub wallpaper_configs: BTreeMap<String, WallpaperConfig>,
-    pub enabled_displays: Vec<SerializedSelector>,
-    pub requires_reconcile: bool,
-}
-
 impl BridgeActorState {
     #[allow(clippy::single_call_fn)]
     pub fn from_app_config(app_config: AppConfig) -> Self {
-        let active_wallpaper_ids = Self::active_ids(&app_config);
+        let active_wallpaper_ids = state_values::configured_ids(&app_config);
         Self {
             filter_scene: app_config.ui.filter.scene,
             filter_video: app_config.ui.filter.video,
@@ -170,13 +159,7 @@ impl BridgeActorState {
     }
 
     pub fn ensure_wallpaper_exists(&self, wallpaper_id: &str) -> Result<(), BridgeError> {
-        self.library
-            .iter()
-            .any(|entry| entry.id == wallpaper_id)
-            .then_some(())
-            .ok_or_else(|| {
-                BridgeError::invalid_input(format!("unknown wallpaper id {wallpaper_id}"))
-            })
+        state_values::ensure_present(&self.library, wallpaper_id)
     }
 
     /// The documents of a scene wallpaper's pending property edits, or `None`
@@ -223,142 +206,56 @@ impl BridgeActorState {
     }
 
     pub fn project_model(&self, wallpaper_id: &str) -> Result<&ProjectModel, BridgeError> {
-        self.ensure_wallpaper_exists(wallpaper_id)?;
-        self.project_models.get(wallpaper_id).ok_or_else(|| {
-            BridgeError::invalid_input(format!(
-                "no project model loaded for wallpaper id {wallpaper_id}"
-            ))
-        })
+        state_values::model_for(&self.library, &self.project_models, wallpaper_id)
     }
 
     pub fn wallpaper_draft(
         &self,
         wallpaper_id: &str,
     ) -> Result<WallpaperOptionsDraft, BridgeError> {
-        self.ensure_wallpaper_exists(wallpaper_id)?;
-        Ok(self
-            .wallpaper_drafts
-            .get(wallpaper_id)
-            .cloned()
-            .or_else(|| {
-                self.wallpaper_configs
-                    .get(wallpaper_id)
-                    .cloned()
-                    .map(|config| {
-                        WallpaperOptionsDraft::from_committed_with_enabled_displays(
-                            config,
-                            self.enabled_selectors(wallpaper_id),
-                        )
-                    })
-            })
-            .unwrap_or_else(|| {
-                WallpaperOptionsDraft::from_committed_with_enabled_displays(
-                    WallpaperConfig::new_for(wallpaper_id, "scene"),
-                    self.enabled_selectors(wallpaper_id),
-                )
-            }))
+        state_values::draft_for(
+            &self.library,
+            &self.app_config,
+            &self.wallpaper_configs,
+            &self.wallpaper_drafts,
+            wallpaper_id,
+        )
     }
 
-    pub fn apply_candidates(
+    pub fn prepare_apply(
         &self,
         wallpaper_id: &str,
         primary_identity_selector: Option<&SerializedSelector>,
-    ) -> Result<ApplyCandidates, BridgeError> {
-        let draft = self.wallpaper_draft(wallpaper_id)?;
-        let active_enabled_displays = self.enabled_selectors(wallpaper_id);
-        let requires_reconcile = draft.requires_reconcile(&active_enabled_displays);
-        let wallpaper_config = draft.current().clone();
-        let mut wallpaper_config = wallpaper_config;
-        let enabled_displays = draft.effective_enabled_displays(&active_enabled_displays);
-        let mut app_config = self.app_config.clone();
-
-        for monitor in &mut app_config.monitors {
-            if monitor.wallpaper.as_deref() == Some(wallpaper_id) {
-                monitor.wallpaper = None;
-            }
-        }
-
-        for selector in &enabled_displays {
-            let monitor = app_config.ensure_monitor(selector.clone());
-            monitor.enabled = true;
-            monitor.mode = "independent".to_string();
-            monitor.wallpaper = Some(wallpaper_id.to_string());
-        }
-
-        if let Some(identity_selector) = primary_identity_selector {
-            if let Some(primary_index) = app_config
-                .monitors
-                .iter()
-                .position(|monitor| monitor.selector == SerializedSelector::Primary)
-            {
-                let mut identity_monitor = app_config.monitors[primary_index].clone();
-                identity_monitor.selector = identity_selector.clone();
-                match app_config
-                    .monitors
-                    .iter()
-                    .position(|monitor| &monitor.selector == identity_selector)
-                {
-                    Some(identity_index) => app_config.monitors[identity_index] = identity_monitor,
-                    None => app_config.monitors.push(identity_monitor),
-                }
-            }
-
-            if let Some(primary_index) = wallpaper_config
-                .monitors
-                .iter()
-                .position(|render| render.selector == SerializedSelector::Primary)
-            {
-                let mut identity_render = wallpaper_config.monitors[primary_index].clone();
-                identity_render.selector = identity_selector.clone();
-                match wallpaper_config
-                    .monitors
-                    .iter()
-                    .position(|render| &render.selector == identity_selector)
-                {
-                    Some(identity_index) => {
-                        wallpaper_config.monitors[identity_index] = identity_render;
-                    }
-                    None => wallpaper_config.monitors.push(identity_render),
-                }
-            }
-        }
-
-        let mut wallpaper_configs = self.wallpaper_configs.clone();
-        wallpaper_configs.insert(wallpaper_id.to_string(), wallpaper_config.clone());
-
-        Ok(ApplyCandidates {
-            app_config,
-            wallpaper_config,
-            wallpaper_configs,
-            enabled_displays,
-            requires_reconcile,
-        })
+    ) -> Result<PreparedApply, BridgeError> {
+        state_values::prepare_apply(
+            &self.library,
+            &self.app_config,
+            &self.wallpaper_configs,
+            &self.wallpaper_drafts,
+            wallpaper_id,
+            primary_identity_selector,
+        )
     }
 
-    pub fn commit_apply_candidates(
+    pub fn publish_apply(
         &mut self,
         wallpaper_id: String,
-        candidates: ApplyCandidates,
+        prepared: PreparedApply,
         active_from_config: bool,
     ) -> Result<(), BridgeError> {
-        self.ensure_wallpaper_exists(&wallpaper_id)?;
-        self.app_config = candidates.app_config;
-        self.wallpaper_configs = candidates.wallpaper_configs;
+        let (app_config, wallpaper_configs, draft) =
+            prepared.into_publication(&self.library, &wallpaper_id)?;
+        self.app_config = app_config;
+        self.wallpaper_configs = wallpaper_configs;
         if active_from_config {
             self.refresh_active_ids();
         }
-        self.wallpaper_drafts.insert(
-            wallpaper_id,
-            WallpaperOptionsDraft::from_committed_with_enabled_displays(
-                candidates.wallpaper_config,
-                candidates.enabled_displays,
-            ),
-        );
+        self.wallpaper_drafts.insert(wallpaper_id, draft);
         Ok(())
     }
 
     pub fn refresh_active_ids(&mut self) {
-        self.active_wallpaper_ids = Self::active_ids(&self.app_config);
+        self.active_wallpaper_ids = state_values::configured_ids(&self.app_config);
     }
 
     /// Active ids are the engine-rendered scenes plus every configured web
@@ -370,25 +267,14 @@ impl BridgeActorState {
         if self.presentation_unloaded && scenes.is_empty() {
             return;
         }
-        let mut ids = scenes
-            .iter()
-            .filter_map(|scene| {
-                let path = std::path::Path::new(&scene.scene_path);
-                path.parent()?
-                    .file_name()?
-                    .to_str()
-                    .filter(|id| !id.is_empty())
-                    .map(ToString::to_string)
-            })
-            .chain(
-                Self::active_ids(&self.app_config)
-                    .into_iter()
-                    .filter(|id| self.is_web_wallpaper(id)),
-            )
-            .collect::<Vec<_>>();
-        ids.sort();
-        ids.dedup();
-        self.active_wallpaper_ids = ids;
+        let configured_ids = state_values::configured_ids(&self.app_config);
+        self.active_wallpaper_ids = state_values::active_ids_from_scenes(
+            scenes.iter().map(|scene| scene.scene_path.as_str()),
+            configured_ids
+                .iter()
+                .filter(|id| self.is_web_wallpaper(id))
+                .map(String::as_str),
+        );
     }
 
     pub fn is_web_wallpaper(&self, wallpaper_id: &str) -> bool {
@@ -420,27 +306,13 @@ impl BridgeActorState {
         &mut self,
         wallpaper_id: &str,
     ) -> Result<&mut WallpaperOptionsDraft, BridgeError> {
-        self.ensure_wallpaper_exists(wallpaper_id)?;
-        if !self.wallpaper_drafts.contains_key(wallpaper_id) {
-            let committed = self
-                .wallpaper_configs
-                .get(wallpaper_id)
-                .cloned()
-                .unwrap_or_else(|| WallpaperConfig::new_for(wallpaper_id, "scene"));
-            let enabled_displays = self.enabled_selectors(wallpaper_id);
-            self.wallpaper_drafts.insert(
-                wallpaper_id.to_string(),
-                WallpaperOptionsDraft::from_committed_with_enabled_displays(
-                    committed,
-                    enabled_displays,
-                ),
-            );
-        }
-
-        Ok(self
-            .wallpaper_drafts
-            .get_mut(wallpaper_id)
-            .expect("draft exists after insertion"))
+        state_values::draft_for_mut(
+            &self.library,
+            &self.app_config,
+            &self.wallpaper_configs,
+            &mut self.wallpaper_drafts,
+            wallpaper_id,
+        )
     }
 
     /// Displays showing `wallpaper_id` as their own wallpaper. A mirror keeps
@@ -448,20 +320,11 @@ impl BridgeActorState {
     /// source instead; counting it here would let the next Apply of that
     /// wallpaper quietly turn the mirror back into an independent display.
     pub fn enabled_selectors(&self, wallpaper_id: &str) -> Vec<SerializedSelector> {
-        self.app_config
-            .monitors
-            .iter()
-            .filter(|monitor| {
-                monitor.enabled
-                    && monitor.mode != "mirror"
-                    && monitor.wallpaper.as_deref() == Some(wallpaper_id)
-            })
-            .map(|monitor| monitor.selector.clone())
-            .collect()
+        state_values::enabled_selectors(&self.app_config, wallpaper_id)
     }
 
     pub fn configured_ids(&self) -> Vec<String> {
-        Self::active_ids(&self.app_config)
+        state_values::configured_ids(&self.app_config)
     }
 
     /// The held wallpapers a display is assigned to, sorted. A hold on a
@@ -486,42 +349,17 @@ impl BridgeActorState {
 
     pub fn replace_library(&mut self, library: Vec<BridgeWallpaperEntry>) {
         self.library = library;
-        if let Some(selected_wallpaper_id) = &self.selected_wallpaper_id
-            && !self
-                .library
-                .iter()
-                .any(|entry| entry.id == *selected_wallpaper_id)
-        {
-            self.selected_wallpaper_id = None;
-            self.app_config.general.last_selected_wallpaper = None;
-        }
+        state_values::clear_missing_selection(
+            &self.library,
+            &mut self.selected_wallpaper_id,
+            &mut self.app_config,
+        );
     }
 
     pub fn rebase_drafts(&mut self) {
-        let enabled_by_wallpaper = self
-            .wallpaper_drafts
-            .keys()
-            .map(|wallpaper_id| (wallpaper_id.clone(), self.enabled_selectors(wallpaper_id)))
-            .collect::<Vec<_>>();
-
-        for (wallpaper_id, enabled_displays) in enabled_by_wallpaper {
-            if let Some(draft) = self.wallpaper_drafts.get_mut(&wallpaper_id) {
-                draft.rebase_enabled_displays(enabled_displays);
-            }
-        }
+        state_values::rebase_existing_drafts(&self.app_config, &mut self.wallpaper_drafts);
     }
 
-    fn active_ids(app_config: &AppConfig) -> Vec<String> {
-        let mut ids = app_config
-            .monitors
-            .iter()
-            .filter(|monitor| monitor.enabled && monitor.mode != "mirror")
-            .filter_map(|monitor| monitor.wallpaper.clone())
-            .collect::<Vec<_>>();
-        ids.sort();
-        ids.dedup();
-        ids
-    }
 }
 
 impl BridgeActorState {

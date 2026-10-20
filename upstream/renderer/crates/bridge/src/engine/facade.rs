@@ -1,10 +1,6 @@
-#[cfg(test)]
-use std::sync::mpsc::Receiver;
 use std::{
-    sync::{
-        Arc,
-        mpsc::{self, Sender},
-    },
+    future::Future,
+    sync::Arc,
     thread,
     time::Duration,
 };
@@ -12,7 +8,10 @@ use std::{
 #[cfg(test)]
 use arc_swap::ArcSwap;
 #[cfg(test)]
-use crossbeam_queue::SegQueue;
+use super::controlled_support::{
+    self, Callable, Completion, Control, FailurePolicy, Failures, Fault, FaultCategory, Hold,
+    Observation, Reading, ReleaseFailure,
+};
 use futures_util::future::{BoxFuture, FutureExt};
 #[cfg(test)]
 use wallpaper_core::project::SceneTemplate;
@@ -27,6 +26,12 @@ use wallpaper_core::{
     project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SceneResult},
     render::RendererSurfaceCounters,
 };
+
+use super::facade_readiness::FirstFrameReadiness;
+use super::audio_requests::{CaptureAssembly, CaptureEvents, CaptureMailbox, start_capture_lane};
+
+#[cfg(test)]
+mod mount_tests;
 
 pub type EngineFuture<T> = BoxFuture<'static, Result<T, EngineError>>;
 
@@ -290,9 +295,9 @@ pub trait EngineFacade: Send + Sync + 'static {
 #[derive(Clone)]
 pub struct RealEngineFacade {
     engine: WallpaperEngine,
-    audio_capture: AudioCaptureWorker,
+    audio_capture: OwnedCaptureLane,
     audio_mutation: Arc<tokio::sync::Mutex<()>>,
-    ready_frames: Arc<std::sync::Mutex<std::collections::HashMap<SceneHandle, u64>>>,
+    readiness: FirstFrameReadiness,
     /// One reconcile at a time, so each waits only on the frames it caused.
     reconcile_turn: Arc<tokio::sync::Mutex<()>>,
 }
@@ -301,9 +306,9 @@ impl RealEngineFacade {
     #[must_use]
     pub fn new(engine: WallpaperEngine) -> Self {
         Self {
-            audio_capture: AudioCaptureWorker::spawn(engine.clone()),
+            audio_capture: OwnedCaptureLane::new(engine.clone()),
             audio_mutation: Arc::default(),
-            ready_frames: Arc::default(),
+            readiness: FirstFrameReadiness::new(),
             reconcile_turn: Arc::default(),
             engine,
         }
@@ -338,6 +343,74 @@ pub(crate) fn displays_awaiting_first_frame(live: &[DisplaySnapshotEntry], scene
         .collect()
 }
 
+// The real facade and device-free controls execute this same sequencing. Closures
+// supply only the core and capture boundaries; no engine/policy is duplicated.
+pub(crate) async fn mutate_scenes_and_prune<T, C, CF, P, PF>(
+    audio_mutation: &tokio::sync::Mutex<()>,
+    core: C,
+    prune: P,
+) -> Result<T, EngineError>
+where
+    C: FnOnce() -> CF,
+    CF: Future<Output = Result<T, EngineError>>,
+    P: FnOnce() -> PF,
+    PF: Future<Output = Result<(), String>>,
+{
+    let _audio_guard = audio_mutation.lock().await;
+    let result = core().await;
+    prune().await.map_err(EngineError::Platform)?;
+    result
+}
+
+pub(crate) async fn mutate_audio<T, C, CF>(
+    audio_mutation: &tokio::sync::Mutex<()>,
+    capture: C,
+) -> Result<T, EngineError>
+where
+    C: FnOnce() -> CF,
+    CF: Future<Output = Result<T, String>>,
+{
+    let _audio_guard = audio_mutation.lock().await;
+    capture().await.map_err(EngineError::Platform)
+}
+
+pub(crate) async fn reconcile_with_readiness<S, C, CF, P, PF>(
+    reconcile_turn: &tokio::sync::Mutex<()>,
+    audio_mutation: &tokio::sync::Mutex<()>,
+    readiness: &FirstFrameReadiness,
+    scenes: Vec<SceneDesc>,
+    snapshot: S,
+    core: C,
+    prune: P,
+) -> Result<Vec<SceneResult>, EngineError>
+where
+    S: FnOnce() -> Vec<DisplaySnapshotEntry>,
+    C: FnOnce(Vec<SceneDesc>) -> CF,
+    CF: Future<Output = Result<Vec<SceneResult>, EngineError>>,
+    P: FnOnce() -> PF,
+    PF: Future<Output = Result<(), String>>,
+{
+    let _turn = reconcile_turn.lock().await;
+    let checkpoint = readiness.checkpoint();
+    let changed = displays_awaiting_first_frame(&snapshot(), &scenes);
+    let results = mutate_scenes_and_prune(audio_mutation, || core(scenes), prune).await?;
+    readiness
+        .await_results(checkpoint, &changed, results, first_frame_timeout)
+        .await
+}
+
+pub(crate) fn register_first_frame_callback(
+    readiness: &FirstFrameReadiness,
+    callback: FirstFrameCallback,
+    install: impl FnOnce(FirstFrameCallback),
+) {
+    install(readiness.wrap_callback(callback));
+}
+
+fn first_frame_timeout() -> EngineError {
+    EngineError::Render("The wallpaper did not render a first frame within 90 seconds. Check the project files and shared scene assets; this wallpaper may use unsupported effects. Your previous configuration will be restored.".into())
+}
+
 impl EngineFacade for RealEngineFacade {
     fn update_media(&self, handle: SceneHandle, enabled: bool, state: wallpaper_core::media::MediaPollResult) -> EngineFuture<()> {
         let engine = self.engine.clone();
@@ -345,38 +418,20 @@ impl EngineFacade for RealEngineFacade {
     }
     fn reconcile_scenes(&self, scenes: Vec<SceneDesc>) -> EngineFuture<Vec<SceneResult>> {
         let engine = self.engine.clone();
-        let ready_frames = self.ready_frames.clone();
+        let readiness = self.readiness.clone();
         let reconcile_turn = self.reconcile_turn.clone();
         let audio_capture = self.audio_capture.clone();
         let audio_mutation = self.audio_mutation.clone();
         async move {
-            let _turn = reconcile_turn.lock().await;
-            let before = ready_frames.lock().unwrap_or_else(|e| e.into_inner()).clone();
-            let changed = displays_awaiting_first_frame(&engine.display_snapshot(), &scenes);
-            let results = {
-                let _audio_guard = audio_mutation.lock().await;
-                let results = engine.reconcile_scenes(scenes).await;
-                audio_capture.retain_scenes().await.map_err(EngineError::Platform)?;
-                results?
-            };
-            // A cold shader and pipeline compile for a large 3D or puppet scene
-            // can run past 20s. The driver's cache makes the next launch short;
-            // the first one still has to be allowed to finish.
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
-            loop {
-                let ready = {
-                    let frames = ready_frames.lock().unwrap_or_else(|e| e.into_inner());
-                    results.iter().filter(|r| changed.contains(&r.display_id)).all(|r| {
-                        frames.get(&r.handle).copied().unwrap_or(0) > before.get(&r.handle).copied().unwrap_or(0)
-                    })
-                };
-                if ready { break; }
-                if std::time::Instant::now() >= deadline {
-                    return Err(EngineError::Render("The wallpaper did not render a first frame within 90 seconds. Check the project files and shared scene assets; this wallpaper may use unsupported effects. Your previous configuration will be restored.".into()));
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            }
-            Ok(results)
+            reconcile_with_readiness(
+                &reconcile_turn,
+                &audio_mutation,
+                &readiness,
+                scenes,
+                || engine.display_snapshot(),
+                |scenes| engine.reconcile_scenes(scenes),
+                || audio_capture.mailbox().prune_scenes(),
+            ).await
         }.boxed()
     }
 
@@ -385,15 +440,12 @@ impl EngineFacade for RealEngineFacade {
         let audio_capture = self.audio_capture.clone();
         let audio_mutation = self.audio_mutation.clone();
         async move {
-            let _audio_guard = audio_mutation.lock().await;
-            let result = engine.refresh_displays().await;
-            audio_capture
-                .retain_scenes()
-                .await
-                .map_err(EngineError::Platform)?;
-            result
-        }
-        .boxed()
+            mutate_scenes_and_prune(
+                &audio_mutation,
+                || engine.refresh_displays(),
+                || audio_capture.mailbox().prune_scenes(),
+            ).await
+        }.boxed()
     }
 
     fn display_snapshot(&self) -> Vec<DisplaySnapshotEntry> {
@@ -405,15 +457,12 @@ impl EngineFacade for RealEngineFacade {
         let audio_capture = self.audio_capture.clone();
         let audio_mutation = self.audio_mutation.clone();
         async move {
-            let _audio_guard = audio_mutation.lock().await;
-            let result = engine.close_all_scenes().await;
-            audio_capture
-                .retain_scenes()
-                .await
-                .map_err(EngineError::Platform)?;
-            result
-        }
-        .boxed()
+            mutate_scenes_and_prune(
+                &audio_mutation,
+                || engine.close_all_scenes(),
+                || audio_capture.mailbox().prune_scenes(),
+            ).await
+        }.boxed()
     }
 
     fn set_all_paused(&self, paused: bool, suspended_displays: Vec<u32>) -> EngineFuture<()> {
@@ -531,26 +580,16 @@ impl EngineFacade for RealEngineFacade {
         let audio_capture = self.audio_capture.clone();
         let audio_mutation = self.audio_mutation.clone();
         async move {
-            let _audio_guard = audio_mutation.lock().await;
-            audio_capture
-                .set_enabled(handle, enabled)
-                .await
-                .map_err(EngineError::Platform)
-        }
-        .boxed()
+            mutate_audio(&audio_mutation, || audio_capture.mailbox().enable_scene(handle, enabled)).await
+        }.boxed()
     }
 
     fn set_audio_capture_demand(&self, demand: AudioCaptureDemand) -> EngineFuture<()> {
         let audio_capture = self.audio_capture.clone();
         let audio_mutation = self.audio_mutation.clone();
         async move {
-            let _audio_guard = audio_mutation.lock().await;
-            audio_capture
-                .set_demand(demand)
-                .await
-                .map_err(EngineError::Platform)
-        }
-        .boxed()
+            mutate_audio(&audio_mutation, || audio_capture.mailbox().update_demand(demand)).await
+        }.boxed()
     }
 
     fn set_scaling_mode(&self, handle: SceneHandle, mode: ScalingMode) -> EngineFuture<()> {
@@ -640,28 +679,18 @@ impl EngineFacade for RealEngineFacade {
         let audio_capture = self.audio_capture.clone();
         let audio_mutation = self.audio_mutation.clone();
         async move {
-            let _audio_guard = audio_mutation.lock().await;
-            let result = engine.set_wallpaper_for_display(selector, assignment).await;
-            audio_capture
-                .retain_scenes()
-                .await
-                .map_err(EngineError::Platform)?;
-            result
-        }
-        .boxed()
+            mutate_scenes_and_prune(
+                &audio_mutation,
+                || engine.set_wallpaper_for_display(selector, assignment),
+                || audio_capture.mailbox().prune_scenes(),
+            ).await
+        }.boxed()
     }
 
     fn set_first_frame_callback(&self, callback: FirstFrameCallback) {
-        let frames = self.ready_frames.clone();
-        self.engine
-            .set_first_frame_callback(Arc::new(move |handle| {
-                *frames
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .entry(handle)
-                    .or_default() += 1;
-                callback(handle);
-            }));
+        register_first_frame_callback(&self.readiness, callback, |wrapped| {
+            self.engine.set_first_frame_callback(wrapped);
+        });
     }
 
     fn set_pointer_consumer_callback(
@@ -818,7 +847,7 @@ fn attempt_audio_restart<B: AudioCaptureBackend>(
 
 /// Asks the worker to try again after `delay`, from a short-lived thread so the
 /// worker itself never sleeps.
-fn schedule_audio_restart(action: RestartAction, events: &Sender<AudioCaptureCommand>) {
+pub(super) fn schedule_audio_restart(action: RestartAction, events: &CaptureEvents) {
     let RestartAction::RetryIn { delay, generation, attempt } = action else {
         return;
     };
@@ -827,7 +856,7 @@ fn schedule_audio_restart(action: RestartAction, events: &Sender<AudioCaptureCom
         .name("wallpaper-bridge-audio-retry".to_string())
         .spawn(move || {
             thread::sleep(delay);
-            let _ = events.send(AudioCaptureCommand::RetryRestart { generation, attempt });
+            events.retry_restart(generation, attempt);
         });
     if let Err(error) = spawned {
         log::warn!("[wallpaper-core audio] could not schedule a system audio tap retry: {error}");
@@ -837,9 +866,9 @@ fn schedule_audio_restart(action: RestartAction, events: &Sender<AudioCaptureCom
 /// Starts an output-device watcher for the worker. Without one the tap is
 /// still started and stopped as before; only the rebuild on a device change is
 /// lost.
-fn watch_output_device(events: Sender<AudioCaptureCommand>) -> Option<OutputDeviceWatcher> {
+fn watch_output_device(events: CaptureEvents) -> Option<OutputDeviceWatcher> {
     let on_change = Arc::new(move || {
-        let _ = events.send(AudioCaptureCommand::OutputDeviceChanged);
+        events.output_changed();
     });
     match OutputDeviceWatcher::start(on_change) {
         Ok(watcher) => Some(watcher),
@@ -895,258 +924,193 @@ impl<W> OutputWatchGate<W> {
 /// Ends the worker thread when the last handle to it goes away. The worker
 /// holds a sender of its own for the device watcher and retries, so the
 /// channel closing is no longer the signal.
-struct AudioWorkerLifetime(Sender<AudioCaptureCommand>);
+struct AudioWorkerLifetime(CaptureEvents);
 
 impl Drop for AudioWorkerLifetime {
     fn drop(&mut self) {
-        let _ = self.0.send(AudioCaptureCommand::Shutdown);
+        self.0.finish();
     }
 }
 
 #[derive(Clone)]
-struct AudioCaptureWorker {
-    sender: Sender<AudioCaptureCommand>,
+pub(super) struct OwnedCaptureLane {
+    mailbox: CaptureMailbox,
     _lifetime: Arc<AudioWorkerLifetime>,
 }
 
-enum AudioCaptureCommand {
-    SetEnabled {
-        handle: SceneHandle,
-        enabled: bool,
-        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
-    },
-    SetDemand {
+impl OwnedCaptureLane {
+    fn new(engine: WallpaperEngine) -> Self {
+        Self::from_mailbox(start_capture_lane(PlatformCaptureAssembly {
+            engine,
+            output_watch: OutputWatchGate::default(),
+            restart: AudioRestartState::default(),
+        }))
+    }
+
+    pub(super) fn from_mailbox(mailbox: CaptureMailbox) -> Self {
+        let lifetime = Arc::new(AudioWorkerLifetime(mailbox.events()));
+        Self { mailbox, _lifetime: lifetime }
+    }
+
+    pub(super) fn mailbox(&self) -> &CaptureMailbox {
+        // Borrow the whole owner in async closures. Direct field capture could
+        // otherwise leave the lifetime guard outside an unpolled request future.
+        &self.mailbox
+    }
+}
+
+pub(super) fn retain_capture_live<B: AudioCaptureBackend>(
+    controller: &mut AudioCaptureController<B>,
+    live: &[DisplaySnapshotEntry],
+) -> Result<Vec<SceneHandle>, String> {
+    let handles: Vec<_> = live.iter().filter_map(|display| display.handle).collect();
+    controller.retain_scenes(&handles).map_err(|error| error.to_string())?;
+    Ok(handles)
+}
+
+struct PlatformCaptureAssembly {
+    engine: WallpaperEngine,
+    output_watch: OutputWatchGate<OutputDeviceWatcher>,
+    restart: AudioRestartState,
+}
+
+impl CaptureAssembly for PlatformCaptureAssembly {
+    type Backend = PlatformAudioCaptureBackend;
+
+    fn make_controller(&mut self) -> Result<AudioCaptureController<Self::Backend>, String> {
+        PlatformAudioCaptureBackend::new()
+            .map(|backend| AudioCaptureController::new(Arc::new(self.engine.clone()), backend))
+            .map_err(|error| error.to_string())
+    }
+
+    fn retain_live(
+        &mut self,
+        controller: &mut AudioCaptureController<Self::Backend>,
+    ) -> Result<Vec<SceneHandle>, String> {
+        retain_capture_live(controller, &self.engine.display_snapshot())
+    }
+
+    fn apply_demand(
+        &mut self,
+        controller: &mut AudioCaptureController<Self::Backend>,
         demand: AudioCaptureDemand,
-        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
-    },
-    RetainScenes {
-        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
-    },
-    /// The default output device changed (debounced).
-    OutputDeviceChanged,
-    /// A scheduled attempt to bring the tap back after a failed rebuild.
-    RetryRestart { generation: u64, attempt: usize },
-    Shutdown,
-}
-
-enum AudioCaptureRequest {
-    Scene { handle: SceneHandle, enabled: bool },
-    Demand(AudioCaptureDemand),
-}
-
-impl AudioCaptureWorker {
-    fn spawn(engine: WallpaperEngine) -> Self {
-        let (sender, receiver) = mpsc::channel::<AudioCaptureCommand>();
-        let events = sender.clone();
-        let lifetime = Arc::new(AudioWorkerLifetime(sender.clone()));
-        thread::Builder::new()
-            .name("wallpaper-bridge-audio-capture".to_string())
-            .spawn(move || {
-                let mut controller = PlatformAudioCaptureBackend::new()
-                    .map(|backend| AudioCaptureController::new(Arc::new(engine.clone()), backend))
-                    .map_err(|error| error.to_string());
-                // Declared after the controller, so it is dropped first and no
-                // device change can arrive while the tap is being released. It
-                // holds a watcher only while capture is wanted.
-                let mut output_watch = OutputWatchGate::<OutputDeviceWatcher>::default();
-                let mut restart = AudioRestartState::default();
-                while let Ok(command) = receiver.recv() {
-                    let (request, reply) = match command {
-                        AudioCaptureCommand::SetEnabled { handle, enabled, reply } =>
-                            (Some(AudioCaptureRequest::Scene { handle, enabled }), reply),
-                        AudioCaptureCommand::SetDemand { demand, reply } =>
-                            (Some(AudioCaptureRequest::Demand(demand)), reply),
-                        AudioCaptureCommand::RetainScenes { reply } => (None, reply),
-                        AudioCaptureCommand::OutputDeviceChanged => {
-                            if let Ok(controller) = controller.as_mut() {
-                                let action = handle_output_device_change(controller, &mut restart);
-                                schedule_audio_restart(action, &events);
-                            }
-                            continue;
-                        }
-                        AudioCaptureCommand::RetryRestart { generation, attempt } => {
-                            if let Ok(controller) = controller.as_mut() {
-                                let action = handle_audio_restart_retry(
-                                    controller, &restart, generation, attempt,
-                                );
-                                schedule_audio_restart(action, &events);
-                            }
-                            continue;
-                        }
-                        AudioCaptureCommand::Shutdown => break,
-                    };
-                    let result = (|| {
-                        let controller = controller.as_mut().map_err(|error| error.clone())?;
-                        let handles: Vec<_> = engine.display_snapshot().iter()
-                            .filter_map(|display| display.handle).collect();
-                        controller.retain_scenes(&handles).map_err(|error| error.to_string())?;
-                        match request {
-                            Some(AudioCaptureRequest::Demand(demand)) => {
-                                apply_audio_capture_demand(controller, demand)?;
-                            }
-                            Some(AudioCaptureRequest::Scene { handle, enabled }) => {
-                                if enabled {
-                                    if !handles.contains(&handle) {
-                                        return Err("The wallpaper is no longer active.".to_string());
-                                    }
-                                    // Core Audio performs the system authorization at capture startup.
-                                    if !controller.has_permission().map_err(|error| error.to_string())?
-                                        && !controller.request_permission().map_err(|error| error.to_string())? {
-                                        return Err("System audio capture permission was not granted.".to_string());
-                                    }
-                                }
-                                controller.set_scene_capturing(handle, enabled)
-                                    .map_err(|error| format!("Audio response could not {}: {error}. Check WallpaperMachine in System Settings > Privacy & Security > Screen & System Audio Recording.", if enabled { "start" } else { "stop" }))?;
-                            }
-                            None => {}
-                        }
-                        Ok(())
-                    })();
-                    if let Ok(controller) = controller.as_ref() {
-                        output_watch.sync(controller.wants_capture(), || {
-                            watch_output_device(events.clone())
-                        });
-                    }
-                    let _ = reply.send(result);
-                }
-            })
-            .expect("audio capture worker thread should start");
-        Self { sender, _lifetime: lifetime }
+    ) -> Result<(), String> {
+        apply_audio_capture_demand(controller, demand)
     }
 
-    async fn set_enabled(&self, handle: SceneHandle, enabled: bool) -> Result<(), String> {
-        let (reply, response) = tokio::sync::oneshot::channel();
-        self.sender
-            .send(AudioCaptureCommand::SetEnabled {
-                handle,
-                enabled,
-                reply,
-            })
-            .map_err(|error| format!("audio capture worker stopped: {error}"))?;
-        response
-            .await
-            .map_err(|error| format!("audio capture worker did not reply: {error}"))?
+    fn output_changed(
+        &mut self,
+        controller: &mut AudioCaptureController<Self::Backend>,
+        events: &CaptureEvents,
+    ) {
+        let action = handle_output_device_change(controller, &mut self.restart);
+        schedule_audio_restart(action, events);
     }
 
-    async fn retain_scenes(&self) -> Result<(), String> {
-        let (reply, response) = tokio::sync::oneshot::channel();
-        self.sender
-            .send(AudioCaptureCommand::RetainScenes { reply })
-            .map_err(|error| format!("audio capture worker stopped: {error}"))?;
-        response
-            .await
-            .map_err(|error| format!("audio capture worker did not reply: {error}"))?
+    fn retry_restart(
+        &mut self,
+        controller: &mut AudioCaptureController<Self::Backend>,
+        generation: u64,
+        attempt: usize,
+        events: &CaptureEvents,
+    ) {
+        let action = handle_audio_restart_retry(controller, &self.restart, generation, attempt);
+        schedule_audio_restart(action, events);
     }
 
-    async fn set_demand(&self, demand: AudioCaptureDemand) -> Result<(), String> {
-        let (reply, response) = tokio::sync::oneshot::channel();
-        self.sender
-            .send(AudioCaptureCommand::SetDemand { demand, reply })
-            .map_err(|error| format!("audio capture worker stopped: {error}"))?;
-        response
-            .await
-            .map_err(|error| format!("audio capture worker did not reply: {error}"))?
+    fn sync_watch(&mut self, wanted: bool, events: &CaptureEvents) {
+        self.output_watch.sync(wanted, || watch_output_device(events.clone()));
+    }
+
+    fn stop_watch(&mut self) {
+        self.output_watch.sync(false, || None);
     }
 }
 
 #[cfg(test)]
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct FakeEngineFacade {
-    audio_capture_demands: Arc<ArcSwap<Vec<AudioCaptureDemand>>>,
-    media_calls: Arc<ArcSwap<Vec<(SceneHandle, bool, wallpaper_core::media::MediaPollResult)>>>,
-    calls: Arc<ArcSwap<Vec<Vec<SceneDesc>>>>,
+    audio_capture_demands: Observation<AudioCaptureDemand>,
+    media_calls: Observation<(SceneHandle, bool, wallpaper_core::media::MediaPollResult)>,
+    calls: Observation<Vec<SceneDesc>>,
     rendered_scenes: Arc<ArcSwap<Vec<SceneDesc>>>,
     snapshot: Arc<ArcSwap<Vec<DisplaySnapshotEntry>>>,
+    /// Serializes the port's read/mutate/publish transaction with other row updates.
+    snapshot_mutation: Arc<std::sync::Mutex<()>>,
     pointer_consumer: Arc<std::sync::Mutex<PointerConsumerObserver>>,
     /// Held, so a test can report a press the way the engine would. Keeping
     /// it also keeps whatever the caller handed over alive, which is the whole
     /// point of installing it.
-    user_shortcut:
-        Arc<std::sync::Mutex<Option<wallpaper_core::UserShortcutObserverCallback>>>,
+    user_shortcut: Callable<wallpaper_core::UserShortcutObserverCallback>,
     /// What the fake renderers report about reading system audio.
     audio_requirement: Arc<std::sync::Mutex<FakeAudioRequirement>>,
     snapshot_after_refresh: Arc<ArcSwap<Option<Vec<DisplaySnapshotEntry>>>>,
-    refresh_failure: Arc<ArcSwap<Option<String>>>,
-    paused_calls: Arc<ArcSwap<Vec<bool>>>,
-    pause_failure: Arc<ArcSwap<Option<String>>>,
-    display_paused_calls: Arc<ArcSwap<Vec<(u32, bool)>>>,
+    paused_calls: Observation<bool>,
+    display_paused_calls: Observation<(u32, bool)>,
     /// Every pause value applied to a rendered scene, by its display, in the
     /// order the fake applied them. A global resume that briefly restarts a
     /// still-hidden display shows up here as a `false` for that display.
-    scene_pause_log: Arc<ArcSwap<Vec<(u32, bool)>>>,
-    display_pause_failure: Arc<ArcSwap<Option<String>>>,
-    suspend_failure: Arc<ArcSwap<Option<String>>>,
-    disable_capture_failure: Arc<ArcSwap<Option<String>>>,
-    close_failure: Arc<ArcSwap<Option<String>>>,
-    audio_volume_calls: Arc<ArcSwap<Vec<(SceneHandle, f32)>>>,
-    audio_muted_calls: Arc<ArcSwap<Vec<(SceneHandle, bool)>>>,
-    audio_response_calls: Arc<ArcSwap<Vec<(SceneHandle, bool)>>>,
-    media_integration_calls: Arc<ArcSwap<Vec<(SceneHandle, bool)>>>,
-    media_event_calls: Arc<ArcSwap<Vec<(SceneHandle, String)>>>,
-    media_artwork_calls: Arc<ArcSwap<Vec<(SceneHandle, u32, u32, usize)>>>,
-    audio_capture_calls: Arc<ArcSwap<Vec<(SceneHandle, bool)>>>,
-    audio_capture_suspend_calls: Arc<ArcSwap<Vec<bool>>>,
-    audio_capture_suspended: Arc<ArcSwap<bool>>,
-    audio_capture_block: Arc<SegQueue<ReconcileBlockGate>>,
-    audio_capture_failure: Arc<ArcSwap<Option<String>>>,
-    scaling_mode_calls: Arc<ArcSwap<Vec<(SceneHandle, ScalingMode)>>>,
-    scaling_factor_calls: Arc<ArcSwap<Vec<(SceneHandle, f64)>>>,
-    framing_calls: Arc<ArcSwap<Vec<(SceneHandle, SceneFraming)>>>,
-    preview_framing_calls: Arc<ArcSwap<Vec<(SceneHandle, SceneFraming)>>>,
-    preview_property_calls: Arc<ArcSwap<Vec<(SceneHandle, String)>>>,
+    scene_pause_log: Observation<(u32, bool)>,
+    audio_volume_calls: Observation<(SceneHandle, f32)>,
+    audio_muted_calls: Observation<(SceneHandle, bool)>,
+    audio_response_calls: Observation<(SceneHandle, bool)>,
+    media_integration_calls: Observation<(SceneHandle, bool)>,
+    media_event_calls: Observation<(SceneHandle, String)>,
+    media_artwork_calls: Observation<(SceneHandle, u32, u32, usize)>,
+    audio_capture_calls: Observation<(SceneHandle, bool)>,
+    audio_capture_suspend_calls: Observation<bool>,
+    audio_capture_suspended: Reading<bool>,
+    scaling_mode_calls: Observation<(SceneHandle, ScalingMode)>,
+    scaling_factor_calls: Observation<(SceneHandle, f64)>,
+    framing_calls: Observation<(SceneHandle, SceneFraming)>,
+    preview_framing_calls: Observation<(SceneHandle, SceneFraming)>,
+    preview_property_calls: Observation<(SceneHandle, String)>,
     /// Property previews the fake engine declined because the scene on the
     /// handle draws another wallpaper: the handle and the project file the
     /// document was made for.
-    declined_property_previews: Arc<ArcSwap<Vec<(SceneHandle, String)>>>,
+    declined_property_previews: Observation<(SceneHandle, String)>,
     /// What each fake renderer was last shown by a property preview, by its
     /// display, like the real renderer's own record: gone when a reconcile opens
     /// the display's scene afresh or loads it again.
     shown_property_documents: Arc<std::sync::Mutex<std::collections::HashMap<u32, String>>>,
-    framing_failure: Arc<ArcSwap<Option<String>>>,
-    property_preview_failure: Arc<ArcSwap<Option<String>>>,
-    fps_calls: Arc<ArcSwap<Vec<(SceneHandle, u32)>>>,
-    render_scale_calls: Arc<ArcSwap<Vec<(SceneHandle, f32)>>>,
-    render_scale_failure: Arc<ArcSwap<Option<String>>>,
-    scene_optimization_calls: Arc<ArcSwap<Vec<bool>>>,
-    scene_on_demand_calls: Arc<ArcSwap<Vec<bool>>>,
-    scene_video_plane_sampling_calls: Arc<ArcSwap<Vec<bool>>>,
-    scene_resolution_calls: Arc<ArcSwap<Vec<SceneResolution>>>,
-    scene_runtime_reports: Arc<ArcSwap<Vec<SceneRuntimeReport>>>,
-    /// Readings handed out one per read before the stored value is used again,
-    /// so a test can say how a scene changes between two looks without a clock.
-    scene_runtime_report_script: Arc<std::sync::Mutex<std::collections::VecDeque<Vec<SceneRuntimeReport>>>>,
-    display_snapshot_script: Arc<std::sync::Mutex<std::collections::VecDeque<Vec<DisplaySnapshotEntry>>>>,
-    recover_calls: Arc<ArcSwap<Vec<(u32, RecoveryReason)>>>,
-    recover_result: Arc<ArcSwap<Option<Result<RecoveryOutcome, String>>>>,
-    audio_spectrum: Arc<ArcSwap<Option<AudioSpectrum128>>>,
-    mouse_poll_calls: Arc<ArcSwap<Vec<()>>>,
-    mouse_poll_block: Arc<SegQueue<ReconcileBlockGate>>,
+    fps_calls: Observation<(SceneHandle, u32)>,
+    render_scale_calls: Observation<(SceneHandle, f32)>,
+    scene_optimization_calls: Observation<bool>,
+    scene_on_demand_calls: Observation<bool>,
+    scene_video_plane_sampling_calls: Observation<bool>,
+    scene_resolution_calls: Observation<SceneResolution>,
+    scene_runtime_reports: Reading<Vec<SceneRuntimeReport>>,
+    /// Scripted snapshots retain the final sample; `None` reads the live state.
+    display_snapshot_script: Reading<Option<Vec<DisplaySnapshotEntry>>>,
+    recover_calls: Observation<(u32, RecoveryReason)>,
+    recover_result: Reading<Option<Result<RecoveryOutcome, String>>>,
+    audio_spectrum: Reading<Option<AudioSpectrum128>>,
+    mouse_poll_calls: Observation<()>,
     mouse_polls_seen: Arc<std::sync::atomic::AtomicUsize>,
+    mouse_poll_count: Arc<std::sync::atomic::AtomicUsize>,
     pointer_activity: Arc<std::sync::Mutex<PointerActivityObserver>>,
-    pointer_probe: Arc<ArcSwap<wallpaper_core::PointerProbe>>,
+    pointer_probe: Reading<wallpaper_core::PointerProbe>,
     pointer_probe_count: Arc<std::sync::atomic::AtomicUsize>,
-    mouse_input: Arc<ArcSwap<(f64, f64)>>,
-    mouse_samples: Arc<ArcSwap<Vec<(f64, f64)>>>,
-    mouse_position_calls: Arc<ArcSwap<Vec<(SceneHandle, f64, f64)>>>,
-    mouse_button_calls: Arc<ArcSwap<Vec<(SceneHandle, u32, bool)>>>,
-    mouse_entered_calls: Arc<ArcSwap<Vec<(SceneHandle, bool)>>>,
-    window_create_calls: Arc<ArcSwap<Vec<DisplaySelector>>>,
-    wallpaper_calls: Arc<ArcSwap<Vec<(DisplaySelector, WallpaperAssignment)>>>,
-    reconcile_failure: Arc<ArcSwap<Option<String>>>,
-    reconcile_block: Arc<SegQueue<ReconcileBlockGate>>,
-    reconcile_done: Arc<SegQueue<Sender<()>>>,
-    first_frame_callback: Arc<ArcSwap<Option<FirstFrameCallback>>>,
-    counters_enabled: Arc<ArcSwap<bool>>,
+    mouse_input: Reading<(f64, f64)>,
+    mouse_samples: Observation<(f64, f64)>,
+    mouse_position_calls: Observation<(SceneHandle, f64, f64)>,
+    mouse_button_calls: Observation<(SceneHandle, u32, bool)>,
+    mouse_entered_calls: Observation<(SceneHandle, bool)>,
+    window_create_calls: Observation<DisplaySelector>,
+    wallpaper_calls: Observation<(DisplaySelector, WallpaperAssignment)>,
+    first_frame_callback: Callable<FirstFrameCallback>,
+    counters_enabled: Reading<bool>,
     /// Values the fake renderer reports. The real increments live in the
     /// renderer; this only lets a bridge test drive the reporting path.
-    surface_counters: Arc<ArcSwap<Vec<RendererSurfaceCounters>>>,
-    shared_counters: Arc<ArcSwap<Vec<u64>>>,
+    surface_counters: Reading<Vec<RendererSurfaceCounters>>,
+    shared_counters: Reading<Vec<u64>>,
+    control: Control<ControlledOperation>,
+    failures: Failures<ControlledOperation>,
 }
 
 #[cfg(test)]
-#[derive(Default)]
 struct PointerActivityObserver {
-    callback: Option<wallpaper_core::PointerActivityCallback>,
+    callback: Callable<wallpaper_core::PointerActivityCallback>,
     monitor_gap: bool,
 }
 
@@ -1154,11 +1118,10 @@ struct PointerActivityObserver {
 /// scene reads audio, which is what the audio-response tests are about; a test
 /// of the requirement itself starts from the real engine's `false`.
 #[cfg(test)]
-#[derive(Default)]
 struct FakeAudioRequirement {
     scenes_start_without_audio: bool,
     reported: std::collections::HashMap<SceneHandle, bool>,
-    callback: Option<wallpaper_core::AudioRequirementCallback>,
+    callback: Callable<wallpaper_core::AudioRequirementCallback>,
 }
 
 #[cfg(test)]
@@ -1175,59 +1138,195 @@ fn is_pointer_consumer(display: &DisplaySnapshotEntry) -> bool {
 }
 
 #[cfg(test)]
-#[derive(Default)]
 struct PointerConsumerObserver {
-    callback: Option<wallpaper_core::PointerConsumerCallback>,
+    callback: Callable<wallpaper_core::PointerConsumerCallback>,
     has_consumers: bool,
 }
 
 #[cfg(test)]
-pub struct ReconcileBlock {
-    blocked_rx: Receiver<()>,
-    release_tx: Sender<()>,
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum ControlledOperation {
+    Reconcile,
+    Capture,
+    Mouse,
+    Refresh,
+    Pause,
+    DisplayPause,
+    Suspend,
+    DisableCapture,
+    Close,
+    Framing,
+    PropertyPreview,
+    RenderScale,
 }
 
 #[cfg(test)]
-pub struct ReconcileDone {
-    done_rx: Receiver<()>,
-}
-
-#[cfg(test)]
-struct ReconcileBlockGate {
-    blocked_tx: Sender<()>,
-    release_rx: Receiver<()>,
-}
-
-/// The next scripted reading: each is handed out once, in order, and the last
-/// stays. `None` when nothing is scripted.
-#[cfg(test)]
-fn next_scripted<T: Clone>(script: &std::sync::Mutex<std::collections::VecDeque<T>>) -> Option<T> {
-    let mut script = script.lock().unwrap_or_else(|error| error.into_inner());
-    if script.len() > 1 {
-        script.pop_front()
-    } else {
-        script.front().cloned()
+fn engine_fault(fault: Fault) -> EngineError {
+    match fault.category {
+        FaultCategory::InvalidInput => EngineError::InvalidInput(fault.message),
+        FaultCategory::Platform => EngineError::Platform(fault.message),
+        FaultCategory::Render => EngineError::Render(fault.message),
     }
 }
 
 #[cfg(test)]
-fn load_log<T: Clone>(log: &ArcSwap<Vec<T>>) -> Vec<T> {
-    log.load_full().as_ref().clone()
+pub struct ReconcileBlock {
+    hold: Hold,
 }
 
 #[cfg(test)]
-fn push_log<T: Clone>(log: &ArcSwap<Vec<T>>, value: T) {
-    log.rcu(|current| {
-        let mut next = current.as_ref().clone();
-        next.push(value.clone());
-        next
-    });
+pub struct ReconcileDone {
+    completion: Completion,
 }
 
 #[cfg(test)]
-fn complete_reconcile_waiters(waiters: &SegQueue<Sender<()>>) {
-    while let Some(waiter) = waiters.pop() {
-        let _ = waiter.send(());
+struct FakeDirectAccess;
+
+#[cfg(test)]
+impl controlled_support::DirectAccess<DisplaySnapshotEntry, SceneHandle, SceneTemplate> for FakeDirectAccess {
+    fn handle(&self, row: &DisplaySnapshotEntry) -> Option<SceneHandle> {
+        row.handle
+    }
+
+    fn direct_mut<'a>(&self, row: &'a mut DisplaySnapshotEntry) -> Option<&'a mut SceneTemplate> {
+        match row.assignment.as_mut() {
+            Some(WallpaperAssignment::Direct(template)) => Some(template),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+impl controlled_support::ScenePort<SceneDesc, DisplaySnapshotEntry, SceneResult> for FakeEngineFacade {
+    fn rendered(&self) -> Vec<SceneDesc> {
+        self.rendered_scenes()
+    }
+
+    fn result(&self, index: usize, scene: &SceneDesc) -> SceneResult {
+        SceneResult::new(scene.display.display_id, SceneHandle::new(index as u64 + 1), 0)
+    }
+
+    fn retain_preview_memory(&self, before: &[SceneDesc], after: &[SceneDesc]) {
+        self.keep_previewed_documents(before, after);
+    }
+
+    fn replace_rendered(&self, scenes: Vec<SceneDesc>) {
+        self.rendered_scenes.store(Arc::new(scenes));
+    }
+
+    fn prepared_refresh(&self) -> Option<Vec<DisplaySnapshotEntry>> {
+        self.snapshot_after_refresh.load_full().as_ref().clone()
+    }
+
+    fn current_rows(&self) -> Vec<DisplaySnapshotEntry> {
+        self.snapshot.load_full().as_ref().clone()
+    }
+
+    fn publish_rows(&self, rows: Vec<DisplaySnapshotEntry>) {
+        // Refresh and close own the row transaction while the helper runs.
+        self.publish_snapshot_locked(|_| rows);
+    }
+
+    fn clear_preview_memory(&self) {
+        self.shown_property_documents.lock().unwrap_or_else(|error| error.into_inner()).clear();
+    }
+
+    fn remove_live_assignment(&self, row: &mut DisplaySnapshotEntry) {
+        row.handle = None;
+        row.accepts_pointer_input = false;
+        row.assignment = None;
+    }
+}
+
+#[cfg(test)]
+impl Default for FakeEngineFacade {
+    fn default() -> Self {
+        Self {
+            audio_capture_demands: Observation::new(),
+            media_calls: Observation::new(),
+            calls: Observation::new(),
+            rendered_scenes: Default::default(),
+            snapshot: Default::default(),
+            pointer_consumer: Default::default(),
+            user_shortcut: Callable::new(),
+            audio_requirement: Default::default(),
+            snapshot_after_refresh: Default::default(),
+            paused_calls: Observation::new(),
+            display_paused_calls: Observation::new(),
+            scene_pause_log: Observation::new(),
+            audio_volume_calls: Observation::new(),
+            audio_muted_calls: Observation::new(),
+            audio_response_calls: Observation::new(),
+            media_integration_calls: Observation::new(),
+            media_event_calls: Observation::new(),
+            media_artwork_calls: Observation::new(),
+            audio_capture_calls: Observation::new(),
+            audio_capture_suspend_calls: Observation::new(),
+            audio_capture_suspended: Reading::new(Default::default()),
+            scaling_mode_calls: Observation::new(),
+            scaling_factor_calls: Observation::new(),
+            framing_calls: Observation::new(),
+            preview_framing_calls: Observation::new(),
+            preview_property_calls: Observation::new(),
+            declined_property_previews: Observation::new(),
+            shown_property_documents: Default::default(),
+            fps_calls: Observation::new(),
+            render_scale_calls: Observation::new(),
+            scene_optimization_calls: Observation::new(),
+            scene_on_demand_calls: Observation::new(),
+            scene_video_plane_sampling_calls: Observation::new(),
+            scene_resolution_calls: Observation::new(),
+            scene_runtime_reports: Reading::new(Default::default()),
+            display_snapshot_script: Reading::new(Default::default()),
+            recover_calls: Observation::new(),
+            recover_result: Reading::new(Default::default()),
+            audio_spectrum: Reading::new(Default::default()),
+            mouse_poll_calls: Observation::new(),
+            mouse_polls_seen: Default::default(),
+            pointer_activity: Default::default(),
+            pointer_probe: Reading::new(Default::default()),
+            pointer_probe_count: Default::default(),
+            mouse_input: Reading::new(Default::default()),
+            mouse_samples: Observation::new(),
+            mouse_position_calls: Observation::new(),
+            mouse_button_calls: Observation::new(),
+            mouse_entered_calls: Observation::new(),
+            window_create_calls: Observation::new(),
+            wallpaper_calls: Observation::new(),
+            first_frame_callback: Callable::new(),
+            counters_enabled: Reading::new(Default::default()),
+            surface_counters: Reading::new(Default::default()),
+            shared_counters: Reading::new(Default::default()),
+            control: Control::new(),
+            failures: Failures::new(),
+            snapshot_mutation: Default::default(),
+            mouse_poll_count: Default::default(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Default for PointerActivityObserver {
+    fn default() -> Self {
+        Self { callback: Callable::new(), monitor_gap: false }
+    }
+}
+
+#[cfg(test)]
+impl Default for PointerConsumerObserver {
+    fn default() -> Self {
+        Self { callback: Callable::new(), has_consumers: false }
+    }
+}
+
+#[cfg(test)]
+impl Default for FakeAudioRequirement {
+    fn default() -> Self {
+        Self {
+            scenes_start_without_audio: false,
+            reported: Default::default(),
+            callback: Callable::new(),
+        }
     }
 }
 
@@ -1235,11 +1334,11 @@ fn complete_reconcile_waiters(waiters: &SegQueue<Sender<()>>) {
 impl ReconcileBlock {
     #[must_use]
     pub fn wait_until_blocked(&self, timeout: Duration) -> bool {
-        self.blocked_rx.recv_timeout(timeout).is_ok()
+        self.hold.wait_entered(timeout)
     }
 
     pub fn release(&self) {
-        let _ = self.release_tx.send(());
+        self.hold.release();
     }
 }
 
@@ -1247,7 +1346,7 @@ impl ReconcileBlock {
 impl ReconcileDone {
     #[must_use]
     pub fn wait(self, timeout: Duration) -> bool {
-        self.done_rx.recv_timeout(timeout).is_ok()
+        self.completion.wait(timeout)
     }
 }
 
@@ -1307,8 +1406,7 @@ impl FakeEngineFacade {
     /// which is the failure this exists to catch.
     #[must_use]
     pub fn report_user_shortcut(&self, handle: SceneHandle, property: &str, value: &str) -> bool {
-        let sink = self.user_shortcut.lock().unwrap_or_else(|error| error.into_inner());
-        let Some(callback) = sink.as_ref() else { return false };
+        let Some(callback) = self.user_shortcut.capture() else { return false };
         callback(handle, property.to_owned(), value.to_owned());
         true
     }
@@ -1329,18 +1427,18 @@ impl FakeEngineFacade {
         let changed = state.requires_audio(handle) != requires_audio;
         let _ = state.reported.insert(handle, requires_audio);
         if changed {
-            if let Some(callback) = &state.callback {
+            if let Some(callback) = state.callback.capture() {
                 callback(handle, requires_audio);
             }
         }
     }
 
     pub fn media_calls(&self) -> Vec<(SceneHandle, bool, wallpaper_core::media::MediaPollResult)> {
-        load_log(&self.media_calls)
+        self.media_calls.snapshot()
     }
     #[must_use]
     pub fn calls(&self) -> Vec<Vec<SceneDesc>> {
-        load_log(&self.calls)
+        self.calls.snapshot()
     }
 
     #[must_use]
@@ -1350,12 +1448,12 @@ impl FakeEngineFacade {
 
     #[must_use]
     pub fn audio_capture_demands(&self) -> Vec<AudioCaptureDemand> {
-        load_log(&self.audio_capture_demands)
+        self.audio_capture_demands.snapshot()
     }
 
     #[must_use]
     pub fn audio_capture_suspended(&self) -> bool {
-        **self.audio_capture_suspended.load()
+        self.audio_capture_suspended.read()
     }
 
     pub fn set_snapshot(&self, snapshot: Vec<DisplaySnapshotEntry>) {
@@ -1363,6 +1461,11 @@ impl FakeEngineFacade {
     }
 
     fn publish_snapshot(&self, update: impl FnOnce(&[DisplaySnapshotEntry]) -> Vec<DisplaySnapshotEntry>) {
+        let _mutation = self.snapshot_mutation.lock().unwrap_or_else(|error| error.into_inner());
+        self.publish_snapshot_locked(update);
+    }
+
+    fn publish_snapshot_locked(&self, update: impl FnOnce(&[DisplaySnapshotEntry]) -> Vec<DisplaySnapshotEntry>) {
         let mut observer = self.pointer_consumer.lock().unwrap_or_else(|error| error.into_inner());
         let previous = self.snapshot.load_full();
         let snapshot = Arc::new(update(previous.as_ref()));
@@ -1375,7 +1478,7 @@ impl FakeEngineFacade {
         self.snapshot.store(snapshot);
         if observer.has_consumers != has_consumers {
             observer.has_consumers = has_consumers;
-            if let Some(callback) = &observer.callback {
+            if let Some(callback) = observer.callback.capture() {
                 callback(has_consumers);
             }
         }
@@ -1394,21 +1497,21 @@ impl FakeEngineFacade {
     pub fn set_pointer_monitor_gap(&self, gap: bool) {
         let mut observer = self.pointer_activity.lock().unwrap_or_else(|error| error.into_inner());
         observer.monitor_gap = gap;
-        if let Some(callback) = &observer.callback {
+        if let Some(callback) = observer.callback.capture() {
             callback(wallpaper_core::PointerActivity::MonitorGap(gap));
         }
     }
 
     fn report_pointer_activity(&self, activity: wallpaper_core::PointerActivity) {
         let observer = self.pointer_activity.lock().unwrap_or_else(|error| error.into_inner());
-        if let Some(callback) = &observer.callback {
+        if let Some(callback) = observer.callback.capture() {
             callback(activity);
         }
     }
 
     /// What the next cursor probe reads.
     pub fn set_pointer_probe(&self, probe: wallpaper_core::PointerProbe) {
-        self.pointer_probe.store(Arc::new(probe));
+        self.pointer_probe.set(probe);
     }
 
     #[must_use]
@@ -1447,22 +1550,23 @@ impl FakeEngineFacade {
     }
 
     pub fn set_snapshot_after_refresh(&self, snapshot: Vec<DisplaySnapshotEntry>) {
+        let _mutation = self.snapshot_mutation.lock().unwrap_or_else(|error| error.into_inner());
         self.snapshot_after_refresh.store(Arc::new(Some(snapshot)));
     }
 
     #[must_use]
     pub fn paused_calls(&self) -> Vec<bool> {
-        load_log(&self.paused_calls)
+        self.paused_calls.snapshot()
     }
 
     #[must_use]
     pub fn display_paused_calls(&self) -> Vec<(u32, bool)> {
-        load_log(&self.display_paused_calls)
+        self.display_paused_calls.snapshot()
     }
 
     #[must_use]
     pub fn scene_pause_log(&self) -> Vec<(u32, bool)> {
-        load_log(&self.scene_pause_log)
+        self.scene_pause_log.snapshot()
     }
 
     pub fn set_renderer_counters(
@@ -1470,59 +1574,59 @@ impl FakeEngineFacade {
         surfaces: Vec<RendererSurfaceCounters>,
         shared: Vec<u64>,
     ) {
-        self.surface_counters.store(Arc::new(surfaces));
-        self.shared_counters.store(Arc::new(shared));
+        self.surface_counters.set(surfaces);
+        self.shared_counters.set(shared);
     }
 
     #[must_use]
     pub fn renderer_counters_enabled(&self) -> bool {
-        **self.counters_enabled.load()
+        self.counters_enabled.read()
     }
 
     #[must_use]
     pub fn audio_volume_calls(&self) -> Vec<(SceneHandle, f32)> {
-        load_log(&self.audio_volume_calls)
+        self.audio_volume_calls.snapshot()
     }
 
     #[must_use]
     pub fn audio_muted_calls(&self) -> Vec<(SceneHandle, bool)> {
-        load_log(&self.audio_muted_calls)
+        self.audio_muted_calls.snapshot()
     }
 
     #[must_use]
     pub fn audio_response_calls(&self) -> Vec<(SceneHandle, bool)> {
-        load_log(&self.audio_response_calls)
+        self.audio_response_calls.snapshot()
     }
 
     #[must_use]
     pub fn media_integration_calls(&self) -> Vec<(SceneHandle, bool)> {
-        load_log(&self.media_integration_calls)
+        self.media_integration_calls.snapshot()
     }
 
     #[must_use]
     pub fn media_event_calls(&self) -> Vec<(SceneHandle, String)> {
-        load_log(&self.media_event_calls)
+        self.media_event_calls.snapshot()
     }
 
     #[must_use]
     pub fn media_artwork_calls(&self) -> Vec<(SceneHandle, u32, u32, usize)> {
-        load_log(&self.media_artwork_calls)
+        self.media_artwork_calls.snapshot()
     }
 
     #[must_use]
     pub fn audio_capture_calls(&self) -> Vec<(SceneHandle, bool)> {
-        load_log(&self.audio_capture_calls)
+        self.audio_capture_calls.snapshot()
     }
 
     #[must_use]
     pub fn audio_capture_suspend_calls(&self) -> Vec<bool> {
-        load_log(&self.audio_capture_suspend_calls)
+        self.audio_capture_suspend_calls.snapshot()
     }
 
     /// Every scene-optimization change the bridge pushed, in order.
     #[must_use]
     pub fn scene_optimization_calls(&self) -> Vec<bool> {
-        load_log(&self.scene_optimization_calls)
+        self.scene_optimization_calls.snapshot()
     }
 
     /// Every scene on-demand change the bridge pushed, in order. A forward
@@ -1530,78 +1634,72 @@ impl FakeEngineFacade {
     /// missing facade delegation a test failure rather than a silent no-op.
     #[must_use]
     pub fn scene_on_demand_calls(&self) -> Vec<bool> {
-        load_log(&self.scene_on_demand_calls)
+        self.scene_on_demand_calls.snapshot()
     }
 
     /// Every direct-plane-sampling change the bridge pushed, in order.
     #[must_use]
     pub fn scene_video_plane_sampling_calls(&self) -> Vec<bool> {
-        load_log(&self.scene_video_plane_sampling_calls)
+        self.scene_video_plane_sampling_calls.snapshot()
     }
 
     /// Every 2D scene resolution the bridge pushed, in order.
     #[must_use]
     pub fn scene_resolution_calls(&self) -> Vec<SceneResolution> {
-        load_log(&self.scene_resolution_calls)
+        self.scene_resolution_calls.snapshot()
     }
 
     /// What the next [`EngineFacade::scene_runtime_reports`] read returns.
     /// Left empty the fake reports nothing observed, so a test has to opt in
     /// to a live state rather than getting one by default.
     pub fn set_scene_runtime_reports(&self, reports: Vec<SceneRuntimeReport>) {
-        self.scene_runtime_reports.store(Arc::new(reports));
+        self.scene_runtime_reports.set(reports);
     }
 
     /// Makes the next reads of the scene reports return `readings` in order,
     /// one per read, and then the last of them for every read after. The
     /// stored value is used again only once the script is empty.
     pub fn script_scene_runtime_reports(&self, readings: Vec<Vec<SceneRuntimeReport>>) {
-        *self
-            .scene_runtime_report_script
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = readings.into();
+        self.scene_runtime_reports.script(readings);
     }
 
     /// As [`Self::script_scene_runtime_reports`], for the display snapshot.
     pub fn script_display_snapshots(&self, readings: Vec<Vec<DisplaySnapshotEntry>>) {
-        *self
-            .display_snapshot_script
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = readings.into();
+        self.display_snapshot_script.script(readings.into_iter().map(Some).collect());
     }
 
     /// Every surface repair the engine was asked for, in order.
     #[must_use]
     pub fn recover_calls(&self) -> Vec<(u32, RecoveryReason)> {
-        load_log(&self.recover_calls)
+        self.recover_calls.snapshot()
     }
 
     /// What every later [`EngineFacade::recover_surface`] call answers. Left
     /// unset the fake reports a repair by a surface reconfigure.
     pub fn set_recover_result(&self, result: Result<RecoveryOutcome, String>) {
-        self.recover_result.store(Arc::new(Some(result)));
+        self.recover_result.set(Some(result));
     }
 
     /// Sets what the next spectrum read returns. `None` is "no analysis yet".
     pub fn set_audio_spectrum(&self, spectrum: Option<AudioSpectrum128>) {
-        self.audio_spectrum.store(Arc::new(spectrum));
+        self.audio_spectrum.set(spectrum);
     }
 
     #[must_use]
     pub fn scaling_mode_calls(&self) -> Vec<(SceneHandle, ScalingMode)> {
-        load_log(&self.scaling_mode_calls)
+        self.scaling_mode_calls.snapshot()
     }
 
     #[must_use]
     pub fn scaling_factor_calls(&self) -> Vec<(SceneHandle, f64)> {
-        load_log(&self.scaling_factor_calls)
+        self.scaling_factor_calls.snapshot()
     }
 
     /// Every position the fake was asked to apply live, in order. A call that
     /// was refused is in here too: it is what the bridge asked for.
     #[must_use]
     pub fn framing_calls(&self) -> Vec<(SceneHandle, SceneFraming)> {
-        load_log(&self.framing_calls)
+        self.framing_calls.snapshot()
     }
 
     /// Every position the fake was asked to show for a drag in progress, in
@@ -1609,7 +1707,7 @@ impl FakeEngineFacade {
     /// is a call the bridge makes, not a change of the scene's position.
     #[must_use]
     pub fn preview_framing_calls(&self) -> Vec<(SceneHandle, SceneFraming)> {
-        load_log(&self.preview_framing_calls)
+        self.preview_framing_calls.snapshot()
     }
 
     /// Every property document the fake renderers were told to show while an
@@ -1621,7 +1719,7 @@ impl FakeEngineFacade {
     /// document moves nothing the fake stores.
     #[must_use]
     pub fn preview_property_calls(&self) -> Vec<(SceneHandle, String)> {
-        load_log(&self.preview_property_calls)
+        self.preview_property_calls.snapshot()
     }
 
     /// Every property preview the fake engine declined because the scene on the
@@ -1629,22 +1727,22 @@ impl FakeEngineFacade {
     /// order, with the project file it was made for.
     #[must_use]
     pub fn declined_property_previews(&self) -> Vec<(SceneHandle, String)> {
-        load_log(&self.declined_property_previews)
+        self.declined_property_previews.snapshot()
     }
 
     #[must_use]
     pub fn fps_calls(&self) -> Vec<(SceneHandle, u32)> {
-        load_log(&self.fps_calls)
+        self.fps_calls.snapshot()
     }
 
     #[must_use]
     pub fn render_scale_calls(&self) -> Vec<(SceneHandle, f32)> {
-        load_log(&self.render_scale_calls)
+        self.render_scale_calls.snapshot()
     }
 
     #[must_use]
     pub fn mouse_poll_calls(&self) -> Vec<()> {
-        load_log(&self.mouse_poll_calls)
+        self.mouse_poll_calls.snapshot()
     }
 
     /// Waits for an engine poll the caller has not seen yet. A sample armed by
@@ -1655,7 +1753,7 @@ impl FakeEngineFacade {
         let deadline = std::time::Instant::now() + timeout;
         let seen = self.mouse_polls_seen.load(std::sync::atomic::Ordering::Acquire);
         loop {
-            let count = self.mouse_poll_calls.load().len();
+            let count = self.mouse_poll_count.load(std::sync::atomic::Ordering::Acquire);
             if count > seen {
                 self.mouse_polls_seen.store(count, std::sync::atomic::Ordering::Release);
                 return true;
@@ -1668,196 +1766,170 @@ impl FakeEngineFacade {
     }
 
     pub fn set_mouse_input(&self, x: f64, y: f64) {
-        self.mouse_input.store(Arc::new((x, y)));
+        self.mouse_input.set((x, y));
     }
 
     pub fn mouse_samples(&self) -> Vec<(f64, f64)> {
-        load_log(&self.mouse_samples)
+        self.mouse_samples.snapshot()
     }
 
     pub fn fail_next_pause(&self) {
-        self.pause_failure
-            .store(Arc::new(Some("pause failed".into())));
+        self.failures.set(ControlledOperation::Pause, FailurePolicy::Next(Fault {
+            category: FaultCategory::Platform,
+            message: "pause failed".into(),
+        }));
     }
 
     pub fn fail_next_display_pause(&self) {
-        self.display_pause_failure
-            .store(Arc::new(Some("display pause failed".into())));
+        self.failures.set(ControlledOperation::DisplayPause, FailurePolicy::Next(Fault {
+            category: FaultCategory::Platform,
+            message: "display pause failed".into(),
+        }));
     }
 
     pub fn fail_next_suspend(&self) {
-        self.suspend_failure
-            .store(Arc::new(Some("audio suspend failed".into())));
+        self.failures.set(ControlledOperation::Suspend, FailurePolicy::Next(Fault {
+            category: FaultCategory::Platform,
+            message: "audio suspend failed".into(),
+        }));
     }
 
     pub fn fail_next_disable_capture(&self) {
-        self.disable_capture_failure
-            .store(Arc::new(Some("audio disable failed".into())));
+        self.failures.set(ControlledOperation::DisableCapture, FailurePolicy::Next(Fault {
+            category: FaultCategory::Platform,
+            message: "audio disable failed".into(),
+        }));
     }
 
     /// The next live position change is refused by the renderer and leaves the
     /// running scene where it was.
     pub fn fail_next_framing(&self) {
-        self.framing_failure
-            .store(Arc::new(Some("framing failed".into())));
+        self.failures.set(ControlledOperation::Framing, FailurePolicy::Next(Fault {
+            category: FaultCategory::Platform,
+            message: "framing failed".into(),
+        }));
     }
 
     /// The next live render-scale change is refused by the renderer.
     pub fn fail_next_render_scale(&self) {
-        self.render_scale_failure
-            .store(Arc::new(Some("render scale failed".into())));
+        self.failures.set(ControlledOperation::RenderScale, FailurePolicy::Next(Fault {
+            category: FaultCategory::Platform,
+            message: "render scale failed".into(),
+        }));
     }
 
     /// The next property document shown on a scene is refused by the
     /// renderer, which leaves the scene as it was.
     pub fn fail_next_property_preview(&self) {
-        self.property_preview_failure
-            .store(Arc::new(Some("property preview failed".into())));
+        self.failures.set(ControlledOperation::PropertyPreview, FailurePolicy::Next(Fault {
+            category: FaultCategory::Platform,
+            message: "property preview failed".into(),
+        }));
     }
 
     pub fn fail_next_close(&self) {
-        self.close_failure
-            .store(Arc::new(Some("close failed".into())));
+        self.failures.set(ControlledOperation::Close, FailurePolicy::Next(Fault {
+            category: FaultCategory::Platform,
+            message: "close failed".into(),
+        }));
     }
 
     pub fn fail_next_refresh(&self) {
-        self.refresh_failure
-            .store(Arc::new(Some("refresh failed after partial commit".into())));
+        self.failures.set(ControlledOperation::Refresh, FailurePolicy::Next(Fault {
+            category: FaultCategory::Platform,
+            message: "refresh failed after partial commit".into(),
+        }));
     }
 
     #[must_use]
     pub fn mouse_position_calls(&self) -> Vec<(SceneHandle, f64, f64)> {
-        load_log(&self.mouse_position_calls)
+        self.mouse_position_calls.snapshot()
     }
 
     #[must_use]
     pub fn mouse_button_calls(&self) -> Vec<(SceneHandle, u32, bool)> {
-        load_log(&self.mouse_button_calls)
+        self.mouse_button_calls.snapshot()
     }
 
     #[must_use]
     pub fn mouse_entered_calls(&self) -> Vec<(SceneHandle, bool)> {
-        load_log(&self.mouse_entered_calls)
+        self.mouse_entered_calls.snapshot()
     }
 
     #[must_use]
     pub fn window_create_calls(&self) -> Vec<DisplaySelector> {
-        load_log(&self.window_create_calls)
+        self.window_create_calls.snapshot()
     }
 
     #[must_use]
     pub fn wallpaper_calls(&self) -> Vec<(DisplaySelector, WallpaperAssignment)> {
-        load_log(&self.wallpaper_calls)
+        self.wallpaper_calls.snapshot()
     }
 
     pub fn fail_reconcile_with(&self, message: impl Into<String>) {
-        self.reconcile_failure.store(Arc::new(Some(message.into())));
+        self.failures.set(ControlledOperation::Reconcile, FailurePolicy::Persistent(Fault {
+            category: FaultCategory::Render,
+            message: message.into(),
+        }));
     }
 
     pub fn clear_reconcile_failure(&self) {
-        self.reconcile_failure.store(Arc::new(None));
+        self.failures.clear(ControlledOperation::Reconcile);
     }
 
     pub fn fail_audio_capture_with(&self, message: Option<String>) {
-        self.audio_capture_failure.store(Arc::new(message));
+        match message {
+            Some(message) => self.failures.set(ControlledOperation::Capture, FailurePolicy::Persistent(Fault {
+                category: FaultCategory::Platform,
+                message,
+            })),
+            None => self.failures.clear(ControlledOperation::Capture),
+        }
     }
 
     #[must_use]
     pub fn block_next_reconcile(&self) -> ReconcileBlock {
-        let (blocked_tx, blocked_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let gate = ReconcileBlockGate {
-            blocked_tx,
-            release_rx,
-        };
-        self.reconcile_block.push(gate);
-
-        ReconcileBlock {
-            blocked_rx,
-            release_tx,
-        }
+        ReconcileBlock { hold: self.control.hold_next(ControlledOperation::Reconcile) }
     }
 
     #[must_use]
     pub fn block_next_audio_capture(&self) -> ReconcileBlock {
-        let (blocked_tx, blocked_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let gate = ReconcileBlockGate {
-            blocked_tx,
-            release_rx,
-        };
-        self.audio_capture_block.push(gate);
-
-        ReconcileBlock {
-            blocked_rx,
-            release_tx,
-        }
+        ReconcileBlock { hold: self.control.hold_next(ControlledOperation::Capture) }
     }
 
     #[must_use]
     pub fn block_next_mouse_poll(&self) -> ReconcileBlock {
-        let (blocked_tx, blocked_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let gate = ReconcileBlockGate {
-            blocked_tx,
-            release_rx,
-        };
-        self.mouse_poll_block.push(gate);
-
-        ReconcileBlock {
-            blocked_rx,
-            release_tx,
-        }
+        ReconcileBlock { hold: self.control.hold_next(ControlledOperation::Mouse) }
     }
 
     #[must_use]
     pub fn wait_for_next_reconcile(&self) -> ReconcileDone {
-        let (done_tx, done_rx) = mpsc::channel();
-        self.reconcile_done.push(done_tx);
-
-        ReconcileDone { done_rx }
+        ReconcileDone {
+            completion: self.control.observe_next_completion(ControlledOperation::Reconcile),
+        }
     }
 
     fn update_direct_assignment(&self, handle: SceneHandle, update: impl Fn(&mut SceneTemplate)) {
-        self.snapshot.rcu(|current| {
-            let mut next = current.as_ref().clone();
-            if let Some(WallpaperAssignment::Direct(template)) = next
-                .iter_mut()
-                .find(|entry| entry.handle == Some(handle))
-                .and_then(|entry| entry.assignment.as_mut())
-            {
-                update(template);
-            }
-            next
-        });
+        let _mutation = self.snapshot_mutation.lock().unwrap_or_else(|error| error.into_inner());
+        let mut current = self.snapshot.load_full().as_ref().clone();
+        let mut prepared = self.snapshot_after_refresh.load_full().as_ref().clone();
+        controlled_support::update_direct(
+            &mut current, prepared.as_mut().map(Vec::as_mut_slice), handle, &FakeDirectAccess, update,
+        );
+        self.snapshot.store(Arc::new(current));
+        self.snapshot_after_refresh.store(Arc::new(prepared));
     }
 
-    fn update_direct_assignment_after_refresh(
-        &self,
-        handle: SceneHandle,
-        update: impl Fn(&mut SceneTemplate),
-    ) {
-        self.snapshot_after_refresh.rcu(|current| {
-            let Some(current) = current.as_ref() else {
-                return None;
-            };
-            let mut next = current.clone();
-            if let Some(WallpaperAssignment::Direct(template)) = next
-                .iter_mut()
-                .find(|entry| entry.handle == Some(handle))
-                .and_then(|entry| entry.assignment.as_mut())
-            {
-                update(template);
-            }
-            Some(next)
-        });
-    }
 
     pub fn trigger_first_frame(&self, handle: SceneHandle) {
-        let callback = self.first_frame_callback.load_full().as_ref().clone();
-        if let Some(callback) = callback {
+        if let Some(callback) = self.first_frame_callback.capture() {
             callback(handle);
         }
+    }
+
+    /// Retains the currently installed callable for an intentional late arrival.
+    pub fn capture_first_frame_callback(&self) -> Option<FirstFrameCallback> {
+        self.first_frame_callback.capture()
     }
 }
 
@@ -1865,92 +1937,46 @@ impl FakeEngineFacade {
 impl EngineFacade for FakeEngineFacade {
     fn update_media(&self, handle: SceneHandle, enabled: bool, state: wallpaper_core::media::MediaPollResult) -> EngineFuture<()> {
         let fake = self.clone();
-        async move { push_log(&fake.media_calls, (handle, enabled, state)); Ok(()) }.boxed()
+        async move { fake.media_calls.record((handle, enabled, state)); Ok(()) }.boxed()
     }
     fn reconcile_scenes(&self, scenes: Vec<SceneDesc>) -> EngineFuture<Vec<SceneResult>> {
         let fake = self.clone();
         async move {
-            push_log(&fake.calls, scenes.clone());
-            if let Some(block) = fake.reconcile_block.pop() {
-                let _ = block.blocked_tx.send(());
-                let _ = block.release_rx.recv();
-            }
-            if let Some(message) = fake.reconcile_failure.load_full().as_ref().clone() {
-                complete_reconcile_waiters(&fake.reconcile_done);
-                return Err(EngineError::Render(message));
-            }
-            let results = scenes
-                .iter()
-                .enumerate()
-                .map(|(index, scene)| {
-                    SceneResult::new(
-                        scene.display.display_id,
-                        SceneHandle::new(index as u64 + 1),
-                        0,
-                    )
-                })
-                .collect();
-            let before = fake.rendered_scenes.load_full();
-            fake.keep_previewed_documents(&before, &scenes);
-            fake.rendered_scenes.store(Arc::new(scenes));
-            complete_reconcile_waiters(&fake.reconcile_done);
-            Ok(results)
-        }
-        .boxed()
+            controlled_support::reconcile(
+                scenes, &fake.calls, &fake.control, ControlledOperation::Reconcile,
+                &fake.failures, ControlledOperation::Reconcile, &fake,
+            ).await.map_err(engine_fault)
+        }.boxed()
     }
 
     fn refresh_displays(&self) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            let refresh_snapshot = fake.snapshot_after_refresh.load_full().as_ref().clone();
-            if let Some(snapshot) = refresh_snapshot {
-                fake.set_snapshot(snapshot);
-            }
-            if let Some(message) = fake.refresh_failure.swap(Arc::new(None)).as_ref() {
-                return Err(EngineError::Platform(message.clone()));
-            }
-            Ok(())
-        }
-        .boxed()
+            let _mutation = fake.snapshot_mutation.lock().unwrap_or_else(|error| error.into_inner());
+            controlled_support::refresh(&fake.failures, ControlledOperation::Refresh, &fake)
+                .map_err(engine_fault)
+        }.boxed()
     }
 
     fn display_snapshot(&self) -> Vec<DisplaySnapshotEntry> {
-        if let Some(scripted) = next_scripted(&self.display_snapshot_script) {
-            return scripted;
-        }
-        self.snapshot.load_full().as_ref().clone()
+        self.display_snapshot_script.read().unwrap_or_else(|| self.snapshot.load_full().as_ref().clone())
     }
 
     fn close_all_scenes(&self) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            if let Some(message) = fake.close_failure.swap(Arc::new(None)).as_ref() {
-                return Err(EngineError::Platform(message.clone()));
-            }
-            fake.shown_property_documents
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .clear();
-            fake.publish_snapshot(|current| {
-                let mut next = current.to_vec();
-                for display in &mut next {
-                    display.handle = None;
-                    display.accepts_pointer_input = false;
-                    display.assignment = None;
-                }
-                next
-            });
-            Ok(())
-        }
-        .boxed()
+            let _mutation = fake.snapshot_mutation.lock().unwrap_or_else(|error| error.into_inner());
+            controlled_support::close(&fake.failures, ControlledOperation::Close, &fake)
+                .map_err(engine_fault)
+        }.boxed()
     }
 
     fn set_all_paused(&self, paused: bool, suspended_displays: Vec<u32>) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.paused_calls, paused);
-            if let Some(message) = fake.pause_failure.swap(Arc::new(None)).as_ref() {
-                return Err(EngineError::Platform(message.clone()));
+            fake.paused_calls.record(paused);
+            if let Err(fault) = fake.failures.check(ControlledOperation::Pause) {
+                return Err(engine_fault(fault));
             }
             let target = |display_id: u32| paused || suspended_displays.contains(&display_id);
             fake.rendered_scenes.rcu(|scenes| {
@@ -1961,7 +1987,7 @@ impl EngineFacade for FakeEngineFacade {
                 scenes
             });
             for scene in fake.rendered_scenes().iter() {
-                push_log(&fake.scene_pause_log, (scene.display.display_id, scene.paused));
+                fake.scene_pause_log.record((scene.display.display_id, scene.paused));
             }
             fake.publish_display_pause(|display_id| Some(target(display_id)));
             Ok(())
@@ -1972,9 +1998,9 @@ impl EngineFacade for FakeEngineFacade {
     fn set_display_paused(&self, display_id: u32, paused: bool) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.display_paused_calls, (display_id, paused));
-            if let Some(message) = fake.display_pause_failure.swap(Arc::new(None)).as_ref() {
-                return Err(EngineError::Platform(message.clone()));
+            fake.display_paused_calls.record((display_id, paused));
+            if let Err(fault) = fake.failures.check(ControlledOperation::DisplayPause) {
+                return Err(engine_fault(fault));
             }
             fake.rendered_scenes.rcu(|scenes| {
                 let mut scenes = scenes.as_ref().clone();
@@ -1986,7 +2012,7 @@ impl EngineFacade for FakeEngineFacade {
                 scenes
             });
             if fake.rendered_scenes().iter().any(|scene| scene.display.display_id == display_id) {
-                push_log(&fake.scene_pause_log, (display_id, paused));
+                fake.scene_pause_log.record((display_id, paused));
             }
             fake.publish_display_pause(|id| (id == display_id).then_some(paused));
             Ok(())
@@ -1995,7 +2021,7 @@ impl EngineFacade for FakeEngineFacade {
     }
 
     fn set_renderer_counters_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        self.counters_enabled.store(Arc::new(enabled));
+        self.counters_enabled.set(enabled);
         Ok(())
     }
 
@@ -2003,8 +2029,8 @@ impl EngineFacade for FakeEngineFacade {
         let fake = self.clone();
         async move {
             Ok((
-                fake.surface_counters.load().as_ref().clone(),
-                fake.shared_counters.load().as_ref().clone(),
+                fake.surface_counters.read(),
+                fake.shared_counters.read(),
             ))
         }
         .boxed()
@@ -2013,11 +2039,8 @@ impl EngineFacade for FakeEngineFacade {
     fn set_audio_volume(&self, handle: SceneHandle, volume: AudioVolume) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.audio_volume_calls, (handle, f32::from(volume)));
+            fake.audio_volume_calls.record((handle, f32::from(volume)));
             fake.update_direct_assignment(handle, |template| {
-                template.audio_volume = volume;
-            });
-            fake.update_direct_assignment_after_refresh(handle, |template| {
                 template.audio_volume = volume;
             });
             Ok(())
@@ -2028,11 +2051,8 @@ impl EngineFacade for FakeEngineFacade {
     fn set_audio_muted(&self, handle: SceneHandle, muted: bool) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.audio_muted_calls, (handle, muted));
+            fake.audio_muted_calls.record((handle, muted));
             fake.update_direct_assignment(handle, |template| {
-                template.audio_muted = muted;
-            });
-            fake.update_direct_assignment_after_refresh(handle, |template| {
                 template.audio_muted = muted;
             });
             Ok(())
@@ -2043,11 +2063,8 @@ impl EngineFacade for FakeEngineFacade {
     fn set_audio_response_enabled(&self, handle: SceneHandle, enabled: bool) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.audio_response_calls, (handle, enabled));
+            fake.audio_response_calls.record((handle, enabled));
             fake.update_direct_assignment(handle, |template| {
-                template.audio_response_enabled = enabled;
-            });
-            fake.update_direct_assignment_after_refresh(handle, |template| {
                 template.audio_response_enabled = enabled;
             });
             Ok(())
@@ -2058,11 +2075,8 @@ impl EngineFacade for FakeEngineFacade {
     fn set_media_integration_enabled(&self, handle: SceneHandle, enabled: bool) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.media_integration_calls, (handle, enabled));
+            fake.media_integration_calls.record((handle, enabled));
             fake.update_direct_assignment(handle, |template| {
-                template.media_integration_enabled = enabled;
-            });
-            fake.update_direct_assignment_after_refresh(handle, |template| {
                 template.media_integration_enabled = enabled;
             });
             Ok(())
@@ -2073,7 +2087,7 @@ impl EngineFacade for FakeEngineFacade {
     fn submit_media_event_json(&self, handle: SceneHandle, json: String) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.media_event_calls, (handle, json));
+            fake.media_event_calls.record((handle, json));
             Ok(())
         }
         .boxed()
@@ -2088,10 +2102,7 @@ impl EngineFacade for FakeEngineFacade {
     ) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(
-                &fake.media_artwork_calls,
-                (handle, width, height, rgba.len()),
-            );
+            fake.media_artwork_calls.record((handle, width, height, rgba.len()));
             Ok(())
         }
         .boxed()
@@ -2100,22 +2111,19 @@ impl EngineFacade for FakeEngineFacade {
     fn set_audio_capture_enabled(&self, handle: SceneHandle, enabled: bool) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            if let Some(block) = fake.audio_capture_block.pop() {
-                let _ = block.blocked_tx.send(());
-                let _ = block.release_rx.recv();
-            }
-            if !enabled {
-                if let Some(message) = fake.disable_capture_failure.swap(Arc::new(None)).as_ref() {
-                    return Err(EngineError::Platform(message.clone()));
+            fake.control.enter(ControlledOperation::Capture).wait().await;
+            let result = (|| {
+                if !enabled {
+                    fake.failures.check(ControlledOperation::DisableCapture).map_err(engine_fault)?;
                 }
-            }
-            if enabled {
-                if let Some(message) = fake.audio_capture_failure.load_full().as_ref() {
-                    return Err(EngineError::Platform(message.clone()));
+                if enabled {
+                    fake.failures.check(ControlledOperation::Capture).map_err(engine_fault)?;
                 }
-            }
-            push_log(&fake.audio_capture_calls, (handle, enabled));
-            Ok(())
+                fake.audio_capture_calls.record((handle, enabled));
+                Ok(())
+            })();
+            fake.control.finish(ControlledOperation::Capture);
+            result
         }
         .boxed()
     }
@@ -2124,17 +2132,17 @@ impl EngineFacade for FakeEngineFacade {
         let fake = self.clone();
         async move {
             let suspended = demand.suspended;
-            push_log(&fake.audio_capture_demands, demand);
-            push_log(&fake.audio_capture_suspend_calls, suspended);
-            if let Some(message) = fake.suspend_failure.swap(Arc::new(None)).as_ref() {
-                return Err(EngineError::Platform(message.clone()));
+            fake.audio_capture_demands.record(demand);
+            fake.audio_capture_suspend_calls.record(suspended);
+            if let Err(fault) = fake.failures.check(ControlledOperation::Suspend) {
+                return Err(engine_fault(fault));
             }
             if !suspended {
-                if let Some(message) = fake.audio_capture_failure.load_full().as_ref() {
-                    return Err(EngineError::Platform(message.clone()));
+                if let Err(fault) = fake.failures.check(ControlledOperation::Capture) {
+                    return Err(engine_fault(fault));
                 }
             }
-            fake.audio_capture_suspended.store(Arc::new(suspended));
+            fake.audio_capture_suspended.set(suspended);
             Ok(())
         }
         .boxed()
@@ -2143,11 +2151,8 @@ impl EngineFacade for FakeEngineFacade {
     fn set_scaling_mode(&self, handle: SceneHandle, mode: ScalingMode) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.scaling_mode_calls, (handle, mode));
+            fake.scaling_mode_calls.record((handle, mode));
             fake.update_direct_assignment(handle, |template| {
-                template.scaling_mode = mode;
-            });
-            fake.update_direct_assignment_after_refresh(handle, |template| {
                 template.scaling_mode = mode;
             });
             Ok(())
@@ -2158,11 +2163,8 @@ impl EngineFacade for FakeEngineFacade {
     fn set_scaling_factor(&self, handle: SceneHandle, factor: f64) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.scaling_factor_calls, (handle, factor));
+            fake.scaling_factor_calls.record((handle, factor));
             fake.update_direct_assignment(handle, |template| {
-                template.scaling_factor = factor;
-            });
-            fake.update_direct_assignment_after_refresh(handle, |template| {
                 template.scaling_factor = factor;
             });
             Ok(())
@@ -2173,14 +2175,11 @@ impl EngineFacade for FakeEngineFacade {
     fn set_framing(&self, handle: SceneHandle, framing: SceneFraming) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.framing_calls, (handle, framing));
-            if let Some(message) = fake.framing_failure.swap(Arc::new(None)).as_ref() {
-                return Err(EngineError::Platform(message.clone()));
+            fake.framing_calls.record((handle, framing));
+            if let Err(fault) = fake.failures.check(ControlledOperation::Framing) {
+                return Err(engine_fault(fault));
             }
             fake.update_direct_assignment(handle, |template| {
-                template.framing = framing;
-            });
-            fake.update_direct_assignment_after_refresh(handle, |template| {
                 template.framing = framing;
             });
             Ok(())
@@ -2191,7 +2190,7 @@ impl EngineFacade for FakeEngineFacade {
     fn preview_framing(&self, handle: SceneHandle, framing: SceneFraming) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.preview_framing_calls, (handle, framing));
+            fake.preview_framing_calls.record((handle, framing));
             Ok(())
         }
         .boxed()
@@ -2211,7 +2210,7 @@ impl EngineFacade for FakeEngineFacade {
                 EngineError::InvalidInput(format!("unknown scene handle {}", handle.raw()))
             })?;
             if drawn.scene_path != scene_path {
-                push_log(&fake.declined_property_previews, (handle, scene_path));
+                fake.declined_property_previews.record((handle, scene_path));
                 return Ok(PropertyPreview::OtherWallpaper);
             }
             let display_id = drawn.display.display_id;
@@ -2224,16 +2223,16 @@ impl EngineFacade for FakeEngineFacade {
             if already_shown {
                 return Ok(PropertyPreview::Shown);
             }
-            push_log(&fake.preview_property_calls, (handle, flat_json.clone()));
+            fake.preview_property_calls.record((handle, flat_json.clone()));
             let mut shown = fake
                 .shown_property_documents
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
-            if let Some(message) = fake.property_preview_failure.swap(Arc::new(None)).as_ref() {
+            if let Err(fault) = fake.failures.check(ControlledOperation::PropertyPreview) {
                 // A refused update leaves the renderer's record empty, so
                 // asking again sends the document.
                 shown.remove(&display_id);
-                return Err(EngineError::Platform(message.clone()));
+                return Err(engine_fault(fault));
             }
             shown.insert(display_id, flat_json);
             Ok(PropertyPreview::Shown)
@@ -2244,11 +2243,8 @@ impl EngineFacade for FakeEngineFacade {
     fn set_fps(&self, handle: SceneHandle, fps: u32) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.fps_calls, (handle, fps));
+            fake.fps_calls.record((handle, fps));
             fake.update_direct_assignment(handle, |template| {
-                template.fps = fps;
-            });
-            fake.update_direct_assignment_after_refresh(handle, |template| {
                 template.fps = fps;
             });
             Ok(())
@@ -2259,9 +2255,9 @@ impl EngineFacade for FakeEngineFacade {
     fn set_render_scale(&self, handle: SceneHandle, scale: f32) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.render_scale_calls, (handle, scale));
-            if let Some(message) = fake.render_scale_failure.swap(Arc::new(None)).as_ref() {
-                return Err(EngineError::Platform(message.clone()));
+            fake.render_scale_calls.record((handle, scale));
+            if let Err(fault) = fake.failures.check(ControlledOperation::RenderScale) {
+                return Err(engine_fault(fault));
             }
             Ok(())
         }
@@ -2269,30 +2265,27 @@ impl EngineFacade for FakeEngineFacade {
     }
 
     fn set_scene_optimization_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        push_log(&self.scene_optimization_calls, enabled);
+        self.scene_optimization_calls.record(enabled);
         Ok(())
     }
 
     fn set_scene_on_demand_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        push_log(&self.scene_on_demand_calls, enabled);
+        self.scene_on_demand_calls.record(enabled);
         Ok(())
     }
 
     fn set_scene_video_plane_sampling_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        push_log(&self.scene_video_plane_sampling_calls, enabled);
+        self.scene_video_plane_sampling_calls.record(enabled);
         Ok(())
     }
 
     fn set_scene_resolution(&self, resolution: SceneResolution) -> Result<(), EngineError> {
-        push_log(&self.scene_resolution_calls, resolution);
+        self.scene_resolution_calls.record(resolution);
         Ok(())
     }
 
     fn scene_runtime_reports(&self) -> Vec<SceneRuntimeReport> {
-        if let Some(scripted) = next_scripted(&self.scene_runtime_report_script) {
-            return scripted;
-        }
-        self.scene_runtime_reports.load().as_ref().clone()
+        self.scene_runtime_reports.read()
     }
 
     fn recover_surface(
@@ -2300,8 +2293,8 @@ impl EngineFacade for FakeEngineFacade {
         display_id: u32,
         reason: RecoveryReason,
     ) -> EngineFuture<RecoveryOutcome> {
-        push_log(&self.recover_calls, (display_id, reason));
-        let result = self.recover_result.load_full().as_ref().clone().unwrap_or(Ok(
+        self.recover_calls.record((display_id, reason));
+        let result = self.recover_result.read().unwrap_or(Ok(
             RecoveryOutcome::Recovered {
                 step: wallpaper_core::RecoveryStep::Reconfigure,
                 attempt: 1,
@@ -2311,32 +2304,33 @@ impl EngineFacade for FakeEngineFacade {
     }
 
     fn current_audio_spectrum(&self) -> Result<Option<AudioSpectrum128>, EngineError> {
-        Ok(**self.audio_spectrum.load())
+        Ok(self.audio_spectrum.read())
     }
 
     fn poll_mouse_position(&self) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.mouse_poll_calls, ());
-            push_log(&fake.mouse_samples, **fake.mouse_input.load());
-            if let Some(block) = fake.mouse_poll_block.pop() {
-                let _ = block.blocked_tx.send(());
-                block
-                    .release_rx
-                    .recv_timeout(Duration::from_secs(2))
-                    .map_err(|error| {
-                        EngineError::Platform(format!("mouse poll release timed out: {error}"))
-                    })?;
-            }
-            Ok(())
-        }
-        .boxed()
+            fake.mouse_poll_calls.record(());
+            fake.mouse_poll_count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            fake.mouse_samples.record(fake.mouse_input.read());
+            let result = fake.control.enter(ControlledOperation::Mouse)
+                .wait_bounded(Duration::from_secs(2)).await
+                .map_err(|error| {
+                    let error = match error {
+                        ReleaseFailure::TimedOut => std::sync::mpsc::RecvTimeoutError::Timeout,
+                        ReleaseFailure::Disconnected => std::sync::mpsc::RecvTimeoutError::Disconnected,
+                    };
+                    EngineError::Platform(format!("mouse poll release timed out: {error}"))
+                });
+            fake.control.finish(ControlledOperation::Mouse);
+            result
+        }.boxed()
     }
 
     fn set_mouse_position(&self, handle: SceneHandle, x: f64, y: f64) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.mouse_position_calls, (handle, x, y));
+            fake.mouse_position_calls.record((handle, x, y));
             Ok(())
         }
         .boxed()
@@ -2350,7 +2344,7 @@ impl EngineFacade for FakeEngineFacade {
     ) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.mouse_button_calls, (handle, button, pressed));
+            fake.mouse_button_calls.record((handle, button, pressed));
             Ok(())
         }
         .boxed()
@@ -2359,7 +2353,7 @@ impl EngineFacade for FakeEngineFacade {
     fn set_mouse_entered(&self, handle: SceneHandle, entered: bool) -> EngineFuture<()> {
         let fake = self.clone();
         async move {
-            push_log(&fake.mouse_entered_calls, (handle, entered));
+            fake.mouse_entered_calls.record((handle, entered));
             Ok(())
         }
         .boxed()
@@ -2371,9 +2365,9 @@ impl EngineFacade for FakeEngineFacade {
     ) -> EngineFuture<Option<SceneHandle>> {
         let fake = self.clone();
         async move {
-            push_log(&fake.window_create_calls, selector);
-            if let Some(message) = fake.reconcile_failure.load_full().as_ref().clone() {
-                return Err(EngineError::Render(message));
+            fake.window_create_calls.record(selector);
+            if let Err(fault) = fake.failures.check(ControlledOperation::Reconcile) {
+                return Err(engine_fault(fault));
             }
             Ok(Some(SceneHandle::new(98)))
         }
@@ -2387,9 +2381,9 @@ impl EngineFacade for FakeEngineFacade {
     ) -> EngineFuture<Option<SceneHandle>> {
         let fake = self.clone();
         async move {
-            push_log(&fake.wallpaper_calls, (selector, assignment));
-            if let Some(message) = fake.reconcile_failure.load_full().as_ref().clone() {
-                return Err(EngineError::Render(message));
+            fake.wallpaper_calls.record((selector, assignment));
+            if let Err(fault) = fake.failures.check(ControlledOperation::Reconcile) {
+                return Err(engine_fault(fault));
             }
             Ok(Some(SceneHandle::new(99)))
         }
@@ -2397,16 +2391,16 @@ impl EngineFacade for FakeEngineFacade {
     }
 
     fn set_first_frame_callback(&self, callback: FirstFrameCallback) {
-        self.first_frame_callback.store(Arc::new(Some(callback)));
+        self.first_frame_callback.replace(Some(callback));
     }
 
     fn set_pointer_consumer_callback(
         &self,
         callback: Option<wallpaper_core::PointerConsumerCallback>,
     ) {
-        let mut observer = self.pointer_consumer.lock().unwrap_or_else(|error| error.into_inner());
-        observer.callback = callback;
-        if let Some(callback) = &observer.callback {
+        let observer = self.pointer_consumer.lock().unwrap_or_else(|error| error.into_inner());
+        observer.callback.replace(callback);
+        if let Some(callback) = observer.callback.capture() {
             callback(observer.has_consumers);
         }
     }
@@ -2415,24 +2409,23 @@ impl EngineFacade for FakeEngineFacade {
         &self,
         callback: Option<wallpaper_core::PointerActivityCallback>,
     ) {
-        let mut observer = self.pointer_activity.lock().unwrap_or_else(|error| error.into_inner());
-        observer.callback = callback;
-        if let Some(callback) = &observer.callback {
+        let observer = self.pointer_activity.lock().unwrap_or_else(|error| error.into_inner());
+        observer.callback.replace(callback);
+        if let Some(callback) = observer.callback.capture() {
             callback(wallpaper_core::PointerActivity::MonitorGap(observer.monitor_gap));
         }
     }
 
     fn probe_pointer(&self) -> wallpaper_core::PointerProbe {
         self.pointer_probe_count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-        **self.pointer_probe.load()
+        self.pointer_probe.read()
     }
 
     fn set_user_shortcut_callback(
         &self,
         callback: Option<wallpaper_core::UserShortcutObserverCallback>,
     ) {
-        let mut sink = self.user_shortcut.lock().unwrap_or_else(|error| error.into_inner());
-        *sink = callback;
+        self.user_shortcut.replace(callback);
     }
 
     fn scene_requires_audio(&self, handle: SceneHandle) -> bool {
@@ -2446,9 +2439,9 @@ impl EngineFacade for FakeEngineFacade {
         &self,
         callback: Option<wallpaper_core::AudioRequirementCallback>,
     ) {
-        let mut state = self.audio_requirement.lock().unwrap_or_else(|error| error.into_inner());
-        state.callback = callback;
-        if let Some(callback) = &state.callback {
+        let state = self.audio_requirement.lock().unwrap_or_else(|error| error.into_inner());
+        state.callback.replace(callback);
+        if let Some(callback) = state.callback.capture() {
             for (handle, requires_audio) in &state.reported {
                 if *requires_audio {
                     callback(*handle, true);

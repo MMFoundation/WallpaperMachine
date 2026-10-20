@@ -1,3 +1,6 @@
+#[cfg(test)]
+pub(crate) mod lifecycle_test_support;
+
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     fs,
@@ -5,10 +8,10 @@ use std::{
 };
 
 use kameo::{
-    actor::{ActorRef, Spawn},
+    actor::{ActorRef, WeakActorRef},
     error::SendError,
     message::{Context, Message},
-    reply::{DelegatedReply, Reply},
+    reply::DelegatedReply,
 };
 use wallpaper_core::{
     DisplayIdentity, DisplaySelector, DisplaySnapshotEntry, PropertyPreview,
@@ -22,6 +25,7 @@ use wallpaper_core::{
 
 use crate::{
     actor::{
+        fixture_values,
         messages::{
             self, ApplyWallpaperOptions, AudioRequirementChanged, Bootstrap, CancelWallpaperOptions,
             ClearShaderCache,
@@ -57,12 +61,13 @@ use crate::{
             Shutdown,
         },
         state::BridgeActorState,
+        transport::BridgeActorHandle,
     },
     api::{
         BridgeAppSnapshot, BridgeDisplayMode, BridgeDisplayMutationBundle,
-        BridgeDisplaySettingsRow, BridgeError, BridgeLibraryScanStatus, BridgeLibrarySnapshot,
+        BridgeDisplaySettingsRow, BridgeError, BridgeLibrarySnapshot,
         BridgeLockScreenScene, BridgeNativeVideoWallpaper, BridgePlaybackState,
-        BridgePropertyEdit,
+        BridgePropertyEdit, FirstFrameDelivery, FirstFrameTarget,
         BridgeRendererCountersReport, BridgeRendererSurfaceCounters, BridgeScalingMode,
         BridgeSnapshotBundle, BridgeWallpaperEntry, BridgeWallpaperKind,
         BridgeWallpaperMutationBundle, BridgeWallpaperPreview, BridgeWebWallpaper, MousePollingControl,
@@ -82,7 +87,7 @@ use crate::{
         DirectoryMode, FileMedia, ProjectModel, ProjectProperty, PropertyKind, PropertyMetadata,
         PropertyValue,
     },
-    state::drafts::{WallpaperOptionsDraft, moved_framing, saved_framing},
+    state::drafts::{moved_framing, saved_framing},
 };
 
 const PRIMARY_DISPLAY_ID: &str = "primary";
@@ -142,137 +147,78 @@ enum PlaybackChangeOrigin {
     Power,
 }
 
-#[derive(Clone)]
-pub struct BridgeActorHandle<E: EngineFacade> {
-    actor: ActorRef<BridgeActor<E>>,
-    runtime: Option<Arc<tokio::runtime::Runtime>>,
+
+pub(crate) struct WeakFirstFrameTarget<E: EngineFacade + Clone> {
+    actor: WeakActorRef<BridgeActor<E>>,
 }
 
-impl<E: EngineFacade> Drop for BridgeActorHandle<E> {
-    fn drop(&mut self) {
-        let Some(runtime) = self.runtime.take() else {
-            return;
+impl<E: EngineFacade + Clone> FirstFrameTarget for WeakFirstFrameTarget<E> {
+    async fn deliver(&self, _handle: SceneHandle) -> FirstFrameDelivery {
+        let Some(actor) = self.actor.upgrade() else {
+            return FirstFrameDelivery::TargetGone;
         };
-
-        match Arc::try_unwrap(runtime) {
-            Ok(runtime) => runtime.shutdown_background(),
-            Err(runtime) => {
-                self.runtime = Some(runtime);
-            }
+        match actor.ask(InitialFrameReady).await.map_err(map_send_error) {
+            Ok(_) => FirstFrameDelivery::Delivered,
+            Err(error) => FirstFrameDelivery::Failed(error),
         }
     }
 }
 
-impl<E: EngineFacade> BridgeActorHandle<E> {
-    #[allow(clippy::single_call_fn)]
-    pub fn spawn(
-        state: BridgeActorState,
-        engine: E,
-        config_store: Option<ConfigStore>,
-        launch_at_login: LaunchAtLoginController,
-        paths: BridgePaths,
-        mouse_polling: Arc<MousePollingControl>,
-        load_journal: LoadJournal,
-    ) -> Result<Self, BridgeError> {
-        let actor = BridgeActor {
-            state,
-            generation: 0,
-            latest_reconcile_generation: 0,
-            reconciled_generation: 0,
-            repair_after_reconcile_generation: None,
-            active_restore_generation: None,
-            restore_requested_after_active: false,
-            pending_audio_changes: HashSet::new(),
-            engine,
-            config_store,
-            launch_at_login,
-            paths,
-            mouse_polling,
-            load_journal,
-            previewed_framing: HashSet::new(),
-            previewed_properties: HashSet::new(),
-        };
-        actor.refresh_mouse_polling_policy();
 
-        let runtime = Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .thread_name("wallpaper-bridge-actor-runtime")
-                .build()
-                .map_err(|error| {
-                    BridgeError::engine(format!("failed to start bridge actor runtime: {error}"))
-                })?,
-        );
-        let actor = {
-            let _guard = runtime.enter();
-            BridgeActor::spawn_in_thread(actor)
-        };
-
-        Ok(Self {
-            actor,
-            runtime: Some(runtime),
-        })
-    }
-
-    pub async fn ask<M, T>(&self, message: M) -> Result<T, BridgeError>
-    where
-        BridgeActor<E>: Message<M>,
-        <BridgeActor<E> as Message<M>>::Reply: kameo::reply::Reply<Ok = T, Error = BridgeError>,
-        M: Send + 'static,
-        T: Send + 'static,
-    {
-        self.actor.ask(message).await.map_err(map_send_error)
-    }
-
-    /// Runs `future` on the runtime that drives this bridge's actor, and
-    /// waits for it. For work that waits on a timer and so cannot run on
-    /// whatever executor the host happens to poll a call with.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the runtime has been shut down or the task
-    /// panicked.
-    pub async fn run_on_runtime<F, T>(&self, future: F) -> Result<T, BridgeError>
-    where
-        F: std::future::Future<Output = T> + Send + 'static,
-        T: Send + 'static,
-    {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| BridgeError::engine("the bridge runtime has shut down"))?;
-        runtime
-            .spawn(future)
-            .await
-            .map_err(|error| BridgeError::engine(format!("a background check failed: {error}")))
-    }
-
-    pub fn blocking_ask<M, T>(&self, message: M) -> Result<T, BridgeError>
-    where
-        BridgeActor<E>: Message<M>,
-        <BridgeActor<E> as Message<M>>::Reply: Reply<Ok = T, Error = BridgeError>,
-        M: Send + 'static,
-        T: Send + 'static,
-    {
-        self.actor
-            .ask(message)
-            .blocking_send()
-            .map_err(map_send_error)
-    }
+pub(super) fn assemble_actor<E: EngineFacade>(
+    state: BridgeActorState,
+    engine: E,
+    config_store: Option<ConfigStore>,
+    launch_at_login: LaunchAtLoginController,
+    paths: BridgePaths,
+    mouse_polling: Arc<MousePollingControl>,
+    load_journal: LoadJournal,
+) -> BridgeActor<E> {
+    let actor = BridgeActor {
+        state,
+        generation: 0,
+        latest_reconcile_generation: 0,
+        reconciled_generation: 0,
+        repair_after_reconcile_generation: None,
+        active_restore_generation: None,
+        restore_requested_after_active: false,
+        pending_audio_changes: HashSet::new(),
+        engine,
+        config_store,
+        launch_at_login,
+        paths,
+        mouse_polling,
+        load_journal,
+        previewed_framing: HashSet::new(),
+        previewed_properties: HashSet::new(),
+    };
+    actor.refresh_mouse_polling_policy();
+    actor
 }
 
 impl<E: EngineFacade + Clone> BridgeActorHandle<E> {
+    pub(crate) fn first_frame_handoff_inputs(
+        &self,
+    ) -> Result<(tokio::runtime::Handle, crate::actor::WeakFirstFrameTarget<E>), BridgeError> {
+        Ok((
+            self.runtime_handle()?,
+            WeakFirstFrameTarget {
+                actor: self.weak_actor(),
+            },
+        ))
+    }
+
     /// The sink for the engine's audio-requirement changes. The engine calls
     /// it under a lock on its actor thread, so it only records the handle and
     /// wakes one task on this actor's runtime, which asks the actor to re-sync
     /// capture. Coalescing: a burst of reports is one delivery, and the
     /// pending set is bounded by the number of live scenes. Nothing polls.
     pub(crate) fn audio_requirement_relay(&self) -> Option<wallpaper_core::AudioRequirementCallback> {
-        let runtime = self.runtime.as_ref()?;
+        let runtime = self.runtime_handle().ok()?;
         let pending = Arc::new(std::sync::Mutex::new(HashSet::<SceneHandle>::new()));
         let notify = Arc::new(tokio::sync::Notify::new());
         // Weak, so the relay never keeps the actor (or its runtime) alive.
-        let actor = self.actor.downgrade();
+        let actor = self.weak_actor();
         let task_pending = Arc::clone(&pending);
         let task_notify = Arc::clone(&notify);
         let _task = runtime.spawn(async move {
@@ -512,49 +458,12 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
     }
 
     fn library_snapshot(&self) -> BridgeLibrarySnapshot {
-        let selected_wallpaper_id = self.state.selected_wallpaper_id.as_deref();
-        let active_wallpaper_ids = self.state.active_wallpaper_ids.clone();
-        let all_wallpapers = self
-            .state
-            .library
-            .iter()
-            .map(|entry| {
-                let mut entry = entry.clone();
-                entry.selected = selected_wallpaper_id == Some(entry.id.as_str());
-                entry.active = active_wallpaper_ids.iter().any(|id| id == &entry.id);
-                entry
-            })
-            .collect::<Vec<_>>();
-        let wallpapers = all_wallpapers
-            .iter()
-            .filter(|entry| self.state.filter_enabled(entry.kind))
-            .cloned()
-            .collect::<Vec<_>>();
-
-        BridgeLibrarySnapshot {
-            scene_count: all_wallpapers
-                .iter()
-                .filter(|entry| entry.kind == BridgeWallpaperKind::ProjectScene)
-                .count() as u64,
-            video_count: all_wallpapers
-                .iter()
-                .filter(|entry| entry.kind == BridgeWallpaperKind::Video)
-                .count() as u64,
-            webpage_count: all_wallpapers
-                .iter()
-                .filter(|entry| entry.kind == BridgeWallpaperKind::Webpage)
-                .count() as u64,
-            unknown_count: all_wallpapers
-                .iter()
-                .filter(|entry| entry.kind == BridgeWallpaperKind::Unknown)
-                .count() as u64,
-            wallpapers,
-            scan_status: BridgeLibraryScanStatus {
-                scanning: false,
-                done: 0,
-                total: 0,
-            },
-        }
+        crate::actor::projection_values::library_snapshot(
+            &self.state.library,
+            self.state.selected_wallpaper_id.as_deref(),
+            &self.state.active_wallpaper_ids,
+            |kind| self.state.filter_enabled(kind),
+        )
     }
 
     fn all_snapshots(&self) -> BridgeSnapshotBundle {
@@ -2537,20 +2446,7 @@ impl<E: EngineFacade + Clone> Message<InjectWallpaperForTest> for BridgeActor<E>
         msg: InjectWallpaperForTest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.state.library.push(BridgeWallpaperEntry {
-            id: msg.id,
-            title: msg.title,
-            kind: msg.kind,
-            supported: matches!(
-                msg.kind,
-                BridgeWallpaperKind::ProjectScene
-                    | BridgeWallpaperKind::Video
-                    | BridgeWallpaperKind::Webpage
-            ),
-            active: false,
-            selected: false,
-            preview_path: None,
-        });
+        fixture_values::add_entry(&mut self.state.library, msg.id, msg.title, msg.kind);
         self.bump_generation();
         Ok(())
     }
@@ -2564,21 +2460,13 @@ impl<E: EngineFacade + Clone> Message<InjectSceneWallpaperConfigForTest> for Bri
         msg: InjectSceneWallpaperConfigForTest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let config = WallpaperConfig::new_for(&msg.id, "scene");
-        self.state.library.push(BridgeWallpaperEntry {
-            id: msg.id.clone(),
-            title: msg.title,
-            kind: BridgeWallpaperKind::ProjectScene,
-            supported: true,
-            active: false,
-            selected: false,
-            preview_path: None,
-        });
-        self.state.wallpaper_drafts.insert(
-            msg.id.clone(),
-            WallpaperOptionsDraft::from_committed(config.clone()),
+        fixture_values::add_scene_configuration(
+            &mut self.state.library,
+            &mut self.state.wallpaper_configs,
+            &mut self.state.wallpaper_drafts,
+            msg.id,
+            msg.title,
         );
-        self.state.wallpaper_configs.insert(msg.id, config);
         self.bump_generation();
         Ok(())
     }
@@ -2592,29 +2480,15 @@ impl<E: EngineFacade + Clone> Message<InjectSceneProjectForTest> for BridgeActor
         msg: InjectSceneProjectForTest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let model = ProjectModel::parse(&msg.id, &msg.project_json)
-            .map_err(|error| BridgeError::invalid_input(error.to_string()))?;
-        let entry = BridgeWallpaperEntry {
-            id: msg.id.clone(),
-            title: if msg.title.is_empty() {
-                model.title.clone()
-            } else {
-                msg.title
-            },
-            kind: BridgeWallpaperKind::from(model.project_type),
-            supported: true,
-            active: false,
-            selected: false,
-            preview_path: None,
-        };
-        let config = WallpaperConfig::new_for(&msg.id, "scene");
-        self.state.library.push(entry);
-        self.state.project_models.insert(msg.id.clone(), model);
-        self.state.wallpaper_drafts.insert(
-            msg.id.clone(),
-            WallpaperOptionsDraft::from_committed(config.clone()),
-        );
-        self.state.wallpaper_configs.insert(msg.id, config);
+        fixture_values::add_project(
+            &mut self.state.library,
+            &mut self.state.project_models,
+            &mut self.state.wallpaper_configs,
+            &mut self.state.wallpaper_drafts,
+            msg.id,
+            msg.title,
+            &msg.project_json,
+        )?;
         self.bump_generation();
         Ok(())
     }
@@ -2628,50 +2502,12 @@ impl<E: EngineFacade + Clone> Message<InjectDisplayForTest> for BridgeActor<E> {
         msg: InjectDisplayForTest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let selector = SerializedSelector::LiveDisplayId {
-            display_id: Self::parse_display_id(&msg.display_id)?,
-        };
-        self.state.app_config.ensure_monitor(selector);
-        let mirror_targets = self
-            .state
-            .display_settings
-            .keys()
-            .filter(|target| target.as_str() != msg.display_id)
-            .cloned()
-            .collect();
-        self.state.display_settings.insert(
-            msg.display_id.clone(),
-            BridgeDisplaySettingsRow {
-                display_id: msg.display_id.clone(),
-                title: msg.title,
-                enabled: true,
-                mode: BridgeDisplayMode::Standalone,
-                mirror_targets,
-                selected_mirror_target: None,
-                scaling_mode: BridgeScalingMode::from(ScalingMode::default()),
-                scaling_factor: 1.0,
-                // No refresh was injected with this synthetic display, so 60/60
-                // is an unknown-refresh placeholder, not a saved rate that
-                // should follow a native refresh this row does not have.
-                target_fps: 60,
-                max_fps: 60,
-                muted: false,
-                volume: 1.0,
-            },
-        );
-        let ids = self
-            .state
-            .display_settings
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        for row in self.state.display_settings.values_mut() {
-            row.mirror_targets = ids
-                .iter()
-                .filter(|target| target.as_str() != row.display_id)
-                .cloned()
-                .collect();
-        }
+        fixture_values::add_display(
+            &mut self.state.app_config,
+            &mut self.state.display_settings,
+            msg.display_id,
+            msg.title,
+        )?;
         self.bump_generation();
         Ok(())
     }
@@ -2685,7 +2521,12 @@ impl<E: EngineFacade + Clone> Message<ReplaceLibraryForTest> for BridgeActor<E> 
         msg: ReplaceLibraryForTest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.state.replace_library(msg.entries);
+        fixture_values::replace_library(
+            &mut self.state.library,
+            &mut self.state.selected_wallpaper_id,
+            &mut self.state.app_config,
+            msg.entries,
+        );
         self.bump_generation();
         Ok(())
     }
@@ -2699,11 +2540,12 @@ impl<E: EngineFacade + Clone> Message<ReplaceWallpaperConfigForTest> for BridgeA
         msg: ReplaceWallpaperConfigForTest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.state.wallpaper_drafts.insert(
-            msg.id.clone(),
-            WallpaperOptionsDraft::from_committed(msg.config.clone()),
+        fixture_values::replace_configuration(
+            &mut self.state.wallpaper_configs,
+            &mut self.state.wallpaper_drafts,
+            msg.id,
+            msg.config,
         );
-        self.state.wallpaper_configs.insert(msg.id, msg.config);
         self.bump_generation();
         Ok(())
     }
@@ -4758,9 +4600,9 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
         let primary_identity_selector = displays
             .first()
             .and_then(DisplaySnapshotExt::stable_identity_selector);
-        let candidates = reply_try!(
+        let prepared = reply_try!(
             self.state
-                .apply_candidates(&msg.wallpaper_id, primary_identity_selector.as_ref())
+                .prepare_apply(&msg.wallpaper_id, primary_identity_selector.as_ref())
         );
         // The user applying a wallpaper again is the way back from a hold.
         // Nothing about its draft changed, so the usual "nothing to reconcile"
@@ -4776,17 +4618,17 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
         // launch instead of counting as a first offence. A failure puts the
         // hold back.
         let lifts_hold = msg.user_initiated && self.state.held_wallpapers.remove(&msg.wallpaper_id);
-        let app_config = candidates.app_config.clone();
-        let wallpaper_configs = candidates.wallpaper_configs.clone();
+        let app_config = prepared.app_config();
+        let wallpaper_configs = prepared.wallpaper_configs();
         let library = self.state.scanned_library().map(<[_]>::to_vec);
-        let requires_reconcile = candidates.requires_reconcile || lifts_hold;
+        let requires_reconcile = prepared.requires_reconcile() || lifts_hold;
         let paused = self.playback_paused();
         let suspended_displays = self.state.suspended_displays.clone();
         let predicted_scenes = match requires_reconcile
             .then(|| {
                 ActivationInputs {
-                    app_config: &app_config,
-                    wallpapers: &wallpaper_configs,
+                    app_config,
+                    wallpapers: wallpaper_configs,
                     library: self.state.scanned_library(),
                     displays: &displays,
                     paused,
@@ -4811,9 +4653,11 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
                 return ctx.reply(Err(error));
             }
         };
-        let project_models = self.state.configured_project_models(&app_config);
+        let project_models = self.state.configured_project_models(app_config);
 
         if requires_reconcile {
+            let app_config = app_config.clone();
+            let wallpaper_configs = wallpaper_configs.clone();
             let generation = self.reserve_reconcile();
             let actor = ctx.actor_ref().clone();
             let engine = self.engine.clone();
@@ -4866,7 +4710,7 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
                 actor
                     .ask(CommitApplyAfterReconcile {
                         wallpaper_id,
-                        candidates,
+                        prepared,
                         scenes,
                         generation,
                     })
@@ -4875,10 +4719,10 @@ impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> 
             });
         }
 
-        reply_try!(self.save_configs(&candidates.app_config, &candidates.wallpaper_config,));
+        reply_try!(self.save_configs(prepared.app_config(), prepared.wallpaper_config()));
         reply_try!(
             self.state
-                .commit_apply_candidates(msg.wallpaper_id.clone(), candidates, false)
+                .publish_apply(msg.wallpaper_id.clone(), prepared, false)
         );
         if msg.user_initiated {
             // Nothing was handed to the engine, so there is no load to wait
@@ -4912,19 +4756,19 @@ impl<E: EngineFacade + Clone> Message<CommitApplyAfterReconcile> for BridgeActor
         // is saved now, so none of them shows an edit that was only pending.
         self.previewed_properties.remove(&msg.wallpaper_id);
         if let Err(error) =
-            self.save_configs(&msg.candidates.app_config, &msg.candidates.wallpaper_config)
+            self.save_configs(msg.prepared.app_config(), msg.prepared.wallpaper_config())
         {
             // Reconciliation already changed the renderer. Publish its assignment even
             // when persistence fails, but keep the draft's committed property baseline.
             // A display refresh reconciles the saved wallpaper config; Apply can retry
             // the retained draft without reporting the old desktop as still active.
-            self.state.app_config = msg.candidates.app_config;
+            self.state.app_config = msg.prepared.into_app_config();
             self.state.set_active_ids_from_scenes(&msg.scenes);
             self.finish_reconcile(msg.generation, ctx.actor_ref().clone());
             return Err(error);
         }
         self.state
-            .commit_apply_candidates(msg.wallpaper_id.clone(), msg.candidates, false)?;
+            .publish_apply(msg.wallpaper_id.clone(), msg.prepared, false)?;
         self.state.set_active_ids_from_scenes(&msg.scenes);
         self.finish_reconcile(msg.generation, ctx.actor_ref().clone());
         self.wallpaper_bundle(msg.wallpaper_id)

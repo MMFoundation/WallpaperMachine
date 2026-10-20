@@ -9,6 +9,18 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-17 — Vulkan path deleted; no Apache-2.0 or GPL-3.0 component left in the link closure
+
+Step 2d-3 of the own-code plan: the Vulkan renderer, its wrapper and swapchain code, spirv_reflect, VMA, the SPIR-V shader target (and with it the spirv crate), the glslang/SPIRV/Vulkan link lines, MoltenVK ICD handling and the Homebrew packages that fed them are gone. Commits 19aeb2e8 (code, tests, docs, provenance), a289d5e9 (build and packaging), and the licensing record.
+
+- `python3 scripts/check_rust.py` — exit 0 (workspace tests green; asset-corpus shader tests skipped, no WALLPAPER_MACHINE_ASSETS_ROOT)
+- `python3 scripts/build.py --renderer-only` — exit 0; bindings regenerated
+- `python3 scripts/check_renderer.py` — exit 0; 12 generated cases drawn pooled and isolated through the Metal offscreen_scene_probe, pixels_equal=True on all, 0 diagnostics; metal_scene_draw_smoke 148 passed, 2 skipped (local corpus); every registered binary exit 0; skips are the local-corpus and local-clip cases
+- `python3 scripts/test.py` — exit 0; 3976 tests: 3930 passed, 0 failed, 46 skipped (131 s)
+- `python3 scripts/build.py --configuration Release` — built; otool -L on the app and the extension shows no vulkan, glslang, SPIRV or MoltenVK library, and the bundle has no MoltenVK_icd.json
+- `python3 scripts/check_licenses.py` on that app — 181 components, 0 Apache-2.0, 0 GPL-3.0 family, 0 unknown, 0 not in LICENSING.md; with --skip-app 178, same zeros. A count of declared licenses, not a clearance
+- Not covered: the local wallpaper corpus (not present here), a desktop run of the built app (not launched), packaging with scripts/package.py (not run), and the draw-smoke cases that compared the two renderers (retired; parity was proven before the Vulkan code went)
+
 ## 2026-10-17 — Native Metal is the only scene renderer: the Scene renderer setting is gone
 
 The Scene renderer setting (Compatibility, Native Metal preferred, Native Metal only), the engine's renderer preference and every path that created the Vulkan renderer for a scene are removed; a scene Native Metal cannot draw is held on its last picture with the reason, as the old Native Metal only mode did. Verified headless on this machine; no desktop, lock screen, audio or Release run.

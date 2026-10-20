@@ -4,6 +4,9 @@ version = "0.2.0"
 edition.workspace = true
 license.workspace = true
 
+[features]
+bridge-contract-tests = []
+
 [dependencies]
 arc-swap = "1.9.1"
 kameo = "0.20.0"

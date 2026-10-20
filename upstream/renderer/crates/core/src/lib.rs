@@ -40,5 +40,9 @@ pub use owe::scene_demand::{
 pub use owe::scene_registry::SceneRegistry;
 pub use window::{PlaceholderStyle, WallpaperWindow, WallpaperWindowBuilder};
 
+#[cfg(feature = "bridge-contract-tests")]
+#[doc(hidden)]
+pub use engine::contract_testing;
+
 #[cfg(test)]
 mod tests;

@@ -25,6 +25,19 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-21 — Independent bridge lifecycle and state units
+
+Bounded independent replacements; existing renderer policy, public APIs and contributor-owned feature islands retained. This is not whole-project licensing clearance.
+
+- python3 scripts/check_rust.py — 2241 reported passes (394 core, 839 bridge, 17 integration, 991 shader); 9 explicit core exclusions and 31 guarded shader skip messages.
+- python3 scripts/build.py --renderer-only — passed; bindings regenerated without API changes.
+- python3 scripts/check_renderer.py — all registered targets passed; 12 generated pooled/isolated comparisons and 8x2 reload cycles passed; 17 asset/corpus cases skipped.
+- Timer contract passed; 42 delivered draws were a diagnostic measurement, not a throughput guarantee. Production scheduling was unchanged.
+- python3 scripts/test.py — 425 Python tests and 3930 native tests passed; 46 native tests skipped.
+- Standalone compiled consumer — genuine core callback cell and production first-frame dispatcher passed ordered delivery, actual pending-send cancellation/join, owner release, stale callback inertia and replacement without replay.
+- Mounted actor/state cases retain real builder, callback, journal and six persistence branches. Natural last-owner actor retention failed before the shared runtime-owner fix; final lifecycle and concurrent-drop cases passed. Earlier failures remain recorded.
+- No desktop, hardware audio, private corpus, permission prompts, native complete-assembly proof or Release delivery. Contributor-grant filing and remaining protected code/resources are separate.
+
 ## 2026-10-20 — Independent display and activation boundaries
 
 Combined current-tree verification in an owned system-temp checkout based on7fad94eb, serialized under the recovery lock with isolated preferences.
@@ -134,15 +147,3 @@ Four commits (3c55d52b audio, f0e3b270 video, d2c891aa Rust decoder, b6ba0c32 bu
 - `python3 scripts/build.py --configuration Release` — built; `otool -L` on the app and the lock-screen extension lists only liblz4, libfreetype and libqjs outside Apple's libraries; no undefined `_av_*`, `_avcodec_*`, `_avformat_*`, `_sws_*` or `_swr_*` symbol in the app executable
 - `python3 scripts/check_licenses.py --enforce` on the tree and the Release app — 177 components (175 with --skip-app): 0 Apache-2.0, 0 GPL-3.0 family, 0 unknown, 0 not named in LICENSING.md; a returning libav* library is reported unknown (new tests)
 - Gaps: VP8, AV1 without hardware decode, 4:2:2, fragmented MP4 and other containers now refuse with a reason and keep the last picture (covered by native tests, not seen on a desktop); the Homebrew ffmpeg, mwe-ffmpeg and dav1d kegs are still installed on this machine and nothing uses them
-
-## 2026-10-17 — Vulkan path deleted; no Apache-2.0 or GPL-3.0 component left in the link closure
-
-Step 2d-3 of the own-code plan: the Vulkan renderer, its wrapper and swapchain code, spirv_reflect, VMA, the SPIR-V shader target (and with it the spirv crate), the glslang/SPIRV/Vulkan link lines, MoltenVK ICD handling and the Homebrew packages that fed them are gone. Commits 19aeb2e8 (code, tests, docs, provenance), a289d5e9 (build and packaging), and the licensing record.
-
-- `python3 scripts/check_rust.py` — exit 0 (workspace tests green; asset-corpus shader tests skipped, no WALLPAPER_MACHINE_ASSETS_ROOT)
-- `python3 scripts/build.py --renderer-only` — exit 0; bindings regenerated
-- `python3 scripts/check_renderer.py` — exit 0; 12 generated cases drawn pooled and isolated through the Metal offscreen_scene_probe, pixels_equal=True on all, 0 diagnostics; metal_scene_draw_smoke 148 passed, 2 skipped (local corpus); every registered binary exit 0; skips are the local-corpus and local-clip cases
-- `python3 scripts/test.py` — exit 0; 3976 tests: 3930 passed, 0 failed, 46 skipped (131 s)
-- `python3 scripts/build.py --configuration Release` — built; otool -L on the app and the extension shows no vulkan, glslang, SPIRV or MoltenVK library, and the bundle has no MoltenVK_icd.json
-- `python3 scripts/check_licenses.py` on that app — 181 components, 0 Apache-2.0, 0 GPL-3.0 family, 0 unknown, 0 not in LICENSING.md; with --skip-app 178, same zeros. A count of declared licenses, not a clearance
-- Not covered: the local wallpaper corpus (not present here), a desktop run of the built app (not launched), packaging with scripts/package.py (not run), and the draw-smoke cases that compared the two renderers (retired; parity was proven before the Vulkan code went)

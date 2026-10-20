@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    actor::state::ApplyCandidates,
+    actor::state_values::PreparedApply,
     api::{
         BridgeAppSnapshot, BridgeDisplayMode, BridgeDisplayMutationBundle,
         BridgeDisplaySettingsRow, BridgeError, BridgeLibrarySnapshot, BridgeLockScreenScene,
@@ -396,7 +396,7 @@ pub struct CancelWallpaperOptions {
 
 pub struct CommitApplyAfterReconcile {
     pub wallpaper_id: String,
-    pub candidates: ApplyCandidates,
+    pub prepared: PreparedApply,
     pub scenes: Vec<wallpaper_core::project::SceneDesc>,
     pub generation: u64,
 }

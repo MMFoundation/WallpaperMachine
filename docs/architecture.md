@@ -557,6 +557,24 @@ and connected-display inheritance. Public exports and host routing are unchanged
 the scoped authorship records in `upstream/provenance.json` do not clear the whole
 workspace's licensing or native behavior.
 
+`actor/transport.rs` owns request delivery and the shared actor-runtime lifetime.
+Clones share one owner; its final destructor aborts the actor and shuts down Tokio
+without blocking the dropping thread. This fallback is not graceful scene shutdown:
+call `WallpaperBridge::shutdown` for the journal and scene teardown contract.
+The owned `api/first_frame_handoff.rs` dispatcher admits callbacks without waiting
+for the actor; callback retention does not own the bridge or its runtime. Closing
+the dispatcher prevents new deliveries and cancels its pending request, but does
+not retract a message already admitted to the actor mailbox.
+
+`engine/facade_readiness.rs` tracks first-frame evidence for outstanding reconcile
+targets, through the facade's existing serialized turn, audio exclusion and prune
+ordering. `engine/audio_requests.rs` owns serialized capture requests; permission,
+live-demand sampling, retry/watch policy and capture-owner lifetime remain distinct.
+`actor/state_values.rs` prepares draft/configuration values without owning engine
+completion or persistence. `actor/projection_values.rs` filters and annotates the
+library in one pass and measures filesystem sizes; the bounded shader-cache size
+cache and its invalidation policy remain in `actor/snapshots.rs`.
+
 The shader layer is not a member: it is `wm-shader`, this project's own crate in the separate
 workspace `Renderer/` (`Renderer/Shader`, `rlib` + `staticlib`; `Renderer/Cargo.toml` pins naga to the
 patched copy in `upstream/naga`). It turns Wallpaper Engine shader text into Metal Shading Language

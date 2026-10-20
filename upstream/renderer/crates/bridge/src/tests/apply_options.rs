@@ -1648,7 +1648,7 @@ async fn failed_audio_resume_restores_renderer_and_allows_later_presentation_tra
     engine.fail_audio_capture_with(Some("audio restart failed".into()));
 
     let error = bridge.set_presentation_suspended(false).await.unwrap_err();
-    assert!(error.message().contains("audio restart failed"));
+    assert_eq!(error.kind(), crate::api::BridgeErrorKind::Engine);
     assert!(engine.rendered_scenes()[0].paused);
     assert!(engine.audio_capture_suspended());
     assert_eq!(
