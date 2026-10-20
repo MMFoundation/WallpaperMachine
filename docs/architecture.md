@@ -548,6 +548,15 @@ two members:
 | `crates/bridge` (`wallpaper-bridge`, lib name `wallpaper_bridge`) | `staticlib` + `rlib`, plus the `uniffi-bindgen` binary | uniffi API surface (`api/`), kameo actor (`actor/`), engine facade (`engine/`), config store (`config/`), library scanner (`library/`), display rows (`display/`), user assets, logging, login item, power |
 | `crates/core` (`wallpaper-core`) | `rlib` | Runtime state machine (`engine/`): scene reconciliation, display discovery and watching, wallpaper windows, media decode (`media/video`, `media/audio` capture for audio response), render cache, and the `owe` FFI wrappers |
 
+Within the bridge, `engine/activation.rs` owns the scene/web/native-video/export
+consumers; `engine/activation_remaining.rs` supplies selection and scene construction,
+and `engine/render_settings.rs` resolves render overrides. Display traits and records
+remain in `display/{label,rows}.rs`; their private `replacement` children provide the
+independently authored bodies. `display/rows.rs` retains reconnect alias reconciliation
+and connected-display inheritance. Public exports and host routing are unchanged;
+the scoped authorship records in `upstream/provenance.json` do not clear the whole
+workspace's licensing or native behavior.
+
 The shader layer is not a member: it is `wm-shader`, this project's own crate in the separate
 workspace `Renderer/` (`Renderer/Shader`, `rlib` + `staticlib`; `Renderer/Cargo.toml` pins naga to the
 patched copy in `upstream/naga`). It turns Wallpaper Engine shader text into Metal Shading Language

@@ -9,19 +9,16 @@ use std::{
 };
 
 use wallpaper_core::{
-    DisplayDesc, DisplaySelector, DisplaySnapshotEntry, EngineError, WallpaperAssignment,
-    media::audio::AudioVolume,
-    project::{
-        ScalingMode, SceneDesc, SceneDescBuilder, SceneFraming, SceneTemplate, WallpaperProjectType,
-    },
+    DisplayDesc, DisplaySnapshotEntry,
+    project::{ScalingMode, SceneDesc, SceneFraming, WallpaperProjectType},
 };
 
 use crate::{
     api::{BridgeError, BridgeErrorKind, BridgeWallpaperEntry},
     config::{AppConfig, MonitorCfg, MonitorSettingsCfg, WallpaperConfig},
-    display::{DisplayDescExt, DisplaySelectorExt},
+    display::DisplayDescExt,
     paths::BridgePaths,
-    project::{ProjectModel, PropertyKind, PropertyValue, scene_property_override_json},
+    project::{ProjectModel, PropertyKind, PropertyValue},
 };
 
 pub struct ActivationInputs<'a> {
@@ -194,7 +191,10 @@ fn native_video_admission_key(media_path: &Path, metadata: &fs::Metadata) -> u64
         .ok()
         .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
         .map_or(0, |since_epoch| since_epoch.as_nanos());
-    let mut hash = fnv1a(FNV1A_OFFSET_BASIS, media_path.as_os_str().as_encoded_bytes());
+    let mut hash = fnv1a(
+        FNV1A_OFFSET_BASIS,
+        media_path.as_os_str().as_encoded_bytes(),
+    );
     hash = fnv1a(hash, &metadata.len().to_le_bytes());
     fnv1a(hash, &modified_nanos.to_le_bytes())
 }
@@ -276,11 +276,12 @@ impl ActivationInputs<'_> {
             }
             let owner = slot.wallpaper_id.to_string();
             scenes.push((
-                self.scene_for_monitor(
-                    slot.display,
+                super::activation_remaining::build_configured_scene(
+                    self,
+                    slot.monitor,
                     slot.wallpaper_id,
                     slot.wallpaper,
-                    slot.monitor,
+                    slot.display,
                 )?,
                 owner,
             ));
@@ -297,37 +298,17 @@ impl ActivationInputs<'_> {
             let Some((source_scene, owner)) = scenes
                 .iter()
                 .find(|(scene, _)| scene.display.display_id == mirror.source_display_id)
-                .cloned()
             else {
                 continue;
             };
             mirrored.push(mirror.display.clone());
-            let audio_volume = AudioVolume::try_from(mirror.settings.volume).map_err(|error| {
-                BridgeError::Error {
-                    kind: BridgeErrorKind::Engine,
-                    message: EngineError::InvalidInput(error.to_string()).to_string(),
-                }
-            })?;
-            let mut scene = source_scene;
-            scene.display = mirror.display;
-            // A mirror presents on its own display, so it takes that display's
-            // suspension rather than the source display's.
-            scene.paused = self.display_paused(scene.display.display_id);
-            scene.scaling_mode = mirror.settings.parse_scaling_mode();
-            scene.scaling_factor = mirror.settings.scaling_factor;
-            // A mirror copies its source's scene but has its own display
-            // settings, and those carry no position. A live position change on
-            // the source never reaches the mirror's handle, so inheriting the
-            // source's would make what the mirror shows depend on when the
-            // last reconcile ran.
-            scene.framing = SceneFraming::default();
-            scene.fps = mirror.settings.fps_on(scene.display.refresh_rate_hz);
-            scene.audio_volume = audio_volume;
-            scene.audio_muted = mirror.settings.muted;
-            scene.validate().map_err(|error| BridgeError::Error {
-                kind: BridgeErrorKind::Engine,
-                message: error.to_string(),
-            })?;
+            let scene = super::activation_remaining::build_mirror_scene(
+                self,
+                source_scene,
+                mirror.display,
+                &mirror.settings,
+            )?;
+            let owner = owner.clone();
             scenes.push((scene, owner));
         }
 
@@ -566,8 +547,7 @@ impl ActivationInputs<'_> {
     }
 
     fn apply_frame_rate_cap(&self, fps: u32) -> u32 {
-        self.frame_rate_cap
-            .map_or(fps, |cap| fps.min(cap.max(1)))
+        self.frame_rate_cap.map_or(fps, |cap| fps.min(cap.max(1)))
     }
 
     /// Plain local videos for every enabled, resolved display, including
@@ -655,277 +635,28 @@ impl ActivationInputs<'_> {
     /// assignments, then mirrors whose display is not already used.
     fn slots(&self) -> (Vec<DirectSlot<'_>>, Vec<MirrorSlot>) {
         let mut direct = Vec::new();
-        let mut used_displays: Vec<DisplayDesc> = Vec::new();
-        let mut monitors = self.app_config.monitors.iter().collect::<Vec<_>>();
-        monitors.sort_by_key(|monitor| {
-            i32::from(monitor.selector != crate::config::SerializedSelector::Primary)
-        });
-
-        for monitor in monitors {
-            if !monitor.enabled {
-                continue;
-            }
-
-            let Some(wallpaper_id) = monitor.wallpaper.as_deref() else {
-                continue;
-            };
-
-            let Some(wallpaper) = self.wallpapers.get(wallpaper_id) else {
-                continue;
-            };
-
-            if self
-                .library
-                .is_some_and(|library| !library.iter().any(|entry| entry.id == wallpaper_id))
-            {
-                // Debug, not warn: snapshots rebuild this plan on every refresh.
-                log::debug!(
-                    "wallpaper {wallpaper_id} is assigned to a display but is not in the \
-                     library; leaving that display empty"
-                );
-                continue;
-            }
-
-            if self.held.contains(wallpaper_id) {
-                // Debug, not warn: snapshots rebuild this plan on every refresh.
-                // The bridge said why once, when it learned the wallpaper is held.
-                log::debug!(
-                    "wallpaper {wallpaper_id} is held back by the load journal; \
-                     leaving its display as it is"
-                );
-                continue;
-            }
-
-            if monitor.mode == "mirror" {
-                continue;
-            }
-
-            let Some(display) = monitor.resolve_display(self.displays) else {
-                continue;
-            };
-            if used_displays
-                .iter()
-                .any(|used| used.same_physical_display(&display))
-            {
-                continue;
-            }
-
-            used_displays.push(display.clone());
-            direct.push(DirectSlot {
-                display,
-                wallpaper_id,
-                wallpaper,
-                monitor,
-            });
-        }
-
         let mut mirrors = Vec::new();
-        for monitor in self
-            .app_config
-            .monitors
-            .iter()
-            .filter(|monitor| monitor.enabled && monitor.mode.eq_ignore_ascii_case("mirror"))
-        {
-            let Some(display) = monitor.resolve_display(self.displays) else {
-                continue;
-            };
-            if used_displays
-                .iter()
-                .any(|used| used.same_physical_display(&display))
-            {
-                continue;
-            }
-            let Some(target) = monitor.mirror_target.as_ref() else {
-                continue;
-            };
-            let Some(source_display_id) = target
-                .to_selector()
-                .resolve_display(self.displays)
-                .map(|entry| entry.desc.display_id)
-            else {
-                continue;
-            };
-            let settings = self
-                .app_config
-                .monitor_settings
-                .iter()
-                .find(|settings| settings.selector == monitor.selector)
-                .cloned()
-                .unwrap_or_else(|| MonitorSettingsCfg {
-                    selector: monitor.selector.clone(),
-                    ..MonitorSettingsCfg::default()
+        super::activation_remaining::visit_selected(
+            self,
+            |monitor, wallpaper, display| {
+                direct.push(DirectSlot {
+                    display: display.desc.clone(),
+                    wallpaper_id: monitor.wallpaper.as_deref().expect("selected wallpaper"),
+                    wallpaper,
+                    monitor,
                 });
-            mirrors.push(MirrorSlot {
-                display,
-                source_display_id,
-                settings,
-            });
-        }
-
+            },
+            |monitor, display, source_display_id, settings| {
+                mirrors.push(MirrorSlot {
+                    display: display.desc.clone(),
+                    source_display_id,
+                    settings: settings.cloned().unwrap_or_else(|| MonitorSettingsCfg {
+                        selector: monitor.selector.clone(),
+                        ..MonitorSettingsCfg::default()
+                    }),
+                });
+            },
+        );
         (direct, mirrors)
     }
-
-    fn scene_for_monitor(
-        &self,
-        display: DisplayDesc,
-        wallpaper_id: &str,
-        wallpaper: &WallpaperConfig,
-        monitor: &MonitorCfg,
-    ) -> Result<SceneDesc, BridgeError> {
-        let display_paused = self.display_paused(display.display_id);
-        SceneDescBuilder::build_from_wallpaper_config(SceneBuildContext {
-            display,
-            workshop_id: wallpaper_id,
-            wallpaper,
-            model: self.project_models.get(wallpaper_id),
-            monitor,
-            displays: self.displays,
-            paused: display_paused,
-            paths: self.paths,
-            force_shader_refresh: self.force_shader_refresh,
-        })
-    }
 }
-
-pub trait WallpaperAssignmentExt {
-    fn build_mirror_assignments(
-        app_config: &AppConfig,
-        displays: &[DisplaySnapshotEntry],
-    ) -> Vec<(DisplaySelector, WallpaperAssignment)>;
-}
-
-impl WallpaperAssignmentExt for WallpaperAssignment {
-    fn build_mirror_assignments(
-        app_config: &AppConfig,
-        displays: &[DisplaySnapshotEntry],
-    ) -> Vec<(DisplaySelector, WallpaperAssignment)> {
-        let mut assignments = Vec::new();
-
-        for monitor in &app_config.monitors {
-            if !monitor.enabled || monitor.mode != "mirror" {
-                continue;
-            }
-            if monitor
-                .selector
-                .to_selector()
-                .resolve_display(displays)
-                .is_none()
-            {
-                continue;
-            }
-            let Some(target) = monitor.mirror_target.as_ref() else {
-                continue;
-            };
-            assignments.push((
-                monitor.selector.to_selector(),
-                WallpaperAssignment::Mirror(target.to_selector()),
-            ));
-        }
-
-        assignments
-    }
-}
-
-trait MonitorCfgActivationExt {
-    fn resolve_display(&self, displays: &[DisplaySnapshotEntry]) -> Option<DisplayDesc>;
-}
-
-impl MonitorCfgActivationExt for MonitorCfg {
-    fn resolve_display(&self, displays: &[DisplaySnapshotEntry]) -> Option<DisplayDesc> {
-        self.selector
-            .to_selector()
-            .resolve_display(displays)
-            .map(|entry| entry.desc.clone())
-    }
-}
-
-pub trait SceneDescBuilderExt {
-    fn build_from_wallpaper_config(
-        context: SceneBuildContext<'_>,
-    ) -> Result<SceneDesc, BridgeError>
-    where
-        Self: Sized;
-}
-
-impl SceneDescBuilderExt for SceneDescBuilder {
-    fn build_from_wallpaper_config(
-        context: SceneBuildContext<'_>,
-    ) -> Result<SceneDesc, BridgeError> {
-        let project_json = context.paths.project_json(context.workshop_id);
-        let assets_path = context.paths.assets_root();
-        let audio_volume =
-            AudioVolume::try_from(context.wallpaper.audio.volume).map_err(|error| {
-                BridgeError::Error {
-                    kind: BridgeErrorKind::Engine,
-                    message: EngineError::InvalidInput(error.to_string()).to_string(),
-                }
-            })?;
-        let render_override = super::render_settings::select_render_setting(
-            &context.wallpaper.monitors,
-            &context.monitor.selector,
-            &context.display,
-            context.displays,
-        );
-        let fps = crate::config::resolve_frame_rate(
-            render_override.and_then(|render| render.frame_rate),
-            context.display.refresh_rate_hz,
-        );
-        let scaling_mode = render_override
-            .map(crate::config::wallpaper::MonitorRender::parse_scaling_mode)
-            .unwrap_or_default();
-        let scaling_factor = render_override.map_or(1.0, |render| render.scaling_factor);
-        let framing = render_override
-            .map(|render| render.framing.to_scene())
-            .unwrap_or_default();
-        let property_override_json = if context.wallpaper.r#type.eq_ignore_ascii_case("scene") {
-            // Also the builder of the document a live preview shows, so what
-            // is previewed is what this loads.
-            scene_property_override_json(context.model, &context.wallpaper.property_overrides)
-        } else {
-            None
-        };
-        let mut builder = SceneTemplate::builder(project_json.to_string_lossy())
-            .assets_path(assets_path.to_string_lossy())
-            .fps(fps)
-            .paused(context.paused)
-            .scaling_mode(scaling_mode)
-            .scaling_factor(scaling_factor)
-            .framing(framing)
-            .audio_response_enabled(context.wallpaper.audio.response_enabled)
-            // Reading what the user is listening to is consent, not a
-            // capability: the scene is told exactly what the inspector shows,
-            // and the lock-screen path forces the flag off after apply.
-            .media_integration_enabled(context.wallpaper.media_integration_enabled)
-            .audio_volume(audio_volume.into())
-            .audio_muted(context.wallpaper.audio.muted)
-            .shader_cache_path(context.paths.shader_cache_root().to_string_lossy())
-            .force_shader_refresh(context.force_shader_refresh);
-
-        if let Some(json) = property_override_json {
-            builder = builder.property_override_json(json);
-        }
-
-        builder
-            .build()
-            .map(|template| template.for_display(context.display))
-            .map_err(|error| BridgeError::Error {
-                kind: BridgeErrorKind::Engine,
-                message: error.to_string(),
-            })
-    }
-}
-
-pub struct SceneBuildContext<'a> {
-    display: DisplayDesc,
-    workshop_id: &'a str,
-    wallpaper: &'a WallpaperConfig,
-    /// Parsed manifest, for the defaults this host supplies rather than reads
-    /// from the project file the scene engine parses for itself.
-    model: Option<&'a ProjectModel>,
-    monitor: &'a MonitorCfg,
-    displays: &'a [DisplaySnapshotEntry],
-    paused: bool,
-    paths: &'a BridgePaths,
-    force_shader_refresh: bool,
-}
-
