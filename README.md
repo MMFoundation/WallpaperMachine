@@ -226,6 +226,18 @@ new versions itself and, where it can replace its own copy, offers
 </details>
 
 <details>
+<summary><b>Does it use my proxy?</b></summary>
+
+Yes, the macOS system proxy: browsing, previews and SteamCMD downloads all follow
+System Settings → Network → Details → Proxies, so there is no separate setting.
+A proxy app in rule mode still decides by host name, so if Steam downloads fail
+outside global mode, route `steamserver.net`, `steamcontent.com`,
+`steamcommunity.com` and `steampowered.com` through the proxy
+([details](docs/features/workshop-downloads.md#proxies)).
+
+</details>
+
+<details>
 <summary><b>Is WallpaperMachine really free?</b></summary>
 
 Yes. The signed download is free, and the complete source is here if you

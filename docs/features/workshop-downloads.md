@@ -479,6 +479,24 @@ never self-updates mid-download. Reinstall through setup when a newer version is
 needed. The implementation is `App/Services/Steam/SteamCMDPackages.swift`,
 `SteamCMDRuntime.swift` and `SteamCMDSetupStore.swift`.
 
+### Proxies
+
+The app has no proxy setting of its own: every connection follows the macOS
+system proxy (System Settings → Network → Details → Proxies). Browsing, thumbnails,
+pixiv and updates use `URLSession`/WebKit defaults. SteamCMD reads the same settings
+itself: Valve's `steamclient.dylib` calls `SCDynamicStoreCopyProxies` and
+`CFNetworkCopyProxiesForURL`, so its HTTP requests and its WebSocket connection
+to Steam's servers both go through a configured HTTP/HTTPS system proxy. It
+ignores `http_proxy`/`https_proxy` environment variables, and its proxy lookup has
+no SOCKS case, so a SOCKS-only system proxy leaves it direct. Passing a proxy to it
+from the app is therefore not possible.
+
+A proxy client in rule mode still decides per host name. Its Steam
+(`steamserver.net`, `steamcontent.com`, `steamcommunity.com`, `steampowered.com`)
+rules decide whether SteamCMD's traffic is proxied; rule sets that send them `DIRECT`
+give the same result as no proxy. Route those domains through the proxy, or use
+global mode while downloading. A TUN ("enhanced") mode applies the same rules.
+
 ## The download queue
 
 Every download also appears in a compact popover opened from the toolbar's

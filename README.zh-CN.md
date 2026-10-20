@@ -162,6 +162,13 @@ WallpaperMachine 支持场景、视频和网页渲染。兼容性因壁纸而异
 </details>
 
 <details>
+<summary><b>会使用我的代理吗？</b></summary>
+
+会，使用的是 macOS 系统代理：浏览、预览图和 SteamCMD 下载都遵循“系统设置 → 网络 → 详细信息 → 代理”，因此没有单独的设置。规则模式下的代理软件仍按域名分流；如果只有全局模式下 Steam 下载才正常，请把 `steamserver.net`、`steamcontent.com`、`steamcommunity.com` 和 `steampowered.com` 设为走代理（[详细说明](docs/features/workshop-downloads.md#proxies)）。
+
+</details>
+
+<details>
 <summary><b>WallpaperMachine 真的免费吗？</b></summary>
 
 是的。签名版免费下载，如果你更想自己构建，完整源代码就在这里。成为支持者，可在网站和本 README 上获得赞助者位置，并享有优先支持。它不购买任何许可：有没有它，应用都一样。包含哪些内容以及如何成为支持者，见[价格页面](https://www.wallpapermachine.app/zh/pricing/)。
