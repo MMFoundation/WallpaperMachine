@@ -595,8 +595,21 @@ void SceneRuntimeContext::Tick(double frame_time) {
         playback.absolute_seconds += scaled_delta;
     }
     for (auto& binding : m_scalar_animations) binding.playback->Advance(frame_time);
-    // Property scripts initialize lazily on their first evaluation, so markers
-    // crossed by this very tick are delivered to an initialized script.
+    // Scripts the scene has not started all run `init`, in the scene's order,
+    // before any of them is told the user properties, and that before any
+    // `update`: one script's first `applyUserProperties` may call what a later
+    // layer's `init` set up. They start on this tick, so markers crossed by it
+    // are delivered to started scripts.
+    const auto first_unstarted = std::min(m_scripted_values_started, scripted_value_count);
+    for (std::size_t index = first_unstarted; index < scripted_value_count; ++index) {
+        if (auto* value = m_scripted_values[index]; value != nullptr) value->Start();
+    }
+    for (std::size_t index = first_unstarted; index < scripted_value_count; ++index) {
+        if (auto* value = m_scripted_values[index]; value != nullptr) {
+            value->DeliverInitialUserProperties();
+        }
+    }
+    m_scripted_values_started = scripted_value_count;
     for (std::size_t index = 0; index < scripted_value_count; ++index) {
         auto* value = m_scripted_values[index];
         if (value != nullptr) value->reevaluate();
@@ -1349,6 +1362,7 @@ void SceneRuntimeContext::RollbackNodeRegistration(
         });
     }
     m_scripted_values.resize(previous->scripted_values_size);
+    m_scripted_values_started = std::min(m_scripted_values_started, m_scripted_values.size());
     m_owned_values.resize(previous->owned_values_size);
 
     if (previous->has_node) m_nodes[key] = previous->node;
@@ -3832,7 +3846,9 @@ bool SceneRuntimeContext::SortLayer(std::string_view name, int index) {
 
 void SceneRuntimeContext::RegisterLayerAuthoredName(std::string runtime_name,
                                                     std::string authored_name) {
-    if (runtime_name.empty() || ! m_nodes.contains(runtime_name)) return;
+    // The parser records names before it builds the layers: a script compiles
+    // as its layer is built and may read its own name then.
+    if (runtime_name.empty()) return;
     m_layer_authored_names.insert_or_assign(std::move(runtime_name), std::move(authored_name));
 }
 

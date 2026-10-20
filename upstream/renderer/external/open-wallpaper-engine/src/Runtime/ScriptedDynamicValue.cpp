@@ -50,8 +50,35 @@ ScriptedDynamicValue::~ScriptedDynamicValue() {
     if (! m_registry.expired()) m_runtime->UnregisterScriptedValue(this);
 }
 
+void ScriptedDynamicValue::Start() {
+    if (m_runtime->ProjectPropertiesChanging() || m_program == nullptr || ! m_program->Valid()) return;
+
+    // What `init` returns is the property's value, as what `update` returns
+    // is: a typing text starts empty, a helper layer hides itself. A value of
+    // another kind than the property's (a flag for a position) is not one it
+    // can take, and leaves it alone. A text script that returns nothing but
+    // writes its own layer's text has decided the text, in `init` as in
+    // `update`.
+    SceneRuntimeContext::OwnTextWrite own_text_write(*m_runtime, *this);
+    const auto initial = m_program->Start(m_runtime->hostContext(), *this);
+    if (initial != nullptr && initial->getType() == getType()) {
+        DynamicValue::update(*initial);
+    } else if (own_text_write.Written().has_value()) {
+        DynamicValue::update(*own_text_write.Written());
+    }
+}
+
+void ScriptedDynamicValue::DeliverInitialUserProperties() {
+    if (m_runtime->ProjectPropertiesChanging() || m_program == nullptr) return;
+    m_program->DeliverInitialUserProperties();
+}
+
 void ScriptedDynamicValue::reevaluate() {
     if (m_runtime->ProjectPropertiesChanging() || m_program == nullptr || ! m_program->Valid()) return;
+    // A script the tick did not start (one a later script made, or one asked
+    // for before the first tick) starts here, on its own.
+    Start();
+    DeliverInitialUserProperties();
 
     // update(value) continues from the previous result, including explicit property writes.
     SceneRuntimeContext::OwnTextWrite own_text_write(*m_runtime, *this);

@@ -9125,6 +9125,201 @@ TEST(SceneSchema, ScriptsSeeTheAuthoredNameOfLayersTheParserRegisteredUnderGener
     EXPECT_EQ(scene->runtime->LayerAuthoredName(scene->runtime->LayerNameAt(2)), "");
 }
 
+// The same holds for a layer that has a script of its own. That script compiles
+// while the parser builds the layer, and the layer object it is handed then
+// (`thisLayer`) is the one every other script's `enumerateLayers()` returns, so
+// the name has to be on record before. A script that gathers its widget's
+// layers by name in `init` missed such a layer and left it where it was.
+TEST(SceneSchema, LayersWithScriptsOfTheirOwnCarryTheirAuthoredNameUnderGeneratedKeys) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const auto own_name_script = [](std::string_view expected) {
+        return nlohmann::json {
+            { "value", true },
+            { "script",
+              "const seen = thisLayer.name;\n"
+              "export function update(value) {\n"
+              "  if (seen !== '" + std::string(expected) + "') throw new Error('own name: ' + seen);\n"
+              "  return value;\n"
+              "}\n" },
+        };
+    };
+    const auto scene = ParseScriptParityScene(vfs, ScriptParityScene(nlohmann::json::array({
+        { { "id", 1 }, { "name", "twin" }, { "image", "image.json" }, { "visible", own_name_script("twin") } },
+        { { "id", 2 }, { "name", "twin" }, { "image", "image.json" }, { "visible", own_name_script("twin") } },
+        { { "id", 3 }, { "image", "image.json" }, { "visible", own_name_script("") } },
+        { { "id", 4 }, { "name", "caption" }, { "text", "a" }, { "font", "Arial" }, { "pointsize", 24 } },
+        { { "id", 5 }, { "name", "caption" }, { "text", "b" }, { "font", "Arial" }, { "pointsize", 24 },
+          { "visible", own_name_script("caption") } },
+        { { "id", 6 }, { "name", "mover" }, { "image", "image.json" },
+          { "origin",
+            { { "value", { 0, 0, 0 } },
+              { "script",
+                "export function init(value) {\n"
+                "  thisScene.enumerateLayers().forEach(layer => {\n"
+                "    if (layer.name === 'twin' || layer.name === 'caption') layer.origin = new Vec3(100, 50, 0);\n"
+                "  });\n"
+                "  return value;\n"
+                "}\n"
+                "export function update(value) { return value; }\n" } } } },
+    })));
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+    runtime.Tick(1.0 / 60.0);
+    for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
+    for (std::size_t index : { 0u, 1u, 3u, 4u }) {
+        const auto key = runtime.LayerNameAt(index);
+        const auto origin = runtime.NodeTranslate(key);
+        EXPECT_TRUE(origin.x() == 100.0f && origin.y() == 50.0f)
+            << runtime.LayerAuthoredName(key) << " at " << index
+            << " was not gathered by its name: " << origin.transpose();
+    }
+}
+
+// Every script runs `init` before any of them is told the user properties. A
+// widget's options layer comes first in the scene and calls, from its first
+// `applyUserProperties`, a function a later layer's `init` hands out. Started
+// one script at a time, the call threw, and everything the options set after
+// it (the switch that keeps the widget shown) was never set.
+TEST(SceneSchema, EveryScriptRunsInitBeforeAnyIsToldTheUserProperties) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const auto scene = ParseScriptParityScene(vfs, ScriptParityScene(nlohmann::json::array({
+        { { "id", 1 }, { "name", "options" }, { "image", "image.json" },
+          { "visible",
+            { { "value", true },
+              { "script",
+                "export function applyUserProperties(changed) {\n"
+                "  shared.startPlayer();\n"
+                "  shared.enabled = true;\n"
+                "}\n"
+                "export function update(value) { return value; }\n" } } } },
+        { { "id", 2 }, { "name", "player" }, { "image", "image.json" },
+          { "visible",
+            { { "value", true },
+              { "script",
+                "export function init(value) {\n"
+                "  shared.startPlayer = () => { thisLayer.scale = new Vec3(3, 3, 1); };\n"
+                "  return value;\n"
+                "}\n"
+                "export function update(value) { return shared.enabled === true; }\n" } } } },
+    })));
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+    runtime.Tick(1.0 / 60.0);
+    EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+    EXPECT_FLOAT_EQ(runtime.NodeScale("player").x(), 3.0f)
+        << "the options' first applyUserProperties ran before the player's init";
+    runtime.Tick(1.0 / 60.0);
+    EXPECT_TRUE(runtime.NodeVisible("player")) << "the options stopped before the switch";
+}
+
+// What `init` returns is the property's value from then on, as what `update`
+// returns is (Wallpaper Engine's own script template says so of both). A
+// drag handle hides itself from `init`, and a typing text starts empty there
+// and adds a letter on every `update`; one that returns nothing keeps the
+// scene file's value, as does one that returns a value of another kind than
+// the property's. Dropped, the handle stayed on screen and the typing text
+// appended its letters to the placeholder.
+TEST(SceneSchema, WhatInitReturnsIsThePropertysValue) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const auto scene = ParseScriptParityScene(vfs, ScriptParityScene(nlohmann::json::array({
+        { { "id", 1 }, { "name", "handle" }, { "image", "image.json" },
+          { "visible",
+            { { "value", true },
+              { "script",
+                "export function init(value) { return false; }\n"
+                "export function update(value) { return value; }\n" } } } },
+        { { "id", 2 }, { "name", "typing" }, { "font", "Arial" }, { "pointsize", 24 },
+          { "text",
+            { { "value", "placeholder" },
+              { "script",
+                "export function init(value) { return ''; }\n"
+                "export function update(value) { return value + 'a'; }\n" } } } },
+        { { "id", 3 }, { "name", "kept" }, { "image", "image.json" }, { "scale", { 2, 2, 1 } },
+          { "visible",
+            { { "value", true },
+              { "script",
+                "export function init(value) { thisLayer.alpha = 0.5; }\n"
+                "export function update(value) { return value; }\n" } } } },
+        { { "id", 4 }, { "name", "steady" }, { "image", "image.json" },
+          { "origin",
+            { { "value", { 10, 20, 0 } },
+              { "script",
+                "export function init(value) { return true; }\n"
+                "export function update(value) { return value; }\n" } } } },
+    })));
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+    runtime.Tick(1.0 / 60.0);
+    runtime.Tick(1.0 / 60.0);
+    EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+    EXPECT_FALSE(runtime.NodeVisible("handle"));
+    EXPECT_EQ(runtime.NodeText("typing"), "aa");
+    EXPECT_TRUE(runtime.NodeVisible("kept")) << "an init that returns nothing hid its layer";
+    const auto steady = runtime.NodeTranslate("steady");
+    EXPECT_TRUE(steady.x() == 10.0f && steady.y() == 20.0f)
+        << "a flag returned for a position moved the layer to " << steady.transpose();
+}
+
+// A sound object is a layer to scripts: counted in the scene file's order,
+// found by its id, called by its own name, and played through the object
+// `enumerateLayers()` hands out. A music widget finds its tracks this way, by
+// the `.mp3` in their names; with no sound listed it found none and threw when
+// it was asked to play on startup. Two sounds that share a name stay two.
+TEST(SceneSchema, ScriptsListSoundLayersInTheScenesOrderAndPlayThem) {
+    fs::VFS vfs;
+    MountSceneFiles(vfs);
+    const auto source = ScriptParityScene(nlohmann::json::array({
+        { { "id", 1 }, { "name", "cover" }, { "image", "image.json" } },
+        { { "id", 2 }, { "name", "song.mp3 t:10" }, { "sound", { "sounds/a.mp3" } },
+          { "startsilent", true }, { "playbackmode", "loop" } },
+        { { "id", 3 }, { "name", "jingle.mp3" }, { "sound", { "sounds/b.mp3" } },
+          { "startsilent", true } },
+        { { "id", 4 }, { "name", "jingle.mp3" }, { "sound", { "sounds/c.mp3" } },
+          { "startsilent", true } },
+        { { "id", 5 }, { "name", "player" }, { "image", "image.json" },
+          { "visible",
+            { { "value", true },
+              { "script",
+                "export function init(value) {\n"
+                "  const layers = thisScene.enumerateLayers();\n"
+                "  const names = layers.map(l => l.name).join(',');\n"
+                "  if (names !== 'cover,song.mp3 t:10,jingle.mp3,jingle.mp3,player') throw new Error('names: ' + names);\n"
+                "  const songs = layers.filter(l => l.name.includes('.mp3'));\n"
+                "  if (thisScene.getLayerByID(2) !== songs[0]) throw new Error('id 2');\n"
+                "  if (thisScene.getLayer('jingle.mp3') !== songs[1]) throw new Error('first jingle');\n"
+                "  if (songs[0].isPlaying()) throw new Error('a silent start played');\n"
+                "  songs[0].play();\n"
+                "  songs[2].play();\n"
+                "  return value;\n"
+                "}\n"
+                "export function update(value) { return value; }\n" } } } },
+    }));
+    // The parse mounts the sounds, which opens a system output device unless
+    // the manager has none.
+    audio::SoundManager sound_manager(audio::SoundManager::OutputBackend::Null);
+    WPSceneParser       parser;
+    ProjectProperties   properties;
+    const auto          scene = parser.Parse(SceneParseRequest {
+        .scene_id = "sound-layers", .project_properties = &properties,
+    }, source.dump(), vfs, sound_manager);
+    ASSERT_NE(scene, nullptr);
+    ASSERT_NE(scene->runtime, nullptr);
+    auto& runtime = *scene->runtime;
+    runtime.Tick(1.0 / 60.0);
+    EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+    EXPECT_EQ(runtime.LayerCount(), 5u);
+    EXPECT_TRUE(runtime.SoundLayerPlaying(runtime.LayerNameAt(1)));
+    EXPECT_FALSE(runtime.SoundLayerPlaying(runtime.LayerNameAt(2)))
+        << "playing one of two sounds that share a name played the other";
+    EXPECT_TRUE(runtime.SoundLayerPlaying(runtime.LayerNameAt(3)));
+}
+
 // A scene script runs `init` as it is registered. By then the layers' order and
 // ids, the scene file's objects, and the hooks that restyle and create text
 // layers are in place, as they are for every call after it.

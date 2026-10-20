@@ -92,11 +92,20 @@ Scripts list the scene's layers through `thisScene`. `getLayer(index)`,
 one order, the scene file's object order followed by the layers scripts made, and a
 sort moves a layer in it as well as in the draw order among its siblings.
 `layer.name` is the name the scene file gives the layer, empty for an unnamed one,
-whatever key the engine files it under. Only layers the parser built are counted:
-an object the scene file marks statically invisible, which nothing can show, is
-never built, so it has no index or id and the count differs from the object list
-by those. `destroyLayer` removes the layers a script made below the layer too.
-A scene script's `init` runs once the scene is built, so it sees all of that.
+whatever key the engine files it under, from the moment any script can reach the
+layer, its own script compiling with it included. A sound object is a layer in that
+order like any other, found by its id and played through the object
+`enumerateLayers()` hands out; a music widget finds its tracks there by name. Only
+layers the parser built are counted: an object the scene file marks statically
+invisible, which nothing can show, is never built, so it has no index or id and the
+count differs from the object list by those. `destroyLayer` removes the layers a
+script made below the layer too. A scene script's `init` runs once the scene is
+built, so it sees all of that. Property scripts start on the scene's first tick:
+every one runs `init`, in the scene's order, before any of them is told the user
+properties, and that before any `update`, because a widget's options layer may call
+from its first `applyUserProperties` what a later layer's `init` set up. What `init`
+returns is the property's value from then on, as what `update` returns is: a drag
+handle hides itself there, and a typing text starts empty.
 `applyGeneralSettings({ language })` is always told `en-us`: the host does not
 yet pass the interface language on. `parallaxDepth` set on a layer reaches the
 layer, its effect passes and the layers below it (a layer drawn through effects

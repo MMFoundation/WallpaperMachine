@@ -543,6 +543,24 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   projected input (`WE_TEST_INPUT_JSON`, `WE_TEST_CLICK_*`), not by forcing
   overlay alpha. A closed author menu and an audio-driven wave with no audio are
   not evidence that a rendered frame has exercised either feature.
+- **Script start-up order and what `init` returns** —
+  `SceneSchema.EveryScriptRunsInitBeforeAnyIsToldTheUserProperties` (an options
+  layer calls from its first `applyUserProperties` a function a later layer's
+  `init` hands out, then sets the switch that keeps the widget shown) and
+  `SceneSchema.WhatInitReturnsIsThePropertysValue` (a handle that hides itself
+  from `init`, a typing text that starts empty there, and an `init` that returns
+  nothing keeping the scene file's value). Started one script at a time, the
+  call threw and the switch was never set, so a music widget faded itself out;
+  with `init`'s value dropped, its drag handle stayed on screen and its title typed
+  onto the placeholder.
+- **Layers scripts gather by name** —
+  `SceneSchema.LayersWithScriptsOfTheirOwnCarryTheirAuthoredNameUnderGeneratedKeys`
+  (twin images, an unnamed image and a twin text, each with a script of its own,
+  are found by name and moved by another layer's `init`) and
+  `SceneSchema.ScriptsListSoundLayersInTheScenesOrderAndPlayThem` (sound layers in
+  the scene's order, found by id and by name, two that share a name played
+  separately). A widget that moves its layers by name prefix left its cover behind,
+  and one that finds its tracks by `.mp3` found none and threw when told to play.
 - **User-switched effects** — `RenderGraph.parsedEffectVisibilityFollowsTheBoundUserProperty`
   (`rendergraph_smoke`, image layers) and
   `TextObjectRuntime.TextEffectVisibilityFollowsTheBoundUserProperty`. An

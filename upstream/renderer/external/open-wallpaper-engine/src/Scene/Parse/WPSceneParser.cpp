@@ -274,6 +274,9 @@ struct ParseContext {
     std::unordered_map<std::string, uint32_t>               layer_name_counts;
     std::unordered_map<int32_t, std::string>                object_runtime_names;
     std::unordered_map<std::string, uint32_t>               text_name_counts;
+    /// Sound objects the scene builds. Each is a layer scripts list and address
+    /// like a plain group, with its sound registered under the same key.
+    std::unordered_set<int32_t>                             sound_layer_ids;
     std::unordered_set<int32_t>                             referenced_layer_ids;
     /// The card each text layer shows, for a composite registered only once
     /// a later consumer turns out to sample the layer.
@@ -578,10 +581,12 @@ void PrewarmParticleSystems(ParseContext& context) {
     context.pending_prewarms.clear();
 }
 
+// `node_kind` takes an object of a kind that has no node of its own (a sound)
+// as a plain group.
 bool ParseLayerObject(const nlohmann::json& json, const nlohmann::json& objects,
-                      RawLayerObject& layer) {
+                      RawLayerObject& layer, bool node_kind = false) {
     GET_JSON_NAME_VALUE_NOWARN(json, "id", layer.id);
-    if (! IsLayerObject(json) &&
+    if (! node_kind && ! IsLayerObject(json) &&
         (! IsSchemaOnlyObject(json) || layer.id == 0 || ! HasChildObject(objects, layer.id)))
         return false;
 
@@ -610,7 +615,8 @@ void ParseLayerNodes(ParseContext& context, const nlohmann::json& objects) {
         }
 
         RawLayerObject layer;
-        if (ParseLayerObject(object, objects, layer)) {
+        if (ParseLayerObject(
+                object, objects, layer, context.sound_layer_ids.contains(object_id))) {
             layers.push_back(std::move(layer));
         }
     }
@@ -6268,10 +6274,15 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
     context.layer_name_counts.clear();
     context.object_runtime_names.clear();
     context.text_name_counts.clear();
+    context.sound_layer_ids.clear();
     for (const auto& obj : wp_objs) {
         std::visit(visitor::overload {
                        [&context](const wpscene::WPImageObject& object) {
                            CountNodeRuntimeName(context.layer_name_counts, object);
+                       },
+                       [&context](const wpscene::WPSoundObject& object) {
+                           CountNodeRuntimeName(context.layer_name_counts, object);
+                           if (object.id != 0) context.sound_layer_ids.insert(object.id);
                        },
                        [&context](const wpscene::WPParticleObject& object) {
                            CountNodeRuntimeName(context.layer_name_counts, object);
@@ -6330,6 +6341,14 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
                            context.object_runtime_names[object.id] =
                                NodeRuntimeName(object.name, object.id, count);
                        },
+                       [&context](const wpscene::WPSoundObject& object) {
+                           if (object.id == 0) return;
+                           const auto count = object.name.empty()
+                                                  ? 0u
+                                                  : context.layer_name_counts[object.name];
+                           context.object_runtime_names[object.id] =
+                               NodeRuntimeName(object.name, object.id, count);
+                       },
                        [](const auto&) {
                        },
                    },
@@ -6356,6 +6375,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
     // duplicate authored names to cross-layer scripts in declaration order.
     // Register before compiling scripts so module-level lookups work too.
     if (context.scene->runtime != nullptr) {
+        auto& runtime = *context.scene->runtime;
         for (const auto& object : *context.object_list) {
             if (!object.is_object() || (object.contains("name") && !object.at("name").is_string()))
                 continue;
@@ -6366,9 +6386,38 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
             const auto id = object.value("id", 0);
             if (const auto key = context.object_runtime_names.find(id);
                 key != context.object_runtime_names.end()) {
-                context.scene->runtime->RegisterLayerAlias(name, key->second);
+                runtime.RegisterLayerAlias(name, key->second);
             } else if (IsLayerObject(object) && id != 0) {
-                context.scene->runtime->RegisterLayerAlias(name, NodeRuntimeName(name, id, count->second));
+                runtime.RegisterLayerAlias(name, NodeRuntimeName(name, id, count->second));
+            }
+        }
+        // A layer registered under a generated key (its name is shared, or
+        // empty) is still called what the scene file calls it. A script
+        // compiles as its layer is parsed, and the layer object it builds then
+        // (its `thisLayer`, a layer it looks up at module level) keeps the
+        // name it was built with, so the names are on record before the first
+        // script compiles, under the key each kind of layer will be given.
+        const auto record_name = [&runtime](const std::string& name, const std::string& key) {
+            if (! key.empty() && key != name) runtime.RegisterLayerAuthoredName(key, name);
+        };
+        for (const auto& obj : wp_objs) {
+            std::visit(visitor::overload {
+                           [&](const wpscene::WPTextObject& object) {
+                               record_name(object.name, TextRuntimeName(context, object));
+                           },
+                           [&](const wpscene::WPLightObject& object) {
+                               record_name(object.name, LightRuntimeName(context, object));
+                           },
+                           [&](const auto& object) {
+                               record_name(object.name, LayerRuntimeName(context, object));
+                           },
+                       },
+                       obj);
+        }
+        for (const auto& object : *context.object_list) {
+            RawLayerObject layer;
+            if (IsLayerObject(object) && ParseLayerObject(object, *context.object_list, layer)) {
+                record_name(layer.name, LayerRuntimeName(context, layer));
             }
         }
     }
@@ -6451,8 +6500,11 @@ std::shared_ptr<Scene> WPSceneParser::Parse(const SceneParseRequest& request,
                            ParseParticleObj(context, obj);
                        },
                        [&context, &sm](wpscene::WPSoundObject& obj) {
-                           WPSoundParser::Parse(
-                               obj, *context.vfs, sm, context.scene->runtime.get());
+                           WPSoundParser::Parse(obj,
+                                                *context.vfs,
+                                                sm,
+                                                context.scene->runtime.get(),
+                                                LayerRuntimeName(context, obj));
                        },
                        [&context](wpscene::WPLightObject& obj) {
                            ParseLightObj(context, obj);

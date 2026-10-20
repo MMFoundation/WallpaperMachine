@@ -83,6 +83,17 @@ public:
 
     bool                  Valid() const;
     const ScriptProgramCapabilities& Capabilities() const noexcept { return m_capabilities; }
+    /// Runs `init` with the property's current value, once, and answers what it
+    /// returned as the property's value from then on (null when it returned
+    /// nothing). The scene starts every script this way before it tells any of
+    /// them the user properties: one script's first `applyUserProperties` may
+    /// call what another script's `init` set up.
+    DynamicValueUniquePtr Start(const ScriptHostContext& host_context,
+                                const DynamicValue&      current_value);
+    /// The first `applyUserProperties`, with every property, once `init` ran.
+    void                  DeliverInitialUserProperties();
+    /// Starts the script and delivers the properties first if nothing has, then
+    /// runs `update`.
     DynamicValueUniquePtr Evaluate(const ScriptHostContext& host_context,
                                    const DynamicValue&      current_value);
     /// Whether the last `Evaluate` got a value from `update()`. When it did not
@@ -127,6 +138,7 @@ private:
     bool                                 m_owns_context = false;
     bool                                 m_valid        = false;
     bool                                 m_init_called  = false;
+    bool                                 m_user_properties_delivered = false;
     bool                                 m_update_returned_value = false;
     bool                                 m_destroyed    = false;
     // The animation layer this script is attached to (`animationlayers[i]`), or -1

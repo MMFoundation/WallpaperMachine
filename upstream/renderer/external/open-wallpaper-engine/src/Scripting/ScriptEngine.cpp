@@ -4285,15 +4285,88 @@ void PropertyScriptProgram::ApplyProjectProperties(
     SetEngineUserProperties(context_handle, global_object, project_properties);
     JS_FreeValue(context_handle, global_object);
     UpdateScriptProperties();
-    // Lazy initialization delivers the full initial snapshot once, not an
-    // additional changed-property event before the program has initialized.
-    if (! m_init_called || changed_properties.empty()) return;
+    // The first delivery is the full snapshot, once the script has started; a
+    // change before then is already in it.
+    if (! m_user_properties_delivered || changed_properties.empty()) return;
     JSValue changed = CreateChangedPropertiesObject(context_handle, changed_properties);
     JSValueConst argv[] = { changed };
     JSValue result = CallStoredExport(
         context_handle, m_exports_object_name.c_str(), "applyUserProperties", 1, argv);
     JS_FreeValue(context_handle, result);
     JS_FreeValue(context_handle, changed);
+}
+
+namespace
+{
+// What a property script is handed as the property's value: angles in degrees,
+// anything else as it is held. Only the payload is serialized; copying a
+// DynamicValue would also copy its live subscriptions.
+JSValue PropertyScriptInput(JSContext* context, PropertyScriptValueSemantic semantic,
+                            const DynamicValue& value) {
+    if (semantic == PropertyScriptValueSemantic::AnglesDegrees &&
+        value.getType() == DynamicValue::Vec3) {
+        const auto angles = RadiansToDegrees(value.getVec3());
+        return CreateJsVec3(context, angles.x(), angles.y(), angles.z());
+    }
+    return DynamicValueToJS(context, value);
+}
+
+// What `init` or `update` returned, as the property's value; null when it
+// returned nothing the property can take (nothing at all, an exception, an
+// object for a flag).
+DynamicValueUniquePtr PropertyScriptOutput(JSContext* context, PropertyScriptValueSemantic semantic,
+                                           JSValueConst result, const DynamicValue& current_value) {
+    if (JS_IsException(result) || JS_IsUndefined(result) ||
+        (current_value.getType() == DynamicValue::Boolean &&
+         JS_VALUE_GET_TAG(result) == JS_TAG_OBJECT)) {
+        return nullptr;
+    }
+    auto value = std::make_unique<DynamicValue>();
+    FillDynamicValueFromJS(context, result, current_value.getType(), *value);
+    if (semantic == PropertyScriptValueSemantic::AnglesDegrees &&
+        value->getType() == DynamicValue::Vec3) {
+        value->update(DegreesToRadians(value->getVec3()));
+    }
+    return value;
+}
+} // namespace
+
+DynamicValueUniquePtr PropertyScriptProgram::Start(const ScriptHostContext& host_context,
+                                                   const DynamicValue&      current_value) {
+    auto* context_handle = static_cast<JSContext*>(m_impl_context);
+    if (! m_valid || context_handle == nullptr || m_init_called) return nullptr;
+
+    UpdateHostContext(host_context);
+    UpdateScriptProperties();
+    JSValue      initial_value_js = PropertyScriptInput(context_handle, m_semantic, current_value);
+    JSValueConst init_argv[]      = { initial_value_js };
+    JSValue      init_result =
+        CallStoredExport(context_handle, m_exports_object_name.c_str(), "init", 1, init_argv);
+    auto initial = PropertyScriptOutput(context_handle, m_semantic, init_result, current_value);
+    JS_FreeValue(context_handle, init_result);
+    JS_FreeValue(context_handle, initial_value_js);
+    // Right after `init`: a script keeps its language tables here.
+    CallGeneralSettings(context_handle, m_exports_object_name, host_context);
+    m_init_called = true;
+    return initial;
+}
+
+void PropertyScriptProgram::DeliverInitialUserProperties() {
+    auto* context_handle = static_cast<JSContext*>(m_impl_context);
+    if (! m_valid || context_handle == nullptr || ! m_init_called || m_user_properties_delivered) {
+        return;
+    }
+    m_user_properties_delivered = true;
+    if (m_runtime == nullptr) return;
+
+    UpdateScriptProperties();
+    JSValue changed_properties =
+        CreateChangedPropertiesObject(context_handle, m_runtime->projectProperties());
+    JSValueConst changed_argv[] = { changed_properties };
+    JSValue      apply_result   = CallStoredExport(
+        context_handle, m_exports_object_name.c_str(), "applyUserProperties", 1, changed_argv);
+    JS_FreeValue(context_handle, apply_result);
+    JS_FreeValue(context_handle, changed_properties);
 }
 
 DynamicValueUniquePtr PropertyScriptProgram::Evaluate(const ScriptHostContext& host_context,
@@ -4305,65 +4378,30 @@ DynamicValueUniquePtr PropertyScriptProgram::Evaluate(const ScriptHostContext& h
     UpdateScriptProperties();
     ProcessScheduledCallbacks(context_handle);
 
-    // Serialize only the payload; copying DynamicValue also copies its live subscriptions.
-    const auto make_script_input = [&]() {
-        if (m_semantic == PropertyScriptValueSemantic::AnglesDegrees &&
-            current_value.getType() == DynamicValue::Vec3) {
-            const auto angles = RadiansToDegrees(current_value.getVec3());
-            return CreateJsVec3(context_handle, angles.x(), angles.y(), angles.z());
-        }
-        return DynamicValueToJS(context_handle, current_value);
-    };
-
-    if (! m_init_called) {
-        JSValue      initial_value_js = make_script_input();
-        JSValueConst init_argv[]      = { initial_value_js };
-        JSValue      init_result =
-            CallStoredExport(context_handle, m_exports_object_name.c_str(), "init", 1, init_argv);
-        JS_FreeValue(context_handle, init_result);
-        JS_FreeValue(context_handle, initial_value_js);
-        // Right after `init`: a script keeps its language tables here.
-        CallGeneralSettings(context_handle, m_exports_object_name, host_context);
-        if (m_runtime != nullptr) {
-            JSValue changed_properties =
-                CreateChangedPropertiesObject(context_handle, m_runtime->projectProperties());
-            JSValueConst changed_argv[] = { changed_properties };
-            JSValue      apply_result   = CallStoredExport(context_handle,
-                                                    m_exports_object_name.c_str(),
-                                                    "applyUserProperties",
-                                                    1,
-                                                    changed_argv);
-            JS_FreeValue(context_handle, apply_result);
-            JS_FreeValue(context_handle, changed_properties);
-        }
-        m_init_called = true;
-    }
+    // A script nothing started yet starts here, on its own, and what its
+    // `init` returned, when the property can take it, is the value `update`
+    // continues from.
+    const auto initial = Start(host_context, current_value);
+    DeliverInitialUserProperties();
+    const DynamicValue& input =
+        initial != nullptr && initial->getType() == current_value.getType() ? *initial
+                                                                            : current_value;
 
     if (! m_capabilities.update) return nullptr;
 
-    JSValue      current_value_js = make_script_input();
+    JSValue      current_value_js = PropertyScriptInput(context_handle, m_semantic, input);
     JSValueConst argv[]           = { current_value_js };
     JSValue      result =
         CallStoredExport(context_handle, m_exports_object_name.c_str(), "update", 1, argv);
     JS_FreeValue(context_handle, current_value_js);
 
-    auto published = std::make_unique<DynamicValue>();
-    m_update_returned_value = false;
-    if (JS_IsException(result) || JS_IsUndefined(result) ||
-        (current_value.getType() == DynamicValue::Boolean &&
-         JS_VALUE_GET_TAG(result) == JS_TAG_OBJECT)) {
-        JS_FreeValue(context_handle, result);
-        published->update(current_value);
-        return published;
-    }
-
-    m_update_returned_value = true;
-    FillDynamicValueFromJS(context_handle, result, current_value.getType(), *published);
-    if (m_semantic == PropertyScriptValueSemantic::AnglesDegrees &&
-        published->getType() == DynamicValue::Vec3) {
-        published->update(DegreesToRadians(published->getVec3()));
-    }
+    auto published = PropertyScriptOutput(context_handle, m_semantic, result, input);
     JS_FreeValue(context_handle, result);
+    m_update_returned_value = published != nullptr;
+    if (published == nullptr) {
+        published = std::make_unique<DynamicValue>();
+        published->update(input);
+    }
     return published;
 }
 

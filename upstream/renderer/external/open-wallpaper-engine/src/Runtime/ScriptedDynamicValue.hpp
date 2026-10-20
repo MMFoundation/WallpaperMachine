@@ -34,6 +34,11 @@ public:
     const std::string& LayerName() const { return m_current_layer_name; }
     uint8_t CursorHandlerMask() const noexcept;
 
+    /// Runs the script's `init` if it has not run. The runtime starts every
+    /// script it holds, then delivers their first user properties, before the
+    /// first `reevaluate` of any of them.
+    void Start();
+    void DeliverInitialUserProperties();
     void reevaluate();
     void ApplyProjectProperties(const ProjectProperties& project_properties,
                                 const ProjectProperties& changed_properties);
