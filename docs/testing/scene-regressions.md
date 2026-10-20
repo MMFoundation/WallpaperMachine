@@ -2755,6 +2755,35 @@ Rust regressions in `crates/shader/tests` (`legalize`, `preprocess`,
   other; before, it took that token for its type and every repair skipped it.
   Known and not handled: logical-not applied to a float (`!someFloat`), which
   still rejects Wallpaper Engine's own `clipping_mask` effect.
+- **An array suffix declares one name, and an integer `clamp` stays integer** —
+  `pipeline` tests `array_suffix_declares_only_its_own_declarator` and
+  `integer_clamp_keeps_integer_literals`, each compiled for SPIR-V and MSL; both
+  fail without the change. Naga's GLSL frontend applies an array suffix to the
+  type a declarator list shares, so in `float color[4], f;` the scalar `f` became
+  `float[4]` and the effect failed to load (a Workshop procedural noise effect).
+  The `array_declarators` strategy ends the statement after each declarator with
+  a suffix and restates the qualifiers and type for the rest
+  (`float color[4]; float f;`); `for` initializers and stage interface or uniform
+  lists are left alone. Integer literals in `clamp` become floats for float
+  operands, which legacy shaders rely on, but an `int` or `ivecN` operand selects
+  the integer overload, so `clamp(index, 0, BANDS - 1)` on an `int` keeps its
+  literals; with only `uint` or `uvecN` operands they gain a `u` suffix, as do
+  those of `min` and `max`. Before, the float literals made an integer index
+  float and an audio line effect failed to load. The coercion now reads a
+  binding's component kind (`int`, `uint`, `float`) as well as its width, and
+  sees an `int` that the step repair turns into a `float` as a float. No pipeline
+  revision bump: a failed compile is never stored, and a program that compiled
+  before keeps its meaning. A split list only restates a name it never used, and
+  an integer `clamp` whose result is used as a float (`clamp(i, 0, 5) * 0.5`),
+  which Naga had compiled as a float clamp of `float(i)`, now clamps as `int`,
+  the same value for integer bounds. Over the 15 local scenes the SPIR-V corpus
+  sweep went from 3 failures to none, and on native Metal no other scene's last
+  frame changed beyond its run-to-run variation; generated SPIR-V and MSL were
+  not compared.
+  Known and not handled: in `uniform float a[4], b;` the generated source still
+  declares no `b`, and a declarator list whose array takes a
+  brace initializer (`= {…}, b`) is not recognized as a declaration, so it is not
+  split.
 - **Legacy effect shader interfaces** — `pipeline` tests: array varyings reserve
   all element locations; unambiguous user function parameters narrow wider vector
   arguments; a whole vector variable assigned to a narrower one keeps its leading

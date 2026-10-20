@@ -36,6 +36,7 @@ use self::{
 };
 use super::{
     ARRAY_PARAMETERS, CONTROL_FLOW_COERCION, CodegenStage, CodegenStrategy, Emitable,
+    control_flow_coercion::float_step_names,
     GENERAL_POLICIES, HLSL_MUL, LEGACY_BUILTINS, StrategyContext, TEXTURE_SAMPLING, TYPE_COERCION,
     TextureSamplingCall,
 };
@@ -79,6 +80,7 @@ impl Emitable for TypeCoercionStrategy {
         functions.collect(token_facts.function_signatures());
         let mut vector_facts =
             VectorTypeBindings::new(&scoped_facts, &context.context().declarations, tokens);
+        vector_facts.retype_float_steps(&float_step_names(tokens, &token_facts));
         vector_facts.functions = functions.items;
         let function_calls = context
             .context()

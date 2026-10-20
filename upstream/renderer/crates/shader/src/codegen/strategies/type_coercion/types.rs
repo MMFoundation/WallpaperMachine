@@ -1,13 +1,15 @@
+use std::collections::BTreeSet;
+
 use smol_str::SmolStr;
 
 use super::ScopedDeclarationFacts;
 use crate::{
     codegen::{
-        DeclarationPlan,
+        DeclarationPlan, LegacyTypeName,
         declarations::PlannedDeclaration,
         expressions::analysis::{
-            FunctionCallRange, VectorExpressionAnalyzer, VectorExpressionFacts,
-            VectorExpressionType, VectorWidth,
+            FunctionCallRange, Lvalue, ScalarExpressionFacts, ScalarType,
+            VectorExpressionAnalyzer, VectorExpressionFacts, VectorExpressionType, VectorWidth,
         },
     },
     tokenizer::{FunctionSignatureFact, TokenCursor, TypedTokenFacts},
@@ -42,6 +44,7 @@ impl VectorTypeBindings<'_> {
             .map(|binding| TypeBinding {
                 name: SmolStr::new(binding.name()),
                 ty: BindingType::classify(binding.ty()),
+                component: ComponentKind::classify(binding.ty()),
                 visible_start: 0,
                 scope_end: usize::MAX,
             })
@@ -49,6 +52,7 @@ impl VectorTypeBindings<'_> {
         bindings.extend(declarations.texture_samplers().map(|sampler| TypeBinding {
             name: SmolStr::new(sampler.texture_name),
             ty: BindingType::Sampler2D,
+            component: ComponentKind::Other,
             visible_start: 0,
             scope_end: usize::MAX,
         }));
@@ -74,11 +78,34 @@ impl VectorTypeBindings<'_> {
 
     /// Looks up the nearest visible binding by name at `use_index`.
     pub(super) fn lookup(&self, name: &str, use_index: usize) -> Option<BindingType> {
+        self.visible(name, use_index).map(|binding| binding.ty)
+    }
+
+    /// Marks the `int` declarators that the control-flow step repair rewrites
+    /// to `float`, so a later call on one of them selects the float overload.
+    pub(super) fn retype_float_steps(&mut self, name_indices: &BTreeSet<usize>) {
+        for binding in &mut self.bindings {
+            if binding
+                .visible_start
+                .checked_sub(1)
+                .is_some_and(|name| name_indices.contains(&name))
+            {
+                binding.component = ComponentKind::Float;
+            }
+        }
+    }
+
+    /// Looks up the component kind of the nearest visible binding.
+    pub(super) fn component(&self, name: &str, use_index: usize) -> Option<ComponentKind> {
+        self.visible(name, use_index).map(|binding| binding.component)
+    }
+
+    /// Returns the nearest binding of `name` visible at `use_index`.
+    fn visible(&self, name: &str, use_index: usize) -> Option<&TypeBinding> {
         self.bindings
             .iter()
             .rev()
             .find(|binding| binding.name == name && binding.visible_at(use_index))
-            .map(|binding| binding.ty)
     }
 
     /// Resolves a declared function return type for a call expression.
@@ -129,6 +156,7 @@ impl From<&ScopedDeclarationFacts> for Vec<TypeBinding> {
             .map(|declaration| TypeBinding {
                 name: SmolStr::new(declaration.name()),
                 ty: BindingType::classify(declaration.ty()),
+                component: ComponentKind::classify(declaration.ty()),
                 visible_start: declaration.visible_start(),
                 scope_end: declaration.scope_end(),
             })
@@ -143,6 +171,8 @@ pub(super) struct TypeBinding {
     pub name: SmolStr,
     /// Declared scalar or vector type.
     pub ty: BindingType,
+    /// Kind of the declared type's components.
+    pub component: ComponentKind,
     /// First token where this binding is visible.
     pub visible_start: usize,
     /// First token outside this binding's lexical scope.
@@ -205,6 +235,35 @@ pub(super) enum BindingType {
     Blocker,
 }
 
+/// Component kind of a declared scalar or vector type.
+///
+/// [`BindingType`] only tells shapes apart; builtins such as `clamp` exist
+/// for both float and integer components, and which one a call selects
+/// depends on this.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ComponentKind {
+    /// `float`, `vecN` and their legacy spellings.
+    Float,
+    /// `int` and `ivecN`.
+    Int,
+    /// `uint` and `uvecN`.
+    Uint,
+    /// Booleans, matrices, structs and anything else.
+    Other,
+}
+
+impl ComponentKind {
+    /// Classifies a declaration type spelling by component kind.
+    pub(super) fn classify(name: &str) -> Self {
+        match LegacyTypeName::new(name).glsl().as_bytes() {
+            b"float" | b"vec2" | b"vec3" | b"vec4" => Self::Float,
+            b"int" | b"ivec2" | b"ivec3" | b"ivec4" => Self::Int,
+            b"uint" | b"uvec2" | b"uvec3" | b"uvec4" => Self::Uint,
+            _ => Self::Other,
+        }
+    }
+}
+
 impl BindingType {
     /// Classifies declaration type spelling into scalar or vector shape.
     pub(super) fn classify(name: &str) -> Self {
@@ -219,6 +278,28 @@ impl BindingType {
             Self::Sampler2D
         } else {
             Self::Blocker
+        }
+    }
+}
+
+impl ScalarExpressionFacts for VectorTypeBindings<'_> {
+    fn visible_type(&self, name: &str, index: usize) -> Option<ScalarType> {
+        let binding = self.visible(name, index)?;
+        Some(match (binding.ty, binding.component) {
+            (BindingType::Scalar, ComponentKind::Float) => ScalarType::Float,
+            (BindingType::Scalar, ComponentKind::Int) => ScalarType::Int,
+            (BindingType::Scalar, ComponentKind::Uint) => ScalarType::Uint,
+            (BindingType::Scalar, ComponentKind::Other) => ScalarType::Bool,
+            (BindingType::Vector(_), _) => ScalarType::FloatVector,
+            (BindingType::Sampler2D | BindingType::Blocker, _) => ScalarType::NonFloatAggregate,
+        })
+    }
+
+    fn float_lvalue(&self, lvalue: &Lvalue) -> bool {
+        match ScalarExpressionFacts::visible_type(self, lvalue.base.as_str(), lvalue.end) {
+            Some(ScalarType::Float) => !lvalue.has_member,
+            Some(ScalarType::FloatVector) => lvalue.has_member,
+            _ => false,
         }
     }
 }

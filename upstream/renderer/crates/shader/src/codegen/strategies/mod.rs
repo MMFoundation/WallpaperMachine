@@ -1,6 +1,7 @@
 //! Internal legalizer strategies.
 
 mod alpha_to_coverage;
+mod array_declarators;
 mod array_parameters;
 mod builtin_variables;
 mod compat_functions;
@@ -59,6 +60,9 @@ pub(super) const COMPATIBILITY_FUNCTIONS: CodegenStrategyName =
 /// Strategy name for reserved identifier rewriting.
 pub(super) const RESERVED_IDENTIFIERS: CodegenStrategyName =
     CodegenStrategyName::new("reserved_identifiers");
+/// Strategy name for splitting declarator lists after array declarators.
+pub(super) const ARRAY_DECLARATORS: CodegenStrategyName =
+    CodegenStrategyName::new("array_declarators");
 /// Strategy name for fixed-array parameter specialization.
 pub(super) const ARRAY_PARAMETERS: CodegenStrategyName =
     CodegenStrategyName::new("array_parameters");
