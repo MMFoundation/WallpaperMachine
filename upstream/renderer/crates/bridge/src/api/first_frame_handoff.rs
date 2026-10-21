@@ -16,6 +16,14 @@ pub(crate) enum FirstFrameDelivery {
     Failed(BridgeError),
 }
 
+#[cfg(test)]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ObservedFirstFrameDelivery {
+    Delivered,
+    TargetGone,
+    Failed(crate::api::BridgeErrorKind),
+}
+
 pub(crate) trait FirstFrameTarget: Send + Sync + 'static {
     fn deliver(&self, handle: SceneHandle) -> impl Future<Output = FirstFrameDelivery> + Send + '_;
 }
@@ -29,6 +37,8 @@ struct Intake {
     state: AtomicU8,
     #[cfg(test)]
     observation: std::sync::Mutex<Option<Arc<tests::DispatchObservation>>>,
+    #[cfg(test)]
+    completed: std::sync::OnceLock<mpsc::UnboundedSender<(SceneHandle, ObservedFirstFrameDelivery)>>,
 }
 
 impl Intake {
@@ -40,6 +50,8 @@ impl Intake {
                 state: AtomicU8::new(OPEN),
                 #[cfg(test)]
                 observation: std::sync::Mutex::new(None),
+                #[cfg(test)]
+                completed: std::sync::OnceLock::new(),
             }),
             receiver,
         )
@@ -70,6 +82,13 @@ impl Intake {
     #[cfg(test)]
     fn observation(&self) -> Option<Arc<tests::DispatchObservation>> {
         self.observation.lock().unwrap().clone()
+    }
+
+    #[cfg(test)]
+    fn record_completed(&self, handle: SceneHandle, outcome: ObservedFirstFrameDelivery) {
+        if let Some(sender) = self.completed.get() {
+            let _ = sender.send((handle, outcome));
+        }
     }
 }
 
@@ -118,7 +137,10 @@ async fn dispatch<T: FirstFrameTarget>(
             break;
         }
         match target.deliver(handle).await {
-            FirstFrameDelivery::Delivered => {}
+            FirstFrameDelivery::Delivered => {
+                #[cfg(test)]
+                lifetime.0.record_completed(handle, ObservedFirstFrameDelivery::Delivered);
+            }
             FirstFrameDelivery::TargetGone => {
                 log::debug!(
                     "First-frame notification skipped for {:?}: target gone",
@@ -128,6 +150,8 @@ async fn dispatch<T: FirstFrameTarget>(
                 if let Some(observation) = &observation {
                     observation.diagnostic(handle, tests::DiagnosticOutcome::TargetGone);
                 }
+                #[cfg(test)]
+                lifetime.0.record_completed(handle, ObservedFirstFrameDelivery::TargetGone);
             }
             FirstFrameDelivery::Failed(error) => {
                 log::warn!(
@@ -145,6 +169,8 @@ async fn dispatch<T: FirstFrameTarget>(
                         },
                     );
                 }
+                #[cfg(test)]
+                lifetime.0.record_completed(handle, ObservedFirstFrameDelivery::Failed(error.kind()));
             }
         }
         if lifetime.0.state.fetch_and(!INVOKING, Ordering::AcqRel) & CLOSED != 0 {
@@ -175,6 +201,16 @@ impl FirstFrameHandoff {
 
     pub(crate) fn callback(&self) -> FirstFrameCallback {
         Intake::callback(&self.intake)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observe_deliveries_for_test(
+        &self,
+    ) -> mpsc::UnboundedReceiver<(SceneHandle, ObservedFirstFrameDelivery)> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        // The observer is supplied at runtime, once; delivery needs no observer lock.
+        assert!(self.intake.completed.set(sender).is_ok(), "one completion observer per owned handoff");
+        receiver
     }
 
     pub(crate) fn close(&self) {

@@ -1,4 +1,6 @@
+mod api_intent_consumer_contract_tests;
 mod playback_consumer_contract_tests;
+mod power_consumer_contract_tests;
 mod property_consumer_contract_tests;
 
 use std::{

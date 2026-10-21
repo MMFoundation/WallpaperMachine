@@ -1559,6 +1559,29 @@ impl FakeEngineFacade {
         self.paused_calls.snapshot()
     }
 
+    pub async fn wait_for_pause_trace(
+        &self,
+        expected: &[bool],
+        bound: std::time::Duration,
+    ) -> bool {
+        const INTERVAL: std::time::Duration = std::time::Duration::from_millis(2);
+        let started = tokio::time::Instant::now();
+        if self.paused_calls().as_slice() == expected {
+            return true;
+        }
+        while started.elapsed() < bound {
+            let remaining = bound.saturating_sub(started.elapsed());
+            tokio::time::sleep(remaining.min(INTERVAL)).await;
+            if started.elapsed() >= bound {
+                break;
+            }
+            if self.paused_calls().as_slice() == expected {
+                return true;
+            }
+        }
+        false
+    }
+
     #[must_use]
     pub fn display_paused_calls(&self) -> Vec<(u32, bool)> {
         self.display_paused_calls.snapshot()

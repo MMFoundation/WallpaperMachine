@@ -115,6 +115,14 @@ One separately identified `FakeEngineFacade` case preserves synthetic core-block
 command admission. It does not model the common readiness/audio exclusion and does
 not replace the real-turn consumer cases or establish native responsiveness.
 
+Power callback cases await the matching actual handoff completion before checking
+unchanged playback/effect vectors; an already-equal vector or an early snapshot is
+not a callback receipt. Watching construction includes a synchronous baseline read,
+distinct from startup policy sampling. The controlled construction test lets that
+baseline return, then holds an actual resample and releases it before joining and
+draining. API projection fixtures also distinguish a missing first-seen monitor
+record (which may inherit Primary) from an explicitly enabled but unassigned row.
+
 The independent display/config/project/draft contract suites now carry the mapped
 self-mirror, corrupt-file backup, raw rich-text/type and Cancel-baseline assertions
 formerly duplicated in small inherited bridge tests. Constructor-pointer equality,
