@@ -12,10 +12,15 @@
 // the scene is already some way into the clip, and what a jump of that clock
 // costs the decoder.
 
+#include "Fs/PhysicalFs.h"
+#include "Fs/VFS.h"
 #include "Image.hpp"
+#include "Scene/Parse/WPTexImageParser.hpp"
+#include "Scene/WPPkgFs.hpp"
 #include "Video/FfmpegVideoTextureSource.hpp"
 #include "Video/VideoSeekPolicy.hpp"
 #include "Video/VideoTextureSource.hpp"
+#include "Video/VideoMetadata.hpp"
 #include "Scene/SceneWallpaper.hpp"
 #include "synthetic_video.hpp"
 #include "video_orientation_cases.hpp"
@@ -28,9 +33,11 @@ extern "C" {
 #include <libavutil/frame.h>
 }
 
+#include <CoreVideo/CoreVideo.h>
 #include <mach/mach.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -709,6 +716,335 @@ TEST_F(VideoSourceInput, PlainVideoProjectNeverReportsAnAudioRequirement) {
     wallpaper.shutdown();
     std::lock_guard lock(mutex);
     EXPECT_EQ(audio, (std::vector<bool> { false }));
+}
+
+// A video a scene names as a texture comes in three shapes: a loose file next
+// to the scene, an entry of the scene's package, and a payload packed into a
+// `.tex`. Each one must reach the decoder with the metadata and the first frame
+// that decoding the media file itself gives, and only the packed-in one may be
+// held in memory: a loose file is opened where it lies, and a package entry is
+// streamed into the cache rather than read whole.
+
+/// Forwards a stream and records the largest single read asked of it.
+class ObservedStream final : public fs::IBinaryStream {
+public:
+    ObservedStream(std::shared_ptr<fs::IBinaryStream> inner, std::shared_ptr<usize> largest_read)
+        : m_inner(std::move(inner)), m_largestRead(std::move(largest_read)) {}
+
+    usize Read(void* buffer, usize size) override {
+        *m_largestRead = std::max(*m_largestRead, size);
+        return m_inner->Read(buffer, size);
+    }
+    char* Gets(char* buffer, usize size) override { return m_inner->Gets(buffer, size); }
+    idx   Tell() const override { return m_inner->Tell(); }
+    bool  SeekSet(idx offset) override { return m_inner->SeekSet(offset); }
+    bool  SeekCur(idx offset) override { return m_inner->SeekCur(offset); }
+    bool  SeekEnd(idx offset) override { return m_inner->SeekEnd(offset); }
+    isize Size() const override { return m_inner->Size(); }
+
+protected:
+    usize Write_impl(const void*, usize) override { return 0; }
+
+private:
+    std::shared_ptr<fs::IBinaryStream> m_inner;
+    std::shared_ptr<usize>             m_largestRead;
+};
+
+/// Forwards to a real file system and records what was read through it.
+class ObservedFs final : public fs::Fs {
+public:
+    explicit ObservedFs(std::unique_ptr<fs::Fs> inner): m_inner(std::move(inner)) {}
+
+    bool Contains(std::string_view path) const override { return m_inner->Contains(path); }
+    std::shared_ptr<fs::IBinaryStream> Open(std::string_view path) override {
+        opened.emplace_back(path);
+        auto stream = m_inner->Open(path);
+        if (stream == nullptr) return nullptr;
+        return std::make_shared<ObservedStream>(std::move(stream), largest_read);
+    }
+    std::shared_ptr<fs::IBinaryStreamW> OpenW(std::string_view) override { return nullptr; }
+    std::string HostPath(std::string_view path) const override { return m_inner->HostPath(path); }
+
+    std::vector<std::string> opened;
+    std::shared_ptr<usize>   largest_read { std::make_shared<usize>(0) };
+
+private:
+    std::unique_ptr<fs::Fs> m_inner;
+};
+
+/// What a consumer gets from a video: its first picture and its timing.
+struct FirstPicture {
+    uint32_t width { 0 };
+    uint32_t height { 0 };
+    double   pts_seconds { 0.0 };
+    uint64_t content { 0 };
+    double   duration_seconds { 0.0 };
+    double   frame_duration_seconds { 0.0 };
+
+    bool operator==(const FirstPicture&) const = default;
+};
+
+/// FNV-1a over the first plane, so two decodes can be told to show one picture.
+uint64_t PictureContent(const VideoTextureFrame& frame) {
+    auto* buffer = static_cast<CVPixelBufferRef>(frame.pixel_buffer);
+    if (buffer == nullptr) return 0;
+    if (CVPixelBufferLockBaseAddress(buffer, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) return 0;
+    const bool planar = CVPixelBufferIsPlanar(buffer);
+    const auto* base = static_cast<const uint8_t*>(
+        planar ? CVPixelBufferGetBaseAddressOfPlane(buffer, 0) : CVPixelBufferGetBaseAddress(buffer));
+    const size_t stride = planar ? CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+                                 : CVPixelBufferGetBytesPerRow(buffer);
+    const size_t rows = planar ? CVPixelBufferGetHeightOfPlane(buffer, 0) : CVPixelBufferGetHeight(buffer);
+    const size_t row_bytes = planar ? CVPixelBufferGetWidthOfPlane(buffer, 0)
+                                    : CVPixelBufferGetWidth(buffer) * 4;
+    uint64_t content = 1469598103934665603ull;
+    for (size_t row = 0; base != nullptr && row < rows; ++row) {
+        for (size_t column = 0; column < row_bytes; ++column) {
+            content = (content ^ base[row * stride + column]) * 1099511628211ull;
+        }
+    }
+    CVPixelBufferUnlockBaseAddress(buffer, kCVPixelBufferLock_ReadOnly);
+    return content;
+}
+
+std::optional<FirstPicture> Decode(const Image& image, std::string* error) {
+    auto source = CreateVideoTextureSource(image, error);
+    if (source == nullptr || ! source->prime(error)) return std::nullopt;
+    const auto frame = source->currentFrame();
+    if (! frame.valid() || frame.pixel_buffer == nullptr) return std::nullopt;
+    return FirstPicture {
+        frame.displayWidth(),         frame.displayHeight(),     frame.pts_seconds,
+        PictureContent(frame),        source->durationSeconds(), source->frameDurationSeconds(),
+    };
+}
+
+class SceneVideoInput : public VideoSourceInput {
+protected:
+    void SetUp() override {
+        VideoSourceInput::SetUp();
+        scene_dir = project_dir / "scene";
+        std::filesystem::create_directories(scene_dir / "materials");
+    }
+
+    /// Encodes a clip outside the scene and records what decoding that file
+    /// itself gives: the result every scene shape has to reproduce.
+    std::vector<char> Clip(const std::string& label, int seconds) {
+        const auto media = project_dir / (label + ".mp4");
+        EXPECT_TRUE(WriteSyntheticVideo(media, seconds, label));
+        std::string error;
+        EXPECT_TRUE(ProbeVideoFileMetadata(media.string(), &expected_metadata, &error)) << error;
+        auto image = CreateVideoProjectImage(project_dir, media.filename().string(), &error);
+        EXPECT_NE(image, nullptr) << error;
+        if (image != nullptr) {
+            auto picture = Decode(*image, &error);
+            EXPECT_TRUE(picture.has_value()) << error;
+            if (picture.has_value()) expected_picture = *picture;
+        }
+        return ReadWholeFile(media);
+    }
+
+    void ExpectClipHeader(const ImageHeader& header) const {
+        EXPECT_TRUE(header.isVideo);
+        EXPECT_EQ(header.durationSeconds, expected_metadata.duration_seconds);
+        EXPECT_GT(header.durationSeconds, 0.0);
+    }
+
+    void ExpectLooseClipHeader(const ImageHeader& header) const {
+        ExpectClipHeader(header);
+        EXPECT_EQ(header.width, static_cast<i32>(expected_metadata.width));
+        EXPECT_EQ(header.height, static_cast<i32>(expected_metadata.height));
+    }
+
+    void ExpectClipPicture(const Image& image) const {
+        std::string error;
+        const auto  picture = Decode(image, &error);
+        ASSERT_TRUE(picture.has_value()) << error;
+        EXPECT_EQ(*picture, expected_picture);
+    }
+
+    ObservedFs& Mount(fs::VFS& vfs, std::unique_ptr<fs::Fs> inner) {
+        auto  observed = std::make_unique<ObservedFs>(std::move(inner));
+        auto& handle   = *observed;
+        EXPECT_TRUE(vfs.Mount("/assets", std::move(observed)));
+        return handle;
+    }
+
+    std::filesystem::path WritePackage(const std::string& entry, const std::vector<char>& payload) {
+        const auto path = project_dir / "scene.pkg";
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        auto write_i32 = [&](int32_t value) { out.write(reinterpret_cast<const char*>(&value), sizeof(value)); };
+        const std::string version = "PKGV0001";
+        write_i32(static_cast<int32_t>(version.size()));
+        out.write(version.data(), static_cast<std::streamsize>(version.size()));
+        write_i32(1);
+        write_i32(static_cast<int32_t>(entry.size()));
+        out.write(entry.data(), static_cast<std::streamsize>(entry.size()));
+        write_i32(0);
+        write_i32(static_cast<int32_t>(payload.size()));
+        out.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+        return path;
+    }
+
+    /// A `.tex` carrying `payload` as its one mip: flagged as a video (texb 2),
+    /// or recognised as one from its bytes (texb 3 of unknown type).
+    void WriteVideoTex(const std::string& name, const std::vector<char>& payload, bool flagged) {
+        std::vector<char> tex;
+        auto raw = [&](const void* data, size_t size) {
+            tex.insert(tex.end(), static_cast<const char*>(data), static_cast<const char*>(data) + size);
+        };
+        auto i32_ = [&](int32_t value) { raw(&value, sizeof(value)); };
+        auto stamp = [&](char kind, int version) {
+            char text[9] {};
+            std::snprintf(text, sizeof(text), "TEX%c%04d", kind, version);
+            raw(text, sizeof(text));
+        };
+        stamp('V', 5);
+        stamp('I', 1);
+        i32_(0);
+        i32_(flagged ? 1 << 5 : 0);
+        for (const int32_t size : { kFrameWidth, kFrameHeight, kFrameWidth, kFrameHeight }) i32_(size);
+        i32_(0);
+        stamp('B', flagged ? 2 : 3);
+        i32_(1);
+        if (! flagged) i32_(static_cast<int32_t>(ImageType::UNKNOWN));
+        i32_(1);
+        i32_(kFrameWidth);
+        i32_(kFrameHeight);
+        i32_(0);
+        i32_(0);
+        i32_(static_cast<int32_t>(payload.size()));
+        raw(payload.data(), payload.size());
+        std::ofstream(scene_dir / "materials" / (name + ".tex"), std::ios::binary)
+            .write(tex.data(), static_cast<std::streamsize>(tex.size()));
+    }
+
+    std::filesystem::path scene_dir;
+    VideoMetadata         expected_metadata;
+    FirstPicture          expected_picture;
+};
+
+TEST_F(SceneVideoInput, ALooseVideoIsOpenedWhereItLies) {
+    const auto payload = Clip("loose", 2);
+    const auto media   = scene_dir / "materials" / "clip.mp4";
+    std::ofstream(media, std::ios::binary).write(payload.data(), static_cast<std::streamsize>(payload.size()));
+    const auto cache_before = VideoCacheEntries();
+
+    fs::VFS          vfs;
+    auto&            observed = Mount(vfs, fs::CreatePhysicalFs(scene_dir.string()));
+    WPTexImageParser parser(&vfs);
+    ExpectLooseClipHeader(parser.ParseHeader("clip"));
+    auto image = parser.Parse("clip");
+    ASSERT_NE(image, nullptr);
+    ExpectLooseClipHeader(image->header);
+    EXPECT_EQ(image->videoFilePath, media.string());
+    EXPECT_TRUE(image->slots.empty());
+    ExpectClipPicture(*image);
+
+    // Never read: the parser and the decoder both open the file by its path.
+    EXPECT_TRUE(observed.opened.empty()) << observed.opened.front();
+    EXPECT_TRUE(CacheEntriesAddedSince(cache_before).empty());
+}
+
+TEST_F(SceneVideoInput, APackagedVideoIsStreamedIntoTheCache) {
+    const auto payload = Clip("packaged-scene-" + std::to_string(::getpid()), 8);
+    ASSERT_GT(payload.size(), 2u * 1024u * 1024u);
+    const auto cache_before = VideoCacheEntries();
+
+    fs::VFS vfs;
+    auto&   observed = Mount(vfs, fs::WPPkgFs::CreatePkgFs(WritePackage("materials/clip.mp4", payload).string()));
+    WPTexImageParser parser(&vfs);
+    ExpectLooseClipHeader(parser.ParseHeader("clip"));
+    auto image = parser.Parse("clip");
+    ASSERT_NE(image, nullptr);
+    ExpectLooseClipHeader(image->header);
+    EXPECT_TRUE(image->slots.empty());
+    ExpectClipPicture(*image);
+
+    const std::filesystem::path published = image->videoFilePath;
+    EXPECT_EQ(published.parent_path(), VideoCacheDirectory());
+    EXPECT_EQ(published.extension(), ".mp4");
+    EXPECT_EQ(ReadWholeFile(published), payload);
+    EXPECT_EQ(CacheEntriesAddedSince(cache_before), (std::set<std::filesystem::path> { published }));
+    // Read in pieces, never as one allocation the size of the video.
+    EXPECT_LT(*observed.largest_read, payload.size() / 2);
+
+    // The cache file is named by its content: a second load finds it.
+    auto again = parser.Parse("clip");
+    ASSERT_NE(again, nullptr);
+    EXPECT_EQ(again->videoFilePath, image->videoFilePath);
+}
+
+TEST_F(SceneVideoInput, APackedInVideoKeepsItsMetadataAndFirstFrame) {
+    const auto payload = Clip("packed-in", 2);
+    for (const bool flagged : { true, false }) {
+        SCOPED_TRACE(flagged ? "flagged" : "recognised");
+        WriteVideoTex("clip", payload, flagged);
+
+        fs::VFS          vfs;
+        Mount(vfs, fs::CreatePhysicalFs(scene_dir.string()));
+        WPTexImageParser parser(&vfs);
+        ExpectClipHeader(parser.ParseHeader("clip"));
+        auto image = parser.Parse("clip");
+        ASSERT_NE(image, nullptr);
+        ExpectClipHeader(image->header);
+        EXPECT_TRUE(image->videoFilePath.empty());
+        ASSERT_EQ(image->slots.size(), 1u);
+        ASSERT_EQ(image->slots.front().mipmaps.size(), 1u);
+        const auto& mip = image->slots.front().mipmaps.front();
+        ASSERT_EQ(mip.size, static_cast<isize>(payload.size()));
+        EXPECT_EQ(std::memcmp(mip.data.get(), payload.data(), payload.size()), 0);
+        ExpectClipPicture(*image);
+    }
+}
+
+TEST_F(SceneVideoInput, ABrokenVideoFailsInEveryShape) {
+    const auto clip = Clip("broken", 2);
+    std::vector<char> noise(64 * 1024);
+    for (size_t i = 0; i < noise.size(); ++i) noise[i] = static_cast<char>(i * 31 + 7);
+    const std::vector<std::pair<const char*, std::vector<char>>> payloads {
+        { "truncated", std::vector<char>(clip.begin(), clip.begin() + static_cast<long>(clip.size() / 2)) },
+        { "noise", noise },
+        { "empty", {} },
+    };
+    for (const auto& [label, payload] : payloads) {
+        SCOPED_TRACE(label);
+        std::filesystem::remove_all(scene_dir / "materials");
+        std::filesystem::create_directories(scene_dir / "materials");
+        std::ofstream(scene_dir / "materials" / "bad.mp4", std::ios::binary)
+            .write(payload.data(), static_cast<std::streamsize>(payload.size()));
+        {
+            SCOPED_TRACE("loose");
+            fs::VFS          vfs;
+            Mount(vfs, fs::CreatePhysicalFs(scene_dir.string()));
+            WPTexImageParser parser(&vfs);
+            EXPECT_FALSE(parser.ParseHeader("bad").isVideo);
+            EXPECT_EQ(parser.Parse("bad"), nullptr);
+        }
+        {
+            SCOPED_TRACE("packaged");
+            fs::VFS          vfs;
+            Mount(vfs, fs::WPPkgFs::CreatePkgFs(WritePackage("materials/bad.mp4", payload).string()));
+            WPTexImageParser parser(&vfs);
+            EXPECT_FALSE(parser.ParseHeader("bad").isVideo);
+            EXPECT_EQ(parser.Parse("bad"), nullptr);
+        }
+        if (payload.empty()) continue;
+        {
+            SCOPED_TRACE("packed in");
+            WriteVideoTex("bad", payload, true);
+            fs::VFS          vfs;
+            Mount(vfs, fs::CreatePhysicalFs(scene_dir.string()));
+            WPTexImageParser parser(&vfs);
+            EXPECT_EQ(parser.ParseHeader("bad").durationSeconds, 0.0);
+            auto image = parser.Parse("bad");
+            ASSERT_NE(image, nullptr);
+            EXPECT_TRUE(image->header.isVideo);
+            EXPECT_EQ(image->header.durationSeconds, 0.0);
+            std::string error;
+            EXPECT_FALSE(Decode(*image, &error).has_value());
+            EXPECT_FALSE(error.empty());
+        }
+    }
 }
 
 } // namespace

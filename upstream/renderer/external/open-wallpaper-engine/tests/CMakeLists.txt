@@ -471,7 +471,7 @@ if(APPLE)
     wescene_prefer_ffmpeg_headers(playback_gpu_test "TEST_")
 endif()
 add_executable(video_source_input_test video_source_input_test.cpp)
-target_link_libraries(video_source_input_test PRIVATE ${PROJECT_NAME}
+target_link_libraries(video_source_input_test PRIVATE ${PROJECT_NAME} wpFs
     PkgConfig::TEST_AVFORMAT PkgConfig::TEST_AVCODEC PkgConfig::TEST_AVUTIL GTest::gtest_main)
 target_include_directories(video_source_input_test PRIVATE
     . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/include)

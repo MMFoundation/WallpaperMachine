@@ -8,7 +8,7 @@
 #include "Video/VideoSeekPolicy.hpp"
 #include "Platform/Apple/FfmpegVideoInterop.hpp"
 #include "Utils/Logging.h"
-#include "Utils/Sha.hpp"
+#include "Video/VideoPayloadCache.hpp"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -34,15 +34,12 @@ extern "C" {
 #include <deque>
 #include <exception>
 #include <filesystem>
-#include <fstream>
 #include <limits>
 #include <mutex>
 #include <span>
 #include <string>
 #include <thread>
 #include <vector>
-
-#include <unistd.h>
 
 namespace wallpaper::video
 {
@@ -79,90 +76,6 @@ double CircularDistance(double left, double right, double duration_seconds)
     if (!(duration_seconds > 0.0)) return std::abs(left - right);
     const double direct = std::abs(left - right);
     return std::min(direct, duration_seconds - direct);
-}
-
-std::filesystem::path VideoCacheDirectory(std::string* error)
-{
-    std::filesystem::path temp_dir = std::filesystem::temp_directory_path() / "wallpaper-engine-video";
-    std::error_code       ec;
-    std::filesystem::create_directories(temp_dir, ec);
-    if (ec) {
-        SetError(error, "failed to create temporary video cache directory");
-        return {};
-    }
-    return temp_dir;
-}
-
-/// Extracts an inline video payload into the shared cache so FFmpeg can open
-/// it by path.
-///
-/// The bytes are staged under a name unique to this attempt and only then
-/// linked onto the content-addressed name, so a concurrent opener sees a whole
-/// file. A losing publisher keeps the winner's file and modification time: the
-/// shared-session registry includes that time in the file's identity.
-std::filesystem::path WriteVideoPayloadToTemp(std::string_view debug_label,
-                                              std::span<const char> payload,
-                                              std::string* error)
-{
-    if (payload.empty()) {
-        SetError(error, "video texture payload is empty");
-        return {};
-    }
-
-    const std::filesystem::path temp_dir = VideoCacheDirectory(error);
-    if (temp_dir.empty()) return {};
-
-    std::error_code ec;
-    const std::string digest = utils::genSha1(payload);
-    const std::filesystem::path media_path = temp_dir / (digest + ".mp4");
-    const auto payload_size = static_cast<uintmax_t>(payload.size());
-    if (std::filesystem::exists(media_path, ec) &&
-        !ec &&
-        std::filesystem::file_size(media_path, ec) == payload_size) {
-        return media_path;
-    }
-
-    static std::atomic<uint64_t> staging_serial { 0 };
-    const std::filesystem::path staging_path =
-        temp_dir / (digest + "." + std::to_string(static_cast<long long>(getpid())) + "." +
-                    std::to_string(staging_serial.fetch_add(1, std::memory_order_relaxed)) + ".part");
-    std::ofstream output(staging_path, std::ios::binary | std::ios::trunc);
-    if (!output.good()) {
-        SetError(error, "failed to open temporary video cache file");
-        return {};
-    }
-
-    output.write(payload.data(), static_cast<std::streamsize>(payload.size()));
-    output.close();
-    // The size on disk is the completion check: a short write is discarded
-    // instead of reaching the published name.
-    if (!output.good() || std::filesystem::file_size(staging_path, ec) != payload_size || ec) {
-        std::filesystem::remove(staging_path, ec);
-        SetError(error, "failed to write temporary video cache file");
-        return {};
-    }
-
-    std::filesystem::create_hard_link(staging_path, media_path, ec);
-    if (ec) {
-        if (std::filesystem::file_size(media_path, ec) == payload_size && !ec) {
-            std::filesystem::remove(staging_path, ec);
-            return media_path;
-        }
-        // Preserve replacement of an incomplete cache entry, or publication
-        // on a filesystem without hard links.
-        std::filesystem::rename(staging_path, media_path, ec);
-    }
-    std::error_code remove_ec;
-    std::filesystem::remove(staging_path, remove_ec);
-    if (ec) {
-        SetError(error, "failed to write temporary video cache file");
-        return {};
-    }
-
-    LOG_INFO("prepared FFmpeg video payload cache for \"%s\": %s",
-             std::string(debug_label).c_str(),
-             media_path.string().c_str());
-    return media_path;
 }
 
 /// Identity of a running decoder instance. Monotonic and never reused, so a
@@ -362,9 +275,13 @@ public:
             return;
         }
 
-        m_payload.assign(
-            reinterpret_cast<const char*>(mip.data.get()),
-            reinterpret_cast<const char*>(mip.data.get()) + static_cast<size_t>(mip.size));
+        // Extracted straight from the image's bytes, so this source never
+        // holds a copy of the video: it opens the cache file like any other.
+        m_media_path = PublishVideoPayload(
+            m_debug_label,
+            ".mp4",
+            std::span(reinterpret_cast<const char*>(mip.data.get()), static_cast<size_t>(mip.size)),
+            &m_initial_error);
     }
 
     ~Impl()
@@ -710,28 +627,12 @@ private:
         return impl != nullptr && impl->m_cancel_requested.load(std::memory_order_relaxed) ? 1 : 0;
     }
 
-    /// Makes the media openable by path.
-    ///
-    /// A file-backed source already has its path and keeps it. An inline
-    /// payload is extracted once and then released, so the decoder does not go
-    /// on holding a whole second copy of the video for the rest of playback.
-    bool resolveMediaPath(std::string* error)
-    {
-        if (!m_media_path.empty()) return true;
-
-        m_media_path = WriteVideoPayloadToTemp(m_debug_label, m_payload, error);
-        if (m_media_path.empty()) return false;
-        m_payload.clear();
-        m_payload.shrink_to_fit();
-        return true;
-    }
-
     bool openDecoder(std::string* error)
     {
         if (auto mismatch = FfmpegAbiMismatch(); !mismatch.empty()) {
             return SetError(error, std::move(mismatch));
         }
-        if (!resolveMediaPath(error)) return false;
+        if (m_media_path.empty()) return SetError(error, "video media path must not be empty");
 
         AVFormatContext* format_context = avformat_alloc_context();
         if (format_context == nullptr) {
@@ -1205,7 +1106,6 @@ private:
 
 private:
     std::string                      m_debug_label;
-    std::vector<char>                m_payload;
     std::filesystem::path            m_media_path;
     std::string                      m_initial_error;
     mutable std::mutex               m_mutex;
@@ -1355,8 +1255,9 @@ std::string ResolveVideoTextureMediaPath(const Image& image, std::string* error)
         SetError(error, "video texture payload is empty");
         return {};
     }
-    return WriteVideoPayloadToTemp(
+    return PublishVideoPayload(
         image.key,
+        ".mp4",
         std::span(reinterpret_cast<const char*>(mip.data.get()), static_cast<size_t>(mip.size)),
         error).string();
 }

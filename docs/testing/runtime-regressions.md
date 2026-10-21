@@ -266,6 +266,14 @@ device.
   compiles cleanly. `video_source_input_test` owns a private `TMPDIR` and only
   removes its own media cache; never clear the app's decode cache to make a test
   pass.
+- **A scene's video is never read whole to be opened** — `SceneVideoInput.*` in
+  `video_source_input_test`, against media the tests encode. A loose video next to
+  the scene is opened where it lies (`Image::videoFilePath`, nothing read through the
+  mount, no cache entry); one inside a `.pkg` is streamed in pieces into its
+  content-named `wallpaper-engine-video` cache file; one packed into a `.tex` keeps
+  its bytes in the mip. Each gives the metadata, duration and first picture that
+  decoding the media file itself gives, and a truncated, garbage or empty video fails
+  in every shape as before.
 - **Packed videos use the existing shared decoder registry** —
   `SharedVideoSessionTest.EquivalentPackedVideosShareOneDecoder` and
   `.ConcurrentPackedVideoOpensShareOneDecoder` open independently held mip

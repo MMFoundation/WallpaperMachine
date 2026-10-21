@@ -2,9 +2,10 @@
 #include "ImageOrientation.hpp"
 
 #include "Type.hpp"
-#include "Utils/Sha.hpp"
+#include "Fs/LimitedBinaryStream.h"
 #include "Video/VideoMetadata.hpp"
 #include "Video/VideoTextureSource.hpp"
+#include "Video/VideoPayloadCache.hpp"
 #include "WPCommon.hpp"
 #include <cstdint>
 #include <lz4.h>
@@ -27,6 +28,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
 
 using namespace wallpaper;
 
@@ -119,21 +121,6 @@ std::optional<std::vector<char>> ReadTexMipPayloadPrefix(
         file.Read(payload.data(), payload.size());
     }
     file.SeekSet(payload_start + src_size);
-    return payload;
-}
-
-std::optional<std::vector<char>> ReadTexMipPayload(
-    fs::IBinaryStream& file,
-    i32               src_size,
-    usize             max_bytes)
-{
-    if (src_size <= 0 || static_cast<usize>(src_size) > max_bytes) return std::nullopt;
-    const idx payload_start = file.Tell();
-    const idx remaining = file.Size() - payload_start;
-    if (remaining < src_size) return std::nullopt;
-
-    std::vector<char> payload(static_cast<usize>(src_size));
-    file.Read(payload.data(), payload.size());
     return payload;
 }
 
@@ -366,55 +353,44 @@ std::optional<std::vector<char>> LoadLooseAssetPayload(fs::VFS& vfs,
     auto stream = vfs.Open(candidate.path);
     if (!stream) return std::nullopt;
 
-    const std::string payload = stream->ReadAllStr();
-    return std::vector<char>(payload.begin(), payload.end());
+    std::vector<char> payload(stream->Usize());
+    if (stream->Read(payload.data(), payload.size()) != payload.size()) return std::nullopt;
+    return payload;
 }
 
-std::filesystem::path WriteVideoPayloadToTemp(
-    std::string_view         debug_label,
-    std::string_view         extension,
-    std::span<const char>    payload)
+/// The file a decoder opens for a loose video: the file itself when it lies on
+/// this machine's disk, otherwise -- an entry of a package -- its cache file,
+/// streamed there. Empty for a missing or empty file.
+std::string LooseVideoFile(fs::VFS&                   vfs,
+                           const LooseAssetCandidate& candidate,
+                           std::string_view           debug_label)
 {
-    if (payload.empty()) return {};
-
-    std::error_code ec;
-    const auto temp_dir = std::filesystem::temp_directory_path(ec) / "wallpaper-engine-video";
-    if (ec) return {};
-    std::filesystem::create_directories(temp_dir, ec);
-    if (ec) return {};
-
-    const std::string ext = extension.empty() ? ".mp4" : std::string(extension);
-    const auto temp_path =
-        temp_dir / (utils::genSha1(payload) + ext);
-    if (std::filesystem::exists(temp_path, ec) &&
-        !ec &&
-        std::filesystem::file_size(temp_path, ec) == static_cast<uintmax_t>(payload.size())) {
-        return temp_path;
+    const std::string host_path = candidate.isHost ? candidate.path : vfs.HostPath(candidate.path);
+    if (!host_path.empty()) {
+        std::error_code ec;
+        const auto      size = std::filesystem::file_size(host_path, ec);
+        return ec || size == 0 ? std::string() : host_path;
     }
 
-    std::ofstream output(temp_path, std::ios::binary | std::ios::trunc);
-    if (!output.good()) return {};
-    output.write(payload.data(), static_cast<std::streamsize>(payload.size()));
-    output.close();
-    if (!output.good()) return {};
-
-    LOG_INFO("prepared FFmpeg video payload cache for \"%s\": %s",
-             std::string(debug_label).c_str(),
-             temp_path.string().c_str());
-    return temp_path;
+    auto stream = vfs.Open(candidate.path);
+    if (!stream || stream->Size() <= 0) return {};
+    std::string error;
+    const auto  media = video::PublishVideoPayload(
+        debug_label, std::filesystem::path(candidate.path).extension().string(), *stream, &error);
+    if (media.empty()) {
+        LOG_ERROR("failed to extract video \"%s\": %s",
+                  std::string(debug_label).c_str(),
+                  error.c_str());
+    }
+    return media.string();
 }
 
-std::optional<video::VideoMetadata> ProbeVideoMetadataFromPayload(
-    std::string_view      debug_label,
-    std::string_view      extension,
-    std::span<const char> payload)
+std::optional<video::VideoMetadata> ProbeVideoFile(std::string_view debug_label,
+                                                   const std::string& media_path)
 {
-    const auto temp_path = WriteVideoPayloadToTemp(debug_label, extension, payload);
-    if (temp_path.empty()) return std::nullopt;
-
     video::VideoMetadata metadata;
     std::string          error;
-    if (!video::ProbeVideoFileMetadata(temp_path.string(), &metadata, &error)) {
+    if (!video::ProbeVideoFileMetadata(media_path, &metadata, &error)) {
         LOG_ERROR("failed to probe video metadata for \"%s\": %s",
                   std::string(debug_label).c_str(),
                   error.c_str());
@@ -423,27 +399,39 @@ std::optional<video::VideoMetadata> ProbeVideoMetadataFromPayload(
     return metadata;
 }
 
-std::optional<std::vector<char>> LoadHeaderVideoPayload(
-    fs::IBinaryStream& file,
-    i32               src_size,
-    bool              lz4_compressed,
-    int32_t           decompressed_size)
+/// Probes video held in memory, through the cache file it is published to.
+std::optional<video::VideoMetadata> ProbeVideoPayload(std::string_view      debug_label,
+                                                      std::span<const char> payload)
 {
-    constexpr usize kMaxHeaderVideoProbeBytes = 64 * 1024 * 1024;
-    auto payload = ReadTexMipPayload(file, src_size, kMaxHeaderVideoProbeBytes);
-    if (!payload.has_value()) return std::nullopt;
-    if (!lz4_compressed) return payload;
-    if (decompressed_size <= 0 ||
-        static_cast<usize>(decompressed_size) > kMaxHeaderVideoProbeBytes) {
+    std::string error;
+    const auto  media = video::PublishVideoPayload(debug_label, ".mp4", payload, &error);
+    if (media.empty()) {
+        LOG_ERROR("failed to extract video \"%s\": %s",
+                  std::string(debug_label).c_str(),
+                  error.c_str());
         return std::nullopt;
     }
-    char* decompressed = Lz4Decompress(payload->data(), src_size, decompressed_size);
-    if (decompressed == nullptr) return std::nullopt;
-    std::vector<char> out(
-        decompressed,
-        decompressed + static_cast<usize>(decompressed_size));
-    delete[] decompressed;
-    return out;
+    return ProbeVideoFile(debug_label, media.string());
+}
+
+/// Probes the uncompressed video of `size` bytes at `offset` in `file`,
+/// streamed into its cache file rather than read into memory.
+std::optional<video::VideoMetadata> ProbeVideoPayload(std::string_view                   debug_label,
+                                                      std::shared_ptr<fs::IBinaryStream> file,
+                                                      idx                                offset,
+                                                      i32                                size)
+{
+    if (size <= 0 || size > file->Size() - offset) return std::nullopt;
+    fs::LimitedBinaryStream window(std::move(file), offset, size);
+    std::string             error;
+    const auto media = video::PublishVideoPayload(debug_label, ".mp4", window, &error);
+    if (media.empty()) {
+        LOG_ERROR("failed to extract video \"%s\": %s",
+                  std::string(debug_label).c_str(),
+                  error.c_str());
+        return std::nullopt;
+    }
+    return ProbeVideoFile(debug_label, media.string());
 }
 
 ImageHeader BuildLooseAssetHeader(
@@ -625,19 +613,16 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 img.header.format = TextureFormat::RGBA8;
                 src_size    = w * h * 4;
             } else {
-                mipmap.data = ImageDataPtr(new uint8_t[(usize)src_size], [](uint8_t* data) {
-                    delete[] data;
-                });
-                std::copy(result, result + src_size, mipmap.data.get());
                 if (img.header.isVideo && i_image == 0 && i_mipmap == 0) {
-                    const auto metadata = ProbeVideoMetadataFromPayload(
-                        name,
-                        ".mp4",
-                        std::span(result, static_cast<std::size_t>(src_size)));
+                    const auto metadata =
+                        ProbeVideoPayload(name, std::span(result, static_cast<std::size_t>(src_size)));
                     if (metadata.has_value()) {
                         img.header.durationSeconds = metadata->duration_seconds;
                     }
                 }
+                // The bytes read above become the mip: handed over, not copied.
+                mipmap.data = ImageDataPtr(reinterpret_cast<uint8_t*>(std::exchange(result, nullptr)),
+                                           [](uint8_t* data) { delete[] reinterpret_cast<char*>(data); });
             }
             mipmap.size = src_size * (i32)sizeof(uint8_t);
             delete[] result;
@@ -772,22 +757,15 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
                     sniff_payload->size());
                 if (embedded.type != ImageType::UNKNOWN) header.type = embedded.type;
                 if (embedded.isVideo) header.isVideo = true;
-                if (embedded.isVideo) {
-                    const idx payload_start = file.Tell() - src_size;
-                    file.SeekSet(payload_start);
-                    auto video_payload = LoadHeaderVideoPayload(
-                        file,
-                        src_size,
-                        lz4_compressed,
-                        decompressed_size);
-                    if (video_payload.has_value()) {
-                        const auto metadata = ProbeVideoMetadataFromPayload(
-                            name,
-                            ".mp4",
-                            std::span(video_payload->data(), video_payload->size()));
-                        if (metadata.has_value()) {
-                            header.durationSeconds = metadata->duration_seconds;
-                        }
+                // Only an uncompressed payload is sniffed, so the video is
+                // streamed from the texture into its cache file to be probed.
+                // The size limit is the one header reads have always probed under.
+                constexpr i32 kMaxHeaderVideoProbeBytes = 64 * 1024 * 1024;
+                if (embedded.isVideo && src_size <= kMaxHeaderVideoProbeBytes) {
+                    const auto metadata =
+                        ProbeVideoPayload(name, pfile, file.Tell() - src_size, src_size);
+                    if (metadata.has_value()) {
+                        header.durationSeconds = metadata->duration_seconds;
                     }
                 }
             }
@@ -801,23 +779,26 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
                 decompressed_size = file.ReadInt32();
             }
             i32 src_size = file.ReadInt32();
-            if (src_size > 0) {
-                std::vector<char> payload(static_cast<std::size_t>(src_size));
-                file.Read(payload.data(), static_cast<usize>(src_size));
-                std::span<const char> video_bytes(payload.data(), payload.size());
-                std::unique_ptr<char[]> decompressed_storage;
-                if (lz4_compressed && decompressed_size > 0) {
-                    char* decompressed = Lz4Decompress(payload.data(), src_size, decompressed_size);
-                    if (decompressed != nullptr) {
-                        decompressed_storage.reset(decompressed);
-                        video_bytes = std::span<const char>(decompressed_storage.get(),
-                                                            static_cast<std::size_t>(decompressed_size));
-                    }
+            std::optional<video::VideoMetadata> metadata;
+            if (lz4_compressed && decompressed_size > 0) {
+                // A compressed payload has to be in memory to be decompressed.
+                std::unique_ptr<char[]> decompressed;
+                if (src_size > 0) {
+                    std::vector<char> compressed(static_cast<std::size_t>(src_size));
+                    file.Read(compressed.data(), compressed.size());
+                    decompressed.reset(Lz4Decompress(compressed.data(), src_size, decompressed_size));
                 }
-                const auto metadata = ProbeVideoMetadataFromPayload(name, ".mp4", video_bytes);
-                if (metadata.has_value()) {
-                    header.durationSeconds = metadata->duration_seconds;
+                if (decompressed != nullptr) {
+                    metadata = ProbeVideoPayload(
+                        name,
+                        std::span<const char>(decompressed.get(),
+                                              static_cast<std::size_t>(decompressed_size)));
                 }
+            } else {
+                metadata = ProbeVideoPayload(name, pfile, file.Tell(), src_size);
+            }
+            if (metadata.has_value()) {
+                header.durationSeconds = metadata->duration_seconds;
             }
         }
     }
@@ -829,42 +810,30 @@ std::shared_ptr<Image> WPTexImageParser::ParseLooseAsset(const std::string& name
     const auto candidate = ResolveLooseAsset(*m_vfs, name);
     if (!candidate.has_value()) return nullptr;
 
-    const auto payload = LoadLooseAssetPayload(*m_vfs, *candidate);
-    if (!payload.has_value() || payload->empty()) return nullptr;
-
-    auto image = std::make_shared<Image>();
-    image->key = name;
-
     if (candidate->isVideo) {
-        const auto metadata = ProbeVideoMetadataFromPayload(
-            name,
-            std::filesystem::path(candidate->path).extension().string(),
-            std::span(payload->data(), payload->size()));
+        // The decoder opens this file; the image carries no copy of the video.
+        const auto media = LooseVideoFile(*m_vfs, *candidate, name);
+        if (media.empty()) return nullptr;
+        const auto metadata = ProbeVideoFile(name, media);
         if (!metadata.has_value()) return nullptr;
 
+        auto image = std::make_shared<Image>();
+        image->key = name;
         image->header = BuildLooseAssetHeader(
             static_cast<int32_t>(metadata->width),
             static_cast<int32_t>(metadata->height),
             true,
             ImageType::UNKNOWN,
             metadata->duration_seconds);
-
-        Image::Slot slot;
-        slot.width = static_cast<int32_t>(metadata->width);
-        slot.height = static_cast<int32_t>(metadata->height);
-
-        ImageData mip;
-        mip.width = slot.width;
-        mip.height = slot.height;
-        mip.size = static_cast<isize>(payload->size());
-        mip.data = ImageDataPtr(new uint8_t[payload->size()], [](uint8_t* data) {
-            delete[] data;
-        });
-        std::copy(payload->begin(), payload->end(), reinterpret_cast<char*>(mip.data.get()));
-        slot.mipmaps.push_back(std::move(mip));
-        image->slots.push_back(std::move(slot));
+        image->videoFilePath = media;
         return image;
     }
+
+    const auto payload = LoadLooseAssetPayload(*m_vfs, *candidate);
+    if (!payload.has_value() || payload->empty()) return nullptr;
+
+    auto image = std::make_shared<Image>();
+    image->key = name;
 
     int width = 0;
     int height = 0;
@@ -910,14 +879,10 @@ ImageHeader WPTexImageParser::ParseLooseAssetHeader(const std::string& name)
     const auto candidate = ResolveLooseAsset(*m_vfs, name);
     if (!candidate.has_value()) return {};
 
-    const auto payload = LoadLooseAssetPayload(*m_vfs, *candidate);
-    if (!payload.has_value() || payload->empty()) return {};
-
     if (candidate->isVideo) {
-        const auto metadata = ProbeVideoMetadataFromPayload(
-            name,
-            std::filesystem::path(candidate->path).extension().string(),
-            std::span(payload->data(), payload->size()));
+        const auto media = LooseVideoFile(*m_vfs, *candidate, name);
+        if (media.empty()) return {};
+        const auto metadata = ProbeVideoFile(name, media);
         if (!metadata.has_value()) return {};
         return BuildLooseAssetHeader(
             static_cast<int32_t>(metadata->width),
@@ -926,6 +891,9 @@ ImageHeader WPTexImageParser::ParseLooseAssetHeader(const std::string& name)
             ImageType::UNKNOWN,
             metadata->duration_seconds);
     }
+
+    const auto payload = LoadLooseAssetPayload(*m_vfs, *candidate);
+    if (!payload.has_value() || payload->empty()) return {};
 
     int width = 0;
     int height = 0;

@@ -27,6 +27,13 @@ public:
 		(void)to;
 		return false;
 	}
+	/// Where the file at `path` lies on this machine's disk, for a caller that
+	/// can open it by name instead of reading it through `Open`; empty when the
+	/// file system keeps it some other way (inside a package, in memory).
+	virtual std::string HostPath(std::string_view path) const {
+		(void)path;
+		return {};
+	}
 public:
 	Fs() = default;
 	virtual ~Fs() = default;

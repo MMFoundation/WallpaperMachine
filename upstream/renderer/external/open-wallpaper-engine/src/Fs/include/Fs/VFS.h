@@ -111,6 +111,17 @@ public:
 		}
 		return false;
 	}
+	/// The disk path of the file `Open` would open for `path`, or empty when
+	/// that file is not a plain file on this machine (see `Fs::HostPath`).
+	std::string HostPath(std::string_view path) const {
+		for(auto iter = m_mountedFss.rbegin();iter < m_mountedFss.rend();iter++) {
+			auto& el = *iter;
+			if(! MountedFs::InMountPoint(el.mountPoint, path)) continue;
+			auto mpath = MountedFs::GetPathInMount(el.mountPoint, path);
+			if(el.fs->Contains(mpath)) return el.fs->HostPath(mpath);
+		}
+		return {};
+	}
 private:
 	std::vector<MountedFs> m_mountedFss;
 };

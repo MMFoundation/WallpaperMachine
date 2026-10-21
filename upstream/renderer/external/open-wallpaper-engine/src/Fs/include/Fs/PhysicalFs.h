@@ -26,6 +26,7 @@ public:
         std::filesystem::create_directories(full_path.parent_path());
         return CreateCBinaryStreamW(full_path.native());
     }
+    std::string HostPath(std::string_view path) const override { return FullPath(path); }
     bool Rename(std::string_view from, std::string_view to) override {
         std::error_code failure;
         std::filesystem::rename(FullPath(from), FullPath(to), failure);
