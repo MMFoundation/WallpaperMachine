@@ -1019,11 +1019,11 @@
       "extractionState" : "manual",
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "Log Out"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ログアウト"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "退出登录"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "登出"}}}
     },
-    "Could not update the saved Steam sign-in: %@. You may need to sign in again next time." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "保存されているSteamのサインイン情報を更新できませんでした：%@。次回、再度サインインが必要になる場合があります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "无法更新已保存的 Steam 登录：%@。下次可能需要重新登录。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "無法更新已儲存的 Steam 登入資訊：%@。下次可能需要重新登入。"}}}
+    "Steam authentication information retained on this device could not be updated (%@); you may need to sign in again later." : {
+      "localizations" : {"en": {"stringUnit": {"state": "translated", "value": "Steam authentication information retained on this device could not be updated (%@); you may need to sign in again later."}}, "ja": {"stringUnit": {"state": "translated", "value": "このデバイスに保持されているSteam認証情報を更新できなかったため（%@）、後で再度ログインが必要になる場合があります。"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "无法更新此设备保留的 Steam 身份验证信息（%@）；之后可能需要重新登录。"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "無法更新此裝置保留的 Steam 驗證資訊（%@）；之後可能需要重新登入。"}}}
     },
-    "Steam did not provide reusable sign-in files. You may need to sign in again next time." : {
-      "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "Steamから再利用可能なサインインファイルが提供されませんでした。次回、再度サインインが必要になる場合があります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "Steam 未提供可复用的登录文件，下次可能需要重新登录。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "Steam 未提供可重複使用的登入檔案。下次可能需要重新登入。"}}}
+    "This Steam sign-in did not provide reusable authentication information, so you may be asked to sign in again later." : {
+      "localizations" : {"en": {"stringUnit": {"state": "translated", "value": "This Steam sign-in did not provide reusable authentication information, so you may be asked to sign in again later."}}, "ja": {"stringUnit": {"state": "translated", "value": "今回のSteamログインでは再利用できる認証情報が得られなかったため、後で再度ログインを求められる場合があります。"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "本次 Steam 登录未提供可重复使用的身份验证信息，因此之后可能会要求您重新登录。"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "本次 Steam 登入未提供可重複使用的驗證資訊，因此之後可能會要求您重新登入。"}}}
     },
     "Saved Steam sign-in expired; waiting for fresh authentication…" : {
       "localizations" : {"ja" : {"stringUnit" : {"state" : "translated", "value" : "保存されているSteamのサインイン情報の有効期限が切れました。新たな認証を待機中…"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "已保存的 Steam 登录已失效，等待重新验证…"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "已儲存的 Steam 登入資訊已過期；正在等待重新驗證…"}}}

@@ -553,7 +553,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                     try Self.saveSession(from: staging, account: account, to: directory)
                 }.value
                 if !stored {
-                    sessionWarning = String(localized: "Steam did not provide reusable sign-in files. You may need to sign in again next time.")
+                    sessionWarning = String(localized: "This Steam sign-in did not provide reusable authentication information, so you may be asked to sign in again later.")
                 }
             } else if cachedCredentialsRejected, let restoredRevision {
                 try await Task.detached(priority: .utility) {
@@ -561,7 +561,7 @@ final class WorkshopDownloader: SteamCMDDownloadActivity {
                 }.value
             }
         } catch {
-            sessionWarning = String(localized: "Could not update the saved Steam sign-in: \(error.localizedDescription). You may need to sign in again next time.")
+            sessionWarning = String(localized: "Steam authentication information retained on this device could not be updated (\(error.localizedDescription)); you may need to sign in again later.")
         }
         savedAccount = Self.readSavedAccount(at: directory)
     }

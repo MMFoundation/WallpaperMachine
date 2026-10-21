@@ -1,6 +1,12 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Steam authentication information retained on this device could not be updated (%@); you may need to sign in again later." : {
+      "localizations" : {"en": {"stringUnit": {"state": "translated", "value": "Steam authentication information retained on this device could not be updated (%@); you may need to sign in again later."}}, "ja": {"stringUnit": {"state": "translated", "value": "このデバイスに保持されているSteam認証情報を更新できなかったため（%@）、後で再度ログインが必要になる場合があります。"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "无法更新此设备保留的 Steam 身份验证信息（%@）；之后可能需要重新登录。"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "無法更新此裝置保留的 Steam 驗證資訊（%@）；之後可能需要重新登入。"}}}
+    },
+    "This Steam sign-in did not provide reusable authentication information, so you may be asked to sign in again later." : {
+      "localizations" : {"en": {"stringUnit": {"state": "translated", "value": "This Steam sign-in did not provide reusable authentication information, so you may be asked to sign in again later."}}, "ja": {"stringUnit": {"state": "translated", "value": "今回のSteamログインでは再利用できる認証情報が得られなかったため、後で再度ログインを求められる場合があります。"}}, "zh-Hans": {"stringUnit": {"state": "translated", "value": "本次 Steam 登录未提供可重复使用的身份验证信息，因此之后可能会要求您重新登录。"}}, "zh-Hant": {"stringUnit": {"state": "translated", "value": "本次 Steam 登入未提供可重複使用的驗證資訊，因此之後可能會要求您重新登入。"}}}
+    },
     "The web wallpaper entry or asset is outside its published folder." : {
       "localizations" : {"en" : {"stringUnit" : {"state" : "translated", "value" : "The web wallpaper entry or asset is outside its published folder."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "Web壁紙のエントリまたはアセットが公開済みフォルダの外にあります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "网页壁纸的入口或资源位于已发布的文件夹之外。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "網頁桌布的進入點或資源位於已發佈的資料夾之外。"}}}
     },
