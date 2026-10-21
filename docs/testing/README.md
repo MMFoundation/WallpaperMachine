@@ -103,6 +103,14 @@ through audio registration. Narrow test-only observations and initial-value seed
 do not simulate publication or export the whole actor state. These cases establish
 no native-renderer, visual, hardware or permission fidelity.
 
+The independent display/config/project/draft contract suites now carry the mapped
+self-mirror, corrupt-file backup, raw rich-text/type and Cancel-baseline assertions
+formerly duplicated in small inherited bridge tests. Constructor-pointer equality,
+record-construction echoes and shallow duplicate default inventories are deliberately
+retired, not counted as replacement lifecycle coverage. Actor filtering/selection,
+unsupported-Application scan and fresh-store reopen cases stay until their distinct
+consumer assertions have an accepted independent replacement.
+
 An `IDELaunchServicesLauncher` assertion `childPID > 0` (exit 250) can abort
 Xcode before the native test host starts, even after successful compilation
 and bundle-signature verification. A missing verdict is not zero failing tests:

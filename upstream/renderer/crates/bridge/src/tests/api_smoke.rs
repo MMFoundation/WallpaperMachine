@@ -3,51 +3,13 @@ use wallpaper_core::{
 };
 
 use crate::{
-    BridgeDisplayMode, BridgeErrorKind, BridgePlaybackState, BridgeScalingMode,
+    BridgeDisplayMode, BridgeErrorKind, BridgeScalingMode,
     BridgeWallpaperKind, WallpaperBridge,
     actor::state::BridgeActorState,
     api::BridgeBuilder,
     config::{AppConfig, ConfigStore, MonitorCfg, SerializedSelector, WallpaperConfig},
     engine::{EngineFacade, FakeEngineFacade},
 };
-
-#[tokio::test]
-async fn bridge_starts_with_playing_state_and_empty_snapshots() {
-    let bridge = WallpaperBridge::new_for_test();
-
-    let app = bridge
-        .app_snapshot()
-        .await
-        .expect("app snapshot should be available");
-    let library = bridge
-        .library_snapshot()
-        .await
-        .expect("library snapshot should be available");
-
-    assert_eq!(app.playback_state, BridgePlaybackState::Playing);
-    assert!(app.active_wallpaper_ids.is_empty());
-    assert!(library.wallpapers.is_empty());
-    assert_eq!(library.scan_status.total, 0);
-}
-
-#[tokio::test]
-async fn actor_bridge_starts_with_playing_state_and_empty_snapshots() {
-    let bridge = WallpaperBridge::new_for_test();
-
-    let app = bridge
-        .app_snapshot()
-        .await
-        .expect("app snapshot should be available");
-    let library = bridge
-        .library_snapshot()
-        .await
-        .expect("library snapshot should be available");
-
-    assert_eq!(app.playback_state, BridgePlaybackState::Playing);
-    assert!(app.active_wallpaper_ids.is_empty());
-    assert!(library.wallpapers.is_empty());
-    assert_eq!(library.scan_status.total, 0);
-}
 
 #[tokio::test]
 async fn actor_snapshots_reflect_actor_state_mutations() {
@@ -671,24 +633,6 @@ async fn wallpaper_options_snapshot_includes_display_config_rows() {
         .find(|row| row.title.contains("secondary"))
         .expect("secondary display config row should exist");
     assert!(!secondary.enabled);
-}
-
-#[tokio::test]
-async fn snapshot_bundle_records_are_constructible() {
-    let bridge = WallpaperBridge::new_for_test();
-    let app = bridge.app_snapshot().await.unwrap();
-    let library = bridge.library_snapshot().await.unwrap();
-    let monitor_information = bridge.monitor_information_snapshot().await.unwrap();
-    let settings = bridge.settings_snapshot().await.unwrap();
-    let bundle = crate::BridgeSnapshotBundle {
-        app,
-        library,
-        wallpaper_options: None,
-        monitor_information,
-        settings,
-    };
-
-    assert!(bundle.wallpaper_options.is_none());
 }
 
 fn identified_display(uuid: &str, display_id: u32) -> DisplaySnapshotEntry {

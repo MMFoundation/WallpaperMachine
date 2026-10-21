@@ -99,32 +99,6 @@ async fn selecting_unknown_wallpaper_keeps_existing_selection() {
 }
 
 #[tokio::test]
-async fn wallpaper_options_snapshot_returns_entry_defaults() {
-    let bridge = WallpaperBridge::new_for_test();
-    bridge
-        .inject_wallpaper_for_test("100", "Scene One", BridgeWallpaperKind::ProjectScene)
-        .await;
-
-    let options = bridge
-        .wallpaper_options_snapshot("100".to_string())
-        .await
-        .expect("options should exist");
-
-    assert_eq!(options.wallpaper_id, "100");
-    assert_eq!(options.title, "Scene One");
-    assert_eq!(options.kind, BridgeWallpaperKind::ProjectScene);
-    assert!(options.supported);
-    assert!(!options.dirty);
-    assert!(options.display_configurations.is_empty());
-    assert!(!options.muted);
-    assert!(
-        (options.volume - 1.0).abs() <= f32::EPSILON,
-        "expected volume {} to be within f32::EPSILON of 1.0",
-        options.volume
-    );
-}
-
-#[tokio::test]
 async fn wallpaper_options_snapshot_rejects_unknown_wallpaper_with_id() {
     let bridge = WallpaperBridge::new_for_test();
 
@@ -135,28 +109,6 @@ async fn wallpaper_options_snapshot_rejects_unknown_wallpaper_with_id() {
 
     assert_eq!(err.kind(), BridgeErrorKind::InvalidInput);
     assert!(err.message().contains("missing"));
-}
-
-#[tokio::test]
-async fn display_snapshots_are_empty_without_engine_displays() {
-    let bridge = WallpaperBridge::new_for_test();
-
-    assert!(
-        bridge
-            .monitor_information_snapshot()
-            .await
-            .unwrap()
-            .rows
-            .is_empty()
-    );
-    assert!(
-        bridge
-            .settings_snapshot()
-            .await
-            .unwrap()
-            .displays
-            .is_empty()
-    );
 }
 
 #[tokio::test]
