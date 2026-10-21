@@ -103,6 +103,18 @@ through audio registration. Narrow test-only observations and initial-value seed
 do not simulate publication or export the whole actor state. These cases establish
 no native-renderer, visual, hardware or permission fidelity.
 
+The Apply/settings consumer children distinguish an unsaved wallpaper draft from
+property/display reset markers: saved nondefault choices remain resettable even
+when the enclosing options are clean. Clean Apply is not a startup primitive; use
+real Bootstrap for configured startup and actual edits for Apply transitions. A
+controlled live setter must update the direct-template snapshot as well as its
+observation cell, or refresh classification observes a stale scene. Scenario-owned
+request waits retain cancellation and join ownership across timeouts; canceling a
+wait does not replace the real actor drain before disposing owned paths.
+One separately identified `FakeEngineFacade` case preserves synthetic core-blocked
+command admission. It does not model the common readiness/audio exclusion and does
+not replace the real-turn consumer cases or establish native responsiveness.
+
 The independent display/config/project/draft contract suites now carry the mapped
 self-mirror, corrupt-file backup, raw rich-text/type and Cancel-baseline assertions
 formerly duplicated in small inherited bridge tests. Constructor-pointer equality,

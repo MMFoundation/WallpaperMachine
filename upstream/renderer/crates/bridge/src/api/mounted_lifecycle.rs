@@ -1211,6 +1211,7 @@ impl EngineFacade for ControlledEngine {
             },
             move |d| selected_setter_mutation(d, SelectedSetter::ScalingMode, handle, |d| {
                 d.controls.scaling_mode.insert(handle, mode);
+                template_mut(d, handle, |template| template.scaling_mode = mode);
                 Ok(())
             }),
         )
@@ -1224,6 +1225,7 @@ impl EngineFacade for ControlledEngine {
             },
             move |d| selected_setter_mutation(d, SelectedSetter::ScalingFactor, handle, |d| {
                 d.controls.scaling_factor.insert(handle, factor);
+                template_mut(d, handle, |template| template.scaling_factor = factor);
                 Ok(())
             }),
         )
@@ -2185,12 +2187,16 @@ async fn nonempty_bootstrap_releases_real_readiness_before_queued_first_frame_ha
         let mut expected_first = first.clone();
         let Some(wallpaper_core::WallpaperAssignment::Direct(expected)) = expected_first.assignment.as_mut() else { unreachable!() };
         expected.audio_volume = volume; expected.audio_muted = muted; expected.audio_response_enabled = response; expected.fps = 47;
+        expected.scaling_mode = wallpaper_core::project::ScalingMode::Fit;
+        expected.scaling_factor = 1.625;
         let unchanged_mirror = mirror.clone(); let unchanged_second = second.clone();
         engine.replace_display_rows(vec![mirror, first, second]); // Valid mirror alias precedes its direct owner.
         bounded(engine.set_audio_volume(SceneHandle::new(10731), volume)).await.unwrap();
         bounded(engine.set_audio_muted(SceneHandle::new(10731), muted)).await.unwrap();
         bounded(engine.set_audio_response_enabled(SceneHandle::new(10731), response)).await.unwrap();
         bounded(engine.set_fps(SceneHandle::new(10731), 47)).await.unwrap();
+        bounded(engine.set_scaling_mode(SceneHandle::new(10731), wallpaper_core::project::ScalingMode::Fit)).await.unwrap();
+        bounded(engine.set_scaling_factor(SceneHandle::new(10731), 1.625)).await.unwrap();
         assert_eq!(engine.display_rows(), vec![unchanged_mirror, expected_first, unchanged_second], "affected setters mutate only the matching direct owner, never its preceding mirror or another scene");
         let capture_before = engine.inner.data.lock().unwrap().controls.capture.get(&SceneHandle::new(10731)).copied();
         let capture_enabled = !capture_before.unwrap_or(false);

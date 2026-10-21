@@ -1,3 +1,6 @@
+mod playback_consumer_contract_tests;
+mod property_consumer_contract_tests;
+
 use std::{
     any::Any,
     fs,

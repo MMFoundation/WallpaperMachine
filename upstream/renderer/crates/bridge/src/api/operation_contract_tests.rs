@@ -1,6 +1,9 @@
 //! Independent operation-consumer tests; mounted as a child of `crate::api`.
 //! All synchronization is bounded and all engine work runs on the real actor runtime.
 
+mod apply_consumer_contract_tests;
+mod settings_consumer_contract_tests;
+
 use super::*;
 use crate::actor::state::BridgeActorState;
 use crate::actor::{BridgeActor, BridgeActorHandle, messages::*};
