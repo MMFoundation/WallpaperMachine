@@ -566,6 +566,17 @@ for the actor; callback retention does not own the bridge or its runtime. Closin
 the dispatcher prevents new deliveries and cancels its pending request, but does
 not retract a message already admitted to the actor mailbox.
 
+`actor/bridge/operations.rs` owns Apply/Cancel and display/mirror operations,
+reservation and stale-result handling, persistence boundaries and committed-state
+repair. The parent supplies only narrow state/service access through
+`operation_access.rs`; retained handlers enter the same owner at their established
+invalidation and startup-correlation points. No legacy completion route runs beside it.
+Apply prediction validates early inputs; the owned worker samples live inventory
+again when it executes and composes the retained live FPS/mute policy before opening
+classification. A physical identity remains distinct from the protected Primary role.
+Reconciled Apply can publish the actual assignment despite a later save failure;
+display-save failure and no-reconcile Apply retain their separate publication rules.
+
 `engine/facade_readiness.rs` tracks first-frame evidence for outstanding reconcile
 targets, through the facade's existing serialized turn, audio exclusion and prune
 ordering. `engine/audio_requests.rs` owns serialized capture requests; permission,
@@ -580,6 +591,11 @@ metadata and user-asset annotations, and shares settings normalization with repo
 Remembered display rows are borrowed lazily only for an empty live inventory. Candidate
 display validation still uses the full settings path; the row split does not remove
 its existing service reads or change bundle error short-circuiting.
+The full candidate-settings path borrows a proposed app configuration instead of
+cloning actor state. Candidate-dependent backend routing, report labels and quality
+caps all use that proposal; power, throttle, library and shared cache observations
+remain actor-owned. Ordinary settings use the same implementation with committed
+configuration, and empty-inventory operation handling still bypasses service reads.
 
 The shader layer is not a member: it is `wm-shader`, this project's own crate in the separate
 workspace `Renderer/` (`Renderer/Shader`, `rlib` + `staticlib`; `Renderer/Cargo.toml` pins naga to the

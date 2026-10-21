@@ -6,6 +6,10 @@ pub(crate) mod lifecycle_test_support;
 pub(crate) mod mounted_lifecycle;
 #[cfg(test)]
 mod mounted_state;
+#[cfg(test)]
+pub(crate) mod operation_contract_test_support;
+#[cfg(test)]
+mod operation_contract_tests;
 mod types;
 
 use std::{
@@ -138,6 +142,8 @@ pub struct BridgeBuilder<E: crate::engine::EngineFacade> {
     engine: E,
     state: Option<crate::actor::state::BridgeActorState>,
     config_store: Option<crate::config::ConfigStore>,
+    #[cfg(test)]
+    journal_for_tests: Option<crate::engine::LoadJournal>,
     launch_at_login: crate::login::LaunchAtLoginController,
     paths: crate::paths::BridgePaths,
     mouse_polling_enabled: bool,
@@ -155,6 +161,8 @@ impl<E: crate::engine::EngineFacade> BridgeBuilder<E> {
             engine,
             state: None,
             config_store: None,
+            #[cfg(test)]
+            journal_for_tests: None,
             launch_at_login: crate::login::LaunchAtLoginController::default(),
             paths: crate::paths::BridgePaths::new(),
             mouse_polling_enabled: true,
@@ -232,6 +240,8 @@ impl<E: crate::engine::EngineFacade> BridgeBuilder<E> {
             engine,
             state,
             config_store,
+            #[cfg(test)]
+            journal_for_tests,
             launch_at_login,
             paths,
             mouse_polling_enabled,
@@ -309,6 +319,12 @@ impl<E: crate::engine::EngineFacade> BridgeBuilder<E> {
             }
         })));
 
+        #[cfg(test)]
+        let journal = journal_for_tests.unwrap_or_else(|| crate::engine::LoadJournal::open(
+            config_store.as_ref().map(|store| store.root()),
+            &crate::engine::build_stamp(),
+        ));
+        #[cfg(not(test))]
         let journal = crate::engine::LoadJournal::open(
             config_store.as_ref().map(|store| store.root()),
             &crate::engine::build_stamp(),

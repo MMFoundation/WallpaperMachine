@@ -41,11 +41,67 @@ pub(crate) enum OperationPhase {
     Applied,
     Rejected,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SelectedSetter {
+    Volume,
+    Muted,
+    ScalingMode,
+    ScalingFactor,
+    AudioResponse,
+    AudioCapture,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FaultTiming {
+    BeforeMutation,
+    AfterMutation,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReconcileResultShape {
+    MissingDisplay(u32),
+    DuplicateDisplay(u32),
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PropertyPreviewPhase {
+    Attempted,
+    Declined,
+    Rejected,
+    Applied,
+    Unchanged,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LiveSceneControls {
+    pub scaling_mode: wallpaper_core::project::ScalingMode,
+    pub scaling_factor: f64,
+    pub audio_volume: wallpaper_core::media::audio::AudioVolume,
+    pub audio_muted: bool,
+    pub audio_response_enabled: bool,
+    pub audio_capture_enabled: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ShownPropertyState {
+    pub scene_path: String,
+    pub flat_json: Option<String>,
+}
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum EngineObservation {
     Reconcile {
         scenes: Vec<SceneDesc>,
         phase: OperationPhase,
+    },
+    ReconcileCore {
+        phase: OperationPhase,
+    },
+    PartialReconcilePublished {
+        displays: Vec<(u32, Option<SceneHandle>)>,
+    },
+    ReconcilePrune {
+        phase: OperationPhase,
+    },
+    PropertyPreview {
+        handle: SceneHandle,
+        scene_path: String,
+        flat_json: String,
+        phase: PropertyPreviewPhase,
     },
     Refresh {
         phase: OperationPhase,
@@ -151,12 +207,35 @@ pub(crate) struct OperationControl {
 struct ReconcilePlan {
     entered: oneshot::Sender<Vec<SceneDesc>>,
     release: oneshot::Receiver<()>,
-    result: Result<Vec<SceneResult>, EngineError>,
+    outcome: ReconcileOutcome,
+}
+enum ReconcileOutcome {
+    Exact(Result<Vec<SceneResult>, EngineError>),
+    Partial {
+        live_after: Vec<DisplaySnapshotEntry>,
+        error: EngineError,
+    },
+    Shaped {
+        complete_results: Vec<SceneResult>,
+        shape: ReconcileResultShape,
+    },
+}
+struct SelectedSetterFault {
+    setter: SelectedSetter,
+    handle: SceneHandle,
+    remaining: u32,
+    timing: FaultTiming,
+    error: EngineError,
 }
 struct OperationPlan {
     entered: oneshot::Sender<()>,
     release: oneshot::Receiver<()>,
     result: Result<(), EngineError>,
+}
+struct RenderScaleCompletionPlan {
+    handle: SceneHandle,
+    entered: oneshot::Sender<()>,
+    release: oneshot::Receiver<()>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -180,6 +259,7 @@ struct LiveControls {
     scaling_factor: HashMap<SceneHandle, f64>,
     framing: HashMap<SceneHandle, wallpaper_core::project::SceneFraming>,
     preview: HashMap<SceneHandle, wallpaper_core::project::SceneFraming>,
+    shown_properties: HashMap<SceneHandle, ShownPropertyState>,
 }
 struct Data {
     rows: Vec<DisplaySnapshotEntry>,
@@ -195,6 +275,10 @@ struct Data {
     close: Option<OperationPlan>,
     fps_error: Option<EngineError>,
     scale_error: Option<EngineError>,
+    prune_error: Option<String>,
+    selected_setter_faults: Vec<SelectedSetterFault>,
+    property_preview_error: Option<EngineError>,
+    render_scale_completions: Vec<RenderScaleCompletionPlan>,
     controls: LiveControls,
     global_pause: bool,
     display_pause: BTreeSet<u32>,
@@ -225,6 +309,10 @@ pub(crate) struct ControlledEngine {
 impl ControlledEngine {
     pub(crate) fn new(initial_displays: Vec<DisplaySnapshotEntry>) -> Self {
         validate_rows(&initial_displays);
+        let controls = LiveControls {
+            shown_properties: shown_properties_from_rows(&initial_displays),
+            ..LiveControls::default()
+        };
         let slot = wallpaper_core::contract_testing::FirstFrameSlot::new();
         let renderer = slot.renderer_callback(); // Acquired before any installation.
         Self {
@@ -248,7 +336,11 @@ impl ControlledEngine {
                     reconcile_witness: None,
                     fps_error: None,
                     scale_error: None,
-                    controls: LiveControls::default(),
+                    prune_error: None,
+                    selected_setter_faults: vec![],
+                    property_preview_error: None,
+                    render_scale_completions: vec![],
+                    controls,
                     global_pause: false,
                     display_pause: BTreeSet::new(),
                     demand: AudioCaptureDemand::default(),
@@ -268,10 +360,31 @@ impl ControlledEngine {
     pub(crate) fn display_rows(&self) -> Vec<DisplaySnapshotEntry> {
         self.inner.data.lock().unwrap().rows.clone()
     }
+    pub(crate) fn live_scene_controls(&self, handle: SceneHandle) -> Option<LiveSceneControls> {
+        let data = self.inner.data.lock().unwrap();
+        let template = direct_template(&data, handle)?;
+        Some(LiveSceneControls {
+            scaling_mode: data.controls.scaling_mode.get(&handle)
+                .cloned().unwrap_or_else(|| template.scaling_mode.clone()),
+            scaling_factor: data.controls.scaling_factor.get(&handle)
+                .copied().unwrap_or(template.scaling_factor),
+            audio_volume: template.audio_volume,
+            audio_muted: template.audio_muted,
+            audio_response_enabled: template.audio_response_enabled,
+            audio_capture_enabled: data.controls.capture.get(&handle).copied().unwrap_or(false),
+        })
+    }
+    pub(crate) fn audio_capture_state(&self, handle: SceneHandle) -> Option<bool> {
+        self.inner.data.lock().unwrap().controls.capture.get(&handle).copied()
+    }
+    pub(crate) fn shown_property_state(&self, handle: SceneHandle) -> Option<ShownPropertyState> {
+        self.inner.data.lock().unwrap().controls.shown_properties.get(&handle).cloned()
+    }
     pub(crate) fn replace_display_rows(&self, rows: Vec<DisplaySnapshotEntry>) {
         validate_rows(&rows);
         let mut data = self.inner.data.lock().unwrap();
         data.rows = rows;
+        data.controls.shown_properties = shown_properties_from_rows(&data.rows);
         prune_controls(&mut data);
     }
     fn observe_next_reconcile(&self) -> mpsc::UnboundedReceiver<ReconcileBoundary> {
@@ -310,6 +423,28 @@ impl ControlledEngine {
         &self,
         result: Result<Vec<SceneResult>, EngineError>,
     ) -> ReconcileControl {
+        self.reconcile_plan(ReconcileOutcome::Exact(result))
+    }
+    pub(crate) fn hold_next_partial_reconcile(
+        &self,
+        live_after: Vec<DisplaySnapshotEntry>,
+        error: EngineError,
+    ) -> ReconcileControl {
+        self.reconcile_plan(ReconcileOutcome::Partial { live_after, error })
+    }
+    pub(crate) fn hold_next_reconcile_with_result_shape(
+        &self,
+        complete_results: Vec<SceneResult>,
+        shape: ReconcileResultShape,
+    ) -> ReconcileControl {
+        let display_id = match shape {
+            ReconcileResultShape::MissingDisplay(id) | ReconcileResultShape::DuplicateDisplay(id) => id,
+        };
+        assert_eq!(complete_results.iter().filter(|r| r.display_id == display_id).count(), 1,
+            "result-shape selection must name exactly one complete result");
+        self.reconcile_plan(ReconcileOutcome::Shaped { complete_results, shape })
+    }
+    fn reconcile_plan(&self, outcome: ReconcileOutcome) -> ReconcileControl {
         let (entered_tx, entered) = oneshot::channel();
         let (release, release_rx) = oneshot::channel();
         let mut data = self.inner.data.lock().unwrap();
@@ -317,9 +452,52 @@ impl ControlledEngine {
         data.reconcile = Some(ReconcilePlan {
             entered: entered_tx,
             release: release_rx,
-            result,
+            outcome,
         });
         ReconcileControl { entered, release }
+    }
+    pub(crate) fn fail_next_prune_after_pruning(&self, error: String) {
+        let mut data = self.inner.data.lock().unwrap();
+        assert!(data.prune_error.is_none(), "unconsumed post-prune fault");
+        data.prune_error = Some(error);
+    }
+    pub(crate) fn fail_selected_setter(
+        &self,
+        setter: SelectedSetter,
+        handle: SceneHandle,
+        occurrence: u32,
+        timing: FaultTiming,
+        error: EngineError,
+    ) {
+        assert!(occurrence > 0, "selected setter occurrence starts at one");
+        let mut data = self.inner.data.lock().unwrap();
+        assert!(!data.selected_setter_faults.iter().any(|fault|
+            fault.setter == setter && fault.handle == handle && fault.remaining == occurrence),
+            "ambiguous duplicate selected setter fault");
+        data.selected_setter_faults.push(SelectedSetterFault {
+            setter, handle, remaining: occurrence, timing, error,
+        });
+    }
+    pub(crate) fn fail_next_property_preview(&self, error: EngineError) {
+        let mut data = self.inner.data.lock().unwrap();
+        assert!(data.property_preview_error.is_none(), "unconsumed property preview fault");
+        data.property_preview_error = Some(error);
+    }
+    pub(crate) fn hold_next_render_scale_completion(
+        &self,
+        handle: SceneHandle,
+    ) -> OperationControl {
+        let (entered_tx, entered) = oneshot::channel();
+        let (release, release_rx) = oneshot::channel();
+        let mut data = self.inner.data.lock().unwrap();
+        assert!(!data.render_scale_completions.iter().any(|plan| plan.handle == handle),
+            "unconsumed render-scale completion plan for the same handle");
+        data.render_scale_completions.push(RenderScaleCompletionPlan {
+            handle,
+            entered: entered_tx,
+            release: release_rx,
+        });
+        OperationControl { entered, release }
     }
     pub(crate) fn fail_next_render_scale(&self, error: EngineError) {
         assert!(
@@ -419,6 +597,142 @@ fn validate_rows(rows: &[DisplaySnapshotEntry]) {
         assert!(ids.insert(row.desc.display_id), "duplicate display id");
     }
 }
+fn validate_partial_rows(rows: &[DisplaySnapshotEntry]) {
+    validate_rows(rows);
+    let mut handles = HashSet::new();
+    for row in rows {
+        if let Some(handle) = row.handle {
+            assert!(handles.insert(handle), "duplicate partial live handle");
+            assert!(row.assignment.is_some(), "partial live handle has no assignment");
+        }
+    }
+}
+fn direct_template(data: &Data, handle: SceneHandle) -> Option<&SceneTemplate> {
+    data.rows.iter().find_map(|row| {
+        if row.handle != Some(handle) {
+            return None;
+        }
+        match row.assignment.as_ref() {
+            Some(wallpaper_core::WallpaperAssignment::Direct(template)) => Some(template),
+            _ => None,
+        }
+    })
+}
+fn shown_properties_from_rows(
+    rows: &[DisplaySnapshotEntry],
+) -> HashMap<SceneHandle, ShownPropertyState> {
+    rows.iter().filter_map(|row| {
+        let handle = row.handle?;
+        match row.assignment.as_ref()? {
+            wallpaper_core::WallpaperAssignment::Direct(template) => Some((handle, ShownPropertyState {
+                scene_path: template.scene_path.clone(),
+                flat_json: template.property_override_json.clone(),
+            })),
+            _ => None,
+        }
+    }).collect()
+}
+fn selected_setter_mutation(
+    data: &mut Data,
+    setter: SelectedSetter,
+    handle: SceneHandle,
+    mutate: impl FnOnce(&mut Data) -> Result<(), EngineError>,
+) -> Result<(), EngineError> {
+    known(data, handle);
+    for fault in &mut data.selected_setter_faults {
+        if fault.setter == setter && fault.handle == handle {
+            fault.remaining -= 1;
+        }
+    }
+    let fault = data.selected_setter_faults.iter().position(|fault|
+        fault.setter == setter && fault.handle == handle && fault.remaining == 0)
+        .map(|index| data.selected_setter_faults.remove(index));
+    match fault {
+        Some(fault) if fault.timing == FaultTiming::BeforeMutation => Err(fault.error),
+        Some(fault) => {
+            mutate(data)?;
+            Err(fault.error)
+        }
+        None => mutate(data),
+    }
+}
+async fn run_reconcile_core(
+    engine: &ControlledEngine,
+    scenes: Vec<SceneDesc>,
+) -> Result<Vec<SceneResult>, EngineError> {
+    let plan = engine.inner.data.lock().unwrap().reconcile.take();
+    let (mut results, shape) = match plan {
+        Some(plan) => {
+            plan.entered.send(scenes.clone()).expect("reconcile observer disappeared");
+            plan.release.await.expect("reconcile release disconnected");
+            match plan.outcome {
+                ReconcileOutcome::Exact(result) => (result?, None),
+                ReconcileOutcome::Partial { live_after, error } => {
+                    validate_partial_rows(&live_after);
+                    let mut data = engine.inner.data.lock().unwrap();
+                    data.rows = live_after;
+                    data.controls.shown_properties = shown_properties_from_rows(&data.rows);
+                    let displays = data.rows.iter().map(|row| (row.desc.display_id, row.handle)).collect();
+                    data.observations.push(EngineObservation::PartialReconcilePublished { displays });
+                    return Err(error);
+                }
+                ReconcileOutcome::Shaped { complete_results, shape } => (complete_results, Some(shape)),
+            }
+        }
+        None => {
+            assert!(scenes.is_empty(), "nonempty reconcile requires explicit exact results");
+            (vec![], None)
+        }
+    };
+    let wanted: BTreeSet<_> = scenes.iter().map(|s| s.display.display_id).collect();
+    let actual: BTreeSet<_> = results.iter().map(|r| r.display_id).collect();
+    assert_eq!(wanted.len(), scenes.len(), "duplicate requested displays");
+    assert_eq!(actual.len(), results.len(), "duplicate result displays");
+    assert_eq!(wanted, actual, "results do not match actual requested displays");
+    let handles: HashSet<_> = results.iter().map(|r| r.handle).collect();
+    assert_eq!(handles.len(), results.len(), "duplicate result handles");
+    assert!(results.iter().all(|r| r.status == 0), "controlled success requires explicit zero statuses");
+    {
+        let mut data = engine.inner.data.lock().unwrap();
+        for row in &mut data.rows {
+            if let Some(scene) = scenes.iter().find(|s| s.display.display_id == row.desc.display_id) {
+                let result = results.iter().find(|r| r.display_id == row.desc.display_id).unwrap();
+                row.identity = scene.display.identity.clone();
+                row.desc = scene.display.clone();
+                row.handle = Some(result.handle);
+                row.paused = scene.paused;
+                row.assignment = Some(wallpaper_core::WallpaperAssignment::Direct(
+                    SceneTemplate::from_scene_desc(scene),
+                ));
+                row.window_active = true;
+            } else {
+                row.handle = None;
+                row.assignment = None;
+                row.accepts_pointer_input = false;
+                row.window_active = false;
+            }
+        }
+        assert!(scenes.iter().all(|s| data.rows.iter()
+            .any(|r| r.desc.display_id == s.display.display_id)), "requested unknown display");
+        data.controls.shown_properties = shown_properties_from_rows(&data.rows);
+    }
+    if let Some(shape) = shape {
+        let display_id = match shape {
+            ReconcileResultShape::MissingDisplay(id) | ReconcileResultShape::DuplicateDisplay(id) => id,
+        };
+        let index = results.iter().position(|r| r.display_id == display_id)
+            .expect("result-shape selection is absent from complete results");
+        match shape {
+            ReconcileResultShape::MissingDisplay(_) => { results.remove(index); }
+            ReconcileResultShape::DuplicateDisplay(_) => {
+                let selected = &results[index];
+                let duplicate = SceneResult::new(selected.display_id, selected.handle, selected.status);
+                results.push(duplicate);
+            }
+        }
+    }
+    Ok(results)
+}
 fn known(data: &Data, handle: SceneHandle) {
     assert!(
         data.rows.iter().any(|row| row.handle == Some(handle)),
@@ -452,6 +766,7 @@ fn prune_controls(data: &mut Data) {
     data.controls.scaling_factor.retain(|h, _| live.contains(h));
     data.controls.framing.retain(|h, _| live.contains(h));
     data.controls.preview.retain(|h, _| live.contains(h));
+    data.controls.shown_properties.retain(|h, _| live.contains(h));
 }
 fn apply_pause(data: &mut Data) {
     for row in &mut data.rows {
@@ -472,6 +787,23 @@ async fn release_plan(plan: Option<OperationPlan>) -> Result<(), EngineError> {
     } else {
         Ok(())
     }
+}
+fn take_render_scale_completion(
+    data: &mut Data,
+    handle: SceneHandle,
+) -> Option<RenderScaleCompletionPlan> {
+    data.render_scale_completions.iter().position(|plan| plan.handle == handle)
+        .map(|index| data.render_scale_completions.remove(index))
+}
+async fn finish_render_scale_completion(
+    plan: Option<RenderScaleCompletionPlan>,
+    result: Result<(), EngineError>,
+) -> Result<(), EngineError> {
+    if let Some(plan) = plan {
+        plan.entered.send(()).expect("render-scale completion observer disappeared");
+        plan.release.await.expect("render-scale completion release disconnected");
+    }
+    result
 }
 fn unsupported<T>(name: &'static str) -> EngineFuture<T> {
     Box::pin(async move { panic!("operation outside declared mounted scenario: {name}") })
@@ -505,83 +837,42 @@ impl EngineFacade for ControlledEngine {
                 scenes,
                 move || snapshot_engine.display_rows(),
                 move |scenes| async move {
-                    let plan = core_engine.inner.data.lock().unwrap().reconcile.take();
-                    let results = match plan {
-                        Some(plan) => {
-                            plan.entered
-                                .send(scenes.clone())
-                                .expect("reconcile observer disappeared");
-                            plan.release.await.expect("reconcile release disconnected");
-                            plan.result?
-                        }
-                        None => {
-                            assert!(
-                                scenes.is_empty(),
-                                "nonempty reconcile requires explicit exact results"
-                            );
-                            vec![]
-                        }
-                    };
-                    let wanted: BTreeSet<_> = scenes.iter().map(|s| s.display.display_id).collect();
-                    let actual: BTreeSet<_> = results.iter().map(|r| r.display_id).collect();
-                    assert_eq!(wanted.len(), scenes.len(), "duplicate requested displays");
-                    assert_eq!(actual.len(), results.len(), "duplicate result displays");
-                    assert_eq!(
-                        wanted, actual,
-                        "results do not match actual requested displays"
-                    );
-                    let handles: HashSet<_> = results.iter().map(|r| r.handle).collect();
-                    assert_eq!(handles.len(), results.len(), "duplicate result handles");
-                    assert!(
-                        results.iter().all(|r| r.status == 0),
-                        "controlled success requires explicit zero statuses"
-                    );
-                    let mut data = core_engine.inner.data.lock().unwrap();
-                    for row in &mut data.rows {
-                        if let Some(scene) = scenes
-                            .iter()
-                            .find(|s| s.display.display_id == row.desc.display_id)
-                        {
-                            let result = results
-                                .iter()
-                                .find(|r| r.display_id == row.desc.display_id)
-                                .unwrap();
-                            row.identity = scene.display.identity.clone();
-                            row.desc = scene.display.clone();
-                            row.handle = Some(result.handle);
-                            row.paused = scene.paused;
-                            row.assignment = Some(wallpaper_core::WallpaperAssignment::Direct(
-                                SceneTemplate::from_scene_desc(scene),
-                            ));
-                            row.window_active = true;
+                    core_engine.inner.data.lock().unwrap().observations.push(
+                        EngineObservation::ReconcileCore { phase: OperationPhase::Started });
+                    let result = run_reconcile_core(&core_engine, scenes).await;
+                    core_engine.inner.data.lock().unwrap().observations.push(
+                        EngineObservation::ReconcileCore { phase: if result.is_ok() {
+                            OperationPhase::Applied
                         } else {
-                            row.handle = None;
-                            row.assignment = None;
-                            row.accepts_pointer_input = false;
-                            row.window_active = false;
-                        }
-                    }
-                    assert!(
-                        scenes.iter().all(|s| data
-                            .rows
-                            .iter()
-                            .any(|r| r.desc.display_id == s.display.display_id)),
-                        "requested unknown display"
-                    );
-                    drop(data);
+                            OperationPhase::Rejected
+                        } });
                     if let Some(witness) = core_witness {
                         witness.core_completed.store(true, Ordering::SeqCst);
                         let _ = witness.events.send(ReconcileBoundary::CoreCompleted);
                     }
-                    Ok(results)
+                    result
                 },
                 move || async move {
-                    prune_controls(&mut prune_engine.inner.data.lock().unwrap());
+                    let result = {
+                        let mut data = prune_engine.inner.data.lock().unwrap();
+                        data.observations.push(EngineObservation::ReconcilePrune {
+                            phase: OperationPhase::Started,
+                        });
+                        prune_controls(&mut data);
+                        let result = match data.prune_error.take() {
+                            Some(error) => Err(error),
+                            None => Ok(()),
+                        };
+                        data.observations.push(EngineObservation::ReconcilePrune {
+                            phase: if result.is_ok() { OperationPhase::Applied } else { OperationPhase::Rejected },
+                        });
+                        result
+                    };
                     if let Some(witness) = prune_witness {
                         witness.prune_completed.store(true, Ordering::SeqCst);
                         let _ = witness.events.send(ReconcileBoundary::PruneCompleted);
                     }
-                    Ok(())
+                    result
                 },
             ));
             let mut waiting_reported = false;
@@ -747,10 +1038,10 @@ impl EngineFacade for ControlledEngine {
                 volume,
                 phase,
             },
-            move |d| {
+            move |d| selected_setter_mutation(d, SelectedSetter::Volume, handle, |d| {
                 template_mut(d, handle, |t| t.audio_volume = volume);
                 Ok(())
-            },
+            }),
         )
     }
     fn set_audio_muted(&self, handle: SceneHandle, muted: bool) -> EngineFuture<()> {
@@ -760,10 +1051,10 @@ impl EngineFacade for ControlledEngine {
                 muted,
                 phase,
             },
-            move |d| {
+            move |d| selected_setter_mutation(d, SelectedSetter::Muted, handle, |d| {
                 template_mut(d, handle, |t| t.audio_muted = muted);
                 Ok(())
-            },
+            }),
         )
     }
     fn set_audio_response_enabled(&self, handle: SceneHandle, enabled: bool) -> EngineFuture<()> {
@@ -773,10 +1064,10 @@ impl EngineFacade for ControlledEngine {
                 enabled,
                 phase,
             },
-            move |d| {
+            move |d| selected_setter_mutation(d, SelectedSetter::AudioResponse, handle, |d| {
                 template_mut(d, handle, |t| t.audio_response_enabled = enabled);
                 Ok(())
-            },
+            }),
         )
     }
     fn set_media_integration_enabled(
@@ -800,29 +1091,29 @@ impl EngineFacade for ControlledEngine {
     fn set_audio_capture_enabled(&self, handle: SceneHandle, enabled: bool) -> EngineFuture<()> {
         let engine = self.clone();
         Box::pin(async move {
-            engine
-                .inner
-                .data
-                .lock()
-                .unwrap()
-                .observations
-                .push(EngineObservation::Capture {
+            {
+                let mut data = engine.inner.data.lock().unwrap();
+                data.observations.push(EngineObservation::Capture {
                     handle,
                     enabled,
                     phase: OperationPhase::Started,
                 });
+            }
             mounted_readiness::mutate_audio(&engine.inner.audio, || async {
                 let mut data = engine.inner.data.lock().unwrap();
-                known(&data, handle);
-                data.controls.capture.insert(handle, enabled);
+                let result = selected_setter_mutation(&mut data, SelectedSetter::AudioCapture, handle, |data| {
+                    data.controls.capture.insert(handle, enabled);
+                    Ok(())
+                });
                 data.observations.push(EngineObservation::Capture {
                     handle,
                     enabled,
-                    phase: OperationPhase::Applied,
+                    phase: if result.is_ok() { OperationPhase::Applied } else { OperationPhase::Rejected },
                 });
-                Ok(())
+                Ok::<Result<(), EngineError>, String>(result)
             })
             .await
+            .and_then(|result| result)
         })
     }
     fn set_audio_capture_demand(&self, demand: AudioCaptureDemand) -> EngineFuture<()> {
@@ -878,21 +1169,33 @@ impl EngineFacade for ControlledEngine {
         )
     }
     fn set_render_scale(&self, handle: SceneHandle, scale: f32) -> EngineFuture<()> {
-        self.mutation(
-            move |phase| EngineObservation::RenderScale {
-                handle,
-                scale,
-                phase,
-            },
-            move |d| {
-                known(d, handle);
-                if let Some(error) = d.scale_error.take() {
-                    return Err(error);
-                }
-                d.controls.scale.insert(handle, scale);
-                Ok(())
-            },
-        )
+        let engine = self.clone();
+        Box::pin(async move {
+            let (plan, result) = {
+                let mut data = engine.inner.data.lock().unwrap();
+                data.observations.push(EngineObservation::RenderScale {
+                    handle,
+                    scale,
+                    phase: OperationPhase::Started,
+                });
+                let plan = take_render_scale_completion(&mut data, handle);
+                known(&data, handle);
+                let result = match data.scale_error.take() {
+                    Some(error) => Err(error),
+                    None => {
+                        data.controls.scale.insert(handle, scale);
+                        Ok(())
+                    }
+                };
+                data.observations.push(EngineObservation::RenderScale {
+                    handle,
+                    scale,
+                    phase: if result.is_ok() { OperationPhase::Applied } else { OperationPhase::Rejected },
+                });
+                (plan, result)
+            };
+            finish_render_scale_completion(plan, result).await
+        })
     }
     fn set_scaling_mode(
         &self,
@@ -906,11 +1209,10 @@ impl EngineFacade for ControlledEngine {
                 mode: event_mode.clone(),
                 phase,
             },
-            move |d| {
-                known(d, handle);
+            move |d| selected_setter_mutation(d, SelectedSetter::ScalingMode, handle, |d| {
                 d.controls.scaling_mode.insert(handle, mode);
                 Ok(())
-            },
+            }),
         )
     }
     fn set_scaling_factor(&self, handle: SceneHandle, factor: f64) -> EngineFuture<()> {
@@ -920,11 +1222,10 @@ impl EngineFacade for ControlledEngine {
                 factor,
                 phase,
             },
-            move |d| {
-                known(d, handle);
+            move |d| selected_setter_mutation(d, SelectedSetter::ScalingFactor, handle, |d| {
                 d.controls.scaling_factor.insert(handle, factor);
                 Ok(())
-            },
+            }),
         )
     }
     fn set_framing(
@@ -1080,11 +1381,49 @@ impl EngineFacade for ControlledEngine {
     }
     fn preview_property_override(
         &self,
-        _: SceneHandle,
-        _: String,
-        _: String,
+        handle: SceneHandle,
+        scene_path: String,
+        flat_json: String,
     ) -> EngineFuture<wallpaper_core::PropertyPreview> {
-        unsupported("preview_property_override")
+        let engine = self.clone();
+        Box::pin(async move {
+            let mut data = engine.inner.data.lock().unwrap();
+            let event = |phase| EngineObservation::PropertyPreview {
+                handle,
+                scene_path: scene_path.clone(),
+                flat_json: flat_json.clone(),
+                phase,
+            };
+            if !data.rows.iter().any(|row| row.handle == Some(handle)) {
+                data.observations.push(event(PropertyPreviewPhase::Rejected));
+                return Err(EngineError::InvalidInput(format!(
+                    "property preview target is not a live controlled scene: {handle:?}"
+                )));
+            }
+            if !direct_template(&data, handle).is_some_and(|template| template.scene_path == scene_path) {
+                data.observations.push(event(PropertyPreviewPhase::Declined));
+                return Ok(wallpaper_core::PropertyPreview::OtherWallpaper);
+            }
+            if data.controls.shown_properties.get(&handle).is_some_and(|shown|
+                shown.scene_path == scene_path && shown.flat_json.as_deref() == Some(flat_json.as_str()))
+            {
+                data.observations.push(event(PropertyPreviewPhase::Unchanged));
+                return Ok(wallpaper_core::PropertyPreview::Shown);
+            }
+            data.observations.push(event(PropertyPreviewPhase::Attempted));
+            if let Some(error) = data.property_preview_error.take() {
+                data.controls.shown_properties.remove(&handle);
+                data.observations.push(event(PropertyPreviewPhase::Rejected));
+                return Err(error);
+            }
+            let applied = event(PropertyPreviewPhase::Applied);
+            data.controls.shown_properties.insert(handle, ShownPropertyState {
+                scene_path,
+                flat_json: Some(flat_json),
+            });
+            data.observations.push(applied);
+            Ok(wallpaper_core::PropertyPreview::Shown)
+        })
     }
     fn poll_mouse_position(&self) -> EngineFuture<()> {
         unsupported("poll_mouse_position")
@@ -2264,27 +2603,6 @@ async fn dropping_only_bridge_releases_actor_runtime_with_engine_and_callbacks_r
     assert!(engine.saved_first_frame().is_some());
 }
 
-#[test]
-fn mounted_real_type_constraints() {
-    fn send_sync_static<T: Send + Sync + 'static>() {}
-    fn clone_engine<T: Clone + EngineFacade>() {}
-    fn send_future<F: Future + Send>(_: F) {}
-    clone_engine::<ControlledEngine>();
-    send_sync_static::<ControlledEngine>();
-    send_sync_static::<WallpaperBridge>();
-    send_sync_static::<BridgeActorHandle<ControlledEngine>>();
-    send_sync_static::<crate::actor::WeakFirstFrameTarget<ControlledEngine>>();
-    send_sync_static::<FirstFrameHandoff>();
-    send_sync_static::<FirstFrameCallback>();
-    fn actual_futures(
-        target: &crate::actor::WeakFirstFrameTarget<ControlledEngine>,
-        helper: FirstFrameHandoff,
-    ) {
-        send_future(target.deliver(SceneHandle::new(13861)));
-        send_future(helper.stop());
-    }
-    let _ = actual_futures;
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn genuine_crash_held_input_is_excluded_and_first_frame_does_not_forgive_it() {

@@ -18,7 +18,7 @@ use crate::{
         BridgeStorageStatus, BridgeVideoBackendReport, BridgeWallpaperOptionsSnapshot,
         bridge_log_status,
     },
-    config::SceneResolutionCfg,
+    config::{AppConfig, SceneResolutionCfg},
     engine::{ActivationInputs, SceneRuntimeReport},
     display::DisplayLabelExt,
     logging::{ApplicationLogger, LogStatus},
@@ -243,8 +243,16 @@ impl BridgeActorState {
         &self,
         displays: &[DisplaySnapshotEntry],
     ) -> BridgeMonitorInformationSnapshot {
+        self.monitor_info_for_app(&self.app_config, displays)
+    }
+
+    fn monitor_info_for_app(
+        &self,
+        app_config: &AppConfig,
+        displays: &[DisplaySnapshotEntry],
+    ) -> BridgeMonitorInformationSnapshot {
         super::snapshot_projection::project_monitors(
-            &self.app_config,
+            app_config,
             displays,
             |id| self.wallpaper_configs.get(id),
             |id| self.library.iter().find(|entry| entry.id == id).map(|entry| entry.title.as_str()),
@@ -309,12 +317,13 @@ impl BridgeActorState {
     fn scene_report_labels(
         &self,
         displays: &[DisplaySnapshotEntry],
-        app_config: &crate::config::AppConfig,
+        app_config: &AppConfig,
+        candidate: &AppConfig,
         scene_reports: &[SceneRuntimeReport],
     ) -> BTreeMap<u32, SceneReportLabels> {
         let primary = displays.first().map(|first| first.desc.display_id);
         let rows = app_config.monitor_rows(displays);
-        let monitor_info = self.monitor_info(displays);
+        let monitor_info = self.monitor_info_for_app(candidate, displays);
         scene_reports
             .iter()
             .map(|report| report.display_id)
@@ -355,7 +364,6 @@ impl BridgeActorState {
             .collect()
     }
 
-    #[allow(clippy::too_many_lines)]
     pub fn settings(
         &self,
         displays: &[DisplaySnapshotEntry],
@@ -363,7 +371,25 @@ impl BridgeActorState {
         paths: &BridgePaths,
         scene_reports: &[SceneRuntimeReport],
     ) -> BridgeSettingsSnapshot {
-        let app_config = self.app_config.normalized(displays);
+        self.operation_candidate_settings(
+            &self.app_config,
+            displays,
+            launch_at_login,
+            paths,
+            scene_reports,
+        )
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn operation_candidate_settings(
+        &self,
+        candidate: &AppConfig,
+        displays: &[DisplaySnapshotEntry],
+        launch_at_login: LaunchAtLoginStatus,
+        paths: &BridgePaths,
+        scene_reports: &[SceneRuntimeReport],
+    ) -> BridgeSettingsSnapshot {
+        let app_config = candidate.normalized(displays);
         let rows = super::snapshot_projection::project_settings_rows(
             &app_config,
             displays,
@@ -371,7 +397,7 @@ impl BridgeActorState {
         );
         let on_battery = self.power_source == crate::power::PowerSource::Battery;
         let backends = ActivationInputs {
-            app_config: &self.app_config,
+            app_config: candidate,
             wallpapers: &self.wallpaper_configs,
             library: self.scanned_library(),
             displays,
@@ -380,7 +406,7 @@ impl BridgeActorState {
             paths,
             force_shader_refresh: false,
             project_models: &self.project_models,
-            frame_rate_cap: self.active_target_fps_cap(),
+            frame_rate_cap: self.active_target_fps_cap_for_app(candidate),
             audio_suppressed: self.audio_suppressed,
             held: &self.held_wallpapers,
         }
@@ -413,7 +439,7 @@ impl BridgeActorState {
                 fallback_reason: routed.problem,
             })
             .collect();
-        let scene_labels = self.scene_report_labels(displays, &app_config, scene_reports);
+        let scene_labels = self.scene_report_labels(displays, &app_config, candidate, scene_reports);
         let scene_update_modes = scene_reports
             .iter()
             .map(|report| {
@@ -465,8 +491,8 @@ impl BridgeActorState {
                 LaunchAtLoginStatus::Available { enabled: true }
             ),
             launch_at_login_needs_approval: launch_at_login == LaunchAtLoginStatus::RequiresApproval,
-            battery_mode: self.app_config.power.on_battery.into(),
-            verbose_logging: self.app_config.diagnostics.verbose_logging,
+            battery_mode: candidate.power.on_battery.into(),
+            verbose_logging: candidate.diagnostics.verbose_logging,
             git_sha: match option_env!("GIT_SHORT_COMMIT").unwrap_or(env!("WM_FALLBACK_GIT_SHORT_COMMIT")) {
                 value if value.trim().is_empty() => UNKNOWN_GIT_SHA.to_string(),
                 value => value.to_string(),
@@ -491,29 +517,27 @@ impl BridgeActorState {
                 ),
             },
             video_backends,
-            scene_optimization_enabled: self.app_config.quality.scene_optimization_enabled,
-            scene_on_demand_enabled: self.app_config.quality.scene_on_demand_enabled,
-            scene_video_plane_sampling_enabled: self
-                .app_config
+            scene_optimization_enabled: candidate.quality.scene_optimization_enabled,
+            scene_on_demand_enabled: candidate.quality.scene_on_demand_enabled,
+            scene_video_plane_sampling_enabled: candidate
                 .experimental
                 .scene_video_plane_sampling,
-            scene_resolution: match self.app_config.quality.scene_resolution {
+            scene_resolution: match candidate.quality.scene_resolution {
                 SceneResolutionCfg::Canvas => SCENE_RESOLUTION_CANVAS.to_string(),
                 SceneResolutionCfg::Display => SCENE_RESOLUTION_DISPLAY.to_string(),
             },
             scene_update_modes,
             scene_renderers,
             user_assets_path: paths.user_assets_root().to_string_lossy().into_owned(),
-            render_scale: self
-                .app_config
-                .effective_render_scale(self.quality_in_force()),
-            preferred_render_scale: self.app_config.quality.render_scale,
-            frame_rate_cap: self.app_config.quality.frame_rate_cap,
-            battery_render_scale: self.app_config.quality.battery.render_scale,
-            battery_target_fps: self.app_config.quality.battery.target_fps,
+            render_scale: candidate
+                .effective_render_scale(self.quality_in_force_for_app(candidate)),
+            preferred_render_scale: candidate.quality.render_scale,
+            frame_rate_cap: candidate.quality.frame_rate_cap,
+            battery_render_scale: candidate.quality.battery.render_scale,
+            battery_target_fps: candidate.quality.battery.target_fps,
             on_battery_power: on_battery,
             quality_throttle: self.quality_throttle.iter().copied().collect(),
-            effective_frame_rate_cap: self.active_target_fps_cap(),
+            effective_frame_rate_cap: self.active_target_fps_cap_for_app(candidate),
             render_scale_supported: backends.render_scale_supported,
         }
     }

@@ -367,8 +367,12 @@ impl BridgeActorState {
     /// battery mode the user saved while the Mac is on battery, and the
     /// causes the host asked for.
     pub(super) fn quality_in_force(&self) -> QualityInForce {
+        self.quality_in_force_for_app(&self.app_config)
+    }
+
+    pub(super) fn quality_in_force_for_app(&self, app_config: &AppConfig) -> QualityInForce {
         QualityInForce {
-            battery_profile: self.app_config.power.on_battery
+            battery_profile: app_config.power.on_battery
                 == crate::config::BatteryModeCfg::ReducedQuality
                 && self.power_source == crate::power::PowerSource::Battery,
             throttled: !self.quality_throttle.is_empty(),
@@ -380,9 +384,13 @@ impl BridgeActorState {
     /// quality profile's rate while the battery mode or a throttle holds it,
     /// or the stricter of the two. It only ever lowers what the user chose.
     pub(super) fn active_target_fps_cap(&self) -> Option<u32> {
-        let quality = &self.app_config.quality;
+        self.active_target_fps_cap_for_app(&self.app_config)
+    }
+
+    pub(super) fn active_target_fps_cap_for_app(&self, app_config: &AppConfig) -> Option<u32> {
+        let quality = &app_config.quality;
         let global = quality.frame_rate_cap.map(|cap| cap.max(1));
-        let in_force = self.quality_in_force();
+        let in_force = self.quality_in_force_for_app(app_config);
         let profile = (in_force.battery_profile || in_force.throttled)
             .then(|| quality.battery.target_fps.max(1));
         match (global, profile) {

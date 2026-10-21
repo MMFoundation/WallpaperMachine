@@ -1,10 +1,7 @@
-use std::collections::BTreeMap;
-
 use crate::{
-    actor::state_values::PreparedApply,
     api::{
         BridgeAppSnapshot, BridgeDisplayMode, BridgeDisplayMutationBundle,
-        BridgeDisplaySettingsRow, BridgeError, BridgeLibrarySnapshot, BridgeLockScreenScene,
+        BridgeError, BridgeLibrarySnapshot, BridgeLockScreenScene,
         BridgeMonitorInformationSnapshot, BridgePlaybackState, BridgePropertyEdit, BridgePropertyValue,
         BridgeNativeVideoWallpaper, BridgeQualityThrottleCause, BridgeRendererCountersReport,
         BridgeScalingMode, BridgeSettingsSnapshot, BridgeSnapshotBundle, BridgeWallpaperEntry,
@@ -12,7 +9,7 @@ use crate::{
         BridgeWebWallpaper,
     },
     config::{
-        AppConfig, SceneResolutionCfg, WallpaperConfig,
+        SceneResolutionCfg, WallpaperConfig,
     },
     power::PowerSource,
 };
@@ -394,34 +391,6 @@ pub struct CancelWallpaperOptions {
     pub wallpaper_id: String,
 }
 
-pub struct CommitApplyAfterReconcile {
-    pub wallpaper_id: String,
-    pub prepared: PreparedApply,
-    pub scenes: Vec<wallpaper_core::project::SceneDesc>,
-    pub generation: u64,
-}
-
-pub struct CommitDisplayAfterReconcile {
-    pub app_config: AppConfig,
-    pub wallpaper_configs: BTreeMap<String, WallpaperConfig>,
-    pub display_settings: BTreeMap<String, BridgeDisplaySettingsRow>,
-    pub scenes: Vec<wallpaper_core::project::SceneDesc>,
-    pub generation: u64,
-}
-
-pub struct CompleteRestoreAfterReconcile {
-    pub result: Result<Vec<wallpaper_core::project::SceneDesc>, BridgeError>,
-    pub generation: u64,
-}
-
-pub struct ReconcileFailed {
-    pub error: BridgeError,
-    pub generation: u64,
-    /// A wallpaper whose hold the failed apply lifted so that the reconcile
-    /// would plan it. Nothing was opened, so the hold goes back.
-    pub restore_hold: Option<String>,
-}
-
 pub struct CompleteAudioResponse {
     pub wallpaper_id: String,
     pub previous_enabled: bool,
@@ -446,15 +415,6 @@ pub type ReleaseHeldWallpaperReply = AllSnapshotsReply;
 pub type PollMousePositionReply = Result<(), BridgeError>;
 pub type SetFilterReply = AllSnapshotsReply;
 pub type DisplayMutationReply = Result<BridgeDisplayMutationBundle, crate::api::BridgeError>;
-pub type SetDisplayEnabledReply = DisplayMutationReply;
-pub type SetDisplayModeReply = DisplayMutationReply;
-pub type SetMirrorTargetReply = DisplayMutationReply;
-pub type SetMirrorScalingModeReply = DisplayMutationReply;
-pub type SetMirrorScalingFactorReply = DisplayMutationReply;
-pub type SetMirrorTargetFpsReply = DisplayMutationReply;
-pub type SetMirrorVolumeReply = DisplayMutationReply;
-pub type SetMirrorMutedReply = DisplayMutationReply;
-pub type EjectWallpaperFromDisplayReply = DisplayMutationReply;
 pub type SetGlobalPlaybackReply = AllSnapshotsReply;
 pub type SetBatteryModeReply = AllSnapshotsReply;
 pub type SetVerboseLoggingReply = AllSnapshotsReply;
@@ -467,8 +427,6 @@ pub type SetPowerSourceReply = AllSnapshotsReply;
 pub type InitialFrameReadyReply = AllSnapshotsReply;
 pub type ShutdownReply = Result<(), BridgeError>;
 pub type WallpaperMutationReply = Result<BridgeWallpaperMutationBundle, crate::api::BridgeError>;
-pub type CommitApplyAfterReconcileReply = WallpaperMutationReply;
-pub type CommitDisplayAfterReconcileReply = DisplayMutationReply;
 pub type SetRendererCountersEnabledReply = Result<(), BridgeError>;
 pub type RendererCountersReply = Result<BridgeRendererCountersReport, BridgeError>;
 pub type SetRenderScaleReply = AllSnapshotsReply;
@@ -488,5 +446,3 @@ pub type GetSystemMediaSceneHandlesReply = Result<Vec<u64>, BridgeError>;
 pub type GetSystemMediaConsentHandlesReply = Result<Vec<u64>, BridgeError>;
 pub type SetPropertyPathReply = WallpaperMutationReply;
 pub type GetNativeVideoWallpapersReply = Result<Vec<BridgeNativeVideoWallpaper>, BridgeError>;
-pub type CompleteRestoreAfterReconcileReply = Result<(), BridgeError>;
-pub type ReconcileFailedReply = Result<(), BridgeError>;

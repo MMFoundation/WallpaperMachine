@@ -92,6 +92,17 @@ Cargo and CMake commands need the Homebrew environment that `scripts/build.py`
 assembles; run the Rust commands from `upstream/renderer`. Build prerequisites
 are in [../build.md](../build.md).
 
+Bridge operation regressions in `crates/bridge/src/api/operation_contract_tests.rs`
+exercise the real actor, transport, state/configuration and journal with isolated
+files and controlled engine IO. They distinguish saved, pending, published and live
+state across persistence failures, stale completions, repair and Cancel. Core/prune/
+readiness still share the real serialized facade turn. Out-of-order completion cases
+park the last actually processed render-scale result, at explicitly reduced scale,
+after mutation and lock release—not inside overlapping held core turns or midway
+through audio registration. Narrow test-only observations and initial-value seeds
+do not simulate publication or export the whole actor state. These cases establish
+no native-renderer, visual, hardware or permission fidelity.
+
 An `IDELaunchServicesLauncher` assertion `childPID > 0` (exit 250) can abort
 Xcode before the native test host starts, even after successful compilation
 and bundle-signature verification. A missing verdict is not zero failing tests:
