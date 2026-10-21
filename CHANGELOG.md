@@ -10,6 +10,64 @@ for older releases without Korean notes. The GitHub Release body repeats only th
 English notes. See
 [docs/release.md](docs/release.md) for how a version is cut.
 
+## 1.5.9 — 2026-10-21
+
+### English
+
+This update lets fitted wallpapers fill empty screen space with a blurred backdrop and makes music-player scenes and multi-display setups behave more reliably
+
+#### New
+
+- Scene and video wallpapers can now fit the whole picture on screen and fill the space around it with a soft blurred copy instead of black bars
+
+#### Fixed
+
+- Each display keeps its own wallpaper when macOS switches the main display, without reloading, flashing or jumping onto a monitor you switched off
+- Some scene wallpapers that showed only a grey background now draw their full picture
+- Scripted music players in scene wallpapers stay in one piece and remain on screen instead of breaking apart and fading away
+- Album covers and their shadows in music-player wallpapers stay on their 3D model when the mouse moves or the album tilts
+- Music-player wallpapers show their default album art until a track plays, so blurred backgrounds and cover fades no longer stay flat grey
+- Wallpapers with a background for each screen shape show only the one you chose, and the cover fade now plays on every new track
+- Audio visualizer bars in some music wallpapers now move with the music instead of staying flat
+
+### 简体中文
+
+本次更新让适应屏幕的壁纸可以用模糊背景填满空白区域，并让音乐播放器场景壁纸和多显示器设置更加稳定可靠
+
+#### 新增
+
+- 场景和视频壁纸现在可以完整显示画面，并用柔和的模糊副本填充周围空白，而不再显示黑边
+
+#### 修复
+
+- macOS 切换主显示器时，每台显示器都会保留自己的壁纸，不再重新载入、闪烁或出现在已关闭壁纸的显示器上
+- 部分原本只显示灰色背景的场景壁纸现在可以完整显示画面
+- 场景壁纸中带脚本的音乐播放器现在保持完整并持续显示，不再散开或逐渐消失
+- 音乐播放器壁纸中的专辑封面及其阴影在鼠标移动或专辑倾斜时会始终贴合 3D 模型
+- 音乐播放器壁纸在播放曲目前会显示默认专辑封面，模糊背景和封面淡入效果不再停留在单调的灰色
+- 为不同屏幕比例准备了背景的壁纸现在只显示所选比例的背景，切换曲目时封面淡入效果也能正常播放
+- 部分音乐壁纸中的音频可视化条现在会随音乐跳动，不再一直静止
+
+### 한국어
+
+이번 업데이트에서는 화면에 맞춘 배경화면의 빈 공간을 흐린 배경으로 채울 수 있으며, 음악 플레이어 장면과 다중 디스플레이 환경이 더 안정적으로 동작합니다
+
+#### 새로운 기능
+
+- 이제 장면 및 비디오 배경화면을 화면에 전체로 맞추고 주변 공간을 검은 여백 대신 부드럽게 흐린 사본으로 채울 수 있습니다
+
+#### 수정됨
+
+- macOS에서 주 디스플레이가 바뀌어도 각 디스플레이가 자기 배경화면을 유지하며, 다시 불러오거나 깜박이거나 꺼 둔 모니터로 옮겨가지 않습니다
+- 회색 배경만 보이던 일부 장면 배경화면이 이제 전체 화면을 제대로 그립니다
+- 장면 배경화면의 스크립트 음악 플레이어가 흩어지거나 사라지지 않고 온전한 모습으로 화면에 계속 표시됩니다
+- 음악 플레이어 배경화면의 앨범 커버와 그림자가 마우스를 움직이거나 앨범이 기울어져도 3D 모델 위에 그대로 붙어 있습니다
+- 음악 플레이어 배경화면이 곡을 재생하기 전까지 기본 앨범 아트를 보여 주므로 흐린 배경과 커버 전환이 더 이상 회색으로 남지 않습니다
+- 화면 비율별 배경이 있는 배경화면은 선택한 비율의 배경만 보여 주며, 새 곡마다 커버 전환 효과가 재생됩니다
+- 일부 음악 배경화면의 오디오 시각화 막대가 이제 멈춰 있지 않고 음악에 맞춰 움직입니다
+
+**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.5.8...v1.5.9
+
 ## 1.5.8 — 2026-10-20
 
 ### English
