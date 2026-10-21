@@ -7321,6 +7321,196 @@ TEST_F(MetalSceneDraw, ASpriteSheetAdvancesOnItsOwnClockAndRedrawsOnlyWhenTheFra
     }
 }
 
+namespace
+{
+/// A raw RGBA picture whose levels are 512, 256 and 128 texels square, every
+/// byte of level `i` holding `shade + i`. A surface whose longest side is at
+/// most 256 drops the 512 level, so two surfaces of different sizes keep
+/// different mip ranges of the same file.
+void WritePictureTex(const std::filesystem::path& path, uint8_t shade)
+{
+    std::ofstream texture(path, std::ios::binary | std::ios::trunc);
+    const auto put = [&texture](uint32_t value) {
+        texture.write(reinterpret_cast<const char*>(&value), sizeof(value));
+    };
+    texture.write("TEXV0005", 9);
+    texture.write("TEXI0001", 9);
+    for (uint32_t value : { 0u, 0u, 512u, 512u, 512u, 512u, 0u }) put(value);
+    texture.write("TEXB0001", 9);
+    put(1);
+    put(3);
+    for (uint32_t level = 0; level < 3; ++level) {
+        const uint32_t side = 512u >> level;
+        put(side);
+        put(side);
+        put(side * side * 4);
+        const std::vector<char> texels(side * side * 4, char(shade + level));
+        texture.write(texels.data(), static_cast<std::streamsize>(texels.size()));
+    }
+}
+
+/// The fixture's card showing `materials/picture.tex` (`WritePictureTex`).
+std::filesystem::path WritePictureFixture(const std::filesystem::path& root, uint8_t shade)
+{
+    const auto project = WriteFixture(root);
+    std::ofstream(root / "shaders/metal_probe.frag")
+        << "uniform sampler2D g_Texture0;\n"
+           "varying vec2 v_TexCoord;\n"
+           "void main() { gl_FragColor = texture(g_Texture0, v_TexCoord); }\n";
+    std::ofstream(root / "materials/tile.json")
+        << R"({"passes":[{"shader":"metal_probe","blending":"translucent","cullmode":"nocull",)"
+           R"("depthtest":"disabled","depthwrite":"disabled","textures":["picture"]}]})";
+    WritePictureTex(root / "materials/picture.tex", shade);
+    return project;
+}
+
+/// One display showing a scene as a running wallpaper has it: its own parse of
+/// the project, its own layer and its own renderer.
+struct PictureDisplay
+{
+    LoadedScene                      loaded;
+    std::unique_ptr<rg::RenderGraph> graph;
+    CAMetalLayer*                    layer { nil };
+    MetalRender                      render;
+    std::string                      error;
+
+    bool open(const std::filesystem::path& project, const std::filesystem::path& cache,
+              uint16_t width, uint16_t height)
+    {
+        if (! LoadScene(project, cache, loaded, error)) return false;
+        layer                 = [CAMetalLayer layer];
+        layer.device          = MTLCreateSystemDefaultDevice();
+        layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+        layer.drawableSize    = CGSizeMake(width, height);
+        layer.framebufferOnly = NO;
+        MetalRenderInitInfo info {
+            .metal_layer = (__bridge void*)layer, .width = width, .height = height,
+            .render_width = width, .render_height = height, .display_scale_factor = 1.0,
+        };
+        if (! render.init(info)) {
+            error = "init: " + render.lastError();
+            return false;
+        }
+        graph = sceneToRenderGraph(*loaded.scene);
+        if (graph == nullptr) {
+            error = "the scene produced no render graph";
+            return false;
+        }
+        if (! render.compileRenderGraph(*loaded.scene, *graph)) {
+            error = "compile: " + render.lastError();
+            return false;
+        }
+        return true;
+    }
+
+    id<MTLTexture> picture() const
+    {
+        return (__bridge id<MTLTexture>)render.ImportedTextureForTests("picture");
+    }
+};
+} // namespace
+
+TEST_F(MetalSceneDraw, TwoDisplaysShowingOneSceneShareEachImportedPictureUntilBothUnload)
+{
+    const auto project  = WritePictureFixture(root_ / "picture", 40);
+    const auto baseline = MetalRender::SharedImportedImagesForTests();
+    @autoreleasepool {
+        PictureDisplay first;
+        PictureDisplay second;
+        // Both displays load at once, as they do when a wallpaper starts on
+        // several screens: whichever imports the picture second must find the
+        // first one's upload rather than racing it to an upload of its own.
+        bool first_opened  = false;
+        bool second_opened = false;
+        std::thread other([&] {
+            @autoreleasepool {
+                second_opened = second.open(project, root_ / "second-cache", 640, 360);
+            }
+        });
+        first_opened = first.open(project, root_ / "first-cache", 640, 360);
+        other.join();
+        ASSERT_TRUE(first_opened) << first.error;
+        ASSERT_TRUE(second_opened) << second.error;
+
+        id<MTLTexture> shown = first.picture();
+        ASSERT_NE(shown, nil);
+        EXPECT_EQ(shown.mipmapLevelCount, 3u);
+        EXPECT_EQ(second.picture(), shown) << "each display uploaded its own copy of the picture";
+
+        const auto both = MetalRender::SharedImportedImagesForTests();
+        EXPECT_EQ(both.textures, baseline.textures + 1);
+        const uint64_t per_display = first.render.ImportedImageBytesForTests();
+        EXPECT_EQ(second.render.ImportedImageBytesForTests(), per_display);
+        EXPECT_EQ(both.bytes - baseline.bytes, per_display)
+            << "two displays hold more than one display's pictures";
+        std::cout << "[ INFO ] imported picture bytes: " << per_display << " per display, "
+                  << both.bytes - baseline.bytes << " resident for both (" << 2 * per_display
+                  << " unshared)\n";
+
+        // The shared picture draws the same on both.
+        DrawOneFrame(first.render, *first.loaded.scene);
+        DrawOneFrame(second.render, *second.loaded.scene);
+        const auto first_output = ReadOutput(first.render, *first.loaded.scene);
+        ASSERT_FALSE(first_output.empty());
+        EXPECT_EQ(ReadOutput(second.render, *second.loaded.scene), first_output);
+        shown = nil;
+
+        // One display unloading leaves the other's picture where it is.
+        ASSERT_TRUE(first.render.clearLastRenderGraph());
+        EXPECT_EQ(MetalRender::SharedImportedImagesForTests().textures, baseline.textures + 1);
+        EXPECT_NE(second.picture(), nil);
+
+        // The last one unloading frees it: the cache keeps nobody's picture.
+        ASSERT_TRUE(second.render.clearLastRenderGraph());
+        const auto after = MetalRender::SharedImportedImagesForTests();
+        EXPECT_EQ(after.textures, baseline.textures) << "an unloaded scene's picture is still alive";
+        EXPECT_EQ(after.bytes, baseline.bytes);
+
+        first.render.destroy();
+        second.render.destroy();
+    }
+}
+
+TEST_F(MetalSceneDraw, DisplaysKeepingAnotherMipRangeOrAChangedFileGetTheirOwnPicture)
+{
+    const auto project = WritePictureFixture(root_ / "picture", 40);
+    @autoreleasepool {
+        PictureDisplay large;
+        ASSERT_TRUE(large.open(project, root_ / "large-cache", 640, 360)) << large.error;
+        id<MTLTexture> full = large.picture();
+        ASSERT_NE(full, nil);
+        EXPECT_EQ(full.width, 512u);
+
+        // A surface no longer than 256 keeps the levels from 256 down: the same
+        // file, but not the same image.
+        PictureDisplay small;
+        ASSERT_TRUE(small.open(project, root_ / "small-cache", 200, 112)) << small.error;
+        id<MTLTexture> reduced = small.picture();
+        ASSERT_NE(reduced, nil);
+        EXPECT_EQ(reduced.width, 256u);
+        EXPECT_EQ(reduced.mipmapLevelCount, 2u);
+        EXPECT_NE(reduced, full);
+
+        // The file changes under the same name, size and layout while the first
+        // display still shows the old one: the next load shows the new pixels.
+        WritePictureTex(root_ / "picture/materials/picture.tex", 90);
+        PictureDisplay reloaded;
+        ASSERT_TRUE(reloaded.open(project, root_ / "reloaded-cache", 640, 360)) << reloaded.error;
+        id<MTLTexture> changed = reloaded.picture();
+        ASSERT_NE(changed, nil);
+        EXPECT_EQ(changed.width, 512u);
+        EXPECT_NE(changed, full) << "a changed file was served the picture uploaded before it changed";
+        uint8_t texel[4] {};
+        [changed getBytes:texel bytesPerRow:sizeof(texel) fromRegion:MTLRegionMake2D(0, 0, 1, 1)
+              mipmapLevel:0];
+        EXPECT_EQ(texel[0], 90);
+
+        large.render.destroy();
+        small.render.destroy();
+        reloaded.render.destroy();
+    }
+}
+
 TEST_F(MetalSceneDraw, TurningTheOptimisationBackOnDoesNotReuseAFrameDrawnWhileItWasOff)
 {
     // The defect this covers: with reuse off, nothing records a signature, so

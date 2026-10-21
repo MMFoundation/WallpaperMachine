@@ -1473,6 +1473,18 @@ limit, and loose images, videos, sprite atlases, multi-slot images and unknown
 encoded containers keep their original loading behavior. It is a texture-residency
 reduction, not a fixed ceiling on total process memory.
 
+When **Native Metal** draws one scene on several displays, each display reads and
+decodes the scene's pictures itself but uploads none that another display already
+holds: displays keeping the same mip levels of a picture (and the same sheet of a
+sprite atlas) on the same GPU bind one texture between them. A texture is handed to
+another display only when its pixels equal what that display just read, so a file
+that changed between two loads, or another wallpaper's picture of the same name,
+gets its own, and so does a display that keeps a different mip range (above). The
+cache holds the textures weakly: a picture is freed when the last display showing it
+unloads. Confirming a match reads the shared texture back once while the scene
+loads; nothing is added per frame. Render targets, pictures a script writes and
+video frames stay per display, and the Compatibility backend does not share.
+
 An authored `hdr` scene with its bloom on selects the HDR path on either scene
 backend, as in Wallpaper Engine: overbright color is preserved in half-float targets
 and bloom is HDR, while other scenes, an `hdr` scene with bloom off included, keep the

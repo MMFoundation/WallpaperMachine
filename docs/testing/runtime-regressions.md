@@ -159,6 +159,17 @@ device.
   a second renderer on the same device must not hand an identical translated
   program to the Metal compiler again. The pipeline key identifies the program by
   content, never by the address of the object holding it.
+- **Imported pictures shared between displays** — `MetalSceneDraw.TwoDisplaysShowingOneSceneShareEachImportedPictureUntilBothUnload`:
+  two renderers compiling one scene at the same moment, each from its own parse,
+  bind one texture for its image (`MetalRender::ImportedTextureForTests`), the
+  process cache holds one display's bytes for both
+  (`SharedImportedImagesForTests`), both draw the same picture, and the texture is
+  kept while either display still shows it and gone once both have unloaded.
+  `.DisplaysKeepingAnotherMipRangeOrAChangedFileGetTheirOwnPicture`: a surface that
+  drops a leading mip gets its own texture, and a file rewritten with other pixels
+  under the same name and layout is loaded fresh while the old picture is still
+  shown. A texture is handed to a further display only after its pixels compare
+  equal to that display's parse; the name and layout alone are never trusted.
 - **Optional programs** — `.AVideoLayerSamplesTheDecoderPlanesThroughItsOwnShader`
   asserts the parse compiled nothing optional before asking for it, and
   `.AVideoLayerKeepsConvertingWhileTheSettingIsOff` asserts the program was never

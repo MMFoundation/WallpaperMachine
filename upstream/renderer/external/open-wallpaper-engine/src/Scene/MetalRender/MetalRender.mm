@@ -1199,6 +1199,243 @@ private:
     uint64_t                                  m_archive_scratch_serial { 0 };
 };
 
+/// One slot of an imported image, uploaded. Whoever holds the last reference
+/// frees the texture.
+struct MetalImportedImage
+{
+    id<MTLTexture> texture;
+};
+
+/// Imported images, uploaded once per device and shared by every renderer that
+/// imports the same pixels: the displays showing one wallpaper hold one copy of
+/// each picture between them, not one each.
+///
+/// Held weakly. A renderer keeps what it imported alive through its own
+/// `images`; this only remembers where those are, so a texture is freed with
+/// the last renderer that lets go of it and an unloaded scene leaves nothing
+/// behind here. Bounded by what renderers hold: a key whose textures are all
+/// gone is dropped the next time anything is imported.
+///
+/// Keyed by device, name, sprite slot, pixel format and the exact levels the
+/// texture keeps, so a display that dropped a different number of leading
+/// mips gets a texture of its own. The key alone is not trusted to mean the
+/// same picture -- a name is relative to its wallpaper, and the file behind it
+/// can change between two loads -- so a texture is handed out only when its
+/// pixels equal the image just parsed. That comparison reads the shared texture
+/// back once per import on a further display; a single display pays only for
+/// the lookup.
+///
+/// Only for images nothing writes after the upload. Render targets, images the
+/// runtime replaces and video frames have owners of their own.
+class MetalImageCache
+{
+public:
+    struct Format
+    {
+        MTLPixelFormat pixel_format { MTLPixelFormatInvalid };
+        uint32_t       bytes_per_pixel { 0 };
+        uint32_t       block_bytes { 0 };
+    };
+
+    static MetalImageCache& shared()
+    {
+        static MetalImageCache cache;
+        return cache;
+    }
+
+    /// Slot `slot_index` of the image `name` as a texture on `device`: the one
+    /// a renderer already holds when its pixels are `slot`'s, else a new upload
+    /// that later imports can share. Null when Metal cannot create it.
+    std::shared_ptr<const MetalImportedImage> acquire(id<MTLDevice> device, const std::string& name,
+                                                      std::size_t slot_index, const Image::Slot& slot,
+                                                      const Format& format)
+    {
+        Key key { device.registryID, name, slot_index, format.pixel_format, slot.width,
+                  slot.height, {} };
+        key.levels.reserve(slot.mipmaps.size());
+        for (const auto& mip : slot.mipmaps) {
+            key.levels.push_back(
+                { mip.width, mip.height, mip.data != nullptr ? static_cast<int64_t>(mip.size) : -1 });
+        }
+
+        std::shared_ptr<Bucket> bucket;
+        {
+            const std::lock_guard lock { m_mutex };
+            forgetUnusedLocked();
+            auto& entry = m_buckets[key];
+            if (entry == nullptr) entry = std::make_shared<Bucket>();
+            bucket = entry;
+        }
+        // Held through the comparison and the upload, so a display importing
+        // the same image at the same moment -- every display does, when a
+        // wallpaper starts on all of them -- waits for this upload and shares
+        // it rather than making a copy of its own. Other images go on meanwhile.
+        const std::lock_guard lock { bucket->mutex };
+        std::erase_if(bucket->images, [](const auto& image) { return image.expired(); });
+        for (const auto& held : bucket->images) {
+            auto image = held.lock();
+            if (image != nullptr && SamePixels(image->texture, slot, format)) return image;
+        }
+        auto image = own(device, slot, format);
+        if (image != nullptr) bucket->images.push_back(image);
+        return image;
+    }
+
+    /// `slot` uploaded into a texture nobody else is handed.
+    static std::shared_ptr<const MetalImportedImage> own(id<MTLDevice> device,
+                                                         const Image::Slot& slot, const Format& format)
+    {
+        MTLTextureDescriptor* descriptor =
+            [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format.pixel_format
+                                                               width:(NSUInteger)slot.width
+                                                              height:(NSUInteger)slot.height
+                                                           mipmapped:slot.mipmaps.size() > 1];
+        descriptor.mipmapLevelCount = slot.mipmaps.size();
+        descriptor.usage            = MTLTextureUsageShaderRead;
+        // Shared storage, so the pixels are written straight into the texture,
+        // and a later import can compare against them without a blit. A staging
+        // buffer plus a blit would need the frame to wait on an upload, which is
+        // exactly what the per-frame path must never do.
+        descriptor.storageMode = MTLStorageModeShared;
+
+        id<MTLTexture> texture = [device newTextureWithDescriptor:descriptor];
+        if (texture == nil) return nullptr;
+        if (! UploadImageLevels(texture, slot, format.bytes_per_pixel, format.block_bytes)) {
+            return nullptr;
+        }
+        return std::make_shared<const MetalImportedImage>(MetalImportedImage { texture });
+    }
+
+#ifdef WESCENE_BUILD_TESTS
+    MetalRender::ImportedImagesForTests residency()
+    {
+        MetalRender::ImportedImagesForTests counts;
+        const std::lock_guard lock { m_mutex };
+        for (const auto& [key, bucket] : m_buckets) {
+            (void)key;
+            const std::lock_guard bucket_lock { bucket->mutex };
+            for (const auto& held : bucket->images) {
+                const auto image = held.lock();
+                if (image == nullptr) continue;
+                ++counts.textures;
+                counts.bytes += image->texture.allocatedSize;
+            }
+        }
+        return counts;
+    }
+#endif
+
+private:
+    struct Level
+    {
+        int32_t width { 0 };
+        int32_t height { 0 };
+        /// Bytes the parser produced for the level; -1 when it has none and
+        /// the upload leaves the level unwritten.
+        int64_t size { 0 };
+        bool    operator==(const Level&) const = default;
+    };
+    struct Key
+    {
+        uint64_t           device { 0 };
+        std::string        name;
+        std::size_t        slot { 0 };
+        MTLPixelFormat     format { MTLPixelFormatInvalid };
+        int32_t            width { 0 };
+        int32_t            height { 0 };
+        std::vector<Level> levels;
+        bool               operator==(const Key&) const = default;
+    };
+    struct KeyHash
+    {
+        std::size_t operator()(const Key& key) const
+        {
+            std::size_t seed = std::hash<std::string> {}(key.name);
+            const auto  mix  = [&seed](uint64_t value) {
+                seed ^= std::hash<uint64_t> {}(value) + 0x9e3779b97f4a7c15ULL + (seed << 6) +
+                        (seed >> 2);
+            };
+            mix(key.device);
+            mix(key.slot);
+            mix(static_cast<uint64_t>(key.format));
+            mix(static_cast<uint64_t>(static_cast<uint32_t>(key.width)) << 32 |
+                static_cast<uint32_t>(key.height));
+            mix(key.levels.size());
+            return seed;
+        }
+    };
+    /// The textures uploaded under one key. More than one only when the same
+    /// name held different pixels for two scenes that are both still loaded.
+    struct Bucket
+    {
+        std::mutex                                           mutex;
+        std::vector<std::weak_ptr<const MetalImportedImage>> images;
+    };
+
+    /// Whether `texture`, uploaded from a slot with the same levels, holds
+    /// exactly `slot`'s bytes. Read back a band of rows at a time, so the check
+    /// needs a small fixed buffer however large the picture, and stops at the
+    /// first difference.
+    static bool SamePixels(id<MTLTexture> texture, const Image::Slot& slot, const Format& format)
+    {
+        constexpr NSUInteger kBandBytes = 1u << 20;
+        std::vector<uint8_t> band;
+        for (std::size_t level = 0; level < slot.mipmaps.size(); ++level) {
+            const auto& mip = slot.mipmaps[level];
+            // Never written into either texture: nothing to compare.
+            if (mip.data == nullptr || mip.width <= 0 || mip.height <= 0) continue;
+            const NSUInteger width  = (NSUInteger)mip.width;
+            const NSUInteger height = (NSUInteger)mip.height;
+            // A row of texels, or of 4x4 blocks for a block-compressed format,
+            // laid out exactly as `UploadImageLevels` read them.
+            const NSUInteger texels_per_row = format.block_bytes > 0 ? 4 : 1;
+            const NSUInteger bytes_per_row  = format.block_bytes > 0
+                                                  ? (width + 3) / 4 * format.block_bytes
+                                                  : width * format.bytes_per_pixel;
+            const NSUInteger rows = (height + texels_per_row - 1) / texels_per_row;
+            if (bytes_per_row == 0 || mip.size < 0 ||
+                (NSUInteger)mip.size < bytes_per_row * rows) {
+                return false;
+            }
+            const NSUInteger band_rows = std::max<NSUInteger>(1, kBandBytes / bytes_per_row);
+            band.resize(std::min(band_rows, rows) * bytes_per_row);
+            for (NSUInteger row = 0; row < rows; row += band_rows) {
+                const NSUInteger count = std::min(band_rows, rows - row);
+                const NSUInteger top   = row * texels_per_row;
+                const NSUInteger tall  = std::min(count * texels_per_row, height - top);
+                [texture getBytes:band.data()
+                      bytesPerRow:bytes_per_row
+                       fromRegion:MTLRegionMake2D(0, top, width, tall)
+                      mipmapLevel:level];
+                if (std::memcmp(band.data(), mip.data.get() + row * bytes_per_row,
+                                count * bytes_per_row) != 0) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /// Drops the keys whose textures are all gone. A bucket some import is
+    /// using right now is left for a later call.
+    void forgetUnusedLocked()
+    {
+        std::erase_if(m_buckets, [](const auto& entry) {
+            const auto& bucket = entry.second;
+            // Buckets are only handed out under `m_mutex`, so one nobody else
+            // holds a reference to stays that way until this returns.
+            if (bucket.use_count() != 1 || ! bucket->mutex.try_lock()) return false;
+            const bool gone = std::all_of(bucket->images.begin(), bucket->images.end(),
+                                          [](const auto& image) { return image.expired(); });
+            bucket->mutex.unlock();
+            return gone;
+        });
+    }
+
+    std::mutex                                                m_mutex;
+    std::unordered_map<Key, std::shared_ptr<Bucket>, KeyHash> m_buckets;
+};
+
 bool FoldsOnLeft(std::string_view name)
 {
     return name == G_VP || name == G_MVP || name == G_ETVP;
@@ -1488,8 +1725,10 @@ struct MetalRender::Impl
     std::unordered_map<uint32_t, id<MTLDepthStencilState>> depth_stencil_states;
     /// Every slot of an imported image, in file order. A plain image has one;
     /// a sprite sheet spread over several images has one per sheet, and the
-    /// frame's `imageId` chooses between them.
-    std::unordered_map<std::string, std::vector<id<MTLTexture>>> images;
+    /// frame's `imageId` chooses between them. Usually shared with the other
+    /// displays showing the same pixels (`MetalImageCache`); holding them here
+    /// is what keeps them alive.
+    std::unordered_map<std::string, std::vector<std::shared_ptr<const MetalImportedImage>>> images;
 
     // ---- images the runtime replaces while the scene plays
     /// One replaceable image's storage: the same picture in one texture per
@@ -2301,12 +2540,13 @@ id<MTLTexture> MetalRender::Impl::resolveTexture(Scene& scene, const std::string
                                                  id<MTLSamplerState>* sampler_out, int image_slot)
 {
     if (key.empty()) return nil;
-    const auto pick = [image_slot](const std::vector<id<MTLTexture>>& slots) -> id<MTLTexture> {
+    const auto pick = [image_slot](const std::vector<std::shared_ptr<const MetalImportedImage>>& slots)
+        -> id<MTLTexture> {
         if (slots.empty()) return nil;
         if (image_slot < 0 || static_cast<std::size_t>(image_slot) >= slots.size()) {
-            return slots.front();
+            return slots.front()->texture;
         }
-        return slots[static_cast<std::size_t>(image_slot)];
+        return slots[static_cast<std::size_t>(image_slot)]->texture;
     };
 
     // A video key never reaches the image parser: its placeholder still would
@@ -2358,11 +2598,9 @@ id<MTLTexture> MetalRender::Impl::resolveTexture(Scene& scene, const std::string
         return nil;
     }
 
-    MTLPixelFormat format {};
-    uint32_t       bytes_per_pixel = 0;
-    uint32_t       block_bytes     = 0;
-    if (! ToMetalImageFormat(parsed->header.format, device.supportsBCTextureCompression, format,
-                             bytes_per_pixel, block_bytes)) {
+    MetalImageCache::Format format {};
+    if (! ToMetalImageFormat(parsed->header.format, device.supportsBCTextureCompression,
+                             format.pixel_format, format.bytes_per_pixel, format.block_bytes)) {
         return nil;
     }
 
@@ -2377,30 +2615,26 @@ id<MTLTexture> MetalRender::Impl::resolveTexture(Scene& scene, const std::string
         scene_texture != scene.textures.end() ? scene_texture->second.isSprite
                                               : parsed->header.isSprite;
     const std::size_t wanted = is_sprite ? parsed->slots.size() : 1;
-    std::vector<id<MTLTexture>> slot_textures;
-    slot_textures.reserve(wanted);
-    for (const auto& slot : std::span(parsed->slots).first(wanted)) {
+    // A name the runtime fills is not a file: what it holds is whatever the
+    // runtime last produced for this scene, so another display is never
+    // handed it. Everything else is a picture another display may already
+    // hold.
+    const auto* runtime_images = dynamic_cast<const RuntimeImageSource*>(scene.imageParser.get());
+    const bool  shareable      = runtime_images == nullptr || ! runtime_images->IsRuntimeImage(key);
+    std::vector<std::shared_ptr<const MetalImportedImage>> slot_images;
+    slot_images.reserve(wanted);
+    for (std::size_t index = 0; index < wanted; ++index) {
+        const auto& slot = parsed->slots[index];
         if (slot.mipmaps.empty() || slot.width <= 0 || slot.height <= 0) break;
-        MTLTextureDescriptor* descriptor =
-            [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
-                                                               width:(NSUInteger)slot.width
-                                                              height:(NSUInteger)slot.height
-                                                           mipmapped:slot.mipmaps.size() > 1];
-        descriptor.mipmapLevelCount = slot.mipmaps.size();
-        descriptor.usage            = MTLTextureUsageShaderRead;
-        // Shared storage, so the pixels are written straight into the texture.
-        // A staging buffer plus a blit would need the frame to wait on an
-        // upload, which is exactly what the per-frame path must never do.
-        descriptor.storageMode = MTLStorageModeShared;
-
-        id<MTLTexture> texture = [device newTextureWithDescriptor:descriptor];
-        if (texture == nil) break;
-        if (! UploadImageLevels(texture, slot, bytes_per_pixel, block_bytes)) break;
-        slot_textures.push_back(texture);
+        auto image = shareable
+                         ? MetalImageCache::shared().acquire(device, key, index, slot, format)
+                         : MetalImageCache::own(device, slot, format);
+        if (image == nullptr) break;
+        slot_images.push_back(std::move(image));
     }
-    if (slot_textures.empty()) return nil;
+    if (slot_images.empty()) return nil;
 
-    const auto inserted = images.emplace(key, std::move(slot_textures)).first;
+    const auto inserted = images.emplace(key, std::move(slot_images)).first;
     if (sampler_out != nullptr) {
         const auto found = scene.textures.find(key);
         *sampler_out     = samplerFor(found != scene.textures.end() ? found->second.sample
@@ -5650,6 +5884,35 @@ uint64_t MetalRender::RenderTargetBytesForTests() const
         }
     }
     return bytes + pImpl->backdrop.allocatedBytes();
+}
+
+void* MetalRender::ImportedTextureForTests(const std::string& key, std::size_t slot) const
+{
+    if (pImpl == nullptr) return nullptr;
+    const auto found = pImpl->images.find(key);
+    if (found == pImpl->images.end() || slot >= found->second.size()) return nullptr;
+    return (__bridge void*)found->second[slot]->texture;
+}
+
+uint64_t MetalRender::ImportedImageBytesForTests() const
+{
+    if (pImpl == nullptr) return 0;
+    std::unordered_set<const void*> counted;
+    uint64_t                        bytes = 0;
+    for (const auto& [key, slots] : pImpl->images) {
+        (void)key;
+        for (const auto& image : slots) {
+            id<MTLTexture> texture = image->texture;
+            if (! counted.insert((__bridge const void*)texture).second) continue;
+            bytes += texture.allocatedSize;
+        }
+    }
+    return bytes;
+}
+
+MetalRender::ImportedImagesForTests MetalRender::SharedImportedImagesForTests()
+{
+    return MetalImageCache::shared().residency();
 }
 
 uint64_t MetalRender::ProgramCompilesForTests() { return MetalProgramCache::shared().compileCount(); }

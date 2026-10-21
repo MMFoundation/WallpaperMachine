@@ -256,6 +256,25 @@ public:
     /// device's own counter is process-wide and moves with the drawable pool.
     [[nodiscard]] uint64_t RenderTargetBytesForTests() const;
 
+    /// The texture this renderer binds for slot `slot` of the imported image
+    /// `key`, unretained, or null when it has imported none under that name.
+    ///
+    /// Test-only, and the only way to tell one texture shared by two displays
+    /// from two textures holding the same pixels: both draw the same picture.
+    [[nodiscard]] void* ImportedTextureForTests(const std::string& key, std::size_t slot = 0) const;
+    /// Bytes Metal allocated for this renderer's imported images, each texture
+    /// counted once. A texture shared with another display counts here too.
+    [[nodiscard]] uint64_t ImportedImageBytesForTests() const;
+    /// Imported images the process-wide cache can still hand out, and their
+    /// bytes: every one is held by at least one renderer, and the total is what
+    /// all displays together keep resident for their pictures.
+    struct ImportedImagesForTests
+    {
+        std::size_t textures { 0 };
+        uint64_t    bytes { 0 };
+    };
+    [[nodiscard]] static ImportedImagesForTests SharedImportedImagesForTests();
+
     /// Whether render targets whose lifetimes in a frame do not overlap share
     /// one image, for graphs compiled from now on. On unless
     /// `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0`; process-wide, test-only.
