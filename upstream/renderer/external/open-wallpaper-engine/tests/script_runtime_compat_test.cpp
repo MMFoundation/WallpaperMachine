@@ -1833,6 +1833,50 @@ export function update(value) { return value; }
     EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag());
 }
 
+TEST(ScriptRuntimeCompat, DestroyLayerDropsAnimationEndedListenersIncludingItsChildren) {
+    LineTemplateScene fixture;
+    auto&             runtime = *fixture.runtime;
+    runtime.RegisterSceneScript(R"JS(
+var ran = false;
+function update() {
+  if (ran) return;
+  ran = true;
+  var fired = 0;
+  var ownerFired = 0;
+  globalThis.__animationLayerEnded.owner = { 0: [function() { ++ownerFired; }] };
+  for (var cycle = 0; cycle < 3; ++cycle) {
+    var parent = thisScene.createLayer({ image: 'models/line.json', name: 'parent' });
+    var child = thisScene.createLayer({ image: 'models/line.json', name: 'child', parent: parent });
+    var names = [parent.__runtimeName, child.__runtimeName];
+    names.forEach(function(name) {
+      globalThis.__fireAnimationLayerEnded(name, 0);
+      if (fired !== cycle * 2) throw new Error('a recreated layer inherited a listener');
+    });
+    // The line template has no native puppet. Populate the table exactly as
+    // addEndedCallback does, and dispatch through the real notification path.
+    names.forEach(function(name) {
+      globalThis.__animationLayerEnded[name] = { 0: [function() { ++fired; }] };
+      globalThis.__fireAnimationLayerEnded(name, 0);
+    });
+    if (fired !== (cycle + 1) * 2) throw new Error('listeners did not fire before destruction');
+    if (!thisScene.destroyLayer(parent)) throw new Error('parent was not destroyed');
+    names.forEach(function(name) {
+      if (globalThis.__animationLayerEnded[name] !== undefined) throw new Error('listener is still rooted');
+      if (globalThis.__layerCache[name] !== undefined) throw new Error('wrapper is still rooted');
+      globalThis.__fireAnimationLayerEnded(name, 0);
+    });
+    if (fired !== (cycle + 1) * 2) throw new Error('a destroyed layer fired a listener');
+    globalThis.__fireAnimationLayerEnded('owner', 0);
+  }
+  if (ownerFired !== 3) throw new Error('an unrelated layer lost its listener');
+}
+)JS", "owner");
+    runtime.Tick(1.0 / 60.0);
+    for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
+    EXPECT_EQ(runtime.scriptErrorCount(), 0u);
+    EXPECT_EQ(fixture.scene.sceneGraph->GetChildren().size(), 1u);
+}
+
 // The graph compiled before a layer was destroyed still points at it, so the
 // layer leaves the scene graph at once but is freed only after the graph has
 // been rebuilt without it, which consuming the mutation flag stands for.

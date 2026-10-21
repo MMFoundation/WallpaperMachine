@@ -6,6 +6,7 @@
 #include "Scene/include/Scene/SceneResolution.hpp"
 #include "Type.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <span>
@@ -278,6 +279,16 @@ public:
     [[nodiscard]] static bool PipelineArchiveServesEverySeenPipelineForTests();
     /// Returns once every pipeline-archive write already scheduled has run.
     static void WaitForPipelineArchiveWritesForTests();
+    /// Balanced suspend/resume calls hold additions and writes pending while a
+    /// test opens enough stores to evict one. Never wait while suspended.
+    static void SetPipelineArchiveQueueSuspendedForTests(bool suspended);
+    struct PipelineArchiveCountsForTests
+    {
+        std::size_t stores { 0 };
+        std::size_t write_generations { 0 };
+        std::size_t descriptors { 0 };
+    };
+    [[nodiscard]] static PipelineArchiveCountsForTests GetPipelineArchiveCountsForTests();
 #endif
 
 private:

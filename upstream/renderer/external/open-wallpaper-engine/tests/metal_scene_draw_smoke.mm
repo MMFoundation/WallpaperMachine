@@ -12411,6 +12411,72 @@ TEST_F(MetalSceneDraw, AStoreFolderDeletedWhileItsArchiveIsWrittenCostsOnlyThatW
     EXPECT_EQ(scratch, 0u) << "a write left its scratch file in the temporary folder";
 }
 
+TEST_F(MetalSceneDraw, PendingArchiveCompletionsCannotReviveEvictedOrReopenedStores)
+{
+    MetalRender::WaitForPipelineArchiveWritesForTests();
+    uint64_t expected_descriptors = 0;
+    {
+        struct HoldArchiveQueue {
+            HoldArchiveQueue() { MetalRender::SetPipelineArchiveQueueSuspendedForTests(true); }
+            ~HoldArchiveQueue() { MetalRender::SetPipelineArchiveQueueSuspendedForTests(false); }
+        } hold;
+
+        // Ten stores evict the first two while every completion is pending.
+        // Reopening the first before releasing the queue must not let its old
+        // completion attach a descriptor to the new collector at the same id.
+        for (int index = 0; index < 11; ++index) {
+            SCOPED_TRACE(index);
+            const auto archive_root = root_ / ("bounded-archive-" + std::to_string(index % 10));
+            const auto suffix = std::to_string(index);
+            const auto project = WriteFixture(root_ / ("bounded-project-" + suffix),
+                                              std::to_string(0.104938 + index * 0.001));
+            LoadedScene loaded;
+            std::string error;
+            ASSERT_TRUE(LoadScene(project, root_ / ("bounded-cache-" + suffix), loaded, error))
+                << error;
+            const auto collected_before = MetalPipelineArchiveStatusForDiagnostics().collected;
+            @autoreleasepool {
+                CAMetalLayer* layer   = [CAMetalLayer layer];
+                layer.device          = MTLCreateSystemDefaultDevice();
+                layer.pixelFormat     = MTLPixelFormatBGRA8Unorm;
+                layer.drawableSize    = CGSizeMake(384, 256);
+                layer.framebufferOnly = NO;
+
+                SceneRendererHandle render;
+                RenderInitInfo info {
+                    .metal_layer          = (__bridge void*)layer,
+                    .width                = 384,
+                    .height               = 256,
+                    .render_width         = 384,
+                    .render_height        = 256,
+                    .display_scale_factor = 1.0,
+                };
+                render.SetPipelineArchivePath(archive_root.string());
+                ASSERT_TRUE(render.createMetal(info, error)) << error;
+                auto graph = sceneToRenderGraph(*loaded.scene);
+                ASSERT_NE(graph, nullptr);
+                ASSERT_TRUE(render.compileRenderGraph(*loaded.scene, *graph)) << render.lastError();
+                loaded.scene->PassFrameTime(1.0 / 60.0);
+                ASSERT_TRUE(render.drawFrame(*loaded.scene)) << render.lastError();
+                render.destroy();
+            }
+            const auto collected = MetalPipelineArchiveStatusForDiagnostics().collected - collected_before;
+            ASSERT_GT(collected, 0u) << "this store never queued a pipeline addition";
+            // Only stores 3..9 and the reopened store 0 are still resident.
+            if (index >= 3) expected_descriptors += collected;
+        }
+        const auto pending = MetalRender::GetPipelineArchiveCountsForTests();
+        EXPECT_EQ(pending.stores, 8u);
+        EXPECT_EQ(pending.descriptors, 0u) << "the queue did not hold every completion";
+    }
+    MetalRender::WaitForPipelineArchiveWritesForTests();
+    const auto finished = MetalRender::GetPipelineArchiveCountsForTests();
+    EXPECT_EQ(finished.stores, 8u) << "a completion resurrected an evicted store";
+    EXPECT_LE(finished.write_generations, 8u) << "a delayed write resurrected an evicted record";
+    EXPECT_EQ(finished.descriptors, expected_descriptors)
+        << "an old completion attached to a reopened store or descriptors were lost";
+}
+
 TEST_F(MetalSceneDraw, ACaptionChangedWhileHiddenIsNotWorkInFlight)
 {
     // The trap in reporting "text is still being laid out" as a reason to keep

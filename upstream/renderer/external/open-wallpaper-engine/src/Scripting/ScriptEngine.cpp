@@ -2217,7 +2217,10 @@ void AppendCommonHostBootstrap(std::ostringstream& wrapper) {
         << "    var name = __layerKey(layerOrName);\n"
         << "    var removed = name ? __layerDestroy(name) : false;\n"
         << "    if (!removed) return false;\n"
-        << "    for (var i = 0; i < removed.length; ++i) delete globalThis.__layerCache[removed[i]];\n"
+        << "    for (var i = 0; i < removed.length; ++i) {\n"
+        << "      delete globalThis.__layerCache[removed[i]];\n"
+        << "      delete globalThis.__animationLayerEnded[removed[i]];\n"
+        << "    }\n"
         << "    return true;\n"
         << "  };\n"
         // Moves the layer to that position of the same order `getLayer(index)` and

@@ -576,6 +576,25 @@ public:
 
     /// Lets every write already scheduled run, keeping the open archives.
     void finishArchiveWrites() { waitForArchiveWrites(); }
+
+    void suspendArchiveQueue(bool suspended)
+    {
+        if (suspended) dispatch_suspend(m_archive_queue);
+        else dispatch_resume(m_archive_queue);
+    }
+
+    MetalRender::PipelineArchiveCountsForTests archiveCounts() const
+    {
+        const std::lock_guard lock { m_mutex };
+        MetalRender::PipelineArchiveCountsForTests counts {
+            m_archives.size(), m_archive_write_generations.size(), 0
+        };
+        for (const auto& [archive_id, entry] : m_archives) {
+            (void)archive_id;
+            counts.descriptors += entry.descriptors.size();
+        }
+        return counts;
+    }
 #endif
 
     [[nodiscard]] MetalPipelineArchiveStatus archiveStatus() const
@@ -964,6 +983,7 @@ private:
         if (entry.attempted) return entry.loaded;
         entry.attempted = true;
         rememberStoreLocked(archive_id);
+        m_archive_write_generations.try_emplace(archive_id, 0);
         entry.device    = device;
         entry.url       = url;
         entry.loaded    = loaded;
@@ -987,7 +1007,9 @@ private:
         id<MTLBinaryArchive> collector = nil;
         {
             const std::lock_guard lock { m_mutex };
-            auto& entry = m_archives[archive_id];
+            const auto found = m_archives.find(archive_id);
+            if (found == m_archives.end()) return;
+            auto& entry = found->second;
             if (entry.collector == nil) return;
             if (entry.keys.size() >= kMaxArchivedPipelines) return;
             if (! entry.keys.insert(key).second) return;
@@ -1011,14 +1033,18 @@ private:
             }
             {
                 const std::lock_guard lock { m_mutex };
-                auto& entry = m_archives[archive_id];
+                const auto found = m_archives.find(archive_id);
+                // An evicted store may already have been reopened at the same
+                // path. This completion belongs only to its original collector.
+                if (found == m_archives.end() || found->second.collector != collector) return;
+                auto& entry = found->second;
                 // Bounded on its own account: `keys` is emptied when the store
                 // is reopened, and this must not grow with every reopen.
                 if (entry.descriptors.size() < kMaxArchivedPipelines) {
                     entry.descriptors.push_back(stored);
                 }
             }
-            scheduleArchiveWrite(archive_id);
+            scheduleArchiveWrite(archive_id, collector);
         });
     }
 
@@ -1028,7 +1054,7 @@ private:
     /// The generation is per store, not global: a Mac with two GPUs, or two
     /// wallpapers with their own caches, must not have one store's pending
     /// write cancelled by an addition to another.
-    void scheduleArchiveWrite(const ArchiveId& requested)
+    void scheduleArchiveWrite(const ArchiveId& requested, id<MTLBinaryArchive> collector)
     {
         // Copied into a local before the block is built. A block that names a
         // reference parameter captures the reference, not the referent, and
@@ -1037,7 +1063,11 @@ private:
         uint64_t        generation = 0;
         {
             const std::lock_guard lock { m_mutex };
-            generation = ++m_archive_write_generations[archive_id];
+            const auto store = m_archives.find(archive_id);
+            const auto write = m_archive_write_generations.find(archive_id);
+            if (store == m_archives.end() || store->second.collector != collector ||
+                write == m_archive_write_generations.end()) return;
+            generation = ++write->second;
         }
         m_archive_writes_pending.fetch_add(1, std::memory_order_relaxed);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(2 * NSEC_PER_SEC)),
@@ -1046,22 +1076,24 @@ private:
                            bool current = false;
                            {
                                const std::lock_guard lock { m_mutex };
-                               current = m_archive_write_generations[archive_id] == generation;
+                               const auto write = m_archive_write_generations.find(archive_id);
+                               current = write != m_archive_write_generations.end() &&
+                                         write->second == generation;
                            }
-                           if (current) writeArchive(archive_id);
+                           if (current) writeArchive(archive_id, collector);
                            m_archive_writes_pending.fetch_sub(1, std::memory_order_relaxed);
                        });
     }
 
     /// Runs only on `m_archive_queue`.
-    void writeArchive(const ArchiveId& archive_id)
+    void writeArchive(const ArchiveId& archive_id, id<MTLBinaryArchive> expected_collector)
     {
         id<MTLBinaryArchive> collector = nil;
         NSURL*               url       = nil;
         {
             const std::lock_guard lock { m_mutex };
             auto found = m_archives.find(archive_id);
-            if (found == m_archives.end()) return;
+            if (found == m_archives.end() || found->second.collector != expected_collector) return;
             collector = found->second.collector;
             url       = found->second.url;
         }
@@ -5630,6 +5662,16 @@ bool MetalRender::PipelineArchiveServesEverySeenPipelineForTests()
 void MetalRender::WaitForPipelineArchiveWritesForTests()
 {
     MetalProgramCache::shared().finishArchiveWrites();
+}
+
+void MetalRender::SetPipelineArchiveQueueSuspendedForTests(bool suspended)
+{
+    MetalProgramCache::shared().suspendArchiveQueue(suspended);
+}
+
+MetalRender::PipelineArchiveCountsForTests MetalRender::GetPipelineArchiveCountsForTests()
+{
+    return MetalProgramCache::shared().archiveCounts();
 }
 #endif
 
