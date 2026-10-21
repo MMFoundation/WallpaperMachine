@@ -5,10 +5,9 @@ use std::{
     time::Duration,
 };
 
-use wallpaper_core::{
-    DisplayDesc, DisplayIdentity, DisplaySnapshotEntry, WallpaperAssignment,
-    project::{SceneHandle, SceneTemplate},
-};
+use wallpaper_core::{DisplaySnapshotEntry, project::SceneHandle};
+
+use super::fixture_values::{anonymous, direct_entry};
 
 use crate::{
     BridgeDisplayMode, BridgeErrorKind, BridgePlaybackState, BridgeScalingMode,
@@ -33,7 +32,7 @@ fn assert_f64_close(actual: f64, expected: f64) {
 async fn only_the_default_rate_is_stored_as_following_the_display() {
     let root = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(7, 120), display_snapshot(8, 120)]);
+    engine.set_snapshot(vec![anonymous(7, 1.0, 120, false), anonymous(8, 1.0, 120, false)]);
     let bridge = BridgeBuilder::new(engine)
         .with_config_store(ConfigStore::open(root.path().to_path_buf()))
         .build()
@@ -111,7 +110,7 @@ fn saved_mirror_rate(root: &std::path::Path) -> Option<u32> {
 #[tokio::test]
 async fn live_audio_response_toggle_keeps_selection_responsive_while_capture_starts() {
     let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(7, 75)]);
+    engine.set_snapshot(vec![anonymous(7, 1.0, 75, false)]);
     let bridge = Arc::new(
         BridgeBuilder::new(engine.clone())
             .with_state(crate::actor::state::BridgeActorState::default())
@@ -139,7 +138,7 @@ async fn live_audio_response_toggle_keeps_selection_responsive_while_capture_sta
         .await
         .unwrap();
     assert!(done.wait(Duration::from_secs(2)));
-    engine.set_snapshot(vec![active_display_snapshot(7, 75, 42)]);
+    engine.set_snapshot(vec![direct_entry(anonymous(7, 1.0, 75, false), 42, "100")]);
 
     let block = engine.block_next_audio_capture();
     let (toggle_tx, toggle_rx) = mpsc::channel();
@@ -188,7 +187,7 @@ async fn live_audio_response_toggle_keeps_selection_responsive_while_capture_sta
 async fn failed_audio_activation_is_reported_and_rolls_back_without_losing_other_options() {
     let root = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(7, 75)]);
+    engine.set_snapshot(vec![anonymous(7, 1.0, 75, false)]);
     let bridge = BridgeBuilder::new(engine.clone())
         .with_config_store(ConfigStore::open(root.path().to_path_buf()))
         .build()
@@ -205,7 +204,7 @@ async fn failed_audio_activation_is_reported_and_rolls_back_without_losing_other
         .await
         .unwrap();
     bridge.apply_wallpaper_options("100".into(), true).await.unwrap();
-    engine.set_snapshot(vec![active_display_snapshot(7, 75, 1)]);
+    engine.set_snapshot(vec![direct_entry(anonymous(7, 1.0, 75, false), 1, "100")]);
     bridge.set_volume("100".into(), 0.25).await.unwrap();
     engine.fail_audio_capture_with(Some("System audio recording denied".into()));
     let error = bridge
@@ -243,7 +242,7 @@ async fn failed_save_reports_live_assignment_and_preserves_pending_scaling() {
     fs::write(root.path().join("wallpapers"), b"not a directory").unwrap();
 
     let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(7, 75)]);
+    engine.set_snapshot(vec![anonymous(7, 1.0, 75, false)]);
     let bridge = BridgeBuilder::new(engine)
         .with_config_store(ConfigStore::open(root.path().to_path_buf()))
         .build()
@@ -294,7 +293,7 @@ async fn failed_save_reports_live_assignment_and_preserves_pending_scaling() {
 #[tokio::test]
 async fn lock_screen_export_ignores_drafts_and_tracks_pause_and_ejection() {
     let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(7, 75)]);
+    engine.set_snapshot(vec![anonymous(7, 1.0, 75, false)]);
     let bridge = BridgeBuilder::new(engine)
         .with_state(crate::actor::state::BridgeActorState::default())
         .build()
@@ -343,7 +342,7 @@ async fn lock_screen_export_ignores_drafts_and_tracks_pause_and_ejection() {
 #[tokio::test]
 async fn web_wallpaper_apply_bypasses_engine_and_exports_host_inputs() {
     let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(7, 75)]);
+    engine.set_snapshot(vec![anonymous(7, 1.0, 75, false)]);
     let bridge = BridgeBuilder::new(engine.clone())
         .with_state(crate::actor::state::BridgeActorState::default())
         .build()
@@ -452,7 +451,7 @@ async fn web_wallpaper_apply_bypasses_engine_and_exports_host_inputs() {
 #[tokio::test]
 async fn web_wallpaper_descriptor_carries_the_effective_render_scale() {
     let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(7, 75)]);
+    engine.set_snapshot(vec![anonymous(7, 1.0, 75, false)]);
     let bridge = BridgeBuilder::new(engine)
         .with_state(crate::actor::state::BridgeActorState::default())
         .build()
@@ -511,7 +510,7 @@ async fn web_wallpaper_descriptor_carries_the_effective_render_scale() {
 #[tokio::test]
 async fn web_wallpaper_combo_values_keep_authored_types_after_editor_changes() {
     let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(7, 75)]);
+    engine.set_snapshot(vec![anonymous(7, 1.0, 75, false)]);
     let bridge = BridgeBuilder::new(engine)
         .with_state(crate::actor::state::BridgeActorState::default())
         .build()
@@ -590,7 +589,7 @@ async fn web_wallpaper_combo_values_keep_authored_types_after_editor_changes() {
 #[tokio::test]
 async fn lock_screen_export_ignores_presentation_suspension_but_preserves_playback_policy() {
     let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(7, 75)]);
+    engine.set_snapshot(vec![anonymous(7, 1.0, 75, false)]);
     let bridge = BridgeBuilder::new(engine.clone())
         .with_state(crate::actor::state::BridgeActorState::default())
         .build()
@@ -632,7 +631,7 @@ async fn lock_screen_export_ignores_the_desktop_display_being_covered() {
     // that. The lock screen is what is on screen then, so it must not take
     // the covered desktop's suspension as a pause and hold a still frame.
     let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(7, 75)]);
+    engine.set_snapshot(vec![anonymous(7, 1.0, 75, false)]);
     let bridge = BridgeBuilder::new(engine.clone())
         .with_state(crate::actor::state::BridgeActorState::default())
         .build()
@@ -769,59 +768,7 @@ async fn failed_audio_resume_restores_renderer_and_allows_later_presentation_tra
 fn live_display_snapshot(display_id: u32, refresh_rate_hz: u32) -> DisplaySnapshotEntry {
     DisplaySnapshotEntry {
         handle: Some(SceneHandle::new(1)),
-        ..display_snapshot(display_id, refresh_rate_hz)
+        ..anonymous(display_id, 1.0, refresh_rate_hz, false)
     }
 }
 
-fn display_snapshot(display_id: u32, refresh_rate_hz: u32) -> DisplaySnapshotEntry {
-    let desc = DisplayDesc::with_identity(
-        display_id,
-        DisplayIdentity::default(),
-        0,
-        0,
-        1920,
-        1080,
-        1.0,
-    )
-    .with_refresh_rate(refresh_rate_hz);
-
-    DisplaySnapshotEntry {
-        identity: DisplayIdentity::default(),
-        desc,
-        handle: None,
-        accepts_pointer_input: false,
-        paused: false,
-        window_active: false,
-        assignment: None,
-    }
-}
-
-fn active_display_snapshot(
-    display_id: u32,
-    refresh_rate_hz: u32,
-    handle: u64,
-) -> DisplaySnapshotEntry {
-    active_display_snapshot_for_wallpaper(display_id, refresh_rate_hz, handle, "100")
-}
-
-fn active_display_snapshot_for_wallpaper(
-    display_id: u32,
-    refresh_rate_hz: u32,
-    handle: u64,
-    wallpaper_id: &str,
-) -> DisplaySnapshotEntry {
-    DisplaySnapshotEntry {
-        handle: Some(SceneHandle::new(handle)),
-        accepts_pointer_input: true,
-        paused: false,
-        window_active: true,
-        assignment: Some(WallpaperAssignment::Direct(
-            SceneTemplate::builder(format!(
-                "/workshop/content/431960/{wallpaper_id}/project.json"
-            ))
-            .build()
-            .unwrap(),
-        )),
-        ..display_snapshot(display_id, refresh_rate_hz)
-    }
-}

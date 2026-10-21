@@ -1,4 +1,6 @@
-use wallpaper_core::{DisplayDesc, DisplayIdentity, DisplaySnapshotEntry};
+use wallpaper_core::DisplaySnapshotEntry;
+
+use super::fixture_values::identified;
 
 use crate::{
     actor::state::BridgeActorState,
@@ -28,7 +30,7 @@ pub(super) fn mouse_scenario<F: Future<Output = ()>>(run: impl FnOnce() -> F + S
 }
 
 pub(super) fn active_mouse_display() -> DisplaySnapshotEntry {
-    let mut display = identified_display("mouse-display", 7);
+    let mut display = identified("mouse-display", 7, 60);
     display.handle = Some(wallpaper_core::project::SceneHandle::new(42));
     display.accepts_pointer_input = true;
     display
@@ -91,7 +93,7 @@ fn mouse_polling_stops_while_the_only_interactive_scene_is_suspended_on_its_disp
         let engine = FakeEngineFacade::default();
         // Display 9 shows nothing a pointer can reach, so it is never suspended
         // and the global "every display paused" gate stays open.
-        engine.set_snapshot(vec![active_mouse_display(), identified_display("empty", 9)]);
+        engine.set_snapshot(vec![active_mouse_display(), identified("empty", 9, 60)]);
         let bridge = BridgeBuilder::new(engine.clone())
             .with_state(BridgeActorState::default())
             .build()
@@ -434,31 +436,3 @@ fn consumer_registration_and_publication_are_serialized_in_both_orders() {
     }
 }
 
-fn identified_display(uuid: &str, display_id: u32) -> DisplaySnapshotEntry {
-    identified_display_with_refresh(uuid, display_id, 60)
-}
-
-fn identified_display_with_refresh(
-    uuid: &str,
-    display_id: u32,
-    refresh_rate_hz: u32,
-) -> DisplaySnapshotEntry {
-    let identity = DisplayIdentity {
-        uuid: Some(uuid.to_string()),
-        vendor_id: Some(10),
-        model_id: Some(display_id),
-        serial_number: Some(100 + display_id),
-        unit_number: Some(display_id),
-        name: Some(format!("Display {uuid}")),
-    };
-    DisplaySnapshotEntry {
-        identity: identity.clone(),
-        desc: DisplayDesc::with_identity(display_id, identity, 0, 0, 1920, 1080, 2.0)
-            .with_refresh_rate(refresh_rate_hz),
-        handle: None,
-        accepts_pointer_input: false,
-        paused: false,
-        window_active: true,
-        assignment: None,
-    }
-}

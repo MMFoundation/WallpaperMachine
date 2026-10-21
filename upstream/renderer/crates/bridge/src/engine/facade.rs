@@ -1442,6 +1442,11 @@ impl FakeEngineFacade {
     }
 
     #[must_use]
+    pub fn reconcile_call_count(&self) -> usize {
+        self.calls.len()
+    }
+
+    #[must_use]
     pub fn rendered_scenes(&self) -> Vec<SceneDesc> {
         self.rendered_scenes.load_full().as_ref().clone()
     }

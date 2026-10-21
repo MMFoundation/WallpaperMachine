@@ -123,6 +123,13 @@ baseline return, then holds an actual resample and releases it before joining an
 draining. API projection fixtures also distinguish a missing first-seen monitor
 record (which may inherit Primary) from an explicitly enabled but unassigned row.
 
+The retained bridge suites share independently authored value and observation
+helpers. Profiles keep their own scale, refresh and window/pointer state; a live
+handle-only fixture is not silently converted to a direct wallpaper assignment.
+Exact reconcile waits read the actual recorded-vector length without cloning its
+scene history, retain the caller bound and assert completion. They do not replace
+the separate 3–4-call coalescing contract or the retained cache-storage assertions.
+
 The independent display/config/project/draft contract suites now carry the mapped
 self-mirror, corrupt-file backup, raw rich-text/type and Cancel-baseline assertions
 formerly duplicated in small inherited bridge tests. Constructor-pointer equality,

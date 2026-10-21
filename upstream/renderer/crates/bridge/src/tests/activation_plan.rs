@@ -1,8 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use wallpaper_core::{
-    DisplayDesc, DisplayIdentity, DisplaySelector, DisplaySnapshotEntry,
+    DisplaySelector, DisplaySnapshotEntry,
     project::{ScalingMode, SceneFraming},
+};
+
+use super::{
+    fixture_observations::assert_owner,
+    fixture_values::{anonymous, identified},
 };
 
 use crate::{
@@ -20,8 +25,8 @@ fn activation_plan_leaves_display_empty_when_assigned_wallpaper_left_the_library
     // A wallpaper deleted while its display was disconnected keeps its
     // assignment. Planning a scene for it would fail the whole reconcile and
     // block applying anything to any other display.
-    let display_a = identified_display("a", 1);
-    let display_b = identified_display("b", 3);
+    let display_a = identified("a", 1, 60);
+    let display_b = identified("b", 3, 60);
     let mut config = AppConfig::default();
     for (display, wallpaper) in [(&display_a, "100"), (&display_b, "gone")] {
         config.monitors.push(MonitorCfg {
@@ -61,7 +66,7 @@ fn activation_plan_leaves_display_empty_when_assigned_wallpaper_left_the_library
     .unwrap();
 
     assert_eq!(scenes.len(), 1);
-    assert_scene(&scenes, 1, "100");
+    assert_owner(&scenes, 1, "100");
 }
 
 /// Library entries for every configured wallpaper, so the plan treats them as installed.
@@ -78,58 +83,6 @@ fn installed(wallpapers: &BTreeMap<String, WallpaperConfig>) -> Vec<BridgeWallpa
             preview_path: None,
         })
         .collect()
-}
-
-fn assert_scene(scenes: &[wallpaper_core::project::SceneDesc], display_id: u32, workshop_id: &str) {
-    let scene = scenes
-        .iter()
-        .find(|scene| scene.display.display_id == display_id)
-        .unwrap_or_else(|| panic!("missing scene for display {display_id}"));
-    assert!(
-        scene.scene_path.contains(&format!("/{workshop_id}/")),
-        "display {display_id} should use wallpaper {workshop_id}, got {}",
-        scene.scene_path
-    );
-}
-
-fn identified_display(uuid: &str, display_id: u32) -> DisplaySnapshotEntry {
-    let identity = DisplayIdentity {
-        uuid: Some(uuid.to_string()),
-        vendor_id: Some(10),
-        model_id: Some(display_id),
-        serial_number: Some(100 + display_id),
-        unit_number: Some(display_id),
-        name: Some(format!("Display {uuid}")),
-    };
-    DisplaySnapshotEntry {
-        identity: identity.clone(),
-        desc: DisplayDesc::with_identity(display_id, identity, 0, 0, 1920, 1080, 2.0),
-        handle: None,
-        accepts_pointer_input: false,
-        paused: false,
-        window_active: true,
-        assignment: None,
-    }
-}
-
-fn display_snapshot(display_id: u32) -> DisplaySnapshotEntry {
-    DisplaySnapshotEntry {
-        identity: DisplayIdentity::default(),
-        desc: DisplayDesc::with_identity(
-            display_id,
-            DisplayIdentity::default(),
-            0,
-            0,
-            1920,
-            1080,
-            2.0,
-        ),
-        handle: None,
-        accepts_pointer_input: false,
-        paused: false,
-        window_active: true,
-        assignment: None,
-    }
 }
 
 /// The routing rules themselves, with no actor and no host query in the way.
@@ -164,7 +117,7 @@ fn a_plain_video_is_never_a_scene_and_is_always_a_native_descriptor_when_its_fil
         )
         .unwrap(),
     );
-    let displays = vec![display_snapshot(1)];
+    let displays = vec![anonymous(1, 2.0, 60, true)];
     let suspended = BTreeSet::new();
     let plan = || ActivationInputs {
         app_config: &config,
@@ -267,7 +220,7 @@ impl HeldFixture {
             config,
             wallpapers,
             models,
-            displays: vec![display_snapshot(1), display_snapshot(2), display_snapshot(3)],
+            displays: vec![anonymous(1, 2.0, 60, true), anonymous(2, 2.0, 60, true), anonymous(3, 2.0, 60, true)],
             suspended: BTreeSet::new(),
         }
     }
@@ -315,7 +268,7 @@ fn held_wallpaper_gets_no_scene_web_or_native_video_descriptor() {
     // The hold belongs to one wallpaper; the others on screen are untouched.
     let only_page: BTreeSet<String> = ["300".to_string()].into();
     let partly = fixture.inputs(&only_page);
-    assert_scene(&partly.build().unwrap(), 1, "100");
+    assert_owner(&partly.build().unwrap(), 1, "100");
     assert!(partly.build_web().unwrap().is_empty());
     assert_eq!(partly.build_native_video().unwrap().len(), 1);
 }
@@ -345,7 +298,7 @@ fn build_owned_maps_each_display_to_its_wallpaper_including_mirrors() {
         ],
         ..AppConfig::default()
     };
-    let displays = vec![display_snapshot(1), display_snapshot(2), display_snapshot(3)];
+    let displays = vec![anonymous(1, 2.0, 60, true), anonymous(2, 2.0, 60, true), anonymous(3, 2.0, 60, true)];
     let paths = BridgePaths::for_home("/tmp/test-home");
     let (suspended, models) = (BTreeSet::new(), BTreeMap::new());
     let inputs = |held| ActivationInputs {
@@ -426,8 +379,8 @@ fn scene_framing(scenes: &[wallpaper_core::project::SceneDesc], display_id: u32)
 #[test]
 fn a_saved_position_reaches_only_the_scene_built_for_its_display() {
     let (left, right) = (
-        identified_display("left", 1),
-        identified_display("right", 2),
+        identified("left", 1, 60),
+        identified("right", 2, 60),
     );
     let selector_of = |display: &DisplaySnapshotEntry| {
         SerializedSelector::from_selector(&DisplaySelector::Identity(display.identity.clone()))
@@ -490,7 +443,7 @@ fn a_saved_position_reaches_only_the_scene_built_for_its_display() {
 /// Primary by one record and by identity by another is still one display.
 #[test]
 fn a_saved_position_follows_the_display_across_the_ways_it_is_addressed() {
-    let display = identified_display("primary", 1);
+    let display = identified("primary", 1, 60);
     let identity_selector =
         SerializedSelector::from_selector(&DisplaySelector::Identity(display.identity.clone()));
     for (monitor_selector, render_selector) in [
@@ -572,7 +525,7 @@ fn a_mirror_is_centred_even_when_its_source_is_positioned() {
         ],
         ..AppConfig::default()
     };
-    let displays = vec![display_snapshot(1), display_snapshot(2)];
+    let displays = vec![anonymous(1, 2.0, 60, true), anonymous(2, 2.0, 60, true)];
     let paths = BridgePaths::for_home("/tmp/test-home");
 
     let scenes = ActivationInputs {

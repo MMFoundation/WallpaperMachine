@@ -4,12 +4,19 @@ use std::{
 };
 
 use wallpaper_core::{
-    DisplayDesc, DisplayIdentity, DisplaySelector, DisplaySnapshotEntry,
+    DisplaySelector, DisplaySnapshotEntry,
     WallpaperAssignment,
     project::{SceneHandle, SceneTemplate},
 };
 
-use super::engine_release::EngineRelease;
+use super::{
+    engine_release::EngineRelease,
+    fixture_observations::{
+        enable_primary_apply, expect_enabled, expect_last_owner, last_scene, settings_key,
+        settings_row, wait_reconciles,
+    },
+    fixture_values::{anonymous, identified},
+};
 use crate::{
     BridgeDisplayMode, BridgePropertyValue,
     WallpaperBridge,
@@ -24,8 +31,8 @@ use crate::{
 
 #[tokio::test]
 async fn stale_reconcile_failure_defers_repair_until_newer_reconcile_finishes() {
-    let primary = identified_display("primary", 1);
-    let secondary = identified_display("secondary", 3);
+    let primary = identified("primary", 1, 60);
+    let secondary = identified("secondary", 3, 60);
     let root = tempfile::tempdir().unwrap();
     let store = ConfigStore::open(root.path().to_path_buf());
     store
@@ -54,7 +61,7 @@ async fn stale_reconcile_failure_defers_repair_until_newer_reconcile_finishes() 
     );
     bridge.bootstrap().await.unwrap();
     let calls_before = engine.calls().len();
-    let secondary_display_id = settings_row_id_by_title(&bridge, "secondary").await;
+    let secondary_display_id = settings_key(&bridge, "secondary").await;
 
     let first_block = engine.block_next_reconcile();
     let second_block = engine.block_next_reconcile();
@@ -121,8 +128,8 @@ async fn stale_reconcile_failure_defers_repair_until_newer_reconcile_finishes() 
 
 #[tokio::test]
 async fn first_seen_display_starts_with_primary_wallpaper_and_keeps_opt_out_after_reconnect() {
-    let primary = identified_display("primary", 1);
-    let mut external = identified_display("external", 3);
+    let primary = identified("primary", 1, 60);
+    let mut external = identified("external", 3, 60);
     // The engine has never shown this display, so it reports no window.
     external.window_active = false;
     let external_selector =
@@ -156,10 +163,10 @@ async fn first_seen_display_starts_with_primary_wallpaper_and_keeps_opt_out_afte
     engine.set_snapshot_after_refresh(vec![primary.clone(), external.clone()]);
     bridge.refresh_displays().await.unwrap();
 
-    let external_id = settings_row_id_by_title(&bridge, "external").await;
-    assert_display_enabled(&bridge, &external_id, true).await;
-    assert_latest_scene(&engine, 1, "100");
-    assert_latest_scene(&engine, 3, "100");
+    let external_id = settings_key(&bridge, "external").await;
+    expect_enabled(&bridge, &external_id, true).await;
+    expect_last_owner(&engine, 1, "100");
+    expect_last_owner(&engine, 3, "100");
 
     bridge
         .set_display_enabled(external_id.clone(), false)
@@ -170,7 +177,7 @@ async fn first_seen_display_starts_with_primary_wallpaper_and_keeps_opt_out_afte
     engine.set_snapshot_after_refresh(vec![primary, external]);
     bridge.refresh_displays().await.unwrap();
 
-    assert_display_enabled(&bridge, &external_id, false).await;
+    expect_enabled(&bridge, &external_id, false).await;
     assert!(
         engine
             .calls()
@@ -192,8 +199,8 @@ async fn first_seen_display_starts_with_primary_wallpaper_and_keeps_opt_out_afte
 
 #[tokio::test]
 async fn primary_wallpaper_stays_on_primary_after_primary_display_switch() {
-    let display_a = identified_display("a", 1);
-    let display_b = identified_display("b", 3);
+    let display_a = identified("a", 1, 60);
+    let display_b = identified("b", 3, 60);
     let root = tempfile::tempdir().unwrap();
     let store = ConfigStore::open(root.path().to_path_buf());
     store
@@ -220,15 +227,15 @@ async fn primary_wallpaper_stays_on_primary_after_primary_display_switch() {
         .expect("tokio runtime and config load for wallpaper bridge");
 
     bridge.bootstrap().await.unwrap();
-    assert_latest_scene(&engine, 1, "300");
+    expect_last_owner(&engine, 1, "300");
 
     engine.set_snapshot_after_refresh(vec![display_b, display_a]);
     bridge.refresh_displays().await.unwrap();
 
-    assert_latest_scene(&engine, 3, "300");
+    expect_last_owner(&engine, 3, "300");
     // The old primary was never configured under its own identity, so it is a
     // first-seen display and keeps showing the primary's wallpaper.
-    assert_latest_scene(&engine, 1, "300");
+    expect_last_owner(&engine, 1, "300");
 }
 
 #[tokio::test]
@@ -239,7 +246,7 @@ async fn clear_shader_cache_removes_cache_and_rebuilds_active_scenes() {
     std::fs::write(paths.shader_cache_root().join("stale-cache.bin"), [1, 2, 3]).unwrap();
 
     let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(1)]);
+    engine.set_snapshot(vec![anonymous(1, 1.0, 60, true)]);
     let bridge = BridgeBuilder::new(engine.clone())
         .with_paths(paths.clone())
         .build()
@@ -247,8 +254,8 @@ async fn clear_shader_cache_removes_cache_and_rebuilds_active_scenes() {
     bridge
         .inject_scene_wallpaper_config_for_test("100", "Scene")
         .await;
-    apply_primary_wallpaper(&bridge, "100").await;
-    wait_for_reconcile_count(&engine, 1);
+    enable_primary_apply(&bridge, "100").await;
+    assert!(wait_reconciles(&engine, 1, std::time::Duration::from_secs(2)).await);
 
     assert_eq!(bridge.settings_snapshot().await.unwrap().storage.shader_cache_size_bytes, 3);
     std::fs::write(paths.shader_cache_root().join("new-cache.bin"), [4, 5]).unwrap();
@@ -257,11 +264,11 @@ async fn clear_shader_cache_removes_cache_and_rebuilds_active_scenes() {
 
     let snapshot = bridge.clear_shader_cache().await.unwrap();
 
-    wait_for_reconcile_count(&engine, 2);
+    assert!(wait_reconciles(&engine, 2, std::time::Duration::from_secs(2)).await);
     assert!(paths.shader_cache_root().is_dir());
     assert!(!paths.shader_cache_root().join("stale-cache.bin").exists());
     assert_eq!(snapshot.storage.shader_cache_size_bytes, 0);
-    assert_latest_scene(&engine, 1, "100");
+    expect_last_owner(&engine, 1, "100");
     let calls = engine.calls();
     let refreshed_scene = calls
         .last()
@@ -275,70 +282,11 @@ async fn clear_shader_cache_removes_cache_and_rebuilds_active_scenes() {
     );
 }
 
-fn display_snapshot(display_id: u32) -> DisplaySnapshotEntry {
-    DisplaySnapshotEntry {
-        identity: DisplayIdentity::default(),
-        desc: DisplayDesc::with_identity(
-            display_id,
-            DisplayIdentity::default(),
-            0,
-            0,
-            1920,
-            1080,
-            1.0,
-        ),
-        handle: None,
-        accepts_pointer_input: false,
-        paused: false,
-        window_active: true,
-        assignment: None,
-    }
-}
-
-async fn assert_display_enabled(bridge: &WallpaperBridge, display_id: &str, expected: bool) {
-    let display = bridge
-        .settings_snapshot()
-        .await
-        .unwrap()
-        .displays
-        .into_iter()
-        .find(|display| display.display_id == display_id)
-        .unwrap_or_else(|| panic!("missing display {display_id}"));
-    assert_eq!(display.enabled, expected);
-}
-
-async fn settings_row_id_by_title(bridge: &WallpaperBridge, title_part: &str) -> String {
-    bridge
-        .settings_snapshot()
-        .await
-        .unwrap()
-        .displays
-        .into_iter()
-        .find(|display| display.title.contains(title_part))
-        .unwrap_or_else(|| panic!("missing display row containing title {title_part}"))
-        .display_id
-}
-
-async fn settings_row(
-    bridge: &WallpaperBridge,
-    display_id: &str,
-) -> crate::BridgeDisplaySettingsRow {
-    bridge
-        .settings_snapshot()
-        .await
-        .unwrap()
-        .displays
-        .into_iter()
-        .find(|display| display.display_id == display_id)
-        .unwrap_or_else(|| panic!("missing settings row for display {display_id}"))
-}
-
-
 /// One scene committed to a 120 Hz primary display and running. The engine
 /// snapshot carries the descriptor the scene was opened with, and live
 /// updates land in it as they do in the real engine.
 async fn running_scene_bridge(engine: &FakeEngineFacade) -> (WallpaperBridge, tempfile::TempDir) {
-    let display = identified_display("primary", 1);
+    let display = identified("primary", 1, 60);
     let primary = DisplaySnapshotEntry {
         desc: display.desc.clone().with_refresh_rate(120),
         ..display
@@ -493,7 +441,7 @@ async fn a_reported_press_comes_back_out_of_the_bridge() {
                 .build()
                 .unwrap(),
         )),
-        ..display_snapshot(7)
+        ..anonymous(7, 1.0, 60, true)
     }]);
     let bridge = BridgeBuilder::new(engine.clone())
         .with_state(crate::actor::state::BridgeActorState::default())
@@ -537,7 +485,7 @@ async fn an_unbound_transport_shortcut_reaches_the_scene_engine() {
     // dropped -- however the panel happens to show the binding.
     let root = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(1)]);
+    engine.set_snapshot(vec![anonymous(1, 1.0, 60, true)]);
     let bridge = BridgeBuilder::new(engine.clone())
         .with_config_store(ConfigStore::open(root.path().to_path_buf()))
         .build()
@@ -568,7 +516,7 @@ async fn an_unbound_transport_shortcut_reaches_the_scene_engine() {
 
     // A name that says nothing stays out of it rather than being guessed at.
     assert_eq!(
-        latest_scene(&engine, 1).property_override_json.as_deref(),
+        last_scene(&engine, 1).property_override_json.as_deref(),
         Some(r#"{"nextsongbutton":"media:next","playpausebutton":"media:playpause"}"#)
     );
 
@@ -588,79 +536,8 @@ async fn an_unbound_transport_shortcut_reaches_the_scene_engine() {
         .await
         .unwrap();
     assert_eq!(
-        latest_scene(&engine, 1).property_override_json.as_deref(),
+        last_scene(&engine, 1).property_override_json.as_deref(),
         Some(r#"{"nextsongbutton":"","playpausebutton":"media:playpause"}"#)
-    );
-}
-
-async fn apply_primary_wallpaper(bridge: &WallpaperBridge, wallpaper_id: &str) {
-    bridge
-        .set_display_config_enabled(wallpaper_id.to_string(), "primary".to_string(), true)
-        .await
-        .unwrap();
-    bridge
-        .apply_wallpaper_options(wallpaper_id.to_string(), true)
-        .await
-        .unwrap();
-}
-
-fn wait_for_reconcile_count(engine: &FakeEngineFacade, expected: usize) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    loop {
-        let calls = engine.calls().len();
-        if calls == expected {
-            return;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "expected {expected} reconcile calls, got {calls}"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-}
-
-fn identified_display(uuid: &str, display_id: u32) -> DisplaySnapshotEntry {
-    let identity = DisplayIdentity {
-        uuid: Some(uuid.to_string()),
-        vendor_id: Some(10),
-        model_id: Some(display_id),
-        serial_number: Some(100 + display_id),
-        unit_number: Some(display_id),
-        name: Some(format!("Display {uuid}")),
-    };
-    DisplaySnapshotEntry {
-        identity: identity.clone(),
-        desc: DisplayDesc::with_identity(display_id, identity, 0, 0, 1920, 1080, 2.0),
-        handle: None,
-        accepts_pointer_input: false,
-        paused: false,
-        window_active: true,
-        assignment: None,
-    }
-}
-
-fn latest_scene(engine: &FakeEngineFacade, display_id: u32) -> wallpaper_core::project::SceneDesc {
-    engine
-        .calls()
-        .last()
-        .expect("reconcile call")
-        .iter()
-        .find(|scene| scene.display.display_id == display_id)
-        .unwrap_or_else(|| panic!("missing scene for display {display_id}"))
-        .clone()
-}
-
-fn assert_latest_scene(engine: &FakeEngineFacade, display_id: u32, workshop_id: &str) {
-    let calls = engine.calls();
-    let scenes = calls.last().expect("reconcile call");
-    let scene = scenes
-        .iter()
-        .find(|scene| scene.display.display_id == display_id)
-        .unwrap_or_else(|| panic!("missing scene for display {display_id}"));
-    assert!(
-        scene.scene_path.contains(&format!("/{workshop_id}/")),
-        "display {display_id} should use wallpaper {workshop_id}, got {}",
-        scene.scene_path
     );
 }
 

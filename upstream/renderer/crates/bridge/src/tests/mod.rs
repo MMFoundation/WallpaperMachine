@@ -9,6 +9,8 @@ mod display_identity;
 mod display_position;
 mod engine_release;
 mod file_properties;
+mod fixture_values;
+mod fixture_observations;
 mod native_video_routing;
 mod persistence_corruption;
 mod playback;

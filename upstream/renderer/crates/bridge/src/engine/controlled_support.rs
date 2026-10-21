@@ -34,6 +34,10 @@ impl<T> Observation<T> {
             .push(value);
     }
 
+    pub(crate) fn len(&self) -> usize {
+        self.values.lock().expect("observation poisoned").len()
+    }
+
     pub(crate) fn snapshot(&self) -> Vec<T>
     where
         T: Clone,
