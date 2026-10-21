@@ -19,9 +19,8 @@ public:
     explicit FfmpegVideoTextureSource(const Image& image);
     /// Opens a decoder directly on a media file, without an `Image`.
     ///
-    /// Needed when a consumer is split off a shared session: the split opens a
-    /// second decoder on the same file, and by then the `Image` that started
-    /// the first one is gone.
+    /// Shared sessions open resolved media this way, including a later split
+    /// after the `Image` that supplied the packed bytes is gone.
     explicit FfmpegVideoTextureSource(std::string media_path);
     ~FfmpegVideoTextureSource() override;
 
@@ -40,6 +39,12 @@ private:
     class Impl;
     std::unique_ptr<Impl> m_impl;
 };
+
+/// Resolves file-backed or packed media before shared-session lookup. Packed
+/// bytes go into the existing content-named cache without constructing a decoder
+/// or retaining another payload copy. Returns an empty path and sets `error`
+/// if the image has no video payload or extraction fails.
+std::string ResolveVideoTextureMediaPath(const Image& image, std::string* error);
 
 /// Builds the texture image for a pure-video wallpaper project.
 ///

@@ -255,6 +255,16 @@ device.
   compiles cleanly. `video_source_input_test` owns a private `TMPDIR` and only
   removes its own media cache; never clear the app's decode cache to make a test
   pass.
+- **Packed videos use the existing shared decoder registry** —
+  `SharedVideoSessionTest.EquivalentPackedVideosShareOneDecoder` and
+  `.ConcurrentPackedVideoOpensShareOneDecoder` open independently held mip
+  payloads through the real decoder and require one decoder identity, including
+  concurrent first extraction. `.PackedVideosRemainPrivateWithSharingOff` and
+  `.DifferentPackedVideosWithTheSameNameAndSizeNeverShare` preserve opt-out and
+  content isolation. `.PackedVideoRateSplitReopensAfterTheImagesAreReleased`
+  requires a second decoder when rates diverge after the original images and
+  fixture media are gone. The suite owns a private `TMPDIR` for its extracted
+  media and never removes another process's cache.
 - **A decoder survives a rebuild of the graph** -
   `MetalVideoTexture.AVideoSetAsideByARebuildIsTakenBackAsItIsAndNotReadAgain`,
   `.AVideoTheNewGraphDoesNotUseIsClosedWithItsCompile`,

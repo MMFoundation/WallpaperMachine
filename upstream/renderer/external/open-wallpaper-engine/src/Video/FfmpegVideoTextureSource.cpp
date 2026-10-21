@@ -97,11 +97,11 @@ std::filesystem::path VideoCacheDirectory(std::string* error)
 /// it by path.
 ///
 /// The bytes are staged under a name unique to this attempt and only then
-/// renamed onto the content-addressed name, so a concurrent opener either sees
-/// nothing or sees the finished file - never a half-written one. Losing the
-/// rename race is success: the winner's file holds the same bytes.
+/// linked onto the content-addressed name, so a concurrent opener sees a whole
+/// file. A losing publisher keeps the winner's file and modification time: the
+/// shared-session registry includes that time in the file's identity.
 std::filesystem::path WriteVideoPayloadToTemp(std::string_view debug_label,
-                                              const std::vector<char>& payload,
+                                              std::span<const char> payload,
                                               std::string* error)
 {
     if (payload.empty()) {
@@ -113,7 +113,7 @@ std::filesystem::path WriteVideoPayloadToTemp(std::string_view debug_label,
     if (temp_dir.empty()) return {};
 
     std::error_code ec;
-    const std::string digest = utils::genSha1(std::span(payload.data(), payload.size()));
+    const std::string digest = utils::genSha1(payload);
     const std::filesystem::path media_path = temp_dir / (digest + ".mp4");
     const auto payload_size = static_cast<uintmax_t>(payload.size());
     if (std::filesystem::exists(media_path, ec) &&
@@ -142,11 +142,19 @@ std::filesystem::path WriteVideoPayloadToTemp(std::string_view debug_label,
         return {};
     }
 
-    std::filesystem::rename(staging_path, media_path, ec);
+    std::filesystem::create_hard_link(staging_path, media_path, ec);
     if (ec) {
-        std::error_code remove_ec;
-        std::filesystem::remove(staging_path, remove_ec);
-        if (std::filesystem::file_size(media_path, ec) == payload_size && !ec) return media_path;
+        if (std::filesystem::file_size(media_path, ec) == payload_size && !ec) {
+            std::filesystem::remove(staging_path, ec);
+            return media_path;
+        }
+        // Preserve replacement of an incomplete cache entry, or publication
+        // on a filesystem without hard links.
+        std::filesystem::rename(staging_path, media_path, ec);
+    }
+    std::error_code remove_ec;
+    std::filesystem::remove(staging_path, remove_ec);
+    if (ec) {
         SetError(error, "failed to write temporary video cache file");
         return {};
     }
@@ -1329,6 +1337,28 @@ std::shared_ptr<VideoTextureSource> CreateVideoTextureSource(const Image& image,
     }
 
     return std::make_shared<FfmpegVideoTextureSource>(image);
+}
+
+std::string ResolveVideoTextureMediaPath(const Image& image, std::string* error)
+{
+    if (!image.header.isVideo) {
+        SetError(error, "image is not marked as a video texture");
+        return {};
+    }
+    if (!image.videoFilePath.empty()) return image.videoFilePath;
+    if (image.slots.empty() || image.slots.front().mipmaps.empty()) {
+        SetError(error, "video texture has no mip payload");
+        return {};
+    }
+    const auto& mip = image.slots.front().mipmaps.front();
+    if (mip.data == nullptr || mip.size <= 0) {
+        SetError(error, "video texture payload is empty");
+        return {};
+    }
+    return WriteVideoPayloadToTemp(
+        image.key,
+        std::span(reinterpret_cast<const char*>(mip.data.get()), static_cast<size_t>(mip.size)),
+        error).string();
 }
 
 std::shared_ptr<Image> CreateVideoProjectImage(const std::filesystem::path& project_directory,

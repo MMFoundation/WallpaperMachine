@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-10-21 — Packed scene videos use shared decoding
+
+- Tests first: shared_video_session_test --gtest_filter='*Packed*' failed four cases before the fix; the sharing-disabled case already passed. Afterward all 14 shared-session tests passed, including identity isolation, concurrent opens and rate splitting.
+- Headless runtime smoke: two real scenes independently parsed a synthetic .tex video, prepared/imported it through Metal, produced matching pixel sums with sharing off/on, shared one decoder session when enabled, split at a different playback rate and released both sessions.
+- python3 scripts/check_renderer.py: passed on retry; every registered binary returned zero, all 12 generated pooled/isolated image pairs matched, and reload cycles passed. Initial attempt stopped because a test executable disappeared during shared-build test discovery. Local asset/corpus and energy cases skipped; GPU and realtime checks ran.
+- python3 scripts/test.py: passed, 3906 passed and 45 skipped, zero failures. The final renderer run also passed all 23 video-source-input tests after concurrent workspace edits completed.
+- Wallpaper Engine comparison not completed: scripts/we_reference.py compare 3326873240 reported missing reference frames; that documented packed-video scene is not installed locally. Visual parity, desktop timing, 4K memory and energy were not measured.
+- Shared decoding remains off by default; timeline policy is unchanged. No Release build or app restart.
+
 ## 2026-10-20 — Fit with blurred backdrop
 
 Fit with blurred backdrop: a scaling mode (`FIT_BLURRED`, `fit_blurred`, `MatchBlurred`) that
@@ -149,16 +158,3 @@ Fixes a music-player widget that sat misaligned and then faded out. Four general
 - python3 scripts/test.py: Python script suites passed; native gate 3887 passed, 0 failed, 45 skipped.
 - python3 scripts/build.py --configuration Release: exit 0; app built without launching or installing it.
 - No live media player, desktop UI, permission prompt or Wallpaper Engine frame comparison was exercised.
-
-## 2026-10-18 — Resume each display from the current playback policy
-
-The presentation policy reconciles per-display visibility during global transitions and retries pending delivery once per evaluation. The bridge corrects retained runtime pause on its actor using current policy, including unchanged refresh and Apply paths.
-
-- Before the fixes, the retained per-display pause regression failed in Rust; three wake/unlock/settlement regressions and the mixed-visibility retry regression failed in native tests.
-- `python3 scripts/test.py --only WallpaperPresentationPolicyTests --only PlaybackPolicyCompositionTests` — final run: 63 passed, 0 failed, 0 skipped; bridge `display_presentation` targeted tests: 13 passed.
-- `python3 scripts/build.py --renderer-only` — exit 0; renderer library and generated bindings rebuilt. No public API or schema changed; no Release app build.
-- `python3 scripts/test.py` — final unchanged rerun: 350 Python tests passed; 3,856 native passed, 0 failed, 45 opt-in skips.
-- The first full native run had 3,855 passed, 1 failed and 45 skipped: `WebWallpaperPageTests/testRefusedOrReplacedNavigationDoesNotFailTheWallpaper` reported “Cannot open file”. The unchanged targeted rerun passed, then the unchanged full rerun passed. Cause not established; the initial failure is not treated as a passing run.
-- `python3 scripts/check_rust.py --output artifacts/multi-display-playback/rust` — exit 0: core 315, bridge 604, integrations 16, shader 580; nine desktop/corpus exclusions and five emitted shader-asset skips remain unverified.
-- `python3 scripts/check_renderer.py` — exit 0: 47 registered binaries passed, 12 pooled/isolated pixel cases matched with expected pixels and no diagnostics, 8 projects × 2 reload cycles passed; GPU and realtime checks executed. Nine external-corpus cases skipped.
-- Changed documentation links, provenance JSON and `git diff --check` passed. No desktop control, real multi-monitor playback check, Wallpaper Engine frame comparison, installation or app restart; task logs, result bundles and generated probe output removed after review.

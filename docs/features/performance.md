@@ -856,9 +856,25 @@ All three switches are experimental and off by default.
 | Shared video decode | Lets equivalent display surfaces showing the same video share one decode session |
 | Direct video plane sampling | Lets a Native Metal scene's own shader read the decoder's two video planes instead of a colour image converted for it each frame |
 
+### Shared video decode
+
 When shared decode is actually merging work, **Shared decode in use** reports the
 live session and surface counts the engine publishes. Sharing is reported only
 where it genuinely happens: surfaces still submit and present separately.
+
+Scene videos packed into `.tex` mip payloads participate too: when the switch is
+on, opening a source first resolves its bytes to the existing content-named
+temporary file, then uses the same file-based session registry as ordinary video
+files. Identical payloads can share even under different texture names; different
+payloads do not share just because their names or sizes match. Extraction and
+identity lookup happen when the source opens, not per frame.
+
+Consumers share one driving playback clock. Each surface still owns its pause
+and retained frame; an incompatible playback rate splits that consumer onto a
+private decoder, reopened from the same file even after the packed image is gone.
+With the switch off, each source keeps its own decoder as before. The switch stays
+off by default: reducing duplicate queues does not establish that one shared
+clock is suitable for every scene or independently timed display.
 
 ### Direct video plane sampling
 

@@ -25,8 +25,11 @@
 #include <atomic>
 #include <barrier>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <optional>
 #include <thread>
 #include <string>
 #include <vector>
@@ -70,18 +73,26 @@ protected:
               ("owe-shared-video-" + std::to_string(::getpid()) + "-" +
                std::to_string(serial.fetch_add(1)));
         std::filesystem::create_directories(dir);
+        if (const char* previous = std::getenv("TMPDIR")) previous_tmpdir = previous;
+        const auto temp = dir / "tmp";
+        std::filesystem::create_directories(temp);
+        ASSERT_EQ(setenv("TMPDIR", temp.c_str(), 1), 0);
+        tmpdir_overridden = true;
         SetSharedVideoDecodeEnabled(true);
     }
 
     void TearDown() override {
         SetSharedVideoDecodeEnabled(false);
         ReleaseIdleVideoSessions();
+        if (tmpdir_overridden) {
+            if (previous_tmpdir) setenv("TMPDIR", previous_tmpdir->c_str(), 1);
+            else unsetenv("TMPDIR");
+        }
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
     }
 
-    /// A project image pointing at a real file, which is the shape the registry
-    /// can identify and therefore the only shape it will share.
+    /// A project image pointing at a real file.
     std::shared_ptr<Image> MakeFileImage(const std::string& name, const std::string& salt) {
         const auto media = dir / name;
         if (! WriteSyntheticVideo(media, 1, salt)) return nullptr;
@@ -89,7 +100,36 @@ protected:
         return CreateVideoProjectImage(dir, name, &error);
     }
 
+    /// The mip-payload shape returned by the texture parser, with no media path.
+    std::shared_ptr<Image> MakePackedImage(const std::string& name, const std::string& key) {
+        std::ifstream input(dir / name, std::ios::binary | std::ios::ate);
+        if (!input.good() || input.tellg() <= 0) return nullptr;
+        const auto size = static_cast<size_t>(input.tellg());
+        input.seekg(0, std::ios::beg);
+
+        auto image             = std::make_shared<Image>();
+        image->key             = key;
+        image->header.isVideo  = true;
+        image->header.count    = 1;
+        image->header.width    = testing_media::kFrameWidth;
+        image->header.height   = testing_media::kFrameHeight;
+        Image::Slot slot;
+        slot.width  = image->header.width;
+        slot.height = image->header.height;
+        ImageData mip;
+        mip.width  = slot.width;
+        mip.height = slot.height;
+        mip.size   = static_cast<isize>(size);
+        mip.data   = ImageDataPtr(new uint8_t[size], [](uint8_t* data) { delete[] data; });
+        if (!input.read(reinterpret_cast<char*>(mip.data.get()), size)) return nullptr;
+        slot.mipmaps.push_back(std::move(mip));
+        image->slots.push_back(std::move(slot));
+        return image;
+    }
+
     std::filesystem::path dir;
+    std::optional<std::string> previous_tmpdir;
+    bool tmpdir_overridden { false };
 };
 
 TEST_F(SharedVideoSessionTest, EquivalentConsumersShareOneDecoder) {
@@ -324,19 +364,129 @@ TEST_F(SharedVideoSessionTest, SharingOffGivesEveryConsumerItsOwnDecoder) {
     EXPECT_EQ(SharedVideoDecodeSessionCount(), 0u);
 }
 
-TEST_F(SharedVideoSessionTest, InPackageMediaIsNeverShared) {
-    // An in-memory payload has no path to identify it and could not be reopened
-    // for a later split, so it stays private whatever the setting says.
-    auto image                    = std::make_shared<Image>();
-    image->key                    = "packaged.mp4";
-    image->header.isVideo         = true;
-    image->header.width           = 64;
-    image->header.height          = 64;
+TEST_F(SharedVideoSessionTest, EquivalentPackedVideosShareOneDecoder) {
+    ASSERT_TRUE(WriteSyntheticVideo(dir / "media.mp4", 1, "packed-shared"));
+    auto first_image  = MakePackedImage("media.mp4", "first-texture");
+    auto second_image = MakePackedImage("media.mp4", "second-texture");
+    ASSERT_NE(first_image, nullptr);
+    ASSERT_NE(second_image, nullptr);
+    std::filesystem::remove(dir / "media.mp4");
 
     std::string error;
-    auto        source = AcquireVideoTextureSource(*image, &error);
-    ASSERT_NE(source, nullptr) << error;
+    auto first = AcquireVideoTextureSource(*first_image, &error);
+    ASSERT_NE(first, nullptr) << error;
+    auto second = AcquireVideoTextureSource(*second_image, &error);
+    ASSERT_NE(second, nullptr) << error;
+    ASSERT_TRUE(first->prime(&error)) << error;
+    ASSERT_TRUE(second->prime(&error)) << error;
+    EXPECT_EQ(SharedVideoDecodeSessionCount(), 1u);
+    EXPECT_EQ(SharedVideoDecodeConsumerCount(), 2u);
+    EXPECT_EQ(first->sourceStats().instance_id, second->sourceStats().instance_id);
+
+    const VideoPlaybackState running { false, 1.0f, 0.0 };
+    ASSERT_TRUE(first->syncPlayback(running, &error)) << error;
+    ASSERT_TRUE(first->refreshFrame(&error)) << error;
+    ASSERT_TRUE(second->syncPlayback(running, &error)) << error;
+    ASSERT_TRUE(second->refreshFrame(&error)) << error;
+    ASSERT_TRUE(first->currentFrame().valid());
+    EXPECT_EQ(first->currentFrame().pixel_buffer, second->currentFrame().pixel_buffer);
+}
+
+TEST_F(SharedVideoSessionTest, PackedVideosRemainPrivateWithSharingOff) {
+    SetSharedVideoDecodeEnabled(false);
+    ASSERT_TRUE(WriteSyntheticVideo(dir / "media.mp4", 1, "packed-disabled"));
+    auto first_image  = MakePackedImage("media.mp4", "texture");
+    auto second_image = MakePackedImage("media.mp4", "texture");
+    ASSERT_NE(first_image, nullptr);
+    ASSERT_NE(second_image, nullptr);
+
+    std::string error;
+    auto first = AcquireVideoTextureSource(*first_image, &error);
+    ASSERT_NE(first, nullptr) << error;
+    auto second = AcquireVideoTextureSource(*second_image, &error);
+    ASSERT_NE(second, nullptr) << error;
+    ASSERT_TRUE(first->prime(&error)) << error;
+    ASSERT_TRUE(second->prime(&error)) << error;
+    EXPECT_NE(first->sourceStats().instance_id, second->sourceStats().instance_id);
     EXPECT_EQ(SharedVideoDecodeSessionCount(), 0u);
+    EXPECT_TRUE(first->currentFrame().valid());
+    EXPECT_TRUE(second->currentFrame().valid());
+}
+
+TEST_F(SharedVideoSessionTest, DifferentPackedVideosWithTheSameNameAndSizeNeverShare) {
+    ASSERT_TRUE(WriteSyntheticVideo(dir / "first.mp4", 1, "first"));
+    ASSERT_TRUE(WriteSyntheticVideo(dir / "second.mp4", 1, "other"));
+    ASSERT_EQ(std::filesystem::file_size(dir / "first.mp4"),
+              std::filesystem::file_size(dir / "second.mp4"));
+    auto first_image  = MakePackedImage("first.mp4", "texture");
+    auto second_image = MakePackedImage("second.mp4", "texture");
+    ASSERT_NE(first_image, nullptr);
+    ASSERT_NE(second_image, nullptr);
+
+    std::string error;
+    auto first = AcquireVideoTextureSource(*first_image, &error);
+    ASSERT_NE(first, nullptr) << error;
+    auto second = AcquireVideoTextureSource(*second_image, &error);
+    ASSERT_NE(second, nullptr) << error;
+    ASSERT_TRUE(first->prime(&error)) << error;
+    ASSERT_TRUE(second->prime(&error)) << error;
+    EXPECT_EQ(SharedVideoDecodeSessionCount(), 2u);
+    EXPECT_NE(first->sourceStats().instance_id, second->sourceStats().instance_id);
+}
+
+TEST_F(SharedVideoSessionTest, PackedVideoRateSplitReopensAfterTheImagesAreReleased) {
+    ASSERT_TRUE(WriteSyntheticVideo(dir / "media.mp4", 1, "packed-rate"));
+    auto image = MakePackedImage("media.mp4", "texture");
+    ASSERT_NE(image, nullptr);
+    std::filesystem::remove(dir / "media.mp4");
+
+    std::string error;
+    auto normal = AcquireVideoTextureSource(*image, &error);
+    ASSERT_NE(normal, nullptr) << error;
+    auto faster = AcquireVideoTextureSource(*image, &error);
+    ASSERT_NE(faster, nullptr) << error;
+    image.reset();
+    ASSERT_TRUE(normal->prime(&error)) << error;
+    ASSERT_TRUE(normal->syncPlayback(VideoPlaybackState { false, 1.0f, 0.0 }, &error)) << error;
+    ASSERT_TRUE(faster->syncPlayback(VideoPlaybackState { false, 1.0f, 0.0 }, &error)) << error;
+    EXPECT_EQ(normal->sourceStats().instance_id, faster->sourceStats().instance_id);
+    const auto normal_id = normal->sourceStats().instance_id;
+
+    ASSERT_TRUE(faster->syncPlayback(VideoPlaybackState { false, 2.0f, 0.4 }, &error)) << error;
+    ASSERT_TRUE(faster->refreshFrame(&error)) << error;
+    EXPECT_TRUE(faster->currentFrame().valid());
+    EXPECT_EQ(SharedVideoDecodeSessionCount(), 2u);
+    EXPECT_EQ(normal->sourceStats().instance_id, normal_id);
+    EXPECT_NE(normal->sourceStats().instance_id, faster->sourceStats().instance_id);
+}
+
+TEST_F(SharedVideoSessionTest, ConcurrentPackedVideoOpensShareOneDecoder) {
+    ASSERT_TRUE(WriteSyntheticVideo(dir / "media.mp4", 1, "packed-concurrent"));
+    constexpr size_t count = 4;
+    std::array<std::shared_ptr<Image>, count> images;
+    std::array<std::shared_ptr<VideoTextureSource>, count> sources;
+    std::array<std::string, count> errors;
+    std::array<bool, count> ready {};
+    for (auto& image : images) {
+        image = MakePackedImage("media.mp4", "texture");
+        ASSERT_NE(image, nullptr);
+    }
+    std::barrier start(static_cast<ptrdiff_t>(count));
+    std::vector<std::thread> workers;
+    for (size_t i = 0; i < count; ++i) {
+        workers.emplace_back([&, i] {
+            start.arrive_and_wait();
+            sources[i] = AcquireVideoTextureSource(*images[i], &errors[i]);
+            ready[i] = sources[i] && sources[i]->prime(&errors[i]);
+        });
+    }
+    for (auto& worker : workers) worker.join();
+    for (size_t i = 0; i < count; ++i) {
+        ASSERT_TRUE(ready[i]) << errors[i];
+        EXPECT_EQ(sources[i]->sourceStats().instance_id, sources[0]->sourceStats().instance_id);
+    }
+    EXPECT_EQ(SharedVideoDecodeSessionCount(), 1u);
+    EXPECT_EQ(SharedVideoDecodeConsumerCount(), count);
 }
 
 } // namespace

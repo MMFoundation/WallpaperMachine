@@ -313,13 +313,10 @@ public:
         return instance;
     }
 
-    std::shared_ptr<VideoTextureSource> acquire(const Image& image, std::string* error) {
-        // Sharing needs a file on disk: an in-memory payload cannot be reopened
-        // for a later split, and its identity is not a path. Those stay private,
-        // which is the behaviour that existed before this registry.
-        auto identity = IdentifyMedia(image.videoFilePath);
-        if (! SharedVideoDecodeEnabled() || ! identity.has_value()) {
-            return CreateVideoTextureSource(image, error);
+    std::shared_ptr<VideoTextureSource> acquire(std::string media_path) {
+        auto identity = IdentifyMedia(media_path);
+        if (! identity.has_value()) {
+            return std::make_shared<FfmpegVideoTextureSource>(std::move(media_path));
         }
 
         const auto    key         = identity->key();
@@ -331,8 +328,7 @@ public:
             return std::make_shared<SharedVideoSourceHandle>(existing->second, consumer_id);
         }
 
-        auto source = CreateVideoTextureSource(image, error);
-        if (! source) return {};
+        auto source = std::make_shared<FfmpegVideoTextureSource>(std::move(media_path));
         auto session = std::make_shared<SharedVideoSession>(*identity, std::move(source));
         session->addConsumer(consumer_id);
         m_sessions.emplace(key, session);
@@ -483,7 +479,12 @@ std::uint32_t SharedVideoDecodeConsumerCount() {
 
 std::shared_ptr<VideoTextureSource> AcquireVideoTextureSource(const Image& image,
                                                               std::string* error) {
-    return SharedVideoRegistry::Instance().acquire(image, error);
+    if (! SharedVideoDecodeEnabled()) return CreateVideoTextureSource(image, error);
+    // Packed textures must be openable by path before lookup, both to share
+    // their content identity and to reopen a decoder if their timelines split.
+    auto media_path = ResolveVideoTextureMediaPath(image, error);
+    if (media_path.empty()) return {};
+    return SharedVideoRegistry::Instance().acquire(std::move(media_path));
 }
 
 void ReleaseIdleVideoSessions() { SharedVideoRegistry::Instance().releaseIdle(); }
