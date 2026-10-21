@@ -574,6 +574,12 @@ live-demand sampling, retry/watch policy and capture-owner lifetime remain disti
 completion or persistence. `actor/projection_values.rs` filters and annotates the
 library in one pass and measures filesystem sizes; the bounded shader-cache size
 cache and its invalidation policy remain in `actor/snapshots.rs`.
+`actor/snapshot_projection.rs` constructs options, monitor information and settings
+display rows from borrowed values. The caller retains real localization, visibility,
+metadata and user-asset annotations, and shares settings normalization with reports.
+Remembered display rows are borrowed lazily only for an empty live inventory. Candidate
+display validation still uses the full settings path; the row split does not remove
+its existing service reads or change bundle error short-circuiting.
 
 The shader layer is not a member: it is `wm-shader`, this project's own crate in the separate
 workspace `Renderer/` (`Renderer/Shader`, `rlib` + `staticlib`; `Renderer/Cargo.toml` pins naga to the

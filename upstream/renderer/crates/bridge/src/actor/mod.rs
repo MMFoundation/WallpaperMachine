@@ -2,6 +2,7 @@ mod bridge;
 mod fixture_values;
 pub mod messages;
 mod projection_values;
+mod snapshot_projection;
 mod snapshots;
 pub mod state;
 mod state_values;
