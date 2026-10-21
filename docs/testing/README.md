@@ -144,6 +144,15 @@ deletion. Only assertion-mapped inherited cases are retired. Remaining apply/set
 cases, contributor corrections and the entire cache-clear storage-observation case
 stay intact; suite membership alone is not evidence for deleting their assertions.
 
+The old Rust project/resource/rendergraph/runtime corpus wrappers are retired,
+together with their hard-coded developer-library paths, generated-data fallback
+and macro registry. Independent disk-manifest, source-resolution and scene-loader
+contracts retain the real type/loading/path-rejection behavior. Nonempty-object
+and default-target inventories were incidental checks, not native graph/runtime
+coverage; they are not recreated. The routine Rust gate excludes only the five
+desktop-window cases explicitly. Other asset skips remain reported, and removing
+the obsolete corpus exclusions does not make real corpus compatibility verified.
+
 An `IDELaunchServicesLauncher` assertion `childPID > 0` (exit 250) can abort
 Xcode before the native test host starts, even after successful compilation
 and bundle-signature verification. A missing verdict is not zero failing tests:

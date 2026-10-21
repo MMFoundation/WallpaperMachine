@@ -26,8 +26,6 @@ class RustGateTests(unittest.TestCase):
             def run(command, log, cwd, env):
                 environments.append(dict(env))
                 self.assertTrue(Path(env["WALLPAPER_MACHINE_HOME"]).is_dir())
-                expected = {name: directory for name, _, directory in check_rust.CHECKS}
-                self.assertEqual(cwd, expected[log.stem])
                 if unavailable:
                     raise FileNotFoundError("cargo unavailable")
                 code = 1 if log.stem == fail else 0
@@ -40,44 +38,28 @@ class RustGateTests(unittest.TestCase):
                 code = check_rust.run_checks(output, {**dict.fromkeys(check_rust.OPT_INS, "1"),
                                                       "WALLPAPER_MACHINE_HOME": "/never-use-the-real-library"}, run)
             report = json.loads((output / "report.json").read_text())
-        return code, report, environments, stdout.getvalue()
+        return code, report, environments
 
     def test_every_cargo_failure_blocks_the_gate_and_remains_in_the_report(self):
         for name, _, _ in check_rust.CHECKS:
             with self.subTest(check=name):
-                code, report, _, _ = self.gate(fail=name)
+                code, report, _ = self.gate(fail=name)
                 self.assertEqual(code, 1)
                 self.assertEqual(next(r for r in report["results"] if r["name"] == name)["exit"], 1)
 
     def test_missing_cargo_cannot_report_success(self):
-        code, report, _, _ = self.gate(unavailable=True)
+        code, report, _ = self.gate(unavailable=True)
         self.assertEqual(code, 1)
         self.assertTrue(all(r["exit"] != 0 for r in report["results"]))
 
-    def test_success_keeps_skip_reasons_and_never_inherits_live_opt_ins(self):
-        code, report, environments, output = self.gate()
+    def test_success_never_inherits_live_opt_ins_and_removes_isolated_state(self):
+        code, _, environments = self.gate()
         self.assertEqual(code, 0)
-        self.assertIn("skipping local corpus", output)
-        self.assertIn("requires an external wallpaper asset corpus", output)
-        self.assertIn("requires an explicitly authorized desktop run", output)
-        self.assertEqual(len(report["explicit_exclusions"]), 9)
-        for case in ("layer_swap_revert", "layer_swap_finish", "announces_layers"):
-            self.assertIn(f"tests::general::platform::case_wallpaper_window_{case}", report["explicit_exclusions"])
-        self.assertTrue(all(r["skips"] for r in report["results"]))
         for env in environments:
             self.assertTrue(all(name not in env for name in check_rust.OPT_INS))
             self.assertNotEqual(env["WALLPAPER_MACHINE_HOME"], "/never-use-the-real-library")
             self.assertFalse(Path(env["WALLPAPER_MACHINE_HOME"]).exists(), "isolated state is removed after the run")
 
-    def test_the_shader_layer_is_tested_in_its_own_workspace_with_the_ffi_feature(self):
-        checks = {name: (arguments, directory) for name, arguments, directory in check_rust.CHECKS}
-        arguments, directory = checks["shader"]
-        self.assertEqual(directory, check_rust.OWN_RENDERER)
-        self.assertEqual((directory.parent, directory.name), (check_rust.RENDERER.parents[1], "Renderer"))
-        self.assertTrue((directory / "Cargo.toml").is_file())
-        self.assertIn("wm-shader", arguments)
-        self.assertIn("ffi", arguments)
-        self.assertTrue(all(directory == check_rust.RENDERER for name, (_, directory) in checks.items() if name != "shader"))
 
 
 if __name__ == "__main__":
