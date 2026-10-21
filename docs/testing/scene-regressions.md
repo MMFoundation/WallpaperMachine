@@ -1037,6 +1037,13 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 
 ## Layers, textures and compositing
 
+The `rendergraph_smoke` target keeps its 34 `RenderGraph` identities: five retained
+project cases in `rendergraph_smoke.cpp` and 29 independently authored cases in
+`graph_contract_cases.cpp`, with concrete support in `graph_contract_support.hpp`.
+The retained blend/effect/skeleton logic and always-active `TestRequire` remain.
+These parser/graph fixtures use in-memory assets and real Null audio; their empty
+texture entrances are not decoded-image or native-rendering evidence.
+
 - **Effect buffers and swaps** — `SceneSchema.EffectBuffersTakeWallpaperEnginesSizesFormatsAndSwaps`
   pins `fit`/`width`/`height` sizing, the float and 8-bit formats and how a `swap`
   lowers to one copy or a three-copy exchange;

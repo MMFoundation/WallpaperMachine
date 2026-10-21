@@ -360,7 +360,7 @@ gtest_discover_tests(
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )
-add_executable(rendergraph_smoke rendergraph_smoke.cpp)
+add_executable(rendergraph_smoke rendergraph_smoke.cpp graph_contract_cases.cpp)
 target_link_libraries(rendergraph_smoke PRIVATE ${PROJECT_NAME} wpRenderCommon wpRGraph wpScene wpAudio wpFs GTest::gtest_main)
 target_include_directories(rendergraph_smoke PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(rendergraph_smoke PRIVATE cxx_std_20)
