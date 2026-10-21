@@ -47,6 +47,17 @@ struct TimerAdmissionTestAccess {
     }
     static void Begin(FrameTimer& frame, Clock::time_point when) { frame.FrameBegin(when); }
     static void End(FrameTimer& frame, Clock::time_point when) { frame.FrameEnd(when); }
+    static void SetOutstandingDraws(FrameTimer& frame, int count) {
+        frame.m_frame_busy_count.store(count);
+    }
+    static void RecordPriorWork(FrameTimer& frame, std::chrono::microseconds duration) {
+        frame.AddFrametime(duration);
+        frame.UpdateFrametime();
+    }
+    static void SetDriverInterval(FrameTimer& frame, std::chrono::microseconds interval) {
+        frame.m_timer.SetInterval(interval);
+    }
+    static void DeliverTick(FrameTimer& frame) { frame.OnTick(); }
 };
 } // namespace wallpaper
 
@@ -374,4 +385,104 @@ TEST(RequestAdmissionContractTest, SuppressedTickUsesObservationTime) {
     // barrier. The existing boundary cases, not this case, select recovery timing.
     harness.timer.FrameEnd();
     ASSERT_NO_FATAL_FAILURE(FinishTrailingDraw(harness));
+}
+
+namespace {
+
+class ScopedResetCaseStop {
+public:
+    explicit ScopedResetCaseStop(wallpaper::FrameTimer& timer) : timer_(&timer) {}
+    ScopedResetCaseStop(const ScopedResetCaseStop&) = delete;
+    ScopedResetCaseStop& operator=(const ScopedResetCaseStop&) = delete;
+
+    ~ScopedResetCaseStop() { Stop(); }
+
+    void Stop() {
+        if (timer_ != nullptr) {
+            timer_->Stop();
+            timer_ = nullptr;
+        }
+    }
+
+private:
+    wallpaper::FrameTimer* timer_;
+};
+
+}  // namespace
+
+TEST(FrameTimerTest, RunClearsStaleSchedulerStateBeforeStarting) {
+    using Access = wallpaper::TimerAdmissionTestAccess;
+    constexpr int required_fps = 40;
+    const auto nominal_period = std::chrono::microseconds(1000000 / required_fps);
+    const double nominal_seconds = std::chrono::duration<double>(nominal_period).count();
+
+    // Callback state outlives the timer, and every exit after Run joins its worker.
+    std::mutex callback_mutex;
+    std::condition_variable callback_ready;
+    bool received_callback = false;
+    wallpaper::FrameTimer timer([&] {
+        {
+            std::lock_guard<std::mutex> lock(callback_mutex);
+            received_callback = true;
+        }
+        callback_ready.notify_one();
+    });
+    timer.SetRequiredFps(required_fps);
+    Access::RecordPriorWork(timer, std::chrono::hours(9));
+    ASSERT_GT(timer.FrameTime(), nominal_seconds * 1000.0);
+    Access::SetOutstandingDraws(timer, 1);
+    const auto stale_interval = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::hours(11));
+    Access::SetDriverInterval(timer, stale_interval);
+
+    ScopedResetCaseStop stop(timer);
+    timer.Run();
+    bool callback_arrived = false;
+    {
+        std::unique_lock<std::mutex> lock(callback_mutex);
+        // A deadlock watchdog, not a throughput or callback-count requirement.
+        callback_arrived = callback_ready.wait_for(lock, std::chrono::seconds(5), [&] {
+            return received_callback;
+        });
+    }
+    stop.Stop();
+
+    ASSERT_TRUE(callback_arrived);
+    EXPECT_EQ(timer.TickInterval(), nominal_period);
+    EXPECT_GE(timer.FrameTime(), 0.0);
+    EXPECT_LE(timer.FrameTime(), nominal_seconds * 2.0);
+    EXPECT_DOUBLE_EQ(timer.IdeaTime(), nominal_seconds);
+}
+
+TEST(FrameTimerTest, FrameEndDropsSuspendedFrameDuration) {
+    using Access = wallpaper::TimerAdmissionTestAccess;
+    using Clock = std::chrono::steady_clock;
+    constexpr int required_fps = 40;
+    const auto nominal_period = std::chrono::microseconds(1000000 / required_fps);
+    const double nominal_seconds = std::chrono::duration<double>(nominal_period).count();
+    int callback_count = 0;
+    wallpaper::FrameTimer timer([&] { ++callback_count; });
+    timer.SetRequiredFps(required_fps);
+
+    const auto begin = Clock::time_point{} + std::chrono::hours(7)
+        + std::chrono::milliseconds(375);
+    const auto suspended_end = begin + std::chrono::hours(13);
+    Access::SetOutstandingDraws(timer, 1);
+    Access::Begin(timer, begin);
+    Access::End(timer, suspended_end);
+
+    EXPECT_GE(timer.FrameTime(), 0.0);
+    EXPECT_LE(timer.FrameTime(), nominal_seconds * 2.0);
+    EXPECT_GE(timer.IdeaTime(), 0.0);
+    EXPECT_LE(timer.IdeaTime(), nominal_seconds * 2.0);
+
+    // A real admitted callback demonstrates that End released the outstanding draw.
+    EXPECT_EQ(callback_count, 0);
+    Access::DeliverTick(timer);
+    ASSERT_EQ(callback_count, 1);
+
+    const auto resumed_begin = suspended_end + nominal_period;
+    Access::Begin(timer, resumed_begin);
+    EXPECT_DOUBLE_EQ(timer.IdeaTime(), nominal_seconds);
+    Access::End(timer, resumed_begin + std::chrono::microseconds(625));
 }

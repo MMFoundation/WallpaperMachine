@@ -22,41 +22,6 @@ namespace
 
 using namespace std::chrono_literals;
 
-TEST(FrameTimerTest, RunClearsStaleSchedulerStateBeforeStarting) {
-    FrameTimer timer;
-    timer.SetRequiredFps(20);
-
-    timer.m_frame_busy_count.store(7);
-    timer.AddFrametime(std::chrono::hours(8));
-    timer.UpdateFrametime();
-    timer.m_timer.SetInterval(std::chrono::hours(24));
-
-    ASSERT_GT(timer.FrameTime(), 60.0);
-
-    timer.Run();
-    timer.Stop();
-
-    EXPECT_EQ(timer.m_frame_busy_count.load(), 0);
-    EXPECT_LT(timer.FrameTime(), 0.1);
-    EXPECT_NEAR(timer.IdeaTime(), 0.05, 0.01);
-}
-
-TEST(FrameTimerTest, FrameEndDropsSuspendedFrameDuration) {
-    FrameTimer timer;
-    timer.SetRequiredFps(20);
-
-    timer.m_frame_busy_count.store(1);
-    const auto start = std::chrono::steady_clock::time_point(1s);
-    timer.FrameBegin(start);
-    timer.FrameEnd(start + 8h);
-
-    EXPECT_EQ(timer.m_frame_busy_count.load(), 0);
-    EXPECT_LT(timer.FrameTime(), 0.1);
-    EXPECT_NEAR(timer.IdeaTime(), 0.05, 0.01);
-
-    timer.FrameBegin(start + 8h + 50ms);
-    EXPECT_DOUBLE_EQ(timer.IdeaTime(), 0.05);
-}
 
 TEST(FrameTimerTest, DeliveredFramesIncludeDroppedTickIntervals) {
     int draws = 0;
