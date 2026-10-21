@@ -176,9 +176,12 @@ the first frame.
 The panel never reads animation pixels back: frames go from ImageIO to the screen,
 and the bright still is chosen once, in the cache. Scrolling a tile offscreen, hiding
 the window or leaving Discover releases its animation, and returning to a visible tile
-reuses the disk cache; flipping to another page drops pending animation requests. An
-installed copy shows the library's still and never animates. The inspector shows
-Steam's 512 px still for the selected item, with its animation played over it.
+reuses the disk cache; flipping to another page drops pending animation requests and
+releases the animations of tiles that left. An installed copy shows the library's
+still and never animates. The inspector shows Steam's 512 px still for the selected
+item, with its animation played over it while the window is on screen; hiding the
+window releases the animation's bytes and showing it again reloads them from the disk
+cache.
 
 ## Collections, authors and subscriptions
 

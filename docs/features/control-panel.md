@@ -111,7 +111,8 @@ does not count). Sweeping across the grid, dragging a selection and a preview
 that is a single picture start nothing, and moving between one tile's own buttons
 keeps it playing. Leaving the tile, hiding the window, filtering the tile away or
 changing page releases the animation. The inspector's artwork is the preview file
-itself, so the selected wallpaper still animates there.
+itself, so the selected wallpaper still animates there while the window is on
+screen; hiding the window releases it, and showing the window reads the file again.
 
 The window never shrinks below a 760×560 content area (capped by the visible
 screen on small displays). `ControlPanelWindow.minimumContentSize` owns that
