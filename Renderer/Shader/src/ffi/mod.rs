@@ -16,7 +16,7 @@ use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::panic::{self, AssertUnwindSafe};
 use std::ptr;
-use std::sync::{Once, OnceLock};
+use std::sync::{LazyLock, Once};
 
 use crate::diagnostic::diagnostics_json;
 use crate::error::ShaderError;
@@ -109,7 +109,10 @@ fn build_program(compiled: &CompiledProgram) -> Result<RsShaderProgram, ShaderEr
     Ok(RsShaderProgram {
         stages,
         metadata: c_string(compiled.metadata.to_json()?),
+        #[cfg(not(feature = "observer-uniform-layout"))]
         reflection: c_string(compiled.reflection.to_json()),
+        #[cfg(feature = "observer-uniform-layout")]
+        reflection: c_string(crate::observer_uniform_layout::reflection_json(compiled)),
         diagnostics: c_string(diagnostics_json(&compiled.diagnostics)),
         cache_key: c_string(compiled.cache_key.as_str()),
     })
@@ -402,6 +405,6 @@ pub unsafe extern "C" fn rs_shader_program_free(program_handle: *mut RsShaderPro
 /// The compiler identity for persistent caches (4.11); a process-lifetime pointer.
 #[unsafe(no_mangle)]
 pub extern "C" fn rs_shader_cache_identity() -> *const c_char {
-    static IDENTITY: OnceLock<CString> = OnceLock::new();
-    IDENTITY.get_or_init(|| c_string(compiler_identity())).as_ptr()
+    static IDENTITY: LazyLock<CString> = LazyLock::new(|| c_string(compiler_identity()));
+    IDENTITY.as_ptr()
 }

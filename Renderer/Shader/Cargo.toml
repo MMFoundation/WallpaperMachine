@@ -13,6 +13,9 @@ crate-type = ["rlib", "staticlib"]
 default = []
 # The C ABI (rs_shader_* functions) declared by include/rs_shader.h.
 ffi = []
+# Retain original translated uniform storage types for a diagnostic reflection document.
+# Changes the compiler/cache identity; never enabled by ordinary builds.
+observer-uniform-layout = []
 
 [dependencies]
 naga.workspace = true

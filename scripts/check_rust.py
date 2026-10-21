@@ -39,19 +39,22 @@ CORE_EXCLUSIONS = {
 }
 
 
-def run_checks(output, environment, runner=run_quiet):
+def run_checks(output, environment, runner=run_quiet, *, observer_uniform_layout=False):
     output.mkdir(parents=True, exist_ok=True)
     report = {"desktop_automation": False, "audio_hardware": False,
               "disabled_opt_ins": list(OPT_INS), "explicit_exclusions": CORE_EXCLUSIONS,
               "results": []}
     for test, reason in CORE_EXCLUSIONS.items():
         print(f"{MARK.warn} Excluded {test}: {reason}")
+    checks = CHECKS
+    if observer_uniform_layout:
+        checks += (("shader-observer", ("-p", "wm-shader", "--features", "ffi,observer-uniform-layout"), OWN_RENDERER),)
     with tempfile.TemporaryDirectory(prefix="wallpaper-rust-tests-") as home:
         env = dict(environment)
         for variable in OPT_INS:
             env.pop(variable, None)
         env["WALLPAPER_MACHINE_HOME"] = home
-        for name, arguments, directory in CHECKS:
+        for name, arguments, directory in checks:
             command = ["cargo", "test", "--release", "--locked", *arguments, "--", "--nocapture"]
             if name == "core":
                 for test in CORE_EXCLUSIONS:
@@ -81,9 +84,11 @@ def run_checks(output, environment, runner=run_quiet):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, help="Directory for full logs and the machine-readable verdict.")
+    parser.add_argument("--observer-uniform-layout", action="store_true",
+                        help="Also check opt-in compiler-origin uniform layout diagnostics; no native capture.")
     args = parser.parse_args(argv)
     output = args.output or ARTIFACTS / "rust" / datetime.now().strftime("checks-%Y%m%d-%H%M%S-%f")
-    return run_checks(output, cargo_environment())
+    return run_checks(output, cargo_environment(), observer_uniform_layout=args.observer_uniform_layout)
 
 
 if __name__ == "__main__":

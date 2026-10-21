@@ -464,14 +464,28 @@ mod tests {
     #[test]
     fn golden_keys_are_recorded_per_identity_and_never_change_silently() {
         let identity = compiler_identity();
+        // A diagnostic identity intentionally changes keys, but must still exercise the
+        // unchanged ordinary stream against its genuine historical golden. No diagnostic
+        // digest is invented or presented as a shipped/executed value.
+        #[cfg(feature = "observer-uniform-layout")]
+        let identity = identity.strip_suffix("-observer-uniform-layout-v1").expect("diagnostic identity discriminator");
         let row = GOLDEN_KEYS.iter().find(|(id, _)| *id == identity).unwrap_or_else(|| {
             panic!("no golden row for identity {identity}: add one when bumping PIPELINE_REVISION")
         });
+        let mut ordinary = golden_case();
+        ordinary.identity = identity.to_string();
         assert_eq!(
-            key(&golden_case()),
+            key(&ordinary),
             row.1,
             "the program key of a fixed input changed under identity {identity}: bump PIPELINE_REVISION and append a row"
         );
+        #[cfg(feature = "observer-uniform-layout")]
+        {
+            let diagnostic = golden_case();
+            assert_ne!(diagnostic.identity, ordinary.identity);
+            assert_ne!(key(&diagnostic), key(&ordinary), "diagnostic metadata cannot reuse an ordinary cached response");
+            assert_eq!(key(&diagnostic), key(&golden_case()), "diagnostic keys remain deterministic");
+        }
         let mut ids: Vec<&str> = GOLDEN_KEYS.iter().map(|(id, _)| *id).collect();
         ids.sort_unstable();
         ids.dedup();

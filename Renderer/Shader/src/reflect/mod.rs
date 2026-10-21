@@ -79,6 +79,33 @@ fn stage_of(kind: StageKind) -> naga::ShaderStage {
     }
 }
 
+/// The backend and reflector both select the first entry of the requested stage. The
+/// diagnostic retainer shares this selection, rather than guessing from the emitted MSL name.
+#[inline]
+pub(crate) fn selected_entry(kind: StageKind, module: &Module) -> Option<usize> {
+    let stage = stage_of(kind);
+    module.entry_points.iter().position(|e| e.stage == stage)
+}
+
+/// The existing reflection resource policy, shared with the opt-in diagnostic retainer.
+/// This is a lazy, allocation-free iterator over the same globals in the same order.
+#[inline]
+pub(crate) fn active_resources<'a>(
+    module: &'a Module,
+    info: &'a ModuleInfo,
+    entry: usize,
+) -> impl Iterator<Item = (naga::Handle<naga::GlobalVariable>, &'a naga::GlobalVariable, ResourceClass)> + 'a {
+    let usage = info.get_entry_point(entry);
+    module.global_variables.iter().filter_map(move |(handle, var)| {
+        let class = classify(module, var);
+        if class == ResourceClass::NotAResource || usage[handle].is_empty() {
+            None
+        } else {
+            Some((handle, var, class))
+        }
+    })
+}
+
 /// Reflects the entry point of `kind` of a validated module.
 pub fn reflect_module(
     kind: StageKind,
@@ -86,25 +113,15 @@ pub fn reflect_module(
     info: &ModuleInfo,
     names: &InputNames,
 ) -> Result<Reflection, ReflectionError> {
-    let stage = stage_of(kind);
-    let Some(index) = module.entry_points.iter().position(|e| e.stage == stage) else {
+    let Some(index) = selected_entry(kind, module) else {
         return Err(ReflectionError::NoEntryPoint { stage: kind.name() });
     };
-    let usage = info.get_entry_point(index);
     let mask = StageMask::of(kind);
 
     let mut descriptors = Vec::new();
     let mut blocks = Vec::new();
     let mut slots = BTreeSet::new();
-    for (handle, var) in module.global_variables.iter() {
-        let class = classify(module, var);
-        if class == ResourceClass::NotAResource {
-            continue;
-        }
-        let used = !usage[handle].is_empty();
-        if !used {
-            continue;
-        }
+    for (_, var, class) in active_resources(module, info, index) {
         let name = resource_name(module, var);
         let (set, binding) = match &var.binding {
             Some(b) => (b.group, Some(b.binding)),

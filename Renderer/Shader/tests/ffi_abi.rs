@@ -256,8 +256,8 @@ unsafe extern "C" fn provider(path: *const c_char, user_data: *mut c_void) -> Rs
             RsShaderOwnedBytes { ptr: p, len: bytes.len(), free: Some(release), free_user_data: user_data }
         }
         Some(Reply::Unowned(bytes)) => {
-            let leaked: &'static mut [u8] = Box::leak(bytes.clone().into_boxed_slice());
-            RsShaderOwnedBytes { ptr: leaked.as_mut_ptr(), len: leaked.len(), free: None, free_user_data: ptr::null_mut() }
+            // Env owns this buffer throughout the synchronous compile; the library only reads it.
+            RsShaderOwnedBytes { ptr: bytes.as_ptr().cast_mut(), len: bytes.len(), free: None, free_user_data: ptr::null_mut() }
         }
     }
 }
@@ -325,9 +325,15 @@ fn the_response_documents_are_compact_and_keyed_in_the_documented_order() {
         keys(&c.metadata()),
         ["combos", "aliases", "default_uniforms", "default_textures", "active_texture_slots"]
     );
+    #[cfg(not(feature = "observer-uniform-layout"))]
     assert_eq!(
         keys(&c.reflection()),
         ["descriptor_bindings", "uniform_blocks", "vertex_inputs", "active_texture_slots"]
+    );
+    #[cfg(feature = "observer-uniform-layout")]
+    assert_eq!(
+        keys(&c.reflection()),
+        ["descriptor_bindings", "uniform_blocks", "vertex_inputs", "active_texture_slots", "observer_uniform_layout"]
     );
     let diagnostics = c.diagnostics();
     for entry in items(&diagnostics) {
@@ -1191,4 +1197,36 @@ fn a_success_diagnostics_document_has_one_codegen_entry_per_stage_with_a_valid_s
         // where the text is known (the pipeline tests).
         assert!(number("start") <= number("end"), "{span:?}");
     }
+}
+
+#[cfg(feature = "observer-uniform-layout")]
+#[test]
+fn existing_reflection_accessor_owns_original_stage_layouts_with_no_new_abi_entry() {
+    let c = ok(&textured());
+    let reflection = c.reflection();
+    let diagnostic = member(&reflection, "observer_uniform_layout");
+    assert_eq!(string_of(member(diagnostic, "origin")), "original-translated-naga-module");
+    let Value::Number(version) = member(diagnostic, "schema_version") else { panic!() };
+    assert_eq!(version.as_u64(), Some(1));
+    let stages = items(member(diagnostic, "stages"));
+    assert_eq!(stages.len(), 2);
+    for (index, stage) in stages.iter().enumerate() {
+        assert_eq!(string_of(member(stage, "stage")), if index == 0 { "vertex" } else { "fragment" });
+        assert_eq!(member(stage, "complete"), &Value::Bool(true));
+        assert_eq!(string_of(member(stage, "msl_entry_point")), string_of(member(&c.stage_doc(index), "entry_point")));
+        assert_eq!(string_of(member(member(stage, "blocks"), "status")), "available");
+    }
+    let vertex_blocks = items(member(member(&stages[0], "blocks"), "value"));
+    let fragment_blocks = items(member(member(&stages[1], "blocks"), "value"));
+    assert_eq!(vertex_blocks.len(), 1);
+    assert!(fragment_blocks.is_empty(), "vertex-only uniform use must not be merged into the fragment diagnostic");
+    let layout = member(member(&vertex_blocks[0], "layout"), "value");
+    let members = items(member(layout, "members"));
+    let matrix = members.iter().find(|m| string_of(member(m, "name")) == "g_ModelViewProjectionMatrix").unwrap();
+    let physical = member(member(matrix, "layout"), "value");
+    let shape = member(member(physical, "type"), "element_shape");
+    assert_eq!(string_of(member(shape, "kind")), "matrix");
+    let Value::Number(stride) = member(shape, "column_stride") else { panic!() };
+    assert_eq!(stride.as_u64(), Some(16));
+    assert!(text_of(rs_shader_cache_identity()).ends_with("-observer-uniform-layout-v1"));
 }

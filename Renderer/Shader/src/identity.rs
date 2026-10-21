@@ -9,12 +9,13 @@
 //! dependency, to the MSL language version or to the compile options. That
 //! is a deliberate act: bump [`PIPELINE_REVISION`] in the same change, and
 //! add the new row to the golden table in `cache_key.rs`, whose tests fail
-//! when a stored program changes without a bump (R88).
+//! when a stored program changes without a bump (R88). The opt-in layout
+//! diagnostic uses a separate options identity; it is not an ordinary shipped revision.
 //!
 //! Nothing here varies per build or per launch: no timestamp, path or
 //! process id (R78).
 
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 /// Counts behavioural revisions of this layer. The first release of the
 /// rewrite is 1; stored programs of the earlier implementation are stale.
@@ -34,7 +35,11 @@ pub const MSL_LANGUAGE_VERSION: &str = "2.0";
 
 /// The set of compile options in force: the source is left untransformed
 /// (all three conventions of R26 are false).
+#[cfg(not(feature = "observer-uniform-layout"))]
 pub const COMPILE_OPTIONS: &str = "untransformed";
+/// Diagnostic reflection must never hit an ordinary cached response without typed metadata.
+#[cfg(feature = "observer-uniform-layout")]
+pub const COMPILE_OPTIONS: &str = "untransformed-observer-uniform-layout-v1";
 
 /// Builds an identity from its parts: `<revision>:<options identity>` (D R37). The options
 /// identity names the translator, the Metal language version and the compile options, and only
@@ -45,8 +50,8 @@ pub fn build_identity(revision: u32, compiler_version: &str, msl_version: &str, 
 
 /// The identity of this build; computed once, valid for the process lifetime.
 pub fn compiler_identity() -> &'static str {
-    static IDENTITY: OnceLock<String> = OnceLock::new();
-    IDENTITY.get_or_init(|| build_identity(PIPELINE_REVISION, NAGA_VERSION, MSL_LANGUAGE_VERSION, COMPILE_OPTIONS))
+    static IDENTITY: LazyLock<String> = LazyLock::new(|| build_identity(PIPELINE_REVISION, NAGA_VERSION, MSL_LANGUAGE_VERSION, COMPILE_OPTIONS));
+    &IDENTITY
 }
 
 #[cfg(test)]

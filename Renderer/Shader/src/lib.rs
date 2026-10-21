@@ -29,6 +29,8 @@ pub mod lexer;
 pub mod metadata;
 pub mod names;
 mod nagair;
+#[cfg(feature = "observer-uniform-layout")]
+pub mod observer_uniform_layout;
 pub mod pipeline;
 pub mod prepare;
 pub mod preprocess;

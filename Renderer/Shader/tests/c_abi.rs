@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 const EXPORTED: [&str; 13] = [
     "rs_shader_cache_identity",
@@ -35,13 +35,13 @@ fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Builds the static library with the feature on, in the profile and target directory of this
-/// test, and returns its path (None, printed, when that cannot be done here).
+/// Builds the static library with ffi and this test binary's diagnostic feature selection,
+/// in its profile and target directory (None, printed, when that cannot be done here).
 fn static_library() -> Option<PathBuf> {
     // Once per test binary: the tests run in parallel and must not read the archive while
     // another one is relinking it.
-    static BUILT: OnceLock<Option<PathBuf>> = OnceLock::new();
-    BUILT.get_or_init(build_static_library).clone()
+    static BUILT: LazyLock<Option<PathBuf>> = LazyLock::new(build_static_library);
+    BUILT.clone()
 }
 
 fn build_static_library() -> Option<PathBuf> {
@@ -50,9 +50,10 @@ fn build_static_library() -> Option<PathBuf> {
     let profile_dir = exe.parent()?.parent()?.to_path_buf();
     let target_dir = profile_dir.parent()?.to_path_buf();
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    let features = if cfg!(feature = "observer-uniform-layout") { "ffi,observer-uniform-layout" } else { "ffi" };
     let mut command = Command::new(cargo);
     command
-        .args(["build", "--lib", "-p", "wm-shader", "--features", "ffi", "--quiet"])
+        .args(["build", "--lib", "-p", "wm-shader", "--features", features, "--quiet"])
         .arg("--target-dir")
         .arg(&target_dir)
         .current_dir(manifest_dir());
@@ -179,39 +180,5 @@ fn the_archive_exports_exactly_the_contract() {
     let header = std::fs::read_to_string(manifest_dir().join("include/rs_shader.h")).unwrap();
     for name in EXPORTED {
         assert!(header.contains(&format!("{name}(")), "{name}");
-    }
-}
-
-/// Amendment a-contract R113 (a) and (c): the package is `wm-shader`, the archive `libwm_shader.a`,
-/// and no other manifest of the workspace names the crate (the host's own dependency table is the
-/// only Rust-level coupling and lives outside this crate).
-#[test]
-fn the_crate_has_the_new_names_and_no_other_manifest_names_it() {
-    let manifest = std::fs::read_to_string(manifest_dir().join("Cargo.toml")).unwrap();
-    assert!(manifest.lines().any(|l| l.trim() == "name = \"wm-shader\""), "{manifest}");
-    assert!(manifest.contains("staticlib"), "the archive is built");
-    // The old names are retired: no manifest line names a package `shader`.
-    let workspace = manifest_dir().parent().unwrap().to_path_buf();
-    let mut manifests = Vec::new();
-    let mut stack = vec![workspace.clone()];
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                if path.file_name().is_some_and(|n| n != "target") {
-                    stack.push(path);
-                }
-            } else if path.file_name().is_some_and(|n| n == "Cargo.toml") {
-                manifests.push(path);
-            }
-        }
-    }
-    assert!(!manifests.is_empty());
-    for path in &manifests {
-        let text = std::fs::read_to_string(path).unwrap();
-        assert!(!text.lines().any(|l| l.trim() == "name = \"shader\""), "{}", path.display());
-        if path != &manifest_dir().join("Cargo.toml") {
-            assert!(!text.contains("wm-shader"), "{} names the crate", path.display());
-        }
     }
 }

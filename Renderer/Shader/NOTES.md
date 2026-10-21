@@ -615,6 +615,47 @@ as in the earlier sweeps; three combo sets: none, lit and fogged, skinned and re
 - Time (release): per program median 0.4 ms and worst 5.2 ms for the shipped ones, median 1.0 ms and
   worst 3.5 ms for the workshop ones, preprocessing and reflection included.
 
+## Opt-in physical uniform-layout diagnostics
+
+`observer-uniform-layout` retains compiler-origin observations from each original
+translated Naga module before that module is dropped. It is disabled by default:
+ordinary stages have no diagnostic field, traversal, allocation or extra reflection
+bytes. No extra C function is added. With the feature enabled, the existing
+`rs_shader_program_reflection_json` document adds `observer_uniform_layout` schema1.
+The compiler/cache identity gains an explicit diagnostic suffix so these responses
+cannot be confused with ordinary cached programs.
+
+Each stage owns its source/emitted entry names and active block/member identities,
+offsets, physical byte spans, scalar kind/width, vector or matrix dimensions,
+matrix-column stride and outermost-first array dimensions/strides. These are the
+translated storage types: a Boolean may be unsigned storage, a two-row matrix may
+have four physical rows, and a scalar array may use padded vectors. Ordinary
+authored component counts remain separate. Matrix-column spacing comes from
+Naga's row-vector alignment rule, not from dividing a guessed byte span or reusing
+the whole-array stride.
+
+Unavailable modules/entries/types and exceeded observation budgets are explicit;
+a consumer must refuse `complete == false`. Limits per stage are 128 blocks,
+4096 members, 16 array dimensions per member and 256 KiB of copied names. Array
+elements are not expanded. Nested struct members and nonconstant arrays remain
+unavailable; their presence does not change ordinary shader compilation success.
+
+From the repository root, exercise both ordinary and diagnostic configurations:
+
+```sh
+python3 scripts/check_rust.py --observer-uniform-layout
+```
+
+The extra `shader-observer` stage does not replace the ordinary stage. Actual C
+consumer builds inherit their test binary's feature selection. Normal and observer
+C callers were also exercised on the same independently authored request: ordinary
+reflection, annotation metadata, MSL and stage payloads matched; compiler/cache
+identities differed; the diagnostic returned physical Boolean, widened matrix and
+padded-array facts through the existing accessor. These are compiler/ABI checks,
+not evidence that a native Metal draw used that layout or those bytes. An observer
+must still join the selected ordinary/variant program to actual bound buffers,
+draws and resource lifetimes; this feature does not perform that capture.
+
 ## What a later step takes from this one
 
 The C ABI (`ffi` feature): `pipeline::compile` returns a `CompiledProgram` with everything the

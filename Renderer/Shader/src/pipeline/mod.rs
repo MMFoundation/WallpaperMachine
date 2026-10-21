@@ -40,6 +40,10 @@ pub struct ProgramStage {
     pub payload: StagePayload,
     /// The legalized GLSL the payload was compiled from, retained as text (R1, R52).
     pub glsl: String,
+    /// Diagnostic storage types from this stage's original translated module, not merged
+    /// author-facing component counts. Entirely absent in normal builds.
+    #[cfg(feature = "observer-uniform-layout")]
+    pub uniform_layout: crate::observer_uniform_layout::StageUniformLayout,
 }
 
 /// A compiled program (spec D 2.2).
@@ -106,6 +110,11 @@ impl Pipeline<'_> {
             let legal_stage = legal.stage(kind).expect("both stages are legalized");
             let compiled = self.compiler.compile(kind, legal_stage).map_err(|e| e.named(name))?;
             let mut reflection = self.reflector.reflect(kind, &compiled, &names).map_err(|e| e.named(name))?;
+            // Retain while the exact translated module and its validation are still owned.
+            // Diagnostic selection shares the reflector's entry/resource helpers; unavailable
+            // metadata is not a shader failure and never changes ordinary reflection.
+            #[cfg(feature = "observer-uniform-layout")]
+            let uniform_layout = crate::observer_uniform_layout::retain(kind, &compiled);
             if let Some(plan) = &legal.layout.block {
                 restore_author_element_counts(&mut reflection, plan);
             }
@@ -114,7 +123,13 @@ impl Pipeline<'_> {
             let prepared_stage = prepared.stages.iter().find(|s| s.kind == kind).expect("both stages are prepared");
             key_stages.push((kind, prepared_stage.evaluated.as_str(), legal_stage.text.as_str()));
             reflections.push(reflection);
-            stages.push(ProgramStage { kind, payload: compiled.payload, glsl: legal_stage.text.clone() });
+            stages.push(ProgramStage {
+                kind,
+                payload: compiled.payload,
+                glsl: legal_stage.text.clone(),
+                #[cfg(feature = "observer-uniform-layout")]
+                uniform_layout,
+            });
         }
 
         // Two stages that disagree about a block they share are a request the layer cannot

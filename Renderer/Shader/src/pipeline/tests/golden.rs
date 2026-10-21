@@ -39,6 +39,11 @@ fn digest() -> String {
 #[test]
 fn the_metal_text_of_fixed_programs_is_recorded_per_identity() {
     let identity = compiler_identity();
+    // Retaining diagnostics must not change generated MSL. Reuse the genuine ordinary
+    // expectation under the explicitly distinct diagnostic identity, without claiming a new
+    // executed digest or adding a fictitious shipped revision.
+    #[cfg(feature = "observer-uniform-layout")]
+    let identity = identity.strip_suffix("-observer-uniform-layout-v1").expect("diagnostic identity discriminator");
     let row = SHIPPED.iter().find(|(id, _)| *id == identity).unwrap_or_else(|| panic!("no row for identity {identity}: append one when bumping the revision"));
     assert_eq!(digest(), row.1, "the Metal text changed under identity {identity}: bump PIPELINE_REVISION and append a row, never edit one");
 }
