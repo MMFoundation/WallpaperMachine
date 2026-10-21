@@ -879,63 +879,6 @@ async fn secondary_display_can_mirror_to_primary_display() {
     assert_eq!(display.selected_mirror_target.as_deref(), Some("primary"));
 }
 
-#[tokio::test]
-async fn mirror_targets_use_stable_selector_ids_and_labels_include_primary() {
-    let primary = identified_display("primary", 1);
-    let secondary = identified_display("secondary", 3);
-    let tertiary = identified_display("tertiary", 5);
-    let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![primary, secondary, tertiary]);
-    let bridge = BridgeBuilder::new(engine)
-        .with_state(crate::actor::state::BridgeActorState::default())
-        .build()
-        .expect("tokio runtime and config load for wallpaper bridge");
-
-    let settings = bridge.settings_snapshot().await.unwrap();
-    let tertiary_row = settings
-        .displays
-        .iter()
-        .find(|display| display.title.contains("tertiary"))
-        .expect("tertiary row");
-    let secondary_row = settings
-        .displays
-        .iter()
-        .find(|display| display.title.contains("secondary"))
-        .expect("secondary row");
-
-    assert!(tertiary_row.display_id.starts_with("identity:"));
-    assert!(secondary_row.display_id.starts_with("identity:"));
-    assert!(tertiary_row.mirror_targets.contains(&"primary".to_string()));
-    assert!(
-        tertiary_row
-            .mirror_targets
-            .iter()
-            .any(|target| target.starts_with("identity:"))
-    );
-    assert!(
-        tertiary_row
-            .mirror_targets
-            .contains(&secondary_row.display_id)
-    );
-    assert!(!tertiary_row.mirror_targets.contains(&"1".to_string()));
-    assert!(!tertiary_row.mirror_targets.contains(&"3".to_string()));
-}
-
-#[tokio::test]
-async fn settings_reject_self_mirror_without_mutating_snapshot() {
-    let bridge = WallpaperBridge::new_for_test();
-    bridge
-        .inject_display_for_test("1", "Vendor - Model (1)")
-        .await;
-
-    let result = bridge
-        .set_mirror_target("1".to_string(), "1".to_string())
-        .await;
-
-    assert!(result.is_err());
-    let snapshot = bridge.settings_snapshot().await.unwrap();
-    assert_eq!(snapshot.displays[0].mode, BridgeDisplayMode::Standalone);
-}
 
 #[tokio::test]
 async fn settings_snapshot_exposes_single_locked_primary_row() {
@@ -1206,57 +1149,6 @@ async fn first_seen_display_starts_with_primary_wallpaper_and_keeps_opt_out_afte
     );
 }
 
-#[tokio::test]
-async fn wallpaper_options_hide_disabled_global_displays() {
-    let primary = identified_display("primary", 1);
-    let secondary = identified_display("secondary", 3);
-    let secondary_identity =
-        SerializedSelector::from_selector(&DisplaySelector::Identity(secondary.identity.clone()));
-    let root = tempfile::tempdir().unwrap();
-    let store = ConfigStore::open(root.path().to_path_buf());
-    store
-        .save_app_config(&AppConfig {
-            monitors: vec![
-                MonitorCfg {
-                    selector: SerializedSelector::Primary,
-                    enabled: true,
-                    mode: "independent".to_string(),
-                    wallpaper: Some("100".to_string()),
-                    mirror_target: None,
-                },
-                MonitorCfg {
-                    selector: secondary_identity,
-                    enabled: false,
-                    mode: "independent".to_string(),
-                    wallpaper: Some("100".to_string()),
-                    mirror_target: None,
-                },
-            ],
-            ..AppConfig::default()
-        })
-        .unwrap();
-    store
-        .save_wallpaper(&WallpaperConfig::new_for("100", "scene"))
-        .unwrap();
-
-    let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![primary, secondary]);
-    let bridge = BridgeBuilder::new(engine)
-        .with_config_store(ConfigStore::open(root.path().to_path_buf()))
-        .build()
-        .expect("tokio runtime and config load for wallpaper bridge");
-    bridge
-        .inject_scene_wallpaper_config_for_test("100", "Scene")
-        .await;
-
-    let options = bridge
-        .wallpaper_options_snapshot("100".to_string())
-        .await
-        .unwrap();
-
-    assert_eq!(options.display_configurations.len(), 1);
-    assert_eq!(options.display_configurations[0].display_id, "primary");
-}
 
 #[tokio::test]
 async fn mirror_display_setting_sends_mirror_assignment_to_engine() {
@@ -2045,57 +1937,6 @@ async fn settings_row(
         .unwrap_or_else(|| panic!("missing settings row for display {display_id}"))
 }
 
-#[tokio::test]
-async fn wallpaper_options_hide_mirror_display_configuration_rows() {
-    let primary = identified_display("primary", 1);
-    let secondary = identified_display("secondary", 3);
-    let secondary_selector =
-        SerializedSelector::from_selector(&DisplaySelector::Identity(secondary.identity.clone()));
-    let root = tempfile::tempdir().unwrap();
-    let store = ConfigStore::open(root.path().to_path_buf());
-    store
-        .save_app_config(&AppConfig {
-            monitors: vec![
-                MonitorCfg {
-                    selector: SerializedSelector::Primary,
-                    enabled: true,
-                    mode: "independent".to_string(),
-                    wallpaper: Some("100".to_string()),
-                    mirror_target: None,
-                },
-                MonitorCfg {
-                    selector: secondary_selector,
-                    enabled: true,
-                    mode: "mirror".to_string(),
-                    wallpaper: None,
-                    mirror_target: Some(SerializedSelector::Primary),
-                },
-            ],
-            ..AppConfig::default()
-        })
-        .unwrap();
-    store
-        .save_wallpaper(&WallpaperConfig::new_for("100", "scene"))
-        .unwrap();
-
-    let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![primary, secondary]);
-    let bridge = BridgeBuilder::new(engine)
-        .with_config_store(ConfigStore::open(root.path().to_path_buf()))
-        .build()
-        .expect("tokio runtime and config load for wallpaper bridge");
-    bridge
-        .inject_scene_wallpaper_config_for_test("100", "Scene")
-        .await;
-
-    let options = bridge
-        .wallpaper_options_snapshot("100".to_string())
-        .await
-        .unwrap();
-
-    assert_eq!(options.display_configurations.len(), 1);
-    assert_eq!(options.display_configurations[0].display_id, "primary");
-}
 
 #[tokio::test]
 async fn mirror_display_settings_apply_to_concrete_mirror_scene() {

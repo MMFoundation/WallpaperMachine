@@ -10,6 +10,8 @@ mod mounted_state;
 pub(crate) mod operation_contract_test_support;
 #[cfg(test)]
 mod operation_contract_tests;
+#[cfg(test)]
+mod small_library_contract_tests;
 mod types;
 
 use std::{

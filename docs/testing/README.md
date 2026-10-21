@@ -107,9 +107,15 @@ The independent display/config/project/draft contract suites now carry the mappe
 self-mirror, corrupt-file backup, raw rich-text/type and Cancel-baseline assertions
 formerly duplicated in small inherited bridge tests. Constructor-pointer equality,
 record-construction echoes and shallow duplicate default inventories are deliberately
-retired, not counted as replacement lifecycle coverage. Actor filtering/selection,
-unsupported-Application scan and fresh-store reopen cases stay until their distinct
-consumer assertions have an accepted independent replacement.
+retired, not counted as replacement lifecycle coverage. Five real consumers in
+`crates/bridge/src/api/small_library_contract_tests.rs` now cover public filter replies
+and later snapshots, hidden inventory across owned concurrent refresh, supported Web
+and Scene beside unsupported Application, cleared selection in both public snapshots,
+and full configuration equality after opening a distinct store. The refresh uses two
+actors with owned paths, never a process-wide HOME change; actor drain precedes root
+deletion. Only assertion-mapped inherited cases are retired. Remaining apply/settings
+cases, contributor corrections and the entire cache-clear storage-observation case
+stay intact; suite membership alone is not evidence for deleting their assertions.
 
 An `IDELaunchServicesLauncher` assertion `childPID > 0` (exit 250) can abort
 Xcode before the native test host starts, even after successful compilation

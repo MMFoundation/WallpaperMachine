@@ -162,68 +162,6 @@ async fn apply_options_keeps_draft_uncommitted_when_reconcile_fails() {
 }
 
 #[tokio::test]
-async fn cancel_options_restores_display_enable_draft() {
-    let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(7, 75)]);
-    let bridge = BridgeBuilder::new(engine)
-        .with_state(crate::actor::state::BridgeActorState::default())
-        .build()
-        .expect("tokio runtime and config load for wallpaper bridge");
-    bridge
-        .inject_scene_wallpaper_config_for_test("100", "Scene")
-        .await;
-    bridge.select_wallpaper("100".to_string()).await.unwrap();
-
-    bridge
-        .set_display_config_enabled("100".to_string(), "7".to_string(), true)
-        .await
-        .unwrap();
-    let edited = bridge
-        .wallpaper_options_snapshot("100".to_string())
-        .await
-        .unwrap();
-    assert!(edited.dirty);
-    assert!(edited.display_configurations[0].enabled);
-
-    bridge
-        .cancel_wallpaper_options("100".to_string())
-        .await
-        .unwrap();
-
-    let restored = bridge
-        .wallpaper_options_snapshot("100".to_string())
-        .await
-        .unwrap();
-    assert!(!restored.dirty);
-    assert!(!restored.display_configurations[0].enabled);
-}
-
-#[tokio::test]
-async fn target_fps_is_clamped_to_display_refresh_rate() {
-    let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![display_snapshot(7, 75)]);
-    let bridge = BridgeBuilder::new(engine)
-        .with_state(crate::actor::state::BridgeActorState::default())
-        .build()
-        .expect("tokio runtime and config load for wallpaper bridge");
-    bridge
-        .inject_scene_wallpaper_config_for_test("100", "Scene")
-        .await;
-
-    bridge
-        .set_target_fps("100".to_string(), "7".to_string(), 144)
-        .await
-        .unwrap();
-
-    let options = bridge
-        .wallpaper_options_snapshot("100".to_string())
-        .await
-        .unwrap();
-    assert_eq!(options.display_configurations[0].max_fps, 75);
-    assert_eq!(options.display_configurations[0].target_fps, 75);
-}
-
-#[tokio::test]
 async fn only_the_default_rate_is_stored_as_following_the_display() {
     let root = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
