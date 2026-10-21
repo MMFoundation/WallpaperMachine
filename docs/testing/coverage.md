@@ -1009,8 +1009,11 @@ never to `.shared`.
   cannot be made falls back once to the downsampled preview, stills decoded to the view's size
   and cached, only https Steam previews and only pixiv's image host and the fixed property hosts
   read, a view that goes away stops waiting without cancelling the shared fetch, animations only
-  from sources that fit the budget), `PanelImageViewTests`, `AnimatedPreviewTests` (GIF, APNG and
-  WebP frames and delays, no timer until asked and never without a window),
+  from sources that fit the budget), `PanelImageViewTests` (offscreen hosting, drawn-size decoding,
+  stable layout, scrolling a lazy list releases both the decoded wrapper and its `CGImage` after
+  cache eviction, scrolling back reloads it, and a cache hit stays alive while visible but is
+  released on disappearance), `AnimatedPreviewTests` (GIF, APNG and WebP frames and delays,
+  no timer until asked and never without a window),
   `PropertyImageCacheTests` (bounded transfers, author images cannot become a network proxy) and
   `LivePreviewSchedulerTests`.
 - Installed and the library: `PanelLibraryActionsTests` (favorites, Show in Finder, selection

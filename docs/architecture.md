@@ -229,7 +229,10 @@ It has no web view, and renderer content is never drawn into it. Coding rules fo
   `PanelImagePipeline` reads through the app's caches (`WorkshopThumbnailCache` for Steam, pixiv
   and installed covers, `PropertyImageCache`), decodes with ImageIO off the main thread at the
   size the view draws, and keeps decoded stills in a 128 MiB memory cache. `PanelImage` loads in
-  a task tied to the view and never shows the previous source's picture. `AnimatedPreview` plays
+  a task tied to the view and never shows the previous source's picture. A disappearing lazy row
+  releases both its decoded still and rendered image; its reference-backed state prevents old
+  SwiftUI view snapshots from retaining pixels outside the cache budget. Returning rows reload
+  through the cache, and visible rows retain their image even if the cache evicts it. `AnimatedPreview` plays
   GIF, APNG and animated WebP one frame at a time at the drawn size, decoding the next frame off
   the main thread while the current one shows, only while asked and while
   its window is visible, and shows the first frame under Reduce Motion; nothing reads pixels back.
