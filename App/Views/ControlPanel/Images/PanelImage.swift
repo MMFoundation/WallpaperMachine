@@ -56,6 +56,9 @@ struct PanelImage: View {
       .clipped()
       .task(id: request) { await load() }
       // Lazy grids keep row state after disappearance; only the bounded cache should keep pixels.
+      // Reactivating on appear, not in the task, lets a returning row show a cached still in its
+      // first frame instead of the placeholder.
+      .onAppear { state.isActive = true }
       .onDisappear {
         state.isActive = false
         state.loaded = nil
@@ -64,7 +67,6 @@ struct PanelImage: View {
 
   private func load() async {
     guard !Task.isCancelled else { return }
-    state.isActive = true
     guard let request, let images else {
       state.loaded = nil
       return
