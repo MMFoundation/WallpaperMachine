@@ -406,7 +406,9 @@ per-Space assignments; see
   pressure, the 5-second collapse of repeats, an unreadable footprint staying unknown
   rather than zero, one test pinning the wording of the two lines the diagnostics doc
   shows, and the footprint of the test process growing with the memory it touches.
-  A real pressure transition is not provoked.
+  The footprint-growth case touches a fresh anonymous mapping, not reusable heap
+  pages already charged to the host; its 32 MB growth margin and bounded attempts
+  stay unchanged. A real pressure transition is not provoked.
 - `EnergyUsageMonitorTests` and `WallpaperEnergyRatingsTests` — coalition
   readings, contention, before/after comparisons, grades, battery share and the
   rating recorder; two `testKernelCounters…` cases read the test process's real
