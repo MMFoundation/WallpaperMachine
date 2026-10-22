@@ -1007,6 +1007,9 @@ constexpr std::string_view kHandlerNames[] = {
     "destroy",
 };
 
+// The first character of a "layer" reference that names the clock of one setting.
+constexpr char kSettingMarker = '\x03';
+
 // The script's text inside a function that hands back the handlers it defined.
 // The prologue shares the first line with the text so line numbers stay the author's.
 std::string WrapScript(const std::string& body) {
@@ -1051,6 +1054,8 @@ enum LibFn : int
     kLibNotifyEnded,
     kLibNoticeLanguage,
     kLibResetTransient,
+    kLibRunInit,
+    kLibUserNotices,
     kLibFnCount,
 };
 
@@ -1058,7 +1063,7 @@ constexpr const char* kLibFnNames[kLibFnCount] = {
     "hostUpdate",    "setProps",       "make",          "evaluate",       "startScene",
     "tickScene",     "cursorEvent",    "animationEvent", "animationListeners", "mediaJson",
     "mediaThumbnail", "resizeProgram", "resizeListeners", "applyProps",     "destroyProgram",
-    "notifyEnded",   "noticeLanguage", "resetTransient",
+    "notifyEnded",   "noticeLanguage", "resetTransient", "runInit",      "userNotices",
 };
 
 #define SCRIPT_NATIVE_LIST(X)                                                                      \
@@ -1070,7 +1075,8 @@ constexpr const char* kLibFnNames[kLibFnCount] = {
     X(createFromTemplate) X(createText) X(nameLayer) X(destroyLayer) X(hasSound) X(soundPlay)     \
     X(soundPause) X(soundStop) X(soundPlaying) X(soundVolume) X(soundSetVolume) X(soundMuted)     \
     X(soundSetMuted) X(puppet) X(puppetName) X(timeline) X(sheet) X(sheetInfo) X(video)           \
-    X(audioMark) X(audioGeneration) X(audio) X(shortcutValue) X(requestShortcut) X(timeOfDay)
+    X(audioMark) X(audioGeneration) X(audio) X(shortcutValue) X(requestShortcut) X(timeOfDay)       \
+    X(effectVisible) X(setEffectVisible) X(rotateObjectSpace)
 
 enum NativeId : int
 {
@@ -1975,7 +1981,10 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         if (rt_ == nullptr) return number(0);
         const auto layer = str(0);
         const auto name  = str(1);
-        auto*      playback = layer.empty() ? rt_->FindAnimationByName(name) : rt_->FindScalarAnimation(layer, name);
+        // A layer reference that starts with the setting marker is a setting's own clock.
+        auto*      playback = layer.empty() ? rt_->FindAnimationByName(name)
+                              : layer.front() == kSettingMarker ? rt_->FindSettingAnimation(layer.substr(1))
+                                                                : rt_->FindScalarAnimation(layer, name);
         if (playback == nullptr) return number(0);
         const auto op = str(2);
         if (op == "fps") return number(playback->animation.fps);
@@ -2075,6 +2084,13 @@ JSValue ScriptEngineContext::NativeCall(int id, int argc, JSValueConst* argv) {
         LOG_INFO("script asked for the user shortcut '%s' (bound to '%s')", name.c_str(), value.c_str());
         return JS_UNDEFINED;
     }
+    case kNative_rotateObjectSpace:
+        if (rt_ != nullptr) rt_->RotateNodeObjectSpace(str(0), vec3(1));
+        return JS_UNDEFINED;
+    case kNative_effectVisible: return boolean(rt_ != nullptr && rt_->EffectObjectVisible(str(0)));
+    case kNative_setEffectVisible:
+        if (rt_ != nullptr) rt_->SetEffectObjectVisible(str(0), flag(1));
+        return JS_UNDEFINED;
     case kNative_timeOfDay: {
         const auto value = LocalTimeOfDay(std::chrono::system_clock::now());
         return number(value.value_or(0.0));
@@ -2123,6 +2139,7 @@ struct ProgramCore {
     ScriptGuard                               guard;
     bool                                      valid { false };
     bool                                      started { false };
+    bool                                      noticed { false };
     bool                                      destroyed { false };
     PropertyScriptValueSemantic               semantic { PropertyScriptValueSemantic::Generic };
     std::map<std::string, DynamicValue*>      props;
@@ -2168,7 +2185,8 @@ void WriteParams(ProgramCore& core) {
 }
 
 bool CreateProgram(ProgramCore& core, bool scene, const std::string& source, const std::string& layer,
-                   const ScriptHostContext& host, int animation_layer_index, int& capabilities) {
+                   const ScriptHostContext& host, int animation_layer_index, int& capabilities,
+                   const std::string& effect_reference = {}, const std::string& animation_reference = {}) {
     auto& e = *core.engine;
     CallScope scope(e, core.runtime, e.limits.creation_budget_ms);
     e.RefreshHost(host);
@@ -2191,7 +2209,9 @@ bool CreateProgram(ProgramCore& core, bool scene, const std::string& source, con
     if (! e.Call(&core.guard, "script start", kLibMake,
                  { JS_DupValue(e.ctx, factory), JS_NewInt32(e.ctx, scene ? 1 : 0),
                    JS_NewStringLen(e.ctx, layer.data(), layer.size()),
-                   JS_NewInt32(e.ctx, animation_layer_index) },
+                   JS_NewInt32(e.ctx, animation_layer_index),
+                   JS_NewStringLen(e.ctx, effect_reference.data(), effect_reference.size()),
+                   JS_NewStringLen(e.ctx, animation_reference.data(), animation_reference.size()) },
                  e.limits.creation_budget_ms, &record)) {
         return false;
     }
@@ -2310,7 +2330,7 @@ PropertyScriptProgram::PropertyScriptProgram(
     SceneRuntimeContext* runtime, std::string script_source, std::string current_layer_name,
     std::map<std::string, DynamicValue*> script_properties, DynamicValue, ScriptHostContext host_context,
     JSRuntime*, JSContext* shared_context, std::string, std::string, PropertyScriptValueSemantic semantic,
-    int animation_layer_index)
+    int animation_layer_index, std::string effect_reference, std::string setting_animation_reference)
     : m_animation_layer_index(animation_layer_index) {
     auto engine = ContextOf(shared_context);
     if (engine == nullptr) return;
@@ -2322,7 +2342,8 @@ PropertyScriptProgram::PropertyScriptProgram(
     m_state->guard.name = current_layer_name.empty() ? "scene" : current_layer_name;
     int capabilities = 0;
     if (! CreateProgram(*m_state, false, script_source, current_layer_name, host_context,
-                        animation_layer_index, capabilities)) {
+                        animation_layer_index, capabilities, effect_reference,
+                        setting_animation_reference)) {
         return;
     }
     m_capabilities = CapabilitiesOf(capabilities);
@@ -2350,32 +2371,82 @@ void PropertyScriptProgram::ApplyProjectProperties(const ProjectProperties& proj
     if (core.started) DeliverChanges(core, changed_properties);
 }
 
+bool PropertyScriptProgram::Initialised() const noexcept { return m_state != nullptr && m_state->started; }
+
+DynamicValueUniquePtr PropertyScriptProgram::RunInit(const ScriptHostContext& host_context,
+                                                     const DynamicValue&      current_value) {
+    if (! Valid() || m_destroyed || m_state->started) return nullptr;
+    auto&        core   = *m_state;
+    auto&        e      = *core.engine;
+    const double budget = e.limits.call_budget_ms;
+    CallScope    scope(e, core.runtime, budget);
+    e.RefreshHost(host_context);
+    if (core.runtime != nullptr) e.PushProps(core.runtime->projectProperties());
+    WriteParams(core);
+    const bool degrees  = core.semantic == PropertyScriptValueSemantic::AnglesDegrees;
+    JSValue    argument = e.ToJs(current_value, degrees);
+    if (e.Overran(&core.guard, "init", budget)) {
+        JS_FreeValue(e.ctx, argument);
+        return nullptr;
+    }
+    JSValue result = JS_UNDEFINED;
+    core.started   = true;
+    const bool completed =
+        e.Call(&core.guard, "init", kLibRunInit, { core.Prog(), argument }, budget, &result);
+    // What `init` returns is converted as the result of `update` is.
+    DynamicValueUniquePtr answer;
+    if (completed) answer = e.FromJs(result, current_value, degrees);
+    JS_FreeValue(e.ctx, result);
+    if (e.Overran(&core.guard, "init", budget)) answer.reset();
+    return answer;
+}
+
+void PropertyScriptProgram::RunUserNotices(const ScriptHostContext& host_context) {
+    if (! Valid() || m_destroyed || ! m_state->started || m_state->noticed) return;
+    auto&     core = *m_state;
+    auto&     e    = *core.engine;
+    CallScope scope(e, core.runtime, e.limits.call_budget_ms);
+    core.noticed = true;
+    e.RefreshHost(host_context);
+    if (core.runtime != nullptr) e.PushProps(core.runtime->projectProperties());
+    e.Call(&core.guard, "applyUserProperties", kLibUserNotices,
+           { core.Prog(), JS_NewBool(e.ctx, core.runtime != nullptr) }, e.limits.call_budget_ms);
+}
+
 DynamicValueUniquePtr PropertyScriptProgram::Evaluate(const ScriptHostContext& host_context,
                                                       const DynamicValue&      current_value) {
     m_update_returned_value = false;
     if (! Valid() || m_destroyed) return nullptr;
-    auto&        core   = *m_state;
-    auto&        e      = *core.engine;
-    const double budget = e.limits.call_budget_ms;
+    // A program nobody has started yet starts here, in the order a scene starts all of them in:
+    // `init` first, then the notices. Whoever owns the property it drives starts it with
+    // `RunInit` itself when it wants what `init` returns (the scene's scripted values do); this
+    // path only keeps a program that was handed straight to `Evaluate` working.
+    if (! m_state->started) {
+        (void)RunInit(host_context, current_value);
+        RunUserNotices(host_context);
+        if (! Valid() || m_destroyed) return nullptr;
+    }
+    const DynamicValue& basis = current_value;
+    auto&               core   = *m_state;
+    auto&               e      = *core.engine;
+    const double        budget = e.limits.call_budget_ms;
     // One budget for everything the host does for this evaluation, so accessors the
     // script defined on its parameters or getters on what it returns are held to it too.
     CallScope scope(e, core.runtime, budget);
     e.RefreshHost(host_context);
-    if (! core.started && core.runtime != nullptr) e.PushProps(core.runtime->projectProperties());
     WriteParams(core);
     const bool degrees  = core.semantic == PropertyScriptValueSemantic::AnglesDegrees;
-    JSValue    argument = e.ToJs(current_value, degrees);
+    JSValue    argument = e.ToJs(basis, degrees);
     if (e.Overran(&core.guard, "update", budget)) {
         JS_FreeValue(e.ctx, argument);
-        return m_capabilities.update ? CopyOf(current_value) : nullptr;
+        return m_capabilities.update ? CopyOf(basis) : nullptr;
     }
-    JSValue result = JS_UNDEFINED;
-    core.started   = true;
+    JSValue    result    = JS_UNDEFINED;
     const bool completed = e.Call(&core.guard, "update", kLibEvaluate,
                                   { core.Prog(), argument, JS_NewBool(e.ctx, core.runtime != nullptr) },
                                   budget, &result);
     DynamicValueUniquePtr answer;
-    if (completed && m_capabilities.update) answer = e.FromJs(result, current_value, degrees);
+    if (completed && m_capabilities.update) answer = e.FromJs(result, basis, degrees);
     JS_FreeValue(e.ctx, result);
     if (e.Overran(&core.guard, "update", budget)) answer.reset();
     if (! m_capabilities.update) return nullptr;
@@ -2385,7 +2456,7 @@ DynamicValueUniquePtr PropertyScriptProgram::Evaluate(const ScriptHostContext& h
     }
     // No value from the script: the property keeps what it holds now, which includes
     // whatever the script wrote to its own layer while it ran.
-    return CopyOf(current_value);
+    return CopyOf(basis);
 }
 
 void PropertyScriptProgram::DispatchCursorClick(const ScriptHostContext& host) {
@@ -2578,13 +2649,15 @@ DynamicValueUniquePtr ScriptEngine::Evaluate(const std::string&                 
 std::unique_ptr<PropertyScriptProgram> ScriptEngine::CreatePropertyScriptProgram(
     SceneRuntimeContext* runtime, std::string script_source, std::string current_layer_name,
     std::map<std::string, DynamicValue*> script_properties, DynamicValue initial_value,
-    ScriptHostContext host_context, PropertyScriptValueSemantic semantic, int animation_layer_index) {
+    ScriptHostContext host_context, PropertyScriptValueSemantic semantic, int animation_layer_index,
+    std::string effect_reference, std::string setting_animation_reference) {
     if (m_context == nullptr || ! m_context->EnsureReady()) return nullptr;
     const auto id = std::to_string(m_context->next_program_id++);
     auto program  = std::make_unique<PropertyScriptProgram>(
         runtime, std::move(script_source), std::move(current_layer_name), std::move(script_properties),
         std::move(initial_value), std::move(host_context), m_context->rt, m_context->ctx,
-        "exports" + id, "scriptProperties" + id, semantic, animation_layer_index);
+        "exports" + id, "scriptProperties" + id, semantic, animation_layer_index,
+        std::move(effect_reference), std::move(setting_animation_reference));
     if (! program->Valid()) return nullptr;
     return program;
 }

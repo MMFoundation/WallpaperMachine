@@ -2,6 +2,7 @@
 #include "WPJson.hpp"
 #include <nlohmann/json.hpp>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -32,6 +33,9 @@ bool IsSystemUserTexture(const WPUserTexture& user_texture);
 struct WPConstantShaderValue {
     std::vector<float> value;
     std::string        user;
+    /// The choice the flag form `{"user": {"name": ..., "condition": ...}}` compares the
+    /// property with; absent for a plain property name.
+    std::optional<std::string> user_condition;
     std::string        script;
     nlohmann::json     scriptproperties;
     nlohmann::json     animation;

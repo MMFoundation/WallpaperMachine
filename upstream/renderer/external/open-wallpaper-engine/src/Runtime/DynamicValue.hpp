@@ -86,6 +86,9 @@ public:
     void                  connectVec3(DynamicValue* other);
     void                  disconnect();
     void                  attachCondition(const ConditionInfo& condition);
+    /// Whether the value follows a choice through a condition (`attachCondition`): what it
+    /// holds is then the flag "the choice equals the condition", of kind Boolean.
+    [[nodiscard]] bool    hasCondition() const noexcept { return m_condition.has_value(); }
 
 private:
     struct Hub;
@@ -93,6 +96,7 @@ private:
     void takeContent(const DynamicValue& other);
     void clearReadings();
     void assignText(const std::string& text);
+    [[nodiscard]] bool conditionHolds(const DynamicValue& choice) const;
     void finishAssignment();
     void track(DynamicValue* other, bool as_vec3);
 

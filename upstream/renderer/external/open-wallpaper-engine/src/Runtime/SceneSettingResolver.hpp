@@ -19,6 +19,9 @@ namespace wallpaper
 class SceneRuntimeContext;
 class SceneNode;
 
+// `own_animation`, for the resolvers below that take one, is the clock of a keyed setting that a
+// script also drives: the script's `thisObject.getAnimation()` with no name answers it.
+
 // Binds a layer's origin, scale and angles as each setting asks: a script or a
 // user property writes it, else its authored absolute/relative timeline plays
 // it, else it stays the scene file's value and allocates no per-tick binding.
@@ -45,11 +48,14 @@ enum class Vec3SettingSemantic
 // `animation_layer_index` is the animation layer of the layer a setting belongs
 // to when it is one of that animation layer's own (`animationlayers[i]`): its
 // script's `thisObject` is that animation layer. -1 for a setting of the layer.
+// `effect_reference` is the reference of the effect (`SceneRuntimeContext::RegisterEffectObject`)
+// whose visibility this setting is, which is its script's `thisObject`.
 std::unique_ptr<DynamicValue> ResolveBoolSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& value,
     std::string_view current_layer_name = {},
-    int animation_layer_index = -1);
+    int animation_layer_index = -1,
+    std::string effect_reference = {});
 std::unique_ptr<DynamicValue> ResolveFloatSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& value,
@@ -59,7 +65,8 @@ std::unique_ptr<DynamicValue> ResolveVec3Setting(
     SceneRuntimeContext& context,
     const nlohmann::json& value,
     std::string_view current_layer_name = {},
-    Vec3SettingSemantic semantic = Vec3SettingSemantic::Generic);
+    Vec3SettingSemantic semantic = Vec3SettingSemantic::Generic,
+    std::shared_ptr<ScalarAnimationPlayback> own_animation = {});
 // Resolves a setting at the component count the shader declares. Handing a two-
 // or four-component constant to a property script as a string loses the vector:
 // the script reads `.x` off that string and hands back NaN.
@@ -67,7 +74,8 @@ std::unique_ptr<DynamicValue> ResolveVectorSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& value,
     std::size_t components,
-    std::string_view current_layer_name = {});
+    std::string_view current_layer_name = {},
+    std::shared_ptr<ScalarAnimationPlayback> own_animation = {});
 std::unique_ptr<DynamicValue> ResolveStringSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& value,

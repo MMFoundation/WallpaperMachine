@@ -28,13 +28,21 @@ public:
                          std::map<std::string, DynamicValueUniquePtr> script_properties,
                          DynamicValue                                 base_value,
                          ScriptedValueSemantic semantic = ScriptedValueSemantic::Generic,
-                         int animation_layer_index = -1);
+                         int animation_layer_index = -1, std::string effect_reference = {},
+                         std::string setting_animation_reference = {});
     ~ScriptedDynamicValue() override;
 
     const std::string& LayerName() const { return m_current_layer_name; }
     uint8_t CursorHandlerMask() const noexcept;
 
     void reevaluate();
+    /// The two steps a script starts in (see `PropertyScriptProgram::RunInit`). The runtime runs
+    /// the first of every script of the scene, then the second of every script, then the
+    /// scripts' `update`. What `init` returns becomes this value, converted as the result of
+    /// `update` is; nothing, an exception or an object for a flag leave it alone.
+    bool Initialised() const noexcept;
+    void RunInit();
+    void RunUserNotices();
     void ApplyProjectProperties(const ProjectProperties& project_properties,
                                 const ProjectProperties& changed_properties);
     void DispatchCursorClick(const ScriptHostContext& host_context);

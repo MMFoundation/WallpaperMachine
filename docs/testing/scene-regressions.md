@@ -430,6 +430,39 @@ Playback, backend, host and startup areas are in
 
 All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 
+- **Script values, objects, start-up and local rotation without a device** —
+  `scenescript_behavior_test` loads synthetic scenes for their runtime only
+  (`tests/support/script_scene.hpp`, no Metal device, surface or window) and ticks them:
+  - `ScriptVectorNumbers.*`: a scale eased with `value.x + (2 - value.x) * k` stays
+    uniform, finite and monotonic for 30 frames; a two-component constant returning
+    `value.y + 1` steps by one on both components; a number returned for angles, origin
+    and colour, and written to `thisLayer.color` / `parallaxDepth`, fills every
+    component; a script that returns nothing leaves a vector alone.
+  - `Choices/ChoiceAsFlag.*`: two script properties bound to one combo with conditions
+    `0` and `2` read `true`/`false` (typeof boolean) as the choice moves through 2, 0, 1,
+    as a number and as text; a conditional layer `visible` follows the choice; a constant
+    bound with a condition reads 1 or 0 while one with no condition keeps the number.
+  - `ScriptEffectObject.*`: `thisObject.visible` of an effect script, written from
+    `init`, `update` and a media handler, switches that effect only (also where a
+    property hid the layer, and with two effects on a layer).
+  - `ScriptKeyedSettingObject.*`: `thisObject.getAnimation()` with no name is a keyed
+    constant's own animation (the layer's slide does not play); a named lookup still
+    finds the layer's animation; a setting without a timeline finds the layer's first
+    unnamed one.
+  - `ScriptStartUp.*`, `ScriptInitResult.*`: all `init`s, then all first notices, then
+    `update`, in layer order; a notice may call what a later layer's `init` set up through
+    `shared`; what `init` returns is the value (a handle hides itself, a typing text starts
+    empty, a vector or number is converted as `update`'s is), and nothing, an exception or
+    an object for a flag leave it alone.
+  - `ScriptLayerNames.*`, `ScriptSoundLayers.*`: twin, unnamed and twin text layers keep
+    their authored names and are found and moved by name, also by a script that looks a
+    later layer up while it compiles; sound objects are listed in order, counted, found
+    by id and name, played and stopped through the layer object, twins played separately;
+    a statically invisible sound has no index.
+  - `Rotation.*`: `rotateObjectSpace` increments about each axis from a known orientation,
+    successive calls, a rotated and scaled parent, mirrored scale and an anchored pivot,
+    with expectations worked out from rotation matrices in the test.
+
 - **Local-axis rotation** — `ScriptRuntimeCompat.RotateObjectSpace*` checks radians
   increments composed with an existing orientation, degree-valued angles readback,
   repeated updates, transformed parents, mirrored scale and anchored pivots.

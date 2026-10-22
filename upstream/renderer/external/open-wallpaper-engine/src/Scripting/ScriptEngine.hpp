@@ -106,7 +106,8 @@ public:
         ScriptHostContext host_context, JSRuntime* shared_runtime, JSContext* shared_context,
         std::string exports_object_name, std::string script_properties_name,
         PropertyScriptValueSemantic semantic = PropertyScriptValueSemantic::Generic,
-        int animation_layer_index = -1);
+        int animation_layer_index = -1, std::string effect_reference = {},
+        std::string setting_animation_reference = {});
     ~PropertyScriptProgram();
 
     PropertyScriptProgram(const PropertyScriptProgram&)            = delete;
@@ -116,6 +117,16 @@ public:
     const ScriptProgramCapabilities& Capabilities() const noexcept { return m_capabilities; }
     DynamicValueUniquePtr Evaluate(const ScriptHostContext& host_context,
                                    const DynamicValue&      current_value);
+    /// Whether the program has run its `init`. A program starts in two steps, so that every
+    /// script of a scene is initialised before any is told the user properties: `RunInit`, then
+    /// `RunUserNotices`. `Evaluate` does whatever of the two has not happened yet.
+    bool                  Initialised() const noexcept;
+    /// Runs `init(value)` once. What it returns is answered as `Evaluate` answers the result of
+    /// `update` (null when it returned nothing, threw, or gave an object for a flag).
+    DynamicValueUniquePtr RunInit(const ScriptHostContext& host_context,
+                                  const DynamicValue&      current_value);
+    /// Tells the script the language and the user properties, once, after `RunInit`.
+    void                  RunUserNotices(const ScriptHostContext& host_context);
     /// Whether the last `Evaluate` got a value from `update()`. When it did not
     /// (it returned nothing, or threw), `Evaluate` hands back the current value.
     bool                  UpdateReturnedValue() const noexcept { return m_update_returned_value; }
@@ -219,7 +230,8 @@ public:
         std::map<std::string, DynamicValue*> script_properties, DynamicValue initial_value,
         ScriptHostContext           host_context,
         PropertyScriptValueSemantic semantic = PropertyScriptValueSemantic::Generic,
-        int                         animation_layer_index = -1);
+        int                         animation_layer_index = -1, std::string effect_reference = {},
+        std::string                 setting_animation_reference = {});
     std::unique_ptr<SceneScriptProgram>
     CreateSceneScriptProgram(SceneRuntimeContext& runtime, std::string script_source,
                              std::string current_layer_name, ProjectProperties project_properties,

@@ -935,8 +935,11 @@ void RegisterScriptedEffectVisibility(ParseContext& context,
     effect->visible = source.visible;
     if (! source.scripted_visible || context.scene->runtime == nullptr) return;
     auto& runtime = *context.scene->runtime;
+    // The script that decides the effect's visibility has the effect as its `thisObject`.
+    auto reference = runtime.RegisterEffectObject(runtime_name, effect);
     runtime.RegisterEffectVisibility(
-        effect, ResolveBoolSetting(runtime, source.visible_setting, runtime_name));
+        effect, ResolveBoolSetting(runtime, source.visible_setting, runtime_name, -1,
+                                   std::move(reference)));
 }
 
 // The keys of a text object that are baked into the card's pixels when the layer
@@ -1032,7 +1035,11 @@ nlohmann::json MaterialConstantSettingJson(const wpscene::WPConstantShaderValue&
                                                     : nlohmann::json(source.value);
     }
     // The binding members, each copied across only when the constant has it.
-    const nlohmann::json user_name = source.user;
+    // The flag form keeps its condition; a plain name stays a plain name.
+    const nlohmann::json user_name =
+        source.user_condition.has_value()
+            ? nlohmann::json { { "name", source.user }, { "condition", *source.user_condition } }
+            : nlohmann::json(source.user);
     const nlohmann::json script_text = source.script;
     const std::pair<const char*, const nlohmann::json*> bindings[] = {
         { "user", source.user.empty() ? nullptr : &user_name },
@@ -1275,12 +1282,24 @@ void RegisterDrivenMaterialConstants(ParseContext& context, const std::shared_pt
     if (runtime == nullptr || material == nullptr) return;
 
     const auto timelines = BuildConstantTimelines(*runtime, wpmat, layer_name);
+    // The constants a script drives that are also keyed: the script's `thisObject` finds the
+    // setting's own timeline, on a clock of its own.
+    const auto keyed = CollectMaterialConstantAnimations(wpmat);
     for (const auto& entry : ResolveConstantUniforms(wpmat, info)) {
         const auto setting = MaterialConstantSettingJson(*entry.constant);
         if (HasDynamicSetting(setting)) {
             const auto lanes = entry.constant->value.size();
+            std::shared_ptr<ScalarAnimationPlayback> own_clock;
+            if (setting.contains("script")) {
+                if (const auto source = keyed.find(entry.key); source != keyed.end()) {
+                    ScalarAnimation clock = source->second.components[source->second.first_curve];
+                    if (!(clock.length_frames > 0.0)) clock.length_frames = source->second.last_frame;
+                    own_clock = runtime->RegisterSettingClock(std::move(clock));
+                }
+            }
             auto       value = lanes == 0 ? ResolveStringSetting(*runtime, setting, layer_name)
-                                          : ResolveVectorSetting(*runtime, setting, lanes, layer_name);
+                                          : ResolveVectorSetting(*runtime, setting, lanes, layer_name,
+                                                                 std::move(own_clock));
             runtime->RegisterMaterialConstant(material, entry.uniform, std::move(value));
         } else if (const auto timeline = timelines.find(entry.key); timeline != timelines.end()) {
             runtime->RegisterMaterialConstant(material, entry.uniform,
@@ -2862,10 +2881,7 @@ std::vector<EntryPlan> PlanEntries(ParseContext& context, const nlohmann::json& 
     std::unordered_map<std::string, uint32_t> counted;
     for (std::size_t at = 0; at < objects.size(); ++at) {
         const auto& plan = plans[at];
-        if (plan.admission == Admission::Skip || plan.kind == EntryKind::Sound ||
-            plan.kind == EntryKind::Light) {
-            continue;
-        }
+        if (plan.admission == Admission::Skip || plan.kind == EntryKind::Light) continue;
         const auto name = objects[at].find("name");
         if (name == objects[at].end() || ! name->is_string()) continue;
         const auto& text = name->get_ref<const std::string&>();
@@ -2902,7 +2918,13 @@ std::vector<EntryPlan> PlanEntries(ParseContext& context, const nlohmann::json& 
             plan.key = ! authored.empty() && count_of(counted) == 0 ? authored
                                                                     : "__we_light_" + id_text;
             break;
-        case EntryKind::Sound: plan.key = authored; break;
+        case EntryKind::Sound:
+            // A sound is a layer like any other: counted by name, and a shared name gives it a
+            // key of its own.
+            plan.key = ! authored.empty() && count_of(counted) <= 1
+                           ? authored
+                           : "__we_layer_" + (plan.id != 0 ? id_text : "s" + std::to_string(at));
+            break;
         default:
             plan.key = ! authored.empty() && count_of(counted) <= 1 ? authored
                                                                     : "__we_layer_" + id_text;
@@ -2986,7 +3008,8 @@ nlohmann::json SettingOrValue(const nlohmann::json& setting, const nlohmann::jso
     return setting.is_null() ? literal : setting;
 }
 
-bool LoadSoundEntry(ParseContext& context, const nlohmann::json& entry, audio::SoundManager& sm);
+bool LoadSoundEntry(ParseContext& context, const nlohmann::json& entry, const EntryPlan& plan,
+                    audio::SoundManager& sm);
 
 /// Makes the node of an entry and puts it in the tree record. A light without an
 /// id hangs from the scene's root and answers to no id.
@@ -5343,6 +5366,17 @@ bool LoadCameraEntry(ParseContext& context, std::size_t at, const nlohmann::json
 void BuildLayers(ParseContext& context, const wpscene::WPSceneGeneral& general,
                  const nlohmann::json& objects, const std::vector<EntryPlan>& plans,
                  audio::SoundManager& sm) {
+    // Every layer's authored name is on record before the first script compiles.
+    if (auto* runtime = context.scene->runtime.get(); runtime != nullptr) {
+        for (std::size_t at = 0; at < objects.size(); ++at) {
+            if (plans[at].admission == Admission::Skip) continue;
+            std::string authored;
+            if (const auto name = objects[at].find("name"); name != objects[at].end() && name->is_string()) {
+                authored = name->get<std::string>();
+            }
+            runtime->DeclareLayerName(plans[at].key, std::move(authored));
+        }
+    }
     for (std::size_t at = 0; at < objects.size(); ++at) {
         const auto& plan  = plans[at];
         const auto& entry = objects[at];
@@ -5357,7 +5391,13 @@ void BuildLayers(ParseContext& context, const wpscene::WPSceneGeneral& general,
         if (plain) continue;
         bool built = true;
         switch (plan.kind) {
-        case EntryKind::Sound: built = LoadSoundEntry(context, entry, sm); break;
+        case EntryKind::Sound: {
+            // The sound's layer: a node of the scene like any other, found by name and id.
+            AddLayer(context, at, entry, plan, false, true);
+            SetUnhittable(context, plan.key);
+            built = LoadSoundEntry(context, entry, plan, sm);
+            break;
+        }
         case EntryKind::Light: built = LoadLightEntry(context, at, entry, plan); break;
         case EntryKind::Image: built = LoadImageEntry(context, at, entry, plan, general); break;
         case EntryKind::Model: built = LoadModelEntry(context, at, entry, plan, general); break;
@@ -5453,13 +5493,14 @@ void AttachLayers(ParseContext& context) {
 // Typed objects: sounds are the only kind this stage builds.
 // ---------------------------------------------------------------------------
 
-bool LoadSoundEntry(ParseContext& context, const nlohmann::json& entry, audio::SoundManager& sm) {
+bool LoadSoundEntry(ParseContext& context, const nlohmann::json& entry, const EntryPlan& plan,
+                    audio::SoundManager& sm) {
     wpscene::WPSoundObject sound;
     if (! sound.FromJson(entry, *context.vfs)) {
         LOG_ERROR("sound object has no list of sounds");
         return false;
     }
-    WPSoundParser::Parse(sound, *context.vfs, sm, context.scene->runtime.get());
+    WPSoundParser::Parse(sound, *context.vfs, sm, context.scene->runtime.get(), plan.key);
     return true;
 }
 

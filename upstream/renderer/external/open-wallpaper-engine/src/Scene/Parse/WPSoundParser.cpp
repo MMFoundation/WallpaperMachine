@@ -239,7 +239,7 @@ std::size_t WPSoundStream::LoopIndex() {
 }
 
 void WPSoundParser::Parse(const wpscene::WPSoundObject& obj, fs::VFS& vfs, audio::SoundManager& sm,
-                          SceneRuntimeContext* runtime) {
+                          SceneRuntimeContext* runtime, const std::string& layer_name) {
     // The user's own slider wins over the author's default when the author
     // bound one: that binding is the whole point of the slider.
     float volume = obj.volume;
@@ -260,7 +260,7 @@ void WPSoundParser::Parse(const wpscene::WPSoundObject& obj, fs::VFS& vfs, audio
 
     auto stream = std::make_shared<WPSoundStream>(obj.sound, vfs, config);
     if (runtime != nullptr) {
-        runtime->RegisterSoundLayer(obj.name, stream);
+        runtime->RegisterSoundLayer(layer_name.empty() ? obj.name : layer_name, stream);
         BindVolumeProperty(*runtime, stream, obj.volume_user, obj.volume);
     }
     sm.MountStream(std::shared_ptr<audio::SoundStream>(stream));

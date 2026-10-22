@@ -54,10 +54,16 @@ class Layer {
     return parent ? getLayer(parent) : null;
   }
   getTransformMatrix() { return new Mat4(n.matrix(this[KEY].key)); }
+  // Turns the layer about its own axes: Euler angles in radians (the `angles` property is in degrees).
+  rotateObjectSpace(v) {
+    var a = vec3Parts(v);
+    n.rotateObjectSpace(this[KEY].key, a[0], a[1], a[2]);
+  }
   getAnimation(name) {
     var st = this[KEY];
     if (st.timelines === null) st.timelines = new Map();
-    var key = String(name);
+    // With no name it is the layer's first animation that has none.
+    var key = name === undefined ? '' : String(name);
     var found = st.timelines.get(key);
     if (found === undefined) { found = new Timeline(st.key, key); st.timelines.set(key, found); }
     return found;
@@ -186,6 +192,33 @@ accessor('muted',
     var st = this[KEY];
     if (n.hasSound(st.key)) n.soundSetMuted(st.key, !!v); else st.muted = !!v;
   });
+
+// What a script that decides an effect's visibility has as `thisObject`: its layer, except that
+// `visible` is the effect's own, so writing it switches the effect and leaves the layer.
+function effectObjectOf(layer, reference) {
+  var object = Object.create(layer);
+  Object.defineProperty(object, 'visible', {
+    get: function () { return n.effectVisible(reference); },
+    set: function (v) { n.setEffectVisible(reference, !!v); },
+    enumerable: false, configurable: true
+  });
+  return object;
+}
+// What a script on a keyed setting has as `thisObject`: its layer, except that
+// `getAnimation()` with no name is the setting's own animation.
+function settingObjectOf(layer, reference) {
+  var object = Object.create(layer);
+  var own = null;
+  Object.defineProperty(object, 'getAnimation', {
+    value: function (name) {
+      if (name !== undefined) return layer.getAnimation(name);
+      if (own === null) own = new Timeline('\u0003' + reference, '');
+      return own;
+    },
+    writable: true, enumerable: false, configurable: true
+  });
+  return object;
+}
 
 function layerFor(key) {
   var layer = layerCache.get(key);

@@ -172,6 +172,10 @@ struct ScriptSite
     std::string_view      layer_name;
     ScriptedValueSemantic semantic { ScriptedValueSemantic::Generic };
     int                   animation_layer { -1 };
+    // The effect whose visibility the script decides, and the clock of the keyed setting it
+    // sits on.
+    std::string                              effect_reference;
+    std::shared_ptr<ScalarAnimationPlayback> own_animation;
 };
 
 DynamicValueUniquePtr resolve_auto_setting(SceneRuntimeContext& context, const nlohmann::json& setting,
@@ -199,9 +203,11 @@ DynamicValueUniquePtr MakeScriptedValue(SceneRuntimeContext& context, const nloh
             owned.emplace(key, resolve_auto_setting(context, item, site.layer_name));
         }
     }
+    std::string animation_reference;
+    if (site.own_animation != nullptr) animation_reference = context.RegisterSettingAnimation(site.own_animation);
     auto scripted = std::make_unique<ScriptedDynamicValue>(
         context, *source, std::string(site.layer_name), std::move(owned), seed, site.semantic,
-        site.animation_layer);
+        site.animation_layer, site.effect_reference, std::move(animation_reference));
     context.RegisterScriptedValue(scripted.get());
     return scripted;
 }
@@ -430,9 +436,10 @@ std::unique_ptr<DynamicValue> ResolveBoolSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& setting,
     std::string_view current_layer_name,
-    int animation_layer_index) {
-    const ScriptSite site { current_layer_name, ScriptedValueSemantic::Generic,
-                            animation_layer_index };
+    int animation_layer_index,
+    std::string effect_reference) {
+    ScriptSite site { current_layer_name, ScriptedValueSemantic::Generic, animation_layer_index };
+    site.effect_reference = std::move(effect_reference);
     return Finish(context, setting, std::make_unique<DynamicValue>(parse_bool(setting)), site,
                   FollowShape::Whole);
 }
@@ -452,9 +459,11 @@ std::unique_ptr<DynamicValue> ResolveVec3Setting(
     SceneRuntimeContext& context,
     const nlohmann::json& setting,
     std::string_view current_layer_name,
-    Vec3SettingSemantic semantic) {
+    Vec3SettingSemantic semantic,
+    std::shared_ptr<ScalarAnimationPlayback> own_animation) {
     ScriptSite site;
-    site.layer_name = current_layer_name;
+    site.layer_name    = current_layer_name;
+    site.own_animation = std::move(own_animation);
     if (semantic == Vec3SettingSemantic::AnglesDegrees) {
         site.semantic = ScriptedValueSemantic::AnglesDegrees;
     }
@@ -466,9 +475,11 @@ std::unique_ptr<DynamicValue> ResolveVectorSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& setting,
     std::size_t components,
-    std::string_view current_layer_name) {
+    std::string_view current_layer_name,
+    std::shared_ptr<ScalarAnimationPlayback> own_animation) {
     if (components == 3) {
-        return ResolveVec3Setting(context, setting, current_layer_name, Vec3SettingSemantic::Generic);
+        return ResolveVec3Setting(context, setting, current_layer_name, Vec3SettingSemantic::Generic,
+                                  std::move(own_animation));
     }
     auto literal = [&]() -> DynamicValueUniquePtr {
         if (components == 2) {
@@ -482,8 +493,9 @@ std::unique_ptr<DynamicValue> ResolveVectorSetting(
         }
         return std::make_unique<DynamicValue>(read_number(setting));
     }();
-    return Finish(context, setting, std::move(literal), ScriptSite { current_layer_name },
-                  FollowShape::Whole);
+    ScriptSite site { current_layer_name };
+    site.own_animation = std::move(own_animation);
+    return Finish(context, setting, std::move(literal), site, FollowShape::Whole);
 }
 
 std::unique_ptr<DynamicValue> ResolveStringSetting(
@@ -627,6 +639,17 @@ void RegisterNodeTransformSettings(SceneRuntimeContext& context, SceneNode* node
             layer_name, Vec3TimelineClock(*timelines[i], group_last_frame[i]));
     }
 
+    // A setting a script drives is not played from its timeline, but the script reaches the
+    // timeline's clock as its own (`thisObject.getAnimation()`).
+    std::array<std::shared_ptr<ScalarAnimationPlayback>, 3> own_clock;
+    for (std::size_t i = 0; i < settings.size(); ++i) {
+        const auto& setting = *settings[i];
+        if (!bound[i] || !setting.is_object() || !setting.contains("script")) continue;
+        if (const auto keyed = ReadVec3Timeline(setting)) {
+            own_clock[i] = context.RegisterSettingClock(Vec3TimelineClock(*keyed, keyed->last_frame));
+        }
+    }
+
     const auto animation_of = [&](std::size_t property) {
         return timelines[property]
                    ? std::shared_ptr<const NodeVec3Animation>(
@@ -634,19 +657,22 @@ void RegisterNodeTransformSettings(SceneRuntimeContext& context, SceneNode* node
                    : nullptr;
     };
     if (bound[0] || timelines[0]) {
-        context.RegisterNodeTranslate(name, node, ResolveVec3Setting(context, origin, layer_name),
-                                      animation_of(0));
+        context.RegisterNodeTranslate(
+            name, node,
+            ResolveVec3Setting(context, origin, layer_name, Vec3SettingSemantic::Generic, own_clock[0]),
+            animation_of(0));
     }
     if (bound[1] || timelines[1]) {
         context.RegisterNodeScale(name, node,
                                   ResolveVec3Setting(context, scale, layer_name,
-                                                     Vec3SettingSemantic::Generic),
+                                                     Vec3SettingSemantic::Generic, own_clock[1]),
                                   animation_of(1));
     }
     if (bound[2] || timelines[2]) {
         context.RegisterNodeRotation(name, node,
                                      ResolveVec3Setting(context, angles, layer_name,
-                                                        Vec3SettingSemantic::AnglesDegrees),
+                                                        Vec3SettingSemantic::AnglesDegrees,
+                                                        own_clock[2]),
                                      animation_of(2));
     }
 }

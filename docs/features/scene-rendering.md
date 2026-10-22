@@ -128,8 +128,17 @@ a layer drawn through its effects renders from are not in it. A layer anchored t
 edge or a corner (`alignment`) answers the centre of its quad, which its anchor
 places, while `layer.origin` still reads the anchor. A layer that ignores its parent's
 transform answers its own placement. The other layer transform calls
-(`getChildren`, `setParent`, `rotateObjectSpace`, `lookAt`, `lookAtYaw` and
-`getAttachment*`) do not exist yet: a script that calls one stops at that line.
+(`getChildren`, `setParent`, `lookAt`, `lookAtYaw` and `getAttachment*`) do not exist
+yet: a script that calls one stops at that line.
+
+`layer.rotateObjectSpace(Vec3)` turns a layer by an Euler-angle increment in radians
+about the layer's own axes, on top of the orientation it has: the new orientation is
+the current one followed by the increment, turned z, then y, then x as the layer's
+`angles` are. `angles` keeps reading and writing degrees, and each call starts from the
+result of the last. The increment is local, so a turned or scaled parent, a mirrored
+axis (a negative `scale`) and an anchored layer change nothing about it: the layer's own
+angles carry the increment, and an anchored layer (`alignment`) keeps its anchor point
+where the origin puts it as its quad turns about it.
 
 A layer's `origin`, `scale` and `angles`, and an image layer's `color`, can be keyed on
 a timeline (`animation`: curves `c0` to `c2` and `options`), and all four play the
@@ -1215,7 +1224,10 @@ bound to a text input whose text is `1` or `true` is on. A string a script retur
 for a flag is read the same way on every tick it runs, by a comparison in place
 that makes no copy. A binding that names a condition compares the choice with it
 instead, so `{"user": {"name": "mode", "condition": "2"}}` is on exactly when the
-choice is `2` and never by the rule above. The bound value is then a flag, not the
+choice is `2` and never by the rule above. A choice that reaches the scene as text is
+compared as text, one that reaches it as a number is compared as a number (a combo
+whose authored `value` is `2` is on for the condition `"2"`, and `0` is a choice like any
+other). The bound value is then a flag, not the
 choice: a script property bound this way reads `true` or `false`. It used to read the
 choice itself, a string such as `"2"` that is true in JavaScript whatever it says, so
 a clock offering its date formats as three flags over one combo (conditions `0`, `1`,

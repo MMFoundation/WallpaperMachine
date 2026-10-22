@@ -99,8 +99,10 @@ private:
 
 class WPSoundParser {
 public:
+    /// `layer_name` is the name the runtime knows the sound's layer by (the object's own name
+    /// when empty); sounds that share a name are layers of different names.
     static void Parse(const wpscene::WPSoundObject&, fs::VFS&, audio::SoundManager&,
-                      SceneRuntimeContext* runtime = nullptr);
+                      SceneRuntimeContext* runtime = nullptr, const std::string& layer_name = {});
 
     // Makes `stream`'s volume follow the project property `property` for as long
     // as the scene runs, so a slider moved on a running scene is heard without

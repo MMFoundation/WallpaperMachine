@@ -496,6 +496,35 @@ void SceneRuntimeContext::ApplyMaterialAlphaBindings() {
     }
 }
 
+void SceneRuntimeContext::StartPendingScripts() {
+    if (m_scripts_torn_down) return;
+    std::vector<ScriptedDynamicValue*> pending;
+    for (auto* value : m_scripted_values) {
+        if (value != nullptr && ! value->Initialised()) pending.push_back(value);
+    }
+    if (pending.empty()) return;
+    // The scene's order: the layers' order, and within a layer the order the scripts were made.
+    const auto rank_of = [this](const ScriptedDynamicValue* value) {
+        const auto rank = NodeRank(value->LayerName());
+        return rank.value_or(std::numeric_limits<std::size_t>::max());
+    };
+    std::stable_sort(pending.begin(), pending.end(),
+                     [&](const ScriptedDynamicValue* a, const ScriptedDynamicValue* b) {
+                         return rank_of(a) < rank_of(b);
+                     });
+    // A script's `init` may remove layers, and with them scripts that were waiting.
+    const auto alive = [this](const ScriptedDynamicValue* value) {
+        return std::find(m_scripted_values.begin(), m_scripted_values.end(), value) !=
+               m_scripted_values.end();
+    };
+    for (auto* value : pending) {
+        if (alive(value)) value->RunInit();
+    }
+    for (auto* value : pending) {
+        if (alive(value)) value->RunUserNotices();
+    }
+}
+
 void SceneRuntimeContext::Tick(double frame_time) {
     // A step that is negative or not a number is none.
     const double step = std::isfinite(frame_time) && frame_time > 0.0 ? frame_time : 0.0;
@@ -543,8 +572,10 @@ void SceneRuntimeContext::Tick(double frame_time) {
     DispatchPuppetLayerEvents();
     AdvanceClocks(step);
 
-    // Phase 2: value scripts in the order they were registered, then the markers the clocks
+    // Phase 2: value scripts that have not started start (all `init`s, then all notices), then
+    // every value script runs in the order the scene lists them, then the markers the clocks
     // crossed, then the bindings take this tick's results onto the layers.
+    StartPendingScripts();
     {
         const auto value_count = m_scripted_values.size();
         for (std::size_t index = 0; index < value_count; ++index) {
@@ -1109,6 +1140,7 @@ void SceneRuntimeContext::UnregisterNode(std::string_view view) {
     m_node_alignment.erase(name);
     m_node_cursor_targets.erase(name);
     m_effect_card_links.erase(name);
+    std::erase_if(m_effect_objects, [&name](const auto& entry) { return entry.second.layer == name; });
     m_node_template_paths.erase(name);
     m_sound_layers.erase(name);
     std::erase_if(m_text_values,
@@ -1435,9 +1467,59 @@ void SceneRuntimeContext::RegisterNodeVisibility(std::string name, SceneNode* no
     m_node_visibility[std::move(name)] = binding;
 }
 
+std::string SceneRuntimeContext::RegisterEffectObject(std::string_view layer_key,
+                                                      std::shared_ptr<SceneImageEffect> effect) {
+    if (effect == nullptr) return {};
+    std::string reference = "effect:" + std::to_string(m_next_object_reference++);
+    m_effect_objects.emplace(reference, EffectObject { std::string(layer_key), std::move(effect), nullptr });
+    return reference;
+}
+
+bool SceneRuntimeContext::EffectObjectVisible(std::string_view reference) const {
+    const auto found = m_effect_objects.find(std::string(reference));
+    return found != m_effect_objects.end() && found->second.effect != nullptr &&
+           found->second.effect->visible;
+}
+
+bool SceneRuntimeContext::SetEffectObjectVisible(std::string_view reference, bool visible) {
+    const auto found = m_effect_objects.find(std::string(reference));
+    if (found == m_effect_objects.end() || found->second.effect == nullptr) return false;
+    if (found->second.visibility != nullptr) {
+        // The value's listener switches the effect and asks for the new graph.
+        found->second.visibility->update(visible);
+    } else {
+        found->second.effect->visible = visible;
+    }
+    return true;
+}
+
+std::string SceneRuntimeContext::RegisterSettingAnimation(
+    std::shared_ptr<ScalarAnimationPlayback> animation) {
+    if (animation == nullptr) return {};
+    std::string reference = "setting:" + std::to_string(m_next_object_reference++);
+    m_setting_animations.emplace(reference, std::move(animation));
+    return reference;
+}
+
+std::shared_ptr<ScalarAnimationPlayback> SceneRuntimeContext::RegisterSettingClock(
+    ScalarAnimation animation) {
+    // Filed under a key no layer has, so a lookup by layer and name never reaches it.
+    return RegisterScalarAnimation("\x03clock:" + std::to_string(m_next_object_reference++),
+                                   std::move(animation));
+}
+
+ScalarAnimationPlayback* SceneRuntimeContext::FindSettingAnimation(std::string_view reference) const {
+    const auto found = m_setting_animations.find(std::string(reference));
+    return found == m_setting_animations.end() ? nullptr : found->second.get();
+}
+
 void SceneRuntimeContext::RegisterEffectVisibility(std::shared_ptr<SceneImageEffect> effect,
                                                    std::unique_ptr<DynamicValue> value) {
     if (effect == nullptr || value == nullptr) return;
+    // A script that decides this effect's visibility writes through its value from now on.
+    for (auto& [reference, object] : m_effect_objects) {
+        if (object.effect == effect) object.visibility = value.get();
+    }
     // The value as the scene loads is what the first graph is built with, so
     // only a later switch asks for a rebuild.
     effect->visible = value->getBool();
@@ -2802,6 +2884,59 @@ bool SceneRuntimeContext::SetNodeRotation(std::string_view name, const linalg::V
     return true;
 }
 
+namespace
+{
+using Turn = std::array<std::array<double, 3>, 3>;
+
+// Rz * Ry * Rx for angles in radians: the orientation a layer's angles describe.
+Turn TurnFromAngles(double x, double y, double z) {
+    const double cx = std::cos(x), sx = std::sin(x);
+    const double cy = std::cos(y), sy = std::sin(y);
+    const double cz = std::cos(z), sz = std::sin(z);
+    return { { { cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx },
+               { sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx },
+               { -sy, cy * sx, cy * cx } } };
+}
+
+Turn Compose(const Turn& first, const Turn& then) {
+    Turn out {};
+    for (std::size_t row = 0; row < 3; ++row) {
+        for (std::size_t column = 0; column < 3; ++column) {
+            for (std::size_t k = 0; k < 3; ++k) out[row][column] += first[row][k] * then[k][column];
+        }
+    }
+    return out;
+}
+
+// The angles (x, y, z in radians) whose `TurnFromAngles` is `m`. At the poles of the y turn the
+// x and z turns share an axis; the whole turn is then given to x.
+linalg::Vector3f AnglesFromTurn(const Turn& m) {
+    const double sin_y = std::clamp(-m[2][0], -1.0, 1.0);
+    double       x     = 0.0;
+    double       z     = 0.0;
+    if (std::abs(sin_y) < 1.0 - 1e-9) {
+        x = std::atan2(m[2][1], m[2][2]);
+        z = std::atan2(m[1][0], m[0][0]);
+    } else {
+        x = std::atan2(-m[1][2], m[1][1]);
+    }
+    return linalg::Vector3f(static_cast<float>(x), static_cast<float>(std::asin(sin_y)),
+                            static_cast<float>(z));
+}
+} // namespace
+
+bool SceneRuntimeContext::RotateNodeObjectSpace(std::string_view name,
+                                                const linalg::Vector3f& increment) {
+    const auto found = m_nodes.find(std::string(name));
+    if (found == m_nodes.end() || found->second == nullptr || ! increment.allFinite()) return false;
+    const auto& now = found->second->Rotation();
+    // The increment is a turn in the layer's own frame, so it is applied before the turn the
+    // layer already has is carried out on the parent's axes: now * increment.
+    const Turn current = TurnFromAngles(now.x(), now.y(), now.z());
+    const Turn step    = TurnFromAngles(increment.x(), increment.y(), increment.z());
+    return SetNodeRotation(name, AnglesFromTurn(Compose(current, step)));
+}
+
 linalg::Vector3f SceneRuntimeContext::NodeTranslate(std::string_view name) const {
     const std::string key(name);
     const auto        found = m_nodes.find(key);
@@ -3917,6 +4052,12 @@ bool SceneRuntimeContext::SortLayer(std::string_view name, int index) {
 void SceneRuntimeContext::RegisterLayerAuthoredName(std::string runtime_name,
                                                     std::string authored_name) {
     if (runtime_name.empty() || ! m_nodes.contains(runtime_name)) return;
+    m_layer_authored_names.insert_or_assign(std::move(runtime_name), std::move(authored_name));
+}
+
+void SceneRuntimeContext::DeclareLayerName(std::string runtime_name, std::string authored_name) {
+    if (runtime_name.empty() || runtime_name == authored_name) return;
+    if (! authored_name.empty()) RegisterLayerAlias(authored_name, runtime_name);
     m_layer_authored_names.insert_or_assign(std::move(runtime_name), std::move(authored_name));
 }
 

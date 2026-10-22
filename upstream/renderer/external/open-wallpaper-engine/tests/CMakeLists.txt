@@ -258,6 +258,29 @@ gtest_discover_tests(
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )
+# SceneScript behaviour at the runtime level: what a script's value means to the property it
+# drives, effect objects, start-up order, layer lists, local rotation. Scenes are loaded for their
+# runtime only (support/script_scene.hpp): no device, no surface, no window.
+add_executable(scenescript_behavior_test
+    scenescript_values_test.cpp
+    scenescript_objects_test.cpp
+    scenescript_startup_test.cpp
+    scenescript_rotation_test.cpp
+    support/pixels.cpp
+    support/scene_package.cpp
+    support/script_scene.cpp)
+target_link_libraries(scenescript_behavior_test PRIVATE ${PROJECT_NAME} wpAudio wpScene wpFs nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(scenescript_behavior_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
+target_compile_features(scenescript_behavior_test PRIVATE cxx_std_20)
+if(TARGET wescene_rust_shader)
+    target_link_libraries(scenescript_behavior_test PRIVATE wescene_rust_shader)
+endif()
+gtest_discover_tests(
+    scenescript_behavior_test
+    TEST_PREFIX scenescript_behavior_test.
+    PROPERTIES TIMEOUT 60
+    DISCOVERY_TIMEOUT 60
+)
 # Explicit CLI diagnostic, not registered with ctest. Never creates a surface.
 add_executable(render_target_lifetime_test render_target_lifetime_test.cpp)
 target_link_libraries(render_target_lifetime_test PRIVATE ${PROJECT_NAME} wpScene wpRenderCommon wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)

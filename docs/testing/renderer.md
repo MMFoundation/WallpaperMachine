@@ -575,7 +575,7 @@ its `tests/` folder). The authoritative routine build/run list is
 (`scene_schema_tests`, `mdl_schema_tests`, `tex_schema_tests`, `version_tests`),
 SceneScript, input and the media protocol (`script_runtime_compat_test`,
 `mouse_input_test`, `scenescript_sound_layer_smoke`,
-`scenescript_media_event_smoke`, `media_thumbnail_texture_smoke`), the shader
+`scenescript_media_event_smoke`, `scenescript_behavior_test`, `media_thumbnail_texture_smoke`), the shader
 preprocessor (`shader_preprocessor_compat_test`, `unpack_shader_compile_smoke`),
 video playback-state merging
 (`video_texture_submission_smoke`), and the texture/cache/lifetime, audio, video,

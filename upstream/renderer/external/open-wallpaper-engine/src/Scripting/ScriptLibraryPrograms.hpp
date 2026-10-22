@@ -75,13 +75,17 @@ var MEDIA_COLORS = ['primaryColor', 'secondaryColor', 'tertiaryColor', 'textColo
 
 // Runs the factory the native side compiled: the script's top level executes here
 // and its handlers come back as plain functions of that scope.
-function make(factory, kind, layerName, animIndex) {
+function make(factory, kind, layerName, animIndex, effectRef, animRef) {
   var sp = {};
   var builder = makeBuilder(sp);
   var layerKey = layerName ? n.resolve(layerName) : '';
   var layer = layerName ? getLayer(layerName) : undefined;
   var object = layer;
-  if (layer !== undefined && animIndex >= 0) object = animationLayerOf(layerKey, animIndex);
+  if (layer !== undefined) {
+    if (animIndex >= 0) object = animationLayerOf(layerKey, animIndex);
+    else if (effectRef) object = effectObjectOf(layer, effectRef);
+    else if (animRef) object = settingObjectOf(layer, animRef);
+  }
   var hooks = {};
   var scene = Object.create(sceneProxy);
   Object.defineProperty(scene, 'createLayer', {
@@ -130,19 +134,28 @@ function ownCopy(value) {
   return value instanceof Vec2 || value instanceof Vec3 || value instanceof Vec4 ? value.copy() : value;
 }
 
+// The first step of a value program's start: its `init`, given the value the property holds.
+// Answers what `init` returned; `undefined` is "no value".
+function runInit(prog, value) {
+  refreshAudio();
+  prog.started = true;
+  var init = prog.h.init;
+  if (typeof init !== 'function') return undefined;
+  try { return init(ownCopy(value)); } catch (e) { reportError('init', e); return undefined; }
+}
+
+// The second step: the language and the user properties, told once every program has had its `init`.
+function userNotices(prog, hasRuntime) {
+  noticeLanguage(prog);
+  if (hasRuntime) guard('applyUserProperties', prog, Object.assign({}, userProps));
+}
+
 // One evaluation of a value program (the host has refreshed `engine` already).
 // Answers what `update` returned; `undefined` is "no value".
 function evaluate(prog, value, hasRuntime) {
   refreshAudio();
   runTimers();
-  var h = prog.h;
-  if (!prog.started) {
-    prog.started = true;
-    guard('init', prog, ownCopy(value));
-    noticeLanguage(prog);
-    if (hasRuntime) guard('applyUserProperties', prog, Object.assign({}, userProps));
-  }
-  var update = h.update;
+  var update = prog.h.update;
   if (typeof update !== 'function') return undefined;
   try { return update(ownCopy(value)); } catch (e) { reportError('update', e); return undefined; }
 }
@@ -254,7 +267,7 @@ return {
   mediaJson: mediaJson, mediaThumbnail: mediaThumbnail, resizeProgram: resizeProgram,
   resizeListeners: resizeListeners, applyProps: applyProps, destroyProgram: destroyProgram,
   noticeLanguage: noticeLanguage, notifyEnded: notifyAnimationLayerEnded,
-  resetTransient: resetTransient
+  resetTransient: resetTransient, runInit: runInit, userNotices: userNotices
 };
 })
 )JS";

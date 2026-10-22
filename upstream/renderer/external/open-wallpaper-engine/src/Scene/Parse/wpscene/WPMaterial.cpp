@@ -108,10 +108,21 @@ WPConstantShaderValue ReadConstant(const nlohmann::json& json) {
     if (const auto value = json.find("value"); value != json.end()) {
         constant.value = ReadConstantComponents(*value);
     }
-    // A constant's property is a plain name; the `{name, condition}` form
-    // belongs to flags and is not read here.
-    if (const auto user = json.find("user"); user != json.end() && user->is_string()) {
-        constant.user = user->get<std::string>();
+    // A constant's property is a plain name, or the `{name, condition}` form: then the
+    // constant is the flag "the choice equals the condition", 1 or 0.
+    if (const auto user = json.find("user"); user != json.end()) {
+        if (user->is_string()) {
+            constant.user = user->get<std::string>();
+        } else if (user->is_object()) {
+            const auto name = user->find("name");
+            if (name != user->end() && name->is_string()) {
+                constant.user = name->get<std::string>();
+                const auto condition = user->find("condition");
+                if (condition != user->end() && condition->is_string()) {
+                    constant.user_condition = condition->get<std::string>();
+                }
+            }
+        }
     }
     if (const auto script = json.find("script"); script != json.end() && script->is_string()) {
         constant.script = script->get<std::string>();

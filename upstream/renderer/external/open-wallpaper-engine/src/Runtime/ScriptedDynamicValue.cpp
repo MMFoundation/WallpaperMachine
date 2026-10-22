@@ -10,7 +10,8 @@ namespace wallpaper
 ScriptedDynamicValue::ScriptedDynamicValue(
     SceneRuntimeContext& runtime, std::string script_source, std::string current_layer_name,
     std::map<std::string, DynamicValueUniquePtr> script_properties, DynamicValue base_value,
-    ScriptedValueSemantic semantic, int animation_layer_index) :
+    ScriptedValueSemantic semantic, int animation_layer_index, std::string effect_reference,
+    std::string setting_animation_reference) :
     m_runtime(&runtime),
     m_registry(runtime.ScriptedValueRegistryToken()),
     m_current_layer_name(std::move(current_layer_name)),
@@ -27,7 +28,7 @@ ScriptedDynamicValue::ScriptedDynamicValue(
         std::move(base_value), runtime.hostContext(),
         semantic == ScriptedValueSemantic::AnglesDegrees ? PropertyScriptValueSemantic::AnglesDegrees
                                                           : PropertyScriptValueSemantic::Generic,
-        animation_layer_index);
+        animation_layer_index, std::move(effect_reference), std::move(setting_animation_reference));
 
     // A parameter that changes re-runs the script at once.
     for (auto& [name, property] : m_script_properties) {
@@ -42,8 +43,36 @@ ScriptedDynamicValue::~ScriptedDynamicValue() {
     if (! m_registry.expired()) m_runtime->UnregisterScriptedValue(this);
 }
 
+bool ScriptedDynamicValue::Initialised() const noexcept {
+    return m_program == nullptr || ! m_program->Valid() || m_program->Initialised();
+}
+
+void ScriptedDynamicValue::RunInit() {
+    if (m_program == nullptr || ! m_program->Valid() || m_program->Initialised()) return;
+    // A text script that writes its own layer's text from `init` and returns nothing has
+    // decided the text, as it does from `update`.
+    SceneRuntimeContext::OwnTextWrite own_text_write(*m_runtime, *this);
+    auto answer = m_program->RunInit(m_runtime->hostContext(), *this);
+    if (answer != nullptr) {
+        DynamicValue::update(*answer);
+    } else if (own_text_write.Written().has_value()) {
+        DynamicValue::update(*own_text_write.Written());
+    }
+}
+
+void ScriptedDynamicValue::RunUserNotices() {
+    if (m_program != nullptr) m_program->RunUserNotices(m_runtime->hostContext());
+}
+
 void ScriptedDynamicValue::reevaluate() {
     if (m_runtime->ProjectPropertiesChanging() || m_program == nullptr || ! m_program->Valid()) return;
+    // Not started yet (a property it reads changed before the scene's first tick): it starts
+    // now, in the same two steps.
+    if (! m_program->Initialised()) {
+        RunInit();
+        RunUserNotices();
+        if (! m_program->Valid()) return;
+    }
 
     // update(value) continues from the previous result, including explicit property writes.
     SceneRuntimeContext::OwnTextWrite own_text_write(*m_runtime, *this);

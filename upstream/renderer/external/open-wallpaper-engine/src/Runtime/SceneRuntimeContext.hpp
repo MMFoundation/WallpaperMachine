@@ -202,6 +202,10 @@ public:
     /// with the name it is registered under.
     void          RegisterLayerAuthoredName(std::string runtime_name, std::string authored_name);
     std::string   LayerAuthoredName(std::string_view runtime_name) const;
+    /// Records the name the scene file gives a layer, and the name lookup that finds it, before
+    /// the layer itself is registered. The parser declares every layer so that a script that
+    /// compiles early (and looks later layers up while it does) already sees the names.
+    void          DeclareLayerName(std::string runtime_name, std::string authored_name);
     /// Puts the registered layers in the scene file's declaration order. Names
     /// not listed keep the order they were registered in, after the listed ones.
     void          SetLayerOrder(const std::vector<std::string>& names);
@@ -262,6 +266,24 @@ public:
     /// effects that run and rebuilds the render graph before the next frame.
     void          RegisterEffectVisibility(std::shared_ptr<SceneImageEffect> effect,
                                            std::unique_ptr<DynamicValue> value);
+    /// Makes `effect`, an effect of layer `layer_key`, the `thisObject` of the script that decides
+    /// its visibility and returns the reference that script's program is made with. Called
+    /// before the script exists, so the effect is there when the script's top level runs;
+    /// `RegisterEffectVisibility` then ties the script's value to it.
+    std::string   RegisterEffectObject(std::string_view layer_key,
+                                       std::shared_ptr<SceneImageEffect> effect);
+    /// What a script reads from, and writes to, `thisObject.visible` of an effect object. A write
+    /// goes through the effect's visibility value when it has one, so the script's next run and
+    /// the effect agree, and the scene graph is rebuilt; an unknown reference reads false.
+    bool          EffectObjectVisible(std::string_view reference) const;
+    bool          SetEffectObjectVisible(std::string_view reference, bool visible);
+    /// A clock that belongs to one setting a script sits on (`thisObject.getAnimation()` with no
+    /// name answers it), and the reference scripts reach it by.
+    std::string   RegisterSettingAnimation(std::shared_ptr<ScalarAnimationPlayback> animation);
+    /// The clock of a keyed setting that a script drives: it runs with the others, but belongs to
+    /// the setting and no layer's name lookup finds it.
+    std::shared_ptr<ScalarAnimationPlayback> RegisterSettingClock(ScalarAnimation animation);
+    ScalarAnimationPlayback* FindSettingAnimation(std::string_view reference) const;
     /// What follows a text layer's effects as a script switches them, and what follows its card.
     /// Wallpaper Engine counts the visible effect passes of a text layer afresh whenever an
     /// effect's visibility changes: the card is padded, and drawn as a composite, only while one
@@ -486,6 +508,10 @@ public:
     // display shows (`SetCursorViewport`), on top of wherever its origin puts it.
     bool            SetNodeScreenAnchor(std::string_view name, TextScreenAnchor anchor);
     bool            SetNodeRotation(std::string_view name, const linalg::Vector3f& value);
+    /// `layer.rotateObjectSpace(Vec3)`: turns the layer by `increment` (Euler angles in radians,
+    /// composed as the layer's own angles are: z, then y, then x) about its own axes, on top of
+    /// the orientation it has now. A layer that is not registered is left alone.
+    bool            RotateNodeObjectSpace(std::string_view name, const linalg::Vector3f& increment);
     // How the cursor treats a layer: only image, text and model layers that are
     // `solid` are hit-tested, and a visible one under the cursor with
     // `disablepropagation` hides every layer behind it from the cursor. A layer
@@ -1064,6 +1090,15 @@ private:
     std::unordered_map<std::string, EffectCardLink> m_effect_card_links;
     std::vector<PassthroughCard> m_passthrough_cards;
     uint64_t                     m_passthrough_card_layouts { 0 };
+    struct EffectObject {
+        std::string                       layer;
+        std::shared_ptr<SceneImageEffect> effect;
+        DynamicValue*                     visibility { nullptr };
+    };
+    /// The effects whose visibility a script decides, by the reference their script is made with.
+    std::unordered_map<std::string, EffectObject> m_effect_objects;
+    std::unordered_map<std::string, std::shared_ptr<ScalarAnimationPlayback>> m_setting_animations;
+    uint64_t m_next_object_reference { 1 };
     std::unordered_map<std::string, LayerTemplate> m_layer_templates;
     /// Layer key -> the template path the layer was made from (or the path a template node
     /// was registered under, which is how a script in a workshop layer finds its siblings).
@@ -1112,6 +1147,10 @@ private:
     void QueueTextJobs();
     void RequestShownLayerGraph();
     void AdvanceClocks(double seconds);
+    /// Starts the value scripts that have not started, as a scene starts them: every script's
+    /// `init` in the scene's order, then every script told the user properties for the first
+    /// time. Only then does any script's `update` run.
+    void StartPendingScripts();
     void ApplyNodeVisibilityBindings();
     void ApplyNodeTransformBindings();
     void ApplyTextValueBindings();

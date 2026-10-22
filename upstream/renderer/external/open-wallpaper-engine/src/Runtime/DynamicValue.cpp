@@ -367,11 +367,37 @@ void DynamicValue::propagate() const {
     }
 }
 
+// Whether `choice` is the choice this value's condition names. A text choice is compared as
+// text; a number is compared as a number when the condition is one (`2` and `2.0` are the same
+// choice), else by the text it reads as.
+bool DynamicValue::conditionHolds(const DynamicValue& choice) const {
+    const std::string& wanted = m_condition->condition;
+    switch (choice.m_type) {
+    case String: return choice.m_string == wanted;
+    case Float:
+    case Int:
+    case Boolean: {
+        std::size_t position = 0;
+        float       number   = 0.0f;
+        if (ReadLeadingNumber(wanted, position, number)) {
+            while (position < wanted.size() && (wanted[position] == ' ' || wanted[position] == '\t')) ++position;
+            if (position == wanted.size()) return choice.m_float == number;
+        }
+        return choice.toString() == wanted;
+    }
+    default: return choice.toString() == wanted;
+    }
+}
+
 void DynamicValue::track(DynamicValue* other, bool as_vec3) {
     if (other == nullptr || other == this) return;
     const auto take = [this, as_vec3](const DynamicValue& source) {
         if (source.m_type == Null) {
             update();
+        } else if (!as_vec3 && m_condition.has_value()) {
+            // A choice read through a condition is a flag: true only while the choice is the
+            // one the condition names.
+            update(conditionHolds(source));
         } else if (!as_vec3) {
             update(source);
         } else if (source.m_type == String) {
