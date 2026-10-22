@@ -71,6 +71,30 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 
+# Scene-schema behaviour tests (the replacement for the tests that used to live in
+# scene_schema_tests.cpp). Convention: every part of the study has its OWN executable,
+# scene_schema_partNN_test, built from its own source file(s) and linked against the shared
+# fixture library below (support/schema_fixtures.hpp). A part adds exactly one
+# add_scene_schema_behavior_test() line to the list and one name to the registry at the top of
+# scripts/check_renderer.py; it never edits another part's source or the support library.
+add_library(scene_schema_support STATIC support/schema_fixtures.cpp)
+target_link_libraries(scene_schema_support PUBLIC ${PROJECT_NAME} wpAudio wpFs wpScene wpParticle nlohmann_json::nlohmann_json)
+target_include_directories(scene_schema_support PUBLIC . ../src/Scene/RenderCommon/include)
+target_compile_features(scene_schema_support PUBLIC cxx_std_20)
+function(add_scene_schema_behavior_test name)
+    add_executable(${name} ${ARGN})
+    target_link_libraries(${name} PRIVATE scene_schema_support GTest::gtest_main)
+    gtest_discover_tests(${name} PROPERTIES TIMEOUT 30 DISCOVERY_TIMEOUT 60)
+endfunction()
+# --- append one line per part below -------------------------------------------------------
+add_scene_schema_behavior_test(scene_schema_fixtures_selftest schema_fixtures_selftest.cpp)
+add_scene_schema_behavior_test(scene_schema_part01_test
+    scene_schema_part01_general_test.cpp
+    scene_schema_part01_objects_test.cpp
+    scene_schema_part01_model_layers_test.cpp
+    scene_schema_part01_cameras_test.cpp)
+# ------------------------------------------------------------------------------------------
+
 add_executable(mdl_schema_tests mdl_schema_tests.cpp)
 target_link_libraries(mdl_schema_tests PRIVATE ${PROJECT_NAME} wpFs wpScene GTest::gtest_main)
 target_include_directories(mdl_schema_tests PRIVATE .)
