@@ -111,4 +111,7 @@ struct LockScreenReadiness: Codable {
   var displayID: UInt32
   var error: String?
   var held: String? = nil
+  /// The extension process that wrote it, so the app can tell when that renderer is gone.
+  /// Absent from copies that predate it.
+  var processID: Int32? = nil
 }

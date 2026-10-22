@@ -123,6 +123,8 @@ final class WallpaperController {
   }
 
   private static func record(_ readiness: LockScreenReadiness) {
+    var readiness = readiness
+    readiness.processID = getpid()
     do {
       let data = try JSONEncoder().encode(readiness)
       try data.write(
