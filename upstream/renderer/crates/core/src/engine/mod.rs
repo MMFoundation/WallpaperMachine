@@ -1080,27 +1080,7 @@ impl DisplayPlane {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct MousePollState {
-    point: NSPoint,
-    buttons: MouseButtonEdges,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct MouseDisplayUpdate {
-    entered: bool,
-    position: Option<NormalizedMousePosition>,
-    buttons: MouseButtonEdges,
-}
-
-impl<M> From<kameo::error::SendError<M, EngineError>> for EngineError {
-    fn from(error: kameo::error::SendError<M, EngineError>) -> Self {
-        match error {
-            kameo::error::SendError::HandlerError(error) => error,
-            other => Self::Platform(format!("engine actor mailbox failed: {other}")),
-        }
-    }
-}
+// R2-CE1: to be written from spec
 
 impl WallpaperEngine {
     /// The resampler if nobody else is using it; a lock a panic poisoned still

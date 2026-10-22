@@ -23,20 +23,7 @@ crossbeam-queue = "0.3"
 dirs = "5"
 fs2 = "0.4"
 futures-util = "0.3"
-image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png"] }
-kameo = "0.20.0"
-log = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
-tempfile = "3"
-thiserror = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", "time", "io-util"] }
-toml = "0.8"
-uniffi = { version = "0.28", features = ["cli"] }
-objc2 = "0.6.4"
-objc2-core-foundation = "0.3.2"
-objc2-foundation = "0.3.2"
-objc2-service-management = "0.3.2"
+# R2-BCARGO: to be written from spec
 objc2-io-kit = "0.3.2"
 
 [build-dependencies]

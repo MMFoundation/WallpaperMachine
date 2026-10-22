@@ -39,21 +39,7 @@ pub struct GetWallpaperPreview {
 
 pub struct GetWebWallpapers;
 
-pub struct GetMonitorInformationSnapshot;
-
-pub struct GetSettingsSnapshot;
-
-pub struct ClearShaderCache;
-
-pub struct GetWallpaperOptionsSnapshot {
-    pub wallpaper_id: String,
-}
-
-pub struct InjectWallpaperForTest {
-    pub id: String,
-    pub title: String,
-    pub kind: BridgeWallpaperKind,
-}
+// R2-BM1: to be written from spec
 
 pub struct InjectSceneWallpaperConfigForTest {
     pub id: String,
@@ -397,25 +383,7 @@ pub struct CompleteAudioResponse {
     pub result: Result<(), BridgeError>,
 }
 
-pub type AllSnapshotsReply = Result<BridgeSnapshotBundle, BridgeError>;
-pub type BootstrapReply = AllSnapshotsReply;
-pub type AppSnapshotReply = Result<BridgeAppSnapshot, BridgeError>;
-pub type LibrarySnapshotReply = Result<BridgeLibrarySnapshot, BridgeError>;
-pub type LockScreenScenesReply = Result<Vec<BridgeLockScreenScene>, BridgeError>;
-pub type WebWallpapersReply = Result<Vec<BridgeWebWallpaper>, BridgeError>;
-pub type MonitorInformationSnapshotReply = Result<BridgeMonitorInformationSnapshot, BridgeError>;
-pub type SettingsSnapshotReply = Result<BridgeSettingsSnapshot, BridgeError>;
-pub type ClearShaderCacheReply = Result<BridgeSettingsSnapshot, BridgeError>;
-pub type WallpaperOptionsSnapshotReply = Result<BridgeWallpaperOptionsSnapshot, BridgeError>;
-pub type TestMutationReply = Result<(), BridgeError>;
-pub type SelectWallpaperReply = AllSnapshotsReply;
-pub type RefreshLibraryReply = AllSnapshotsReply;
-pub type RefreshDisplaysReply = AllSnapshotsReply;
-pub type ReleaseHeldWallpaperReply = AllSnapshotsReply;
-pub type PollMousePositionReply = Result<(), BridgeError>;
-pub type SetFilterReply = AllSnapshotsReply;
-pub type DisplayMutationReply = Result<BridgeDisplayMutationBundle, crate::api::BridgeError>;
-pub type SetGlobalPlaybackReply = AllSnapshotsReply;
+// R2-BM2: to be written from spec
 pub type SetBatteryModeReply = AllSnapshotsReply;
 pub type SetVerboseLoggingReply = AllSnapshotsReply;
 pub type SetPresentationSuspendedReply = Result<(), BridgeError>;

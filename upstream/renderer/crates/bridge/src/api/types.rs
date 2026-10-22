@@ -342,105 +342,11 @@ pub struct BridgeDisplayConfigRow {
     pub can_restore_defaults: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct BridgeSliderMetadata {
-    pub min: f64,
-    pub max: f64,
-    pub step: f64,
-    pub precision: u32,
-}
+// R2-BT1: to be written from spec
 
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct BridgeComboOption {
-    pub label: String,
-    pub value: BridgePropertyValue,
-}
+// R2-BT2: to be written from spec
 
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct BridgePropertyDescriptor {
-    pub id: String,
-    pub kind: BridgePropertyKind,
-    pub label_html: String,
-    pub value: BridgePropertyValue,
-    pub default_value: BridgePropertyValue,
-    pub slider: Option<BridgeSliderMetadata>,
-    pub combo_options: Vec<BridgeComboOption>,
-    /// Present only on file and directory properties, and only when the
-    /// project declared a file-type option.
-    pub file_filter: Option<BridgeFileFilter>,
-    /// Present only on directory properties.
-    pub directory_mode: Option<BridgeDirectoryMode>,
-    pub dirty: bool,
-    pub can_restore_defaults: bool,
-    /// False while an authored visibility rule hides the property. The row is
-    /// still listed, with the value the renderer is using, so a host can show only
-    /// the enabled rows and still reach the rest. A rule the bridge cannot read
-    /// never disables a property.
-    pub enabled: bool,
-    /// File and directory properties only: the app holds its own copy of this
-    /// property's assets in managed storage, so deleting or re-downloading the
-    /// wallpaper does not lose them. Always false for every other kind.
-    pub asset_managed: bool,
-    /// File and directory properties only: the property names something, and
-    /// neither the user's own path nor a managed copy resolves any more. An
-    /// unset property is not missing.
-    pub asset_missing: bool,
-    /// The user's own path, for display. `None` when the property is unset.
-    pub asset_source_path: Option<String>,
-}
-
-#[allow(clippy::struct_excessive_bools)]
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct BridgeWallpaperOptionsSnapshot {
-    pub wallpaper_id: String,
-    pub title: String,
-    pub kind: BridgeWallpaperKind,
-    pub supported: bool,
-    pub dirty: bool,
-    pub properties: Vec<BridgePropertyDescriptor>,
-    pub display_configurations: Vec<BridgeDisplayConfigRow>,
-    pub audio_response_enabled: bool,
-    /// The user's consent to look for a system media source for this
-    /// wallpaper, given by default until the user turns it off. Consent, not
-    /// availability.
-    pub media_integration_enabled: bool,
-    pub muted: bool,
-    pub volume: f32,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct BridgeMonitorInfoRow {
-    pub display_id: String,
-    pub title: String,
-    pub wallpaper_id: String,
-    pub wallpaper_title: String,
-    pub mirror_target_display_id: Option<String>,
-    pub mirror_target_title: Option<String>,
-    pub scaling_mode: String,
-    pub target_fps: String,
-    pub audio_response: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct BridgeMonitorInformationSnapshot {
-    pub rows: Vec<BridgeMonitorInfoRow>,
-}
-
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct BridgeDisplaySettingsRow {
-    pub display_id: String,
-    pub title: String,
-    pub enabled: bool,
-    pub mode: BridgeDisplayMode,
-    pub mirror_targets: Vec<String>,
-    pub selected_mirror_target: Option<String>,
-    pub scaling_mode: BridgeScalingMode,
-    pub scaling_factor: f64,
-    pub target_fps: u32,
-    pub max_fps: u32,
-    pub muted: bool,
-    pub volume: f32,
-}
+// R2-BT3: to be written from spec
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum BridgeLogLevel {
@@ -451,19 +357,7 @@ pub enum BridgeLogLevel {
     Error,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct BridgeLogStatus {
-    pub logs_root: String,
-    pub active_session: String,
-    pub active_file: String,
-    pub active_file_size_bytes: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct BridgeStorageStatus {
-    pub shader_cache_size_bytes: u64,
-    pub logs: BridgeLogStatus,
-}
+// R2-BT4: to be written from spec
 
 /// Which renderer is actually playing the video on one display.
 ///
@@ -607,31 +501,7 @@ pub struct BridgeSettingsSnapshot {
     pub render_scale_supported: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct BridgeSnapshotBundle {
-    pub app: BridgeAppSnapshot,
-    pub library: BridgeLibrarySnapshot,
-    pub wallpaper_options: Option<BridgeWallpaperOptionsSnapshot>,
-    pub monitor_information: BridgeMonitorInformationSnapshot,
-    pub settings: BridgeSettingsSnapshot,
-}
-
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct BridgeWallpaperMutationBundle {
-    pub app: BridgeAppSnapshot,
-    pub library: BridgeLibrarySnapshot,
-    pub wallpaper_options: BridgeWallpaperOptionsSnapshot,
-    pub monitor_information: BridgeMonitorInformationSnapshot,
-    pub settings: BridgeSettingsSnapshot,
-}
-
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct BridgeDisplayMutationBundle {
-    pub app: BridgeAppSnapshot,
-    pub library: BridgeLibrarySnapshot,
-    pub monitor_information: BridgeMonitorInformationSnapshot,
-    pub settings: BridgeSettingsSnapshot,
-}
+// R2-BT5: to be written from spec
 
 /// Renderer work counters for one wallpaper surface.
 ///

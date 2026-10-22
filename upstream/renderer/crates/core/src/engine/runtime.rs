@@ -1224,21 +1224,7 @@ impl SceneRuntime {
         renderer
     }
 
-    /// The live state of the scene as the next scene on the slot inherits it.
-    pub fn runtime_state(&self) -> SceneRuntimeState {
-        SceneRuntimeState {
-            scaling_mode: self.scaling_mode,
-            scaling_factor: self.scaling_factor,
-            framing: self.framing,
-            render_resolution: self.render_resolution,
-            audio_response_enabled: self.audio_response_enabled,
-            media_integration_enabled: self.media_integration_enabled,
-            paused: self.paused,
-            audio_volume: self.audio_volume,
-            audio_muted: self.audio_muted,
-            property_override_json: self.property_override_json.clone(),
-        }
-    }
+    // R2-CR1: to be written from spec
 
     /// The state a scene for `desc` takes over from this one.
     pub(crate) fn runtime_state_for_desc(

@@ -1082,31 +1082,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
     }
 
-    pub(super) fn operation_source_id(
-        &self,
-        selector: &SerializedSelector,
-        displays: &[DisplaySnapshotEntry],
-    ) -> Result<u32, BridgeError> {
-        match selector {
-            SerializedSelector::LiveDisplayId { display_id } => Ok(*display_id),
-            SerializedSelector::Identity { .. } => selector
-                .to_selector()
-                .resolve_display(displays)
-                .map(|display| display.desc.display_id)
-                .ok_or_else(|| BridgeError::invalid_input("unknown display identity")),
-            SerializedSelector::Primary => {
-                if let Some(primary) = displays.first() {
-                    return Ok(primary.desc.display_id);
-                }
-                self.operation_rows()
-                    .get("primary")
-                    .and_then(|row| row.title.rsplit_once(" - Primary)"))
-                    .and_then(|(before, _)| before.rsplit_once('('))
-                    .and_then(|(_, id)| id.parse::<u32>().ok())
-                    .ok_or_else(|| BridgeError::invalid_input("unknown display id primary"))
-            }
-        }
-    }
+    // R2-BO1: to be written from spec
 
     fn operation_selector_matches_live_primary(
         &self,

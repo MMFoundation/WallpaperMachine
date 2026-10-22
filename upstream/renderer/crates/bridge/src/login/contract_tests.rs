@@ -352,47 +352,6 @@ fn losing_an_eligible_path_during_registration_is_a_successful_unavailable_resul
 }
 
 #[test]
-fn synthetic_mutations_cover_all_available_and_approval_rows() {
-    for (initial, enabled, expected) in [
-        (
-            LaunchAtLoginStatus::Available { enabled: true },
-            true,
-            LaunchAtLoginStatus::Available { enabled: true },
-        ),
-        (
-            LaunchAtLoginStatus::Available { enabled: true },
-            false,
-            LaunchAtLoginStatus::Available { enabled: false },
-        ),
-        (
-            LaunchAtLoginStatus::Available { enabled: false },
-            true,
-            LaunchAtLoginStatus::Available { enabled: true },
-        ),
-        (
-            LaunchAtLoginStatus::Available { enabled: false },
-            false,
-            LaunchAtLoginStatus::Available { enabled: false },
-        ),
-        (
-            LaunchAtLoginStatus::RequiresApproval,
-            true,
-            LaunchAtLoginStatus::RequiresApproval,
-        ),
-        (
-            LaunchAtLoginStatus::RequiresApproval,
-            false,
-            LaunchAtLoginStatus::Available { enabled: false },
-        ),
-    ] {
-        let state = SyntheticLoginStatus::new(initial);
-        assert_status(state.observe(), initial);
-        assert_status(state.change_enabled(enabled), expected);
-        assert_status(state.observe(), expected);
-    }
-}
-
-#[test]
 fn synthetic_unavailability_is_unchanged_by_either_rejected_request() {
     let state = SyntheticLoginStatus::new(LaunchAtLoginStatus::Unavailable);
     for enabled in [true, false, true] {

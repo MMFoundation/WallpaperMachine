@@ -225,20 +225,7 @@ impl Default for FilterCfg {
 pub enum SerializedSelector {
     #[default]
     Primary,
-    Identity {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        uuid: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        vendor_id: Option<u32>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        model_id: Option<u32>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        serial_number: Option<u32>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        unit_number: Option<u32>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        name: Option<String>,
-    },
+    // R2-BC1: to be written from spec
     LiveDisplayId {
         display_id: u32,
     },
@@ -267,22 +254,7 @@ impl SerializedSelector {
         }
     }
 
-    pub fn from_selector(sel: &DisplaySelector) -> Self {
-        match sel {
-            DisplaySelector::Primary => Self::Primary,
-            DisplaySelector::Identity(identity) => Self::Identity {
-                uuid: identity.uuid.clone(),
-                vendor_id: identity.vendor_id,
-                model_id: identity.model_id,
-                serial_number: identity.serial_number,
-                unit_number: identity.unit_number,
-                name: identity.name.clone(),
-            },
-            DisplaySelector::LiveDisplayId(display_id) => Self::LiveDisplayId {
-                display_id: *display_id,
-            },
-        }
-    }
+    // R2-BC2: to be written from spec
 
     pub fn id(&self) -> String {
         match self {

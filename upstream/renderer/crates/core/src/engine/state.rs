@@ -325,27 +325,7 @@ impl EngineState {
         self.close_all_with(SceneRuntime::close)
     }
 
-    fn close_all_with(
-        &mut self,
-        mut close: impl FnMut(&mut SceneRuntime) -> Result<(), EngineError>,
-    ) -> Result<(), EngineError> {
-        self.handles_by_display.clear();
-        self.displays_by_handle.clear();
-        let mut scenes = Vec::new();
-        for record in &mut self.display_records {
-            record.handle = None;
-            record.model.runtime_open = false;
-            record.store_runtime_snapshot();
-            scenes.extend(record.runtime.take());
-        }
-        let mut first_error = None;
-        for mut scene in scenes {
-            if let Err(error) = close(&mut scene) {
-                first_error.get_or_insert(error);
-            }
-        }
-        first_error.map_or(Ok(()), Err)
-    }
+    // R2-CT1: to be written from spec
 }
 
 impl Default for EngineState {

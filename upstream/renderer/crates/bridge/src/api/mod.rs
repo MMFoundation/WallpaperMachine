@@ -1028,32 +1028,7 @@ impl EngineFacade for ArcEngineFacade {
         self.0.set_mouse_button(handle, button, pressed)
     }
 
-    fn set_mouse_entered(
-        &self,
-        handle: SceneHandle,
-        entered: bool,
-    ) -> Pin<Box<dyn Future<Output = Result<(), wallpaper_core::EngineError>> + Send>> {
-        self.0.set_mouse_entered(handle, entered)
-    }
-
-    fn create_window_for_display(
-        &self,
-        selector: DisplaySelector,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<Option<SceneHandle>, wallpaper_core::EngineError>> + Send>,
-    > {
-        self.0.create_window_for_display(selector)
-    }
-
-    fn set_wallpaper_for_display(
-        &self,
-        selector: DisplaySelector,
-        assignment: WallpaperAssignment,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<Option<SceneHandle>, wallpaper_core::EngineError>> + Send>,
-    > {
-        self.0.set_wallpaper_for_display(selector, assignment)
-    }
+    // R2-BX1: to be written from spec
 
     fn set_first_frame_callback(&self, callback: FirstFrameCallback) {
         self.0.set_first_frame_callback(callback);
@@ -2671,23 +2646,7 @@ impl From<ScalingMode> for BridgeScalingMode {
     }
 }
 
-impl From<&crate::project::PropertyKind> for BridgePropertyKind {
-    fn from(value: &crate::project::PropertyKind) -> Self {
-        match value {
-            crate::project::PropertyKind::Slider => Self::Slider,
-            crate::project::PropertyKind::Combo => Self::Combo,
-            crate::project::PropertyKind::Bool => Self::Bool,
-            crate::project::PropertyKind::Color => Self::Color,
-            crate::project::PropertyKind::TextInput => Self::TextInput,
-            crate::project::PropertyKind::Text => Self::Text,
-            crate::project::PropertyKind::Group => Self::Group,
-            crate::project::PropertyKind::File => Self::File,
-            crate::project::PropertyKind::Directory => Self::Directory,
-            crate::project::PropertyKind::Texture => Self::Texture,
-            crate::project::PropertyKind::Unknown(_) => Self::Unknown,
-        }
-    }
-}
+// R2-BX2: to be written from spec
 
 impl From<crate::project::PropertyValue> for BridgePropertyValue {
     fn from(value: crate::project::PropertyValue) -> Self {
@@ -2705,20 +2664,7 @@ impl From<crate::project::PropertyValue> for BridgePropertyValue {
     }
 }
 
-#[allow(clippy::cast_possible_truncation)]
-impl From<BridgePropertyValue> for crate::project::PropertyValue {
-    fn from(value: BridgePropertyValue) -> Self {
-        match value {
-            BridgePropertyValue::Bool { value } => Self::Bool(value),
-            BridgePropertyValue::Number { value } => Self::Number(value),
-            BridgePropertyValue::String { value } => Self::String(value),
-            BridgePropertyValue::ColorRgb { red, green, blue } => {
-                Self::ColorRgb(red as f32, green as f32, blue as f32)
-            }
-            BridgePropertyValue::Empty => Self::Null,
-        }
-    }
-}
+// R2-BX3: to be written from spec
 
 #[cfg(test)]
 mod mouse_polling_tests {

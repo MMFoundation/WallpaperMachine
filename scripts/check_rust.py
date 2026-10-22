@@ -20,8 +20,8 @@ MARK = markers()
 CHECKS = (
     ("core", ("-p", "wallpaper-core", "--lib"), RENDERER),
     ("bridge", ("-p", "wallpaper-bridge", "--lib"), RENDERER),
-    ("core-integration", ("-p", "wallpaper-core", "--test", "audio_response_controller",
-                          "--test", "core_audio_api", "--test", "project_override_json",
+    ("core-integration", ("-p", "wallpaper-core", "--test", "core_audio_api",
+                          "--test", "project_override_json",
                           "--test", "wallpaper_background"), RENDERER),
     ("shader", ("-p", "wm-shader", "--features", "ffi"), OWN_RENDERER),
 )

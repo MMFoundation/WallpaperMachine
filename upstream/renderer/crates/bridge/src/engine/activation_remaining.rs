@@ -192,34 +192,7 @@ pub(super) fn build_mirror_scene(
     Ok(scene)
 }
 
-/// Saved mirror assignments, without presenter source-availability filtering.
-pub trait WallpaperAssignmentExt {
-    fn build_mirror_assignments(
-        app_config: &crate::config::AppConfig,
-        displays: &[DisplaySnapshotEntry],
-    ) -> Vec<(DisplaySelector, WallpaperAssignment)>;
-}
-
-impl WallpaperAssignmentExt for WallpaperAssignment {
-    fn build_mirror_assignments(
-        app_config: &crate::config::AppConfig,
-        displays: &[DisplaySnapshotEntry],
-    ) -> Vec<(DisplaySelector, WallpaperAssignment)> {
-        app_config
-            .monitors
-            .iter()
-            .filter_map(|monitor| {
-                if !monitor.enabled || monitor.mode != "mirror" {
-                    return None;
-                }
-                let own = monitor.selector.to_selector();
-                own.resolve_display(displays)?;
-                let target = monitor.mirror_target.as_ref()?.to_selector();
-                Some((own, WallpaperAssignment::Mirror(target)))
-            })
-            .collect()
-    }
-}
+// R2-BR1: to be written from spec
 
 #[cfg(test)]
 mod tests {

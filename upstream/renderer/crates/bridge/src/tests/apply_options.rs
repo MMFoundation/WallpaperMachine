@@ -1,6 +1,6 @@
 use std::{
     fs,
-    sync::{Arc, mpsc},
+    sync::Arc,
     thread,
     time::Duration,
 };
@@ -105,82 +105,6 @@ fn saved_mirror_rate(root: &std::path::Path) -> Option<u32> {
     settings
         .get("frame_rate")
         .map(|rate| u32::try_from(rate.as_integer().unwrap()).unwrap())
-}
-
-#[tokio::test]
-async fn live_audio_response_toggle_keeps_selection_responsive_while_capture_starts() {
-    let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![anonymous(7, 1.0, 75, false)]);
-    let bridge = Arc::new(
-        BridgeBuilder::new(engine.clone())
-            .with_state(crate::actor::state::BridgeActorState::default())
-            .build()
-            .expect("tokio runtime and config load for wallpaper bridge"),
-    );
-    bridge
-        .inject_scene_wallpaper_config_for_test("100", "Scene")
-        .await;
-    bridge
-        .inject_scene_wallpaper_config_for_test("200", "Other")
-        .await;
-    bridge
-        .set_audio_response_enabled("100".to_string(), false)
-        .await
-        .unwrap();
-
-    bridge
-        .set_display_config_enabled("100".to_string(), "7".to_string(), true)
-        .await
-        .unwrap();
-    let done = engine.wait_for_next_reconcile();
-    bridge
-        .apply_wallpaper_options("100".to_string(), true)
-        .await
-        .unwrap();
-    assert!(done.wait(Duration::from_secs(2)));
-    engine.set_snapshot(vec![direct_entry(anonymous(7, 1.0, 75, false), 42, "100")]);
-
-    let block = engine.block_next_audio_capture();
-    let (toggle_tx, toggle_rx) = mpsc::channel();
-    let toggle_bridge = Arc::clone(&bridge);
-    let toggle = thread::spawn(move || {
-        let result = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            toggle_bridge
-                .set_audio_response_enabled("100".to_string(), true)
-                .await
-        });
-        toggle_tx.send(result).unwrap();
-    });
-    assert!(
-        block.wait_until_blocked(Duration::from_secs(2)),
-        "audio response toggle did not reach audio capture"
-    );
-
-    assert!(
-        matches!(toggle_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
-        "audio activation must not report success before capture starts"
-    );
-
-    bridge
-        .select_wallpaper("200".to_string())
-        .await
-        .expect("selection should stay responsive while capture finishes");
-    assert_eq!(
-        bridge
-            .app_snapshot()
-            .await
-            .unwrap()
-            .selected_wallpaper_id
-            .as_deref(),
-        Some("200")
-    );
-
-    block.release();
-    toggle_rx
-        .recv_timeout(Duration::from_secs(2))
-        .unwrap()
-        .unwrap();
-    toggle.join().unwrap();
 }
 
 #[tokio::test]

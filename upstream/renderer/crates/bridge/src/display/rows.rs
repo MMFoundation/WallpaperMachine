@@ -172,41 +172,6 @@ impl MonitorCfg {
     }
 }
 
-pub trait DisplaySnapshotExt {
-    fn connected_selector(&self) -> SerializedSelector;
-    fn config_selector(&self, displays: &[DisplaySnapshotEntry]) -> SerializedSelector;
-    fn stable_identity_selector(&self) -> Option<SerializedSelector>;
-    fn matches_primary(&self, primary: &Self) -> bool;
-}
+// R2-BD1: to be written from spec
 
-pub trait DisplayIdentityExt {
-    fn has_stable_identity(&self) -> bool;
-    fn same_physical_identity(&self, other: &Self) -> bool;
-}
-
-impl DisplayIdentityExt for DisplayIdentity {
-    fn has_stable_identity(&self) -> bool {
-        replacement::stable_identity_available(self)
-    }
-
-    fn same_physical_identity(&self, other: &Self) -> bool {
-        self.match_score(other).is_some()
-    }
-}
-
-pub trait DisplayDescExt {
-    fn same_physical_display(&self, other: &Self) -> bool;
-}
-
-pub trait DisplaySelectorExt {
-    fn matches_primary(
-        &self,
-        primary: &DisplaySnapshotEntry,
-        displays: &[DisplaySnapshotEntry],
-    ) -> bool;
-    fn matches_display(&self, display: &DisplaySnapshotEntry) -> bool;
-    fn resolve_display<'a>(
-        &self,
-        displays: &'a [DisplaySnapshotEntry],
-    ) -> Option<&'a DisplaySnapshotEntry>;
-}
+// R2-BD2: to be written from spec

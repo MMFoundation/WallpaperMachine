@@ -1,8 +1,3 @@
-use std::{
-    sync::{Arc, mpsc},
-    thread,
-};
-
 use wallpaper_core::{
     DisplaySelector, DisplaySnapshotEntry,
     WallpaperAssignment,
@@ -11,14 +6,11 @@ use wallpaper_core::{
 
 use super::{
     engine_release::EngineRelease,
-    fixture_observations::{
-        enable_primary_apply, expect_enabled, expect_last_owner, last_scene, settings_key,
-        settings_row, wait_reconciles,
-    },
+    fixture_observations::{expect_enabled, expect_last_owner, last_scene, settings_key},
     fixture_values::{anonymous, identified},
 };
 use crate::{
-    BridgeDisplayMode, BridgePropertyValue,
+    BridgePropertyValue,
     WallpaperBridge,
     api::BridgeBuilder,
     config::{
@@ -26,105 +18,7 @@ use crate::{
         WallpaperConfig,
     },
     engine::FakeEngineFacade,
-    paths::BridgePaths,
 };
-
-#[tokio::test]
-async fn stale_reconcile_failure_defers_repair_until_newer_reconcile_finishes() {
-    let primary = identified("primary", 1, 60);
-    let secondary = identified("secondary", 3, 60);
-    let root = tempfile::tempdir().unwrap();
-    let store = ConfigStore::open(root.path().to_path_buf());
-    store
-        .save_app_config(&AppConfig {
-            monitors: vec![MonitorCfg {
-                selector: SerializedSelector::Primary,
-                enabled: true,
-                mode: "independent".to_string(),
-                wallpaper: Some("100".to_string()),
-                mirror_target: None,
-            }],
-            ..AppConfig::default()
-        })
-        .unwrap();
-    store
-        .save_wallpaper(&WallpaperConfig::new_for("100", "scene"))
-        .unwrap();
-
-    let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![primary, secondary]);
-    let bridge = Arc::new(
-        BridgeBuilder::new(engine.clone())
-            .with_config_store(ConfigStore::open(root.path().to_path_buf()))
-            .build()
-            .expect("tokio runtime and config load for wallpaper bridge"),
-    );
-    bridge.bootstrap().await.unwrap();
-    let calls_before = engine.calls().len();
-    let secondary_display_id = settings_key(&bridge, "secondary").await;
-
-    let first_block = engine.block_next_reconcile();
-    let second_block = engine.block_next_reconcile();
-    let (disable_tx, disable_rx) = mpsc::channel();
-    let disable_bridge = Arc::clone(&bridge);
-    let disable_display_id = secondary_display_id.clone();
-    let disable = thread::spawn(move || {
-        let result = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            disable_bridge
-                .set_display_enabled(disable_display_id, false)
-                .await
-        });
-        disable_tx.send(result).unwrap();
-    });
-    assert!(
-        first_block.wait_until_blocked(std::time::Duration::from_secs(2)),
-        "first display mutation did not reach reconcile"
-    );
-
-    let (mirror_tx, mirror_rx) = mpsc::channel();
-    let mirror_bridge = Arc::clone(&bridge);
-    let mirror_display_id = secondary_display_id.clone();
-    let mirror = thread::spawn(move || {
-        let result = tokio::runtime::Runtime::new().unwrap().block_on(async {
-            mirror_bridge
-                .set_display_mode(mirror_display_id, BridgeDisplayMode::Mirror)
-                .await
-        });
-        mirror_tx.send(result).unwrap();
-    });
-    assert!(
-        second_block.wait_until_blocked(std::time::Duration::from_secs(2)),
-        "second display mutation did not reach reconcile"
-    );
-
-    engine.fail_reconcile_with("post-reconcile failure");
-    first_block.release();
-    disable_rx
-        .recv_timeout(std::time::Duration::from_secs(2))
-        .expect("first mutation should report reconcile failure")
-        .expect_err("stale mutation should return the renderer failure");
-    disable.join().unwrap();
-
-    second_block.release();
-    mirror_rx
-        .recv_timeout(std::time::Duration::from_secs(2))
-        .expect("second mutation should report reconcile failure")
-        .expect_err("newer mutation should return the renderer failure");
-    mirror.join().unwrap();
-
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        while engine.calls().len() < calls_before + 3 {
-            tokio::task::yield_now().await;
-        }
-    }).await.expect("failed changes must request a committed-state repair");
-
-    let display = settings_row(&bridge, &secondary_display_id).await;
-    assert!(display.enabled);
-    assert_eq!(display.mode, BridgeDisplayMode::Standalone);
-    // If the first repair has already failed when the second failure arrives,
-    // it is a fresh request. Coalescing an active repair still needs only one.
-    assert!((3..=4).contains(&(engine.calls().len() - calls_before)));
-}
 
 #[tokio::test]
 async fn first_seen_display_starts_with_primary_wallpaper_and_keeps_opt_out_after_reconnect() {
@@ -194,91 +88,6 @@ async fn first_seen_display_starts_with_primary_wallpaper_and_keeps_opt_out_afte
             .iter()
             .any(|monitor| monitor.selector == external_selector && !monitor.enabled),
         "the opt-out must be saved under the display's identity"
-    );
-}
-
-#[tokio::test]
-async fn primary_wallpaper_stays_on_primary_after_primary_display_switch() {
-    let display_a = identified("a", 1, 60);
-    let display_b = identified("b", 3, 60);
-    let root = tempfile::tempdir().unwrap();
-    let store = ConfigStore::open(root.path().to_path_buf());
-    store
-        .save_app_config(&AppConfig {
-            monitors: vec![MonitorCfg {
-                selector: SerializedSelector::Primary,
-                enabled: true,
-                mode: "independent".to_string(),
-                wallpaper: Some("300".to_string()),
-                mirror_target: None,
-            }],
-            ..AppConfig::default()
-        })
-        .unwrap();
-    store
-        .save_wallpaper(&WallpaperConfig::new_for("300", "scene"))
-        .unwrap();
-
-    let engine = FakeEngineFacade::default();
-    engine.set_snapshot_after_refresh(vec![display_a.clone(), display_b.clone()]);
-    let bridge = BridgeBuilder::new(engine.clone())
-        .with_config_store(ConfigStore::open(root.path().to_path_buf()))
-        .build()
-        .expect("tokio runtime and config load for wallpaper bridge");
-
-    bridge.bootstrap().await.unwrap();
-    expect_last_owner(&engine, 1, "300");
-
-    engine.set_snapshot_after_refresh(vec![display_b, display_a]);
-    bridge.refresh_displays().await.unwrap();
-
-    expect_last_owner(&engine, 3, "300");
-    // The old primary was never configured under its own identity, so it is a
-    // first-seen display and keeps showing the primary's wallpaper.
-    expect_last_owner(&engine, 1, "300");
-}
-
-#[tokio::test]
-async fn clear_shader_cache_removes_cache_and_rebuilds_active_scenes() {
-    let root = tempfile::tempdir().unwrap();
-    let paths = BridgePaths::for_home(root.path());
-    std::fs::create_dir_all(paths.shader_cache_root()).unwrap();
-    std::fs::write(paths.shader_cache_root().join("stale-cache.bin"), [1, 2, 3]).unwrap();
-
-    let engine = FakeEngineFacade::default();
-    engine.set_snapshot(vec![anonymous(1, 1.0, 60, true)]);
-    let bridge = BridgeBuilder::new(engine.clone())
-        .with_paths(paths.clone())
-        .build()
-        .expect("tokio runtime and config load for wallpaper bridge");
-    bridge
-        .inject_scene_wallpaper_config_for_test("100", "Scene")
-        .await;
-    enable_primary_apply(&bridge, "100").await;
-    assert!(wait_reconciles(&engine, 1, std::time::Duration::from_secs(2)).await);
-
-    assert_eq!(bridge.settings_snapshot().await.unwrap().storage.shader_cache_size_bytes, 3);
-    std::fs::write(paths.shader_cache_root().join("new-cache.bin"), [4, 5]).unwrap();
-    assert_eq!(bridge.settings_snapshot().await.unwrap().storage.shader_cache_size_bytes, 5,
-        "an explicit settings read sees new files even within a snapshot burst");
-
-    let snapshot = bridge.clear_shader_cache().await.unwrap();
-
-    assert!(wait_reconciles(&engine, 2, std::time::Duration::from_secs(2)).await);
-    assert!(paths.shader_cache_root().is_dir());
-    assert!(!paths.shader_cache_root().join("stale-cache.bin").exists());
-    assert_eq!(snapshot.storage.shader_cache_size_bytes, 0);
-    expect_last_owner(&engine, 1, "100");
-    let calls = engine.calls();
-    let refreshed_scene = calls
-        .last()
-        .expect("cache clear should reconcile scenes")
-        .iter()
-        .find(|scene| scene.display.display_id == 1)
-        .expect("primary display should keep an active scene");
-    assert!(
-        refreshed_scene.force_shader_refresh,
-        "cache clear must force active scenes to rebuild their shader cache"
     );
 }
 

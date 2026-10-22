@@ -147,27 +147,7 @@ impl MediaThumbnailRgba {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(tag = "type")]
-pub enum MediaIntegrationEvent {
-    #[serde(rename = "mediaStatusChanged")]
-    StatusChanged { enabled: bool },
-    #[serde(rename = "mediaPlaybackChanged")]
-    PlaybackChanged { state: MediaPlaybackState },
-    #[serde(rename = "mediaPropertiesChanged")]
-    PropertiesChanged(MediaProperties),
-    #[serde(rename = "mediaTimelineChanged")]
-    TimelineChanged { duration: f64, position: f64 },
-    #[serde(rename = "mediaThumbnailChanged")]
-    ThumbnailChanged {
-        #[serde(rename = "hasThumbnail")]
-        has_thumbnail: bool,
-        #[serde(rename = "primaryColor")]
-        primary_color: [f32; 3],
-        #[serde(rename = "textColor")]
-        text_color: [f32; 3],
-    },
-}
+// R2-CD1: to be written from spec
 
 impl MediaIntegrationEvent {
     /// # Errors

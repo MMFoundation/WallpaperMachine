@@ -130,21 +130,7 @@ pub trait EngineFacade: Send + Sync + 'static {
     /// Live-updates one scene's internal rasterization scale. Resizes render
     /// targets in place; it must not reparse the project or reopen video.
     fn set_render_scale(&self, handle: SceneHandle, scale: f32) -> EngineFuture<()>;
-    fn poll_mouse_position(&self) -> EngineFuture<()>;
-    fn set_mouse_position(&self, handle: SceneHandle, x: f64, y: f64) -> EngineFuture<()>;
-    fn set_mouse_button(&self, handle: SceneHandle, button: u32, pressed: bool)
-    -> EngineFuture<()>;
-    fn set_mouse_entered(&self, handle: SceneHandle, entered: bool) -> EngineFuture<()>;
-    fn create_window_for_display(
-        &self,
-        selector: DisplaySelector,
-    ) -> EngineFuture<Option<SceneHandle>>;
-    fn set_wallpaper_for_display(
-        &self,
-        selector: DisplaySelector,
-        assignment: WallpaperAssignment,
-    ) -> EngineFuture<Option<SceneHandle>>;
-    fn set_first_frame_callback(&self, callback: FirstFrameCallback);
+    // R2-BF1: to be written from spec
     fn set_pointer_consumer_callback(
         &self,
         callback: Option<wallpaper_core::PointerConsumerCallback>,
@@ -535,20 +521,7 @@ impl EngineFacade for RealEngineFacade {
         async move { engine.renderer_counters().await }.boxed()
     }
 
-    fn set_audio_volume(&self, handle: SceneHandle, volume: AudioVolume) -> EngineFuture<()> {
-        let engine = self.engine.clone();
-        async move { engine.set_audio_volume(handle, volume).await }.boxed()
-    }
-
-    fn set_audio_muted(&self, handle: SceneHandle, muted: bool) -> EngineFuture<()> {
-        let engine = self.engine.clone();
-        async move { engine.set_audio_muted(handle, muted).await }.boxed()
-    }
-
-    fn set_audio_response_enabled(&self, handle: SceneHandle, enabled: bool) -> EngineFuture<()> {
-        let engine = self.engine.clone();
-        async move { engine.set_audio_response_enabled(handle, enabled).await }.boxed()
-    }
+    // R2-BF2: to be written from spec
 
     fn set_media_integration_enabled(&self, handle: SceneHandle, enabled: bool) -> EngineFuture<()> {
         let engine = self.engine.clone();
@@ -647,45 +620,7 @@ impl EngineFacade for RealEngineFacade {
         async move { engine.set_mouse_position(handle, x, y).await }.boxed()
     }
 
-    fn set_mouse_button(
-        &self,
-        handle: SceneHandle,
-        button: u32,
-        pressed: bool,
-    ) -> EngineFuture<()> {
-        let engine = self.engine.clone();
-        async move { engine.set_mouse_button(handle, button, pressed).await }.boxed()
-    }
-
-    fn set_mouse_entered(&self, handle: SceneHandle, entered: bool) -> EngineFuture<()> {
-        let engine = self.engine.clone();
-        async move { engine.set_mouse_entered(handle, entered).await }.boxed()
-    }
-
-    fn create_window_for_display(
-        &self,
-        selector: DisplaySelector,
-    ) -> EngineFuture<Option<SceneHandle>> {
-        let engine = self.engine.clone();
-        async move { engine.create_window_for_display(selector).await }.boxed()
-    }
-
-    fn set_wallpaper_for_display(
-        &self,
-        selector: DisplaySelector,
-        assignment: WallpaperAssignment,
-    ) -> EngineFuture<Option<SceneHandle>> {
-        let engine = self.engine.clone();
-        let audio_capture = self.audio_capture.clone();
-        let audio_mutation = self.audio_mutation.clone();
-        async move {
-            mutate_scenes_and_prune(
-                &audio_mutation,
-                || engine.set_wallpaper_for_display(selector, assignment),
-                || audio_capture.mailbox().prune_scenes(),
-            ).await
-        }.boxed()
-    }
+    // R2-BF3: to be written from spec
 
     fn set_first_frame_callback(&self, callback: FirstFrameCallback) {
         register_first_frame_callback(&self.readiness, callback, |wrapped| {

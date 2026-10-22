@@ -535,26 +535,7 @@ impl SceneDesc {
         Ok(Some(decision.scene_cache_path().to_string_lossy().into_owned()))
     }
 
-    #[must_use]
-    pub fn same_wallpaper(&self, other: &SceneDesc) -> bool {
-        self.scene_path == other.scene_path
-            && self.assets_path == other.assets_path
-            && self.fps == other.fps
-            && self.scaling_mode == other.scaling_mode
-            && (self.scaling_factor - other.scaling_factor).abs() <= f64::EPSILON
-            && self.framing == other.framing
-            && self.audio_response_enabled == other.audio_response_enabled
-            && self.media_integration_enabled == other.media_integration_enabled
-            && self.audio_volume == other.audio_volume
-            && self.audio_muted == other.audio_muted
-            && self.property_override_json == other.property_override_json
-            && self.shader_cache_path == other.shader_cache_path
-            && self.force_shader_refresh == other.force_shader_refresh
-    }
-
-    pub fn mark_shader_refresh_complete(&mut self) {
-        self.force_shader_refresh = false;
-    }
+    // R2-CS1: to be written from spec
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -599,47 +580,9 @@ impl SceneTemplate {
         }
     }
 
-    #[must_use]
-    pub fn from_scene_desc(scene: &SceneDesc) -> Self {
-        Self {
-            scene_path: scene.scene_path.clone(),
-            assets_path: scene.assets_path.clone(),
-            fps: scene.fps,
-            scaling_mode: scene.scaling_mode,
-            scaling_factor: scene.scaling_factor,
-            framing: scene.framing,
-            paused: scene.paused,
-            audio_response_enabled: scene.audio_response_enabled,
-            media_integration_enabled: scene.media_integration_enabled,
-            audio_volume: scene.audio_volume,
-            audio_muted: scene.audio_muted,
-            property_override_json: scene.property_override_json.clone(),
-            shader_cache_path: scene.shader_cache_path.clone(),
-            force_shader_refresh: scene.force_shader_refresh,
-        }
-    }
+    // R2-CS2: to be written from spec
 
-    #[must_use]
-    pub fn for_display(&self, display: DisplayDesc) -> SceneDesc {
-        SceneDesc {
-            display,
-            scene_path: self.scene_path.clone(),
-            assets_path: self.assets_path.clone(),
-            fps: self.fps,
-            scaling_mode: self.scaling_mode,
-            scaling_factor: self.scaling_factor,
-            framing: self.framing,
-            paused: self.paused,
-            audio_response_enabled: self.audio_response_enabled,
-            media_integration_enabled: self.media_integration_enabled,
-            audio_volume: self.audio_volume,
-            audio_muted: self.audio_muted,
-            property_override_json: self.property_override_json.clone(),
-            shader_cache_path: self.shader_cache_path.clone(),
-            force_shader_refresh: self.force_shader_refresh,
-            rejected_audio_volume: false,
-        }
-    }
+    // R2-CS3: to be written from spec
 
     /// # Errors
     ///
@@ -754,31 +697,7 @@ impl SceneTemplateBuilder {
         self
     }
 
-    /// # Errors
-    ///
-    /// Returns `InvalidInput` naming the first field the renderer could not take.
-    pub fn build(self) -> Result<SceneTemplate, EngineError> {
-        let audio_volume = AudioVolume::try_from(self.audio_volume);
-        let template = SceneTemplate {
-            scene_path: self.scene_path,
-            assets_path: self.assets_path,
-            fps: self.fps,
-            scaling_mode: self.scaling_mode,
-            scaling_factor: self.scaling_factor,
-            framing: self.framing,
-            paused: self.paused,
-            audio_response_enabled: self.audio_response_enabled,
-            media_integration_enabled: self.media_integration_enabled,
-            audio_volume: audio_volume.unwrap_or_else(|_| full_volume()),
-            audio_muted: self.audio_muted,
-            property_override_json: self.property_override_json,
-            shader_cache_path: self.shader_cache_path,
-            force_shader_refresh: self.force_shader_refresh,
-        };
-        template.validate()?;
-        audio_volume.map_err(|_| invalid(AUDIO_VOLUME_MESSAGE))?;
-        Ok(template)
-    }
+    // R2-CS4: to be written from spec
 }
 
 pub trait SceneDescSliceExt {
@@ -932,39 +851,7 @@ impl SceneDescBuilder {
         self
     }
 
-    /// # Errors
-    ///
-    /// Returns `InvalidInput` naming the first field the renderer could not take;
-    /// the display is not checked here.
-    pub fn build(self) -> Result<SceneDesc, EngineError> {
-        let audio_volume = AudioVolume::try_from(self.audio_volume);
-        let scene = SceneDesc {
-            display: self.display,
-            scene_path: self.scene_path,
-            assets_path: self.assets_path,
-            fps: self.fps,
-            scaling_mode: self.scaling_mode,
-            scaling_factor: self.scaling_factor,
-            framing: self.framing,
-            paused: self.paused,
-            audio_response_enabled: self.audio_response_enabled,
-            media_integration_enabled: self.media_integration_enabled,
-            audio_volume: audio_volume.unwrap_or_else(|_| full_volume()),
-            audio_muted: self.audio_muted,
-            property_override_json: self.property_override_json,
-            shader_cache_path: self.shader_cache_path,
-            force_shader_refresh: self.force_shader_refresh,
-            rejected_audio_volume: false,
-        };
-        check_wallpaper_fields(
-            &scene.scene_path,
-            scene.fps,
-            scene.scaling_factor,
-            scene.framing,
-        )?;
-        audio_volume.map_err(|_| invalid(AUDIO_VOLUME_MESSAGE))?;
-        Ok(scene)
-    }
+    // R2-CS5: to be written from spec
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -989,31 +876,6 @@ impl SceneResult {
 mod tests {
     use super::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SceneResult, SceneTemplate};
     use crate::{DisplayDesc, EngineError};
-
-    #[test]
-    fn scene_descriptor_keeps_display_assignment() {
-        let display = DisplayDesc::new(42, -1920, 0, 1920, 1080, 2.0);
-        let scene = SceneDesc::new(
-            display.clone(),
-            "/scene/project.json",
-            "/scene/assets",
-            60,
-            false,
-        );
-
-        assert_eq!(scene.display, display);
-        assert_eq!(scene.display.display_id, 42);
-        assert_eq!(scene.scene_path, "/scene/project.json");
-        assert_eq!(scene.assets_path, "/scene/assets");
-        assert_eq!(scene.fps, 60);
-        assert!(!scene.paused);
-        assert!(!scene.audio_response_enabled);
-        assert!(!scene.media_integration_enabled);
-        assert!(!scene.audio_muted);
-        assert_eq!(scene.property_override_json, None);
-        assert_eq!(scene.shader_cache_path, None);
-        assert!(!scene.force_shader_refresh);
-    }
 
     #[test]
     fn scene_descriptor_can_enable_audio_response() {
@@ -1183,77 +1045,6 @@ mod tests {
         assert_eq!(scene.framing, framing);
         assert_eq!(SceneTemplate::from_scene_desc(&scene).framing, framing);
         assert_eq!(SceneTemplate::from_scene_desc(&scene), template);
-    }
-
-    #[test]
-    fn scene_template_builds_scene_for_display() {
-        let display = DisplayDesc::new(42, -1920, 0, 1920, 1080, 2.0);
-        let template = SceneTemplate::builder("/scene/project.json")
-            .assets_path("/scene/assets")
-            .fps(75)
-            .scaling_mode(ScalingMode::Fill)
-            .scaling_factor(1.25)
-            .paused(true)
-            .audio_response_enabled(true)
-            .media_integration_enabled(true)
-            .audio_volume(0.5)
-            .audio_muted(true)
-            .property_override_json("{\"general\":{\"brightness\":1}}")
-            .shader_cache_path("/tmp/cache")
-            .force_shader_refresh(true)
-            .build()
-            .expect("template should build");
-
-        let scene = template.for_display(display.clone());
-
-        assert_eq!(scene.display, display);
-        assert_eq!(scene.scene_path, "/scene/project.json");
-        assert_eq!(scene.assets_path, "/scene/assets");
-        assert_eq!(scene.fps, 75);
-        assert_eq!(scene.scaling_mode, ScalingMode::Fill);
-        assert!(
-            (scene.scaling_factor - 1.25).abs() <= f64::EPSILON,
-            "expected scaling factor {} to be within f64::EPSILON of 1.25",
-            scene.scaling_factor
-        );
-        assert!(scene.paused);
-        assert!(scene.audio_response_enabled);
-        assert!(scene.media_integration_enabled);
-        assert_eq!(
-            scene.audio_volume,
-            crate::media::audio::AudioVolume::try_from(0.5).unwrap()
-        );
-        assert!(scene.audio_muted);
-        assert_eq!(
-            scene.property_override_json.as_deref(),
-            Some("{\"general\":{\"brightness\":1}}")
-        );
-        assert_eq!(scene.shader_cache_path.as_deref(), Some("/tmp/cache"));
-        assert!(scene.force_shader_refresh);
-    }
-
-    #[test]
-    fn scene_template_can_be_copied_from_scene_desc() {
-        let display = DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0);
-        let scene = SceneDesc::builder(display, "/tmp/project.json")
-            .assets_path("/tmp/assets")
-            .fps(30)
-            .build()
-            .expect("scene should build");
-
-        let template = SceneTemplate::from_scene_desc(&scene);
-
-        assert_eq!(template.scene_path, scene.scene_path);
-        assert_eq!(template.assets_path, scene.assets_path);
-        assert_eq!(template.fps, scene.fps);
-        assert_eq!(template.scaling_mode, scene.scaling_mode);
-        assert!(
-            (template.scaling_factor - scene.scaling_factor).abs() <= f64::EPSILON,
-            "expected template scaling factor {} to be within f64::EPSILON of scene scaling \
-             factor {}",
-            template.scaling_factor,
-            scene.scaling_factor
-        );
     }
 
     #[test]

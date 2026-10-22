@@ -1,5 +1,3 @@
-use std::time::{Duration, Instant};
-
 use wallpaper_core::project::SceneDesc;
 
 use crate::engine::FakeEngineFacade;
@@ -72,33 +70,4 @@ pub(super) async fn expect_enabled(
         row.enabled, expected,
         "Unexpected enabled state for display {display_id:?}",
     );
-}
-
-pub(super) async fn enable_primary_apply(bridge: &WallpaperBridge, wallpaper_id: &str) {
-    bridge
-        .set_display_config_enabled(wallpaper_id.to_owned(), "primary".to_owned(), true)
-        .await
-        .expect("Could not enable the primary display configuration");
-    bridge
-        .apply_wallpaper_options(wallpaper_id.to_owned(), true)
-        .await
-        .expect("Could not apply wallpaper options");
-}
-
-pub(super) async fn wait_reconciles(
-    engine: &FakeEngineFacade,
-    expected: usize,
-    bound: Duration,
-) -> bool {
-    let started = Instant::now();
-    loop {
-        if engine.reconcile_call_count() == expected {
-            return true;
-        }
-        let elapsed = started.elapsed();
-        if elapsed >= bound {
-            return false;
-        }
-        tokio::time::sleep((bound - elapsed).min(Duration::from_millis(1))).await;
-    }
 }

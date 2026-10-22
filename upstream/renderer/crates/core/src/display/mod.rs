@@ -10,16 +10,7 @@ pub mod callback;
 pub mod state;
 pub mod watcher;
 
-/// Identifying keys of a display that can outlive a display id.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct DisplayIdentity {
-    pub uuid: Option<String>,
-    pub vendor_id: Option<u32>,
-    pub model_id: Option<u32>,
-    pub serial_number: Option<u32>,
-    pub unit_number: Option<u32>,
-    pub name: Option<String>,
-}
+// R2-CW1: to be written from spec
 
 impl DisplayIdentity {
     #[must_use]

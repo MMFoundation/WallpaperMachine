@@ -62,21 +62,7 @@ pub struct BridgeActorState {
     /// Whether `library` came from a successful scan of the workshop root.
     /// Only then does a wallpaper missing from it mean the files are gone.
     pub library_scanned: bool,
-    pub app_config: AppConfig,
-    pub wallpaper_configs: BTreeMap<String, WallpaperConfig>,
-    pub wallpaper_drafts: BTreeMap<String, WallpaperOptionsDraft>,
-    pub project_models: BTreeMap<String, ProjectModel>,
-    pub display_settings: BTreeMap<String, BridgeDisplaySettingsRow>,
-    pub power_source: crate::power::PowerSource,
-    pub auto_paused_for_battery: bool,
-    pub battery_pause_suppressed: bool,
-    pub startup_power_sample_received: bool,
-    pub initial_frame_ready: bool,
-    pub pending_battery_pause_after_initial_frame: bool,
-    pub filter_scene: bool,
-    pub filter_video: bool,
-    pub filter_webpage: bool,
-    pub filter_unknown: bool,
+    // R2-BS1: to be written from spec
     /// Web pages that have registered an audio listener, keyed by wallpaper id
     /// and then by the display their web view renders on.
     ///
@@ -104,17 +90,7 @@ impl Default for BridgeActorState {
             errors: Vec::new(),
             library: Vec::new(),
             library_scanned: false,
-            app_config: AppConfig::default(),
-            wallpaper_configs: BTreeMap::new(),
-            wallpaper_drafts: BTreeMap::new(),
-            project_models: BTreeMap::new(),
-            display_settings: BTreeMap::new(),
-            power_source: crate::power::PowerSource::External,
-            auto_paused_for_battery: false,
-            battery_pause_suppressed: false,
-            startup_power_sample_received: false,
-            initial_frame_ready: false,
-            pending_battery_pause_after_initial_frame: false,
+            // R2-BS2: to be written from spec
             filter_scene: true,
             filter_video: true,
             filter_webpage: true,
@@ -140,23 +116,7 @@ impl BridgeActorState {
         }
     }
 
-    pub fn apply_startup_power_source(&mut self, source: crate::power::PowerSource) {
-        self.power_source = source;
-        self.startup_power_sample_received = true;
-        self.pending_battery_pause_after_initial_frame = source
-            == crate::power::PowerSource::Battery
-            && self.app_config.power.on_battery == crate::config::BatteryModeCfg::Pause
-            && !self.initial_frame_ready;
-    }
-
-    pub fn filter_enabled(&self, kind: BridgeWallpaperKind) -> bool {
-        match kind {
-            BridgeWallpaperKind::ProjectScene => self.filter_scene,
-            BridgeWallpaperKind::Video => self.filter_video,
-            BridgeWallpaperKind::Webpage => self.filter_webpage,
-            BridgeWallpaperKind::Unknown => self.filter_unknown,
-        }
-    }
+    // R2-BS3: to be written from spec
 
     pub fn ensure_wallpaper_exists(&self, wallpaper_id: &str) -> Result<(), BridgeError> {
         state_values::ensure_present(&self.library, wallpaper_id)

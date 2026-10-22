@@ -18,23 +18,7 @@ use objc2_quartz_core::{CAMetalLayer, CATransaction};
 
 use crate::{DisplayDesc, EngineError};
 
-define_class!(
-    #[unsafe(super = NSWindow)]
-    #[thread_kind = MainThreadOnly]
-    #[name = "MWEWallpaperDesktopWindow"]
-    struct WallpaperDesktopWindow;
-
-    impl WallpaperDesktopWindow {
-        #[unsafe(method(constrainFrameRect:toScreen:))]
-        fn constrain_frame_rect_to_screen(
-            &self,
-            frame: NSRect,
-            _screen: Option<&NSScreen>,
-        ) -> NSRect {
-            frame
-        }
-    }
-);
+// R2-CW2: to be written from spec
 
 /// Background exposed before the first frame or while a drawable is unavailable.
 /// Default to black so display wake and surface recreation cannot flash white.

@@ -94,29 +94,7 @@ pub struct SequenceForTest {
 #[cfg(test)]
 pub struct FailNextRefreshDisplaysForTest;
 
-pub struct RefreshDisplays;
-
-pub struct RefreshDisplayDescriptors {
-    pub primary: DisplayDesc,
-    pub displays: Vec<DisplayDesc>,
-}
-
-pub struct ReconcileScenes {
-    pub scenes: Vec<SceneDesc>,
-}
-
-pub struct CreateWindowForDisplay {
-    pub selector: DisplaySelector,
-}
-
-pub struct DestroyWindowForDisplay {
-    pub selector: DisplaySelector,
-}
-
-pub struct SetWallpaperForDisplay {
-    pub selector: DisplaySelector,
-    pub wallpaper: WallpaperAssignment,
-}
+// R2-CM1: to be written from spec
 
 pub struct SetScalingMode {
     pub handle: SceneHandle,
