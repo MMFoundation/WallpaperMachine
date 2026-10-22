@@ -178,6 +178,8 @@ wm_gtest_executable(audio_tests
         fs/limited_binary_stream_test.cpp
         audio/sample_math_test.cpp
         audio/sound_layer_control_test.cpp
+        audio/sound_layer_playback_test.cpp
+        audio/audio_response_service_test.cpp
         audio/sound_output_lifecycle_test.cpp
         support/allocation_tracking.cpp
     LIBS ${PROJECT_NAME} wpAudio wpFs

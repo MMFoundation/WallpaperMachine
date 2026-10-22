@@ -585,8 +585,9 @@ device.
 - **FIFO continuity and overflow** — `audio_tests --gtest_filter='AudioResponseMonoTest.*'`
   includes `CompactedFifoPreservesEveryStereoWindow` (21 back-to-back stereo
   windows from 49 chunks of 700 frames, so windows straddle submissions; 34,300
-  accepted frames, 700 retained) and `OversizedStereoSubmitAnalyzesOnlyRetainedFrames`
-  (waits for all 60 windows from each latest-96,000-frame input).
+  accepted frames, 700 retained) and `OversizedStereoSubmitKeepsTheNewestSecondsWithoutAStagingCopy`
+  (waits for all 60 windows from each latest-96,000-frame input and bounds the
+  largest heap allocation of the submit).
 - **Spectrum matches Wallpaper Engine** — `AudioResponseMonoTest.TonesLandInTheBandsWallpaperEngineMeasures`
   (octave tones from 42 Hz to 12 kHz peak inside the bands measured on Wallpaper
   Engine), `.LevelsSpanFortyEightDecibelsBelowAFullScaleTone`,
@@ -616,7 +617,11 @@ device.
   `SoundLayerControlTest` checks authored random playback delays between clips
   against emitted sample counts, including different callback sizes,
   pause/resume, stop/restart and seeded bounds, on the null backend, which never
-  opens an audio device. All sound fixtures use the null backend.
+  opens an audio device. The same suite drives a layer over scripted in-memory
+  streams: a layer built silent reads nothing, play/pause/stop resume or restart
+  the file, volume is clamped and mute keeps consuming it, and one-shot, loop and
+  zero-delay random layers each end or restart when their file runs out. All sound
+  fixtures use the null backend.
 - **Output device rebuild** — `wallpaper-core` `media::audio::device_watch::tests`
   (a burst of changes is one report after the quiet period, a change wakes an idle
   watcher, `cancel` drops a pending report without waiting it out, every subscriber
