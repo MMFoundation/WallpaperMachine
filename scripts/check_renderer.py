@@ -20,7 +20,7 @@ GENERATED_CASE_COUNT = 12
 # One registry owns the build/run/verdict and the Metal-device prerequisite.
 # VideoToolbox codec prerequisites, if unavailable, are reported by those tests.
 REGRESSION_BINARIES = {
-    "render_target_lifetime_test": False, "text_object_runtime_test": False,
+    "render_target_lifetime_test": False, "text_object_runtime_test": False, "text_object_behavior_test": False,
     "shader_cache_metadata_test": False, "video_decode_pump_test": False,
     "video_color_conversion_test": False, "video_frame_pacing_test": False,
     "video_source_input_test": False, "video_probe_test": False, "vt_frame_decoder_test": False, "webm_reader_test": False,

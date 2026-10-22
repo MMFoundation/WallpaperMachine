@@ -1998,7 +1998,7 @@ texture entrances are not decoded-image or native-rendering evidence.
   found is asked for again after the retry time, a found one is kept while its file is there and
   looked up again when the file is gone. The migrated tests: the scene-font parse tests now expect the kind `system`
   and the identity of the key (`arial` for a family and a font that cannot be loaded),
-  `.ParserResolvesSceneFontsForFreeTypeRasterization` (renamed from the family test) and
+  `TextParseScene.ParsedVerdanaTextIsDrawnAntiAliasedIntoACardOfItsMeasuredSize` (in `text_object_behavior_test`, which replaced the family test) and
   `.TheFaceTheSystemNamesReachesTheLayerFromTheSceneAndFromAScript` use the keys,
   `.FontFallbackHandlesFamiliesMissingFilesAndCorruptAssets` builds its reference through
   `ResolveSceneFont`, and the tests that wanted Helvetica's metrics ask for the installed family
@@ -2090,9 +2090,9 @@ texture entrances are not decoded-image or native-rendering evidence.
   before), and `.PlainAlignedTextKeepsItsCardEdgeOnTheOrigin` pins what the
   placement changes after it must keep: a plain text sits on its origin by its card's
   left, right or middle edge and its top, along the layer's own scale. The scene
-  `size` appears in no other expectation; `.CenteredTextIsCenteredInItsCard` and the
-  clock parent test (`.Workshop3409533530ClockParentKeepsVisibleRuntimeTexture`) read
-  the card from the text.
+  `size` appears in no other expectation; `TextRaster.CentredTextIsCentredInItsCard` and the
+  clock parent test (`TextClockScene.TheParentClockKeepsAVisibleRuntimeTexture`, a synthetic clock
+  scene) in `text_object_behavior_test` read the card from the text.
 - **Text placement about the origin** — `text_object_runtime_test`. The alignment keys
   hang the card from the layer's origin and leave the node on it.
   `TextObjectRuntime.TheReferenceLineOfTheVerticalAlignmentSitsOnTheOrigin` finds the
@@ -2262,7 +2262,11 @@ texture entrances are not decoded-image or native-rendering evidence.
   `.ParserTextEffectFinalUvsAreTheWholeCutOffBuffer`,
   `.SceneScriptTextEffectMutationKeepsFinalUvsOnTheWholeBuffer` and the two
   `.AlignedTextEffect...` tests follow the same rule through the parser, a relayout, a
-  script and the alignment. `.OversizedTextEffectClipsFinalMeshToBoundedTarget` keeps the
+  script and the alignment. They are now `TextEffectChain.TheChainFollowsACardThatGrows`,
+  `.AFractionalCardIsCutOffNeverRounded`, `.AScriptSetTextKeepsTheFinalCardWhole`,
+  `.ARightBottomTextWithAnEffectFollowsTheMeasuredRenderFrame` and
+  `.AStaticAlignedTextWithAnEffectCoversItsRasterWithoutScaling` in `text_object_behavior_test`.
+  `.ACardPastTheBufferLimitIsCutOffToIt` there (formerly `.OversizedTextEffectClipsFinalMeshToBoundedTarget`) keeps the
   one clamp that is left: a card past 4096 texels on a side, which Wallpaper Engine has no
   limit for, is drawn into buffers cut to 4096. `MetalSceneDraw.AnEffectsUvOffsetIsAFractionOfTheCard` puts a layer
   through an effect that reads its input 0.25 along, across and down, and requires the text
@@ -2354,7 +2358,8 @@ texture entrances are not decoded-image or native-rendering evidence.
   word, a number, `null`, an object) and `.AlignmentWordsParseLikeTheEnumRegistry`
   checks the two parse functions on their own: exact words, `left` for any other
   horizontal value and `center` for any other vertical one, and no `alignment` key
-  (`.HorizontalAlignIsTheOnlyKeyThatAlignsTheTextHorizontally` and its vertical twin).
+  (`TextParseScene.AStrayAlignmentKeyDoesNotPlaceTextAcrossTheOrigin` and `...AboveTheOrigin` in
+  `text_object_behavior_test`).
   `SceneSchema.CreateLayerBuildsATextLayerThroughTheParsersOwnTextPath` makes a layer
   with an `alignment` and a wrong-case word and gets a centred one.
   `.TextBrightnessAppliesOnlyInTheHdrPipeline` reads the material's brightness in a
@@ -2519,13 +2524,11 @@ texture entrances are not decoded-image or native-rendering evidence.
   whole or freezes at its first layout. Use text whose glyphs differ from the first
   text, so that a relayout that never reached the chain is a picture that did not
   change.
-- **Opt-in local-asset diagnostic** — `TextObjectRuntime.LonelyCatHeadlessRegression`
-  in `text_object_runtime_test`: set `WE_TEST_PROJECT`, `WE_TEST_ASSETS` and a
-  disposable `WE_TEST_CACHE`, then run with
-  `--gtest_filter=TextObjectRuntime.LonelyCatHeadlessRegression`; add
-  `WE_TEST_EXPECT_WARM=1` for a second run. It parses the package, ticks scripts
-  and constructs the render graph; it does not initialize playback, capture the
-  desktop, or modify the imported wallpaper.
+- **Headless run of a script-driven text scene** — `TextClockScene.ASynthesisedClockSceneRunsHeadlessWithoutScriptErrors`
+  in `text_object_behavior_test`. A clock-like scene built in memory (a time text driven by a script, two
+  children, user-bound origin, scale and visibility) is parsed, ticked three frames and turned into a render
+  graph; it needs no local package and no environment variable, and requires no script error and the text
+  each layer should hold. The earlier diagnostic that loaded a real package from environment variables is gone.
 
 ## Animation and puppets
 

@@ -321,6 +321,28 @@ gtest_discover_tests(
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )
+# Behaviour of text layers, written against the specification of the retired tests: parse,
+# effect chains, runtime mutation, scripts and the FreeType raster. Headless.
+add_executable(text_object_behavior_test
+    text_parse_scene_test.cpp
+    text_effect_chain_test.cpp
+    text_runtime_cache_test.cpp
+    text_script_raster_test.cpp
+    support/text_scene.cpp
+    support/pixels.cpp
+    support/scene_package.cpp)
+target_link_libraries(text_object_behavior_test PRIVATE ${PROJECT_NAME} wpAudio wpScene wpFs wpRenderCommon wpRGraph Freetype::Freetype nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(text_object_behavior_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
+target_compile_features(text_object_behavior_test PRIVATE cxx_std_20)
+if(TARGET wescene_rust_shader)
+    target_link_libraries(text_object_behavior_test PRIVATE wescene_rust_shader)
+endif()
+gtest_discover_tests(
+    text_object_behavior_test
+    TEST_PREFIX text_object_behavior_test.
+    PROPERTIES TIMEOUT 60
+    DISCOVERY_TIMEOUT 60
+)
 add_executable(mouse_input_test mouse_input_test.cpp)
 target_link_libraries(mouse_input_test PRIVATE ${PROJECT_NAME} wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(mouse_input_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
