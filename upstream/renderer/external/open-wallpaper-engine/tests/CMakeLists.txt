@@ -104,6 +104,18 @@ add_scene_schema_behavior_test(scene_schema_part01_test
     scene_schema_part01_objects_test.cpp
     scene_schema_part01_model_layers_test.cpp
     scene_schema_part01_cameras_test.cpp)
+add_scene_schema_behavior_test(scene_schema_part02_test
+    scene_schema_part02_shots_test.cpp
+    scene_schema_part02_lights_test.cpp
+    scene_schema_part02_materials_test.cpp
+    scene_schema_part02_graph_test.cpp)
+add_scene_schema_behavior_test(scene_schema_part03_test
+    scene_schema_part03_layout_test.cpp
+    scene_schema_part03_tint_test.cpp)
+add_scene_schema_behavior_test(scene_schema_part04_test
+    scene_schema_part04_effects_test.cpp
+    scene_schema_part04_cards_test.cpp
+    scene_schema_part04_names_test.cpp)
 add_scene_schema_behavior_test(scene_schema_part05_test scene_schema_part05_test.cpp)
 add_scene_schema_behavior_test(scene_schema_part06_test scene_schema_part06_test.cpp)
 add_scene_schema_behavior_test(scene_schema_part07_test scene_schema_part07_test.cpp)

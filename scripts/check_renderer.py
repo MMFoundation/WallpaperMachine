@@ -33,6 +33,7 @@ REGRESSION_BINARIES = {
     "project_property_preview_test": False,
     "scenescript_media_event_smoke": False, "scenescript_behavior_test": False, "media_thumbnail_texture_smoke": False,
     "scene_schema_tests": False, "scene_schema_fixtures_selftest": False, "scene_schema_part01_test": False,
+    "scene_schema_part02_test": False, "scene_schema_part03_test": False, "scene_schema_part04_test": False,
     "scene_schema_part05_test": False, "scene_schema_part06_test": False, "scene_schema_part07_test": False, "scene_schema_part08_test": False,
     "scene_schema_part09_test": False, "scene_schema_part10_test": False, "scene_schema_part11_test": False,
     "script_runtime_compat_test": False,
