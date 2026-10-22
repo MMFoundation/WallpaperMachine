@@ -1060,7 +1060,7 @@ final class WorkshopStore {
         AppLog.warn("Workshop \(request.query.source.key) page \(request.page) failed: \(error.localizedDescription)")
         if error is SteamSignInRequired {
           // The session ended: drop it and the stale tiles, so the panel offers signing in again.
-          self.steamWebSession = nil
+          self.forgetSteamWebSession()
           self.clearResults()
         } else if self.committedQuery?.source != request.query.source {
           self.clearResults()

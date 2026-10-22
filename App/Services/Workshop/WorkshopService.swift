@@ -751,9 +751,10 @@ actor WorkshopService {
         }
         guard let browse = queries.first(where: { key($0).first == "workshop_browse" }),
               let result = data(browse) else { throw WorkshopLayoutChanged() }
-        guard (result["eresult"] as? NSNumber)?.intValue == 1 else {
-            throw WorkshopFailure(message: WorkshopLayoutChanged.message)
-        }
+        let answer = (result["eresult"] as? NSNumber)?.intValue
+        // 10 is Steam's search being overloaded; any other refusal keeps the page-changed wording.
+        if answer == 10 { throw WorkshopBusy() }
+        guard answer == 1 else { throw WorkshopFailure(message: WorkshopLayoutChanged.message) }
         guard let rows = result["results"] as? [[String: Any]] else { throw WorkshopLayoutChanged() }
 
         // Display names of the creators the page mentions, by Steam id.
