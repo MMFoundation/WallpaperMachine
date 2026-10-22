@@ -58,6 +58,8 @@ REGRESSION_BINARIES = {
     "surface_health_test": False, "wallpaper_scaling_test": False,
     "backdrop_geometry_test": False,
     "shader_preprocessor_compat_test": False,
+    "rust_shader_bridge_behavior_test": False, "shader_program_cache_behavior_test": False,
+    "shader_dialect_compat_test": False, "shader_corpus_test": False,
     "video_texture_submission_smoke": False,
     "version_tests": False,
     # Renderer/Media/tests: the project's own container readers, pure C++ and headless.

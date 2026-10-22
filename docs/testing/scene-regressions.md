@@ -2495,7 +2495,7 @@ texture entrances are not decoded-image or native-rendering evidence.
   blend there weighs the card by its alpha, so the colour of a clear texel does not reach
   the screen.
 - **Cache metadata and corruption** — `render_target_lifetime_test`,
-  `text_object_runtime_test` and `shader_cache_metadata_test` cover clock/text
+  `text_object_runtime_test` and `shader_program_cache_behavior_test` cover clock/text
   corruption, persistent shader-cache metadata, cache invalidation after include
   edits, corrupt-cache recovery, parent-aware compose-background sampling, and
   SceneScript AM/PM sprite-frame selection. They create no window and no GPU
@@ -2918,7 +2918,7 @@ shader sources; the corpus sweeps skip asset-dependent cases with a printed reas
   Known and not handled: a bool stored into a genuine `int` or `uint`, and a number
   as an operand of `!`, `&&` or `||`, are still rejected
   ([Known limitations](renderer.md#known-limitations)). The corpus sweep
-  `unpack_shader_compile_smoke` (`*ParsesCorpus*`) compiled only the material's own
+  `shader_corpus_test` (`*ParsesCorpus*`) compiled only the material's own
   combos, so it never saw a scene's choice of `SHAPE`; it now overlays the effect
   file's pass combos and the scene's entry for the pass, in the engine's order, so
   it reaches this defect. Tests: `legalize`
@@ -2928,7 +2928,7 @@ shader sources; the corpus sweeps skip asset-dependent cases with a printed reas
   `MetalSceneDraw.ABooleanMultipliedIntoAStepMaskClipsIt` (a card
   masked white above and below a black band by `int` step masks cut apart by
   booleans: the same picture) and
-  `UnpackShaderCompileSmoke.CompilesAnEffectUnderTheCombosTheSceneSetsOnIt`; the
+  `ShaderCorpusScene.EffectIsCompiledUnderTheCombosTheSceneSetsOnItsPasses`; the
   first two fail without the change.
 - **Source-defined multiplication helpers** —
   `MetalSceneDraw.ASourceDefinedMulDrawsItsOwnResultWhileTheOtherStageUsesTheBuiltin`

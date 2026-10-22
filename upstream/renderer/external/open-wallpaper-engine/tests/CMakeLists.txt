@@ -234,6 +234,55 @@ gtest_discover_tests(
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )
+# The C++ side of the shader compiler. The engine library links the Rust compiler
+# PUBLIC when it is configured, and these tests fail (not skip) without it.
+add_executable(rust_shader_bridge_behavior_test rust_shader_bridge_behavior_test.cpp)
+target_link_libraries(rust_shader_bridge_behavior_test PRIVATE ${PROJECT_NAME} wpFs wpScene wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)
+if(DEFINED RUST_SHADER_STATICLIB AND NOT "${RUST_SHADER_STATICLIB}" STREQUAL "")
+    target_link_libraries(rust_shader_bridge_behavior_test PRIVATE wescene_rust_shader)
+endif()
+target_include_directories(rust_shader_bridge_behavior_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
+target_compile_features(rust_shader_bridge_behavior_test PRIVATE cxx_std_20)
+gtest_discover_tests(
+    rust_shader_bridge_behavior_test
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
+add_executable(shader_program_cache_behavior_test shader_program_cache_behavior_test.cpp)
+target_link_libraries(shader_program_cache_behavior_test PRIVATE ${PROJECT_NAME} wpFs wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(shader_program_cache_behavior_test PRIVATE .)
+target_compile_features(shader_program_cache_behavior_test PRIVATE cxx_std_20)
+gtest_discover_tests(
+    shader_program_cache_behavior_test
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
+add_executable(shader_dialect_compat_test shader_dialect_compat_test.cpp)
+target_link_libraries(shader_dialect_compat_test PRIVATE ${PROJECT_NAME} wpFs wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(shader_dialect_compat_test PRIVATE .)
+target_compile_features(shader_dialect_compat_test PRIVATE cxx_std_20)
+gtest_discover_tests(
+    shader_dialect_compat_test
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
+# How a scene becomes shader compile jobs (always run) and the opt-in whole-corpus
+# compile sweep (DISABLED_ParsesCorpus). The unpack root default is compiled in; the
+# environment overrides it at run time.
+get_filename_component(_wescene_default_unpack_root "${CMAKE_CURRENT_SOURCE_DIR}/../../../unpack" ABSOLUTE)
+add_executable(shader_corpus_test shader_corpus_unit_test.cpp shader_corpus_sweep_test.cpp)
+target_link_libraries(shader_corpus_test PRIVATE ${PROJECT_NAME} wpFs wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
+if(DEFINED RUST_SHADER_STATICLIB AND NOT "${RUST_SHADER_STATICLIB}" STREQUAL "")
+    target_link_libraries(shader_corpus_test PRIVATE wescene_rust_shader)
+endif()
+target_include_directories(shader_corpus_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
+target_compile_features(shader_corpus_test PRIVATE cxx_std_20)
+target_compile_definitions(shader_corpus_test PRIVATE "WM_DEFAULT_UNPACK_ROOT=\"${_wescene_default_unpack_root}\"")
+gtest_discover_tests(
+    shader_corpus_test
+    PROPERTIES TIMEOUT 600
+    DISCOVERY_TIMEOUT 120
+)
 add_executable(media_thumbnail_texture_smoke media_thumbnail_texture_smoke.cpp)
 target_link_libraries(media_thumbnail_texture_smoke PRIVATE ${PROJECT_NAME} wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(media_thumbnail_texture_smoke PRIVATE .)

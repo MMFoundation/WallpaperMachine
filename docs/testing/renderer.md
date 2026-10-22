@@ -577,8 +577,10 @@ its `tests/` folder). The authoritative routine build/run list is
 SceneScript, input and the media protocol (`script_runtime_compat_test`,
 `mouse_input_test`, `scenescript_media_event_smoke`, `scenescript_behavior_test`,
 `media_thumbnail_texture_smoke`, and the `*_behavior_test` executables below), the shader
-preprocessor (`shader_preprocessor_compat_test`, `unpack_shader_compile_smoke`),
-video playback-state merging
+compiler (`rust_shader_bridge_behavior_test` for the C++ bridge and the parser's compile entry,
+`shader_program_cache_behavior_test` for the program cache, `shader_dialect_compat_test` for
+constructs real shaders use, `shader_preprocessor_compat_test`, and `shader_corpus_test` for
+compile-job building and the path guards), video playback-state merging
 (`video_texture_submission_smoke`), and the texture/cache/lifetime, audio, video,
 graph, particle, timer and Metal checks; a non-zero exit from any registered
 binary fails the check. A test binary that is not registered fails unnoticed, so a
@@ -627,16 +629,18 @@ and their defaults are in
 version it finds (a parsed model needs geometry; it may have no bones, which the
 renderer draws as a static mesh). Without a corpus it generates no cases and
 `CorpusSmoke.NonEmpty` skips, naming the folder it looked in; pointed at the app's
-`Library` folder (60 items) it takes about 3 seconds. `unpack_shader_compile_smoke`
+`Library` folder (60 items) it takes about 3 seconds. `shader_corpus_test`
 checks its compile-job building (a scene's combos on an effect's passes included) and
-path guards on every run. Its corpus sweep compiles every shader-bearing material of
+path guards on every run. The compiler-dependent shader binaries fail, rather than skip,
+when the Rust shader library is not linked, because the shipped build always links it.
+The corpus sweep (`ShaderCorpusSweep.DISABLED_ParsesCorpus`) compiles every shader-bearing material of
 every scene under `WALLPAPER_MACHINE_UNPACK_ROOT`, with `WALLPAPER_MACHINE_ASSETS_ROOT`
 mounted and an effect's passes under the combos the scene sets on them, and took 5 to
 6 minutes for 60 scenes, so it is disabled and runs only on request:
 
 ```sh
 WALLPAPER_MACHINE_UNPACK_ROOT=<folder of id/scene.json> \
-  artifacts/renderer/bin/tests/unpack_shader_compile_smoke \
+  artifacts/renderer/bin/tests/shader_corpus_test \
   --gtest_also_run_disabled_tests --gtest_filter='*ParsesCorpus*'
 ```
 
