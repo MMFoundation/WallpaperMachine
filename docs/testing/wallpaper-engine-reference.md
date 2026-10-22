@@ -99,8 +99,9 @@ python3 scripts/we_reference.py render 2440387496 --label after
 python3 scripts/we_reference.py compare 2440387496 --labels before,after
 ```
 
-`render` runs `metal_scene_draw_smoke`'s renderer comparison
-(`*DrawTheSamePictureOnBothRenderers*` with `WE_TEST_COMPARE_NATIVE_ONLY`, see
+`render` runs `metal_scene_draw_smoke`'s poster test
+(`LocalProjectsDrawAPosterPicture`; a binary built before the Vulkan path was removed
+names it `DrawTheSamePictureOnBothRenderers`, with `WE_TEST_COMPARE_NATIVE_ONLY`, see
 [renderer.md](renderer.md#probe-environment-variables)) for each shot, matching it as
 closely as the harness allows:
 

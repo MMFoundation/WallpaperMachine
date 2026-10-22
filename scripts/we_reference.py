@@ -54,6 +54,9 @@ HOST, PORT = "10.211.55.2", 8765
 SHOT_DELAYS = (8, 7)            # seconds after opening, then after the first shot
 DEFAULT_TIMES = (8.0, 15.0)     # scene time of each shot when a capture did not record it
 STEP = 1.0 / 30.0
+# The harness test that draws a local project as a poster, and its name in binaries built
+# before the Vulkan path went (they write `*-native.ppm`), so a "before" binary still renders.
+POSTER_TESTS = "*LocalProjectsDrawAPosterPicture*:*DrawTheSamePictureOnBothRenderers*"
 SHEET_WIDTH, METRIC_WIDTH = 640, 256
 WALLPAPER_ENGINE_APP = "431960"
 # SteamCMD output that means the saved sign-in is no longer accepted; fetch never answers it.
@@ -546,11 +549,11 @@ def render(args) -> int:
                        WE_TEST_INPUT_JSON='[{"frame":0,"x":0.5,"y":0.5,"inside":true}]', WE_TEST_OUTPUT=str(work))
             if "opened" in meta:
                 env["TZ"] = reference_tz(meta["opened"], time.time(), time.localtime().tm_gmtoff)
-            result = subprocess.run([str(args.binary), "--gtest_filter=*DrawTheSamePictureOnBothRenderers*"], env=env,
+            result = subprocess.run([str(args.binary), f"--gtest_filter={POSTER_TESTS}"], env=env,
                                     capture_output=True, text=True, errors="replace")
             log = out / f"{folder.name}-{k}.log"
             log.write_text(result.stdout + result.stderr)
-            pictures = sorted(work.glob("*-native.ppm"))
+            pictures = sorted(work.glob("*-native.ppm")) or sorted(work.glob("*.ppm"))
             if pictures:
                 subprocess.run(["sips", "-s", "format", "png", str(pictures[0]), "--out", str(out / f"{folder.name}-{k}.png")],
                                check=True, capture_output=True)
