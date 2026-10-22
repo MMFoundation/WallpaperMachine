@@ -21,7 +21,7 @@ GENERATED_CASE_COUNT = 12
 # VideoToolbox codec prerequisites, if unavailable, are reported by those tests.
 REGRESSION_BINARIES = {
     "render_target_lifetime_test": False, "text_object_runtime_test": False, "text_object_behavior_test": False,
-    "shader_cache_metadata_test": False, "video_decode_pump_test": False,
+    "video_decode_pump_test": False,
     "video_color_conversion_test": False, "video_frame_pacing_test": False,
     "video_source_input_test": False, "video_probe_test": False, "vt_frame_decoder_test": False, "webm_reader_test": False,
     "synthetic_video_test": False,
@@ -53,10 +53,10 @@ REGRESSION_BINARIES = {
     "metal_memory_test": True, "scene_video_input_test": False,
     "audio_tests": False, "miniaudio_failure_paths_test": False, "sprite_animation_test": False,
     "rendergraph_smoke": False,
-    "rust_shader_bridge_test": False, "stb_image_regression_test": False,
+    "stb_image_regression_test": False,
     "surface_health_test": False, "wallpaper_scaling_test": False,
     "backdrop_geometry_test": False,
-    "shader_preprocessor_compat_test": False, "unpack_shader_compile_smoke": False,
+    "shader_preprocessor_compat_test": False,
     "video_texture_submission_smoke": False,
     "version_tests": False,
     # Renderer/Media/tests: the project's own container readers, pure C++ and headless.

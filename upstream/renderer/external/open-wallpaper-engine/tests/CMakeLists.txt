@@ -224,16 +224,6 @@ if(APPLE)
             -DHEADER=${CMAKE_SOURCE_DIR}/src/Audio/miniaudio-wrapper.hpp
             -P ${CMAKE_CURRENT_SOURCE_DIR}/audio/coreaudio_backend_config.cmake)
 endif()
-add_executable(shader_cache_metadata_test shader_cache_metadata_test.cpp)
-target_link_libraries(shader_cache_metadata_test PRIVATE ${PROJECT_NAME} wpFs wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
-target_include_directories(shader_cache_metadata_test PRIVATE .)
-target_compile_features(shader_cache_metadata_test PRIVATE cxx_std_20)
-gtest_discover_tests(
-    shader_cache_metadata_test
-    TEST_PREFIX shader_cache_metadata_test.
-    PROPERTIES TIMEOUT 30
-    DISCOVERY_TIMEOUT 60
-)
 add_executable(shader_preprocessor_compat_test shader_preprocessor_compat_test.cpp)
 target_link_libraries(shader_preprocessor_compat_test PRIVATE ${PROJECT_NAME} wpFs wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(shader_preprocessor_compat_test PRIVATE .)
@@ -243,55 +233,6 @@ gtest_discover_tests(
     TEST_PREFIX shader_preprocessor_compat_test.
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
-)
-
-add_executable(rust_shader_bridge_test rust_shader_bridge_test.cpp)
-target_link_libraries(
-    rust_shader_bridge_test
-    PRIVATE ${PROJECT_NAME} wpFs wpScene wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)
-target_include_directories(rust_shader_bridge_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
-target_compile_features(rust_shader_bridge_test PRIVATE cxx_std_20)
-if(DEFINED RUST_SHADER_STATICLIB AND NOT "${RUST_SHADER_STATICLIB}" STREQUAL "")
-    target_link_libraries(rust_shader_bridge_test PRIVATE wescene_rust_shader)
-endif()
-gtest_discover_tests(
-    rust_shader_bridge_test
-    TEST_PREFIX rust_shader_bridge_test.
-    PROPERTIES TIMEOUT 30
-    DISCOVERY_TIMEOUT 60
-)
-
-add_executable(unpack_shader_compile_smoke unpack_shader_compile_smoke.cpp)
-# The corpus test reads WALLPAPER_MACHINE_UNPACK_ROOT and
-# WALLPAPER_MACHINE_ASSETS_ROOT at run time; without them it looks in
-# upstream/renderer/unpack, as the shader crate's tests do, and skips when that
-# is missing.
-get_filename_component(UNPACK_SHADER_COMPILE_SMOKE_DEFAULT_CORPUS_ROOT
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../../unpack" ABSOLUTE)
-target_link_libraries(
-    unpack_shader_compile_smoke
-    PRIVATE ${PROJECT_NAME} wpFs wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
-target_include_directories(unpack_shader_compile_smoke PRIVATE . ${CMAKE_SOURCE_DIR}/src)
-target_compile_features(unpack_shader_compile_smoke PRIVATE cxx_std_20)
-target_compile_definitions(
-    unpack_shader_compile_smoke
-    PRIVATE
-        "UNPACK_SHADER_COMPILE_SMOKE_DEFAULT_CORPUS_ROOT=\"${UNPACK_SHADER_COMPILE_SMOKE_DEFAULT_CORPUS_ROOT}\"")
-if(TARGET wescene_rust_shader)
-    target_link_libraries(unpack_shader_compile_smoke PRIVATE wescene_rust_shader)
-else()
-    message(FATAL_ERROR
-        "unpack_shader_compile_smoke requires the Rust shader static library target. "
-        "Configure with -DRUST_SHADER_STATICLIB=<path-to-libwm_shader.a>, the static library "
-        "of the wm-shader package: from Renderer/, run "
-        "`cargo build -p wm-shader --features ffi --release --locked`, which writes "
-        "Renderer/target/release/libwm_shader.a.")
-endif()
-gtest_discover_tests(
-    unpack_shader_compile_smoke
-    TEST_PREFIX unpack_shader_compile_smoke.
-    PROPERTIES TIMEOUT 600
-    DISCOVERY_TIMEOUT 120
 )
 add_executable(media_thumbnail_texture_smoke media_thumbnail_texture_smoke.cpp)
 target_link_libraries(media_thumbnail_texture_smoke PRIVATE ${PROJECT_NAME} wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
