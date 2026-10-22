@@ -56,6 +56,7 @@ REGRESSION_BINARIES = {
     "metal_memory_test": True, "scene_video_input_test": False,
     "audio_tests": False, "miniaudio_failure_paths_test": False, "sprite_animation_test": False,
     "rendergraph_smoke": False,
+    "workshop_snapshot_test": False, "workshop_corpus_stamps_test": False,
     "stb_image_regression_test": False,
     "surface_health_test": False, "wallpaper_scaling_test": False,
     "backdrop_geometry_test": False,
@@ -73,7 +74,9 @@ REGRESSION_BINARIES = {
 }
 # Executables in tests/CMakeLists.txt that the check neither builds nor runs, and
 # why. Every other one is registered above, a probe, or the diagnostic benchmark below.
-MANUAL_BINARIES = {}
+MANUAL_BINARIES = {
+    "wpdump": "inspection tool, not a test: dumps one workshop item's parse to JSON",
+}
 OFFSCREEN_PROBE = "offscreen_scene_probe"
 RELOAD_PROBE = "scene_reload_cycle_probe"
 TIMER_PROBE = "timer-precision"

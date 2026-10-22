@@ -152,22 +152,35 @@ target_include_directories(sprite_animation_test PRIVATE ${CMAKE_SOURCE_DIR}/src
 target_compile_features(sprite_animation_test PRIVATE cxx_std_20)
 gtest_discover_tests(sprite_animation_test PROPERTIES TIMEOUT 30 DISCOVERY_TIMEOUT 60)
 
-add_executable(
-    audio_tests
-    audio/audio_response_mono_test.cpp
-    audio/sound_stream_test.cpp
-    fs/limited_binary_stream_test.cpp
-    audio/sample_math_test.cpp
-    audio/sound_layer_control_test.cpp
-    audio/sound_output_lifecycle_test.cpp)
-target_link_libraries(audio_tests PRIVATE ${PROJECT_NAME} wpAudio wpFs GTest::gtest_main)
-target_include_directories(audio_tests PRIVATE . ${CMAKE_SOURCE_DIR}/src)
-target_compile_features(audio_tests PRIVATE cxx_std_20)
-gtest_discover_tests(
-    audio_tests
-    PROPERTIES TIMEOUT 30
-    DISCOVERY_TIMEOUT 60
-)
+# A headless gtest executable in one call: `name` is built from SOURCES, linked with LIBS (and
+# gtest_main), sees INCLUDES, and every discovered test gets TIMEOUT seconds. PREFIX, when
+# given, is put in front of the discovered test names.
+function(wm_gtest_executable name)
+    cmake_parse_arguments(WM "" "TIMEOUT;PREFIX" "SOURCES;LIBS;INCLUDES" ${ARGN})
+    add_executable(${name} ${WM_SOURCES})
+    target_link_libraries(${name} PRIVATE ${WM_LIBS} GTest::gtest_main)
+    target_include_directories(${name} PRIVATE ${WM_INCLUDES})
+    target_compile_features(${name} PRIVATE cxx_std_20)
+    set(discover_prefix "")
+    if(WM_PREFIX)
+        set(discover_prefix TEST_PREFIX ${WM_PREFIX})
+    endif()
+    gtest_discover_tests(${name} ${discover_prefix}
+        PROPERTIES TIMEOUT ${WM_TIMEOUT}
+        DISCOVERY_TIMEOUT 60)
+endfunction()
+
+wm_gtest_executable(audio_tests
+    TIMEOUT 30
+    SOURCES
+        audio/audio_response_mono_test.cpp
+        audio/sound_stream_test.cpp
+        fs/limited_binary_stream_test.cpp
+        audio/sample_math_test.cpp
+        audio/sound_layer_control_test.cpp
+        audio/sound_output_lifecycle_test.cpp
+    LIBS ${PROJECT_NAME} wpAudio wpFs
+    INCLUDES . ${CMAKE_SOURCE_DIR}/src)
 if(APPLE)
     add_executable(stb_image_regression_test stb_image_regression_test.mm)
     add_library(stb_scalar_test_decoder OBJECT stb_jpeg_variant.cpp)
@@ -181,23 +194,19 @@ if(APPLE)
     target_compile_features(stb_image_regression_test PRIVATE cxx_std_20)
     set_target_properties(stb_image_regression_test PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
     gtest_discover_tests(stb_image_regression_test PROPERTIES TIMEOUT 30 DISCOVERY_TIMEOUT 60)
-    add_test(
-        NAME audio_coreaudio_backend_config
-        COMMAND
-            ${CMAKE_COMMAND}
-            -DHEADER=${CMAKE_SOURCE_DIR}/src/Audio/miniaudio-wrapper.hpp
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/audio/coreaudio_backend_config.cmake)
+    # A script test: checks the CoreAudio backend switches of the miniaudio wrapper header.
+    set(coreaudio_script ${CMAKE_CURRENT_SOURCE_DIR}/audio/coreaudio_backend_config.cmake)
+    set(miniaudio_header ${CMAKE_SOURCE_DIR}/src/Audio/miniaudio-wrapper.hpp)
+    add_test(NAME audio_coreaudio_backend_config
+             COMMAND ${CMAKE_COMMAND} -DHEADER=${miniaudio_header} -P ${coreaudio_script})
 endif()
-add_executable(shader_preprocessor_compat_test shader_preprocessor_compat_test.cpp)
-target_link_libraries(shader_preprocessor_compat_test PRIVATE ${PROJECT_NAME} wpFs wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
-target_include_directories(shader_preprocessor_compat_test PRIVATE .)
-target_compile_features(shader_preprocessor_compat_test PRIVATE cxx_std_20)
-gtest_discover_tests(
-    shader_preprocessor_compat_test
-    TEST_PREFIX shader_preprocessor_compat_test.
-    PROPERTIES TIMEOUT 30
-    DISCOVERY_TIMEOUT 60
-)
+
+wm_gtest_executable(shader_preprocessor_compat_test
+    TIMEOUT 30
+    PREFIX shader_preprocessor_compat_test.
+    SOURCES shader_preprocessor_compat_test.cpp
+    LIBS ${PROJECT_NAME} wpFs wpScene nlohmann_json::nlohmann_json
+    INCLUDES .)
 # The C++ side of the shader compiler. The engine library links the Rust compiler
 # PUBLIC when it is configured, and these tests fail (not skip) without it.
 add_executable(rust_shader_bridge_behavior_test rust_shader_bridge_behavior_test.cpp)
@@ -780,11 +789,36 @@ target_link_libraries(timer_delivery_benchmark PRIVATE wpTimer)
 target_include_directories(timer_delivery_benchmark PRIVATE . ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(timer_delivery_benchmark PRIVATE cxx_std_20)
 
-#gtest_discover_tests(
-#    version_tests
-#    PROPERTIES TIMEOUT 30
-#    DISCOVERY_TIMEOUT 60
-#)
+# The workshop snapshot: what the engine's parsers make of one packed workshop item, as JSON.
+# It is the library behind the wpdump tool, the dump tests and the corpus tests.
+# WM_DEFAULT_CORPUS_ROOT is the folder the corpus tests read when WALLPAPER_MACHINE_WORKSHOP_ROOT
+# is not set; neither ships with the repository.
+add_library(workshop_snapshot STATIC workshop_snapshot.cpp workshop_corpus.cpp)
+target_link_libraries(workshop_snapshot PUBLIC ${PROJECT_NAME} wpFs wpScene nlohmann_json::nlohmann_json)
+target_include_directories(workshop_snapshot PUBLIC .)
+target_compile_features(workshop_snapshot PUBLIC cxx_std_20)
+target_compile_definitions(workshop_snapshot PUBLIC WM_DEFAULT_CORPUS_ROOT="${CMAKE_SOURCE_DIR}/workshop")
+
+# Inspection tool, not a test: wpdump <workshop folder> [out.json].
+add_executable(wpdump wpdump_main.cpp)
+target_link_libraries(wpdump PRIVATE workshop_snapshot)
+target_compile_features(wpdump PRIVATE cxx_std_20)
+
+# Always-on: the dump tool and the corpus index, on items built in a scratch folder.
+wm_gtest_executable(workshop_snapshot_test
+    TIMEOUT 30
+    SOURCES workshop_snapshot_test.cpp workshop_corpus_index_test.cpp
+    LIBS workshop_snapshot ${PROJECT_NAME} wpFs wpScene PkgConfig::TEST_LZ4
+    INCLUDES .)
+target_compile_definitions(workshop_snapshot_test PRIVATE WPDUMP_EXE="$<TARGET_FILE:wpdump>")
+add_dependencies(workshop_snapshot_test wpdump)
+
+# Corpus-gated: one instance per version stamp found in the local workshop folder; skips
+# (and instantiates nothing) when there is none. CPU only.
+wm_gtest_executable(workshop_corpus_stamps_test
+    TIMEOUT 30
+    SOURCES workshop_corpus_stamps_test.cpp
+    LIBS workshop_snapshot)
 
 # Native Metal backend: capability gate, blend mapping, clip-space derivation
 # and pipeline cache keys. No device needed for any of it; the one

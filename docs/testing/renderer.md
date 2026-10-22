@@ -573,7 +573,8 @@ CMake test binaries are built under `artifacts/renderer/bin/` (executables in
 its `tests/` folder). The authoritative routine build/run list is
 `REGRESSION_BINARIES` in `scripts/check_renderer.py`, covering the parsers
 (`scene_schema_tests`, `mdl_schema_tests`, `mdl_parse_tests`, `puppet_pose_tests`,
-`tex_schema_tests`, `tex_container_tests`, `version_tests`),
+`tex_schema_tests`, `tex_container_tests`, `workshop_snapshot_test`,
+`workshop_corpus_stamps_test`),
 SceneScript, input and the media protocol (`script_runtime_compat_test`,
 `mouse_input_test`, `cursor_input_state_test`, `scenescript_media_event_smoke`, `scenescript_behavior_test`,
 `media_thumbnail_texture_smoke`, and the `*_behavior_test` executables below), the shader
@@ -624,15 +625,24 @@ existing child scheduling policy, not direct execution of the binary; avoid
 concurrent builds/benchmarks. Do not infer a particular frame count from a passing
 test whose successful output prints no count.
 
-Two registered binaries (`version_tests` and `unchanged_present_test`) and the media binaries' corpus A/B tests described above also read a local corpus when there is one; the roots
+Two registered binaries (`workshop_corpus_stamps_test` and `unchanged_present_test`) and the media binaries' corpus A/B tests described above also read a local corpus when there is one; the roots
 and their defaults are in
 [wallpaper-corpus.md](wallpaper-corpus.md#pointing-the-tests-at-your-local-corpus).
-`version_tests` parses every `<id>/scene.pkg` under
-`WALLPAPER_MACHINE_WORKSHOP_ROOT` and checks each package, texture and model
-version it finds (a parsed model needs geometry; it may have no bones, which the
-renderer draws as a static mesh). Without a corpus it generates no cases and
-`CorpusSmoke.NonEmpty` skips, naming the folder it looked in; pointed at the app's
-`Library` folder (60 items) it takes about 3 seconds. `shader_corpus_test`
+`workshop_corpus_stamps_test` dumps every `<id>/scene.pkg` under
+`WALLPAPER_MACHINE_WORKSHOP_ROOT` once and creates one test instance per package,
+texture (`texv`, `texi`, `texb`, pixel format) and model (`mdlv`, `mdls`, `mdla`) stamp it
+finds, so a stamp nobody has seen before appears on the next run without an allow-list.
+Each instance checks every item that carries the stamp (a package needs a parsed scene, a
+texture needs a size, a parsed model needs geometry; it may have no bones, which the renderer
+draws as a static mesh). Without a corpus it generates no cases and
+`CorpusSmoke.CorpusFolderHoldsItemsWithStamps` skips, naming the folder it looked in and the
+variable that sets it. The index itself and the dump it is built from have no corpus
+dependency: `workshop_snapshot_test` (always on, CPU only, about half a second) builds its items in a
+scratch folder and covers the `wpdump` command line (exit codes, usage and error text, the
+output file), the package, scene, object, texture and model blocks of the JSON, the pose
+sampling switch, loose files beside the package, determinism, and the index (root lookup,
+which folders count, the skipped id, harvested stamp sets, slices, a missing root).
+`shader_corpus_test`
 checks its compile-job building (a scene's combos on an effect's passes included) and
 path guards on every run. The compiler-dependent shader binaries fail, rather than skip,
 when the Rust shader library is not linked, because the shipped build always links it.
@@ -647,9 +657,12 @@ WALLPAPER_MACHINE_UNPACK_ROOT=<folder of id/scene.json> \
   --gtest_also_run_disabled_tests --gtest_filter='*ParsesCorpus*'
 ```
 
-Run by hand only (`MANUAL_BINARIES`): `wpdump <workshop folder> [out.json]` writes
-the snapshot `version_tests` checks for one item (package, scene, texture and
-model versions and fields) as JSON, to inspect what the parsers make of it.
+Run by hand only (`MANUAL_BINARIES`): `wpdump <workshop folder> [out.json]` prints (or writes)
+the snapshot `workshop_corpus_stamps_test` checks for one item (package, scene, object,
+texture and model versions and fields) as JSON, to inspect what the parsers make of it. It exits
+2 on a wrong argument count, 1 when the folder has no `scene.pkg`, the package is rejected or
+the output file cannot be opened. With `WE_TEST_DUMP_POSES` set (to anything) each bone and
+animation track also lists its bind pose and sampled frames.
 
 To iterate on one test, build and run its binary in the Homebrew environment from
 `scripts/build.py`, once `check_renderer.py` has configured the build directory:
