@@ -287,30 +287,42 @@ enum WebWallpaperProtocol {
       // `restaged` names properties the host restaged: the value reads the same but
       // the bytes behind it are new (a file reselected after it was edited, or
       // another folder's file of the same name), so they count as changed once.
+      // The deliver functions return whether the page took something in.
       const deliverProperties = (name, properties, restaged) => {
         const set = propertySets[name];
         set.latest = properties;
-        if (!listener || typeof listener[name] !== "function") return;
+        const again = new Set(Array.isArray(restaged) ? restaged : []);
+        // A restaged property the page did not take in, for want of a handler or
+        // because it threw, is still owed to it.
+        const owe = () => {
+          if (set.delivered) for (const key of again) set.delivered.delete(key);
+          return false;
+        };
+        if (!listener || typeof listener[name] !== "function") return owe();
         const source = properties !== null && typeof properties === "object" ? properties : {};
         const snapshot = new Map(Object.keys(source).map(key => [key, canonical(source[key])]));
-        const again = new Set(Array.isArray(restaged) ? restaged : []);
         let payload = properties;
         if (set.delivered) {
           const changed = Object.keys(source).filter(key => again.has(key) || set.delivered.get(key) !== snapshot.get(key));
-          if (changed.length === 0) return;
+          if (changed.length === 0) return false;
           payload = Object.fromEntries(changed.map(key => [key, source[key]]));
         }
-        if (call(name, payload)) set.delivered = snapshot;
-        // A restaged property the handler failed to take in is still owed to it.
-        else if (set.delivered) for (const key of again) set.delivered.delete(key);
+        if (!call(name, payload)) return owe();
+        set.delivered = snapshot;
+        return true;
       };
-      const deliverPaused = () => { if (call("setPaused", lastPaused)) pausedTakenIn = lastPaused; };
+      const deliverPaused = () => {
+        if (!call("setPaused", lastPaused)) return false;
+        pausedTakenIn = lastPaused;
+        return true;
+      };
       // A change the handler did not take in is owed again, even for a file it had.
       const deliverDirectoryFiles = (property, files) => {
         if (!filesTakenIn.has(property)) filesTakenIn.set(property, new Set());
         const takenIn = filesTakenIn.get(property);
         const accepted = call("userDirectoryFilesAddedOrChanged", property, files);
         for (const file of files) accepted ? takenIn.add(file) : takenIn.delete(file);
+        return accepted;
       };
       // Wallpaper Engine calls whichever listener is there when it delivers, and
       // assigning one is not a delivery: a listener that replaces one which took
@@ -323,28 +335,37 @@ enum WebWallpaperProtocol {
       // than Wallpaper Engine, so bundled pages that register asynchronously still
       // start.
       let replayQueued = false;
+      let reassigned = false;
+      const queueReplay = () => { replayQueued = true; queueMicrotask(replayOwed); };
       const replayOwed = () => {
+        reassigned = false;
+        let tookIn = false;
         try {
           for (const name of ["applyGeneralProperties", "applyUserProperties"]) {
-            if (propertySets[name].latest) deliverProperties(name, propertySets[name].latest);
+            if (propertySets[name].latest && deliverProperties(name, propertySets[name].latest)) tookIn = true;
           }
-          if (lastPaused !== null && lastPaused !== pausedTakenIn) deliverPaused();
+          if (lastPaused !== null && lastPaused !== pausedTakenIn && deliverPaused()) tookIn = true;
           for (const [property, files] of directories) {
             const takenIn = filesTakenIn.get(property);
             const owed = files.filter(file => !(takenIn && takenIn.has(file)));
-            if (owed.length) deliverDirectoryFiles(property, owed);
+            if (owed.length && deliverDirectoryFiles(property, owed)) tookIn = true;
           }
         } finally {
-          // Cleared only now, so a handler that assigns a listener cannot queue the replay again.
+          // Cleared only now: a listener assigned during the pass is noted, not queued.
           replayQueued = false;
         }
+        // That listener may have a handler the one before it lacked. It gets another
+        // pass, but only after a pass the page took something in from, so a handler
+        // that throws and assigns a listener cannot loop.
+        if (reassigned && tookIn) queueReplay();
       };
       Object.defineProperty(window, "wallpaperPropertyListener", {
         configurable: true,
         get() { return listener; },
         set(value) {
           listener = value;
-          if (!replayQueued) { replayQueued = true; queueMicrotask(replayOwed); }
+          if (replayQueued) reassigned = true;
+          else queueReplay();
         },
       });
       // Right clicks are forwarded to the page, never to WebKit's own context

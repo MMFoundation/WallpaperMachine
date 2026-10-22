@@ -157,7 +157,10 @@ and loop until React gave up and left the page blank. What the page has not take
 in (properties, the pause state and directory files that arrived before it had a
 listener or a handler, or that its handler threw on) is replayed once the turn that
 assigned the listener is over, so pages that install the listener from a deferred
-module still start.
+module still start. A listener that a handler assigns during that replay gets
+another pass after it, so a handler the replaced listener lacked still hears what it
+is owed; a pass follows only one the page took something in from, so a handler that
+throws and assigns a listener every time is not called in a loop.
 
 `applyUserProperties` and `applyGeneralProperties` follow Wallpaper Engine's
 contract: the first delivery the page takes in carries every property, and every
@@ -174,8 +177,8 @@ same: the staged path is built from the property and the file's name, so a file
 reselected after it was edited, or another folder's file of the same name, arrives
 under the path the page already has, and the desktop host passes the restaged property ids
 along with the payload (`restagedFiles` of `WebWallpaperHost.stageAssets`). A paused
-page draws that change like any edit, and a handler that threw on it is sent it
-again. A page
+page draws that change like any edit, and a handler that threw on it, or was
+missing when it arrived, is sent it again. A page
 that rebuilt itself from the payload on every edit has to keep its earlier values,
 as it must under Wallpaper Engine. `setPaused` is not deduplicated.
 

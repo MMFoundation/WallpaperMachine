@@ -443,6 +443,30 @@ final class WebWallpaperAuthorAPITests: XCTestCase {
     XCTAssertEqual(received["passes"] as? [Int], [1, 1, 1], "no render had to run again")
   }
 
+  /// A handler that assigns another listener during the replay can hand over to one
+  /// with a handler the first lacked; what that handler is owed must not wait for the host.
+  func testAListenerAssignedDuringTheReplayGetsWhatTheOneBeforeItLacked() async throws {
+    let page = WebWallpaperPage(projectURL: project, entryFile: "index.html")
+    page.load()
+    try await waitUntilLoaded(page)
+    try await eval(page, """
+      window.__received.user = [];
+      window.__received.general = [];
+      window.__mweWallpaperHost.applyGeneralProperties({ fps: 30 });
+      window.__mweWallpaperHost.applyUserProperties({ a: { value: 1 } });
+      const full = {
+        applyUserProperties(p) { window.__received.user.push(Object.keys(p)); },
+        applyGeneralProperties(p) { window.__received.general.push(p.fps); },
+      };
+      window.wallpaperPropertyListener = {
+        applyUserProperties(p) { window.__received.user.push(Object.keys(p)); window.wallpaperPropertyListener = full; },
+      };
+      """)
+    let received = try await pollState(page) { ($0["general"] as? [Int])?.count == 1 }
+    XCTAssertEqual(received["general"] as? [Int], [30])
+    XCTAssertEqual(received["user"] as? [[String]], [["a"]], "the new listener replaces one that took them in")
+  }
+
   func testAListenerThatGainsItsHandlerLaterStillGetsTheWholeSet() async throws {
     let page = WebWallpaperPage(projectURL: project, entryFile: "index.html")
     page.load()
@@ -530,6 +554,22 @@ final class WebWallpaperAuthorAPITests: XCTestCase {
     page.applyUserProperties(json: json)
     let received = try await pollState(page) { ($0["user"] as? [[String: Any]])?.count == 2 }
     XCTAssertEqual(try keys(received, "user", 1), ["cover"])
+  }
+
+  func testARestagedFileThatArrivedWithNoHandlerIsOwedToTheNextListener() async throws {
+    let page = try await listenerPage()
+    let json = #"{"cover":{"type":"file","value":"p/cover.png"},"size":{"value":3}}"#
+    page.applyUserProperties(json: json)
+    _ = try await pollState(page) { ($0["user"] as? [[String: Any]])?.count == 1 }
+
+    // The new bytes arrive while the page has no handler; its next listener is owed them.
+    try await eval(page, """
+      window.wallpaperPropertyListener = {};
+      window.__mweWallpaperHost.applyUserProperties(\(json), ["cover"]);
+      """)
+    try await installUserRecorder(page, as: "next")
+    let received = try await pollState(page) { ($0["next"] as? [[String: Any]])?.count == 1 }
+    XCTAssertEqual(try keys(received, "next", 0), ["cover"])
   }
 
   func testGeneralPropertiesAreDeduplicatedToo() async throws {
