@@ -109,7 +109,7 @@ final class VideoWallpaperPreviewSurface: WallpaperPreviewSurface {
     private func playWithWebM(_ file: WebMFile) {
         let player = WebMPlayer(file: file, withAudio: true, paused: paused)
         webM = player
-        let mode = NativeVideoScalingMode(rawValue: request.scalingMode) ?? .fill
+        let mode = NativeVideoScalingMode(rendererValue: request.scalingMode) ?? .fill
         player.setVolume(request.volume, muted: muted)
         player.setScaling(mode, factor: 1, pan: .centered)
         player.attach(to: content.layer ?? CALayer())
@@ -167,9 +167,9 @@ final class VideoWallpaperPreviewSurface: WallpaperPreviewSurface {
 
     /// `none` has no gravity of its own; the nearest one that shows the whole picture stands in.
     private static func gravity(for scalingMode: Int32) -> AVLayerVideoGravity {
-        switch NativeVideoScalingMode(rawValue: scalingMode) ?? .fill {
+        switch NativeVideoScalingMode(rendererValue: scalingMode) ?? .fill {
         case .stretch: return .resize
-        case .match, .none: return .resizeAspect
+        case .match, .matchBlurred, .none: return .resizeAspect
         case .fill: return .resizeAspectFill
         }
     }

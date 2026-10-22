@@ -235,6 +235,7 @@ extension BridgeScalingMode {
         case .stretch: .stretch
         case .match: .match
         case .fill: .fill
+        case .matchBlurred: .matchBlurred
         }
     }
 }

@@ -2,12 +2,26 @@ import AVFoundation
 import CoreGraphics
 
 /// How a picture is scaled to its display, by the numbers the lock-screen configuration
-/// and the renderer use: none (original size) 0, stretch 1, fit 2, fill 3.
+/// and the renderer use: none (original size) 0, stretch 1, fit 2, fill 3. Fit with a blurred
+/// backdrop is the renderer's number 4; here it is a case of its own that is laid out as Fit, and
+/// `init(rendererValue:)` is how those numbers come in. Its `rawValue` is only this enum's tag.
 enum NativeVideoScalingMode: Int32, Equatable, Sendable {
     case none = 0
     case stretch = 1
     case match = 2
     case fill = 3
+    case matchBlurred = 5
+
+    /// The mode for a number of the lock-screen configuration or the renderer.
+    init?(rendererValue: Int32) {
+        if rendererValue == 4 {
+            self = .matchBlurred
+        } else if let mode = NativeVideoScalingMode(rawValue: rendererValue), mode != .matchBlurred {
+            self = mode
+        } else {
+            return nil
+        }
+    }
 }
 
 /// Where a clip's picture goes on a display under each scaling mode.

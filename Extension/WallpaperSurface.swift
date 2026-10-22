@@ -362,7 +362,7 @@ final class WallpaperSurface: LockScreenSurfaceLifecycle {
       scene: scene, resolve: { try WallpaperRuntime.asset($0) })
     try Task.checkCancellation()
     let framing = scene.effectiveFraming
-    let mode = NativeVideoScalingMode(rawValue: scene.scalingMode) ?? .fill
+    let mode = NativeVideoScalingMode(rendererValue: scene.scalingMode) ?? .fill
     let pan = NativeVideoLayout.Pan(x: framing.panX, y: framing.panY)
     let player: LockScreenVideoPlaying
     switch path {
