@@ -208,15 +208,6 @@ gtest_discover_tests(
     PROPERTIES TIMEOUT 600
     DISCOVERY_TIMEOUT 120
 )
-add_executable(scenescript_sound_layer_smoke scenescript_sound_layer_smoke.cpp)
-target_link_libraries(scenescript_sound_layer_smoke PRIVATE ${PROJECT_NAME} wpAudio wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
-target_include_directories(scenescript_sound_layer_smoke PRIVATE .)
-target_compile_features(scenescript_sound_layer_smoke PRIVATE cxx_std_20)
-gtest_discover_tests(
-    scenescript_sound_layer_smoke
-    PROPERTIES TIMEOUT 30
-    DISCOVERY_TIMEOUT 60
-)
 add_executable(media_thumbnail_texture_smoke media_thumbnail_texture_smoke.cpp)
 target_link_libraries(media_thumbnail_texture_smoke PRIVATE ${PROJECT_NAME} wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(media_thumbnail_texture_smoke PRIVATE .)

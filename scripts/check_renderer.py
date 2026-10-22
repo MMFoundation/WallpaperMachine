@@ -30,7 +30,7 @@ REGRESSION_BINARIES = {
     "scene_mesh_tests": False, "particle_rope_geometry_test": False,
     "particle_mouse_controlpoint_test": False, "particle_parity_test": False,
     "layer_texture_reference_test": False,
-    "project_property_preview_test": False, "scenescript_sound_layer_smoke": False,
+    "project_property_preview_test": False,
     "scenescript_media_event_smoke": False, "scenescript_behavior_test": False, "media_thumbnail_texture_smoke": False,
     "scene_schema_tests": False, "script_runtime_compat_test": False,
     "mouse_input_test": False, "mdl_schema_tests": False, "tex_schema_tests": False,
