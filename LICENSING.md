@@ -402,8 +402,10 @@ policy Apache-2.0 and the GPL-3.0 family no longer fail; the count of unknown li
 and of GPL-2.0-only components is what matters. On 2026-10-22, after the change,
 `python3 scripts/check_licenses.py --skip-app` on the tree reports 172 components (24
 compiled-in or statically linked inventory entries, 148 third-party and 3 first-party Rust
-crates) with 0 GPL-2.0-only, 0 incompatible, 0 unknown and 0 not named in this file; the
-Release app's dylibs were not part of that run.
+crates) with 0 GPL-2.0-only, 0 incompatible, 0 unknown and 0 not named in this file. With
+`--enforce` on a Release app built from `2794fa3f2` it reports 174 components (3 Mach-O roots,
+5 third-party libraries, 24 inventory entries, 148 third-party Rust crates) with the same zeros.
+That app was built locally to verify the change, not for distribution.
 
 Should a GPL-2.0-only component enter the closure, the check reports it and no binary
 may be distributed until it is replaced, or its copyright holders grant use under
