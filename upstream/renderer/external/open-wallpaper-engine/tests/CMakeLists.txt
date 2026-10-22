@@ -423,6 +423,15 @@ gtest_discover_tests(
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )
+add_executable(particle_override_tint_test particle_override_tint_test.cpp)
+target_link_libraries(particle_override_tint_test PRIVATE ${PROJECT_NAME} wpScene wpParticle wpAudio nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(particle_override_tint_test PRIVATE .)
+target_compile_features(particle_override_tint_test PRIVATE cxx_std_20)
+gtest_discover_tests(
+    particle_override_tint_test
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
 add_executable(particle_parity_test particle_parity_test.cpp)
 target_link_libraries(particle_parity_test PRIVATE ${PROJECT_NAME} wpScene wpParticle wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(particle_parity_test PRIVATE .)

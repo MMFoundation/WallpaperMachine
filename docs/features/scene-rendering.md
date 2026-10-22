@@ -622,7 +622,10 @@ entry's value plus and minus the noise, cut off at 0 and 1), `inheritcontrolpoin
 `mapsequencebetweencontrolpoints` and `inheritinitialvaluefromevent` initializers are
 implemented. A scene object's `instanceoverride` colour re-tints the preset's own colours
 by the difference between the override and the preset's representative colour, keeping
-their spread, and is a plain tint only for a preset without colours; its
+their spread, and then multiplies each newborn particle's colour by the override once (the
+particle's remembered birth colour is the product, so a `colorchange` ramp scales from it);
+a preset without colours takes the override as its colour, not multiplied again, and an
+override equal to the representative colour changes nothing; its
 `controlpoint0`..`7` and `controlpointangle0`..`7` replace the preset's control points
 (a control point flagged 2 is held at its scene position as the layer moves), and
 `brightness` multiplies the tint in an HDR scene, and each of them follows a user

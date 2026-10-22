@@ -871,6 +871,11 @@ ParticleInitOp WPParticleParser::genOverrideInitOp(
         if (size_override) PM::MutiplyInitSize(p, size(over->size));
         if (speed_override) PM::MutiplyVelocity(p, speed(over->speed));
         if (const auto flat = tint.FlatTint()) PM::InitColor(p, flat->x(), flat->y(), flat->z());
+        // A file with colours had them re-tinted by its initializers and operators;
+        // the newborn is then multiplied by the override itself, once. Nothing
+        // moved (override equal to the file's colour) means no multiply either.
+        else if (const auto moved = tint.Shifted())
+            PM::MutiplyInitColor(p, moved->target.x(), moved->target.y(), moved->target.z());
         const double glow = brightness(over->brightness);
         if (over->hdr && glow != 1.0) PM::MutiplyInitColor(p, glow, glow, glow);
     };

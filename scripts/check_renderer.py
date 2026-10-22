@@ -29,6 +29,7 @@ REGRESSION_BINARIES = {
     "static_subgraph_cache_test": False,
     "scene_mesh_tests": False, "particle_rope_geometry_test": False,
     "particle_mouse_controlpoint_test": False, "particle_parity_test": False,
+    "particle_override_tint_test": False,
     "layer_texture_reference_test": False,
     "project_property_preview_test": False,
     "scenescript_media_event_smoke": False, "scenescript_behavior_test": False, "media_thumbnail_texture_smoke": False,

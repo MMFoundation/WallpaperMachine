@@ -1722,7 +1722,11 @@ texture entrances are not decoded-image or native-rendering evidence.
   the scene parser and a real spawn), the colour override
   re-tinting colours (spread kept, identity for the preset's own colour, white
   desaturating, plain tint without colours, HSV and list initializers, `colorchange`
-  default and re-tint, brightness only in HDR). `SequenceInitializers.*`:
+  default and re-tint, brightness only in HDR). `ParticleOverrideTint.*`
+  (`particle_override_tint_test`): after the re-tint a colour-bearing preset's newborn is
+  multiplied by the override and remembers that product, the colourless preset gets the
+  override unsquared, an override equal to the preset's representative colour leaves the
+  default colour exactly, and a `colorchange` ramp is tinted at both ends. `SequenceInitializers.*`:
   `mapsequencearound`/`between`, `inheritcontrolpointvelocity`, `positionoffsetrandom`,
   `inheritinitialvaluefromevent` (an inherited `multiplysize` scales by half of the
   parent's size, in the engine's unit, `setsize` copies it). `Movement.*`, `AngularMovement.*`,
