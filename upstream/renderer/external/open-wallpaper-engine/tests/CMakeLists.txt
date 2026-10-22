@@ -104,6 +104,10 @@ add_scene_schema_behavior_test(scene_schema_part01_test
     scene_schema_part01_objects_test.cpp
     scene_schema_part01_model_layers_test.cpp
     scene_schema_part01_cameras_test.cpp)
+add_scene_schema_behavior_test(scene_schema_part05_test scene_schema_part05_test.cpp)
+add_scene_schema_behavior_test(scene_schema_part06_test scene_schema_part06_test.cpp)
+add_scene_schema_behavior_test(scene_schema_part07_test scene_schema_part07_test.cpp)
+add_scene_schema_behavior_test(scene_schema_part08_test scene_schema_part08_test.cpp)
 add_scene_schema_behavior_test(scene_schema_part09_test
     scene_schema_part09_nodes_test.cpp
     scene_schema_part09_layers_test.cpp)
