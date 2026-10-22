@@ -398,6 +398,15 @@ gtest_discover_tests(
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )
+add_executable(cursor_input_state_test cursor_input_state_test.cpp)
+target_link_libraries(cursor_input_state_test PRIVATE ${PROJECT_NAME} wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(cursor_input_state_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
+target_compile_features(cursor_input_state_test PRIVATE cxx_std_20)
+gtest_discover_tests(
+    cursor_input_state_test
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
 add_executable(wallpaper_scaling_test wallpaper_scaling_test.cpp)
 target_link_libraries(wallpaper_scaling_test PRIVATE ${PROJECT_NAME} wpScene GTest::gtest_main)
 target_include_directories(wallpaper_scaling_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
@@ -442,6 +451,42 @@ target_include_directories(particle_override_tint_test PRIVATE .)
 target_compile_features(particle_override_tint_test PRIVATE cxx_std_20)
 gtest_discover_tests(
     particle_override_tint_test
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
+add_executable(particle_billboard_size_test particle_billboard_size_test.cpp)
+target_link_libraries(particle_billboard_size_test PRIVATE ${PROJECT_NAME} wpScene wpParticle wpAudio nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(particle_billboard_size_test PRIVATE .)
+target_compile_features(particle_billboard_size_test PRIVATE cxx_std_20)
+gtest_discover_tests(
+    particle_billboard_size_test
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
+add_executable(particle_control_point_test particle_control_point_test.cpp)
+target_link_libraries(particle_control_point_test PRIVATE ${PROJECT_NAME} wpScene wpParticle wpAudio nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(particle_control_point_test PRIVATE .)
+target_compile_features(particle_control_point_test PRIVATE cxx_std_20)
+gtest_discover_tests(
+    particle_control_point_test
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
+add_executable(particle_override_test particle_override_test.cpp)
+target_link_libraries(particle_override_test PRIVATE ${PROJECT_NAME} wpScene wpParticle wpAudio nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(particle_override_test PRIVATE .)
+target_compile_features(particle_override_test PRIVATE cxx_std_20)
+gtest_discover_tests(
+    particle_override_test
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
+add_executable(particle_rope_pieces_test particle_rope_pieces_test.cpp)
+target_link_libraries(particle_rope_pieces_test PRIVATE ${PROJECT_NAME} wpScene wpParticle wpAudio nlohmann_json::nlohmann_json GTest::gtest_main)
+target_include_directories(particle_rope_pieces_test PRIVATE .)
+target_compile_features(particle_rope_pieces_test PRIVATE cxx_std_20)
+gtest_discover_tests(
+    particle_rope_pieces_test
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )

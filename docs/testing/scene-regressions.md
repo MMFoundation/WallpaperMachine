@@ -1684,9 +1684,10 @@ texture entrances are not decoded-image or native-rendering evidence.
   exact bounds and coverage assertions. Local size must not be divided by an
   average owner scale: that made small authored flames enormous and erased
   the difference between their scales. CPU coverage in
-  `particle_mouse_controlpoint_test` protects authored-canvas and perspective
+  `particle_billboard_size_test` protects authored-canvas and perspective
   projection, depth, inherited/nonuniform/mirrored scale and model-space size;
-  `particle_rope_geometry_test` checks local endpoint widths. No transform or
+  `particle_rope_pieces_test` (`RopePieces.ThickFormatCarriesTheEndColourAndEndHalfSize`)
+  checks local endpoint widths. No transform or
   scale norm is read during raw geometry generation. A `worldspace` particle
   file is the exception that draws through none of its layer's matrix (above).
 - **Random sprite-sheet frames** — `ParticleMouseControlpoint.SpawnedParticlesCarryAnIndependentFrameValueSpreadOverTheSheet`
@@ -1770,25 +1771,37 @@ texture entrances are not decoded-image or native-rendering evidence.
   is opt-in (`WE_TEST_PARTICLE_DIR` names a directory of unpacked scenes): twenty
   simulated seconds of every particle file there, no non-finite value, never more than
   `maxcount`; `ParticleCorpus.PrewarmCostOfTheLocalLibraryIsReported` times the prewarm of
-  every file with its own start time and prints the slowest. `particle_mouse_controlpoint_test` keeps the audio-emitter,
-  override, mouse control point and layer-scale size cases (`RawParticleSizeIsTheAuthoredSizeWhateverTheLayerScale`, `AuthoredCanvasBillboardsScaleWithTheirLayer`), with the attract,
-  movement and audio-band cases updated to the rules above.
-- **Rope and rope-trail geometry** — `particle_rope_geometry_test` and
+  every file with its own start time and prints the slowest. `particle_mouse_controlpoint_test` keeps the audio-emitter
+  cases, the size override on ramps, the control point attraction, the mouse control point in
+  the cropped presentation and the movement and audio-band cases, updated to the rules above.
+  The layer-scale size cases live in `particle_billboard_size_test`
+  (`ParticleBillboardSize.GeneratorWritesTheAuthoredHalfSizeWhateverTheOwnerAndParentScales`,
+  `.LayerSpaceBillboardIsDrawnThroughTheWholeLayerMatrix`,
+  `.AuthoredCanvasAndPerspectiveCamerasBothFollowTheLayerScale`); the instance override record,
+  the birth initializer and the rate and count overrides in `particle_override_test`
+  (`ParticleInstanceOverride.*`, `ParticleRateOverride.*`, `ParticleCountOverride.*`); mouse
+  control points in the owner's space, emitter control point selection and the order of
+  movement and control point attraction in `particle_control_point_test`
+  (`ParticleControlPoints.*`).
+- **Rope and rope-trail geometry** — `particle_rope_pieces_test` and
+  `particle_rope_geometry_test`, with
   `RopeGeometry.ATrailIsDrawnAsOnePiecePerSubdivisionBetweenItsRecordedPoints`
-  (CPU, in the gate; its subsystem fixtures carry a movement operator because a
-  particle only moves inside one): pieces per instance and never across instances, dead particles skipped
+  (CPU, in the gate). `particle_rope_pieces_test` (`RopePieces.*`, `RopeTextureRepeat.*`)
+  builds the generator input by hand: pieces per instance and never across instances, dead particles skipped
   and neighbours joined, subdivision through the particles, coincident points
-  without `NaN`, the rope-trail head, tail shrink and per-slot separation, and the
-  simulation's history — birth point, growth to capacity, zero time step, respawn
+  without `NaN`, the thick format's end colour and half-size, the instance offset, the rope-trail head, tail shrink and per-slot
+  separation, and how `uv_scale`, scrolling and smoothing encode the strip length.
+  `particle_rope_geometry_test` keeps the simulation's history (its subsystem fixtures carry a movement
+  operator because a particle only moves inside one) — birth point, growth to capacity, zero time step, respawn
   reset. Index width: packed 16-bit up to 16 384 quads, 32-bit past that,
   overflow-safe capacity math, and draw order across instances on a 32-bit mesh.
 - **Hidden particle geometry** — `ParticleSystem::RebuildVisibleMeshes` runs after
   `Tick` and rebuilds a hidden subsystem on the frame it becomes visible or must
   produce; the simulation still runs while it is hidden.
-  `ParticleHiddenGeometry.LayerShownByTickAfterEmittDrawsWhatAlwaysGeneratingDraws`
-  shows a layer (or its parent) in the Tick after Emitt and compares the first
-  visible frame's mesh bytes with an always-visible run; `particle_rope_geometry_test`
-  and `particle_mouse_controlpoint_test` cover the geometry; a fixed-seed
+  `RopeHiddenLayerReveal.ALayerRevealedAfterItsStepDrawsWhatAnAlwaysVisibleRunDraws`
+  (`particle_rope_pieces_test`) shows a layer (or its parent) in the Tick after Emitt and compares the first
+  visible frame's mesh bytes with an always-visible run, counting the generator's calls; `particle_rope_pieces_test`
+  and `particle_billboard_size_test` cover the geometry; a fixed-seed
   `offscreen_scene_probe` dump of a hidden-then-shown particle scene must stay
   byte-identical to a build that generated every frame.
 - **Matrix packing and live uniform updates** — `ShaderValuePacking.*` and
@@ -2608,11 +2621,11 @@ texture entrances are not decoded-image or native-rendering evidence.
   and a `worldspace` file's is the world offset.
 - **Worldspace particle files** — a `worldspace` system is in scene units from its
   layer's origin and is drawn through that origin alone.
-  `ParticleMouseControlpoint.AWorldspaceSystemKeepsItsBillboardSizeWhateverItsLayerScale`
-  draws one billboard under a layer scaled 0.25, 24 by 1 and flipped, and turned,
+  `ParticleBillboardSize.WorldSpaceBillboardKeepsItsAuthoredSizeWhateverTheLayerDoes`
+  (`particle_billboard_size_test`) draws one billboard under a layer scaled 0.25, 24 by 1 and flipped, and turned,
   and requires the authored size and an identity draw matrix apart from the origin;
-  `ParticleMouseControlpoint.AWorldspaceEmitterStretchesItsSpawnsAndTheirHeadingButNotTheirSpeed`
-  gives the emitter a layer matrix and requires the spawn offset and the heading
+  `ParticleControlPoints.WorldSpaceMatrixStretchesPlacementAndHeadingButNotSpeed`
+  (`particle_control_point_test`) gives the emitter a layer matrix and requires the spawn offset and the heading
   stretched, the origin not, and the speed as authored;
   `ParticleMouseControlpoint.AWorldspaceLayersMatrixScalesTheVelocityInitializersDraw`
   requires a `velocityrandom` velocity scaled by that matrix in a worldspace system

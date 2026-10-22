@@ -575,14 +575,17 @@ its `tests/` folder). The authoritative routine build/run list is
 (`scene_schema_tests`, `mdl_schema_tests`, `mdl_parse_tests`, `puppet_pose_tests`,
 `tex_schema_tests`, `tex_container_tests`, `version_tests`),
 SceneScript, input and the media protocol (`script_runtime_compat_test`,
-`mouse_input_test`, `scenescript_media_event_smoke`, `scenescript_behavior_test`,
+`mouse_input_test`, `cursor_input_state_test`, `scenescript_media_event_smoke`, `scenescript_behavior_test`,
 `media_thumbnail_texture_smoke`, and the `*_behavior_test` executables below), the shader
 compiler (`rust_shader_bridge_behavior_test` for the C++ bridge and the parser's compile entry,
 `shader_program_cache_behavior_test` for the program cache, `shader_dialect_compat_test` for
 constructs real shaders use, `shader_preprocessor_compat_test`, and `shader_corpus_test` for
 compile-job building and the path guards), video playback-state merging
 (`video_texture_submission_smoke`), and the texture/cache/lifetime, audio, video,
-graph, particle, timer and Metal checks; a non-zero exit from any registered
+graph, particle (`particle_billboard_size_test`, `particle_control_point_test`,
+`particle_override_test`, `particle_rope_pieces_test`, with the older
+`particle_mouse_controlpoint_test`, `particle_rope_geometry_test` and
+`particle_parity_test`), timer and Metal checks; a non-zero exit from any registered
 binary fails the check. A test binary that is not registered fails unnoticed, so a
 new one joins the registry in the change that adds it. The few executables in
 `tests/CMakeLists.txt` that are neither registered nor one of the two probes are
