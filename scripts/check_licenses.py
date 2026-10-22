@@ -17,8 +17,9 @@ Three inventories, each with its license and where it comes from:
    `cargo metadata`, which also lists crates the build never compiles).
 
 Licenses are SPDX expressions. `OR` is a choice (any allowed option is enough), `AND`
-needs every part allowed. The policy is the `ALLOWED` table: today the app is
-GPL-2.0-only, so Apache-2.0, GPL-3.0 and unknown licenses fail.
+needs every part allowed. The policy is the `ALLOWED` table: the app is GPL-3.0-only, so
+a dependency must be GPLv3-compatible; GPL-2.0-only, other known incompatible licenses
+and unknown licenses fail.
 
 Report-only by default: findings are warnings and the exit status is 0. `--enforce`
 exits 1 on any finding, and on any section that could not be checked. Tool errors (no
@@ -50,22 +51,28 @@ CARGO_TREE = ("cargo", "tree", "--offline", "--manifest-path", str(CARGO_MANIFES
               "-f", "{p}|{l}")
 
 # ---------------------------------------------------------------------------
-# License policy. Phase 6 moves the project to GPL-3.0: that change is made here
-# and nowhere else (ALLOWED gains Apache-2.0 and the GPL-3.0 family and loses
-# GPL-2.0-only; REJECTED_CLASSES stops naming them). Identifiers are SPDX ids,
-# compared case-insensitively.
+# License policy. The project is GPL-3.0-only, so everything it links must be
+# GPLv3-compatible; LICENSING.md is the account of what the project contains.
+# Identifiers are SPDX ids, compared case-insensitively.
 # ---------------------------------------------------------------------------
-POLICY = "GPL-2.0-only"
+POLICY = "GPL-3.0-only"
 ALLOWED = frozenset(license.lower() for license in (
     "MIT", "MIT-0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "0BSD", "Unlicense", "CC0-1.0",
     "BSL-1.0", "Unicode-3.0", "Unicode-DFS-2016", "libpng-2.0", "WTFPL",
     "LicenseRef-PublicDomain",
-    "MPL-2.0",  # section 3.3 names GPL-2.0 as a Secondary License
-    "LGPL-2.1-only", "LGPL-2.1-or-later", "GPL-2.0-only", "GPL-2.0-or-later",
+    "Apache-2.0",  # compatible with GPLv3 (not with GPLv2)
+    "MPL-2.0",  # section 3.3 names GPL-3.0 as a Secondary License
+    "LGPL-2.1-only", "LGPL-2.1-or-later", "LGPL-3.0-only", "LGPL-3.0-or-later",
+    "GPL-2.0-or-later",  # usable under version 3
+    "GPL-3.0-only", "GPL-3.0-or-later",
 ))
-# Why a license outside ALLOWED fails, for the licenses the policy names: everything else
-# outside ALLOWED is "unknown", which needs a human to look at it before it can be added.
-REJECTED_CLASSES = (("apache", re.compile(r"^apache-")), ("gpl3", re.compile(r"^(gpl-3|lgpl-3|agpl-)")))
+# Why a license outside ALLOWED fails: the licenses the policy knows to be GPLv3-incompatible;
+# everything else outside ALLOWED is "unknown", which needs a human to look at it before it can be added.
+REJECTED_CLASSES = (
+    ("gpl2", re.compile(r"^gpl-2\.0-only$")),
+    ("incompatible", re.compile(r"^(gpl-1|apache-1|cddl-|epl-|eupl-1\.[01]|sspl-|busl-|openssl|ssleay|"
+                                r"cc-by-nc)")),
+)
 # Deprecated SPDX spellings and the `+` suffix.
 SPDX_ALIASES = {"gpl-2.0": "GPL-2.0-only", "gpl-3.0": "GPL-3.0-only", "lgpl-2.1": "LGPL-2.1-only",
                 "lgpl-3.0": "LGPL-3.0-only", "agpl-3.0": "AGPL-3.0-only"}
@@ -73,8 +80,8 @@ SPDX_ALIASES = {"gpl-2.0": "GPL-2.0-only", "gpl-3.0": "GPL-3.0-only", "lgpl-2.1"
 NO_LICENSE = re.compile(r"^(|noassertion|none|file:.*)$", re.IGNORECASE)
 
 PASSING = ("system", "tool", "not-linked", "first-party")
-FAILING = ("gpl3", "apache", "unknown")
-CLASS_LABEL = {"apache": "Apache-2.0", "gpl3": "GPL-3.0 family", "unknown": "unknown license"}
+FAILING = ("gpl2", "incompatible", "unknown")
+CLASS_LABEL = {"gpl2": "GPL-2.0-only", "incompatible": "GPLv3-incompatible license", "unknown": "unknown license"}
 
 
 class ToolError(Exception):
@@ -179,15 +186,16 @@ def evaluate(node):
 
 
 def rejected_class(atom):
+    identifier = atom.lower().split(" with ")[0]
     for name, pattern in REJECTED_CLASSES:
-        if pattern.match(atom.lower()):
+        if pattern.match(identifier):
             return name
     return "unknown"
 
 
 @dataclass(frozen=True)
 class Verdict:
-    status: str  # ok | gpl3 | apache | unknown
+    status: str  # ok | gpl2 | incompatible | unknown
     classes: tuple = ()
     rejected: tuple = ()
     reason: str = ""
@@ -509,7 +517,7 @@ def inventory_components(engine, build_script):
     for key, (raw_name, kinds, origins) in sorted(grouped.items()):
         origins = tuple(sorted(set(origins)))
         if "first-party" in kinds:
-            components.append(Component(key, "first-party", "inventory", license="GPL-2.0-only", source="map",
+            components.append(Component(key, "first-party", "inventory", license="GPL-3.0-only", source="map",
                                         reached_from=origins, note="the project's own archive"))
             continue
         entry = COMPONENTS.get(key)
@@ -756,8 +764,8 @@ def run_checks(output, options, runner=run_command, environment=None, licensing_
               "components": entries}
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     write_closure(output, sections, entries)
-    summary = (f"license closure ({POLICY}): {counts['components']} components, {len(lists['apache'])} Apache-2.0, "
-               f"{len(lists['gpl3'])} GPL-3.0 family, {len(lists['unknown'])} unknown, {len(unrecorded)} not in LICENSING.md")
+    summary = (f"license closure ({POLICY}): {counts['components']} components, {len(lists['gpl2'])} GPL-2.0-only, "
+               f"{len(lists['incompatible'])} incompatible, {len(lists['unknown'])} unknown, {len(unrecorded)} not in LICENSING.md")
     if incomplete or skipped_by_choice:
         summary += f"; skipped: {', '.join(incomplete + skipped_by_choice)}"
     if not failed:

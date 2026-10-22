@@ -18,7 +18,7 @@
 <p align="center">
   <a href="https://github.com/WallpaperMachine/WallpaperMachine/releases/latest"><img src="https://img.shields.io/github/v/release/WallpaperMachine/WallpaperMachine?label=version&color=0a84ff" alt="Latest version"></a>
   <a href="https://github.com/WallpaperMachine/WallpaperMachine/actions/workflows/version.yml"><img src="https://img.shields.io/github/actions/workflow/status/WallpaperMachine/WallpaperMachine/version.yml?branch=main&label=build" alt="Build and release status"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/WallpaperMachine/WallpaperMachine?color=blue" alt="License: GPL-2.0"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/WallpaperMachine/WallpaperMachine?color=blue" alt="License: GPL-3.0"></a>
   <img src="https://img.shields.io/badge/macOS_15%2B-Apple_silicon-111111?logo=apple&logoColor=white" alt="macOS 15 or later on Apple silicon">
   <a href="https://github.com/WallpaperMachine/WallpaperMachine/stargazers"><img src="https://img.shields.io/github/stars/WallpaperMachine/WallpaperMachine" alt="GitHub stars"></a>
 </p>
@@ -113,7 +113,7 @@ without opening the window.
 ## Why you can trust it
 
 - **Open source, all of it.** The app, its renderer and its scene engine are all in
-  this repository under GPL-2.0. There is no closed core and no paid features: the app
+  this repository under GPL-3.0-only. There is no closed core and no paid features: the app
   is the same for everyone.
 - **Built in public.** Every release is built and tested by
   [GitHub Actions](docs/release.md#build-buildyml) from a tagged commit, then
@@ -311,18 +311,17 @@ desktop, [become a Supporter](SPONSORS.md).
 
 ## License
 
-The source is offered under the GNU General Public License, version 2 only
-([LICENSE](LICENSE)). The vendored renderer is GPL-2.0-only and the app shell is
-derived from it; upstream code keeps its own copyright and license notices,
+The source is offered under the GNU General Public License, version 3 only
+([LICENSE](LICENSE)). Upstream code keeps its own copyright and license notices,
 recorded in [upstream/provenance.json](upstream/provenance.json). Every recipient
 keeps every right the GPL grants, whether or not they are a Supporter.
 
-**No binary is cleared for distribution yet.** The Apache-2.0 and GPL-3.0 components the
-build used to link (MoltenVK, the Vulkan loader, SPIRV-Tools, glslang, the vendored
-spirv_reflect, and the spirv Rust crate) were removed on 2026-10-17, and the license check
-now reports none in the closure; that is a count of declared licenses, not a clearance.
-[LICENSING.md](LICENSING.md) records the policy, the Supporter model, each
-component's license, what was removed, and what is still open before any distribution. Workshop
+[LICENSING.md](LICENSING.md) is the account of where the code comes from, the license of
+each third-party component, the Supporter model, and what is still open before any
+distribution; this README claims no binary is cleared or legally reviewed. The
+Apache-2.0 and GPL-3.0 components the build used to link (MoltenVK, the Vulkan loader,
+SPIRV-Tools, glslang, the vendored spirv_reflect, and the spirv Rust crate) were removed
+on 2026-10-17 under the earlier GPL-2.0-only policy and are GPLv3-compatible. Workshop
 wallpapers belong to their creators, and scene resources come from a Wallpaper
 Engine you own; the app bundles neither.
 

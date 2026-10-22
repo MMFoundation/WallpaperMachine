@@ -161,7 +161,7 @@ bundle is absent.
      app.** Preview with `--dry-run`, keep a copy of any app you still need,
      and only then clean and rebuild; nothing cleans automatically.
    - The notice payload must exist: repository `LICENSE`, `LICENSING.md`,
-     `upstream/renderer/LICENSE`, `upstream/provenance.json`, the
+     `upstream/renderer/LICENSE.upstream-GPL-2.0`, `upstream/provenance.json`, the
      Xcode-bundled `Resources/LICENSE` (mediaremote-adapter, BSD-3-Clause) and
      the extension's `Phosphene-LICENSE.txt`, and a `LICENSE*`/`COPYING*`/
      `COPYRIGHT*`/`NOTICE*` file in every Homebrew keg the link closure
@@ -201,7 +201,7 @@ bundle is absent.
    and Rust-crate inventories; see [testing](testing/README.md).
 2. **License payload.** The root `LICENSE` is copied in as
    `WallpaperMachine-LICENSE.txt`, `LICENSING.md` as `LICENSING.md`,
-   `upstream/renderer/LICENSE` as `Renderer-LICENSE.txt`,
+   `upstream/renderer/LICENSE.upstream-GPL-2.0` (the imported renderer's terms) as `Renderer-LICENSE.txt`,
    `upstream/provenance.json` as `provenance.json`, each bundled keg's notices
    under `Licenses/<formula>-<version>/`, the notices of the third-party
    code statically linked into the renderer under

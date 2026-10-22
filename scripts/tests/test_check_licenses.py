@@ -40,19 +40,20 @@ fn main() {
 }
 """
 CARGO_TREE_OUTPUT = """\
-wm-shader v0.1.0 (/work/Renderer/Shader)|GPL-2.0-only
+wm-shader v0.1.0 (/work/Renderer/Shader)|GPL-3.0-only
 miette v7.6.0|Apache-2.0
 backtrace v0.3.76|MIT OR Apache-2.0
 cfg-if v1.0.4|MIT OR Apache-2.0
 rustc-demangle v0.1.27|MIT/Apache-2.0
-shadow-rs v2.0.0|MIT AND Apache-2.0
+shadow-rs v2.0.0|MIT AND GPL-2.0-only
 cfg-if v1.0.4|MIT OR Apache-2.0 (*)
 mystery v1.0.0|
+legacy-crate v0.9.0|EPL-1.0
 
-wallpaper-core v0.2.0 (/work/upstream/renderer/crates/core)|GPL-2.0-only
+wallpaper-core v0.2.0 (/work/upstream/renderer/crates/core)|GPL-3.0-only
 cfg-if v1.0.4|MIT OR Apache-2.0 (*)
 """
-CLEAN_TREE_OUTPUT = "wallpaper-core v0.2.0 (/work/crates/core)|GPL-2.0-only\ncfg-if v1.0.4|MIT OR Apache-2.0\n"
+CLEAN_TREE_OUTPUT = "wallpaper-core v0.2.0 (/work/crates/core)|GPL-3.0-only\ncfg-if v1.0.4|MIT OR Apache-2.0\n"
 
 
 def otool_text(path, dependencies):
@@ -98,64 +99,74 @@ class PolicyTests(unittest.TestCase):
         return check_licenses.classify(expression)
 
     def test_a_choice_needs_one_allowed_option_and_a_conjunction_needs_all(self):
-        self.assertEqual(self.verdict("MIT OR Apache-2.0").status, "ok")
-        self.assertEqual(self.verdict("Apache-2.0 OR MIT").status, "ok")
+        self.assertEqual(self.verdict("MIT OR GPL-2.0-only").status, "ok")
+        self.assertEqual(self.verdict("GPL-2.0-only OR MIT").status, "ok")
         self.assertEqual(self.verdict("MIT AND BSD-3-Clause").status, "ok")
-        self.assertEqual(self.verdict("MIT AND Apache-2.0").status, "apache")
+        self.assertEqual(self.verdict("MIT AND GPL-2.0-only").status, "gpl2")
         self.assertEqual(self.verdict("FTL OR GPL-2.0-or-later").status, "ok")
 
-    def test_apache_gpl3_and_unknown_licenses_fail_with_their_own_class(self):
-        self.assertEqual(self.verdict("Apache-2.0").classes, ("apache",))
-        self.assertEqual(self.verdict("GPL-3.0-or-later").classes, ("gpl3",))
-        self.assertEqual(self.verdict("LGPL-3.0-only").classes, ("gpl3",))
-        self.assertEqual(self.verdict("AGPL-3.0-or-later").classes, ("gpl3",))
+    def test_the_project_license_and_gplv3_compatible_licenses_pass(self):
+        for expression in ("GPL-3.0-only", "GPL-3.0-or-later", "GPL-2.0-or-later", "Apache-2.0", "MPL-2.0",
+                           "LGPL-2.1-or-later", "LGPL-3.0-only", "MIT OR Apache-2.0", "Apache-2.0 AND MIT"):
+            with self.subTest(expression=expression):
+                self.assertEqual(self.verdict(expression).status, "ok")
+
+    def test_gpl2_only_and_known_incompatible_licenses_fail_with_their_own_class(self):
+        self.assertEqual(self.verdict("GPL-2.0-only").classes, ("gpl2",))
+        self.assertEqual(self.verdict("EPL-1.0").classes, ("incompatible",))
+        self.assertEqual(self.verdict("CDDL-1.0").classes, ("incompatible",))
+        self.assertEqual(self.verdict("Apache-1.1").classes, ("incompatible",))
+        self.assertEqual(self.verdict("OpenSSL").classes, ("incompatible",))
+
+    def test_unlisted_licenses_are_unknown_and_need_a_human(self):
         self.assertEqual(self.verdict("FTL").classes, ("unknown",))
+        self.assertEqual(self.verdict("AGPL-3.0-or-later").classes, ("unknown",))
         self.assertEqual(self.verdict("Some-Unlisted-License").classes, ("unknown",))
 
     def test_a_composite_reports_every_failing_class(self):
-        composite = self.verdict("BSD-3-Clause AND GPL-3.0-or-later AND MIT AND Apache-2.0")
-        self.assertEqual(set(composite.classes), {"gpl3", "apache"})
-        self.assertEqual(composite.status, "gpl3")
-        self.assertEqual(set(composite.rejected), {"GPL-3.0-or-later", "Apache-2.0"})
+        composite = self.verdict("BSD-3-Clause AND GPL-2.0-only AND MIT AND EPL-1.0 AND Apache-2.0")
+        self.assertEqual(set(composite.classes), {"gpl2", "incompatible"})
+        self.assertEqual(composite.status, "gpl2")
+        self.assertEqual(set(composite.rejected), {"GPL-2.0-only", "EPL-1.0"})
 
     def test_parentheses_and_precedence(self):
-        self.assertEqual(self.verdict("(MIT OR Apache-2.0) AND BSD-3-Clause").status, "ok")
-        self.assertEqual(set(self.verdict("(Apache-2.0 OR GPL-3.0-only) AND MIT").classes), {"apache", "gpl3"})
+        self.assertEqual(self.verdict("(MIT OR GPL-2.0-only) AND BSD-3-Clause").status, "ok")
+        self.assertEqual(set(self.verdict("(EPL-1.0 OR GPL-2.0-only) AND MIT").classes), {"gpl2", "incompatible"})
         # AND binds tighter than OR.
-        self.assertEqual(self.verdict("MIT OR Apache-2.0 AND GPL-3.0-only").status, "ok")
-        self.assertEqual(self.verdict("Apache-2.0 AND GPL-3.0-only OR MIT").status, "ok")
-        self.assertEqual(self.verdict("Apache-2.0 AND (GPL-3.0-only OR MIT)").status, "apache")
+        self.assertEqual(self.verdict("MIT OR EPL-1.0 AND GPL-2.0-only").status, "ok")
+        self.assertEqual(self.verdict("EPL-1.0 AND GPL-2.0-only OR MIT").status, "ok")
+        self.assertEqual(self.verdict("GPL-2.0-only AND (EPL-1.0 OR MIT)").status, "gpl2")
 
     def test_exceptions_never_make_a_rejected_license_acceptable(self):
-        self.assertEqual(self.verdict("Apache-2.0 WITH LLVM-exception").status, "apache")
-        self.assertEqual(self.verdict("Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT").status, "ok")
-        self.assertEqual(self.verdict("GPL-2.0-only WITH Classpath-exception-2.0").status, "ok")
-        self.assertEqual(self.verdict("GPL-3.0-or-later WITH Bison-exception-2.2").status, "gpl3")
+        self.assertEqual(self.verdict("GPL-2.0-only WITH Classpath-exception-2.0").status, "gpl2")
+        self.assertEqual(self.verdict("GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only OR MIT").status, "ok")
+        self.assertEqual(self.verdict("GPL-3.0-or-later WITH Bison-exception-2.2").status, "ok")
 
     def test_spellings_cargo_and_homebrew_use(self):
         self.assertEqual(self.verdict("MIT/Apache-2.0").status, "ok")
         self.assertEqual(self.verdict("Apache-2.0/MIT").status, "ok")
-        self.assertEqual(self.verdict("Apache-2.0/Apache-2.0").status, "apache")
+        self.assertEqual(self.verdict("GPL-2.0/GPL-2.0-only").status, "gpl2")
         self.assertEqual(self.verdict("GPL-2.0+").status, "ok")
-        self.assertEqual(self.verdict("GPL-3.0+").classes, ("gpl3",))
+        self.assertEqual(self.verdict("GPL-3.0+").status, "ok")
         self.assertEqual(self.verdict("  mit   or   apache-2.0 ").status, "ok")
-        self.assertEqual(self.verdict("GPL-2.0").status, "ok")
-        self.assertEqual(self.verdict("GPL-3.0").classes, ("gpl3",))
+        self.assertEqual(self.verdict("GPL-2.0").classes, ("gpl2",))
+        self.assertEqual(self.verdict("GPL-3.0").status, "ok")
 
     def test_missing_or_unparseable_metadata_is_unknown(self):
         for expression in (None, "", "   ", "FILE:LICENSE", "NOASSERTION", "MIT OR", "(MIT", "MIT)", "AND MIT",
-                           "MIT AND AND Apache-2.0", "MIT WITH", "()"):
+                           "MIT AND AND MIT", "MIT WITH", "()"):
             with self.subTest(expression=expression):
                 verdict = self.verdict(expression)
                 self.assertEqual(verdict.status, "unknown")
                 self.assertTrue(verdict.reason)
 
-    def test_every_allowed_license_passes_and_the_rejected_families_are_not_allowed(self):
+    def test_every_allowed_license_passes_and_the_rejected_ones_are_not_allowed(self):
         for identifier in check_licenses.ALLOWED:
             with self.subTest(identifier=identifier):
                 self.assertEqual(self.verdict(identifier).status, "ok")
-        for identifier in ("Apache-2.0", "GPL-3.0-only", "GPL-3.0-or-later", "LGPL-3.0-or-later", "AGPL-3.0-only"):
+        for identifier in ("GPL-2.0-only", "EPL-1.0", "CDDL-1.0", "AGPL-3.0-only"):
             self.assertNotIn(identifier.lower(), check_licenses.ALLOWED)
+        self.assertEqual(check_licenses.POLICY, "GPL-3.0-only")
 
     def test_hand_kept_tables_are_self_consistent(self):
         for name, (license, reason) in check_licenses.OVERRIDES.items():
@@ -178,7 +189,7 @@ class CargoTreeTests(unittest.TestCase):
         components = check_licenses.parse_cargo_tree(CARGO_TREE_OUTPUT)
         crates = [c for c in components if c.kind == "crate"]
         self.assertEqual(sorted(c.name for c in crates),
-                         ["backtrace", "cfg-if", "miette", "mystery", "rustc-demangle", "shadow-rs"])
+                         ["backtrace", "cfg-if", "legacy-crate", "miette", "mystery", "rustc-demangle", "shadow-rs"])
         self.assertEqual(sorted(c.name for c in components if c.kind == "first-party"), ["wallpaper-core", "wm-shader"])
         by_name = {c.name: c for c in crates}
         self.assertEqual(by_name["miette"].version, "7.6.0")
@@ -186,11 +197,13 @@ class CargoTreeTests(unittest.TestCase):
         self.assertIsNone(by_name["mystery"].license)
         self.assertEqual(check_licenses.assess(by_name["mystery"])[0], "unknown")
         self.assertEqual(check_licenses.assess(by_name["rustc-demangle"])[0], "ok")
-        self.assertEqual(check_licenses.assess(by_name["shadow-rs"])[1], ("apache",))
+        self.assertEqual(check_licenses.assess(by_name["miette"])[0], "ok")
+        self.assertEqual(check_licenses.assess(by_name["shadow-rs"])[1], ("gpl2",))
+        self.assertEqual(check_licenses.assess(by_name["legacy-crate"])[1], ("incompatible",))
 
     def test_a_vendored_path_crate_is_third_party_with_the_license_its_manifest_declares(self):
         text = (
-            "wallpaper-core v0.2.0 (/work/upstream/renderer/crates/core)|GPL-2.0-only\n"
+            "wallpaper-core v0.2.0 (/work/upstream/renderer/crates/core)|GPL-3.0-only\n"
             "naga v29.0.3 (/work/upstream/naga)|MIT OR Apache-2.0\n"
             "naga v29.0.3 (/work/upstream/naga)|MIT OR Apache-2.0 (*)\n"
             "cfg-if v1.0.4|MIT OR Apache-2.0\n"
@@ -217,10 +230,10 @@ class CargoTreeTests(unittest.TestCase):
                 self.assertEqual(check_licenses.is_vendored_crate(str(path)), vendored)
 
     def test_a_vendored_crate_with_a_rejected_license_is_flagged(self):
-        text = "naga v29.0.3 (/work/upstream/naga)|Apache-2.0\n"
+        text = "naga v29.0.3 (/work/upstream/naga)|GPL-2.0-only\n"
         (naga,) = check_licenses.parse_cargo_tree(text)
         self.assertEqual(naga.kind, "crate")
-        self.assertNotEqual(check_licenses.assess(naga)[0], "ok")
+        self.assertEqual(check_licenses.assess(naga)[0], "gpl2")
 
     def test_a_table_entry_supplies_a_license_cargo_does_not(self):
         with mock.patch.dict(check_licenses.COMPONENTS, {"mystery": check_licenses.Entry("MIT", "checked by hand")}):
@@ -282,7 +295,7 @@ class AppWalkTests(unittest.TestCase):
         self.assertEqual(len(analysed), len(set(analysed)), "every file is read once")
 
         # Fictional kegs, so the classes below come from the license strings Homebrew reports.
-        licenses = {"sample-lib": "BSD-3-Clause AND GPL-3.0-or-later AND MIT AND Apache-2.0", "sample-tools": "Apache-2.0"}
+        licenses = {"sample-lib": "BSD-3-Clause AND GPL-2.0-only AND MIT AND EPL-1.0", "sample-tools": "GPL-2.0-only"}
         components = check_licenses.dylib_components(walk, self.prefix, self.app,
                                                      FakeTools(brew_licenses=licenses))
         by_name = {c.name: c for c in components}
@@ -290,8 +303,8 @@ class AppWalkTests(unittest.TestCase):
         self.assertEqual(by_name["sample-lib"].version, "16.6.0")
         self.assertEqual(by_name["sample-lib"].source, "brew")
         self.assertEqual(by_name["sample-lib"].files, ("libsample.16.dylib", "libsampleio.16.dylib"))
-        self.assertEqual(check_licenses.assess(by_name["sample-lib"])[1], ("gpl3", "apache"))
-        self.assertEqual(check_licenses.assess(by_name["sample-tools"])[0], "apache")
+        self.assertEqual(check_licenses.assess(by_name["sample-lib"])[1], ("gpl2", "incompatible"))
+        self.assertEqual(check_licenses.assess(by_name["sample-tools"])[0], "gpl2")
 
     def test_without_homebrew_the_table_supplies_the_license_and_says_so(self):
         self.keg("lz4", "1.10.0", "liblz4.1.dylib")
@@ -445,7 +458,7 @@ class ReportTests(unittest.TestCase):
             (self.app / path).write_bytes(b"\x00")
         self.output = self.tmp / "out"
 
-    def check(self, *arguments, tools=None, licensing="miette shadow-rs", app=True):
+    def check(self, *arguments, tools=None, licensing="shadow-rs legacy-crate mystery", app=True):
         tools = tools or FakeTools(otool={"Main": ["/usr/lib/libSystem.B.dylib"]}, tree=CARGO_TREE_OUTPUT)
         argv = ["--output", str(self.output), *arguments]
         if app and "--app" not in arguments and "--skip-app" not in arguments:
@@ -471,6 +484,20 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(enforced, 1)
         self.assertNotIn("report-only", output)
 
+    def test_apache_and_gpl3_crates_and_the_projects_own_crates_pass_when_enforced(self):
+        tree = ("wallpaper-core v0.2.0 (/work/crates/core)|GPL-3.0-only\nmiette v7.6.0|Apache-2.0\n"
+                "gpl-lib v1.0.0|GPL-3.0-or-later\nlgpl-lib v1.0.0|LGPL-3.0-only\n")
+        code, output, _ = self.check("--enforce", tools=FakeTools(otool={"Main": []}, tree=tree))
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.report()["counts"]["failing"], 0)
+
+    def test_a_gpl2_only_crate_fails_when_enforced(self):
+        tree = "wallpaper-core v0.2.0 (/work/crates/core)|GPL-3.0-only\nold-lib v1.0.0|GPL-2.0-only\n"
+        code, output, _ = self.check("--enforce", tools=FakeTools(otool={"Main": []}, tree=tree),
+                                     licensing="old-lib")
+        self.assertEqual(code, 1, output)
+        self.assertEqual(self.report()["lists"]["gpl2"], ["old-lib"])
+
     def test_a_clean_closure_passes_even_when_enforced(self):
         tools = FakeTools(otool={"Main": []}, tree=CLEAN_TREE_OUTPUT)
         (self.engine / "third_party/miniaudio").mkdir(exist_ok=True)
@@ -478,15 +505,18 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertEqual(self.report()["counts"]["failing"], 0)
 
-    def test_the_report_lists_apache_components_and_the_closure(self):
+    def test_the_report_lists_failing_components_by_class_and_the_closure(self):
         self.check()
         report = self.report()
-        self.assertEqual(report["lists"]["apache"], ["miette", "shadow-rs"])
+        self.assertEqual(report["policy"], "GPL-3.0-only")
+        self.assertEqual(report["lists"]["gpl2"], ["shadow-rs"])
+        self.assertEqual(report["lists"]["incompatible"], ["legacy-crate"])
+        self.assertNotIn("miette", report["lists"]["gpl2"] + report["lists"]["incompatible"] + report["lists"]["unknown"])
         for key in ("generated", "policy", "enforce", "app", "sections", "counts", "lists", "components",
                     "violations", "unrecorded_in_licensing_md", "incomplete"):
             self.assertIn(key, report)
         self.assertEqual(set(report["sections"]), {"dylibs", "inventory", "crates"})
-        self.assertEqual(report["sections"]["crates"]["third_party"], 6)
+        self.assertEqual(report["sections"]["crates"]["third_party"], 7)
         self.assertEqual(report["sections"]["dylibs"]["system_libraries"], ["/usr/lib/libSystem.B.dylib"])
         self.assertTrue((self.output / "closure.txt").read_text().strip())
         self.assertTrue(all(c["status"] for c in report["components"]))
@@ -494,11 +524,11 @@ class ReportTests(unittest.TestCase):
     def test_a_failing_component_missing_from_licensing_md_is_reported_and_enforced(self):
         code, output, _ = self.check(licensing="nothing relevant")
         self.assertEqual(code, 0)
-        self.assertIn("miette", self.report()["unrecorded_in_licensing_md"])
+        self.assertIn("legacy-crate", self.report()["unrecorded_in_licensing_md"])
         self.assertIn("shadow-rs", self.report()["unrecorded_in_licensing_md"])
-        tools = FakeTools(otool={"Main": []}, tree="miette v7.6.0|Apache-2.0\n")
-        recorded, _, _ = self.check("--enforce", tools=tools, licensing="Apache-2.0 crate miette")
-        self.assertEqual(recorded, 1, "Apache-2.0 still fails")
+        tools = FakeTools(otool={"Main": []}, tree="miette v7.6.0|GPL-2.0-only\n")
+        recorded, _, _ = self.check("--enforce", tools=tools, licensing="GPL-2.0-only crate miette")
+        self.assertEqual(recorded, 1, "GPL-2.0-only still fails")
         tools = FakeTools(otool={"Main": []}, tree=CLEAN_TREE_OUTPUT)
         code, _, _ = self.check("--enforce", tools=tools, licensing="")
         self.assertEqual(code, 0, "nothing failing needs no record")

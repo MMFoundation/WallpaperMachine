@@ -47,7 +47,7 @@ enum ExternalLink {
     string: "https://store.steampowered.com/app/431960/Wallpaper_Engine/")!
   /// Apple's page on how macOS treats apps it cannot verify.
   static let macOSAppSecurity = URL(string: "https://support.apple.com/en-us/102445")!
-  static let gnuGPL2 = URL(string: "https://www.gnu.org/licenses/old-licenses/gpl-2.0.html")!
+  static let gnuGPL3 = URL(string: "https://www.gnu.org/licenses/gpl-3.0.html")!
 
   // MARK: Built links
 
@@ -85,7 +85,7 @@ enum ExternalLink {
   static var fixedLinks: [URL] {
     [
       steamMobileApp, steamEmailedCodeHelp, steamJoin, wallpaperEngineStore, macOSAppSecurity,
-      gnuGPL2, repository, repositoryIssues,
+      gnuGPL3, repository, repositoryIssues,
     ]
   }
 }

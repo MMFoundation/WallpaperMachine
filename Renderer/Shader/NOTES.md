@@ -7,8 +7,7 @@ toolchain facts. Keep it current as later steps land.
 
 ## Layout
 
-`Renderer/Cargo.toml` is the workspace (resolver 2, edition 2024, GPL-2.0-only
-until the relicensing phase). `Renderer/Shader` is the crate `wm-shader`
+`Renderer/Cargo.toml` is the workspace (resolver 2, edition 2024, GPL-3.0-only). `Renderer/Shader` is the crate `wm-shader`
 (`rlib` + `staticlib`; the non-default `ffi` feature adds the C ABI of Step 6, declared by
 `include/rs_shader.h`).
 

@@ -11,8 +11,8 @@ CLAUDE.md -> AGENTS.md              Claude entry point; relative symlink, same r
 CHANGELOG.md                       published versions, newest first; written by scripts/release_notes.py
 CODE_OF_CONDUCT.md                 conduct expected in the project's spaces and how it is enforced
 CONTRIBUTING.md                    contributor working agreement
-LICENSE                            GNU GPL version 2 text; the license of this repository's source (verbatim copy of upstream/renderer/LICENSE)
-LICENSING.md                       GPL-2.0-only policy, Supporter model, component licenses and distribution blockers
+LICENSE                            GNU GPL version 3 text; the license of this repository's source
+LICENSING.md                       GPL-3.0-only policy, Supporter model, component licenses and distribution blockers
 README.md                          product overview after the website, build quickstart, FAQ, sponsor list (written by scripts/update_sponsors.py), documentation index
 README.zh-CN.md                    README.md in 简体中文; change both together (same sponsor list block)
 SECURITY.md                        private vulnerability reporting, supported versions and scope

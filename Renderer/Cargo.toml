@@ -1,5 +1,5 @@
 # Workspace for the Rust side of the renderer rewrite. The shader crate is the
-# first member. Licence is GPL-2.0-only until the relicensing phase.
+# first member. Licence is GPL-3.0-only.
 
 [workspace]
 resolver = "2"
@@ -7,7 +7,7 @@ members = ["Shader"]
 
 [workspace.package]
 edition = "2024"
-license = "GPL-2.0-only"
+license = "GPL-3.0-only"
 publish = false
 
 [workspace.dependencies]

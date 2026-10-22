@@ -164,7 +164,7 @@ def preflight(notice_files, libraries):
     repository file it must match.
     """
     licenses = keg_licenses(libraries)
-    sources = [ROOT / "LICENSE", ROOT / "LICENSING.md", RENDERER / "LICENSE", ROOT / "upstream/provenance.json", *notice_files.values()]
+    sources = [ROOT / "LICENSE", ROOT / "LICENSING.md", RENDERER / "LICENSE.upstream-GPL-2.0", ROOT / "upstream/provenance.json", *notice_files.values()]
     missing = [f"{file} is missing from the repository" for file in sources if not file.is_file()]
     missing += [f"{file} is missing from the build or differs from {original}" for file, original in notice_files.items() if original.is_file() and (not file.is_file() or file.read_bytes() != original.read_bytes())]
     if missing:
@@ -210,7 +210,7 @@ def write_licenses(resources, licenses, third_party):
         shutil.copy2(file, target / file.name)
     shutil.copy2(ROOT / "LICENSE", resources / "WallpaperMachine-LICENSE.txt")
     shutil.copy2(ROOT / "LICENSING.md", resources / "LICENSING.md")
-    shutil.copy2(RENDERER / "LICENSE", resources / "Renderer-LICENSE.txt")
+    shutil.copy2(RENDERER / "LICENSE.upstream-GPL-2.0", resources / "Renderer-LICENSE.txt")
     shutil.copy2(ROOT / "upstream/provenance.json", resources / "provenance.json")
     (resources / "THIRD-PARTY-NOTICES.txt").write_text(third_party)
 

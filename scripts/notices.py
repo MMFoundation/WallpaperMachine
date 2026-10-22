@@ -313,7 +313,7 @@ THIN = "-" * 78
 PREAMBLE = """\
 THIRD-PARTY NOTICES
 
-WallpaperMachine is licensed under the GNU General Public License, version 2 only
+WallpaperMachine is licensed under the GNU General Public License, version 3 only
 (see WallpaperMachine-LICENSE.txt and LICENSING.md). It contains the third-party
 software listed below, which is licensed under its own terms. Each entry gives the
 component, its version, the SPDX license expression it declares, the license the

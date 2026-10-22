@@ -201,7 +201,7 @@ class NoticeTests(unittest.TestCase):
         self.assertTrue(notice.found)
 
     def test_first_party_system_and_unlinked_entries_are_not_noticed(self):
-        components = [check_licenses.Component("wp-engine", "first-party", "inventory", license="GPL-2.0-only"),
+        components = [check_licenses.Component("wp-engine", "first-party", "inventory", license="GPL-3.0-only"),
                       check_licenses.Component("(apple system)", "system", "inventory"),
                       check_licenses.Component("glad", "not-linked", "inventory"),
                       check_licenses.Component("pkgconfig", "tool", "inventory")]

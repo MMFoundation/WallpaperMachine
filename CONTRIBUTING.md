@@ -114,6 +114,54 @@ The rules contributors trip over; [AGENTS.md](AGENTS.md) and
 - The [PR template](.github/pull_request_template.md) carries the checklist, and
   the definition of done is in [docs/conventions.md](docs/conventions.md#definition-of-done).
 
+## License and sign-off
+
+WallpaperMachine is licensed under the GNU GPL version 3 only ([LICENSE](LICENSE));
+[LICENSING.md](LICENSING.md) records where its code came from and the licenses of the
+components it uses. By contributing you agree that your contribution is licensed under
+the same terms, GPL-3.0-only, and that it does not carry code you may not license that
+way: code available only under GPL-2.0-only, for example, cannot be accepted.
+
+Sign off every commit with `git commit -s`. The `Signed-off-by:` line certifies the
+Developer Certificate of Origin below, as published at https://developercertificate.org/:
+
+```text
+Developer Certificate of Origin
+Version 1.1
+
+Copyright (C) 2004, 2006 The Linux Foundation and its contributors.
+
+Everyone is permitted to copy and distribute verbatim copies of this
+license document, but changing it is not allowed.
+
+
+Developer's Certificate of Origin 1.1
+
+By making a contribution to this project, I certify that:
+
+(a) The contribution was created in whole or in part by me and I
+    have the right to submit it under the open source license
+    indicated in the file; or
+
+(b) The contribution is based upon previous work that, to the best
+    of my knowledge, is covered under an appropriate open source
+    license and I have the right under that license to submit that
+    work with modifications, whether created in whole or in part
+    by me, under the same open source license (unless I am
+    permitted to submit under a different license), as indicated
+    in the file; or
+
+(c) The contribution was provided directly to me by some other
+    person who certified (a), (b) or (c) and I have not modified
+    it.
+
+(d) I understand and agree that this project and the contribution
+    are public and that a record of the contribution (including all
+    personal information I submit with it, including my sign-off) is
+    maintained indefinitely and may be redistributed consistent with
+    this project or the open source license(s) involved.
+```
+
 ## Automated review
 
 Same-repository PRs are reviewed by Claude Code

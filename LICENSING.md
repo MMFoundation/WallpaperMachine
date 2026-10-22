@@ -1,12 +1,12 @@
 # Licensing, Supporter model and distribution status
 
-Recorded: 2026-10-17 (first recorded 2026-09-14).
-Status: source policy decided (GPL-2.0-only); Supporter model decided (a free
+Recorded: 2026-10-22 (first recorded 2026-09-14).
+Status: source license GPL-3.0-only (changed from GPL-2.0-only on 2026-10-22, see
+[Source license](#source-license-gpl-30-only)); Supporter model decided (a free
 signed download, and a one-time Supporter purchase for a sponsor place and
-priority support); **binary distribution is not cleared**: the Apache-2.0
-and GPL-3.0-family components that blocked it were removed from the link closure on
-2026-10-17, but the items under [Before any distribution](#before-any-distribution)
-are open (see [Remaining blockers](#remaining-blockers)).
+priority support); **binary distribution is not cleared**: the items under
+[Before any distribution](#before-any-distribution) are open (see
+[Remaining blockers](#remaining-blockers)).
 
 This document is the project's own record of what it has checked and decided.
 It is not legal advice and it does not claim clearance that has not been
@@ -17,54 +17,89 @@ source is linked.
 
 | Question | Answer |
 |---|---|
-| Under which license is this repository's source offered? | GNU GPL version 2 only, the text in the root [`LICENSE`](LICENSE). See [Source license](#source-license-gpl-20-only). |
+| Under which license is this repository's source offered? | GNU GPL version 3 only, the text in the root [`LICENSE`](LICENSE). See [Source license](#source-license-gpl-30-only). |
 | Is anything sold? | Only the Supporter purchase: a one-time payment for a sponsor place and priority support. The signed download is free and no copy of the software is sold. See [Supporter model](#supporter-model-free-signed-download-paid-sponsorship-and-support). |
-| Can it be distributed today? | Not cleared. FFmpeg is no longer used, and the Apache-2.0 components (the Khronos/Vulkan libraries, MoltenVK, glslang's Apache-2.0 and GPL-3.0 parts, `spirv_reflect` and the `spirv` Rust crate) were removed from the link closure on 2026-10-17; this record has not been reviewed by counsel and the items under [Before any distribution](#before-any-distribution) are open. See [Remaining blockers](#remaining-blockers). |
+| Can it be distributed today? | Not cleared. The upstream GPL-2.0-only expression has been rewritten and every linked component's declared license is GPLv3-compatible, but two contributors' written permissions are reported and not yet filed, this record has not been reviewed by counsel, and the items under [Before any distribution](#before-any-distribution) are open. See [Remaining blockers](#remaining-blockers). |
 | Is a Developer ID signed, notarized build available? | No. `scripts/package.py` signs ad hoc, or with a self-signed project certificate for releases. Signing is a platform mechanism, not a license grant. See [Signing and notarization](#signing-and-notarization). |
-| Can it be listed on the Mac App Store? | Not as the app is built today, and not without first settling the GPLv2 question. See [Mac App Store](#mac-app-store). |
+| Can it be listed on the Mac App Store? | Not as the app is built today, and not without first settling the GPL question. See [Mac App Store](#mac-app-store). |
 | Does publishing this source resolve the blockers? | No. Distribution of the combined program is what the licenses govern; posting the repository changes nothing about it. |
 
-## Source license: GPL-2.0-only
+## Source license: GPL-3.0-only
 
-This project's original contributions are offered under GNU GPL version 2 only,
-except where an existing notice specifies different terms. Third-party code
-retains its own licenses; the root license does not replace them. The root
-[`LICENSE`](LICENSE) is a verbatim copy of `upstream/renderer/LICENSE`, supplied
-so source recipients receive the applicable GPLv2 text.
+This project's code is offered under GNU GPL version 3 only, except where an
+existing notice specifies different terms. Third-party code retains its own
+licenses; the root license does not replace them. The root [`LICENSE`](LICENSE)
+is the unmodified GPLv3 text published by the FSF
+(https://www.gnu.org/licenses/gpl-3.0.txt).
 
-Why version 2 only: the vendored renderer declares `license = "GPL-2.0-only"`
-in its `Cargo.toml`
-(https://github.com/bigsaltyfishes/wallpaper-engine-for-macos/blob/main/Cargo.toml),
-and the application shell in `App/` is a derived work of that renderer's
-`app/WallpaperEngine` sources. GPLv2-only code cannot be relicensed by anyone
-but its copyright holders, and the "or any later version" option is one the
-upstream authors did not grant
-(https://www.gnu.org/licenses/gpl-faq.html#v2v3Compatibility). This project
-therefore inherits GPL-2.0-only for the whole program and applies it to its own
-contributions so that the whole is under one license.
+Until 2026-10-22 the project was GPL-2.0-only. It inherited that from the code it
+was built on: the renderer it imported on 2026-09-14
+(bigsaltyfishes/wallpaper-engine-for-macos at `8c19c002`, whose `Cargo.toml` declares
+`license = "GPL-2.0-only"`), that renderer's application shell (the origin of `App/`),
+and the scene engine vendored under it (bigsaltyfishes' fork of
+waywallen/open-wallpaper-engine at `c4c36357`). GPL-2.0-only code cannot be combined
+with GPLv3 code or relicensed by anyone but its copyright holders
+(https://www.gnu.org/licenses/gpl-faq.html#v2v3Compatibility), and no holder of that
+code was asked for or gave a grant.
+
+The change rests instead on replacing that code. Between 2026-10-17 and 2026-10-22
+every part of the imported renderer, shell and scene engine that carried substantial
+upstream expression was rewritten under a clean-room protocol, module by module: a
+study session that read the old code wrote a behavior and contract specification
+without its expression, deleted the old code, and a separate session that never read
+it, its history or the study notes wrote the replacement and its tests from that
+specification; every replacement test was shown to fail when the behavior it covers is
+broken. `upstream/provenance.json` records each replacement, its specification and its
+verification under `renderer.*Replacement` and `sceneEngine.*Replacement` and the later
+entries of 2026-10-22. The measure used to find upstream expression is runs of 8 or
+more consecutive lines (gaps of at most 2) that also occur in the import snapshot. On
+2026-10-22 the tree has no such run outside:
+
+- the generated Swift bindings in `App/Bridge/Generated/`, which `uniffi-bindgen`
+  produces from the exported API's names and types;
+- the license texts themselves (see below) and nothing else under `upstream/renderer`;
+- 30 lines in `App/`: Apple's standard `Info.plist` keys with Xcode build variables, and
+  property assignments and a five-field struct in `App/ViewModels/BridgeStore.swift`
+  whose names are dictated by the exported API.
+
+Interface names, field lists, API signatures and one-line idioms still match in places;
+they are facts of the interfaces the code implements, not copied expression. Three
+small contributors to the imported code were checked line by line: wjj-8283's two
+scene-engine commits (non-finite audio sanitizing, horizontal flip) were rewritten with
+the rest of the engine on 2026-10-22; of OiCkilL's four commits, what remains is
+declarations (`std::weak_ptr<SceneMaterial> material;`, a method signature), the
+`if (material == nullptr) continue;` idiom, the name `synchronizeStatusItem` with a
+standard `DispatchQueue.main.async { [weak self] in` guard, and the signature of
+AppKit's `applicationShouldHandleReopen`.
 
 What the root `LICENSE` does and does not do:
 
-- It states the terms under which this project's own code (`App/`, `Extension/`,
-  `Shared/`, `Renderer/`, `Tests/`, `scripts/`, `project.yml`) is
-  offered, and it is the same license the vendored GPL code is already under.
-- It does not transfer, merge or relicense anyone's copyright. The
-  bigsaltyfishes projects, the mediaremote-adapter authors,
-  Phosphene and every other holder named in `upstream/provenance.json`
-  and in the notices under `upstream/` keep their copyright and their own
-  license terms. Third-party notices are retained where they were found and are
-  bundled by `scripts/package.py` (see [Notice payload](#notice-payload)).
-- It is not a grant from third parties: where a third party's license is
-  incompatible with GPLv2, the presence of this file resolves nothing.
+- It states the terms under which this project's code (`App/`, `Extension/`,
+  `Shared/`, `Renderer/`, `Tests/`, `scripts/`, `project.yml` and the rewritten code
+  under `upstream/renderer`) is offered.
+- It does not transfer or relicense anyone else's copyright. The mediaremote-adapter
+  authors, Phosphene, naga and every other holder named in `upstream/provenance.json`
+  and in the notices under `upstream/` keep their copyright and their own license terms.
+  Third-party notices are retained where they were found and are bundled by
+  `scripts/package.py` (see [Notice payload](#notice-payload)).
+- The upstream projects' GPLv2 texts are kept, renamed, as
+  `upstream/renderer/LICENSE.upstream-GPL-2.0` and
+  `upstream/renderer/external/open-wallpaper-engine/LICENSE.upstream-GPL-2.0`: they record
+  under which terms the imported code was received, not the terms of the code there now.
+  The imported code itself remains in this repository's Git history under those terms.
+- Two contributors to the project's own code after the import, Morax (the scene
+  engine's Native Metal renderer, `Scene/MetalRender`) and Henry Yang (regions of the
+  scene tests), are reported by the maintainer to have given written permission for
+  their contributions to be used under this license. Those texts are not yet filed with
+  this record; until they are, their contributions' license rests on that report (see
+  [Remaining blockers](#remaining-blockers)).
 
-The derived application shell and independently implemented extension and
-Workshop browser are recorded in `upstream/provenance.json` under
-`applicationShell`, `lockScreenExtension` and `workshopBrowser` as GPL-2.0-only.
-The browser is independently implemented; no code from the GPLv3 Unayung/wallpaper-engine-mac project
-(https://github.com/Unayung/wallpaper-engine-mac/blob/main/LICENSE) was
-copied, translated or adapted, because GPLv2-only and GPLv3 code cannot be
-combined into one distributed program
-(https://www.gnu.org/licenses/gpl-faq.html#v2v3Compatibility).
+The application shell, extension and Workshop browser are recorded in
+`upstream/provenance.json` under `applicationShell`, `lockScreenExtension` and
+`workshopBrowser`. The browser is independently implemented; no code from the
+Unayung/wallpaper-engine-mac project
+(https://github.com/Unayung/wallpaper-engine-mac/blob/main/LICENSE) was copied,
+translated or adapted.
 
 ## Supporter model: free signed download, paid sponsorship and support
 
@@ -100,15 +135,15 @@ own answers:
 - Distributing copies gratis and charging for them are both allowed
   (https://www.gnu.org/licenses/gpl-faq.html#DoesTheGPLAllowMoney,
   https://www.gnu.org/philosophy/selling.html). Activities other than copying,
-  distribution and modification are outside the license (GPLv2 section 0), so
-  support and a sponsor listing are services the GPL does not regulate; GPLv2
-  section 1 expressly allows offering warranty protection for a fee.
+  conveying and modification are outside the license (GPLv3 sections 2 and 9), so
+  support and a sponsor listing are services the GPL does not regulate; GPLv3
+  section 4 expressly allows offering support or warranty protection for a fee.
 - When a binary is offered for download, offering equivalent access to copy
-  the corresponding source from the same place counts as distributing the
-  source (GPLv2 section 3;
+  the corresponding source from the same place counts as conveying the
+  source (GPLv3 section 6(d);
   https://www.gnu.org/licenses/gpl-faq.html#DoesTheGPLAllowDownloadFee).
 - No further restrictions may be imposed on recipients' exercise of the rights
-  the GPL grants (GPLv2 section 6). That covers the terms of every channel a
+  the GPL grants (GPLv3 section 10). That covers the terms of every channel a
   copy is distributed through, an app store's as much as this project's own
   (https://www.fsf.org/blogs/licensing/more-about-the-app-store-gpl-enforcement).
 - Requiring everyone who obtains a copy to pay this project, or to notify it,
@@ -124,10 +159,10 @@ The policy that follows from that:
   purchase: there is no license key, no Supporter build and no feature gate.
 - **Recipients keep every GPL right.** Anyone who receives the signed download
   may run it, study and modify its source, redistribute it, and sell copies
-  themselves, gratis or for any price, under GPLv2. No further restriction is
-  imposed (GPLv2 section 6). Supporters receive exactly the license everyone
+  themselves, gratis or for any price, under GPLv3. No further restriction is
+  imposed (GPLv3 section 10). Supporters receive exactly the license everyone
   else does, and a refund takes none of it back.
-- **No restrictive EULA.** The signed download ships with the GPLv2 text and
+- **No restrictive EULA.** The signed download ships with the GPLv3 text and
   the third-party notices and with no additional end-user agreement. There is
   no anti-redistribution clause, no reverse-engineering prohibition, no
   per-seat or per-device term, and no claim of ownership over third-party
@@ -138,17 +173,18 @@ The policy that follows from that:
   complete corresponding source for that exact binary—including this repository,
   vendored code, all covered linked dependencies, modifications, `project.yml`,
   build/install scripts—is offered alongside the
-  download with equivalent access and no fee (GPLv2 section 3(a) and its
-  download provision). Mirror the exact dependency source, not merely links to
-  third-party servers. A future section 3(b) written-offer route would instead
-  require an offer valid for at least three years to any third party, subject to
-  its source-distribution cost limit; it is not the selected route.
-  GPLv2 expressly includes scripts controlling compilation and installation.
+  download with equivalent access and no fee (GPLv3 section 6(d)). Mirror the
+  exact dependency source, not merely links to third-party servers. A future
+  section 6(b) written-offer route would instead require an offer valid for at
+  least three years to anyone who possesses the object code, at no more than the
+  cost of physically performing the conveying; it is not the selected route.
+  GPLv3's Corresponding Source (section 1) expressly includes the scripts used to
+  control compilation and installation.
 - **Sponsorship and support are services, not license conditions.** The
   sponsor place is a listing and priority support is time and attention. The
   software works identically with or without them.
-- **Warranty.** The GPLv2 disclaimer (sections 11 and 12) applies unless this
-  project states otherwise in writing. GPLv2 section 1 allows warranty
+- **Warranty.** The GPLv3 disclaimer (sections 15 and 16) applies unless this
+  project states otherwise in writing. GPLv3 section 4 allows warranty
   protection to be offered for a fee; if a support tier does so, that is a
   written commitment of this project alone and binds no upstream author.
 
@@ -166,10 +202,11 @@ open questions of its own, independent of the license-compatibility items:
   Usage Rules restrict how recipients may use and distribute a program, which
   GPLv2 section 6 forbids, and Apple removed GNU Go rather than change them
   (https://www.fsf.org/blogs/licensing/more-about-the-app-store-gpl-enforcement).
-  This project has not reviewed Apple's current terms against section 6.
-  Unless such a review shows they add no further restriction, a listing needs
-  an additional permission from the copyright holders of the GPL-2.0-only
-  code, the upstream renderer's included. This project has none.
+  GPLv3 section 10 carries the same rule. This project has not reviewed Apple's
+  current terms against it. Unless such a review shows they add no further
+  restriction, a listing needs an additional permission from every copyright
+  holder of the program's GPL code, Morax and Henry Yang included, and of any
+  third-party GPL component. This project has none.
 - **App Review.** Apple's App Review Guidelines
   (https://developer.apple.com/app-store/review/guidelines/) require Mac App
   Store apps to be sandboxed (2.4.5(i)), not to download additional code
@@ -205,12 +242,12 @@ machine, the vendored license files, and the dynamic link closure reported by
 ones on that date, not pins. The Rust crates were checked 2026-10-17;
 see [Rust crates](#rust-crates) for how.
 
-| Component | Where | License | GPL-2.0-only combination |
+| Component | Where | License | Combination with GPL-3.0-only |
 |---|---|---|---|
-| Renderer (`wallpaper-core`, `wallpaper-bridge`) | `upstream/renderer`, revision in `provenance.json` | GPL-2.0-only | Same license |
-| Shader layer (`wm-shader`: Wallpaper Engine shader text to Metal Shading Language, reflection, the C ABI the scene engine calls) | `Renderer/Shader` (a Rust workspace of its own, `Renderer/Cargo.toml`), linked into `libwallpaper_bridge.a` | GPL-2.0-only (this project; clean-room, see the [implementation record](#implementation-record)) | Same license |
-| Scene engine (open-wallpaper-engine) | `upstream/renderer/external/open-wallpaper-engine` | GPL-2.0-only (vendored under the renderer) | Same license |
-| Application shell, extension, Workshop browser, control panel, scripts, new renderer code | `App/`, `Extension/`, `Shared/`, `Renderer/`, `scripts/` | GPL-2.0-only (this project) | Same license |
+| Renderer (`wallpaper-core`, `wallpaper-bridge`) | `upstream/renderer` (rewritten; origin in `provenance.json`) | GPL-3.0-only (this project) | Same license |
+| Shader layer (`wm-shader`: Wallpaper Engine shader text to Metal Shading Language, reflection, the C ABI the scene engine calls) | `Renderer/Shader` (a Rust workspace of its own, `Renderer/Cargo.toml`), linked into `libwallpaper_bridge.a` | GPL-3.0-only (this project; clean-room, see the [implementation record](#implementation-record)) | Same license |
+| Scene engine (open-wallpaper-engine) | `upstream/renderer/external/open-wallpaper-engine` (rewritten; origin in `provenance.json`) | GPL-3.0-only (this project) | Same license |
+| Application shell, extension, Workshop browser, control panel, scripts, new renderer code | `App/`, `Extension/`, `Shared/`, `Renderer/`, `scripts/` | GPL-3.0-only (this project) | Same license |
 | Phosphene ABI reference | notice in `Extension/Phosphene-LICENSE.txt` | MIT | Compatible |
 | ungive/mediaremote-adapter | `upstream/mediaremote-adapter` | BSD-3-Clause | Compatible; embedded as an unlinked framework |
 | miniaudio | `upstream/renderer/external/open-wallpaper-engine/third_party/miniaudio` | Public domain or MIT-0 (choice) | Compatible |
@@ -219,19 +256,22 @@ see [Rust crates](#rust-crates) for how.
 | nlohmann-json, argparse | Homebrew, header-only | MIT | Compatible |
 | quickjs-ng | Homebrew `quickjs-ng` 0.16.2, `libqjs` in the verified Debug dependency closure | MIT | Compatible |
 | lz4 | Homebrew `lz4` 1.10.0 | BSD-2-Clause | Compatible |
-| FreeType | Homebrew `freetype` 2.14.3 | FTL or GPL-2.0-or-later, licensee's choice (`LICENSE.TXT` in the keg) | Compatible under the GPLv2 option; the FTL option is not GPLv2-compatible and is not the one used |
+| FreeType | Homebrew `freetype` 2.14.3 | FTL or GPL-2.0-or-later, licensee's choice (`LICENSE.TXT` in the keg) | Compatible under the GPL-2.0-or-later option, used under GPLv3 |
 | libpng | Homebrew `libpng` 1.6.58 (FreeType dependency) | libpng-2.0 | Compatible |
 | naga 29.0.3 | Rust crate, a patched copy vendored in `upstream/naga` (`upstream/naga/PATCHES.md`): the shader translator and validator the `wm-shader` crate (`Renderer/Shader`) uses for every shader; built with `glsl-in` and `msl-out` only | MIT OR Apache-2.0, used under MIT | Compatible under the MIT terms; the patch makes Apache-2.0 `codespan-reporting` an optional dependency `wm-shader` does not enable, so it is no longer linked, and dropping `spv-out` removed the Apache-2.0 `spirv` crate |
-| uniffi 0.28.3 (`uniffi`, `uniffi_core`, `uniffi_bindgen`, `uniffi_meta`, `uniffi_udl`, `uniffi_testing`), option-ext 0.2.0 | Rust crates: the Swift bridge, and `dirs` | MPL-2.0 | Compatible through MPL-2.0 section 3.3, which names GPL-2.0 as a Secondary License; none of their source files carries the "Incompatible With Secondary Licenses" notice |
+| uniffi 0.28.3 (`uniffi`, `uniffi_core`, `uniffi_bindgen`, `uniffi_meta`, `uniffi_udl`, `uniffi_testing`), option-ext 0.2.0 | Rust crates: the Swift bridge, and `dirs` | MPL-2.0 | Compatible through MPL-2.0 section 3.3, whose Secondary Licenses include GPL-2.0 "or any later version", so GPLv3; none of their source files carries the "Incompatible With Secondary Licenses" notice |
 | The other 140 linked Rust crates | `upstream/renderer/Cargo.lock` | 136 offer MIT, alone or as a choice; the rest are Zlib (foldhash), BSD-3-Clause (pp-rs) or BSD-3-Clause OR Apache-2.0 (moxcms, pxfm) | Compatible under the MIT, Zlib or BSD-3-Clause terms |
 | Valve SteamCMD | installed at runtime into the app's support directory, never bundled | Valve's terms | Outside the GPL entirely; see [Rights outside software licenses](#rights-outside-software-licenses) |
 
-"Compatible" in this table means compatible with GPLv2 according to the FSF's
+"Compatible" in this table means compatible with GPLv3 according to the FSF's
 license list (https://www.gnu.org/licenses/license-list.html) or the license's
 own text; it is not an audit of every file.
 
 Removed on 2026-10-17, each from the source tree, the build and the link closure (the
-commits are in this repository's history, and `upstream/provenance.json` records them):
+commits are in this repository's history, and `upstream/provenance.json` records them).
+They were removed under the earlier GPL-2.0-only policy, which Apache-2.0 and the GPL-3.0
+family could not join; every one of them is GPLv3-compatible, so bringing one back is a
+product decision, not a license question:
 
 | Component | License | Removed by |
 |---|---|---|
@@ -310,9 +350,10 @@ cause, and the wallpaper keeps its last picture.
 
 Before this change the project had already replaced Homebrew's `ffmpeg@8`
 (configured with `--enable-gpl --enable-version3 --enable-openssl`, so
-GPL-3.0-or-later with Apache-2.0 OpenSSL, neither of which can be combined with
-this GPL-2.0-only program) by an LGPL-2.1-or-later build of the same release. Neither
-is part of the product now.
+GPL-3.0-or-later with Apache-2.0 OpenSSL, neither of which could be combined with
+the program while it was GPL-2.0-only) by an LGPL-2.1-or-later build of the same
+release. Neither is part of the product now; an optional FFmpeg fallback for the lost
+formats is a separate, later decision.
 
 FFmpeg's command-line tools are not part of the repository, the build or any
 distribution. A developer may have `ffmpeg` or `ffprobe` installed: the test fixtures
@@ -332,62 +373,42 @@ signed download beside a paid Supporter purchase have not been reviewed by couns
 
 ## Remaining blockers
 
-The FSF's position is that the Apache License 2.0 is not compatible with GPL
-version 2 because of its patent-termination and indemnification terms
-(https://www.gnu.org/licenses/license-list.html#apache2), and this project's policy
-table rejects the GPL-3.0 family for the same GPL-2.0-only combination.
+Since 2026-10-22 the program is GPL-3.0-only. GPLv3 is compatible with the
+Apache License 2.0, the GPL-3.0 family, LGPL, MPL-2.0 and the permissive licenses
+(https://www.gnu.org/licenses/license-list.html); what it cannot be combined with is
+code available only under GPL-2.0-only
+(https://www.gnu.org/licenses/gpl-faq.html#v2v3Compatibility). `scripts/check_licenses.py`
+applies that policy: GPL-2.0-only and unknown licenses fail.
 
-**State on 2026-10-17.** `python3 scripts/check_licenses.py --enforce`, run on the tree
-after the FFmpeg removal (`b6ba0c32`) and on a Release app built from it, reports 177
-components (3 Mach-O roots, 5 third-party libraries walked from them, 24 compiled-in or
-statically linked inventory entries and 151 third-party Rust crates) with 0 Apache-2.0, 0
-GPL-3.0 family, 0 unknown and 0 not named in this file; with `--skip-app` it reports 175
-with the same zeros. The third-party libraries the app loads are `lz4`,
-`freetype` (with its `libpng`), `quickjs-ng` and the unlinked `MediaRemoteAdapter`
-framework; no `libav*` library is among them ([FFmpeg](#ffmpeg)). The
-earlier run, after the Vulkan deletion and before the FFmpeg removal, reported 181
-(178 with `--skip-app`). After the shader layer was replaced by `wm-shader` (`7141a105`), the same
-command on a Release app built from it reports 174 components (3 Mach-O roots, 5 third-party libraries,
-24 inventory entries and 148 third-party Rust crates) with the same zeros; with `--skip-app` it reports
-172. `linkme`, `logos` and `smol_str` (all MIT OR Apache-2.0) left the closure with the old crate.
-The Apache-2.0 and GPL-3.0 parts that
-used to be loaded into, or compiled into, the same process as the GPL-2.0-only renderer
-are gone (see the table of removed components above): `libvulkan` and `libMoltenVK`,
-`libSPIRV-Tools` and `libSPIRV-Tools-opt`, glslang (its Apache-2.0 portion and its
-GPL-3.0-or-later parser skeleton), the vendored `spirv_reflect` and the Rust crate
-`spirv`. Neither the app nor the lock-screen extension executable of that build links or
-loads Vulkan, glslang, SPIRV or MoltenVK libraries (`otool -L`), and the bundle carries no
-`MoltenVK_icd.json`.
+Open before any distribution:
 
-What this does not establish: it counts declared licenses, not files (the Rust crates
-were audited by declared license only, and the vendored sources by their notices); it is
-not a legal opinion, and none has been obtained. FFmpeg, the only LGPL component the table
-above listed, is no longer linked. No grant or permission from any copyright holder was requested or received,
-and none is described as existing.
+1. **Contributor permissions on file.** Morax's and Henry Yang's written permissions
+   to use their contributions under GPL-3.0-only are reported by the maintainer and not
+   yet filed here. Each filed text must name who gave it, which contributions it covers
+   and under which license; a text narrower than that scope leaves the rest uncovered.
+2. **A run of the closure check on the app to be distributed.**
+   `python3 scripts/check_licenses.py --enforce` on that Release app, with the outcome
+   recorded here.
+3. **The Rust crates beyond their declared licenses**, including build-dependencies and
+   proc-macros.
+4. **A qualified legal review** of this record, before charging money or calling
+   distribution cleared. None has been obtained, and nothing here is a legal opinion.
 
-Should a component under Apache-2.0 or the GPL-3.0 family enter the closure again,
-the check reports it and no binary may be distributed, sold or given away until it is
-resolved. Resolution means one of:
+The state on 2026-10-17, before the change of license: `python3 scripts/check_licenses.py
+--enforce` on a Release app built from `b6ba0c32` reported 177 components with 0
+Apache-2.0, 0 GPL-3.0 family, 0 unknown and 0 not named in this file; after the shader
+layer was replaced (`7141a105`), 174 components with the same zeros. Under the current
+policy Apache-2.0 and the GPL-3.0 family no longer fail; the count of unknown licenses
+and of GPL-2.0-only components is what matters. On 2026-10-22, after the change,
+`python3 scripts/check_licenses.py --skip-app` on the tree reports 172 components (24
+compiled-in or statically linked inventory entries, 148 third-party and 3 first-party Rust
+crates) with 0 GPL-2.0-only, 0 incompatible, 0 unknown and 0 not named in this file; the
+Release app's dylibs were not part of that run.
 
-1. **Replace** the component with one under a GPLv2-compatible license or with
-   code written for this project, and remove the Apache-2.0 code from the link
-   closure. For a Rust crate it means dropping the feature or dependency that
-   pulls it in, or replacing or patching the crate that needs it: the vendored
-   naga builds without `codespan-reporting`, and without `spv-out`, so without
-   `spirv`.
-2. **Obtain compatible license grants** covering the Apache-2.0 code, or obtain
-   a sufficient linking exception or GPLv3-compatible relicense from the
-   copyright holders of the GPLv2-only code. A generic endorsement is not enough.
-   Grants must come from the actual holders of the code involved—for the renderer that means
-   every contributor whose code is in the combined work, not only the current
-   repository maintainer; for the Khronos projects that means their
-   contributors, not a downstream packager - and has to be kept in writing.
-3. **A qualified legal opinion** that a particular boundary (for example the
-   loader/ICD interface) is an aggregation rather than a combined work. The
-   FSF's guidance is that this depends on how the pieces communicate, not on
-   the process or container boundary
-   (https://www.gnu.org/licenses/gpl-faq.html#MereAggregation); this project
-   has no such opinion and does not rely on one.
+Should a GPL-2.0-only component enter the closure, the check reports it and no binary
+may be distributed until it is replaced, or its copyright holders grant use under
+GPLv3 in writing. A generic endorsement is not enough: a grant must come from the
+actual holders of the code involved and be kept in writing.
 
 Nothing here is resolved by publishing the source. The GPL does not require a
 modified version to be published at all
@@ -395,9 +416,6 @@ modified version to be published at all
 publishing one does not make its combination with incompatible code lawful to
 distribute. Private use and private builds are unaffected
 (https://www.gnu.org/licenses/gpl-faq.html#WhatDoesCompatMean).
-
-Also still open: the Rust crates beyond their declared licenses, including
-build-dependencies and proc-macros.
 
 ## Rights outside software licenses
 
@@ -451,8 +469,7 @@ As implemented by `scripts/package.py` and `.github/workflows/build.yml`
   [Rust crates](#rust-crates); a vendored path crate under `upstream/` outside
   the renderer workspace, naga, counts as third party with the license its
   `Cargo.toml` declares). It classifies SPDX expressions against one
-  policy table (today GPL-2.0-only: Apache-2.0, the GPL-3.0 family and unknown
-  licenses fail), prints the Apache-2.0 components and any failing component
+  policy table (today GPL-3.0-only: GPL-2.0-only, GPLv3-incompatible and unknown licenses fail) and prints any failing component, and any component
   this file does not name. It is report-only by default; `--enforce` exits 1.
   It needs a built app, Homebrew and Cargo, so the routine gate does not run it.
 - `python3 scripts/notices.py` reuses that closure and writes `THIRD-PARTY-NOTICES.txt`:
@@ -464,7 +481,7 @@ As implemented by `scripts/package.py` and `.github/workflows/build.yml`
   say, not by name. A component with no text found is marked `LICENSE TEXT NOT FOUND`;
   `--enforce` exits 1 on one. `scripts/package.py` runs the same generator.
 
-The packaging checks catch a missing notice. An Apache-2.0 component is a matter of
+The packaging checks catch a missing notice. A GPL-2.0-only component is a matter of
 what is linked, not of a string in one library; `scripts/check_licenses.py` reports
 it from the link closure, in report-only mode unless `--enforce` is given. Its
 license table carries no entry for FFmpeg or dav1d, so a `libav*` library or CMake
@@ -476,7 +493,8 @@ package that returns is reported as unknown.
 
 - `Contents/Resources/WallpaperMachine-LICENSE.txt`: the root `LICENSE`;
 - `Contents/Resources/LICENSING.md`: this file;
-- `Contents/Resources/Renderer-LICENSE.txt`: `upstream/renderer/LICENSE`;
+- `Contents/Resources/Renderer-LICENSE.txt`: `upstream/renderer/LICENSE.upstream-GPL-2.0`,
+  the terms under which the imported renderer was received;
 - `Contents/Resources/provenance.json`: `upstream/provenance.json`;
 - `Contents/Resources/Licenses/<formula>-<version>/`: every `LICENSE*`,
   `COPYING*`, `COPYRIGHT*` and `NOTICE*` file of each Homebrew keg in the link
@@ -510,14 +528,12 @@ not pass it yet.
 The native application is named **WallpaperMachine**; its bundle identifier
 prefix is `app.wallpapermachine`.
 
-- Renderer source is in `upstream/renderer`, based on revision
-  `8c19c002ff37930c68117dd591dfe3f44792e25e`, modified as recorded in
-  `upstream/provenance.json`.
-- The application shell in `App/` is a derived work of that renderer revision's
-  `app/WallpaperEngine` sources, relocated out of `upstream/renderer` so the
-  sources this project actively develops are not mixed into vendored
-  third-party code. The relocation moves files only: GPL-2.0-only terms and the
-  upstream copyright notices continue to apply.
+- Renderer source is in `upstream/renderer`. It was imported from revision
+  `8c19c002ff37930c68117dd591dfe3f44792e25e` and has since been rewritten as
+  recorded in `upstream/provenance.json` (see [Source license](#source-license-gpl-30-only)).
+- The application shell in `App/` began as that renderer revision's
+  `app/WallpaperEngine` sources, relocated out of `upstream/renderer`; its
+  remaining matching lines are listed under [Source license](#source-license-gpl-30-only).
 - The native lock-screen extension is in `Extension/`, with
   `Extension/Phosphene-LICENSE.txt` carrying the third-party notice for the
   MIT-licensed [Phosphene](https://github.com/kageroumado/phosphene/tree/8b5bd57c1450eda74cf2ec6ceaae2e586cfdfcd6)
@@ -530,10 +546,10 @@ prefix is `app.wallpapermachine`.
   descriptions, the VideoToolbox decoder wrapper and `WebMReader`, the Objective-C face of the Matroska reader that the app's WebM player and the lock-screen extension use) and the scene engine's native video
   backend (`Video/NativeVideoBackend.cpp` and
   `Video/VideoTextureSourceFactory.cpp`) were written from Apple's public VideoToolbox, Core
-  Media and Core Video headers and documentation. `Video/ClockedVideoSource.cpp` is not new
-  code: it is the clock, queue, seek and promotion logic of the engine's existing
-  open-wallpaper-engine `FfmpegVideoTextureSource.cpp` (GPL-2.0), moved into its own file and
-  left otherwise as it was. No code from FFmpeg, libav, libwebm, libmatroska, libvpx, mp4v2,
+  Media and Core Video headers and documentation. `Video/ClockedVideoSource.cpp` began as the
+  clock, queue, seek and promotion logic of the engine's open-wallpaper-engine
+  `FfmpegVideoTextureSource.cpp` (GPL-2.0), and was rewritten clean-room on 2026-10-18 with the
+  rest of the text, audio and video runtime (`sceneEngine.mediaRuntimeReplacement`). No code from FFmpeg, libav, libwebm, libmatroska, libvpx, mp4v2,
   Bento4, GPAC or any other implementation was copied into the new code. FFmpeg was removed
   on 2026-10-17 ([FFmpeg](#ffmpeg)): the native backend is the only video decoder.
 - The sound path in `Renderer/Sound` (channel remix, resampler, loop pipeline the AudioToolbox and Ogg Vorbis decoder adapters, and `Renderer/Sound/Matroska`, which decodes the audio of a WebM or Matroska file: Opus, AAC and MP3 packets through an AudioToolbox AudioConverter, Vorbis packets re-framed as an in-memory Ogg stream for stb_vorbis, written from the Matroska, RFC 6716, RFC 7845 and RFC 3533 specifications and Apple's documentation) was written for this project from the documented behaviour of a conventional downmix, the mathematics of windowed-sinc resampling and Apple's AudioToolbox documentation. No code from FFmpeg, libswresample, libvorbis, opus or any other implementation was copied; Ogg Vorbis decoding is the public-domain stb_vorbis, vendored unchanged. FFmpeg no longer decodes scene sounds, and no longer decodes the audio of a plain video wallpaper on the desktop, where the app's own players play it (AVFoundation, or the WebM player over the sound decoders above); the scene engine no longer builds a plain-video scene at all (removed 2026-10-17), so it decodes no plain video's audio anywhere.
@@ -551,7 +567,7 @@ prefix is `app.wallpapermachine`.
   retired crate, read both. The specification files and their SHA-256 are in
   `upstream/provenance.json` (`renderer.shaderCrateReplacement`). The retired crate's source is
   gone from the tree (`upstream/renderer/crates/shader`); it remains in Git history, under
-  GPL-2.0-only. The only third-party dependency of the new crate is the vendored naga; the crates
+  GPL-2.0-only, as does all other replaced code. The only third-party dependency of the new crate is the vendored naga; the crates
   the retired one used for tokens, string storage and static registration (`logos`, `smol_str`,
   `linkme`) are no longer linked.
 - The Rust bridge's configuration and project-data domains
@@ -565,8 +581,7 @@ prefix is `app.wallpapermachine`.
   bridge, renderer, application interfaces or retained tests, and does not supply
   contributor grants or legal clearance. Its contract identities and verification
   scope are recorded under `renderer.bridgeConfigurationReplacement` and
-  `renderer.bridgeProjectReplacement` in `upstream/provenance.json`. The interim
-  GPL-2.0-only license and third-party notices remain unchanged.
+  `renderer.bridgeProjectReplacement` in `upstream/provenance.json`.
 - The bridge path-value module, render-settings lookup and mesh contract tests
   now use independently authored replacements from separate behavior/declaration
   inputs. The lookup's three activation callers migrated together; the old
@@ -576,8 +591,8 @@ prefix is `app.wallpapermachine`.
   qualifications are recorded under `renderer.bridgePathsReplacement`,
   `renderer.renderSettingsLookupReplacement` and
   `renderer.sceneMeshContractTestsReplacement` in `upstream/provenance.json`.
-  These are bounded source replacements, not a whole-project independence,
-  native-parity, contributor-rights or GPL-3.0-only publication clearance.
+  These were bounded source replacements; the completion of the rewrite is the
+  entry below.
 - Bounded independent replacements also cover the core descriptor/model/pointer
   tests and the bridge's inherited logging lifecycle, login operations and power
   reader/callback boundaries. Project-side formatting/retention, login cache and
@@ -586,8 +601,8 @@ prefix is `app.wallpapermachine`.
   recorded under `renderer.coreDisplayContractTestsReplacement`,
   `renderer.bridgeLoggingLifecycleReplacement`, `renderer.bridgeLoginOperationsReplacement`
   and `renderer.bridgePowerBoundaryReplacement` in `upstream/provenance.json`.
-  Existing interface/ordinary-expression treatment, native acceptance and written
-  contributor-record review remain separate; the interim license is unchanged.
+  Existing interface/ordinary-expression treatment is described under
+  [Source license](#source-license-gpl-30-only).
 - The library scanner/filter/thumbnail unit and inherited options-draft operations
   also use separately authored replacements. Web support, retained position/media/
   property features and their regression coverage remain. The thumbnail comparison
@@ -595,8 +610,16 @@ prefix is `app.wallpapermachine`.
   returned bytes, not private wallpapers or the transform as its own oracle.
   Scope, retained-code integration and filesystem/reference limitations are under
   `renderer.bridgeLibraryReplacement` and `renderer.bridgeOptionsDraftReplacement`
-  in `upstream/provenance.json`. These records do not clear remaining actor/facade,
-  interface, contributor or distribution requirements and do not change the license.
+  in `upstream/provenance.json`.
+- The rewrite was completed between 2026-10-19 and 2026-10-22: the scene engine's remaining
+  declarations, build files, Apple bindings and runtime headers, every inherited C++ test file
+  (the scene schema, model and texture, text object, script, shader, particle, cursor input,
+  dump-tool, corpus and audio tests), and the Rust crates' remaining scene, bridge actor, API,
+  facade, configuration and display code and their tests. Each part followed the protocol
+  under [Source license](#source-license-gpl-30-only); `upstream/provenance.json` records it
+  under `renderer.cleanRoomCompletion2026_10_22`. Main's renderer fixes made after the import
+  were carried over as behavior, each by a separate implementer from a behavior specification
+  with a regression test, and compared with Wallpaper Engine's own frames.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
   at revision `73f14ab1568371e6e3c44063f21c34c5e2712c4d`, BSD-3-Clause, vendored
   under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes
@@ -629,8 +652,8 @@ prefix is `app.wallpapermachine`.
   first public download or Supporter sale.
 - Before any Mac App Store listing, settle both questions under
   [Mac App Store](#mac-app-store).
-- Keep every third-party notice intact and identify modifications as GPLv2
-  section 2(a) requires.
+- Keep every third-party notice intact and mark modified files as GPLv3
+  section 5(a) requires.
 
 ## Local build and use
 
@@ -646,7 +669,8 @@ Dated verification history: [docs/testing/verification-log.md](docs/testing/veri
 
 ## References
 
-- GNU GPL version 2 text: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+- GNU GPL version 3 text: https://www.gnu.org/licenses/gpl-3.0.html
+- GNU GPL version 2 text (the imported code's terms): https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 - GPL FAQ, selling copies: https://www.gnu.org/licenses/gpl-faq.html#DoesTheGPLAllowMoney
 - GPL FAQ, download fees and equivalent source access: https://www.gnu.org/licenses/gpl-faq.html#DoesTheGPLAllowDownloadFee
 - GPL FAQ, no fee may be required of others' recipients: https://www.gnu.org/licenses/gpl-faq.html#DoesTheGPLAllowRequireFee
@@ -655,9 +679,9 @@ Dated verification history: [docs/testing/verification-log.md](docs/testing/veri
 - GPL FAQ, what "compatible" means: https://www.gnu.org/licenses/gpl-faq.html#WhatDoesCompatMean
 - GPL FAQ, no obligation to publish private modifications: https://www.gnu.org/licenses/gpl-faq.html#GPLRequireSourcePostedPublic
 - GPL FAQ, aggregation versus combined work: https://www.gnu.org/licenses/gpl-faq.html#MereAggregation
-- FSF license list, Apache 2.0 incompatible with GPLv2: https://www.gnu.org/licenses/license-list.html#apache2
+- FSF license list (Apache 2.0 is compatible with GPLv3, not with GPLv2): https://www.gnu.org/licenses/license-list.html#apache2
 - FSF, selling free software: https://www.gnu.org/philosophy/selling.html
-- Renderer license file: https://github.com/bigsaltyfishes/wallpaper-engine-for-macos/blob/main/LICENSE
+- Imported renderer's license file: https://github.com/bigsaltyfishes/wallpaper-engine-for-macos/blob/main/LICENSE
 - FSF, App Store terms and GPL section 6: https://www.fsf.org/blogs/licensing/more-about-the-app-store-gpl-enforcement
 - Apple App Review Guidelines: https://developer.apple.com/app-store/review/guidelines/
 - WallpaperMachine terms of service (Supporter purchase, Paddle): https://www.wallpapermachine.app/terms/
