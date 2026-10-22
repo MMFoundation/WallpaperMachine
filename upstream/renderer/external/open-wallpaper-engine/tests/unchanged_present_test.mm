@@ -9,6 +9,7 @@
 // no video wallpaper appears here.)
 
 #include "Core/RendererCounters.hpp"
+#include "Presentation/WallpaperScaling.hpp"
 #include "Scene/SceneResolution.hpp"
 #include "Scene/SceneWallpaper.hpp"
 #include "Scene/SceneWallpaperSurface.hpp"
@@ -29,6 +30,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -869,6 +871,20 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
     const bool  display =
         resolution_name != nullptr && std::string_view(resolution_name) == "display";
     const double scale_factor = number("WE_TEST_ENERGY_SCALE_FACTOR", 1.0);
+    // The scaling mode the host pushes: `fill`, `fit`, `fit_blurred`,
+    // `stretch` or `none`. Unset, none is pushed and the scene keeps its own.
+    const std::string_view scaling_name = std::getenv("WE_TEST_ENERGY_SCALING") != nullptr
+                                              ? std::getenv("WE_TEST_ENERGY_SCALING")
+                                              : "default";
+    const std::map<std::string_view, WallpaperScalingMode> scaling_modes {
+        { "none", WallpaperScalingMode::NONE },
+        { "stretch", WallpaperScalingMode::STRETCH },
+        { "fit", WallpaperScalingMode::FIT },
+        { "fill", WallpaperScalingMode::FILL },
+        { "fit_blurred", WallpaperScalingMode::FIT_BLURRED },
+    };
+    ASSERT_TRUE(scaling_name == "default" || scaling_modes.contains(scaling_name))
+        << "no scaling mode " << scaling_name;
     const double warmup  = number("WE_TEST_ENERGY_WARMUP", 5.0);
     const double window  = number("WE_TEST_ENERGY_SECONDS", 20.0);
     const auto   width   = static_cast<uint16_t>(number("WE_TEST_ENERGY_WIDTH", 1920));
@@ -918,6 +934,10 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
     info.render_height    = height;
     info.display_scale_factor = scale_factor;
     wallpaper.initSurface(info);
+    if (scaling_name != "default") {
+        wallpaper.setPropertyInt32(PROPERTY_SCALINGMODE,
+                                   static_cast<int32_t>(scaling_modes.at(scaling_name)));
+    }
     SceneWallpaperConfig config;
     config.source     = project;
     config.assets     = assets;
@@ -941,7 +961,8 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
     const double seconds = std::chrono::duration<double>(after.at - before.at).count();
     const uint64_t completed = after.health.frames_completed - before.health.frames_completed;
     const uint64_t presented = after.health.frames_presented - before.health.frames_presented;
-    std::cout << "ENERGY {\"renderer\":\"native\",\"resolution\":\""
+    std::cout << "ENERGY {\"renderer\":\"native\",\"scaling\":\"" << scaling_name
+              << "\",\"resolution\":\""
               << (display ? "display" : "canvas") << "\",\"backend\":\""
               << (selection.failed() ? "held" : "native")
               << "\",\"seconds\":" << seconds
