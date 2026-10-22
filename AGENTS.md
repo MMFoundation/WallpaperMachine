@@ -15,6 +15,8 @@ use `rg -u` only when those are the target.
 - Code / tests / docs: [conventions](docs/conventions.md), [testing](docs/testing/README.md).
 - Build / package / versions: [build](docs/build.md), [release](docs/release.md).
 - Product / features: [README](README.md), [docs index](docs/README.md).
+- A wallpaper that looks wrong (issue reports): [wallpaper fixes](docs/testing/wallpaper-fixes.md),
+  skill `wallpaper-issue`.
 
 ## Ownership and invariants
 
@@ -81,8 +83,9 @@ use `rg -u` only when those are the target.
   `.omo/`, `.omp/`, `.pi/`) and `CLAUDE.local.md` are Git-ignored, machine-local state
   and personal rules: never `git add -f` them or link them from tracked docs. Ignore a
   new agent tool's dir in the same change; a shared file inside one follows the
-  `.gitignore` recipe and is listed here (none today). Check `git status` for agent
-  paths before every commit.
+  `.gitignore` recipe and is listed here: the `wallpaper-issue` skill
+  (`.agents/skills/wallpaper-issue/`, linked from `.claude/skills/`). Check `git status`
+  for agent paths before every commit.
 
 ## Permissions
 
@@ -91,8 +94,10 @@ use `rg -u` only when those are the target.
 - No desktop control, opening windows, screenshots, wallpaper/appearance changes, audio
   hardware, permission prompts, live Steam login or app install/restart without explicit
   authorization. Feature/test approval is not desktop approval, with one exception: a
-  wallpaper fix may wake the Parallels Windows VM, run the reference capture in it
-  (Wallpaper Engine muted) and suspend it again. Peekaboo and
+  wallpaper fix may download the reported Workshop item with
+  `scripts/we_reference.py fetch` (the app's saved Steam sign-in, never a new one), wake
+  the Parallels Windows VM, run the reference capture in it (Wallpaper Engine muted)
+  and suspend it again. Peekaboo and
   `python3 scripts/test.py --ui` require a requested desktop run, never a completion/release
   gate. [Tool guidance](docs/development-tools.md) includes `python3 scripts/check_dev_tools.py`
   (safe inspection; installation ≠ permission).

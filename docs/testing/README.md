@@ -47,9 +47,11 @@ Routine verification **must not**:
 - replace or restart the installed `/Applications/WallpaperMachine.app`.
 
 Each of those requires an explicit user decision, with one standing exception: a
-wallpaper fix may wake the Parallels Windows VM, capture Wallpaper Engine's frames
-in it with Wallpaper Engine muted, and suspend it again
-([wallpaper-engine-reference.md](wallpaper-engine-reference.md)). `python3 scripts/test.py --ui`
+wallpaper fix may download the reported Workshop item with the app's saved Steam
+sign-in (`scripts/we_reference.py fetch`, never a new sign-in), wake the Parallels
+Windows VM, capture Wallpaper Engine's frames in it with Wallpaper Engine muted, and
+suspend it again ([wallpaper-fixes.md](wallpaper-fixes.md),
+[wallpaper-engine-reference.md](wallpaper-engine-reference.md)). `python3 scripts/test.py --ui`
 and the manual smoke checklist take over the desktop and are neither part of
 routine verification nor a required release gate. See
 [../../AGENTS.md](../../AGENTS.md) for the agent-facing form of this rule and
