@@ -57,6 +57,17 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 
+# Containers, pictures, packages and scene sources built byte by byte (tex_fixtures.hpp).
+add_executable(tex_container_tests tex_container_tests.cpp)
+target_link_libraries(tex_container_tests PRIVATE ${PROJECT_NAME} wpFs wpScene PkgConfig::TEST_LZ4 GTest::gtest_main)
+target_include_directories(tex_container_tests PRIVATE .)
+target_compile_features(tex_container_tests PRIVATE cxx_std_20)
+gtest_discover_tests(
+    tex_container_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
+
 # utils_known_answer_tests.cpp pins outputs of the utils the scene engine relies on bit for bit.
 # linalg_tests.cpp does the same for Utils/Linalg.hpp (against linalg_golden.inc, and the
 # behaviour its call sites rely on).
@@ -101,6 +112,29 @@ target_include_directories(mdl_schema_tests PRIVATE .)
 target_compile_features(mdl_schema_tests PRIVATE cxx_std_20)
 gtest_discover_tests(
     mdl_schema_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
+
+# Model files built byte by byte (mdl_fixtures.hpp): mesh records, skeleton, optional blocks and the
+# geometry generated from them.
+add_executable(mdl_parse_tests mdl_mesh_tests.cpp mdl_skeleton_tests.cpp)
+target_link_libraries(mdl_parse_tests PRIVATE ${PROJECT_NAME} wpFs wpScene GTest::gtest_main)
+target_include_directories(mdl_parse_tests PRIVATE .)
+target_compile_features(mdl_parse_tests PRIVATE cxx_std_20)
+gtest_discover_tests(
+    mdl_parse_tests
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
+
+# In-memory puppets: layer sampling, blending, playback controls and shared state.
+add_executable(puppet_pose_tests puppet_pose_tests.cpp)
+target_link_libraries(puppet_pose_tests PRIVATE ${PROJECT_NAME} wpFs wpScene GTest::gtest_main)
+target_include_directories(puppet_pose_tests PRIVATE .)
+target_compile_features(puppet_pose_tests PRIVATE cxx_std_20)
+gtest_discover_tests(
+    puppet_pose_tests
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )

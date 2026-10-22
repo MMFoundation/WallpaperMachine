@@ -572,7 +572,8 @@ no assets prints `skipped: …` and is not a pass).
 CMake test binaries are built under `artifacts/renderer/bin/` (executables in
 its `tests/` folder). The authoritative routine build/run list is
 `REGRESSION_BINARIES` in `scripts/check_renderer.py`, covering the parsers
-(`scene_schema_tests`, `mdl_schema_tests`, `tex_schema_tests`, `version_tests`),
+(`scene_schema_tests`, `mdl_schema_tests`, `mdl_parse_tests`, `puppet_pose_tests`,
+`tex_schema_tests`, `tex_container_tests`, `version_tests`),
 SceneScript, input and the media protocol (`script_runtime_compat_test`,
 `mouse_input_test`, `scenescript_sound_layer_smoke`,
 `scenescript_media_event_smoke`, `scenescript_behavior_test`, `media_thumbnail_texture_smoke`), the shader
@@ -657,11 +658,20 @@ The video suites (`video_source_input_test`, `unchanged_present_test`, `metal_sc
 
 The scene-schema behaviour tests (what `scene_schema_tests.cpp` used to hold beyond its independent remainder) are written in parts, each part in its own executable `scene_schema_partNN_test` built from its own `tests/scene_schema_partNN_*.cpp` files and linked against one shared static library, `scene_schema_support` (`tests/support/schema_fixtures.{hpp,cpp}`). The library is plain headless test data and a thin driver: a read-only `fs::Fs` over a map of path to bytes (mounted at `/assets`), a little-endian byte writer, the binary model and video-texture files, the asset sets (basic image/particle objects, a skinned puppet in its variants, a leaf model layer, the LDR/HDR bloom stand-ins), the scene-file skeletons (quiet canvas, perspective, canvas with a camera object, camera-path clips), `ParseRig`, which parses a scene document through `WPSceneParser` with a null-output sound manager, and a few helpers for reading the parsed tree. `scene_schema_fixtures_selftest` checks the library against the production readers, so a part can rely on it. A new part adds one `add_scene_schema_behavior_test(scene_schema_partNN_test ...)` line to the marked list in `tests/CMakeLists.txt` and one name to `REGRESSION_BINARIES`; it never edits another part's sources or the library (what it needs beyond the library it writes in its own files). Test names say what behaviour they pin, and a part states the behaviour (not a count) in its comments.
 
-`tex_schema_tests` links `PkgConfig::TEST_LZ4` itself
+`tex_schema_tests` and `tex_container_tests` link `PkgConfig::TEST_LZ4` themselves
 (`tests/CMakeLists.txt`): the
 renderer links LZ4 `PRIVATE`, so the include directory does not propagate to a
-test that builds its own compressed `.tex` fixtures. Run it when touching
-`WPTexImageParser`. Other useful filters:
+test that builds its own compressed `.tex` fixtures. Run them when touching
+`WPTexImageParser`.
+
+`mdl_parse_tests`, `puppet_pose_tests` and `tex_container_tests` build every input byte by byte
+(`tests/mdl_fixtures.hpp`, `tests/tex_fixtures.hpp`, on the writer and in-memory file space of
+`tests/support/byte_fs.hpp`), so they need no wallpaper, device or environment variable; the only skip is
+one `.tex` permission row when run as root. They cover `.mdl` mesh records for versions 13-23, the skeleton
+and optional blocks and the generated submeshes (`MdlMesh.*`, `MdlGeometry.*`, `MdlSkeleton.*`), puppet
+layer blending and playback state (`Puppet*.*`), and `.tex` containers, loose pictures, packages and
+scene sources (`Tex*.*`; host files live in a per-process folder under the system temp directory).
+Other useful filters:
 
 ```sh
 audio_tests --gtest_filter='AudioResponseMonoTest.*'

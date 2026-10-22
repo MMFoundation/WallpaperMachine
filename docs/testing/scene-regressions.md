@@ -1235,9 +1235,12 @@ texture entrances are not decoded-image or native-rendering evidence.
   unchanged. Skeletal models share one `WPPuppetLayer` playback across material
   slots, attachments and runtime animation controls, including bind-pose uploads
   when no clip matches, with no extra render passes or texture allocations.
-  `MdlSchema.Mdls3SkinningPreservesAuthoredHierarchyAndPivotsAcrossMeshVersions`
-  in `mdl_schema_tests`: mesh format versions do not justify flattening an
-  authored skeleton. Versioned model fixtures cover MDLV13–23 attribute layouts.
+  `MdlSkeleton.VersionThreeSkeletonKeepsHierarchyAndPivotsForMeshVersions`
+  and `.VersionTwentyThreeFileWithVersionThreeSkeletonKeepsTheChain` in
+  `mdl_parse_tests`: mesh format versions do not justify flattening an
+  authored skeleton. Versioned model fixtures cover MDLV13–23 attribute layouts
+  (`MdlMesh.SurfaceAttributesSurviveEveryFileVersion` and
+  `.SkinnedMeshesKeepBoneStreamsAndSkeletonForEveryVersion`).
 - **Pass depth and cull words** — `SceneSchema.PassStateValuesOutsideWallpaperEnginesListsReadAsTheirFirstEntry`:
   `depthtest` and `depthwrite` are on only for `enabled` and `cullmode` is off only for
   `nocull`; any other word (`less`, `greater`, `always`, `inverted`) reads as the list's
@@ -1274,9 +1277,9 @@ texture entrances are not decoded-image or native-rendering evidence.
   Wallpaper Engine draws a smooth pool. The
   attribute is now named `a_Tangent4` (`WE_IN_TANGENT`); nothing else changes, so
   there is no extra pass, buffer or per-frame work, and a model without a normal map
-  never read it. Tests: `MdlSchema.VersionedSurfaceMeshesPreserveAllVertexAttributes`
-  and `.GenMeshIncludesNormals` in `mdl_schema_tests` (the names the generated mesh
-  carries) and
+  never read it. Tests: `MdlMesh.SurfaceAttributesSurviveEveryFileVersion` in
+  `mdl_parse_tests` (the names the generated mesh carries, for every file version)
+  and `MdlSchema.GenMeshIncludesNormals` in `mdl_schema_tests`, and
   `MetalSceneDraw.AModelsTangentReachesTheShaderThatDeclaresIt` (a
   quad built by the model parser from a tangent that is no axis, with handedness
   -1, drawn through a probe vertex shader that builds the tangent and bitangent as
@@ -1545,10 +1548,10 @@ texture entrances are not decoded-image or native-rendering evidence.
 - **User-chosen scene textures** — `MediaThumbnailTextureSmoke.TextureProperty*`,
   `.UnsetTexturePropertyKeepsTheAuthoredTexture` and
   `.AnUnreadableUserFileKeepsTheAuthoredTexture` in `media_thumbnail_texture_smoke`;
-  `TexSchema.AbsolutePath*`, `.PackagedLooseImageStillLoadsFromTheMount` and
-  `.OnlyAReadableHostPictureCountsAsOne` plus
-  `SceneSourceMount.APresetFileBesideThePackageLoadsAndThePackageStillWins` in
-  `tex_schema_tests`. A `usertextures` entry is either a cover slot the runtime
+  `TexLoose.AbsolutePath*`, `.PackagedLoosePicturesComeFromTheMountNotTheHostDisk` and
+  `.HostLooseAssetReadability` plus
+  `TexPackage.PresetFilesMountBesideThePackageAndThePackageWins` in
+  `tex_container_tests`. A `usertextures` entry is either a cover slot the runtime
   supplies or the name of a `scenetexture` property. The property stores a path,
   not a copy, so a slot is only replaced when that file opens at load; unset,
   moved and unreadable all keep the authored texture. Origin travels on
@@ -1589,7 +1592,7 @@ texture entrances are not decoded-image or native-rendering evidence.
 - **JPEG/EXIF orientation** — `tex_schema_tests`: all eight EXIF display
   transforms on asymmetric RGBA pixels, both TIFF byte orders, truncated
   JPEG/EXIF data, invalid IFD offsets.
-- **Texture mip budget** — `TexSchema.SurfaceBudget*` in `tex_schema_tests` and
+- **Texture mip budget** — `TexBudget.*` in `tex_container_tests` and
   `MetalSceneDraw.ATextureWhoseNextLevelFallsShortOfTheSurfaceKeepsItsFullSizeLevel`
   in `metal_scene_draw_smoke`. A 2D scene's packaged chain loses a leading level only
   while the next one is still at least as long as the surface's longest side
@@ -1598,16 +1601,16 @@ texture entrances are not decoded-image or native-rendering evidence.
   keeps its full-size level, which Wallpaper Engine samples, where the earlier rule
   (the surface rounded up to a power of two) dropped it and drew the next, 2120 px,
   level 1.8 times too large. Covered: the selection and the layout metadata it
-  preserves (`.SurfaceBudgetSelectsAuthoredMipsAndKeepsLayoutMetadata`), encoded
-  levels dropped without decoding and truncation (`.SurfaceBudgetSkipsEncodedPixels…`),
-  sprite and video chains left whole (`.SurfaceBudgetPreservesSpriteAndVideoMipChains`),
+  preserves (`.SurfacePicksAuthoredLevelsAndKeepsLayoutMetadata`), encoded
+  levels dropped without decoding and truncation (`.DroppedEncodedLevelsAreSkippedButALyingSizeStillFails`),
+  sprite and video chains left whole (`.SpriteAndVideoTexturesKeepTheirWholeChain`),
   a 4100 px level on a 3456 px surface kept
-  (`.SurfaceBudgetKeepsALevelThatTheNextOneWouldNotCover`), the property for 1920×1080,
+  (`.ALevelTheNextOneCannotCoverIsKept`), the property for 1920×1080,
   2560×1440 and 3456×2234 surfaces and wide and tall textures from half the surface to
   twice it (the kept level is as long as the surface or the texture, and the one after
-  it is shorter than the surface: `.SurfaceBudgetKeepsTheSmallestLevelThatStillCoversTheSurface`),
+  it is shorter than the surface: `.KeptChainIsTheSmallestThatStillCoversTheSurface`),
   levels of a TEXB0003 container measured by their headers
-  (`.SurfaceBudgetFollowsTheHeaderSizesOfAnEncodedChain`), and the draw test, a 528×352
+  (`.EncodedChainsAreMeasuredByTheirHeaders`), and the draw test, a 528×352
   chain with a white first level and black others across a 384×256 surface, which
   is drawn from the first level blended with the second (black without
   the change). Not covered: a layer drawn larger than the display
@@ -2532,11 +2535,11 @@ texture entrances are not decoded-image or native-rendering evidence.
 
 ## Animation and puppets
 
-- **Non-additive layer weights** — `MdlSchema.NonAdditiveLayersShareTheWholePoseWeight`
+- **Non-additive layer weights** — `PuppetPose.NonAdditiveLayersShareOneUnitOfPoseWeight`
   (normalized and partial weights, rotation, scale, loop wrap, repeated samples)
-  and `.NonAdditivePoseMixRetainsDistinctMotionAndAdditiveOffsets` (distinct
+  and `.DistinctMotionMixesAndAdditiveOffsetsRideOnTop` (distinct
   animations, additive overlays, live blend/visibility changes) in
-  `mdl_schema_tests`. Non-additive puppet animation layers use their effective
+  `puppet_pose_tests`. Non-additive puppet animation layers use their effective
   blend weights for the entire pose (translation, scale and rotation), including
   offsets from the reference pose; otherwise overlapping layers double
   character-sheet assembly offsets and separate attached pieces. Additive layers

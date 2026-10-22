@@ -35,6 +35,7 @@ REGRESSION_BINARIES = {
     "scene_schema_tests": False, "scene_schema_fixtures_selftest": False, "scene_schema_part01_test": False,
     "script_runtime_compat_test": False,
     "mouse_input_test": False, "mdl_schema_tests": False, "tex_schema_tests": False,
+    "mdl_parse_tests": False, "puppet_pose_tests": False, "tex_container_tests": False,
     "timer_tests": False, "metal_backend_test": False,
     "metal_scene_draw_smoke": True, "metal_poster_capture_test": True,
     "metal_video_texture_test": True, "unchanged_present_test": True, "scene_failure_policy_test": True,
