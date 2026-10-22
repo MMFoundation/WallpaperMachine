@@ -277,8 +277,12 @@ pub unsafe extern "C" fn rs_shader_compile_program(
     match outcome {
         Ok(program) => {
             set_last_error(NO_ERROR_TEXT);
-            // SAFETY: success implies `out_program` was checked non-null above and is writable.
-            unsafe { *out_program = Box::into_raw(Box::new(program)) };
+            // Success already implies a non-null `out_program`; the check is repeated so the write
+            // carries its own guard.
+            if !out_program.is_null() {
+                // SAFETY: non-null and writable by the caller's promise.
+                unsafe { *out_program = Box::into_raw(Box::new(program)) };
+            }
             RS_SHADER_OK
         }
         Err(text) => {
