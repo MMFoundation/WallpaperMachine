@@ -148,26 +148,37 @@ statements in the page keep working. Property `order`/`index` values are orderin
 hints, not identity: fractional values are preserved and properties that share one
 all stay, in declaration order.
 
-Values are replayed in full to a listener that registers after the first push, so
-pages that install the listener from a deferred module still start.
+Assigning `wallpaperPropertyListener` is not a delivery, as in Wallpaper Engine: the
+host never calls a listener from inside the statement that assigned it, and a
+listener that replaces one which already took the values in hears nothing until a
+value changes. A page that assigns its listener while it renders, as a React
+component body does, would otherwise set state inside its own render on every pass
+and loop until React gave up and left the page blank. What the page has not taken
+in (properties, the pause state and directory files that arrived before it had a
+listener or a handler, or that its handler threw on) is replayed once the turn that
+assigned the listener is over, so pages that install the listener from a deferred
+module still start. A listener that a handler assigns during that replay gets
+another pass after it, so a handler the replaced listener lacked still hears what it
+is owed; a pass follows only one the page took something in from, so a handler that
+throws and assigns a listener every time is not called in a loop.
 
 `applyUserProperties` and `applyGeneralProperties` follow Wallpaper Engine's
-contract: the first delivery a listener takes in carries every property, and every
+contract: the first delivery the page takes in carries every property, and every
 later one only the properties whose values differ, in any key order; nothing is
 called when nothing differs. The host resends the whole committed set on each
 apply (the screen saver on every reconcile, pause toggles included) and the shared
-host script works out the difference per listener, so a page that tests each key
-sees the same calls on the desktop, in the preview and on the lock screen. A
-listener assigned late or again, a reloaded document and a content-process restart
-start from the whole set; a handler that is missing or throws has not taken a
-delivery in, so the next call is measured against what it last accepted. A `file`
+host script works out the difference against what the page last accepted, so a
+page that tests each key sees the same calls on the desktop, in the preview and on
+the lock screen. A reloaded document and a content-process restart start from the
+whole set; a handler that is missing or throws has not taken a delivery in, so the
+next call is measured against what it last accepted. A `file`
 property the host stages again counts as changed once even though its value reads the
 same: the staged path is built from the property and the file's name, so a file
 reselected after it was edited, or another folder's file of the same name, arrives
 under the path the page already has, and the desktop host passes the restaged property ids
 along with the payload (`restagedFiles` of `WebWallpaperHost.stageAssets`). A paused
-page draws that change like any edit, and a handler that threw on it is sent it
-again. A page
+page draws that change like any edit, and a handler that threw on it, or was
+missing when it arrived, is sent it again. A page
 that rebuilt itself from the payload on every edit has to keep its earlier values,
 as it must under Wallpaper Engine. `setPaused` is not deduplicated.
 
@@ -563,7 +574,8 @@ never substitutes Pause for an unavailable mute.
 ## Verification
 
 The page host is tested against a real offscreen `WKWebView` with no desktop window
-(`Tests/Unit/WebWallpaper/`: module loading, late-listener replay, local request
+(`Tests/Unit/WebWallpaper/`: module loading, late-listener replay, a listener
+re-assigned on every render, local request
 metadata in the page and in iframe, `srcdoc` and script-created frames, pause
 composition, suspension by presentation and by pause with its
 first-frame grace and edits shown while paused, navigation lockdown, forwarded pointer events, mouse routing
