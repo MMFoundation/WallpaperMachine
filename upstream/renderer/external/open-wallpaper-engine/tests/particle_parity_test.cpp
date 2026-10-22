@@ -19,6 +19,7 @@
 #include "SpecTexs.hpp"
 #include "WPParticleParser.hpp"
 #include "WPSceneParser.hpp"
+#include "support/byte_fs.hpp"
 #include "wpscene/WPParticleObject.h"
 #include "wpscene/WPScene.h"
 
@@ -52,23 +53,12 @@ using nlohmann::json;
 // Fixtures
 // ---------------------------------------------------------------------------
 
-class MemoryFs final : public fs::Fs {
-public:
-    explicit MemoryFs(std::map<std::string, std::string> files): m_files(std::move(files)) {}
-    bool Contains(std::string_view path) const override {
-        return m_files.contains(std::string(path));
-    }
-    std::shared_ptr<fs::IBinaryStream> Open(std::string_view path) override {
-        const auto it = m_files.find(std::string(path));
-        if (it == m_files.end()) return nullptr;
-        const auto& s = it->second;
-        return std::make_shared<fs::MemBinaryStream>(std::vector<uint8_t>(s.begin(), s.end()));
-    }
-    std::shared_ptr<fs::IBinaryStreamW> OpenW(std::string_view) override { return nullptr; }
-
-private:
-    std::map<std::string, std::string> m_files;
-};
+/// The text files of a fixture as the byte map the in-memory file space serves.
+test::MapFs::Files FilesAsBytes(const std::map<std::string, std::string>& files) {
+    test::MapFs::Files bytes;
+    for (const auto& [name, content] : files) bytes[name].assign(content.begin(), content.end());
+    return bytes;
+}
 
 /// A generator that builds no geometry: the tests read the simulation itself.
 class SilentGener final : public IParticleRawGener {
@@ -2073,7 +2063,7 @@ struct ParticleScene {
             { "/materials/a.tex.tex", "" },
         };
         for (auto& [name, content] : particle_files) files[name] = std::move(content);
-        EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+        EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<test::MapFs>(FilesAsBytes(files))));
         scene = WPSceneParser().Parse(SceneParseRequest {
                                           .scene_id           = "particle-parity",
                                           .project_properties = &properties,
@@ -3394,8 +3384,8 @@ struct CorpusRig {
         wpscene::Particle particle;
         fs::VFS           vfs;
         if (! vfs.Mount("/assets",
-                        std::make_unique<MemoryFs>(std::map<std::string, std::string> {
-                            { "/mat.json", R"({"passes":[]})" } }))) {
+                        std::make_unique<test::MapFs>(FilesAsBytes(
+                            { { "/mat.json", R"({"passes":[]})" } })))) {
             return nullptr;
         }
         if (! particle.FromJson(document, vfs)) return nullptr;
