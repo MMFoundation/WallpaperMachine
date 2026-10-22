@@ -60,9 +60,9 @@ fn a_parameter_named_like_a_dialect_function_does_not_switch_it_off() {
 
 #[test]
 fn adjacent_tokens_lex_as_expected() {
-    let t = text("", "int k = ui; int m = 3; float a[2] = float[2](1.0, 2.0); int i = 0; float r = a[i].x * 2.0;\nint q = k%-m; ++i; o = vec4(r + float(q) + float(i));");
+    let t = text("", "int k = ui; int m = 3; vec2 a[2] = vec2[2](vec2(1.0), vec2(2.0)); int i = 0; float r = a[i].x * 2.0;\nint q = k%-m; ++i; o = vec4(r + float(q) + float(i));");
     assert!(t.contains("k % -m") && t.contains("++i;") && t.contains("a[i].x"), "{t}");
-    // (`a[i].x` on a float is not valid GLSL; the point is the token shapes)
+    // (the elements are vectors: `.x` of a scalar element is a splat and is written without the swizzle)
     let t = text("", "int k = ui; int m = 3; int q = k%-m; int i = 0; ++i; vec2 v = i2; float r = v.xy.x; o = vec4(float(q + i) + r);");
     compile_glsl(StageKind::Fragment, &t).unwrap();
 }

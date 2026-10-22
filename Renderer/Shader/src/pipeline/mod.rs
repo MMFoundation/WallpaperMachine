@@ -61,7 +61,8 @@ pub struct CompiledProgram {
     pub metadata: Metadata,
     /// The merged reflection of the stages (R33).
     pub reflection: Reflection,
-    /// Per stage in request order: the legalizer's entries, then the backend's (R5, R36).
+    /// Per stage in request order: the preprocessor's non-fatal entries, then the legalizer's, then
+    /// the backend's (R5, R36).
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -118,9 +119,10 @@ impl Pipeline<'_> {
             if let Some(plan) = &legal.layout.block {
                 restore_author_element_counts(&mut reflection, plan);
             }
+            let prepared_stage = prepared.stages.iter().find(|s| s.kind == kind).expect("both stages are prepared");
+            diagnostics.extend(prepared_stage.diagnostics.iter().cloned());
             diagnostics.extend(legal_stage.diagnostics.iter().cloned());
             diagnostics.extend(compiled.diagnostics.iter().cloned());
-            let prepared_stage = prepared.stages.iter().find(|s| s.kind == kind).expect("both stages are prepared");
             key_stages.push((kind, prepared_stage.evaluated.as_str(), legal_stage.text.as_str()));
             reflections.push(reflection);
             stages.push(ProgramStage {

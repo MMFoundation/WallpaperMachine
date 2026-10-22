@@ -341,6 +341,48 @@ fn describe(tok: &Tok) -> String {
     }
 }
 
+/// The first token of a directive expression that no preprocessor expression can contain, which
+/// marks the text as a test of run-time values (`g_Texture0Resolution.x < g_Texture0Resolution.y`):
+/// a `.` after a name, a number or a `)` (a member access), and any character outside names,
+/// numbers, parentheses and the operators of the C preprocessor (`[`, `,`, a quote...). Tokens of
+/// that language this evaluator does not support (`defined`, arithmetic, `?:`, `0x10`, `2.5`) are
+/// not such a mark. `None` when there is no such token.
+pub(super) fn runtime_token(expr: &str) -> Option<String> {
+    let bytes = expr.as_bytes();
+    let number_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'.';
+    let mut i = 0;
+    // The previous token was a name, a number or a `)`.
+    let mut after_operand = false;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c.is_ascii_whitespace() {
+            i += 1;
+        } else if c.is_ascii_digit() || (c == b'.' && !after_operand && bytes.get(i + 1).is_some_and(u8::is_ascii_digit)) {
+            // A number as the C preprocessor reads one: digits, letters, `_`, `.` and an exponent sign.
+            i += 1;
+            while i < bytes.len() && (number_byte(bytes[i]) || (matches!(bytes[i], b'+' | b'-') && matches!(bytes[i - 1], b'e' | b'E'))) {
+                i += 1;
+            }
+            after_operand = true;
+        } else if c.is_ascii_alphabetic() || c == b'_' {
+            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            after_operand = true;
+        } else if c == b')' {
+            i += 1;
+            after_operand = true;
+        } else if b"(!=<>&|+-*/%^~?:;".contains(&c) {
+            i += 1;
+            after_operand = false;
+        } else {
+            let ch = expr[i..].chars().next().unwrap_or('?');
+            return Some(format!("`{}`", ch.escape_default()));
+        }
+    }
+    None
+}
+
 /// Evaluates a (comment-stripped, trimmed) directive expression. The error is the message text.
 pub(super) fn evaluate(expr: &str, env: &HashMap<String, String>) -> Result<bool, String> {
     let toks = tokenize(expr)?;

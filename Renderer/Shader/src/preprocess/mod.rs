@@ -37,6 +37,9 @@ pub const MAX_INCLUDE_DEPTH: usize = 64;
 pub const MAX_INCLUDE_EXPANSIONS: usize = 20_000;
 /// Largest expanded stage text, in bytes (6.4).
 pub const MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+/// Conditions about run-time values recorded one by one per stage; further ones are counted in
+/// one closing entry, so a hostile stage cannot inflate the diagnostics the engine stores.
+pub const MAX_CONDITION_NOTES: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -165,6 +168,9 @@ impl MacroFacts {
 pub struct StageOutput {
     pub text: String,
     pub macros: MacroFacts,
+    /// Non-fatal findings, such as a condition that was treated as false because it refers to
+    /// run-time values. Spans are byte ranges of the directive line in its origin's text.
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 /// Preprocesses one stage (R15, R29). `combos` are written as macros at the
@@ -186,10 +192,21 @@ pub fn preprocess_stage(
         macros: MacroFacts::default(),
         include_stack: Vec::new(),
         expansions: 0,
+        diagnostics: Vec::new(),
+        unrecorded_conditions: 0,
     };
     engine.start(combos);
     engine.expand(source, &Origin::Stage)?;
-    Ok(StageOutput { text: engine.out, macros: engine.macros })
+    if engine.unrecorded_conditions > 0 {
+        let more = Diagnostic::new(format!(
+            "{} more conditions that test run-time values are treated as false",
+            engine.unrecorded_conditions
+        ))
+        .in_stage(kind)
+        .in_pass(Pass::Preprocess);
+        engine.diagnostics.push(more);
+    }
+    Ok(StageOutput { text: engine.out, macros: engine.macros, diagnostics: engine.diagnostics })
 }
 
 /// What a written line means for the leading macro facts.
@@ -225,6 +242,9 @@ struct Engine<'a> {
     macros: MacroFacts,
     include_stack: Vec<StackEntry>,
     expansions: usize,
+    diagnostics: Vec<Diagnostic>,
+    /// Conditions about run-time values past [`MAX_CONDITION_NOTES`].
+    unrecorded_conditions: usize,
 }
 
 /// One physical line.
@@ -443,6 +463,38 @@ impl Engine<'_> {
         }))
     }
 
+    /// The value of an `#if` or `#elif` condition. A condition that tests run-time values (a member
+    /// access such as `g_Texture0Resolution.x`, a subscript) cannot be decided before the shader
+    /// runs; Wallpaper Engine's compiler accepts such source, so the condition is false, as an
+    /// unknown name is, and a diagnostic records it. Any other failure stops preprocessing.
+    fn condition(&mut self, dir: &Directive, origin: &Origin, text: &str, line: &Line<'_>) -> Result<bool, PreprocessError> {
+        let message = match expr::evaluate(&dir.body, &self.env) {
+            Ok(value) => return Ok(value),
+            Err(message) => message,
+        };
+        let Some(token) = expr::runtime_token(&dir.body) else {
+            return Err(self.fail(origin, text, line, message));
+        };
+        if self.diagnostics.len() >= MAX_CONDITION_NOTES {
+            self.unrecorded_conditions += 1;
+            return Ok(false);
+        }
+        let mut note = Diagnostic::new(format!(
+            "#{} condition tests run-time values ({token} cannot appear in a preprocessor expression); it is treated as false",
+            dir.keyword
+        ))
+        .in_stage(self.kind)
+        .in_pass(Pass::Preprocess);
+        if let Some(span) = Span::new(line.start, line.end) {
+            note = note.at(span);
+        }
+        if let Origin::Include(path) = origin {
+            note = note.in_origin(format!("include {path}"));
+        }
+        self.diagnostics.push(note);
+        Ok(false)
+    }
+
     fn expand(&mut self, text: &str, origin: &Origin) -> Result<(), PreprocessError> {
         let mut conds: Vec<Cond> = Vec::new();
         let mut cursor = Cursor::new(text);
@@ -486,7 +538,7 @@ impl Engine<'_> {
                 "if" | "ifdef" | "ifndef" => {
                     let condition = if active {
                         if dir.keyword == "if" {
-                            expr::evaluate(&dir.body, &self.env).map_err(|m| self.fail(origin, text, &line, m))?
+                            self.condition(&dir, origin, text, &line)?
                         } else {
                             if !is_identifier(&dir.body) {
                                 return Err(self.fail(origin, text, &line, "conditional expects a single macro name"));
@@ -517,7 +569,7 @@ impl Engine<'_> {
                     }
                     let evaluate = top.enclosing_active && !top.taken;
                     let condition = if evaluate {
-                        expr::evaluate(&dir.body, &self.env).map_err(|m| self.fail(origin, text, &line, m))?
+                        self.condition(&dir, origin, text, &line)?
                     } else {
                         false
                     };

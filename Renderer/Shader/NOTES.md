@@ -126,7 +126,7 @@ the file; the crate uses no nightly feature and builds, tests and passes clippy
    on them (R84 "shader source text").
 10. **Digest.** SHA-256 truncated to 128 bits, 32 lower-case hex digits.
 11. **Compiler identity.** `<revision>:naga-<naga version>-msl<language
-    version>-<options>`, currently `1:naga-29.0.3-msl2.0-untransformed` (Step 5 changed the
+    version>-<options>`, currently `2:naga-29.0.3-msl2.0-untransformed` (Step 5 changed the
     first spelling `wm1-naga-...` to the `<integer>:<text>` form D R37 asks for; it differs from
     the stored upstream identity). `cache_key.rs` carries an append-only golden
     table of program keys per identity (R88): a change to what a key covers
@@ -387,8 +387,8 @@ Design:
 63. **Spans and diagnostics.** A syntax failure (R6) has pass `Parse`; a refusal of this part
     (unsupported name, sampler3D coordinate, array-parameter specialisation) has pass `Codegen`
     and the span of the construct; success carries the one informational `Codegen` entry.
-64. **Float swizzle on a scalar** (`f.x`, `f.xxx`, legal HLSL) is not supported: the swizzle's
-    type is `Unknown` and naga refuses it (the spec asks for no such rule).
+64. **Float swizzle on a scalar** (`f.x`, `f.xxx`, legal HLSL) was first left `Unknown` for naga to
+    refuse; it is translated since the A1 repairs (note 120).
 
 ## Step 4 choices (interface and resource legalisation)
 
@@ -837,6 +837,63 @@ Pass rates after these amendments are in the final report of the change: the wor
 compiles 807 of 813 programs (798 before), the dialect sweep 1,665 of 1,680 stages (1,653 before); the
 remainder is an undeclared varying (`phantomtransitionfx`), a `#if` the preprocessor refuses
 (`lens_distorsion`) and `v_TexCoord.zw` on a two-component varying, none of them in the amendments.
+
+## A1 repairs (declarator lists, integer `clamp`/`min`/`max`, scalar swizzles, run-time `#if`)
+
+Four general repairs of behaviour a release of the earlier implementation had. The tests are new files:
+`tests/declarator_lists.rs`, `tests/integer_clamp_min_max.rs`, `tests/scalar_swizzles.rs` and
+`tests/runtime_if_conditions.rs`, with the shared `tests/support/` (a pipeline helper, naga IR queries, and
+the GPU kernel runner of `tests/gpu_probe.rs` behind the same `WM_SHADER_GPU_PROBES=1`). What the earlier
+steps had already done is noted; those tests passed before the change and stay as proof.
+
+118. **An array suffix types one declarator.** Already done by the converter (`stmt::needs_split`): a local
+    or global list with an array declarator before another declarator is written one declaration per
+    declarator, each with the list's qualifiers and type; constants, constructor initializers and brace
+    lists included. Uniform, varying and attribute lists are split by the legalizer (note 66), so
+    `uniform float a[4], b;` declares `b`, and the metadata scan reads the source, so an annotation keeps
+    binding to the list's first name (R50). New: a `for` initializer split that way became a `Seq` the
+    loop header cannot print, and its declarations were dropped; they now go into a block of their own
+    around the loop. A list without an array declarator, a `for` initializer included, is unchanged, and
+    struct members and parameters are never split.
+119. **Integer `clamp`, `min`, `max`.** Already the rule of `call::shape_args`: with every argument typed and
+    none float, the call keeps integer literals (`uint` operands make them `3u`); a float operand turns
+    them into floats. Two readings of the packet: a call of literals only stays an integer call (the
+    rule in force since Step 3; its value is the same, and it converts where a float is needed), and the
+    converter has no repair that rewrites an `int` declaration to `float` (note 71 keeps `int q = step(...)`
+    an `int` with a conversion), so the "an int the step repair made a float" case cannot arise.
+120. **Scalar swizzles** (supersedes note 64). A swizzle of a scalar whose letters all name component 0 of
+    one set (`x`, `r`, `s`, one to four of them) is that scalar repeated: one letter is the value itself
+    (so `f.x = 1.0` writes `f`), more are the constructor of the scalar's kind and that width (`vec3(f)`,
+    `ivec2(i)`, `bvec2(b)`), which evaluates the scalar once. The result is typed, so the width rules apply
+    to it like to any vector (narrowing into a `vec2`, truncation beside a wider vector, `.x` into a
+    scalar). Any other letter (`f.y`, `f.xy`) stays `Unknown` and naga refuses it. Names resolve through the
+    converter's scopes, so a scalar shadowed by a vector (or the other way) is swizzled by the declaration
+    in scope. A scalar initialised from a vector expression was already the first component of the whole
+    converted expression (`coerce` narrows last); the tests pin that with consumers that reorder components
+    and check that a sample reaches `max`/`mix` whole.
+121. **A condition about run-time values is false.** `#if g_Texture0Resolution.x < g_Texture0Resolution.y`
+    used to stop preprocessing. `expr::runtime_token` looks for a token no preprocessor expression can hold:
+    a `.` after a name, a number or `)`, or a character outside names, numbers, parentheses and the C
+    preprocessor's operators (`[`, `,`, a quote). When the strict evaluator fails on such a condition, the
+    condition is false (its `#else` or a later `#elif` is taken) and the preprocessor records a diagnostic
+    (pass `Preprocess`, the stage, the directive line as span, `include <path>` as origin inside an
+    include). `StageOutput::diagnostics` carries it, `PreparedStage::diagnostics` keeps the final evaluated
+    pass's entries, and the program lists them ahead of the legalizer's. At most `MAX_CONDITION_NOTES` (16)
+    are recorded per stage and one more entry counts the rest, so a hostile stage cannot grow the stored
+    diagnostics document; the engine only copies that document. Conditions made of preprocessor
+    tokens behave as before, including the refusals R24 to R26 and the existing tests pin: `defined(X)`,
+    arithmetic (so `X / 0` too), `?:`, `0x10`, `1u`, `2.5`, an opaque value or an undefined chain in a
+    comparison, unbalanced parentheses, an empty condition. A condition that has both a run-time token and
+    a structural fault (`(g.x < 1`) is false, since it is not a preprocessor expression at all.
+122. **Pipeline revision 2.** Naga refuses every scalar swizzle and an unevaluable condition failed the
+    request, so repairs 120 and 121 change no response that succeeded before. The `for` fix of 118 can: a
+    loop whose names resolved to outer variables after its declarations were dropped compiled, with other
+    meaning. That is enough under `identity.rs`'s rule, so the revision is 2. The fixed programs of the golden
+    tables translate to the same Metal and converter text; only the cache key row is new.
+
+The shipped sweeps are unchanged (158 of 159 programs, 317 of 318 stages); the system Metal compiler accepted
+all 316 shipped stages. The workshop sweeps could not run in the worktree of this change (no unpacked
+copies): `lens_distorsion`, refused before by the preprocessor, now goes further and has to be checked there.
 
 ## Measurements (step 3)
 

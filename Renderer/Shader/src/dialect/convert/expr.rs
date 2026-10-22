@@ -423,6 +423,14 @@ impl Converter {
     fn member(&mut self, base: Expr, field: String, span: Span) -> T {
         let b = self.expr(base);
         let (name, ty) = match &b.ty {
+            // A scalar swizzled like a one-component vector (`f.x`, `f.xxx`, `f.rr`, `f.s`) repeats
+            // its value. naga takes no swizzle of a scalar: one component is the value itself, more
+            // are the constructor of that width, which reads the scalar once.
+            Ty::Scalar(k) => match swizzle_type(*k, 1, &field) {
+                Some(Ty::Vec(_, n)) => return self.broadcast(b, n),
+                Some(_) => return b,
+                None => (field, Ty::Unknown),
+            },
             Ty::Vec(k, n) => {
                 let ty = swizzle_type(*k, *n, &field).unwrap_or(Ty::Unknown);
                 (field, ty)

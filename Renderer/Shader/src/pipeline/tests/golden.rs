@@ -11,7 +11,10 @@ use crate::sha256::{Sha256, to_hex};
 /// Each row is `(identity, digest of the Metal text of the fixed programs)` as shipped. Rows are only
 /// ever appended, in the order of release, and the revision in front of the colon only ever grows: a
 /// revision is an opaque counter, compared for equality, and one that is reset or reused is a defect.
-const SHIPPED: &[(&str, &str)] = &[("1:naga-29.0.3-msl2.0-untransformed", "81d5f272f54deb9007775fa53bda918b9a6656b2773cc935d54c91a992d1c453")];
+const SHIPPED: &[(&str, &str)] = &[
+    ("1:naga-29.0.3-msl2.0-untransformed", "81d5f272f54deb9007775fa53bda918b9a6656b2773cc935d54c91a992d1c453"),
+    ("2:naga-29.0.3-msl2.0-untransformed", "81d5f272f54deb9007775fa53bda918b9a6656b2773cc935d54c91a992d1c453"),
+];
 
 fn programs() -> Vec<crate::pipeline::CompiledProgram> {
     let textured = "varying vec2 v_Coord;\nuniform sampler2D g_Texture0; uniform float g_Alpha;\nvoid main() { gl_FragColor = texSample2D(g_Texture0, v_Coord) * g_Alpha; }";

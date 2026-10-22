@@ -183,7 +183,7 @@ impl Converter {
             }
             Stmt::For { init, cond, step, body } => {
                 self.push_scope();
-                let init = init.map(|i| Box::new(self.stmt(*i)));
+                let init = init.map(|i| self.stmt(*i));
                 // naga reads a `for` condition that starts with a type name as a declaration.
                 let cond = cond.map(|c| {
                     let c = self.condition(c);
@@ -192,7 +192,16 @@ impl Converter {
                 let step = step.map(|s| self.expr(s).e);
                 let body = Box::new(self.sub_stmt(*body));
                 self.pop_scope();
-                Stmt::For { init, cond, step, body }
+                match init {
+                    // A declaration list split at an array declarator is several statements, which
+                    // the loop header cannot hold: they go into a block of their own around the
+                    // loop, so the names still belong to the loop alone.
+                    Some(Stmt::Seq(mut decls)) => {
+                        decls.push(Stmt::For { init: None, cond, step, body });
+                        Stmt::Block(decls)
+                    }
+                    init => Stmt::For { init: init.map(Box::new), cond, step, body },
+                }
             }
             Stmt::While { cond, body } => {
                 let cond = self.condition(cond);

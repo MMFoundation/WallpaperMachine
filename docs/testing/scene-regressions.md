@@ -2624,6 +2624,29 @@ Rust regressions in `Renderer/Shader` (`src/*/tests/` for the preprocessor, the 
 converter, the legalizer and the pipeline, and `tests/`) cover these paths with synthetic
 shader sources; the corpus sweeps skip asset-dependent cases with a printed reason.
 
+- **One declarator per array suffix (`Renderer/Shader`)** — `tests/declarator_lists.rs`:
+  in `float color[4], f;` only `color` is an array, for locals, globals, constants,
+  constructor and brace initializers and uniform lists (reflection lists every member);
+  naga would type `f` as the array and drop the effect. A `for` initializer with an array
+  declarator keeps its declarations (they move into a block around the loop); a plain
+  `for (int i = 0, j = 1; ...)` list is untouched. Kernels are evaluated on the GPU with
+  `WM_SHADER_GPU_PROBES=1`.
+- **Integer `clamp`, `min` and `max` stay integer (`Renderer/Shader`)** —
+  `tests/integer_clamp_min_max.rs`: an `int`/`ivecN` operand keeps literals integer, so
+  `clamp(index, 0, BANDS - 1)` can index an array again (`clamp(7, 0, 5)` selects element
+  5); `uint` operands get unsigned literals; a float operand still promotes them.
+- **Scalar swizzles (`Renderer/Shader`)** — `tests/scalar_swizzles.rs`: `f.x`, `f.rr`,
+  `f.xxx` repeat a scalar of any kind, in any position, after scope resolution, and feed
+  the usual width rules; a vector swizzle keeps its mapping. A scalar initialised from a
+  vector expression takes the first component of the finished expression (checked with
+  reordering consumers on the GPU and with a texture sample reaching `max`/`mix` whole).
+  Pipeline revision 2 (see `Renderer/Shader/NOTES.md`, note 122).
+- **A `#if` about run-time values is false (`Renderer/Shader`)** —
+  `tests/runtime_if_conditions.rs`: `#if g_Texture0Resolution.x < g_Texture0Resolution.y`
+  takes its `#else` (or a later `#elif`) with a `Preprocess` diagnostic instead of failing
+  the effect; conditions made only of preprocessor tokens evaluate, or are refused, as
+  before.
+
 - **Scalar component swizzles** — `legalize_type_coercion::scalar_swizzles_*`
   compiles scalar splats through both backends and checks Naga IR component types,
   widths, vector selection, lexical shadowing and downstream width conversions.

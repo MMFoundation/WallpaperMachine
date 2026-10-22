@@ -226,7 +226,10 @@ fn converted_output_is_pinned_per_pipeline_revision() {
         hash.update(out.as_bytes());
     }
     let digest = to_hex(&hash.finalize());
-    const PINNED: &[(u32, &str)] = &[(1, "598de99a1dfb6a8fe0e1cf6098dc80652da65681d6a9c506da39ee3628871b9c")];
+    const PINNED: &[(u32, &str)] = &[
+        (1, "598de99a1dfb6a8fe0e1cf6098dc80652da65681d6a9c506da39ee3628871b9c"),
+        (2, "598de99a1dfb6a8fe0e1cf6098dc80652da65681d6a9c506da39ee3628871b9c"),
+    ];
     let row = PINNED.iter().find(|(r, _)| *r == PIPELINE_REVISION);
     match row {
         Some((_, d)) => assert_eq!(

@@ -25,6 +25,7 @@
 //! in request order, then texture-derived combos, then annotation defaults,
 //! each in stage order and first-seen order.
 
+use crate::diagnostic::Diagnostic;
 use crate::error::ShaderError;
 use crate::items::{BraceMode, scan_items};
 use crate::lexer::lex;
@@ -44,6 +45,8 @@ pub struct PreparedStage {
     pub macros: MacroFacts,
     /// The metadata-preserving text (R29), built with the request combos only.
     pub view: String,
+    /// The preprocessor's non-fatal diagnostics for `evaluated`.
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -120,7 +123,13 @@ pub fn prepare_program(request: &ValidRequest, includes: &dyn IncludeSource) -> 
         } else {
             earlier
         };
-        stages.push(PreparedStage { kind: stage.kind, evaluated: evaluated.text, macros: evaluated.macros, view });
+        stages.push(PreparedStage {
+            kind: stage.kind,
+            evaluated: evaluated.text,
+            macros: evaluated.macros,
+            view,
+            diagnostics: evaluated.diagnostics,
+        });
     }
     Ok(PreparedProgram { stages, compile_combos, metadata: reported, includes_read: cache.paths_read() })
 }
