@@ -179,6 +179,7 @@ wm_gtest_executable(audio_tests
         audio/sample_math_test.cpp
         audio/sound_layer_control_test.cpp
         audio/sound_output_lifecycle_test.cpp
+        support/allocation_tracking.cpp
     LIBS ${PROJECT_NAME} wpAudio wpFs
     INCLUDES . ${CMAKE_SOURCE_DIR}/src)
 if(APPLE)
