@@ -64,9 +64,12 @@ more consecutive lines (gaps of at most 2) that also occur in the import snapsho
 
 Interface names, field lists, API signatures and one-line idioms still match in places;
 they are facts of the interfaces the code implements, not copied expression. Three
-small contributors to the imported code were checked line by line: wjj-8283's two
-scene-engine commits (non-finite audio sanitizing, horizontal flip) were rewritten with
-the rest of the engine on 2026-10-22; of OiCkilL's four commits, what remains is
+small contributors to the imported code were checked line by line: the code of wjj-8283's
+two scene-engine commits (non-finite audio sanitizing, horizontal flip) was cut and
+re-implemented from a specification on 2026-10-22 by a session that had not seen it; the
+handful of lines that came out the same are dictated by the interface (two threshold
+constants, the flip's command name and one call, a mirrored coordinate `1 - x`, and an
+`isfinite` filter); of OiCkilL's four commits, what remains is
 declarations (`std::weak_ptr<SceneMaterial> material;`, a method signature), the
 `if (material == nullptr) continue;` idiom, the name `synchronizeStatusItem` with a
 standard `DispatchQueue.main.async { [weak self] in` guard, and the signature of
@@ -87,11 +90,22 @@ What the root `LICENSE` does and does not do:
   `upstream/renderer/external/open-wallpaper-engine/LICENSE.upstream-GPL-2.0`: they record
   under which terms the imported code was received, not the terms of the code there now.
   The imported code itself remains in this repository's Git history under those terms.
-- Two contributors to the project's own code after the import, Morax (the scene
-  engine's Native Metal renderer, `Scene/MetalRender`) and Henry Yang (regions of the
-  scene tests), are reported by the maintainer to have given written permission for
-  their contributions to be used under this license. Those texts are not yet filed with
-  this record; until they are, their contributions' license rests on that report (see
+- Three people besides the maintainer contributed to the project's own code after the
+  import, while it was GPL-2.0-only. Their contributions are under the terms they gave
+  them, and offering them under GPL-3.0-only needs each one's permission:
+  - **Morax** (163 commits; about 91,000 lines at HEAD across `App/`, `Tests/`, the Rust
+    bridge and core crates, the scene engine including its Native Metal renderer
+    `Scene/MetalRender`, and `scripts/`). The maintainer reports a written permission; the
+    text is not yet filed here, and its scope must cover all of these contributions.
+  - **Henry Yang** (3 commits; about 130 lines, mostly the bridge's
+    `actor/snapshots.rs` and `actor/state.rs` and `tests/metal_scene_draw_smoke.mm`, a few in
+    `App/` and `Extension/`). The maintainer reports a written permission; the text is not
+    yet filed here.
+  - **Hi-Jiajun** (3 commits, `50dd988f0`, `d53864e34`, `ca5b7b1bb`; about 370 lines of the
+    solar automation: `SolarLocationTracker.swift`, the `WallpaperAutomation*` sources and
+    tests, `DisplaysGroups.swift`). No permission is recorded.
+  Until each permission is filed with a scope that covers the contributions, or the
+  contributions are replaced, the GPL-3.0-only offer of those lines rests on it (see
   [Remaining blockers](#remaining-blockers)).
 
 The application shell, extension and Workshop browser are recorded in
@@ -384,8 +398,10 @@ Open before any distribution:
 
 1. **Contributor permissions on file.** Morax's and Henry Yang's written permissions
    to use their contributions under GPL-3.0-only are reported by the maintainer and not
-   yet filed here. Each filed text must name who gave it, which contributions it covers
-   and under which license; a text narrower than that scope leaves the rest uncovered.
+   yet filed here; Hi-Jiajun's is not recorded at all, so their solar automation code
+   needs a permission or a replacement. Each filed text must name who gave it, which
+   contributions it covers and under which license; a text narrower than that scope
+   leaves the rest uncovered.
 2. **A run of the closure check on the app to be distributed.**
    `python3 scripts/check_licenses.py --enforce` on that Release app, with the outcome
    recorded here.
@@ -495,8 +511,9 @@ package that returns is reported as unknown.
 
 - `Contents/Resources/WallpaperMachine-LICENSE.txt`: the root `LICENSE`;
 - `Contents/Resources/LICENSING.md`: this file;
-- `Contents/Resources/Renderer-LICENSE.txt`: `upstream/renderer/LICENSE.upstream-GPL-2.0`,
-  the terms under which the imported renderer was received;
+- `Contents/Resources/Imported-Renderer-GPL-2.0-LICENSE.txt`:
+  `upstream/renderer/LICENSE.upstream-GPL-2.0`, the terms under which the imported renderer
+  was received, not the license of the code now;
 - `Contents/Resources/provenance.json`: `upstream/provenance.json`;
 - `Contents/Resources/Licenses/<formula>-<version>/`: every `LICENSE*`,
   `COPYING*`, `COPYRIGHT*` and `NOTICE*` file of each Homebrew keg in the link
@@ -621,7 +638,8 @@ prefix is `app.wallpapermachine`.
   under [Source license](#source-license-gpl-30-only); `upstream/provenance.json` records it
   under `renderer.cleanRoomCompletion2026_10_22`. Main's renderer fixes made after the import
   were carried over as behavior, each by a separate implementer from a behavior specification
-  with a regression test, and compared with Wallpaper Engine's own frames.
+  with a regression test, and compared with Wallpaper Engine's own frames: on nine scenes the
+  rewritten renderer is within noise of main's, better on one shot and slightly worse on one.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
   at revision `73f14ab1568371e6e3c44063f21c34c5e2712c4d`, BSD-3-Clause, vendored
   under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes

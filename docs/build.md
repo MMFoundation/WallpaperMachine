@@ -201,7 +201,7 @@ bundle is absent.
    and Rust-crate inventories; see [testing](testing/README.md).
 2. **License payload.** The root `LICENSE` is copied in as
    `WallpaperMachine-LICENSE.txt`, `LICENSING.md` as `LICENSING.md`,
-   `upstream/renderer/LICENSE.upstream-GPL-2.0` (the imported renderer's terms) as `Renderer-LICENSE.txt`,
+   `upstream/renderer/LICENSE.upstream-GPL-2.0` (the terms the imported renderer arrived under, not the license of the code now) as `Imported-Renderer-GPL-2.0-LICENSE.txt`,
    `upstream/provenance.json` as `provenance.json`, each bundled keg's notices
    under `Licenses/<formula>-<version>/`, the notices of the third-party
    code statically linked into the renderer under

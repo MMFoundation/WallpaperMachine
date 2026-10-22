@@ -210,7 +210,7 @@ def write_licenses(resources, licenses, third_party):
         shutil.copy2(file, target / file.name)
     shutil.copy2(ROOT / "LICENSE", resources / "WallpaperMachine-LICENSE.txt")
     shutil.copy2(ROOT / "LICENSING.md", resources / "LICENSING.md")
-    shutil.copy2(RENDERER / "LICENSE.upstream-GPL-2.0", resources / "Renderer-LICENSE.txt")
+    shutil.copy2(RENDERER / "LICENSE.upstream-GPL-2.0", resources / "Imported-Renderer-GPL-2.0-LICENSE.txt")
     shutil.copy2(ROOT / "upstream/provenance.json", resources / "provenance.json")
     (resources / "THIRD-PARTY-NOTICES.txt").write_text(third_party)
 

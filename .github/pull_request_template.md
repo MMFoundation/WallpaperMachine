@@ -20,3 +20,4 @@
 - [ ] Generated files regenerated, not hand-edited (`project.yml` → Xcode project; bridge bindings through `scripts/build.py`); `upstream/` changes update `upstream/provenance.json`
 - [ ] The document that owns the behavior updated
 - [ ] No build output, secrets, private wallpapers or personal paths in the diff
+- [ ] My commits are signed off (`git commit -s`): I certify the Developer Certificate of Origin and license this change under GPL-3.0-only (CONTRIBUTING.md)

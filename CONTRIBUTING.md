@@ -122,8 +122,10 @@ components it uses. By contributing you agree that your contribution is licensed
 the same terms, GPL-3.0-only, and that it does not carry code you may not license that
 way: code available only under GPL-2.0-only, for example, cannot be accepted.
 
-Sign off every commit with `git commit -s`. The `Signed-off-by:` line certifies the
-Developer Certificate of Origin below, as published at https://developercertificate.org/:
+Sign off the commits of a pull request with `git commit -s`, and tick the sign-off box in
+the pull request; a squash merge drops per-commit trailers, so the box is what remains.
+The sign-off certifies the Developer Certificate of Origin below, as published at
+https://developercertificate.org/:
 
 ```text
 Developer Certificate of Origin
