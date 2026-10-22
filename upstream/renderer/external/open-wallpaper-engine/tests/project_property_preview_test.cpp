@@ -15,6 +15,7 @@
 #include "Fs/Fs.h"
 #include "Fs/MemBinaryStream.h"
 #include "Fs/VFS.h"
+#include "support/byte_fs.hpp"
 #include "Project/ProjectProperties.hpp"
 #include "Runtime/DynamicValue.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
@@ -167,26 +168,12 @@ void main() {
 }
 )";
 
-class MemoryFs final : public fs::Fs {
-public:
-    explicit MemoryFs(std::map<std::string, std::string> files): m_files(std::move(files)) {}
-
-    bool Contains(std::string_view path) const override {
-        return m_files.contains(std::string(path));
-    }
-
-    std::shared_ptr<fs::IBinaryStream> Open(std::string_view path) override {
-        const auto it = m_files.find(std::string(path));
-        if (it == m_files.end()) return nullptr;
-        const auto& s = it->second;
-        return std::make_shared<fs::MemBinaryStream>(std::vector<uint8_t>(s.begin(), s.end()));
-    }
-
-    std::shared_ptr<fs::IBinaryStreamW> OpenW(std::string_view) override { return nullptr; }
-
-private:
-    std::map<std::string, std::string> m_files;
-};
+// The in-memory file space the tests mount; text goes in, the project's byte map serves it.
+std::unique_ptr<fs::Fs> MakeTextFs(const std::map<std::string, std::string>& files) {
+    test::MapFs::Files bytes;
+    for (const auto& [path, text] : files) bytes[path].assign(text.begin(), text.end());
+    return std::make_unique<test::MapFs>(std::move(bytes));
+}
 
 std::string SceneJson(std::string_view objects) {
     return std::string(R"({
@@ -266,7 +253,7 @@ std::unique_ptr<LoadedScene> Load(std::string_view objects, const ProjectPropert
         { "/materials/solid.tex", "" },
     };
     files.insert(more_files.begin(), more_files.end());
-    if (! loaded_scene->vfs.Mount("/assets", std::make_unique<MemoryFs>(files))) return nullptr;
+    if (! loaded_scene->vfs.Mount("/assets", MakeTextFs(files))) return nullptr;
     loaded_scene->scene = loaded_scene->parser.Parse(
         SceneParseRequest {
             .scene_id                    = "property-preview",

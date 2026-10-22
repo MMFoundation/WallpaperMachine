@@ -6,6 +6,7 @@
 #include "Fs/Fs.h"
 #include "Fs/MemBinaryStream.h"
 #include "Fs/VFS.h"
+#include "support/byte_fs.hpp"
 #include "Image.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Scene/Scene.h"
@@ -34,26 +35,12 @@ namespace
 {
 using namespace wallpaper;
 
-class MemoryFs final : public fs::Fs {
-public:
-    explicit MemoryFs(std::map<std::string, std::string> files): m_files(std::move(files)) {}
-
-    bool Contains(std::string_view path) const override {
-        return m_files.contains(std::string(path));
-    }
-
-    std::shared_ptr<fs::IBinaryStream> Open(std::string_view path) override {
-        const auto it = m_files.find(std::string(path));
-        if (it == m_files.end()) return nullptr;
-        const auto& s = it->second;
-        return std::make_shared<fs::MemBinaryStream>(std::vector<uint8_t>(s.begin(), s.end()));
-    }
-
-    std::shared_ptr<fs::IBinaryStreamW> OpenW(std::string_view) override { return nullptr; }
-
-private:
-    std::map<std::string, std::string> m_files;
-};
+// The in-memory file space the tests mount; text goes in, the project's byte map serves it.
+std::unique_ptr<fs::Fs> MakeTextFs(const std::map<std::string, std::string>& files) {
+    test::MapFs::Files bytes;
+    for (const auto& [path, text] : files) bytes[path].assign(text.begin(), text.end());
+    return std::make_unique<test::MapFs>(std::move(bytes));
+}
 
 constexpr std::string_view kVert = R"(attribute vec3 a_Position;
 attribute vec2 a_TexCoord;
@@ -94,7 +81,7 @@ void MountFiles(fs::VFS& vfs, std::map<std::string, std::string> extra = {}) {
         { "/materials/solid.tex", "" },
     };
     for (auto& [path, content] : extra) files[path] = std::move(content);
-    ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    ASSERT_TRUE(vfs.Mount("/assets", MakeTextFs(files)));
 }
 
 /// With `properties`, parsed with a runtime as the wallpaper is, so a layer the

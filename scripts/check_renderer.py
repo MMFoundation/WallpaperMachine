@@ -61,7 +61,6 @@ REGRESSION_BINARIES = {
     "rust_shader_bridge_behavior_test": False, "shader_program_cache_behavior_test": False,
     "shader_dialect_compat_test": False, "shader_corpus_test": False,
     "video_texture_submission_smoke": False,
-    "version_tests": False,
     # Renderer/Media/tests: the project's own container readers, pure C++ and headless.
     "media_core_tests": False, "media_isobmff_tests": False, "media_matroska_tests": False,
     # Renderer/Sound/tests: the project's own remix, resample and loop path, pure C++ and headless.
@@ -72,9 +71,7 @@ REGRESSION_BINARIES = {
 }
 # Executables in tests/CMakeLists.txt that the check neither builds nor runs, and
 # why. Every other one is registered above, a probe, or the diagnostic benchmark below.
-MANUAL_BINARIES = {
-    "wpdump": "inspection tool, not a test: dumps one workshop item's parse to JSON",
-}
+MANUAL_BINARIES = {}
 OFFSCREEN_PROBE = "offscreen_scene_probe"
 RELOAD_PROBE = "scene_reload_cycle_probe"
 TIMER_PROBE = "timer-precision"

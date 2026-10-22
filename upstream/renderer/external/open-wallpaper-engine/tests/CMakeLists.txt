@@ -1,15 +1,5 @@
-#Test suite for wescene - renderer.
-#
-#Strategy : a single gtest binary indexes workshop/* once via DumpWorkshop
-# (no on-disk fixtures) and uses TEST_P fixtures to register one test
-# instance per (category, version) pair observed in the corpus. Each
-# instance asserts category-specific structural invariants on the slice
-# of assets matching its parameter.
-#
-# Adding a new workshop with a previously-unseen pkg/tex/mdl version
-# automatically grows the test matrix on the next run — no allow-list
-# bumps required, but the new instance must still satisfy the invariants
-# in version_tests.cpp or it fails immediately.
+# Test suite for wescene - renderer: one gtest executable per area, registered in
+# scripts/check_renderer.py (REGRESSION_BINARIES).
 
 include(FetchContent)
 
@@ -23,26 +13,6 @@ set(BUILD_GMOCK OFF CACHE INTERNAL "")
 set(INSTALL_GTEST OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(googletest)
 include(GoogleTest)
-
-# Shared library for the dumper + corpus index. Used by the gtest binary
-# and any future ad-hoc tools.
-add_library(wpdump_lib STATIC dump.cpp corpus.cpp)
-target_link_libraries(
-    wpdump_lib
-    PUBLIC
-        ${PROJECT_NAME}
-        wpFs
-        wpScene
-        nlohmann_json::nlohmann_json
-)
-target_include_directories(wpdump_lib PUBLIC .)
-target_compile_features(wpdump_lib PUBLIC cxx_std_20)
-target_compile_definitions(
-    wpdump_lib PUBLIC
-    "WAYWALLEN_WORKSHOP_DIR=\"${CMAKE_SOURCE_DIR}/workshop\"")
-
-add_executable(version_tests version_tests.cpp)
-target_link_libraries(version_tests PRIVATE wpdump_lib GTest::gtest_main)
 
 # The .tex fixtures this suite builds are lz4-compressed, and the renderer links
 # lz4 privately, so the headers do not arrive with it.
@@ -182,12 +152,6 @@ target_include_directories(sprite_animation_test PRIVATE ${CMAKE_SOURCE_DIR}/src
 target_compile_features(sprite_animation_test PRIVATE cxx_std_20)
 gtest_discover_tests(sprite_animation_test PROPERTIES TIMEOUT 30 DISCOVERY_TIMEOUT 60)
 
-# CLI for inspecting one workshop: dumps its DumpWorkshop snapshot to JSON.
-add_executable(wpdump wpdump_main.cpp)
-target_link_libraries(wpdump PRIVATE wpdump_lib)
-
-# Use gtest_discover_tests so each TEST_P instance becomes its own ctest
-# entry, runnable individually with `ctest -R ScenePkgVersionTest`.
 add_executable(
     audio_tests
     audio/audio_response_mono_test.cpp

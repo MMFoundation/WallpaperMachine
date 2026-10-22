@@ -24,18 +24,10 @@
 
 namespace
 {
-using wallpaper::Scene;
-using wallpaper::SceneCamera;
-using wallpaper::SceneImageEffect;
-using wallpaper::SceneImageEffectLayer;
-using wallpaper::SceneImageEffectNode;
-using wallpaper::SceneMaterial;
-using wallpaper::SceneMesh;
-using wallpaper::SceneNode;
-using wallpaper::SceneRenderTarget;
-using wallpaper::SpecTex_Default;
-using wallpaper::rg::CopyPass;
-using wallpaper::rg::DrawPass;
+using wallpaper::Scene, wallpaper::SceneCamera, wallpaper::SceneMesh, wallpaper::SceneNode;
+using wallpaper::SceneImageEffect, wallpaper::SceneImageEffectLayer, wallpaper::SceneImageEffectNode;
+using wallpaper::SceneMaterial, wallpaper::SceneRenderTarget, wallpaper::SpecTex_Default;
+using wallpaper::rg::CopyPass, wallpaper::rg::DrawPass;
 using namespace graph_contract;
 
 // One triangle skinned to a single root bone, with no animations.

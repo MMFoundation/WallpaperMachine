@@ -98,17 +98,15 @@ inline std::shared_ptr<Image> CreateVideoProjectImage(const std::filesystem::pat
     // process and nothing writes a second copy of it, which is why the image
     // carries no slots.
     image->videoFilePath            = resolved_media.string();
-    image->header.isVideo           = true;
-    image->header.videoAudioEnabled = true;
-    image->header.count             = 1;
-    image->header.sample.wrapS      = TextureWrap::CLAMP_TO_EDGE;
-    image->header.sample.wrapT      = TextureWrap::CLAMP_TO_EDGE;
-    image->header.sample.minFilter  = TextureFilter::LINEAR;
-    image->header.sample.magFilter  = TextureFilter::LINEAR;
-    image->header.width             = static_cast<i32>(source_width);
-    image->header.height            = static_cast<i32>(source_height);
-    image->header.mapWidth          = static_cast<i32>(source_width);
-    image->header.mapHeight         = static_cast<i32>(source_height);
+    // Single frame, clamped and linear: how a decoded video frame is sampled.
+    ImageHeader& header = image->header;
+    header.isVideo = true;
+    header.videoAudioEnabled = true;
+    header.count = 1;
+    header.sample.wrapS = header.sample.wrapT = TextureWrap::CLAMP_TO_EDGE;
+    header.sample.minFilter = header.sample.magFilter = TextureFilter::LINEAR;
+    header.width = header.mapWidth = static_cast<i32>(source_width);
+    header.height = header.mapHeight = static_cast<i32>(source_height);
     return image;
 }
 
