@@ -1,60 +1,59 @@
 # Scene rendering
 
-How scene wallpapers are drawn and kept cheap: the renderer that draws them, the
+How scene wallpapers are drawn and kept cheap: which renderer draws them, the
 optimisation and update-only-on-change behaviour, and the renderer-internal memory
-and repeated-work reductions. The settings that govern them are on
+and repeated-work reductions. The settings that choose between them are on
 **Settings → Performance → Advanced**, described in
 [Performance](performance.md#advanced).
 
 ## Scene wallpapers
 
-The two scene controls in **Advanced**:
+The three scene controls in **Advanced**:
 
 | Setting | Values | Default |
 | --- | --- | --- |
+| Scene renderer | Compatibility / Native Metal preferred | Native Metal preferred |
 | Scene render optimisation | Off / On | **On** |
 | Update only when the scene changes | Off / On | Off |
 
 ### Scene renderer
 
-Native Metal is the only scene renderer. There is no setting to choose another, and
-the engine never creates one: a scene Native Metal cannot draw is held and reported
-instead ([below](#when-native-metal-cannot-draw-a-scene)), and no effect is dropped to
-make a scene fit. The lock screen and the screen saver work the same way (see [lock
-screen](lock-screen.md#scene-renderer)).
+Which renderer scene wallpapers prefer. **Native Metal preferred**, the default,
+asks for the native Metal backend; a scene it cannot draw runs on Compatibility as a
+whole (an effect is never dropped to keep a scene native) and the status line says
+why. **Compatibility** is the Vulkan-through-MoltenVK path for every scene.
+Lock-screen playback always uses Compatibility.
 
-The Compatibility renderer (Vulkan through MoltenVK) and the **Scene renderer** setting
-that chose it are gone, and the Vulkan source with them. Native Metal replaced it once it drew every scene of the local
-test library the way Compatibility did (drawn by both renderers in one harness, the
-pictures were the same) and cost less to run: over 12 of those scenes at 3840×2160 and
-60 FPS it took about 21% less process CPU time and 14% less GPU time in its own command
-buffers (one per frame instead of three), about 3% less memory footprint, and held 60
-FPS where Compatibility dropped frames. The commands are in the [verification
-log](../testing/verification-log.md). A saved `scene_renderer` of any value
-(`compatibility`, `native_metal_preferred` or `native_metal_only`) is read past and not
-written back, and means this behaviour. No Vulkan, MoltenVK, glslang or SPIR-V code or
-library remains in the tree or the build; the shader compiler writes Metal Shading Language
-only, and the parse asks it for an analysis (parse, validate, reflect) that produces no code.
+Native Metal became the default once it drew every scene of the local test library
+the way Compatibility does (drawn by both renderers in one harness, the pictures
+were the same) and cost less to run. Over 12 of those scenes at 3840×2160 and 60
+FPS it took about 21% less process CPU time and 14% less GPU time in its own command
+buffers (one per frame instead of three), about 3% less memory footprint, and held
+60 FPS where Compatibility dropped frames; the commands are in the
+[verification log](../testing/verification-log.md). A configuration saved before
+then holds `compatibility` whether or not anyone chose it, so it moves to Native
+Metal preferred once, when this version first loads it, and records that it did
+(`native_metal_default_applied`); choosing Compatibility afterwards is kept.
 
-No GPU renderer is created until the scene has been parsed and found drawable, so the
-**Drawn by** row reports one of three states per scene: **preparing** (no renderer yet),
-**Native Metal**, or the reason the scene is held. It never shows a guess in place of the
-outcome.
+No GPU backend is created until the scene has been parsed and a backend chosen, so
+the row reports one of three states per scene: **preparing** (no backend yet), the
+backend actually in use, or Compatibility with the reason native was not used. It
+never shows the preference in place of the outcome.
 
 Native Metal draws image layers, text layers, sprite-sheet animation,
 two-dimensional puppets, two-dimensional sprite, sprite-trail, rope and rope-trail
 particles, 3D models and skyboxes, perspective cameras, scene lights, ordinary
 effect chains and scene post-processing, layers that read an image another layer
-produced in the same frame, effects and layers that read the previous frame (a motion-blur
-trail, a fluid or ripple simulation, a layer sampling its own last composite), images the runtime replaces while the scene
-plays, and BGRA, 8-bit NV12 or 10-bit video textures — an 8-bit one either converted
-once per frame or, with
+produced in the same frame, effects that read the previous frame (a motion-blur
+trail, a fluid or ripple simulation), images the runtime replaces while the scene
+plays, and BGRA or 8-bit NV12 video textures — the latter either converted once per
+frame or, with
 [**Direct video plane sampling**](performance.md#direct-video-plane-sampling) on,
-sampled by the layer's own shader, a 10-bit one always converted once per frame
-([10-bit and HDR video](#10-bit-and-hdr-video-textures)). A scene is held as a
-whole for a plain video wallpaper (the app's own players play those), a video format the
-decoder cannot produce (4:2:2, 4:4:4, 12-bit or an unsupported codec), or a shader that
-does not translate.
+sampled by the layer's own shader. A scene falls back as a whole for HDR or 10-bit
+video, a plain video wallpaper, a shader that does not translate, particle geometry
+in a layout it does not recognise (lit particles among them), a multisampled target,
+an effect that samples a depth buffer, or a layer that reads its own previous frame (its `_b` composite, bound anywhere but its
+own effects).
 A scene with `camerashake` on shakes its camera as Wallpaper Engine does: the eye and
 what it looks at move together by `(cos t, sin 1.333t, sin t)` at
 `t = camerashakespeed² × time`, its length raised to `camerashakeroughness³`, scaled
@@ -105,9 +104,7 @@ order like any other, found by its id and played through the object
 layers the parser built are counted: an object the scene file marks statically
 invisible, which nothing can show, is never built, so it has no index or id and the
 count differs from the object list by those. `destroyLayer` removes the layers a
-script made below the layer too, and with each of them the script's wrapper object
-and the animation-ended callbacks registered on it, so their closures are released
-and a destroyed layer never fires a stale listener. A scene script's `init` runs once the scene is
+script made below the layer too. A scene script's `init` runs once the scene is
 built, so it sees all of that. Property scripts start on the scene's first tick:
 every one runs `init`, in the scene's order, before any of them is told the user
 properties, and that before any `update`, because a widget's options layer may call
@@ -130,17 +127,8 @@ a layer drawn through its effects renders from are not in it. A layer anchored t
 edge or a corner (`alignment`) answers the centre of its quad, which its anchor
 places, while `layer.origin` still reads the anchor. A layer that ignores its parent's
 transform answers its own placement. The other layer transform calls
-(`getChildren`, `setParent`, `lookAt`, `lookAtYaw` and `getAttachment*`) do not exist
-yet: a script that calls one stops at that line.
-
-`layer.rotateObjectSpace(Vec3)` turns a layer by an Euler-angle increment in radians
-about the layer's own axes, on top of the orientation it has: the new orientation is
-the current one followed by the increment, turned z, then y, then x as the layer's
-`angles` are. `angles` keeps reading and writing degrees, and each call starts from the
-result of the last. The increment is local, so a turned or scaled parent, a mirrored
-axis (a negative `scale`) and an anchored layer change nothing about it: the layer's own
-angles carry the increment, and an anchored layer (`alignment`) keeps its anchor point
-where the origin puts it as its quad turns about it.
+(`getChildren`, `setParent`, `rotateObjectSpace`, `lookAt`, `lookAtYaw` and
+`getAttachment*`) do not exist yet: a script that calls one stops at that line.
 
 A layer's `origin`, `scale` and `angles`, and an image layer's `color`, can be keyed on
 a timeline (`animation`: curves `c0` to `c2` and `options`), and all four play the
@@ -188,22 +176,9 @@ material, every effect pass and a compose layer's passthrough, as a colour bound
 user property does (alpha stays with the alpha bindings). A script whose `update()`
 returns nothing leaves the colour as it is, and one that writes `thisLayer.color` sets
 it from then on: the next `update(value)` is given it, and a value `update()` returns
-replaces it, as for `visible` and `origin`. A static layer colour is a load-time
-default, not a live writer: an effect's explicit shader constant (including a material
-alias for `g_Color`) overrides that default at load and stays intact through ticks.
-A static partial constant replaces only its supplied lanes: tint `0.25` over a static
-`(0.3,0.5,0.7)` owner yields `(0.25,0.5,0.7)`, not the shader-default tail.
-A material constant driven by a property, script or timeline instead retains whole-value
-ownership: its binding replaces a differing current value, including its lane count.
-It does not retain extra lanes from an earlier material value. For a shorter scalar/vector
-value, the remaining uniform lanes follow shader defaults and later live writes, not
-an implicit extension of the static-effect rule.
-Explicit colour writes still reach the layer's registered recipients, including a write
-of the value already held; a truly unbound, single-material layer writes only its own
-mesh. Static multi-material recipients reuse the existing value/listener storage without
-an initial replay or per-frame work. Half-built-layer rollback also restores colour
-recipients registered before their node, without requiring an anchor registration.
-A scripted colour costs one script call a frame, as a text layer's does, and
+replaces it, as for `visible` and `origin`. A write to the colour of a layer that has no
+property or script bound to it reaches only the layer's own material, not its effect
+passes. A scripted colour costs one script call a frame, as a text layer's does, and
 no pass or memory. It is also a script like any other, so a scene whose only script is
 an image layer's colour no longer goes idle (it did, while the colour script was never
 created); a scene with other scripts did not idle before either.
@@ -252,61 +227,15 @@ this app's own windows is not a click on the wallpaper, so neither scripts
 dragged onto the desktop before the button is let go. A press the wallpaper did get is
 always released, wherever the pointer ends up.
 
-Scenes have one video decoder. A video texture in a scene is read by the
-project's own MP4/QuickTime and WebM/Matroska readers and decoded by VideoToolbox (H.264,
-HEVC, VP9 through its supplemental decoder, and AV1 on a Mac with an AV1 hardware decoder);
-the payload is read where it lies instead of being written out for a demuxer. There is no other
-decoder: media those readers do not read (another container, or an MP4 feature they refuse such
-as fragmentation) fails with its reason and the scene keeps its last picture. A codec with no hardware or VideoToolbox decoder (VP8, AV1 on an M1 or M2) is
-refused with a "format not supported" reason that names it, and the first frame must still
-decode successfully. This does not enable software-only decoders.
-[container-readers.md](../container-readers.md) has the details.
-
-#### 10-bit and HDR video textures
-
-On Native Metal a 10-bit video texture (HEVC Main 10, 10-bit VP9 or AV1) stays in the scene
-and is shown as an SDR picture. The decoder is asked for 10-bit biplanar 4:2:0 (`x420`); the
-two planes are imported as 16-bit images without a copy, and one conversion per new frame
-turns them into the same BGRA image an 8-bit video produces, which every layer that samples
-the video then reads. What the conversion does depends on the transfer function the stream
-declares, which the decoder attaches to each frame:
-
-- **PQ (SMPTE ST 2084) and HLG (BT.2100)**, the two HDR curves, are tone mapped. The picture
-  is converted from YCbCr with the BT.2020 matrix (or whichever the stream states), brought
-  to light in nits (PQ directly, HLG through its inverse OETF and the OOTF of a 1000-nit
-  display), compressed with the BT.2390 EETF in linear light, rotated from the stream's
-  primaries (BT.2020, or P3-D65 when it says so) into BT.709, and encoded with the sRGB
-  curve. Linear light is scaled so that 203 nits, the reference white of BT.2408, is 1.0,
-  and the EETF maps the stream's peak to that SDR white: the peak is the stream's maximum
-  content light level, else its mastering display's maximum luminance, else 1000 nits, and
-  never more than the 10000 nits the curves can express. The compression acts on the
-  brightest channel of each pixel, so the ratio between channels survives it. A colour that
-  falls outside BT.709 is desaturated towards its own luminance just far enough that no
-  channel is negative, and scaled down if a channel exceeds one, rather than cut off per
-  channel. Mapping a 1000-nit peak onto SDR white leaves a stream's 203-nit diffuse white a
-  little under white (about 90% in encoded value); a stream that states a lower peak is
-  compressed less.
-- **Anything else** (BT.709, BT.601, an unstated transfer) is display-referred 10-bit
-  video, and is not tone mapped: the codes are converted with their matrix and written as
-  they decode, exactly as an 8-bit frame is. If such a stream names BT.2020 or P3-D65
-  primaries, its linear light (with a 2.4 power law standing for the display) is rotated into
-  BT.709 and encoded back with the same law, so mid-tones stay where they were.
-
-A stream that declares PQ or HLG without naming primaries or a matrix is taken to be BT.2020.
-The peak comes from the decoded frame's own attachments; the content light level and mastering
-display boxes of an MP4 are not forwarded to the decoder, so a stream that carries them only
-there is tone mapped from 1000 nits.
-
-A 10-bit frame has no direct-plane path: its planes are 16-bit and belong to the conversion, so
-a material that could sample 8-bit planes reads the converted image instead, whatever
-[**Direct video plane sampling**](performance.md#direct-video-plane-sampling) says, and the
-scene reports its video path as `yuv10_converted`. The 10-bit conversion kernel is compiled
-when a scene whose video is 10-bit is prepared, not before: an 8-bit video never compiles it
-and its frames take exactly the path they did before.
+Both scene renderers share video decoder selection. On macOS, an eligible FFmpeg
+default is kept; a software-only default does not rule out another decoder for
+the same codec that supports VideoToolbox, as with dav1d and native AV1. A codec
+with no VideoToolbox-capable decoder is still rejected, and the first frame must
+still decode successfully. This does not enable software-only decoders.
 
 
 An effect that composes its layer over the screen (refraction among them) reads
-that screen the right way up. The shader compiler defines `HLSL`
+that screen the right way up on both renderers. The shader compiler defines `HLSL`
 and `HLSL_SM40` as Wallpaper Engine does, so the Direct3D branches of an effect's own
 shaders are the ones compiled: the flipped screen coordinate of the compositing
 pass, a brace-listed sample kernel, and a light falloff that stays defined beyond a
@@ -314,7 +243,7 @@ light's radius.
 
 A vertex shader may assign to its own inputs, as Wallpaper Engine's HLSL lets it (the
 Shadow effect's default `a_TexCoord *= atFactor`, a factor of 1 at its default
-settings). The input keeps reading the mesh attribute it names, so
+settings). The input keeps reading the mesh attribute it names on both renderers, so
 a text or image layer under such an effect is drawn at its own texture coordinates
 and not at the vertex position's, which left a text layer empty and an image layer
 sampled at the wrong place.
@@ -341,7 +270,7 @@ without it the effect failed to compile and its layers lost the bars whatever
 played. A number as an operand of `!`, `&&` or `||` is not converted, whether a mask
 or not ([Known limitations](../testing/renderer.md#known-limitations)).
 
-Scene lighting works as in Wallpaper Engine. A lit shader
+Scene lighting works as in Wallpaper Engine, on both renderers. A lit shader
 (`genericimage4`, `generic4`, the particle, rope, foliage and fluid shaders) asks for
 `#require LightingV1`; the shader compiler writes in a `PerformLighting_V1` with one
 uniform array per light kind, sized by the scene's `general.lightconfig`, and calls
@@ -397,7 +326,7 @@ continues to read and write degrees.
 Shadow maps, spot cookies and
 volumetric light shafts are not drawn: a light that casts a shadow lights as if
 nothing did, which is also what Wallpaper Engine shows when nothing in the scene
-casts one. Native Metal applies a material's depth state and cull mode so: a
+casts one. Both renderers apply a material's depth state and cull mode the same way: a
 pass into a depth-attached target (a model, a skybox, a scene with a perspective
 camera) takes its material's depth test, depth write and cull mode, against the same
 front faces, and every other pass draws in painter's order and culls nothing. A pass
@@ -451,43 +380,17 @@ Metal shading language
 turns GLSL's `inverse`, which Metal has no built-in for, into helper functions, so
 the stock perspective, reflection, water, light-shaft and cursor-ripple effects
 translate. A step that samples an image nothing in the scene produces (a layer
-texture whose layer draws no composite) is skipped on Native Metal, instead of holding
-the scene; an image that exists and does not load still holds it.
+texture whose layer draws no composite) is skipped on Native Metal exactly as
+Compatibility skips it, instead of sending the scene to Compatibility; an image that
+exists and does not load still does.
 
-A texture slot that a pass's shader samples and nobody bound (the material lists no
-texture for it, or lists a null) reads zero in all four channels, as a null resource
-does in Direct3D, instead of dropping the pass. Only a slot the author left out is
-bound so, after the shader's own default textures and the switches that follow "a
-texture is bound" have settled, and the binding changes neither: an authored texture
-always wins and such a switch still reads the slot as unbound. The slot names one
-shared 1x1 image of zeros (`kUnboundTextureName`) that the ordinary image caches hold,
-so it costs no pass and no per-frame work. A texture the material names by a path that
-does not exist is not a null binding and keeps holding the scene as an image that does
-not load; a reference to a layer that does not resolve is not one either and the step
-is skipped as above.
-
-Image-card UVs and file-texture resolution constants use the authored first stored
-level's padding fact, not nominal texture area or the first mip kept by the display
-budget. A nominal 8×8, visible 6×4 texture stored as 6×4 therefore has resolution
-`(6,4,6,4)` and full-card UVs; an actually padded sheet retains allocated/visible
-pairs. `nopadding` changes only the card's UVs. Flat sheets entering puppet effects
-use the same rule; puppet meshes retain authored UVs and effect-final cards use full UVs.
-
-Puppets and rope geometry behave the same. A puppet is deformed
+Puppets and rope geometry behave the same on both renderers. A puppet is deformed
 by its author's own skinning shader, and its pose comes from the one animation
 system the scene already has (animation layers, their play, pause, stop, rate,
 blend and visibility, and any script or user property driving them); the renderer
-only uploads the resulting bone matrices. Under effects, the closing puppet material's
-slot 0 must read the processed sheet even when its copied material or a user texture
-names the original picture. This also applies to boneless meshes and blend-only
-chains; other slots, playback, and the direct/additive routes are unchanged.
-Rope and rope-trail geometry is generated
+only uploads the resulting bone matrices. Rope and rope-trail geometry is generated
 once by the shared particle simulation, with the rope renderers' *UV scale*, scrolling
-and smoothing. Particle-sheet `g_RenderVar1` uses normalized frame width/height,
-frame count and texel-height/texel-width aspect. These facts follow the final
-compiled sheet program even if it never samples its slot 0 and that unused
-resource is pruned; retaining metadata does not upload the unused texture.
-A particle's sprite, rope or trail is sized as authored and drawn
+and smoothing. A particle's sprite, rope or trail is sized as authored and drawn
 through its layer's model matrix, so a particle layer scaled up draws its
 particles larger by the same factor, in a 2D canvas as in 3D, as Wallpaper
 Engine's particle shader does. A `worldspace` file is the exception: Wallpaper
@@ -512,7 +415,8 @@ its authored offset unscaled, and so does a static child whose own file is
 model parser cannot read is drawn in its bind pose on both, with a log line when it
 loads. A text layer is an ordinary layer: it takes its place in the layer order and
 carries its transform, opacity, blend, effect chain, camera and the final
-composition, appears in desktop posters, and uses the engine's one text system. Text whose content has not changed is not laid out, rasterised or
+composition, appears in desktop posters, and uses the engine's one text system on
+both renderers. Text whose content has not changed is not laid out, rasterised or
 uploaded again; a script that produces it still runs on its own schedule every
 frame. A text script that writes `thisLayer.text` from `update()` and returns nothing
 keeps what it wrote, as in Wallpaper Engine (a clock that writes the time once a
@@ -526,14 +430,13 @@ established (the one frame that covers it shows the text script's value). Effect
 video output of Native Metal has not been compared against real wallpapers.
 
 A video texture plays against the clock of the layer that shows it, the scene's until a script
-moves it. A render graph built again under a playing video (a property that shows or hides a layer, a
-script that creates one, a change of the render scale on Native Metal) does not close the videos
-the new graph still shows. A text layer whose card changes size in texels builds no graph: the
-renderer resizes the targets of its effect under the graph it has (`ResizeRenderTargets`), and
-the scene's videos, images and models are not touched. Wallpaper Engine touches nothing else a
-scene holds either, so its video neither goes back
+moves it, on both renderers. A render graph built again under a playing video (a text layer
+whose card changes size in texels, a property that shows or hides a layer, a change of the
+render scale on Native Metal) does not close the videos the new graph still shows. Wallpaper Engine resizes a text
+card's buffers in place and touches nothing else a scene holds, so its video neither goes back
 to the head of its clip nor stops. Here the host asks the renderer to clear the graph *for a
-rebuild* (`clearLastRenderGraphForRebuild`), which sets every open video aside (`MetalVideoTextures::hold`); the compile that
+rebuild* (`clearLastRenderGraphForRebuild`), which sets every open video aside (Native Metal:
+`MetalVideoTextures::hold`; Compatibility: `TextureCache::ClearForRebuild`); the compile that
 follows takes back the ones the new graph binds, by texture, and closes the rest when it ends,
 however it ends: a compile that is refused, or a clear that fails, closes them too. A video
 taken back is not parsed, so one packaged in the scene is not read, copied and hashed again
@@ -542,8 +445,9 @@ a 319 MB one, which a rebuild paid for every video it opened), and it is not ope
 decoder carries on from the frame it had, given the scene's clock as any draw gives it. A
 decoder that failed while it waited is opened again like any other. Only the rebuild of the
 scene that is drawing keeps videos: a scene that is replaced and a renderer that is destroyed
-close them with the graph, as before; Native Metal keeps its graph, and the videos
-with it, through a surface release (a display change). A video whose layer a property shows again was left out of
+close them with the graph, as before, and so does a Compatibility surface that is released (a
+display change), which clears the texture cache; Native Metal keeps its graph, and the videos
+with it, through a surface release. A video whose layer a property shows again was left out of
 the graph by the rebuild that hid it, and closed then: it opens at the head of its clip and is
 sought to the clock, as any open is (below). Nothing is added to a frame, and no decoder is kept
 that was not open already. On the clock wallpaper of the re-test (3326873240: five 4K videos
@@ -555,7 +459,7 @@ not rebuild, pixel for pixel: the seeks of this wallpaper's clips land while the
 are still opening, so the head of a clip is not seen on it, only the wait.
 
 A video that is opened while the clock is already some way into the clip (a scene that falls
-back to the other renderer) opens
+back to the other renderer, a surface split off a shared decoder with shared decode on) opens
 at the head of the clip, as any open does, and the first call that gives it the clock seeks it
 there. The open waits for no seek, so it costs what opening at the head costs. The head of the
 clip is on screen until the seek has landed and the decoder has caught up with the clock, which
@@ -577,7 +481,7 @@ runs while the seek is made being where it should be. A seek of any length there
 the frames after it are decoded on to the clock, at several times the pace the clip plays,
 instead of sought to again.
 
-Particle systems follow Wallpaper Engine 2.8's own rules, because
+Particle systems follow Wallpaper Engine 2.8's own rules, on both renderers, because
 one simulation feeds both. A system is simulated for its file's `starttime` before the
 first frame (steps of 0.05 s, or 0.2 s once the file holds 500 or more particles; at most
 6000 steps are run, and an even longer start time only advances the system clock), so
@@ -622,10 +526,10 @@ entry's value plus and minus the noise, cut off at 0 and 1), `inheritcontrolpoin
 `mapsequencebetweencontrolpoints` and `inheritinitialvaluefromevent` initializers are
 implemented. A scene object's `instanceoverride` colour re-tints the preset's own colours
 by the difference between the override and the preset's representative colour, keeping
-their spread, and then multiplies each newborn particle's colour by the override once (the
-particle's remembered birth colour is the product, so a `colorchange` ramp scales from it);
-a preset without colours takes the override as its colour, not multiplied again, and an
-override equal to the representative colour changes nothing; its
+their spread, and then tints the particle by the override as well (so an orange override
+on a fire whose red end the re-tint turns magenta draws it red again, as Wallpaper Engine
+does); a preset without colours takes the override as its colour, and an override equal
+to the preset's own colour changes nothing; its
 `controlpoint0`..`7` and `controlpointangle0`..`7` replace the preset's control points
 (a control point flagged 2 is held at its scene position as the layer moves), and
 `brightness` multiplies the tint in an HDR scene, and each of them follows a user
@@ -653,14 +557,6 @@ pieces between them; the renderers fill the keys a file omits with their own def
 clamping what they read. What a file omits in an operator or initializer takes the
 pixel-canvas defaults in a scene drawn with an orthogonal projection of a size (a scene
 that names none is drawn as the default canvas) and the scene-unit defaults otherwise.
-For `genericparticle` and `genericropeparticle`, a usable sheet writes `g_RenderVar1`
-as normalized horizontal/vertical cell fractions, frame count, and cell height divided
-by cell width in texels: two 4×4 cells in an 8×4 picture give `(0.5,1,2,1)`.
-Sheet/layout combos follow the final substituted/default texture slot. Whole-cell
-resolution rounding uses nominal power-of-two extents and skips subtexel cells;
-frame-blending policy is unchanged. An empty frame table is static, and other
-shaders receive no particle-sheet constants.
-
 The known differences, among them the operators
 (`vortex_v2`, `boids`, `remapvalue`) and the renderer `orientation`, `fadealpha` and
 `fadesize` keys that are not implemented, are listed under
@@ -748,28 +644,20 @@ hangs.
 Every buffer of a card, an effect's or the composite another layer
 samples, is built at the card's width and height with the fraction cut off, at least 4
 texels, whatever the size of the scene or of the editor's box, as the scene loads and
-again whenever a change of the text gives the card another size in texels (the renderer
-allocates the targets again under the render graph it has, once for that change, in about
-0.8 ms on a scene of 42 render passes a frame; none while the card only moves, as when its
-alignment flips, or grows by less than a texel). The graph is not built again for it: that
-compiled every pass, decoded and uploaded every image and copied every vertex buffer of
-the scene, about 54 ms each time on that scene, and a text with a visible effect whose
-card changes in texels every few frames (proportional digits, a readout, a typewriter) did
-it each time, which held a scene of seven models and 17 text layers to 19 frames a second.
-Nothing the scene loaded is touched, so a video playing in the scene is not either. An effect on the text therefore sees
+again whenever a change of the text gives the card another size in texels (one rebuild
+of the render graph for that change; none while the card only moves, as when its
+alignment flips, or grows by less than a texel; a rebuild is about 0.5 ms of lowering and
+the compile of every pass, 0.6 to 0.9 ms in all on a scene of one layer and 39 to 45 ms on
+a scene of 72 passes, and it drops every uploaded image; a video playing in the scene stays open
+through it, as described under video textures above; a text with a visible effect whose
+card changes in texels every second, proportional digits or a typewriter, makes a heavy
+scene hitch for a few frames once per change). An effect on the text therefore sees
 the card as its whole picture: `v_TexCoord` runs 0 to 1 across it and
 `g_Texture0Resolution` is its size, so an offset, skew or scroll given as a fraction of
 the picture moves by that fraction of the card, as in Wallpaper Engine. A card past
 4096 texels on a side is drawn cut off to 4096. An effect's own buffers (`fbos`) that name no
 `width`, `height` or `fit` are the card's size whatever their `scale`; one that names its own
 size keeps that fixed size, as for an image layer, and is not resized with the card.
-Both live ping-pong working targets follow the measured card, including the second
-buffer after asynchronous growth or shrinkage. The existing resize event sizes both
-sibling roots and their authored extents directly, so each can be render-scaled
-independently without depending on bound-target traversal order. Target sharing
-stays enabled: no extra target, pass, per-frame loop, or additional resize request.
-Glyph rasters still ceil each axis while
-effect targets floor it; alignment-only changes retain the target extents.
 
 A text layer that draws through a
 visible effect is a composite, as in Wallpaper Engine: the card first holds the scene behind
@@ -882,7 +770,7 @@ cross-fade's `$mediaPreviousThumbnail` slot stays on its authored picture until 
 track has a predecessor. `ApplySystemUserTextures` binds such a slot through
 `RuntimeImageSource::BindCoverSlot`, which hands back a runtime image name that
 resolves to the cover while one is published and to the authored picture while it is
-not, so the renderer swaps it on a version change like any cover, with no graph
+not, so both renderers swap it on a version change like any cover, with no graph
 rebuild and no per-frame work beyond the version check they already did. The picture
 is decoded the first time a renderer asks for it, after the texture budget is known,
 and stays resident so a clear costs no decode (one picture per cover name and
@@ -904,9 +792,9 @@ track has a predecessor; the slot was the transparent texel instead, so a cross-
 that writes the previous cover's alpha drew nothing at all and a background built on
 it was the clear colour. A target is not a picture the image source can hold, so the
 material keeps the target in the slot, which keeps the graph drawing it first, and
-carries the cover's name beside it (`SceneMaterial::cover_slots`); the renderer binds
-the cover's image there, with the cover's own clamped sampler, instead of the target
-while the image it uploaded for that frame is a cover and not the empty texel. Such a pass reads an image the runtime replaces, so it
+carries the cover's name beside it (`SceneMaterial::texture_covers`); each renderer
+binds the cover's image there instead while the image it uploaded for that frame is a
+cover and not the empty texel. Such a pass reads an image the runtime replaces, so it
 is never reused as a still target. The slot's size uniforms stay the target's, as a
 picture slot's stay its art's.
 
@@ -941,12 +829,7 @@ depth-testing composition layer composes like the plain one. A pass-through laye
 drawn through effects, such as a project layer under a CRT effect, copies the part of
 the screen it is drawn over, under the groups it sits in, not at the origin it has
 within them, and follows them when a property, a script or a timeline moves them while
-the scene runs: the card is laid out again only when the layer's world transform is not the
-one it was last laid out from, so a still scene does no work for it. A card that the scene
-file itself says can move (an origin, scale or angles bound to a property, script or timeline,
-on the layer or on a group above it) is geometry the renderer rewrites in place; a card nothing
-declared to move is fixed, and if something moves it anyway (another layer's script moving a
-plain group) the render graph is built again once for that move. Camera parallax moves
+the scene runs. Camera parallax moves
 what a composition layer holds along with its card, as Wallpaper Engine's draw loop gives
 every pass of a layer the same offset: the screen its first pass reads is the place its last
 pass draws it, so a layer that only copies what is behind it shows a continuous scene, not
@@ -975,12 +858,12 @@ make; it has no texture, and its last effect, with `DIRECTDRAW` forced on, is dr
 straight onto the scene as the layer's own geometry, so it keeps a layer's transform,
 parents, visibility and scripts. An effect of more than one pass is left out.
 
-Desktop posters need no setting: the renderer re-draws its final
+Desktop posters work on both backends and need no setting: each re-draws its final
 composition — fit, zoom, flip and position included — into an image of its own only
 when a poster is requested, including while the scene is idle or paused. The
-drawable is therefore only ever rendered to, never read back.
+Compatibility drawable is therefore only ever rendered to, never read back.
 
-Where the picture sits is one layout, shared with the pointer mapping and
+Where the picture sits is one layout shared by both backends, the pointer mapping and
 the posters. The scaling mode and the scale factor decide how large the picture is;
 whatever room that leaves around it (bars for Fit, Original size or a factor below 1,
 filled by a blurred copy [under Fit with blurred backdrop](#fit-with-blurred-backdrop))
@@ -1001,9 +884,8 @@ display is centred, so an older build ignores it and a file nobody positioned is
 unchanged. A hand-edited value never costs the file its other settings: a fraction
 outside 0 to 1 is clamped, and anything that is not a number reads as the centre. A
 mirror display is always centred, because it has its own display settings and a live
-change to its source's position never reaches it. The native video player places its layer
-by the saved position through the same layout (`NativeVideoLayout`), centred for a mirror, and
-moves when the position is saved (it has no per-step preview). The bridge moves a wallpaper on one display (`set_display_position`, an axis
+change to its source's position never reaches it. The native video player ignores the
+position. The bridge moves a wallpaper on one display (`set_display_position`, an axis
 passed as nothing keeps its saved value): it refuses a fraction outside 0 to 1 or not a
 number instead of clamping it, saves the position at once and moves the scene that runs
 on that display without rebuilding it. Like the scaling mode, and unlike the scale factor,
@@ -1045,18 +927,10 @@ there. The archive is written in the app's temporary folder and moved into the c
 only once it is complete, so clearing the cache while a write is due costs that
 write and nothing else.
 
-A session keeps at most eight of these stores open at once; the oldest is let go and
-opened again the next time one of its pipelines is built. Work that finishes later on
-the archive's own queue (adding a pipeline to a store, publishing its file) never
-brings a store back: it finds the store it was started for or does nothing, and a
-store that was let go and then opened again under the same folder is a different
-store, which that older work does not touch. The records kept for a store go with
-it, so they stay within the same bound.
-
-The Compatibility renderer, retired, kept no compiled Metal code of its own. Its MoltenVK
-pipeline cache (`vk-pipeline-cache.bin`, beside the same scene's shaders) stored the Metal
-source MoltenVK generated, which saved translating it again but not compiling it; the
-compiled forms came from macOS's own Metal shader cache. That cache survives
+Compatibility keeps no compiled Metal code of its own. MoltenVK's pipeline cache
+(`vk-pipeline-cache.bin`, beside the same scene's shaders) stores the Metal source
+MoltenVK generated, which saves translating it again but not compiling it; the
+compiled forms come from macOS's own Metal shader cache. That cache survives
 relaunching the app, rebuilding it, a new version number and a bundle replaced at
 the same path, but it keeps compiled Metal source per app location: a second copy of
 the app at another path — an installed copy beside a development build, say —
@@ -1065,138 +939,75 @@ Compiled pipelines are shared between copies. The native backend's binary archiv
 stores pipelines, so it covers the smaller part. Method and what recompiles:
 [renderer testing](../testing/renderer.md#metal-compile-across-processes).
 
-### When Native Metal cannot draw a scene
-
-A scene Native Metal cannot draw is not drawn by anything else. No other renderer is
-created, and no layer, effect or pass is dropped to make the scene fit. The scene is
-**held** instead, and the failure is said once, with its reason, in the log and in the
-panel. Five things can stop a scene, each with a stage the host words in the user's
-language and the engine's own English explanation beside it:
-
-| Stage | What happened | Where the engine found out |
-|---|---|---|
-| `unsupported` | The admission gate refused the scene (HDR video, a plain video wallpaper, a shader that does not compile for Metal, ...) | `SelectSceneBackend`, before any renderer exists |
-| `prepare` | The native renderer could not be created on the surface (also a surface with no Metal layer, such as an offscreen probe) | `createMetal` |
-| `compile` | The scene's shaders or pipelines did not compile for Metal | `compileRenderGraph` |
-| `frame` | A frame failed after the scene was running | `drawFrame` |
-| `surface` | The renderer could not take the replacement surface after a display change | `resetSurface` |
-
-What a held scene leaves on the display:
-
-- **A layer that has drawn keeps its last frame.** The engine stops the frame clock and
-  never touches the layer again: no drawable is acquired, nothing is cleared, nothing
-  is presented over it. A scene refused while another scene was drawing (a wallpaper
-  switch) also releases the outgoing scene's renderer, so a later surface rebuild
-  cannot draw the refused scene on it; the layer still holds the outgoing last frame. The host's [recovery ladder](#recovery) still runs after a
-  frame that fails once the scene had shown one.
-- **A layer that has drawn nothing shows the project's preview picture.** The engine
-  finds it (the `preview` key of `project.json`, else `preview.jpg`, `preview.jpeg`,
-  `preview.png` or `preview.gif`, always inside the project's own folder and under
-  32 MB), decodes it once with ImageIO and lays it over the layer as a plain Core
-  Animation sublayer, scaled to fill: no GPU pipeline, no per-frame work, nothing
-  while the surface is idle (`Renderer/Surface`, `StillPreview`). The first real frame
-  that is later presented takes it away. A project with no preview picture shows
-  nothing made up: the layer stays as it was, and the failure is still reported.
-- **The host is told a first picture exists.** Its activation waits for one for up to
-  90 seconds and then puts the previous wallpaper back; a held scene settles that wait
-  at once, so the wallpaper stays assigned, failed and visible, instead of being
-  rolled back with a message that names no cause. This happens once per scene.
-
-The failure is published as the scene's `failure_stage` and `failure_reason` in the
-bridge's `scene_renderers` row, with `backend` `unknown` (nothing is drawing it). The engine's log line, at error level and once per failure, is
-`scene cannot be drawn with native Metal (<stage>): <reason>; holding the last frame|preview picture`.
-**Settings → Performance → Advanced → Drawn by** words it as "not drawn — <stage in the
-user's language> (reason: …). Showing its last picture.", the scene is in **Updating
-now** as "stopped after a rendering failure" with **Retry**, the inspector's Compatibility
-check card says the same, and the diagnostics report and a library issue report name the
-stage and reason. The reason itself stays English.
-
-**A shader that does not compile holds the scene.** The parser compiles every material's
-program for Metal once; when one does not compile, the layer, effect, text card,
-particle, puppet or shape that wanted it cannot load, and the parse records the shader
-(`Scene::shader_compile_error`, the first failure and a count of the rest) instead of
-carrying on without the part. The admission gate refuses the scene on it first, before
-any other finding, because the parts that look wrong after a drop follow from the drop:
-the stage is `unsupported` and the reason names the shader and gives the compiler's
-first line, as `the shader 'effects/waterripple' could not be translated to Metal
-(<compiler message>)`, with "; N more shaders failed too" when several did. The scene
-never draws with an effect, layer or text missing: the last picture or the preview stays,
-and the failure is said once. The reason is the engine's English like every other; no
-new catalog string is involved. One path is not a scene load: a layer a script creates
-with `createLayer` after the scene is drawing is parsed as it runs, and a shader that
-does not compile there fails that call (the script gets no layer, and the log says why)
-without stopping a scene that is already on screen.
-
-A retry really retries: the engine neither remembers a failure against the scene nor
-consults one, so **Retry** (or the host's recovery) asks the native renderer again.
-
-The same faults are forced in `scene_failure_policy_test`, on a layer no window owns, and
-each leaves the failure logged once, the frame loop stopped without presenting again, and
-the last frame or the preview in place. The shader case uses a scene whose card compiles
-and whose one effect does not: it is held with the effect's shader named and no frame
-presented, and the same scene with a compiling effect draws.
-
 ### Fit with blurred backdrop
 
 `FIT_BLURRED` (the C ABI's scaling mode 4, `fit_blurred` in a display's `monitors` entry,
-`MatchBlurred` across the bridge) shows the whole picture exactly as Fit does, with its
-position, scale factor and pointer mapping, and fills the room around it with a soft,
+`MatchBlurred` across the bridge) lays the picture out exactly as Fit does, position,
+scale factor and pointer mapping included, and fills the room around it with a blurred,
 darker copy of the same live picture instead of the clear colour
-([user-facing behaviour](wallpaper-properties.md#fit-with-blurred-backdrop)). The copy is
-what Fill at a factor of 1 would show, centred; moving or scaling the picture moves the
-picture only. Nothing of it exists in any other mode.
+([user-facing behaviour](wallpaper-properties.md#fit-with-blurred-backdrop)). The layout
+(`ComputeWallpaperScalingLayout`) adds `backdrop_px`, the picture as Fill at a factor of 1
+places it, centred whatever the position, and `backdrop`, whether the picture leaves room:
+a gap of one pixel, the most rounding leaves when the shapes match, is none. The copy is
+drawn only into that room (`ComputeWallpaperBackdropBands`), so the picture's pixels are
+Fit's byte for byte. Both backends build the copy the same way
+(`Presentation/WallpaperBackdrop.hpp`, `MetalWallpaperBackdrop`, `WallpaperBackdropPass`):
+the scene's output is reduced to an image 128 texels on its longer side, a picture longer
+than 1024 texels first to an eighth of its size in an 8-bit image, with bilinear taps at
+most four texels apart; that image is blurred by a separable Gaussian of 3 texels, then
+stretched over the room through a cubic B-spline, darkened to 70% and dithered by one
+8-bit step. A quarter of the source texels is read: reading all of them cost about three
+times the GPU time on a 6880-wide raster (below), and the copy is blurred over about 160
+source texels, so by estimate a one-pixel line moving in and out of the taps changes it by less
+than one 8-bit step (not measured with a moving fixture). The posters draw it too, since
+they compose the same picture again. A scale factor or a position change moves the
+picture and not the copy.
 
-**Layout.** `ComputeWallpaperScalingLayout` gives this mode Fit's rectangle and adds
-`backdrop_px`, the rectangle the copy is stretched over (Fill at a factor of 1, centred,
-whatever the position), and `backdrop`, whether the picture leaves room. A gap of one
-pixel on an axis is the rounding a picture of the display's own shape leaves, so room
-means more than one. `ComputeSurroundBands` (`Presentation/BackdropGeometry.hpp`)
-returns the up to four rectangles of the display the picture does not cover, and the copy
-is drawn into those only: the picture's own pixels are Fit's byte for byte.
-`WallpaperScalingModeFromValue` turns a host value into a mode, or into nothing for a value
-past the last mode; `SceneWallpaper` and the C bindings ignore or refuse such a value
-rather than casting it into a layout that scales nothing.
+Nothing of it exists in any other mode: the pipelines are built when the mode is chosen,
+between frames (a pipeline built inside a frame would hold it on the shader compiler),
+and the images (two half-float ones and, for a large picture, the 8-bit one) exist only
+while a composition has room to fill and go on the first frame that has none. The present
+key carries the copy's rectangle, so switching between Fit and this mode presents again,
+and a frame that repeats the picture still repeats the copy and is skipped as before.
+On Compatibility, a plain video keeps presenting straight from its decoded frame
+(`CustomShaderPass::recordPresentation`): that frame is texel for texel the scene output
+the copy would otherwise be made from, so the copy is made from it and drawn first. A
+mirrored picture takes the copy path as before. The native video player has no copy and
+shows Fit's black bars. `SceneWallpaper` ignores a scaling-mode value it has no mode for,
+instead of casting it into an unscaled layout. An app that predates the mode reads
+`fit_blurred` as Fill.
 
-**Making the copy** (`MetalBackdrop`, every frame that is drawn, all on the GPU, from the
-scene's final output):
+Cost, measured headlessly on an M3 Max (macOS 27.2) with
+`UnchangedPresent.LocalProjectEnergyIsMeasuredHeadlessly` and `WE_TEST_ENERGY_SCALING`
+([renderer testing](../testing/renderer.md)), three or four alternating 15-second rounds
+per case at 60 FPS, while another copy of the app was drawing the desktop and other apps
+used the GPU (medians of the GPU time of the process's own command buffers per 60 Hz
+tick, Fit against this mode):
 
-1. The output is reduced to an image 128 texels on its longer side. A picture longer than
-   1024 texels is first reduced to an eighth of its size into an 8-bit image. A reduction
-   is a grid of bilinear taps spread over each destination texel, never more than four
-   source texels apart (`PlanBackdropReduction`), so about a quarter of the source
-   texels is read rather than all of them.
-2. A separable Gaussian (sigma 3 texels, radius 9, one horizontal and one vertical pass)
-   blurs it in half-float images.
-3. The composition stretches it over the bands through a cubic B-spline filter (four
-   bilinear fetches), darkens it to 70% and adds a fixed 4x4 ordered dither of one 8-bit
-   step, so one frame always draws the same bytes.
+| Wallpaper, surface | Renderer | Fit | Fit with blurred backdrop |
+| --- | --- | --- | --- |
+| 3840x2160 scene, display resolution, 6880x2880 @2 | Native Metal | 5.96 ms | 6.50 ms |
+| the same, 4112x2658 @2 | Native Metal | 5.17 ms | 5.04 ms (within the noise) |
+| the same, 6880x2880 @2 | Compatibility | 5.81 ms | 6.11 ms |
+| the same, 4112x2658 @2 | Compatibility | 4.90 ms | 5.35 ms |
+| 3840x2160 30 FPS HEVC clip, 6880x2880 @2 | Compatibility | 0.25 ms | 0.54 ms |
+| the same, 4112x2658 @2 | Compatibility | 0.26 ms | 0.32 ms |
 
-**Lifetime.** The pipelines are built when the mode is chosen, between frames; nothing is
-compiled inside a frame. The images are made on the first composition that has room to
-fill and let go on the first frame that has none, or when another mode is chosen (which
-also lets go of the pipelines). Fit records exactly the commands it recorded before the
-mode existed. The copy's rectangle is part of the presentation key (which has room for it
-within its capacity), so switching between Fit and this mode presents again, and a frame
-that repeats the picture repeats the copy and is skipped as before. The images count in
-the render-target byte statistic. The posters (the desktop, preview and lock-screen
-pictures) compose the same picture again and draw the copy too. The composition's GPU work
-carries debug labels: the group "Fit with blurred backdrop" on the passes that make the
-copy, and the composition pass itself is named for the mode.
-
-**Cost**, measured headlessly with `backdrop_scene_test` (a throwaway probe, not kept: the
-GPU time of the frame's command buffer, 300 frames with static reuse off so each draws and
-presents, a 3840x2160 scene, Fit against this mode) on an Apple M5 Pro, macOS 27.0.1:
-
-| Display raster | Fit | Fit with blurred backdrop |
-| --- | --- | --- |
-| 6880x2880 | 1.16 to 1.34 ms | 1.84 to 1.99 ms |
-| 4112x2658 | 0.80 to 0.91 ms | 1.34 ms |
-
-That is 0.6 to 0.75 ms more on the 6880-wide display (about 0.45 ms for the reductions and
-blur, 0.1 ms of it the blur, and about 0.23 ms for the bands) and 0.45 to 0.5 ms on the
-4112-wide one, a little above the 0.3 to 0.5 ms the design aimed for; the figures
-move by about 0.1 ms from one run to the next. The images hold about 0.9 MB for a 4K
-scene.
+The clip presents on every other tick, so a presented frame costs about twice its share
+here. Every run kept its frame rate. In the quietest rounds the GPU as a whole drew 0.1
+to 0.2 W more and the process's CPU about 8 mW more. These figures are coarse: one case
+measured up to twice as long from one run to the next, so differences under about half a
+millisecond are not resolved, and on Compatibility the time also counts waiting for a
+drawable. The images hold about 2.0 MB on the ultrawide's 6880x3870 display raster,
+1.2 MB on the panel's 4726x2658 one and 0.86 MB for a 4K clip, on either renderer. With
+Fit, the composition records exactly the commands it recorded before the mode existed,
+plus two words of presentation key; a Metal System Trace shows the same 37 render passes
+a frame for the Compatibility scene, before and after. The native time goes to the first
+reduction (about 0.3 ms on the 6880-wide raster), the second step and the two blurs (about
+0.15 ms together) and the bands (about 0.05 ms); on Compatibility each of the small passes
+costs 0.1 to 0.17 ms. Earlier versions show what the design avoids: one pass straight to
+the small image, reading every texel, took about 3.4 ms for the clip, and a first
+reduction reading every texel took about 0.95 ms on the 6880-wide raster against 0.3 ms.
 
 ### Live property edits
 
@@ -1249,10 +1060,7 @@ bound to a text input whose text is `1` or `true` is on. A string a script retur
 for a flag is read the same way on every tick it runs, by a comparison in place
 that makes no copy. A binding that names a condition compares the choice with it
 instead, so `{"user": {"name": "mode", "condition": "2"}}` is on exactly when the
-choice is `2` and never by the rule above. A choice that reaches the scene as text is
-compared as text, one that reaches it as a number is compared as a number (a combo
-whose authored `value` is `2` is on for the condition `"2"`, and `0` is a choice like any
-other). The bound value is then a flag, not the
+choice is `2` and never by the rule above. The bound value is then a flag, not the
 choice: a script property bound this way reads `true` or `false`. It used to read the
 choice itself, a string such as `"2"` that is true in JavaScript whatever it says, so
 a clock offering its date formats as three flags over one combo (conditions `0`, `1`,
@@ -1370,12 +1178,14 @@ The only scene control that ships on. It reuses the result of scene subgraphs wh
 inputs have not changed and removes render passes proven redundant, inside the scene
 renderer's own render graph. It is not a quality tier: the same pixels are
 produced, and resolution, frame rate and animation speed are untouched. It reaches
-scene wallpapers; video and web wallpapers do not go through it, since the app's own
-players and web view draw them. It is on the
+wallpapers the scene engine draws — scenes on either renderer, and video wallpapers
+on Compatibility, which the engine draws as a one-texture scene; native video and
+web wallpapers do not go through it. It is on the
 [Performance page](performance.md#advanced) so it can be turned off and on for an
 A/B comparison without an environment variable.
 
-Its row reports the saved preference: the renderer publishes no query for
+Unlike [content pacing and shared video decode](performance.md#experimental-switches),
+which are read back from the renderer, its row reports the saved preference: the renderer publishes no query for
 it. The engine applies a change to a running scene in place, on that scene's next
 frame in either direction — the copy plan, the targets it governs and the reuse
 table are rebuilt over the graph that is already compiled, without reparsing the
@@ -1396,14 +1206,15 @@ still redraws.
 
 A scene with an authored canvas is rasterized at the size it is presented at on the
 display by default (**Display resolution**), or at the canvas's own size (**Canvas
-size**), and the internal render scale divides whichever is chosen. The renderer
-sizes its render targets from one shared function
+size**), and the internal render scale divides whichever is chosen. Both renderers
+size their render targets from one shared function
 (`ResolveScreenBoundRenderTargetSizes`): the default target and every target that
 follows the screen come from the raster, a target the author sized keeps scaling
 with the render scale alone, and the canvas stays the source extent of layout,
 cursor mapping and scripts. The raster is the Fill layout of the canvas over the
 output in whole points, at the display's backing scale, capped at the device's
-largest texture (Native Metal reads Apple's published limit for the GPU family). A perspective scene and a
+largest texture (Native Metal reads Apple's published limit for the GPU family,
+Compatibility the Vulkan device's `maxImageDimension2D`). A perspective scene and a
 plain video do not read it.
 
 The choice is process-wide, like [scene render optimisation](#scene-render-optimisation):
@@ -1420,14 +1231,20 @@ bloom scene pays more than one with author-sized buffers, is under
 
 With scene render optimisation on, a frame that would put back exactly the picture
 already on screen is not drawn, submitted or presented, and the surface keeps
-showing the last frame. A scene qualifies when every pass was reused from the
-previous frame, leaving only the final composition to redo.
+showing the last frame. Two cases qualify:
+
+- a Compatibility video wallpaper whose playback clock selected the same decoded
+  frame as the last present, which is most ticks of a 24 or 30 fps clip under a 60
+  or 120 fps limit;
+- a scene, on either renderer, whose every pass was reused from the previous frame,
+  leaving only the final composition to redo.
 
 The frame clock still ticks at the configured rate, and the scene still runs its
 scripts, timeline, sound and events on every tick; only drawing an identical
-picture is left out. A newly decoded video frame of a scene layer is presented on the tick that
-selects it, so this is not updating only when the scene changes, and no drawable is held
-to keep the picture. A resize, fill, scaling,
+picture is left out. A newly decoded video frame is presented on the tick that
+selects it, so this is neither content pacing (an
+[experimental switch](performance.md#experimental-switches)) nor updating only when
+the scene changes, and no drawable is held to keep the picture. A resize, fill, scaling,
 position or flip change, a render-scale or scene-optimisation change, a rebuilt graph or
 surface, a resumed wallpaper, a failed frame or a poster request makes the next
 frame present. The renderer counters report these frames as
@@ -1480,7 +1297,7 @@ of that: it stays outstanding until a draw consumes it, so a tick dropped becaus
 draw was still in flight loses the tick and not the update, and the end of that draw
 re-arms the clock — one wake at that edge, not a retry per frame period.
 
-The status line reports what each running scene is
+Both renderers implement this. The status line reports what each running scene is
 doing right now — updating continuously and why, waiting for events, paused by you,
 suspended by the system, stopped after a rendering failure, or that the state could
 not be read. A scene that is running but cannot be read says so; it is never shown as
@@ -1587,7 +1404,7 @@ rebuilt (attempt 2/3); waiting for it to draw", and then either "renderer recove
 renderer rebuild (attempt 2/3)" once it has presented a frame, or "renderer rebuilt
 (attempt 2/3) stopped before it drew" followed by the next rung.
 
-A real Metal presentation failure has not been reproduced on a desktop. The
+A real MoltenVK or Metal presentation failure has not been reproduced on a desktop. The
 tests inject the failure into the renderer's own failure routine and exercise everything
 after it there, the ladder with injected instants, and the relay that carries the report
 to the engine. The engine's reaction to a report on a live scene needs a real window and
@@ -1631,7 +1448,13 @@ scene on its mirror have not been checked on a desktop.
 
 ## Renderer memory
 
-For scenes with an authored 2D canvas, Native Metal loads packaged mip chains to
+On Apple platforms, the Compatibility renderer grows its Vulkan allocator in 8 MiB
+preferred blocks rather than the library's 256 MiB default. This reduces unused
+reservations in unified memory; it is not a cap on wallpaper size, and larger
+resources still allocate normally. The offscreen probe prints allocator reserved and
+used bytes separately from process memory.
+
+For scenes with an authored 2D canvas, both backends load packaged mip chains to
 match the physical display: a leading mip is skipped only while the next one is still
 at least as long as the display's longest edge, so the level kept always covers the
 display (a 3024×1964 display uses the authored 4K mip of an 8K source, and a 4240 px
@@ -1683,22 +1506,7 @@ rate and render scale ([Quality](performance.md#quality)). The HDR bloom's level
 sampling and weights are Wallpaper Engine's ([scene
 regressions](../testing/scene-regressions.md)).
 
-A scene's video is never read whole into memory merely to be opened. A loose clip
-next to the scene on the host disk, or in a folder the project is mounted from, is
-probed and played where it lies: nothing is read through the file space and no copy
-is made. A loose clip inside a `.pkg` is streamed in 1 MiB pieces into one file of the
-temp directory named by the SHA-1 of its content (hashed first, as it is read), once:
-the file is written under a staging name and published in one step, so another
-display opening the same clip never sees half of it, and an entry already there is
-reused, not replaced. A clip packed into a `.tex` keeps its bytes in the texture's
-first level, in the allocation the file was read or expanded into, and the header of
-an uncompressed one is read by probing that byte range in the file. All of these give
-the metadata, length and first picture that decoding the media file itself gives, and
-a truncated, garbage or empty clip fails the same way in each. Opening a 154 MiB clip
-from a package grew the process's peak resident size by 1.1 MiB; reading it whole
-(as loose clips were read before) grew it by 154 MiB.
-
-A layer hidden by its authored visibility or by one of the
+On both backends, a layer hidden by its authored visibility or by one of the
 wallpaper's own properties, itself or through a parent, is left out of the render
 graph. Applying a property change reloads the scene, so until then only a script,
 or a property edit shown on the running scene ([live property
@@ -1731,10 +1539,11 @@ buffers are metadata until a pass needs them. References from hidden passes left
 the graph (a script decides their visibility) and elided copies still count, so
 animation and live optimization toggles retain the targets they can use, and the
 same filter applies when a toggle reallocates targets.
-This applies to every scene Native Metal draws.
+This applies to scenes drawn with **Native Metal preferred**; the Compatibility
+backend already requests its targets from the cache as passes prepare them.
 
 Native Metal also lets targets that are never alive at the same time share one
-image, as the retired Compatibility renderer's cache pooled them. A target qualifies when its first touch
+image, as Compatibility's cache pools them. A target qualifies when its first touch
 in every frame is a clear that really happens, nothing copies into or out of it,
 and it is not carried into the next frame, pinned for reuse, mip-mapped,
 depth-attached or the scene output; targets of one shape whose spans of passes do
@@ -1744,13 +1553,7 @@ traded copies of one source share a small set of images: each copy takes one whe
 runs and gives it back once its last reader has drawn, so a scene with forty such
 copies keeps two or three images instead of forty-one, with no extra blit. A scene
 that draws over the whole screen many times holds about a quarter of the target
-memory it did. How much can be shared depends on the order the render graph returns
-its passes in. The graph builds that order from the back: a pass runs as late as the
-passes that read its result allow, so a layer's buffers are filled next to where they
-are read and not kept alive across unrelated work, and passes that draw into one target
-stay together, so the backend opens one render pass for the stretch instead of one per
-layer. Passes with nothing to tie them keep the order they were added in.
-`WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` gives every target its own
+memory it did. `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0` gives every target its own
 image again, for comparison or to read each target's own pixels after a frame.
 
 The lock-screen extension keeps its renderer paused while unlocked or asleep to
@@ -1781,7 +1584,7 @@ render scale, animation speed or audio-response subscription:
   match shader values to their uniform slots through a per-pass table built once;
   every value is still written every frame and no camera, bone, script or effect
   result is cached by this path.
-- On the retired Compatibility renderer, a hidden layer's first-use clear was left out when nothing can
+- On Compatibility, a hidden layer's first-use clear is left out when nothing can
   see its target, the first draw into a composite just cleared to transparent opens
   with that clear, and a plain video wallpaper whose decoded frame is exactly the
   scene's size draws straight through the final composition instead of copying into
