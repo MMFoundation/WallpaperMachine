@@ -745,6 +745,35 @@ if(APPLE)
       PROPERTIES TIMEOUT 240
       DISCOVERY_TIMEOUT 60
   )
+
+  # Scene layout: placeholder pictures, pass-through and fullscreen layers, layer size. Each draws
+  # into private textures only, except the size test, which parses and never draws.
+  foreach(layout_test
+      scene_placeholder_picture_test
+      scene_passthrough_layout_test
+      scene_fullscreen_parallax_test)
+    add_executable(${layout_test} ${layout_test}.mm)
+    target_link_libraries(${layout_test} PRIVATE scene_test_support GTest::gtest_main)
+    set_target_properties(${layout_test} PROPERTIES
+        OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+    target_compile_options(${layout_test} PRIVATE
+        $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+    gtest_discover_tests(
+        ${layout_test}
+        TEST_PREFIX ${layout_test}.
+        PROPERTIES TIMEOUT 180
+        DISCOVERY_TIMEOUT 60
+    )
+  endforeach()
+
+  add_executable(scene_layer_size_test scene_layer_size_test.cpp)
+  target_link_libraries(scene_layer_size_test PRIVATE scene_test_support GTest::gtest_main)
+  gtest_discover_tests(
+      scene_layer_size_test
+      TEST_PREFIX scene_layer_size_test.
+      PROPERTIES TIMEOUT 60
+      DISCOVERY_TIMEOUT 60
+  )
 endif()
 
 # Standalone miniaudio implementation with controlled CoreAudio/backend failures.

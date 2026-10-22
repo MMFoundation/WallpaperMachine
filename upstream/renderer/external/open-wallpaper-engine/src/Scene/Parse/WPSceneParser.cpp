@@ -318,6 +318,20 @@ void FlushPendingMetalTranslations(Scene& scene) {
 
 } // namespace
 
+/// What the card of a passthrough layer with effects is made from: the layer's rectangle
+/// (`half_w` by `half_h` about its origin) and how the draw puts it into the buffer its
+/// effects work on. With `clip_space` the pass copies the footprint 1:1 into clip space.
+/// Otherwise the pass goes through the camera that frames the card's own rectangle about the
+/// origin, so the positions are the card's own corners and only the texture coordinates
+/// follow the footprint.
+struct PassthroughCardShape {
+    float half_w { 0.0f };
+    float half_h { 0.0f };
+    float canvas_width { 1.0f };
+    float canvas_height { 1.0f };
+    bool  clip_space { false };
+};
+
 struct ParseContext {
     std::shared_ptr<Scene>                                  scene;
     WPShaderValueUpdater*                                   shader_updater;
@@ -339,6 +353,15 @@ struct ParseContext {
     /// Work that waits for the layers to sit in their tree (a child system's place under a
     /// world-space parent depends on the scale it is drawn under).
     std::vector<std::function<void()>>                      after_attach;
+    /// The scene file's objects, for questions about a layer's ancestors.
+    const nlohmann::json*                                   objects { nullptr };
+    /// The cards of pass-through layers, laid out once every layer sits under its parent.
+    struct PassthroughCard {
+        std::shared_ptr<SceneNode> node;
+        std::shared_ptr<SceneMesh> mesh;
+        PassthroughCardShape       shape;
+    };
+    std::vector<PassthroughCard>                            passthrough_cards;
     /// Bindings whose scripts read other layers as they are made: bound once every layer exists.
     std::vector<std::function<void()>>                      deferred_bindings;
     /// A parse after the scene exists (a layer a script makes) binds at once: every layer is there.
@@ -587,30 +610,48 @@ std::shared_ptr<SceneMesh> MakeTextCardMesh(float left, float bottom, float righ
                         { 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.0f }, MeshUpdate::OnEvent);
 }
 
-/// The card of a passthrough layer with effects: its four corners where the layer's
-/// own local transform puts them (canvas positions, y up, in the order of
-/// `MakeQuadMesh`), each sampling the scene output at that place. With
-/// `clip_space` the positions are the same corners in clip space, so a pass that
-/// copies the footprint draws it 1:1. Otherwise the pass goes through the camera
-/// that frames the card's own rectangle about the origin, so the positions are the
-/// card's own corners (`half_w` by `half_h` about the origin) and only the texture
-/// coordinates follow the footprint.
-std::shared_ptr<SceneMesh> MakePassthroughMesh(const std::array<linalg::Vector2f, 4>& corners,
-                                               float canvas_width, float canvas_height,
-                                               bool clip_space, float half_w, float half_h) {
+/// The positions and texture coordinates (in the order of `MakeQuadMesh`) of the card of a
+/// passthrough layer with effects drawn where `world` puts the layer: its four corners in
+/// canvas positions, y up, each sampling the scene output at that place.
+void PassthroughCardVertices(const PassthroughCardShape& shape, const Matrix4d& world,
+                             std::array<float, 12>& positions, std::array<float, 8>& uvs) {
+    const std::array<std::array<double, 2>, 4> offsets { {
+        { -static_cast<double>(shape.half_w), -static_cast<double>(shape.half_h) },
+        { -static_cast<double>(shape.half_w), static_cast<double>(shape.half_h) },
+        { static_cast<double>(shape.half_w), -static_cast<double>(shape.half_h) },
+        { static_cast<double>(shape.half_w), static_cast<double>(shape.half_h) } } };
+    for (std::size_t corner = 0; corner < 4; ++corner) {
+        const linalg::Vector4d point =
+            world * linalg::Vector4d(offsets[corner][0], offsets[corner][1], 0.0, 1.0);
+        const float x = static_cast<float>(point.x());
+        const float y = static_cast<float>(point.y());
+        positions[corner * 3]     = shape.clip_space ? 2.0f * x / shape.canvas_width - 1.0f
+                                                     : static_cast<float>(offsets[corner][0]);
+        positions[corner * 3 + 1] = shape.clip_space ? 2.0f * y / shape.canvas_height - 1.0f
+                                                     : static_cast<float>(offsets[corner][1]);
+        positions[corner * 3 + 2] = 0.0f;
+        uvs[corner * 2]           = x / shape.canvas_width;
+        uvs[corner * 2 + 1]       = 1.0f - y / shape.canvas_height;
+    }
+}
+
+std::shared_ptr<SceneMesh> MakePassthroughMesh(const PassthroughCardShape& shape, const Matrix4d& world,
+                                               MeshUpdate update) {
     std::array<float, 12> positions {};
     std::array<float, 8>  uvs {};
-    const std::array<std::array<float, 2>, 4> own { { { -half_w, -half_h }, { -half_w, half_h },
-                                                      { half_w, -half_h }, { half_w, half_h } } };
-    for (std::size_t corner = 0; corner < 4; ++corner) {
-        const float x = corners[corner].x();
-        const float y = corners[corner].y();
-        positions[corner * 3]     = clip_space ? 2.0f * x / canvas_width - 1.0f : own[corner][0];
-        positions[corner * 3 + 1] = clip_space ? 2.0f * y / canvas_height - 1.0f : own[corner][1];
-        uvs[corner * 2]           = x / canvas_width;
-        uvs[corner * 2 + 1]       = 1.0f - y / canvas_height;
-    }
-    return MakeQuadMesh(positions, uvs);
+    PassthroughCardVertices(shape, world, positions, uvs);
+    return MakeQuadMesh(positions, uvs, update);
+}
+
+/// Lays the card out again where `world` puts its layer.
+void LayOutPassthroughCard(SceneMesh& mesh, const PassthroughCardShape& shape, const Matrix4d& world) {
+    if (mesh.VertexCount() < 1 || mesh.GetVertexArray(0).VertexCount() < 4) return;
+    std::array<float, 12> positions {};
+    std::array<float, 8>  uvs {};
+    PassthroughCardVertices(shape, world, positions, uvs);
+    auto& quad = mesh.GetVertexArray(0);
+    quad.SetVertex(WE_IN_POSITION, positions);
+    quad.SetVertex(WE_IN_TEXCOORD, uvs);
 }
 
 void AddParticleIndexArray(SceneMesh& mesh, uint32_t count) {
@@ -1424,6 +1465,33 @@ struct LoadedMaterial {
 
 constexpr std::size_t kMaxTextureSlots   = 13;
 constexpr int         kMaxCompileRounds  = 8;
+
+/// Whether the picture a `scenetexture` property chose can be opened: a texture or loose
+/// picture the project holds, a video, or one of the names the renderer itself supplies.
+/// (The slot takes the name either way; this decides only whether the layer's colour still
+/// shows.)
+bool ChosenPictureOpens(ParseContext& context, const std::string& name) {
+    if (name.empty()) return false;
+    if (IsSpecTex(name)) return true;
+    const auto* runtime_images = dynamic_cast<RuntimeImageSource*>(context.scene->imageParser.get());
+    if (runtime_images != nullptr && runtime_images->IsRuntimeImage(name)) return true;
+    const auto& header = TextureHeaderOf(context, name);
+    return header.width > 0 || header.mapWidth > 0 || header.isVideo;
+}
+
+/// Whether a chosen picture fills the solid-colour placeholder this material is made of: the
+/// texture slot a `scenetexture` property names resolves, now, to a picture that can be opened,
+/// and the slot held no picture of its own. The layer then draws that picture as it is.
+bool ChosenPictureFillsPlaceholder(ParseContext& context, const wpscene::WPMaterial& wpmat) {
+    if (context.scene->runtime == nullptr || wpmat.usertextures.empty()) return false;
+    if (UserTexturePropertyName(wpmat.usertextures.front()).empty()) return false;
+    const std::string shipped = wpmat.textures.empty() ? std::string() : wpmat.textures.front();
+    if (! shipped.empty() && shipped != "util/white") return false;
+    std::vector<std::string> slots { shipped };
+    ApplySystemUserTextures(slots, { wpmat.usertextures.front() },
+                            &context.scene->runtime->projectProperties(), nullptr);
+    return slots.front() != shipped && ChosenPictureOpens(context, slots.front());
+}
 
 /// Loads a material (R23 to R30, R39, R48): reads the shader, settles its combos
 /// and default textures, clears the slots the shader does not sample, and fills the
@@ -3061,6 +3129,34 @@ bool LoadPuppetSlots(ParseContext& context, const wpscene::WPImageObject& image,
     return ! slots.empty();
 }
 
+/// Whether something the scene file says can move an object while the scene runs: an origin,
+/// scale or angles that a property, a script or a timeline drives (those are objects in the
+/// file, not plain values), on the object or on any of its ancestors.
+bool WorldTransformMayChange(const ParseContext& context, const nlohmann::json& entry) {
+    if (context.objects == nullptr || ! context.objects->is_array()) return true;
+    const nlohmann::json* current = &entry;
+    for (std::size_t depth = 0; depth <= context.objects->size(); ++depth) {
+        if (! current->is_object()) return false;
+        for (const char* key : { "origin", "scale", "angles" }) {
+            const auto setting = current->find(key);
+            if (setting != current->end() && setting->is_object()) return true;
+        }
+        int32_t parent = 0;
+        const auto link = current->find("parent");
+        if (link == current->end() || ! wpscene::ReadInt32(*link, parent)) return false;
+        const nlohmann::json* next = nullptr;
+        for (const auto& candidate : *context.objects) {
+            if (candidate.is_object() && EntryId(candidate) == parent) {
+                next = &candidate;
+                break;
+            }
+        }
+        if (next == nullptr) return false;
+        current = next;
+    }
+    return true; // a loop of parents has no end to look at
+}
+
 /// The model flags and the numbers that decide how an image layer is built.
 struct ImageKind {
     bool fullscreen { false };
@@ -3076,6 +3172,11 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     wpscene::WPImageObject image;
     if (! image.FromJson(entry, *context.vfs)) return false;
     if (image.id == 0) image.id = plan.id;
+    // A picture the user (or the preset) chose for the placeholder is drawn as it is.
+    if (! image.colorIgnored && ChosenPictureFillsPlaceholder(context, image.material)) {
+        image.color        = { 1.0f, 1.0f, 1.0f };
+        image.colorIgnored = true;
+    }
 
     ImageKind kind;
     kind.fullscreen    = image.fullscreen;
@@ -3227,6 +3328,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     // The own pass and its mesh.
     const bool passthrough_card = kind.passthrough && ! kind.compose_model && has_effects;
     std::shared_ptr<SceneMesh> mesh;
+    std::optional<PassthroughCardShape> passthrough_shape;
     std::vector<PuppetSlot>    puppet_slots;
     if (puppet_direct) {
         mesh = std::make_shared<SceneMesh>();
@@ -3239,23 +3341,23 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
             for (auto& submesh : mesh->Submeshes()) submesh.material_slot = 0;
         }
     } else if (passthrough_card) {
-        // The card's corners where the layer's own local transform puts them (R78).
+        // The card copies the screen where the layer is drawn. Its parents are not attached
+        // yet, so it starts from the layer's own transform and is laid out from its world
+        // transform once every layer is under its parent (R78), and again whenever that moves.
         const Matrix4d local = SceneNode::LocalTransOf(Vector3f(origin.data()), Vector3f(scale.data()),
                                                        Vector3f(angles.data()));
-        const double half_w = static_cast<double>(geometry.size[0]) * 0.5;
-        const double half_h = static_cast<double>(geometry.size[1]) * 0.5;
-        std::array<linalg::Vector2f, 4> corners;
-        const std::array<std::array<double, 2>, 4> offsets { { { -half_w, -half_h }, { -half_w, half_h },
-                                                               { half_w, -half_h }, { half_w, half_h } } };
-        for (std::size_t corner = 0; corner < 4; ++corner) {
-            const linalg::Vector4d point =
-                local * linalg::Vector4d(offsets[corner][0], offsets[corner][1], 0.0, 1.0);
-            corners[corner] = linalg::Vector2f(static_cast<float>(point.x()), static_cast<float>(point.y()));
-        }
-        mesh = MakePassthroughMesh(corners, static_cast<float>(std::max(1, context.ortho_w)),
-                                   static_cast<float>(std::max(1, context.ortho_h)),
-                                   image.material.shader == "passthrough", static_cast<float>(half_w),
-                                   static_cast<float>(half_h));
+        PassthroughCardShape shape;
+        shape.half_w        = static_cast<float>(static_cast<double>(geometry.size[0]) * 0.5);
+        shape.half_h        = static_cast<float>(static_cast<double>(geometry.size[1]) * 0.5);
+        shape.canvas_width  = static_cast<float>(std::max(1, context.ortho_w));
+        shape.canvas_height = static_cast<float>(std::max(1, context.ortho_h));
+        shape.clip_space    = image.material.shader == "passthrough";
+        // A card that something in the scene can move is rewritten in place by an event; any
+        // other is fixed, and rewritten (with the graph built again) only if it moves anyway.
+        mesh = MakePassthroughMesh(shape, local,
+                                   WorldTransformMayChange(context, entry) ? MeshUpdate::OnEvent
+                                                                           : MeshUpdate::Fixed);
+        passthrough_shape = shape;
     } else {
         mesh = MakeCardMesh(geometry.size[0], geometry.size[1], geometry.u, geometry.v);
     }
@@ -3264,6 +3366,9 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     SetLayerTint(context, own, image, false);
     if (puppet_slots.empty()) mesh->AddMaterial(std::move(own));
     node->AddMesh(mesh);
+    if (passthrough_shape.has_value()) {
+        context.passthrough_cards.push_back({ node, mesh, *passthrough_shape });
+    }
     auto own_material = mesh->MaterialSlotPtr(0);
     WPPuppetLayer puppet_layer;
     if (puppet_ok && mdl.puppet != nullptr) {
@@ -3423,7 +3528,14 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     if (referenced) RegisterImageComposite(context, image, *node);
 
     RegisterLayerAlphaDrivers(context, plan.key, image, all_materials);
-    RegisterLayerTint(context, plan.key, entry, image.color, tinted);
+    if (image.colorIgnored && entry.contains("color")) {
+        // The colour (and what drives it) no longer tints anything: the picture is drawn as it is.
+        nlohmann::json without_color = entry;
+        without_color.erase("color");
+        RegisterLayerTint(context, plan.key, without_color, image.color, tinted);
+    } else {
+        RegisterLayerTint(context, plan.key, entry, image.color, tinted);
+    }
     if (runtime != nullptr && ImageObjectHandlesCursorEvents(image)) {
         if (auto mask = BuildImageHitMask(context, image); mask.has_value()) {
             runtime->RegisterNodeHitMask(plan.key, std::move(*mask));
@@ -3440,6 +3552,26 @@ void SyncEffectFinals(ParseContext& context) {
         layer.node->UpdateTrans();
         SetNodeTransformFromMatrix(layer.effects->FinalNode(), layer.node->ModelTrans());
     }
+}
+
+/// The card of every pass-through layer with effects copies the screen where its layer is
+/// drawn: its world transform, under all its parents, which is known once the tree exists.
+/// The runtime then keeps the card in step with that transform while the scene runs.
+void LayOutPassthroughCards(ParseContext& context) {
+    auto* runtime = context.scene->runtime.get();
+    for (auto& card : context.passthrough_cards) {
+        card.node->UpdateTrans();
+        const Matrix4d world = card.node->ModelTrans();
+        LayOutPassthroughCard(*card.mesh, card.shape, world);
+        if (runtime == nullptr) continue;
+        runtime->RegisterPassthroughCard(
+            card.node, card.mesh,
+            [shape = card.shape](SceneMesh& mesh, const Matrix4d& moved) {
+                LayOutPassthroughCard(mesh, shape, moved);
+            },
+            world);
+    }
+    context.passthrough_cards.clear();
 }
 
 /// The layer record of a typed entry: the stand-in node its children already hang from,
@@ -5634,6 +5766,7 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
     scene->display_sized = ! general.isOrtho;
 
     ParseContext context {};
+    context.objects        = &objects;
     context.scene          = scene;
     context.vfs            = &vfs;
     context.shader_updater = static_cast<WPShaderValueUpdater*>(scene->shaderValueUpdater.get());
@@ -5688,6 +5821,7 @@ std::shared_ptr<Scene> ParseSceneDocument(const SceneParseRequest& request, cons
 
     BuildLayers(context, general, objects, plans, sm);
     AttachLayers(context);
+    LayOutPassthroughCards(context);
     SyncEffectFinals(context);
 
     ApplyDefaultDepthTarget(context);

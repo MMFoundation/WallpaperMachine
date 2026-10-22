@@ -915,7 +915,12 @@ depth-testing composition layer composes like the plain one. A pass-through laye
 drawn through effects, such as a project layer under a CRT effect, copies the part of
 the screen it is drawn over, under the groups it sits in, not at the origin it has
 within them, and follows them when a property, a script or a timeline moves them while
-the scene runs. Camera parallax moves
+the scene runs: the card is laid out again only when the layer's world transform is not the
+one it was last laid out from, so a still scene does no work for it. A card that the scene
+file itself says can move (an origin, scale or angles bound to a property, script or timeline,
+on the layer or on a group above it) is geometry the renderer rewrites in place; a card nothing
+declared to move is fixed, and if something moves it anyway (another layer's script moving a
+plain group) the render graph is built again once for that move. Camera parallax moves
 what a composition layer holds along with its card, as Wallpaper Engine's draw loop gives
 every pass of a layer the same offset: the screen its first pass reads is the place its last
 pass draws it, so a layer that only copies what is behind it shows a continuous scene, not

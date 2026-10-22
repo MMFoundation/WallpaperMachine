@@ -301,18 +301,23 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         ReadPlainFlag(*found, "passthrough", config.passthrough);
     }
 
-    // Size: the model's own, else the object's `size`, else twice the origin.
-    // A fullscreen layer reads none of them.
-    if (! fullscreen) {
-        if (const auto width = model_json.find("width"); width != model_json.end()) {
+    // Size: the object's own `size`, else the one its model states, else twice the origin. A
+    // model states a size for a layer that saved none (the editor writes a sprite sheet's frame
+    // there), never over one the scene saved. A fullscreen layer reads none of them, and has no
+    // parallax depth: the screen it copies is drawn back over the whole screen wherever the
+    // cursor is, so its saved depth is not read either.
+    if (fullscreen) {
+        parallaxDepth = { 0.0f, 0.0f };
+    } else {
+        if (const auto found = json.find("size"); found != json.end()) {
+            ReadStrictVec(*found, size);
+        } else if (const auto width = model_json.find("width"); width != model_json.end()) {
             int32_t w = 0, h = 0;
             ReadNumberSetting(*width, w);
             if (const auto height = model_json.find("height"); height != model_json.end()) {
                 ReadNumberSetting(*height, h);
             }
             size = { static_cast<float>(w), static_cast<float>(h) };
-        } else if (const auto found = json.find("size"); found != json.end()) {
-            ReadStrictVec(*found, size);
         } else {
             size = { origin[0] * 2.0f, origin[1] * 2.0f };
         }
@@ -338,12 +343,14 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         WPMaterialPass instance_pass;
         if (instance_pass.FromJson(*found)) {
             material.MergePass(instance_pass);
-            // A runtime picture that replaces the placeholder white takes the tint with it;
-            // a property-chosen picture leaves the layer a solid colour.
+            // A runtime picture that replaces the placeholder white takes the tint with it. (A
+            // picture a property chooses does too, but only the scene's property table says
+            // whether the property has one: the loader decides that.)
             for (std::size_t slot = 0; slot < instance_pass.usertextures.size(); ++slot) {
                 const bool white = slot < material.textures.size() && material.textures[slot] == "util/white";
                 if (white && IsSystemUserTexture(instance_pass.usertextures[slot])) {
-                    color = { 1.0f, 1.0f, 1.0f };
+                    color        = { 1.0f, 1.0f, 1.0f };
+                    colorIgnored = true;
                     if (field_bindings.is_object()) field_bindings.erase("color");
                 }
             }

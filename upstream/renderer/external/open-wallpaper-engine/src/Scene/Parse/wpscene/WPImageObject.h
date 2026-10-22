@@ -82,6 +82,9 @@ public:
     std::array<float, 2>       parallaxDepth { 1.0f, 1.0f };
     std::array<float, 2>       cropoffset { 0.0f, 0.0f };
     std::array<float, 3>       color { 1.0f, 1.0f, 1.0f };
+    // A picture stands in for the plain colour this layer is made of, and is drawn as it is: the
+    // colour (and whatever property or script drives it) no longer tints it.
+    bool                       colorIgnored { false };
     int32_t                    colorBlendMode { 0 };
     bool                       copybackground { true };
     float                      alpha { 1.0f };

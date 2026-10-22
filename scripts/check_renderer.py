@@ -38,6 +38,8 @@ REGRESSION_BINARIES = {
     "metal_scene_draw_smoke": True, "metal_poster_capture_test": True,
     "metal_video_texture_test": True, "unchanged_present_test": True, "scene_failure_policy_test": True,
     "scene_harness_selftest": True, "backdrop_scene_test": True,
+    "scene_placeholder_picture_test": True, "scene_passthrough_layout_test": True,
+    "scene_fullscreen_parallax_test": True, "scene_layer_size_test": False,
     "audio_tests": False, "miniaudio_failure_paths_test": False, "sprite_animation_test": False,
     "rendergraph_smoke": False,
     "rust_shader_bridge_test": False, "stb_image_regression_test": False,

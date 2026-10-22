@@ -449,6 +449,37 @@ void SceneRuntimeContext::ApplyEffectFinalBindings() {
     }
 }
 
+void SceneRuntimeContext::RegisterPassthroughCard(std::shared_ptr<SceneNode> node,
+                                                  std::shared_ptr<SceneMesh> mesh,
+                                                  PassthroughCardLayout layout,
+                                                  const linalg::Matrix4d& laid_out_from) {
+    if (node == nullptr || mesh == nullptr || ! layout) return;
+    m_passthrough_cards.push_back(
+        PassthroughCard { node, std::move(mesh), std::move(layout), laid_out_from });
+}
+
+// A pass-through layer copies the screen where it is drawn: when its world transform is not the
+// one its card was laid out from, the card is laid out again.
+void SceneRuntimeContext::ApplyPassthroughCards() {
+    std::erase_if(m_passthrough_cards, [](const PassthroughCard& card) { return card.node.expired(); });
+    for (auto& card : m_passthrough_cards) {
+        const auto node = card.node.lock();
+        if (node == nullptr) continue;
+        node->UpdateTrans();
+        const linalg::Matrix4d now = node->ModelTrans();
+        if ((now - card.laid_out_from).cwiseAbs().maxCoeff() <= 1.0e-6) continue;
+        card.laid_out_from = now;
+        card.layout(*card.mesh, now);
+        ++m_passthrough_card_layouts;
+        if (node->Mesh() != card.mesh.get()) continue; // a different card is drawn now
+        if (card.mesh->Dynamic()) {
+            card.mesh->SetDirty();
+        } else {
+            MarkSceneGraphMutated("passthrough-card");
+        }
+    }
+}
+
 void SceneRuntimeContext::ApplyMaterialConstantBindings() {
     for (auto& binding : m_material_constants) SyncMaterialConstant(binding);
 }
@@ -556,6 +587,8 @@ void SceneRuntimeContext::Tick(double frame_time) {
     ApplyMaterialAlphaBindings();
     for (auto& binding : m_material_colors) ApplyMaterialColorAnimation(binding);
     ApplyMaterialConstantBindings();
+    // Last, so the card follows every move this tick made.
+    ApplyPassthroughCards();
 }
 
 ScriptEngine& SceneRuntimeContext::scriptEngine() { return *m_script_engine; }

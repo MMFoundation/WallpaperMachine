@@ -344,6 +344,18 @@ public:
                                       bool replay_current = true);
     void RegisterNodeEffectFinal(std::string name, SceneNode* node, SceneImageEffectLayer* layer,
                                  TextLayerRenderFrame target_frame = {});
+    /// Lays a pass-through layer's card out again from where `matrix` puts the layer
+    /// (its world transform, y up, canvas units), into `mesh`.
+    using PassthroughCardLayout = std::function<void(SceneMesh& mesh, const linalg::Matrix4d& matrix)>;
+    /// A pass-through layer's card copies the part of the screen the layer is drawn over. The
+    /// loader laid it out from `laid_out_from`; from then on every tick lays it out again
+    /// when the layer's world transform differs from the one it was last laid out from, and
+    /// not otherwise. A mesh that was not made to be rewritten is rewritten in place and
+    /// the render graph asked to be built again.
+    void RegisterPassthroughCard(std::shared_ptr<SceneNode> node, std::shared_ptr<SceneMesh> mesh,
+                                 PassthroughCardLayout layout, const linalg::Matrix4d& laid_out_from);
+    /// How many times a registered card was laid out again after the scene loaded.
+    uint64_t PassthroughCardLayoutCount() const { return m_passthrough_card_layouts; }
     void RegisterMaterialAlphaAnimation(std::shared_ptr<SceneMaterial> material,
                                         std::shared_ptr<ScalarAnimationPlayback> animation);
     // A scripted or user-bound image `alpha` is not an animation timeline.
@@ -742,6 +754,12 @@ private:
         SceneImageEffectLayer* layer { nullptr };
         TextLayerRenderFrame   target_frame {};
     };
+    struct PassthroughCard {
+        std::weak_ptr<SceneNode> node;
+        std::shared_ptr<SceneMesh> mesh;
+        PassthroughCardLayout    layout;
+        linalg::Matrix4d         laid_out_from;
+    };
     /// A layer a script can copy (`createLayer`), as registered by the loader.
     struct LayerTemplate {
         std::shared_ptr<SceneNode> node;
@@ -1044,6 +1062,8 @@ private:
     /// Ends the subscription a registered listener made, in registration order.
     std::vector<std::function<void()>> m_listener_ends;
     std::unordered_map<std::string, EffectCardLink> m_effect_card_links;
+    std::vector<PassthroughCard> m_passthrough_cards;
+    uint64_t                     m_passthrough_card_layouts { 0 };
     std::unordered_map<std::string, LayerTemplate> m_layer_templates;
     /// Layer key -> the template path the layer was made from (or the path a template node
     /// was registered under, which is how a script in a workshop layer finds its siblings).
@@ -1096,6 +1116,7 @@ private:
     void ApplyNodeTransformBindings();
     void ApplyTextValueBindings();
     void ApplyEffectFinalBindings();
+    void ApplyPassthroughCards();
     void ApplyMaterialConstantBindings();
     void ApplyMaterialAlphaBindings();
     void ApplyAnchoredTransform(const std::string& name);

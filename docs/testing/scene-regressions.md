@@ -272,16 +272,19 @@ Playback, backend, host and startup areas are in
     cursor centred) requires a picture under group -> fullscreen layer (with and without
     an effect) and under a top-level fullscreen layer saved where the group is (children
     inheriting its depth 2) to equal the picture under the group alone.
-    `.AFullscreenLayerStaysOverTheScreenWhileParallaxMovesTheSceneOnBothRenderers`
-    (amount 0.5, cursor at the top-left and the bottom-right corner, a backdrop at depth 1)
-    requires a top-level fullscreen layer without an effect, with one, saved with depth 0,
-    saved off the middle with depth 0.5, and saved where the backdrop is with the backdrop
-    below it, to equal the backdrop alone. `ParseImageObj` gives a fullscreen layer depth
-    0: the file's is never read for one (`WPImageObject::FromJson`), and the default depth 1 moved the
-    last pass of its effects, drawn through the `fullscreen` camera, so the copy of the
-    screen was drawn a second time, shifted by the cursor, over the scene (3521337568's
-    film-grain post-processing layer). The layers below it keep their tree's depth
-    (`ResolveLayerParallax`).
+    `FullscreenParallax.*` in `scene_fullscreen_parallax_test` (amount 0.5, the cursor
+    at the top-left and then the bottom-right corner, a backdrop at depth 1; on both
+    shader flavours of a pass-through material) requires a top-level fullscreen layer
+    without an effect, with one, saved with depth 0, saved with depth 0.5, saved off
+    the canvas middle, and saved where the backdrop is with the backdrop below it, to
+    draw exactly what the backdrop alone draws under the same cursor;
+    `FullscreenParallaxBaseline` requires a normal layer at depth 1 to move at all, which
+    the other cases would otherwise pass without. `WPImageObject::FromJson` gives a
+    fullscreen layer depth 0 and never reads the one in the file, and the default depth 1
+    moved the last pass of its effects, so the copy of the screen was drawn a second time,
+    shifted by the cursor, over the scene (3521337568's film-grain post-processing layer).
+    The layers below it keep their tree's depth (`ResolveLayerParallax`, which copies the
+    outermost layer's saved depth into its descendants).
     Established from the 2.8.42 decompile (the layer's own draw ignores its model matrix;
     children are drawn through its composite) and from two local scenes, not from a
     Wallpaper Engine frame of a scene that has the layer: 3804689861's author preview
@@ -291,24 +294,33 @@ Playback, backend, host and startup areas are in
     now draws its large dark foreground fish at scale 3.7 across the frame early in its
     timeline, which a Wallpaper Engine frame at the same time would settle.
 - **A pass-through layer in a group reads the screen where it is drawn** —
-  `MetalSceneDraw.APassThroughLayerInAGroupReadsTheScreenWhereItIsDrawnOnBothRenderers`
-  draws a four-quadrant backdrop through a pass-through layer with an identity effect,
-  alone, as a project layer with no origin in a group at the canvas centre, and under a
-  moved, 2x-scaled group, and requires each to equal the backdrop alone on both
-  renderers (the scaled one away from the 3-pixel band its half-sized card softens). The
-  card that copies the screen (`PassthroughCardVertices`, `PassthroughClipSpaceVertices`)
-  is laid out again from the layer's world matrix by `LayOutPassthroughCards` once every
-  layer is under its parent; from the local transform the parse had before that, issue
-  #53's CRT "Full Composition Layer" (a project layer under a centred group) copied the
-  screen half a canvas off and showed a half-sized copy of the scene in one quadrant.
-  `MetalSceneDraw.APassThroughLayerReadsTheScreenWhereItsGroupMovesItWhileTheSceneRunsOnBothRenderers`
-  moves the group once the scene has loaded, by a zoom slider bound to its scale and
-  changed in the running scene and by a script on its origin, requires the same of the
-  frames after, and requires the card to have been laid out exactly once more.
-  `SyncEffectFinalNode` lays the card (`PassthroughCard`, an `OnEvent` mesh) out again
-  from the matrix it places the final card with, only when that matrix differs from the
-  one the card was last laid out from; before, the card kept copying the screen from
-  where the layer had been until the scene was loaded again.
+  `PassThroughLayout.*` and `PassThroughLayoutMoved.*` in `scene_passthrough_layout_test`
+  draw a four-quadrant backdrop through a pass-through layer whose effect returns what
+  it receives, so every picture has to equal the backdrop alone: the layer alone, a
+  project layer with no origin in a group at the canvas centre (both shader flavours of
+  a pass-through material), and, with the camera flavour, under a moved, 2x-scaled group
+  (away from the 3-pixel band its half-sized card softens). The effect also makes the
+  result opaque, so a card that copies the wrong part of the screen leaves black instead
+  of letting the backdrop show through. The card that copies the screen
+  (`PassthroughCardVertices`) used to be laid out from the layer's own origin, which is
+  relative to its group, before any layer had a parent: issue #53's CRT "Full Composition
+  Layer" (a project layer under a centred group) copied the screen half a canvas off and
+  showed a half-sized copy of the scene in one quadrant. `LayOutPassthroughCards` now lays
+  every card out from the layer's world matrix once the tree exists, and
+  `SceneRuntimeContext::ApplyPassthroughCards` does it again at the end of a tick when that
+  matrix is not the one the card was last laid out from, and never otherwise. The tests
+  move the group once the scene has loaded (a slider bound to its scale and a
+  property bound to its origin; a script on its origin; another layer's script on a group
+  whose file holds plain values), and require the frames after to equal the backdrop and
+  `PassthroughCardLayoutCount()` to have grown by exactly one per change and by nothing
+  on the frames in between. A card that anything the file says can move (an origin, scale
+  or angles that is a property, script or timeline, on the layer or an ancestor) is an
+  `OnEvent` mesh, rewritten in place with no new graph; any other card is fixed geometry,
+  and a move nothing declared (the last case) rewrites it and builds the graph again once,
+  so a still scene keeps its static reuse of the chain. The pass that draws the footprint
+  straight into clip space (the material shader named `passthrough`) lays the copy out
+  in canvas coordinates, which is the screen again only for a layer covering the canvas; the
+  moved and scaled cases are not required of it.
 - **One cursor mapping, owned by the presentation** —
   `SceneRuntimeContext::SetCursorInput` maps window-normalized input through the
   cursor viewport the renderer publishes (`origin + (x, 1 - y) * size`) and writes
@@ -493,11 +505,18 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   frame and runs only when the property changes. A layer whose placeholder a
   runtime image replaces drops a bound colour as it drops an authored one, and so
   does a solid placeholder whose slot a `scenetexture` property fills:
-  `PlaceholderPicture.*` in `project_property_preview_test`. `WPImageObject` cannot
-  read the properties, so `ParseImageObj` resolves the instance's slots against the
-  loaded values as the material will (`PropertyPictureReplacesPlaceholder`); a preset's
-  picture multiplied by its dark scheme colour drew the whole wallpaper black (issue
-  #53). Unset, or a file that cannot be opened, keeps the placeholder and its colour.
+  `PlaceholderPicture.*` in `scene_placeholder_picture_test`. `WPImageObject` cannot
+  read the properties, so `LoadImageEntry` resolves the layer's first slot against the
+  loaded values as the material will (`ChosenPictureFillsPlaceholder`, over the same
+  `ApplySystemUserTextures` that `LoadMaterial` uses); a preset's picture multiplied by its dark
+  scheme colour drew the whole wallpaper black (issue #53). The tests draw a dark scheme
+  colour over a chosen picture (a loose file the user picked, and a texture the preset
+  ships), change the colour while the scene runs, and leave the property unset or name a
+  file that is not there; the last two keep the placeholder's colour and keep following
+  it. A layer with a picture of its own is still tinted by its colour. A host file that
+  cannot be opened leaves the slot on the texture the material shipped
+  (`TexturePropertyTextureName`); a name that a project does not hold takes the slot as it
+  always did, but is no picture, so the placeholder keeps its colour.
 - **Image layer brightness** — `SceneSchema.AnImageLayersBrightnessTintsItsMaterialsOnlyInAnHdrSceneAndFollowsItsBindings`,
   `MetalSceneDraw.AnImageLayersBrightnessTintsItOnlyWhereTheSceneRendersHdr`
   and `.AnImageLayersBoundBrightnessFollowsItsPropertyAndScript`.
@@ -1274,13 +1293,15 @@ texture entrances are not decoded-image or native-rendering evidence.
   the scene saved. `solidlayer` is read and unused, and `autosize` alone still takes
   the saved size.
 - **A layer's saved size over its model's** —
-  `SceneSchema.ALayerIsDrawnAtTheSizeItsSceneSavedRatherThanItsModels`. A model can
-  state a `width` and `height` (the editor writes a frame's size for a sprite sheet);
-  the layer is still as large as the `size` the scene saved, and the model's size is
-  only for a layer that saved none. A CRT wallpaper whose screen is a sprite sheet
-  resized in the editor drew its screen at the frame's size, a dark rectangle inset
-  in the monitor with background showing round it, where Wallpaper Engine's frames
-  fill the bezel.
+  `LayerSize.*` in `scene_layer_size_test` (parse only, no device). A model can state a
+  `width` and `height` (the editor writes a frame's size for a sprite sheet); the layer is
+  still as large as the `size` the scene saved, and the model's size is only for a layer that
+  saved none (400x300 saved over 64x64 stated draws 400x300; none saved draws 64x64; neither
+  stated leaves twice the origin, as before), for a still picture and for an animated
+  sheet of frames alike, and the picture is sampled over the whole card. A CRT wallpaper
+  whose screen is a sprite sheet resized in the editor drew its screen at the frame's size,
+  a dark rectangle inset in the monitor with a wide border of background round it. Not
+  compared with a Wallpaper Engine frame (no Windows VM).
 - **Depth state of a layer drawn through effects** —
   `MetalSceneDraw.ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWrite`.
   The last pass of an image layer's effects is drawn with the layer's authored
