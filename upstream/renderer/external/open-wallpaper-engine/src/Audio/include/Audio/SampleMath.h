@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e5-text-audio-video-runtime.md; written without access to the original source.
 #pragma once
 
 #include <algorithm>
@@ -13,26 +14,25 @@ inline float ClampVolume(float value) {
 }
 
 inline void ClearInterleavedF32(void* output, std::size_t sample_count) {
-    auto* samples = static_cast<float*>(output);
-    std::fill_n(samples, sample_count, 0.0f);
+    if (output == nullptr || sample_count == 0) return;
+    float* out = static_cast<float*>(output);
+    std::fill(out, out + sample_count, 0.0f);
 }
 
 inline void ApplyVolumeF32(void* data, std::size_t sample_count, float volume) {
-    auto*       samples        = static_cast<float*>(data);
-    const float clamped_volume = ClampVolume(volume);
-    for (std::size_t index = 0; index < sample_count; ++index) {
-        samples[index] *= clamped_volume;
-    }
+    if (data == nullptr || sample_count == 0) return;
+    const float gain = ClampVolume(volume);
+    float*      samples = static_cast<float*>(data);
+    for (std::size_t i = 0; i < sample_count; ++i) samples[i] *= gain;
 }
 
 inline void MixInterleavedF32(void* output, const void* input, std::size_t sample_count,
                               float volume) {
-    auto*       output_samples = static_cast<float*>(output);
-    const auto* input_samples  = static_cast<const float*>(input);
-    const float clamped_volume = ClampVolume(volume);
-    for (std::size_t index = 0; index < sample_count; ++index) {
-        output_samples[index] += input_samples[index] * clamped_volume;
-    }
+    if (output == nullptr || input == nullptr || sample_count == 0) return;
+    const float  gain = ClampVolume(volume);
+    float*       out  = static_cast<float*>(output);
+    const float* in   = static_cast<const float*>(input);
+    for (std::size_t i = 0; i < sample_count; ++i) out[i] += in[i] * gain;
 }
 
 } // namespace wallpaper::audio

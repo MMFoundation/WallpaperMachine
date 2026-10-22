@@ -11,8 +11,8 @@ CLAUDE.md -> AGENTS.md              Claude entry point; relative symlink, same r
 CHANGELOG.md                       published versions, newest first; written by scripts/release_notes.py
 CODE_OF_CONDUCT.md                 conduct expected in the project's spaces and how it is enforced
 CONTRIBUTING.md                    contributor working agreement
-LICENSE                            GNU GPL version 2 text; the license of this repository's source (verbatim copy of upstream/renderer/LICENSE)
-LICENSING.md                       GPL-2.0-only policy, Supporter model, component licenses and distribution blockers
+LICENSE                            GNU GPL version 3 text; the license of this repository's source
+LICENSING.md                       GPL-3.0-only policy, Supporter model, component licenses and distribution blockers
 README.md                          product overview after the website, build quickstart, FAQ, sponsor list (written by scripts/update_sponsors.py), documentation index
 README.zh-CN.md                    README.md in 简体中文; change both together (same sponsor list block)
 SECURITY.md                        private vulnerability reporting, supported versions and scope
@@ -22,7 +22,7 @@ WallpaperMachine.xcodeproj/        generated from project.yml by xcodegen; commi
 App/                               WallpaperMachine application target sources only
   WallpaperEngineApp.swift         @main AppKit entry point; no scene/UI logic
   AppDelegate.swift                lifecycle, menu bar, window and shutdown ordering
-  Bridge/                          BridgeEnvironment.swift (Vulkan ICD), WallpaperPreviewBridge.h (scene C API for previews)
+  Bridge/                          WallpaperPreviewBridge.h (scene C API for previews)
                                    and Generated/ (uniffi output; not hand-edited)
   Logging/                         AppLog.swift (the only Swift logging entry point) and its router
   Services/<Domain>/               domain logic and stores, one folder per domain:
@@ -46,7 +46,9 @@ App/                               WallpaperMachine application target sources o
                                    (InstanceLock, SingleInstance)
     Localization/                  AppLanguage.swift: shipped-language registry and the language preference store
     LockScreen/                    lock-screen selection overrides, extension registration and configuration publishing
-    NativeVideo/                   AVFoundation video backend: admission, player and host window
+    NativeVideo/                   native video backend: the AVFoundation player and the WebM player's window, the
+                                   host, and the format check Apply uses (the admission rule, the layout rules
+                                   and the WebM player itself are in Shared/)
     Pixiv/                         pixiv browsing, sign-in session, downloads and still-wallpaper packaging
     Playlist/                      per-display playlists: model, planner, store and the scheduler that switches wallpapers
     Preview/                       isolated live preview inputs, lifecycle, WebKit and scene/video surfaces
@@ -80,7 +82,10 @@ Extension/                         WallpaperMachineExtension sources, Info.plist
                                    its own string catalog (Localizable.xcstrings), third-party notice
 Shared/                            contracts compiled into both targets: lock-screen configuration, status and surface
                                    lifecycle, web-wallpaper protocol and screen-saver surface, RuntimeCounters,
-                                   WallpaperPresentationAuthority, display power and its re-check burst
+                                   WallpaperPresentationAuthority, display power and its re-check burst,
+                                   the native video admission and layout rules, the WebM player and its
+                                   opening (WebMPlayer, WebMOpening), the recovery budget, and the lock-screen
+                                   video planner and player
 Resources/StarterWallpaper/        bundled sample wallpaper (Aurora.mp4, preview.jpg, project.json)
 Resources/ReleaseBanners/          bundled release banners, x.y.z.jpg and x.y.z.zh-Hans.jpg (or .png), shown by What's New and the release page
 Tests/Unit/<Domain>/               WallpaperMachineTests, one folder per App/Services domain plus Panel for
@@ -96,13 +101,41 @@ scripts/                           developer command line; Python only
                                    dmg.py drag-to-install disk image, bundle_contract.py signed entitlements and
                                    Info.plist keys of the built app, wordmark.py logo outlines for brand.py)
   tests/                           unit tests for the scripts, run by scripts/test.py
-Formula/                           mwe-ffmpeg.rb: the LGPL-2.1-or-later FFmpeg build the app links (scripts/install_ffmpeg.py)
 Packaging/dmg/                     disk-image window background (background.png, @2x); generated by scripts/brand.py --dmg
+Renderer/                          this project's own renderer code (not vendored), outside upstream/, built as static
+                                   libraries the scene engine's CMake includes
+  Media/                           wmMedia: the container readers (ISO-BMFF/MP4, Matroska/WebM), pure C++ with no Apple or
+                                   third-party dependency, their shared byte source, error and cursor types, and tests/
+                                   (see container-readers.md)
+    Apple/                         wmMediaApple: the platform layer of the readers, ObjC++ over VideoToolbox with C++
+                                   headers: codec format descriptions and a decompression session that returns frames in
+                                   display order; WebMReader.h/.mm, the Objective-C face of the Matroska reader that
+                                   Swift imports (`import WallpaperMedia`, WallpaperMedia.modulemap); its tests/
+                                   (vt_frame_decoder_test, webm_reader_test) are built by the engine's tests
+  Sound/                           wmSound: the scene-sound path (channel remix, resampler, loop pipeline, the
+                                   AudioToolbox decoder and the Ogg Vorbis decoder over the vendored stb_vorbis),
+                                   Matroska/ (the audio track of a WebM or Matroska file as PCM), tests/
+                                   (see sound-decoding.md)
+  Cargo.toml, Cargo.lock,          the Rust workspace of this project's own code (apart from upstream/renderer's); its
+  rust-toolchain.toml              one member so far is Shader/
+  Shader/                          wm-shader: the shader layer (Wallpaper Engine shader text to Metal Shading Language,
+                                   reflection, the C ABI of include/rs_shader.h behind the `ffi` feature), written
+                                   from a clean-room specification; NOTES.md records its choices; tests in src/ and tests/.
+                                   upstream/renderer's wallpaper-core links it as a path crate (`wm-shader` with `ffi`)
+  Surface/                         wmSurface: the still preview a wallpaper that cannot be drawn shows instead of an empty
+                                   layer (ImageIO and Core Animation, ObjC++ with a C++ header) and the pure rule that
+                                   keeps the picture inside the project's folder; tests/ (see scene-rendering.md)
+  Testing/                         synthetic video for the renderer tests: a VideoToolbox H.264 encoder (with and without
+                                   B-frames) and an AVAssetWriter passthrough writer behind a C++ header, its own test,
+                                   and two small embedded clips (VP9 in WebM, H.264 with B-frames in Matroska)
 upstream/                          vendored third-party code only
   provenance.json                  repositories, pinned revisions, modification status
-  renderer/                        Rust workspace (crates/), C++ scene engine (external/), cargo target/;
-                                   trimmed to what the build and renderer checks use
+  renderer/                        Rust workspace (crates/bridge, crates/core), C++ scene engine (external/),
+                                   cargo target/; trimmed to what the build and renderer checks use
   mediaremote-adapter/             ungive/mediaremote-adapter, BSD-3-Clause; built as an embedded framework
+  naga/                            naga 29.0.3 (MIT OR Apache-2.0, used under MIT), patched so codespan-reporting is
+                                   optional (PATCHES.md lists the differences); wired in by [patch.crates-io] in
+                                   upstream/renderer/Cargo.toml
 artifacts/                         Git-ignored: all test and verification evidence
 build/                             Git-ignored: Xcode derived data and built products only
 .github/FUNDING.yml                the repository's Sponsor button; links the website's pricing page
@@ -111,7 +144,7 @@ build/                             Git-ignored: Xcode derived data and built pro
 .github/pull_request_template.md   the pull-request description outline and checklist
 .github/workflows/                 CI: build.yml, release.yml, version.yml, warm-caches.yml, supporters.yml,
                                    codeql.yml, claude.yml and claude-code-review.yml
-.github/actions/prepare-build/     composite action: Xcode, Homebrew packages, LGPL FFmpeg and the build caches
+.github/actions/prepare-build/     composite action: Xcode, Homebrew packages and the build caches
 ```
 
 Git-ignored and machine-local, never committed: `artifacts/`, `build/`, the agent tool
@@ -120,7 +153,8 @@ directories and `CLAUDE.local.md` named in `AGENTS.md`, and the root `node_modul
 
 Things that must not appear:
 
-- No product code under `upstream/` — it is vendored renderer code only.
+- No product code under `upstream/` — it is vendored third-party code only (the renderer,
+  the MediaRemote adapter, the patched `naga` crate); new renderer code goes in `Renderer/`.
 - No app-target code under `Shared/`; it must stay compilable with
   `APPLICATION_EXTENSION_API_ONLY`.
 - No generated Xcode settings edited in `WallpaperMachine.xcodeproj`; change `project.yml`.
@@ -142,7 +176,8 @@ Things that must not appear:
 | Developer script | `scripts/<name>.py` | `snake_case.py`, argparse flags, no shell wrappers |
 | Shared Python helper | `scripts/lib/` | With a test in `scripts/tests/` |
 | Documentation | `docs/`, `docs/features/` (product behavior) or `docs/testing/` | Add it to the index in [README.md](README.md); one topic per file |
-| Renderer, scene-engine or shader change | `upstream/renderer/` | Vendored: keep changes minimal and reflect them in `upstream/provenance.json` |
+| Renderer or scene-engine change | `upstream/renderer/` | Vendored: keep changes minimal and reflect them in `upstream/provenance.json` |
+| New renderer code that is this project's own (container readers, the shader layer, test support such as the synthetic video writer, and later the decoders and engine pieces that replace vendored ones) | `Renderer/<Area>/` | Never under `upstream/`; written from public specifications and Apple documentation, never copied from another implementation. Pure C++17 until a layer needs a platform API; headers are included as `"<Area>/<Header>.hpp"`; tests in `Renderer/<Area>/tests/`, registered in `scripts/check_renderer.py` (`REGRESSION_BINARIES`). The engine build includes it from `upstream/renderer/external/open-wallpaper-engine/CMakeLists.txt` (`Renderer/Testing` from its `tests/CMakeLists.txt`) |
 | Generated code | nowhere by hand | Regenerate via `scripts/build.py`; commit only what the tooling produces |
 | Evidence, logs, result bundles | `artifacts/` | Disposable; never committed |
 

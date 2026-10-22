@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <cstdint>
 #include <unordered_map>
 #include <cstdint>
@@ -69,8 +70,6 @@ public:
     // Black, as Wallpaper Engine leaves them when a scene omits them.
     std::array<float, 3> ambientcolor { 0.0f, 0.0f, 0.0f };
     std::array<float, 3> skylightcolor { 0.0f, 0.0f, 0.0f };
-    // Property-bound lighting/fog values are resolved when the graph is built.
-    nlohmann::json       lighting_settings = nlohmann::json::object();
     // Wallpaper Engine's defaults: bloom on, at strength 2 above 0.65.
     bool                 bloom { true };
     float                bloomstrength { 2.0f };
@@ -90,20 +89,27 @@ public:
     nlohmann::json       bloomhdrscatter_setting;
     nlohmann::json       bloomhdrfeather_setting;
     nlohmann::json       bloomhdriterations_setting;
-    bool                 norecompile { false };
+    bool norecompile { false };
+
+    // Bloom tint, with its authored setting for a property to drive.
     std::array<float, 3> bloomtint { 1.0f, 1.0f, 1.0f };
     nlohmann::json       bloomtint_setting;
     bool                 dynamic_bloomtint { false };
-    float                perspectiveoverridefov { 0.0f };
+
+    float perspectiveoverridefov { 0.0f };
+
+    // Forces particles feel. Gravity pulls down (-y) and wind blows along +z unless told otherwise.
     bool                 windenabled { false };
     std::array<float, 3> winddirection { 0.0f, 0.0f, 1.0f };
     float                windstrength { 0.0f };
     std::array<float, 3> gravitydirection { 0.0f, -1.0f, 0.0f };
     float                gravitystrength { 0.0f };
-    bool                 transparentsorting { false };
-    // Wallpaper Engine's defaults for a scene that switches fog on and leaves
-    // the rest out.
-    bool                 fogdistance { false };
+
+    bool transparentsorting { false };
+
+    // Distance fog is off unless the scene file turns it on; the settings below keep their own
+    // defaults either way.
+    bool fogdistance { false };
     float                fogdistancestart { 1.0f };
     float                fogdistanceend { 5.0f };
     float                fogdistancestartdensity { 0.0f };
@@ -116,6 +122,15 @@ public:
     float                fogheightenddensity { 1.0f };
     std::array<float, 3> fogheightcolor { 0.0f, 0.0f, 0.0f };
     nlohmann::json       lightconfig;
+    // The settings the lighting and the height fog read from, whole, for the ones a user
+    // property may be bound to. The scene reads the property once, as it loads.
+    nlohmann::json       ambientcolor_setting;
+    nlohmann::json       skylightcolor_setting;
+    nlohmann::json       fogheightstart_setting;
+    nlohmann::json       fogheightend_setting;
+    nlohmann::json       fogheightstartdensity_setting;
+    nlohmann::json       fogheightenddensity_setting;
+    nlohmann::json       fogheightcolor_setting;
 };
 
 class WPScene {

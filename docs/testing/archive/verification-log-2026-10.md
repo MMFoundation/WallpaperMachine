@@ -9,6 +9,90 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-10-17 — FFmpeg removed: native video and sound only, no libav* in the app
+
+Four commits (3c55d52b audio, f0e3b270 video, d2c891aa Rust decoder, b6ba0c32 build and packaging) delete every FFmpeg use; nothing was run on a desktop, the lock screen or an audio device.
+
+- `python3 scripts/check_renderer.py` after the video commit — exit 0; no failed test, no nonzero count in report.json; `video_source_input_test` 30, `video_probe_test` 10, `video_decode_pump_test` 13, `metal_video_texture_test` 30, `unchanged_present_test` 7, `metal_scene_draw_smoke` 148, `audio_tests` 66 passed; skipped: the env-gated local-corpus cases (not a pass)
+- `video_probe_test` on the local library — 20 video payloads, 20 read from memory, 20 opened and decoded by the native backend, 0 declined, 0 refused (this replaces the FFmpeg A/B: nothing in the local library needed FFmpeg)
+- `python3 scripts/check_rust.py` after the Rust commit — exit 0; core 314, bridge 581, shader and integration suites all passed; asset and opt-in skips are unverified coverage
+- `python3 scripts/build.py --renderer-only`, then `python3 scripts/test.py` — exit 0; 22 Python suites OK; 3930 passed, 0 failed, 46 skipped of 3976. A first run before the renderer was rebuilt failed at the link on the stale `libwallpaper_bridge.a` (undefined `_av_*`): rebuild the renderer after a change like this
+- `python3 scripts/build.py --configuration Release` — built; `otool -L` on the app and the lock-screen extension lists only liblz4, libfreetype and libqjs outside Apple's libraries; no undefined `_av_*`, `_avcodec_*`, `_avformat_*`, `_sws_*` or `_swr_*` symbol in the app executable
+- `python3 scripts/check_licenses.py --enforce` on the tree and the Release app — 177 components (175 with --skip-app): 0 Apache-2.0, 0 GPL-3.0 family, 0 unknown, 0 not named in LICENSING.md; a returning libav* library is reported unknown (new tests)
+- Gaps: VP8, AV1 without hardware decode, 4:2:2, fragmented MP4 and other containers now refuse with a reason and keep the last picture (covered by native tests, not seen on a desktop); the Homebrew ffmpeg, mwe-ffmpeg and dav1d kegs are still installed on this machine and nothing uses them
+
+## 2026-10-17 — Vulkan path deleted; no Apache-2.0 or GPL-3.0 component left in the link closure
+
+Step 2d-3 of the own-code plan: the Vulkan renderer, its wrapper and swapchain code, spirv_reflect, VMA, the SPIR-V shader target (and with it the spirv crate), the glslang/SPIRV/Vulkan link lines, MoltenVK ICD handling and the Homebrew packages that fed them are gone. Commits 19aeb2e8 (code, tests, docs, provenance), a289d5e9 (build and packaging), and the licensing record.
+
+- `python3 scripts/check_rust.py` — exit 0 (workspace tests green; asset-corpus shader tests skipped, no WALLPAPER_MACHINE_ASSETS_ROOT)
+- `python3 scripts/build.py --renderer-only` — exit 0; bindings regenerated
+- `python3 scripts/check_renderer.py` — exit 0; 12 generated cases drawn pooled and isolated through the Metal offscreen_scene_probe, pixels_equal=True on all, 0 diagnostics; metal_scene_draw_smoke 148 passed, 2 skipped (local corpus); every registered binary exit 0; skips are the local-corpus and local-clip cases
+- `python3 scripts/test.py` — exit 0; 3976 tests: 3930 passed, 0 failed, 46 skipped (131 s)
+- `python3 scripts/build.py --configuration Release` — built; otool -L on the app and the extension shows no vulkan, glslang, SPIRV or MoltenVK library, and the bundle has no MoltenVK_icd.json
+- `python3 scripts/check_licenses.py` on that app — 181 components, 0 Apache-2.0, 0 GPL-3.0 family, 0 unknown, 0 not in LICENSING.md; with --skip-app 178, same zeros. A count of declared licenses, not a clearance
+- Not covered: the local wallpaper corpus (not present here), a desktop run of the built app (not launched), packaging with scripts/package.py (not run), and the draw-smoke cases that compared the two renderers (retired; parity was proven before the Vulkan code went)
+
+## 2026-10-17 — Native Metal is the only scene renderer: the Scene renderer setting is gone
+
+The Scene renderer setting (Compatibility, Native Metal preferred, Native Metal only), the engine's renderer preference and every path that created the Vulkan renderer for a scene are removed; a scene Native Metal cannot draw is held on its last picture with the reason, as the old Native Metal only mode did. Verified headless on this machine; no desktop, lock screen, audio or Release run.
+
+- `python3 scripts/check_rust.py` — exit 0; bridge lib 585 tests passed (config: every old scene_renderer value loads and is not written back; activation: build_lock_screen names a video the extension plays)
+- `python3 scripts/build.py --renderer-only` — built; bindings regenerated (no scene_renderer, set_scene_renderer or fallback_reason)
+- `python3 scripts/check_renderer.py` — report.json nonzero: timer_tests only (FrameTimerTest.ADrawSlightlyLongerThanTheIntervalDoesNotHalveTheRate, 41 frames against 42 in a 1 s window under load; 2 of 3 alone passed, 32 of 32 earlier): a known timing flake, unrelated. metal_scene_draw_smoke 150 passed, 2 local-corpus skips; unchanged_present_test 7 passed; scene_failure_policy_test 8 passed; metal_backend_test 28 passed
+- `python3 scripts/test.py` — exit 0; 3977 tests: 3931 passed, 46 skipped (opt-in media, network and UI layers)
+- Retired with the Vulkan fallback: the four plain-video cases of unchanged_present_test (the engine is never given a video), the preferred-mode fallback case and the Vulkan counters of scene_failure_policy_test, the remembered-prepare-failure test, the Scene renderer settings test and the lock-screen sceneRenderer publication test. Kept: every Metal behaviour they pinned has a Metal-only test (static-scene repeat skip and property preview now count Metal's present requests). The tests that draw a scene with both renderers stay, with the Vulkan side created by the test alone, until the Vulkan code is deleted
+- Found while proving it: the scene engine refuses a plain video, so the preview window would have shown a failed preview for every video once Compatibility was gone; it now plays a video with the app's own players (VideoWallpaperPreviewSurface: AVFoundation, or the WebM player for WebM and Matroska)
+- Not checked: a video preview and a held lock-screen clip on a real window and lock screen (no desktop run authorised); the preview does not reproduce the scale factor or position the desktop applies
+
+## 2026-10-17 — Native Metal parity and cost before the Vulkan path is deleted
+
+Lane metal, phase 2c on a worktree of b6daf0b6: measurements only, no code change. Headless; no desktop, lock screen, audio or app launch. The 67 scene wallpapers of the local Library were read, not changed.
+
+- Admission, `metal_scene_draw_smoke` once per scene (`WE_TEST_METAL_PROJECTS`, `WE_TEST_METAL_FRAMES=2`, `LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBackend`): 67/67 Native Metal, 0 `Compatibility --`, 0 `Compatibility after prepare --`, 0 `metal translation of`, every process OK (60/60 on 2026-10-13, 64/64 in 2b).
+- Poster parity, `LocalProjectsDrawTheSamePictureOnBothRenderers`, 12 batches of at most 6 scenes, `WE_TEST_METAL_WARMUP_TICKS=40`, `WE_TEST_RANDOM_SEED=1`, `WE_TEST_METAL_FRAMES=180`, 960x540: 39/67 byte-identical, 65/67 with mean absolute difference under 0.05/255 (the 2026-10-13 criterion, 57/60); worst 0.99 (3675966045) and 0.57 (3616389236), the same two scenes as then (0.26, 0.06). The 28 others were run a second time to separate run-to-run noise and each is explained.
+- 17 scenes differ by exactly 1 level on 1 to 240 pixels (float rounding between the two shader compilers); 9 differ only inside the wall-clock text both renderers also change between two runs of the same renderer (clock digits, an FPS counter), plus 1-level pixels on one of them.
+- 3616389236: the spinning globe is a sprite sheet and its phase differs, because a clock digit changing width rebuilds the graph at a wall-clock moment and the rebuild restarts the sheet (trace on Compatibility: frame 33 back to 1). Runs in which neither renderer rebuilt draw the globe identically (0 pixels), runs with a Compatibility rebuild differ on 1400 to 1850 pixels. Host behaviour of both renderers, not a rendering difference.
+- 3675966045: its fluid simulation (a feedback simulation, line emitter) is chaotic. Byte-identical on both renderers with that effect removed from an unpacked copy (mean 0.000, 0.993 with it); identical for the first 10 frames; Native differs from itself by mean 1.04 to 1.16 (1.9 to 2.1% of pixels over 48) when the frame step changes by 3e-8 s, as much as Native against Compatibility (0.99, 1.7%).
+- Cost, `UnchangedPresent.LocalProjectEnergyIsMeasuredHeadlessly`, 6 scenes at 3840x2160 and 60 FPS, 5 s warm-up and 15 s windows, warm caches, one renderer per process, C N N C then repeated (2 to 6 runs each, `/usr/bin/time -l` for peak). Per frame, Compatibility to Native: CPU 3.64 to 3.35 ms (3226487183), 2.75 to 2.31 (3620484312), 3.17 to 1.75 (3675966045), 2.54 to 2.26 (3657295614), 2.17 to 2.29 (3013702957, +6%, medians 2.24 to 2.18, spread 1.57 to 2.82), 127.6 to 44.0 (3589454154); GPU 19.8 to 5.5 ms, 5.15 to 4.90, 7.81 to 7.03, 5.17 to 5.15, 5.42 to 5.16, 9.7 to 11.1 (+14%); command buffers per frame 3 to 1 (118 to 1.6 on 3589454154). Compatibility holds 37 FPS on 3226487183 and 7.4 on 3589454154 where Native holds 60 and 20.
+- Footprint, same runs. End of window, Compatibility to Native: 6479 to 7132 MB (3226487183, +10%; Compatibility's end value swings 6402 to 7176 MB between runs, Native's is constant at 7114 to 7151 and was 7148 on a 2026-10-14 build), 792 to 757, 902 to 882, 1014 to 981, 623 to 594, 1603 to 1705 (3589454154, within Native's own 1494 to 2162 spread). Process peak: 8256 to 7118 MB (-14%), 884 to 1372 (3620484312, +55%, a load transient: the 2026-10-14 build measured 1191 to 1618), 903 to 1035 (one Native run 1207, the other 864), 1014 to 1069, 623 to 635, 2425 to 2360.
+- Found, not caused by Native Metal: 3589454154 (perspective, 7 puppets, 17 texts) asks for a graph rebuild about every 5 draws on both renderers (43 Compatibility and 41 Native rebuilds in 180 draws), so each frame pays texture decoding and uploads again; the 2026-10-14 build held 60 FPS at 14 ms CPU and 4.8 ms GPU per frame on it, the current tree 7.4 FPS (Compatibility) and 20 FPS (Native). Its GPU figure above is that rebuild cost, not a steady frame. Not bisected.
+- Not run: lock screen and screen saver on Metal (recorded in 2b), desktop or UI tests, Release build, WE reference frames.
+
+## 2026-10-17 — HDR scene video tone mapping and the Native-Metal-only hold policy
+
+- Commits 1d85361d, 4dfbcf4b (10-bit and HDR video textures tone mapped to SDR) and 008783df, 8e9d3bae, 4fc7856d, 01222d8f (wmSurface, the Native Metal only failure policy, panel, lock screen) integrated onto b7ac57c1.
+- build.py --renderer-only rc=0 and regenerated bindings identical to the committed ones; check_rust.py rc=0, 1527 passed, 0 failed; asset and corpus tests skipped.
+- check_renderer.py rc=0: no FAILED test in any evidence log, report.json has no nonzero count, 2124 engine tests passed, all generated-scene cases pixels_equal, reload cycles 0; local-corpus and local-clip tests skipped.
+- test.py rc=0: 3897 passed, 0 failed, 46 skipped of 3943, Python suites and native unit tests (app target) included.
+- Lane evidence: P010ConvertedMatchesCpuReference against a standards-based double reference; ATenBitVideoLayerStaysOnNativeMetalAndIsToneMappedToSdr with real HEVC Main10 PQ, HLG and BT.709 clips; scene_failure_policy_test covers admission, prepare, compile, frame, surface and a refused reload.
+- Not checked: the real lock screen and screen saver, a real HDR display or any HDR file from the library, container mdcv/clli boxes, Dolby Vision profile 5, the held-scene look on a desktop; a scene that fails to parse still waits 90 s and rolls back.
+- Not run: Release build, desktop or UI tests.
+
+## 2026-10-17 — Own WebM player, plain video native-only, Video backend setting removed
+
+Lane ext (phase 3b/3c) on a worktree of b7ac57c1: WebMReader and the WebM player (desktop and lock screen), plain video never reaches the scene engine, the Video backend setting is gone. Headless only: no desktop, lock screen or audio hardware.
+
+- `python3 scripts/check_rust.py` — exit 0 (bridge lib tests, core, integration, shader); asset and corpus tests skipped (no WE assets dir, no unpack corpus)
+- `python3 scripts/build.py --renderer-only` — passed after every Rust/C++ change; bindings regenerated and committed
+- `python3 scripts/check_renderer.py` — exit 0, no failed test in any evidence log; webm_reader_test, sound_matroska_tests, vt_frame_decoder_test, media_matroska_tests all pass
+- `python3 scripts/test.py --only <class>` for WebMOpening/WebMPlayer/WebMVideoWallpaperWindow/LockScreenWebMPlayer/LockScreenVideoPlanner/VideoFormatSupport/NativeVideo*/WallpaperActivationRecovery/WallpaperCompatibility/Panel*/Settings*/LockScreenWallpaperService — all passed; 38 opt-in NativeVideoPlayerMediaTests skipped
+- `python3 -m unittest discover -s tests` (scripts/) — 376 tests OK
+- Cost probe (temporary, removed): 1080p/30 fps VP9 WebM in WebMPlayer 1.52% of one core, H.264 MP4 in AVPlayerLayer 1.38%, idle host 0.19%, about 29-30 MiB each, headless layer, no audio. The old scene-engine path was not measured (needs a running desktop).
+- Not verified: WebM window on a real desktop, audio output and A/V sync, rotated clips on screen, HDR, the extension reaching the supplemental VP9 decoder, AV1 hardware decode, M1/M2, real libvorbis WebM, full test.py, Release build.
+
+## 2026-10-17 — Native video default, native scene video textures, scene sounds without FFmpeg
+
+Integration of the plain-video, scene-video and scene-sound lanes on one branch (16 commits over 06c37925), after each lane passed its own gate.
+
+- `python3 scripts/build.py --renderer-only` — exit 0; bridge bindings regenerated with no diff.
+- `python3 scripts/check_rust.py` — exit 0; 1524 tests passed, 0 failed (asset and corpus tests skipped: no Wallpaper Engine assets or unpack corpus on this machine).
+- `python3 scripts/check_renderer.py` — exit 0; 2083 headless engine tests passed, 0 failed across every registered binary (including video_probe_test, vt_frame_decoder_test, sound_core_tests, sound_apple_tests, sound_vorbis_tests, audio_tests); report.json has no nonzero counter; 20 distinct tests skipped (local corpus, local clips and Workshop projects).
+- `python3 scripts/test.py` — first run: 3889 passed, 1 failed (DownloaderLifecycleTests/testSteamCMDInheritsTheStagingClaim, unrelated to this wave, passed alone 47/47); full rerun exit 0: Python 376 tests, native 3890 passed, 0 failed, 46 skipped of 3936.
+- Lock screen and screen saver were checked on the real desktop earlier today: AVFoundation video and Native Metal scenes both render.
+- Gap: WebM plain videos still fall back to the scene engine until the WebM surface lands; its audio track and any other container FFmpeg still decodes are unchanged.
+- Gap: no Release build was made for this entry; the AudioToolbox MP3 decoder clips at full scale where FFmpeg kept float peaks (documented in docs/sound-decoding.md).
+
 ## 2026-10-18 — Resume each display from the current playback policy
 
 The presentation policy reconciles per-display visibility during global transitions and retries pending delivery once per evaluation. The bridge corrects retained runtime pause on its actor using current policy, including unchanged refresh and Apply paths.

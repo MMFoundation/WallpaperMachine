@@ -1,21 +1,37 @@
+// Clean-room implementation from the WallpaperMachine spec e1b-scene-model.md; written without access to the original source.
 #include "SceneNode.h"
 
-#include <Eigen/Geometry>
+#include <cmath>
+#include <vector>
+
+#include "Utils/Linalg.hpp"
 
 using namespace wallpaper;
-using namespace Eigen;
+using namespace wallpaper::linalg;
 
 Matrix4d SceneNode::LocalTransOf(const Vector3f& translate, const Vector3f& scale,
                                  const Vector3f& rotation) {
-    Affine3d trans = Affine3d::Identity();
-    trans.prescale(scale.cast<double>());
+    // T * Rz * Ry * Rx * S, written out column by column.
+    const double cx = std::cos(static_cast<double>(rotation.x()));
+    const double sx = std::sin(static_cast<double>(rotation.x()));
+    const double cy = std::cos(static_cast<double>(rotation.y()));
+    const double sy = std::sin(static_cast<double>(rotation.y()));
+    const double cz = std::cos(static_cast<double>(rotation.z()));
+    const double sz = std::sin(static_cast<double>(rotation.z()));
 
-    trans.prerotate(AngleAxis<double>(rotation.x(), Vector3d::UnitX())); // x
-    trans.prerotate(AngleAxis<double>(rotation.y(), Vector3d::UnitY())); // y
-    trans.prerotate(AngleAxis<double>(rotation.z(), Vector3d::UnitZ())); // z
+    const double axes[3][3] = {
+        { cz * cy, sz * cy, -sy },
+        { cz * sy * sx - sz * cx, sz * sy * sx + cz * cx, cy * sx },
+        { cz * sy * cx + sz * sx, sz * sy * cx - cz * sx, cy * cx },
+    };
 
-    trans.pretranslate(translate.cast<double>());
-    return trans.matrix();
+    Matrix4d local = Matrix4d::Identity();
+    for (int column = 0; column < 3; ++column) {
+        const double factor = static_cast<double>(scale[column]);
+        for (int row = 0; row < 3; ++row) local(row, column) = axes[column][row] * factor;
+        local(column, 3) = static_cast<double>(translate[column]);
+    }
+    return local;
 }
 
 Matrix4d SceneNode::GetLocalTrans() const {
@@ -26,26 +42,39 @@ Matrix4d SceneNode::GetLocalTrans() const {
 
 void SceneNode::UpdateTrans() {
     if (! m_dirty) return;
-    m_dirty = false;
+    if (m_parent != nullptr) m_parent->UpdateTrans();
 
-    if (m_parent) {
-        m_parent->UpdateTrans();
+    const Matrix4d local = GetLocalTrans();
+    const bool     under = m_parent != nullptr;
+    m_trans = (under && ! m_ignoreParentTransform) ? Matrix4d(m_parent->m_childTrans * local) : local;
+    if (m_childLocal) {
+        const Matrix4d base = under ? m_parent->m_childTrans : Matrix4d(Matrix4d::Identity());
+        m_childTrans        = base * *m_childLocal;
+    } else {
+        m_childTrans = m_trans;
     }
-    // What this node's own place is built on, and what its children's is: the
-    // same, except where the node is drawn by something other than its own
-    // transform (a fullscreen layer), whose children are placed from the
-    // transform the scene saved for it.
-    const Matrix4d parent_frame = m_parent ? m_parent->ChildTrans() : Matrix4d::Identity();
-    const bool     inherits     = m_parent && ! m_ignoreParentTransform;
-    m_trans = ((inherits ? parent_frame : Matrix4d::Identity()) * GetLocalTrans()).eval();
-    m_childTrans = m_childLocal ? Matrix4d(parent_frame * *m_childLocal) : m_trans;
+    m_dirty = false;
 }
 
 void SceneNode::MarkTransDirty() {
-    if (! m_dirty) {
-        m_dirty = true;
-        for (auto& child : m_children) {
-            child->MarkTransDirty();
+    if (m_dirty) return;
+    InvalidateSubtree();
+}
+
+void SceneNode::InvalidateSubtree() {
+    m_dirty = true;
+    if (m_children.empty()) return; // the common case: a leaf moves every frame, at no cost
+    // Iterative, so a very deep tree cannot exhaust the stack; the work list is kept
+    // between calls so a moving group does not allocate each frame.
+    thread_local std::vector<SceneNode*> pending;
+    pending.clear();
+    pending.push_back(this);
+    while (! pending.empty()) {
+        SceneNode* node = pending.back();
+        pending.pop_back();
+        node->m_dirty = true;
+        for (const auto& child : node->m_children) {
+            if (child != nullptr) pending.push_back(child.get());
         }
     }
 }

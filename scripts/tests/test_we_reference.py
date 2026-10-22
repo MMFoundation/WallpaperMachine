@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 import urllib.error
 import urllib.request
 
@@ -197,6 +198,30 @@ class MainCheckoutTests(unittest.TestCase):
             self.assertEqual(main_checkout(main), main)
             self.assertEqual(main_checkout(linked), main)
             self.assertEqual(main_checkout(Path(directory)), Path(directory))
+
+
+class CaptureDelayTests(unittest.TestCase):
+    def jobs_for(self, argv):
+        """The shot delays the worker is handed when capture runs with argv."""
+        handed = []
+        class Stop(Exception):
+            pass
+        def fake_run(folders, shots, delays):
+            handed.append(list(delays))
+            raise Stop
+        with tempfile.TemporaryDirectory() as root:
+            folder = wallpaper(Path(root), "333")
+            with mock.patch.object(we_reference, "CaptureRun", fake_run), self.assertRaises(Stop):
+                we_reference.main(["--shots", root, "capture", *argv, str(folder)])
+        return handed[0]
+
+    def test_the_first_shot_waits_long_enough_for_a_heavy_scene_to_appear(self):
+        first, second = self.jobs_for([])
+        self.assertGreaterEqual(first, 30)
+        self.assertGreater(second, 0)
+
+    def test_the_delays_can_be_set_for_one_capture(self):
+        self.assertEqual(self.jobs_for(["--delays", "40", "20"]), [40.0, 20.0])
 
 
 class SceneClockTests(unittest.TestCase):

@@ -29,15 +29,9 @@ struct AudioSpectrumSnapshot
     // full-scale tone, and above 1 for the rare band louder than that, as
     // Wallpaper Engine documents its own values. Each frame stands alone;
     // wallpapers smooth them themselves.
-    std::array<float, 64> left64 {};
-    std::array<float, 64> right64 {};
-    std::array<float, 64> average64 {};
-    std::array<float, 32> left32 {};
-    std::array<float, 32> right32 {};
-    std::array<float, 32> average32 {};
-    std::array<float, 16> left16 {};
-    std::array<float, 16> right16 {};
-    std::array<float, 16> average16 {};
+    std::array<float, 64> left64 {}, right64 {}, average64 {};
+    std::array<float, 32> left32 {}, right32 {}, average32 {};
+    std::array<float, 16> left16 {}, right16 {}, average16 {};
 };
 
 bool SubmitMonoAudioFrames(

@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec p1-scene-structure.md; written without access to the original source.
 #include "WPLightObject.hpp"
 #include "WPObjectSchema.hpp"
 
@@ -23,18 +24,21 @@ void ReadScalarSetting(const nlohmann::json& json, const char* key, float& value
 } // namespace
 
 bool WPLightObject::FromJson(const nlohmann::json& json, fs::VFS&) {
+    if (! json.is_object()) return false;
     FromCommonJson(json);
-    bool dynamic_color = false;
-    ReadMiscVec3Setting(json, "color", &color, &color_setting, &dynamic_color);
-    GET_JSON_NAME_VALUE_NOWARN(json, "light", light);
+    ReadMiscString(json, "light", light);
+    if (json.contains("color")) {
+        color_setting = json.at("color");
+        ReadTolerantVec3(color_setting, color);
+    }
     ReadScalarSetting(json, "radius", radius, radius_setting);
     ReadScalarSetting(json, "intensity", intensity, intensity_setting);
     ReadScalarSetting(json, "exponent", exponent, exponent_setting);
-    GET_JSON_NAME_VALUE_NOWARN(json, "innercone", innercone);
-    GET_JSON_NAME_VALUE_NOWARN(json, "outercone", outercone);
-    GET_JSON_NAME_VALUE_NOWARN(json, "controlpoint", controlpoint);
-    GET_JSON_NAME_VALUE_NOWARN(json, "castshadow", castshadow);
-    GET_JSON_NAME_VALUE_NOWARN(json, "usecookie", usecookie);
-    GET_JSON_NAME_VALUE_NOWARN(json, "castvolumetrics", castvolumetrics);
+    ReadMiscNumber(json, "innercone", innercone);
+    ReadMiscNumber(json, "outercone", outercone);
+    if (json.contains("controlpoint")) ReadStrictVec(json.at("controlpoint"), controlpoint);
+    ReadMiscFlag(json, "castshadow", castshadow);
+    ReadMiscFlag(json, "usecookie", usecookie);
+    ReadMiscFlag(json, "castvolumetrics", castvolumetrics);
     return true;
 }

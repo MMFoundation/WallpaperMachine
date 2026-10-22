@@ -42,7 +42,7 @@ struct VideoConsumerDemand
     bool rgb { true };
 };
 
-/// The decoder's two planes and the constants that turn them into colour.
+/// The decoder's two 8-bit planes and the constants that turn them into colour.
 struct VideoFramePlanes
 {
     id<MTLTexture>          luma { nil };
@@ -60,8 +60,7 @@ struct VideoFramePlanes
 /// This is not the plain-video backend and does not replace it: it exists so a
 /// scene whose author samples a video the way it samples any other texture can
 /// stay on the native Metal renderer. Each texture keeps its own decoder and
-/// its own playback semantics, exactly as the compatibility backend's texture
-/// cache gives it.
+/// its own playback semantics.
 ///
 /// One frame is imported per generation, no matter how many passes sample it,
 /// and every object that frame's texture depends on — the pixel buffer, the
@@ -79,8 +78,8 @@ public:
     /// Graph compile time. One source per key; keys that are not video
     /// textures are ignored. A key whose source `hold` set aside is not opened
     /// again, nor is its media read again: the source is given the scene's clock
-    /// as it is and carries on. False with an error means the whole scene falls
-    /// back to the compatibility backend.
+    /// as it is and carries on. False with an error means the whole scene is not drawn
+    /// and holds with that reason.
     bool prepare(Scene& scene, const std::vector<std::string>& texture_keys, std::string* error);
 
     /// Drops the open sources and the textures. Frames a command buffer may still
@@ -116,10 +115,6 @@ public:
     /// image" -- the behaviour every consumer had before planes existed.
     void setDemand(std::map<std::string, VideoConsumerDemand> demand);
 
-    /// Shortest frame period among the sources, in seconds, or 0 when any of
-    /// them cannot say — pacing on the others would skip its changes.
-    [[nodiscard]] double shortestFramePeriod() const;
-
     /// True when at least one source is unpaused with a positive rate: the
     /// scene must not idle, because its content changes without an event.
     [[nodiscard]] bool advancesOnItsOwn() const;
@@ -135,7 +130,9 @@ public:
     [[nodiscard]] id<MTLTexture> texture(const std::string& key) const;
 
     /// The planes of `key`'s current frame, valid only while the current frame
-    /// really is NV12 and the planes were published for it.
+    /// really is 8-bit NV12 and the planes were published for it. A 10-bit frame
+    /// has none: its planes are 16-bit, belong to its conversion, and its one
+    /// image is `texture`.
     [[nodiscard]] VideoFramePlanes planes(const std::string& key) const;
 
     /// How `key`'s current frame reached its consumers.
@@ -158,6 +155,9 @@ public:
                          std::string*                               error);
     [[nodiscard]] std::uint64_t conversionsEncodedForTests() const;
     [[nodiscard]] std::uint64_t importsForTests() const;
+    /// Whether the 10-bit conversion pipeline has been compiled. An 8-bit scene
+    /// must never have paid for it.
+    [[nodiscard]] bool tenBitPipelineBuiltForTests() const;
 #endif
 
 private:

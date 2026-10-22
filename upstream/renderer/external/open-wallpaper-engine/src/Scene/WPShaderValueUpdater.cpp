@@ -1,6 +1,6 @@
+// Clean-room implementation from the WallpaperMachine spec e1a-scene-host.md; written without access to the original source.
 #include "WPShaderValueUpdater.hpp"
-#include "Eigen/src/Core/Matrix.h"
-#include "Eigen/src/Geometry/Transform.h"
+#include "Utils/Linalg.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Scene/Scene.h"
 #include "SpriteAnimation.hpp"
@@ -9,8 +9,6 @@
 #include "Utils/Algorism.h"
 #include "Utils/TimeOfDay.hpp"
 
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
 #include <iostream>
 #include <chrono>
 #include <ctime>
@@ -19,20 +17,24 @@
 #include <span>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 using namespace wallpaper;
-using namespace Eigen;
+using namespace wallpaper::linalg;
 
 namespace
 {
 
-constexpr std::string_view G_AUDIO_SPECTRUM16_LEFT  = "g_AudioSpectrum16Left";
-constexpr std::string_view G_AUDIO_SPECTRUM16_RIGHT = "g_AudioSpectrum16Right";
-constexpr std::string_view G_AUDIO_SPECTRUM32_LEFT  = "g_AudioSpectrum32Left";
-constexpr std::string_view G_AUDIO_SPECTRUM32_RIGHT = "g_AudioSpectrum32Right";
-constexpr std::string_view G_AUDIO_SPECTRUM64_LEFT  = "g_AudioSpectrum64Left";
-constexpr std::string_view G_AUDIO_SPECTRUM64_RIGHT = "g_AudioSpectrum64Right";
 constexpr std::string_view G_NORMALMODEL            = "g_NormalModelMatrix";
+constexpr std::string_view G_LAYERMODEL             = "g_LayerModelMatrix";
+constexpr std::string_view G_DAYTIME_ALIAS          = "g_Daytime";
+
+constexpr std::string_view G_AUDIO16_LEFT  = "g_AudioSpectrum16Left";
+constexpr std::string_view G_AUDIO16_RIGHT = "g_AudioSpectrum16Right";
+constexpr std::string_view G_AUDIO32_LEFT  = "g_AudioSpectrum32Left";
+constexpr std::string_view G_AUDIO32_RIGHT = "g_AudioSpectrum32Right";
+constexpr std::string_view G_AUDIO64_LEFT  = "g_AudioSpectrum64Left";
+constexpr std::string_view G_AUDIO64_RIGHT = "g_AudioSpectrum64Right";
 
 constexpr std::string_view G_LPOINT_COLOR         = "g_LPoint_Color";
 constexpr std::string_view G_LPOINT_ORIGIN        = "g_LPoint_Origin";
@@ -150,30 +152,43 @@ struct LegacyLightArrays {
 
 LegacyLightArrays PackLegacyLights(const Scene& scene) {
     LegacyLightArrays arrays;
-    uint              i = 0;
-    for (const auto& l : scene.lights) {
-        if (i == 4) break;
-        if (l == nullptr || l->type() != SceneLightType::Legacy || l->node() == nullptr) continue;
-        if (! l->visible()) continue;
-        l->node()->UpdateTrans();
-        const Vector3d trans = l->node()->ModelTrans().block<3, 1>(0, 3);
-        for (size_t axis = 0; axis < 3; ++axis) {
-            arrays.positions[i * 4 + axis] = static_cast<float>(trans[axis]);
+    std::size_t       count = 0;
+    for (const auto& light : scene.lights) {
+        if (light == nullptr || light->type() != SceneLightType::Legacy) continue;
+        if (light->node() == nullptr || ! light->visible()) continue;
+        // Only the first four shine; the rest are left out.
+        if (count >= 4) break;
+        auto* node = light->node();
+        node->UpdateTrans();
+        const Matrix4d world = node->ModelTrans();
+        for (int axis = 0; axis < 3; ++axis) {
+            arrays.positions[count * 4 + static_cast<std::size_t>(axis)] =
+                static_cast<float>(world(axis, 3));
         }
-        const auto color = l->premultipliedColor();
-        if (i < 3) {
-            std::copy(color.begin(), color.end(), arrays.colors.begin() + i * 4);
-        } else {
-            // Three vec4 uniforms hold four RGB lights: the last light's
-            // channels occupy the w component of each of the first three.
-            for (size_t channel = 0; channel < 3; ++channel) {
-                arrays.colors[channel * 4 + 3] = color[channel];
+        arrays.positions[count * 4 + 3] = 0.0f;
+        const Vector3f color = light->premultipliedColor();
+        if (count < 3) {
+            for (int axis = 0; axis < 3; ++axis) {
+                arrays.colors[count * 4 + static_cast<std::size_t>(axis)] = color[axis];
             }
+        } else {
+            // The fourth light rides in the w lanes of the three colour vectors.
+            arrays.colors[3]  = color[0];
+            arrays.colors[7]  = color[1];
+            arrays.colors[11] = color[2];
         }
-        i++;
+        ++count;
     }
     return arrays;
 }
+
+/// A shader value from a short list of floats.
+ShaderValue Vec(std::initializer_list<float> values) {
+    return ShaderValue(values.begin(), values.size());
+}
+
+/// The first four lanes of `slot`'s family in a table of 13 names, or null past it.
+bool SlotInRange(uint32_t slot) { return slot < 13; }
 
 uint64_t HashFloats(uint64_t hash, const float* values, std::size_t count) {
     const auto* bytes = reinterpret_cast<const unsigned char*>(values);
@@ -198,7 +213,8 @@ void WPShaderValueUpdater::FrameBegin() {
                                         std::clamp(m_mousePosInput[1], 0.0f, 1.0f) };
     double step = 1.0;
     if (m_parallax.delay > 0.0f) {
-        step = std::clamp((1.0 - m_parallax.delay / 3.0) * 10.0 * m_scene->frameTime, 0.0, 1.0);
+        const double frame_time = m_scene != nullptr ? m_scene->frameTime : 0.0;
+        step = std::clamp((1.0 - m_parallax.delay / 3.0) * 10.0 * frame_time, 0.0, 1.0);
     }
     for (std::size_t axis = 0; axis < 2; ++axis) {
         m_parallaxPos[axis] = static_cast<float>(
@@ -238,63 +254,80 @@ uint64_t WPShaderValueUpdater::LightStateHash(SceneNode* node, uint32_t material
     return hash == 0 ? 1 : hash;
 }
 
-uint32_t WPShaderValueUpdater::FrameVaryingUniforms(SceneNode*          node,
-                                                    uint32_t            material_slot,
-                                                    const std::string& camera_override) const {
-    // Reflection captured at InitUniforms is the authority. A node the updater
-    // never saw is reported as varying in every way, because absence of a
-    // record is not evidence that nothing advances.
-    if (node == nullptr || ! exists(m_nodeUniformInfoMap, node)) return frame_varying_uniform::kAll;
-    const auto& slot_infos = m_nodeUniformInfoMap.at(node);
-    auto        it         = slot_infos.find(material_slot);
-    if (it == slot_infos.end()) it = slot_infos.find(0);
-    if (it == slot_infos.end()) return frame_varying_uniform::kAll;
+const WPUniformInfo* WPShaderValueUpdater::FindUniformInfo(const SceneNode* node,
+                                                           uint32_t slot) const {
+    const auto slots = m_nodeUniformInfoMap.find(const_cast<SceneNode*>(node));
+    if (slots == m_nodeUniformInfoMap.end()) return nullptr;
+    auto found = slots->second.find(slot);
+    if (found == slots->second.end()) found = slots->second.find(0);
+    return found == slots->second.end() ? nullptr : &found->second;
+}
 
-    const auto& info  = it->second;
-    uint32_t    flags = frame_varying_uniform::kNone;
-    if (info.has_TIME || info.has_FRAMETIME) flags |= frame_varying_uniform::kTime;
-    if (info.has_DAYTIME || info.has_DAYTIME_ALIAS) flags |= frame_varying_uniform::kDayTime;
-    if (info.has_POINTERPOSITION || info.has_POINTERPOSITIONLAST || info.has_POINTERSTATE)
-        flags |= frame_varying_uniform::kPointer;
-    if (info.has_PARALLAXPOSITION) flags |= frame_varying_uniform::kParallax;
-    if (info.has_BONES) flags |= frame_varying_uniform::kBones;
-    if (info.has_AudioSpectrum16Left || info.has_AudioSpectrum16Right ||
-        info.has_AudioSpectrum32Left || info.has_AudioSpectrum32Right ||
-        info.has_AudioSpectrum64Left || info.has_AudioSpectrum64Right)
-        flags |= frame_varying_uniform::kAudio;
-    // Camera parallax moves a layer with the cursor through its model matrix.
-    // No uniform the shader declares reveals that, and the static cache hashes
-    // the node's transform without it: unreported, the pass is reused while the
-    // cursor moves, and a still scene never wakes for the pointer. Decided for
-    // the camera the pass draws through, as UpdateUniforms decides it: the
-    // effect camera and a layer-local one never move a layer, so a composite
-    // another layer samples stays reusable.
-    if (m_parallax.enable && m_parallax.amount != 0.0f && m_parallax.mouseinfluence != 0.0f &&
-        (info.has_M || info.has_MVP || info.has_MI || info.has_MVPI)) {
-        const std::string& cam_name = camera_override.empty() ? node->Camera() : camera_override;
-        const SceneCamera* camera   = m_scene->activeCamera;
-        if (! cam_name.empty()) {
-            const auto found = m_scene->cameras.find(cam_name);
-            camera = found != m_scene->cameras.end() ? found->second.get() : nullptr;
-        }
-        const auto data_slots = m_nodeDataMap.find(node);
-        if (camera != nullptr && cam_name != "effect" && ! camera->IsLayerLocal() &&
-            data_slots != m_nodeDataMap.end()) {
-            auto data = data_slots->second.find(material_slot);
-            if (data == data_slots->second.end()) data = data_slots->second.find(0);
-            if (data != data_slots->second.end()) {
-                // The depth UpdateUniforms moves the pass by.
-                const auto* material = node->Mesh() != nullptr
-                                           ? node->Mesh()->MaterialForSlot(material_slot)
-                                           : nullptr;
-                const auto depth = material != nullptr && SamplesScreenBackground(*material)
-                                       ? NodeParallaxDepth(node)
-                                       : data->second.parallaxDepth;
-                if (depth[0] != 0.0f || depth[1] != 0.0f) flags |= frame_varying_uniform::kParallax;
-            }
-        }
+const WPShaderValueData* WPShaderValueUpdater::FindNodeData(const SceneNode* node,
+                                                            uint32_t slot) const {
+    const auto slots = m_nodeDataMap.find(const_cast<SceneNode*>(node));
+    if (slots == m_nodeDataMap.end()) return nullptr;
+    auto found = slots->second.find(slot);
+    if (found == slots->second.end()) found = slots->second.find(0);
+    return found == slots->second.end() ? nullptr : &found->second;
+}
+
+const SceneCamera* WPShaderValueUpdater::CameraNamed(const std::string& name) const {
+    if (m_scene == nullptr) return nullptr;
+    if (name.empty()) return m_scene->activeCamera;
+    const auto found = m_scene->cameras.find(name);
+    return found == m_scene->cameras.end() ? nullptr : found->second.get();
+}
+
+bool WPShaderValueUpdater::ParallaxMovesDraw(const WPUniformInfo& info, const SceneNode* node,
+                                             const std::string& camera_name,
+                                             const WPShaderValueData* data, bool compose_first,
+                                             std::array<float, 2>* depth) const {
+    if (! m_parallax.enable || m_parallax.amount == 0.0f || m_parallax.mouseinfluence == 0.0f) {
+        return false;
     }
-    return flags;
+    if (! (info.has_M || info.has_MVP || info.has_MI || info.has_MVPI)) return false;
+    const SceneCamera* camera = CameraNamed(camera_name);
+    if (camera == nullptr || camera_name == "effect" || camera->IsLayerLocal()) return false;
+    // Without node data nothing says how deep the draw is.
+    if (data == nullptr) return false;
+    // A compose layer's first pass asks for the depth of the layer, which sits on its effect
+    // passes; every other draw moves by the depth of its own record.
+    const std::array<float, 2> found = compose_first ? NodeParallaxDepth(node) : data->parallaxDepth;
+    if (depth != nullptr) *depth = found;
+    return found[0] != 0.0f || found[1] != 0.0f;
+}
+
+uint32_t WPShaderValueUpdater::FrameVaryingUniforms(SceneNode* node, uint32_t material_slot,
+                                                    const std::string& camera_override) const {
+    if (m_scene == nullptr || node == nullptr) return frame_varying_uniform::kAll;
+    const WPUniformInfo* info = FindUniformInfo(node, material_slot);
+    // No record is no evidence that nothing advances.
+    if (info == nullptr) return frame_varying_uniform::kAll;
+
+    uint32_t bits = frame_varying_uniform::kNone;
+    if (info->has_TIME || info->has_FRAMETIME) bits |= frame_varying_uniform::kTime;
+    if (info->has_DAYTIME || info->has_DAYTIME_ALIAS) bits |= frame_varying_uniform::kDayTime;
+    if (info->has_POINTERPOSITION || info->has_POINTERPOSITIONLAST || info->has_POINTERSTATE) {
+        bits |= frame_varying_uniform::kPointer;
+    }
+    if (info->has_PARALLAXPOSITION) bits |= frame_varying_uniform::kParallax;
+    if (info->has_BONES) bits |= frame_varying_uniform::kBones;
+    if (info->has_AudioSpectrum16Left || info->has_AudioSpectrum16Right ||
+        info->has_AudioSpectrum32Left || info->has_AudioSpectrum32Right ||
+        info->has_AudioSpectrum64Left || info->has_AudioSpectrum64Right) {
+        bits |= frame_varying_uniform::kAudio;
+    }
+    // Parallax that moves the draw through its model matrix, which no uniform reveals.
+    const std::string& camera_name = camera_override.empty() ? node->Camera() : camera_override;
+    const SceneMaterial* material =
+        node->Mesh() != nullptr ? node->Mesh()->MaterialForSlot(material_slot) : nullptr;
+    const bool compose = material != nullptr && SamplesScreenBackground(*material);
+    if (ParallaxMovesDraw(*info, node, camera_name, FindNodeData(node, material_slot), compose,
+                          nullptr)) {
+        bits |= frame_varying_uniform::kParallax;
+    }
+    return bits;
 }
 
 void WPShaderValueUpdater::RegisterPuppetAttachments(
@@ -305,7 +338,7 @@ void WPShaderValueUpdater::RegisterPuppetAttachments(
 }
 
 void WPShaderValueUpdater::UpdatePuppetAttachments(PuppetAttachmentGroup& group) {
-    const auto bones = group.layer.genFrame(m_scene->elapsingTime);
+    const auto bones = group.layer.genFrame(m_scene != nullptr ? m_scene->elapsingTime : 0.0);
     for (const auto& attachment : group.attachments) {
         if (attachment.node == nullptr || attachment.bone_index >= bones.size()) continue;
         attachment.node->SetAttachmentTransform(
@@ -314,81 +347,74 @@ void WPShaderValueUpdater::UpdatePuppetAttachments(PuppetAttachmentGroup& group)
 }
 
 void WPShaderValueUpdater::MouseInput(double x, double y) {
-    m_mousePosInput[0] = (float)x;
-    m_mousePosInput[1] = (float)y;
+    // As given: the clamped copy parallax follows is made when the frame begins.
+    m_mousePosInput = { static_cast<float>(x), static_cast<float>(y) };
 }
 
 void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp& existsOp) {
     InitUniforms(pNode, 0, existsOp);
 }
 
-void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, uint32_t material_slot,
-                                        const ExistsUniformOp& existsOp) {
-    m_nodeUniformInfoMap[pNode][material_slot] = WPUniformInfo();
-    auto& info                                = m_nodeUniformInfoMap[pNode][material_slot];
-    info.has_MI                 = existsOp(G_MI);
-    info.has_M                  = existsOp(G_M);
-    info.has_AM                 = existsOp(G_AM);
-    info.has_MVP                = existsOp(G_MVP);
-    info.has_MVPI               = existsOp(G_MVPI);
-    info.has_ETVP               = existsOp(G_ETVP);
-    info.has_ETVPI              = existsOp(G_ETVPI);
-
-    info.has_VP = existsOp(G_VP);
-    info.has_layer_model  = existsOp("g_LayerModelMatrix");
-    info.has_effect_mvp   = existsOp(G_EFFECTMVP);
-    info.has_effect_model = existsOp(G_EFFECTMODEL);
-    info.has_effect_mvpi  = existsOp(G_EFFECTMVPI);
-
-    info.has_BONES            = existsOp(G_BONES);
-    info.has_TIME             = existsOp(G_TIME);
-    info.has_DAYTIME          = existsOp(G_DAYTIME);
-    info.has_DAYTIME_ALIAS    = existsOp("g_Daytime");
-    info.has_POINTERPOSITION  = existsOp(G_POINTERPOSITION);
-    info.has_POINTERPOSITIONLAST   = existsOp(G_POINTERPOSITIONLAST);
-    info.has_POINTERSTATE          = existsOp(G_POINTERSTATE);
-    info.has_FRAMETIME             = existsOp(G_FRAMETIME);
-    info.has_TEXTUREREDUCTIONSCALE = existsOp(G_TEXTUREREDUCTIONSCALE);
-    info.has_PARALLAXPOSITION = existsOp(G_PARALLAXPOSITION);
-    info.has_TEXELSIZE        = existsOp(G_TEXELSIZE);
-    info.has_TEXELSIZEHALF    = existsOp(G_TEXELSIZEHALF);
-    info.has_SCREEN           = existsOp(G_SCREEN);
-    info.has_LP               = existsOp(G_LP);
-    info.has_LCP              = existsOp(G_LCP);
-    info.has_LIGHTS_V1        = std::any_of(kLightingV1Uniforms.begin(), kLightingV1Uniforms.end(),
-                                     [&existsOp](std::string_view name) { return existsOp(name); });
-    info.has_NORMALMODEL      = existsOp(G_NORMALMODEL);
-    info.has_ORIENTATIONUP      = existsOp(G_ORIENTATIONUP);
-    info.has_ORIENTATIONRIGHT   = existsOp(G_ORIENTATIONRIGHT);
-    info.has_ORIENTATIONFORWARD = existsOp(G_ORIENTATIONFORWARD);
-    info.has_EYE              = existsOp(G_EYEPOSITION);
-    info.has_VIEWFORWARD      = existsOp(G_VIEWFORWARD);
-    info.has_VIEWUP           = existsOp(G_VIEWUP);
-    info.has_VIEWRIGHT        = existsOp(G_VIEWRIGHT);
-    info.has_AudioSpectrum16Left = existsOp(G_AUDIO_SPECTRUM16_LEFT);
-    info.has_AudioSpectrum16Right = existsOp(G_AUDIO_SPECTRUM16_RIGHT);
-    info.has_AudioSpectrum32Left = existsOp(G_AUDIO_SPECTRUM32_LEFT);
-    info.has_AudioSpectrum32Right = existsOp(G_AUDIO_SPECTRUM32_RIGHT);
-    info.has_AudioSpectrum64Left = existsOp(G_AUDIO_SPECTRUM64_LEFT);
-    info.has_AudioSpectrum64Right = existsOp(G_AUDIO_SPECTRUM64_RIGHT);
-
-    if (info.has_AudioSpectrum16Left || info.has_AudioSpectrum16Right ||
-        info.has_AudioSpectrum32Left || info.has_AudioSpectrum32Right ||
-        info.has_AudioSpectrum64Left || info.has_AudioSpectrum64Right) {
-        if (! m_audioSpectrumPacked) {
-            m_audioSpectrumPacked.emplace(std::array<float, 64 * 4> {});
-        }
-        if (m_scene != nullptr && m_scene->runtime != nullptr) {
-            m_scene->runtime->MarkSceneRequiresAudioResponse();
-        }
+void WPShaderValueUpdater::InitUniforms(SceneNode* node, uint32_t material_slot,
+                                        const ExistsUniformOp& exists) {
+    if (node == nullptr || ! exists) return;
+    WPUniformInfo info;
+    info.has_M                = exists(G_M);
+    info.has_AM               = exists(G_AM);
+    info.has_MI               = exists(G_MI);
+    info.has_MVP              = exists(G_MVP);
+    info.has_MVPI             = exists(G_MVPI);
+    info.has_VP               = exists(G_VP);
+    info.has_NORMALMODEL      = exists(G_NORMALMODEL);
+    info.has_ETVP             = exists(G_ETVP);
+    info.has_ETVPI            = exists(G_ETVPI);
+    info.has_layer_model      = exists(G_LAYERMODEL);
+    info.has_effect_model     = exists(G_EFFECTMODEL);
+    info.has_effect_mvp       = exists(G_EFFECTMVP);
+    info.has_effect_mvpi      = exists(G_EFFECTMVPI);
+    info.has_BONES            = exists(G_BONES);
+    info.has_TIME             = exists(G_TIME);
+    info.has_FRAMETIME        = exists(G_FRAMETIME);
+    info.has_DAYTIME          = exists(G_DAYTIME);
+    info.has_DAYTIME_ALIAS    = exists(G_DAYTIME_ALIAS);
+    info.has_POINTERPOSITION     = exists(G_POINTERPOSITION);
+    info.has_POINTERPOSITIONLAST = exists(G_POINTERPOSITIONLAST);
+    info.has_POINTERSTATE        = exists(G_POINTERSTATE);
+    info.has_TEXTUREREDUCTIONSCALE = exists(G_TEXTUREREDUCTIONSCALE);
+    info.has_PARALLAXPOSITION = exists(G_PARALLAXPOSITION);
+    info.has_TEXELSIZE        = exists(G_TEXELSIZE);
+    info.has_TEXELSIZEHALF    = exists(G_TEXELSIZEHALF);
+    info.has_SCREEN           = exists(G_SCREEN);
+    info.has_LP               = exists(G_LP);
+    info.has_LCP              = exists(G_LCP);
+    for (const auto name : kLightingV1Uniforms) {
+        if (exists(name)) info.has_LIGHTS_V1 = true;
     }
-
-    std::accumulate(begin(info.texs), end(info.texs), 0, [&existsOp](uint index, auto& value) {
-        value.has_resolution = existsOp(WE_GLTEX_RESOLUTION_NAMES[index]);
-        value.has_mipmap     = existsOp(WE_GLTEX_MIPMAPINFO_NAMES[index]);
-        value.has_texel      = existsOp(WE_GLTEX_TEXEL_NAMES[index]);
-        return index + 1;
-    });
+    info.has_ORIENTATIONUP      = exists(G_ORIENTATIONUP);
+    info.has_ORIENTATIONRIGHT   = exists(G_ORIENTATIONRIGHT);
+    info.has_ORIENTATIONFORWARD = exists(G_ORIENTATIONFORWARD);
+    info.has_EYE                = exists(G_EYEPOSITION);
+    info.has_VIEWFORWARD        = exists(G_VIEWFORWARD);
+    info.has_VIEWUP             = exists(G_VIEWUP);
+    info.has_VIEWRIGHT          = exists(G_VIEWRIGHT);
+    info.has_AudioSpectrum16Left  = exists(G_AUDIO16_LEFT);
+    info.has_AudioSpectrum16Right = exists(G_AUDIO16_RIGHT);
+    info.has_AudioSpectrum32Left  = exists(G_AUDIO32_LEFT);
+    info.has_AudioSpectrum32Right = exists(G_AUDIO32_RIGHT);
+    info.has_AudioSpectrum64Left  = exists(G_AUDIO64_LEFT);
+    info.has_AudioSpectrum64Right = exists(G_AUDIO64_RIGHT);
+    for (std::size_t slot = 0; slot < info.texs.size(); ++slot) {
+        info.texs[slot].has_resolution = exists(WE_GLTEX_RESOLUTION_NAMES[slot]);
+        info.texs[slot].has_mipmap     = exists(WE_GLTEX_MIPMAPINFO_NAMES[slot]);
+        info.texs[slot].has_texel      = exists(WE_GLTEX_TEXEL_NAMES[slot]);
+    }
+    const bool reads_audio = info.has_AudioSpectrum16Left || info.has_AudioSpectrum16Right ||
+                             info.has_AudioSpectrum32Left || info.has_AudioSpectrum32Right ||
+                             info.has_AudioSpectrum64Left || info.has_AudioSpectrum64Right;
+    if (reads_audio && m_scene != nullptr && m_scene->runtime != nullptr) {
+        m_scene->runtime->MarkSceneRequiresAudioResponse();
+    }
+    m_nodeUniformInfoMap[node][material_slot] = info;
 }
 
 void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprites,
@@ -396,407 +422,306 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     UpdateUniforms(pNode, 0, sprites, updateOp);
 }
 
-void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, uint32_t material_slot,
-                                          sprite_map_t& sprites,
-                                          const UpdateUniformOp& updateOp) {
-    if (! pNode->Mesh()) return;
+void WPShaderValueUpdater::UpdateUniforms(SceneNode* node, uint32_t material_slot,
+                                          sprite_map_t& sprites, const UpdateUniformOp& write) {
+    if (node == nullptr || m_scene == nullptr || ! write) return;
+    SceneMesh* mesh = node->Mesh();
+    if (mesh == nullptr) return;
+    const SceneMaterial* material = mesh->MaterialForSlot(material_slot);
+    if (material == nullptr) return;
+    const std::string& camera_name = node->Camera();
+    const SceneCamera* draw_camera = CameraNamed(camera_name);
+    if (draw_camera == nullptr) return;
 
-    pNode->UpdateTrans();
+    node->UpdateTrans();
+    const WPShaderValueData* data = FindNodeData(node, material_slot);
+    const WPUniformInfo* info = FindUniformInfo(node, material_slot);
 
-    SceneCamera*      camera;
-    std::string_view   cam_name = pNode->Camera();
-    if (! pNode->Camera().empty()) {
-        camera = m_scene->cameras.at(cam_name.data()).get();
-    } else
-        camera = m_scene->activeCamera;
+    UpdateSprites(node, sprites, write);
+    if (info == nullptr) return;
 
-    if (! camera) return;
-
-    auto* material = pNode->Mesh()->MaterialForSlot(material_slot);
-    if (! material) return;
-    // auto& shadervs = material->customShader.updateValueList;
-    // const auto& valueSet = material->customShader.valueSet;
-
-    assert(exists(m_nodeUniformInfoMap, pNode));
-    const auto& slot_infos = m_nodeUniformInfoMap.at(pNode);
-    assert(exists(slot_infos, material_slot));
-    const auto& info = slot_infos.at(material_slot);
-
-    WPShaderValueData* nodeData = nullptr;
-    if (const auto node_it = m_nodeDataMap.find(pNode); node_it != m_nodeDataMap.end()) {
-        auto& slot_data = node_it->second;
-        auto        data_it   = slot_data.find(material_slot);
-        if (data_it == slot_data.end()) data_it = slot_data.find(0);
-        if (data_it != slot_data.end()) nodeData = &data_it->second;
-    }
-    bool hasNodeData = nodeData != nullptr;
-    if (info.has_layer_model || info.has_effect_mvp || info.has_effect_model ||
-        info.has_effect_mvpi || info.has_ETVP || info.has_ETVPI) {
-        auto* owner = hasNodeData && nodeData->effect_owner != nullptr
-            ? nodeData->effect_owner : pNode;
-        owner->UpdateTrans();
-        const Matrix4d layer_model = owner->ModelTrans();
-        if (info.has_layer_model) {
-            updateOp("g_LayerModelMatrix", ShaderValue::fromMatrix(layer_model));
-        }
-        // The card the chain ends in is drawn where the layer is drawn, which a screen anchor
-        // moves without moving the layer (`SceneNode::DrawOffset`), so the matrices that say
-        // where the effect lands on the screen follow the draw, as the final card does.
-        Matrix4d drawn_model = layer_model;
-        drawn_model.block<3, 1>(0, 3) += owner->DrawOffset().cast<double>();
-        Matrix4d effect_model = drawn_model;
-        // Intermediate passes use a unit quad; final passes use the layer card.
-        if (hasNodeData && nodeData->effect_owner != nullptr && cam_name == "effect") {
-            effect_model = drawn_model * Affine3d(Scaling(
-                double(nodeData->effect_extent.x()) * 0.5,
-                double(nodeData->effect_extent.y()) * 0.5, 1.0)).matrix();
-        }
-        // Where the effect quad lands in the scene, for lit effects that
-        // shade by world position.
-        if (info.has_effect_model) updateOp(G_EFFECTMODEL, ShaderValue::fromMatrix(effect_model));
-        // An effect pass maps the layer's own texture space onto the screen
-        // with the layer card's projection: its view-projection, its model and
-        // half its card size, intermediate and final passes alike. A pointer or
-        // direction effect undoes it to land in the layer's texture wherever the
-        // layer sits, turned, scaled or flipped. Outside an effect chain the
-        // parser's identity stays.
-        if ((info.has_ETVP || info.has_ETVPI) && hasNodeData && nodeData->effect_owner != nullptr &&
-            m_scene->activeCamera != nullptr) {
-            const Matrix4d texture_projection =
-                m_scene->activeCamera->GetViewProjectionMatrix() * drawn_model *
-                Affine3d(Scaling(double(nodeData->effect_extent.x()) * 0.5,
-                                 double(nodeData->effect_extent.y()) * 0.5, 1.0))
-                    .matrix();
-            if (info.has_ETVP) updateOp(G_ETVP, ShaderValue::fromMatrix(texture_projection));
-            if (info.has_ETVPI) {
-                updateOp(G_ETVPI, ShaderValue::fromMatrix(Matrix4d(texture_projection.inverse())));
+    // ---- bones
+    if (info->has_BONES && data != nullptr && data->puppet_layer.hasPuppet()) {
+        // Copies of a puppet layer share their playback state, so the pose is the layer's own.
+        const auto pose = const_cast<WPShaderValueData*>(data)->puppet_layer.genFrame(m_scene->elapsingTime);
+        if (! pose.empty()) {
+            std::vector<float> packed(pose.size() * 16);
+            for (std::size_t bone = 0; bone < pose.size(); ++bone) {
+                const Matrix4f matrix = pose[bone].matrix();
+                std::memcpy(packed.data() + bone * 16, matrix.data(), 16 * sizeof(float));
             }
-        }
-        if ((info.has_effect_mvp || info.has_effect_mvpi) && m_scene->activeCamera != nullptr) {
-            const Matrix4d effect_mvp =
-                m_scene->activeCamera->GetViewProjectionMatrix() * effect_model;
-            if (info.has_effect_mvp) updateOp(G_EFFECTMVP, ShaderValue::fromMatrix(effect_mvp));
-            if (info.has_effect_mvpi)
-                updateOp(G_EFFECTMVPI, ShaderValue::fromMatrix(Matrix4d(effect_mvp.inverse())));
-        }
-    }
-    if (hasNodeData) {
-        for (const auto& el : nodeData->renderTargets) {
-            const auto rt_it = m_scene->renderTargets.find(el.second);
-            if (rt_it == m_scene->renderTargets.end()) continue;
-            const auto& rt = rt_it->second;
-
-            const auto& unifrom_tex = info.texs[el.first];
-
-            if (unifrom_tex.has_resolution) {
-                std::array<i32, 4> resolution_uint({ rt.width, rt.height, rt.width, rt.height });
-                updateOp(WE_GLTEX_RESOLUTION_NAMES[el.first],
-                         ShaderValue(array_cast<float>(resolution_uint)));
-            }
-            if (unifrom_tex.has_mipmap) {
-                updateOp(WE_GLTEX_MIPMAPINFO_NAMES[el.first], (float)rt.mipmap_level);
-            }
-            if (unifrom_tex.has_texel && rt.width > 0 && rt.height > 0) {
-                const float width  = static_cast<float>(rt.width);
-                const float height = static_cast<float>(rt.height);
-                updateOp(WE_GLTEX_TEXEL_NAMES[el.first],
-                         std::array { 1.0f / width, 1.0f / height, width, height });
-            }
-        }
-        if (nodeData->puppet_layer.hasPuppet() && info.has_BONES) {
-            const auto data = nodeData->puppet_layer.genFrame(m_scene->elapsingTime);
-            if (! data.empty()) {
-                updateOp(G_BONES, std::span<const float> { data.front().data(), data.size() * 16 });
-            }
+            write(G_BONES, ShaderValue(packed.data(), packed.size()));
         }
     }
 
-    bool reqMI    = info.has_MI;
-    bool reqM     = info.has_M;
-    bool reqAM    = info.has_AM;
-    bool reqMVP   = info.has_MVP;
-    bool reqMVPI  = info.has_MVPI;
-
-    // composelayer.vert draws a full local target using UVs, but its MVP is
-    // used to sample the *screen* behind the layer. The effect camera and
-    // identity render override lose the parent's translation/scale here. That
-    // holds wherever the layer is drawn to, its own composite included: the
-    // screen behind it is what its card holds.
-    // A layer-local camera frames the card in the layer's own texture space,
-    // so where the layer sits in the scene -- transform, scene camera and
-    // parallax alike -- must not reach the image another layer samples.
-    const bool layer_local = camera->IsLayerLocal();
-    const bool samples_screen_background = SamplesScreenBackground(*material);
-    SceneCamera* matrix_camera =
-        samples_screen_background && m_scene->activeCamera != nullptr ? m_scene->activeCamera : camera;
-    Matrix4d viewProTrans = matrix_camera->GetViewProjectionMatrix();
-
-    if (info.has_VP) {
-        updateOp(G_VP, ShaderValue::fromMatrix(viewProTrans));
+    // ---- time, pointer and screen
+    const float frame_time = static_cast<float>(m_scene->frameTime);
+    if (info->has_TIME) write(G_TIME, ShaderValue(static_cast<float>(m_scene->elapsingTime)));
+    if (info->has_FRAMETIME) write(G_FRAMETIME, ShaderValue(frame_time));
+    if (info->has_DAYTIME) write(G_DAYTIME, ShaderValue(static_cast<float>(m_dayTime)));
+    if (info->has_DAYTIME_ALIAS) write(G_DAYTIME_ALIAS, ShaderValue(static_cast<float>(m_dayTime)));
+    if (info->has_TEXTUREREDUCTIONSCALE) write(G_TEXTUREREDUCTIONSCALE, ShaderValue(1.0f));
+    if (info->has_POINTERPOSITION) write(G_POINTERPOSITION, Vec({ m_mousePos[0], m_mousePos[1] }));
+    if (info->has_POINTERPOSITIONLAST) {
+        write(G_POINTERPOSITIONLAST, Vec({ m_mousePosLast[0], m_mousePosLast[1] }));
     }
-    if (info.has_ORIENTATIONUP || info.has_ORIENTATIONRIGHT || info.has_ORIENTATIONFORWARD) {
-        // Screen-facing particles read the camera node's world axes. The parser
-        // writes a constant screen-XY basis; that is only right for an unrotated
-        // camera looking down -Z, so the live camera replaces it here.
-        const auto axes = camera->GetAxes();
-        if (info.has_ORIENTATIONRIGHT) {
-            updateOp(G_ORIENTATIONRIGHT,
-                     std::array { (float)axes.right.x(), (float)axes.right.y(),
-                                  (float)axes.right.z() });
-        }
-        if (info.has_ORIENTATIONUP) {
-            updateOp(G_ORIENTATIONUP,
-                     std::array { (float)axes.up.x(), (float)axes.up.y(), (float)axes.up.z() });
-        }
-        if (info.has_ORIENTATIONFORWARD) {
-            updateOp(G_ORIENTATIONFORWARD,
-                     std::array { (float)axes.forward.x(), (float)axes.forward.y(),
-                                  (float)axes.forward.z() });
+    if (info->has_POINTERSTATE) {
+        const bool  down    = (m_mouseButtonsDown & 1u) != 0;
+        const bool  before  = (m_mouseButtonsDownLast & 1u) != 0;
+        const float held    = down ? 1.0f : 0.0f;
+        const float pressed = down && ! before ? 1.0f : 0.0f;
+        write(G_POINTERSTATE, Vec({ held, held, pressed, 0.0f }));
+    }
+    if (info->has_PARALLAXPOSITION) {
+        if (! m_parallax.enable) {
+            write(G_PARALLAXPOSITION, Vec({ 0.5f, 0.5f }));
+        } else {
+            const float influence = m_parallax.mouseinfluence;
+            write(G_PARALLAXPOSITION,
+                  Vec({ 0.5f + (m_parallaxPos[0] - 0.5f) * influence,
+                        0.5f - (m_parallaxPos[1] - 0.5f) * influence }));
         }
     }
-    if (reqM || reqMVP || reqMI || reqMVPI || info.has_NORMALMODEL) {
-        Matrix4d modelTrans = samples_screen_background ? pNode->ModelTrans()
-                              : layer_local             ? Matrix4d::Identity()
-                                                        : pNode->RenderTrans();
-        if (hasNodeData && cam_name != "effect" && ! layer_local) {
-            if (m_parallax.enable) {
-                // The screen a compose layer's first pass reads is the place its
-                // card is drawn, where the layer's last pass puts it: through the
-                // scene camera, moved by the layer's depth. A layer drawn through
-                // effects holds that depth on those passes, not on its own node,
-                // so it is asked there; read at the unshifted place, the layer
-                // would hold what is behind that place instead.
-                const auto layer_depth = samples_screen_background ? NodeParallaxDepth(pNode)
-                                                                   : nodeData->parallaxDepth;
-                Vector2f depth(layer_depth[0], layer_depth[1]);
-                Vector2f ortho { (float)m_scene->ortho[0], (float)m_scene->ortho[1] };
-                // flip mouse y axis
-                Vector2f mouseVec =
-                    Scaling(1.0f, -1.0f) * (Vector2f { 0.5f, 0.5f } - Vector2f(&m_parallaxPos[0]));
-                mouseVec = mouseVec.cwiseProduct(ortho) * m_parallax.mouseinfluence;
-                // Parallax moves a layer by the cursor's offset from the
-                // centre of the view and by where the layer sits, scaled by
-                // its depth and the scene's amount. The centre of the view is
-                // that of the camera the matrix is built with: a compose layer
-                // without children frames its effects with a camera at the
-                // origin, but its first pass reads the screen through the scene
-                // camera.
-                Vector2f offset = mouseVec;
-                if (m_parallax.canvas_scene) {
-                    // Wallpaper Engine moves the whole tree under an outermost
-                    // layer by that layer's distance from the eased cursor
-                    // point, which rests at the centre of the view: with the
-                    // cursor centred a layer off the centre is pushed further
-                    // out by its depth. The outermost layer's current origin,
-                    // so a scripted or animated one carries its children.
-                    const SceneNode* root = nodeData->parallax_layer != nullptr
-                                                ? nodeData->parallax_layer
-                                                : pNode;
-                    // A layer placed by its own transform alone (a fullscreen
-                    // layer) is the outermost of its own tree; the layers below
-                    // it belong to the tree it sits in, and are placed from the
-                    // transform the scene saved for it.
-                    const SceneNode* const start = root;
-                    if (! root->IgnoresParentTransform()) {
-                        while (root->Parent() != nullptr &&
-                               root->Parent() != m_scene->sceneGraph.get())
-                            root = root->Parent();
-                    }
-                    const Matrix4d root_model = root != start && root->HasChildFrame()
-                                                    ? root->ChildTrans()
-                                                    : root->ModelTrans();
-                    offset += root_model.block<2, 1>(0, 3).cast<float>() -
-                              matrix_camera->GetPosition().cast<float>().head<2>();
-                }
-                if (! m_parallax.canvas_scene) {
-                    // Where the layer sits in the scene, not its parent-relative
-                    // origin, which is near zero for the child of a centred group.
-                    const Vector2f nodePos = modelTrans.block<2, 1>(0, 3).cast<float>();
-                    offset += nodePos - matrix_camera->GetPosition().cast<float>().head<2>();
-                }
-                const Vector2f paraVec = offset.cwiseProduct(depth) * m_parallax.amount;
-                modelTrans =
-                    Affine3d(Translation3d(Vector3d(paraVec.x(), paraVec.y(), 0.0f))).matrix() *
-                    modelTrans;
+    if (info->has_SCREEN) {
+        const float w = static_cast<float>(m_screenWidth);
+        const float h = static_cast<float>(m_screenHeight);
+        write(G_SCREEN, Vec({ w, h, w / h }));
+    }
+    if (info->has_TEXELSIZE) write(G_TEXELSIZE, Vec({ m_texelSize[0], m_texelSize[1] }));
+    if (info->has_TEXELSIZEHALF) {
+        write(G_TEXELSIZEHALF, Vec({ m_texelSize[0] * 0.5f, m_texelSize[1] * 0.5f }));
+    }
+
+    // ---- matrices
+    const bool compose_first = SamplesScreenBackground(*material);
+    const SceneCamera* view_camera =
+        compose_first && m_scene->activeCamera != nullptr ? m_scene->activeCamera : draw_camera;
+    if (info->has_VP) write(G_VP, ShaderValue::fromMatrix(view_camera->GetViewProjectionMatrix()));
+
+    const bool wants_model = info->has_M || info->has_AM || info->has_MI || info->has_MVP ||
+                             info->has_MVPI || info->has_NORMALMODEL;
+    if (wants_model) {
+        Matrix4d model;
+        if (compose_first) {
+            model = node->ModelTrans();
+        } else if (draw_camera->IsLayerLocal()) {
+            model = Matrix4d::Identity();
+        } else {
+            model = node->RenderTrans();
+        }
+        std::array<float, 2> depth { 0.0f, 0.0f };
+        if (ParallaxMovesDraw(*info, node, camera_name, data, compose_first, &depth)) {
+            const Vector3d camera_at = view_camera->GetPosition();
+            const double   influence = m_parallax.mouseinfluence;
+            const double   amount    = m_parallax.amount;
+            const double   mouse_x   = (0.5 - m_parallaxPos[0]) * m_scene->ortho[0] * influence;
+            const double   mouse_y   = -(0.5 - m_parallaxPos[1]) * m_scene->ortho[1] * influence;
+            double         root_x    = model(0, 3);
+            double         root_y    = model(1, 3);
+            if (m_parallax.canvas_scene) {
+                const Vector3d origin = ParallaxRootOrigin(node, data);
+                root_x                = origin.x();
+                root_y                = origin.y();
             }
+            const double shift_x = (mouse_x + root_x - camera_at.x()) * depth[0] * amount;
+            const double shift_y = (mouse_y + root_y - camera_at.y()) * depth[1] * amount;
+            model(0, 3) += shift_x;
+            model(1, 3) += shift_y;
         }
-
-        if (reqM) updateOp(G_M, ShaderValue::fromMatrix(modelTrans));
-        if (info.has_NORMALMODEL) {
-            // The draw's rotation without its scale: each axis of the model
-            // matrix normalised, as a std140 mat3 (three padded columns).
-            std::array<float, 12> normal_model { 0 };
+        if (info->has_M) write(G_M, ShaderValue::fromMatrix(model));
+        if (info->has_AM) write(G_AM, ShaderValue::fromMatrix(model));
+        if (info->has_MI) write(G_MI, ShaderValue::fromMatrix(Matrix4d(model.inverse())));
+        const Matrix4d mvp = view_camera->GetViewProjectionMatrix() * model;
+        if (info->has_MVP) write(G_MVP, ShaderValue::fromMatrix(mvp));
+        if (info->has_MVPI) write(G_MVPI, ShaderValue::fromMatrix(Matrix4d(mvp.inverse())));
+        if (info->has_NORMALMODEL) {
+            std::array<float, 12> normal {};
             for (int column = 0; column < 3; ++column) {
-                Vector3d axis = modelTrans.block<3, 1>(0, column);
-                if (axis.squaredNorm() > 0.0) axis.normalize();
+                Vector3d axis = model.col(column).head<3>();
+                const double length = axis.norm();
+                if (length > 0.0) axis /= length;
                 for (int row = 0; row < 3; ++row) {
-                    normal_model[column * 4 + row] = static_cast<float>(axis[row]);
+                    normal[static_cast<std::size_t>(column * 4 + row)] = static_cast<float>(axis[row]);
                 }
             }
-            updateOp(G_NORMALMODEL, normal_model);
-        }
-        if (reqAM) updateOp(G_AM, ShaderValue::fromMatrix(modelTrans));
-        if (reqMI) updateOp(G_MI, ShaderValue::fromMatrix(modelTrans.inverse()));
-        if (reqMVP) {
-            Matrix4d mvpTrans = viewProTrans * modelTrans;
-            updateOp(G_MVP, ShaderValue::fromMatrix(mvpTrans));
-            if (reqMVPI) updateOp(G_MVPI, ShaderValue::fromMatrix(mvpTrans.inverse()));
+            write(G_NORMALMODEL, ShaderValue(normal));
         }
     }
 
-    //	g_EffectTextureProjectionMatrix
-    // shadervs.push_back({"g_EffectTextureProjectionMatrixInverse",
-    // ShaderValue::ValueOf(Eigen::Matrix4f::Identity())});
-    if (info.has_TIME) updateOp(G_TIME, (float)m_scene->elapsingTime);
-
-    if (info.has_DAYTIME) updateOp(G_DAYTIME, (float)m_dayTime);
-    if (info.has_DAYTIME_ALIAS) updateOp("g_Daytime", (float)m_dayTime);
-
-    if (info.has_AudioSpectrum16Left || info.has_AudioSpectrum16Right ||
-        info.has_AudioSpectrum32Left || info.has_AudioSpectrum32Right ||
-        info.has_AudioSpectrum64Left || info.has_AudioSpectrum64Right) {
-        const auto snapshot = m_scene != nullptr && m_scene->runtime != nullptr
-            ? m_scene->runtime->CurrentAudioSpectrumSnapshot()
-            : wallpaper::audio::AudioSpectrumSnapshot {};
-
-        const auto pushAudioSpectrum = [this, &updateOp](std::string_view name, const auto& values) {
-            auto& packed = *m_audioSpectrumPacked;
-            packed.setSize(values.size() * 4u);
-            for (std::size_t index = 0; index < values.size(); ++index) {
-                packed[index * 4u] = values[index];
+    // ---- effect chain matrices
+    if (info->has_layer_model || info->has_effect_model || info->has_effect_mvp ||
+        info->has_effect_mvpi || info->has_ETVP || info->has_ETVPI) {
+        SceneNode* owner = data != nullptr && data->effect_owner != nullptr ? data->effect_owner : node;
+        owner->UpdateTrans();
+        const Matrix4d layer = owner->ModelTrans();
+        Matrix4d       drawn = layer;
+        drawn.block<3, 1>(0, 3) += owner->DrawOffset().cast<double>();
+        const Vector2f extent = data != nullptr ? data->effect_extent : Vector2f(2.0f, 2.0f);
+        Matrix4d       scale  = Matrix4d::Identity();
+        scale(0, 0)           = extent.x() / 2.0;
+        scale(1, 1)           = extent.y() / 2.0;
+        const bool has_owner  = data != nullptr && data->effect_owner != nullptr;
+        Matrix4d   effect_model = drawn;
+        if (has_owner && camera_name == "effect") effect_model = drawn * scale;
+        if (info->has_layer_model) write(G_LAYERMODEL, ShaderValue::fromMatrix(layer));
+        if (info->has_effect_model) write(G_EFFECTMODEL, ShaderValue::fromMatrix(effect_model));
+        if (m_scene->activeCamera != nullptr) {
+            const Matrix4d view_projection = m_scene->activeCamera->GetViewProjectionMatrix();
+            if (info->has_effect_mvp || info->has_effect_mvpi) {
+                const Matrix4d effect_mvp = view_projection * effect_model;
+                if (info->has_effect_mvp) write(G_EFFECTMVP, ShaderValue::fromMatrix(effect_mvp));
+                if (info->has_effect_mvpi) {
+                    write(G_EFFECTMVPI, ShaderValue::fromMatrix(Matrix4d(effect_mvp.inverse())));
+                }
             }
-            updateOp(name, packed);
+            if (has_owner && (info->has_ETVP || info->has_ETVPI)) {
+                const Matrix4d projection = view_projection * drawn * scale;
+                if (info->has_ETVP) write(G_ETVP, ShaderValue::fromMatrix(projection));
+                if (info->has_ETVPI) {
+                    write(G_ETVPI, ShaderValue::fromMatrix(Matrix4d(projection.inverse())));
+                }
+            }
+        }
+    }
+
+    // ---- render-target slots
+    if (data != nullptr) {
+        for (const auto& [slot, target_name] : data->renderTargets) {
+            if (! SlotInRange(static_cast<uint32_t>(slot)) || slot >= info->texs.size()) continue;
+            const auto target = m_scene->renderTargets.find(target_name);
+            if (target == m_scene->renderTargets.end()) continue;
+            const float width  = static_cast<float>(target->second.width);
+            const float height = static_cast<float>(target->second.height);
+            const auto& flags  = info->texs[slot];
+            if (flags.has_resolution) {
+                write(WE_GLTEX_RESOLUTION_NAMES[slot], Vec({ width, height, width, height }));
+            }
+            if (flags.has_mipmap) {
+                write(WE_GLTEX_MIPMAPINFO_NAMES[slot],
+                      ShaderValue(static_cast<float>(target->second.mipmap_level)));
+            }
+            if (flags.has_texel && target->second.width > 0 && target->second.height > 0) {
+                write(WE_GLTEX_TEXEL_NAMES[slot], Vec({ 1.0f / width, 1.0f / height, width, height }));
+            }
+        }
+    }
+
+    // ---- camera-derived values
+    if (info->has_ORIENTATIONRIGHT || info->has_ORIENTATIONUP || info->has_ORIENTATIONFORWARD) {
+        const auto axes = draw_camera->GetAxes();
+        const auto put  = [&](std::string_view name, const Vector3d& v) {
+            write(name, Vec({ static_cast<float>(v.x()), static_cast<float>(v.y()),
+                              static_cast<float>(v.z()) }));
         };
-
-        if (info.has_AudioSpectrum16Left) {
-            pushAudioSpectrum(G_AUDIO_SPECTRUM16_LEFT, snapshot.left16);
-        }
-        if (info.has_AudioSpectrum16Right) {
-            pushAudioSpectrum(G_AUDIO_SPECTRUM16_RIGHT, snapshot.right16);
-        }
-        if (info.has_AudioSpectrum32Left) {
-            pushAudioSpectrum(G_AUDIO_SPECTRUM32_LEFT, snapshot.left32);
-        }
-        if (info.has_AudioSpectrum32Right) {
-            pushAudioSpectrum(G_AUDIO_SPECTRUM32_RIGHT, snapshot.right32);
-        }
-        if (info.has_AudioSpectrum64Left) {
-            pushAudioSpectrum(G_AUDIO_SPECTRUM64_LEFT, snapshot.left64);
-        }
-        if (info.has_AudioSpectrum64Right) {
-            pushAudioSpectrum(G_AUDIO_SPECTRUM64_RIGHT, snapshot.right64);
-        }
+        if (info->has_ORIENTATIONRIGHT) put(G_ORIENTATIONRIGHT, axes.right);
+        if (info->has_ORIENTATIONUP) put(G_ORIENTATIONUP, axes.up);
+        if (info->has_ORIENTATIONFORWARD) put(G_ORIENTATIONFORWARD, axes.forward);
     }
-
-    if (info.has_POINTERPOSITION) updateOp(G_POINTERPOSITION, m_mousePos);
-    // Simulation effects (cursor ripple, fluid) move by the cursor's travel
-    // since the last frame and push harder while the primary button is held.
-    if (info.has_POINTERPOSITIONLAST) updateOp(G_POINTERPOSITIONLAST, m_mousePosLast);
-    if (info.has_POINTERSTATE) {
-        // Held in x and y; z only on the frame the button went down, the
-        // one-frame push a ripple or fluid gets per click.
-        const bool  held    = (m_mouseButtonsDown & 1u) != 0;
-        const float down    = held ? 1.0f : 0.0f;
-        const float pressed = held && (m_mouseButtonsDownLast & 1u) == 0 ? 1.0f : 0.0f;
-        updateOp(G_POINTERSTATE, std::array { down, down, pressed, 0.0f });
-    }
-    // The seconds this frame advances the scene, which simulation steps scale by.
-    if (info.has_FRAMETIME) updateOp(G_FRAMETIME, (float)m_scene->frameTime);
-    // Textures are always loaded at their authored size, never reduced.
-    if (info.has_TEXTUREREDUCTIONSCALE) updateOp(G_TEXTUREREDUCTIONSCALE, 1.0f);
-
-    if (info.has_TEXELSIZE) updateOp(G_TEXELSIZE, m_texelSize);
-
-    if (info.has_TEXELSIZEHALF)
-        updateOp(G_TEXELSIZEHALF, std::array { m_texelSize[0] / 2.0f, m_texelSize[1] / 2.0f });
-
-    if (info.has_SCREEN)
-        updateOp(G_SCREEN,
-                 std::array<float, 3> {
-                     m_screen_size[0], m_screen_size[1], m_screen_size[0] / m_screen_size[1] });
-
-    if (info.has_PARALLAXPOSITION) {
-        Vector2f para { 0.5f, 0.5f };
-        if (m_parallax.enable) {
-            const Vector2f mouseCentered = Vector2f(&m_parallaxPos[0]) - Vector2f { 0.5f, 0.5f };
-            para = Vector2f { 0.5f, 0.5f } +
-                   (Scaling(1.0f, -1.0f) * mouseCentered) * m_parallax.mouseinfluence;
-        }
-        updateOp(G_PARALLAXPOSITION, std::array { para[0], para[1] });
-    }
-
-    bool reported_texture_frame = false;
-    for (auto& [i, sp] : sprites) {
-        if (sp.numFrames() == 0) continue;
-        // A pinned frame holds; otherwise the sheet advances by the frame time
-        // the layer's script lets it have (none while paused, scaled by `rate`).
-        const auto& f = pNode->TextureFrame().has_value()
-                            ? sp.SetFrame(*pNode->TextureFrame())
-                            : sp.GetAnimateFrame(pNode->TextureAnimationStep(m_scene->frameTime));
-        if (! reported_texture_frame) {
-            pNode->SetTextureAnimationFrame(static_cast<double>(sp.CurFrameIndex()));
-            reported_texture_frame = true;
-        }
-        auto        grot   = WE_GLTEX_ROTATION_NAMES[i];
-        auto        gtrans = WE_GLTEX_TRANSLATION_NAMES[i];
-        updateOp(grot, std::array { f.xAxis[0], f.xAxis[1], f.yAxis[0], f.yAxis[1] });
-        updateOp(gtrans, std::array { f.x, f.y });
-    }
-
-    if (info.has_LP || info.has_LCP) {
-        const auto legacy = PackLegacyLights(*m_scene);
-        updateOp(G_LP, legacy.positions);
-        updateOp(G_LCP, legacy.colors);
-    }
-    if (info.has_LIGHTS_V1) {
-        const auto lights = PackLightingV1(*m_scene);
-        for (const auto& [name, values] : {
-                 std::pair { G_LPOINT_COLOR, &lights.point_color },
-                 std::pair { G_LPOINT_ORIGIN, &lights.point_origin },
-                 std::pair { G_LSPOT_COLOR, &lights.spot_color },
-                 std::pair { G_LSPOT_ORIGIN, &lights.spot_origin },
-                 std::pair { G_LSPOT_DIRECTION, &lights.spot_direction },
-                 std::pair { G_LSPOT_EXPONENT, &lights.spot_exponent },
-                 std::pair { G_LTUBE_COLOR, &lights.tube_color },
-                 std::pair { G_LTUBE_ORIGINA, &lights.tube_origin_a },
-                 std::pair { G_LTUBE_ORIGINB, &lights.tube_origin_b },
-                 std::pair { G_LDIRECTIONAL_COLOR, &lights.directional_color },
-                 std::pair { G_LDIRECTIONAL_DIRECTION, &lights.directional_direction },
-             }) {
-            if (! values->empty()) updateOp(name, std::span<const float> { *values });
-        }
-    }
-
-    if (info.has_EYE || info.has_VIEWFORWARD || info.has_VIEWUP || info.has_VIEWRIGHT) {
-        // 2D scenes keep the authored axis-aligned constants. Overwriting them
-        // from the ortho camera node (canvas centre, z = 0) collapses particle
-        // billboards that subtract g_EyePosition from a layer on the same plane.
-        SceneCamera* view_camera = nullptr;
-        if (camera != nullptr && camera->IsPerspective()) {
-            view_camera = camera;
-        } else if (m_scene->activeCamera != nullptr && m_scene->activeCamera->IsPerspective()) {
-            view_camera = m_scene->activeCamera;
-        }
-        if (view_camera != nullptr) {
-            const auto to_array = [](const Eigen::Vector3d& value) {
-                return std::array<float, 3> { static_cast<float>(value.x()),
-                                              static_cast<float>(value.y()),
-                                              static_cast<float>(value.z()) };
+    if (info->has_EYE || info->has_VIEWFORWARD || info->has_VIEWUP || info->has_VIEWRIGHT) {
+        // A perspective camera supplies them; an orthographic one would collapse billboards.
+        const SceneCamera* eye_camera = draw_camera->IsPerspective() ? draw_camera
+                                         : (m_scene->activeCamera != nullptr &&
+                                            m_scene->activeCamera->IsPerspective())
+                                             ? m_scene->activeCamera
+                                             : nullptr;
+        if (eye_camera != nullptr) {
+            const auto put = [&](std::string_view name, const Vector3d& v) {
+                write(name, Vec({ static_cast<float>(v.x()), static_cast<float>(v.y()),
+                                  static_cast<float>(v.z()) }));
             };
-            if (info.has_EYE) {
-                auto eye = to_array(view_camera->GetPosition());
-                // A 2D scene's perspective camera sits where its field of view
-                // puts it, which is not where Wallpaper Engine keeps the eye its
-                // shaders read: over the view's centre at a fixed depth.
-                if (! view_camera->FovLocked()) eye[2] = kCanvasShaderEyeDepth;
-                updateOp(G_EYEPOSITION, eye);
+            if (info->has_EYE) {
+                Vector3d eye = eye_camera->GetPosition();
+                if (! eye_camera->FovLocked()) eye.z() = kCanvasShaderEyeDepth;
+                put(G_EYEPOSITION, eye);
             }
-            if (info.has_VIEWFORWARD)
-                updateOp(G_VIEWFORWARD, to_array(view_camera->GetDirection()));
-            if (info.has_VIEWUP) updateOp(G_VIEWUP, to_array(view_camera->GetUp()));
-            if (info.has_VIEWRIGHT) updateOp(G_VIEWRIGHT, to_array(view_camera->GetRight()));
+            if (info->has_VIEWFORWARD) put(G_VIEWFORWARD, eye_camera->GetDirection());
+            if (info->has_VIEWUP) put(G_VIEWUP, eye_camera->GetUp());
+            if (info->has_VIEWRIGHT) put(G_VIEWRIGHT, eye_camera->GetRight());
         }
     }
+
+    // ---- lights
+    if (info->has_LP || info->has_LCP) {
+        const auto legacy = PackLegacyLights(*m_scene);
+        write(G_LP, ShaderValue(legacy.positions.data(), legacy.positions.size()));
+        write(G_LCP, ShaderValue(legacy.colors.data(), legacy.colors.size()));
+    }
+    if (info->has_LIGHTS_V1) {
+        const auto lights = PackLightingV1(*m_scene);
+        const std::array<std::pair<std::string_view, const std::vector<float>*>, 11> arrays { {
+            { G_LPOINT_COLOR, &lights.point_color },
+            { G_LPOINT_ORIGIN, &lights.point_origin },
+            { G_LSPOT_COLOR, &lights.spot_color },
+            { G_LSPOT_ORIGIN, &lights.spot_origin },
+            { G_LSPOT_DIRECTION, &lights.spot_direction },
+            { G_LSPOT_EXPONENT, &lights.spot_exponent },
+            { G_LTUBE_COLOR, &lights.tube_color },
+            { G_LTUBE_ORIGINA, &lights.tube_origin_a },
+            { G_LTUBE_ORIGINB, &lights.tube_origin_b },
+            { G_LDIRECTIONAL_COLOR, &lights.directional_color },
+            { G_LDIRECTIONAL_DIRECTION, &lights.directional_direction },
+        } };
+        for (const auto& [name, values] : arrays) {
+            if (values->empty()) continue;
+            write(name, ShaderValue(values->data(), values->size()));
+        }
+    }
+
+    // ---- audio spectrum, one value per vec4 element
+    if (info->has_AudioSpectrum16Left || info->has_AudioSpectrum16Right ||
+        info->has_AudioSpectrum32Left || info->has_AudioSpectrum32Right ||
+        info->has_AudioSpectrum64Left || info->has_AudioSpectrum64Right) {
+        audio::AudioSpectrumSnapshot snapshot;
+        if (m_scene->runtime != nullptr) snapshot = m_scene->runtime->CurrentAudioSpectrumSnapshot();
+        const auto put = [&](std::string_view name, const auto& bands) {
+            m_audioPack.assign(bands.size() * 4, 0.0f);
+            for (std::size_t i = 0; i < bands.size(); ++i) m_audioPack[i * 4] = bands[i];
+            write(name, ShaderValue(m_audioPack.data(), m_audioPack.size()));
+        };
+        if (info->has_AudioSpectrum16Left) put(G_AUDIO16_LEFT, snapshot.left16);
+        if (info->has_AudioSpectrum16Right) put(G_AUDIO16_RIGHT, snapshot.right16);
+        if (info->has_AudioSpectrum32Left) put(G_AUDIO32_LEFT, snapshot.left32);
+        if (info->has_AudioSpectrum32Right) put(G_AUDIO32_RIGHT, snapshot.right32);
+        if (info->has_AudioSpectrum64Left) put(G_AUDIO64_LEFT, snapshot.left64);
+        if (info->has_AudioSpectrum64Right) put(G_AUDIO64_RIGHT, snapshot.right64);
+    }
+}
+
+void WPShaderValueUpdater::UpdateSprites(SceneNode* node, sprite_map_t& sprites,
+                                         const UpdateUniformOp& write) {
+    bool reported = false;
+    for (auto& [slot, animation] : sprites) {
+        if (animation.FrameCount() == 0 || ! SlotInRange(static_cast<uint32_t>(slot))) continue;
+        const SpriteFrame* frame = nullptr;
+        if (node->TextureFrame().has_value()) {
+            frame = &animation.SetFrame(*node->TextureFrame());
+        } else {
+            frame = &animation.GetAnimateFrame(node->TextureAnimationStep(m_scene->frameTime));
+        }
+        if (! reported) {
+            reported = true;
+            node->SetTextureAnimationFrame(static_cast<double>(animation.CurFrameIndex()));
+        }
+        write(WE_GLTEX_ROTATION_NAMES[slot],
+              Vec({ frame->xAxis[0], frame->xAxis[1], frame->yAxis[0], frame->yAxis[1] }));
+        write(WE_GLTEX_TRANSLATION_NAMES[slot], Vec({ frame->x, frame->y }));
+    }
+}
+
+Vector3d WPShaderValueUpdater::ParallaxRootOrigin(const SceneNode* node,
+                                                  const WPShaderValueData* data) const {
+    SceneNode* start = data != nullptr && data->parallax_layer != nullptr
+                           ? data->parallax_layer
+                           : const_cast<SceneNode*>(node);
+    SceneNode* root  = start;
+    if (! start->IgnoresParentTransform()) {
+        const SceneNode* scene_root = m_scene->sceneGraph.get();
+        while (root->Parent() != nullptr && root->Parent() != scene_root) root = root->Parent();
+    }
+    root->UpdateTrans();
+    // A fullscreen root places its layers from the frame the scene saved for it.
+    const Matrix4d from = root != start && root->HasChildFrame() ? root->ChildTrans() : root->ModelTrans();
+    return Vector3d(from(0, 3), from(1, 3), from(2, 3));
 }
 
 void WPShaderValueUpdater::SetNodeData(void* nodeAddr, const WPShaderValueData& data) {
@@ -878,9 +803,32 @@ std::array<float, 2> WPShaderValueUpdater::NodeParallaxDepth(const SceneNode* no
 }
 
 void WPShaderValueUpdater::ForgetNode(SceneNode* node) {
+    if (node == nullptr) return;
     m_nodeDataMap.erase(node);
     m_nodeUniformInfoMap.erase(node);
     m_parallaxPasses.erase(node);
+    // A pass that is freed must not stay in the list of the layer it belonged to.
+    for (auto it = m_parallaxPasses.begin(); it != m_parallaxPasses.end();) {
+        auto& passes = it->second;
+        passes.erase(std::remove(passes.begin(), passes.end(), static_cast<void*>(node)),
+                     passes.end());
+        it = passes.empty() ? m_parallaxPasses.erase(it) : std::next(it);
+    }
+    // Nor may a puppet attachment keep writing to a node that is gone.
+    for (auto& group : m_puppetAttachments) {
+        auto& attachments = group.attachments;
+        attachments.erase(std::remove_if(attachments.begin(), attachments.end(),
+                                         [node](const PuppetAttachment& a) { return a.node == node; }),
+                          attachments.end());
+    }
+    m_puppetAttachments.erase(
+        std::remove_if(m_puppetAttachments.begin(), m_puppetAttachments.end(),
+                       [](const PuppetAttachmentGroup& g) { return g.attachments.empty(); }),
+        m_puppetAttachments.end());
 }
 
-void WPShaderValueUpdater::SetTexelSize(float x, float y) { m_texelSize = { x, y }; }
+void WPShaderValueUpdater::SetTexelSize(float x, float y) {
+    // A texel that is not a positive number would put infinities in every neighbour tap.
+    if (! std::isfinite(x) || ! std::isfinite(y) || x <= 0.0f || y <= 0.0f) return;
+    m_texelSize = { x, y };
+}

@@ -1,11 +1,4 @@
-//! Safe Rust ownership wrapper for Open Wallpaper Engine renderer objects.
-//!
-//! The generated `sys` module is the only place Rust sees OWE's C symbols.
-//! Everything above it speaks in wallpaper-core domain types (`SceneDesc`,
-//! `ScalingMode`, audio frames) and owns only an opaque renderer pointer. There
-//! are deliberately no raw scene/display descriptor structs here;
-//! reconciliation and runtime state stay in `crate::engine`.
-
+// Clean-room implementation from the WallpaperMachine spec r1c-core-media.md; written without access to the original source.
 use std::{
     ffi::{CStr, CString, c_char, c_int, c_void},
     panic::{AssertUnwindSafe, catch_unwind},
@@ -13,7 +6,6 @@ use std::{
     sync::Arc,
 };
 
-use serde_json::Value;
 
 /// One system-audio analysis result in the layout Wallpaper Engine's web audio
 /// listener expects: 128 values, indices 0..=63 the left channel and 64..=127
@@ -32,6 +24,7 @@ impl AudioSpectrum128 {
     pub const BIN_COUNT: usize = 128;
 }
 
+
 use crate::{
     EngineError,
     media::audio::{AudioVolume, InterleavedStereoF32, MonoPcmF32},
@@ -39,11 +32,11 @@ use crate::{
     project::{ScalingMode, SceneDesc, SceneFraming, SerdeValudeExt},
 };
 
-/// Private handle to the statically linked Open Wallpaper Engine renderer.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OweBackend;
 
 pub type FirstFrameCallback = Arc<dyn Fn() + Send + Sync + 'static>;
+
 pub type PointerInputCallback = Arc<dyn Fn(bool) + Send + Sync + 'static>;
 /// Receives one `engine.openUserShortcut` request: the property the wallpaper
 /// named, and the value its user chose for it.
@@ -58,18 +51,17 @@ pub type AudioRequirementCallback = Arc<dyn Fn(bool) + Send + Sync + 'static>;
 /// and never raised for a failure before the first presented frame.
 pub type RenderFailureCallback = Arc<dyn Fn() + Send + Sync + 'static>;
 
+
 impl OweBackend {
-    /// Initializes access to the statically linked backend.
-    ///
-    /// OWE currently has no global renderer initialization entry point that is
-    /// separate from `SceneWallpaper::init`, so this is intentionally a no-op.
-    ///
     /// # Errors
     ///
-    /// Reserved for future backend initialization failures; currently always
-    /// returns `Ok`.
+    /// Reserved for future backend initialization failures.
     pub fn initialize() -> Result<Self, EngineError> {
-        shader::ffi::ensure_linked();
+
+        // The engine calls the rs_shader_* exports from C++ only; naming one keeps their object in the link.
+        let _ = wm_shader::ffi::keep_exports_alive();
+
+        // SAFETY: the callback is a plain function that contains its own panics.
         unsafe {
             UnwindSafeFFI::new("owe_set_log_callback")
                 .call(|| sys::owe_set_log_callback(Some(owe_log_callback)))?;
@@ -77,12 +69,6 @@ impl OweBackend {
         Ok(Self)
     }
 
-    /// Creates and fully configures one OWE renderer scene.
-    ///
-    /// `metal_layer` must be the `CAMetalLayer` owned by the paired
-    /// `WallpaperWindow`. Render resolution is constructor-only because OWE
-    /// bakes it into the Vulkan surface setup.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] when the OWE scene cannot be allocated or any
@@ -101,6 +87,7 @@ impl OweBackend {
         audio_requirement_callback: Option<AudioRequirementCallback>,
         render_failure_callback: Option<RenderFailureCallback>,
     ) -> Result<OweScene, EngineError> {
+
         let display = &desc.display;
         let load = crate::log_context::begin_load(
             "scene",
@@ -123,14 +110,18 @@ impl OweBackend {
         // Lines this thread logs while opening belong to the load too; the
         // scene's own threads are tagged below, before `init` starts them.
         let _scope = crate::log_context::LoadScope::enter(load);
-        let mut raw = std::ptr::null_mut();
+
+        let mut raw: *mut sys::owe_scene_wallpaper = std::ptr::null_mut();
         call_status("owe_scene_wallpaper_new", || unsafe {
             sys::owe_scene_wallpaper_new(&raw mut raw)
         })?;
-
         let raw = NonNull::new(raw).ok_or_else(|| {
-            EngineError::Render("open-wallpaper-engine returned a null scene".to_string())
+            EngineError::Render("open-wallpaper-engine returned no scene object".to_owned())
         })?;
+
+        // From here on the object is owned by `scene`: any early return below shuts
+        // it down and deletes it (skipping the surface release while no surface
+        // exists yet) through its `Drop`.
         let mut scene = OweScene {
             raw: Some(raw),
             render_initialized: false,
@@ -138,15 +129,44 @@ impl OweBackend {
             load,
             previewed_properties: None,
         };
+
         call_status("owe_scene_wallpaper_set_log_scope", || unsafe {
             sys::owe_scene_wallpaper_set_log_scope(raw.as_ptr(), load)
         })?;
-        scene.initialize_renderer(desc, metal_layer, render_resolution)?;
-        scene.set_first_frame_callback(first_frame_callback)?;
-        scene.set_pointer_input_callback(pointer_input_callback)?;
-        scene.set_user_shortcut_callback(user_shortcut_callback)?;
-        scene.set_audio_requirement_callback(audio_requirement_callback)?;
-        scene.set_render_failure_callback(render_failure_callback)?;
+        call_status("owe_scene_wallpaper_init", || unsafe {
+            sys::owe_scene_wallpaper_init(raw.as_ptr())
+        })?;
+
+        let (render_width, render_height) = render_resolution.unwrap_or((0, 0));
+        call_status("owe_scene_wallpaper_init_metal", || unsafe {
+            sys::owe_scene_wallpaper_init_metal(
+                raw.as_ptr(),
+                metal_layer,
+                display.width,
+                display.height,
+                render_width,
+                render_height,
+                display.scale_factor,
+            )
+        })?;
+        scene.render_initialized = true;
+
+        if first_frame_callback.is_some() {
+            scene.set_first_frame_callback(first_frame_callback)?;
+        }
+        if pointer_input_callback.is_some() {
+            scene.set_pointer_input_callback(pointer_input_callback)?;
+        }
+        if user_shortcut_callback.is_some() {
+            scene.set_user_shortcut_callback(user_shortcut_callback)?;
+        }
+        if audio_requirement_callback.is_some() {
+            scene.set_audio_requirement_callback(audio_requirement_callback)?;
+        }
+        if render_failure_callback.is_some() {
+            scene.set_render_failure_callback(render_failure_callback)?;
+        }
+
         scene.apply_scene_config(desc)?;
         scene.set_scaling_mode(scaling_mode)?;
         scene.set_scaling_factor(scaling_factor)?;
@@ -154,8 +174,6 @@ impl OweBackend {
         Ok(scene)
     }
 
-    /// Submits interleaved stereo PCM to OWE's audio response input.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError::Render`] when OWE rejects the audio frame upload.
@@ -169,8 +187,6 @@ impl OweBackend {
         })
     }
 
-    /// Submits mono PCM to OWE's audio response input.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError::Render`] when OWE rejects the audio frame upload.
@@ -183,6 +199,7 @@ impl OweBackend {
             )
         })
     }
+
 
     /// Turns renderer counting on or off for the whole process.
     ///
@@ -197,62 +214,6 @@ impl OweBackend {
         call_status("owe_renderer_counters_set_enabled", || unsafe {
             sys::owe_renderer_counters_set_enabled(enabled)
         })
-    }
-
-    /// Turns content pacing on or off for the whole process.
-    ///
-    /// Off is the default: with it off the renderer produces a frame per
-    /// display refresh as before.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if the call unwinds.
-    pub fn set_content_pacing_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        unsafe {
-            UnwindSafeFFI::new("owe_set_content_pacing_enabled")
-                .call(|| sys::owe_set_content_pacing_enabled(enabled))
-        }
-    }
-
-    /// Whether the renderer process currently has content pacing on.
-    ///
-    /// Read back from the renderer rather than from persisted settings, so a
-    /// report describes what is running.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if the call unwinds.
-    pub fn content_pacing_enabled(&self) -> Result<bool, EngineError> {
-        unsafe {
-            UnwindSafeFFI::new("owe_content_pacing_enabled")
-                .call(|| sys::owe_content_pacing_enabled())
-        }
-    }
-
-    /// Turns shared video decoding on or off for the whole process.
-    ///
-    /// Off is the default: with it off every surface opens its own decoder.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if the call unwinds.
-    pub fn set_shared_video_decode_enabled(&self, enabled: bool) -> Result<(), EngineError> {
-        unsafe {
-            UnwindSafeFFI::new("owe_set_shared_video_decode_enabled")
-                .call(|| sys::owe_set_shared_video_decode_enabled(enabled))
-        }
-    }
-
-    /// Whether the renderer process currently has shared video decoding on.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if the call unwinds.
-    pub fn shared_video_decode_enabled(&self) -> Result<bool, EngineError> {
-        unsafe {
-            UnwindSafeFFI::new("owe_shared_video_decode_enabled")
-                .call(|| sys::owe_shared_video_decode_enabled())
-        }
     }
 
     /// Turns scene render optimisation on or off for the whole renderer
@@ -291,21 +252,6 @@ impl OweBackend {
         unsafe {
             UnwindSafeFFI::new("owe_set_scene_video_plane_sampling_enabled")
                 .call(|| sys::owe_set_scene_video_plane_sampling_enabled(enabled))
-        }
-    }
-
-    /// Chooses which renderer newly opened scenes prefer.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if the call unwinds.
-    pub fn set_scene_renderer_preference(
-        &self,
-        preference: crate::SceneRendererPreference,
-    ) -> Result<(), EngineError> {
-        unsafe {
-            UnwindSafeFFI::new("owe_set_scene_renderer_preference")
-                .call(|| sys::owe_set_scene_renderer_preference(preference.as_raw()))
         }
     }
 
@@ -361,28 +307,6 @@ impl OweBackend {
         }))
     }
 
-    /// Live decoder instances currently serving at least one surface, and the
-    /// number of surfaces consuming them.
-    ///
-    /// A session is one running decoder, not one file: two decoders of the
-    /// same clip are two sessions. Sharing shows up as consumers exceeding
-    /// sessions.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if either call unwinds.
-    pub fn shared_video_decode_counts(&self) -> Result<(u32, u32), EngineError> {
-        let sessions = unsafe {
-            UnwindSafeFFI::new("owe_shared_video_decode_session_count")
-                .call(|| sys::owe_shared_video_decode_session_count())
-        }?;
-        let consumers = unsafe {
-            UnwindSafeFFI::new("owe_shared_video_decode_consumer_count")
-                .call(|| sys::owe_shared_video_decode_consumer_count())
-        }?;
-        Ok((sessions, consumers))
-    }
-
     /// Copies process-wide renderer counters, in `owe_renderer_shared_counter`
     /// order. These belong to no single surface.
     ///
@@ -400,9 +324,21 @@ impl OweBackend {
     }
 }
 
-/// Owned `wallpaper::SceneWallpaper` backend object.
+/// The value of the engine's scaling-mode property for `mode`, as the C ABI
+/// numbers them. An engine that does not know a value ignores it.
+pub(crate) fn scaling_mode_property_value(mode: ScalingMode) -> i32 {
+    match mode {
+        ScalingMode::None => 0,
+        ScalingMode::Stretch => 1,
+        ScalingMode::Fit => 2,
+        ScalingMode::Fill => 3,
+        ScalingMode::FitBlurred => 4,
+    }
+}
+
 pub struct OweScene {
     raw: Option<NonNull<sys::owe_scene_wallpaper>>,
+    #[allow(dead_code)]
     render_initialized: bool,
     /// Registry entry to withdraw before this scene is destroyed.
     ///
@@ -428,114 +364,76 @@ pub struct OweScene {
     previewed_properties: Option<String>,
 }
 
-// SAFETY: The pointer is an owned renderer token. Rust mutates it behind the
-// engine mutex, and destruction is routed through the OWE delete wrapper.
 unsafe impl Send for OweScene {}
 
 impl OweScene {
-    /// Retrieves the last error message from OWE, if any.
     fn property_name(
         operation: &'static str,
         call: impl FnOnce() -> *const c_char,
     ) -> Result<*const c_char, EngineError> {
-        // Property names are owned by OWE constants. Keeping lookups behind
-        // functions avoids duplicating string literals that must match upstream.
-        let name = unsafe { UnwindSafeFFI::new(operation).call(call) }?;
+        let name = unsafe { UnwindSafeFFI::new(operation).call(call)? };
         if name.is_null() {
-            Err(EngineError::Render(
-                "open-wallpaper-engine returned a null property name".to_string(),
-            ))
-        } else {
-            Ok(name)
+            return Err(EngineError::Render(
+                "open-wallpaper-engine returned a null property name".to_owned(),
+            ));
         }
+        Ok(name)
     }
 
-    /// Retrieves the current value of the scaling mode property from OWE.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError::Render`] if OWE returns a null property name or
     /// [`EngineError::Crash`] if the FFI call unwinds.
     pub fn scaling_mode() -> Result<*const c_char, EngineError> {
-        Self::property_name("owe_property_scaling_mode", || unsafe {
-            sys::owe_property_scaling_mode()
-        })
+        Self::property_name("owe_property_scaling_mode", || unsafe { sys::owe_property_scaling_mode() })
     }
 
-    /// Retrieves the current value of the scaling factor property from OWE.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError::Render`] if OWE returns a null property name or
     /// [`EngineError::Crash`] if the FFI call unwinds.
     pub fn scaling_factor() -> Result<*const c_char, EngineError> {
-        Self::property_name("owe_property_scaling_factor", || unsafe {
-            sys::owe_property_scaling_factor()
-        })
+        Self::property_name("owe_property_scaling_factor", || unsafe { sys::owe_property_scaling_factor() })
     }
 
-    /// Retrieves the current value of the audio response enabled property from
-    /// OWE.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError::Render`] if OWE returns a null property name or
     /// [`EngineError::Crash`] if the FFI call unwinds.
     pub fn audio_response_enabled() -> Result<*const c_char, EngineError> {
-        Self::property_name("owe_property_audio_response_enabled", || unsafe {
-            sys::owe_property_audio_response_enabled()
-        })
+        Self::property_name("owe_property_audio_response_enabled", || unsafe { sys::owe_property_audio_response_enabled() })
     }
 
-    /// Retrieves the current value of the media integration enabled property
-    /// from OWE.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError::Render`] if OWE returns a null property name or
     /// [`EngineError::Crash`] if the FFI call unwinds.
     pub fn media_integration_enabled() -> Result<*const c_char, EngineError> {
-        Self::property_name("owe_property_media_integration_enabled", || unsafe {
-            sys::owe_property_media_integration_enabled()
-        })
+        Self::property_name("owe_property_media_integration_enabled", || unsafe { sys::owe_property_media_integration_enabled() })
     }
 
-    /// Retrieves the current value of the force shader refresh property from
-    /// OWE.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError::Render`] if OWE returns a null property name or
     /// [`EngineError::Crash`] if the FFI call unwinds.
     pub fn force_shader_refresh() -> Result<*const c_char, EngineError> {
-        Self::property_name("owe_property_force_shader_refresh", || unsafe {
-            sys::owe_property_force_shader_refresh()
-        })
+        Self::property_name("owe_property_force_shader_refresh", || unsafe { sys::owe_property_force_shader_refresh() })
     }
 
-    /// Retrieves the current value of the project property override JSON from
-    /// OWE.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError::Render`] if OWE returns a null property name or
     /// [`EngineError::Crash`] if the FFI call unwinds.
     pub fn project_property_override_json() -> Result<*const c_char, EngineError> {
-        Self::property_name("owe_property_project_property_override_json", || unsafe {
-            sys::owe_property_project_property_override_json()
-        })
+        Self::property_name("owe_property_project_property_override_json", || unsafe { sys::owe_property_project_property_override_json() })
     }
 
-    /// Retrieves the current value of the project property reset from OWE.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError::Render`] if OWE returns a null property name or
     /// [`EngineError::Crash`] if the FFI call unwinds.
     pub fn project_property_reset() -> Result<*const c_char, EngineError> {
-        Self::property_name("owe_property_project_property_reset", || unsafe {
-            sys::owe_property_project_property_reset()
-        })
+        Self::property_name("owe_property_project_property_reset", || unsafe { sys::owe_property_project_property_reset() })
     }
 
     /// Retrieves the name of the property that shows a project property
@@ -553,14 +451,6 @@ impl OweScene {
 }
 
 impl OweScene {
-    /// Applies the descriptor-driven scene configuration to an existing
-    /// renderer.
-    ///
-    /// This covers project source/assets paths, shader cache path, target FPS,
-    /// pause state, audio-response defaults, force-refresh state, and
-    /// descriptor property overrides. Callers that maintain mutable runtime
-    /// overrides must reapply them after this method.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] when descriptor paths contain interior NUL
@@ -569,23 +459,21 @@ impl OweScene {
     pub fn apply_scene_config(&mut self, desc: &SceneDesc) -> Result<(), EngineError> {
         let source = cstring(&desc.scene_path)?;
         let assets = cstring(&desc.assets_path)?;
-        let cache_path = desc
-            .shader_cache_path()?
-            .as_deref()
-            .map(cstring)
-            .transpose()?;
-        let property_override_json = desc
+        let cache = desc.shader_cache_path()?.map(|path| cstring(&path)).transpose()?;
+        let overrides = desc
             .property_override_json
             .as_deref()
-            .map(|json| {
-                let flat_json = serde_json::from_str::<Value>(json)
-                    .map_err(|e| EngineError::InvalidInput(e.to_string()))?
-                    .flatten()?;
-                serde_json::to_string(&flat_json)
-                    .map_err(|e| EngineError::InvalidInput(e.to_string()))
+            .map(|json| -> Result<CString, EngineError> {
+                let document: serde_json::Value = serde_json::from_str(json).map_err(|error| {
+                    EngineError::InvalidInput(format!("failed to parse property override: {error}"))
+                })?;
+                let flat = document.flatten()?;
+                let text = serde_json::to_string(&flat).map_err(|error| {
+                    EngineError::InvalidInput(format!("failed to encode property override: {error}"))
+                })?;
+                cstring(&text)
             })
             .transpose()?;
-        let property_override_json = property_override_json.as_deref().map(cstring).transpose()?;
 
         let raw = self.raw_ptr()?;
         call_status("owe_scene_wallpaper_apply_config", || unsafe {
@@ -593,30 +481,20 @@ impl OweScene {
                 raw.as_ptr(),
                 source.as_ptr(),
                 assets.as_ptr(),
-                cache_path
-                    .as_ref()
-                    .map_or(std::ptr::null(), |value| value.as_ptr()),
+                cache.as_ref().map_or(std::ptr::null(), |text| text.as_ptr()),
                 desc.fps,
                 desc.paused,
                 desc.force_shader_refresh,
-                property_override_json
-                    .as_ref()
-                    .map_or(std::ptr::null(), |value| value.as_ptr()),
+                overrides.as_ref().map_or(std::ptr::null(), |text| text.as_ptr()),
             )
         })?;
 
         self.set_audio_response_enabled(desc.audio_response_enabled)?;
         self.set_media_integration_enabled(desc.media_integration_enabled)?;
         self.set_audio_volume(desc.audio_volume)?;
-        self.set_audio_muted(desc.audio_muted)?;
-        Ok(())
+        self.set_audio_muted(desc.audio_muted)
     }
 
-    /// Pauses rendering and releases the Vulkan surface + swapchain on the
-    /// backend. Scene, shaders, textures, audio, and runtime state remain
-    /// loaded. Synchronous — blocks until the render thread confirms the
-    /// transaction's begin step.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError::InvalidInput`] if the scene is already closed, or
@@ -628,17 +506,11 @@ impl OweScene {
         })
     }
 
-    /// Rebuilds the Vulkan surface + swapchain from a new Metal layer,
-    /// rebuilds the render graph, and resumes rendering. Dimensions replace
-    /// those used during the last init or finish. Synchronous — blocks until
-    /// the render thread confirms the new surface is presentable.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError::InvalidInput`] if `metal_layer` is null or the
     /// scene is closed, or [`EngineError::Render`] if OWE fails the finish
     /// step.
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn finish_surface_reconfigure(
         &mut self,
         metal_layer: *mut c_void,
@@ -650,52 +522,41 @@ impl OweScene {
     ) -> Result<(), EngineError> {
         if metal_layer.is_null() {
             return Err(EngineError::InvalidInput(
-                "metal_layer must not be null".to_string(),
+                "metal_layer must not be null".to_owned(),
             ));
         }
         let raw = self.raw_ptr()?;
-        call_status(
-            "owe_scene_wallpaper_finish_surface_reconfigure",
-            || unsafe {
-                sys::owe_scene_wallpaper_finish_surface_reconfigure(
-                    raw.as_ptr(),
-                    metal_layer,
-                    width,
-                    height,
-                    render_width,
-                    render_height,
-                    scale_factor,
-                )
-            },
-        )
+        call_status("owe_scene_wallpaper_finish_surface_reconfigure", || unsafe {
+            sys::owe_scene_wallpaper_finish_surface_reconfigure(
+                raw.as_ptr(),
+                metal_layer,
+                width,
+                height,
+                render_width,
+                render_height,
+                scale_factor,
+            )
+        })?;
+        self.render_initialized = true;
+        Ok(())
     }
 
-    /// Sets the renderer scaling mode property.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the scene is closed, OWE property lookup
     /// fails, or OWE rejects the property update.
     pub fn set_scaling_mode(&mut self, mode: ScalingMode) -> Result<(), EngineError> {
-        let value = match mode {
-            ScalingMode::None => 0,
-            ScalingMode::Stretch => 1,
-            ScalingMode::Fit => 2,
-            ScalingMode::Fill => 3,
-            ScalingMode::FitBlurred => 4,
-        };
-        self.set_property_int32(Self::scaling_mode()?, value)
+        let name = Self::scaling_mode()?;
+        self.set_property_int32(name, scaling_mode_property_value(mode))
     }
 
-    /// Sets the renderer scaling factor property.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the scene is closed, OWE property lookup
     /// fails, or OWE rejects the property update.
-    #[allow(clippy::cast_possible_truncation)]
     pub fn set_scaling_factor(&mut self, factor: f64) -> Result<(), EngineError> {
-        self.set_property_float(Self::scaling_factor()?, factor as f32)
+        let name = Self::scaling_factor()?;
+        self.set_property_float(name, factor as f32)
     }
 
     /// Sets where the presented wallpaper sits inside the room its display
@@ -716,8 +577,6 @@ impl OweScene {
         })
     }
 
-    /// Sets the target renderer frame rate.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the scene is closed or OWE rejects the
@@ -748,8 +607,6 @@ impl OweScene {
         })
     }
 
-    /// Sets the renderer pause state.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the scene is closed or OWE rejects the
@@ -787,8 +644,6 @@ impl OweScene {
         Ok(values)
     }
 
-    /// Registers a first-frame callback owned by this renderer scene.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the scene is closed or OWE rejects the
@@ -797,32 +652,20 @@ impl OweScene {
         &mut self,
         callback: Option<FirstFrameCallback>,
     ) -> Result<(), EngineError> {
-        let Some(callback) = callback else {
-            let raw = self.raw_ptr()?;
-            return call_status("owe_scene_wallpaper_set_first_frame_callback", || unsafe {
-                sys::owe_scene_wallpaper_set_first_frame_callback(
-                    raw.as_ptr(),
-                    Some(owe_first_frame_callback),
-                    std::ptr::null_mut(),
-                    Some(owe_first_frame_callback_drop),
-                )
-            });
-        };
-
-        let user_data = Box::into_raw(Box::new(callback)).cast::<c_void>();
         let raw = self.raw_ptr()?;
+        let user_data = callback.map_or(std::ptr::null_mut(), |callback| {
+            Box::into_raw(Box::new(callback)).cast::<c_void>()
+        });
         let result = call_status("owe_scene_wallpaper_set_first_frame_callback", || unsafe {
             sys::owe_scene_wallpaper_set_first_frame_callback(
                 raw.as_ptr(),
-                Some(owe_first_frame_callback),
+                if user_data.is_null() { None } else { Some(owe_first_frame_callback) },
                 user_data,
-                Some(owe_first_frame_callback_drop),
+                if user_data.is_null() { None } else { Some(owe_first_frame_callback_drop) },
             )
         });
-        if result.is_err() {
-            // SAFETY: `user_data` was produced by `Box::into_raw` immediately
-            // above and OWE rejected the registration, so Rust must reclaim
-            // that box.
+        if result.is_err() && !user_data.is_null() {
+            // A refused registration never consumes the userdata; take it back.
             drop(unsafe { Box::<FirstFrameCallback>::from_raw(user_data.cast()) });
         }
         result
@@ -851,12 +694,6 @@ impl OweScene {
         result
     }
 
-    /// Sends normalized mouse coordinates to the renderer.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError`] if coordinates are non-finite, the scene is
-    /// closed, or OWE rejects the update.
     /// Installs the sink for `engine.openUserShortcut` requests.
     ///
     /// The callback receives the property the wallpaper named and the value its
@@ -966,10 +803,14 @@ impl OweScene {
         unsafe { super::scene_registry::read_surface_health(raw.as_ptr().cast()) }
     }
 
+    /// # Errors
+    ///
+    /// Returns [`EngineError`] if coordinates are non-finite, the scene is
+    /// closed, or OWE rejects the update.
     pub fn set_mouse_position(&mut self, x: f64, y: f64) -> Result<(), EngineError> {
         if !x.is_finite() || !y.is_finite() {
             return Err(EngineError::InvalidInput(
-                "mouse coordinates must be finite".to_string(),
+                "mouse coordinates must be finite".to_owned(),
             ));
         }
         let raw = self.raw_ptr()?;
@@ -978,21 +819,17 @@ impl OweScene {
         })
     }
 
-    /// Sends one mouse button transition to the renderer.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the button is out of range, the scene is
     /// closed, or OWE rejects the update.
     pub fn set_mouse_button(&mut self, button: u32, pressed: bool) -> Result<(), EngineError> {
-        let button = i32::try_from(button).map_err(|_| {
-            EngineError::InvalidInput("mouse button must be in range 0..31".to_string())
-        })?;
-        if !(0..=31).contains(&button) {
-            return Err(EngineError::InvalidInput(
-                "mouse button must be in range 0..31".to_string(),
-            ));
-        }
+        let button = i32::try_from(button)
+            .ok()
+            .filter(|button| (0..=31).contains(button))
+            .ok_or_else(|| {
+                EngineError::InvalidInput("mouse button must be in range 0..31".to_owned())
+            })?;
         let raw = self.raw_ptr()?;
         call_status("owe_scene_wallpaper_mouse_button", || unsafe {
             sys::owe_scene_wallpaper_mouse_button(raw.as_ptr(), button, pressed)
@@ -1007,8 +844,6 @@ impl OweScene {
         })
     }
 
-    /// Sends mouse enter/leave state to the renderer.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the scene is closed or OWE rejects the
@@ -1020,18 +855,15 @@ impl OweScene {
         })
     }
 
-    /// Enables or disables audio-response behavior.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the scene is closed, OWE property lookup
     /// fails, or OWE rejects the property update.
     pub fn set_audio_response_enabled(&mut self, enabled: bool) -> Result<(), EngineError> {
-        self.set_property_bool(Self::audio_response_enabled()?, enabled)
+        let name = Self::audio_response_enabled()?;
+        self.set_property_bool(name, enabled)
     }
 
-    /// Sets the scene-wide audio volume multiplier.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the scene is closed or OWE rejects the
@@ -1039,12 +871,10 @@ impl OweScene {
     pub fn set_audio_volume(&mut self, volume: AudioVolume) -> Result<(), EngineError> {
         let raw = self.raw_ptr()?;
         call_status("owe_scene_wallpaper_set_audio_volume", || unsafe {
-            sys::owe_scene_wallpaper_set_audio_volume(raw.as_ptr(), volume.into())
+            sys::owe_scene_wallpaper_set_audio_volume(raw.as_ptr(), f32::from(volume))
         })
     }
 
-    /// Sets the scene-wide audio mute flag.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the scene is closed or OWE rejects the
@@ -1056,18 +886,15 @@ impl OweScene {
         })
     }
 
-    /// Enables or disables media integration behavior.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the scene is closed, OWE property lookup
     /// fails, or OWE rejects the property update.
     pub fn set_media_integration_enabled(&mut self, enabled: bool) -> Result<(), EngineError> {
-        self.set_property_bool(Self::media_integration_enabled()?, enabled)
+        let name = Self::media_integration_enabled()?;
+        self.set_property_bool(name, enabled)
     }
 
-    /// Submits one serialized media integration event to OWE.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if event serialization fails, the JSON contains
@@ -1092,15 +919,13 @@ impl OweScene {
     /// Returns [`EngineError`] if the JSON contains an interior NUL byte, the
     /// scene is closed, or OWE rejects the event.
     pub fn submit_media_event_json(&mut self, json: &str) -> Result<(), EngineError> {
-        let json = cstring(json)?;
+        let encoded = cstring(json)?;
         let raw = self.raw_ptr()?;
         call_status("owe_scene_wallpaper_submit_media_event_json", || unsafe {
-            sys::owe_scene_wallpaper_submit_media_event_json(raw.as_ptr(), json.as_ptr())
+            sys::owe_scene_wallpaper_submit_media_event_json(raw.as_ptr(), encoded.as_ptr())
         })
     }
 
-    /// Uploads system media artwork to OWE.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the scene is closed or OWE rejects the
@@ -1110,22 +935,17 @@ impl OweScene {
         artwork: &crate::media::MediaThumbnailRgba,
     ) -> Result<(), EngineError> {
         let raw = self.raw_ptr()?;
-        call_status(
-            "owe_scene_wallpaper_apply_system_media_artwork",
-            || unsafe {
-                sys::owe_scene_wallpaper_apply_system_media_artwork(
-                    raw.as_ptr(),
-                    artwork.width,
-                    artwork.height,
-                    artwork.rgba.as_ptr(),
-                    artwork.rgba.len(),
-                )
-            },
-        )
+        call_status("owe_scene_wallpaper_apply_system_media_artwork", || unsafe {
+            sys::owe_scene_wallpaper_apply_system_media_artwork(
+                raw.as_ptr(),
+                artwork.width,
+                artwork.height,
+                artwork.rgba.as_ptr(),
+                artwork.rgba.len(),
+            )
+        })
     }
 
-    /// Applies a flattened project property override JSON document.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the JSON contains an interior NUL byte, the
@@ -1135,20 +955,24 @@ impl OweScene {
         // The scene loads again whatever comes of the call, and shows what it
         // loads.
         self.previewed_properties = None;
-        self.set_force_shader_refresh(true)?;
-        self.set_property_string(Self::project_property_override_json()?, encoded.as_ptr())
+        // A returned name is only valid until the next name is asked for, so each
+        // is fetched right before it is used.
+        let refresh = Self::force_shader_refresh()?;
+        self.set_property_bool(refresh, true)?;
+        let name = Self::project_property_override_json()?;
+        self.set_property_string(name, encoded.as_ptr())
     }
 
-    /// Clears any project property override from the renderer.
-    ///
     /// # Errors
     ///
     /// Returns [`EngineError`] if the scene is closed, OWE property lookup
     /// fails, or OWE rejects the update.
     pub fn reset_property_override(&mut self) -> Result<(), EngineError> {
         self.previewed_properties = None;
-        self.set_force_shader_refresh(true)?;
-        self.set_property_bool(Self::project_property_reset()?, true)
+        let refresh = Self::force_shader_refresh()?;
+        self.set_property_bool(refresh, true)?;
+        let reset = Self::project_property_reset()?;
+        self.set_property_bool(reset, true)
     }
 
     /// Shows a flattened project property document on the running scene
@@ -1164,6 +988,7 @@ impl OweScene {
     /// A renderer that already shows exactly this document is not told again.
     /// Whether it does is known here and nowhere else, because this object is
     /// what shows it and what loses it (see `previewed_properties`).
+    ///
     ///
     /// # Errors
     ///
@@ -1191,13 +1016,6 @@ impl OweScene {
         self.previewed_properties.as_deref()
     }
 
-    /// Closes and deletes the OWE renderer object.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EngineError::Render`] if any OWE quiesce/shutdown/delete call
-    /// fails. The scene pointer is still consumed so repeated close is
-    /// harmless.
     /// Publishes this scene so its live update state can be read without
     /// going through the engine actor.
     ///
@@ -1236,56 +1054,31 @@ impl OweScene {
         if let Some((registry, handle)) = self.registration.take() {
             registry.unregister(handle);
         }
+        // A second close is fine: there is nothing left to release.
         let Some(raw) = self.raw.take() else {
             return Ok(());
         };
 
-        let quiesce = if self.render_initialized {
-            call_status("owe_scene_wallpaper_begin_surface_reconfigure", || unsafe {
-                sys::owe_scene_wallpaper_begin_surface_reconfigure(raw.as_ptr())
-            })
-        } else {
-            Ok(())
+        // All three steps run whatever happens; the first failure is the one reported.
+        let mut first_error = None;
+        let mut note = |result: Result<(), EngineError>| {
+            if let Err(error) = result {
+                first_error.get_or_insert(error);
+            }
         };
-        let shutdown = call_status("owe_scene_wallpaper_shutdown", || unsafe {
+        if std::mem::take(&mut self.render_initialized) {
+            // Quiesce: drawing stops and the surface is released before shutdown.
+            note(call_status("owe_scene_wallpaper_begin_surface_reconfigure", || unsafe {
+                sys::owe_scene_wallpaper_begin_surface_reconfigure(raw.as_ptr())
+            }));
+        }
+        note(call_status("owe_scene_wallpaper_shutdown", || unsafe {
             sys::owe_scene_wallpaper_shutdown(raw.as_ptr())
-        });
-        let delete = call_status("owe_scene_wallpaper_delete", || unsafe {
+        }));
+        note(call_status("owe_scene_wallpaper_delete", || unsafe {
             sys::owe_scene_wallpaper_delete(raw.as_ptr())
-        });
-        quiesce.and(shutdown).and(delete)
-    }
-
-    fn initialize_renderer(
-        &mut self,
-        desc: &SceneDesc,
-        metal_layer: *mut c_void,
-        render_resolution: Option<(u32, u32)>,
-    ) -> Result<(), EngineError> {
-        // `RenderInitInfo` contains C++ containers and callbacks, so the OWE
-        // wrapper builds it on the C++ side from these primitive arguments.
-        let (render_width, render_height) = render_resolution.unwrap_or((0, 0));
-        let raw = self.raw_ptr()?;
-        call_status("owe_scene_wallpaper_init", || unsafe {
-            sys::owe_scene_wallpaper_init(raw.as_ptr())
-        })?;
-        call_status("owe_scene_wallpaper_init_metal_vulkan", || unsafe {
-            sys::owe_scene_wallpaper_init_metal_vulkan(
-                raw.as_ptr(),
-                metal_layer,
-                desc.display.width,
-                desc.display.height,
-                render_width,
-                render_height,
-                desc.display.scale_factor,
-            )
-        })?;
-        self.render_initialized = true;
-        Ok(())
-    }
-
-    fn set_force_shader_refresh(&mut self, enabled: bool) -> Result<(), EngineError> {
-        self.set_property_bool(Self::force_shader_refresh()?, enabled)
+        }));
+        first_error.map_or(Ok(()), Err)
     }
 
     fn set_property_bool(&mut self, name: *const c_char, value: bool) -> Result<(), EngineError> {
@@ -1322,7 +1115,7 @@ impl OweScene {
 
     fn raw_ptr(&self) -> Result<NonNull<sys::owe_scene_wallpaper>, EngineError> {
         self.raw
-            .ok_or_else(|| EngineError::InvalidInput("scene is already closed".to_string()))
+            .ok_or_else(|| EngineError::InvalidInput("scene is already closed".to_owned()))
     }
 }
 
@@ -1353,21 +1146,22 @@ impl OweScene {
     }
 }
 
-// TODO: Remove this
 fn cstring(value: &str) -> Result<CString, EngineError> {
     CString::new(value).map_err(|error| EngineError::InvalidInput(error.to_string()))
 }
 
 fn call_status(operation: &'static str, call: impl FnOnce() -> c_int) -> Result<(), EngineError> {
-    let status = unsafe { UnwindSafeFFI::new(operation).call(call) }?;
+    // SAFETY: the closure only calls the engine ABI, whose declarations allow unwinding.
+    let status = unsafe { UnwindSafeFFI::new(operation).call(call)? };
     if status == 0 {
         Ok(())
     } else {
+        // SAFETY: the engine's thread-local error text is readable at any time.
         Err(EngineError::Render(unsafe { UnwindSafeFFI::last_error() }))
     }
 }
 
-#[allow(clippy::single_call_fn)]
+#[allow(dead_code)]
 unsafe extern "C-unwind" fn owe_log_callback(
     level: c_int,
     file: *const c_char,
@@ -1375,72 +1169,46 @@ unsafe extern "C-unwind" fn owe_log_callback(
     message: *const c_char,
 ) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
-        let file = copy_c_string(file).unwrap_or_else(|| "unknown".to_string());
-        let message = copy_c_string(message).unwrap_or_default();
-        let level = match level {
-            1 => log::Level::Error,
-            _ => log::Level::Info,
+        let text = |pointer: *const c_char| {
+            (!pointer.is_null()).then(|| unsafe { CStr::from_ptr(pointer) }.to_string_lossy())
         };
-        let line = u32::try_from(line).ok();
-
-        let args = format_args!("{message}");
-        let record = log::Record::builder()
-            .args(args)
-            .level(level)
-            .target("open_wallpaper_engine")
-            .file(Some(&file))
-            .line(line)
-            .build();
-        log::logger().log(&record);
+        let message = text(message).unwrap_or_default();
+        let file = text(file);
+        log::logger().log(
+            &log::Record::builder()
+                .args(format_args!("{message}"))
+                .level(if level == 1 { log::Level::Error } else { log::Level::Info })
+                .target("open_wallpaper_engine")
+                .file(Some(file.as_deref().unwrap_or("unknown")))
+                .line(u32::try_from(line).ok())
+                .build(),
+        );
     }));
 }
 
-#[allow(clippy::single_call_fn)]
+#[allow(dead_code)]
 unsafe extern "C-unwind" fn owe_first_frame_callback(user_data: *mut c_void) {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        if user_data.is_null() {
-            return;
-        }
-
-        // SAFETY: `user_data` is produced by `OweScene::set_first_frame_callback`
-        // from `Box<FirstFrameCallback>`. The C++ wrapper owns that box until
-        // it invokes `owe_first_frame_callback_drop`.
-        let callback = unsafe { &*user_data.cast::<FirstFrameCallback>() };
-        callback();
-    }));
+    if let Some(callback) = unsafe { user_data.cast::<FirstFrameCallback>().as_ref() } {
+        let _ = catch_unwind(AssertUnwindSafe(|| callback()));
+    }
 }
 
-#[allow(clippy::single_call_fn)]
+#[allow(dead_code)]
 unsafe extern "C-unwind" fn owe_first_frame_callback_drop(user_data: *mut c_void) {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        if user_data.is_null() {
-            return;
-        }
-
-        // SAFETY: C++ calls this exactly once for each `Box<FirstFrameCallback>`
-        // transferred through `owe_scene_wallpaper_set_first_frame_callback`.
-        drop(unsafe { Box::<FirstFrameCallback>::from_raw(user_data.cast()) });
-    }));
+    release_callback::<FirstFrameCallback>(user_data);
 }
 
 unsafe extern "C-unwind" fn owe_pointer_input_callback(
     user_data: *mut c_void,
     accepts_pointer_input: bool,
 ) {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        if !user_data.is_null() {
-            let callback = unsafe { &*user_data.cast::<PointerInputCallback>() };
-            callback(accepts_pointer_input);
-        }
-    }));
+    if let Some(callback) = unsafe { user_data.cast::<PointerInputCallback>().as_ref() } {
+        let _ = catch_unwind(AssertUnwindSafe(|| callback(accepts_pointer_input)));
+    }
 }
 
 unsafe extern "C-unwind" fn owe_pointer_input_callback_drop(user_data: *mut c_void) {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        if !user_data.is_null() {
-            drop(unsafe { Box::<PointerInputCallback>::from_raw(user_data.cast()) });
-        }
-    }));
+    release_callback::<PointerInputCallback>(user_data);
 }
 
 unsafe extern "C-unwind" fn owe_user_shortcut_callback(
@@ -1448,85 +1216,57 @@ unsafe extern "C-unwind" fn owe_user_shortcut_callback(
     property_name: *const c_char,
     property_value: *const c_char,
 ) {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        if user_data.is_null() {
-            return;
+    let Some(callback) = (unsafe { user_data.cast::<UserShortcutCallback>().as_ref() }) else {
+        return;
+    };
+    let read = |pointer: *const c_char| {
+        if pointer.is_null() {
+            return None;
         }
-        // A request that cannot name its property is not one a host can act on,
-        // and an unreadable value would be a choice nobody made.
-        let (Some(name), Some(value)) =
-            (copy_c_string(property_name), copy_c_string(property_value))
-        else {
-            return;
-        };
-        let callback = unsafe { &*user_data.cast::<UserShortcutCallback>() };
-        callback(name, value);
-    }));
+        unsafe { CStr::from_ptr(pointer) }.to_str().ok().map(str::to_owned)
+    };
+    // A name or value the engine handed over unreadable is dropped silently.
+    let (Some(name), Some(value)) = (read(property_name), read(property_value)) else {
+        return;
+    };
+    let _ = catch_unwind(AssertUnwindSafe(|| callback(name, value)));
 }
 
 unsafe extern "C-unwind" fn owe_user_shortcut_callback_drop(user_data: *mut c_void) {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        if !user_data.is_null() {
-            drop(unsafe { Box::<UserShortcutCallback>::from_raw(user_data.cast()) });
-        }
-    }));
+    release_callback::<UserShortcutCallback>(user_data);
 }
 
 unsafe extern "C-unwind" fn owe_audio_requirement_callback(
     user_data: *mut c_void,
     requires_audio: bool,
 ) {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        if !user_data.is_null() {
-            // SAFETY: produced by `OweScene::set_audio_requirement_callback`
-            // from `Box<AudioRequirementCallback>`, owned by C++ until
-            // `owe_audio_requirement_callback_drop`.
-            let callback = unsafe { &*user_data.cast::<AudioRequirementCallback>() };
-            callback(requires_audio);
-        }
-    }));
+    if let Some(callback) = unsafe { user_data.cast::<AudioRequirementCallback>().as_ref() } {
+        let _ = catch_unwind(AssertUnwindSafe(|| callback(requires_audio)));
+    }
 }
 
 unsafe extern "C-unwind" fn owe_audio_requirement_callback_drop(user_data: *mut c_void) {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        if !user_data.is_null() {
-            // SAFETY: C++ calls this exactly once per transferred box.
-            drop(unsafe { Box::<AudioRequirementCallback>::from_raw(user_data.cast()) });
-        }
-    }));
+    release_callback::<AudioRequirementCallback>(user_data);
 }
 
 unsafe extern "C-unwind" fn owe_render_failure_callback(user_data: *mut c_void) {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        if !user_data.is_null() {
-            // SAFETY: produced by `OweScene::set_render_failure_callback` from
-            // `Box<RenderFailureCallback>`, owned by C++ until
-            // `owe_render_failure_callback_drop`.
-            let callback = unsafe { &*user_data.cast::<RenderFailureCallback>() };
-            callback();
-        }
-    }));
+    if let Some(callback) = unsafe { user_data.cast::<RenderFailureCallback>().as_ref() } {
+        let _ = catch_unwind(AssertUnwindSafe(|| callback()));
+    }
 }
 
 unsafe extern "C-unwind" fn owe_render_failure_callback_drop(user_data: *mut c_void) {
-    let _ = catch_unwind(AssertUnwindSafe(|| {
-        if !user_data.is_null() {
-            // SAFETY: C++ calls this exactly once per transferred box.
-            drop(unsafe { Box::<RenderFailureCallback>::from_raw(user_data.cast()) });
-        }
-    }));
+    release_callback::<RenderFailureCallback>(user_data);
 }
 
-fn copy_c_string(value: *const c_char) -> Option<String> {
-    if value.is_null() {
-        return None;
+/// Frees one boxed callback registration, whose drop may itself panic.
+fn release_callback<T>(user_data: *mut c_void) {
+    if user_data.is_null() {
+        return;
     }
-
-    Some(
-        unsafe { CStr::from_ptr(value) }
-            .to_string_lossy()
-            .into_owned(),
-    )
+    // SAFETY: a registration owns exactly one `Box<T>` and releases it once.
+    let boxed = unsafe { Box::<T>::from_raw(user_data.cast()) };
+    let _ = catch_unwind(AssertUnwindSafe(move || drop(boxed)));
 }
 
 #[cfg(test)]

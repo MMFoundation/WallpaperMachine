@@ -1,24 +1,22 @@
+//! Path values only; callers are responsible for validation and filesystem access.
+
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 pub const BUNDLE_IDENTIFIER: &str = "app.wallpapermachine";
 
+/// Captures a home basis while resolving environment overrides on each request.
 #[derive(Clone, Debug)]
 pub struct BridgePaths {
     home: Option<PathBuf>,
 }
 
-impl Default for BridgePaths {
-    fn default() -> Self {
-        Self {
-            home: dirs::home_dir(),
-        }
-    }
-}
-
 impl BridgePaths {
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            home: discover_home(),
+        }
     }
 
     #[must_use]
@@ -30,32 +28,28 @@ impl BridgePaths {
 
     #[must_use]
     pub fn app_support_root(&self) -> PathBuf {
-        if let Some(root) = std::env::var_os("WALLPAPER_MACHINE_SUPPORT_ROOT") {
-            return PathBuf::from(root);
-        }
-        self.home.as_deref().map_or_else(
-            || PathBuf::from(".").join(BUNDLE_IDENTIFIER),
-            |home| {
-                home.join("Library")
-                    .join("Application Support")
-                    .join(BUNDLE_IDENTIFIER)
-            },
-        )
+        override_path("WALLPAPER_MACHINE_SUPPORT_ROOT").unwrap_or_else(|| {
+            match &self.home {
+                Some(home) => home
+                    .join("Library/Application Support")
+                    .join(BUNDLE_IDENTIFIER),
+                None => PathBuf::from(".").join(BUNDLE_IDENTIFIER),
+            }
+        })
     }
 
     #[must_use]
     pub fn steam_workshop_root(&self) -> PathBuf {
-        if let Some(root) = std::env::var_os("WALLPAPER_MACHINE_LIBRARY_ROOT") {
-            return PathBuf::from(root);
-        }
-        self.home.as_deref().map_or_else(
-            || PathBuf::from("/missing/workshop"),
-            |home| home.join("Library/Application Support/Steam/steamapps/workshop/content/431960"),
-        )
+        override_path("WALLPAPER_MACHINE_LIBRARY_ROOT").unwrap_or_else(|| {
+            match &self.home {
+                Some(home) => home.join(
+                    "Library/Application Support/Steam/steamapps/workshop/content/431960",
+                ),
+                None => PathBuf::from("/missing/workshop"),
+            }
+        })
     }
 
-    /// The project file of a Workshop wallpaper: the `scene_path` its scene
-    /// descriptor carries, and so what a running scene reports it draws.
     #[must_use]
     pub fn project_json(&self, wallpaper_id: &str) -> PathBuf {
         self.steam_workshop_root()
@@ -65,31 +59,20 @@ impl BridgePaths {
 
     #[must_use]
     pub fn assets_root(&self) -> PathBuf {
-        if let Some(root) = std::env::var_os("WALLPAPER_MACHINE_ASSETS_ROOT") {
-            return PathBuf::from(root);
-        }
-        self.home.as_deref().map_or_else(
-            || PathBuf::from("/missing/assets"),
-            |home| {
-                home.join(
+        override_path("WALLPAPER_MACHINE_ASSETS_ROOT").unwrap_or_else(|| {
+            match &self.home {
+                Some(home) => home.join(
                     "Library/Application Support/Steam/steamapps/common/wallpaper_engine/assets",
-                )
-            },
-        )
+                ),
+                None => PathBuf::from("/missing/assets"),
+            }
+        })
     }
 
-    /// Where the app keeps its copies of the files a user picked for a
-    /// wallpaper's file or directory properties.
-    ///
-    /// Under the support root but deliberately not under `shader-cache`: these
-    /// are user-imported originals that nothing regenerates, so an ordinary
-    /// cache clean must never reach them.
     #[must_use]
     pub fn user_assets_root(&self) -> PathBuf {
-        if let Some(root) = std::env::var_os("WALLPAPER_MACHINE_USER_ASSETS_ROOT") {
-            return PathBuf::from(root);
-        }
-        self.app_support_root().join("UserAssets")
+        override_path("WALLPAPER_MACHINE_USER_ASSETS_ROOT")
+            .unwrap_or_else(|| self.app_support_root().join("UserAssets"))
     }
 
     #[must_use]
@@ -108,31 +91,34 @@ impl BridgePaths {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{BUNDLE_IDENTIFIER, BridgePaths};
-
-    #[test]
-    fn logs_root_lives_under_app_support() {
-        let paths = BridgePaths::for_home("/Users/example");
-
-        assert_eq!(
-            paths.logs_root(),
-            std::path::PathBuf::from("/Users/example")
-                .join("Library")
-                .join("Application Support")
-                .join(BUNDLE_IDENTIFIER)
-                .join("Logs")
-        );
-    }
-
-    #[test]
-    fn log_session_root_appends_session_name() {
-        let paths = BridgePaths::for_home("/Users/example");
-
-        assert_eq!(
-            paths.log_session_root("20260520-120000"),
-            paths.logs_root().join("20260520-120000")
-        );
+impl Default for BridgePaths {
+    fn default() -> Self {
+        Self::new()
     }
 }
+
+fn discover_home() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(home) = contract_tests::home_input() {
+        return home;
+    }
+
+    dirs::home_dir()
+}
+
+fn override_path(key: &str) -> Option<PathBuf> {
+    override_value(key).map(PathBuf::from)
+}
+
+fn override_value(key: &str) -> Option<OsString> {
+    #[cfg(test)]
+    if let Some(value) = contract_tests::override_input(key) {
+        return value;
+    }
+
+    std::env::var_os(key)
+}
+
+#[cfg(test)]
+#[path = "paths_contract_tests.rs"]
+mod contract_tests;

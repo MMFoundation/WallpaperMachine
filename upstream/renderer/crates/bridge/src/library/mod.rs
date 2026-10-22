@@ -11,3 +11,6 @@ pub use scanner::{resolve_preview, scan};
 pub use thumbnails::{
     CACHE_CAPACITY, THUMB_SIDE, ThumbKey, ThumbnailCache, ThumbnailRgba, decode_and_crop,
 };
+
+#[cfg(test)]
+mod contract_tests;

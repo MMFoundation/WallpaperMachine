@@ -2,13 +2,12 @@
 members = [
     "crates/core",
     "crates/bridge",
-    "crates/shader",
 ]
 resolver = "2"
 
 [workspace.package]
 edition = "2024"
-license = "GPL-2.0-only"
+license = "GPL-3.0-only"
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -28,3 +27,7 @@ unwrap_used = "deny"
 dbg_macro = "warn"
 todo = "warn"
 undocumented_unsafe_blocks = "warn"
+
+# Naga 29.0.3 with `codespan-reporting` made optional (upstream/naga/PATCHES.md).
+[patch.crates-io]
+naga = { path = "../naga" }

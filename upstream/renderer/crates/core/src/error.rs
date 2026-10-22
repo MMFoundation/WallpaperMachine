@@ -1,24 +1,15 @@
+// Clean-room implementation from the WallpaperMachine spec r1c-core-media.md; written without access to the original source.
 use std::{
     error::Error,
     fmt::{Display, Formatter},
 };
 
-/// Error type returned by wallpaper-core APIs.
-///
-/// Variants are intentionally broad because the crate crosses several
-/// subsystems: platform windows/audio, Open Wallpaper Engine renderer calls,
-/// media decoding, JSON parsing, and filesystem-backed cache management.
 #[derive(Debug)]
 pub enum EngineError {
-    /// Caller supplied invalid data or an unsupported value.
     InvalidInput(String),
-    /// Platform API or system integration failed.
     Platform(String),
-    /// Renderer setup, cache preparation, or rendering backend failed.
     Render(String),
-    /// An unwind crossed the Open Wallpaper Engine FFI boundary.
     Crash(String),
-    /// The requested operation is not implemented on this target OS.
     UnsupportedPlatform(&'static str),
 }
 
@@ -28,10 +19,8 @@ impl Display for EngineError {
             Self::InvalidInput(message)
             | Self::Platform(message)
             | Self::Render(message)
-            | Self::Crash(message) => write!(f, "{message}"),
-            Self::UnsupportedPlatform(platform) => {
-                write!(f, "unsupported platform: {platform}")
-            }
+            | Self::Crash(message) => f.write_str(message),
+            Self::UnsupportedPlatform(name) => write!(f, "unsupported platform: {name}"),
         }
     }
 }

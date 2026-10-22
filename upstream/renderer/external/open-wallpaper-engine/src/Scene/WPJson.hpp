@@ -6,20 +6,18 @@
 
 #include "Utils/Logging.h"
 
+// The call-site info comes first, then the json, the value, and how the lookup should behave.
 #define GET_JSON_VALUE(json, value) \
-    wallpaper::GetJsonValue(        \
-        __SHORT_FILE__, __FUNCTION__, __LINE__, (json), (value), false, "", true)
-#define GET_JSON_NAME_VALUE(json, name, value) \
-    wallpaper::GetJsonValue(                   \
-        __SHORT_FILE__, __FUNCTION__, __LINE__, (json), (value), true, (name), true)
-
-#define GET_JSON_VALUE_NOWARN(json, value) \
-    wallpaper::GetJsonValue(               \
-        __SHORT_FILE__, __FUNCTION__, __LINE__, (json), (value), false, "", false)
-#define GET_JSON_NAME_VALUE_NOWARN(json, name, value) \
-    wallpaper::GetJsonValue(                          \
-        __SHORT_FILE__, __FUNCTION__, __LINE__, (json), (value), true, (name), false)
-
+    wallpaper::GetJsonValue(__SHORT_FILE__, __FUNCTION__, __LINE__, (json), (value), false, "", true)
+#define GET_JSON_NAME_VALUE(json, name, value)                                                   \
+    wallpaper::GetJsonValue(__SHORT_FILE__, __FUNCTION__, __LINE__, (json), (value), true, (name), \
+                            true)
+#define GET_JSON_VALUE_NOWARN(json, value)                                                      \
+    wallpaper::GetJsonValue(__SHORT_FILE__, __FUNCTION__, __LINE__, (json), (value), false, "", \
+                            false)
+#define GET_JSON_NAME_VALUE_NOWARN(json, name, value)                                            \
+    wallpaper::GetJsonValue(__SHORT_FILE__, __FUNCTION__, __LINE__, (json), (value), true, (name), \
+                            false)
 #define PARSE_JSON(source, result) \
     wallpaper::ParseJson(__SHORT_FILE__, __FUNCTION__, __LINE__, (source), (result))
 

@@ -30,7 +30,7 @@ public:
     std::string target;
     std::string source;
 
-    i32 afterpos { 0 }; // 0 for begin, start from 1
+    i32 afterpos { 0 };
 };
 
 class WPEffectFbo {
@@ -46,13 +46,10 @@ public:
 };
 
 class WPImageEffect {
-private:
-    static const std::unordered_set<std::string> BLACKLISTED_WORKSHOP_EFFECTS;
-    bool IsEffectBlacklisted(const std::string& filePath);
 public:
     bool                         FromJson(const nlohmann::json&, fs::VFS& vfs);
     bool                         FromFileJson(const nlohmann::json&, fs::VFS& vfs);
-    int32_t                      id;
+    int32_t                      id { 0 };
     std::string                  name;
     bool                         visible { true };
     /// `visible` as written when a user property or a script decides it:
@@ -61,7 +58,7 @@ public:
     /// the scene runs (`scripted_visible`). Null for a fixed visibility.
     nlohmann::json               visible_setting;
     bool                         scripted_visible { false };
-    int32_t                      version;
+    int32_t                      version { 0 };
     std::vector<WPMaterial>      materials;
     std::vector<WPMaterialPass>  passes;
     std::vector<WPEffectCommand> commands;
@@ -73,30 +70,35 @@ public:
     struct Config {
         bool passthrough { false };
     };
-    bool                       FromJson(const nlohmann::json&, fs::VFS&);
-    int32_t                    id { 0 };
-    int32_t                    parent_id { -1 };
-    std::string                name;
-    std::array<float, 3>       origin { 0.0f, 0.0f, 0.0f };
-    std::array<float, 3>       scale { 1.0f, 1.0f, 1.0f };
-    std::array<float, 3>       angles { 0.0f, 0.0f, 0.0f };
-    std::array<float, 2>       size { 2.0f, 2.0f };
-    // Wallpaper Engine's default for an object that leaves the key out.
-    std::array<float, 2>       parallaxDepth { 1.0f, 1.0f };
-    std::array<float, 2>       cropoffset { 0.0f, 0.0f };
-    std::array<float, 3>       color { 1.0f, 1.0f, 1.0f };
+
+    bool FromJson(const nlohmann::json&, fs::VFS&);
+
+    int32_t     id { 0 };
+    int32_t     parent_id { -1 };  // -1: a layer of the scene itself
+    std::string name;
+    // Placement.
+    std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3> scale { 1.0f, 1.0f, 1.0f };
+    std::array<float, 3> angles { 0.0f, 0.0f, 0.0f };
+    std::array<float, 2> size { 2.0f, 2.0f };
+    // What the key reads when the file leaves it out.
+    std::array<float, 2> parallaxDepth { 1.0f, 1.0f };
+    std::array<float, 2> cropoffset { 0.0f, 0.0f };
+    std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
+    // A picture stands in for the plain colour this layer is made of, and is drawn as it is: the
+    // colour (and whatever property or script drives it) no longer tints it.
+    bool                       colorIgnored { false };
     int32_t                    colorBlendMode { 0 };
     bool                       copybackground { true };
     float                      alpha { 1.0f };
     float                      brightness { 1.0f };
     bool                       fullscreen { false };
-    /// Drawn through the scene's perspective camera, as a 3D model or a
-    /// particle system with the flag is, instead of flat.
-    bool                       perspective { false };
     bool                       nopadding { false };
     // How the layer's texture (`_rt_imageLayerComposite_<id>`) is addressed
     // outside 0..1. Unspecified keeps the historical clamp.
     bool                       clampuvs { true };
+    // Drawn through the perspective camera of a 2D scene instead of the flat view.
+    bool                       perspective { false };
     // Point-samples the layer's own render targets (the ping-pong pair its
     // effects run through and the composite other layers read), as a texture
     // whose header asks for it is sampled. Off by default.
@@ -113,24 +115,25 @@ public:
     bool                       autosize { false };
     bool                       projectlayer { false };
     bool                       solidlayer { false };
-    bool                       dynamic_origin { false };
-    bool                       dynamic_visible { false };
-    bool                       dynamic_alpha { false };
-    std::string                image;
-    std::string                alignment { "center" };
-    nlohmann::json             origin_setting;
-    nlohmann::json             scale_setting;
-    nlohmann::json             angles_setting;
-    nlohmann::json             visible_setting;
-    nlohmann::json             alpha_setting;
-    WPMaterial                 material;
-    // The slots a solid instance layer's `instance` block delegates, kept apart
-    // from the model material's: the parser, which can read the project's
-    // properties, decides from them whether a picture replaced the placeholder.
-    std::vector<WPUserTexture> instance_usertextures;
-    std::vector<WPImageEffect> effects;
+    // Set when a script or user property drives the value, so it is bound rather than read once.
+    bool dynamic_origin { false };
+    bool dynamic_visible { false };
+    bool dynamic_alpha { false };
+
+    std::string image;                      // model file
+    std::string alignment { "center" };     // layout tests rely on this default
+
+    // The setting objects as authored, whole, for the ones a property or script may drive.
+    nlohmann::json origin_setting;
+    nlohmann::json scale_setting;
+    nlohmann::json angles_setting;
+    nlohmann::json visible_setting;
+    nlohmann::json alpha_setting;
+
+    WPMaterial                 material;        // the layer's own pass
+    std::vector<WPImageEffect> effects;         // run in order over the layer's picture
     Config                     config;
-    std::vector<int32_t>       dependencies;
+    std::vector<int32_t>       dependencies;    // ids of the layers this one depends on
     nlohmann::json             field_bindings;
 
     std::string                                puppet;

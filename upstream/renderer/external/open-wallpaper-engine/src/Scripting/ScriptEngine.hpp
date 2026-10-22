@@ -2,13 +2,12 @@
 
 #include "Project/ProjectProperties.hpp"
 #include "Runtime/DynamicValue.hpp"
-#include "Runtime/PropertyScriptObject.hpp"
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include <map>
-#include <optional>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -20,12 +19,14 @@ namespace wallpaper
 {
 
 class SceneRuntimeContext;
+// The execution context of one engine and the state around it (defined in ScriptEngine.cpp).
+struct ScriptEngineContext;
 
 struct ScriptHostContext {
-    Eigen::Vector2f canvas_size { 0.0f, 0.0f };
-    Eigen::Vector2f screen_resolution { 0.0f, 0.0f };
-    Eigen::Vector2f cursor_normalized_position { 0.5f, 0.5f };
-    Eigen::Vector3f cursor_world_position { 0.0f, 0.0f, 0.0f };
+    linalg::Vector2f canvas_size { 0.0f, 0.0f };
+    linalg::Vector2f screen_resolution { 0.0f, 0.0f };
+    linalg::Vector2f cursor_normalized_position { 0.5f, 0.5f };
+    linalg::Vector3f cursor_world_position { 0.0f, 0.0f, 0.0f };
     double          frame_time { 0.0 };
     double          runtime_seconds { 0.0 };
     bool            cursor_in_window { false };
@@ -38,14 +39,43 @@ struct ScriptHostContext {
     std::string     language { "en-us" };
 };
 
+// The cost and bookkeeping limits of the script host (spec R98, R99). One value
+// holds them all; a test replaces it with `ScriptEngine::SetLimits` and a fake
+// clock so hostile scripts run in no time.
+struct ScriptLimits {
+    // Wall-clock budget of one host-initiated call into a script (a tick of one
+    // program, an event, a notification, a timer pass) and of program creation
+    // (compile, top level and, for a scene program, `init` and its notices).
+    double      call_budget_ms { 50.0 };
+    double      creation_budget_ms { 250.0 };
+    // A program interrupted on this many consecutive calls is disabled for good.
+    int         max_consecutive_interrupts { 3 };
+    std::size_t memory_limit_bytes { 64u * 1024u * 1024u };
+    // At 1 MiB a function with a dozen locals only nests ~900 calls deep (R99 asks for
+    // 1,000); a thread with less stack than this is given what it has (see the engine).
+    std::size_t stack_limit_bytes { 2u * 1024u * 1024u };
+    // Recorded error texts are cut to this many characters.
+    std::size_t max_error_text_chars { 1024 };
+    // Per entry point: this many errors are logged in full, then one summary line
+    // per `log_summary_seconds` states how many were held back.
+    int         log_full_count { 5 };
+    double      log_summary_seconds { 10.0 };
+    // Monotonic nanoseconds that do not run during system sleep; empty means
+    // `std::chrono::steady_clock`. Interrupts are measured on it.
+    std::function<int64_t()> clock_nanoseconds {};
+    // Seconds for the log rate limit; empty means the same clock.
+    std::function<double()>  log_clock_seconds {};
+};
+
+// Where the time and the work of starting scripts went, in milliseconds and counts.
 struct ScriptStartupMetrics {
-    double   module_strip_ms { 0.0 };
-    double   bootstrap_build_ms { 0.0 };
-    double   wrapper_build_ms { 0.0 };
-    double   eval_ms { 0.0 };
-    double   callback_registration_ms { 0.0 };
-    uint64_t bootstrap_installs { 0 };
-    uint64_t script_compiles { 0 };
+    double   module_strip_ms { 0.0 };            // removing import/export syntax
+    double   bootstrap_build_ms { 0.0 };         // building the shared runtime
+    double   wrapper_build_ms { 0.0 };           // wrapping each script
+    double   eval_ms { 0.0 };                    // running it the first time
+    double   callback_registration_ms { 0.0 };   // finding its handlers
+    uint64_t bootstrap_installs { 0 };           // times the runtime was set up
+    uint64_t script_compiles { 0 };              // scripts compiled
 };
 
 enum class PropertyScriptValueSemantic
@@ -77,7 +107,8 @@ public:
         ScriptHostContext host_context, JSRuntime* shared_runtime, JSContext* shared_context,
         std::string exports_object_name, std::string script_properties_name,
         PropertyScriptValueSemantic semantic = PropertyScriptValueSemantic::Generic,
-        PropertyScriptObject object = {});
+        int animation_layer_index = -1, std::string effect_reference = {},
+        std::string setting_animation_reference = {});
     ~PropertyScriptProgram();
 
     PropertyScriptProgram(const PropertyScriptProgram&)            = delete;
@@ -85,26 +116,21 @@ public:
 
     bool                  Valid() const;
     const ScriptProgramCapabilities& Capabilities() const noexcept { return m_capabilities; }
-    /// Runs `init` with the property's current value, once, and answers what it
-    /// returned as the property's value from then on (null when it returned
-    /// nothing). The scene starts every script this way before it tells any of
-    /// them the user properties: one script's first `applyUserProperties` may
-    /// call what another script's `init` set up.
-    DynamicValueUniquePtr Start(const ScriptHostContext& host_context,
-                                const DynamicValue&      current_value);
-    /// The first `applyUserProperties`, with every property, once `init` ran.
-    void                  DeliverInitialUserProperties();
-    /// Starts the script and delivers the properties first if nothing has, then
-    /// runs `update`.
     DynamicValueUniquePtr Evaluate(const ScriptHostContext& host_context,
                                    const DynamicValue&      current_value);
+    /// Whether the program has run its `init`. A program starts in two steps, so that every
+    /// script of a scene is initialised before any is told the user properties: `RunInit`, then
+    /// `RunUserNotices`. `Evaluate` does whatever of the two has not happened yet.
+    bool                  Initialised() const noexcept;
+    /// Runs `init(value)` once. What it returns is answered as `Evaluate` answers the result of
+    /// `update` (null when it returned nothing, threw, or gave an object for a flag).
+    DynamicValueUniquePtr RunInit(const ScriptHostContext& host_context,
+                                  const DynamicValue&      current_value);
+    /// Tells the script the language and the user properties, once, after `RunInit`.
+    void                  RunUserNotices(const ScriptHostContext& host_context);
     /// Whether the last `Evaluate` got a value from `update()`. When it did not
     /// (it returned nothing, or threw), `Evaluate` hands back the current value.
     bool                  UpdateReturnedValue() const noexcept { return m_update_returned_value; }
-    /// What the script last wrote to its effect's `visible`, once, when it is an
-    /// effect's visibility (`PropertyScriptObject::effect_visibility`) and wrote
-    /// it since this was last asked; nothing otherwise.
-    std::optional<bool>   TakeOwnVisibilityWrite();
     void                  ApplyProjectProperties(const ProjectProperties& project_properties,
                                                   const ProjectProperties& changed_properties);
     void                  DispatchCursorClick(const ScriptHostContext& host_context);
@@ -115,8 +141,8 @@ public:
     void                  DispatchCursorUp(const ScriptHostContext& host_context);
     void                  DispatchAnimationEvent(const ScriptHostContext& host_context,
                                                  std::string_view event_name, double frame);
-    void                  DispatchMediaThumbnailChanged(const Eigen::Vector3f& primary_color,
-                                                        const Eigen::Vector3f& text_color);
+    void                  DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
+                                                        const linalg::Vector3f& text_color);
     void                  DispatchMediaEventJson(std::string_view event_json);
     // The display's size or the interface language changed since the script
     // started. A script that has not run `init` yet has nothing to be told:
@@ -129,31 +155,14 @@ public:
     void                  Destroy();
 
 private:
-    void UpdateHostContext(const ScriptHostContext& host_context);
-    void UpdateScriptProperties();
-
-    std::map<std::string, DynamicValue*> m_script_properties;
-    void*                                m_impl_runtime = nullptr;
-    void*                                m_impl_context = nullptr;
-    SceneRuntimeContext*                 m_runtime      = nullptr;
-    std::string                          m_current_layer_name;
-    std::string                          m_exports_object_name;
-    std::string                          m_script_properties_name;
-    PropertyScriptValueSemantic          m_semantic { PropertyScriptValueSemantic::Generic };
+    struct State;
     ScriptProgramCapabilities             m_capabilities;
-    bool                                 m_owns_context = false;
-    bool                                 m_valid        = false;
-    bool                                 m_init_called  = false;
-    bool                                 m_user_properties_delivered = false;
     bool                                 m_update_returned_value = false;
     bool                                 m_destroyed    = false;
-    // What `thisObject` is beyond the layer: the animation layer the script is
-    // attached to (`animationlayers[i]`), the effect whose visibility it decides,
-    // the timeline bound to its setting.
-    PropertyScriptObject                 m_object;
-    // Where an effect's `thisObject` keeps the `visible` the script wrote, until
-    // `TakeOwnVisibilityWrite` takes it. Empty for any other script.
-    std::string                          m_own_state_name;
+    // The animation layer this script is attached to (`animationlayers[i]`), or -1
+    // when it is attached to the layer itself. `thisObject` is that animation layer.
+    int                                  m_animation_layer_index = -1;
+    std::unique_ptr<State>               m_state;
 };
 
 class SceneScriptProgram {
@@ -169,7 +178,7 @@ public:
 
     bool               Valid() const;
     const ScriptProgramCapabilities& Capabilities() const noexcept { return m_capabilities; }
-    const std::string& LayerName() const { return m_current_layer_name; }
+    const std::string& LayerName() const;
     void               Tick(const ScriptHostContext& host_context);
     void               DispatchCursorClick(const ScriptHostContext& host_context);
     void               DispatchCursorDown(const ScriptHostContext& host_context);
@@ -179,8 +188,8 @@ public:
     void               DispatchCursorUp(const ScriptHostContext& host_context);
     void               DispatchAnimationEvent(const ScriptHostContext& host_context,
                                               std::string_view event_name, double frame);
-    void               DispatchMediaThumbnailChanged(const Eigen::Vector3f& primary_color,
-                                                     const Eigen::Vector3f& text_color);
+    void               DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
+                                                     const linalg::Vector3f& text_color);
     void               DispatchMediaEventJson(std::string_view event_json);
     void               ApplyProjectProperties(const ProjectProperties& project_properties,
                                                const ProjectProperties& changed_properties);
@@ -189,20 +198,12 @@ public:
     void               Destroy();
 
 private:
+    struct State;
     void ApplyUserProperties(const ProjectProperties& property_changes);
-    void UpdateHostContext(const ScriptHostContext& host_context);
-
-    SceneRuntimeContext* m_runtime = nullptr;
-    std::string          m_script_source;
-    std::string          m_current_layer_name;
-    ProjectProperties    m_project_properties;
-    std::string          m_exports_object_name;
-    void*                m_impl_runtime = nullptr;
-    void*                m_impl_context = nullptr;
     ScriptProgramCapabilities m_capabilities;
-    bool                 m_owns_context = false;
-    bool                 m_valid        = false;
     bool                 m_destroyed    = false;
+    std::string          m_layer_name;
+    std::unique_ptr<State> m_state;
 };
 
 class ScriptEngine {
@@ -213,19 +214,33 @@ public:
     ScriptEngine(const ScriptEngine&)            = delete;
     ScriptEngine& operator=(const ScriptEngine&) = delete;
 
-    static void                 ResetStartupMetrics();
-    static ScriptStartupMetrics GetStartupMetrics();
+    /// Replaces this engine's limits (R98, R99). Budgets, interrupt policy, log
+    /// rate limit and the memory and stack caps apply from the next call on.
+    void                        SetLimits(const ScriptLimits& limits);
+    ScriptLimits                Limits() const;
 
-    DynamicValueUniquePtr                  Evaluate(const std::string&                          script_source,
-                                                    const std::map<std::string, DynamicValue*>& script_properties,
-                                                    const DynamicValue&                         current_value,
-                                                    const ScriptHostContext&                    host_context);
+    static void                 ResetStartupMetrics();          // zeroes the counters
+    static ScriptStartupMetrics GetStartupMetrics();            // a copy of them
+
+    /// One-shot evaluation of a property script against `current_value`.
+    DynamicValueUniquePtr Evaluate(const std::string& script_source,
+                                   const std::map<std::string, DynamicValue*>& properties,
+                                   const DynamicValue& current_value,
+                                   const ScriptHostContext& host_context);
+
+    /// A long-lived program for one property: it keeps its state between ticks.
     std::unique_ptr<PropertyScriptProgram> CreatePropertyScriptProgram(
-        SceneRuntimeContext* runtime, std::string script_source, std::string current_layer_name,
-        std::map<std::string, DynamicValue*> script_properties, DynamicValue initial_value,
-        ScriptHostContext           host_context,
-        PropertyScriptValueSemantic semantic = PropertyScriptValueSemantic::Generic,
-        PropertyScriptObject        object = {});
+        SceneRuntimeContext*                 runtime,
+        std::string                          script_source,
+        std::string                          current_layer_name,
+        std::map<std::string, DynamicValue*> script_properties,
+        DynamicValue                         initial_value,
+        ScriptHostContext                    host_context,
+        PropertyScriptValueSemantic          semantic = PropertyScriptValueSemantic::Generic,
+        int                                  animation_layer_index = -1,
+        std::string                          effect_reference = {},
+        std::string                          setting_animation_reference = {});
+
     std::unique_ptr<SceneScriptProgram>
     CreateSceneScriptProgram(SceneRuntimeContext& runtime, std::string script_source,
                              std::string current_layer_name, ProjectProperties project_properties,
@@ -242,9 +257,7 @@ public:
                                    std::string_view layer_name, int animation_layer_index);
 
 private:
-    JSRuntime* m_runtime         = nullptr;
-    JSContext* m_context         = nullptr;
-    uint64_t   m_next_program_id = 0;
+    std::shared_ptr<ScriptEngineContext> m_context;
 };
 
 } // namespace wallpaper

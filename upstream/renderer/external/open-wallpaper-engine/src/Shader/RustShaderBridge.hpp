@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Scene/Parse/WPShaderParser.hpp"
-#include "Vulkan/Shader.hpp"
+#include "Shader/RustShaderIdentity.hpp"
 
 #include <array>
 #include <cstdint>
@@ -15,12 +15,6 @@
 
 namespace wallpaper::shader
 {
-
-// Shader compilation target requested from the Rust shader pipeline.
-enum class RustShaderTarget {
-    VulkanSpirv,
-    MetalMsl,
-};
 
 // Metal argument-table namespace a shader resource is bound into. Metal keeps
 // buffers, textures and samplers in independent index spaces, so a slot is
@@ -67,7 +61,6 @@ struct RustShaderProperty {
 struct RustShaderRequest {
     std::string                         shader_name;
     std::string                         scene_id;
-    RustShaderTarget                    target { RustShaderTarget::VulkanSpirv };
     bool                                cache_enabled { false };
     std::vector<RustShaderStageSource>  stages;
     Combos                              combos;
@@ -110,17 +103,15 @@ struct RustShaderMetalStage {
 };
 
 struct RustShaderOutput {
-    std::vector<ShaderCode> codes;
-    WPShaderInfo           shader_info;
-    WPPreprocessorInfo     vertex_preprocessor_info;
-    WPPreprocessorInfo     fragment_preprocessor_info;
-    vulkan::ShaderReflected reflection;
-    std::string             metadata_json;
-    std::string             reflection_json;
-    std::string             diagnostics_json;
-    std::string             cache_key;
-    // Populated only for RustShaderTarget::MetalMsl, one entry per stage in
-    // the same order as `codes` would carry for the SPIR-V target.
+    WPShaderInfo       shader_info;
+    WPPreprocessorInfo vertex_preprocessor_info;
+    WPPreprocessorInfo fragment_preprocessor_info;
+    std::string        metadata_json;
+    std::string        reflection_json;
+    std::string        diagnostics_json;
+    std::string        cache_key;
+    // One entry per stage, in request order. The shader layer has one target,
+    // Metal Shading Language, so every successful compile carries them.
     std::vector<RustShaderMetalStage> metal_stages;
 };
 
@@ -135,19 +126,19 @@ void ApplyRustShaderMetalStageJson(
     ShaderType kind,
     RustShaderMetalStage& stage);
 
-bool CompileRustShaderProgram(
-    const RustShaderRequest& request,
-    RustShaderOutput& output,
-    const RustShaderIncludeReader& include_reader = {});
+// Compiles one shader program through the Rust library. True only when `output` is usable;
+// otherwise `LastRustShaderError()` says why. `include_reader` serves `#include` paths.
+bool CompileRustShaderProgram(const RustShaderRequest& request, RustShaderOutput& output,
+                              const RustShaderIncludeReader& include_reader = {});
 
+// The text of the last bridge failure on the calling thread.
 std::string LastRustShaderError();
-std::string RustShaderCacheIdentity();
 
 #ifdef WESCENE_BUILD_TESTS
-bool CompileRustShaderProgramWithBridgeJson(
-    const nlohmann::json& request_json,
-    RustShaderOutput& output,
-    const RustShaderIncludeReader& include_reader = {});
+// The same compile from a hand-written request document, so tests can feed the bridge input
+// the request builder would never produce.
+bool CompileRustShaderProgramWithBridgeJson(const nlohmann::json& request_json,
+                                            RustShaderOutput& output,
+                                            const RustShaderIncludeReader& include_reader = {});
 #endif
-
 } // namespace wallpaper::shader

@@ -1,24 +1,19 @@
+// Clean-room implementation from the WallpaperMachine spec e1b-scene-model.md; written without access to the original source.
 #include "SceneVertexArray.h"
-#include <cstring>
-#include <iostream>
-#include <utility>
+
 #include <algorithm>
-#include <cassert>
+#include <limits>
+#include <utility>
 
 using namespace wallpaper;
 
 uint8_t SceneVertexArray::TypeCount(VertexType t) {
-    switch (t) {
-    case VertexType::FLOAT1:
-    case VertexType::UINT1: return 1;
-    case VertexType::FLOAT2:
-    case VertexType::UINT2: return 2;
-    case VertexType::FLOAT3:
-    case VertexType::UINT3: return 3;
-    case VertexType::FLOAT4:
-    case VertexType::UINT4: return 4;
-    }
-    return 1;
+    // The enumerators run through the four float widths and then the four unsigned
+    // widths, so the width is the position within its group of four, plus one.
+    const int ordinal = static_cast<int>(t);
+    if (ordinal < static_cast<int>(VertexType::FLOAT1) || ordinal > static_cast<int>(VertexType::UINT4))
+        return 1;
+    return static_cast<uint8_t>(ordinal % 4 + 1);
 }
 
 uint8_t SceneVertexArray::RealAttributeSize(const SceneVertexArray::SceneVertexAttribute& attr) {
@@ -27,104 +22,111 @@ uint8_t SceneVertexArray::RealAttributeSize(const SceneVertexArray::SceneVertexA
 
 SceneVertexArray::SceneVertexArray(const std::vector<SceneVertexAttribute>& attrs,
                                    const usize                              count)
-    : m_attributes(attrs) {
-    for (const auto& el : m_attributes) {
-        usize size = SceneVertexArray::RealAttributeSize(el);
-        m_oneSize += size;
-    }
-    m_capacity = m_oneSize * count;
-    m_pData    = new float[m_capacity];
-    std::fill(m_pData, m_pData + m_capacity, 0.0f);
+    : m_attrs(attrs) {
+    for (const auto& attr : m_attrs) m_stride += RealAttributeSize(attr);
+    if (m_stride == 0 || count == 0) return;
+    if (count > std::numeric_limits<usize>::max() / m_stride) return; // too large to address
+    const usize words = count * m_stride;
+    if (words > std::numeric_limits<usize>::max() / sizeof(float)) return;
+    m_capacity = words;
+    m_data     = std::make_unique<float[]>(words); // value-initialised: zero
 }
 
-SceneVertexArray::~SceneVertexArray() {
-    if (m_pData != nullptr) delete[] m_pData;
-}
+SceneVertexArray::~SceneVertexArray() = default;
+
 SceneVertexArray::SceneVertexArray(SceneVertexArray&& o) noexcept
-    : m_attributes(o.m_attributes),
-      m_pData(std::exchange(o.m_pData, nullptr)),
-      m_oneSize(o.m_oneSize),
-      m_size(o.m_size),
-      m_capacity(o.m_capacity),
-      m_id(o.m_id) {}
+    : m_attrs(std::move(o.m_attrs)),
+      m_stride(std::exchange(o.m_stride, 0)),
+      m_capacity(std::exchange(o.m_capacity, 0)),
+      m_size(std::exchange(o.m_size, 0)),
+      m_data(std::move(o.m_data)),
+      m_options(std::move(o.m_options)),
+      m_id(std::exchange(o.m_id, 0)) {
+    o.m_attrs.clear();
+    o.m_options.clear();
+}
 
 SceneVertexArray& SceneVertexArray::operator=(SceneVertexArray&& o) noexcept {
-    m_attributes = o.m_attributes;
-    m_pData      = std::exchange(o.m_pData, nullptr);
-    m_oneSize    = o.m_oneSize;
-    m_size       = o.m_size;
-    m_capacity   = o.m_capacity;
-    m_id         = o.m_id;
+    if (this == &o) return *this;
+    m_attrs    = std::move(o.m_attrs);
+    m_stride   = std::exchange(o.m_stride, 0);
+    m_capacity = std::exchange(o.m_capacity, 0);
+    m_size     = std::exchange(o.m_size, 0);
+    m_data     = std::move(o.m_data); // frees what this array held
+    m_options  = std::move(o.m_options);
+    m_id       = std::exchange(o.m_id, 0);
+    o.m_attrs.clear();
+    o.m_options.clear();
     return *this;
 }
 
 bool SceneVertexArray::AddVertex(const float* data) {
-    if (m_size + m_oneSize >= m_capacity) return false;
-    usize  pos   = 0;
-    usize  mpos  = 0;
-    float* mData = m_pData + m_size;
-    for (const auto& el : m_attributes) {
-        auto typeSize = SceneVertexArray::TypeCount(el.type);
-        std::copy(data + pos, data + pos + typeSize, m_pData + mpos);
-        pos += typeSize;
-        mpos += SceneVertexArray::RealAttributeSize(el);
+    if (m_stride == 0 || m_size > m_capacity || m_capacity - m_size < m_stride) return false;
+    float* vertex = m_data.get() + m_size;
+    std::fill(vertex, vertex + m_stride, 0.0f);
+    usize next = 0;
+    for (const auto& attr : m_attrs) {
+        const usize components = TypeCount(attr.type);
+        std::copy(data, data + components, vertex + next);
+        data += components;
+        next += RealAttributeSize(attr);
     }
-    m_size += m_oneSize;
+    m_size += m_stride;
     return true;
 }
 
 bool SceneVertexArray::SetVertex(std::string_view name, std::span<const float> data) noexcept {
-    u32 offset = 0;
-    for (const auto& el : m_attributes) {
-        if (el.name == name) {
-            usize typeSize = SceneVertexArray::TypeCount(el.type);
-            usize count    = data.size() / typeSize;
-            if (! TrySetSize(count * m_oneSize)) return false;
-
-            for (usize i = 0; i < data.size(); i += typeSize) {
-                auto  start = data.begin() + (isize)i;
-                usize num   = i / typeSize;
-                std::copy(start, start + (isize)typeSize, m_pData + offset + num * m_oneSize);
-            }
-            return true;
-        } else
-            offset += RealAttributeSize(el);
+    // The last attribute of a name wins, as in the offset map.
+    const SceneVertexAttribute* found = nullptr;
+    usize                       word  = 0;
+    usize                       at    = 0;
+    for (const auto& attr : m_attrs) {
+        if (attr.name == name) {
+            found = &attr;
+            word  = at;
+        }
+        at += RealAttributeSize(attr);
     }
-    return false;
+    if (found == nullptr) return false;
+
+    const usize components = TypeCount(found->type);
+    const usize count      = data.size() / components;
+    if (count > m_capacity / m_stride) return false;
+    for (usize vertex = 0; vertex < count; ++vertex) {
+        std::copy_n(data.data() + vertex * components, components,
+                    m_data.get() + vertex * m_stride + word);
+    }
+    m_size = std::max(m_size, count * m_stride);
+    return true;
 }
 
 bool SceneVertexArray::SetVertexs(usize index, std::span<const float> data) noexcept {
-    usize start = index * m_oneSize;
-    if (TrySetSize(start + data.size())) {
-        std::copy(data.begin(), data.end(), m_pData + start);
-        return true;
-    }
-    return false;
-}
-
-bool SceneVertexArray::TrySetSize(usize new_size) noexcept {
-    assert(new_size <= m_capacity);
-    if (new_size > m_capacity) {
+    if (data.empty()) return true;
+    usize start = 0, end = 0;
+    if (__builtin_mul_overflow(index, m_stride, &start) ||
+        __builtin_add_overflow(start, data.size(), &end) || end > m_capacity) {
         return false;
     }
-    if (new_size > m_size) m_size = new_size;
+    std::copy(data.begin(), data.end(), m_data.get() + start);
+    m_size = std::max(m_size, end);
     return true;
 }
 
 Map<std::string, SceneVertexArray::SceneVertexAttributeOffset>
 SceneVertexArray::GetAttrOffsetMap() const {
-    Map<std::string, SceneVertexArray::SceneVertexAttributeOffset> result;
-    usize                                                          offset { 0 };
-    for (const auto& attr : m_attributes) {
-        result[attr.name] = (SceneVertexAttributeOffset { .attr = attr, .offset = offset });
-        offset += SceneVertexArray::RealAttributeSize(attr) * sizeof(float);
+    Map<std::string, SceneVertexAttributeOffset> map;
+    usize                                        words = 0;
+    for (const auto& attr : m_attrs) {
+        map.insert_or_assign(attr.name, SceneVertexAttributeOffset { attr, words * sizeof(float) });
+        words += RealAttributeSize(attr);
     }
-    return result;
+    return map;
 }
 
 bool SceneVertexArray::GetOption(std::string_view name) const {
-    return exists(m_options, name) && m_options.at(std::string(name));
+    const auto found = m_options.find(name);
+    return found != m_options.end() && found->second;
 }
 void SceneVertexArray::SetOption(std::string_view name, bool value) {
-    m_options[std::string(name)] = value;
+    m_options.insert_or_assign(std::string(name), value);
 }

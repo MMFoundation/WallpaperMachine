@@ -1,44 +1,60 @@
+// This project's own code, written from the clean-room specification of the
+// project manifest (specs/engine/e7-small-units.md, R38 to R41).
 #include "Project/ProjectManifest.hpp"
 
 #include <algorithm>
 #include <cctype>
-#include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <nlohmann/json.hpp>
-#include <sstream>
+#include <string_view>
+
+#include "Utils/Logging.h"
 
 namespace wallpaper
 {
 namespace
 {
 
-bool read_file(const std::filesystem::path& path, std::string* content)
+bool ReadWholeFile(const std::string& path, std::string* text)
 {
-    if (content == nullptr) return false;
-
-    std::ifstream input(path);
-    if (!input.good()) return false;
-
-    std::ostringstream buffer;
-    buffer << input.rdbuf();
-    *content = buffer.str();
-    return input.good() || input.eof();
+    std::ifstream in(path, std::ios::binary);
+    if (! in) return false;
+    text->assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    return ! in.bad();
 }
 
-WallpaperProjectType ParseProjectType(std::string type)
+bool EqualsIgnoreCase(const std::string& text, std::string_view word)
 {
-    std::transform(
-        type.begin(),
-        type.end(),
-        type.begin(),
-        [](unsigned char value) {
-            return static_cast<char>(std::tolower(value));
-        });
+    return text.size() == word.size() &&
+           std::equal(text.begin(), text.end(), word.begin(), [](unsigned char a, char b) {
+               return std::tolower(a) == b;
+           });
+}
 
-    if (type == "scene") return WallpaperProjectType::Scene;
-    if (type == "video") return WallpaperProjectType::Video;
-    if (type == "web") return WallpaperProjectType::Web;
+WallpaperProjectType TypeFromWord(const std::string& word)
+{
+    if (EqualsIgnoreCase(word, "scene")) return WallpaperProjectType::Scene;
+    if (EqualsIgnoreCase(word, "video")) return WallpaperProjectType::Video;
+    if (EqualsIgnoreCase(word, "web")) return WallpaperProjectType::Web;
     return WallpaperProjectType::Unknown;
+}
+
+// A workshop id is written either as text or as a whole number; anything else
+// (a fraction, an object, null) is treated as absent.
+std::string WorkshopIdFrom(const nlohmann::json& value)
+{
+    if (value.is_string()) return value.get<std::string>();
+    if (value.is_number_unsigned()) return std::to_string(value.get<std::uint64_t>());
+    if (value.is_number_integer()) return std::to_string(value.get<std::int64_t>());
+    return {};
+}
+
+bool Fail(std::string* error, std::string message)
+{
+    LOG_ERROR("project manifest: %s", message.c_str());
+    if (error != nullptr) *error = std::move(message);
+    return false;
 }
 
 } // namespace
@@ -49,65 +65,46 @@ const char* ToString(WallpaperProjectType type)
     case WallpaperProjectType::Scene: return "scene";
     case WallpaperProjectType::Video: return "video";
     case WallpaperProjectType::Web: return "web";
-    case WallpaperProjectType::Unknown: return "unknown";
+    case WallpaperProjectType::Unknown: break;
     }
     return "unknown";
 }
 
-bool ParseProjectManifest(
-    const std::string& project_path,
-    ProjectManifest*   manifest,
-    std::string*       error)
+bool ParseProjectManifest(const std::string& project_path,
+                          ProjectManifest*   manifest,
+                          std::string*       error)
 {
-    if (manifest == nullptr) {
-        if (error != nullptr) *error = "project manifest output must not be null";
-        return false;
-    }
-    if (project_path.empty()) {
-        if (error != nullptr) *error = "project manifest path must not be empty";
-        return false;
-    }
+    if (project_path.empty()) return Fail(error, "project path must not be empty");
+    if (manifest == nullptr) return Fail(error, "project manifest output must not be null");
 
-    std::string content;
-    if (!read_file(project_path, &content)) {
-        if (error != nullptr) *error = "failed to read project manifest";
-        return false;
-    }
+    std::string text;
+    if (! ReadWholeFile(project_path, &text))
+        return Fail(error, "can't read project file: " + project_path);
 
-    nlohmann::json project;
-    try {
-        project = nlohmann::json::parse(content);
-    } catch (const nlohmann::json::exception& exception) {
-        if (error != nullptr) *error = exception.what();
-        return false;
+    // The parser skips a leading UTF-8 byte-order mark by itself.
+    const nlohmann::json root = nlohmann::json::parse(text, nullptr, false);
+    if (root.is_discarded()) {
+        std::string reason = "project file is not valid JSON";
+        try {
+            (void)nlohmann::json::parse(text);
+        } catch (const nlohmann::json::exception& e) {
+            reason = e.what();
+        }
+        return Fail(error, reason);
     }
 
     ProjectManifest parsed;
-    if (project.contains("type")) {
-        if (!project.at("type").is_string()) {
-            if (error != nullptr) *error = "project manifest `type` must be a string";
-            return false;
+    if (root.is_object()) {
+        if (const auto it = root.find("type"); it != root.end()) {
+            if (! it->is_string()) return Fail(error, "project type must be a string");
+            parsed.type = TypeFromWord(it->get<std::string>());
         }
-        parsed.type = ParseProjectType(project.at("type").get<std::string>());
-    }
-
-    if (project.contains("file")) {
-        if (!project.at("file").is_string()) {
-            if (error != nullptr) *error = "project manifest `file` must be a string";
-            return false;
+        if (const auto it = root.find("file"); it != root.end()) {
+            if (! it->is_string()) return Fail(error, "project file entry must be a string");
+            parsed.file = it->get<std::string>();
         }
-        parsed.file = project.at("file").get<std::string>();
-    }
-
-    if (project.contains("workshopid")) {
-        const auto& workshop_id = project.at("workshopid");
-        if (workshop_id.is_string()) {
-            parsed.workshop_id = workshop_id.get<std::string>();
-        } else if (workshop_id.is_number_integer()) {
-            parsed.workshop_id = std::to_string(workshop_id.get<long long>());
-        } else if (workshop_id.is_number_unsigned()) {
-            parsed.workshop_id = std::to_string(workshop_id.get<unsigned long long>());
-        }
+        if (const auto it = root.find("workshopid"); it != root.end())
+            parsed.workshop_id = WorkshopIdFrom(*it);
     }
 
     *manifest = std::move(parsed);

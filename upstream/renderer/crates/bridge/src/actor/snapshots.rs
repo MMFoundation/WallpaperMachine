@@ -1,29 +1,26 @@
 use std::{
     collections::BTreeMap,
-    fs,
-    path::Path,
     sync::PoisonError,
     time::{Duration, Instant},
 };
 
-use wallpaper_core::{
-    DisplaySnapshotEntry, SceneBackend, SceneUpdateMode, WallpaperAssignment, project::ScalingMode,
-};
+use super::projection_values::directory_size;
+
+use wallpaper_core::{DisplaySnapshotEntry, SceneBackend, SceneUpdateMode};
 
 use crate::{
     actor::state::BridgeActorState,
     api::{
-        BridgeComboOption, BridgeDirectoryMode, BridgeDisplayConfigRow, BridgeDisplayMode,
-        BridgeDisplaySettingsRow, BridgeError, BridgeFileFilter, BridgeMonitorInfoRow,
-        BridgeMonitorInformationSnapshot, BridgePlaybackState, BridgePropertyDescriptor,
-        BridgePropertyKind, BridgePropertyValue, BridgeScalingMode, BridgeSceneBackendReport,
+        BridgeComboOption, BridgeDirectoryMode, BridgeError, BridgeFileFilter,
+        BridgeMonitorInformationSnapshot, BridgePlaybackState, BridgePropertyValue,
+        BridgeSceneBackendReport,
         BridgeSceneUpdateModeReport, BridgeSettingsSnapshot, BridgeSliderMetadata,
         BridgeStorageStatus, BridgeVideoBackendReport, BridgeWallpaperOptionsSnapshot,
         bridge_log_status,
     },
-    config::{SceneRendererModeCfg, SceneResolutionCfg, SerializedSelector, VideoBackendModeCfg},
-    engine::{ActivationInputs, RendererVideoPipelineState, SceneRuntimeReport},
-    display::{DisplayLabelExt, DisplaySelectorExt, DisplaySnapshotExt},
+    config::{AppConfig, SceneResolutionCfg},
+    engine::{ActivationInputs, SceneRuntimeReport},
+    display::DisplayLabelExt,
     logging::{ApplicationLogger, LogStatus},
     login::LaunchAtLoginStatus,
     paths::BridgePaths,
@@ -31,21 +28,14 @@ use crate::{
     user_assets::UserAssetManifest,
 };
 
-const MIRROR_DISPLAY_MODE: &str = "mirror";
 const UNKNOWN_GIT_SHA: &str = "Unknown";
 const SHADER_PIPELINE_VERSION: &str = "0.1.0";
-const VIDEO_BACKEND_COMPATIBILITY: &str = "compatibility";
-const VIDEO_BACKEND_NATIVE_PREFERRED: &str = "native_preferred";
 const RUNNING_BACKEND_NATIVE: &str = "native";
-const RUNNING_BACKEND_LEGACY: &str = "legacy";
-const SCENE_RENDERER_COMPATIBILITY: &str = "compatibility";
-const SCENE_RENDERER_NATIVE_METAL_PREFERRED: &str = "native_metal_preferred";
 const SCENE_RESOLUTION_CANVAS: &str = "canvas";
 const SCENE_RESOLUTION_DISPLAY: &str = "display";
-const SCENE_BACKEND_LEGACY_VULKAN: &str = "legacy_vulkan";
 const SCENE_BACKEND_NATIVE_METAL: &str = "native_metal";
 /// A scene that is running and whose backend the renderer could not name.
-/// Distinct from both real backends on purpose.
+/// Distinct from the real backend on purpose.
 const SCENE_BACKEND_UNKNOWN: &str = "unknown";
 const SCENE_MODE_CONTINUOUS: &str = "continuous";
 const SCENE_MODE_WAITING_FOR_EVENT: &str = "waiting_for_event";
@@ -79,24 +69,6 @@ fn bridge_file_filter(filter: &FileFilter) -> Option<BridgeFileFilter> {
     })
 }
 
-fn directory_size(path: &Path) -> u64 {
-    let Ok(metadata) = fs::metadata(path) else {
-        return 0;
-    };
-    if metadata.is_file() {
-        return metadata.len();
-    }
-    if !metadata.is_dir() {
-        return 0;
-    }
-
-    fs::read_dir(path)
-        .ok()
-        .into_iter()
-        .flat_map(|entries| entries.filter_map(Result::ok))
-        .map(|entry| directory_size(&entry.path()))
-        .sum()
-}
 
 impl BridgeActorState {
     pub(crate) fn invalidate_shader_cache_size(&self) {
@@ -142,10 +114,22 @@ impl BridgeActorState {
         // tell an imported asset from one that has gone missing.
         let user_assets_root = paths.user_assets_root();
         let user_assets = UserAssetManifest::load(&user_assets_root, &wallpaper_id);
-        let properties = self
-            .project_models
-            .get(&wallpaper_id)
-            .map(|model| {
+        let model = self.project_models.get(&wallpaper_id);
+        let overrides = model
+            .map(|model| model.override_values(&config.property_overrides))
+            .unwrap_or_default();
+        let active_enabled_displays = self.enabled_selectors(&wallpaper_id);
+        Ok(super::snapshot_projection::project_options(
+            entry,
+            &draft,
+            &active_enabled_displays,
+            model,
+            &overrides,
+            &self.app_config,
+            displays,
+            |property, value| {
+                // Projection only annotates properties from this actual model.
+                let model = model.expect("property annotation requires its model");
                 // A label that is exactly one of the project's own tokens becomes
                 // its text in the app's language; anything else is left as written.
                 let localized = |raw: &str| {
@@ -154,7 +138,6 @@ impl BridgeActorState {
                         .resolve(raw, &self.label_locales)
                         .map_or_else(|| raw.to_owned(), str::to_owned)
                 };
-                let overrides = model.override_values(&config.property_overrides);
                 let lookup = |id: &str| {
                     overrides.get(id).cloned().or_else(|| {
                         model
@@ -164,274 +147,116 @@ impl BridgeActorState {
                             .map(crate::project::ProjectProperty::default_value)
                     })
                 };
-                model
-                    .properties
-                    .iter()
-                    .map(|property| {
-                        // A rule that hides a property keeps its row, not enabled: the
-                        // host still sees what the project defines and what its hidden
-                        // overrides hold, and decides what to list. A rule that cannot be
-                        // read leaves the property enabled.
-                        let enabled = property
-                            .condition
-                            .as_deref()
-                            .and_then(|condition| Condition::parse(condition).ok())
-                            .is_none_or(|condition| condition.eval(&lookup));
-                        let value = property.effective_value(&overrides);
-                        let default_value = property.default_value();
-                        let dirty = !property.value_is_default(&value);
-                        let slider = match &property.metadata {
-                            PropertyMetadata::Slider {
-                                min,
-                                max,
-                                step,
-                                precision,
-                                ..
-                            } => Some(BridgeSliderMetadata {
-                                min: *min,
-                                max: *max,
-                                step: *step,
-                                precision: *precision,
-                            }),
-                            _ => None,
-                        };
-                        let combo_options = match &property.metadata {
-                            PropertyMetadata::Combo { options } => options
-                                .iter()
-                                .map(|option| BridgeComboOption {
-                                    label: localized(&option.label),
-                                    value: BridgePropertyValue::from(PropertyValue::String(
-                                        option.value.clone(),
-                                    )),
-                                })
-                                .collect(),
-                            _ => Vec::new(),
-                        };
-                        let (file_filter, directory_mode) = match &property.metadata {
-                            PropertyMetadata::File { filter } => {
-                                (bridge_file_filter(filter), None)
-                            }
-                            PropertyMetadata::Directory { filter, mode } => (
-                                bridge_file_filter(filter),
-                                Some(match mode {
-                                    DirectoryMode::OnDemand => BridgeDirectoryMode::OnDemand,
-                                    DirectoryMode::FetchAll => BridgeDirectoryMode::FetchAll,
-                                }),
-                            ),
-                            _ => (None, None),
-                        };
-                        // Only file and directory properties have a user asset behind
-                        // them; a texture picker names a path inside the package, which
-                        // the app never imports and must never report as missing.
-                        let is_asset_property = matches!(
-                            property.metadata,
-                            PropertyMetadata::File { .. } | PropertyMetadata::Directory { .. }
-                        );
-                        let picked = if is_asset_property {
-                            value.to_property_string()
-                        } else {
-                            String::new()
-                        };
-                        let asset = if !is_asset_property {
-                            crate::user_assets::UserAssetStatus::default()
-                        } else if let Some(manifest) = user_assets.as_ref() {
-                            manifest.status(
-                                &user_assets_root,
-                                &wallpaper_id,
-                                &property.id,
-                                &picked,
-                            )
-                        } else {
-                            crate::user_assets::unmanaged_status(&picked)
-                        };
-                        let asset_source_path = user_assets
-                            .as_ref()
-                            .and_then(|manifest| manifest.source_path(&property.id))
-                            .map(ToString::to_string)
-                            .or_else(|| (!picked.is_empty()).then(|| picked.clone()));
-
-                        BridgePropertyDescriptor {
-                            id: property.id.clone(),
-                            kind: BridgePropertyKind::from(&property.kind),
-                            label_html: localized(&property.label_html),
-                            value: BridgePropertyValue::from(value),
-                            default_value: BridgePropertyValue::from(default_value),
-                            slider,
-                            combo_options,
-                            file_filter,
-                            directory_mode,
-                            dirty,
-                            can_restore_defaults: dirty,
-                            enabled,
-                            asset_managed: asset.managed,
-                            asset_missing: asset.missing,
-                            asset_source_path,
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let app_config = self.app_config.normalized(displays);
-        let active_enabled_displays = self.enabled_selectors(&wallpaper_id);
-        let display_configurations = app_config
-            .monitor_rows(displays)
-            .into_iter()
-            .filter(|row| {
-                row.connected && row.config.enabled && row.config.mode != MIRROR_DISPLAY_MODE
-            })
-            .filter_map(|row| {
-                let display = row.display_index.and_then(|index| displays.get(index))?;
-                let selector = &row.selector;
-                let primary = *selector == SerializedSelector::Primary;
-                let render = config
-                    .monitors
-                    .iter()
-                    .find(|render| render.selector == *selector);
-                let default_render = crate::config::MonitorRender {
-                    selector: selector.clone(),
-                    ..crate::config::MonitorRender::default()
+                // A rule that hides a property keeps its row, not enabled: the
+                // host still sees what the project defines and what its hidden
+                // overrides hold, and decides what to list. A rule that cannot be
+                // read leaves the property enabled.
+                let enabled = property
+                    .condition
+                    .as_deref()
+                    .and_then(|condition| Condition::parse(condition).ok())
+                    .is_none_or(|condition| condition.eval(&lookup));
+                let slider = match &property.metadata {
+                    PropertyMetadata::Slider {
+                        min,
+                        max,
+                        step,
+                        precision,
+                        ..
+                    } => Some(BridgeSliderMetadata {
+                        min: *min,
+                        max: *max,
+                        step: *step,
+                        precision: *precision,
+                    }),
+                    _ => None,
                 };
-                let render = render.unwrap_or(&default_render);
-                let max_fps = display.desc.refresh_rate_hz.max(1);
-                let render_dirty = config
-                    .monitors
-                    .iter()
-                    .find(|candidate| candidate.selector == *selector)
-                    .is_some_and(|candidate| candidate != &default_render);
+                let combo_options = match &property.metadata {
+                    PropertyMetadata::Combo { options } => options
+                        .iter()
+                        .map(|option| BridgeComboOption {
+                            label: localized(&option.label),
+                            value: BridgePropertyValue::from(PropertyValue::String(
+                                option.value.clone(),
+                            )),
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                let (file_filter, directory_mode) = match &property.metadata {
+                    PropertyMetadata::File { filter } => (bridge_file_filter(filter), None),
+                    PropertyMetadata::Directory { filter, mode } => (
+                        bridge_file_filter(filter),
+                        Some(match mode {
+                            DirectoryMode::OnDemand => BridgeDirectoryMode::OnDemand,
+                            DirectoryMode::FetchAll => BridgeDirectoryMode::FetchAll,
+                        }),
+                    ),
+                    _ => (None, None),
+                };
+                // Only file and directory properties have a user asset behind
+                // them; a texture picker names a path inside the package, which
+                // the app never imports and must never report as missing.
+                let is_asset_property = matches!(
+                    property.metadata,
+                    PropertyMetadata::File { .. } | PropertyMetadata::Directory { .. }
+                );
+                let picked = if is_asset_property {
+                    value.to_property_string()
+                } else {
+                    String::new()
+                };
+                let asset = if !is_asset_property {
+                    crate::user_assets::UserAssetStatus::default()
+                } else if let Some(manifest) = user_assets.as_ref() {
+                    manifest.status(
+                        &user_assets_root,
+                        &wallpaper_id,
+                        &property.id,
+                        &picked,
+                    )
+                } else {
+                    crate::user_assets::unmanaged_status(&picked)
+                };
+                let asset_source_path = user_assets
+                    .as_ref()
+                    .and_then(|manifest| manifest.source_path(&property.id))
+                    .map(ToString::to_string)
+                    .or_else(|| (!picked.is_empty()).then(|| picked.clone()));
 
-                Some(BridgeDisplayConfigRow {
-                    display_id: selector.id(),
-                    title: display.title_with_role(primary),
-                    enabled: draft.effective_display_enabled(selector, &active_enabled_displays),
-                    scaling_mode: match render.parse_scaling_mode() {
-                        ScalingMode::None => BridgeScalingMode::None,
-                        ScalingMode::Stretch => BridgeScalingMode::Stretch,
-                        ScalingMode::Fit => BridgeScalingMode::Match,
-                        ScalingMode::FitBlurred => BridgeScalingMode::MatchBlurred,
-                        ScalingMode::Fill => BridgeScalingMode::Fill,
-                    },
-                    scaling_factor: render.scaling_factor,
-                    framing: render.framing.into(),
-                    target_fps: render.fps_on(max_fps),
-                    max_fps,
-                    muted: config.audio.muted,
-                    volume: config.audio.volume,
-                    dirty: render_dirty || draft.display_dirty(selector, &active_enabled_displays),
-                    can_restore_defaults: render != &default_render
-                        || draft.display_dirty(selector, &active_enabled_displays),
-                })
-            })
-            .collect();
-
-        Ok(BridgeWallpaperOptionsSnapshot {
-            wallpaper_id: entry.id.clone(),
-            title: entry.title.clone(),
-            kind: entry.kind,
-            supported: entry.supported,
-            dirty: draft.is_dirty(&active_enabled_displays),
-            properties,
-            display_configurations,
-            audio_response_enabled: config.audio.response_enabled,
-            media_integration_enabled: config.media_integration_enabled,
-            muted: config.audio.muted,
-            volume: config.audio.volume,
-        })
+                super::snapshot_projection::PropertyAnnotation {
+                    label_html: localized(&property.label_html),
+                    slider,
+                    combo_options,
+                    file_filter,
+                    directory_mode,
+                    enabled,
+                    asset_managed: asset.managed,
+                    asset_missing: asset.missing,
+                    asset_source_path,
+                }
+            },
+        ))
     }
 
     pub fn monitor_info(
         &self,
         displays: &[DisplaySnapshotEntry],
     ) -> BridgeMonitorInformationSnapshot {
-        let app_config = self.app_config.normalized(displays);
-        let rows = app_config
-            .monitor_rows(displays)
-            .into_iter()
-            .filter(|row| {
-                row.connected
-                    && row.config.enabled
-                    && (row.config.wallpaper.is_some()
-                        || row.config.mode == MIRROR_DISPLAY_MODE
-                            && row.config.mirror_target.is_some())
-            })
-            .filter_map(|row| {
-                let display = row.display_index.and_then(|index| displays.get(index))?;
-                let mirror_target = if row.config.mode == MIRROR_DISPLAY_MODE {
-                    row.config.mirror_target.as_ref()
-                } else {
-                    None
-                };
-                let target_display = mirror_target
-                    .and_then(|selector| selector.to_selector().resolve_display(displays));
-                let target_config_selector =
-                    target_display.map(|display| display.config_selector(displays));
-                let target_row = target_config_selector.as_ref().and_then(|selector| {
-                    app_config
-                        .monitor_rows(displays)
-                        .into_iter()
-                        .find(|candidate| candidate.selector == *selector)
-                });
-                let wallpaper_id = if mirror_target.is_some() {
-                    target_row
-                        .as_ref()
-                        .and_then(|target| target.config.wallpaper.as_ref())
-                } else {
-                    row.config.wallpaper.as_ref()
-                }?;
-                let wallpaper_title = self
-                    .library
-                    .iter()
-                    .find(|entry| entry.id == *wallpaper_id)
-                    .map_or_else(|| wallpaper_id.clone(), |entry| entry.title.clone());
-                let render_selector = target_config_selector.as_ref().unwrap_or(&row.selector);
-                let render = self.wallpaper_configs.get(wallpaper_id).and_then(|config| {
-                    config
-                        .monitors
-                        .iter()
-                        .find(|render| render.selector == *render_selector)
-                });
-                let default_render = crate::config::MonitorRender {
-                    selector: render_selector.clone(),
-                    ..crate::config::MonitorRender::default()
-                };
-                let render = render.unwrap_or(&default_render);
-                let primary = row.selector == SerializedSelector::Primary;
-                let role = if primary { "Primary" } else { "Secondary" };
-                let suffix = format!("({} - {role} - {wallpaper_id})", display.desc.display_id);
-                let title = display.title_with_suffix(&suffix);
-                let scaling_mode = match render.parse_scaling_mode() {
-                    ScalingMode::None => "None",
-                    ScalingMode::Stretch => "Stretch",
-                    ScalingMode::Fit => "Match",
-                    ScalingMode::Fill => "Fill",
-                    ScalingMode::FitBlurred => "Match, blurred",
-                };
+        self.monitor_info_for_app(&self.app_config, displays)
+    }
 
-                Some(BridgeMonitorInfoRow {
-                    display_id: row.selector.id(),
-                    title,
-                    wallpaper_id: wallpaper_id.clone(),
-                    wallpaper_title,
-                    mirror_target_display_id: target_config_selector
-                        .as_ref()
-                        .map(SerializedSelector::id),
-                    mirror_target_title: target_display.map(|display| {
-                        let primary =
-                            target_config_selector.as_ref() == Some(&SerializedSelector::Primary);
-                        display.title_with_role(primary)
-                    }),
-                    scaling_mode: scaling_mode.to_string(),
-                    target_fps: render
-                        .fps_on(display.desc.refresh_rate_hz)
-                        .to_string(),
-                    audio_response: self.wallpaper_configs.get(wallpaper_id).map_or_else(
-                        || crate::config::AudioCfg::default().response_enabled,
-                        |config| config.audio.response_enabled,
-                    ),
-                })
-            })
-            .collect();
-
-        BridgeMonitorInformationSnapshot { rows }
+    fn monitor_info_for_app(
+        &self,
+        app_config: &AppConfig,
+        displays: &[DisplaySnapshotEntry],
+    ) -> BridgeMonitorInformationSnapshot {
+        super::snapshot_projection::project_monitors(
+            app_config,
+            displays,
+            |id| self.wallpaper_configs.get(id),
+            |id| self.library.iter().find(|entry| entry.id == id).map(|entry| entry.title.as_str()),
+        )
     }
 
     /// Composes one running scene's renderer read-back with the host's own
@@ -492,12 +317,13 @@ impl BridgeActorState {
     fn scene_report_labels(
         &self,
         displays: &[DisplaySnapshotEntry],
-        app_config: &crate::config::AppConfig,
+        app_config: &AppConfig,
+        candidate: &AppConfig,
         scene_reports: &[SceneRuntimeReport],
     ) -> BTreeMap<u32, SceneReportLabels> {
         let primary = displays.first().map(|first| first.desc.display_id);
         let rows = app_config.monitor_rows(displays);
-        let monitor_info = self.monitor_info(displays);
+        let monitor_info = self.monitor_info_for_app(candidate, displays);
         scene_reports
             .iter()
             .map(|report| report.display_id)
@@ -538,104 +364,40 @@ impl BridgeActorState {
             .collect()
     }
 
-    #[allow(clippy::too_many_lines)]
     pub fn settings(
         &self,
         displays: &[DisplaySnapshotEntry],
         launch_at_login: LaunchAtLoginStatus,
         paths: &BridgePaths,
-        renderer: RendererVideoPipelineState,
         scene_reports: &[SceneRuntimeReport],
     ) -> BridgeSettingsSnapshot {
-        let app_config = self.app_config.normalized(displays);
-        let rows = if displays.is_empty() {
-            self.display_settings.values().cloned().collect()
-        } else {
-            let rows = app_config.monitor_rows(displays);
-            rows.iter()
-                .filter_map(|row| {
-                    let entry = row.display_index.and_then(|index| displays.get(index))?;
-                    let configured = app_config
-                        .monitors
-                        .iter()
-                        .any(|monitor| monitor.selector == row.selector);
-                    let primary = row.selector == SerializedSelector::Primary;
-                    let mode = if primary || !row.config.mode.eq_ignore_ascii_case("mirror") {
-                        BridgeDisplayMode::Standalone
-                    } else {
-                        BridgeDisplayMode::Mirror
-                    };
-                    let mode = if configured {
-                        mode
-                    } else {
-                        match entry.assignment.as_ref() {
-                            Some(WallpaperAssignment::Mirror(_)) => BridgeDisplayMode::Mirror,
-                            _ => BridgeDisplayMode::Standalone,
-                        }
-                    };
-                    let selected_mirror_target = if mode == BridgeDisplayMode::Mirror && configured
-                    {
-                        row.config
-                            .mirror_target
-                            .as_ref()
-                            .and_then(|selector| selector.mirror_target_id(entry, displays))
-                    } else if mode == BridgeDisplayMode::Mirror {
-                        match entry.assignment.as_ref()? {
-                            WallpaperAssignment::Mirror(selector) => {
-                                SerializedSelector::from_selector(selector)
-                                    .mirror_target_id(entry, displays)
-                            }
-                            WallpaperAssignment::Direct(_) => None,
-                        }
-                    } else {
-                        None
-                    };
-                    let settings = app_config
-                        .monitor_settings
-                        .iter()
-                        .find(|settings| settings.selector == row.selector)
-                        .cloned()
-                        .unwrap_or_else(|| crate::config::MonitorSettingsCfg {
-                            selector: row.selector.clone(),
-                            ..crate::config::MonitorSettingsCfg::default()
-                        });
-                    let scaling_mode = BridgeScalingMode::from(settings.parse_scaling_mode());
-                    let max_fps = entry.desc.refresh_rate_hz.max(1);
+        self.operation_candidate_settings(
+            &self.app_config,
+            displays,
+            launch_at_login,
+            paths,
+            scene_reports,
+        )
+    }
 
-                    Some(BridgeDisplaySettingsRow {
-                        display_id: row.selector.id(),
-                        title: entry.title_with_role(primary),
-                        enabled: primary || row.config.enabled,
-                        mode,
-                        mirror_targets: rows
-                            .iter()
-                            .filter(|candidate| {
-                                candidate.connected
-                                    && candidate.config.enabled
-                                    && candidate.config.mode != MIRROR_DISPLAY_MODE
-                                    && candidate.selector != row.selector
-                            })
-                            .filter_map(|candidate| {
-                                candidate
-                                    .display_index
-                                    .and_then(|index| displays.get(index))
-                            })
-                            .map(|display| display.config_selector(displays).id())
-                            .collect(),
-                        selected_mirror_target,
-                        scaling_mode,
-                        scaling_factor: settings.scaling_factor,
-                        target_fps: settings.fps_on(max_fps),
-                        max_fps,
-                        muted: settings.muted,
-                        volume: settings.volume,
-                    })
-                })
-                .collect()
-        };
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn operation_candidate_settings(
+        &self,
+        candidate: &AppConfig,
+        displays: &[DisplaySnapshotEntry],
+        launch_at_login: LaunchAtLoginStatus,
+        paths: &BridgePaths,
+        scene_reports: &[SceneRuntimeReport],
+    ) -> BridgeSettingsSnapshot {
+        let app_config = candidate.normalized(displays);
+        let rows = super::snapshot_projection::project_settings_rows(
+            &app_config,
+            displays,
+            || self.display_settings.values(),
+        );
         let on_battery = self.power_source == crate::power::PowerSource::Battery;
         let backends = ActivationInputs {
-            app_config: &self.app_config,
+            app_config: candidate,
             wallpapers: &self.wallpaper_configs,
             library: self.scanned_library(),
             displays,
@@ -644,10 +406,7 @@ impl BridgeActorState {
             paths,
             force_shader_refresh: false,
             project_models: &self.project_models,
-            native_video_enabled: self.app_config.video_backend
-                == VideoBackendModeCfg::NativePreferred,
-            native_video_rejected: &self.native_video_rejected,
-            frame_rate_cap: self.active_target_fps_cap(),
+            frame_rate_cap: self.active_target_fps_cap_for_app(candidate),
             audio_suppressed: self.audio_suppressed,
             held: &self.held_wallpapers,
         }
@@ -676,15 +435,11 @@ impl BridgeActorState {
                     .map(|entry| entry.title.clone())
                     .unwrap_or_default(),
                 wallpaper_id: routed.wallpaper_id,
-                backend: if routed.native {
-                    RUNNING_BACKEND_NATIVE.to_string()
-                } else {
-                    RUNNING_BACKEND_LEGACY.to_string()
-                },
-                fallback_reason: routed.fallback_reason,
+                backend: RUNNING_BACKEND_NATIVE.to_string(),
+                fallback_reason: routed.problem,
             })
             .collect();
-        let scene_labels = self.scene_report_labels(displays, &app_config, scene_reports);
+        let scene_labels = self.scene_report_labels(displays, &app_config, candidate, scene_reports);
         let scene_update_modes = scene_reports
             .iter()
             .map(|report| {
@@ -713,16 +468,16 @@ impl BridgeActorState {
                     display_name: labels.map(|l| l.display_name.clone()).unwrap_or_default(),
                     wallpaper_id: labels.map(|l| l.wallpaper_id.clone()).unwrap_or_default(),
                     wallpaper_title: labels.map(|l| l.wallpaper_title.clone()).unwrap_or_default(),
-                    // A backend the renderer could not name is reported as
-                    // unknown rather than as the preference, which would make
-                    // the preference look like evidence of what ran.
+                    // A backend the renderer could not name (a scene still
+                    // being read, or one held in a failure) is reported as
+                    // unknown rather than assumed to be drawing.
                     backend: match report.backend {
-                        Some(SceneBackend::LegacyVulkan) => SCENE_BACKEND_LEGACY_VULKAN,
                         Some(SceneBackend::NativeMetal) => SCENE_BACKEND_NATIVE_METAL,
                         None => SCENE_BACKEND_UNKNOWN,
                     }
                     .to_string(),
-                    fallback_reason: report.fallback_reason.clone(),
+                    failure_stage: report.failure.as_ref().map(|failure| failure.stage.as_str().to_string()),
+                    failure_reason: report.failure.as_ref().map(|failure| failure.reason.clone()),
                     video_path: report.video_path.name().to_string(),
                     optimization_applied: report.optimization_applied,
                 }
@@ -736,9 +491,9 @@ impl BridgeActorState {
                 LaunchAtLoginStatus::Available { enabled: true }
             ),
             launch_at_login_needs_approval: launch_at_login == LaunchAtLoginStatus::RequiresApproval,
-            battery_mode: self.app_config.power.on_battery.into(),
-            verbose_logging: self.app_config.diagnostics.verbose_logging,
-            git_sha: match option_env!("GIT_SHORT_COMMIT").unwrap_or(crate::build::SHORT_COMMIT) {
+            battery_mode: candidate.power.on_battery.into(),
+            verbose_logging: candidate.diagnostics.verbose_logging,
+            git_sha: match option_env!("GIT_SHORT_COMMIT").unwrap_or(env!("WM_FALLBACK_GIT_SHORT_COMMIT")) {
                 value if value.trim().is_empty() => UNKNOWN_GIT_SHA.to_string(),
                 value => value.to_string(),
             },
@@ -761,46 +516,28 @@ impl BridgeActorState {
                     bridge_log_status,
                 ),
             },
-            video_backend: match self.app_config.video_backend {
-                VideoBackendModeCfg::Compatibility => VIDEO_BACKEND_COMPATIBILITY.to_string(),
-                VideoBackendModeCfg::NativePreferred => {
-                    VIDEO_BACKEND_NATIVE_PREFERRED.to_string()
-                }
-            },
             video_backends,
-            content_pacing_enabled: renderer.content_pacing_enabled,
-            shared_video_decode_enabled: renderer.shared_video_decode_enabled,
-            shared_video_decode_sessions: renderer.shared_video_decode_sessions,
-            shared_video_decode_consumers: renderer.shared_video_decode_consumers,
-            scene_optimization_enabled: self.app_config.quality.scene_optimization_enabled,
-            scene_on_demand_enabled: self.app_config.quality.scene_on_demand_enabled,
-            scene_video_plane_sampling_enabled: self
-                .app_config
+            scene_optimization_enabled: candidate.quality.scene_optimization_enabled,
+            scene_on_demand_enabled: candidate.quality.scene_on_demand_enabled,
+            scene_video_plane_sampling_enabled: candidate
                 .experimental
                 .scene_video_plane_sampling,
-            scene_renderer: match self.app_config.scene_renderer {
-                SceneRendererModeCfg::Compatibility => SCENE_RENDERER_COMPATIBILITY.to_string(),
-                SceneRendererModeCfg::NativeMetalPreferred => {
-                    SCENE_RENDERER_NATIVE_METAL_PREFERRED.to_string()
-                }
-            },
-            scene_resolution: match self.app_config.quality.scene_resolution {
+            scene_resolution: match candidate.quality.scene_resolution {
                 SceneResolutionCfg::Canvas => SCENE_RESOLUTION_CANVAS.to_string(),
                 SceneResolutionCfg::Display => SCENE_RESOLUTION_DISPLAY.to_string(),
             },
             scene_update_modes,
             scene_renderers,
             user_assets_path: paths.user_assets_root().to_string_lossy().into_owned(),
-            render_scale: self
-                .app_config
-                .effective_render_scale(self.quality_in_force()),
-            preferred_render_scale: self.app_config.quality.render_scale,
-            frame_rate_cap: self.app_config.quality.frame_rate_cap,
-            battery_render_scale: self.app_config.quality.battery.render_scale,
-            battery_target_fps: self.app_config.quality.battery.target_fps,
+            render_scale: candidate
+                .effective_render_scale(self.quality_in_force_for_app(candidate)),
+            preferred_render_scale: candidate.quality.render_scale,
+            frame_rate_cap: candidate.quality.frame_rate_cap,
+            battery_render_scale: candidate.quality.battery.render_scale,
+            battery_target_fps: candidate.quality.battery.target_fps,
             on_battery_power: on_battery,
             quality_throttle: self.quality_throttle.iter().copied().collect(),
-            effective_frame_rate_cap: self.active_target_fps_cap(),
+            effective_frame_rate_cap: self.active_target_fps_cap_for_app(candidate),
             render_scale_supported: backends.render_scale_supported,
         }
     }
@@ -856,7 +593,6 @@ mod tests {
                 &[],
                 status,
                 &paths,
-                crate::engine::RendererVideoPipelineState::default(),
                 &[],
             );
             assert_eq!(
@@ -871,16 +607,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn directory_size_sums_nested_files() {
-        let root = tempfile::tempdir().unwrap();
-        let nested = root.path().join("nested");
-        fs::create_dir_all(&nested).unwrap();
-        fs::write(root.path().join("a.bin"), [1, 2, 3]).unwrap();
-        fs::write(nested.join("b.bin"), [4, 5]).unwrap();
-
-        assert_eq!(directory_size(root.path()), 5);
-    }
 
     #[test]
     fn settings_snapshot_reports_storage_status() {
@@ -893,7 +619,6 @@ mod tests {
             &[],
             LaunchAtLoginStatus::Unavailable,
             &paths,
-            crate::engine::RendererVideoPipelineState::default(),
             &[],
         );
 

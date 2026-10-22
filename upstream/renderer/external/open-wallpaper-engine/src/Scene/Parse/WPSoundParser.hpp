@@ -73,27 +73,39 @@ private:
     std::size_t LoopIndex();
     uint64_t    DelayFrames();
 
+    // One piece of a request: how many frames it produced (silence counts) and whether the
+    // layer can offer nothing more for this request.
+    struct Piece {
+        std::size_t frames { 0 };
+        bool        starved { false };
+    };
+    void  DropActiveFile();
+    Piece NextPiece(float* out, std::size_t room, std::size_t& dead_files);
+    void  ApplyLayerGain(float* out, std::size_t samples) const;
+
     Config                              m_config;
     Desc                                m_desc {};
+    // Which file of the playlist is open, how long until the next one starts, and what makes it.
     std::size_t                         m_cur_index { 0 };
     uint64_t                            m_delay_frames { 0 };
     std::vector<StreamFactory>          m_stream_factories;
     std::shared_ptr<audio::SoundStream> m_cur_active;
-    std::mt19937                        m_random { std::random_device {}() };
-    std::atomic<float>                  m_volume { 1.0f };
-    std::atomic<bool>                   m_muted { false };
-    std::atomic<bool>                   m_playing { true };
-    std::atomic<bool>                   m_rewind_requested { false };
-    std::atomic<bool>                   m_finished { false };
+    std::mt19937                        m_random { std::random_device {}() };  // random playback order
+
+    // Controls, written by whichever thread calls them and read by the audio thread.
+    std::atomic<float> m_volume { 1.0f };
+    std::atomic<bool>  m_muted { false };
+    std::atomic<bool>  m_playing { true };            // plays from construction
+    std::atomic<bool>  m_rewind_requested { false };
+    std::atomic<bool>  m_finished { false };
 };
 
 class WPSoundParser {
 public:
-    // `runtime_name` is the key the scene registered the layer under, when it is
-    // not the layer's own name (a name another layer shares, or none).
+    /// `layer_name` is the name the runtime knows the sound's layer by (the object's own name
+    /// when empty); sounds that share a name are layers of different names.
     static void Parse(const wpscene::WPSoundObject&, fs::VFS&, audio::SoundManager&,
-                      SceneRuntimeContext* runtime = nullptr,
-                      std::string_view     runtime_name = {});
+                      SceneRuntimeContext* runtime = nullptr, const std::string& layer_name = {});
 
     // Makes `stream`'s volume follow the project property `property` for as long
     // as the scene runs, so a slider moved on a running scene is heard without

@@ -34,16 +34,17 @@ public:
 
     std::string              name;
     std::vector<std::string> textures;
-    /// Per texture slot, in slot order: the now-playing cover (`$mediaThumbnail`,
-    /// `$mediaPreviousThumbnail`) a slot shows in place of its authored render
-    /// target -- another layer's composite, the default cover a layer of its own
-    /// draws -- while a cover is published (`RuntimeImageSource::HoldsCover`).
-    /// Empty for every other slot. The slot keeps the target in `textures`, so
-    /// the graph still draws the target before this pass reads it.
-    std::vector<std::string> texture_covers;
     std::vector<std::string> defines;
 
     bool hasSprite { false };
+
+    /// Per texture slot, the cover the slot shows once one is published
+    /// (`$mediaThumbnail` or `$mediaPreviousThumbnail`), and empty for every other
+    /// slot; empty altogether when no slot is one. Only a slot whose authored
+    /// texture is another layer's composite is listed: the slot keeps sampling that
+    /// composite (its entry in `textures`) until a cover exists. A slot over a
+    /// picture is a runtime image of its own and needs no entry.
+    std::vector<std::string> cover_slots;
 
     SceneMaterialCustomShader customShader;
     /// Set on the materials that take a layer's `g_Color4`; the rest keep white.
@@ -77,7 +78,7 @@ struct SceneDepthState {
 /// authored, whatever its blending: its own depth-tested font materials are
 /// translucent and write depth. A translucent or additive draw that asks to
 /// write depth therefore hides what is drawn behind it afterwards, its
-/// transparent texels included. As in Direct3D, OpenGL and Vulkan, a draw that
+/// transparent texels included. As in Direct3D, OpenGL and Metal, a draw that
 /// does not depth-test writes no depth, and a target without a depth
 /// attachment draws in painter's order.
 [[nodiscard]] inline SceneDepthState ResolveSceneDepthState(const SceneMaterial& material,

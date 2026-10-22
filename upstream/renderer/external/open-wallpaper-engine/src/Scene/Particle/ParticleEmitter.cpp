@@ -1,469 +1,414 @@
+// Clean-room implementation from the WallpaperMachine spec e4-particle-simulation.md; written without access to the original source.
 #include "ParticleEmitter.h"
 #include "ParticleModify.h"
 #include "Utils/Algorism.h"
 #include "Utils/Logging.h"
-#include "Utils/Algorism.h"
-#include "Core/Random.hpp"
+#include "Utils/Random.hpp"
 
-#include <Eigen/src/Core/Matrix.h>
-#include <random>
+#include "Utils/Linalg.hpp"
+#include <algorithm>
 #include <array>
-#include <tuple>
 #include <cmath>
-#include <cstring>
+#include <cstdint>
+#include <limits>
+#include <random>
+#include <utility>
 
 using namespace wallpaper;
-
-typedef std::function<Particle()> GenParticleOp;
-typedef std::function<Particle()> SpwanOp;
 
 namespace
 {
 
-inline std::tuple<u32, bool> FindLastParticle(std::span<const Particle> ps, u32 last) {
-    for (u32 i = last; i < ps.size(); i++) {
-        if (! ParticleModify::LifetimeOk(ps[i])) return { i, true };
-    }
-    return { 0, false };
+using Vec3 = linalg::Vector3d;
+namespace PM = ParticleModify;
+
+/// A draw from [0, 1).
+double Uniform() { return Random::get(0.0, 1.0); }
+
+double Lerp(double a, double b, double t) { return a + (b - a) * t; }
+
+Vec3 ToVec(const std::array<float, 3>& v) {
+    return { static_cast<double>(v[0]), static_cast<double>(v[1]), static_cast<double>(v[2]) };
 }
 
-inline u32 GetEmitNum(double& timer, double speed) {
-    if (speed <= 0.0) return 0;
-    const double emitDur = 1.0 / speed;
-    if (emitDur > timer) return 0;
-    u32 num = static_cast<u32>((timer / emitDur) + 1.0e-9);
-    timer -= static_cast<double>(num) * emitDur;
-    if (timer < 1.0e-9) timer = 0;
-    return num;
-}
+/// The most rate-driven particles one step may attempt: the balance is capped
+/// here so a huge step cannot ask for an unbounded burst.
+constexpr double kMaxDuePerStep = 4.0e9;
 
-inline u32 Emitt(std::vector<Particle>& particles, u32 num, u32 maxcount, bool sort,
-                 SpwanOp Spwan) {
-    u32  lastPartcle = 0;
-    bool has_dead    = true;
-    u32  i           = 0;
-
-    for (i = 0; i < num; i++) {
-        if (has_dead) {
-            auto [r1, r2] = FindLastParticle(particles, lastPartcle);
-            lastPartcle   = r1;
-            has_dead      = r2;
-        }
-        if (has_dead) {
-            particles[lastPartcle] = Spwan();
-
-        } else {
-            if (maxcount == particles.size()) break;
-            particles.push_back(Spwan());
-        }
-    }
-
-    if (sort) {
-        // old << new << dead, stable within each bucket. Three linear passes
-        // into scratch instead of a sort; the order is the same one
-        // stable_sort produced.
-        thread_local std::vector<Particle> scratch;
-        scratch.clear();
-        scratch.reserve(particles.size());
-        for (const auto& particle : particles) {
-            if (ParticleModify::LifetimeOk(particle) && ! ParticleModify::IsNew(particle)) {
-                scratch.push_back(particle);
-            }
-        }
-        for (const auto& particle : particles) {
-            if (ParticleModify::LifetimeOk(particle) && ParticleModify::IsNew(particle)) {
-                scratch.push_back(particle);
-            }
-        }
-        for (const auto& particle : particles) {
-            if (! ParticleModify::LifetimeOk(particle)) scratch.push_back(particle);
-        }
-        particles.swap(scratch);
-    }
-
-    return i + 1;
-}
-
-inline Particle Spwan(GenParticleOp gen, std::vector<ParticleInitOp>& inis, double duration) {
-    auto particle = gen();
-    // One draw per particle. Operators that vary a particle against its
-    // neighbours (oscillators, turbulence) and the sprite-sheet frame of a
-    // `randomframe` particle read this value, as Wallpaper Engine keeps a
-    // single random per particle for all of them. A function of the spawn
-    // state would give identical particles identical values.
-    particle.seed       = static_cast<float>(Random::get(0.0, 1.0));
-    particle.init.frame = particle.seed;
-    for (auto& el : inis) el(particle, duration);
-    // Nothing has moved it yet: an operator that compares the particle with
-    // where it was last step finds it where it was placed.
-    particle.prev_position = particle.position;
-    return particle;
-}
-
-inline void ApplySign(Eigen::Vector3d& p, int32_t x, int32_t y, int32_t z) noexcept {
-    if (x != 0) {
-        p.x() = std::abs(p.x()) * (float)x;
-    }
-    if (y != 0) {
-        p.y() = std::abs(p.y()) * (float)y;
-    }
-    if (z != 0) {
-        p.z() = std::abs(p.z()) * (float)z;
-    }
-}
-
-/// Where a spawn offset is measured from and how the control point turns it.
-struct EmitterFrame {
-    Eigen::Vector3d origin { Eigen::Vector3d::Zero() };
-    Eigen::Matrix3d rotation { Eigen::Matrix3d::Identity() };
-    bool            rotated { false };
-    /// The layer's rotation and scale, for a world-space system: the spawn
-    /// offset is turned and scaled by it, the origin added after, as it is.
-    Eigen::Matrix3d world_linear { Eigen::Matrix3d::Identity() };
-    bool            world { false };
+/// What every emitter shares, whichever shape it places particles in.
+struct EmitterConfig {
+    double                                rate { 0.0 };
+    u32                                   burst { 0 };
+    bool                                  one_per_frame { false };
+    bool                                  sort { false };
+    i32                                   controlpoint { 0 };
+    Vec3                                  directions { 1, 1, 0 };
+    Vec3                                  origin { 0, 0, 0 };
+    double                                min_speed { 0.0 };
+    double                                max_speed { 0.0 };
+    std::shared_ptr<const float>          count;
+    std::function<float()>                audio;
+    ParticleEmitterTiming                 timing;
+    std::shared_ptr<ParticleSpawnContext> spawn;
 };
 
-inline EmitterFrame ResolveEmitterFrame(std::span<const ParticleControlpoint> cps, i32 cp_index,
-                                        const std::array<float, 3>& authored) {
-    EmitterFrame frame;
-    frame.origin = Eigen::Vector3d {
-        static_cast<double>(authored[0]),
-        static_cast<double>(authored[1]),
-        static_cast<double>(authored[2]),
-    };
-    if (cp_index >= 0 && static_cast<std::size_t>(cp_index) < cps.size()) {
-        const auto& cp = cps[static_cast<std::size_t>(cp_index)];
-        frame.origin += cp.offset;
-        // Wallpaper Engine turns the spawn offset and its velocity direction by
-        // the control point's orientation only for an emitter that names a
-        // control point other than the first.
-        if (cp_index != 0 && cp.has_rotation) {
-            frame.rotation = cp.rotation;
-            frame.rotated  = true;
-        }
-        if (cp.has_world_linear) {
-            frame.world_linear = cp.world_linear;
-            frame.world        = true;
-        }
-    }
-    return frame;
-}
+/// Where an emitter is in its timetable and how much it owes. One lives in each
+/// emit callable, so every copy of the callable (one per instance) keeps its own.
+struct Schedule {
+    double delay_left { 0.0 };
+    double duration_left { 0.0 };
+    bool   finished { false };
+    bool   burst_pending { false };
+    double balance { 0.0 };
+    double last_count { 1.0 };
 
-/// The velocity initializers of the particles this emitter spawns read the
-/// matrix of its control point, as Wallpaper Engine hands it to them: the layer's
-/// for a worldspace system, unless the control point is pinned to the world.
-inline void HandOnWorldLinear(const std::shared_ptr<ParticleSpawnContext>& spawn,
-                              const EmitterFrame&                          frame) {
-    if (spawn == nullptr) return;
-    spawn->has_world_linear = frame.world;
-    spawn->world_linear     = frame.world_linear;
-}
-
-inline float ResolveMultiplier(const std::shared_ptr<const float>& multiplier) {
-    if (multiplier == nullptr) return 1.0f;
-    return std::max(0.0f, *multiplier);
-}
-
-inline double UnitRandom() { return Random::get(0.0, 1.0); }
-
-/// Direction a particle leaves its spawn point in: away from the emitter
-/// centre, or, when it spawned on the centre, along a random direction drawn
-/// over `directions` (Wallpaper Engine's fallback for a degenerate offset).
-inline Eigen::Vector3d SpawnDirection(const Eigen::Vector3d& offset,
-                                      const std::array<float, 3>& directions,
-                                      const EmitterFrame& frame) {
-    if (offset.squaredNorm() >= 1.0e-4) return offset.normalized();
-    Eigen::Vector3d random {
-        static_cast<double>(directions[0]) * (2.0 * UnitRandom() - 1.0),
-        static_cast<double>(directions[1]) * (2.0 * UnitRandom() - 1.0),
-        static_cast<double>(directions[2]) * (2.0 * UnitRandom() - 1.0),
-    };
-    if (frame.rotated) random = frame.rotation * random;
-    if (frame.world) random = frame.world_linear * random;
-    const double length = random.norm();
-    return length > 1.0e-12 ? Eigen::Vector3d(random / length) : Eigen::Vector3d(Eigen::Vector3d::Zero());
-}
-
-/// The emitter's schedule: when it waits, emits, pauses and stops, and how
-/// many particles one step owes. One per emitter per particle-system instance,
-/// because a recycled instance starts its schedule again.
-class EmitterClock {
-public:
-    EmitterClock(const ParticleEmitterTiming& timing, u32 instantaneous, bool one_per_frame,
-                 float authored_rate)
-        : m_timing(timing),
-          m_instantaneous(instantaneous),
-          m_one_per_frame(one_per_frame),
-          m_authored_rate(authored_rate),
-          m_delay(std::max(0.0f, timing.delay)),
-          m_duration(std::max(0.0f, timing.duration)),
-          m_pending(instantaneous) {
-        // The shorter bound is the minimum, whichever way the file wrote them.
-        if (m_timing.minPeriodicDuration > m_timing.maxPeriodicDuration) {
-            std::swap(m_timing.minPeriodicDuration, m_timing.maxPeriodicDuration);
-        }
-        if (m_timing.minPeriodicDelay > m_timing.maxPeriodicDelay) {
-            std::swap(m_timing.minPeriodicDelay, m_timing.maxPeriodicDelay);
-        }
-    }
-
-    /// Particles this step asks for, before the system's capacity is applied.
-    /// `rate` is particles per second already scaled by the count override and
-    /// the audio level; `count_multiplier` scales a burst.
-    u32 Step(double dt, double rate, float count_multiplier) {
-        if (m_finished) return 0;
-        if (m_delay > 0.0) {
-            m_delay -= dt;
-            return 0;
-        }
-
-        if (m_timing.periodic) {
-            if (m_window > 0.0) {
-                m_window -= dt;
-                if (m_window < 0.0) {
-                    m_window = -Lerp(m_timing.minPeriodicDelay, m_timing.maxPeriodicDelay);
-                }
-            } else {
-                m_window += dt;
-                if (m_window < 0.0) {
-                    rate = 0.0;
-                } else {
-                    // A new window re-arms the burst and the per-window cap.
-                    m_pending      = m_instantaneous;
-                    m_emitted      = 0;
-                    m_window       = Lerp(m_timing.minPeriodicDuration, m_timing.maxPeriodicDuration);
-                    m_window_began = true;
-                }
-            }
-        }
-
-        // The burst is paid out once the count multiplier lets any of it through:
-        // while a user-bound `count` holds it at zero the burst stays owed
-        // (and the emitter is not finished) instead of being spent on nothing.
-        u32 burst = 0;
-        if (m_pending != 0 && count_multiplier > 0.0f) {
-            burst = static_cast<u32>(
-                std::ceil(static_cast<double>(m_pending) * static_cast<double>(count_multiplier)));
-            m_pending = 0;
-        }
-
-        const double total = rate * dt + m_accum;
-        u32          count = 0;
-        // A hair of tolerance, as the accumulator is a sum of fractions: a rate
-        // of sixty at sixty frames a second owes one particle every frame, not
-        // one frame in a hundred late.
-        constexpr double kTolerance = 1.0e-9;
-        if (total + kTolerance < 1.0 || m_duration < 0.0) {
-            // The burst is paid for out of the same account the rate draws on,
-            // so a large burst holds the steady stream back for a while.
-            m_accum = total - static_cast<double>(burst);
-        } else {
-            const double due = std::floor(total + kTolerance);
-            m_accum          = total - (due + static_cast<double>(burst));
-            double n         = due;
-            if (m_one_per_frame) n = std::min(n, 1.0);
-            if (m_timing.periodic && m_timing.maxToEmitPerPeriod != 0) {
-                const double room = std::max(
-                    0.0, static_cast<double>(m_timing.maxToEmitPerPeriod) - static_cast<double>(m_emitted));
-                n = std::min(n, room);
-                m_emitted += static_cast<u32>(n);
-            }
-            count = static_cast<u32>(std::min(n, 4.0e9));
-        }
-        EndOfStep(dt, m_pending != 0);
-        return burst + count;
-    }
-
-    /// The audio-gated emitter: the level has already shaped the rate, silence
-    /// discards the part of a particle owed, and a burst waits for sound.
-    u32 StepAudio(double dt, double rate_per_second, float response, float count_multiplier) {
-        if (m_finished) return 0;
-        if (m_delay > 0.0) {
-            m_delay -= dt;
-            return 0;
-        }
-        bool paused = false;
-        if (m_timing.periodic) {
-            if (m_window > 0.0) {
-                m_window -= dt;
-                if (m_window < 0.0) {
-                    m_window = -Lerp(m_timing.minPeriodicDelay, m_timing.maxPeriodicDelay);
-                }
-            } else {
-                m_window += dt;
-                if (m_window < 0.0) {
-                    paused = true;
-                } else {
-                    m_window       = Lerp(m_timing.minPeriodicDuration, m_timing.maxPeriodicDuration);
-                    m_window_began = true;
-                    m_audio_burst_done = false;
-                }
-            }
-        }
-        u32 count = 0;
-        if (paused) {
-            // Nothing is emitted and nothing accrues while the window is shut.
-        } else if (! std::isfinite(response) || response <= 0.0f || count_multiplier <= 0.0f) {
-            m_accum = 0.0;
-        } else {
-            const float multiplier = std::min(response, 1.0f) * count_multiplier;
-            // Accumulate fractional particles, not elapsed silent time or time at an old rate.
-            m_accum += std::max(0.0, dt) * std::max(0.0, rate_per_second) * multiplier;
-            count = GetEmitNum(m_accum, 1.0);
-            if (m_instantaneous > 0 && ! m_audio_burst_done) {
-                count = static_cast<u32>(
-                    std::ceil(static_cast<float>(m_instantaneous) * multiplier));
-                m_audio_burst_done = true;
-            }
-            if (m_one_per_frame) count = std::min(count, 1u);
-        }
-        // A burst that waits for sound is still to come.
-        EndOfStep(dt, m_instantaneous > 0 && ! m_audio_burst_done);
-        return count;
-    }
-
-    bool Finished() const noexcept { return m_finished; }
-
-private:
-    static double Lerp(double a, double b) { return a + UnitRandom() * (b - a); }
-
-    void EndOfStep(double dt, bool burst_pending) {
-        if (m_duration > 0.0) {
-            m_duration -= dt;
-            if (m_duration <= 0.0) {
-                m_duration = -1.0;
-                m_finished = true;
-            }
-        } else if (m_authored_rate <= 0.0f && ! burst_pending &&
-                   ! (m_instantaneous != 0 && m_timing.periodic)) {
-            // Nothing but an unrepeated burst is left to do.
-            m_finished = true;
-        }
-    }
-
-    ParticleEmitterTiming m_timing;
-    u32                   m_instantaneous;
-    bool                  m_one_per_frame;
-    float                 m_authored_rate;
-    double                m_delay;
-    double                m_duration;
-    double                m_accum { 0.0 };
-    double                m_window { 0.0 };
-    u32                   m_emitted { 0 };
-    u32                   m_pending;
-    bool                  m_finished { false };
-    bool                  m_window_began { false };
-    bool                  m_audio_burst_done { false };
+    // Periodic windows.
+    enum class Phase { Fresh, InWindow, InPause };
+    Phase  phase { Phase::Fresh };
+    double window_left { 0.0 };
+    double pause_left { 0.0 };
+    u32    window_emitted { 0 };
 };
 
-/// One step's particle count for either emitter type.
-template<typename Args>
-u32 EmitterCount(const Args& args, EmitterClock& clock, double timepass) {
-    const float count_multiplier = ResolveMultiplier(args.countMultiplier);
-    if (! args.audioResponse) {
-        return clock.Step(timepass, static_cast<double>(args.emitSpeed) * count_multiplier,
-                          count_multiplier);
-    }
-    return clock.StepAudio(timepass, args.emitSpeed, args.audioResponse(), count_multiplier);
+double LengthBetween(float a, float b) {
+    return Random::get(static_cast<double>(a), static_cast<double>(b));
 }
+
+/// The multiplier of the instance override, read now: absent counts 1, a
+/// negative value 0, and a value that is not a number keeps the last good one.
+double CountMultiplier(const EmitterConfig& cfg, Schedule& s) {
+    if (! cfg.count) return 1.0;
+    const double v = static_cast<double>(*cfg.count);
+    if (std::isfinite(v)) s.last_count = std::max(v, 0.0);
+    return s.last_count;
+}
+
+void OpenWindow(const EmitterConfig& cfg, Schedule& s) {
+    s.phase          = Schedule::Phase::InWindow;
+    s.window_left    = LengthBetween(cfg.timing.minPeriodicDuration, cfg.timing.maxPeriodicDuration);
+    s.window_emitted = 0;
+    s.burst_pending  = cfg.burst > 0;
+}
+
+/// Moves a periodic emitter's windows on by `dt`; true when this step is inside
+/// a window. The window runs out only by going below zero, and the step that
+/// does is its last; reaching zero exactly opens the next window at once.
+bool StepWindows(const EmitterConfig& cfg, Schedule& s, double dt) {
+    using Phase = Schedule::Phase;
+    if (s.phase == Phase::Fresh) {
+        OpenWindow(cfg, s);
+        return true;
+    }
+    if (s.phase == Phase::InWindow) {
+        if (s.window_left > 0.0) {
+            s.window_left -= dt;
+            return true;
+        }
+        if (s.window_left == 0.0) {
+            OpenWindow(cfg, s);
+            return true;
+        }
+        s.phase      = Phase::InPause;
+        s.pause_left = LengthBetween(cfg.timing.minPeriodicDelay, cfg.timing.maxPeriodicDelay);
+    }
+    s.pause_left -= dt;
+    if (s.pause_left > 0.0) return false;
+    OpenWindow(cfg, s);
+    return true;
+}
+
+/// The whole number of particles `balance` holds, with a sliver of slack so
+/// rate 48 at 1/48 s is one a step despite rounding.
+double WholeDue(double balance) {
+    const double whole = std::floor(balance + 1.0e-9);
+    return std::clamp(whole, 0.0, kMaxDuePerStep);
+}
+
+double BurstSize(double burst, double factor) {
+    return std::ceil(burst * factor - 1.0e-7);
+}
+
+/// How many particles this step attempts. Advances the schedule.
+double PlanStep(const EmitterConfig& cfg, Schedule& s, double dt) {
+    if (s.finished) return 0.0;
+
+    const bool   audio_gated = static_cast<bool>(cfg.audio);
+    double       level       = 1.0;
+    if (audio_gated) {
+        const double raw = static_cast<double>(cfg.audio());
+        level            = (std::isfinite(raw) && raw > 0.0) ? raw : 0.0;
+    }
+    const double factor = CountMultiplier(cfg, s);
+
+    if (s.delay_left > 0.0) {
+        s.delay_left -= dt;
+        return 0.0;
+    }
+    bool last_step = false;
+    if (cfg.timing.duration > 0.0f) {
+        s.duration_left -= dt;
+        last_step = s.duration_left <= 0.0;
+    }
+    const bool in_window = cfg.timing.periodic ? StepWindows(cfg, s, dt) : true;
+
+    double emit = 0.0;
+    if (in_window) {
+        if (audio_gated) {
+            if (level > 0.0 && factor > 0.0) {
+                const double l = std::min(level, 1.0);
+                if (s.burst_pending) {
+                    // The burst waits for sound and replaces this step's stream.
+                    s.burst_pending = false;
+                    emit            = BurstSize(cfg.burst, l * factor);
+                } else {
+                    s.balance += cfg.rate * l * factor * dt;
+                    const double due = WholeDue(s.balance);
+                    s.balance -= due;
+                    emit = due;
+                }
+                if (cfg.one_per_frame) emit = std::min(emit, 1.0);
+            } else {
+                // Silence: nothing builds up, and a long quiet step is never repaid.
+                s.balance = std::min(s.balance, 0.0);
+            }
+        } else {
+            s.balance += cfg.rate * factor * dt;
+            if (! std::isfinite(s.balance)) s.balance = 0.0;
+            const double due   = WholeDue(s.balance);
+            double       paid  = due;
+            if (cfg.one_per_frame) paid = std::min(paid, 1.0);
+            if (cfg.timing.periodic && cfg.timing.maxToEmitPerPeriod > 0) {
+                const double room =
+                    static_cast<double>(cfg.timing.maxToEmitPerPeriod) -
+                    static_cast<double>(std::min(s.window_emitted, cfg.timing.maxToEmitPerPeriod));
+                paid = std::min(paid, room);
+            }
+            double burst = 0.0;
+            if (s.burst_pending && factor > 0.0) {
+                burst           = BurstSize(cfg.burst, factor);
+                s.burst_pending = false;
+            }
+            // Everything that fell due is paid for, whether or not it got out.
+            s.balance -= due + burst;
+            s.window_emitted += static_cast<u32>(std::min(paid, kMaxDuePerStep));
+            emit = paid + burst;
+        }
+    }
+
+    if (last_step) s.finished = true;
+    if (cfg.rate == 0.0 && cfg.timing.duration <= 0.0f && ! s.burst_pending &&
+        ! (cfg.timing.periodic && cfg.burst > 0)) {
+        s.finished = true;
+    }
+    return emit;
+}
+
+/// Puts the slots of a plain rope in order: particles that were already alive,
+/// then this step's newborns, then dead slots. Linear, with scratch space that
+/// is kept between calls.
+void OrderSlots(std::vector<Particle>& slots) {
+    const auto rank = [](const Particle& p) {
+        if (! PM::LifetimeOk(p)) return 2;
+        return PM::IsNew(p) ? 1 : 0;
+    };
+    int  highest = 0;
+    bool ordered = true;
+    for (const auto& p : slots) {
+        const int r = rank(p);
+        if (r < highest) {
+            ordered = false;
+            break;
+        }
+        highest = r;
+    }
+    if (ordered) return;
+    thread_local std::vector<Particle> scratch;
+    scratch.clear();
+    for (int wanted = 0; wanted < 3; ++wanted) {
+        for (const auto& p : slots) {
+            if (rank(p) == wanted) scratch.push_back(p);
+        }
+    }
+    // Copied back, not swapped: a swap would hand this instance's buffer to the
+    // next caller and take theirs, so instances of different sizes would make
+    // the scratch grow again every frame.
+    std::copy(scratch.begin(), scratch.end(), slots.begin());
+}
+
+/// The control point an emitter is framed by, or null when it has none.
+const ParticleControlpoint* FramePoint(i32 index, std::span<const ParticleControlpoint> points) {
+    if (index < 0) index = 7;
+    if (static_cast<std::size_t>(index) >= points.size()) return nullptr;
+    return &points[static_cast<std::size_t>(index)];
+}
+
+/// An offset turned by the orientation of the emitter's control point (never
+/// the first point's) and carried through the layer matrix that point holds.
+Vec3 Frame(const Vec3& offset, const ParticleControlpoint* point, i32 index) {
+    Vec3 out = offset;
+    if (point == nullptr) return out;
+    if (index != 0 && point->has_rotation) out = point->rotation * out;
+    if (point->has_world_linear) out = point->world_linear * out;
+    return out;
+}
+
+Particle MakeParticle(const EmitterConfig& cfg, const Vec3& raw_offset,
+                      const ParticleControlpoint* point, i32 index) {
+    Particle     p;
+    const Vec3   offset = Frame(raw_offset, point, index);
+    Vec3         heading;
+    if (offset.norm() < 0.01) {
+        const Vec3 random { Random::get(-cfg.directions.x(), cfg.directions.x()),
+                            Random::get(-cfg.directions.y(), cfg.directions.y()),
+                            Random::get(-cfg.directions.z(), cfg.directions.z()) };
+        heading = Frame(random, point, index);
+        const double len = heading.norm();
+        heading          = len > 0.0 ? Vec3(heading / len) : Vec3::Zero();
+    } else {
+        heading = offset / offset.norm();
+    }
+    const double speed = Random::get(cfg.min_speed, cfg.max_speed);
+
+    Vec3 position = cfg.origin + offset;
+    if (point != nullptr) position += point->offset;
+    PM::MoveTo(p, position);
+    PM::InitVelocity(p, heading * speed);
+    return p;
+}
+
+/// Records what an initializer chain left as the particle's birth state.
+void SealBirth(Particle& p, double seed) {
+    p.seed = static_cast<float>(std::min(seed, static_cast<double>(std::nextafter(1.0f, 0.0f))));
+    p.init.frame = p.seed;
+}
+
+void FinishBirth(Particle& p) {
+    p.prev_position = p.position;
+    p.init.color    = p.color;
+    p.init.alpha    = p.alpha;
+    p.init.size     = p.size;
+    p.mark_new      = true;
+}
+
+/// One emitter step on one instance. `place` returns an unturned offset.
+template<class Place>
+void EmitInto(const EmitterConfig& cfg, Schedule& schedule, Place& place,
+              std::vector<Particle>& slots, std::vector<ParticleInitOp>& initializers,
+              u32 maxcount, double dt_in, std::span<const ParticleControlpoint> controlpoints) {
+    const double dt = (std::isfinite(dt_in) && dt_in > 0.0) ? dt_in : 0.0;
+
+    const i32                   index = cfg.controlpoint < 0 ? 7 : cfg.controlpoint;
+    const ParticleControlpoint* point = FramePoint(index, controlpoints);
+    if (cfg.spawn) {
+        cfg.spawn->has_world_linear = point != nullptr && point->has_world_linear;
+        cfg.spawn->world_linear =
+            cfg.spawn->has_world_linear ? point->world_linear : linalg::Matrix3d::Identity();
+    }
+
+    const double wanted = PlanStep(cfg, schedule, dt);
+    if (wanted >= 1.0) {
+        const double duration = cfg.rate > 0.0 ? 1.0 / cfg.rate : 0.0;
+        std::size_t  cursor   = 0;
+        for (double made = 0.0; made < wanted; made += 1.0) {
+            while (cursor < slots.size() && PM::LifetimeOk(slots[cursor])) ++cursor;
+            if (cursor == slots.size()) {
+                if (slots.size() >= maxcount) break;
+                slots.emplace_back();
+            }
+            Particle& slot = slots[cursor++];
+            Particle  p    = MakeParticle(cfg, place(), point, index);
+            SealBirth(p, Uniform());
+            for (auto& init : initializers) init(p, duration);
+            FinishBirth(p);
+            slot = p;
+        }
+    }
+    if (cfg.sort) OrderSlots(slots);
+}
+
+template<class Place>
+ParticleEmittOp MakeOp(EmitterConfig cfg, Place place) {
+    Schedule schedule;
+    schedule.delay_left     = cfg.timing.delay;
+    schedule.duration_left  = cfg.timing.duration;
+    schedule.burst_pending  = cfg.burst > 0;
+    return [cfg = std::move(cfg), schedule, place](std::vector<Particle>&           slots,
+                                                    std::vector<ParticleInitOp>&     initializers,
+                                                    u32 maxcount, double dt,
+                                                    std::span<const ParticleControlpoint> points) mutable {
+        EmitInto(cfg, schedule, place, slots, initializers, maxcount, dt, points);
+    };
+}
+
 } // namespace
 
 ParticleEmittOp ParticleBoxEmitterArgs::MakeEmittOp(ParticleBoxEmitterArgs a) {
-    EmitterClock clock(a.timing, a.instantaneous, a.one_per_frame, a.emitSpeed);
-    return [a, clock](std::vector<Particle>&       ps,
-                      std::vector<ParticleInitOp>& inis,
-                      u32                          maxcount,
-                      double                       timepass,
-                      std::span<const ParticleControlpoint>
-                          controlpoints) mutable {
-        const EmitterFrame frame = ResolveEmitterFrame(controlpoints, a.controlpoint, a.orgin);
-        HandOnWorldLinear(a.spawn, frame);
-        auto               GenBox = [&]() {
-            // Per axis a signed draw scaled by `directions`; the minimum bounds
-            // the distance from the centre, so a hollow box leaves its centre
-            // empty and a negative minimum folds the two halves together.
-            Eigen::Vector3d pos;
-            for (int32_t i = 0; i < 3; i++) {
-                const double s   = (2.0 * UnitRandom() - 1.0) * static_cast<double>(a.directions[i]);
-                const double sgn = s > 0.0 ? 1.0 : (s < 0.0 ? -1.0 : 0.0);
-                const double lo  = a.minDistance[i];
-                const double hi  = a.maxDistance[i];
-                pos[i]           = sgn * (lo + (hi - lo) * std::abs(s));
-            }
-            auto p = Particle();
-            if (frame.rotated) pos = frame.rotation * pos;
-            // A world-space system's layer turns and scales the offset, and the
-            // particle leaves along the offset's new direction at its authored
-            // speed.
-            if (frame.world) pos = frame.world_linear * pos;
-            ParticleModify::MoveTo(p, pos);
-            ParticleModify::ChangeVelocity(
-                p,
-                Random::get(a.minSpeed, a.maxSpeed) * SpawnDirection(pos, a.directions, frame));
+    EmitterConfig cfg;
+    cfg.rate          = a.emitSpeed;
+    cfg.burst         = a.instantaneous;
+    cfg.one_per_frame = a.one_per_frame;
+    cfg.sort          = a.sort;
+    cfg.controlpoint  = a.controlpoint;
+    cfg.directions    = ToVec(a.directions);
+    cfg.origin        = ToVec(a.orgin);
+    cfg.min_speed     = a.minSpeed;
+    cfg.max_speed     = a.maxSpeed;
+    cfg.count         = std::move(a.countMultiplier);
+    cfg.audio         = std::move(a.audioResponse);
+    cfg.timing        = a.timing;
+    cfg.spawn         = std::move(a.spawn);
 
-            ParticleModify::Move(p, frame.origin);
-            return p;
-        };
-        const u32 emit_num = EmitterCount(a, clock, timepass);
-        Emitt(ps, emit_num, maxcount, a.sort, [&]() {
-            return Spwan(GenBox, inis, a.emitSpeed > 0.0f ? 1.0f / a.emitSpeed : 0.0f);
-        });
-    };
+    const Vec3 dir = cfg.directions;
+    const Vec3 lo  = ToVec(a.minDistance);
+    const Vec3 hi  = ToVec(a.maxDistance);
+    return MakeOp(std::move(cfg), [dir, lo, hi]() {
+        Vec3 offset;
+        for (int i = 0; i < 3; ++i) {
+            const double s    = (2.0 * Uniform() - 1.0) * dir[i];
+            const double sign = (s > 0.0) - (s < 0.0);
+            offset[i]         = sign * Lerp(lo[i], hi[i], std::abs(s));
+        }
+        return offset;
+    });
 }
 
 ParticleEmittOp ParticleSphereEmitterArgs::MakeEmittOp(ParticleSphereEmitterArgs a) {
-    using namespace Eigen;
-    EmitterClock clock(a.timing, a.instantaneous, a.one_per_frame, a.emitSpeed);
-    return [a, clock](std::vector<Particle>&       ps,
-                      std::vector<ParticleInitOp>& inis,
-                      u32                          maxcount,
-                      double                       timepass,
-                      std::span<const ParticleControlpoint>
-                          controlpoints) mutable {
-        const EmitterFrame frame = ResolveEmitterFrame(controlpoints, a.controlpoint, a.orgin);
-        HandOnWorldLinear(a.spawn, frame);
-        const double       cone_floor = -std::cos(EIGEN_PI * static_cast<double>(a.cone));
-        auto               GenSphere = [&]() {
-            auto p = Particle();
-            // A point of the unit ball, uniform by volume, stretched by
-            // `directions`. Its length, not a separate radius draw, places the
-            // particle between the minimum and maximum distance, so a flat
-            // `directions` (a disc) fills toward the middle the way the ball's
-            // projection does. The polar axis is x; `cone` narrows the ball to
-            // a cone about +x.
-            const double z      = UnitRandom() * (1.0 - cone_floor) + cone_floor;
-            const double s      = std::sqrt(std::max(0.0, 1.0 - z * z));
-            const double phi    = 2.0 * EIGEN_PI * UnitRandom();
-            const double radius = std::cbrt(UnitRandom());
-            Vector3d     v {
-                radius * z * static_cast<double>(a.directions[0]),
-                radius * s * std::sin(phi) * static_cast<double>(a.directions[1]),
-                radius * s * std::cos(phi) * static_cast<double>(a.directions[2]),
-            };
-            const double length = v.norm();
-            Vector3d     offset = Vector3d::Zero();
-            if (length > 1.0e-12) {
-                Vector3d direction = v / length;
-                ApplySign(direction, a.sign[0], a.sign[1], a.sign[2]);
-                offset = (static_cast<double>(a.minDistance) +
-                          (static_cast<double>(a.maxDistance) - static_cast<double>(a.minDistance)) *
-                              length) *
-                         direction;
-            }
-            if (frame.rotated) offset = frame.rotation * offset;
-            if (frame.world) offset = frame.world_linear * offset;
+    EmitterConfig cfg;
+    cfg.rate          = a.emitSpeed;
+    cfg.burst         = a.instantaneous;
+    cfg.one_per_frame = a.one_per_frame;
+    cfg.sort          = a.sort;
+    cfg.controlpoint  = a.controlpoint;
+    cfg.directions    = ToVec(a.directions);
+    cfg.origin        = ToVec(a.orgin);
+    cfg.min_speed     = a.minSpeed;
+    cfg.max_speed     = a.maxSpeed;
+    cfg.count         = std::move(a.countMultiplier);
+    cfg.audio         = std::move(a.audioResponse);
+    cfg.timing        = a.timing;
+    cfg.spawn         = std::move(a.spawn);
 
-            ParticleModify::MoveTo(p, offset);
-            ParticleModify::ChangeVelocity(
-                p,
-                Random::get(a.minSpeed, a.maxSpeed) * SpawnDirection(offset, a.directions, frame));
-
-            ParticleModify::Move(p, frame.origin);
-            return p;
-        };
-        const u32 emit_num = EmitterCount(a, clock, timepass);
-        Emitt(ps, emit_num, maxcount, a.sort, [&]() {
-            return Spwan(GenSphere, inis, a.emitSpeed > 0.0f ? 1.0f / a.emitSpeed : 0.0f);
-        });
-    };
+    const Vec3   dir      = cfg.directions;
+    const double lo       = a.minDistance;
+    const double hi       = a.maxDistance;
+    const double floor_z  = -std::cos(linalg::Pi * static_cast<double>(a.cone));
+    const std::array<int32_t, 3> sign = a.sign;
+    return MakeOp(std::move(cfg), [dir, lo, hi, floor_z, sign]() {
+        // A point of the unit ball by volume, polar axis along +x, stretched
+        // by `directions`; its stretched length sets the distance.
+        const double z      = Lerp(floor_z, 1.0, Uniform());
+        const double phi    = 2.0 * linalg::Pi * Uniform();
+        const double radius = std::cbrt(Uniform());
+        const double ring   = std::sqrt(std::max(0.0, 1.0 - z * z));
+        const Vec3   point { radius * z * dir.x(), radius * ring * std::sin(phi) * dir.y(),
+                             radius * ring * std::cos(phi) * dir.z() };
+        const double length = point.norm();
+        if (! (length > 0.0)) return Vec3 { 0.0, 0.0, 0.0 };
+        Vec3 unit = point / length;
+        for (int i = 0; i < 3; ++i) {
+            if (sign[static_cast<std::size_t>(i)] != 0)
+                unit[i] = std::abs(unit[i]) * static_cast<double>(sign[static_cast<std::size_t>(i)]);
+        }
+        return Vec3(unit * Lerp(lo, hi, length));
+    });
 }

@@ -3,10 +3,9 @@ set(LIB_NAME wpUtils)
 add_library(${LIB_NAME}
 STATIC
 Logging.cpp
-FpsCounter.cpp
 Algorism.cpp	
+Linalg.cpp
 Sha.cpp
-DynamicLibrary.cpp
 )
 
 target_link_libraries(${LIB_NAME}

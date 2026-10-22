@@ -4,60 +4,57 @@
 
 namespace wallpaper
 {
-// From Repkg github repo
 enum class ImageType
 {
-    UNKNOWN = -1, /// Unknown format (returned value only, never use it as input value)
-    BMP     = 0,  /// Windows or OS/2 Bitmap File (*.BMP)
-    ICO     = 1,  /// Windows Icon (*.ICO)
-    JPEG    = 2,  /// Independent JPEG Group (*.JPG, *.JIF, *.JPEG, *.JPE)
-    JNG     = 3,  /// JPEG Network Graphics (*.JNG)
-    KOALA   = 4,  /// Commodore 64 Koala format (*.KOA)
-    LBM     = 5,  /// Amiga IFF (*.IFF, *.LBM)
-    MNG     = 6,  /// Multiple Network Graphics (*.MNG)
-    PBM     = 7,  /// Portable Bitmap (ASCII) (*.PBM)
-    PBMRAW  = 8,  /// Portable Bitmap (BINARY) (*.PBM)
-    PCD     = 9,  /// Kodak PhotoCD (*.PCD)
-    PCX     = 10, /// Zsoft Paintbrush PCX bitmap format (*.PCX)
-    PGM     = 11, /// Portable Graymap (ASCII) (*.PGM)
-    PGMRAW  = 12, /// Portable Graymap (BINARY) (*.PGM)
-    PNG     = 13, /// Portable Network Graphics (*.PNG)
-    PPM     = 14, /// Portable Pixelmap (ASCII) (*.PPM)
-    PPMRAW  = 15, /// Portable Pixelmap (BINARY) (*.PPM)
-    RAS     = 16, /// Sun Rasterfile (*.RAS)
-    TARGA   = 17, /// truevision Targa files (*.TGA, *.TARGA)
-    TIFF    = 18, /// Tagged Image File Format (*.TIF, *.TIFF)
-    WBMP    = 19, /// Wireless Bitmap (*.WBMP)
-    PSD     = 20, /// Adobe Photoshop (*.PSD)
-    CUT     = 21, /// Dr. Halo (*.CUT)
-    XBM     = 22, /// X11 Bitmap Format (*.XBM)
-    XPM     = 23, /// X11 Pixmap Format (*.XPM)
-    DDS     = 24, /// DirectDraw Surface (*.DDS)
-    GIF     = 25, /// Graphics Interchange Format (*.GIF)
-    HDR     = 26, /// High Dynamic Range (*.HDR)
-    FAXG3   = 27, /// Raw Fax format CCITT G3 (*.G3)
-    SGI     = 28, /// Silicon Graphics SGI image format (*.SGI)
-    EXR     = 29, /// OpenEXR format (*.EXR)
-    J2K     = 30, /// JPEG-2000 format (*.J2K, *.J2C)
-    JP2     = 31, /// JPEG-2000 format (*.JP2)
-    PFM     = 32, /// portable floatmap (*.pfm)
-    PICT    = 33, /// Macintosh PICT (*.PICT)
-    RAW     = 34, /// RAW camera image (*.*)
+    UNKNOWN = -1,
+    BMP     = 0,
+    ICO     = 1,
+    JPEG    = 2,
+    JNG     = 3,
+    KOALA   = 4,
+    LBM     = 5,
+    MNG     = 6,
+    PBM     = 7,
+    PBMRAW  = 8,
+    PCD     = 9,
+    PCX     = 10,
+    PGM     = 11,
+    PGMRAW  = 12,
+    PNG     = 13,
+    PPM     = 14,
+    PPMRAW  = 15,
+    RAS     = 16,
+    TARGA   = 17,
+    TIFF    = 18,
+    WBMP    = 19,
+    PSD     = 20,
+    CUT     = 21,
+    XBM     = 22,
+    XPM     = 23,
+    DDS     = 24,
+    GIF     = 25,
+    HDR     = 26,
+    FAXG3   = 27,
+    SGI     = 28,
+    EXR     = 29,
+    J2K     = 30,
+    JP2     = 31,
+    PFM     = 32,
+    PICT    = 33,
+    RAW     = 34,
 };
-std::string ToString(const ImageType&);
 
 enum class TextureFormat
 {
-    BC1, // DXT1
-    BC2, // DXT3
-    BC3, // DXT5
+    BC1,
+    BC2,
+    BC3,
     RGB8,
     RGBA8,
     RG8,
     R8,
     RGBA16F
 };
-std::string ToString(const TextureFormat&);
 /// Decodes diagnostic readback samples without a platform half-float ABI.
 float HalfFloatToFloat(uint16_t bits);
 

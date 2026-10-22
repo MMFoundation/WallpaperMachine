@@ -1,7 +1,5 @@
 #pragma once
 
-// policy class
-
 struct NoCopy {
   protected:
 	NoCopy()  = default;

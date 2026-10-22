@@ -1,5 +1,6 @@
 use crate::{DisplayIdentity, project::SceneTemplate};
 
+/// The displays an engine is created with.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WallpaperEngineConfig {
     pub displays: Vec<DisplayConfig>,
@@ -12,6 +13,7 @@ pub struct DisplayConfig {
     pub wallpaper: Option<WallpaperAssignment>,
 }
 
+/// How a configured display is found among the connected ones.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DisplaySelector {
     Primary,

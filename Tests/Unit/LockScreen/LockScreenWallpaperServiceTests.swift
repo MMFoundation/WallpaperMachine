@@ -20,11 +20,10 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
 
   override func setUpWithError() throws {
     (defaults, defaultsSuite) = try TemporaryDefaults.make(for: self)
-    // Asset snapshots derive relative paths from a resolved enumeration root;
-    // the temporary directory is under /var, a symlink that enumeration
-    // resolves but standardizedFileURL restores, so stage under Caches instead.
-    root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
-      "Library/Caches/lock-screen-service-tests-" + UUID().uuidString, isDirectory: true)
+    // Keep the system-temp alias in play so asset publication cannot regress
+    // to subtracting differently resolved absolute path spellings.
+    root = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "lock-screen-service-tests-" + UUID().uuidString, isDirectory: true)
     try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: exchange, withIntermediateDirectories: true)
     // The managed user-asset store lives under the support root; every test that
@@ -135,7 +134,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
 
   /// Answers the extension's readiness files like the real lock-screen renderer, as process
   /// `processID` when given.
-  private func readinessResponder(processID: Int32? = nil) -> Task<Void, Never> {
+  private func readinessResponder(held: String? = nil, processID: Int32? = nil) -> Task<Void, Never> {
     let exchange = self.exchange
     return Task.detached {
       while !Task.isCancelled {
@@ -145,7 +144,7 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
         {
           for scene in configuration.scenes {
             let readiness = LockScreenReadiness(
-              revision: configuration.revision, displayID: scene.displayID, error: nil,
+              revision: configuration.revision, displayID: scene.displayID, error: nil, held: held,
               processID: processID)
             try? JSONEncoder().encode(readiness).write(
               to: exchange.appendingPathComponent("ready-\(scene.displayID).json"),
@@ -155,6 +154,27 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(50))
       }
     }
+  }
+
+  /// A scene the extension holds because Native Metal is the only renderer and could not draw it is not an
+  /// activation failure: the surface exists and shows its picture, so the lock screen stays on it, and the
+  /// extension's own words about why ride on the status instead of an error that would restore the original.
+  @MainActor
+  func testAHeldSceneKeepsTheLockScreenOnAndShowsTheExtensionsNote() async throws {
+    try XCTSkipIf(CGDisplayIsOnline(CGMainDisplayID()) == 0, "No online main display")
+    let service = LockScreenWallpaperService(
+      prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [self.scene()] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor)
+    let note = "Native Metal can't draw this wallpaper: it uses something Native Metal can't draw."
+    let responder = readinessResponder(held: note)
+    defer { responder.cancel() }
+    service.setEnabled(true)
+    await waitFor("the lock screen to enable on the held scene") { service.isEnabled }
+    XCTAssertNil(service.errorMessage, "a held scene is not an activation failure")
+    XCTAssertTrue(service.status.hasPrefix("Enabled for 1 display"), service.status)
+    XCTAssertTrue(service.status.hasSuffix(note), service.status)
+    XCTAssertTrue(service.ownsDesktopProvider, "the lock screen stays on the held surface")
   }
 
   @MainActor
@@ -2426,5 +2446,92 @@ final class LockScreenWallpaperServiceTests: XCTestCase {
     global["Type"] = "linked"
     root["AllSpacesAndDisplays"] = global
     try write(root)
+  }
+
+  /// A refresh that changes nothing publishes nothing, so the extension is not told to reload a
+  /// configuration that is the same.
+  @MainActor
+  func testARefreshThatChangesNothingPublishesNothing() async throws {
+    var record = scene()
+    record.displayId = 1
+    var publications = 0
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in "one" },
+      persistConfiguration: { url, bytes in
+        try bytes.write(to: url, options: .atomic)
+        publications += 1
+      })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try service.start()
+    service.setEnabled(true)
+    await waitFor("first publication") { service.isEnabled && !service.isBusy }
+    let first = try publishedConfiguration()
+    let count = publications
+
+    service.refresh()
+    await waitFor("unchanged refresh") { !service.isBusy }
+    XCTAssertEqual(publications, count, "the same inputs publish nothing")
+    XCTAssertEqual(try publishedConfiguration().revision, first.revision)
+    try await service.shutdown()
+  }
+
+  /// The scene the app publishes for a project of `type` with the Video backend `backend`.
+  @MainActor
+  private func publishedVideoScene(
+    type: String, file: String = "clip.mp4", makeFile: Bool = true
+  ) async throws -> LockScreenScene {
+    try Data(#"{"type":"\#(type)","title":"t","file":"\#(file)"}"#.utf8).write(
+      to: project.appendingPathComponent("project.json"))
+    let media = project.appendingPathComponent(file)
+    if makeFile { try Data("bytes".utf8).write(to: media) }
+    var record = scene()
+    record.displayId = 1
+    let service = LockScreenWallpaperService(prepareExtension: {}, notifyConfigurationChanged: {}, scenes: { [record] },
+      selection: LockScreenWallpaperSelection(storeURL: store, journalURL: journal, reload: {}),
+      exchange: exchange, defaults: defaults, scheduleMonitor: scheduleMonitor,
+      displayUUID: { _ in "one" })
+    let responder = readinessResponder()
+    defer { responder.cancel() }
+    try service.start()
+    service.setEnabled(true)
+    await waitFor("\(type) published") { service.isEnabled && !service.isBusy }
+    let published = try XCTUnwrap(publishedConfiguration().scenes.first)
+    try await service.shutdown()
+    return published
+  }
+
+  /// A plain video project always says it is a video and carries its media file for the extension,
+  /// which plays it itself. Scenes carry neither.
+  @MainActor
+  func testAVideoAlwaysCarriesItsMediaFile() async throws {
+    let video = try await publishedVideoScene(type: "video")
+    XCTAssertEqual(video.plainVideo, true)
+    XCTAssertEqual(video.nativeVideoFile, "clip.mp4")
+    let scene = try await publishedVideoScene(type: "scene")
+    XCTAssertNil(scene.plainVideo, "a scene is not a plain video")
+    XCTAssertNil(scene.nativeVideoFile, "a scene is not a plain video")
+  }
+
+  /// A video whose file is not a regular file inside its project is still published as a video, with
+  /// no file: the extension holds it and says the clip is missing, and no scene engine takes it over.
+  @MainActor
+  func testAMediaFileThatIsNotARegularFileInsideTheProjectIsPublishedAsAVideoWithNoFile() async throws {
+    let missing = try await publishedVideoScene(type: "video", makeFile: false)
+    XCTAssertEqual(missing.plainVideo, true)
+    XCTAssertNil(missing.nativeVideoFile)
+    let folder = project.appendingPathComponent("sub", isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data("x".utf8).write(to: folder.appendingPathComponent("a.txt"))
+    let directory = try await publishedVideoScene(
+      type: "video", file: "sub", makeFile: false)
+    XCTAssertEqual(directory.plainVideo, true)
+    XCTAssertNil(directory.nativeVideoFile, "a folder is not a clip")
+    let outside = try await publishedVideoScene(
+      type: "video", file: "../escape.mp4", makeFile: false)
+    XCTAssertEqual(outside.plainVideo, true)
+    XCTAssertNil(outside.nativeVideoFile)
   }
 }

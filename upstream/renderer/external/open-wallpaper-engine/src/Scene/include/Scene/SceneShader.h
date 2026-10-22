@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e1b-scene-model.md; written without access to the original source.
 #pragma once
 #include <vector>
 #include <cstdint>
@@ -7,8 +8,10 @@
 #include <span>
 #include <optional>
 #include <memory>
+#include <array>
+#include <type_traits>
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include "Core/MapSet.hpp"
 #include "Core/ArrayHelper.hpp"
@@ -28,64 +31,71 @@ public:
     ShaderValue(const ShaderValue&)            = default;
     ShaderValue& operator=(const ShaderValue&) = default;
 
-    ShaderValue(const value_type& value) noexcept { fromSpan(spanone { value }); }
+    ShaderValue(const value_type& value) noexcept: m_size(1) { m_value[0] = value; }
     template<typename Range>
+        requires std::is_constructible_v<std::span<const value_type>, const Range&>
     ShaderValue(const Range& range) noexcept {
-        fromSpan(range);
+        const std::span<const value_type> view(range);
+        Fill(view.data(), view.size());
     }
-    ShaderValue(const value_type* ptr, std::size_t num) noexcept { fromSpan({ ptr, num }); }
+    ShaderValue(const value_type* ptr, std::size_t num) noexcept { Fill(ptr, num); }
 
     template<typename Derived>
-    static ShaderValue fromMatrix(const Eigen::MatrixBase<Derived>& mat) {
+    static ShaderValue fromMatrix(const linalg::DenseBase<Derived>& mat) {
         ShaderValue result;
         result.m_size    = static_cast<size_t>(mat.size());
         result.m_dynamic = result.m_size > result.m_value.size();
         // Match fromSpan's allocation-failure semantics for the final owning storage.
+        // Matrices, blocks and maps hold their values already, in the original scalar
+        // type, so narrowing to the shader's float is the only conversion.
         const auto pack = [&](const auto& evaluated) noexcept {
             if (result.m_dynamic) result.m_dvalue.resize(result.m_size);
             auto* destination = result.m_dynamic ? result.m_dvalue.data() : result.m_value.data();
             size_t index = 0;
-            for (Eigen::Index column = 0; column < evaluated.cols(); ++column) {
-                for (Eigen::Index row = 0; row < evaluated.rows(); ++row) {
+            for (linalg::Index column = 0; column < evaluated.cols(); ++column) {
+                for (linalg::Index row = 0; row < evaluated.rows(); ++row) {
                     destination[index++] = static_cast<value_type>(evaluated.coeff(row, column));
                 }
             }
         };
-        if constexpr ((Derived::Flags & Eigen::DirectAccessBit) != 0) {
-            pack(mat);
-        } else {
-            // Evaluate once in the original scalar type before narrowing the result.
-            const typename Derived::PlainObject evaluated = mat;
-            pack(evaluated);
-        }
+        pack(mat.derived());
         return result;
     }
-    const auto& operator[](std::size_t index) const { return _value()[index]; }
-    auto& operator[](std::size_t index) { return m_dynamic ? m_dvalue[index] : m_value[index]; }
+    const auto& operator[](std::size_t index) const { return data()[index]; }
+    auto&       operator[](std::size_t index) { return Storage()[index]; }
 
-    auto data() const noexcept { return _value().data(); };
-    // constexpr auto data() noexcept { return m_value.data(); };
+    const value_type* data() const noexcept {
+        return m_dynamic ? m_dvalue.data() : m_value.data();
+    };
     size_t size() const noexcept { return m_size; };
 
-    void setSize(size_t v) noexcept { m_size = std::min(v, (size_t)_value().size()); }
+    /// Shrinks or regrows the count within the storage the value already has.
+    void setSize(size_t v) noexcept {
+        const size_t capacity = m_dynamic ? m_dvalue.size() : m_value.size();
+        m_size                = std::min(v, capacity);
+    }
 
 private:
-    void fromSpan(std::span<const value_type> s) noexcept;
-
-    std::span<const value_type> _value() const noexcept {
-        if (m_dynamic) return m_dvalue;
-        return m_value;
+    value_type* Storage() noexcept { return m_dynamic ? m_dvalue.data() : m_value.data(); }
+    // Copies `num` floats, inline when they fit and on the heap otherwise.
+    void Fill(const value_type* ptr, std::size_t num) noexcept {
+        m_size    = num;
+        m_dynamic = num > m_value.size();
+        if (m_dynamic) {
+            m_dvalue.assign(ptr, ptr + num);
+        } else if (num != 0) {
+            std::copy_n(ptr, num, m_value.begin());
+        }
     }
+
     bool                    m_dynamic { false };
-    ShaderValueInter        m_value;
+    ShaderValueInter        m_value {};
     std::vector<value_type> m_dvalue;
     size_t                  m_size { 0 };
 };
 
 using ShaderValues   = Map<std::string, ShaderValue>;
 using ShaderValueMap = ShaderValues;
-
-using ShaderCode = std::vector<unsigned int>;
 
 struct ShaderAttribute {
 public:
@@ -110,13 +120,11 @@ public:
     std::string fragmentCode;
     */
 
-    std::vector<ShaderCode> codes;
-
     std::vector<ShaderAttribute> attrs;
     ShaderValues                 default_uniforms;
     std::optional<std::string>   rust_reflection_json;
-    /// Null means translation was never attempted, which is the normal state
-    /// whenever the compatibility renderer is selected. A non-null program
+    /// Null means translation was never attempted, which is the state until the
+    /// parse's pending translations are flushed. A non-null program
     /// that reports an error means it was attempted and failed. The two must
     /// stay distinguishable: only the second is a fault in the shader.
     std::shared_ptr<const SceneMetalProgram> metal_program;

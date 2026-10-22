@@ -1,69 +1,180 @@
+// Clean-room implementation from the WallpaperMachine spec p1-scene-structure.md; written without access to the original source.
 #include "WPMaterial.h"
+#include "WPObjectSchema.hpp"
 
+#include "Utils/Logging.h"
+
+#include <algorithm>
+#include <cmath>
+#include <iterator>
 #include <cstddef>
+#include <sstream>
 
 using namespace wallpaper::wpscene;
 
 namespace
 {
-WPUserTexture ParseUserTexture(const nlohmann::json& json) {
-    WPUserTexture user_texture;
-    if (json.is_null()) return user_texture;
+
+// Reads a JSON array into a list, one `decode` call per element. Anything that
+// is not an array reads as an empty list.
+template<typename Item, typename Decode>
+std::vector<Item> DecodeArray(const nlohmann::json& json, Decode decode) {
+    std::vector<Item> items;
+    if (! json.is_array()) return items;
+    items.reserve(json.size());
+    std::transform(json.begin(), json.end(), std::back_inserter(items), decode);
+    return items;
+}
+
+// The slot-indexed lists of a pass (`textures`, `usertextures`) layer on top of
+// each other: the list grows to the longer one, and a slot of `top` that is not
+// `vacant` replaces the slot below it.
+template<typename Item, typename Vacant>
+void OverlaySlots(std::vector<Item>& base, const std::vector<Item>& top, Vacant vacant) {
+    if (top.size() > base.size()) base.resize(top.size());
+    for (std::size_t i = 0; i < top.size(); ++i) {
+        if (! vacant(top[i])) base[i] = top[i];
+    }
+}
+
+// A `usertextures` entry: a bare string names a project property; an object
+// holds `name` and, for the runtime's own images, `type`. Anything else
+// (`null`, an empty object, a number) leaves the slot as it is.
+WPUserTexture DecodeUserTexture(const nlohmann::json& json) {
+    const auto text = [&json](const char* key) {
+        const auto found = json.find(key);
+        return found != json.end() && found->is_string() ? found->get<std::string>()
+                                                         : std::string();
+    };
+    WPUserTexture texture;
     if (json.is_string()) {
-        GET_JSON_VALUE_NOWARN(json, user_texture.name);
-        return user_texture;
+        texture.name = json.get<std::string>();
+    } else if (json.is_object()) {
+        texture.name = text("name");
+        texture.type = text("type");
     }
-    if (json.is_object()) {
-        GET_JSON_NAME_VALUE_NOWARN(json, "name", user_texture.name);
-        GET_JSON_NAME_VALUE_NOWARN(json, "type", user_texture.type);
-    }
-    return user_texture;
+    return texture;
 }
 
-void ParseUserTextures(const nlohmann::json& json, std::vector<WPUserTexture>& usertextures) {
-    if (! json.contains("usertextures")) return;
-    for (const auto& item : json.at("usertextures")) {
-        usertextures.push_back(ParseUserTexture(item));
-    }
+std::string DecodeTexturePath(const nlohmann::json& json) {
+    return json.is_string() ? json.get<std::string>() : std::string();
 }
 
-bool UserTextureEmpty(const WPUserTexture& user_texture) {
-    return user_texture.name.empty() && user_texture.type.empty();
-}
-
-WPConstantShaderValue ParseConstantShaderValue(const nlohmann::json& json) {
-    WPConstantShaderValue result;
-
-    if (json.is_object()) {
-        GET_JSON_NAME_VALUE_NOWARN(json, "user", result.user);
-        GET_JSON_NAME_VALUE_NOWARN(json, "script", result.script);
-        if (json.contains("scriptproperties")) {
-            result.scriptproperties = json.at("scriptproperties");
+std::unordered_map<std::string, int32_t> ReadCombos(const nlohmann::json& json) {
+    std::unordered_map<std::string, int32_t> combos;
+    if (! json.is_object()) return combos;
+    for (const auto& [name, value] : json.items()) {
+        if (value.is_boolean()) {
+            combos[name] = value.get<bool>() ? 1 : 0;
+        } else if (value.is_number()) {
+            int32_t number = 0;
+            if (ReadNumberSetting(value, number)) combos[name] = number;
         }
-        if (json.contains("animation")) {
-            result.animation = json.at("animation");
+    }
+    return combos;
+}
+
+// The numbers a constant's `value` holds. A string is split at white space and a
+// piece that is not a number reads as 0; an array keeps its numbers (and reads
+// any other element as 0); a bare number is one component.
+std::vector<float> ReadConstantComponents(const nlohmann::json& value) {
+    std::vector<float> lanes;
+    if (value.is_number()) {
+        lanes.push_back(value.get<float>());
+    } else if (value.is_string()) {
+        std::istringstream words(value.get<std::string>());
+        std::string        piece;
+        while (words >> piece) {
+            float number = 0.0f;
+            if (! detail::ParseNumberToken(piece, number)) number = 0.0f;
+            lanes.push_back(number);
         }
-        if (json.contains("value")) {
-            if (json.at("value").is_array()) {
-                result.value = json.at("value").get<std::vector<float>>();
-            } else {
-                GET_JSON_VALUE(json.at("value"), result.value);
+    } else if (value.is_array()) {
+        for (const auto& element : value) {
+            lanes.push_back(element.is_number() ? element.get<float>() : 0.0f);
+        }
+    }
+    return lanes;
+}
+
+// One `constantshadervalues` entry. An entry that cannot be read has no
+// components and does not fail the material.
+WPConstantShaderValue ReadConstant(const nlohmann::json& json) {
+    WPConstantShaderValue constant;
+    if (! json.is_object()) {
+        if (json.is_number() || json.is_string()) constant.value = ReadConstantComponents(json);
+        return constant;
+    }
+    if (const auto value = json.find("value"); value != json.end()) {
+        constant.value = ReadConstantComponents(*value);
+    }
+    // A constant's property is a plain name, or the `{name, condition}` form: then the
+    // constant is the flag "the choice equals the condition", 1 or 0.
+    if (const auto user = json.find("user"); user != json.end()) {
+        if (user->is_string()) {
+            constant.user = user->get<std::string>();
+        } else if (user->is_object()) {
+            const auto name = user->find("name");
+            if (name != user->end() && name->is_string()) {
+                constant.user = name->get<std::string>();
+                const auto condition = user->find("condition");
+                if (condition != user->end() && condition->is_string()) {
+                    constant.user_condition = condition->get<std::string>();
+                }
             }
         }
-        return result;
     }
-
-    GET_JSON_VALUE(json, result.value);
-    return result;
+    if (const auto script = json.find("script"); script != json.end() && script->is_string()) {
+        constant.script = script->get<std::string>();
+    }
+    if (const auto props = json.find("scriptproperties"); props != json.end() && props->is_object()) {
+        constant.scriptproperties = *props;
+    }
+    if (const auto animation = json.find("animation");
+        animation != json.end() && animation->is_object()) {
+        constant.animation = *animation;
+    }
+    return constant;
 }
 
-void MergeUserTextures(std::vector<WPUserTexture>&       target,
-                       const std::vector<WPUserTexture>& source) {
-    if (source.size() > target.size()) target.resize(source.size());
-    for (std::size_t index = 0; index < source.size(); ++index) {
-        if (! UserTextureEmpty(source[index])) target[index] = source[index];
+std::unordered_map<std::string, WPConstantShaderValue> ReadConstants(const nlohmann::json& json) {
+    std::unordered_map<std::string, WPConstantShaderValue> constants;
+    if (! json.is_object()) return constants;
+    for (const auto& [name, entry] : json.items()) constants[name] = ReadConstant(entry);
+    return constants;
+}
+
+// What every layer of a pass has in common: slots, user textures, combos and
+// constants (the pass-shaped keys a later layer may override).
+template<typename Target>
+void ReadPassShape(const nlohmann::json& json, Target& target) {
+    if (const auto found = json.find("textures"); found != json.end()) {
+        target.textures = DecodeArray<std::string>(*found, DecodeTexturePath);
+    }
+    if (const auto found = json.find("usertextures"); found != json.end()) {
+        target.usertextures = DecodeArray<WPUserTexture>(*found, DecodeUserTexture);
+    }
+    if (const auto found = json.find("combos"); found != json.end()) {
+        target.combos = ReadCombos(*found);
+    }
+    if (const auto found = json.find("constantshadervalues"); found != json.end()) {
+        target.constantshadervalues = ReadConstants(*found);
     }
 }
+
+template<typename Target>
+void OverlayPassShape(Target& target, const WPMaterialPass& later) {
+    OverlaySlots(target.textures, later.textures,
+                 [](const std::string& path) { return path.empty(); });
+    OverlaySlots(target.usertextures, later.usertextures, [](const WPUserTexture& user) {
+        return user.name.empty() && user.type.empty();
+    });
+    for (const auto& [name, value] : later.combos) target.combos[name] = value;
+    for (const auto& [name, value] : later.constantshadervalues) {
+        target.constantshadervalues[name] = value;
+    }
+}
+
 } // namespace
 
 bool wallpaper::wpscene::IsSystemUserTexture(const WPUserTexture& user_texture) {
@@ -75,121 +186,68 @@ bool wallpaper::wpscene::IsSystemUserTexture(const WPUserTexture& user_texture) 
 }
 
 bool WPMaterialPassBindItem::FromJson(const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE(json, "name", name);
-    GET_JSON_NAME_VALUE(json, "index", index);
+    if (! json.is_object()) return false;
+    const auto name = json.find("name");
+    if (name == json.end() || ! name->is_string()) return false;
+    this->name = name->get<std::string>();
+    index      = 0;
+    if (const auto slot = json.find("index"); slot != json.end()) {
+        ReadNumberSetting(*slot, index);
+    }
     return true;
 }
 
+// A later layer of the same pass: textures and user textures replace by slot
+// where it names one, constants and combos replace by key. `target` and `bind`
+// belong to the effect file's entry and are never overridden.
 void WPMaterialPass::Update(const WPMaterialPass& p) {
-    int32_t i = -1;
-    for (const auto& el : p.textures) {
-        i++;
-        if (p.textures.size() > textures.size()) textures.resize(p.textures.size());
-        if (! el.empty()) {
-            textures[i] = el;
-        }
-    }
-    MergeUserTextures(usertextures, p.usertextures);
-    for (const auto& el : p.constantshadervalues) {
-        constantshadervalues[el.first] = el.second;
-    }
-    for (const auto& el : p.combos) {
-        combos[el.first] = el.second;
-    }
+    OverlayPassShape(*this, p);
 }
 
 void WPMaterial::MergePass(const WPMaterialPass& p) {
-    int32_t i = -1;
-    for (const auto& el : p.textures) {
-        i++;
-        if (p.textures.size() > textures.size()) textures.resize(p.textures.size());
-        if (! el.empty()) {
-            textures[i] = el;
-        }
-    }
-    MergeUserTextures(usertextures, p.usertextures);
-    for (const auto& el : p.constantshadervalues) {
-        constantshadervalues[el.first] = el.second;
-    }
-    for (const auto& el : p.combos) {
-        combos[el.first] = el.second;
-    }
+    OverlayPassShape(*this, p);
 }
 
 bool WPMaterialPass::FromJson(const nlohmann::json& json) {
-    if (json.contains("textures")) {
-        for (const auto& jT : json.at("textures")) {
-            std::string tex;
-            if (! jT.is_null()) GET_JSON_VALUE(jT, tex);
-            textures.push_back(tex);
-        }
+    if (! json.is_object()) return false;
+    ReadPassShape(json, *this);
+    if (const auto found = json.find("target"); found != json.end() && found->is_string()) {
+        target = found->get<std::string>();
     }
-    ParseUserTextures(json, usertextures);
-    if (json.contains("constantshadervalues")) {
-        for (const auto& jC : json.at("constantshadervalues").items()) {
-            std::string name;
-            GET_JSON_VALUE(jC.key(), name);
-            constantshadervalues[name] = ParseConstantShaderValue(jC.value());
-        }
-    }
-    if (json.contains("combos")) {
-        for (const auto& jC : json.at("combos").items()) {
-            std::string name;
-            int32_t     value;
-            GET_JSON_VALUE(jC.key(), name);
-            GET_JSON_VALUE(jC.value(), value);
-            combos[name] = value;
-        }
-    }
-    GET_JSON_NAME_VALUE_NOWARN(json, "target", target);
-    if (json.contains("bind")) {
-        for (const auto& jB : json.at("bind")) {
-            WPMaterialPassBindItem bindItem;
-            bindItem.FromJson(jB);
-            bind.push_back(bindItem);
+    if (const auto found = json.find("bind"); found != json.end() && found->is_array()) {
+        for (const auto& entry : *found) {
+            WPMaterialPassBindItem item;
+            if (item.FromJson(entry)) bind.push_back(std::move(item));
         }
     }
     return true;
 }
 
 bool WPMaterial::FromJson(const nlohmann::json& json) {
-    if (! json.contains("passes") || json.at("passes").size() == 0) {
-        LOG_ERROR("material no data");
+    if (! json.is_object()) return false;
+    const auto passes = json.find("passes");
+    if (passes == json.end() || ! passes->is_array() || passes->empty()) {
+        LOG_ERROR("material has no passes");
         return false;
     }
-    const auto jContent = json.at("passes").at(0);
-    if (! jContent.contains("shader")) {
-        LOG_ERROR("material no shader");
+    // Only the first pass is a layer's material.
+    const auto& first = passes->front();
+    if (! first.is_object()) return false;
+    const auto shader_name = first.find("shader");
+    if (shader_name == first.end() || ! shader_name->is_string()) {
+        LOG_ERROR("material pass has no shader");
         return false;
     }
-    GET_JSON_NAME_VALUE(jContent, "blending", blending);
-    GET_JSON_NAME_VALUE(jContent, "cullmode", cullmode);
-    GET_JSON_NAME_VALUE(jContent, "depthtest", depthtest);
-    GET_JSON_NAME_VALUE(jContent, "depthwrite", depthwrite);
-    GET_JSON_NAME_VALUE(jContent, "shader", shader);
-    if (jContent.contains("textures")) {
-        for (const auto& jT : jContent.at("textures")) {
-            std::string tex;
-            if (! jT.is_null()) GET_JSON_VALUE(jT, tex);
-            textures.push_back(tex);
+    shader = shader_name->get<std::string>();
+    const auto word = [&first](const char* key, std::string& out) {
+        if (const auto found = first.find(key); found != first.end() && found->is_string()) {
+            out = found->get<std::string>();
         }
-    }
-    ParseUserTextures(jContent, usertextures);
-    if (jContent.contains("constantshadervalues")) {
-        for (const auto& jC : jContent.at("constantshadervalues").items()) {
-            std::string name;
-            GET_JSON_VALUE(jC.key(), name);
-            constantshadervalues[name] = ParseConstantShaderValue(jC.value());
-        }
-    }
-    if (jContent.contains("combos")) {
-        for (const auto& jC : jContent.at("combos").items()) {
-            std::string name;
-            int32_t     value;
-            GET_JSON_VALUE(jC.key(), name);
-            GET_JSON_VALUE(jC.value(), value);
-            combos[name] = value;
-        }
-    }
+    };
+    word("blending", blending);
+    word("cullmode", cullmode);
+    word("depthtest", depthtest);
+    word("depthwrite", depthwrite);
+    ReadPassShape(first, *this);
     return true;
 }

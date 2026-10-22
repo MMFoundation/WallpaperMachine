@@ -238,156 +238,39 @@ async fn render_scale_is_supported_when_a_web_wallpaper_runs() {
 }
 
 #[tokio::test]
-async fn video_backend_report_names_the_running_backend_and_only_real_fallbacks() {
+async fn the_video_report_names_the_display_and_wallpaper_and_has_no_problem_to_report() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
     engine.set_snapshot(vec![display_with_scene(7, 1)]);
     let bridge = bridge_with(&engine, &temp);
     commit(&bridge, "300", "video", "7").await;
 
-    let compatibility = settings(&bridge).await;
-    assert_eq!(compatibility.video_backend, "compatibility");
-    assert_eq!(compatibility.video_backends.len(), 1);
-    assert_eq!(compatibility.video_backends[0].display_id, 7);
-    assert_eq!(compatibility.video_backends[0].wallpaper_id, "300");
-    assert_eq!(compatibility.video_backends[0].backend, "legacy");
-    assert_eq!(
-        compatibility.video_backends[0].fallback_reason, None,
-        "the scene engine is not a fallback when it is what the user chose"
-    );
-
-    let native = bridge
-        .set_video_backend("native_preferred".into())
-        .await
-        .unwrap()
-        .settings;
-    assert_eq!(native.video_backend, "native_preferred");
+    let native = settings(&bridge).await;
+    assert_eq!(native.video_backends.len(), 1);
+    assert_eq!(native.video_backends[0].display_id, 7);
+    assert_eq!(native.video_backends[0].wallpaper_id, "300");
     assert_eq!(native.video_backends[0].backend, "native");
     assert_eq!(native.video_backends[0].fallback_reason, None);
-
-    let key = bridge
-        .native_video_wallpapers()
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|row| row.wallpaper_id == "300")
-        .expect("the wallpaper has to be offered natively before it can be refused")
-        .admission_key;
-    bridge
-        .reject_native_video("300".into(), key, "codec the player cannot decode".into())
-        .await
-        .unwrap();
-
-    let refused = settings(&bridge).await;
-    assert_eq!(refused.video_backends[0].backend, "legacy");
-    assert_eq!(
-        refused.video_backends[0].fallback_reason.as_deref(),
-        Some("codec the player cannot decode")
-    );
 }
 
 #[tokio::test]
-async fn battery_video_backend_report_preserves_native_rejection() {
+async fn a_battery_frame_rate_does_not_change_what_the_video_report_says() {
     let temp = tempfile::tempdir().unwrap();
     let engine = FakeEngineFacade::default();
     engine.set_snapshot(vec![display_with_scene(7, 1)]);
     let bridge = bridge_with(&engine, &temp);
     commit(&bridge, "300", "video", "7").await;
-
-    let compatibility = settings(&bridge).await;
-    assert_eq!(compatibility.video_backend, "compatibility");
-    assert_eq!(compatibility.video_backends.len(), 1);
-    assert_eq!(compatibility.video_backends[0].display_id, 7);
-    assert_eq!(compatibility.video_backends[0].wallpaper_id, "300");
-    assert_eq!(compatibility.video_backends[0].backend, "legacy");
-    assert_eq!(
-        compatibility.video_backends[0].fallback_reason, None,
-        "the scene engine is not a fallback when it is what the user chose"
-    );
-
-    let native = bridge
-        .set_video_backend("native_preferred".into())
-        .await
-        .unwrap()
-        .settings;
-    assert_eq!(native.video_backend, "native_preferred");
-    assert_eq!(native.video_backends[0].backend, "native");
-    assert_eq!(native.video_backends[0].fallback_reason, None);
 
     bridge.set_battery_quality_profile(0.5, 24).await.unwrap();
     bridge.set_battery_mode(crate::BridgeBatteryMode::ReducedQuality).await.unwrap();
     bridge.set_power_source_for_test(PowerSource::Battery).await;
-    assert_eq!(bridge.native_video_wallpapers().await.unwrap()[0].admission_fps, 24);
-
-    let key = bridge
-        .native_video_wallpapers()
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|row| row.wallpaper_id == "300")
-        .expect("the wallpaper has to be offered natively before it can be refused")
-        .admission_key;
-    bridge
-        .reject_native_video("300".into(), key, "codec the player cannot decode".into())
-        .await
-        .unwrap();
-
-    let refused = settings(&bridge).await;
-    assert_eq!(refused.video_backends[0].backend, "legacy");
     assert_eq!(
-        refused.video_backends[0].fallback_reason.as_deref(),
-        Some("codec the player cannot decode")
+        bridge.native_video_wallpapers().await.unwrap().len(),
+        1,
+        "a battery frame rate does not take a clip off the native player"
     );
+    let report = settings(&bridge).await;
+    assert_eq!(report.video_backends[0].backend, "native");
+    assert_eq!(report.video_backends[0].fallback_reason, None);
 }
 
-#[tokio::test]
-async fn unknown_video_backend_mode_is_rejected() {
-    let temp = tempfile::tempdir().unwrap();
-    let engine = FakeEngineFacade::default();
-    let bridge = bridge_with(&engine, &temp);
-
-    let error = bridge
-        .set_video_backend("turbo".into())
-        .await
-        .expect_err("only the two declared modes exist");
-
-    assert_eq!(error.kind(), crate::BridgeErrorKind::InvalidInput);
-}
-
-#[tokio::test]
-async fn shared_video_decode_counts_come_from_the_renderer() {
-    let temp = tempfile::tempdir().unwrap();
-    let engine = FakeEngineFacade::default();
-    let bridge = bridge_with(&engine, &temp);
-    engine.set_shared_video_decode_counts(1, 3);
-
-    let snapshot = bridge
-        .set_shared_video_decode_enabled(true)
-        .await
-        .unwrap()
-        .settings;
-
-    assert!(snapshot.shared_video_decode_enabled);
-    assert_eq!(snapshot.shared_video_decode_sessions, 1);
-    assert_eq!(
-        snapshot.shared_video_decode_consumers, 3,
-        "sharing is consumers exceeding sessions, not the setting being on"
-    );
-}
-
-#[tokio::test]
-async fn content_pacing_is_reported_from_the_renderer_not_the_preference() {
-    let temp = tempfile::tempdir().unwrap();
-    let engine = FakeEngineFacade::default();
-    let bridge = bridge_with(&engine, &temp);
-
-    assert!(!settings(&bridge).await.content_pacing_enabled);
-
-    let snapshot = bridge
-        .set_content_pacing_enabled(true)
-        .await
-        .unwrap()
-        .settings;
-
-    assert!(snapshot.content_pacing_enabled);
-}

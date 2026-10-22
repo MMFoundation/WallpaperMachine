@@ -19,6 +19,7 @@
 #include "SpecTexs.hpp"
 #include "WPParticleParser.hpp"
 #include "WPSceneParser.hpp"
+#include "support/byte_fs.hpp"
 #include "wpscene/WPParticleObject.h"
 #include "wpscene/WPScene.h"
 
@@ -52,23 +53,12 @@ using nlohmann::json;
 // Fixtures
 // ---------------------------------------------------------------------------
 
-class MemoryFs final : public fs::Fs {
-public:
-    explicit MemoryFs(std::map<std::string, std::string> files): m_files(std::move(files)) {}
-    bool Contains(std::string_view path) const override {
-        return m_files.contains(std::string(path));
-    }
-    std::shared_ptr<fs::IBinaryStream> Open(std::string_view path) override {
-        const auto it = m_files.find(std::string(path));
-        if (it == m_files.end()) return nullptr;
-        const auto& s = it->second;
-        return std::make_shared<fs::MemBinaryStream>(std::vector<uint8_t>(s.begin(), s.end()));
-    }
-    std::shared_ptr<fs::IBinaryStreamW> OpenW(std::string_view) override { return nullptr; }
-
-private:
-    std::map<std::string, std::string> m_files;
-};
+/// The text files of a fixture as the byte map the in-memory file space serves.
+test::MapFs::Files FilesAsBytes(const std::map<std::string, std::string>& files) {
+    test::MapFs::Files bytes;
+    for (const auto& [name, content] : files) bytes[name].assign(content.begin(), content.end());
+    return bytes;
+}
 
 /// A generator that builds no geometry: the tests read the simulation itself.
 class SilentGener final : public IParticleRawGener {
@@ -343,8 +333,8 @@ TEST(ParticleSpawn, BoxWithoutAMinimumIsUnchanged) {
 
 TEST(ParticleSpawn, ControlpointOrientationTurnsTheSpawnOfAnEmitterThatNamesIt) {
     std::array<ParticleControlpoint, 8> controlpoints {};
-    controlpoints[2].offset       = Eigen::Vector3d(100.0, 0.0, 0.0);
-    controlpoints[2].rotation     = Eigen::AngleAxisd(M_PI / 2.0, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+    controlpoints[2].offset       = linalg::Vector3d(100.0, 0.0, 0.0);
+    controlpoints[2].rotation     = linalg::AngleAxisd(M_PI / 2.0, linalg::Vector3d::UnitZ()).toRotationMatrix();
     controlpoints[2].has_rotation = true;
     const auto particles = SpawnBurst({ { "name", "boxrandom" },
                                         { "distancemin", "-1 0 0" },
@@ -362,7 +352,7 @@ TEST(ParticleSpawn, ControlpointOrientationTurnsTheSpawnOfAnEmitterThatNamesIt) 
         EXPECT_LE(p.position.y(), 5.0f + 10.0f + 1.0e-3f);
     }
     // The first control point never turns a spawn.
-    controlpoints[0].offset       = Eigen::Vector3d(100.0, 0.0, 0.0);
+    controlpoints[0].offset       = linalg::Vector3d(100.0, 0.0, 0.0);
     controlpoints[0].rotation     = controlpoints[2].rotation;
     controlpoints[0].has_rotation = true;
     const auto first              = SpawnBurst({ { "name", "boxrandom" },
@@ -736,7 +726,7 @@ TEST(Initializers, TheLifetimeStaysReplacedWhileSizeAndAlphaScale) {
     for (const auto& p : particles) EXPECT_FLOAT_EQ(p.lifetime, 2.0f);
 }
 
-Eigen::Vector3f Hsv(const Eigen::Vector3f& c) {
+linalg::Vector3f Hsv(const linalg::Vector3f& c) {
     const float mx = c.maxCoeff(), mn = c.minCoeff(), range = mx - mn;
     if (range < 1.0e-5f) return { 0.0f, 0.0f, mx };
     float h;
@@ -749,7 +739,7 @@ Eigen::Vector3f Hsv(const Eigen::Vector3f& c) {
 }
 
 ParticleParseContext ColourContext(const json& initializers, const json& operators,
-                                   Eigen::Vector3f colorn, bool with_override = true) {
+                                   linalg::Vector3f colorn, bool with_override = true) {
     ParticleParseContext ctx;
     std::vector<json>    ini(initializers.begin(), initializers.end());
     std::vector<json>    ops(operators.begin(), operators.end());
@@ -855,7 +845,7 @@ TEST(ColourOverride, AnOverrideEqualToTheFilesColourDoesNotTint) {
     auto ctx = ColourContext(json::array(), operators, { 1.0f, 0.74902f, 0.0f });
     Particle p;
     WPParticleParser::genOverrideInitOp(ctx.over, ctx.color)(p, 0.0);
-    EXPECT_EQ(p.color, Eigen::Vector3f::Ones());
+    EXPECT_EQ(p.color, linalg::Vector3f::Ones());
 }
 
 TEST(ColourOverride, AColourchangeEndRetintedPastRedIsTintedBackToRed) {
@@ -1043,7 +1033,7 @@ struct SpawnRig {
 
 TEST(SequenceInitializers, MapSequenceAroundSpacesConsecutiveSpawnsAroundTheAxis) {
     SpawnRig rig;
-    rig.controlpoints[0].offset = Eigen::Vector3d(10.0, 20.0, 0.0);
+    rig.controlpoints[0].offset = linalg::Vector3d(10.0, 20.0, 0.0);
     rig.Sync();
     const auto op = WPParticleParser::genParticleInitOp(
         { { "name", "mapsequencearoundcontrolpoint" },
@@ -1052,14 +1042,14 @@ TEST(SequenceInitializers, MapSequenceAroundSpacesConsecutiveSpawnsAroundTheAxis
           { "speedmin", "0 0 100" },
           { "speedmax", "0 0 100" } },
         rig.ctx);
-    std::vector<Eigen::Vector3f> spots;
+    std::vector<linalg::Vector3f> spots;
     for (int i = 0; i < 4; ++i) {
         Particle p;
         p.position = { 10.0f + 5.0f, 20.0f, 3.0f }; // 5 units from the axis, 3 along it
         op(p, 0.0);
         spots.push_back(p.position);
         EXPECT_NEAR(p.position.z(), 3.0f, 1.0e-4f) << "the height along the axis is kept";
-        EXPECT_NEAR(Eigen::Vector2f(p.position.x() - 10.0f, p.position.y() - 20.0f).norm(), 5.0f, 1.0e-4f);
+        EXPECT_NEAR(linalg::Vector2f(p.position.x() - 10.0f, p.position.y() - 20.0f).norm(), 5.0f, 1.0e-4f);
         EXPECT_NEAR(p.velocity.z(), 100.0f, 1.0e-3f) << "the axis speed is added";
     }
     // A quarter turn between neighbours.
@@ -1074,8 +1064,8 @@ TEST(SequenceInitializers, MapSequenceAroundTurnsItsAxisWithTheControlpoint) {
     // axis (0 0 1) to (0 -1 0): the spawns circle that axis, keep their height
     // along it (here the y coordinate) and the axis speed points along it.
     SpawnRig rig;
-    rig.controlpoints[0].offset       = Eigen::Vector3d(10.0, 20.0, 0.0);
-    rig.controlpoints[0].rotation     = Eigen::AngleAxisd(M_PI / 2.0, Eigen::Vector3d::UnitX()).toRotationMatrix();
+    rig.controlpoints[0].offset       = linalg::Vector3d(10.0, 20.0, 0.0);
+    rig.controlpoints[0].rotation     = linalg::AngleAxisd(M_PI / 2.0, linalg::Vector3d::UnitX()).toRotationMatrix();
     rig.controlpoints[0].has_rotation = true;
     rig.Sync();
     const auto op = WPParticleParser::genParticleInitOp(
@@ -1085,14 +1075,14 @@ TEST(SequenceInitializers, MapSequenceAroundTurnsItsAxisWithTheControlpoint) {
           { "speedmin", "0 0 100" },
           { "speedmax", "0 0 100" } },
         rig.ctx);
-    std::vector<Eigen::Vector3f> spots;
+    std::vector<linalg::Vector3f> spots;
     for (int i = 0; i < 4; ++i) {
         Particle p;
         p.position = { 15.0f, 23.0f, 0.0f }; // 5 from the axis in x, 3 along y from the control point
         op(p, 0.0);
         spots.push_back(p.position);
         EXPECT_NEAR(p.position.y(), 23.0f, 1.0e-4f) << "the height along the turned axis is kept";
-        EXPECT_NEAR(Eigen::Vector2f(p.position.x() - 10.0f, p.position.z()).norm(), 5.0f, 1.0e-4f);
+        EXPECT_NEAR(linalg::Vector2f(p.position.x() - 10.0f, p.position.z()).norm(), 5.0f, 1.0e-4f);
         EXPECT_NEAR(p.velocity.y(), -100.0f, 1.0e-3f) << "the axis speed follows the turned axis";
         EXPECT_NEAR(p.velocity.z(), 0.0f, 1.0e-3f);
     }
@@ -1103,8 +1093,8 @@ TEST(SequenceInitializers, MapSequenceAroundTurnsItsAxisWithTheControlpoint) {
 
 TEST(SequenceInitializers, MapSequenceBetweenStringsSpawnsAlongTheSegmentBetweenTwoControlpoints) {
     SpawnRig rig;
-    rig.controlpoints[0].offset = Eigen::Vector3d(0.0, 0.0, 0.0);
-    rig.controlpoints[1].offset = Eigen::Vector3d(0.0, -450.0, 0.0);
+    rig.controlpoints[0].offset = linalg::Vector3d(0.0, 0.0, 0.0);
+    rig.controlpoints[1].offset = linalg::Vector3d(0.0, -450.0, 0.0);
     rig.Sync();
     const auto op = WPParticleParser::genParticleInitOp(
         { { "name", "mapsequencebetweencontrolpoints" }, { "count", 4 } }, rig.ctx);
@@ -1123,7 +1113,7 @@ TEST(SequenceInitializers, MapSequenceBetweenStringsSpawnsAlongTheSegmentBetween
 
 TEST(SequenceInitializers, MapSequenceBetweenFlagsPinchTheEndsAndArcTheMiddle) {
     SpawnRig rig;
-    rig.controlpoints[1].offset = Eigen::Vector3d(100.0, 0.0, 0.0);
+    rig.controlpoints[1].offset = linalg::Vector3d(100.0, 0.0, 0.0);
     rig.Sync();
     // Flags 1 (pinch the sideways spread at the ends), 4 (smaller toward the
     // ends) and 8 (arc by arcamount in arcdirection).
@@ -1153,8 +1143,8 @@ TEST(SequenceInitializers, MapSequenceBetweenFlagsPinchTheEndsAndArcTheMiddle) {
 
 TEST(SequenceInitializers, InheritControlpointVelocityTakesAShareOfTheControlpointsMotion) {
     SpawnRig rig;
-    rig.controlpoints[2].offset      = Eigen::Vector3d(10.0, 0.0, 0.0);
-    rig.controlpoints[2].prev_offset = Eigen::Vector3d(0.0, 0.0, 0.0);
+    rig.controlpoints[2].offset      = linalg::Vector3d(10.0, 0.0, 0.0);
+    rig.controlpoints[2].prev_offset = linalg::Vector3d(0.0, 0.0, 0.0);
     rig.spawn->frame_time            = 0.5;
     rig.Sync();
     const auto op = WPParticleParser::genParticleInitOp(
@@ -1312,7 +1302,7 @@ TEST(Movement, FlagOneKeepsGravityAlignedToTheScreenOnATurnedLayer) {
         .time_pass     = 1.0,
     };
     // The layer is turned a quarter of a turn about z: world down is local +x.
-    info.world_to_local = Eigen::AngleAxisd(-M_PI / 2.0, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+    info.world_to_local = linalg::AngleAxisd(-M_PI / 2.0, linalg::Vector3d::UnitZ()).toRotationMatrix();
     op(info);
     EXPECT_NEAR(particles[0].velocity.x(), -10.0f, 1.0e-4f);
     EXPECT_NEAR(particles[0].velocity.y(), 0.0f, 1.0e-4f);
@@ -1388,7 +1378,7 @@ TEST(Movement, FlagOneGravityKeepsTheLayersScale) {
                                 1.0, ParticleSubSystem::SpawnType::STATIC,
                                 [](const Particle&, const ParticleRawGenSpec&) {});
     auto owner = std::make_shared<SceneNode>();
-    owner->SetScale(Eigen::Vector3f(2.0f, 2.0f, 2.0f));
+    owner->SetScale(linalg::Vector3f(2.0f, 2.0f, 2.0f));
     subsystem.SetOwnerNode(owner);
     subsystem.SetNeedsWorldAxes(true);
     subsystem.AddOperator(MakeOperator({ { "name", "movement" }, { "gravity", "0 -10 0" }, { "flags", 1 } }));
@@ -1417,7 +1407,7 @@ TEST(Movement, FlagOneGravityOfAWorldspaceSystemNeedsNoTurningByItsLayer) {
                                     1, 1.0, ParticleSubSystem::SpawnType::STATIC,
                                     [](const Particle&, const ParticleRawGenSpec&) {});
         auto owner = std::make_shared<SceneNode>();
-        owner->SetScale(Eigen::Vector3f(2.0f, 2.0f, 2.0f));
+        owner->SetScale(linalg::Vector3f(2.0f, 2.0f, 2.0f));
         subsystem.SetOwnerNode(owner);
         subsystem.SetWorldSpace(world_space);
         subsystem.SetNeedsWorldAxes(true);
@@ -1446,7 +1436,7 @@ TEST(AngularMovement, DragDampsTheSpinInsteadOfPullingTheAngleBack) {
     EXPECT_NEAR(particles[0].rotation.z(), 2.0f + 0.4f, 1.0e-5f);
     EXPECT_NEAR(particles[0].angularVelocity.z(), 4.0f * 0.95f, 1.0e-5f);
     // A particle that does not spin keeps its angle however large it is.
-    particles[0].angularVelocity = Eigen::Vector3f::Zero();
+    particles[0].angularVelocity = linalg::Vector3f::Zero();
     particles[0].rotation        = { 0.0f, 0.0f, 3.0f };
     RunOperator(op, particles, 0.1);
     EXPECT_NEAR(particles[0].rotation.z(), 3.0f, 1.0e-6f);
@@ -1475,7 +1465,7 @@ TEST(ControlpointAttract, FlagTwoNeverCarriesAParticlePastTheControlpoint) {
                                      { "controlpoint", 0 },
                                      { "scale", 1000.0 },
                                      { "threshold", 1.0 } });
-    particles[0].velocity = Eigen::Vector3f::Zero();
+    particles[0].velocity = linalg::Vector3f::Zero();
     RunOperator(free, particles, 1.0);
     EXPECT_NEAR(particles[0].velocity.x(), -500.0f, 1.0e-3f);
 }
@@ -1692,7 +1682,7 @@ TEST(Turbulence, TheSpeedOverrideScalesTheParticleSpeedUnlessTheFileIgnoresIt) {
         RunOperator(op, particles, 0.1);
         return particles[0].velocity;
     };
-    const Eigen::Vector3f base = kick(MakeOperator(fields));
+    const linalg::Vector3f base = kick(MakeOperator(fields));
     ASSERT_GT(base.norm(), 0.0f);
     EXPECT_NEAR(kick(MakeOperator(fields, over)).norm() / base.norm(), 2.5f, 1.0e-3f);
     EXPECT_NEAR(kick(MakeOperatorIn(fields, IgnoringSpeedOverride(over))).norm() / base.norm(), 1.0f,
@@ -1761,7 +1751,7 @@ TEST(Vortex, PushesParticlesAroundTheControlpointNotTheOrigin) {
                         { "speedinner", 10.0 }, { "speedouter", 0.0 } };
     const auto op = MakeOperator(fields);
     std::array<ParticleControlpoint, 8> controlpoints {};
-    controlpoints[1].offset = Eigen::Vector3d(100.0, 0.0, 0.0);
+    controlpoints[1].offset = linalg::Vector3d(100.0, 0.0, 0.0);
     std::array<Particle, 1> particles { LivingParticle() };
     particles[0].position = { 101.0f, 0.0f, 0.0f };
     RunOperator(op, particles, 1.0, controlpoints);
@@ -1798,7 +1788,7 @@ TEST(Vortex, FlagOneMeasuresDistanceFromTheAxisAlone) {
     // With the infinite-axis flag only the distance to the axis counts.
     fields["flags"] = 1;
     RunOperator(MakeOperator(fields), near_axis, 1.0);
-    high_up[0].velocity = Eigen::Vector3f::Zero();
+    high_up[0].velocity = linalg::Vector3f::Zero();
     RunOperator(MakeOperator(fields), high_up, 1.0);
     EXPECT_NEAR(near_axis[0].velocity.y(), -10.0f, 1.0e-3f);
     EXPECT_NEAR(high_up[0].velocity.y(), near_axis[0].velocity.y(), 1.0e-3f);
@@ -1972,8 +1962,8 @@ TEST(Collision, ASphereWithoutAnOriginSitsTwoHundredBelowTheOriginInAPixelScene)
 /// turned a quarter of a turn about z.
 std::array<ParticleControlpoint, 8> TurnedControlpoint() {
     std::array<ParticleControlpoint, 8> points {};
-    points[1].offset       = Eigen::Vector3d(10.0, 100.0, 0.0);
-    points[1].rotation     = Eigen::AngleAxisd(M_PI / 2.0, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+    points[1].offset       = linalg::Vector3d(10.0, 100.0, 0.0);
+    points[1].rotation     = linalg::AngleAxisd(M_PI / 2.0, linalg::Vector3d::UnitZ()).toRotationMatrix();
     points[1].has_rotation = true;
     return points;
 }
@@ -2108,7 +2098,7 @@ struct ParticleScene {
             { "/materials/a.tex.tex", "" },
         };
         for (auto& [name, content] : particle_files) files[name] = std::move(content);
-        EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+        EXPECT_TRUE(vfs.Mount("/assets", std::make_unique<test::MapFs>(FilesAsBytes(files))));
         scene = WPSceneParser().Parse(SceneParseRequest {
                                           .scene_id           = "particle-parity",
                                           .project_properties = &properties,
@@ -2447,7 +2437,7 @@ TEST(WorldSpace, LiveParticlesStayPutWhenTheLayerMovesAndNewOnesFollowIt) {
             ++spawned;
         });
         subsystem.Emitt();
-        owner->SetTranslate(Eigen::Vector3f(100.0f, 0.0f, 0.0f));
+        owner->SetTranslate(linalg::Vector3f(100.0f, 0.0f, 0.0f));
         subsystem.Emitt();
         const auto& particles = subsystem.Instances()[0]->Particles();
         ASSERT_EQ(particles.size(), 2u);
@@ -2487,8 +2477,8 @@ TEST(WorldSpace, ARotatingOrScalingLayerLeavesLiveParticlesAndTheirVelocityAlone
         particles.push_back(p);
     });
     subsystem.Emitt();
-    owner->SetRotation(Eigen::Vector3f(0.0f, 0.0f, static_cast<float>(M_PI / 2.0)));
-    owner->SetScale(Eigen::Vector3f(24.0f, 1.0f, 1.0f));
+    owner->SetRotation(linalg::Vector3f(0.0f, 0.0f, static_cast<float>(M_PI / 2.0)));
+    owner->SetScale(linalg::Vector3f(24.0f, 1.0f, 1.0f));
     subsystem.Emitt();
     const auto& p = subsystem.Instances()[0]->Particles()[0];
     EXPECT_NEAR(p.velocity.x(), 1.0f, 1.0e-4f);
@@ -2507,8 +2497,8 @@ TEST(WorldSpace, AFollowerHangsWhereItsLayersMatrixPutsAWorldspaceParentsParticl
         auto        owner      = std::make_shared<SceneNode>();
         auto        child_node = std::make_shared<SceneNode>();
         owner->AppendChild(child_node);
-        owner->SetTranslate(Eigen::Vector3f(10.0f, 0.0f, 0.0f));
-        owner->SetScale(Eigen::Vector3f(2.0f, 2.0f, 1.0f));
+        owner->SetTranslate(linalg::Vector3f(10.0f, 0.0f, 0.0f));
+        owner->SetScale(linalg::Vector3f(2.0f, 2.0f, 1.0f));
         rig.parent->SetOwnerNode(owner);
         rig.parent->SetWorldSpace(world_space);
         rig.child->SetOwnerNode(child_node);
@@ -2519,8 +2509,8 @@ TEST(WorldSpace, AFollowerHangsWhereItsLayersMatrixPutsAWorldspaceParentsParticl
         // already the follower's coordinate; in scene units it is 50 of them.
         EXPECT_NEAR(anchored, world_space ? 50.0f : 100.0f, 1.0e-3f);
         child_node->UpdateTrans();
-        const Eigen::Vector3d hung =
-            (child_node->ModelTrans() * Eigen::Vector4d(anchored, 0.0, 0.0, 1.0)).head<3>();
+        const linalg::Vector3d hung =
+            (child_node->ModelTrans() * linalg::Vector4d(anchored, 0.0, 0.0, 1.0)).head<3>();
         EXPECT_NEAR(hung.x(), world_space ? 10.0 + 100.0 : 10.0 + 200.0, 1.0e-3);
     }
 }
@@ -2550,7 +2540,7 @@ TEST(WorldSpace, EveryRendererOfAFileIsDrawnFromItsLayersOriginAloneOrThroughIts
         ASSERT_NE(second.Mesh(), nullptr);
         for (SceneNode* node : { layer, &second }) {
             node->UpdateTrans();
-            const Eigen::Matrix4d drawn = node->RenderTrans();
+            const linalg::Matrix4d drawn = node->RenderTrans();
             EXPECT_NEAR(drawn(0, 0), world_space ? 1.0 : 24.0, 1.0e-9);
             EXPECT_NEAR(drawn(1, 1), 1.0, 1.0e-9);
             EXPECT_NEAR(drawn(0, 3), 320.0, 1.0e-9);
@@ -2580,8 +2570,8 @@ TEST(WorldSpace, ALayerUnderAScaledGroupIsDrawnFromItsOriginAndSpreadByTheWholeC
     ASSERT_EQ(group->GetChildren().size(), 1u);
     SceneNode& layer = *group->GetChildren().front();
     layer.UpdateTrans();
-    const Eigen::Matrix4d drawn = layer.RenderTrans();
-    EXPECT_TRUE(Eigen::Matrix3d(drawn.topLeftCorner<3, 3>()).isIdentity(1.0e-12));
+    const linalg::Matrix4d drawn = layer.RenderTrans();
+    EXPECT_TRUE(linalg::Matrix3d(drawn.topLeftCorner<3, 3>()).isIdentity(1.0e-12));
     EXPECT_NEAR(drawn(0, 3), 100.0 + 3.0 * 20.0, 1.0e-9);
     EXPECT_NEAR(drawn(1, 3), 50.0 + 3.0 * 10.0, 1.0e-9);
     ASSERT_EQ(scene.Sub().Instances().size(), 1u);
@@ -3257,7 +3247,7 @@ TEST(RopeGeometry, ATrailIsDrawnAsOnePiecePerSubdivisionBetweenItsRecordedPoints
         instance->ParticlesVec().push_back(p);
         auto& trail = instance->TrailsVec().emplace_back();
         trail.Reset(4);
-        for (int i = 1; i <= 4; ++i) trail.Push({ Eigen::Vector3f(4.0f - static_cast<float>(i), 0.0f, 0.0f) });
+        for (int i = 1; i <= 4; ++i) trail.Push({ linalg::Vector3f(4.0f - static_cast<float>(i), 0.0f, 0.0f) });
         instances.push_back(std::move(instance));
         WPParticleRawGener   gener;
         ParticleRawGenSpecOp spec = [](const Particle&, const ParticleRawGenSpec&) {};
@@ -3394,7 +3384,7 @@ TEST(Renderers, APerspectiveParticleReadsTheEyeTwoThousandUnitsOutWhateverTheLen
         EXPECT_NEAR(eye[2], 2000.0f, 1e-3f);
 
         // A reframed canvas moves the view's centre and the camera's distance.
-        scene.scene->FrameCanvas(2.0, Eigen::Vector2f(-40.0f, 20.0f));
+        scene.scene->FrameCanvas(2.0, linalg::Vector2f(-40.0f, 20.0f));
         eye = read_eye();
         EXPECT_NEAR(eye[0], 280.0f, 1e-3f);
         EXPECT_NEAR(eye[1], 200.0f, 1e-3f);
@@ -3429,8 +3419,8 @@ struct CorpusRig {
         wpscene::Particle particle;
         fs::VFS           vfs;
         if (! vfs.Mount("/assets",
-                        std::make_unique<MemoryFs>(std::map<std::string, std::string> {
-                            { "/mat.json", R"({"passes":[]})" } }))) {
+                        std::make_unique<test::MapFs>(FilesAsBytes(
+                            { { "/mat.json", R"({"passes":[]})" } })))) {
             return nullptr;
         }
         if (! particle.FromJson(document, vfs)) return nullptr;
@@ -3462,7 +3452,7 @@ struct CorpusRig {
         rig->subsystem->SetStartTime(start_cap < 0.0 ? rig->starttime : std::min(rig->starttime, start_cap));
         auto points = rig->subsystem->Controlpoints();
         for (std::size_t i = 0; i < points.size(); ++i) {
-            points[i].base_offset = Eigen::Vector3d(120.0 * static_cast<double>(i), -40.0 * static_cast<double>(i), 0.0);
+            points[i].base_offset = linalg::Vector3d(120.0 * static_cast<double>(i), -40.0 * static_cast<double>(i), 0.0);
             points[i].offset      = points[i].base_offset;
             points[i].prev_offset = points[i].offset;
         }

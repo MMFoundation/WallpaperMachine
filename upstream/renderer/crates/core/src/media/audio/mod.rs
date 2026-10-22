@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec r1c-core-media.md; written without access to the original source.
 mod capture;
 pub mod device_watch;
 
@@ -14,7 +15,6 @@ pub use capture::{DefaultAudioResponseController, PlatformAudioCaptureBackend};
 
 use crate::project::SceneHandle;
 
-/// Safe audio volume wrapper
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AudioVolume(f32);
 
@@ -22,11 +22,27 @@ impl TryFrom<f32> for AudioVolume {
     type Error = AudioInputError;
 
     fn try_from(value: f32) -> Result<Self, Self::Error> {
-        if !value.is_finite() || !(0.0..=1.0).contains(&value) {
-            return Err(AudioInputError::InvalidAudioVolume(value));
+        if value.is_finite() && (0.0..=1.0).contains(&value) {
+            Ok(Self(value))
+        } else {
+            Err(AudioInputError::InvalidAudioVolume(value))
         }
-        Ok(Self(value))
     }
+}
+
+/// Shared checks of every input buffer: the rate first, then emptiness.
+fn check_input(sample_rate: u32, sample_count: usize) -> Result<(), AudioInputError> {
+    if sample_rate == 0 {
+        return Err(AudioInputError::InvalidSampleRate);
+    }
+    if sample_count == 0 {
+        return Err(AudioInputError::EmptyInput);
+    }
+    Ok(())
+}
+
+fn saturating_count(frames: usize) -> u32 {
+    u32::try_from(frames).unwrap_or(u32::MAX)
 }
 
 impl From<AudioVolume> for f32 {
@@ -42,25 +58,14 @@ pub struct InterleavedStereoF32<'a> {
 }
 
 impl<'a> InterleavedStereoF32<'a> {
-    /// Creates an interleaved stereo PCM view.
-    ///
     /// # Errors
     ///
-    /// Returns [`AudioInputError::InvalidSampleRate`] when `sample_rate` is
-    /// zero, [`AudioInputError::EmptyInput`] when `samples` is empty, or
-    /// [`AudioInputError::OddSampleCount`] when the buffer does not contain
-    /// complete left/right sample pairs.
+    /// Returns [`AudioInputError`] for a zero rate, no samples or an odd sample count.
     pub fn new(sample_rate: u32, samples: &'a [f32]) -> Result<Self, AudioInputError> {
-        if sample_rate == 0 {
-            return Err(AudioInputError::InvalidSampleRate);
-        }
-        if samples.is_empty() {
-            return Err(AudioInputError::EmptyInput);
-        }
-        if !samples.len().is_multiple_of(2) {
+        check_input(sample_rate, samples.len())?;
+        if samples.len() % 2 != 0 {
             return Err(AudioInputError::OddSampleCount(samples.len()));
         }
-
         Ok(Self {
             sample_rate,
             samples,
@@ -74,7 +79,7 @@ impl<'a> InterleavedStereoF32<'a> {
 
     #[must_use]
     pub fn frame_count(self) -> u32 {
-        u32::try_from(self.samples.len() / 2).unwrap_or(u32::MAX)
+        saturating_count(self.samples.len() / 2)
     }
 
     #[must_use]
@@ -90,38 +95,22 @@ pub struct MonoPcmF32<'a> {
 }
 
 impl<'a> MonoPcmF32<'a> {
-    /// Creates a borrowed mono PCM view.
-    ///
     /// # Errors
     ///
-    /// Returns [`AudioInputError::InvalidSampleRate`] when `sample_rate` is
-    /// zero or [`AudioInputError::EmptyInput`] when `samples` is empty.
+    /// Returns [`AudioInputError`] for a zero rate or no samples.
     pub fn borrowed(sample_rate: u32, samples: &'a [f32]) -> Result<Self, AudioInputError> {
-        if sample_rate == 0 {
-            return Err(AudioInputError::InvalidSampleRate);
-        }
-        if samples.is_empty() {
-            return Err(AudioInputError::EmptyInput);
-        }
+        check_input(sample_rate, samples.len())?;
         Ok(Self {
             sample_rate,
             samples: Cow::Borrowed(samples),
         })
     }
 
-    /// Creates an owned mono PCM buffer.
-    ///
     /// # Errors
     ///
-    /// Returns [`AudioInputError::InvalidSampleRate`] when `sample_rate` is
-    /// zero or [`AudioInputError::EmptyInput`] when `samples` is empty.
+    /// Returns [`AudioInputError`] for a zero rate or no samples.
     pub fn owned(sample_rate: u32, samples: Vec<f32>) -> Result<Self, AudioInputError> {
-        if sample_rate == 0 {
-            return Err(AudioInputError::InvalidSampleRate);
-        }
-        if samples.is_empty() {
-            return Err(AudioInputError::EmptyInput);
-        }
+        check_input(sample_rate, samples.len())?;
         Ok(Self {
             sample_rate,
             samples: Cow::Owned(samples),
@@ -135,7 +124,7 @@ impl<'a> MonoPcmF32<'a> {
 
     #[must_use]
     pub fn frame_count(&self) -> u32 {
-        u32::try_from(self.samples.len()).unwrap_or(u32::MAX)
+        saturating_count(self.samples.len())
     }
 
     #[must_use]
@@ -143,6 +132,7 @@ impl<'a> MonoPcmF32<'a> {
         &self.samples
     }
 }
+
 
 /// Channel layout of the platform system-audio tap actually in use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -163,6 +153,7 @@ pub enum AudioResponseBlock<'a> {
 /// layout it was fed: a stereo submission stays two independent channels all
 /// the way to the analyser.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct AudioResponseResampler {
     /// Interleaved when `channels == 2`, otherwise one sample per frame.
     pending: Vec<f32>,
@@ -200,12 +191,6 @@ impl AudioResponseResampler {
     }
 
     /// Appends mono PCM and emits every complete fixed-size mono block.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the fixed-size block emitted internally is rejected as an
-    /// invalid mono PCM buffer, which would indicate a broken resampler
-    /// invariant.
     pub fn push_mono(
         &mut self,
         frames: &MonoPcmF32<'_>,
@@ -222,12 +207,6 @@ impl AudioResponseResampler {
 
     /// Appends interleaved stereo PCM and emits every complete fixed-size
     /// stereo block, keeping the two channels independent.
-    ///
-    /// # Panics
-    ///
-    /// Panics only if the fixed-size block emitted internally is rejected as an
-    /// invalid stereo PCM buffer, which would indicate a broken resampler
-    /// invariant.
     pub fn push_stereo(
         &mut self,
         frames: &InterleavedStereoF32<'_>,
@@ -277,46 +256,58 @@ impl AudioResponseResampler {
         }
     }
 
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_precision_loss,
-        clippy::cast_sign_loss
-    )]
     fn append_resampled(&mut self, source_sample_rate: u32, samples: &[f32]) {
         let channels = self.channels;
+        let frames = samples.len() / channels;
+        if frames == 0 {
+            return;
+        }
         let step = f64::from(source_sample_rate) / f64::from(Self::TARGET_SAMPLE_RATE);
-        let carried = usize::from(self.has_previous);
+
+        // The frame carried from the previous call (when there is one) sits in
+        // front of this call's frames, so the walk sees one continuous run.
+        let carried = self.has_previous;
         let previous = self.previous;
-        let total_frames = carried + (samples.len() / channels);
-        // The carried tail frame is addressed in place instead of being
-        // prepended into a scratch buffer.
-        let sample_at = |frame: usize, channel: usize| {
-            if frame < carried {
-                previous[channel]
+        let total = frames + usize::from(carried);
+        let frame_value = |index: usize, channel: usize| -> f32 {
+            if carried {
+                if index == 0 {
+                    previous[channel]
+                } else {
+                    samples[(index - 1) * channels + channel]
+                }
             } else {
-                samples[((frame - carried) * channels) + channel]
+                samples[index * channels + channel]
             }
         };
 
-        while self.source_position + 1.0 < total_frames as f64 {
-            let index = self.source_position.floor() as usize;
-            let fraction = (self.source_position - index as f64) as f32;
-            for channel in 0..channels {
-                let current = sample_at(index, channel);
-                let next = sample_at(index + 1, channel);
-                self.pending.push(current + ((next - current) * fraction));
+        let mut position = self.source_position;
+        let reachable = (total - 1) as f64 - position;
+        if reachable > 0.0 {
+            self.pending
+                .reserve(((reachable / step) as usize + 1) * channels);
+        }
+        loop {
+            let index = position.floor() as usize;
+            if index + 1 >= total {
+                break;
             }
-            self.source_position += step;
+            let fraction = (position - index as f64) as f32;
+            for channel in 0..channels {
+                let from = frame_value(index, channel);
+                let to = frame_value(index + 1, channel);
+                self.pending.push(from + (to - from) * fraction);
+            }
+            position += step;
         }
 
-        if total_frames > 0 {
-            for channel in 0..channels {
-                self.previous[channel] = sample_at(total_frames - 1, channel);
-            }
-            self.has_previous = true;
-            self.source_position = (self.source_position - (total_frames - 1) as f64).max(0.0);
+        for channel in 0..channels {
+            self.previous[channel] = frame_value(total - 1, channel);
         }
+        self.has_previous = true;
+        self.source_position = position - (total - 1) as f64;
     }
+
 
     #[cfg(test)]
     #[must_use]
@@ -336,13 +327,13 @@ pub enum AudioInputError {
 impl Display for AudioInputError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidSampleRate => write!(f, "sample_rate must be greater than zero"),
-            Self::EmptyInput => write!(f, "samples must not be empty"),
+            Self::InvalidSampleRate => f.write_str("sample_rate must be greater than zero"),
+            Self::EmptyInput => f.write_str("samples must not be empty"),
+            Self::InvalidAudioVolume(value) => {
+                write!(f, "audio volume must be between 0.0 and 1.0, got {value}")
+            }
             Self::OddSampleCount(count) => {
                 write!(f, "samples must contain stereo pairs, got {count} values")
-            }
-            Self::InvalidAudioVolume(volume) => {
-                write!(f, "audio volume must be between 0.0 and 1.0, got {volume}")
             }
         }
     }
@@ -362,11 +353,11 @@ impl Display for AudioCaptureError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnsupportedPlatform => {
-                write!(f, "system audio capture is not supported on this platform")
+                f.write_str("system audio capture is not supported on this platform")
             }
-            Self::PermissionDenied(message) | Self::Platform(message) | Self::Engine(message) => {
-                write!(f, "{message}")
-            }
+            Self::PermissionDenied(message)
+            | Self::Platform(message)
+            | Self::Engine(message) => f.write_str(message),
         }
     }
 }
@@ -374,10 +365,6 @@ impl Display for AudioCaptureError {
 impl Error for AudioCaptureError {}
 
 pub trait AudioFrameConsumer: Send + Sync {
-    /// Accepts interleaved stereo `float32` PCM in LRLR order.
-    /// The sample rate is supplied by the caller and is not resampled by this
-    /// API.
-    ///
     /// # Errors
     ///
     /// Returns [`AudioCaptureError`] when the consumer cannot forward or
@@ -387,8 +374,6 @@ pub trait AudioFrameConsumer: Send + Sync {
         frames: InterleavedStereoF32<'_>,
     ) -> Result<(), AudioCaptureError>;
 
-    /// Accepts mono `float32` PCM.
-    ///
     /// Consumers must not satisfy this by duplicating the mono samples into an
     /// interleaved pair and forwarding them to [`Self::submit_audio_frames`]:
     /// downstream analysis reports a two-channel submission as stereo, and a
@@ -402,8 +387,6 @@ pub trait AudioFrameConsumer: Send + Sync {
 }
 
 pub trait AudioResponseEngine: AudioFrameConsumer {
-    /// Enables or disables audio response for one scene.
-    ///
     /// # Errors
     ///
     /// Returns [`AudioCaptureError`] when the engine cannot update the scene.
@@ -415,8 +398,6 @@ pub trait AudioResponseEngine: AudioFrameConsumer {
 }
 
 pub trait AudioCaptureBackend {
-    /// Returns the backend's current permission status or capture-start hint.
-    ///
     /// # Errors
     ///
     /// Returns [`AudioCaptureError`] when the platform permission check fails.
@@ -431,20 +412,31 @@ pub trait AudioCaptureBackend {
     /// Returns [`AudioCaptureError`] when the platform permission prompt or
     /// status check fails.
     fn request_permission(&mut self) -> Result<bool, AudioCaptureError>;
-    /// Starts audio capture and forwards captured frames to `consumer`.
+    /// Starts usable capture, completing any pending cleanup before creating a
+    /// replacement session. A backend reporting pending cleanup must not treat
+    /// its retained resources as an already healthy capture or overlap sessions.
     ///
     /// # Errors
     ///
-    /// Returns [`AudioCaptureError`] when platform capture setup fails.
+    /// Returns [`AudioCaptureError`] when platform capture setup or cleanup fails.
     fn start(&mut self, consumer: Arc<dyn AudioFrameConsumer>) -> Result<(), AudioCaptureError>;
-    /// Stops audio capture.
-    ///
     /// # Errors
     ///
     /// Returns [`AudioCaptureError`] when platform teardown fails.
     fn stop(&mut self) -> Result<(), AudioCaptureError>;
+    /// Whether capture is healthy and usable, not merely still owned.
     #[must_use]
     fn is_running(&self) -> bool;
+    /// Whether resources from unfinished teardown are still owned. A backend
+    /// may report this even after native recording has stopped. Even if a backend
+    /// reports both queries true, pending cleanup means capture is not usable.
+    /// Controllers must retry cleanup before treating an owned session as usable
+    /// or fully stopped.
+    /// Backends without partial teardown need not override this query.
+    #[must_use]
+    fn has_pending_cleanup(&self) -> bool {
+        false
+    }
 }
 
 /// How long to wait before each further attempt to bring the tap back after a
@@ -473,9 +465,9 @@ pub struct AudioCaptureController<B: AudioCaptureBackend> {
     enabled_handles: HashSet<SceneHandle>,
     suspended: bool,
     external_consumers: bool,
-    /// A rebuild stopped the tap and could not start it again. Capture is still
-    /// wanted, so the next [`AudioCaptureController::restart_capture`] starts
-    /// it without a device change having to be seen again.
+    /// A rebuild owes a fresh start after failed teardown or startup. Capture is
+    /// still wanted, so the next [`AudioCaptureController::restart_capture`]
+    /// retries it without requiring another device change.
     restart_pending: bool,
 }
 
@@ -529,19 +521,19 @@ impl<B: AudioCaptureBackend> AudioCaptureController<B> {
         handle: SceneHandle,
         enabled: bool,
     ) -> Result<(), AudioCaptureError> {
-        let inserted = if enabled {
-            self.enabled_handles.insert(handle)
+        if enabled {
+            let newly_added = self.enabled_handles.insert(handle);
+            if let Err(error) = self.sync_capture_state() {
+                if newly_added {
+                    self.enabled_handles.remove(&handle);
+                }
+                return Err(error);
+            }
+            Ok(())
         } else {
             self.enabled_handles.remove(&handle);
-            false
-        };
-        if let Err(error) = self.sync_capture_state() {
-            if inserted {
-                self.enabled_handles.remove(&handle);
-            }
-            return Err(error);
+            self.sync_capture_state()
         }
-        Ok(())
     }
 
     /// Releases capture ownership for scenes absent from `handles`.
@@ -587,7 +579,7 @@ impl<B: AudioCaptureBackend> AudioCaptureController<B> {
 
     #[must_use]
     pub fn is_capturing(&self) -> bool {
-        self.backend.is_running()
+        self.backend.is_running() && !self.backend.has_pending_cleanup()
     }
 
     #[must_use]
@@ -603,13 +595,13 @@ impl<B: AudioCaptureBackend> AudioCaptureController<B> {
     /// Stops the tap and starts it again, for a change underneath it such as a
     /// new default output device.
     ///
-    /// Only a tap that is running is rebuilt, and only while capture is wanted.
-    /// Permission was granted when it first started, so a rebuild never asks
-    /// again; a controller that is suspended, has no consumers or was never
-    /// started does nothing and starts fresh when it is next needed. If the tap
-    /// stops but cannot start again, the error is returned and the next call
-    /// tries to start it again, so a caller can retry without a second device
-    /// change. Any scene or demand change that starts capture also heals it.
+    /// Only a running tap or unfinished capture cleanup is rebuilt, and only
+    /// while capture is wanted. A rebuild never asks for permission again;
+    /// a controller that was never started and has no pending cleanup does
+    /// nothing. Without demand, remaining resources are only released, never
+    /// restarted. If teardown or startup fails, the error is returned and the
+    /// next call retries the owed rebuild without a second device change.
+    /// Any scene or demand change that starts healthy capture also heals it.
     ///
     /// # Errors
     ///
@@ -617,20 +609,26 @@ impl<B: AudioCaptureBackend> AudioCaptureController<B> {
     pub fn restart_capture(&mut self) -> Result<RestartOutcome, AudioCaptureError> {
         if !self.wants_capture() {
             self.restart_pending = false;
+            if self.backend.is_running() || self.backend.has_pending_cleanup() {
+                self.backend.stop()?;
+            }
             return Ok(RestartOutcome::NotRunning);
         }
-        if self.backend.is_running() {
-            self.backend.stop()?;
+        if self.backend.is_running() || self.backend.has_pending_cleanup() {
+            // Record the owed rebuild before teardown: it may stop recording but
+            // fail to release a later resource, leaving no healthy running tap.
             self.restart_pending = true;
+            self.backend.stop()?;
         } else if !self.restart_pending {
             return Ok(RestartOutcome::NotRunning);
         }
         if !self.backend.has_permission()? {
-            self.restart_pending = false;
             return Ok(RestartOutcome::NotRunning);
         }
         self.backend.start(Arc::clone(&self.consumer))?;
-        self.restart_pending = false;
+        if self.is_capturing() {
+            self.restart_pending = false;
+        }
         Ok(RestartOutcome::Restarted)
     }
 
@@ -643,33 +641,35 @@ impl<B: AudioCaptureBackend> AudioCaptureController<B> {
     }
 
     fn sync_capture_state(&mut self) -> Result<(), AudioCaptureError> {
-        let should_run = self.wants_capture();
-        if should_run {
-            if !self.backend.is_running() && self.backend.has_permission()? {
-                self.backend.start(Arc::clone(&self.consumer))?;
+        let wanted = self.wants_capture();
+        let running = self.backend.is_running();
+        let cleanup = self.backend.has_pending_cleanup();
+        let outcome = if wanted && (!running || cleanup) {
+            match self.backend.has_permission() {
+                Ok(true) => self.backend.start(Arc::clone(&self.consumer)),
+                Ok(false) => Ok(()),
+                Err(error) => Err(error),
             }
-        } else if self.backend.is_running() {
-            self.backend.stop()?;
-        }
-        if !should_run || self.backend.is_running() {
+        } else if !wanted && (running || cleanup) {
+            self.backend.stop()
+        } else {
+            Ok(())
+        };
+        if !wanted || self.is_capturing() {
             self.restart_pending = false;
         }
-        Ok(())
+        outcome
     }
 }
 
 impl<B: AudioCaptureBackend> Drop for AudioCaptureController<B> {
     fn drop(&mut self) {
-        if self.backend.is_running() {
+        if self.backend.is_running() || self.backend.has_pending_cleanup() {
             let _ = self.backend.stop();
         }
     }
 }
 
-/// macOS hosts using the built-in backend must provide
-/// `NSAudioCaptureUsageDescription` in the embedding app bundle. The native
-/// backend captures system output audio and forwards interleaved stereo
-/// `float32` PCM while preserving the source sample rate.
 pub struct AudioResponseController<E: AudioResponseEngine + 'static, B: AudioCaptureBackend> {
     engine: Arc<E>,
     backend: B,
@@ -686,8 +686,6 @@ impl<E: AudioResponseEngine + 'static, B: AudioCaptureBackend> AudioResponseCont
         }
     }
 
-    /// Returns whether the backend currently has capture permission.
-    ///
     /// # Errors
     ///
     /// Returns [`AudioCaptureError`] when the backend permission check fails.
@@ -695,23 +693,17 @@ impl<E: AudioResponseEngine + 'static, B: AudioCaptureBackend> AudioResponseCont
         self.backend.has_permission()
     }
 
-    /// Requests capture permission and starts capture if scenes are already
-    /// enabled.
-    ///
     /// # Errors
     ///
     /// Returns [`AudioCaptureError`] when permission or capture startup fails.
     pub fn request_permission(&mut self) -> Result<bool, AudioCaptureError> {
         let granted = self.backend.request_permission()?;
         if granted {
-            self.sync_capture_state()?;
+            self.sync_capture()?;
         }
         Ok(granted)
     }
 
-    /// Enables or disables audio response for one scene and syncs capture
-    /// state.
-    ///
     /// # Errors
     ///
     /// Returns [`AudioCaptureError`] when the engine update or capture state
@@ -727,12 +719,28 @@ impl<E: AudioResponseEngine + 'static, B: AudioCaptureBackend> AudioResponseCont
         } else {
             self.enabled_handles.remove(&handle);
         }
-        self.sync_capture_state()
+        self.sync_capture()
+    }
+
+    /// Capture runs exactly while at least one scene is enabled and permission is held.
+    fn sync_capture(&mut self) -> Result<(), AudioCaptureError> {
+        let wanted = !self.enabled_handles.is_empty();
+        let running = self.backend.is_running();
+        let cleanup = self.backend.has_pending_cleanup();
+        if wanted && (!running || cleanup) {
+            if self.backend.has_permission()? {
+                let engine: Arc<E> = Arc::clone(&self.engine);
+                self.backend.start(engine)?;
+            }
+        } else if !wanted && (running || cleanup) {
+            self.backend.stop()?;
+        }
+        Ok(())
     }
 
     #[must_use]
     pub fn is_capturing(&self) -> bool {
-        self.backend.is_running()
+        self.backend.is_running() && !self.backend.has_pending_cleanup()
     }
 
     #[must_use]
@@ -744,25 +752,13 @@ impl<E: AudioResponseEngine + 'static, B: AudioCaptureBackend> AudioResponseCont
     pub fn backend(&self) -> &B {
         &self.backend
     }
-
-    fn sync_capture_state(&mut self) -> Result<(), AudioCaptureError> {
-        let should_run = !self.enabled_handles.is_empty();
-        if should_run {
-            if !self.backend.is_running() && self.backend.has_permission()? {
-                self.backend.start(self.engine.clone())?;
-            }
-        } else if self.backend.is_running() {
-            self.backend.stop()?;
-        }
-        Ok(())
-    }
 }
 
 impl<E: AudioResponseEngine + 'static, B: AudioCaptureBackend> Drop
     for AudioResponseController<E, B>
 {
     fn drop(&mut self) {
-        if self.backend.is_running() {
+        if self.backend.is_running() || self.backend.has_pending_cleanup() {
             let _ = self.backend.stop();
         }
     }

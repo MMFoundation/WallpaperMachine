@@ -82,11 +82,11 @@ struct SceneMetalStage
 ///
 /// Attached to `SceneShader` by the parser, which is the only place that still
 /// holds the final combos, the preprocessed units and the texture info the
-/// SPIR-V compile settled on. A null `metal_program` on a shader therefore
+/// settling compile ran with. A null `metal_program` on a shader therefore
 /// means "translation was never attempted", which is a different answer from
 /// "translation was attempted and failed" and has to stay distinguishable: the
-/// first is what every scene looks like when the user has not selected the
-/// native renderer, and reporting it as a translation failure would accuse the
+/// first is what a scene looks like until its pending translations are
+/// flushed, and reporting it as a translation failure would accuse the
 /// author's shader of a fault it does not have.
 /// The same author program, translated to sample one video slot as NV12 luma
 /// and chroma planes instead of one pre-converted image.
@@ -115,9 +115,9 @@ struct SceneMetalVideoPlaneVariant
 struct SceneMetalProgram
 {
     std::vector<SceneMetalStage> stages;
-    /// The same reflection payload the SPIR-V path produces: uniform block
+    /// The reflection payload: uniform block
     /// layout, vertex inputs and active texture slots. Kept as the raw
-    /// document so this type stays free of both Vulkan and JSON dependencies.
+    /// document so this type stays free of JSON dependencies.
     std::string reflection_json;
     /// Non-empty when translation was attempted and failed. The scene still
     /// loads and still draws; only the native backend is refused.

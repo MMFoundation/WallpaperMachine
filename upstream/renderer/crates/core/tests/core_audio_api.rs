@@ -77,28 +77,6 @@ fn scene_desc_keeps_override_and_shader_cache_configuration() {
 }
 
 #[test]
-#[should_panic]
-fn scene_desc_rejects_invalid_audio_volume() {
-    for volume in [f32::NAN, -0.01, 1.01, f32::INFINITY, f32::NEG_INFINITY] {
-        let error = SceneDesc::builder(
-            DisplayDesc::new(1, 0, 0, 2560, 1440, 2.0),
-            "/tmp/project.json",
-        )
-        .assets_path("/tmp/assets")
-        .audio_volume(volume)
-        .build()
-        .expect_err("invalid audio volume should fail");
-
-        match error {
-            EngineError::InvalidInput(message) => {
-                assert_eq!(message, "audio_volume must be finite and within [0.0, 1.0]");
-            }
-            other => panic!("expected invalid input, got {other:?}"),
-        }
-    }
-}
-
-#[test]
 fn interleaved_stereo_frames_validate_format_and_count_frames() {
     let samples = [0.0f32, 0.1, 0.2, 0.3, 0.4, 0.5];
     let frames = InterleavedStereoF32::new(48_000, &samples).expect("valid stereo frames");

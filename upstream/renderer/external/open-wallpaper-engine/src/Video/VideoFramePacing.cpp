@@ -75,47 +75,6 @@ double VideoFramePacingEstimator::PeriodSeconds() const
     return m_observed_period;
 }
 
-double ResolveContentPeriodSeconds(double source_period_seconds, double playback_rate)
-{
-    if (! std::isfinite(source_period_seconds) || ! (source_period_seconds > 0.0)) return 0.0;
-    if (! std::isfinite(playback_rate) || ! (playback_rate > 0.0)) return 0.0;
-    const double period = source_period_seconds / playback_rate;
-    if (! std::isfinite(period) || ! (period > 0.0)) return 0.0;
-    return period;
-}
-
-bool ContentPacingEnabledByEnvironment(const char* value)
-{
-    if (value == nullptr) return false;
-    const std::string_view text { value };
-    if (text.empty()) return false;
-    return text != "0" && text != "false";
-}
-
-namespace
-{
-/// -1 means "not decided yet", so the first read can seed from the environment
-/// while a later explicit setting still wins over it.
-std::atomic<int> g_content_pacing_state { -1 };
-} // namespace
-
-void SetContentPacingEnabled(bool enabled)
-{
-    g_content_pacing_state.store(enabled ? 1 : 0, std::memory_order_relaxed);
-}
-
-bool ContentPacingEnabled()
-{
-    const int state = g_content_pacing_state.load(std::memory_order_relaxed);
-    if (state >= 0) return state == 1;
-    const bool from_env =
-        ContentPacingEnabledByEnvironment(std::getenv("WALLPAPER_MACHINE_CONTENT_PACING"));
-    int expected = -1;
-    g_content_pacing_state.compare_exchange_strong(
-        expected, from_env ? 1 : 0, std::memory_order_relaxed);
-    return g_content_pacing_state.load(std::memory_order_relaxed) == 1;
-}
-
 VideoFrameSelection VideoFrameSelectionTracker::Observe(std::uint64_t generation)
 {
     // Generation 0 is "no frame"; nothing was selected, reused or skipped.

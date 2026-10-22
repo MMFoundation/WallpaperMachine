@@ -22,8 +22,9 @@ class VFS;
 /// another layer as `_rt_imageLayerComposite_<id>` with an optional `_a` / `_b`
 /// ping-pong suffix. `_a` (or no suffix) is that layer's produced output.
 /// Inside the layer's own effect chain both are the chain's ping-pong buffers,
-/// the image the effect works on (`IsOwnEffectChainInput`); a self `_b`
-/// anywhere else is still taken as last-frame history.
+/// the image the effect works on (`IsOwnEffectChainInput`); a layer's own `_a` or
+/// `_b` anywhere else is its composite as the frame before left it, which the
+/// render graph keeps for it, so it is not a reason to refuse a scene.
 inline constexpr std::string_view kLayerTextureMissingTarget =
     "a texture names a layer that does not exist";
 inline constexpr std::string_view kLayerTextureDuplicateName =
@@ -32,8 +33,6 @@ inline constexpr std::string_view kLayerTextureDuplicateId =
     "a texture names a layer whose id is not unique";
 inline constexpr std::string_view kLayerTextureIllegalCycle =
     "layer texture references form a cycle";
-inline constexpr std::string_view kLayerTextureHistoryFeedback =
-    "a layer texture reference reads a previous frame";
 
 struct LayerObjectIndex {
     struct Entry {

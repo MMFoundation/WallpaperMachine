@@ -16,7 +16,7 @@ namespace wallpaper
 // scale of 1, is unmoved by any value.
 //
 // Kept apart from the layout function so the scene's public header can carry it
-// without pulling in the Vulkan headers that function's result types need.
+// without pulling in the heavier headers that function's result types need.
 struct WallpaperFraming {
     double pan_x { 0.5 };
     double pan_y { 0.5 };

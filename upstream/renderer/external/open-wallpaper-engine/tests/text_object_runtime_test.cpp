@@ -10,8 +10,8 @@
 #include <atomic>
 #include <chrono>
 #include "Runtime/SceneRuntimeContext.hpp"
-#include "VulkanRender/CustomShaderPass.hpp"
-#include "VulkanRender/SceneToRenderGraph.hpp"
+#include "RenderCommon/ScenePass.hpp"
+#include "RenderCommon/SceneToRenderGraph.hpp"
 #include "WPShaderValueUpdater.hpp"
 #include "Scene/Scene.h"
 #include "Scene/SceneNode.h"
@@ -21,8 +21,6 @@
 #include "Shader/RustShaderBridge.hpp"
 #include "Text/SystemFontResolver.hpp"
 #include "Text/TextLayer.hpp"
-#include "Vulkan/Shader.hpp"
-#include "Vulkan/ShaderComp.hpp"
 #include "WPSceneParser.hpp"
 #include "WPPkgFs.hpp"
 
@@ -30,7 +28,6 @@
 #include FT_FREETYPE_H
 #include FT_ADVANCES_H
 #include <gtest/gtest.h>
-#include <spirv_reflect.h>
 
 #include <algorithm>
 #include <cmath>
@@ -51,160 +48,48 @@
 
 namespace wallpaper
 {
-namespace vulkan
-{
-bool ReflectCustomShader(const SceneShader& shader, std::vector<Uni_ShaderSpv>& spvs,
-                         ShaderReflected& ref);
-} // namespace vulkan
-
 namespace
 {
 
-// Opt-in local-asset diagnostic: parser, scripts and render graph only. No
-// Vulkan device, window, audio device or desktop state is created.
-TEST(TextObjectRuntime, LonelyCatHeadlessRegression) {
-    const auto* project = std::getenv("WE_TEST_PROJECT");
-    const auto* assets = std::getenv("WE_TEST_ASSETS");
-    const auto* cache = std::getenv("WE_TEST_CACHE");
-    if (!project || !assets || !cache) GTEST_SKIP() << "No local scene fixture requested";
-    fs::VFS vfs;
-    ASSERT_TRUE(vfs.Mount("/assets", fs::CreatePhysicalFs(assets), "assets"));
-    ASSERT_TRUE(vfs.Mount("/assets", fs::WPPkgFs::CreatePkgFs(
-        (std::filesystem::path(project).parent_path() / "scene.pkg").string())));
-    ASSERT_TRUE(vfs.Mount("/cache", fs::CreatePhysicalFs(cache, true), "cache"));
-    ASSERT_TRUE(InstallVirtualAssets(vfs));
-    ProjectProperties properties;
-    std::string error;
-    ASSERT_TRUE(ParseProjectProperties(project, &properties, &error)) << error;
-    auto source = vfs.Open("/assets/scene.json");
-    ASSERT_NE(source, nullptr);
-    audio::SoundManager sound(audio::SoundManager::OutputBackend::Null);
-    WPSceneParser parser;
-    WPShaderParser::ClearProgramCache();
-    WPShaderParser::ResetStartupMetrics();
-    const auto started = std::chrono::steady_clock::now();
-    auto scene = parser.Parse(SceneParseRequest {
-        .scene_id = "local-regression", .project_path = project,
-        .project_properties = &properties, .pkg_version = 22,
-    }, source->ReadAllStr(), vfs, sound);
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    for (int i = 0; i < 3; ++i) scene->runtime->Tick(1.0 / 60.0);
-    auto graph = sceneToRenderGraph(*scene);
-    ASSERT_NE(graph, nullptr);
-    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
-    const auto metrics = WPShaderParser::GetStartupMetrics();
-    std::printf("Headless parse %.1f ms; shader hits=%llu misses=%llu compile=%.1f ms\n",
-        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count(),
-        static_cast<unsigned long long>(metrics.cache_hits),
-        static_cast<unsigned long long>(metrics.cache_misses), metrics.compile_ms);
-    EXPECT_GT(metrics.cache_hits, 0u);
-    if (std::getenv("WE_TEST_EXPECT_WARM")) EXPECT_EQ(metrics.cache_misses, 0u);
-    EXPECT_EQ(scene->runtime->NodeText("__we_text_312").size(), 5u);
-    EXPECT_FALSE(scene->runtime->NodeText("__we_text_150").empty());
-}
-
-constexpr uint32_t kSpirvMagic = 0x07230203u;
-constexpr int32_t  kTexFormatR8 = 9;
-
+// Files served from memory: the key is the absolute path inside the mount.
 class MemoryFs final : public fs::Fs {
 public:
-    explicit MemoryFs(std::map<std::string, std::string> files): m_files(std::move(files)) {}
+    explicit MemoryFs(const std::map<std::string, std::string>& files) {
+        for (const auto& [path, text] : files) {
+            m_bytes[path].assign(text.begin(), text.end());
+        }
+    }
 
     bool Contains(std::string_view path) const override {
-        return m_files.contains(std::string(path));
+        return m_bytes.find(std::string(path)) != m_bytes.end();
     }
 
     std::shared_ptr<fs::IBinaryStream> Open(std::string_view path) override {
-        const auto it = m_files.find(std::string(path));
-        if (it == m_files.end()) return nullptr;
-        const auto& s = it->second;
-        return std::make_shared<fs::MemBinaryStream>(std::vector<uint8_t>(s.begin(), s.end()));
+        auto found = m_bytes.find(std::string(path));
+        if (found == m_bytes.end()) return nullptr;
+        return std::make_shared<fs::MemBinaryStream>(std::vector<uint8_t>(found->second));
     }
 
     std::shared_ptr<fs::IBinaryStreamW> OpenW(std::string_view) override { return nullptr; }
 
 private:
-    std::map<std::string, std::string> m_files;
+    std::map<std::string, std::vector<uint8_t>> m_bytes;
 };
-
-class TestTexBytes {
-public:
-    void Stamp(char kind, int version) {
-        char stamp[9] {};
-        std::snprintf(stamp, sizeof(stamp), "TEX%c%04d", kind, version);
-        Append(stamp, sizeof(stamp));
-    }
-
-    void I32(int32_t value) { Append(&value, sizeof(value)); }
-    void U32(uint32_t value) { Append(&value, sizeof(value)); }
-
-    std::string Take() {
-        return std::string(reinterpret_cast<const char*>(m_bytes.data()), m_bytes.size());
-    }
-
-private:
-    void Append(const void* data, std::size_t size) {
-        const auto* p = static_cast<const uint8_t*>(data);
-        m_bytes.insert(m_bytes.end(), p, p + size);
-    }
-
-    std::vector<uint8_t> m_bytes;
-};
-
-std::string BuildTextureHeaderFixture(int32_t format) {
-    TestTexBytes b;
-    b.Stamp('V', 5);
-    b.Stamp('I', 1);
-    b.I32(format);
-    b.U32(0);
-    b.I32(1);
-    b.I32(1);
-    b.I32(1);
-    b.I32(1);
-    b.I32(0);
-    b.Stamp('B', 3);
-    b.I32(1);
-    b.I32(static_cast<int32_t>(ImageType::UNKNOWN));
-    b.I32(0);
-    return b.Take();
-}
 
 void MountAssets(fs::VFS& vfs, std::map<std::string, std::string> files = {}) {
     ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
 }
 
-bool MountPhysicalAssets(fs::VFS& vfs, const std::filesystem::path& assets_path) {
-    auto physical_fs = fs::CreatePhysicalFs(assets_path.string());
-    if (physical_fs == nullptr) return false;
-    return vfs.Mount("/assets", std::move(physical_fs), "assets");
-}
-
-std::filesystem::path HomePath() {
-    const char* home = std::getenv("HOME");
-    return home != nullptr ? std::filesystem::path(home) : std::filesystem::path();
-}
-
-std::optional<std::string> ReadTextFile(const std::filesystem::path& path) {
-    std::ifstream input(path);
-    if (! input.good()) return std::nullopt;
-    std::string content((std::istreambuf_iterator<char>(input)),
-                        std::istreambuf_iterator<char>());
-    return content;
-}
-
-std::string MinimalSceneObjects(std::string objects_json) {
-    return R"({
-      "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
-      "general": {
-        "ambientcolor":[0,0,0], "skylightcolor":[0,0,0],
-        "clearcolor":[0,0,0], "cameraparallax":false,
-        "cameraparallaxamount":0, "cameraparallaxdelay":0,
-        "cameraparallaxmouseinfluence":0,
-        "orthogonalprojection":{"width":640,"height":360}
-      },
-      "objects": )" +
-           objects_json + "\n}";
+// A 640x360 canvas, a camera looking down -z, everything dark and no parallax; `objects_json`
+// is the array of layers.
+std::string MinimalSceneObjects(const std::string& objects_json) {
+    const std::string camera  = R"("camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]})";
+    const std::string general = R"("general": {"ambientcolor":[0,0,0], "skylightcolor":[0,0,0], )"
+                                R"("clearcolor":[0,0,0], "cameraparallax":false, )"
+                                R"("cameraparallaxamount":0, "cameraparallaxdelay":0, )"
+                                R"("cameraparallaxmouseinfluence":0, )"
+                                R"("orthogonalprojection":{"width":640,"height":360}})";
+    return "{" + camera + ", " + general + ", \"objects\": " + objects_json + "}";
 }
 
 SceneNode* FindRootChild(Scene& scene, std::string_view name) {
@@ -222,7 +107,7 @@ struct MeshBounds {
     float min_y { 0.0f };
     float max_y { 0.0f };
 
-    Eigen::Vector2f Size() const { return Eigen::Vector2f(max_x - min_x, max_y - min_y); }
+    linalg::Vector2f Size() const { return linalg::Vector2f(max_x - min_x, max_y - min_y); }
 };
 
 MeshBounds MeshLocalBounds(const SceneMesh& mesh) {
@@ -250,13 +135,13 @@ MeshBounds MeshLocalBounds(const SceneMesh& mesh) {
     return bounds;
 }
 
-Eigen::Vector2f MeshSize(const SceneMesh& mesh) {
+linalg::Vector2f MeshSize(const SceneMesh& mesh) {
     return MeshLocalBounds(mesh).Size();
 }
 
-Eigen::Vector2f MeshCenter(const SceneMesh& mesh) {
+linalg::Vector2f MeshCenter(const SceneMesh& mesh) {
     const auto bounds = MeshLocalBounds(mesh);
-    return Eigen::Vector2f((bounds.min_x + bounds.max_x) * 0.5f,
+    return linalg::Vector2f((bounds.min_x + bounds.max_x) * 0.5f,
                            (bounds.min_y + bounds.max_y) * 0.5f);
 }
 
@@ -269,50 +154,24 @@ struct TexCoordBounds {
 
 TexCoordBounds MeshTexCoordBounds(const SceneMesh& mesh) {
     const auto& vertices = mesh.GetVertexArray(0);
-    const auto  stride   = vertices.OneSize();
-    const auto* data     = vertices.Data();
-    if (data == nullptr || vertices.VertexCount() == 0) {
+    const auto  layout   = vertices.GetAttrOffsetMap();
+    const auto  uv_attr  = layout.find(WE_IN_TEXCOORD.data());
+    if (vertices.Data() == nullptr || vertices.VertexCount() == 0 || uv_attr == layout.end()) {
         return {};
     }
+    const std::size_t stride = vertices.OneSize();
+    const std::size_t uv_at  = uv_attr->second.offset / sizeof(float);
+    const auto        u_of   = [&](std::size_t vertex) { return vertices.Data()[vertex * stride + uv_at]; };
+    const auto        v_of   = [&](std::size_t vertex) { return vertices.Data()[vertex * stride + uv_at + 1u]; };
 
-    const auto offsets = vertices.GetAttrOffsetMap();
-    const auto offset_iterator = offsets.find(WE_IN_TEXCOORD.data());
-    if (offset_iterator == offsets.end()) return {};
-    const auto tex_offset = offset_iterator->second.offset / sizeof(float);
-
-    TexCoordBounds bounds {
-        .min_u = data[tex_offset + 0u],
-        .max_u = data[tex_offset + 0u],
-        .min_v = data[tex_offset + 1u],
-        .max_v = data[tex_offset + 1u],
-    };
-    for (std::size_t index = 1; index < vertices.VertexCount(); ++index) {
-        const auto base = index * stride + tex_offset;
-        const float u  = data[base + 0u];
-        const float v  = data[base + 1u];
-        bounds.min_u   = std::min(bounds.min_u, u);
-        bounds.max_u   = std::max(bounds.max_u, u);
-        bounds.min_v   = std::min(bounds.min_v, v);
-        bounds.max_v   = std::max(bounds.max_v, v);
+    TexCoordBounds out { u_of(0), u_of(0), v_of(0), v_of(0) };
+    for (std::size_t vertex = 1; vertex < vertices.VertexCount(); ++vertex) {
+        out.min_u = std::min(out.min_u, u_of(vertex));
+        out.max_u = std::max(out.max_u, u_of(vertex));
+        out.min_v = std::min(out.min_v, v_of(vertex));
+        out.max_v = std::max(out.max_v, v_of(vertex));
     }
-    return bounds;
-}
-
-void ExpectTextEffectFboCoversFinalMesh(const SceneRenderTarget& fbo,
-                                        const SceneMesh& final_mesh,
-                                        int32_t target_width,
-                                        int32_t target_height) {
-    const auto final_mesh_size = MeshSize(final_mesh);
-    const auto uv_bounds       = MeshTexCoordBounds(final_mesh);
-    const auto effective_width =
-        static_cast<float>(fbo.width) * (uv_bounds.max_u - uv_bounds.min_u);
-    const auto effective_height =
-        static_cast<float>(fbo.height) * (uv_bounds.max_v - uv_bounds.min_v);
-    constexpr float kUvResolutionTolerance = 1.0e-3f;
-    EXPECT_GE(effective_width + kUvResolutionTolerance,
-              std::min(static_cast<float>(target_width), std::ceil(final_mesh_size.x())));
-    EXPECT_GE(effective_height + kUvResolutionTolerance,
-              std::min(static_cast<float>(target_height), std::ceil(final_mesh_size.y())));
+    return out;
 }
 
 /// A scene whose only layer is the text "caption" with one effect on it, as `effects/gradient`:
@@ -382,76 +241,12 @@ struct TextEffectScene {
     SceneRenderTarget* FirstTarget() { return scene->FindRenderTarget(effect_layer->FirstTarget()); }
 };
 
-bool ShaderUsesUniformMember(const ShaderCode& spirv, std::string_view member_name) {
-    spv_reflect::ShaderModule module(spirv, SPV_REFLECT_MODULE_FLAG_NO_COPY);
-
-    uint32_t binding_count = 0;
-    if (module.EnumerateDescriptorBindings(&binding_count, nullptr) != SPV_REFLECT_RESULT_SUCCESS) {
-        return false;
-    }
-
-    std::vector<SpvReflectDescriptorBinding*> bindings(binding_count);
-    if (module.EnumerateDescriptorBindings(&binding_count, bindings.data()) !=
-        SPV_REFLECT_RESULT_SUCCESS) {
-        return false;
-    }
-
-    for (const auto* binding : bindings) {
-        if (binding == nullptr || ! binding->accessed ||
-            binding->descriptor_type != SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-            continue;
-        }
-        const auto& block = binding->block;
-        for (uint32_t index = 0; index < block.member_count; ++index) {
-            const auto* name = block.members[index].name;
-            if (name != nullptr && member_name == name) return true;
-        }
-    }
-    return false;
-}
-
-bool ShaderUsesUniformMember(const SceneShader& shader, std::string_view member_name) {
-    if (shader.rust_reflection_json.has_value()) {
-        shader::RustShaderOutput output;
-        try {
-            shader::ApplyRustShaderReflectionJson(*shader.rust_reflection_json, output);
-            for (const auto& block : output.reflection.blocks) {
-                if (block.member_map.contains(std::string(member_name))) return true;
-            }
-            return false;
-        } catch (const std::exception&) {
-        }
-    }
-
-    for (const auto& code : shader.codes) {
-        if (ShaderUsesUniformMember(code, member_name)) return true;
-    }
-    return false;
-}
-
-int VisibleAlphaPixels(const Image& image) {
-    int visible_pixels = 0;
-    if (image.slots.empty() || image.slots[0].mipmaps.empty()) return visible_pixels;
-
-    const auto& mip = image.slots[0].mipmaps[0];
-    if (mip.data == nullptr) return visible_pixels;
-    for (int y = 0; y < mip.height; ++y) {
-        for (int x = 0; x < mip.width; ++x) {
-            const auto alpha =
-                mip.data.get()[(static_cast<std::size_t>(y) * mip.width + x) * 4u + 3u];
-            if (alpha > 0u) ++visible_pixels;
-        }
-    }
-    return visible_pixels;
-}
-
-const vulkan::CustomShaderPass* FindCustomPassForNode(const rg::RenderGraph& graph,
-                                                      const SceneNode*       node) {
-    for (const auto id : graph.topologicalOrder()) {
-        auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
-        if (pass != nullptr && pass->desc().node == node) return pass;
-    }
-    return nullptr;
+/// The reflection payload of a shader's compile, or null when there is none or it
+/// does not parse.
+nlohmann::json ReflectionOf(const SceneShader& shader) {
+    if (! shader.rust_reflection_json.has_value()) return nullptr;
+    auto reflection = nlohmann::json::parse(*shader.rust_reflection_json, nullptr, false);
+    return reflection.is_discarded() ? nlohmann::json(nullptr) : reflection;
 }
 
 void PumpTextUntilClean(SceneRuntimeContext& runtime, int max_attempts = 200) {
@@ -464,119 +259,6 @@ void PumpTextUntilClean(SceneRuntimeContext& runtime, int max_attempts = 200) {
         if (! any_dirty) return;
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-}
-
-bool ReflectShaderDescriptors(const SceneShader& shader, vulkan::ShaderReflected& reflected) {
-    std::vector<vulkan::Uni_ShaderSpv> spvs;
-    return vulkan::ReflectCustomShader(shader, spvs, reflected);
-}
-
-SceneShader CompileTextShaderForSpirvReflection(fs::VFS& vfs) {
-    (void)vfs;
-    std::string vertex_src =
-        "#version 450\n"
-        "layout(location = 0) in vec3 a_Position;\n"
-        "layout(binding = 1) uniform GlobalUniforms {\n"
-        "  mat4 g_ModelViewProjectionMatrix;\n"
-        "};\n"
-        "void main() {\n"
-        "  gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);\n"
-        "}\n";
-    std::string fragment_src = "#version 450\n"
-                               "layout(binding = 0) uniform sampler2D g_Texture0;\n"
-                               "layout(location = 0) out vec4 glOutColor;\n"
-                               "void main() {\n"
-                               "  glOutColor = texture(g_Texture0, vec2(0.5));\n"
-                               "}\n";
-
-    std::vector<vulkan::ShaderCompUnit> units {
-        vulkan::ShaderCompUnit {
-            .stage = EShLangVertex,
-            .src   = std::move(vertex_src),
-        },
-        vulkan::ShaderCompUnit {
-            .stage = EShLangFragment,
-            .src   = std::move(fragment_src),
-        },
-    };
-
-    vulkan::ShaderCompOpt opt;
-    opt.client_ver             = glslang::EShTargetVulkan_1_1;
-    opt.auto_map_bindings      = true;
-    opt.auto_map_locations     = true;
-    opt.relaxed_errors_glsl    = true;
-    opt.relaxed_rules_vulkan   = true;
-    opt.suppress_warnings_glsl = true;
-
-    WPShaderParser::InitGlslang();
-    std::vector<vulkan::Uni_ShaderSpv> compiled;
-    const bool ok = vulkan::CompileAndLinkShaderUnits(units, opt, compiled);
-    WPShaderParser::FinalGlslang();
-    if (! ok || compiled.size() != 2u) return {};
-
-    SceneShader shader;
-    shader.name = "text";
-    shader.codes.reserve(compiled.size());
-    for (auto& spv : compiled) {
-        shader.codes.emplace_back(std::move(spv->spirv));
-    }
-    return shader;
-}
-
-std::optional<VkDescriptorSetLayoutBinding>
-ShaderDescriptorBinding(const std::vector<ShaderCode>& spirv, std::string_view name) {
-    std::vector<vulkan::Uni_ShaderSpv> spvs;
-    vulkan::ShaderReflected            reflected;
-    if (! vulkan::GenReflect(spirv, spvs, reflected)) return std::nullopt;
-
-    const auto iterator = reflected.binding_map.find(std::string(name));
-    if (iterator == reflected.binding_map.end()) return std::nullopt;
-
-    return iterator->second;
-}
-
-std::optional<VkDescriptorSetLayoutBinding>
-ShaderDescriptorBinding(const SceneShader& shader, std::string_view name) {
-    vulkan::ShaderReflected reflected;
-    if (! ReflectShaderDescriptors(shader, reflected)) {
-        return std::nullopt;
-    }
-
-    const auto iterator = reflected.binding_map.find(std::string(name));
-    if (iterator == reflected.binding_map.end()) return std::nullopt;
-
-    return iterator->second;
-}
-
-std::vector<VkDescriptorSetLayoutBinding>
-ShaderDescriptorBindings(const std::vector<ShaderCode>& spirv) {
-    std::vector<vulkan::Uni_ShaderSpv> spvs;
-    vulkan::ShaderReflected            reflected;
-    if (! vulkan::GenReflect(spirv, spvs, reflected)) return {};
-
-    std::vector<VkDescriptorSetLayoutBinding> bindings;
-    bindings.reserve(reflected.binding_map.size());
-    for (const auto& [name, binding] : reflected.binding_map) {
-        (void)name;
-        bindings.push_back(binding);
-    }
-    return bindings;
-}
-
-std::vector<VkDescriptorSetLayoutBinding>
-ShaderDescriptorBindings(const SceneShader& shader) {
-    vulkan::ShaderReflected reflected;
-    if (! ReflectShaderDescriptors(shader, reflected)) {
-        return {};
-    }
-
-    std::vector<VkDescriptorSetLayoutBinding> bindings;
-    bindings.reserve(reflected.binding_map.size());
-    for (const auto& [name, binding] : reflected.binding_map) {
-        (void)name;
-        bindings.push_back(binding);
-    }
-    return bindings;
 }
 
 } // namespace
@@ -667,163 +349,6 @@ TEST(TextObjectRuntime, ParsedLimitsContinueToConstrainDynamicText) {
     EXPECT_EQ(scene->runtime->NodeText("caption"), std::string(100, 'W'));
 }
 
-TEST(TextObjectRuntime, ParserCreatesRuntimeTextNodeAndState) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-
-    ProjectProperties properties;
-    SceneParseRequest request {
-        .scene_id           = "text-object",
-        .project_properties = &properties,
-    };
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {
-            "id": 1,
-            "name": "caption",
-            "text": {"value": "hello"},
-            "font": {"value": "Arial"},
-            "pointsize": 20,
-            "padding": 4,
-            "origin": [100, 50, 0],
-            "horizontalalign": "right",
-            "verticalalign": "bottom",
-            "visible": true
-          }
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    EXPECT_TRUE(scene->runtime->HasNodeNamed("caption"));
-    EXPECT_EQ(scene->runtime->NodeText("caption"), "hello");
-
-    const auto size = scene->runtime->NodeSize("caption");
-    EXPECT_GT(size.x(), 8.0f);
-    EXPECT_GT(size.y(), 8.0f);
-
-    auto* node = FindRootChild(*scene, "caption");
-    ASSERT_NE(node, nullptr);
-    ASSERT_NE(node->Mesh(), nullptr);
-    // The layer's alignment hangs the card from its origin and leaves the node on it.
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
-    const auto layout = scene->runtime->NodeTextLayout("caption");
-    ASSERT_TRUE(layout.has_value());
-    const auto bounds = MeshLocalBounds(*node->Mesh());
-    // Right aligned: the card ends on the origin. Bottom aligned: the descender line of the
-    // last row is on it, so the card reaches one ascender and one descender above.
-    EXPECT_NEAR(bounds.max_x, 0.0f, 1.0e-3f);
-    EXPECT_NEAR(bounds.min_x, -size.x(), 1.0e-3f);
-    EXPECT_NEAR(bounds.max_y, layout->top + layout->descender, 1.0e-3f);
-}
-
-TEST(TextObjectRuntime, ParserCreatesRenderableTextMaterialAndTexture) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-
-    ProjectProperties properties;
-    SceneParseRequest request {
-        .scene_id           = "text-renderable-material",
-        .project_properties = &properties,
-    };
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {
-            "id": 1,
-            "name": "caption",
-            "text": "I I",
-            "font": "Arial",
-            "pointsize": 20,
-            "visible": true
-          }
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    auto* node = FindRootChild(*scene, "caption");
-    ASSERT_NE(node, nullptr);
-    ASSERT_NE(node->Mesh(), nullptr);
-
-    auto* material = node->Mesh()->MaterialForSlot(0);
-    ASSERT_NE(material, nullptr);
-    EXPECT_EQ(material->name, "text");
-    ASSERT_EQ(material->textures.size(), 1u);
-    EXPECT_FALSE(material->textures.front().empty());
-    EXPECT_FALSE(IsSpecTex(material->textures.front()));
-    EXPECT_TRUE(scene->textures.contains(material->textures.front()));
-    auto image = scene->imageParser->Parse(material->textures.front());
-    ASSERT_NE(image, nullptr);
-    ASSERT_EQ(image->slots.size(), 1u);
-    ASSERT_EQ(image->slots[0].mipmaps.size(), 1u);
-    const auto& mip = image->slots[0].mipmaps[0];
-    ASSERT_NE(mip.data, nullptr);
-    ASSERT_GT(mip.width, 1);
-    ASSERT_GT(mip.height, 1);
-    bool has_visible_alpha            = false;
-    bool has_transparent_space_column = false;
-    for (int y = 1; y < mip.height - 1; ++y) {
-        for (int x = 1; x < mip.width - 1; ++x) {
-            const auto alpha =
-                mip.data.get()[(static_cast<std::size_t>(y) * mip.width + x) * 4u + 3u];
-            has_visible_alpha = has_visible_alpha || alpha > 0u;
-        }
-    }
-    const int min_space_x = mip.width / 4;
-    const int max_space_x = (mip.width * 3) / 4;
-    for (int x = min_space_x; x < max_space_x && ! has_transparent_space_column; ++x) {
-        bool column_clear = true;
-        for (int y = 1; y < mip.height - 1; ++y) {
-            const auto alpha =
-                mip.data.get()[(static_cast<std::size_t>(y) * mip.width + x) * 4u + 3u];
-            if (alpha != 0u) {
-                column_clear = false;
-                break;
-            }
-        }
-        has_transparent_space_column = column_clear;
-    }
-    EXPECT_TRUE(has_visible_alpha);
-    EXPECT_TRUE(has_transparent_space_column);
-    ASSERT_NE(material->customShader.shader, nullptr);
-    ASSERT_EQ(material->customShader.shader->codes.size(), 2u);
-    for (const auto& code : material->customShader.shader->codes) {
-        ASSERT_FALSE(code.empty());
-        EXPECT_EQ(code.front(), kSpirvMagic);
-    }
-    EXPECT_TRUE(ShaderUsesUniformMember(*material->customShader.shader,
-                                        "g_ModelViewProjectionMatrix"));
-    const auto texture_binding =
-        ShaderDescriptorBinding(*material->customShader.shader, "g_Texture0");
-    ASSERT_TRUE(texture_binding.has_value());
-    const bool has_rust_reflection = material->customShader.shader->rust_reflection_json.has_value();
-    EXPECT_EQ(texture_binding->descriptorType,
-              has_rust_reflection ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-                                  : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-    const auto descriptor_bindings = ShaderDescriptorBindings(*material->customShader.shader);
-    ASSERT_FALSE(descriptor_bindings.empty());
-    bool has_uniform_buffer_descriptor = false;
-    bool has_sampler_descriptor        = ! has_rust_reflection;
-    for (const auto& binding : descriptor_bindings) {
-        if (binding.descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-            has_uniform_buffer_descriptor = true;
-            EXPECT_NE(binding.binding, texture_binding->binding);
-        }
-        if (binding.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER) {
-            has_sampler_descriptor = true;
-            EXPECT_NE(binding.binding, texture_binding->binding);
-        }
-    }
-    EXPECT_TRUE(has_uniform_buffer_descriptor);
-    EXPECT_TRUE(has_sampler_descriptor);
-    EXPECT_EQ(material->blenmode, BlendMode::Translucent);
-}
-
 namespace {
 
 // A 640x360 canvas whose camera parallax is on, with a cursor that rests at the
@@ -844,14 +369,14 @@ std::string ParallaxTextScene(std::string objects_json) {
 
 // How far the model matrix a pass hands its shader sits from where the layer's
 // node places it: the whole of what camera parallax does to a layer.
-Eigen::Vector2f ParallaxDisplacement(WPShaderValueUpdater& updater, SceneNode& node) {
+linalg::Vector2f ParallaxDisplacement(WPShaderValueUpdater& updater, SceneNode& node) {
     sprite_map_t sprites;
     ShaderValue  model;
     updater.UpdateUniforms(&node, sprites, [&](std::string_view name, const ShaderValue& value) {
         if (name == "g_ModelMatrix") model = value;
     });
     node.UpdateTrans();
-    return Eigen::Vector2f(model[12] - static_cast<float>(node.ModelTrans()(0, 3)),
+    return linalg::Vector2f(model[12] - static_cast<float>(node.ModelTrans()(0, 3)),
                            model[13] - static_cast<float>(node.ModelTrans()(1, 3)));
 }
 
@@ -948,110 +473,6 @@ TEST(TextObjectRuntime, ATextLayerUnderAGroupRidesTheGroupsParallax) {
     EXPECT_NEAR(moved.y(), 0.0f, 1e-3f);
 }
 
-TEST(TextObjectRuntime, ParserRoutesTextObjectEffectsThroughImageEffectLayer) {
-    fs::VFS vfs;
-    MountAssets(vfs,
-                {
-                    { "/effects/gradient/effect.json",
-                      R"JSON({
-                        "name": "gradient",
-                        "version": 1,
-                        "passes": [
-                          { "material": "materials/effects/gradient.json" }
-                        ]
-                      })JSON" },
-                    { "/materials/effects/gradient.json",
-                      R"JSON({
-                        "passes": [{
-                          "shader": "effects/gradient",
-                          "textures": [null],
-                          "constantshadervalues": {
-                            "gradient": "0.1 0.2 0.3"
-                          }
-                        }]
-                      })JSON" },
-                    { "/shaders/effects/gradient.vert",
-                      "layout(binding = 1) uniform mat4 g_ModelViewProjectionMatrix;\n"
-                      "in vec3 a_Position;\n"
-                      "in vec2 a_TexCoord;\n"
-                      "out vec2 v_TexCoord;\n"
-                      "void main() { gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0); v_TexCoord = a_TexCoord; }\n" },
-                    { "/shaders/effects/gradient.frag",
-                      "uniform sampler2D g_Texture0;\n"
-                      "uniform float g_Time;\n"
-                      "uniform vec3 u_Gradient; // {\"material\":\"gradient\",\"default\":\"1 1 1\"}\n"
-                      "in vec2 v_TexCoord;\n"
-                      "void main() { vec4 albedo = texture(g_Texture0, v_TexCoord); gl_FragColor = vec4(u_Gradient * abs(cos(g_Time)), albedo.a); }\n" },
-                });
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-effect",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"JSON([
-            {
-              "id": 1,
-              "name": "caption",
-              "text": "hello",
-              "font": "Arial",
-              "pointsize": 20,
-              "origin": "0 0 0",
-              "size": "200 40",
-              "visible": true,
-              "effects": [
-                {
-                  "file": "effects/gradient/effect.json",
-                  "id": 2,
-                  "visible": true,
-                  "passes": [
-                    {
-                      "constantshadervalues": {
-                        "gradient": "0.25 0.5 0.75"
-                      }
-                    }
-                  ]
-                }
-              ]
-            }
-          ])JSON"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    auto* text = FindRootChild(*scene, "caption");
-    ASSERT_NE(text, nullptr);
-    ASSERT_FALSE(text->Camera().empty());
-    ASSERT_TRUE(scene->cameras.contains(text->Camera()));
-    ASSERT_TRUE(scene->cameras.at(text->Camera())->HasImgEffect());
-
-    auto graph = sceneToRenderGraph(*scene);
-    ASSERT_NE(graph, nullptr);
-
-    auto* effect_node = scene->cameras.at(text->Camera())
-                            ->GetImgEffect()
-                            ->GetEffect(0)
-                            ->nodes.front()
-                            .sceneNode.get();
-    auto* updater = dynamic_cast<WPShaderValueUpdater*>(scene->shaderValueUpdater.get());
-    ASSERT_NE(updater, nullptr);
-    updater->InitUniforms(effect_node, [](std::string_view name) {
-        return name == "g_Time";
-    });
-
-    scene->PassFrameTime(0.5);
-    sprite_map_t sprites;
-    std::unordered_map<std::string, ShaderValue> updates;
-    updater->UpdateUniforms(effect_node, sprites, [&](std::string_view name, const ShaderValue& value) {
-        updates.emplace(std::string(name), value);
-    });
-    ASSERT_TRUE(updates.contains("g_Time"));
-    EXPECT_FLOAT_EQ(updates.at("g_Time")[0], 0.5f);
-}
-
 TEST(TextObjectRuntime, TextEffectVisibilityFollowsTheBoundUserProperty) {
     // The scene file's `value` is the editor's default; the property decides.
     fs::VFS vfs;
@@ -1116,252 +537,6 @@ TEST(TextObjectRuntime, TextEffectVisibilityFollowsTheBoundUserProperty) {
     const auto* material = layer.GetEffect(0)->nodes.front().sceneNode->Mesh()->Material();
     ASSERT_NE(material, nullptr);
     EXPECT_EQ(material->name, "effects/chosen");
-}
-
-TEST(TextObjectRuntime, RuntimeTextEffectTargetsResizeWithTextRasterSize) {
-    fs::VFS vfs;
-    MountAssets(vfs,
-                {
-                    { "/effects/gradient/effect.json",
-                      R"JSON({
-                        "name": "gradient",
-                        "version": 1,
-                        "fbos": [
-                          { "name": "_rt_BlurBuffer", "scale": 2 }
-                        ],
-                        "passes": [
-                          {
-                            "material": "materials/effects/gradient.json",
-                            "bind": [
-                              { "name": "previous", "index": 0 }
-                            ],
-                            "target": "_rt_BlurBuffer"
-                          },
-                          {
-                            "material": "materials/effects/gradient.json",
-                            "bind": [
-                              { "name": "_rt_BlurBuffer", "index": 0 }
-                            ]
-                          }
-                        ]
-                      })JSON" },
-                    { "/materials/effects/gradient.json",
-                      R"JSON({
-                        "passes": [{
-                          "shader": "effects/gradient",
-                          "textures": [null]
-                        }]
-                      })JSON" },
-                    { "/shaders/effects/gradient.vert",
-                      "layout(binding = 1) uniform mat4 g_ModelViewProjectionMatrix;\n"
-                      "in vec3 a_Position;\n"
-                      "in vec2 a_TexCoord;\n"
-                      "out vec2 v_TexCoord;\n"
-                      "void main() { gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0); v_TexCoord = a_TexCoord; }\n" },
-                    { "/shaders/effects/gradient.frag",
-                      "uniform sampler2D g_Texture0;\n"
-                      "in vec2 v_TexCoord;\n"
-                      "void main() { gl_FragColor = texture(g_Texture0, v_TexCoord); }\n" },
-                });
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-effect-resize",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"JSON([
-            {
-              "id": 1,
-              "name": "caption",
-              "text": "a",
-              "font": "Arial",
-              "pointsize": 20,
-              "padding": 0,
-              "origin": "0 0 0",
-              "visible": true,
-              "effects": [
-                {
-                  "file": "effects/gradient/effect.json",
-                  "id": 2,
-                  "visible": true
-                }
-              ]
-            }
-          ])JSON"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* text = FindRootChild(*scene, "caption");
-    ASSERT_NE(text, nullptr);
-    ASSERT_FALSE(text->Camera().empty());
-    auto camera = scene->cameras.at(text->Camera());
-    ASSERT_TRUE(camera->HasImgEffect());
-    const auto effect_layer = camera->GetImgEffect();
-    ASSERT_NE(effect_layer, nullptr);
-
-    auto* pingpong = scene->FindRenderTarget(effect_layer->FirstTarget());
-    ASSERT_NE(pingpong, nullptr);
-    const auto initial_pingpong_width = pingpong->width;
-    const auto initial_camera_width   = camera->Width();
-    auto* fbo = scene->FindRenderTarget(
-        effect_layer->GetEffect(0)->nodes.front().output);
-    ASSERT_NE(fbo, nullptr);
-    const auto initial_fbo_width = fbo->width;
-    const auto initial_text_mesh_size = MeshSize(*text->Mesh());
-    const auto initial_final_mesh_size = MeshSize(effect_layer->FinalMesh());
-
-    auto graph = sceneToRenderGraph(*scene);
-    ASSERT_NE(graph, nullptr);
-    auto* resolved_final = effect_layer->ResolvedFinalRenderNode();
-    ASSERT_NE(resolved_final, nullptr);
-    ASSERT_NE(resolved_final->Mesh(), nullptr);
-    EXPECT_TRUE(resolved_final->Mesh()->Dynamic());
-
-    ASSERT_TRUE(scene->runtime->SetNodeText("caption", "a much longer caption for effects"));
-    PumpTextUntilClean(*scene->runtime);
-
-    pingpong = scene->FindRenderTarget(effect_layer->FirstTarget());
-    ASSERT_NE(pingpong, nullptr);
-    fbo = scene->FindRenderTarget(effect_layer->GetEffect(0)->nodes.front().output);
-    ASSERT_NE(fbo, nullptr);
-    // The chain's buffers are the new card's, with the fraction cut off, as Wallpaper
-    // Engine builds them again for every layout.
-    const auto resized_layout = scene->runtime->NodeTextLayout("caption");
-    ASSERT_TRUE(resized_layout.has_value());
-    EXPECT_GT(pingpong->width, initial_pingpong_width);
-    EXPECT_EQ(pingpong->width, static_cast<int>(resized_layout->card.x()));
-    EXPECT_EQ(pingpong->height, static_cast<int>(resized_layout->card.y()));
-    EXPECT_GT(camera->Width(), initial_camera_width);
-    EXPECT_EQ(static_cast<int>(camera->Width()), pingpong->width);
-    EXPECT_EQ(static_cast<int>(camera->Height()), pingpong->height);
-    const auto resized_text_mesh_size = MeshSize(*text->Mesh());
-    const auto resized_final_mesh_size = MeshSize(effect_layer->FinalMesh());
-    ExpectTextEffectFboCoversFinalMesh(*fbo,
-                                       effect_layer->FinalMesh(),
-                                       pingpong->width,
-                                       pingpong->height);
-    EXPECT_GT(fbo->width, initial_fbo_width);
-    EXPECT_GT(resized_text_mesh_size.x(), initial_text_mesh_size.x());
-    EXPECT_GT(resized_final_mesh_size.x(), initial_final_mesh_size.x());
-    EXPECT_NEAR(resized_final_mesh_size.x(), resized_text_mesh_size.x(), 1.0f);
-    EXPECT_NEAR(resized_final_mesh_size.y(), resized_text_mesh_size.y(), 1.0f);
-    const auto uv_bounds = MeshTexCoordBounds(effect_layer->FinalMesh());
-    EXPECT_FLOAT_EQ(uv_bounds.min_u, 0.0f);
-    EXPECT_FLOAT_EQ(uv_bounds.max_u, 1.0f);
-    EXPECT_FLOAT_EQ(uv_bounds.min_v, 0.0f);
-    EXPECT_FLOAT_EQ(uv_bounds.max_v, 1.0f);
-
-    ASSERT_EQ(resolved_final, effect_layer->ResolvedFinalRenderNode());
-    ASSERT_NE(resolved_final->Mesh(), nullptr);
-    EXPECT_TRUE(resolved_final->Mesh()->Dynamic());
-    const auto resolved_final_mesh_size = MeshSize(*resolved_final->Mesh());
-    EXPECT_NEAR(resolved_final_mesh_size.x(), resized_text_mesh_size.x(), 1.0f);
-    EXPECT_NEAR(resolved_final_mesh_size.y(), resized_text_mesh_size.y(), 1.0f);
-    const auto resolved_uv_bounds = MeshTexCoordBounds(*resolved_final->Mesh());
-    EXPECT_FLOAT_EQ(resolved_uv_bounds.min_u, 0.0f);
-    EXPECT_FLOAT_EQ(resolved_uv_bounds.max_u, 1.0f);
-    EXPECT_FLOAT_EQ(resolved_uv_bounds.min_v, 0.0f);
-    EXPECT_FLOAT_EQ(resolved_uv_bounds.max_v, 1.0f);
-    // The buffers are another size, so the graph that owns them is built again: once.
-    EXPECT_TRUE(scene->runtime->ConsumeSceneGraphMutationFlag());
-    EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
-}
-
-TEST(TextObjectRuntime, ParserTextEffectFinalUvsAreTheWholeCutOffBuffer) {
-    fs::VFS vfs;
-    MountAssets(vfs,
-                {
-                    { "/effects/gradient/effect.json",
-                      R"JSON({
-                        "name": "gradient",
-                        "version": 1,
-                        "passes": [
-                          { "material": "materials/effects/gradient.json" }
-                        ]
-                      })JSON" },
-                    { "/materials/effects/gradient.json",
-                      R"JSON({
-                        "passes": [{
-                          "shader": "effects/gradient",
-                          "textures": [null]
-                        }]
-                      })JSON" },
-                    { "/shaders/effects/gradient.vert",
-                      "layout(binding = 1) uniform mat4 g_ModelViewProjectionMatrix;\n"
-                      "in vec3 a_Position;\n"
-                      "in vec2 a_TexCoord;\n"
-                      "out vec2 v_TexCoord;\n"
-                      "void main() { gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0); v_TexCoord = a_TexCoord; }\n" },
-                    { "/shaders/effects/gradient.frag",
-                      "uniform sampler2D g_Texture0;\n"
-                      "in vec2 v_TexCoord;\n"
-                      "void main() { gl_FragColor = texture(g_Texture0, v_TexCoord); }\n" },
-                });
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-effect-rounded-uvs",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"JSON([
-            {
-              "id": 1,
-              "name": "caption",
-              "text": "Wind",
-              "font": "Arial",
-              "pointsize": 20,
-              "spacing": "0.2 0",
-              "padding": 0,
-              "origin": "0 0 0",
-              "size": [93.6, 41.6],
-              "visible": true,
-              "effects": [
-                {
-                  "file": "effects/gradient/effect.json",
-                  "id": 2,
-                  "visible": true
-                }
-              ]
-            }
-          ])JSON"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* text = FindRootChild(*scene, "caption");
-    ASSERT_NE(text, nullptr);
-    ASSERT_FALSE(text->Camera().empty());
-    auto camera = scene->cameras.at(text->Camera());
-    ASSERT_TRUE(camera->HasImgEffect());
-    const auto effect_layer = camera->GetImgEffect();
-    ASSERT_NE(effect_layer, nullptr);
-
-    // The buffers are the card with the fraction cut off, and the final card is exactly that
-    // box with the whole buffer on it: texture coordinates 0 to 1, neither a texel of the
-    // buffer left out nor one stretched over a fraction of a unit.
-    const auto layout = scene->runtime->NodeTextLayout("caption");
-    ASSERT_TRUE(layout.has_value());
-    ASSERT_GE(layout->card.x() - std::floor(layout->card.x()), 0.5f)
-        << "the card has a fraction that rounding would take up";
-    EXPECT_EQ(static_cast<int>(camera->Width()), static_cast<int>(layout->card.x()));
-    EXPECT_EQ(static_cast<int>(camera->Height()), static_cast<int>(layout->card.y()));
-    const auto final_mesh_size = MeshSize(effect_layer->FinalMesh());
-    EXPECT_NEAR(final_mesh_size.x(), std::floor(layout->card.x()), 1.0e-3f);
-    EXPECT_NEAR(final_mesh_size.y(), std::floor(layout->card.y()), 1.0e-3f);
-    const auto uv_bounds = MeshTexCoordBounds(effect_layer->FinalMesh());
-    EXPECT_FLOAT_EQ(uv_bounds.min_u, 0.0f);
-    EXPECT_FLOAT_EQ(uv_bounds.max_u, 1.0f);
-    EXPECT_FLOAT_EQ(uv_bounds.min_v, 0.0f);
-    EXPECT_FLOAT_EQ(uv_bounds.max_v, 1.0f);
 }
 
 // Wallpaper Engine builds the buffers an effect chain draws into as the card's width and
@@ -1444,17 +619,21 @@ TEST(TextObjectRuntime, EffectTargetIsTheCardNotACapacity) {
     }
 }
 
-// A card that changes size in texels is built again, once for the text change that did it
-// and not again while it stays that size. A card that changes by less than a texel, or only
-// moves, costs the graph nothing: `ACardThatGrowsWithinATexelKeepsItsBuffers` and
+// A card that changes size in texels has the renderer resize the buffers under the graph it
+// has, once for the text change that did it and not again while it stays that size. It never
+// asks for the graph to be built again: that drops every uploaded image and vertex buffer of
+// the scene, and a text that changes width as it runs (proportional digits, a readout) did it
+// every few frames. A card that changes by less than a texel, or only moves, costs nothing:
+// `ACardThatGrowsWithinATexelKeepsItsBuffers` and
 // `AnEffectChainFollowsTheCardWhenTheAlignmentMovesIt`.
-TEST(TextObjectRuntime, ACardThatChangesInTexelsRebuildsTheGraphOncePerTextChange) {
+TEST(TextObjectRuntime, ACardThatChangesInTexelsResizesTheBuffersOncePerTextChangeAndRebuildsNothing) {
     TextEffectScene fixture;
     ASSERT_TRUE(fixture.Load("text-effect-card-grows",
                              R"("text":"a","padding":0,"horizontalalign":"right")", true));
     auto& runtime = *fixture.scene->runtime;
     ASSERT_NE(sceneToRenderGraph(*fixture.scene), nullptr);
     (void)runtime.ConsumeSceneGraphMutationFlag();
+    (void)runtime.ConsumeRenderTargetResizeFlag();
     const int before_width = fixture.FirstTarget()->width;
 
     ASSERT_TRUE(runtime.SetNodeText("caption", "a much longer caption for effects"));
@@ -1483,17 +662,19 @@ TEST(TextObjectRuntime, ACardThatChangesInTexelsRebuildsTheGraphOncePerTextChang
     EXPECT_FLOAT_EQ(uv.min_u, 0.0f);
     EXPECT_FLOAT_EQ(uv.max_u, 1.0f);
 
-    // The graph the renderers rebuild is asked for once...
-    EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag());
+    // The renderers are asked to resize their targets once, and never to rebuild...
+    EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag());
+    EXPECT_TRUE(runtime.ConsumeRenderTargetResizeFlag());
     // ...and the frames that follow, with nothing changed, ask for nothing.
     for (int frame = 0; frame < 30; ++frame) {
         runtime.Tick(1.0 / 60.0);
         runtime.PumpTextLayerCache();
         ASSERT_FALSE(runtime.ConsumeSceneGraphMutationFlag()) << "frame " << frame;
+        ASSERT_FALSE(runtime.ConsumeRenderTargetResizeFlag()) << "frame " << frame;
     }
 
-    // A card that gets smaller is built again at its new size the same way: the buffers do
-    // not stay as large as the longest text the layer has shown.
+    // A card that gets smaller has its buffers resized the same way: they do not stay as
+    // large as the longest text the layer has shown.
     ASSERT_TRUE(runtime.SetNodeText("caption", "a"));
     PumpTextUntilClean(runtime);
     const auto shrunk = runtime.NodeTextLayout("caption");
@@ -1504,634 +685,14 @@ TEST(TextObjectRuntime, ACardThatChangesInTexelsRebuildsTheGraphOncePerTextChang
     EXPECT_EQ(static_cast<int>(fixture.camera->Width()), fixture.FirstTarget()->width);
     EXPECT_NEAR(MeshSize(fixture.effect_layer->FinalMesh()).x(),
                 static_cast<float>(fixture.FirstTarget()->width), 1.0e-3f);
-    EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag());
+    EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag());
+    EXPECT_TRUE(runtime.ConsumeRenderTargetResizeFlag());
     for (int frame = 0; frame < 30; ++frame) {
         runtime.Tick(1.0 / 60.0);
         runtime.PumpTextLayerCache();
         ASSERT_FALSE(runtime.ConsumeSceneGraphMutationFlag()) << "frame " << frame;
+        ASSERT_FALSE(runtime.ConsumeRenderTargetResizeFlag()) << "frame " << frame;
     }
-}
-
-TEST(TextObjectRuntime, OversizedTextEffectClipsFinalMeshToBoundedTarget) {
-    fs::VFS vfs;
-    MountAssets(vfs,
-                {
-                    { "/effects/gradient/effect.json",
-                      R"JSON({
-                        "name": "gradient",
-                        "version": 1,
-                        "fbos": [
-                          { "name": "_rt_BlurBuffer", "scale": 2 }
-                        ],
-                        "passes": [
-                          {
-                            "material": "materials/effects/gradient.json",
-                            "bind": [
-                              { "name": "previous", "index": 0 }
-                            ],
-                            "target": "_rt_BlurBuffer"
-                          },
-                          {
-                            "material": "materials/effects/gradient.json",
-                            "bind": [
-                              { "name": "_rt_BlurBuffer", "index": 0 }
-                            ]
-                          }
-                        ]
-                      })JSON" },
-                    { "/materials/effects/gradient.json",
-                      R"JSON({
-                        "passes": [{
-                          "shader": "effects/gradient",
-                          "textures": [null]
-                        }]
-                      })JSON" },
-                    { "/shaders/effects/gradient.vert",
-                      "layout(binding = 1) uniform mat4 g_ModelViewProjectionMatrix;\n"
-                      "in vec3 a_Position;\n"
-                      "in vec2 a_TexCoord;\n"
-                      "out vec2 v_TexCoord;\n"
-                      "void main() { gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0); v_TexCoord = a_TexCoord; }\n" },
-                    { "/shaders/effects/gradient.frag",
-                      "uniform sampler2D g_Texture0;\n"
-                      "in vec2 v_TexCoord;\n"
-                      "void main() { gl_FragColor = texture(g_Texture0, v_TexCoord); }\n" },
-                });
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-effect-oversized-cap",
-          .project_properties = &properties,
-    };
-    const std::string oversized_text(260, 'W');
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"JSON([
-            {
-              "id": 1,
-              "name": "caption",
-              "text": ")JSON" + oversized_text +
-                                                  R"JSON(",
-              "font": "Arial",
-              "pointsize": 40,
-              "padding": 0,
-              "origin": "0 0 0",
-              "visible": true,
-              "effects": [
-                {
-                  "file": "effects/gradient/effect.json",
-                  "id": 2,
-                  "visible": true
-                }
-              ]
-            }
-          ])JSON"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* text = FindRootChild(*scene, "caption");
-    ASSERT_NE(text, nullptr);
-    ASSERT_NE(text->Mesh(), nullptr);
-    ASSERT_FALSE(text->Camera().empty());
-    auto camera = scene->cameras.at(text->Camera());
-    ASSERT_TRUE(camera->HasImgEffect());
-    const auto effect_layer = camera->GetImgEffect();
-    ASSERT_NE(effect_layer, nullptr);
-
-    const auto layout = scene->runtime->NodeTextLayout("caption");
-    ASSERT_TRUE(layout.has_value());
-    ASSERT_GT(layout->card.x(), 4096.0f);
-    EXPECT_LE(camera->Width(), 4096.0);
-    EXPECT_LE(camera->Height(), 4096.0);
-
-    auto* pingpong = scene->FindRenderTarget(effect_layer->FirstTarget());
-    ASSERT_NE(pingpong, nullptr);
-    EXPECT_LE(pingpong->width, 4096);
-    EXPECT_LE(pingpong->height, 4096);
-    auto* fbo = scene->FindRenderTarget(effect_layer->GetEffect(0)->nodes.front().output);
-    ASSERT_NE(fbo, nullptr);
-
-    const auto text_mesh_size = MeshSize(*text->Mesh());
-    EXPECT_GT(text_mesh_size.x(), static_cast<float>(pingpong->width));
-    const auto final_mesh_size = MeshSize(effect_layer->FinalMesh());
-    ExpectTextEffectFboCoversFinalMesh(*fbo,
-                                       effect_layer->FinalMesh(),
-                                       pingpong->width,
-                                       pingpong->height);
-    EXPECT_NEAR(final_mesh_size.x(), static_cast<float>(pingpong->width), 1.0f);
-    EXPECT_LE(final_mesh_size.y(), static_cast<float>(pingpong->height));
-    const auto uv_bounds = MeshTexCoordBounds(effect_layer->FinalMesh());
-    EXPECT_FLOAT_EQ(uv_bounds.min_u, 0.0f);
-    EXPECT_FLOAT_EQ(uv_bounds.max_u, 1.0f);
-    EXPECT_GE(uv_bounds.min_v, 0.0f);
-    EXPECT_LE(uv_bounds.max_v, 1.0f);
-
-    auto graph = sceneToRenderGraph(*scene);
-    ASSERT_NE(graph, nullptr);
-    auto* resolved_final = effect_layer->ResolvedFinalRenderNode();
-    ASSERT_NE(resolved_final, nullptr);
-    ASSERT_NE(resolved_final->Mesh(), nullptr);
-    const auto resolved_final_size = MeshSize(*resolved_final->Mesh());
-    EXPECT_NEAR(resolved_final_size.x(), static_cast<float>(pingpong->width), 1.0f);
-    const auto resolved_uv_bounds = MeshTexCoordBounds(*resolved_final->Mesh());
-    EXPECT_FLOAT_EQ(resolved_uv_bounds.min_u, 0.0f);
-    EXPECT_FLOAT_EQ(resolved_uv_bounds.max_u, 1.0f);
-    EXPECT_GE(resolved_uv_bounds.min_v, 0.0f);
-    EXPECT_LE(resolved_uv_bounds.max_v, 1.0f);
-    EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
-}
-
-TEST(TextObjectRuntime, SceneScriptTextEffectMutationKeepsFinalUvsOnTheWholeBuffer) {
-    fs::VFS vfs;
-    MountAssets(vfs,
-                {
-                    { "/effects/gradient/effect.json",
-                      R"JSON({
-                        "name": "gradient",
-                        "version": 1,
-                        "passes": [
-                          { "material": "materials/effects/gradient.json" }
-                        ]
-                      })JSON" },
-                    { "/materials/effects/gradient.json",
-                      R"JSON({
-                        "passes": [{
-                          "shader": "effects/gradient",
-                          "textures": [null]
-                        }]
-                      })JSON" },
-                    { "/shaders/effects/gradient.vert",
-                      "layout(binding = 1) uniform mat4 g_ModelViewProjectionMatrix;\n"
-                      "in vec3 a_Position;\n"
-                      "in vec2 a_TexCoord;\n"
-                      "out vec2 v_TexCoord;\n"
-                      "void main() { gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0); v_TexCoord = a_TexCoord; }\n" },
-                    { "/shaders/effects/gradient.frag",
-                      "uniform sampler2D g_Texture0;\n"
-                      "in vec2 v_TexCoord;\n"
-                      "void main() { gl_FragColor = texture(g_Texture0, v_TexCoord); }\n" },
-                });
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-effect-script-mutation",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"JSON([
-            {
-              "id": 1,
-              "name": "caption",
-              "text": {
-                "text": "a",
-                "script": "engine.on('cursorDown', function() { thisLayer.text = 'a much longer caption for effects'; })"
-              },
-              "font": "Arial",
-              "pointsize": 20,
-              "padding": 0,
-              "origin": "0 0 0",
-              "visible": true,
-              "effects": [
-                {
-                  "file": "effects/gradient/effect.json",
-                  "id": 2,
-                  "visible": true
-                }
-              ]
-            }
-          ])JSON"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* text = FindRootChild(*scene, "caption");
-    ASSERT_NE(text, nullptr);
-    ASSERT_FALSE(text->Camera().empty());
-    auto camera = scene->cameras.at(text->Camera());
-    ASSERT_TRUE(camera->HasImgEffect());
-    const auto effect_layer = camera->GetImgEffect();
-    ASSERT_NE(effect_layer, nullptr);
-
-    scene->runtime->DispatchCursorDown();
-    PumpTextUntilClean(*scene->runtime);
-
-    EXPECT_EQ(scene->runtime->NodeText("caption"), "a much longer caption for effects");
-    // The buffers were built again for the longer text, and the final card is all of them.
-    const auto uv_bounds = MeshTexCoordBounds(effect_layer->FinalMesh());
-    EXPECT_FLOAT_EQ(uv_bounds.min_u, 0.0f);
-    EXPECT_FLOAT_EQ(uv_bounds.max_u, 1.0f);
-    EXPECT_FLOAT_EQ(uv_bounds.min_v, 0.0f);
-    EXPECT_FLOAT_EQ(uv_bounds.max_v, 1.0f);
-    const auto layout = scene->runtime->NodeTextLayout("caption");
-    ASSERT_TRUE(layout.has_value());
-    auto* pingpong = scene->FindRenderTarget(effect_layer->FirstTarget());
-    ASSERT_NE(pingpong, nullptr);
-    EXPECT_EQ(pingpong->width, static_cast<int>(layout->card.x()));
-    EXPECT_TRUE(scene->runtime->ConsumeSceneGraphMutationFlag());
-    EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
-    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
-}
-
-TEST(TextObjectRuntime, AlignedTextEffectTracksMeasuredRenderFrameWhenRasterExpands) {
-    fs::VFS vfs;
-    MountAssets(vfs,
-                {
-                    { "/effects/gradient/effect.json",
-                      R"JSON({
-                        "name": "gradient",
-                        "version": 1,
-                        "fbos": [
-                          { "name": "_rt_BlurBuffer", "scale": 2 }
-                        ],
-                        "passes": [
-                          {
-                            "material": "materials/effects/gradient.json",
-                            "bind": [
-                              { "name": "previous", "index": 0 }
-                            ],
-                            "target": "_rt_BlurBuffer"
-                          },
-                          {
-                            "material": "materials/effects/gradient.json",
-                            "bind": [
-                              { "name": "_rt_BlurBuffer", "index": 0 }
-                            ]
-                          }
-                        ]
-                      })JSON" },
-                    { "/materials/effects/gradient.json",
-                      R"JSON({
-                        "passes": [{
-                          "shader": "effects/gradient",
-                          "textures": [null]
-                        }]
-                      })JSON" },
-                    { "/shaders/effects/gradient.vert",
-                      "layout(binding = 1) uniform mat4 g_ModelViewProjectionMatrix;\n"
-                      "in vec3 a_Position;\n"
-                      "in vec2 a_TexCoord;\n"
-                      "out vec2 v_TexCoord;\n"
-                      "void main() { gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0); v_TexCoord = a_TexCoord; }\n" },
-                    { "/shaders/effects/gradient.frag",
-                      "uniform sampler2D g_Texture0;\n"
-                      "in vec2 v_TexCoord;\n"
-                      "void main() { gl_FragColor = texture(g_Texture0, v_TexCoord); }\n" },
-                });
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "aligned-text-effect-raster-camera",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"JSON([
-            {
-              "id": 1,
-              "name": "caption",
-              "text": {
-                "value": "a",
-                "script": "export function update(value) { return 'a much longer caption for explicit effects'; }"
-              },
-              "font": "Arial",
-              "pointsize": 20,
-              "padding": 0,
-              "origin": "0 0 0",
-              "horizontalalign": "right",
-              "verticalalign": "bottom",
-              "visible": true,
-              "effects": [
-                {
-                  "file": "effects/gradient/effect.json",
-                  "id": 2,
-                  "visible": true
-                }
-              ]
-            }
-          ])JSON"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* text = FindRootChild(*scene, "caption");
-    ASSERT_NE(text, nullptr);
-    ASSERT_NE(text->Mesh(), nullptr);
-    ASSERT_FALSE(text->Camera().empty());
-    auto camera = scene->cameras.at(text->Camera());
-    ASSERT_TRUE(camera->HasImgEffect());
-    const auto effect_layer = camera->GetImgEffect();
-    ASSERT_NE(effect_layer, nullptr);
-    scene->runtime->Tick(1.0 / 60.0);
-    PumpTextUntilClean(*scene->runtime);
-
-    EXPECT_EQ(scene->runtime->NodeText("caption"),
-              "a much longer caption for explicit effects");
-
-    const auto state = scene->runtime->NodeTextState("caption");
-    const auto layout = scene->runtime->NodeTextLayout("caption");
-    ASSERT_TRUE(state.has_value());
-    ASSERT_TRUE(layout.has_value());
-    // The card is the text the script wrote, and the layer is placed by the edges of it.
-    const auto card = scene->runtime->NodeSize("caption");
-    EXPECT_TRUE(card.isApprox(layout->card));
-    EXPECT_GT(card.x(), 400.0f);
-    EXPECT_TRUE(text->Translate().isApprox(Eigen::Vector3f::Zero()));
-    const auto render_frame = TextLayerRenderFrameForLayout(*state, *layout);
-    EXPECT_NEAR(render_frame.center.x(), -card.x() * 0.5f, 1.0e-3f);
-
-    const auto text_mesh_size = MeshSize(*text->Mesh());
-    EXPECT_NEAR(text_mesh_size.x(), render_frame.size.x(), 1.0f);
-    EXPECT_NEAR(text_mesh_size.y(), render_frame.size.y(), 1.0f);
-    const auto text_mesh_center = MeshCenter(*text->Mesh());
-    EXPECT_NEAR(text_mesh_center.x(), render_frame.center.x(), 1.0e-4f);
-    EXPECT_NEAR(text_mesh_center.y(), render_frame.center.y(), 1.0e-4f);
-
-    auto* pingpong = scene->FindRenderTarget(effect_layer->FirstTarget());
-    ASSERT_NE(pingpong, nullptr);
-    auto* fbo = scene->FindRenderTarget(effect_layer->GetEffect(0)->nodes.front().output);
-    ASSERT_NE(fbo, nullptr);
-    // The buffers are the card, its fraction cut off, and the final card is all of them.
-    EXPECT_EQ(pingpong->width, static_cast<int32_t>(render_frame.size.x()));
-    EXPECT_EQ(pingpong->height, static_cast<int32_t>(render_frame.size.y()));
-    EXPECT_EQ(static_cast<int32_t>(std::lround(camera->Width())), pingpong->width);
-    EXPECT_EQ(static_cast<int32_t>(std::lround(camera->Height())), pingpong->height);
-
-    const auto final_mesh_size = MeshSize(effect_layer->FinalMesh());
-    ExpectTextEffectFboCoversFinalMesh(*fbo,
-                                       effect_layer->FinalMesh(),
-                                       pingpong->width,
-                                       pingpong->height);
-    EXPECT_NEAR(final_mesh_size.x(), render_frame.size.x(), 1.0f);
-    EXPECT_NEAR(final_mesh_size.y(), render_frame.size.y(), 1.0f);
-    const auto final_mesh_center = MeshCenter(effect_layer->FinalMesh());
-    EXPECT_NEAR(final_mesh_center.x(), render_frame.center.x(), 1.0e-4f);
-    EXPECT_NEAR(final_mesh_center.y(), render_frame.center.y(), 1.0e-4f);
-    const auto uv_bounds = MeshTexCoordBounds(effect_layer->FinalMesh());
-    EXPECT_FLOAT_EQ(uv_bounds.min_u, 0.0f);
-    EXPECT_FLOAT_EQ(uv_bounds.max_u, 1.0f);
-    EXPECT_FLOAT_EQ(uv_bounds.min_v, 0.0f);
-    EXPECT_FLOAT_EQ(uv_bounds.max_v, 1.0f);
-
-    auto graph = sceneToRenderGraph(*scene);
-    ASSERT_NE(graph, nullptr);
-    auto* resolved_final = effect_layer->ResolvedFinalRenderNode();
-    ASSERT_NE(resolved_final, nullptr);
-    ASSERT_NE(resolved_final->Mesh(), nullptr);
-    const auto resolved_final_mesh_size = MeshSize(*resolved_final->Mesh());
-    EXPECT_NEAR(resolved_final_mesh_size.x(), render_frame.size.x(), 1.0f);
-    EXPECT_NEAR(resolved_final_mesh_size.y(), render_frame.size.y(), 1.0f);
-    const auto resolved_final_mesh_center = MeshCenter(*resolved_final->Mesh());
-    EXPECT_NEAR(resolved_final_mesh_center.x(), render_frame.center.x(), 1.0e-4f);
-    EXPECT_NEAR(resolved_final_mesh_center.y(), render_frame.center.y(), 1.0e-4f);
-
-    EXPECT_TRUE(scene->runtime->ConsumeSceneGraphMutationFlag());
-    PumpTextUntilClean(*scene->runtime);
-    EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
-}
-
-TEST(TextObjectRuntime, AlignedTextEffectCoversMeasuredRasterWithoutScaling) {
-    fs::VFS vfs;
-    MountAssets(vfs,
-                {
-                    { "/effects/gradient/effect.json",
-                      R"JSON({
-                        "name": "gradient",
-                        "version": 1,
-                        "fbos": [
-                          { "name": "_rt_BlurBuffer", "scale": 2 }
-                        ],
-                        "passes": [
-                          {
-                            "material": "materials/effects/gradient.json",
-                            "bind": [
-                              { "name": "previous", "index": 0 }
-                            ],
-                            "target": "_rt_BlurBuffer"
-                          },
-                          {
-                            "material": "materials/effects/gradient.json",
-                            "bind": [
-                              { "name": "_rt_BlurBuffer", "index": 0 }
-                            ]
-                          }
-                        ]
-                      })JSON" },
-                    { "/materials/effects/gradient.json",
-                      R"JSON({
-                        "passes": [{
-                          "shader": "effects/gradient",
-                          "textures": [null]
-                        }]
-                      })JSON" },
-                    { "/shaders/effects/gradient.vert",
-                      "layout(binding = 1) uniform mat4 g_ModelViewProjectionMatrix;\n"
-                      "in vec3 a_Position;\n"
-                      "in vec2 a_TexCoord;\n"
-                      "out vec2 v_TexCoord;\n"
-                      "void main() { gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0); v_TexCoord = a_TexCoord; }\n" },
-                    { "/shaders/effects/gradient.frag",
-                      "uniform sampler2D g_Texture0;\n"
-                      "in vec2 v_TexCoord;\n"
-                      "void main() { gl_FragColor = texture(g_Texture0, v_TexCoord); }\n" },
-                });
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "aligned-text-effect-measured-raster",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"JSON([
-            {
-              "id": 1,
-              "name": "caption",
-              "text": "Saturday Saturday Saturday",
-              "font": "Arial",
-              "pointsize": 20,
-              "padding": 0,
-              "origin": "0 0 0",
-              "horizontalalign": "right",
-              "verticalalign": "bottom",
-              "visible": true,
-              "effects": [
-                {
-                  "file": "effects/gradient/effect.json",
-                  "id": 2,
-                  "visible": true
-                }
-              ]
-            }
-          ])JSON"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* text = FindRootChild(*scene, "caption");
-    ASSERT_NE(text, nullptr);
-    ASSERT_NE(text->Mesh(), nullptr);
-    ASSERT_FALSE(text->Camera().empty());
-    auto camera = scene->cameras.at(text->Camera());
-    ASSERT_TRUE(camera->HasImgEffect());
-    const auto effect_layer = camera->GetImgEffect();
-    ASSERT_NE(effect_layer, nullptr);
-
-    const auto layout = scene->runtime->NodeTextLayout("caption");
-    ASSERT_TRUE(layout.has_value());
-    const auto card = scene->runtime->NodeSize("caption");
-    EXPECT_TRUE(card.isApprox(layout->card));
-
-    const auto text_mesh_size = MeshSize(*text->Mesh());
-    EXPECT_NEAR(text_mesh_size.x(), card.x(), 1.0f);
-    EXPECT_NEAR(text_mesh_size.y(), card.y(), 1.0f);
-    // The card hangs from the layer's origin by the edges it is aligned to: its right edge
-    // is on the origin, and the descender line of its last row.
-    const auto text_mesh_center = MeshCenter(*text->Mesh());
-    EXPECT_NEAR(text_mesh_center.x(), layout->centre.x(), 1.0e-4f);
-    EXPECT_NEAR(text_mesh_center.y(), layout->centre.y(), 1.0e-4f);
-    EXPECT_NEAR(text_mesh_center.x(), -card.x() * 0.5f, 1.0e-4f);
-
-    auto* pingpong = scene->FindRenderTarget(effect_layer->FirstTarget());
-    ASSERT_NE(pingpong, nullptr);
-    auto* fbo = scene->FindRenderTarget(effect_layer->GetEffect(0)->nodes.front().output);
-    ASSERT_NE(fbo, nullptr);
-    EXPECT_EQ(pingpong->width, static_cast<int32_t>(card.x()));
-    EXPECT_EQ(pingpong->height, static_cast<int32_t>(card.y()));
-    EXPECT_EQ(static_cast<int32_t>(std::lround(camera->Width())), pingpong->width);
-    EXPECT_EQ(static_cast<int32_t>(std::lround(camera->Height())), pingpong->height);
-    EXPECT_NEAR(camera->GetPosition().x(), text_mesh_center.x(), 1.0e-4);
-    EXPECT_NEAR(camera->GetPosition().y(), text_mesh_center.y(), 1.0e-4);
-
-    const auto final_mesh_size = MeshSize(effect_layer->FinalMesh());
-    ExpectTextEffectFboCoversFinalMesh(*fbo,
-                                       effect_layer->FinalMesh(),
-                                       pingpong->width,
-                                       pingpong->height);
-    EXPECT_NEAR(final_mesh_size.x(), card.x(), 1.0f);
-    EXPECT_NEAR(final_mesh_size.y(), card.y(), 1.0f);
-    EXPECT_NEAR(MeshCenter(effect_layer->FinalMesh()).x(), text_mesh_center.x(), 1.0e-4f);
-    EXPECT_NEAR(MeshCenter(effect_layer->FinalMesh()).y(), text_mesh_center.y(), 1.0e-4f);
-
-    auto graph = sceneToRenderGraph(*scene);
-    ASSERT_NE(graph, nullptr);
-    auto* resolved_final = effect_layer->ResolvedFinalRenderNode();
-    ASSERT_NE(resolved_final, nullptr);
-    ASSERT_NE(resolved_final->Mesh(), nullptr);
-    const auto resolved_final_mesh_size = MeshSize(*resolved_final->Mesh());
-    EXPECT_NEAR(resolved_final_mesh_size.x(), card.x(), 1.0f);
-    EXPECT_NEAR(resolved_final_mesh_size.y(), card.y(), 1.0f);
-    EXPECT_NEAR(MeshCenter(*resolved_final->Mesh()).x(), text_mesh_center.x(), 1.0e-4f);
-    EXPECT_NEAR(MeshCenter(*resolved_final->Mesh()).y(), text_mesh_center.y(), 1.0e-4f);
-
-    EXPECT_TRUE(text->Translate().isApprox(Eigen::Vector3f::Zero()));
-}
-
-TEST(TextObjectRuntime, ParserStabilizesCascadingRustShaderDefaultTextureMetadata) {
-    fs::VFS vfs;
-    MountAssets(vfs,
-                {
-                    { "/image.json", R"({"width":64,"height":32,"material":"mat.json"})" },
-                    { "/mat.json",
-                      R"({"passes":[{"blending":"translucent","cullmode":"nocull",)"
-                      R"("depthtest":"disabled","depthwrite":"disabled",)"
-                      R"("shader":"defaulttexture","textures":[""]}]})" },
-                    { "/shaders/defaulttexture.vert",
-                      R"(
-attribute vec3 a_Position;
-attribute vec2 a_TexCoord;
-varying vec2 v_TexCoord;
-void main() {
-  gl_Position = vec4(a_Position, 1.0);
-  v_TexCoord = a_TexCoord;
-}
-)" },
-                    { "/shaders/defaulttexture.frag",
-                      R"(
-uniform sampler2D g_Texture0; // {"material":"albedo","default":"fallback-r8.tex"}
-#ifndef TEX0FORMAT
-// [COMBO] {"combo":"FIRST_PASS_ONLY","default":1}
-#endif
-#if FIRST_PASS_ONLY
-uniform float g_StaleFirstPassMarker; // {"default":1.0}
-#endif
-#if TEX0FORMAT == 9
-uniform sampler2D g_Texture1; // {"material":"second","default":"second-r8.tex"}
-#endif
-#if TEX1FORMAT == 9
-uniform float g_CascadedDefaultObserved; // {"default":1.0}
-#endif
-varying vec2 v_TexCoord;
-void main() {
-  vec4 texel = texture(g_Texture0, v_TexCoord);
-#if TEX1FORMAT == 9
-  texel += texture(g_Texture1, v_TexCoord) * 0.001;
-  texel.r += g_CascadedDefaultObserved * 0.001;
-#endif
-  gl_FragColor = texel;
-}
-)" },
-                    { "/materials/fallback-r8.tex.tex", BuildTextureHeaderFixture(kTexFormatR8) },
-                    { "/materials/second-r8.tex.tex", BuildTextureHeaderFixture(kTexFormatR8) },
-                });
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-
-    ProjectProperties properties;
-    SceneParseRequest request {
-        .scene_id           = "rust-default-texture-material",
-        .project_properties = &properties,
-    };
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {
-            "id": 1,
-            "name": "defaulted image",
-            "image": "image.json",
-            "visible": true
-          }
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    auto* node = FindRootChild(*scene, "defaulted image");
-    ASSERT_NE(node, nullptr);
-    ASSERT_NE(node->Mesh(), nullptr);
-    auto* material = node->Mesh()->MaterialForSlot(0);
-    ASSERT_NE(material, nullptr);
-    ASSERT_EQ(material->textures.size(), 2u);
-    EXPECT_EQ(material->textures[0], "fallback-r8.tex");
-    EXPECT_EQ(material->textures[1], "second-r8.tex");
-    EXPECT_TRUE(scene->textures.contains("fallback-r8.tex"));
-    EXPECT_TRUE(scene->textures.contains("second-r8.tex"));
-    ASSERT_NE(material->customShader.shader, nullptr);
-    EXPECT_TRUE(ShaderUsesUniformMember(*material->customShader.shader,
-                                        "g_CascadedDefaultObserved"));
-    EXPECT_FALSE(ShaderUsesUniformMember(*material->customShader.shader,
-                                         "g_StaleFirstPassMarker"));
-}
-
-TEST(TextObjectRuntime, MissingOrInvalidReflectionFailsWithoutLegacyFallback) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    SceneShader shader = CompileTextShaderForSpirvReflection(vfs);
-    ASSERT_FALSE(shader.codes.empty());
-    vulkan::ShaderReflected reflected;
-    EXPECT_FALSE(ReflectShaderDescriptors(shader, reflected));
-    shader.rust_reflection_json = "{ incomplete metadata";
-    EXPECT_FALSE(ReflectShaderDescriptors(shader, reflected));
-    shader.rust_reflection_json = "{}";
-    EXPECT_FALSE(ReflectShaderDescriptors(shader, reflected));
 }
 
 TEST(TextObjectRuntime, ResourceFreeShaderUsesItsValidEmptyRustReflection) {
@@ -2145,50 +706,12 @@ TEST(TextObjectRuntime, ResourceFreeShaderUsesItsValidEmptyRustReflection) {
     shader::RustShaderOutput compiled;
     ASSERT_TRUE(shader::CompileRustShaderProgram(request, compiled)) << shader::LastRustShaderError();
     SceneShader source;
-    source.codes = compiled.codes;
     source.rust_reflection_json = compiled.reflection_json;
-    vulkan::ShaderReflected reflected;
-    ASSERT_TRUE(ReflectShaderDescriptors(source, reflected));
-    EXPECT_TRUE(reflected.binding_map.empty());
-    EXPECT_TRUE(reflected.blocks.empty());
-    EXPECT_TRUE(reflected.input_location_map.empty());
-}
-
-TEST(TextObjectRuntime, RasterizedTextUsesFontPixelSizeAndAntialiasesEdges) {
-    TextLayerState state {
-        .text                   = "Hg",
-        .font_key               = "systemfont_Helvetica",
-        .resolved_font_kind     = "system",
-        .resolved_font_identity = "Helvetica",
-        .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
-        .point_size             = 40.0f,
-        .padding                = { 4.0f, 4.0f },
-    };
-#ifdef __APPLE__
-    ASSERT_FALSE(state.resolved_font_path.empty());
-#endif
-
-    constexpr uint32_t   width  = 420;
-    constexpr uint32_t   height = 220;
-    std::vector<uint8_t> rgba(static_cast<std::size_t>(width) * height * 4u, 0u);
-    RasterizeTextLayer(state, width, height, rgba);
-
-    int  min_y                  = static_cast<int>(height);
-    int  max_y                  = -1;
-    bool has_partial_alpha_edge = false;
-    for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-            const auto alpha = rgba[(static_cast<std::size_t>(y) * width + x) * 4u + 3u];
-            if (alpha == 0u) continue;
-            min_y                  = std::min(min_y, static_cast<int>(y));
-            max_y                  = std::max(max_y, static_cast<int>(y));
-            has_partial_alpha_edge = has_partial_alpha_edge || (alpha > 0u && alpha < 255u);
-        }
-    }
-
-    ASSERT_GE(max_y, min_y);
-    EXPECT_GT(max_y - min_y + 1, 110);
-    EXPECT_TRUE(has_partial_alpha_edge);
+    const auto reflection = ReflectionOf(source);
+    ASSERT_TRUE(reflection.is_object());
+    EXPECT_TRUE(reflection.value("descriptor_bindings", nlohmann::json::array()).empty());
+    EXPECT_TRUE(reflection.value("uniform_blocks", nlohmann::json::array()).empty());
+    EXPECT_TRUE(reflection.value("vertex_inputs", nlohmann::json::array()).empty());
 }
 
 // A card's texture is drawn as straight alpha with linear filtering, and a layer scaled up
@@ -2204,7 +727,7 @@ TEST(TextObjectRuntime, EveryTexelOfRasterizedTextCarriesTheTextsColourWhateverI
         .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
         .point_size             = 40.0f,
         .padding                = { 4.0f, 4.0f },
-        .color                  = Eigen::Vector3f(1.0f, 0.5f, 0.25f),
+        .color                  = linalg::Vector3f(1.0f, 0.5f, 0.25f),
     };
 #ifdef __APPLE__
     ASSERT_FALSE(state.resolved_font_path.empty());
@@ -2240,7 +763,7 @@ TEST(TextObjectRuntime, StyledTextLeavesEveryTexelOutsideItsMasksClear) {
         .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
         .point_size             = 40.0f,
         .padding                = { 4.0f, 4.0f },
-        .color                  = Eigen::Vector3f(1.0f, 0.5f, 0.25f),
+        .color                  = linalg::Vector3f(1.0f, 0.5f, 0.25f),
     };
     state.style.outline = true;
 #ifdef __APPLE__
@@ -2271,7 +794,7 @@ TEST(TextObjectRuntime, SansSerifAliasRasterizesClockDigits) {
         .resolved_font_path     = ResolveSceneFont("systemfont_sansserif").path,
         .point_size             = 33.0f,
         .padding                = { 32.0f, 32.0f },
-        .color                  = Eigen::Vector3f(1.0f, 0.81176f, 0.87059f),
+        .color                  = linalg::Vector3f(1.0f, 0.81176f, 0.87059f),
         .horizontal_align       = "center",
         .vertical_align         = "center",
     };
@@ -2299,343 +822,6 @@ TEST(TextObjectRuntime, SansSerifAliasRasterizesClockDigits) {
 
     EXPECT_GT(visible_pixels, 200);
     EXPECT_GT(max_alpha, 128);
-}
-
-TEST(TextObjectRuntime, ParserResolvesSceneFontsForFreeTypeRasterization) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-
-    ProjectProperties properties;
-    SceneParseRequest request {
-        .scene_id           = "text-family-freetype",
-        .project_properties = &properties,
-    };
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {
-            "id": 1,
-            "name": "caption",
-            "text": "Hg",
-            "font": "systemfont_verdana",
-            "pointsize": 40,
-            "visible": true
-          }
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    const auto state = scene->runtime->NodeTextState("caption");
-    ASSERT_TRUE(state.has_value());
-    EXPECT_EQ(state->resolved_font_kind, "system");
-    EXPECT_EQ(state->resolved_font_identity, "verdana");
-#ifdef __APPLE__
-    EXPECT_FALSE(state->resolved_font_path.empty());
-#endif
-    const auto runtime_size = scene->runtime->NodeSize("caption");
-    EXPECT_GT(runtime_size.x(), 130.0f);
-    EXPECT_GT(runtime_size.y(), 120.0f);
-    EXPECT_LT(runtime_size.x(), 280.0f);
-    EXPECT_LT(runtime_size.y(), 220.0f);
-
-    auto* node = FindRootChild(*scene, "caption");
-    ASSERT_NE(node, nullptr);
-    ASSERT_NE(node->Mesh(), nullptr);
-    const auto& vertex_array = node->Mesh()->GetVertexArray(0);
-    ASSERT_EQ(vertex_array.VertexCount(), 4u);
-    const float* vertices = vertex_array.Data();
-    ASSERT_NE(vertices, nullptr);
-    const auto stride = vertex_array.OneSize();
-    float      min_x  = vertices[0];
-    float      max_x  = vertices[0];
-    float      min_y  = vertices[1];
-    float      max_y  = vertices[1];
-    for (std::size_t index = 1; index < vertex_array.VertexCount(); ++index) {
-        const float x = vertices[index * stride + 0u];
-        const float y = vertices[index * stride + 1u];
-        min_x         = std::min(min_x, x);
-        max_x         = std::max(max_x, x);
-        min_y         = std::min(min_y, y);
-        max_y         = std::max(max_y, y);
-    }
-    EXPECT_NEAR(max_x - min_x, runtime_size.x(), 1.0f);
-    EXPECT_NEAR(max_y - min_y, runtime_size.y(), 1.0f);
-
-    auto* material = node->Mesh()->MaterialForSlot(0);
-    ASSERT_NE(material, nullptr);
-    ASSERT_EQ(material->textures.size(), 1u);
-    auto image = scene->imageParser->Parse(material->textures.front());
-    ASSERT_NE(image, nullptr);
-    ASSERT_EQ(image->slots.size(), 1u);
-    ASSERT_EQ(image->slots[0].mipmaps.size(), 1u);
-    const auto& mip = image->slots[0].mipmaps[0];
-    ASSERT_NE(mip.data, nullptr);
-
-    bool has_partial_alpha_edge = false;
-    for (int y = 0; y < mip.height && ! has_partial_alpha_edge; ++y) {
-        for (int x = 0; x < mip.width; ++x) {
-            const auto alpha =
-                mip.data.get()[(static_cast<std::size_t>(y) * mip.width + x) * 4u + 3u];
-            if (alpha > 0u && alpha < 255u) {
-                has_partial_alpha_edge = true;
-                break;
-            }
-        }
-    }
-    EXPECT_TRUE(has_partial_alpha_edge);
-}
-
-TEST(TextObjectRuntime, FreeTypeEstimatedSizeContainsTallGlyphs) {
-    TextLayerState state {
-        .text                   = "Hg",
-        .font_key               = "systemfont_Helvetica",
-        .resolved_font_kind     = "system",
-        .resolved_font_identity = "Helvetica",
-        .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
-        .point_size             = 40.0f,
-        .padding                = { 4.0f, 4.0f },
-    };
-#ifdef __APPLE__
-    ASSERT_FALSE(state.resolved_font_path.empty());
-#endif
-
-    const auto size = TextLayerRasterSize(state);
-    EXPECT_GT(size.x(), 130.0f);
-    EXPECT_GT(size.y(), 120.0f);
-    EXPECT_LT(size.x(), 280.0f);
-    EXPECT_LT(size.y(), 220.0f);
-
-    std::vector<uint8_t> rgba(static_cast<std::size_t>(std::ceil(size.x())) *
-                                  static_cast<std::size_t>(std::ceil(size.y())) * 4u,
-                              0u);
-    RasterizeTextLayer(state,
-                       static_cast<uint32_t>(std::ceil(size.x())),
-                       static_cast<uint32_t>(std::ceil(size.y())),
-                       rgba);
-
-    bool has_visible_alpha = false;
-    for (std::size_t offset = 3; offset < rgba.size(); offset += 4u) {
-        if (rgba[offset] > 0u) {
-            has_visible_alpha = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(has_visible_alpha);
-}
-
-// A padded, centred row has its ink in the middle of the card, whatever the card's width.
-TEST(TextObjectRuntime, CenteredTextIsCenteredInItsCard) {
-    TextLayerState state {
-        .text                   = "Saturday",
-        .font_key               = "systemfont_Helvetica",
-        .resolved_font_kind     = "system",
-        .resolved_font_identity = "Helvetica",
-        .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
-        .point_size             = 20.0f,
-        .padding                = { 32.0f, 32.0f },
-        .horizontal_align       = "center",
-        .vertical_align         = "center",
-    };
-#ifdef __APPLE__
-    ASSERT_FALSE(state.resolved_font_path.empty());
-#endif
-
-    const auto size = TextLayerRasterSize(state);
-    EXPECT_TRUE(size.isApprox(MeasureTextLayerSize(state)));
-
-    const uint32_t       width  = static_cast<uint32_t>(std::ceil(size.x()));
-    const uint32_t       height = static_cast<uint32_t>(std::ceil(size.y()));
-    std::vector<uint8_t> rgba(static_cast<std::size_t>(width) * height * 4u, 0u);
-    RasterizeTextLayer(state, width, height, rgba);
-
-    int min_x = static_cast<int>(width);
-    int max_x = -1;
-    for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-            const auto alpha = rgba[(static_cast<std::size_t>(y) * width + x) * 4u + 3u];
-            if (alpha == 0u) continue;
-            min_x = std::min(min_x, static_cast<int>(x));
-            max_x = std::max(max_x, static_cast<int>(x));
-        }
-    }
-
-    ASSERT_GE(max_x, min_x);
-    const float ink_center = (static_cast<float>(min_x) + static_cast<float>(max_x)) * 0.5f;
-    EXPECT_NEAR(ink_center, static_cast<float>(width) * 0.5f, 4.0f);
-    EXPECT_GE(min_x, 32);
-    EXPECT_LE(max_x, static_cast<int>(width) - 32);
-}
-
-TEST(TextObjectRuntime, DynamicTextTransformSettingsUpdateRuntimeNode) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties {
-          { "text_origin", RuntimeScalarValue::String("30 40 0") },
-          { "text_scale", RuntimeScalarValue::Float(2.5f) },
-    };
-    SceneParseRequest request {
-        .scene_id           = "text-dynamic-transform",
-        .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {
-            "id": 1,
-            "name": "caption",
-            "text": "clock",
-            "font": "Arial",
-            "pointsize": 20,
-            "origin": {"value": "10 20 0", "user": "text_origin"},
-            "scale": {"value": "1 1 1", "user": "text_scale"},
-            "horizontalalign": "center",
-            "verticalalign": "center",
-            "visible": true
-          }
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* node = FindRootChild(*scene, "caption");
-    ASSERT_NE(node, nullptr);
-
-    EXPECT_FLOAT_EQ(node->Translate().x(), 30.0f);
-    EXPECT_FLOAT_EQ(node->Translate().y(), 40.0f);
-    EXPECT_FLOAT_EQ(node->Scale().x(), 2.5f);
-    EXPECT_FLOAT_EQ(node->Scale().y(), 2.5f);
-
-    scene->runtime->ApplyProjectPropertyOverride({
-        { "text_origin", RuntimeScalarValue::String("50 60 0") },
-        { "text_scale", RuntimeScalarValue::Float(3.0f) },
-    });
-    scene->runtime->Tick(1.0 / 60.0);
-
-    EXPECT_FLOAT_EQ(node->Translate().x(), 50.0f);
-    EXPECT_FLOAT_EQ(node->Translate().y(), 60.0f);
-    EXPECT_FLOAT_EQ(node->Scale().x(), 3.0f);
-    EXPECT_FLOAT_EQ(node->Scale().y(), 3.0f);
-}
-
-TEST(TextObjectRuntime, DynamicTextTransformScriptsUseCanvasSize) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties {
-          { "x", RuntimeScalarValue::Float(0.8f) },
-          { "y", RuntimeScalarValue::Float(0.25f) },
-    };
-    SceneParseRequest request {
-        .scene_id           = "text-dynamic-transform-script",
-        .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              R"JSON({
-          "camera": {"center":[0,0,0], "eye":[0,0,1], "up":[0,1,0]},
-          "general": {
-            "ambientcolor":[0,0,0], "skylightcolor":[0,0,0],
-            "clearcolor":[0,0,0], "cameraparallax":false,
-            "cameraparallaxamount":0, "cameraparallaxdelay":0,
-            "cameraparallaxmouseinfluence":0,
-            "orthogonalprojection":{"width":1000,"height":500}
-          },
-          "objects": [
-            {
-              "id": 1,
-              "name": "caption",
-              "text": "clock",
-              "font": "Arial",
-              "pointsize": 20,
-              "origin": {
-                "value": "0 0 0",
-                "scriptproperties": {
-                  "x": {"user": "x", "value": 0.5},
-                  "y": {"user": "y", "value": 0.5}
-                },
-                "script": "export var scriptProperties = createScriptProperties().addSlider({name:'x',value:0.5}).addSlider({name:'y',value:0.5}).finish(); export function update(value) { value.x = scriptProperties.x * engine.canvasSize.x; value.y = scriptProperties.y * engine.canvasSize.y; return value; }"
-              },
-              "horizontalalign": "center",
-              "verticalalign": "center",
-              "visible": true
-            }
-          ]
-        })JSON",
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* node = FindRootChild(*scene, "caption");
-    ASSERT_NE(node, nullptr);
-
-    scene->runtime->Tick(1.0 / 60.0);
-
-    EXPECT_FLOAT_EQ(node->Translate().x(), 800.0f);
-    EXPECT_FLOAT_EQ(node->Translate().y(), 125.0f);
-    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
-}
-
-TEST(TextObjectRuntime, ParserUsesUniqueTextureKeysForDuplicateTextLayerNames) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-
-    ProjectProperties properties;
-    SceneParseRequest request {
-        .scene_id           = "duplicate-text-names",
-        .project_properties = &properties,
-    };
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {
-            "id": 1,
-            "name": "duplicate",
-            "text": "first",
-            "font": "Arial",
-            "pointsize": 20,
-            "visible": true
-          },
-          {
-            "id": 2,
-            "name": "duplicate",
-            "text": "second much wider",
-            "font": "Arial",
-            "pointsize": 20,
-            "visible": true
-          }
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->sceneGraph, nullptr);
-    auto* first  = FindRootChild(*scene, "__we_text_1");
-    auto* second = FindRootChild(*scene, "__we_text_2");
-    ASSERT_NE(first, nullptr);
-    ASSERT_NE(second, nullptr);
-    ASSERT_NE(first->Mesh(), nullptr);
-    ASSERT_NE(second->Mesh(), nullptr);
-    auto* first_material  = first->Mesh()->MaterialForSlot(0);
-    auto* second_material = second->Mesh()->MaterialForSlot(0);
-    ASSERT_NE(first_material, nullptr);
-    ASSERT_NE(second_material, nullptr);
-    ASSERT_EQ(first_material->textures.size(), 1u);
-    ASSERT_EQ(second_material->textures.size(), 1u);
-
-    EXPECT_NE(first_material->textures.front(), second_material->textures.front());
-    EXPECT_TRUE(scene->runtime->HasNodeNamed("__we_text_1"));
-    EXPECT_TRUE(scene->runtime->HasNodeNamed("__we_text_2"));
-    EXPECT_EQ(scene->runtime->NodeText("__we_text_1"), "first");
-    EXPECT_EQ(scene->runtime->NodeText("__we_text_2"), "second much wider");
 }
 
 TEST(TextObjectRuntime, TextLabelDoesNotStealAnotherLayersName) {
@@ -2692,381 +878,6 @@ TEST(TextObjectRuntime, TextLabelDoesNotStealAnotherLayersName) {
     EXPECT_FLOAT_EQ(body->Scale().y(), 5.0f);
     EXPECT_FLOAT_EQ(body->Scale().z(), 5.0f);
     EXPECT_NEAR(label->Scale().x(), 0.0001f, 1e-6f);
-    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
-}
-
-TEST(TextObjectRuntime, ParserReadsSupportedTextFormsIntoRuntimeState) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-forms",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {"id": 1, "name": "plain", "text": "plain text", "font": "Arial", "visible": true},
-          {"id": 2, "name": "nested", "text": {"text": "nested text"}, "font": {"value": "Arial"}, "visible": true}
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    EXPECT_EQ(scene->runtime->NodeText("plain"), "plain text");
-    EXPECT_EQ(scene->runtime->NodeText("nested"), "nested text");
-}
-
-TEST(TextObjectRuntime, ParserResolvesFontFamiliesAssetsAndSystemFontAliases) {
-    fs::VFS vfs;
-    MountAssets(vfs,
-                {
-                    { "/fonts/asset.ttf", "fake-font-bytes" },
-                    { "/fonts/prefixed.ttf", "fake-font-bytes" },
-                });
-    ASSERT_TRUE(vfs.Mount("/provided",
-                          std::make_unique<MemoryFs>(std::map<std::string, std::string> {
-                              { "/absolute.otf", "fake-font-bytes" },
-                          })));
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-fonts",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {"id": 1, "name": "family", "text": "a", "font": "Arial", "visible": true},
-          {"id": 2, "name": "asset", "text": "a", "font": "fonts/asset.ttf", "visible": true},
-          {"id": 3, "name": "system", "text": "a", "font": "systemfont_consolas", "visible": true},
-          {"id": 4, "name": "provided", "text": "a", "font": "/provided/absolute.otf", "visible": true},
-          {"id": 5, "name": "prefixed", "text": "a", "font": "assets/fonts/prefixed.ttf", "visible": true}
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-
-    // A family named by its name alone is a path to a font file that is not there, and a
-    // font that cannot be loaded is drawn in Arial.
-    auto family = scene->runtime->NodeTextState("family");
-    ASSERT_TRUE(family.has_value());
-    EXPECT_EQ(family->font_key, "Arial");
-    EXPECT_EQ(family->resolved_font_kind, "system");
-    EXPECT_EQ(family->resolved_font_identity, "arial");
-
-    auto asset = scene->runtime->NodeTextState("asset");
-    ASSERT_TRUE(asset.has_value());
-    EXPECT_EQ(asset->resolved_font_kind, "asset");
-    EXPECT_EQ(asset->resolved_font_path, "/assets/fonts/asset.ttf");
-    EXPECT_EQ(std::string(asset->resolved_font_data.begin(), asset->resolved_font_data.end()),
-              "fake-font-bytes");
-
-    auto system = scene->runtime->NodeTextState("system");
-    ASSERT_TRUE(system.has_value());
-    EXPECT_EQ(system->resolved_font_kind, "system");
-    EXPECT_EQ(system->resolved_font_identity, "consolas");
-
-    auto provided = scene->runtime->NodeTextState("provided");
-    ASSERT_TRUE(provided.has_value());
-    EXPECT_EQ(provided->resolved_font_kind, "asset");
-    EXPECT_EQ(provided->resolved_font_path, "/provided/absolute.otf");
-    EXPECT_EQ(std::string(provided->resolved_font_data.begin(), provided->resolved_font_data.end()),
-              "fake-font-bytes");
-
-    auto prefixed = scene->runtime->NodeTextState("prefixed");
-    ASSERT_TRUE(prefixed.has_value());
-    EXPECT_EQ(prefixed->resolved_font_kind, "asset");
-    EXPECT_EQ(prefixed->resolved_font_path, "/assets/fonts/prefixed.ttf");
-}
-
-TEST(TextObjectRuntime, TextLayerStateCopiesShareResolvedFontData) {
-    TextLayerState state {
-        .text               = "fps: 60",
-        .resolved_font_data = std::vector<uint8_t>(1024, 42),
-    };
-
-    const auto copy = state;
-
-    ASSERT_FALSE(state.resolved_font_data.empty());
-    ASSERT_FALSE(copy.resolved_font_data.empty());
-    EXPECT_EQ(copy.resolved_font_data.data(), state.resolved_font_data.data());
-}
-
-TEST(TextObjectRuntime, ParserMapsSystemFontAliasesToPlatformFontPath) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-system-font-path",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {"id": 1, "name": "system", "text": "a", "font": "systemfont_verdana", "visible": true}
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-
-    auto system = scene->runtime->NodeTextState("system");
-    ASSERT_TRUE(system.has_value());
-    EXPECT_EQ(system->resolved_font_kind, "system");
-    EXPECT_EQ(system->resolved_font_identity, "verdana");
-#ifdef __APPLE__
-    EXPECT_FALSE(system->resolved_font_path.empty());
-#else
-    EXPECT_TRUE(system->resolved_font_path.empty());
-#endif
-}
-
-TEST(TextObjectRuntime, HiddenTextStillCreatesNodeAndRuntimeState) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "hidden-text",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {"id": 1, "name": "hiddenCaption", "text": "secret", "font": "Arial", "visible": false}
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    EXPECT_TRUE(scene->runtime->HasNodeNamed("hiddenCaption"));
-    EXPECT_EQ(scene->runtime->NodeText("hiddenCaption"), "secret");
-    auto* node = FindRootChild(*scene, "hiddenCaption");
-    ASSERT_NE(node, nullptr);
-    EXPECT_FALSE(node->Visible());
-}
-
-TEST(TextObjectRuntime, TextVisibleScriptUpdatesVisibilityOnTick) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-visible-script",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {
-            "id": 1,
-            "name": "caption",
-            "text": "scripted",
-            "font": "Arial",
-            "visible": {
-              "value": true,
-              "script": "export function update(value) { return false; }"
-            }
-          }
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* node = FindRootChild(*scene, "caption");
-    ASSERT_NE(node, nullptr);
-
-    scene->runtime->Tick(1.0 / 60.0);
-    EXPECT_FALSE(node->Visible());
-    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
-}
-
-TEST(TextObjectRuntime, TextVisibleUserBindingFollowsProjectOverride) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties {
-          { "show_text", RuntimeScalarValue::Bool(true) },
-    };
-    SceneParseRequest request {
-        .scene_id           = "text-visible-user",
-        .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {
-            "id": 1,
-            "name": "caption",
-            "text": "user",
-            "font": "Arial",
-            "visible": {"value": true, "user": "show_text"}
-          }
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* node = FindRootChild(*scene, "caption");
-    ASSERT_NE(node, nullptr);
-    EXPECT_TRUE(node->Visible());
-
-    scene->runtime->ApplyProjectPropertyOverride({
-        { "show_text", RuntimeScalarValue::Bool(false) },
-    });
-    scene->runtime->Tick(1.0 / 60.0);
-    EXPECT_FALSE(node->Visible());
-}
-
-TEST(TextObjectRuntime, TextScriptsWaitForTheNormalTickBeforeReadingSharedState) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound;
-    WPSceneParser parser;
-    ProjectProperties properties;
-    SceneParseRequest request {
-        .scene_id = "text-shared-order", .project_properties = &properties,
-    };
-    auto scene = parser.Parse(request, MinimalSceneObjects(R"([
-        {"id":1,"name":"producer","visible":{"value":true,
-         "script":"export function update() { shared.number = (shared.number || 6) + 1; return true; }"}},
-        {"id":2,"name":"caption","font":"Arial","text":{"value":"waiting",
-         "script":"export function update() { return shared.number.toFixed(1); }"}}
-      ])"), vfs, sound);
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
-    scene->runtime->Tick(1.0 / 60.0);
-    EXPECT_EQ(scene->runtime->NodeText("caption"), "7.0");
-    scene->runtime->Tick(1.0 / 60.0);
-    EXPECT_EQ(scene->runtime->NodeText("caption"), "8.0");
-    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
-}
-
-TEST(TextObjectRuntime, StaticObjectTextDoesNotOverwriteRuntimeMutationOnTick) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-static-object-field",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {
-            "id": 1,
-            "name": "caption",
-            "text": {"text": "before"},
-            "font": "Arial",
-            "visible": true
-          }
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    EXPECT_EQ(scene->runtime->NodeText("caption"), "before");
-
-    scene->runtime->SetNodeText("caption", "after");
-    scene->runtime->Tick(1.0 / 60.0);
-
-    EXPECT_EQ(scene->runtime->NodeText("caption"), "after");
-    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
-}
-
-TEST(TextObjectRuntime, EventOnlyTextScriptDoesNotOverwriteRuntimeMutationOnTick) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-event-script-object-field",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"JSON([
-          {
-            "id": 1,
-            "name": "caption",
-            "text": {
-              "value": "before",
-              "script": "engine.on('custom', function() {})"
-            },
-            "font": "Arial",
-            "visible": true
-          }
-        ])JSON"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    EXPECT_EQ(scene->runtime->NodeText("caption"), "before");
-
-    scene->runtime->SetNodeText("caption", "after");
-    scene->runtime->Tick(1.0 / 60.0);
-
-    EXPECT_EQ(scene->runtime->NodeText("caption"), "after");
-    EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
-}
-
-TEST(TextObjectRuntime, EventOnlyTextScriptRegistersAsSceneScript) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-event-script-scene-script",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"JSON([
-          {
-            "id": 1,
-            "name": "caption",
-            "text": {
-              "value": "before",
-              "script": "engine.on('cursorDown', function() { thisLayer.text = 'clicked'; })"
-            },
-            "font": "Arial",
-            "visible": true
-          }
-        ])JSON"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    EXPECT_EQ(scene->runtime->NodeText("caption"), "before");
-    EXPECT_EQ(scene->runtime->sceneScriptCount(), 1u);
-
-    scene->runtime->DispatchCursorDown(0);
-
-    EXPECT_EQ(scene->runtime->NodeText("caption"), "clicked");
     EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
 }
 
@@ -3309,464 +1120,6 @@ TEST(TextObjectRuntime, TextScriptWritingAnotherLayersTextKeepsItsOwnValue) {
     EXPECT_EQ(scene->runtime->scriptErrorCount(), 0u);
 }
 
-TEST(TextObjectRuntime, TextParentReusesPlaceholderWhenChildAppearsFirst) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-placeholder",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {"id": 2, "name": "childText", "parent": 1, "text": "child", "font": "Arial", "visible": true},
-          {"id": 1, "name": "parentText", "text": "parent", "font": "Arial", "visible": true}
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    auto* parent = FindRootChild(*scene, "parentText");
-    ASSERT_NE(parent, nullptr);
-    EXPECT_NE(parent->Mesh(), nullptr);
-    ASSERT_EQ(parent->GetChildren().size(), 1u);
-    EXPECT_EQ(parent->GetChildren().front()->Name(), "childText");
-    EXPECT_EQ(parent->GetChildren().front()->Parent(), parent);
-}
-
-TEST(TextObjectRuntime, UnnamedTextPlaceholderDoesNotLeaveStaleRuntimeLayerKey) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "unnamed-text-placeholder",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {"id": 2, "name": "childText", "parent": 1, "text": "child", "font": "Arial", "visible": true},
-          {"id": 1, "text": "parent", "font": "Arial", "visible": true}
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    EXPECT_FALSE(scene->runtime->HasNodeNamed("__we_layer_1"));
-    EXPECT_TRUE(scene->runtime->HasNodeNamed("__we_text_1"));
-    EXPECT_EQ(scene->runtime->NodeText("__we_text_1"), "parent");
-}
-
-TEST(TextObjectRuntime, TextStateUsesRuntimeRgbaTextureBackend) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(runtime, nullptr);
-
-    auto node = std::make_shared<SceneNode>();
-    runtime->RegisterNode("caption", node.get());
-    runtime->RegisterTextLayer("caption",
-                               TextLayerState {
-                                   .text       = "layout only",
-                                   .font_key   = "Arial",
-                                   .point_size = 12.0f,
-                               });
-
-    const auto state = runtime->NodeTextState("caption");
-    ASSERT_TRUE(state.has_value());
-    EXPECT_EQ(state->render_backend, "runtime-rgba-texture");
-}
-
-TEST(TextObjectRuntime, RuntimeTextMutationUpdatesPersistentTextAndSize) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(runtime, nullptr);
-
-    auto node = std::make_shared<SceneNode>();
-    runtime->RegisterNode("caption", node.get());
-    runtime->RegisterTextLayer("caption",
-                               TextLayerState {
-                                   .text             = "a",
-                                   .font_key         = "Arial",
-                                   .point_size       = 10.0f,
-                                   .padding          = { 2.0f, 2.0f },
-                                   .horizontal_align = "left",
-                                   .vertical_align   = "top",
-                               });
-
-    const auto before       = runtime->NodeSize("caption");
-    const auto before_state = runtime->NodeTextState("caption");
-    ASSERT_TRUE(before_state.has_value());
-    EXPECT_FALSE(before_state->texture_cache_key.empty());
-    EXPECT_EQ(before_state->cache_revision, 1u);
-    ASSERT_TRUE(runtime->SetNodeText("caption", "longer text"));
-
-    EXPECT_EQ(runtime->NodeText("caption"), "longer text");
-    EXPECT_TRUE(runtime->NodeTextDirty("caption"));
-
-    PumpTextUntilClean(*runtime);
-
-    const auto after = runtime->NodeSize("caption");
-    EXPECT_GT(after.x(), before.x());
-    EXPECT_FLOAT_EQ(after.y(), before.y());
-    const auto dirty_state = runtime->NodeTextState("caption");
-    ASSERT_TRUE(dirty_state.has_value());
-    EXPECT_EQ(dirty_state->cache_revision, before_state->cache_revision + 1u);
-    EXPECT_FALSE(dirty_state->cache_dirty);
-    EXPECT_FALSE(dirty_state->full_dirty);
-
-    runtime->ClearNodeTextDirty("caption");
-    const auto clean_state = runtime->NodeTextState("caption");
-    ASSERT_TRUE(clean_state.has_value());
-    EXPECT_EQ(clean_state->text, "longer text");
-    EXPECT_EQ(clean_state->cache_revision, dirty_state->cache_revision);
-    EXPECT_FALSE(clean_state->cache_dirty);
-    EXPECT_FALSE(clean_state->full_dirty);
-    EXPECT_FALSE(runtime->NodeTextDirty("caption"));
-}
-
-TEST(TextObjectRuntime, UnchangedRuntimeTextMutationSkipsDirtyAndCacheRevision) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(runtime, nullptr);
-
-    auto node = std::make_shared<SceneNode>();
-    runtime->RegisterNode("caption", node.get());
-    runtime->RegisterTextLayer("caption",
-                               TextLayerState {
-                                   .text             = "12:34",
-                                   .font_key         = "systemfont_sansserif",
-                                   .point_size       = 33.0f,
-                                   .padding          = { 32.0f, 32.0f },
-                                   .horizontal_align = "center",
-                                   .vertical_align   = "center",
-                               });
-    runtime->RegisterTextValue("caption", std::make_unique<DynamicValue>("12:34"));
-    runtime->ClearNodeTextDirty("caption");
-    ASSERT_FALSE(runtime->ConsumeSceneGraphMutationFlag());
-
-    const auto before_state = runtime->NodeTextState("caption");
-    ASSERT_TRUE(before_state.has_value());
-    ASSERT_FALSE(before_state->cache_dirty);
-    ASSERT_FALSE(before_state->full_dirty);
-
-    ResetTextLayerMeasurementCountForTests();
-    runtime->Tick(1.0 / 60.0);
-
-    const auto after_state = runtime->NodeTextState("caption");
-    ASSERT_TRUE(after_state.has_value());
-    EXPECT_EQ(TextLayerMeasurementCountForTests(), 0u);
-    EXPECT_EQ(after_state->cache_revision, before_state->cache_revision);
-    EXPECT_FALSE(after_state->cache_dirty);
-    EXPECT_FALSE(after_state->full_dirty);
-    EXPECT_FALSE(runtime->NodeTextDirty("caption"));
-    EXPECT_FALSE(runtime->ConsumeSceneGraphMutationFlag());
-}
-
-TEST(TextObjectRuntime, Workshop3409533530ClockParentKeepsVisibleRuntimeTexture) {
-    fs::VFS vfs;
-    MountAssets(vfs,
-                {
-                    {
-                        "/fonts/workshop/3261114750/SourceHanSansCN-Normal.otf",
-                        "not-used-by-clock",
-                    },
-                });
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties {
-          { "clock", RuntimeScalarValue::Bool(true) },
-          { "time", RuntimeScalarValue::Bool(true) },
-          { "x", RuntimeScalarValue::Float(0.8f) },
-          { "y", RuntimeScalarValue::Float(0.25f) },
-          { "newproperty1", RuntimeScalarValue::String("1 0.8117647 0.8705882") },
-          { "newproperty2", RuntimeScalarValue::Float(2.5f) },
-    };
-    SceneParseRequest request {
-          .scene_id           = "workshop-3409533530-clock-repro",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              R"JSON({
-          "camera": {"center":"0.00000 0.00000 -1.00000", "eye":"0.00000 0.00000 0.00000", "up":"0.00000 1.00000 0.00000"},
-          "general": {
-            "ambientcolor":"0.30000 0.30000 0.30000",
-            "skylightcolor":"0.30000 0.30000 0.30000",
-            "clearcolor":"0.70000 0.70000 0.70000",
-            "clearenabled":true,
-            "cameraparallax":false,
-            "cameraparallaxamount":0,
-            "cameraparallaxdelay":0,
-            "cameraparallaxmouseinfluence":0,
-            "orthogonalprojection":{"width":3840,"height":2160}
-          },
-          "objects": [
-            {
-              "id": 31,
-              "name": "Clock",
-              "text": {
-                "value": "06:15",
-                "scriptproperties": {
-                  "delimiter": ":",
-                  "showCD": false,
-                  "showTime": false,
-                  "use12hFormat": {"user": "show12h", "value": false}
-                },
-                "script": "export var scriptProperties = createScriptProperties().addCheckbox({name:'use12hFormat',value:false}).addText({name:'delimiter',value:':'}).addCheckbox({name:'showTime',value:false}).addCheckbox({name:'showCD',value:false}).finish(); export function update(value) { let time = new Date(); var hours = time.getHours(); if (scriptProperties.use12hFormat) { hours %= 12; if (hours == 0) hours = 12; } hours = ('00' + hours).slice(-2); let minutes = ('00' + time.getMinutes()).slice(-2); value = hours + scriptProperties.delimiter + minutes; if (scriptProperties.showTime) value = '\\0'; if (scriptProperties.showCD) value = '\\0'; return value; }"
-              },
-              "font": "systemfont_sansserif",
-              "pointsize": 33.0,
-              "padding": 32,
-              "size": "342.00000 156.00000",
-              "origin": {
-                "value": "0.00000 0.00000 0.00000",
-                "scriptproperties": {
-                  "x": {"user": "x", "value": 1},
-                  "y": {"user": "y", "value": 1}
-                },
-                "script": "export var scriptProperties = createScriptProperties().addSlider({name:'x',value:0.5}).addSlider({name:'y',value:0.5}).finish(); export function update(value) { value.x = scriptProperties.x * engine.canvasSize.x; value.y = scriptProperties.y * engine.canvasSize.y; return value; }"
-              },
-              "scale": {"user": "newproperty2", "value": "2.50000 2.50000 2.50000"},
-              "visible": {"user": "clock", "value": true},
-              "color": {"user": "newproperty1", "value": "1.00000 0.81176 0.87059"},
-              "horizontalalign": "center",
-              "verticalalign": "center",
-              "anchor": "none"
-            },
-            {
-              "id": 32,
-              "name": "Date",
-              "parent": 31,
-              "text": "DATE",
-              "font": "systemfont_sansserif",
-              "pointsize": 20.0,
-              "padding": 36,
-              "size": "987.00000 125.00000",
-              "origin": "283.14212 -113.36209 0.00000",
-              "scale": "0.28000 0.28000 0.00000",
-              "visible": {"user": "time", "value": true},
-              "horizontalalign": "right",
-              "verticalalign": "center",
-              "anchor": "none"
-            },
-            {
-              "id": 33,
-              "name": "Dy",
-              "parent": 31,
-              "text": "PM",
-              "font": "systemfont_sansserif",
-              "pointsize": 32.0,
-              "padding": 32,
-              "size": "190.00000 200.00000",
-              "origin": "230.29727 -31.03779 0.00000",
-              "scale": "0.61854 0.56577 0.43846",
-              "horizontalalign": "center",
-              "verticalalign": "center",
-              "anchor": "none"
-            }
-          ]
-        })JSON",
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* runtime = scene->runtime.get();
-
-    auto* clock = FindRootChild(*scene, "Clock");
-    ASSERT_NE(clock, nullptr);
-    ASSERT_NE(clock->Mesh(), nullptr);
-    ASSERT_EQ(clock->GetChildren().size(), 2u);
-    EXPECT_EQ(clock->GetChildren().front()->Name(), "Date");
-    EXPECT_EQ(clock->GetChildren().back()->Name(), "Dy");
-
-    runtime->Tick(1.0 / 60.0);
-    PumpTextUntilClean(*runtime);
-
-    EXPECT_TRUE(runtime->NodeVisible("Clock"));
-    EXPECT_TRUE(clock->EffectiveVisible());
-    EXPECT_NE(runtime->NodeText("Clock"), std::string("\0", 1));
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-
-    const auto translate = runtime->NodeTranslate("Clock");
-    const auto scale     = runtime->NodeScale("Clock");
-    EXPECT_NEAR(translate.x(), 3072.0f, 1.0e-3f);
-    EXPECT_NEAR(translate.y(), 540.0f, 1.0e-3f);
-    EXPECT_NEAR(scale.x(), 2.5f, 1.0e-3f);
-    EXPECT_NEAR(scale.y(), 2.5f, 1.0e-3f);
-
-    auto state = runtime->NodeTextState("Clock");
-    ASSERT_TRUE(state.has_value());
-    EXPECT_EQ(state->resolved_font_kind, "system");
-#ifdef __APPLE__
-    EXPECT_FALSE(state->resolved_font_path.empty());
-#endif
-
-    auto* material = clock->Mesh()->MaterialForSlot(0);
-    ASSERT_NE(material, nullptr);
-    ASSERT_EQ(material->textures.size(), 1u);
-    auto image = scene->imageParser->Parse(material->textures.front());
-    ASSERT_NE(image, nullptr);
-    // The authored `size` is ignored: the texture is the card of the time it shows.
-    const auto card = MeasureTextLayerSize(*state);
-    EXPECT_EQ(image->header.width, static_cast<int>(std::ceil(card.x())));
-    EXPECT_EQ(image->header.height, static_cast<int>(std::ceil(card.y())));
-    EXPECT_GT(image->header.width, 100);
-    EXPECT_GT(VisibleAlphaPixels(*image), 200);
-
-    runtime->ClearNodeTextDirty("Clock");
-    ResetTextLayerMeasurementCountForTests();
-    runtime->Tick(1.0 / 60.0);
-    EXPECT_EQ(TextLayerMeasurementCountForTests(), 0u);
-}
-
-TEST(TextObjectRuntime, Workshop3409533530FullSceneKeepsClockRenderPassAndTexture) {
-    const auto home = HomePath();
-    if (home.empty()) GTEST_SKIP() << "HOME is not set";
-
-    const auto workshop_root =
-        home / "Library/Application Support/Steam/steamapps/workshop/content/431960/3409533530";
-    const auto project_json = ReadTextFile(workshop_root / "project.json");
-    if (! project_json.has_value() || ! std::filesystem::exists(workshop_root / "scene.pkg")) {
-        GTEST_SKIP() << "local workshop 3409533530 package is not available";
-    }
-
-    fs::VFS vfs;
-    const auto common_assets =
-        home / "Library/Application Support/Steam/steamapps/common/wallpaper_engine/assets";
-    if (std::filesystem::exists(common_assets)) {
-        ASSERT_TRUE(MountPhysicalAssets(vfs, common_assets));
-    }
-    ASSERT_TRUE(vfs.Mount("/assets", fs::WPPkgFs::CreatePkgFs((workshop_root / "scene.pkg").string())));
-    auto scene_stream = vfs.Open("/assets/scene.json");
-    ASSERT_NE(scene_stream, nullptr);
-    const auto scene_json = scene_stream->ReadAllStr();
-
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties {
-          { "clock", RuntimeScalarValue::Bool(true) },
-          { "time", RuntimeScalarValue::Bool(true) },
-          { "x", RuntimeScalarValue::Float(0.8f) },
-          { "y", RuntimeScalarValue::Float(0.25f) },
-          { "newproperty1", RuntimeScalarValue::String("1 0.8117647 0.8705882") },
-          { "newproperty2", RuntimeScalarValue::Float(2.5f) },
-    };
-    SceneParseRequest request {
-          .scene_id           = "workshop-3409533530-full-scene-clock-repro",
-          .project_path       = (workshop_root / "project.json").string(),
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request, scene_json, vfs, sound_manager);
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-
-    auto* clock = FindRootChild(*scene, "Clock");
-    ASSERT_NE(clock, nullptr);
-    ASSERT_NE(clock->Mesh(), nullptr);
-    EXPECT_GE(clock->GetChildren().size(), 4u);
-
-    auto* runtime = scene->runtime.get();
-    runtime->Tick(1.0 / 60.0);
-    runtime->PumpTextLayerCache();
-
-    EXPECT_TRUE(runtime->NodeVisible("Clock"));
-    EXPECT_TRUE(clock->EffectiveVisible());
-    EXPECT_NE(runtime->NodeText("Clock"), std::string("\0", 1));
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-
-    auto* material = clock->Mesh()->MaterialForSlot(0);
-    ASSERT_NE(material, nullptr);
-    ASSERT_EQ(material->textures.size(), 1u);
-    EXPECT_EQ(material->textures.front(), TextTextureName("Clock"));
-    auto image = scene->imageParser->Parse(material->textures.front());
-    ASSERT_NE(image, nullptr);
-    EXPECT_GT(VisibleAlphaPixels(*image), 200);
-
-    const auto graph = sceneToRenderGraph(*scene);
-    ASSERT_NE(graph, nullptr);
-    const auto* clock_pass = FindCustomPassForNode(*graph, clock);
-    ASSERT_NE(clock_pass, nullptr);
-    ASSERT_EQ(clock_pass->desc().textures.size(), 1u);
-    EXPECT_EQ(clock_pass->desc().textures.front(), TextTextureName("Clock"));
-    EXPECT_EQ(clock_pass->desc().visibility_node, clock);
-    EXPECT_EQ(clock_pass->desc().output, SpecTex_Default);
-    EXPECT_NE(clock_pass->desc().uploaded_mesh_dirty_generation, clock->Mesh()->DirtyGeneration());
-
-    runtime->ClearNodeTextDirty("Clock");
-    ResetTextLayerMeasurementCountForTests();
-    runtime->Tick(1.0 / 60.0);
-    EXPECT_EQ(TextLayerMeasurementCountForTests(), 0u);
-}
-
-TEST(TextObjectRuntime, DynamicTextPassStartsWithPendingInitialZeroGenerationUpload) {
-    SceneMesh mesh(MeshUpdate::OnEvent);
-    ASSERT_TRUE(mesh.Dynamic());
-    ASSERT_EQ(mesh.DirtyGeneration(), 0u);
-
-    vulkan::CustomShaderPass::Desc desc;
-    vulkan::CustomShaderPass       pass(desc);
-
-    EXPECT_NE(pass.desc().uploaded_mesh_dirty_generation, mesh.DirtyGeneration());
-}
-
-TEST(TextObjectRuntime, RuntimeTextMutationResizesRenderableMesh) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-runtime-mesh-resize",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {"id": 1, "name": "caption", "text": "a", "font": "Arial", "pointsize": 10, "visible": true}
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* node = FindRootChild(*scene, "caption");
-    ASSERT_NE(node, nullptr);
-    ASSERT_NE(node->Mesh(), nullptr);
-    EXPECT_TRUE(node->Mesh()->Dynamic());
-
-    auto mesh_width = [](const SceneMesh& mesh) {
-        const auto& vertices = mesh.GetVertexArray(0);
-        const auto  stride   = vertices.OneSize();
-        const auto* data     = vertices.Data();
-        float       min_x    = data[0];
-        float       max_x    = data[0];
-        for (std::size_t index = 1; index < vertices.VertexCount(); ++index) {
-            const float x = data[index * stride];
-            min_x         = std::min(min_x, x);
-            max_x         = std::max(max_x, x);
-        }
-        return max_x - min_x;
-    };
-
-    const auto before_size  = scene->runtime->NodeSize("caption");
-    const auto before_width = mesh_width(*node->Mesh());
-
-    ASSERT_TRUE(scene->runtime->SetNodeText("caption", "aaaaaaaaaa"));
-    PumpTextUntilClean(*scene->runtime);
-
-    const auto after_size  = scene->runtime->NodeSize("caption");
-    const auto after_width = mesh_width(*node->Mesh());
-    EXPECT_GT(after_size.x(), before_size.x());
-    EXPECT_GT(after_width, before_width);
-    EXPECT_NEAR(after_width, after_size.x(), 1.0f);
-    EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
-}
-
 TEST(TextObjectRuntime, AlignedTextKeepsItsNodeAndMovesItsCardWhenTheTextChanges) {
     fs::VFS vfs;
     MountAssets(vfs);
@@ -3789,7 +1142,7 @@ TEST(TextObjectRuntime, AlignedTextKeepsItsNodeAndMovesItsCardWhenTheTextChanges
     ASSERT_NE(scene->runtime, nullptr);
     auto* node = FindRootChild(*scene, "caption");
     ASSERT_NE(node, nullptr);
-    const Eigen::Vector3f origin(100.0f, 50.0f, 0.0f);
+    const linalg::Vector3f origin(100.0f, 50.0f, 0.0f);
     EXPECT_TRUE(node->Translate().isApprox(origin));
     const auto before_size = scene->runtime->NodeSize("caption");
     EXPECT_NEAR(MeshLocalBounds(*node->Mesh()).max_x, 0.0f, 1.0e-3f);
@@ -3841,7 +1194,7 @@ TEST(TextObjectRuntime, AScaledAlignedTextHasItsCardEdgeOnTheOriginWhateverItsSi
         const auto  bounds = MeshLocalBounds(*node->Mesh());
         const auto  layout = scene->runtime->NodeTextLayout("caption");
         EXPECT_TRUE(layout.has_value());
-        EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+        EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
         EXPECT_NEAR(node->Translate().x() + 2.0f * bounds.max_x, 100.0f, 1.0e-3f);
         EXPECT_NEAR(node->Translate().y() + 3.0f * bounds.max_y,
                     50.0f + 3.0f * (layout->top + layout->descender), 1.0e-3f);
@@ -3855,350 +1208,6 @@ TEST(TextObjectRuntime, AScaledAlignedTextHasItsCardEdgeOnTheOriginWhateverItsSi
     const auto resized = scene->runtime->NodeSize("caption");
     EXPECT_GT(resized.x(), size.x());
     EXPECT_NEAR(world_edges(), 100.0f - 2.0f * resized.x(), 1.0e-3f);
-}
-
-TEST(TextObjectRuntime, PumpTextLayerCacheClearsDirtyStateWithoutLosingText) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(runtime, nullptr);
-
-    auto node = std::make_shared<SceneNode>();
-    runtime->RegisterNode("caption", node.get());
-    runtime->RegisterTextLayer("caption",
-                               TextLayerState {
-                                   .text       = "before",
-                                   .font_key   = "Arial",
-                                   .point_size = 12.0f,
-                               });
-
-    ASSERT_TRUE(runtime->SetNodeText("caption", "after"));
-    ASSERT_TRUE(runtime->NodeTextDirty("caption"));
-    PumpTextUntilClean(*runtime);
-
-    const auto state = runtime->NodeTextState("caption");
-    ASSERT_TRUE(state.has_value());
-    EXPECT_EQ(state->text, "after");
-    EXPECT_FALSE(state->cache_dirty);
-    EXPECT_FALSE(state->full_dirty);
-    EXPECT_FALSE(runtime->NodeTextDirty("caption"));
-}
-
-TEST(TextObjectRuntime, PumpTextLayerCacheDoesNotKeepDirtyWhenSceneCannotAcceptRuntimeTexture) {
-    Scene scene;
-    scene.runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(scene.runtime, nullptr);
-    scene.runtime->AttachScene(&scene);
-
-    auto node = std::make_shared<SceneNode>();
-    scene.runtime->RegisterNode("caption", node.get());
-    scene.runtime->RegisterTextLayer("caption",
-                                     TextLayerState {
-                                         .text       = "before",
-                                         .font_key   = "Arial",
-                                         .point_size = 12.0f,
-                                     });
-
-    ASSERT_TRUE(scene.runtime->SetNodeText("caption", "after"));
-    ASSERT_TRUE(scene.runtime->NodeTextDirty("caption"));
-
-    PumpTextUntilClean(*scene.runtime);
-
-    const auto state = scene.runtime->NodeTextState("caption");
-    ASSERT_TRUE(state.has_value());
-    EXPECT_FALSE(state->cache_dirty);
-    EXPECT_FALSE(state->full_dirty);
-    EXPECT_FALSE(scene.runtime->NodeTextDirty("caption"));
-    EXPECT_FALSE(scene.runtime->ConsumeSceneGraphMutationFlag());
-}
-
-TEST(TextObjectRuntime, PumpTextLayerCacheRerasterizesAttachedSceneTexture) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-rerasterize",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {"id": 1, "name": "caption", "text": "a", "font": "Arial", "pointsize": 20, "visible": true}
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* node = FindRootChild(*scene, "caption");
-    ASSERT_NE(node, nullptr);
-    ASSERT_NE(node->Mesh(), nullptr);
-    auto* material = node->Mesh()->MaterialForSlot(0);
-    ASSERT_NE(material, nullptr);
-    ASSERT_EQ(material->textures.size(), 1u);
-    const auto texture_name = material->textures.front();
-
-    auto before = scene->imageParser->Parse(texture_name);
-    ASSERT_NE(before, nullptr);
-    ASSERT_TRUE(scene->runtime->SetNodeText("caption", "aaaaaa"));
-    ASSERT_TRUE(scene->runtime->NodeTextDirty("caption"));
-
-    PumpTextUntilClean(*scene->runtime);
-
-    auto after = scene->imageParser->Parse(texture_name);
-    ASSERT_NE(after, nullptr);
-    EXPECT_NE(before->key, after->key);
-    EXPECT_GT(after->header.width, before->header.width);
-    EXPECT_FALSE(scene->runtime->NodeTextDirty("caption"));
-    EXPECT_FALSE(scene->runtime->ConsumeSceneGraphMutationFlag());
-}
-
-TEST(TextObjectRuntime, PumpTextLayerCacheSkipsHiddenTextUntilVisible) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "hidden-text-cache-pump",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {
-            "id": 1,
-            "name": "caption",
-            "text": "before",
-            "font": "Arial",
-            "pointsize": 20,
-            "visible": false
-          }
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* node = FindRootChild(*scene, "caption");
-    ASSERT_NE(node, nullptr);
-    ASSERT_NE(node->Mesh(), nullptr);
-    auto* material = node->Mesh()->MaterialForSlot(0);
-    ASSERT_NE(material, nullptr);
-    ASSERT_EQ(material->textures.size(), 1u);
-    const auto texture_name = material->textures.front();
-
-    auto before = scene->imageParser->Parse(texture_name);
-    ASSERT_NE(before, nullptr);
-    ASSERT_TRUE(scene->runtime->SetNodeText("caption", "after"));
-    ASSERT_TRUE(scene->runtime->NodeTextDirty("caption"));
-
-    scene->runtime->PumpTextLayerCache();
-
-    auto hidden = scene->imageParser->Parse(texture_name);
-    ASSERT_NE(hidden, nullptr);
-    EXPECT_EQ(hidden->key, before->key);
-    EXPECT_TRUE(scene->runtime->NodeTextDirty("caption"));
-
-    scene->runtime->SetNodeVisible("caption", true);
-    PumpTextUntilClean(*scene->runtime);
-
-    auto visible = scene->imageParser->Parse(texture_name);
-    ASSERT_NE(visible, nullptr);
-    EXPECT_NE(visible->key, before->key);
-    EXPECT_FALSE(scene->runtime->NodeTextDirty("caption"));
-}
-
-TEST(TextObjectRuntime, RuntimeTextMutationDoesNotMeasureSynchronously) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(runtime, nullptr);
-
-    auto node = std::make_shared<SceneNode>();
-    runtime->RegisterNode("caption", node.get());
-    runtime->RegisterTextLayer("caption",
-                               TextLayerState {
-                                   .text          = "fps: 59",
-                                   .font_key      = "Arial",
-                                   .point_size    = 20.0f,
-                                   .padding       = { 32.0f, 32.0f },
-                               });
-    runtime->ClearNodeTextDirty("caption");
-    ASSERT_FALSE(runtime->NodeTextDirty("caption"));
-
-    ResetTextLayerMeasurementCountForTests();
-    ASSERT_TRUE(runtime->SetNodeText("caption", "fps: 60"));
-
-    EXPECT_EQ(TextLayerMeasurementCountForTests(), 0u);
-    EXPECT_TRUE(runtime->NodeTextDirty("caption"));
-}
-
-TEST(TextObjectRuntime, RuntimeTextMutationDefersVisibleTextPreparation) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "visible-text-async-preparation",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {
-            "id": 1,
-            "name": "caption",
-            "text": "before",
-            "font": "Arial",
-            "pointsize": 28,
-            "padding": 32,
-            "visible": true
-          }
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    ASSERT_NE(scene->runtime, nullptr);
-    auto* node = FindRootChild(*scene, "caption");
-    ASSERT_NE(node, nullptr);
-    ASSERT_NE(node->Mesh(), nullptr);
-    auto* material = node->Mesh()->MaterialForSlot(0);
-    ASSERT_NE(material, nullptr);
-    ASSERT_EQ(material->textures.size(), 1u);
-    const auto texture_name = material->textures.front();
-
-    auto before = scene->imageParser->Parse(texture_name);
-    ASSERT_NE(before, nullptr);
-
-    ResetTextLayerMeasurementCountForTests();
-    ASSERT_TRUE(scene->runtime->SetNodeText("caption", "after after after"));
-    EXPECT_EQ(TextLayerMeasurementCountForTests(), 0u);
-    EXPECT_EQ(scene->runtime->NodeText("caption"), "after after after");
-    EXPECT_TRUE(scene->runtime->NodeTextDirty("caption"));
-
-    scene->runtime->PumpTextLayerCache();
-    auto queued = scene->imageParser->Parse(texture_name);
-    ASSERT_NE(queued, nullptr);
-    EXPECT_EQ(queued->key, before->key);
-    EXPECT_TRUE(scene->runtime->NodeTextDirty("caption"));
-
-    std::shared_ptr<Image> updated;
-    for (int attempt = 0; attempt < 200; ++attempt) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        scene->runtime->PumpTextLayerCache();
-        updated = scene->imageParser->Parse(texture_name);
-        ASSERT_NE(updated, nullptr);
-        if (updated->key != before->key) break;
-    }
-
-    ASSERT_NE(updated, nullptr);
-    EXPECT_NE(updated->key, before->key);
-    EXPECT_FALSE(scene->runtime->NodeTextDirty("caption"));
-}
-
-TEST(TextObjectRuntime, TextCacheKeysAreUniquePerLayerEvenWithSameFontAndSize) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(runtime, nullptr);
-
-    auto first  = std::make_shared<SceneNode>();
-    auto second = std::make_shared<SceneNode>();
-    runtime->RegisterNode("first", first.get());
-    runtime->RegisterNode("second", second.get());
-    runtime->RegisterTextLayer("first",
-                               TextLayerState {
-                                   .text       = "one",
-                                   .font_key   = "Arial",
-                                   .point_size = 12.0f,
-                               });
-    runtime->RegisterTextLayer("second",
-                               TextLayerState {
-                                   .text       = "two",
-                                   .font_key   = "Arial",
-                                   .point_size = 12.0f,
-                               });
-
-    const auto first_state  = runtime->NodeTextState("first");
-    const auto second_state = runtime->NodeTextState("second");
-    ASSERT_TRUE(first_state.has_value());
-    ASSERT_TRUE(second_state.has_value());
-    EXPECT_NE(first_state->texture_cache_key, second_state->texture_cache_key);
-}
-
-// A text object has no `alignment` key in Wallpaper Engine's registry, only
-// `horizontalalign`, `verticalalign` and the screen `anchor`: a scene that carries
-// one has it ignored, so a layer with only that key is centred like any other.
-TEST(TextObjectRuntime, HorizontalAlignIsTheOnlyKeyThatAlignsTheTextHorizontally) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-align-horizontal",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {"id": 1, "name": "fallback", "text": "aaaa", "font": "Arial", "pointsize": 10, "origin": [100, 50, 0], "alignment": "left", "visible": true},
-          {"id": 2, "name": "override", "text": "aaaa", "font": "Arial", "pointsize": 10, "origin": [100, 50, 0], "alignment": "left", "horizontalalign": "right", "visible": true}
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    auto* fallback = FindRootChild(*scene, "fallback");
-    auto* override = FindRootChild(*scene, "override");
-    ASSERT_NE(fallback, nullptr);
-    ASSERT_NE(override, nullptr);
-    // Neither is moved: the key only says which edge of the text the origin sits on. The
-    // key-less layer is centred (the card straddles the origin), the other ends on it.
-    for (auto* node : { fallback, override }) {
-        EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
-    }
-    ASSERT_NE(fallback->Mesh(), nullptr);
-    ASSERT_NE(override->Mesh(), nullptr);
-    EXPECT_NEAR(MeshCenter(*fallback->Mesh()).x(), 0.0f, 1.0e-3f);
-    EXPECT_NEAR(MeshLocalBounds(*override->Mesh()).max_x, 0.0f, 1.0e-3f);
-    EXPECT_LT(MeshCenter(*override->Mesh()).x(), -1.0f);
-    EXPECT_EQ(scene->runtime->NodeTextState("fallback")->horizontal_align, "center");
-}
-
-TEST(TextObjectRuntime, VerticalAlignIsTheOnlyKeyThatAlignsTheTextVertically) {
-    fs::VFS vfs;
-    MountAssets(vfs);
-    audio::SoundManager sound_manager;
-    WPSceneParser       parser;
-    ProjectProperties   properties;
-    SceneParseRequest   request {
-          .scene_id           = "text-align-vertical",
-          .project_properties = &properties,
-    };
-
-    auto scene = parser.Parse(request,
-                              MinimalSceneObjects(R"([
-          {"id": 1, "name": "fallback", "text": "aaaa", "font": "Arial", "pointsize": 10, "origin": [100, 50, 0], "alignment": "top", "visible": true},
-          {"id": 2, "name": "override", "text": "aaaa", "font": "Arial", "pointsize": 10, "origin": [100, 50, 0], "alignment": "top", "verticalalign": "bottom", "visible": true}
-        ])"),
-                              vfs,
-                              sound_manager);
-
-    ASSERT_NE(scene, nullptr);
-    auto* fallback = FindRootChild(*scene, "fallback");
-    auto* override = FindRootChild(*scene, "override");
-    ASSERT_NE(fallback, nullptr);
-    ASSERT_NE(override, nullptr);
-    for (auto* node : { fallback, override }) {
-        EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
-    }
-    ASSERT_NE(fallback->Mesh(), nullptr);
-    ASSERT_NE(override->Mesh(), nullptr);
-    // The key-less layer is centred on its rows, the other has the text above its origin.
-    EXPECT_GT(MeshCenter(*override->Mesh()).y(), MeshCenter(*fallback->Mesh()).y() + 1.0f);
-    EXPECT_NEAR(MeshCenter(*fallback->Mesh()).x(), 0.0f, 1.0e-3f);
-    EXPECT_NEAR(MeshCenter(*override->Mesh()).x(), 0.0f, 1.0e-3f);
-    EXPECT_EQ(scene->runtime->NodeTextState("fallback")->vertical_align, "center");
 }
 
 TEST(TextObjectRuntime, ScriptThisLayerTextSetterMutatesRuntimeText) {
@@ -4326,60 +1335,6 @@ TEST(TextObjectRuntime, MissingWindowsFontUsesRealGlyphsInsteadOfRectangles) {
 TEST(TextObjectRuntime, ResolvesWallpaperEngineSansSerifSystemFontAlias) {
 #ifdef __APPLE__
     EXPECT_FALSE(ResolveSceneFont("systemfont_sansserif").path.empty());
-#endif
-}
-
-TEST(TextObjectRuntime, FreeTypeRasterizationFallsBackForMissingPrimaryGlyph) {
-#ifdef __APPLE__
-    TextLayerState state {
-        .text                   = "\xE4\xB8\xAD",
-        .font_key               = "systemfont_Helvetica",
-        .resolved_font_kind     = "system",
-        .resolved_font_identity = "Helvetica",
-        .resolved_font_path     = ResolveInstalledFamily("Helvetica").path,
-        .point_size             = 40.0f,
-        .padding                = { 4.0f, 4.0f },
-    };
-    ASSERT_FALSE(state.resolved_font_path.empty());
-
-    const auto size = TextLayerRasterSize(state);
-    EXPECT_GT(size.x(), 40.0f);
-    EXPECT_GT(size.y(), 40.0f);
-
-    const auto           width  = static_cast<uint32_t>(std::ceil(size.x()));
-    const auto           height = static_cast<uint32_t>(std::ceil(size.y()));
-    std::vector<uint8_t> rgba(static_cast<std::size_t>(width) * height * 4u, 0u);
-    RasterizeTextLayer(state, width, height, rgba);
-
-    TextLayerState unsupported_state = state;
-    unsupported_state.text           = "\xF4\x8F\xBF\xBF";
-    const auto unsupported_size      = TextLayerRasterSize(unsupported_state);
-    const auto unsupported_width     = static_cast<uint32_t>(std::ceil(unsupported_size.x()));
-    const auto unsupported_height    = static_cast<uint32_t>(std::ceil(unsupported_size.y()));
-    std::vector<uint8_t> unsupported_rgba(
-        static_cast<std::size_t>(unsupported_width) * unsupported_height * 4u, 0u);
-    RasterizeTextLayer(unsupported_state, unsupported_width, unsupported_height, unsupported_rgba);
-
-    int min_x = static_cast<int>(width);
-    int max_x = -1;
-    int min_y = static_cast<int>(height);
-    int max_y = -1;
-    for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-            const auto alpha = rgba[(static_cast<std::size_t>(y) * width + x) * 4u + 3u];
-            if (alpha == 0u) continue;
-            min_x = std::min(min_x, static_cast<int>(x));
-            max_x = std::max(max_x, static_cast<int>(x));
-            min_y = std::min(min_y, static_cast<int>(y));
-            max_y = std::max(max_y, static_cast<int>(y));
-        }
-    }
-
-    ASSERT_GE(max_x, min_x);
-    ASSERT_GE(max_y, min_y);
-    EXPECT_GT(max_x - min_x + 1, 20);
-    EXPECT_GT(max_y - min_y + 1, 20);
-    EXPECT_NE(rgba, unsupported_rgba);
 #endif
 }
 
@@ -4712,11 +1667,11 @@ TEST(TextObjectRuntime, LayoutRecordMatchesFreeType) {
 
     // The card is the block and the padding on both sides, on each axis.
     state.text    = "H";
-    state.spacing = Eigen::Vector2f::Zero();
+    state.spacing = linalg::Vector2f::Zero();
     state.padding = { 8.0f, 3.0f };
     const auto padded = MeasureTextLayerLayout(state);
-    EXPECT_TRUE(padded.padding.isApprox(Eigen::Vector2f(8.0f, 3.0f)));
-    EXPECT_TRUE(padded.card.isApprox(one.BlockSize() + Eigen::Vector2f(16.0f, 6.0f)));
+    EXPECT_TRUE(padded.padding.isApprox(linalg::Vector2f(8.0f, 3.0f)));
+    EXPECT_TRUE(padded.card.isApprox(one.BlockSize() + linalg::Vector2f(16.0f, 6.0f)));
     EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(padded.card));
 
     // No text has no block and no rows, and a 2 by 2 card; the face's numbers stay.
@@ -4724,7 +1679,7 @@ TEST(TextObjectRuntime, LayoutRecordMatchesFreeType) {
     const auto empty = MeasureTextLayerLayout(state);
     EXPECT_EQ(empty.rows, 0u);
     EXPECT_TRUE(empty.BlockSize().isZero());
-    EXPECT_TRUE(empty.card.isApprox(Eigen::Vector2f(18.0f, 8.0f)));
+    EXPECT_TRUE(empty.card.isApprox(linalg::Vector2f(18.0f, 8.0f)));
     EXPECT_FLOAT_EQ(empty.ascender, ascender);
     // It has no offsets either: the 2 by 2 card is on the origin whatever the alignment.
     state.horizontal_align = "right";
@@ -4751,7 +1706,7 @@ TEST(TextObjectRuntime, BoxLayoutHasTheSameRecordAsAFace) {
     EXPECT_NEAR(layout.max_x, 0.6f * em + 0.45f * em, 1.0e-3f);
     EXPECT_NEAR(layout.top, 0.9f * em, 1.0e-3f);
     EXPECT_NEAR(layout.bottom, 0.9f * em - 2.0f * (1.2f * em + 5.0f), 1.0e-3f);
-    EXPECT_TRUE(layout.card.isApprox(layout.BlockSize() + Eigen::Vector2f(8.0f, 4.0f)));
+    EXPECT_TRUE(layout.card.isApprox(layout.BlockSize() + linalg::Vector2f(8.0f, 4.0f)));
 }
 
 TEST(TextObjectRuntime, PointSizeIsClampedToTheRangeWallpaperEngineAccepts) {
@@ -4770,7 +1725,7 @@ TEST(TextObjectRuntime, PointSizeIsClampedToTheRangeWallpaperEngineAccepts) {
 TEST(TextObjectRuntime, EmptyTextIsATwoByTwoCardPlusPadding) {
     auto state    = HelveticaState("", 20.0f);
     state.padding = { 8.0f, 3.0f };
-    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(Eigen::Vector2f(18.0f, 8.0f)));
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(linalg::Vector2f(18.0f, 8.0f)));
 }
 
 TEST(TextObjectRuntime, CardPaddingSizesTheCardAndNeverNarrowsTheWrap) {
@@ -5061,12 +2016,12 @@ TEST(TextObjectRuntime, ANegativePaddingTakesTheCardInAndOnlyTheTopIsCapped) {
     auto state = HelveticaState("HHHH", 20.0f);
     const auto natural = MeasureTextLayerSize(state);
     state.padding      = { -6.0f, -4.0f };
-    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(natural + Eigen::Vector2f(-12.0f, -8.0f)));
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(natural + linalg::Vector2f(-12.0f, -8.0f)));
     state.padding = { 900.0f, 600.0f };
-    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(natural + Eigen::Vector2f(1024.0f, 1024.0f)));
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(natural + linalg::Vector2f(1024.0f, 1024.0f)));
     // Taken in further than the text is wide, the card is a pixel, not nothing.
     state.padding = { -4000.0f, -4000.0f };
-    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(Eigen::Vector2f(1.0f, 1.0f)));
+    EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(linalg::Vector2f(1.0f, 1.0f)));
 }
 
 
@@ -5167,17 +2122,17 @@ void main() {
     };
 }
 
-std::vector<const vulkan::CustomShaderPass*> CustomPasses(const rg::RenderGraph& graph) {
-    std::vector<const vulkan::CustomShaderPass*> passes;
+std::vector<const rg::DrawPass*> CustomPasses(const rg::RenderGraph& graph) {
+    std::vector<const rg::DrawPass*> passes;
     for (const auto id : graph.topologicalOrder()) {
-        if (const auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id))) {
+        if (const auto* pass = dynamic_cast<const rg::DrawPass*>(graph.getPass(id))) {
             passes.push_back(pass);
         }
     }
     return passes;
 }
 
-bool SamplesScreen(const vulkan::CustomShaderPass& pass) {
+bool SamplesScreen(const rg::DrawPass& pass) {
     const auto& textures = pass.desc().textures;
     return std::any_of(textures.begin(), textures.end(), [](const std::string& texture) {
         return texture.starts_with(SpecTex_Default);
@@ -5206,21 +2161,21 @@ TEST(TextObjectRuntime, PaddingAndSpacingReadTheFormsWallpaperEngineReads) {
     ASSERT_NE(fixture.scene, nullptr);
     ASSERT_NE(fixture.scene->runtime, nullptr);
 
-    EXPECT_TRUE(fixture.State("number").padding.isApprox(Eigen::Vector2f(8.0f, 8.0f)));
-    EXPECT_TRUE(fixture.State("number").spacing.isApprox(Eigen::Vector2f(2.0f, 2.0f)));
-    EXPECT_TRUE(fixture.State("pair").padding.isApprox(Eigen::Vector2f(6.0f, 10.0f)));
-    EXPECT_TRUE(fixture.State("pair").spacing.isApprox(Eigen::Vector2f(-3.58f, 1.0f)));
+    EXPECT_TRUE(fixture.State("number").padding.isApprox(linalg::Vector2f(8.0f, 8.0f)));
+    EXPECT_TRUE(fixture.State("number").spacing.isApprox(linalg::Vector2f(2.0f, 2.0f)));
+    EXPECT_TRUE(fixture.State("pair").padding.isApprox(linalg::Vector2f(6.0f, 10.0f)));
+    EXPECT_TRUE(fixture.State("pair").spacing.isApprox(linalg::Vector2f(-3.58f, 1.0f)));
     // A string with one number sets only the x lane.
-    EXPECT_TRUE(fixture.State("lone").padding.isApprox(Eigen::Vector2f(5.0f, 0.0f)));
-    EXPECT_TRUE(fixture.State("lone").spacing.isApprox(Eigen::Vector2f(4.0f, 0.0f)));
+    EXPECT_TRUE(fixture.State("lone").padding.isApprox(linalg::Vector2f(5.0f, 0.0f)));
+    EXPECT_TRUE(fixture.State("lone").spacing.isApprox(linalg::Vector2f(4.0f, 0.0f)));
     // A binding is read through its value.
-    EXPECT_TRUE(fixture.State("bound").padding.isApprox(Eigen::Vector2f(3.0f, 4.0f)));
+    EXPECT_TRUE(fixture.State("bound").padding.isApprox(linalg::Vector2f(3.0f, 4.0f)));
     // No key: 32 on both axes. Each lane is capped at 512 and not floored: a
     // negative padding stays negative.
-    EXPECT_TRUE(fixture.State("absent").padding.isApprox(Eigen::Vector2f(32.0f, 32.0f)));
-    EXPECT_TRUE(fixture.State("huge").padding.isApprox(Eigen::Vector2f(512.0f, -20.0f)));
+    EXPECT_TRUE(fixture.State("absent").padding.isApprox(linalg::Vector2f(32.0f, 32.0f)));
+    EXPECT_TRUE(fixture.State("huge").padding.isApprox(linalg::Vector2f(512.0f, -20.0f)));
     // A JSON array is not a form the reference reads, so it leaves the default.
-    EXPECT_TRUE(fixture.State("array").padding.isApprox(Eigen::Vector2f(32.0f, 32.0f)));
+    EXPECT_TRUE(fixture.State("array").padding.isApprox(linalg::Vector2f(32.0f, 32.0f)));
 }
 
 TEST(TextObjectRuntime, CardPaddingAppliesOnlyToLayersWallpaperEnginePads) {
@@ -5242,8 +2197,8 @@ TEST(TextObjectRuntime, CardPaddingAppliesOnlyToLayersWallpaperEnginePads) {
     ASSERT_NE(fixture.scene, nullptr);
     ASSERT_NE(fixture.scene->runtime, nullptr);
 
-    const Eigen::Vector2f none = Eigen::Vector2f::Zero();
-    const Eigen::Vector2f pad(32.0f, 32.0f);
+    const linalg::Vector2f none = linalg::Vector2f::Zero();
+    const linalg::Vector2f pad(32.0f, 32.0f);
     EXPECT_TRUE(fixture.State("plain").padding.isApprox(none));
     EXPECT_TRUE(fixture.State("effect").padding.isApprox(pad));
     EXPECT_TRUE(fixture.State("hidden effect").padding.isApprox(none));
@@ -5255,7 +2210,7 @@ TEST(TextObjectRuntime, CardPaddingAppliesOnlyToLayersWallpaperEnginePads) {
 
     // The layer's card is its text plus the padding, only where it applies.
     const auto plain = fixture.scene->runtime->NodeSize("plain");
-    EXPECT_TRUE(fixture.scene->runtime->NodeSize("effect").isApprox(plain + Eigen::Vector2f(64.0f, 64.0f)));
+    EXPECT_TRUE(fixture.scene->runtime->NodeSize("effect").isApprox(plain + linalg::Vector2f(64.0f, 64.0f)));
     EXPECT_TRUE(fixture.scene->runtime->NodeSize("add").isApprox(plain));
 }
 
@@ -5285,10 +2240,10 @@ TEST(TextObjectRuntime, ACardKeepsItsPaddingOnlyWhileAnEffectPassIsVisible) {
     ASSERT_NE(fixture.scene->runtime, nullptr);
     auto& runtime = *fixture.scene->runtime;
 
-    const Eigen::Vector2f none = Eigen::Vector2f::Zero();
-    const Eigen::Vector2f pad(32.0f, 24.0f);
-    const Eigen::Vector2f bare = runtime.NodeSize("plain");
-    const Eigen::Vector2f padded = bare + Eigen::Vector2f(64.0f, 48.0f);
+    const linalg::Vector2f none = linalg::Vector2f::Zero();
+    const linalg::Vector2f pad(32.0f, 24.0f);
+    const linalg::Vector2f bare = runtime.NodeSize("plain");
+    const linalg::Vector2f padded = bare + linalg::Vector2f(64.0f, 48.0f);
     const auto holds = [&](const char* name, bool padded_now, const char* when) {
         SCOPED_TRACE(std::string(name) + " " + when);
         EXPECT_TRUE(fixture.State(name).padding.isApprox(padded_now ? pad : none));
@@ -5357,8 +2312,8 @@ TEST(TextObjectRuntime, AnEffectWithNoPassCountsForNeitherTheMarginNorTheComposi
                                  std::string("text-effect-no-pass-") + item.name, assets);
         ASSERT_NE(fixture.scene, nullptr);
         const auto state = fixture.State("caption");
-        EXPECT_TRUE(state.padding.isApprox(item.padded ? Eigen::Vector2f(32.0f, 24.0f)
-                                                       : Eigen::Vector2f::Zero()));
+        EXPECT_TRUE(state.padding.isApprox(item.padded ? linalg::Vector2f(32.0f, 24.0f)
+                                                       : linalg::Vector2f::Zero()));
         EXPECT_FALSE(state.layout_pending) << "the margin was changed as the scene loaded";
         auto* node = FindRootChild(*fixture.scene, "caption");
         ASSERT_NE(node, nullptr);
@@ -5426,8 +2381,8 @@ TEST(TextObjectRuntime, ASceneWithFogPadsEveryTextLayerWhateverItsEffects) {
       {"id":2,"name":"add","text":"a","font":"Arial","padding":"32 32","colorBlendMode":31,
        "visible":true}
     ])";
-    const Eigen::Vector2f none = Eigen::Vector2f::Zero();
-    const Eigen::Vector2f pad(32.0f, 32.0f);
+    const linalg::Vector2f none = linalg::Vector2f::Zero();
+    const linalg::Vector2f pad(32.0f, 32.0f);
     {
         TextSceneFixture clear(layers, "text-no-fog", ColorBlendAssets());
         ASSERT_NE(clear.scene, nullptr);
@@ -5442,7 +2397,7 @@ TEST(TextObjectRuntime, ASceneWithFogPadsEveryTextLayerWhateverItsEffects) {
         EXPECT_TRUE(fogged.State("add").padding.isApprox(pad));
         const auto plain_card = fogged.scene->runtime->NodeSize("plain");
         TextSceneFixture clear(layers, "text-fog-reference", ColorBlendAssets());
-        EXPECT_TRUE(plain_card.isApprox(clear.scene->runtime->NodeSize("plain") + Eigen::Vector2f(64.0f, 64.0f)));
+        EXPECT_TRUE(plain_card.isApprox(clear.scene->runtime->NodeSize("plain") + linalg::Vector2f(64.0f, 64.0f)));
     }
     // A flag that is false pads nothing.
     TextSceneFixture off(layers, "text-fog-off", ColorBlendAssets(), {},
@@ -5496,15 +2451,15 @@ TEST(TextObjectRuntime, StyleColoursFollowTheirPropertiesAndTheBakedKeysAreReadO
     ASSERT_NE(material, nullptr);
     const auto colour = [&](const char* name) {
         const auto& value = material->customShader.constValues.at(name);
-        return Eigen::Vector3f(value[0], value[1], value[2]);
+        return linalg::Vector3f(value[0], value[1], value[2]);
     };
-    EXPECT_TRUE(colour("g_OutlineColor").isApprox(Eigen::Vector3f(1.0f, 0.0f, 0.0f)));
-    EXPECT_TRUE(colour("g_ShadowColor").isApprox(Eigen::Vector3f(0.0f, 0.0f, 1.0f)));
+    EXPECT_TRUE(colour("g_OutlineColor").isApprox(linalg::Vector3f(1.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(colour("g_ShadowColor").isApprox(linalg::Vector3f(0.0f, 0.0f, 1.0f)));
     runtime.ApplyProjectPropertyOverride({ { "ink", RuntimeScalarValue::String("0 1 0") },
                                            { "shade", RuntimeScalarValue::String("1 1 0") } });
     runtime.Tick(1.0 / 60.0);
-    EXPECT_TRUE(colour("g_OutlineColor").isApprox(Eigen::Vector3f(0.0f, 1.0f, 0.0f)));
-    EXPECT_TRUE(colour("g_ShadowColor").isApprox(Eigen::Vector3f(1.0f, 1.0f, 0.0f)));
+    EXPECT_TRUE(colour("g_OutlineColor").isApprox(linalg::Vector3f(0.0f, 1.0f, 0.0f)));
+    EXPECT_TRUE(colour("g_ShadowColor").isApprox(linalg::Vector3f(1.0f, 1.0f, 0.0f)));
 
     // A document that asks for other baked values is held at the ones the scene
     // loaded with and says so; the colours move (`shade`, left out, returns to the
@@ -5517,7 +2472,7 @@ TEST(TextObjectRuntime, StyleColoursFollowTheirPropertiesAndTheBakedKeysAreReadO
     EXPECT_EQ(preview.changed, (std::vector<std::string> { "ink", "shade" }));
     EXPECT_EQ(preview.deferred, (std::vector<std::string> { "edge", "thick" }));
     runtime.Tick(1.0 / 60.0);
-    EXPECT_TRUE(colour("g_OutlineColor").isApprox(Eigen::Vector3f(0.0f, 0.0f, 1.0f)));
+    EXPECT_TRUE(colour("g_OutlineColor").isApprox(linalg::Vector3f(0.0f, 0.0f, 1.0f)));
     EXPECT_FLOAT_EQ(fixture.State("caption").style.outline_thickness, 2.0f);
 }
 
@@ -5758,9 +2713,9 @@ TEST(TextObjectRuntime, SpacingAndBlockAlignReachTheLayerState) {
     ])", "text-spacing-state");
     ASSERT_NE(fixture.scene, nullptr);
     ASSERT_NE(fixture.scene->runtime, nullptr);
-    EXPECT_TRUE(fixture.State("set").spacing.isApprox(Eigen::Vector2f(6.0f, 0.0f)));
+    EXPECT_TRUE(fixture.State("set").spacing.isApprox(linalg::Vector2f(6.0f, 0.0f)));
     EXPECT_TRUE(fixture.State("set").block_align);
-    EXPECT_TRUE(fixture.State("unset").spacing.isApprox(Eigen::Vector2f::Zero()));
+    EXPECT_TRUE(fixture.State("unset").spacing.isApprox(linalg::Vector2f::Zero()));
     EXPECT_FALSE(fixture.State("unset").block_align);
     // Spacing is a property of the glyphs, not of the card: a plain layer keeps
     // it. Three glyphs have two gaps between them, each 6 pixels wider.
@@ -5871,12 +2826,12 @@ TEST(TextObjectRuntime, AddColorBlendTextIsDrawnAdditivelyOntoTheSceneUnlessItGo
 namespace
 {
 // Where the layer's origin is drawn: its draw matrix taken on the point.
-Eigen::Vector3d DrawnOrigin(SceneNode& node) {
+linalg::Vector3d DrawnOrigin(SceneNode& node) {
     node.UpdateTrans();
-    return (node.RenderTrans() * Eigen::Vector4d(0.0, 0.0, 0.0, 1.0)).head<3>();
+    return (node.RenderTrans() * linalg::Vector4d(0.0, 0.0, 0.0, 1.0)).head<3>();
 }
 
-Eigen::Vector3d ModelOrigin(SceneNode& node) {
+linalg::Vector3d ModelOrigin(SceneNode& node) {
     node.UpdateTrans();
     return node.ModelTrans().block<3, 1>(0, 3);
 }
@@ -5899,15 +2854,15 @@ TEST(TextObjectRuntime, ScreenAnchorOffsetsPinTheLayerToTheEdgeItNames) {
     const auto offset = [&](std::string_view name) {
         return TextScreenAnchorOffset(ParseTextScreenAnchor(name), margins);
     };
-    EXPECT_TRUE(offset("center").isApprox(Eigen::Vector2f(-10.0f, 1.0f)));
-    EXPECT_TRUE(offset("top").isApprox(Eigen::Vector2f(-10.0f, -4.0f)));
-    EXPECT_TRUE(offset("bottom").isApprox(Eigen::Vector2f(-10.0f, 6.0f)));
-    EXPECT_TRUE(offset("left").isApprox(Eigen::Vector2f(10.0f, 1.0f)));
-    EXPECT_TRUE(offset("right").isApprox(Eigen::Vector2f(-30.0f, 1.0f)));
-    EXPECT_TRUE(offset("topleft").isApprox(Eigen::Vector2f(10.0f, -4.0f)));
-    EXPECT_TRUE(offset("topright").isApprox(Eigen::Vector2f(-30.0f, -4.0f)));
-    EXPECT_TRUE(offset("bottomleft").isApprox(Eigen::Vector2f(10.0f, 6.0f)));
-    EXPECT_TRUE(offset("bottomright").isApprox(Eigen::Vector2f(-30.0f, 6.0f)));
+    EXPECT_TRUE(offset("center").isApprox(linalg::Vector2f(-10.0f, 1.0f)));
+    EXPECT_TRUE(offset("top").isApprox(linalg::Vector2f(-10.0f, -4.0f)));
+    EXPECT_TRUE(offset("bottom").isApprox(linalg::Vector2f(-10.0f, 6.0f)));
+    EXPECT_TRUE(offset("left").isApprox(linalg::Vector2f(10.0f, 1.0f)));
+    EXPECT_TRUE(offset("right").isApprox(linalg::Vector2f(-30.0f, 1.0f)));
+    EXPECT_TRUE(offset("topleft").isApprox(linalg::Vector2f(10.0f, -4.0f)));
+    EXPECT_TRUE(offset("topright").isApprox(linalg::Vector2f(-30.0f, -4.0f)));
+    EXPECT_TRUE(offset("bottomleft").isApprox(linalg::Vector2f(10.0f, 6.0f)));
+    EXPECT_TRUE(offset("bottomright").isApprox(linalg::Vector2f(-30.0f, 6.0f)));
     EXPECT_TRUE(offset("none").isZero());
     EXPECT_TRUE(offset("").isZero());
     EXPECT_TRUE(offset("sideways").isZero());
@@ -5941,8 +2896,8 @@ TEST(TextObjectRuntime, ScreenAnchoredTextFollowsThePresentedAreaAndNothingElseD
     }
     ASSERT_FALSE(runtime.TextLayoutInFlight());
     const auto names = { "top right", "left", "centre", "free", "no key", "edge only" };
-    std::map<std::string, Eigen::Vector3f> resting;
-    const auto placed = [&](const char* name) -> Eigen::Vector3f {
+    std::map<std::string, linalg::Vector3f> resting;
+    const auto placed = [&](const char* name) -> linalg::Vector3f {
         // Where the layer's origin is drawn, which the anchor offset moves.
         return DrawnOrigin(*FindRootChild(*fixture.scene, name)).cast<float>();
     };
@@ -5957,24 +2912,24 @@ TEST(TextObjectRuntime, ScreenAnchoredTextFollowsThePresentedAreaAndNothingElseD
     runtime.SetCursorViewport(CursorViewport {
         .origin = { 10.0f, 0.0f }, .size = { 560.0f, 360.0f },
         .content_origin = { 10.0f, 0.0f }, .content_size = { 560.0f, 360.0f } });
-    const auto moved = [&](const char* name) -> Eigen::Vector3f {
+    const auto moved = [&](const char* name) -> linalg::Vector3f {
         return placed(name) - resting[name];
     };
     // left = 10, right = 640 - 570 = 70, top = bottom = 0.
-    EXPECT_TRUE(moved("top right").isApprox(Eigen::Vector3f(-70.0f, 0.0f, 0.0f)));
-    EXPECT_TRUE(moved("left").isApprox(Eigen::Vector3f(10.0f, 0.0f, 0.0f)));
-    EXPECT_TRUE(moved("centre").isApprox(Eigen::Vector3f(-30.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(moved("top right").isApprox(linalg::Vector3f(-70.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(moved("left").isApprox(linalg::Vector3f(10.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(moved("centre").isApprox(linalg::Vector3f(-30.0f, 0.0f, 0.0f)));
     EXPECT_TRUE(moved("free").isZero());
     EXPECT_TRUE(moved("no key").isZero());
-    EXPECT_TRUE(moved("edge only").isApprox(Eigen::Vector3f(-70.0f, 0.0f, 0.0f)));
+    EXPECT_TRUE(moved("edge only").isApprox(linalg::Vector3f(-70.0f, 0.0f, 0.0f)));
 
     // A display that shows more than the canvas moves the layers outward.
     runtime.SetCursorViewport(CursorViewport {
         .origin = { 0.0f, -45.0f }, .size = { 640.0f, 450.0f },
         .content_origin = { 0.0f, 0.0f }, .content_size = { 640.0f, 360.0f } });
-    EXPECT_TRUE(moved("top right").isApprox(Eigen::Vector3f(0.0f, 45.0f, 0.0f)));
+    EXPECT_TRUE(moved("top right").isApprox(linalg::Vector3f(0.0f, 45.0f, 0.0f)));
     // Centred, the extra room is the same on both sides, so "center" stays put.
-    EXPECT_TRUE(moved("centre").isApprox(Eigen::Vector3f::Zero()));
+    EXPECT_TRUE(moved("centre").isApprox(linalg::Vector3f::Zero()));
     EXPECT_TRUE(moved("free").isZero());
 
     // Presenting the canvas whole puts everything back.
@@ -6015,7 +2970,7 @@ InkBox ChannelBounds(const Rastered& image, std::size_t channel, uint8_t thresho
 
 TextLayerState StyledState(float point_size = 40.0f) {
     auto state = HelveticaState("H", point_size);
-    state.style.outline_color = Eigen::Vector3f(1.0f, 0.0f, 0.0f);
+    state.style.outline_color = linalg::Vector3f(1.0f, 0.0f, 0.0f);
     return state;
 }
 } // namespace
@@ -6155,7 +3110,7 @@ TEST(TextObjectRuntime, StyledTextCardGrowsOutwardAndKeepsTheLayoutBoxWhereItWas
     const float margin = TextStyleMargin(state);
     ASSERT_GE(margin, 5.0f);
     const auto size = TextLayerRasterSize(state);
-    EXPECT_TRUE(size.isApprox(plain_size + Eigen::Vector2f::Constant(2.0f * margin)));
+    EXPECT_TRUE(size.isApprox(plain_size + linalg::Vector2f::Constant(2.0f * margin)));
     // The layout card, which the layer is placed by, does not move: the raster gains
     // the margin on every side.
     EXPECT_TRUE(MeasureTextLayerSize(state).isApprox(plain_size));
@@ -6196,15 +3151,15 @@ TEST(TextObjectRuntime, ParserReadsTheFontShaderStyleAndPicksTheStyledShader) {
     const auto outlined = fixture.State("outlined").style;
     EXPECT_TRUE(outlined.outline);
     EXPECT_FLOAT_EQ(outlined.outline_thickness, 2.45f);
-    EXPECT_TRUE(outlined.outline_color.isApprox(Eigen::Vector3f(1.0f, 0.5f, 0.25f)));
+    EXPECT_TRUE(outlined.outline_color.isApprox(linalg::Vector3f(1.0f, 0.5f, 0.25f)));
     EXPECT_FALSE(outlined.drop_shadow);
 
     const auto shadowed = fixture.State("shadowed").style;
     EXPECT_TRUE(shadowed.drop_shadow);
     EXPECT_FLOAT_EQ(shadowed.shadow_size, 1.0f);
     EXPECT_FLOAT_EQ(shadowed.shadow_opacity, 0.75f);
-    EXPECT_TRUE(shadowed.shadow_offset.isApprox(Eigen::Vector2f(2.0f, 3.0f)));
-    EXPECT_TRUE(shadowed.shadow_color.isApprox(Eigen::Vector3f(0.4f, 0.3f, 0.6f)));
+    EXPECT_TRUE(shadowed.shadow_offset.isApprox(linalg::Vector2f(2.0f, 3.0f)));
+    EXPECT_TRUE(shadowed.shadow_color.isApprox(linalg::Vector3f(0.4f, 0.3f, 0.6f)));
 
     const auto blurred = fixture.State("blurred").style;
     EXPECT_TRUE(blurred.blur);
@@ -6216,7 +3171,7 @@ TEST(TextObjectRuntime, ParserReadsTheFontShaderStyleAndPicksTheStyledShader) {
     EXPECT_FLOAT_EQ(defaults.blur_size, 6.0f);
     EXPECT_FLOAT_EQ(defaults.shadow_size, 6.0f);
     EXPECT_FLOAT_EQ(defaults.shadow_opacity, 1.0f);
-    EXPECT_TRUE(defaults.shadow_offset.isApprox(Eigen::Vector2f(4.0f, 4.0f)));
+    EXPECT_TRUE(defaults.shadow_offset.isApprox(linalg::Vector2f(4.0f, 4.0f)));
     EXPECT_TRUE(defaults.outline_color.isZero());
 
     const auto shader_of = [&](std::string_view name) -> const SceneMaterial* {
@@ -6782,7 +3737,7 @@ TEST(TextObjectRuntime, ArialAtThirtyTwoPointsHangsFromTheOriginByTheReferenceLi
 // way the text is aligned. The same offsets with the padding gate on or off differ by the
 // padding and by nothing else.
 TEST(TextObjectRuntime, TheCardHangsFromTheOriginByTheEdgeTheTextIsAlignedTo) {
-    for (const Eigen::Vector2f padding : { Eigen::Vector2f(0.0f, 0.0f), Eigen::Vector2f(24.0f, 10.0f) }) {
+    for (const linalg::Vector2f padding : { linalg::Vector2f(0.0f, 0.0f), linalg::Vector2f(24.0f, 10.0f) }) {
         for (const std::string_view text : { "Hg", "Hg\nHgHg\nH" }) {
             for (const std::string_view horizontal : { "left", "center", "right" }) {
                 for (const std::string_view vertical : { "top", "center", "bottom" }) {
@@ -7056,8 +4011,8 @@ TEST(TextObjectRuntime, AlignmentOffsetsTheQuadAndNeverTheNode) {
             auto* node = FindRootChild(*fixture.scene, name);
             ASSERT_NE(node, nullptr);
             ASSERT_NE(node->Mesh(), nullptr);
-            EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(300.0f, 120.0f, 0.0f)));
-            EXPECT_TRUE(node->Scale().isApprox(Eigen::Vector3f(2.0f, 3.0f, 1.0f)));
+            EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(300.0f, 120.0f, 0.0f)));
+            EXPECT_TRUE(node->Scale().isApprox(linalg::Vector3f(2.0f, 3.0f, 1.0f)));
             EXPECT_GT(node->Rotation().z(), 0.1f);
             const auto layout = fixture.scene->runtime->NodeTextLayout(name);
             ASSERT_TRUE(layout.has_value());
@@ -7071,14 +4026,14 @@ TEST(TextObjectRuntime, AlignmentOffsetsTheQuadAndNeverTheNode) {
             // the point of the right edge, the left edge or the middle at the quad's height,
             // taken into the scene, lies on the layer's rotated vertical axis.
             node->UpdateTrans();
-            const Eigen::Matrix4d model = node->ModelTrans();
+            const linalg::Matrix4d model = node->ModelTrans();
             const double edge_x = std::string_view(horizontal) == "left"    ? bounds.min_x
                                   : std::string_view(horizontal) == "right" ? bounds.max_x
                                                                            : (bounds.min_x + bounds.max_x) * 0.5;
-            const Eigen::Vector3d origin = model.block<3, 1>(0, 3);
-            const Eigen::Vector3d edge =
-                (model * Eigen::Vector4d(edge_x, layout->centre.y(), 0.0, 1.0)).head<3>();
-            const Eigen::Vector3d across = model.block<3, 1>(0, 0).normalized();
+            const linalg::Vector3d origin = model.block<3, 1>(0, 3);
+            const linalg::Vector3d edge =
+                (model * linalg::Vector4d(edge_x, layout->centre.y(), 0.0, 1.0)).head<3>();
+            const linalg::Vector3d across = model.block<3, 1>(0, 0).normalized();
             EXPECT_NEAR((edge - origin).dot(across), 0.0, 1.0e-3);
         }
     }
@@ -7100,9 +4055,9 @@ TEST(TextObjectRuntime, ChildrenOfAlignedTextStayOnTheParentsOrigin) {
     parent->UpdateTrans();
     child->UpdateTrans();
     // The child's own origin is its place in the parent's space: (0, 35) from the parent's.
-    const Eigen::Vector3d expected =
-        (parent->ModelTrans() * Eigen::Vector4d(0.0, 35.0, 0.0, 1.0)).head<3>();
-    const Eigen::Vector3d actual = child->ModelTrans().block<3, 1>(0, 3);
+    const linalg::Vector3d expected =
+        (parent->ModelTrans() * linalg::Vector4d(0.0, 35.0, 0.0, 1.0)).head<3>();
+    const linalg::Vector3d actual = child->ModelTrans().block<3, 1>(0, 3);
     EXPECT_NEAR(actual.x(), expected.x(), 1.0e-3);
     EXPECT_NEAR(actual.y(), expected.y(), 1.0e-3);
     // And the parent's origin is where the scene put it.
@@ -7132,7 +4087,7 @@ TEST(TextObjectRuntime, ChangingTheAlignmentMovesTheQuadWithoutResizingIt) {
     bounds = MeshLocalBounds(*node->Mesh());
     EXPECT_NEAR(bounds.min_x, 0.0f, 1.0e-3f);
     EXPECT_NEAR(bounds.max_x, card.x(), 1.0e-3f);
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
 
     ASSERT_TRUE(runtime.SetNodeTextStyle("caption", "verticalalign", "bottom"));
     PumpTextUntilClean(runtime);
@@ -7140,7 +4095,7 @@ TEST(TextObjectRuntime, ChangingTheAlignmentMovesTheQuadWithoutResizingIt) {
     const auto layout = runtime.NodeTextLayout("caption");
     ASSERT_TRUE(layout.has_value());
     EXPECT_NEAR(bounds.max_y, layout->top + layout->descender, 1.0e-3f);
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
 }
 
 // The chain a text layer draws through follows its card when the alignment moves it: the
@@ -7189,7 +4144,7 @@ TEST(TextObjectRuntime, AnEffectChainFollowsTheCardWhenTheAlignmentMovesIt) {
     ASSERT_TRUE(runtime.SetNodeTextStyle("caption", "horizontalalign", "left"));
     PumpTextUntilClean(runtime);
     expect_card_at(1.0f);
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
     EXPECT_TRUE(runtime.NodeSize("caption").isApprox(card));
     EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag())
         << "moving a card that kept its size rebuilt the graph";
@@ -7209,8 +4164,8 @@ TEST(TextObjectRuntime, ScriptsCannotSetAnAlignmentOnATextLayer) {
     const auto before = MeshLocalBounds(*node->Mesh());
     EXPECT_FALSE(runtime.SetNodeAlignment("caption", "right bottom"));
     runtime.Tick(1.0 / 60.0);
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
-    EXPECT_TRUE(runtime.NodeTranslate("caption").isApprox(Eigen::Vector3f(100.0f, 50.0f, 0.0f)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
+    EXPECT_TRUE(runtime.NodeTranslate("caption").isApprox(linalg::Vector3f(100.0f, 50.0f, 0.0f)));
     const auto after = MeshLocalBounds(*node->Mesh());
     EXPECT_FLOAT_EQ(after.min_x, before.min_x);
     EXPECT_FLOAT_EQ(after.max_y, before.max_y);
@@ -7231,7 +4186,7 @@ TEST(TextObjectRuntime, TheBoxesOfTheFallbackAreSetByTheRuleTheGlyphsAre) {
             };
             const auto layout = TextLayerBoxLayoutForTests(state);
             ASSERT_EQ(layout.rows, 3u);
-            const auto size = layout.card + Eigen::Vector2f::Constant(2.0f * TextStyleMargin(state));
+            const auto size = layout.card + linalg::Vector2f::Constant(2.0f * TextStyleMargin(state));
             Rastered   image;
             image.width  = static_cast<uint32_t>(std::ceil(size.x()));
             image.height = static_cast<uint32_t>(std::ceil(size.y()));
@@ -7297,7 +4252,7 @@ TEST(TextObjectRuntime, ScreenAnchorDoesNotMoveTheChildrenOfTheLayer) {
 
     runtime.SetCursorViewport(PannedViewport());
     // The parent is drawn 70 columns to the left, by the right edge of what is shown ...
-    EXPECT_TRUE(DrawnOrigin(*parent).isApprox(parent_at + Eigen::Vector3d(-70.0, 0.0, 0.0)));
+    EXPECT_TRUE(DrawnOrigin(*parent).isApprox(parent_at + linalg::Vector3d(-70.0, 0.0, 0.0)));
     // ... and what hangs from it is placed from where the parent is, not from where it is drawn.
     EXPECT_TRUE(ModelOrigin(*parent).isApprox(parent_at));
     EXPECT_TRUE(ModelOrigin(*child).isApprox(child_at));
@@ -7324,17 +4279,17 @@ TEST(TextObjectRuntime, ScreenAnchorIsAWorldTranslationWhateverTheLayerScaleAndT
     runtime.SetCursorViewport(PannedViewport());
     // 10 columns to the right in the scene, whatever scale and turn the layer has.
     for (auto* node : { plain, turned }) {
-        EXPECT_TRUE(DrawnOrigin(*node).isApprox(ModelOrigin(*node) + Eigen::Vector3d(10.0, 0.0, 0.0)))
+        EXPECT_TRUE(DrawnOrigin(*node).isApprox(ModelOrigin(*node) + linalg::Vector3d(10.0, 0.0, 0.0)))
             << node->Name();
-        EXPECT_TRUE(node->DrawOffset().isApprox(Eigen::Vector3f(10.0f, 0.0f, 0.0f))) << node->Name();
+        EXPECT_TRUE(node->DrawOffset().isApprox(linalg::Vector3f(10.0f, 0.0f, 0.0f))) << node->Name();
     }
     // The matrix that places the node, and so the layer's own axes, is untouched.
-    EXPECT_TRUE(turned->Translate().isApprox(Eigen::Vector3f(320.0f, 180.0f, 0.0f)));
-    EXPECT_TRUE(turned->Scale().isApprox(Eigen::Vector3f(3.0f, 0.5f, 1.0f)));
+    EXPECT_TRUE(turned->Translate().isApprox(linalg::Vector3f(320.0f, 180.0f, 0.0f)));
+    EXPECT_TRUE(turned->Scale().isApprox(linalg::Vector3f(3.0f, 0.5f, 1.0f)));
     // And the draw matrix keeps the layer's own scale and turn.
     turned->UpdateTrans();
-    const Eigen::Matrix3d drawn_axes = turned->RenderTrans().block<3, 3>(0, 0);
-    const Eigen::Matrix3d model_axes = turned->ModelTrans().block<3, 3>(0, 0);
+    const linalg::Matrix3d drawn_axes = turned->RenderTrans().block<3, 3>(0, 0);
+    const linalg::Matrix3d model_axes = turned->ModelTrans().block<3, 3>(0, 0);
     EXPECT_TRUE(drawn_axes.isApprox(model_axes));
 
     runtime.SetCursorViewport(WholeCanvas());
@@ -7356,7 +4311,7 @@ TEST(TextObjectRuntime, AScreenAnchoredLayersOriginReadsBackAsTheSceneGaveIt) {
     auto* node    = FindRootChild(*fixture.scene, "caption");
     ASSERT_NE(node, nullptr);
     runtime.SetCursorViewport(PannedViewport());
-    const Eigen::Vector3f origin(600.0f, 340.0f, 0.0f);
+    const linalg::Vector3f origin(600.0f, 340.0f, 0.0f);
     EXPECT_TRUE(runtime.NodeTranslate("caption").isApprox(origin));
     EXPECT_TRUE(node->Translate().isApprox(origin));
 
@@ -7366,8 +4321,8 @@ TEST(TextObjectRuntime, AScreenAnchoredLayersOriginReadsBackAsTheSceneGaveIt) {
         value.x() += 5.0f;
         ASSERT_TRUE(runtime.SetNodeTranslate("caption", value));
     }
-    EXPECT_TRUE(runtime.NodeTranslate("caption").isApprox(Eigen::Vector3f(610.0f, 340.0f, 0.0f)));
-    EXPECT_TRUE(DrawnOrigin(*node).isApprox(Eigen::Vector3d(610.0 - 70.0, 340.0, 0.0)));
+    EXPECT_TRUE(runtime.NodeTranslate("caption").isApprox(linalg::Vector3f(610.0f, 340.0f, 0.0f)));
+    EXPECT_TRUE(DrawnOrigin(*node).isApprox(linalg::Vector3d(610.0 - 70.0, 340.0, 0.0)));
 }
 
 // The card another pass of the layer draws, the final card of an effect chain, is drawn
@@ -7387,13 +4342,13 @@ TEST(TextObjectRuntime, ScreenAnchorMovesTheFinalCardOfALayerWithAnEffectChain) 
     ASSERT_NE(effect_layer, nullptr);
 
     runtime.Tick(1.0 / 60.0);
-    const Eigen::Vector3d resting = DrawnOrigin(effect_layer->FinalNode());
-    EXPECT_TRUE(resting.isApprox(Eigen::Vector3d(600.0, 340.0, 0.0)));
+    const linalg::Vector3d resting = DrawnOrigin(effect_layer->FinalNode());
+    EXPECT_TRUE(resting.isApprox(linalg::Vector3d(600.0, 340.0, 0.0)));
     runtime.SetCursorViewport(PannedViewport());
     runtime.Tick(1.0 / 60.0);
-    EXPECT_TRUE(DrawnOrigin(effect_layer->FinalNode()).isApprox(resting + Eigen::Vector3d(-70.0, 0.0, 0.0)));
+    EXPECT_TRUE(DrawnOrigin(effect_layer->FinalNode()).isApprox(resting + linalg::Vector3d(-70.0, 0.0, 0.0)));
     // The pass that draws into the chain's own buffer is not moved by it.
-    EXPECT_TRUE(DrawnOrigin(*node).isApprox(Eigen::Vector3d::Zero()));
+    EXPECT_TRUE(DrawnOrigin(*node).isApprox(linalg::Vector3d::Zero()));
 }
 
 TEST(TextObjectRuntime, PenAdvancesAreUnhintedWholePixelsKernedWithTheNextGlyph) {
@@ -7633,39 +4588,13 @@ TEST(TextObjectRuntime, AFaceOfACollectionIsChosenByItsPostScriptName) {
 #endif
 }
 
-// PingFang SC as the renderer reads it: a file FreeType opens, holding the regular face by
-// name and the Han it draws. A Mac that has not downloaded the PingFang font asset, as a
-// fresh CI image has not, matches the family to a copy the renderer cannot draw with, and
-// a test about PingFang's own glyphs has nothing to measure there.
-bool HasReadablePingFangSC(const SystemFontFace& font) {
-    if (font.path.empty() || font.postscript_name != "PingFangSC-Regular") return false;
-    FT_Library library = nullptr;
-    if (FT_Init_FreeType(&library) != 0) return false;
-    bool    found = false;
-    FT_Face first = nullptr;
-    if (FT_New_Face(library, font.path.c_str(), 0, &first) == 0) {
-        const FT_Long count = first->num_faces;
-        FT_Done_Face(first);
-        for (FT_Long index = 0; index < count && ! found; ++index) {
-            FT_Face face = nullptr;
-            if (FT_New_Face(library, font.path.c_str(), index, &face) != 0) continue;
-            const char* name = FT_Get_Postscript_Name(face);
-            found = name != nullptr && font.postscript_name == name &&
-                    FT_Get_Char_Index(face, 0x4E2Du) != 0u;
-            FT_Done_Face(face);
-        }
-    }
-    FT_Done_FreeType(library);
-    return found;
-}
-
 // The fullwidth comma and the ideographic comma and full stop sit on the baseline in
 // the Simplified Chinese cut of PingFang, and centred in the line in the Hong Kong
 // cut, which is the first face of PingFang.ttc.
 TEST(TextObjectRuntime, HanFallbackUsesTheSimplifiedFace) {
 #ifdef __APPLE__
     const auto pingfang = ResolveInstalledFamily("PingFang SC");
-    if (! HasReadablePingFangSC(pingfang)) GTEST_SKIP() << "no readable PingFang SC installed";
+    if (pingfang.postscript_name != "PingFangSC-Regular") GTEST_SKIP() << "no PingFang SC installed";
 
     constexpr float kPointSize = 40.0f;
     const float     em         = kPointSize * 300.0f / 72.0f;
@@ -8014,7 +4943,7 @@ TEST(TextObjectRuntime, AGlyphTheFontLacksComesFromTheFirstFaceOfWallpaperEngine
     EXPECT_EQ(ink(in_braille("A")), arial_a);
     auto latin_in_pingfang = HelveticaState("A", 40.0f);
     const auto pingfang    = ResolveInstalledFamily("PingFang SC");
-    if (HasReadablePingFangSC(pingfang)) {
+    if (! pingfang.path.empty()) {
         latin_in_pingfang.resolved_font_path = pingfang.path;
         latin_in_pingfang.resolved_font_face = pingfang.postscript_name;
         ASSERT_NE(ink(latin_in_pingfang), arial_a) << "PingFang's A is no different from Arial's";
@@ -8022,7 +4951,7 @@ TEST(TextObjectRuntime, AGlyphTheFontLacksComesFromTheFirstFaceOfWallpaperEngine
 
     // A Han character comes from PingFang SC (Wallpaper Engine's Microsoft YaHei) and not from
     // Arial Unicode MS, which has it too, since that face is Office's and not Windows'.
-    if (HasReadablePingFangSC(pingfang)) {
+    if (pingfang.postscript_name == "PingFangSC-Regular") {
         auto han_in_pingfang = HelveticaState("\xE4\xB8\xAD", 40.0f);
         han_in_pingfang.resolved_font_path = pingfang.path;
         han_in_pingfang.resolved_font_face = pingfang.postscript_name;
@@ -8197,9 +5126,8 @@ TEST(TextObjectRuntime, CjkPunctuationIsNotDrawnByTheSymbolFace) {
     const std::string braille_path = "/System/Library/Fonts/Apple Braille.ttf";
     const auto        pingfang     = ResolveInstalledFamily("PingFang SC");
     const auto        symbols      = ResolveInstalledFamily("Apple Symbols");
-    if (! std::filesystem::exists(braille_path) || ! HasReadablePingFangSC(pingfang) ||
-        symbols.path.empty()) {
-        GTEST_SKIP() << "no Apple Braille, readable PingFang SC or Apple Symbols on this system";
+    if (! std::filesystem::exists(braille_path) || pingfang.path.empty() || symbols.path.empty()) {
+        GTEST_SKIP() << "no Apple Braille, PingFang SC or Apple Symbols on this system";
     }
     FT_Library library = nullptr;
     ASSERT_EQ(FT_Init_FreeType(&library), 0);

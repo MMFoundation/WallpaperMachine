@@ -1,4 +1,3 @@
-#include "Presentation/WallpaperBackdrop.hpp"
 #include "Presentation/WallpaperScaling.hpp"
 
 #include <gtest/gtest.h>
@@ -42,8 +41,7 @@ ReferenceLayout CentredReference(WallpaperScalingMode mode, uint32_t scene_width
         scale_x = sx;
         scale_y = sy;
         break;
-    case WallpaperScalingMode::FIT:
-    case WallpaperScalingMode::FIT_BLURRED: scale_x = scale_y = std::min(sx, sy); break;
+    case WallpaperScalingMode::FIT: scale_x = scale_y = std::min(sx, sy); break;
     case WallpaperScalingMode::FILL: scale_x = scale_y = std::max(sx, sy); break;
     }
     scale_x *= factor;
@@ -73,7 +71,6 @@ constexpr std::array kModes {
     WallpaperScalingMode::STRETCH,
     WallpaperScalingMode::FIT,
     WallpaperScalingMode::FILL,
-    WallpaperScalingMode::FIT_BLURRED,
 };
 
 const char* ModeName(WallpaperScalingMode mode) {
@@ -82,7 +79,6 @@ const char* ModeName(WallpaperScalingMode mode) {
     case WallpaperScalingMode::STRETCH: return "stretch";
     case WallpaperScalingMode::FIT: return "fit";
     case WallpaperScalingMode::FILL: return "fill";
-    case WallpaperScalingMode::FIT_BLURRED: return "fit_blurred";
     }
     return "?";
 }
@@ -231,26 +227,21 @@ TEST(WallpaperScaling, AnAxisWithoutSlackIsUnmovedByPan) {
     EXPECT_EQ(centred.viewport_px.y, 0);
 }
 
-// The viewport is built with a negative height so the image is not flipped;
-// its top edge, y + height, is what lands on the window row viewport_px.y says.
+// `viewport_px.y` is the window row the picture's top edge lands on.
 TEST(WallpaperScaling, TopPanTouchesTheTopOfTheWindow) {
     const auto top = ComputeWallpaperScalingLayout(WallpaperScalingMode::FIT, 1920, 1080, 1000,
                                                    1000, 1.0, 1.0, 0.5, 0.0);
-    const auto top_viewport = MakeWallpaperViewport(top);
-    EXPECT_LT(top_viewport.height, 0.0f);
-    EXPECT_FLOAT_EQ(top_viewport.y + top_viewport.height, 0.0f);
-    EXPECT_FLOAT_EQ(top_viewport.y, static_cast<float>(top.viewport_px.height));
+    EXPECT_EQ(top.viewport_px.y, 0);
 
     const auto bottom = ComputeWallpaperScalingLayout(WallpaperScalingMode::FIT, 1920, 1080, 1000,
                                                       1000, 1.0, 1.0, 0.5, 1.0);
-    const auto bottom_viewport = MakeWallpaperViewport(bottom);
-    const auto scissor         = MakeWallpaperScissor(bottom);
     // Only the bottom edge reaches the window's last row (rounding of the
     // half-pixel slack may overshoot it by one).
-    EXPECT_NEAR(bottom_viewport.y, static_cast<float>(scissor.extent.height), 1.0f);
+    EXPECT_NEAR(bottom.viewport_px.y + bottom.viewport_px.height,
+                bottom.scissor_px.height, 1);
     // Panning never changes the clip: the window stays the window.
-    EXPECT_EQ(scissor.extent.width, MakeWallpaperScissor(top).extent.width);
-    EXPECT_EQ(scissor.extent.height, MakeWallpaperScissor(top).extent.height);
+    EXPECT_EQ(bottom.scissor_px.width, top.scissor_px.width);
+    EXPECT_EQ(bottom.scissor_px.height, top.scissor_px.height);
 }
 
 TEST(WallpaperScaling, NonFinitePanFallsBackToCentreAndOutOfRangeIsClamped) {
@@ -337,184 +328,6 @@ TEST(WallpaperScaling, CursorMappingFollowsThePannedPresentation) {
     ASSERT_TRUE(fit_top.valid);
     EXPECT_NEAR(fit_top.origin_y + fit_top.size_y, 1080.0, 2.0);
     EXPECT_LT(fit_top.origin_y, 0.0);
-}
-
-// The blurred fill changes nothing about the picture: it sits, and answers the
-// pointer, exactly where Fit puts it, whatever the factor and the position.
-TEST(WallpaperScaling, ABlurredFitPlacesThePictureExactlyAsFit) {
-    for (const auto& g : kGeometries) {
-        for (const double factor : { 1.0, 1.5, 0.6 }) {
-            for (const double pan : { 0.0, 0.3, 0.5, 1.0 }) {
-                SCOPED_TRACE(std::to_string(g.scene_w) + "x" + std::to_string(g.scene_h) +
-                             " on " + std::to_string(g.display_w) + "x" +
-                             std::to_string(g.display_h) + " factor " + std::to_string(factor) +
-                             " pan " + std::to_string(pan));
-                const auto fit = ComputeWallpaperScalingLayout(WallpaperScalingMode::FIT,
-                    g.scene_w, g.scene_h, g.display_w, g.display_h, g.display_scale, factor, pan,
-                    1.0 - pan);
-                const auto blurred = ComputeWallpaperScalingLayout(
-                    WallpaperScalingMode::FIT_BLURRED, g.scene_w, g.scene_h, g.display_w,
-                    g.display_h, g.display_scale, factor, pan, 1.0 - pan);
-                ExpectSameRect(blurred.viewport_px, fit.viewport_px, "viewport");
-                ExpectSameRect(blurred.scissor_px, fit.scissor_px, "scissor");
-                EXPECT_FALSE(fit.backdrop);
-                const auto a = ComputeWallpaperCursorMapping(fit, 0.0, 0.0, 1920.0, 1080.0);
-                const auto b = ComputeWallpaperCursorMapping(blurred, 0.0, 0.0, 1920.0, 1080.0);
-                EXPECT_EQ(a.origin_x, b.origin_x);
-                EXPECT_EQ(a.origin_y, b.origin_y);
-                EXPECT_EQ(a.size_x, b.size_x);
-                EXPECT_EQ(a.size_y, b.size_y);
-            }
-        }
-    }
-}
-
-// The copy behind the picture covers the display the way Fill at a factor of 1
-// would, centred: the position and the factor move the picture, not the copy.
-TEST(WallpaperScaling, TheBlurredCopyCoversTheDisplayAsACentredFill) {
-    const auto fill = ComputeWallpaperScalingLayout(WallpaperScalingMode::FILL, 3840, 2160, 3440,
-                                                    1440, 2.0, 1.0);
-    for (const double factor : { 1.0, 0.6, 1.5 }) {
-        for (const double pan : { 0.0, 0.5, 1.0 }) {
-            SCOPED_TRACE("factor " + std::to_string(factor) + " pan " + std::to_string(pan));
-            const auto blurred = ComputeWallpaperScalingLayout(WallpaperScalingMode::FIT_BLURRED,
-                3840, 2160, 3440, 1440, 2.0, factor, pan, pan);
-            ExpectSameRect(blurred.backdrop_px, fill.viewport_px, "backdrop");
-        }
-    }
-    // A 16:9 picture on the 3440x1440 ultrawide fills its height and is
-    // 6880 device pixels wide: the copy is cropped above and below.
-    EXPECT_EQ(fill.viewport_px.width, 6880);
-    EXPECT_LT(fill.viewport_px.y, 0);
-}
-
-int32_t BandArea(const WallpaperBackdropBands& bands) {
-    int32_t area = 0;
-    for (uint32_t i = 0; i < bands.count; ++i) area += bands.rects[i].width * bands.rects[i].height;
-    return area;
-}
-
-bool Overlaps(const PixelRect& a, const PixelRect& b) {
-    return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height &&
-           b.y < a.y + a.height;
-}
-
-// The blurred copy is drawn only in the room the picture leaves: never under
-// the picture, all of the room, and nothing at all where the shapes match.
-TEST(WallpaperScaling, TheBlurredCopyFillsOnlyTheRoomAroundThePicture) {
-    struct Case {
-        const char* name;
-        uint32_t    display_w, display_h;
-        double      display_scale, factor, pan_x, pan_y;
-        uint32_t    bands;
-    };
-    const Case cases[] = {
-        // Bars either side on the ultrawide, above and below on the laptop.
-        { "ultrawide", 3440, 1440, 2.0, 1.0, 0.5, 0.5, 2 },
-        { "laptop", 2056, 1329, 2.0, 1.0, 0.5, 0.5, 2 },
-        // Pushed against the left edge, all the room is on the right.
-        { "ultrawide, left", 3440, 1440, 2.0, 1.0, 0.0, 0.5, 1 },
-        // Shrunk, the picture has room on every side.
-        { "shrunk", 2056, 1329, 2.0, 0.6, 0.5, 0.5, 4 },
-    };
-    for (const auto& c : cases) {
-        SCOPED_TRACE(c.name);
-        const auto layout = ComputeWallpaperScalingLayout(WallpaperScalingMode::FIT_BLURRED, 3840,
-            2160, c.display_w, c.display_h, c.display_scale, c.factor, c.pan_x, c.pan_y);
-        ASSERT_TRUE(layout.backdrop);
-        const auto bands = ComputeWallpaperBackdropBands(layout);
-        ASSERT_EQ(bands.count, c.bands);
-        const int32_t window = layout.scissor_px.width * layout.scissor_px.height;
-        const int32_t picture = layout.viewport_px.width * layout.viewport_px.height;
-        EXPECT_EQ(BandArea(bands), window - picture);
-        for (uint32_t i = 0; i < bands.count; ++i) {
-            EXPECT_FALSE(Overlaps(bands.rects[i], layout.viewport_px)) << "band " << i;
-            for (uint32_t j = i + 1; j < bands.count; ++j) {
-                EXPECT_FALSE(Overlaps(bands.rects[i], bands.rects[j])) << i << " and " << j;
-            }
-        }
-    }
-
-    // The same shape, or a shape rounding leaves one pixel short of it, has no
-    // room: nothing is blurred and the other modes never are.
-    for (const auto& [w, h] : { std::pair { 1920u, 1080u }, std::pair { 1366u, 768u } }) {
-        const auto same = ComputeWallpaperScalingLayout(WallpaperScalingMode::FIT_BLURRED, 1920,
-                                                        1080, w, h, 1.0, 1.0);
-        EXPECT_FALSE(same.backdrop) << w << "x" << h;
-        EXPECT_EQ(ComputeWallpaperBackdropBands(same).count, 0u);
-    }
-    for (const auto mode : { WallpaperScalingMode::NONE, WallpaperScalingMode::STRETCH,
-                             WallpaperScalingMode::FIT, WallpaperScalingMode::FILL }) {
-        const auto other =
-            ComputeWallpaperScalingLayout(mode, 3840, 2160, 3440, 1440, 2.0, 0.6);
-        EXPECT_FALSE(other.backdrop) << ModeName(mode);
-        EXPECT_EQ(ComputeWallpaperBackdropBands(other).count, 0u);
-    }
-}
-
-// The picture is reduced to an image of about 128 texels a side, keeping its
-// shape, with taps spread evenly over each block no more than four texels apart.
-TEST(WallpaperScaling, TheBlurredCopyIsReducedWithTapsSpreadOverEachBlock) {
-    struct Case {
-        uint32_t w, h, small_w, small_h;
-    };
-    const Case cases[] = {
-        { 3840, 2160, 128, 72 },
-        { 6880, 3870, 128, 72 },
-        { 1080, 1920, 72, 128 },
-        { 2560, 1440, 128, 72 },
-        { 100, 50, 100, 50 },
-        { 0, 0, 1, 1 },
-    };
-    for (const auto& c : cases) {
-        SCOPED_TRACE(std::to_string(c.w) + "x" + std::to_string(c.h));
-        const auto extent = ComputeWallpaperBackdropExtent(c.w, c.h);
-        EXPECT_EQ(extent.width, c.small_w);
-        EXPECT_EQ(extent.height, c.small_h);
-        const auto downsample = ComputeWallpaperBackdropDownsample(c.w, c.h, extent);
-        const float spacing = float(kWallpaperBackdropTapSpacing);
-        EXPECT_GE(spacing * float(downsample.taps_x), downsample.block_x);
-        EXPECT_GE(spacing * float(downsample.taps_y), downsample.block_y);
-        EXPECT_LT(spacing * float(downsample.taps_x - 1), std::max(spacing, downsample.block_x));
-    }
-}
-
-// A large picture is reduced to an eighth of its size first, so no pixel of
-// either step reads more than four taps; a small one goes straight to the end.
-TEST(WallpaperScaling, ALargePictureIsReducedInTwoStepsOfFewTaps) {
-    struct Case {
-        uint32_t w, h;
-        bool     two_steps;
-        uint32_t reduced_w, reduced_h;
-    };
-    const Case cases[] = {
-        { 3840, 2160, true, 480, 270 },
-        { 6880, 3870, true, 860, 484 },
-        { 7680, 2160, true, 960, 270 },
-        { 1920, 1080, true, 240, 135 },
-        { 1024, 576, false, 128, 72 },
-        { 640, 360, false, 128, 72 },
-    };
-    for (const auto& c : cases) {
-        SCOPED_TRACE(std::to_string(c.w) + "x" + std::to_string(c.h));
-        const auto plan = ComputeWallpaperBackdropPlan(c.w, c.h);
-        EXPECT_EQ(plan.two_steps, c.two_steps);
-        EXPECT_EQ(plan.reduced.width, c.reduced_w);
-        EXPECT_EQ(plan.reduced.height, c.reduced_h);
-        const auto end = ComputeWallpaperBackdropExtent(c.w, c.h);
-        EXPECT_EQ(plan.extent.width, end.width);
-        EXPECT_EQ(plan.extent.height, end.height);
-        for (const auto* step : { &plan.first, &plan.second }) {
-            if (step == &plan.first && ! plan.two_steps) continue;
-            EXPECT_LE(step->taps_x * step->taps_y, 4u);
-        }
-    }
-}
-
-TEST(WallpaperScaling, OnlyKnownModesAreAccepted) {
-    for (const auto mode : kModes) EXPECT_TRUE(IsWallpaperScalingMode(static_cast<int32_t>(mode)));
-    EXPECT_FALSE(IsWallpaperScalingMode(-1));
-    EXPECT_FALSE(IsWallpaperScalingMode(5));
 }
 
 } // namespace

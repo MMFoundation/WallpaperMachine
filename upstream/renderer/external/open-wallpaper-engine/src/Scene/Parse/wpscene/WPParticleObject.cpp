@@ -1,90 +1,170 @@
+// Clean-room implementation from the WallpaperMachine spec e4-particle-simulation.md; written without access to the original source.
 #include "WPParticleObject.h"
 #include "WPObjectSchema.hpp"
 
 #include "Utils/Logging.h"
 #include "Fs/VFS.h"
 #include "Core/StringHelper.hpp"
+#include "Interface/IParticleRawGener.h"
 
 #include <sstream>
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <string>
 
 using namespace wallpaper::wpscene;
 
 namespace
 {
 
-const nlohmann::json& unwrap_setting(const nlohmann::json& value)
-{
-    if (value.is_object() && value.contains("value")) return value.at("value");
-    return value;
-}
+/// How deep a chain of child particle files may nest; a file that names itself
+/// (or a cycle of files) stops here instead of recursing for ever.
+constexpr int kMaxChildDepth = 8;
 
-bool has_dynamic_setting(const nlohmann::json& value)
-{
-    return value.is_object() && (value.contains("script") || value.contains("user"));
-}
+/// Counts the child entries being loaded on this thread. The guard unwinds on
+/// every way out of `ParticleChild::FromJson`.
+thread_local int t_child_depth = 0;
 
-void remember_user_binding(
-    const nlohmann::json&                  json,
-    const char*                            key,
-    std::map<std::string, std::string>*    bindings)
-{
-    if (bindings == nullptr || !json.contains(key)) return;
-    const auto& value = json.at(key);
-    if (!value.is_object() || !value.contains("user") || !value.at("user").is_string()) return;
-    (*bindings)[key] = value.at("user").get<std::string>();
-}
+struct ChildDepthGuard {
+    ChildDepthGuard() { ++t_child_depth; }
+    ~ChildDepthGuard() { --t_child_depth; }
+    ChildDepthGuard(const ChildDepthGuard&)            = delete;
+    ChildDepthGuard& operator=(const ChildDepthGuard&) = delete;
+};
 
-void read_vec3_setting(
-    const nlohmann::json&  json,
-    const char*            key,
-    std::array<float, 3>*  destination,
-    nlohmann::json*        setting,
-    bool*                  dynamic)
-{
-    if (!json.contains(key) || destination == nullptr || setting == nullptr) return;
-
-    *setting = json.at(key);
-    if (dynamic != nullptr) *dynamic = has_dynamic_setting(*setting);
-
-    const auto& source = unwrap_setting(*setting);
-    if (source.is_array() && source.size() >= 3) {
-        (*destination)[0] = source.at(0).get<float>();
-        (*destination)[1] = source.at(1).get<float>();
-        (*destination)[2] = source.at(2).get<float>();
-        return;
+/// A view of one scene-file member as a setting. A setting is written either
+/// as its value or as a wrapper object that carries the value in `value` next
+/// to a `script` or `user` source. The view never owns the JSON.
+class SettingView {
+public:
+    SettingView() = default;
+    SettingView(const nlohmann::json& holder, const char* key) {
+        if (! holder.is_object()) return;
+        const auto it = holder.find(key);
+        if (it != holder.end()) m_raw = &*it;
     }
-    if (source.is_number()) {
-        const float scalar = source.get<float>();
-        *destination = { scalar, scalar, scalar };
-        return;
+
+    bool Present() const { return m_raw != nullptr; }
+    /// The member exactly as written.
+    const nlohmann::json& Raw() const { return *m_raw; }
+
+    /// True when the member is a wrapper that a script or a property drives.
+    bool Driven() const {
+        return m_raw != nullptr && m_raw->is_object() &&
+               (m_raw->contains("script") || m_raw->contains("user"));
     }
-    if (source.is_string()) {
-        std::istringstream stream(source.get<std::string>());
-        stream >> (*destination)[0] >> (*destination)[1] >> (*destination)[2];
+
+    /// The plain value inside the wrapper, or the member itself.
+    const nlohmann::json& Payload() const {
+        if (m_raw->is_object()) {
+            if (const auto it = m_raw->find("value"); it != m_raw->end()) return *it;
+        }
+        return *m_raw;
     }
+
+    /// Vector reading: an array of at least three numbers, one number for all
+    /// three components, or a string of numbers where a component the string
+    /// lacks keeps the value `out` already has. A malformed array leaves `out`.
+    void ReadVec3(std::array<float, 3>& out) const {
+        if (m_raw == nullptr) return;
+        const nlohmann::json& v = Payload();
+        try {
+            if (v.is_array()) {
+                if (v.size() < 3) return;
+                std::array<float, 3> got {};
+                for (std::size_t i = 0; i < got.size(); ++i) {
+                    if (! v[i].is_number()) return;
+                    got[i] = v[i].get<float>();
+                }
+                out = got;
+            } else if (v.is_number()) {
+                out.fill(v.get<float>());
+            } else if (v.is_string()) {
+                std::istringstream words(v.get<std::string>());
+                for (float& component : out) {
+                    if (! (words >> component)) break;
+                }
+            }
+        } catch (const nlohmann::json::exception& e) {
+            LOG_INFO("particle object: unreadable vector setting: %s", e.what());
+        }
+    }
+
+    /// A boolean the file may write as a boolean or as a number.
+    void ReadFlag(bool& out) const {
+        if (m_raw == nullptr) return;
+        const nlohmann::json& v = Payload();
+        if (v.is_boolean()) {
+            out = v.get<bool>();
+        } else if (v.is_number()) {
+            out = v.get<double>() != 0.0;
+        }
+    }
+
+private:
+    const nlohmann::json* m_raw { nullptr };
+};
+
+/// Whether `key` names a field of the instance override that a project
+/// property may drive: the plain fields and `controlpoint0..7` / `controlpointangle0..7`.
+bool IsBindableOverrideKey(const std::string& key) {
+    static const char* const kPlain[] = { "alpha", "size", "lifetime", "rate",      "speed",
+                                          "count", "color", "colorn",   "brightness" };
+    for (const char* plain : kPlain) {
+        if (key == plain) return true;
+    }
+    for (const char* stem : { "controlpoint", "controlpointangle" }) {
+        const std::size_t n = std::char_traits<char>::length(stem);
+        if (key.size() == n + 1 && key.compare(0, n, stem) == 0 && key[n] >= '0' && key[n] <= '7')
+            return true;
+    }
+    return false;
 }
+
+/// A non-negative whole number the file may write with a fraction.
+uint32_t ClampedWhole(double value) {
+    if (! std::isfinite(value) || value <= 0.0) return 0u;
+    if (value >= static_cast<double>(std::numeric_limits<uint32_t>::max()))
+        return std::numeric_limits<uint32_t>::max();
+    return static_cast<uint32_t>(value);
+}
+
+/// A particle file or material named by the scene, read from the package.
+bool LoadAssetJson(wallpaper::fs::VFS& vfs, const std::string& name, nlohmann::json& out) {
+    if (name.empty()) return false;
+    return PARSE_JSON(wallpaper::fs::GetFileContent(vfs, "/assets/" + name), out);
+}
+
+/// Control point numbers: 0..6 name themselves, anything else names the last.
+wallpaper::i32 ClampControlpoint(wallpaper::i32 index) { return (index >= 0 && index <= 6) ? index : 7; }
 
 } // namespace
 
 bool ParticleChild::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
-    GET_JSON_NAME_VALUE(json, "name", name);
-    GET_JSON_NAME_VALUE(json, "type", type);
-
-    if (name.empty()) {
+    if (t_child_depth >= kMaxChildDepth) {
+        LOG_ERROR("particle child nests deeper than %d files; entry dropped", kMaxChildDepth);
         return false;
     }
+    ChildDepthGuard guard;
 
-    nlohmann::json jParticle;
-    if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + name), jParticle)) return false;
-
-    if (! obj.FromJson(jParticle, vfs)) return false;
-
+    std::string file;
+    GET_JSON_NAME_VALUE_NOWARN(json, "name", file);
+    if (file.empty()) return false;
+    nlohmann::json child_json;
+    if (! LoadAssetJson(vfs, file, child_json)) {
+        LOG_ERROR("can't load child particle json: %s", file.c_str());
+        return false;
+    }
+    name = file;
+    if (! obj.FromJson(child_json, vfs)) {
+        LOG_ERROR("child particle '%s' is not a usable particle file", file.c_str());
+        return false;
+    }
+    GET_JSON_NAME_VALUE_NOWARN(json, "type", type);
     GET_JSON_NAME_VALUE_NOWARN(json, "maxcount", maxcount);
     GET_JSON_NAME_VALUE_NOWARN(json, "controlpointstartindex", controlpointstartindex);
     GET_JSON_NAME_VALUE_NOWARN(json, "probability", probability);
-
     GET_JSON_NAME_VALUE_NOWARN(json, "origin", origin);
     GET_JSON_NAME_VALUE_NOWARN(json, "scale", scale);
     GET_JSON_NAME_VALUE_NOWARN(json, "angles", angles);
@@ -92,89 +172,96 @@ bool ParticleChild::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
 }
 
 bool ParticleControlpoint::FromJson(const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE(json, "id", id);
-
-    uint32_t _raw_flags { 0 };
-    GET_JSON_NAME_VALUE_NOWARN(json, "flags", _raw_flags);
-    flags = EFlags(_raw_flags);
-
+    uint32_t raw_flags { 0 };
+    GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
+    GET_JSON_NAME_VALUE_NOWARN(json, "flags", raw_flags);
     GET_JSON_NAME_VALUE_NOWARN(json, "offset", offset);
+    flags = EFlags(raw_flags);
     return true;
-};
+}
 
 bool ParticleRender::FromJson(const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE(json, "name", name);
+    // Every call starts from the member defaults, so one object can be read again.
+    *this = ParticleRender {};
+    GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
 
-    // Each renderer fills the keys a file leaves out with its own numbers.
-    if (name == "rope") {
-        subdivision = 4.0f;
-        uvsmoothing = true;
-    } else if (name == "ropetrail") {
+    const bool is_rope  = sstart_with(name, "rope");
+    const bool is_trail = send_with(name, "trail");
+    if (is_rope && is_trail) {
         length      = 1.0f;
         segments    = 4.0f;
         subdivision = 1.0f;
+    } else if (is_rope) {
+        subdivision = 4.0f;
+        uvsmoothing = true;
     }
 
-    if (sstart_with(name, "rope")) {
+    GET_JSON_NAME_VALUE_NOWARN(json, "length", length);
+    GET_JSON_NAME_VALUE_NOWARN(json, "maxlength", maxlength);
+    GET_JSON_NAME_VALUE_NOWARN(json, "minlength", minlength);
+    if (is_rope) {
         GET_JSON_NAME_VALUE_NOWARN(json, "subdivision", subdivision);
-        // Truncated, never rounded, and kept inside what the renderer supports.
-        subdivision = std::clamp(std::trunc(subdivision), 0.0f, 32.0f);
-        if (json.contains("uvscale")) {
-            uvscale_setting = json.at("uvscale");
-            const auto& source = unwrap_setting(uvscale_setting);
-            if (source.is_number()) uvscale = source.get<float>();
+        subdivision = std::isfinite(subdivision) ? std::clamp(std::trunc(subdivision), 0.0f, 32.0f)
+                                                 : 0.0f;
+        if (is_trail) {
+            GET_JSON_NAME_VALUE_NOWARN(json, "segments", segments);
+            segments = std::isfinite(segments) ? std::clamp(std::trunc(segments), 2.0f, 32.0f)
+                                               : 2.0f;
+            length   = std::isfinite(length) ? std::max(length, 0.001f) : 0.001f;
         }
-        if (json.contains("uvscrolling")) {
-            uvscrolling_setting = json.at("uvscrolling");
-            const auto& source  = unwrap_setting(uvscrolling_setting);
-            if (source.is_boolean()) uvscrolling = source.get<bool>();
-            else if (source.is_number()) uvscrolling = source.get<float>() != 0.0f;
-        }
-        // Smoothing belongs to the plain rope and is only read while the
-        // texture is not scrolling; a rope trail has none.
-        if (name == "rope" && json.contains("uvsmoothing")) {
-            uvsmoothing_setting = json.at("uvsmoothing");
-            const auto& source  = unwrap_setting(uvsmoothing_setting);
-            if (source.is_boolean()) uvsmoothing = source.get<bool>();
-            else if (source.is_number()) uvsmoothing = source.get<float>() != 0.0f;
-        }
-        if (uvscrolling) uvsmoothing = false;
-        if (name != "rope") uvsmoothing = false;
     }
-    if (name == "spritetrail") {
-        GET_JSON_NAME_VALUE_NOWARN(json, "length", length);
-        GET_JSON_NAME_VALUE_NOWARN(json, "maxlength", maxlength);
-        GET_JSON_NAME_VALUE_NOWARN(json, "minlength", minlength);
+
+    // The three uv settings may be bound to a property or a script; the raw
+    // value goes to the scene loader, which follows it at run time.
+    const SettingView uv_scale_view(json, "uvscale");
+    const SettingView uv_scroll_view(json, "uvscrolling");
+    const SettingView uv_smooth_view(json, "uvsmoothing");
+    if (uv_scale_view.Present()) {
+        uvscale_setting = uv_scale_view.Raw();
+        float value { uvscale };
+        if (GET_JSON_NAME_VALUE_NOWARN(json, "uvscale", value)) uvscale = RopeUvScaleOrOne(value);
     }
-    if (name == "ropetrail") {
-        GET_JSON_NAME_VALUE_NOWARN(json, "length", length);
-        GET_JSON_NAME_VALUE_NOWARN(json, "segments", segments);
-        length   = std::max(length, 0.001f);
-        segments = std::clamp(std::trunc(segments), 2.0f, 32.0f);
-    }
+    if (uv_scroll_view.Present()) uvscrolling_setting = uv_scroll_view.Raw();
+    if (uv_smooth_view.Present()) uvsmoothing_setting = uv_smooth_view.Raw();
+    uv_scroll_view.ReadFlag(uvscrolling);
+    uv_smooth_view.ReadFlag(uvsmoothing);
+    // Smoothing eases the strip position, which scrolling already owns; a trail
+    // never smooths.
+    if (uvscrolling || is_trail) uvsmoothing = false;
     return true;
 }
 
 bool Emitter::FromJson(const nlohmann::json& json) {
-    GET_JSON_NAME_VALUE(json, "name", name);
-    GET_JSON_NAME_VALUE(json, "id", id);
+    // A missing or mistyped key leaves the member as it is, without a warning.
+    const auto lenient = [&json](const char* key, auto& member) {
+        GET_JSON_NAME_VALUE_NOWARN(json, key, member);
+    };
 
-    GET_JSON_NAME_VALUE_NOWARN(json, "speedmin", speedmin);
-    GET_JSON_NAME_VALUE_NOWARN(json, "speedmax", speedmax);
-    GET_JSON_NAME_VALUE_NOWARN(json, "instantaneous", instantaneous);
-    GET_JSON_NAME_VALUE_NOWARN(json, "distancemax", distancemax);
-    GET_JSON_NAME_VALUE_NOWARN(json, "distancemin", distancemin);
-    GET_JSON_NAME_VALUE_NOWARN(json, "rate", rate);
-    GET_JSON_NAME_VALUE_NOWARN(json, "directions", directions);
-    GET_JSON_NAME_VALUE_NOWARN(json, "origin", origin);
-    GET_JSON_NAME_VALUE_NOWARN(json, "sign", sign);
-    GET_JSON_NAME_VALUE_NOWARN(json, "audioprocessingmode", audioprocessingmode);
-    GET_JSON_NAME_VALUE_NOWARN(json, "audioprocessingbounds", audioprocessingbounds);
-    GET_JSON_NAME_VALUE_NOWARN(json, "audioprocessingexponent", audioprocessingexponent);
-    GET_JSON_NAME_VALUE_NOWARN(
-        json, "audioprocessingfrequencystart", audioprocessingfrequencystart);
-    GET_JSON_NAME_VALUE_NOWARN(json, "audioprocessingfrequencyend", audioprocessingfrequencyend);
-    GET_JSON_NAME_VALUE_NOWARN(json, "controlpoint", controlpoint);
+    id = 0;  // the member has no initialiser; an absent key must read 0
+    lenient("name", name);
+    lenient("id", id);
+    lenient("rate", rate);
+    lenient("instantaneous", instantaneous);
+    lenient("speedmin", speedmin);
+    lenient("speedmax", speedmax);
+    lenient("directions", directions);
+    lenient("origin", origin);
+    lenient("distancemin", distancemin);
+    lenient("distancemax", distancemax);
+    lenient("cone", cone);
+
+    // Only the direction of each axis matters, so the sign is reduced to -1, 0 or 1.
+    lenient("sign", sign);
+    for (int32_t& axis : sign) axis = (axis > 0) - (axis < 0);
+
+    lenient("controlpoint", controlpoint);
+    if (controlpoint >= 8) LOG_ERROR("emitter names control point %d; using 7", controlpoint);
+    controlpoint = ClampControlpoint(controlpoint);
+
+    uint32_t raw_flags { 0 };
+    GET_JSON_NAME_VALUE_NOWARN(json, "flags", raw_flags);
+    flags = EFlags(raw_flags);
+
     GET_JSON_NAME_VALUE_NOWARN(json, "delay", delay);
     GET_JSON_NAME_VALUE_NOWARN(json, "duration", duration);
     GET_JSON_NAME_VALUE_NOWARN(json, "minperiodicduration", minperiodicduration);
@@ -182,163 +269,192 @@ bool Emitter::FromJson(const nlohmann::json& json) {
     GET_JSON_NAME_VALUE_NOWARN(json, "minperiodicdelay", minperiodicdelay);
     GET_JSON_NAME_VALUE_NOWARN(json, "maxperiodicdelay", maxperiodicdelay);
     GET_JSON_NAME_VALUE_NOWARN(json, "maxtoemitperperiod", maxtoemitperperiod);
-    GET_JSON_NAME_VALUE_NOWARN(json, "cone", cone);
 
-    if (controlpoint >= 8) LOG_ERROR("wrong controlpoint %d", controlpoint);
-    // Wallpaper Engine keeps 0..6 and names the last control point for
-    // anything else, a negative index included.
-    controlpoint = static_cast<u32>(controlpoint) < 7u ? controlpoint : 7;
-
-    uint32_t _raw_flags { 0 };
-    GET_JSON_NAME_VALUE_NOWARN(json, "flags", _raw_flags);
-    flags = EFlags(_raw_flags);
-
-    std::transform(sign.begin(), sign.end(), sign.begin(), [](int32_t v) {
-        if (v != 0)
-            return v / std::abs(v);
-        else
-            return 0;
-    });
+    GET_JSON_NAME_VALUE_NOWARN(json, "audioprocessingmode", audioprocessingmode);
+    GET_JSON_NAME_VALUE_NOWARN(json, "audioprocessingbounds", audioprocessingbounds);
+    GET_JSON_NAME_VALUE_NOWARN(json, "audioprocessingexponent", audioprocessingexponent);
+    GET_JSON_NAME_VALUE_NOWARN(json, "audioprocessingfrequencystart", audioprocessingfrequencystart);
+    GET_JSON_NAME_VALUE_NOWARN(json, "audioprocessingfrequencyend", audioprocessingfrequencyend);
     return true;
 }
 
 bool ParticleInstanceoverride::FromJosn(const nlohmann::json& json) {
     enabled = true;
-    for (const char* key : { "alpha", "size", "lifetime", "rate", "speed", "count", "color", "colorn",
-                             "brightness" }) {
-        remember_user_binding(json, key, &bindings);
-    }
-    for (int i = 0; i < 8; ++i) {
-        const std::string point = "controlpoint" + std::to_string(i);
-        const std::string angle = "controlpointangle" + std::to_string(i);
-        remember_user_binding(json, point.c_str(), &bindings);
-        remember_user_binding(json, angle.c_str(), &bindings);
-        std::array<float, 3> value {};
-        if (json.contains(point) && GET_JSON_NAME_VALUE_NOWARN(json, point, value)) {
-            controlpointSet[i] = true;
-            controlpoint[i]    = value;
-        }
-        if (json.contains(angle) && GET_JSON_NAME_VALUE_NOWARN(json, angle, value)) {
-            controlpointangleSet[i] = true;
-            controlpointangle[i]    = value;
-        }
-    }
-    GET_JSON_NAME_VALUE_NOWARN(json, "brightness", brightness);
-    GET_JSON_NAME_VALUE_NOWARN(json, "alpha", alpha);
-    GET_JSON_NAME_VALUE_NOWARN(json, "size", size);
-    GET_JSON_NAME_VALUE_NOWARN(json, "lifetime", lifetime);
-    GET_JSON_NAME_VALUE_NOWARN(json, "rate", rate);
-    GET_JSON_NAME_VALUE_NOWARN(json, "speed", speed);
-    GET_JSON_NAME_VALUE_NOWARN(json, "count", count);
+    if (! json.is_object()) return true;
+
+    // Scalars: every one is a plain value under its own key.
+    const std::pair<const char*, float*> scalars[] = {
+        { "alpha", &alpha },     { "size", &size }, { "lifetime", &lifetime },
+        { "rate", &rate },       { "speed", &speed }, { "count", &count },
+        { "brightness", &brightness },
+    };
+    for (const auto& [key, target] : scalars) GET_JSON_NAME_VALUE_NOWARN(json, key, *target);
     GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
-    if (json.contains("color")) {
-        GET_JSON_NAME_VALUE(json, "color", color);
-        overColor = true;
-    } else if (json.contains("colorn")) {
-        GET_JSON_NAME_VALUE(json, "colorn", colorn);
-        overColorn = true;
-    }
-    return true;
-};
 
-bool Particle::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
-    if (! json.contains("emitter")) {
-        LOG_ERROR("particle no emitter");
-        return false;
-    }
-    for (const auto& el : json.at("emitter")) {
-        Emitter emi;
-        emi.FromJson(el);
-        emitters.push_back(emi);
-    }
-    // Wallpaper Engine appends a sprite renderer unless the key holds an array;
-    // an array the file wrote empty is kept, and then nothing is drawn.
-    const bool has_renderer_list = json.contains("renderer") && json.at("renderer").is_array();
-    if (has_renderer_list) {
-        for (const auto& el : json.at("renderer")) {
-            ParticleRender pr;
-            pr.FromJson(el);
-            renderers.push_back(pr);
-        }
+    // Colour: `color` wins; `colorn` is the same override on a 0..1 scale.
+    if (const auto it = json.find("color"); it != json.end() && ! it->is_null()) {
+        overColor = GET_JSON_NAME_VALUE_NOWARN(json, "color", color) || overColor;
     } else {
-        ParticleRender pr;
-        pr.name = "sprite";
-        renderers.push_back(pr);
-    }
-    if (json.contains("initializer")) {
-        for (const auto& el : json.at("initializer")) {
-            initializers.push_back(el);
-        }
-    }
-    if (json.contains("operator")) {
-        for (const auto& el : json.at("operator")) {
-            operators.push_back(el);
-        }
-    }
-    if (json.contains("controlpoint")) {
-        for (const auto& el : json.at("controlpoint")) {
-            ParticleControlpoint pc;
-            pc.FromJson(el);
-            controlpoints.push_back(pc);
-        }
+        overColorn = GET_JSON_NAME_VALUE_NOWARN(json, "colorn", colorn) || overColorn;
     }
 
-    if (json.contains("children")) {
-        for (const auto& el : json.at("children")) {
-            ParticleChild child;
-            if (child.FromJson(el, vfs)) {
-                children.push_back(child);
+    // Control points: eight slots each for the offset and the angles.
+    struct PointGroup {
+        const char*                         stem;
+        std::array<bool, 8>&                set;
+        std::array<std::array<float, 3>, 8>& value;
+    };
+    for (const PointGroup& group : { PointGroup { "controlpoint", controlpointSet, controlpoint },
+                                     PointGroup { "controlpointangle", controlpointangleSet,
+                                                  controlpointangle } }) {
+        for (std::size_t slot = 0; slot < group.value.size(); ++slot) {
+            std::array<float, 3> got {};
+            if (GET_JSON_NAME_VALUE_NOWARN(json, std::string(group.stem) + std::to_string(slot), got)) {
+                group.value[slot] = got;
+                group.set[slot]   = true;
             }
         }
     }
-    if (json.contains("material")) {
-        std::string matPath;
-        GET_JSON_NAME_VALUE(json, "material", matPath);
-        nlohmann::json jMat;
-        if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + matPath), jMat)) return false;
-        material.FromJson(jMat);
-    } else {
-        LOG_ERROR("particle object no material");
+
+    // Bindings: a bindable field whose value is an object naming a project property.
+    for (const auto& [key, field] : json.items()) {
+        if (! field.is_object() || ! IsBindableOverrideKey(key)) continue;
+        const auto user = field.find("user");
+        if (user != field.end() && user->is_string()) bindings[key] = user->get<std::string>();
+    }
+    return true;
+}
+
+bool Particle::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+    if (! json.is_object() || ! json.contains("emitter")) {
+        LOG_ERROR("particle file has no emitter key");
         return false;
+    }
+
+    std::string material_path;
+    GET_JSON_NAME_VALUE_NOWARN(json, "material", material_path);
+    nlohmann::json material_json;
+    if (! LoadAssetJson(vfs, material_path, material_json)) {
+        LOG_ERROR("can't load particle material json: %s", material_path.c_str());
+        return false;
+    }
+    material.FromJson(material_json);
+
+    // The list-valued keys: absent or null is an empty list.
+    const auto list_of = [&json](const char* key) -> const nlohmann::json* {
+        const auto found = json.find(key);
+        return (found != json.end() && found->is_array()) ? &*found : nullptr;
+    };
+
+    emitters.clear();
+    if (const auto* list = list_of("emitter")) {
+        for (const auto& entry : *list) {
+            Emitter emitter;
+            emitter.FromJson(entry);
+            emitters.push_back(std::move(emitter));
+        }
+    }
+
+    initializers.clear();
+    if (const auto* list = list_of("initializer")) {
+        initializers.assign(list->begin(), list->end());
+    }
+    operators.clear();
+    if (const auto* list = list_of("operator")) {
+        operators.assign(list->begin(), list->end());
+    }
+
+    renderers.clear();
+    if (const auto* list = list_of("renderer")) {
+        for (const auto& entry : *list) {
+            ParticleRender renderer;
+            renderer.FromJson(entry);
+            renderers.push_back(std::move(renderer));
+        }
+    } else {
+        ParticleRender sprite;
+        sprite.FromJson(nlohmann::json { { "name", "sprite" } });
+        renderers.push_back(std::move(sprite));
+    }
+
+    controlpoints.clear();
+    if (const auto* list = list_of("controlpoint")) {
+        for (const auto& entry : *list) {
+            ParticleControlpoint point;
+            point.FromJson(entry);
+            controlpoints.push_back(std::move(point));
+        }
+    }
+
+    children.clear();
+    if (const auto* list = list_of("children")) {
+        for (const auto& entry : *list) {
+            ParticleChild child;
+            if (child.FromJson(entry, vfs)) children.push_back(std::move(child));
+        }
     }
 
     GET_JSON_NAME_VALUE_NOWARN(json, "animationmode", animationmode);
     GET_JSON_NAME_VALUE_NOWARN(json, "sequencemultiplier", sequencemultiplier);
-    GET_JSON_NAME_VALUE(json, "maxcount", maxcount);
-    GET_JSON_NAME_VALUE(json, "starttime", starttime);
-
-    uint32_t rawflags { 0 };
-    GET_JSON_NAME_VALUE_NOWARN(json, "flags", rawflags);
-    flags = EFlags(rawflags);
-
+    if (json.contains("maxcount")) {
+        double count { static_cast<double>(maxcount) };
+        if (GET_JSON_NAME_VALUE_NOWARN(json, "maxcount", count)) maxcount = ClampedWhole(count);
+    }
+    GET_JSON_NAME_VALUE_NOWARN(json, "starttime", starttime);
+    uint32_t raw_flags { 0 };
+    GET_JSON_NAME_VALUE_NOWARN(json, "flags", raw_flags);
+    flags = EFlags(raw_flags);
     return true;
 }
 
 bool WPParticleObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
-    GET_JSON_NAME_VALUE(json, "particle", particle);
-    GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
-    if (json.contains("visible")) {
-        visible_setting  = json.at("visible");
-        dynamic_visible = visible_setting.is_object() &&
-                          (visible_setting.contains("script") || visible_setting.contains("user"));
+    // Resources first: a scene object whose particle file is unusable is dropped.
+    GET_JSON_NAME_VALUE_NOWARN(json, "particle", particle);
+    bool usable = false;
+    {
+        nlohmann::json file_json;
+        if (! LoadAssetJson(vfs, particle, file_json)) {
+            LOG_ERROR("can't load particle json: %s", particle.c_str());
+        } else if (! particleObj.FromJson(file_json, vfs)) {
+            LOG_ERROR("particle '%s' is not a usable particle file", particle.c_str());
+        } else {
+            usable = true;
+        }
     }
 
+    // Identity.
+    id = 0;
     GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
     GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
     GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent_id);
-    read_vec3_setting(json, "origin", &origin, &origin_setting, &dynamic_origin);
-    read_vec3_setting(json, "angles", &angles, &angles_setting, nullptr);
-    read_vec3_setting(json, "scale", &scale, &scale_setting, nullptr);
-    GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
     ParseDependencies(json, dependencies);
 
-    if (json.contains("instanceoverride") && ! json.at("instanceoverride").is_null()) {
-        instanceoverride.FromJosn(json.at("instanceoverride"));
+    // Placement; each setting keeps its raw JSON for the scene loader.
+    const SettingView origin_view(json, "origin");
+    const SettingView angles_view(json, "angles");
+    const SettingView scale_view(json, "scale");
+    origin_view.ReadVec3(origin);
+    angles_view.ReadVec3(angles);
+    scale_view.ReadVec3(scale);
+    if (origin_view.Present()) origin_setting = origin_view.Raw();
+    if (angles_view.Present()) angles_setting = angles_view.Raw();
+    if (scale_view.Present()) scale_setting = scale_view.Raw();
+    GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
+
+    // Settings a script or a property may drive.
+    GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
+    if (const SettingView visible_view(json, "visible"); visible_view.Present()) {
+        visible_setting = visible_view.Raw();
+        dynamic_visible = visible_view.Driven();
+    }
+    dynamic_origin = origin_view.Driven();
+
+    if (const SettingView override_view(json, "instanceoverride");
+        override_view.Present() && override_view.Raw().is_object()) {
+        instanceoverride.FromJosn(override_view.Raw());
     }
 
-    nlohmann::json jParticle;
-    if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + particle), jParticle)) return false;
-    if (! particleObj.FromJson(jParticle, vfs)) return false;
-    AbsorbFieldBindings(json, field_bindings);
+    if (! usable) return false;
+    if (json.is_object()) AbsorbFieldBindings(json, field_bindings);
     return true;
 }

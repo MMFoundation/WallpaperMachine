@@ -43,9 +43,12 @@ public:
     IShaderValueUpdater()          = default;
     virtual ~IShaderValueUpdater() = default;
 
-    virtual void FrameBegin()                                                      = 0;
-    virtual void InitUniforms(SceneNode*, const ExistsUniformOp&)                  = 0;
-    virtual void UpdateUniforms(SceneNode*, sprite_map_t&, const UpdateUniformOp&) = 0;
+    virtual void FrameBegin()                                                          = 0;
+    virtual void InitUniforms(SceneNode*, const ExistsUniformOp&)                      = 0;
+    virtual void UpdateUniforms(SceneNode*, sprite_map_t&, const UpdateUniformOp&)     = 0;
+
+    /// Per-material-slot forms. An updater that has no per-slot state ignores the
+    /// slot and lands in the plain overloads above.
     virtual void InitUniforms(SceneNode* node, uint32_t material_slot,
                               const ExistsUniformOp& exists_op) {
         (void)material_slot;
@@ -57,9 +60,10 @@ public:
         UpdateUniforms(node, sprites, update_op);
     }
 
+
     /// Which self-advancing uniforms this node's material actually binds, drawn
     /// through `camera_override` when the pass sets one and through the node's
-    /// own camera when it is empty, as the backends draw it.
+    /// own camera when it is empty, as the renderer draws it.
     ///
     /// The default reports all of them, so an updater that does not track
     /// reflection can never make a pass look reusable by omission.

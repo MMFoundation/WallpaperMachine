@@ -1,38 +1,63 @@
+// Clean-room implementation from the WallpaperMachine spec e7-small-units.md; written without access to the original source.
 #include "Utils/Logging.h"
-#include <cstdio>
-#include <cstdarg>
-#include <filesystem>
+
 #include <atomic>
-#include <vector>
-
-#include "Utils/Sha.hpp"
-
-constexpr const char* level_names[] = { "INFO", "ERROR" };
-constexpr const char* level_fmt[]   = { "%-5s", "%-5s %s:%d " };
+#include <cstdarg>
+#include <cstdio>
+#include <string>
 
 namespace
 {
-std::atomic<WallpaperLogCallback> g_log_callback { nullptr };
 thread_local uint64_t             t_log_scope { 0 };
+// The host's sink. Swapped from any thread; each message takes one snapshot of it.
+struct HostSink {
+    std::atomic<WallpaperLogCallback> fn { nullptr };
+    WallpaperLogCallback              snapshot() const { return fn.load(std::memory_order_acquire); }
+    void                              install(WallpaperLogCallback next) {
+        fn.exchange(next, std::memory_order_acq_rel);
+    }
+};
+HostSink s_host_sink;
 
-std::string format_message(const char* fmt, std::va_list args)
-{
-    std::va_list args_copy;
-    va_copy(args_copy, args);
-    const int length = std::vsnprintf(nullptr, 0, fmt, args_copy);
-    va_end(args_copy);
+// The line the default sink writes, newline included.
+std::string DefaultLine(int level, const char* file, int line, const std::string& text) {
+    std::string out;
+    if (level == LOGLEVEL_INFO) {
+        out.append("INFO ");
+    } else {
+        out.append("ERROR ").append(file != nullptr ? file : "").append(1, ':');
+        out.append(std::to_string(line)).append(1, ' ');
+    }
+    return out.append(text).append(1, '\n');
+}
 
-    if (length < 0) return "failed to format log message";
+constexpr const char* kFormatFailed = "(a log message could not be formatted)";
 
-    std::vector<char> message(static_cast<std::size_t>(length) + 1);
-    std::vsnprintf(message.data(), message.size(), fmt, args);
-    return std::string(message.data(), static_cast<std::size_t>(length));
+// The message after printf-style formatting, whole whatever its length.
+std::string Format(const char* fmt, va_list args) {
+    if (fmt == nullptr) return kFormatFailed;
+    char    stack[512];
+    va_list again;
+    va_copy(again, args);
+    const int needed = std::vsnprintf(stack, sizeof(stack), fmt, args);
+    if (needed < 0) {
+        va_end(again);
+        return kFormatFailed;
+    }
+    if (static_cast<size_t>(needed) < sizeof(stack)) {
+        va_end(again);
+        return std::string(stack, static_cast<size_t>(needed));
+    }
+    std::string text(static_cast<size_t>(needed), '\0');
+    const int   written = std::vsnprintf(text.data(), text.size() + 1, fmt, again);
+    va_end(again);
+    if (written < 0) return kFormatFailed;
+    return text;
 }
 } // namespace
 
-void SetWallpaperLogCallback(WallpaperLogCallback callback)
-{
-    g_log_callback.store(callback, std::memory_order_release);
+void SetWallpaperLogCallback(WallpaperLogCallback callback) {
+    s_host_sink.install(callback);
 }
 
 void SetWallpaperLogScope(uint64_t scope) { t_log_scope = scope; }
@@ -40,34 +65,18 @@ void SetWallpaperLogScope(uint64_t scope) { t_log_scope = scope; }
 uint64_t WallpaperLogScope() { return t_log_scope; }
 
 void WallpaperLog(int level, const char* file, int line, const char* fmt, ...) {
-    std::va_list args;
+    va_list args;
     va_start(args, fmt);
-    std::string message = format_message(fmt, args);
+    const std::string text = Format(fmt, args);
     va_end(args);
 
-    if (auto callback = g_log_callback.load(std::memory_order_acquire)) {
-        callback(level, file, line, message.c_str());
+    const WallpaperLogCallback host = s_host_sink.snapshot();
+    if (host != nullptr) {
+        host(level, file, line, text.c_str());
         return;
     }
-
-    std::fprintf(stderr, level_fmt[level], level_names[level], file, line);
-    std::fprintf(stderr, "%s", message.c_str());
-    std::fprintf(stderr, "\n");
+    // One line, one write, so lines of different threads never mix.
+    const std::string out = DefaultLine(level, file, line, text);
+    std::fwrite(out.data(), 1, out.size(), stderr);
     std::fflush(stderr);
-}
-
-std::string logToTmpfileWithSha1(std::span<const char> in, const char* fmt, ...) {
-    std::va_list          args;
-    std::string           name   = utils::genSha1(in);
-    std::filesystem::path fspath = std::filesystem::temp_directory_path() / name;
-    std::string           path   = fspath.native();
-    auto*                 file   = std::fopen(path.c_str(), "w+");
-    {
-        va_start(args, fmt);
-        std::vfprintf(file, fmt, args);
-        va_end(args);
-    }
-    std::fprintf(file, "\n");
-    std::fclose(file);
-    return path;
 }

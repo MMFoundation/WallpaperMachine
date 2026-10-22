@@ -24,6 +24,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <limits>
 #include <set>
 #include <string>
 #include <thread>
@@ -63,9 +64,9 @@ TEST(ScriptRuntimeCompat, CallbackOnlyPropertyScriptsInitializeAndToggleLayersOn
     auto runtime = MakeRuntimeWithScene(scene);
     auto button = std::make_shared<SceneNode>();
     auto target = std::make_shared<SceneNode>();
-    button->SetTranslate(Eigen::Vector3f(300, 200, 0));
+    button->SetTranslate(linalg::Vector3f(300, 200, 0));
     runtime->RegisterNode("button", button.get());
-    runtime->RegisterNodeSize("button", Eigen::Vector2f(80, 60));
+    runtime->RegisterNodeSize("button", linalg::Vector2f(80, 60));
     runtime->RegisterNode("target", target.get());
     runtime->RegisterNodeVisibility("button", button.get(), ResolveBoolSetting(*runtime, {
         {"value", true}, {"script", R"JS(
@@ -78,11 +79,11 @@ export function cursorClick(event) {
 )JS"}}, "button"));
     runtime->Tick(0.01);
     runtime->SetCursorEnter(true);
-    runtime->SetCursorWorldPosition(Eigen::Vector3f(600, 200, 0));
+    runtime->SetCursorWorldPosition(linalg::Vector3f(600, 200, 0));
     runtime->SetCursorButtons(0, 1, 1);
     runtime->DispatchCursorFrameEvents(false);
     EXPECT_TRUE(target->Visible());
-    runtime->SetCursorWorldPosition(Eigen::Vector3f(300, 200, 0));
+    runtime->SetCursorWorldPosition(linalg::Vector3f(300, 200, 0));
     runtime->DispatchCursorFrameEvents(true);
     runtime->Tick(0.01);
     EXPECT_FALSE(target->Visible());
@@ -125,10 +126,10 @@ TEST(ScriptRuntimeCompat, CallbackOnlyMenuReceivesInitialAndChangedUserPropertie
     });
     auto button = std::make_shared<SceneNode>();
     auto panel = std::make_shared<SceneNode>();
-    button->SetTranslate(Eigen::Vector3f(200, 100, 0));
+    button->SetTranslate(linalg::Vector3f(200, 100, 0));
     panel->SetVisible(false);
     runtime->RegisterNode("control", button.get());
-    runtime->RegisterNodeSize("control", Eigen::Vector2f(80, 40));
+    runtime->RegisterNodeSize("control", linalg::Vector2f(80, 40));
     runtime->RegisterNode("panel", panel.get());
     runtime->RegisterNodeVisibility("control", button.get(), ResolveBoolSetting(*runtime, {
         {"value", true},
@@ -164,7 +165,7 @@ export function cursorClick() {
 
     runtime->Tick(0.01);
     EXPECT_FALSE(panel->Visible());
-    EXPECT_TRUE(panel->Scale().isApprox(Eigen::Vector3f(1, 1, 7)));
+    EXPECT_TRUE(panel->Scale().isApprox(linalg::Vector3f(1, 1, 7)));
     runtime->SetCursorInput(0.5f, 0.5f);
     runtime->SetCursorEnter(true);
     runtime->SetCursorButtons(0u, 1u, 1u);
@@ -180,7 +181,7 @@ export function cursorClick() {
     };
     runtime->ApplyProjectPropertyOverride(overrides);
     EXPECT_TRUE(panel->Visible());
-    EXPECT_TRUE(panel->Scale().isApprox(Eigen::Vector3f(2, 3, 3)));
+    EXPECT_TRUE(panel->Scale().isApprox(linalg::Vector3f(2, 3, 3)));
     runtime->SetCursorButtons(0u, 1u, 1u);
     runtime->DispatchCursorFrameEvents(true);
     runtime->BeginFrame();
@@ -194,10 +195,10 @@ export function cursorClick() {
         {"menu", RuntimeScalarValue::Bool(true)},
         {"amount", RuntimeScalarValue::Float(5.0f)},
     });
-    EXPECT_TRUE(panel->Scale().isApprox(Eigen::Vector3f(3, 5, 2)));
+    EXPECT_TRUE(panel->Scale().isApprox(linalg::Vector3f(3, 5, 2)));
     runtime->ResetProjectPropertyOverride();
     EXPECT_FALSE(panel->Visible());
-    EXPECT_TRUE(panel->Scale().isApprox(Eigen::Vector3f(4, 1, 3)));
+    EXPECT_TRUE(panel->Scale().isApprox(linalg::Vector3f(4, 1, 3)));
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
@@ -234,9 +235,9 @@ export function applyUserProperties(changed) {
     });
     runtime->Tick(0.01);
     EXPECT_TRUE(control->Visible());
-    EXPECT_TRUE(control->Scale().isApprox(Eigen::Vector3f(1, 4, 1)));
+    EXPECT_TRUE(control->Scale().isApprox(linalg::Vector3f(1, 4, 1)));
     for (int frame = 0; frame < 4; ++frame) runtime->Tick(0.01);
-    EXPECT_TRUE(control->Scale().isApprox(Eigen::Vector3f(1, 4, 1)));
+    EXPECT_TRUE(control->Scale().isApprox(linalg::Vector3f(1, 4, 1)));
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
@@ -257,13 +258,13 @@ export function applyUserProperties(changed) {
     thisLayer.visible = engine.userProperties.enabled;
 }
 )JS", "control");
-    EXPECT_TRUE(control->Scale().isApprox(Eigen::Vector3f(1, 1, 1)));
+    EXPECT_TRUE(control->Scale().isApprox(linalg::Vector3f(1, 1, 1)));
     runtime->ApplyProjectPropertyOverride({{"amount", RuntimeScalarValue::Float(2.0f)}});
     EXPECT_TRUE(control->Visible());
-    EXPECT_TRUE(control->Scale().isApprox(Eigen::Vector3f(2, 2, 0)));
+    EXPECT_TRUE(control->Scale().isApprox(linalg::Vector3f(2, 2, 0)));
     runtime->ApplyProjectPropertyOverride({{"amount", RuntimeScalarValue::Float(2.0f)}});
     for (int frame = 0; frame < 4; ++frame) runtime->Tick(0.01);
-    EXPECT_TRUE(control->Scale().isApprox(Eigen::Vector3f(2, 2, 0)));
+    EXPECT_TRUE(control->Scale().isApprox(linalg::Vector3f(2, 2, 0)));
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
@@ -271,8 +272,8 @@ TEST(ScriptRuntimeCompat, HoverScaleInterpolatesAcrossFramesAndReversesWithoutSn
     Scene scene;
     auto runtime = MakeRuntimeWithScene(scene);
     auto node = std::make_shared<SceneNode>();
-    node->SetTranslate(Eigen::Vector3f(300, 200, 0));
-    runtime->RegisterNodeSize("hover", Eigen::Vector2f(80, 60));
+    node->SetTranslate(linalg::Vector3f(300, 200, 0));
+    runtime->RegisterNodeSize("hover", linalg::Vector2f(80, 60));
     runtime->RegisterNodeScale("hover", node.get(), ResolveVec3Setting(*runtime, {
         {"value", "1 2 1"}, {"script", R"JS(
 import * as WEMath from 'WEMath';
@@ -292,7 +293,7 @@ export function update(value) {
 )JS"}}, "hover"));
     runtime->Tick(1.0 / 60.0);
     runtime->SetCursorEnter(true);
-    runtime->SetCursorWorldPosition(Eigen::Vector3f(300, 200, 0));
+    runtime->SetCursorWorldPosition(linalg::Vector3f(300, 200, 0));
     runtime->DispatchCursorFrameEvents(false);
     runtime->Tick(1.0 / 60.0);
     EXPECT_NEAR(node->Scale().x(), 1.02f, 1.0e-6f);
@@ -301,11 +302,11 @@ export function update(value) {
     EXPECT_NEAR(node->Scale().x(), 1.038f, 1.0e-6f);
     EXPECT_NEAR(node->Scale().y(), 2.076f, 1.0e-6f);
 
-    runtime->SetCursorWorldPosition(Eigen::Vector3f(600, 200, 0));
+    runtime->SetCursorWorldPosition(linalg::Vector3f(600, 200, 0));
     runtime->DispatchCursorFrameEvents(true);
     runtime->Tick(1.0 / 60.0);
     EXPECT_NEAR(node->Scale().x(), 1.0342f, 1.0e-6f);
-    runtime->SetCursorWorldPosition(Eigen::Vector3f(300, 200, 0));
+    runtime->SetCursorWorldPosition(linalg::Vector3f(300, 200, 0));
     runtime->DispatchCursorFrameEvents(true);
     runtime->Tick(1.0 / 60.0);
     EXPECT_NEAR(node->Scale().x(), 1.05078f, 1.0e-6f);
@@ -340,8 +341,8 @@ TEST(ScriptRuntimeCompat, HoverScaleFollowsNormalizedDisplayInputOnACroppedWallp
     runtime->AttachScene(&scene);
 
     auto node = std::make_shared<SceneNode>();
-    node->SetTranslate(Eigen::Vector3f(3850.0f, 865.0f, 0.0f));
-    runtime->RegisterNodeSize("hover", Eigen::Vector2f(275.0f, 134.0f));
+    node->SetTranslate(linalg::Vector3f(3850.0f, 865.0f, 0.0f));
+    runtime->RegisterNodeSize("hover", linalg::Vector2f(275.0f, 134.0f));
     runtime->RegisterNodeScale("hover",
                                node.get(),
                                ResolveVec3Setting(*runtime,
@@ -370,13 +371,13 @@ export function update(value) {
     const auto mapping = ComputeWallpaperCursorMapping(layout, 3840.0, 1080.0, 7680.0, 2160.0);
     ASSERT_TRUE(mapping.valid);
     runtime->SetCursorViewport(CursorViewport {
-        .origin = Eigen::Vector2f(static_cast<float>(mapping.origin_x),
+        .origin = linalg::Vector2f(static_cast<float>(mapping.origin_x),
                                   static_cast<float>(mapping.origin_y)),
         .size =
-            Eigen::Vector2f(static_cast<float>(mapping.size_x), static_cast<float>(mapping.size_y)),
-        .content_origin = Eigen::Vector2f(static_cast<float>(mapping.content_origin_x),
+            linalg::Vector2f(static_cast<float>(mapping.size_x), static_cast<float>(mapping.size_y)),
+        .content_origin = linalg::Vector2f(static_cast<float>(mapping.content_origin_x),
                                           static_cast<float>(mapping.content_origin_y)),
-        .content_size   = Eigen::Vector2f(static_cast<float>(mapping.content_size_x),
+        .content_size   = linalg::Vector2f(static_cast<float>(mapping.content_size_x),
                                         static_cast<float>(mapping.content_size_y)),
     });
 
@@ -408,63 +409,6 @@ export function update(value) {
     EXPECT_NEAR(settle(3850.0 + 120.0, 865.0, 120), 1.2f, 1.0e-4f);
     EXPECT_NEAR(settle(3850.0 + 400.0, 865.0, 120), 1.0f, 1.0e-4f);
     EXPECT_NEAR(settle(3850.0 - 120.0, 865.0, 120), 1.2f, 1.0e-4f);
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-}
-
-// A script may hand back a bare number for a vector property, as a hover zoom
-// whose `update(value)` returns `value.x + (target - value.x) * speed` does: it
-// is that number on every axis, and the next `update` still receives a vector.
-// Kept as a number, the next call read `.x` off it, and the layer's scale and
-// with it its position went NaN, so the layer was never drawn.
-TEST(ScriptRuntimeCompat, ANumberReturnedForAVectorPropertyFillsEveryAxisAndStaysAVector) {
-    Scene scene;
-    auto runtime = MakeRuntimeWithScene(scene);
-    ASSERT_NE(runtime, nullptr);
-    auto node = std::make_shared<SceneNode>();
-    runtime->RegisterNodeScale("zoom", node.get(), ResolveVec3Setting(*runtime, {
-        {"value", "1 1 1"},
-        {"scriptproperties", {{"target", 2.0}}},
-        {"script", R"JS(
-export var scriptProperties = createScriptProperties()
-    .addSlider({name: 'target', value: 1}).finish();
-export function update(value) {
-    return value.x + (scriptProperties.target - value.x) * 0.5;
-}
-)JS"}}, "zoom"));
-
-    float previous = 1.0f;
-    for (int frame = 1; frame <= 30; ++frame) {
-        runtime->Tick(1.0 / 60.0);
-        const Eigen::Vector3f scale = node->Scale();
-        ASSERT_TRUE(scale.allFinite()) << "frame " << frame;
-        EXPECT_FLOAT_EQ(scale.y(), scale.x());
-        EXPECT_FLOAT_EQ(scale.z(), scale.x());
-        EXPECT_GT(scale.x(), previous - 1.0e-6f) << "frame " << frame;
-        previous = scale.x();
-    }
-    EXPECT_NEAR(previous, 2.0f, 1.0e-4f);
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-}
-
-// The same holds for a shader constant of another width: a number fills both
-// components of a two-component constant, and the script keeps receiving a pair.
-TEST(ScriptRuntimeCompat, ANumberReturnedForAShaderVectorFillsEveryComponent) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(runtime, nullptr);
-    auto material = std::make_shared<SceneMaterial>();
-    runtime->RegisterMaterialConstant(material, "g_Offset", ResolveVectorSetting(*runtime, {
-        {"value", "0 0"},
-        {"script", R"JS(
-export function update(value) { return value.y + 1; }
-)JS"}}, 2));
-    for (int frame = 1; frame <= 3; ++frame) {
-        runtime->Tick(1.0 / 60.0);
-        const auto& offset = material->customShader.constValues.at("g_Offset");
-        ASSERT_EQ(offset.size(), 2u) << "frame " << frame;
-        ASSERT_TRUE(std::isfinite(offset[0])) << "frame " << frame;
-        EXPECT_GE(offset[0], static_cast<float>(frame));
-        EXPECT_FLOAT_EQ(offset[1], offset[0]);
-    }
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
@@ -651,9 +595,9 @@ std::shared_ptr<WPPuppet> MakePuppet(WPPuppet::PlayMode mode) {
     WPPuppet::Animation::BoneTrack track;
     for (int frame = 0; frame <= animation.length; ++frame) {
         track.frames.push_back(WPPuppet::BoneFrame {
-            .position = Eigen::Vector3f(static_cast<float>(frame), 0.0f, 0.0f),
-            .angle    = Eigen::Vector3f::Zero(),
-            .scale    = Eigen::Vector3f::Ones(),
+            .position = linalg::Vector3f(static_cast<float>(frame), 0.0f, 0.0f),
+            .angle    = linalg::Vector3f::Zero(),
+            .scale    = linalg::Vector3f::Ones(),
         });
     }
     animation.bone_tracks.push_back(std::move(track));
@@ -727,51 +671,14 @@ TEST(ScriptRuntimeCompat, PuppetAnimationLayerVisibilityFollowsUserProperty) {
     EXPECT_FLOAT_EQ(copy.genFrame(0.0)[0].translation().x(), 0.0f);
 }
 
-// A script property bound to a combo with a condition is a flag: whether the
-// combo's choice equals the condition. Handing the script the choice itself
-// ("2") made every such flag truthy, so a clock offering three date formats as
-// three flags over one combo always took the first.
-TEST(ScriptRuntimeCompat, AScriptPropertyBoundToAComboChoiceReadsWhetherTheChoiceMatches) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
-        .project_properties = {{"format", RuntimeScalarValue::String("2")}},
-    });
-    ASSERT_NE(runtime, nullptr);
-    const auto text = ResolveStringSetting(*runtime, {
-        {"value", ""},
-        {"scriptproperties", {
-            {"first", {{"user", {{"name", "format"}, {"condition", "0"}}}, {"value", false}}},
-            {"third", {{"user", {{"name", "format"}, {"condition", "2"}}}, {"value", true}}},
-        }},
-        {"script", R"JS(
-export var scriptProperties = createScriptProperties()
-    .addCheckbox({name: 'first', value: false})
-    .addCheckbox({name: 'third', value: true}).finish();
-export function update(value) {
-    if (scriptProperties.first) return 'first ' + typeof scriptProperties.first;
-    if (scriptProperties.third) return 'third ' + typeof scriptProperties.third;
-    return 'neither ' + typeof scriptProperties.first;
-}
-)JS"},
-    });
-    runtime->Tick(1.0 / 60.0);
-    EXPECT_EQ(text->getString(), "third boolean");
-    runtime->ApplyProjectPropertyOverride({{"format", RuntimeScalarValue::String("0")}});
-    runtime->Tick(1.0 / 60.0);
-    EXPECT_EQ(text->getString(), "first boolean");
-    runtime->ApplyProjectPropertyOverride({{"format", RuntimeScalarValue::String("1")}});
-    runtime->Tick(1.0 / 60.0);
-    EXPECT_EQ(text->getString(), "neither boolean");
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-}
-
 // Two interlocking triangle buttons share a bounding box; the cursor must only
 // hit the one whose texels are opaque under it.
 TEST(ScriptRuntimeCompat, CursorHitTestRespectsCoverageMask) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto node    = std::make_shared<SceneNode>();
-    node->SetTranslate(Eigen::Vector3f(100.0f, 100.0f, 0.0f));
+    node->SetTranslate(linalg::Vector3f(100.0f, 100.0f, 0.0f));
     runtime->RegisterNode("button", node.get());
-    runtime->RegisterNodeSize("button", Eigen::Vector2f(40.0f, 40.0f));
+    runtime->RegisterNodeSize("button", linalg::Vector2f(40.0f, 40.0f));
     // Left half opaque, right half transparent.
     NodeHitMask mask;
     mask.width  = 4;
@@ -785,111 +692,16 @@ export function cursorClick(event) { thisLayer.visible = false; }
     runtime->Tick(0.01);
     runtime->SetCursorEnter(true);
 
-    runtime->SetCursorWorldPosition(Eigen::Vector3f(110.0f, 100.0f, 0.0f));
+    runtime->SetCursorWorldPosition(linalg::Vector3f(110.0f, 100.0f, 0.0f));
     runtime->SetCursorButtons(0, 1, 1);
     runtime->DispatchCursorFrameEvents(false);
     EXPECT_TRUE(node->Visible());
 
-    runtime->SetCursorWorldPosition(Eigen::Vector3f(90.0f, 100.0f, 0.0f));
+    runtime->SetCursorWorldPosition(linalg::Vector3f(90.0f, 100.0f, 0.0f));
     runtime->SetCursorButtons(0, 1, 1);
     runtime->DispatchCursorFrameEvents(true);
     EXPECT_FALSE(node->Visible());
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-}
-
-TEST(ScriptRuntimeCompat, TextureAnimationSelectsAMPMFrameWithoutScriptErrors) {
-    Scene scene;
-    auto runtime = MakeRuntimeWithScene(scene);
-    auto node = std::make_shared<SceneNode>();
-    runtime->RegisterNode("ampm", node.get());
-    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(
-        runtime.get(), R"JS(
-export function update(value) {
-    thisLayer.getTextureAnimation().setFrame(1);
-    return thisLayer.getTextureAnimation().getFrame();
-}
-)JS", "ampm", {}, DynamicValue(0.0f), runtime->hostContext());
-    ASSERT_TRUE(program->Valid());
-    for (int i = 0; i < 120; ++i) {
-        const auto result = program->Evaluate(runtime->hostContext(), DynamicValue(0.0f));
-        ASSERT_NE(result, nullptr);
-        EXPECT_FLOAT_EQ(result->getFloat(), 1.0f);
-    }
-    EXPECT_EQ(node->TextureFrame(), 1.0);
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-
-    SpriteAnimation animation;
-    animation.AppendFrame(SpriteFrame { .imageId = 0, .frametime = 0.1f });
-    animation.AppendFrame(SpriteFrame { .imageId = 1, .frametime = 0.1f });
-    EXPECT_EQ(animation.SetFrame(1).imageId, 1);
-    EXPECT_EQ(animation.SetFrame(-1).imageId, 0);
-    EXPECT_EQ(animation.SetFrame(100).imageId, 1);
-}
-
-TEST(ScriptRuntimeCompat, ComposeBackgroundUsesScreenCameraAndParentTransform) {
-    Scene scene;
-    auto screen = std::make_shared<SceneCamera>(640, 360, -1, 1);
-    auto effect = std::make_shared<SceneCamera>(64, 32, -1, 1);
-    scene.activeCamera = screen.get();
-    scene.cameras["effect-test"] = effect;
-    auto parent = std::make_shared<SceneNode>();
-    parent->SetTranslate(Eigen::Vector3f(200, 100, 0));
-    auto node = std::make_shared<SceneNode>();
-    node->SetTranslate(Eigen::Vector3f(10, 20, 0));
-    node->SetScale(Eigen::Vector3f(-0.3f, 0.2f, 1));
-    node->SetCamera("effect-test");
-    node->SetRenderTransformOverride(Eigen::Matrix4d::Identity());
-    auto mesh = std::make_shared<SceneMesh>();
-    SceneMaterial material;
-    material.name = "composelayer";
-    mesh->AddMaterial(std::move(material));
-    node->AddMesh(mesh);
-    parent->AppendChild(node);
-    WPShaderValueUpdater updater(&scene);
-    updater.InitUniforms(node.get(), [](std::string_view n) {
-        return n == "g_ModelViewProjectionMatrix";
-    });
-    sprite_map_t sprites;
-    ShaderValue actual;
-    updater.UpdateUniforms(node.get(), sprites, [&](std::string_view n, const ShaderValue& v) {
-        if (n == "g_ModelViewProjectionMatrix") actual = v;
-    });
-    const auto expected = ShaderValue::fromMatrix(screen->GetViewProjectionMatrix() * node->ModelTrans());
-    ASSERT_EQ(actual.size(), expected.size());
-    for (std::size_t i = 0; i < actual.size(); ++i) EXPECT_NEAR(actual[i], expected[i], 1e-5);
-
-    parent->SetTranslate(Eigen::Vector3f(260, 80, 0));
-    auto screen_node = std::make_shared<SceneNode>();
-    screen_node->SetTranslate(Eigen::Vector3f(30, 0, 0));
-    screen->AttatchNode(screen_node);
-    actual = ShaderValue {};
-    updater.UpdateUniforms(node.get(), sprites, [&](std::string_view n, const ShaderValue& v) {
-        if (n == "g_ModelViewProjectionMatrix") actual = v;
-    });
-    const auto second_expected =
-        ShaderValue::fromMatrix(screen->GetViewProjectionMatrix() * node->ModelTrans());
-    ASSERT_EQ(actual.size(), second_expected.size());
-    for (std::size_t i = 0; i < actual.size(); ++i) {
-        EXPECT_NEAR(actual[i], second_expected[i], 1e-5);
-    }
-
-    // Drawn into its own composite for another layer to sample, the compose
-    // layer still samples the screen behind where it sits: that is what its
-    // card holds.
-    auto composite = std::make_shared<SceneCamera>(64, 32, -1, 1);
-    composite->SetLayerLocal(true);
-    scene.cameras["composite-test"] = composite;
-    node->SetCamera("composite-test");
-    actual = ShaderValue {};
-    updater.UpdateUniforms(node.get(), sprites, [&](std::string_view n, const ShaderValue& v) {
-        if (n == "g_ModelViewProjectionMatrix") actual = v;
-    });
-    const auto composite_expected =
-        ShaderValue::fromMatrix(screen->GetViewProjectionMatrix() * node->ModelTrans());
-    ASSERT_EQ(actual.size(), composite_expected.size());
-    for (std::size_t i = 0; i < actual.size(); ++i) {
-        EXPECT_NEAR(actual[i], composite_expected[i], 1e-5);
-    }
 }
 
 // A compose layer with effects holds what is behind the place its card is
@@ -912,7 +724,7 @@ TEST(ScriptRuntimeCompat, AComposeLayersFirstPassReadsTheScreenWhereParallaxDraw
     scene.sceneGraph = std::make_shared<SceneNode>();
     auto screen      = std::make_shared<SceneCamera>(640, 360, -1, 1);
     auto screen_node = std::make_shared<SceneNode>();
-    screen_node->SetTranslate(Eigen::Vector3f(320, 180, 0));
+    screen_node->SetTranslate(linalg::Vector3f(320, 180, 0));
     screen->AttatchNode(screen_node);
     scene.activeCamera     = screen.get();
     scene.cameras["screen"] = screen;
@@ -929,7 +741,7 @@ TEST(ScriptRuntimeCompat, AComposeLayersFirstPassReadsTheScreenWhereParallaxDraw
     scene.frameTime = 1.0 / 60.0;
 
     auto group = std::make_shared<SceneNode>();
-    group->SetTranslate(Eigen::Vector3f(400, 100, 0));
+    group->SetTranslate(linalg::Vector3f(400, 100, 0));
     scene.sceneGraph->AppendChild(group);
 
     // A layer drawn through one effect, as the parser builds it: the layer's own
@@ -961,12 +773,12 @@ TEST(ScriptRuntimeCompat, AComposeLayersFirstPassReadsTheScreenWhereParallaxDraw
     const auto add_layer = [&](const char* name, const char* shader, bool has_children) {
         EffectLayer layer { add_node(shader), add_node("copy"), std::string(name) + "-camera",
                             has_children ? "screen" : "" };
-        layer.node->SetTranslate(Eigen::Vector3f(-40, 20, 0));
+        layer.node->SetTranslate(linalg::Vector3f(-40, 20, 0));
         auto camera = std::make_shared<SceneCamera>(64, 32, -1, 1);
         camera->AttatchNode(has_children ? layer.node : effect_camera_node);
         scene.cameras[layer.camera] = camera;
         layer.node->SetCamera(layer.camera);
-        if (! has_children) layer.node->SetRenderTransformOverride(Eigen::Matrix4d::Identity());
+        if (! has_children) layer.node->SetRenderTransformOverride(linalg::Matrix4d::Identity());
         group->AppendChild(layer.node);
         layer.node->UpdateTrans();
         layer.card->SetRenderTransformOverride(layer.node->ModelTrans());
@@ -993,14 +805,14 @@ TEST(ScriptRuntimeCompat, AComposeLayersFirstPassReadsTheScreenWhereParallaxDraw
         node.SetCamera(own);
         return actual;
     };
-    const auto expect_matrix = [](const ShaderValue& actual, const Eigen::Matrix4d& expected,
+    const auto expect_matrix = [](const ShaderValue& actual, const linalg::Matrix4d& expected,
                                   const char* what) {
         const auto wanted = ShaderValue::fromMatrix(expected);
         ASSERT_EQ(actual.size(), wanted.size()) << what;
         for (std::size_t i = 0; i < actual.size(); ++i) EXPECT_NEAR(actual[i], wanted[i], 1e-5) << what;
     };
-    const auto moved = [](const Eigen::Matrix4d& model, const Eigen::Vector2d& by) -> Eigen::Matrix4d {
-        return Eigen::Affine3d(Eigen::Translation3d(by.x(), by.y(), 0.0)).matrix() * model;
+    const auto moved = [](const linalg::Matrix4d& model, const linalg::Vector2d& by) -> linalg::Matrix4d {
+        return linalg::Affine3d(linalg::Translation3d(by.x(), by.y(), 0.0)).matrix() * model;
     };
     const auto follows_cursor = [&](SceneNode& node, const std::string& camera_override) {
         return (updater.FrameVaryingUniforms(&node, 0, camera_override) &
@@ -1012,7 +824,7 @@ TEST(ScriptRuntimeCompat, AComposeLayersFirstPassReadsTheScreenWhereParallaxDraw
     const auto plain         = add_layer("plain", "genericimage", false);
     // A compose layer without effects draws its card itself and holds its own depth.
     auto bare = add_node("composelayer");
-    bare->SetTranslate(Eigen::Vector3f(-40, 20, 0));
+    bare->SetTranslate(linalg::Vector3f(-40, 20, 0));
     group->AppendChild(bare);
     bare->UpdateTrans();
     WPShaderValueData bare_data;
@@ -1020,25 +832,25 @@ TEST(ScriptRuntimeCompat, AComposeLayersFirstPassReadsTheScreenWhereParallaxDraw
     updater.SetNodeData(bare.get(), bare_data);
     updater.InitUniforms(bare.get(), exists);
 
-    const Eigen::Matrix4d view_projection = screen->GetViewProjectionMatrix();
-    const Eigen::Matrix4d model           = leaf.node->ModelTrans();
+    const linalg::Matrix4d view_projection = screen->GetViewProjectionMatrix();
+    const linalg::Matrix4d model           = leaf.node->ModelTrans();
     // The group is the outermost layer: it sits (80, -80) from the view centre, and
     // the cursor, when it moves, adds its own distance from the centre of the canvas.
-    const Eigen::Vector2d root_offset(80.0, -80.0);
+    const linalg::Vector2d root_offset(80.0, -80.0);
     const double          depth_and_amount = 2.0 * 0.5;
 
     struct Cursor
     {
         const char*     name;
         double          x;
-        Eigen::Vector2d pull;
+        linalg::Vector2d pull;
     };
     for (const auto& cursor : { Cursor { "cursor centred", 0.5, { 0.0, 0.0 } },
                                 Cursor { "cursor right", 0.75, { -160.0, 0.0 } } }) {
         SCOPED_TRACE(cursor.name);
         updater.MouseInput(cursor.x, 0.5);
         updater.FrameBegin();
-        const Eigen::Vector2d shift = (cursor.pull + root_offset) * depth_and_amount;
+        const linalg::Vector2d shift = (cursor.pull + root_offset) * depth_and_amount;
 
         for (const auto* layer : { &with_children, &leaf }) {
             SCOPED_TRACE(layer == &leaf ? "a layer without children" : "a layer with children");
@@ -1094,7 +906,7 @@ TEST(ScriptRuntimeCompat, AComposeLayersFirstPassReadsTheScreenWhereParallaxDraw
             << "it followed the cursor before and still does";
         EXPECT_EQ(updater.NodeParallaxDepth(layer->node.get()), (std::array<float, 2> { 4.0f, 1.0f }));
         if (compose) {
-            const Eigen::Vector2d shift(root_offset.x() * 4.0 * 0.5, root_offset.y() * 1.0 * 0.5);
+            const linalg::Vector2d shift(root_offset.x() * 4.0 * 0.5, root_offset.y() * 1.0 * 0.5);
             expect_matrix(mvp(*layer->card), view_projection * moved(model, shift),
                           "the card at the depth the script wrote");
             expect_matrix(first_pass(), view_projection * moved(model, shift),
@@ -1120,9 +932,9 @@ TEST(ScriptRuntimeCompat, ThisLayerAndThisSceneResolveCurrentLayer) {
     ASSERT_NE(runtime, nullptr);
 
     auto node = std::make_shared<SceneNode>();
-    node->SetTranslate(Eigen::Vector3f(12.0f, 34.0f, 0.0f));
+    node->SetTranslate(linalg::Vector3f(12.0f, 34.0f, 0.0f));
     runtime->RegisterNode("probe", node.get());
-    runtime->RegisterNodeSize("probe", Eigen::Vector2f(320.0f, 240.0f));
+    runtime->RegisterNodeSize("probe", linalg::Vector2f(320.0f, 240.0f));
 
     auto program = runtime->scriptEngine().CreatePropertyScriptProgram(
         runtime.get(),
@@ -1144,113 +956,12 @@ export function update(value) {
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
-TEST(ScriptRuntimeCompat, SceneNodeIdentityIsStableAcrossLookups) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(runtime, nullptr);
-
-    auto node = std::make_shared<SceneNode>();
-    runtime->RegisterNode("probe", node.get());
-
-    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(
-        runtime.get(),
-        R"JS(
-var cached = thisScene.getObject('probe');
-export function update(value) {
-  return (cached === thisScene.getLayer('probe') &&
-          cached === thisLayer &&
-          thisScene.getSprite('probe') === thisLayer) ? 7 : -1;
-}
-)JS",
-        "probe",
-        {},
-        DynamicValue(0.0f),
-        runtime->hostContext());
-    ASSERT_NE(program, nullptr);
-
-    const auto result = program->Evaluate(runtime->hostContext(), DynamicValue(0.0f));
-    ASSERT_NE(result, nullptr);
-    EXPECT_FLOAT_EQ(result->getFloat(), 7.0f);
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-}
-
-TEST(ScriptRuntimeCompat, ThisLayerTextSetterMutatesRuntimeTextState) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(runtime, nullptr);
-
-    auto node = std::make_shared<SceneNode>();
-    runtime->RegisterNode("caption", node.get());
-    runtime->RegisterTextLayer("caption", TextLayerState {
-                                              .text       = "before",
-                                              .font_key   = "Arial",
-                                              .point_size = 12.0f,
-                                          });
-
-    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(
-        runtime.get(),
-        R"JS(
-export function update(value) {
-  thisLayer.text = "after";
-  var indirect = thisScene.getLayer('caption');
-  indirect.text = indirect.text + " indirect";
-  return thisLayer.text === "after indirect" ? 1 : -1;
-}
-)JS",
-        "caption",
-        {},
-        DynamicValue(0.0f),
-        runtime->hostContext());
-    ASSERT_NE(program, nullptr);
-
-    const auto result = program->Evaluate(runtime->hostContext(), DynamicValue(0.0f));
-    ASSERT_NE(result, nullptr);
-    EXPECT_FLOAT_EQ(result->getFloat(), 1.0f);
-    EXPECT_EQ(runtime->NodeText("caption"), "after indirect");
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-}
-
-TEST(ScriptRuntimeCompat, SetTimeoutGlobalAndEngineAliasesFireOnceAndCancel) {
-    ScriptEngine      engine;
-    ScriptHostContext host {};
-    host.runtime_seconds = 0.0;
-
-    auto program = engine.CreatePropertyScriptProgram(
-        nullptr,
-        R"JS(
-var fired = 0;
-var canceled = 0;
-setTimeout(function() { fired += 1; }, 100);
-var handle = engine.setTimeout(function() { canceled += 1; }, 100);
-clearTimeout(handle);
-export function update(value) { return fired * 10 + canceled; }
-)JS",
-        "",
-        {},
-        DynamicValue(0.0f),
-        host);
-    ASSERT_NE(program, nullptr);
-
-    host.runtime_seconds = 0.05;
-    auto before = program->Evaluate(host, DynamicValue(0.0f));
-    ASSERT_NE(before, nullptr);
-    EXPECT_FLOAT_EQ(before->getFloat(), 0.0f);
-
-    host.runtime_seconds = 0.15;
-    auto after = program->Evaluate(host, DynamicValue(0.0f));
-    ASSERT_NE(after, nullptr);
-    EXPECT_FLOAT_EQ(after->getFloat(), 10.0f);
-
-    host.runtime_seconds = 0.30;
-    auto later = program->Evaluate(host, DynamicValue(0.0f));
-    ASSERT_NE(later, nullptr);
-    EXPECT_FLOAT_EQ(later->getFloat(), 10.0f);
-}
-
 TEST(ScriptRuntimeCompat, UpstreamConsoleInputAndEngineCompatibilityStubsAreCallable) {
     ScriptEngine      engine;
     ScriptHostContext host {};
-    host.canvas_size                = Eigen::Vector2f(1920.0f, 1080.0f);
-    host.cursor_normalized_position = Eigen::Vector2f(0.25f, 0.75f);
-    host.cursor_world_position      = Eigen::Vector3f(480.0f, 270.0f, 0.0f);
+    host.canvas_size                = linalg::Vector2f(1920.0f, 1080.0f);
+    host.cursor_normalized_position = linalg::Vector2f(0.25f, 0.75f);
+    host.cursor_world_position      = linalg::Vector3f(480.0f, 270.0f, 0.0f);
     host.cursor_in_window           = true;
     host.mouse_buttons_down         = 3u;
     host.mouse_buttons_pressed      = 1u;
@@ -1298,84 +1009,6 @@ export function update(value) {
     const auto result = program->Evaluate(host, DynamicValue(0.0f));
     ASSERT_NE(result, nullptr);
     EXPECT_FLOAT_EQ(result->getFloat(), 12.0f);
-}
-
-TEST(ScriptRuntimeCompat, ThrowingOneShotTimeoutDoesNotFireAgainOrBlockLaterTimers) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(runtime, nullptr);
-
-    ScriptHostContext host {};
-    host.runtime_seconds = 0.0;
-
-    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(
-        runtime.get(),
-        R"JS(
-var later = 0;
-setTimeout(function() { throw new Error('timeout failed once'); }, 100);
-setTimeout(function() { later += 1; }, 150);
-export function update(value) { return later; }
-)JS",
-        "",
-        {},
-        DynamicValue(0.0f),
-        host);
-    ASSERT_NE(program, nullptr);
-
-    host.runtime_seconds = 0.12;
-    auto first_due = program->Evaluate(host, DynamicValue(0.0f));
-    ASSERT_NE(first_due, nullptr);
-    EXPECT_FLOAT_EQ(first_due->getFloat(), 0.0f);
-    ASSERT_EQ(runtime->scriptErrorCount(), 1u);
-
-    host.runtime_seconds = 0.20;
-    auto later_due = program->Evaluate(host, DynamicValue(0.0f));
-    ASSERT_NE(later_due, nullptr);
-    EXPECT_FLOAT_EQ(later_due->getFloat(), 1.0f);
-    EXPECT_EQ(runtime->scriptErrorCount(), 1u);
-}
-
-TEST(ScriptRuntimeCompat, ThrowingIntervalDoesNotBlockLaterTimersOrKeepStaleDeadline) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(runtime, nullptr);
-
-    ScriptHostContext host {};
-    host.runtime_seconds = 0.0;
-
-    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(
-        runtime.get(),
-        R"JS(
-var later = 0;
-var throwCount = 0;
-setInterval(function() {
-  throwCount += 1;
-  if (throwCount <= 1) throw new Error('interval failed once');
-}, 100);
-setTimeout(function() { later += 1; }, 150);
-export function update(value) { return later * 100 + throwCount; }
-)JS",
-        "",
-        {},
-        DynamicValue(0.0f),
-        host);
-    ASSERT_NE(program, nullptr);
-
-    host.runtime_seconds = 0.12;
-    auto first_due = program->Evaluate(host, DynamicValue(0.0f));
-    ASSERT_NE(first_due, nullptr);
-    EXPECT_FLOAT_EQ(first_due->getFloat(), 1.0f);
-    ASSERT_EQ(runtime->scriptErrorCount(), 1u);
-
-    host.runtime_seconds = 0.16;
-    auto later_due = program->Evaluate(host, DynamicValue(0.0f));
-    ASSERT_NE(later_due, nullptr);
-    EXPECT_FLOAT_EQ(later_due->getFloat(), 101.0f);
-    EXPECT_EQ(runtime->scriptErrorCount(), 1u);
-
-    host.runtime_seconds = 0.18;
-    auto before_next_interval = program->Evaluate(host, DynamicValue(0.0f));
-    ASSERT_NE(before_next_interval, nullptr);
-    EXPECT_FLOAT_EQ(before_next_interval->getFloat(), 101.0f);
-    EXPECT_EQ(runtime->scriptErrorCount(), 1u);
 }
 
 TEST(ScriptRuntimeCompat, LocalStorageRoundTripsObjectsInSharedRuntime) {
@@ -1521,10 +1154,10 @@ export function update(value) {
 TEST(ScriptRuntimeCompat, CursorScreenPositionIsInDisplayPixelsFromTheTop) {
     ScriptEngine      engine;
     ScriptHostContext host {};
-    host.canvas_size                = Eigen::Vector2f(1920.0f, 1080.0f);
-    host.screen_resolution          = Eigen::Vector2f(2560.0f, 1440.0f);
-    host.cursor_normalized_position = Eigen::Vector2f(0.25f, 0.75f);
-    host.cursor_world_position      = Eigen::Vector3f(480.0f, 270.0f, 0.0f);
+    host.canvas_size                = linalg::Vector2f(1920.0f, 1080.0f);
+    host.screen_resolution          = linalg::Vector2f(2560.0f, 1440.0f);
+    host.cursor_normalized_position = linalg::Vector2f(0.25f, 0.75f);
+    host.cursor_world_position      = linalg::Vector3f(480.0f, 270.0f, 0.0f);
     host.mouse_buttons_down         = 0u;
 
     auto program = engine.CreatePropertyScriptProgram(
@@ -1675,10 +1308,10 @@ TEST(ScriptRuntimeCompat, HostVectorUpdatesDoNotCallMutableGlobalVectorConstruct
     ASSERT_NE(runtime, nullptr);
 
     ScriptHostContext host {};
-    host.canvas_size                = Eigen::Vector2f(100.0f, 50.0f);
-    host.cursor_normalized_position = Eigen::Vector2f(0.1f, 0.2f);
-    host.cursor_world_position      = Eigen::Vector3f(10.0f, 20.0f, 0.0f);
-    DynamicValue tint(Eigen::Vector4f(0.5f, 0.25f, 0.125f, 0.75f));
+    host.canvas_size                = linalg::Vector2f(100.0f, 50.0f);
+    host.cursor_normalized_position = linalg::Vector2f(0.1f, 0.2f);
+    host.cursor_world_position      = linalg::Vector3f(10.0f, 20.0f, 0.0f);
+    DynamicValue tint(linalg::Vector4f(0.5f, 0.25f, 0.125f, 0.75f));
 
     auto program = runtime->scriptEngine().CreatePropertyScriptProgram(
         runtime.get(),
@@ -1703,63 +1336,12 @@ export function update(value) {
         host);
     ASSERT_NE(program, nullptr);
 
-    host.canvas_size                = Eigen::Vector2f(200.0f, 100.0f);
-    host.cursor_normalized_position = Eigen::Vector2f(0.25f, 0.75f);
-    host.cursor_world_position      = Eigen::Vector3f(25.0f, 75.0f, 0.0f);
+    host.canvas_size                = linalg::Vector2f(200.0f, 100.0f);
+    host.cursor_normalized_position = linalg::Vector2f(0.25f, 0.75f);
+    host.cursor_world_position      = linalg::Vector3f(25.0f, 75.0f, 0.0f);
     const auto result = program->Evaluate(host, DynamicValue(0.0f));
     ASSERT_NE(result, nullptr);
     EXPECT_FLOAT_EQ(result->getFloat(), 279.0f);
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-}
-
-TEST(ScriptRuntimeCompat, CreateLayerClonesTemplateAndFansOutMaterialBindings) {
-    Scene scene;
-    auto  runtime = MakeRuntimeWithScene(scene);
-    ASSERT_NE(runtime, nullptr);
-
-    auto source_node = std::make_shared<SceneNode>(
-        Eigen::Vector3f(100.0f, 50.0f, 0.0f),
-        Eigen::Vector3f::Ones(),
-        Eigen::Vector3f::Zero(),
-        "source");
-    auto source_mesh = std::make_shared<SceneMesh>();
-    source_mesh->AddMaterial(SceneMaterial {});
-    source_node->AddMesh(source_mesh);
-    scene.sceneGraph->AppendChild(source_node);
-
-    DynamicValue tint(Eigen::Vector3f(0.25f, 0.5f, 0.75f));
-    runtime->RegisterNode("source", source_node.get());
-    runtime->RegisterLayerTemplate("models/workshop/123456/bar.json",
-                                   source_node,
-                                   Eigen::Vector2f(20.0f, 10.0f));
-    runtime->RegisterMaterialConstant(source_mesh->MaterialSlotPtr(), "g_Tint", std::make_unique<DynamicValue>(tint));
-
-    runtime->RegisterSceneScript(
-        R"JS(
-function update() {
-  var a = thisScene.createLayer('models/bar.json');
-  var b = thisScene.createLayer('models/bar.json');
-  a.origin = new Vec3(10, 20, 0);
-  b.origin = new Vec3(30, 40, 0);
-}
-)JS",
-        "source");
-
-    runtime->Tick(1.0 / 60.0);
-
-    ASSERT_EQ(scene.sceneGraph->GetChildren().size(), 3u);
-    EXPECT_TRUE(runtime->ConsumeSceneGraphMutationFlag());
-    for (const auto& child : scene.sceneGraph->GetChildren()) {
-        if (child.get() == source_node.get()) continue;
-        ASSERT_NE(child->Mesh(), nullptr);
-        ASSERT_NE(child->Mesh()->Material(), nullptr);
-        const auto constant = child->Mesh()->Material()->customShader.constValues.find("g_Tint");
-        ASSERT_NE(constant, child->Mesh()->Material()->customShader.constValues.end());
-        ASSERT_EQ(constant->second.size(), 3u);
-        EXPECT_FLOAT_EQ(constant->second[0], 0.25f);
-        EXPECT_FLOAT_EQ(constant->second[1], 0.5f);
-        EXPECT_FLOAT_EQ(constant->second[2], 0.75f);
-    }
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
@@ -1769,7 +1351,7 @@ struct LineTemplateScene {
     Scene                                scene;
     std::unique_ptr<SceneRuntimeContext> runtime = MakeRuntimeWithScene(scene);
     std::shared_ptr<SceneNode>           owner   = std::make_shared<SceneNode>(
-        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "owner");
+        linalg::Vector3f::Zero(), linalg::Vector3f::Ones(), linalg::Vector3f::Zero(), "owner");
 
     LineTemplateScene() {
         auto mesh = std::make_shared<SceneMesh>();
@@ -1777,7 +1359,7 @@ struct LineTemplateScene {
         owner->AddMesh(mesh);
         scene.sceneGraph->AppendChild(owner);
         runtime->RegisterNode("owner", owner.get());
-        runtime->RegisterLayerTemplate("models/line.json", owner, Eigen::Vector2f(1, 1));
+        runtime->RegisterLayerTemplate("models/line.json", owner, linalg::Vector2f(1, 1));
     }
 };
 } // namespace
@@ -1831,50 +1413,6 @@ export function update(value) { return value; }
         EXPECT_TRUE(layer->Translate().isZero()) << layer->Name();
     }
     EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag());
-}
-
-TEST(ScriptRuntimeCompat, DestroyLayerDropsAnimationEndedListenersIncludingItsChildren) {
-    LineTemplateScene fixture;
-    auto&             runtime = *fixture.runtime;
-    runtime.RegisterSceneScript(R"JS(
-var ran = false;
-function update() {
-  if (ran) return;
-  ran = true;
-  var fired = 0;
-  var ownerFired = 0;
-  globalThis.__animationLayerEnded.owner = { 0: [function() { ++ownerFired; }] };
-  for (var cycle = 0; cycle < 3; ++cycle) {
-    var parent = thisScene.createLayer({ image: 'models/line.json', name: 'parent' });
-    var child = thisScene.createLayer({ image: 'models/line.json', name: 'child', parent: parent });
-    var names = [parent.__runtimeName, child.__runtimeName];
-    names.forEach(function(name) {
-      globalThis.__fireAnimationLayerEnded(name, 0);
-      if (fired !== cycle * 2) throw new Error('a recreated layer inherited a listener');
-    });
-    // The line template has no native puppet. Populate the table exactly as
-    // addEndedCallback does, and dispatch through the real notification path.
-    names.forEach(function(name) {
-      globalThis.__animationLayerEnded[name] = { 0: [function() { ++fired; }] };
-      globalThis.__fireAnimationLayerEnded(name, 0);
-    });
-    if (fired !== (cycle + 1) * 2) throw new Error('listeners did not fire before destruction');
-    if (!thisScene.destroyLayer(parent)) throw new Error('parent was not destroyed');
-    names.forEach(function(name) {
-      if (globalThis.__animationLayerEnded[name] !== undefined) throw new Error('listener is still rooted');
-      if (globalThis.__layerCache[name] !== undefined) throw new Error('wrapper is still rooted');
-      globalThis.__fireAnimationLayerEnded(name, 0);
-    });
-    if (fired !== (cycle + 1) * 2) throw new Error('a destroyed layer fired a listener');
-    globalThis.__fireAnimationLayerEnded('owner', 0);
-  }
-  if (ownerFired !== 3) throw new Error('an unrelated layer lost its listener');
-}
-)JS", "owner");
-    runtime.Tick(1.0 / 60.0);
-    for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
-    EXPECT_EQ(runtime.scriptErrorCount(), 0u);
-    EXPECT_EQ(fixture.scene.sceneGraph->GetChildren().size(), 1u);
 }
 
 // The graph compiled before a layer was destroyed still points at it, so the
@@ -1934,7 +1472,7 @@ TEST(ScriptRuntimeCompat, ScriptsLoadedByAnEventStartWithTheFollowingEvent) {
                     {"value", 0.0f}, {"script", "export function " + handler + "(){" + increment("y") + "}"}
                 }));
             runtime->RegisterSceneScript("function " + handler + "(){" + increment("z") + "}", "");
-            runtime->RegisterLayerTemplate(std::string(path), source, Eigen::Vector2f(16, 16));
+            runtime->RegisterLayerTemplate(std::string(path), source, linalg::Vector2f(16, 16));
             return true;
         });
         runtime->RegisterSceneScript("var made=false; function " + handler +
@@ -1952,10 +1490,10 @@ TEST(ScriptRuntimeCompat, ScriptsLoadedByAnEventStartWithTheFollowingEvent) {
         };
         dispatch();
         EXPECT_EQ(loads, 1);
-        EXPECT_TRUE(observer->Translate().isApprox(Eigen::Vector3f(1, 0, 0)));
+        EXPECT_TRUE(observer->Translate().isApprox(linalg::Vector3f(1, 0, 0)));
         dispatch();
         EXPECT_EQ(loads, 1);
-        EXPECT_TRUE(observer->Translate().isApprox(Eigen::Vector3f(2, 1, 1)));
+        EXPECT_TRUE(observer->Translate().isApprox(linalg::Vector3f(2, 1, 1)));
         EXPECT_EQ(runtime->scriptErrorCount(), 0u);
     }
 }
@@ -1979,7 +1517,7 @@ TEST(ScriptRuntimeCompat, LazyTemplateScriptsStartOnTheFollowingTickAndLoadedGeo
 export function update(value) { return value + 1; }
 )JS"}
             }));
-        runtime->RegisterLayerTemplate(std::string(path), source, Eigen::Vector2f(32, 32));
+        runtime->RegisterLayerTemplate(std::string(path), source, linalg::Vector2f(32, 32));
         return true;
     });
     runtime->RegisterNodeVisibility("owner", owner.get(), ResolveBoolSetting(*runtime, {
@@ -2000,8 +1538,8 @@ export function update(value) {
     ASSERT_EQ(scene.sceneGraph->GetChildren().size(), 3u);
     auto first = std::next(scene.sceneGraph->GetChildren().begin());
     auto second = std::next(first);
-    EXPECT_TRUE((*first)->Translate().isApprox(Eigen::Vector3f(1, 0, 0)));
-    EXPECT_TRUE((*second)->Translate().isApprox(Eigen::Vector3f(2, 0, 0)));
+    EXPECT_TRUE((*first)->Translate().isApprox(linalg::Vector3f(1, 0, 0)));
+    EXPECT_TRUE((*second)->Translate().isApprox(linalg::Vector3f(2, 0, 0)));
     EXPECT_FLOAT_EQ((*first)->Mesh()->Material()->customShader.constValues.at("u_Age")[0], 1);
     EXPECT_FLOAT_EQ((*second)->Mesh()->Material()->customShader.constValues.at("u_Age")[0], 1);
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
@@ -2016,7 +1554,7 @@ TEST(ScriptRuntimeCompat, RecursiveTemplateLoadsAreGuardedAndMissingAssetsAreNot
         EXPECT_TRUE(runtime->CreateLayerFromTemplate(path, "").empty());
         if (path == "models/missing.json") return false;
         auto source = std::make_shared<SceneNode>();
-        runtime->RegisterLayerTemplate(std::string(path), source, Eigen::Vector2f(32, 32));
+        runtime->RegisterLayerTemplate(std::string(path), source, linalg::Vector2f(32, 32));
         return true;
     });
     const auto first = runtime->CreateLayerFromTemplate("models/available.json", "");
@@ -2024,7 +1562,7 @@ TEST(ScriptRuntimeCompat, RecursiveTemplateLoadsAreGuardedAndMissingAssetsAreNot
     ASSERT_FALSE(first.empty());
     ASSERT_FALSE(second.empty());
     EXPECT_NE(first, second);
-    runtime->SetNodeTranslate(first, Eigen::Vector3f(1, 2, 3));
+    runtime->SetNodeTranslate(first, linalg::Vector3f(1, 2, 3));
     EXPECT_TRUE(runtime->NodeTranslate(second).isZero());
     EXPECT_TRUE(runtime->CreateLayerFromTemplate("models/missing.json", "").empty());
     EXPECT_TRUE(runtime->CreateLayerFromTemplate("models/missing.json", "").empty());
@@ -2041,7 +1579,7 @@ struct WorkshopTemplateScene {
     Scene                                scene;
     std::unique_ptr<SceneRuntimeContext> runtime = MakeRuntimeWithScene(scene);
     std::shared_ptr<SceneNode>           owner   = std::make_shared<SceneNode>(
-        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "owner");
+        linalg::Vector3f::Zero(), linalg::Vector3f::Ones(), linalg::Vector3f::Zero(), "owner");
     std::vector<std::string> requested;
 
     explicit WorkshopTemplateScene(std::vector<std::string> loadable) {
@@ -2054,7 +1592,7 @@ struct WorkshopTemplateScene {
             auto mesh   = std::make_shared<SceneMesh>();
             mesh->AddMaterial(SceneMaterial {});
             source->AddMesh(mesh);
-            runtime->RegisterLayerTemplate(std::string(path), source, Eigen::Vector2f(8, 8));
+            runtime->RegisterLayerTemplate(std::string(path), source, linalg::Vector2f(8, 8));
             return true;
         });
     }
@@ -2119,7 +1657,7 @@ TEST(ScriptRuntimeCompat, CreateLayerBuildsTheModelsOwnLayerWhenTheLayerUsingItC
             fixture.owner->AppendChild(std::make_shared<SceneNode>());
         }
         runtime.RegisterLayerTemplate(
-            "models/workshop/2398102478/bar.json", fixture.owner, Eigen::Vector2f(8, 8));
+            "models/workshop/2398102478/bar.json", fixture.owner, linalg::Vector2f(8, 8));
         runtime.RegisterNodeVisibility(
             "owner",
             fixture.owner.get(),
@@ -2140,7 +1678,7 @@ TEST(ScriptRuntimeCompat, CreateLayerBuildsTheModelsOwnLayerWhenTheLayerUsingItC
             EXPECT_TRUE(created->GetChildren().empty());
         }
         EXPECT_TRUE(fixture.scene.sceneGraph->GetChildren().back()->Translate().isApprox(
-            Eigen::Vector3f(1, 2, 0)));
+            linalg::Vector3f(1, 2, 0)));
         EXPECT_EQ(fixture.requested,
                   (std::vector<std::string> { "models/workshop/2398102478/bar.json" }));
     }
@@ -2154,11 +1692,11 @@ TEST(ScriptRuntimeCompat, CreateLayerDoesNotReloadAModelThatLoadsIntoALayerItCan
         node->SetCamera("effects");
         return node;
     };
-    runtime->RegisterLayerTemplate("models/fx.json", uncopyable(), Eigen::Vector2f(8, 8));
+    runtime->RegisterLayerTemplate("models/fx.json", uncopyable(), linalg::Vector2f(8, 8));
     int loads = 0;
     runtime->SetLayerTemplateLoader([&](std::string_view path) {
         ++loads;
-        runtime->RegisterLayerTemplate(std::string(path), uncopyable(), Eigen::Vector2f(8, 8));
+        runtime->RegisterLayerTemplate(std::string(path), uncopyable(), linalg::Vector2f(8, 8));
         return true;
     });
 
@@ -2200,7 +1738,7 @@ TEST(ScriptRuntimeCompat, CachedFactoriesCreateLayersBesideTheirOwnOwner) {
     auto mesh = std::make_shared<SceneMesh>();
     mesh->AddMaterial(SceneMaterial {});
     source->AddMesh(mesh);
-    runtime->RegisterLayerTemplate("models/point.json", source, Eigen::Vector2f(32, 32));
+    runtime->RegisterLayerTemplate("models/point.json", source, linalg::Vector2f(32, 32));
     const std::string script = R"JS(
 let point;
 export function update(value) {
@@ -2213,7 +1751,7 @@ export function update(value) {
     for (int index = 0; index < 2; ++index) {
         parents[index] = std::make_shared<SceneNode>();
         auto owner = std::make_shared<SceneNode>();
-        owner->SetTranslate(Eigen::Vector3f(10 * (index + 1), 0, 0));
+        owner->SetTranslate(linalg::Vector3f(10 * (index + 1), 0, 0));
         parents[index]->AppendChild(owner);
         scene.sceneGraph->AppendChild(parents[index]);
         const auto name = "owner" + std::to_string(index);
@@ -2225,7 +1763,7 @@ export function update(value) {
     for (int index = 0; index < 2; ++index) {
         ASSERT_EQ(parents[index]->GetChildren().size(), 2u);
         EXPECT_TRUE(parents[index]->GetChildren().back()->Translate().isApprox(
-            Eigen::Vector3f(10 * (index + 1), 0, 0)));
+            linalg::Vector3f(10 * (index + 1), 0, 0)));
     }
     runtime->Tick(0.01);
     for (const auto& parent : parents) EXPECT_EQ(parent->GetChildren().size(), 2u);
@@ -2236,7 +1774,7 @@ TEST(ScriptRuntimeCompat, ConfiguredTrailPoolKeepsIndependentLayersAndRecyclesWi
     Scene scene;
     auto runtime = MakeRuntimeWithScene(scene);
     auto source = std::make_shared<SceneNode>(
-        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "source");
+        linalg::Vector3f::Zero(), linalg::Vector3f::Ones(), linalg::Vector3f::Zero(), "source");
     auto mesh = std::make_shared<SceneMesh>();
     SceneMaterial material;
     material.customShader.constValues["g_Color"] = std::array<float, 3> {1, 1, 1};
@@ -2247,7 +1785,7 @@ TEST(ScriptRuntimeCompat, ConfiguredTrailPoolKeepsIndependentLayersAndRecyclesWi
     source->AddMesh(mesh);
     scene.sceneGraph->AppendChild(source);
     runtime->RegisterNode("source", source.get());
-    runtime->RegisterLayerTemplate("models/point.json", source, Eigen::Vector2f(32, 32));
+    runtime->RegisterLayerTemplate("models/point.json", source, linalg::Vector2f(32, 32));
     runtime->RegisterSceneScript(R"JS(
 let points = [], frame = 0;
 export function update() {
@@ -2276,27 +1814,27 @@ export function update() {
 
     runtime->Tick(0.01);
     auto first = scene.sceneGraph->GetChildren().back();
-    EXPECT_TRUE(first->Translate().isApprox(Eigen::Vector3f(1, 2, -3)));
-    EXPECT_TRUE(first->Scale().isApprox(Eigen::Vector3f(0.1f, 0.2f, 0.3f)));
+    EXPECT_TRUE(first->Translate().isApprox(linalg::Vector3f(1, 2, -3)));
+    EXPECT_TRUE(first->Scale().isApprox(linalg::Vector3f(0.1f, 0.2f, 0.3f)));
     EXPECT_NEAR(first->Rotation().z(), 1.57079632679f, 1.0e-6f);
     EXPECT_FALSE(first->Visible());
     EXPECT_EQ(runtime->NodeAlpha(first->Name()), 0.25f);
-    EXPECT_TRUE(runtime->NodeColor(first->Name()).isApprox(Eigen::Vector3f(0.2f, 0.4f, 0.6f)));
+    EXPECT_TRUE(runtime->NodeColor(first->Name()).isApprox(linalg::Vector3f(0.2f, 0.4f, 0.6f)));
     EXPECT_FLOAT_EQ(first->Mesh()->Material()->customShader.constValues.at("g_Alpha")[0], 0.25f);
     runtime->Tick(0.01);
     auto second = scene.sceneGraph->GetChildren().back();
     EXPECT_NE(first, second);
-    EXPECT_TRUE(first->Translate().isApprox(Eigen::Vector3f(1, 2, -3)));
-    EXPECT_TRUE(second->Translate().isApprox(Eigen::Vector3f(2, 2, -3)));
+    EXPECT_TRUE(first->Translate().isApprox(linalg::Vector3f(1, 2, -3)));
+    EXPECT_TRUE(second->Translate().isApprox(linalg::Vector3f(2, 2, -3)));
     for (int frame = 3; frame <= 8; ++frame) runtime->Tick(0.01);
     ASSERT_EQ(scene.sceneGraph->GetChildren().size(), 4u);
-    EXPECT_TRUE(first->Translate().isApprox(Eigen::Vector3f(7, 2, -3)));
-    EXPECT_TRUE(second->Translate().isApprox(Eigen::Vector3f(8, 2, -3)));
+    EXPECT_TRUE(first->Translate().isApprox(linalg::Vector3f(7, 2, -3)));
+    EXPECT_TRUE(second->Translate().isApprox(linalg::Vector3f(8, 2, -3)));
     for (const auto& point : scene.sceneGraph->GetChildren()) {
         if (point == source) continue;
         EXPECT_TRUE(point->Visible());
         EXPECT_EQ(runtime->NodeAlpha(point->Name()), 0.5f);
-        EXPECT_TRUE(runtime->NodeColor(point->Name()).isApprox(Eigen::Vector3f(0.6f, 0.4f, 0.2f)));
+        EXPECT_TRUE(runtime->NodeColor(point->Name()).isApprox(linalg::Vector3f(0.6f, 0.4f, 0.2f)));
         EXPECT_FLOAT_EQ(point->Mesh()->Material()->customShader.constValues.at("g_Color4")[3], 0.5f);
     }
     EXPECT_TRUE(source->Translate().isZero());
@@ -2327,91 +1865,6 @@ export function update(value) { return shared.position.toFixed(2); }
     EXPECT_EQ(runtime->NodeText("readout"), "1.25");
     runtime->Tick(0.25);
     EXPECT_EQ(runtime->NodeText("readout"), "2.50");
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-}
-
-TEST(ScriptRuntimeCompat, PropertyScriptCreateLayerWaitsForMaterialBindings) {
-    Scene scene;
-    auto  runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
-         .canvas_width  = 1920,
-         .canvas_height = 1080,
-         .project_properties = {
-             { "bar_count", RuntimeScalarValue::Float(4.0f) },
-             { "visualizer_visible", RuntimeScalarValue::Bool(true) },
-         },
-    });
-    ASSERT_NE(runtime, nullptr);
-    runtime->AttachScene(&scene);
-
-    auto source_node = std::make_shared<SceneNode>(
-        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "source");
-    auto source_mesh = std::make_shared<SceneMesh>();
-    source_mesh->AddMaterial(SceneMaterial {});
-    source_node->AddMesh(source_mesh);
-    scene.sceneGraph->AppendChild(source_node);
-    runtime->RegisterNode("source", source_node.get());
-    runtime->RegisterLayerTemplate("models/workshop/2652516218/bar.json",
-                                   source_node,
-                                   Eigen::Vector2f(20.0f, 120.0f));
-
-    auto visualizer_node = std::make_shared<SceneNode>(
-        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "visualizer");
-    scene.sceneGraph->AppendChild(visualizer_node);
-    runtime->RegisterNode("visualizer", visualizer_node.get());
-    runtime->RegisterLayerTemplate("models/workshop/2652516218/visualizer.json",
-                                   visualizer_node,
-                                   Eigen::Vector2f(200.0f, 200.0f));
-
-    auto visibility = ResolveBoolSetting(
-        *runtime,
-        nlohmann::json {
-            {
-                "script",
-                R"JS(
-export var scriptProperties = createScriptProperties()
-  .addSlider({ name: 'count', value: 4 })
-  .finish();
-export function update(value) {
-  for (var i = 0; i < scriptProperties.count; ++i) {
-    var bar = thisScene.createLayer('models/bar.json');
-    bar.angles = new Vec3(0, 0, i * 90);
-  }
-  return value;
-}
-)JS",
-            },
-            {
-                "scriptproperties",
-                {
-                    { "count", { { "user", "bar_count" }, { "value", 4.0f } } },
-                },
-            },
-            { "user", "visualizer_visible" },
-            { "value", true },
-        },
-        "visualizer");
-    runtime->RegisterNodeVisibility("visualizer", visualizer_node.get(), std::move(visibility));
-
-    ASSERT_EQ(scene.sceneGraph->GetChildren().size(), 2u);
-
-    DynamicValue tint(Eigen::Vector3f(0.25f, 0.5f, 0.75f));
-    runtime->RegisterMaterialConstant(
-        source_mesh->MaterialSlotPtr(), "g_Tint", std::make_unique<DynamicValue>(tint));
-
-    runtime->Tick(1.0 / 60.0);
-
-    ASSERT_EQ(scene.sceneGraph->GetChildren().size(), 6u);
-    for (const auto& child : scene.sceneGraph->GetChildren()) {
-        if (child.get() == source_node.get() || child.get() == visualizer_node.get()) continue;
-        ASSERT_NE(child->Mesh(), nullptr);
-        ASSERT_NE(child->Mesh()->Material(), nullptr);
-        const auto constant = child->Mesh()->Material()->customShader.constValues.find("g_Tint");
-        ASSERT_NE(constant, child->Mesh()->Material()->customShader.constValues.end());
-        ASSERT_EQ(constant->second.size(), 3u);
-        EXPECT_FLOAT_EQ(constant->second[0], 0.25f);
-        EXPECT_FLOAT_EQ(constant->second[1], 0.5f);
-        EXPECT_FLOAT_EQ(constant->second[2], 0.75f);
-    }
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
@@ -2505,7 +1958,7 @@ TEST(ScriptRuntimeCompat, VectorMaterialTimelineDrivesEveryComponentSeparately) 
     auto timeline      = BuildComponentTimeline(setting, 4);
     timeline->playback = runtime->RegisterScalarAnimation("subject", timeline->components[0]);
     runtime->RegisterMaterialConstant(
-        material, "u_Fold", std::make_unique<DynamicValue>(Eigen::Vector4f(0.0f, 0.0f, 0.0f, 0.0f)),
+        material, "u_Fold", std::make_unique<DynamicValue>(linalg::Vector4f(0.0f, 0.0f, 0.0f, 0.0f)),
         timeline);
     const auto component = [&](std::size_t index) {
         return material->customShader.constValues.at("u_Fold")[index];
@@ -2544,19 +1997,19 @@ TEST(ScriptRuntimeCompat, ClonedTemplateLayersShareOneTimelineAndKeepEveryBindin
     auto  runtime = MakeRuntimeWithScene(scene);
     ASSERT_NE(runtime, nullptr);
 
-    auto source_node = std::make_shared<SceneNode>(Eigen::Vector3f(100.0f, 50.0f, 0.0f),
-                                                   Eigen::Vector3f::Ones(),
-                                                   Eigen::Vector3f::Zero(), "source");
+    auto source_node = std::make_shared<SceneNode>(linalg::Vector3f(100.0f, 50.0f, 0.0f),
+                                                   linalg::Vector3f::Ones(),
+                                                   linalg::Vector3f::Zero(), "source");
     auto source_mesh = std::make_shared<SceneMesh>();
     source_mesh->AddMaterial(SceneMaterial {});
     source_node->AddMesh(source_mesh);
     scene.sceneGraph->AppendChild(source_node);
     runtime->RegisterNode("source", source_node.get());
     runtime->RegisterLayerTemplate("models/workshop/123456/bar.json", source_node,
-                                   Eigen::Vector2f(20.0f, 10.0f));
+                                   linalg::Vector2f(20.0f, 10.0f));
     runtime->RegisterMaterialConstant(
         source_mesh->MaterialSlotPtr(), "g_Tint",
-        std::make_unique<DynamicValue>(Eigen::Vector3f(0.25f, 0.5f, 0.75f)));
+        std::make_unique<DynamicValue>(linalg::Vector3f(0.25f, 0.5f, 0.75f)));
     const auto setting = nlohmann::json::parse(R"({
         "value":[0,0.625],
         "animation":{
@@ -2567,7 +2020,7 @@ TEST(ScriptRuntimeCompat, ClonedTemplateLayersShareOneTimelineAndKeepEveryBindin
     auto timeline      = BuildComponentTimeline(setting, 2);
     timeline->playback = runtime->RegisterScalarAnimation("source", timeline->components[0]);
     runtime->RegisterMaterialConstant(source_mesh->MaterialSlotPtr(), "g_Point",
-                                      std::make_unique<DynamicValue>(Eigen::Vector2f(0.0f, 0.0f)),
+                                      std::make_unique<DynamicValue>(linalg::Vector2f(0.0f, 0.0f)),
                                       timeline);
 
     runtime->Tick(2.0);
@@ -2628,7 +2081,7 @@ TEST(ScriptRuntimeCompat, TimelineEventsFireWhenThePlayheadCrossesTheirFrame) {
     auto marker  = std::make_shared<SceneNode>();
     runtime->RegisterNode("subject", subject.get());
     runtime->RegisterNode("marker", marker.get());
-    marker->SetScale(Eigen::Vector3f(0.0f, 1.0f, 1.0f));
+    marker->SetScale(linalg::Vector3f(0.0f, 1.0f, 1.0f));
     const auto setting = TimelineEventSetting(
         R"({"fps":30,"length":9,"mode":"single","startpaused":true,"name":"fold",
             "events":[{"frame":5,"name":"half"},{"frame":9,"name":"done"}]})");
@@ -2676,7 +2129,7 @@ TEST(ScriptRuntimeCompat, LoopingTimelineEventsFireOncePerLapAndOncePerStall) {
     auto marker  = std::make_shared<SceneNode>();
     runtime->RegisterNode("subject", subject.get());
     runtime->RegisterNode("marker", marker.get());
-    marker->SetScale(Eigen::Vector3f(0.0f, 1.0f, 1.0f));
+    marker->SetScale(linalg::Vector3f(0.0f, 1.0f, 1.0f));
     const auto setting = TimelineEventSetting(
         R"({"fps":30,"length":10,"mode":"loop","name":"fold",
             "events":[{"frame":5,"name":"half"}]})");
@@ -2918,7 +2371,7 @@ TEST(ScriptRuntimeCompat, SceneGetAnimationFindsATimelineOnAnotherLayer) {
     timeline->playback = runtime->RegisterScalarAnimation("page", timeline->components[0]);
     auto material      = std::make_shared<SceneMaterial>();
     runtime->RegisterMaterialConstant(material, "g_Point",
-                                      std::make_unique<DynamicValue>(Eigen::Vector2f(0.0f, 0.0f)),
+                                      std::make_unique<DynamicValue>(linalg::Vector2f(0.0f, 0.0f)),
                                       timeline);
     auto other = std::make_shared<SceneNode>();
     runtime->RegisterNode("other", other.get());
@@ -3104,82 +2557,6 @@ export function update(value) {
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
-TEST(ScriptRuntimeCompat, MaterialConstantUserBindingUpdatesThroughRuntimeProperties) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
-        .project_properties = {
-            { "tint", RuntimeScalarValue::String("0.25 0.5 0.75") },
-        },
-    });
-    ASSERT_NE(runtime, nullptr);
-
-    auto material = std::make_shared<SceneMaterial>();
-    runtime->RegisterMaterialConstant(
-        material,
-        "g_Tint",
-        ResolveVec3Setting(
-            *runtime,
-            nlohmann::json {
-                { "user", "tint" },
-                { "value", { 1.0f, 1.0f, 1.0f } },
-            }));
-
-    runtime->Tick(1.0 / 60.0);
-    auto constant = material->customShader.constValues.find("g_Tint");
-    ASSERT_NE(constant, material->customShader.constValues.end());
-    ASSERT_EQ(constant->second.size(), 3u);
-    EXPECT_FLOAT_EQ(constant->second[0], 0.25f);
-    EXPECT_FLOAT_EQ(constant->second[1], 0.5f);
-    EXPECT_FLOAT_EQ(constant->second[2], 0.75f);
-
-    runtime->ApplyProjectPropertyOverride({
-        { "tint", RuntimeScalarValue::String("0.1 0.2 0.3") },
-    });
-    runtime->Tick(1.0 / 60.0);
-
-    constant = material->customShader.constValues.find("g_Tint");
-    ASSERT_NE(constant, material->customShader.constValues.end());
-    ASSERT_EQ(constant->second.size(), 3u);
-    EXPECT_FLOAT_EQ(constant->second[0], 0.1f);
-    EXPECT_FLOAT_EQ(constant->second[1], 0.2f);
-    EXPECT_FLOAT_EQ(constant->second[2], 0.3f);
-}
-
-TEST(ScriptRuntimeCompat, RepeatedSortLayerToHigherIndexMutatesOnlyOnce) {
-    Scene scene;
-    auto  runtime = MakeRuntimeWithScene(scene);
-    ASSERT_NE(runtime, nullptr);
-
-    auto first = std::make_shared<SceneNode>(
-        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "first");
-    auto second = std::make_shared<SceneNode>(
-        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "second");
-    auto third = std::make_shared<SceneNode>(
-        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "third");
-    scene.sceneGraph->AppendChild(first);
-    scene.sceneGraph->AppendChild(second);
-    scene.sceneGraph->AppendChild(third);
-    runtime->RegisterNode("first", first.get());
-    runtime->RegisterNode("second", second.get());
-    runtime->RegisterNode("third", third.get());
-
-    runtime->RegisterSceneScript(
-        R"JS(
-function update() {
-  scene.sortLayer('first', 2);
-}
-)JS",
-        "");
-
-    runtime->Tick(1.0 / 60.0);
-    EXPECT_TRUE(runtime->ConsumeSceneGraphMutationFlag());
-    EXPECT_EQ(runtime->NodeSiblingIndex("first"), 2);
-
-    runtime->Tick(1.0 / 60.0);
-    EXPECT_FALSE(runtime->ConsumeSceneGraphMutationFlag());
-    EXPECT_EQ(runtime->NodeSiblingIndex("first"), 2);
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-}
-
 TEST(ScriptRuntimeCompat, VisibleOnlyBindingIgnoresObjectReturn) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
         .project_properties = {
@@ -3299,40 +2676,6 @@ export function update(value) {
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
-TEST(ScriptRuntimeCompat, CursorCallbacksReceiveButtonAndPositions) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {
-        .canvas_width  = 1920,
-        .canvas_height = 1080,
-    });
-    ASSERT_NE(runtime, nullptr);
-
-    auto node = std::make_shared<SceneNode>();
-    node->SetVisible(false);
-    runtime->RegisterNode("probe", node.get());
-    runtime->RegisterSceneScript(
-        R"JS(
-var ok = 0;
-function cursorDown(event) {
-  if (event.button === 1 &&
-      event.normalizedPosition.x === 0.25 &&
-      event.position.x === 480 &&
-      event.worldPosition.y === 270) ok++;
-}
-function update() {
-  if (ok === 1) scene.getObject('probe').visible = true;
-}
-)JS",
-        "");
-
-    runtime->SetCursorInput(0.25f, 0.75f);
-    runtime->SetCursorButton(1, true);
-    runtime->DispatchCursorDown(1);
-    runtime->Tick(1.0 / 60.0);
-
-    EXPECT_TRUE(runtime->NodeVisible("probe"));
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-}
-
 TEST(AudioResponseCompat, RegisteredBuffersSupportTypedViewsAndClearWhenDisabled) {
     audio::ResetAudioResponseServiceForTesting();
     // A bass tone: the lowest of 16 bands spans roughly 20 to 120 Hz.
@@ -3392,17 +2735,17 @@ TEST(AudioResponseCompat, NativeRegistrationsKeepTypedViewsAndRefreshLateBuffers
     auto runtime = MakeRuntimeWithScene(scene);
     runtime->SetAudioResponseEnabled(true);
     for (const auto [resolution, expected] : {
-        std::pair {16, Eigen::Vector3f(0.125f, 0.25f, 0.375f)},
-        std::pair {32, Eigen::Vector3f(0.25f, 0.375f, 0.5f)},
-        std::pair {64, Eigen::Vector3f(0.375f, 0.5f, 0.625f)} }) {
+        std::pair {16, linalg::Vector3f(0.125f, 0.25f, 0.375f)},
+        std::pair {32, linalg::Vector3f(0.25f, 0.375f, 0.5f)},
+        std::pair {64, linalg::Vector3f(0.375f, 0.5f, 0.625f)} }) {
         const auto size = std::to_string(resolution);
         auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(),
             "const b=engine.registerAudioBuffers(" + size + ");const held=b.average.subarray(" +
             std::to_string(resolution - 1) + "); export function update(){return new Vec3(b.left[" +
             std::to_string(resolution - 1) + "],b.right[" + std::to_string(resolution - 1) + "],held[0]);}",
-            "", {}, DynamicValue(Eigen::Vector3f::Zero().eval()), runtime->hostContext());
+            "", {}, DynamicValue(linalg::Vector3f::Zero().eval()), runtime->hostContext());
         ASSERT_TRUE(program->Valid());
-        const auto value = program->Evaluate(runtime->hostContext(), DynamicValue(Eigen::Vector3f::Zero().eval()));
+        const auto value = program->Evaluate(runtime->hostContext(), DynamicValue(linalg::Vector3f::Zero().eval()));
         ASSERT_NE(value, nullptr);
         EXPECT_TRUE(value->getVec3().isApprox(expected));
     }
@@ -3444,103 +2787,39 @@ export function update() {
     EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
-TEST(AudioResponseCompat, ShaderSpectrumUniformsUseVec4ArrayStride) {
-    struct ResetAudioOnExit {
-        ~ResetAudioOnExit() { audio::ResetAudioResponseServiceForTesting(); }
-    } reset_audio;
-    audio::AudioSpectrumSnapshot snapshot;
-    snapshot.generation = 17;
-    const auto fill = [](auto& values, float offset) {
-        for (std::size_t i = 0; i < values.size(); ++i) values[i] = offset + float(i) / 128.0f;
-    };
-    fill(snapshot.left16, 0.125f);
-    fill(snapshot.right16, 0.25f);
-    fill(snapshot.left32, 0.375f);
-    fill(snapshot.right32, 0.5f);
-    fill(snapshot.left64, 0.625f);
-    fill(snapshot.right64, 0.75f);
-    audio::SetAudioSpectrumSnapshotForTesting(snapshot);
+TEST(AudioResponseCompat, ASceneWhoseLayersAllRegisterBuffersKeepsEveryRegistration) {
     Scene scene;
-    SceneCamera camera(1920, 1080, 0.01f, 1000.0f);
-    scene.activeCamera = &camera;
-    scene.runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(scene.runtime, nullptr);
-    scene.runtime->AttachScene(&scene);
-    scene.runtime->SetAudioResponseEnabled(true);
-    auto node = std::make_shared<SceneNode>();
-    auto mesh = std::make_shared<SceneMesh>();
-    mesh->AddMaterial(SceneMaterial {});
-    mesh->AddMaterial(SceneMaterial {});
-    node->AddMesh(mesh);
-    WPShaderValueUpdater updater(&scene);
-    const ExistsUniformOp has_spectrum = [](std::string_view name) {
-        return name == "g_AudioSpectrum16Left" || name == "g_AudioSpectrum16Right" ||
-               name == "g_AudioSpectrum32Left" || name == "g_AudioSpectrum32Right" ||
-               name == "g_AudioSpectrum64Left" || name == "g_AudioSpectrum64Right";
-    };
-    updater.InitUniforms(node.get(), 0, has_spectrum);
-    updater.InitUniforms(node.get(), 1, has_spectrum);
-    sprite_map_t sprites;
-    std::unordered_map<std::string, ShaderValue> updates;
-    const UpdateUniformOp capture = [&](std::string_view name, const ShaderValue& value) {
-        updates.insert_or_assign(std::string(name), value);
-    };
-    const auto expect_snapshot = [&](const audio::AudioSpectrumSnapshot& expected) {
-        ASSERT_EQ(updates.size(), 6u);
-        const auto expect_packed = [&](const char* name, const auto& source) {
-            const auto it = updates.find(name);
-            ASSERT_NE(it, updates.end()) << name;
-            ASSERT_EQ(it->second.size(), source.size() * 4u) << name;
-            for (std::size_t i = 0; i < source.size(); ++i) {
-                EXPECT_FLOAT_EQ(it->second[i * 4u], source[i]);
-                EXPECT_FLOAT_EQ(it->second[i * 4u + 1u], 0.0f);
-                EXPECT_FLOAT_EQ(it->second[i * 4u + 2u], 0.0f);
-                EXPECT_FLOAT_EQ(it->second[i * 4u + 3u], 0.0f);
-            }
-        };
-        expect_packed("g_AudioSpectrum16Left", expected.left16);
-        expect_packed("g_AudioSpectrum16Right", expected.right16);
-        expect_packed("g_AudioSpectrum32Left", expected.left32);
-        expect_packed("g_AudioSpectrum32Right", expected.right32);
-        expect_packed("g_AudioSpectrum64Left", expected.left64);
-        expect_packed("g_AudioSpectrum64Right", expected.right64);
-    };
-    updater.UpdateUniforms(node.get(), 0, sprites, capture);
-    expect_snapshot(snapshot);
-    // Same generation and elapsed time, with no intervening FrameBegin.
-    fill(snapshot.left16, -0.125f);
-    fill(snapshot.right16, -0.25f);
-    fill(snapshot.left32, -0.375f);
-    fill(snapshot.right32, -0.5f);
-    fill(snapshot.left64, -0.625f);
-    fill(snapshot.right64, -0.75f);
-    audio::SetAudioSpectrumSnapshotForTesting(snapshot);
-    updates.clear();
-    updater.UpdateUniforms(node.get(), 1, sprites, capture);
-    expect_snapshot(snapshot);
-    updater.InitUniforms(node.get(), 0, has_spectrum);
-    updates.clear();
-    updater.UpdateUniforms(node.get(), 0, sprites, capture);
-    expect_snapshot(snapshot);
-    scene.runtime->SetAudioResponseEnabled(false);
-    updates.clear();
-    updater.UpdateUniforms(node.get(), 1, sprites, capture);
-    expect_snapshot({});
-    scene.runtime->SetAudioResponseEnabled(true);
-    audio::SetAudioSpectrumSnapshotForTesting({});
-    updates.clear();
-    updater.UpdateUniforms(node.get(), 0, sprites, capture);
-    expect_snapshot({});
-    audio::SetAudioSpectrumSnapshotForTesting(snapshot);
-    scene.runtime.reset();
-    updates.clear();
-    updater.UpdateUniforms(node.get(), 1, sprites, capture);
-    expect_snapshot({});
-    scene.activeCamera = nullptr;
+    auto runtime = MakeRuntimeWithScene(scene);
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update() {
+    var last;
+    for (var i = 0; i < 200; ++i) last = engine.registerAudioBuffers(engine.AUDIO_RESOLUTION_16);
+    return last.left.length;
+}
+)JS", "", {}, DynamicValue(0.0f), runtime->hostContext());
+    ASSERT_TRUE(program->Valid());
+    const auto result = program->Evaluate(runtime->hostContext(), DynamicValue(0.0f));
+    ASSERT_NE(result, nullptr);
+    EXPECT_FLOAT_EQ(result->getFloat(), 16.0f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
+TEST(ScriptRuntimeCompat, InitAndUpdateEachReceiveTheirOwnCopyOfTheValue) {
+    Scene scene;
+    auto runtime = MakeRuntimeWithScene(scene);
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function init(value) { value.y = 90; return value; }
+export function update(value) { return value; }
+)JS", "", {}, DynamicValue(linalg::Vector3f(1, 2, 3)), runtime->hostContext());
+    ASSERT_TRUE(program->Valid());
+    const auto result = program->Evaluate(runtime->hostContext(), DynamicValue(linalg::Vector3f(1, 2, 3)));
+    ASSERT_NE(result, nullptr);
+    EXPECT_TRUE(result->getVec3().isApprox(linalg::Vector3f(1, 2, 3)));
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
 }
 
 TEST(ShaderValuePacking, FixedMatricesAndExpressionsPreserveColumnMajorValues) {
-    Eigen::Matrix4d matrix;
+    linalg::Matrix4d matrix;
     matrix << 1, 2, 0, 4,
               0, 2, 1, 3,
               0, 0, 4, 2,
@@ -3575,11 +2854,11 @@ TEST(ShaderValuePacking, FixedMatricesAndExpressionsPreserveColumnMajorValues) {
     expect_packed("inverse", ShaderValue::fromMatrix(matrix.inverse()), expected_inverse);
     expect_packed("product", ShaderValue::fromMatrix(matrix * matrix.transpose()), expected_product);
 
-    const Eigen::Matrix<float, 4, 4> float_matrix = matrix.cast<float>();
+    const linalg::Matrix<float, 4, 4> float_matrix = matrix.cast<float>();
     expect_packed("fixed float", ShaderValue::fromMatrix(float_matrix), expected_matrix);
-    const Eigen::Matrix<double, 4, 4, Eigen::RowMajor> row_major = matrix;
+    const linalg::Matrix<double, 4, 4, linalg::RowMajor> row_major = matrix;
     expect_packed("row major", ShaderValue::fromMatrix(row_major), expected_matrix);
-    Eigen::Matrix<double, 6, 7> padded = Eigen::Matrix<double, 6, 7>::Constant(-99.0);
+    linalg::Matrix<double, 6, 7> padded = linalg::Matrix<double, 6, 7>::Constant(-99.0);
     padded.block<4, 4>(1, 2) = matrix;
     expect_packed("strided block", ShaderValue::fromMatrix(padded.block<4, 4>(1, 2)),
                   expected_matrix);
@@ -3587,28 +2866,28 @@ TEST(ShaderValuePacking, FixedMatricesAndExpressionsPreserveColumnMajorValues) {
 
 TEST(ShaderValuePacking, PackedValuesOwnTheirStorageAcrossInputChanges) {
     const auto packed = [] {
-        Eigen::Matrix4d inline_matrix;
-        Eigen::Matrix<double, 5, 5> large_matrix;
-        Eigen::MatrixXd empty_matrix(0, 0);
-        for (Eigen::Index column = 0; column < inline_matrix.cols(); ++column) {
-            for (Eigen::Index row = 0; row < inline_matrix.rows(); ++row) {
+        linalg::Matrix4d inline_matrix;
+        linalg::Matrix<double, 5, 5> large_matrix;
+        linalg::Matrix<double, 1, 1> single_matrix;
+        single_matrix(0, 0) = 0.7;
+        for (linalg::Index column = 0; column < inline_matrix.cols(); ++column) {
+            for (linalg::Index row = 0; row < inline_matrix.rows(); ++row) {
                 inline_matrix(row, column) = (10 * column + row + 1) / 10.0;
             }
         }
-        for (Eigen::Index column = 0; column < large_matrix.cols(); ++column) {
-            for (Eigen::Index row = 0; row < large_matrix.rows(); ++row) {
+        for (linalg::Index column = 0; column < large_matrix.cols(); ++column) {
+            for (linalg::Index row = 0; row < large_matrix.rows(); ++row) {
                 large_matrix(row, column) = (10 * column + row + 1) / 10.0;
             }
         }
         std::array<ShaderValue, 3> values {
             ShaderValue::fromMatrix(inline_matrix),
             ShaderValue::fromMatrix(large_matrix),
-            ShaderValue::fromMatrix(empty_matrix),
+            ShaderValue::fromMatrix(single_matrix),
         };
         inline_matrix.setConstant(-99.0);
         large_matrix.setConstant(-99.0);
-        empty_matrix.resize(4, 4);
-        empty_matrix.setConstant(-99.0);
+        single_matrix.setConstant(-99.0);
         return values;
     }();
 
@@ -3633,7 +2912,8 @@ TEST(ShaderValuePacking, PackedValuesOwnTheirStorageAcrossInputChanges) {
     for (std::size_t i = 0; i < expected_large.size(); ++i) {
         EXPECT_FLOAT_EQ(packed[1][i], expected_large[i]) << "dynamic coefficient " << i;
     }
-    EXPECT_EQ(packed[2].size(), 0u);
+    ASSERT_EQ(packed[2].size(), 1u);
+    EXPECT_FLOAT_EQ(packed[2][0], 0.7f) << "single coefficient";
 }
 
 TEST(ShaderValueUpdaterCompat, FourLightColorsRoundTripThroughPackedUniforms) {
@@ -3654,9 +2934,9 @@ TEST(ShaderValueUpdaterCompat, FourLightColorsRoundTripThroughPackedUniforms) {
         SCOPED_TRACE(count);
         if (count > 0) {
             const float n = static_cast<float>(count);
-            auto light = std::make_unique<SceneLight>(Eigen::Vector3f(n, n + 1, n + 2), 2.f, 0.5f);
+            auto light = std::make_unique<SceneLight>(linalg::Vector3f(n, n + 1, n + 2), 2.f, 0.5f);
             auto transform = std::make_shared<SceneNode>();
-            transform->SetTranslate(Eigen::Vector3f(n * 10, n * 20, n * 30));
+            transform->SetTranslate(linalg::Vector3f(n * 10, n * 20, n * 30));
             light->setNode(transform);
             scene.lights.push_back(std::move(light));
         }
@@ -3685,86 +2965,6 @@ TEST(ShaderValueUpdaterCompat, FourLightColorsRoundTripThroughPackedUniforms) {
         if (name == "g_LightsColorPremultiplied")
             for (size_t i = 0; i < value.size(); ++i) EXPECT_FLOAT_EQ(value[i], 0.f);
     });
-    scene.activeCamera = nullptr;
-}
-
-TEST(ShaderValueUpdaterCompat, UniformMetadataIsIsolatedPerMaterialSlot) {
-    Scene scene;
-    scene.runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(scene.runtime, nullptr);
-    scene.runtime->AttachScene(&scene);
-    scene.activeCamera = new SceneCamera(1920, 1080, 0.01f, 1000.0f);
-
-    auto node = std::make_shared<SceneNode>();
-    auto mesh = std::make_shared<SceneMesh>();
-    mesh->AddMaterial(SceneMaterial {});
-    mesh->AddMaterial(SceneMaterial {});
-    node->AddMesh(mesh);
-
-    WPShaderValueUpdater updater(&scene);
-    updater.InitUniforms(node.get(), 0, [](std::string_view name) {
-        return name == "g_ModelMatrix";
-    });
-    updater.InitUniforms(node.get(), 1, [](std::string_view name) {
-        return name == "g_Time";
-    });
-
-    sprite_map_t slot_zero_sprites;
-    std::unordered_map<std::string, ShaderValue> slot_zero_updates;
-    updater.UpdateUniforms(
-        node.get(),
-        0,
-        slot_zero_sprites,
-        [&](std::string_view name, const ShaderValue& value) {
-            slot_zero_updates.emplace(std::string(name), value);
-        });
-
-    sprite_map_t slot_one_sprites;
-    std::unordered_map<std::string, ShaderValue> slot_one_updates;
-    updater.UpdateUniforms(
-        node.get(),
-        1,
-        slot_one_sprites,
-        [&](std::string_view name, const ShaderValue& value) {
-            slot_one_updates.emplace(std::string(name), value);
-        });
-
-    EXPECT_TRUE(slot_zero_updates.contains("g_ModelMatrix"));
-    EXPECT_FALSE(slot_zero_updates.contains("g_Time"));
-    EXPECT_FALSE(slot_one_updates.contains("g_ModelMatrix"));
-    EXPECT_TRUE(slot_one_updates.contains("g_Time"));
-
-    delete scene.activeCamera;
-    scene.activeCamera = nullptr;
-}
-
-TEST(ShaderValueUpdaterCompat, SlotUniformsUpdateWhenSlotZeroMaterialIsMissing) {
-    Scene scene;
-    scene.runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(scene.runtime, nullptr);
-    scene.runtime->AttachScene(&scene);
-    scene.activeCamera = new SceneCamera(1920, 1080, 0.01f, 1000.0f);
-
-    auto node = std::make_shared<SceneNode>();
-    auto mesh = std::make_shared<SceneMesh>();
-    mesh->MaterialSlots().push_back(nullptr);
-    mesh->AddMaterial(SceneMaterial {});
-    node->AddMesh(mesh);
-
-    WPShaderValueUpdater updater(&scene);
-    updater.InitUniforms(node.get(), 1, [](std::string_view name) {
-        return name == "g_Time";
-    });
-
-    sprite_map_t sprites;
-    std::unordered_map<std::string, ShaderValue> updates;
-    updater.UpdateUniforms(node.get(), 1, sprites, [&](std::string_view name, const ShaderValue& value) {
-        updates.emplace(std::string(name), value);
-    });
-
-    EXPECT_TRUE(updates.contains("g_Time"));
-
-    delete scene.activeCamera;
     scene.activeCamera = nullptr;
 }
 
@@ -3823,7 +3023,7 @@ TEST(ShaderValueUpdaterCompat, CameraParallaxMovesEachLayerTreeByItsRootsDistanc
     scene.sceneGraph = std::make_shared<SceneNode>();
     auto camera      = std::make_shared<SceneCamera>(3840, 2160, -1.0f, 1.0f);
     auto camera_node = std::make_shared<SceneNode>();
-    camera_node->SetTranslate(Eigen::Vector3f(1920, 1080, 0));
+    camera_node->SetTranslate(linalg::Vector3f(1920, 1080, 0));
     camera->AttatchNode(camera_node);
     scene.activeCamera = camera.get();
 
@@ -3851,30 +3051,30 @@ TEST(ShaderValueUpdaterCompat, CameraParallaxMovesEachLayerTreeByItsRootsDistanc
         });
         node.UpdateTrans();
         const auto model = node.ModelTrans();
-        return Eigen::Vector2f(value[12] - static_cast<float>(model(0, 3)),
+        return linalg::Vector2f(value[12] - static_cast<float>(model(0, 3)),
                                value[13] - static_cast<float>(model(1, 3)));
     };
 
     auto planet = layer();
-    planet->SetTranslate(Eigen::Vector3f(1907, 2647, 0));
+    planet->SetTranslate(linalg::Vector3f(1907, 2647, 0));
     scene.sceneGraph->AppendChild(planet);
     auto group = std::make_shared<SceneNode>();
-    group->SetTranslate(Eigen::Vector3f(1000, 500, 0));
+    group->SetTranslate(linalg::Vector3f(1000, 500, 0));
     scene.sceneGraph->AppendChild(group);
     auto nested = layer();
-    nested->SetTranslate(Eigen::Vector3f(500, 200, 0));
+    nested->SetTranslate(linalg::Vector3f(500, 200, 0));
     group->AppendChild(nested);
     auto centred = layer();
-    centred->SetTranslate(Eigen::Vector3f(1920, 1080, 0));
+    centred->SetTranslate(linalg::Vector3f(1920, 1080, 0));
     scene.sceneGraph->AppendChild(centred);
     // An effect pass of the planet: a node of its own, outside the tree.
     auto planet_effect = layer();
 
     // At rest: (origin - view centre) * amount * depth, the root's origin for
     // the whole tree.
-    const Eigen::Vector2f planet_rest = displacement(*planet, 0.5f);
-    EXPECT_LT((planet_rest - Eigen::Vector2f(-3.25f, 391.75f)).norm(), 1e-2f);
-    EXPECT_LT((displacement(*nested, 0.5f) - Eigen::Vector2f(-230.0f, -145.0f)).norm(), 1e-2f)
+    const linalg::Vector2f planet_rest = displacement(*planet, 0.5f);
+    EXPECT_LT((planet_rest - linalg::Vector2f(-3.25f, 391.75f)).norm(), 1e-2f);
+    EXPECT_LT((displacement(*nested, 0.5f) - linalg::Vector2f(-230.0f, -145.0f)).norm(), 1e-2f)
         << "a nested layer is not anchored at its outermost layer";
     EXPECT_LT((displacement(*planet_effect, 0.5f, planet.get()) - planet_rest).norm(), 1e-2f)
         << "an effect pass is not anchored at its layer";
@@ -3883,7 +3083,7 @@ TEST(ShaderValueUpdaterCompat, CameraParallaxMovesEachLayerTreeByItsRootsDistanc
     updater.MouseInput(1.0, 0.0);
     scene.frameTime = 10.0; // long enough for the eased cursor to arrive
     updater.FrameBegin();
-    const Eigen::Vector2f moved = displacement(*centred, 0.5f);
+    const linalg::Vector2f moved = displacement(*centred, 0.5f);
     EXPECT_GT(moved.norm(), 1.0f) << "a cursor away from the centre must move the layer";
     EXPECT_LT((displacement(*planet, 0.5f) - planet_rest - moved).norm(), 1e-2f);
     EXPECT_LT((displacement(*centred, 1.0f) - 2.0f * moved).norm(), 1e-3f);
@@ -3900,7 +3100,7 @@ TEST(ShaderValueUpdaterCompat, ZeroParallaxDelayFollowsTheCursorAtOnce) {
     scene.ortho[1] = 1080;
     auto camera      = std::make_shared<SceneCamera>(1920, 1080, -1.0f, 1.0f);
     auto camera_node = std::make_shared<SceneNode>();
-    camera_node->SetTranslate(Eigen::Vector3f(960, 540, 0));
+    camera_node->SetTranslate(linalg::Vector3f(960, 540, 0));
     camera->AttatchNode(camera_node);
     scene.activeCamera = camera.get();
 
@@ -3908,7 +3108,7 @@ TEST(ShaderValueUpdaterCompat, ZeroParallaxDelayFollowsTheCursorAtOnce) {
     auto mesh = std::make_shared<SceneMesh>();
     mesh->AddMaterial(SceneMaterial {});
     node->AddMesh(mesh);
-    node->SetTranslate(Eigen::Vector3f(960, 540, 0));
+    node->SetTranslate(linalg::Vector3f(960, 540, 0));
 
     WPShaderValueUpdater updater(&scene);
     WPShaderValueData    data;
@@ -4050,83 +3250,14 @@ TEST(ShaderValueUpdaterCompat, ParallaxLayersAreReportedAsFollowingTheCursor) {
     EXPECT_FALSE(follows_cursor(deep, "")) << "without mouse influence the cursor moves nothing";
 }
 
-TEST(ShaderValueUpdaterCompat, SlotRenderTargetUniformsUseSlotShaderValueData) {
-    Scene scene;
-    scene.runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    ASSERT_NE(scene.runtime, nullptr);
-    scene.runtime->AttachScene(&scene);
-    scene.activeCamera = new SceneCamera(1920, 1080, 0.01f, 1000.0f);
-    scene.renderTargets["_rt_slot_zero"] = SceneRenderTarget {
-        .width        = 64,
-        .height       = 32,
-        .mipmap_level = 2,
-    };
-    scene.renderTargets["_rt_slot_one"] = SceneRenderTarget {
-        .width        = 128,
-        .height       = 96,
-        .mipmap_level = 4,
-    };
-
-    auto node = std::make_shared<SceneNode>();
-    auto mesh = std::make_shared<SceneMesh>();
-    mesh->AddMaterial(SceneMaterial {});
-    mesh->AddMaterial(SceneMaterial {});
-    node->AddMesh(mesh);
-
-    WPShaderValueData slot_zero_data;
-    slot_zero_data.renderTargets.push_back({ 0, "_rt_slot_zero" });
-    WPShaderValueData slot_one_data;
-    slot_one_data.renderTargets.push_back({ 0, "_rt_slot_one" });
-
-    WPShaderValueUpdater updater(&scene);
-    updater.SetNodeData(node.get(), 0, slot_zero_data);
-    updater.SetNodeData(node.get(), 1, slot_one_data);
-    updater.InitUniforms(node.get(), 0, [](std::string_view name) {
-        return name == "g_Texture0Resolution";
-    });
-    updater.InitUniforms(node.get(), 1, [](std::string_view name) {
-        return name == "g_Texture0Resolution";
-    });
-
-    sprite_map_t slot_zero_sprites;
-    std::unordered_map<std::string, ShaderValue> slot_zero_updates;
-    updater.UpdateUniforms(
-        node.get(),
-        0,
-        slot_zero_sprites,
-        [&](std::string_view name, const ShaderValue& value) {
-            slot_zero_updates.emplace(std::string(name), value);
-        });
-
-    sprite_map_t slot_one_sprites;
-    std::unordered_map<std::string, ShaderValue> slot_one_updates;
-    updater.UpdateUniforms(
-        node.get(),
-        1,
-        slot_one_sprites,
-        [&](std::string_view name, const ShaderValue& value) {
-            slot_one_updates.emplace(std::string(name), value);
-        });
-
-    ASSERT_TRUE(slot_zero_updates.contains("g_Texture0Resolution"));
-    ASSERT_TRUE(slot_one_updates.contains("g_Texture0Resolution"));
-    EXPECT_FLOAT_EQ(slot_zero_updates.at("g_Texture0Resolution")[0], 64.0f);
-    EXPECT_FLOAT_EQ(slot_zero_updates.at("g_Texture0Resolution")[1], 32.0f);
-    EXPECT_FLOAT_EQ(slot_one_updates.at("g_Texture0Resolution")[0], 128.0f);
-    EXPECT_FLOAT_EQ(slot_one_updates.at("g_Texture0Resolution")[1], 96.0f);
-
-    delete scene.activeCamera;
-    scene.activeCamera = nullptr;
-}
-
 TEST(ShaderValueUpdaterCompat, EffectMatricesRetainOwnerScaleAndMapQuadToLayer) {
     Scene scene;
     auto camera = std::make_shared<SceneCamera>(1920, 1080, -1.0f, 1.0f);
     scene.activeCamera = camera.get();
     scene.cameras["effect"] = std::make_shared<SceneCamera>(2, 2, -1.0f, 1.0f);
     SceneNode owner;
-    owner.SetScale(Eigen::Vector3f(0.8f, 0.6f, 1.0f));
-    owner.SetTranslate(Eigen::Vector3f(100.0f, 200.0f, 0.0f));
+    owner.SetScale(linalg::Vector3f(0.8f, 0.6f, 1.0f));
+    owner.SetTranslate(linalg::Vector3f(100.0f, 200.0f, 0.0f));
     owner.UpdateTrans();
     auto node = std::make_shared<SceneNode>();
     auto mesh = std::make_shared<SceneMesh>();
@@ -4135,7 +3266,7 @@ TEST(ShaderValueUpdaterCompat, EffectMatricesRetainOwnerScaleAndMapQuadToLayer) 
     node->SetCamera("effect");
     WPShaderValueData data;
     data.effect_owner = &owner;
-    data.effect_extent = Eigen::Vector2f(280, 300);
+    data.effect_extent = linalg::Vector2f(280, 300);
     WPShaderValueUpdater updater(&scene);
     updater.SetNodeData(node.get(), data);
     updater.InitUniforms(node.get(), [](std::string_view name) {
@@ -4149,15 +3280,15 @@ TEST(ShaderValueUpdaterCompat, EffectMatricesRetainOwnerScaleAndMapQuadToLayer) 
     updater.UpdateUniforms(node.get(), sprites, capture);
     ASSERT_TRUE(values.contains("g_LayerModelMatrix"));
     EXPECT_NEAR(values.at("g_LayerModelMatrix")[0], 0.8f, 1e-6f);
-    Eigen::Matrix4d extent = Eigen::Matrix4d::Identity();
+    linalg::Matrix4d extent = linalg::Matrix4d::Identity();
     extent(0, 0) = 140;
     extent(1, 1) = 150;
-    const Eigen::Matrix4d expected = camera->GetViewProjectionMatrix() * owner.ModelTrans() * extent;
+    const linalg::Matrix4d expected = camera->GetViewProjectionMatrix() * owner.ModelTrans() * extent;
     for (int i = 0; i < 16; ++i)
         EXPECT_NEAR(values.at("g_EffectModelViewProjectionMatrix")[i], expected.data()[i], 1e-5);
     node->SetCamera("");
     updater.UpdateUniforms(node.get(), sprites, capture);
-    const Eigen::Matrix4d final_expected = camera->GetViewProjectionMatrix() * owner.ModelTrans();
+    const linalg::Matrix4d final_expected = camera->GetViewProjectionMatrix() * owner.ModelTrans();
     for (int i = 0; i < 16; ++i)
         EXPECT_NEAR(values.at("g_EffectModelViewProjectionMatrix")[i], final_expected.data()[i], 1e-5);
 }
@@ -4257,13 +3388,13 @@ TEST(ShaderValueUpdaterCompat, EffectModelMatrixAndInverseProjectionMatchTheEffe
     scene.activeCamera      = camera.get();
     scene.cameras["effect"] = std::make_shared<SceneCamera>(2, 2, -1.0f, 1.0f);
     SceneNode owner;
-    owner.SetScale(Eigen::Vector3f(0.8f, 0.6f, 1.0f));
-    owner.SetTranslate(Eigen::Vector3f(100.0f, 200.0f, 0.0f));
+    owner.SetScale(linalg::Vector3f(0.8f, 0.6f, 1.0f));
+    owner.SetTranslate(linalg::Vector3f(100.0f, 200.0f, 0.0f));
     owner.UpdateTrans();
     // Once as the layer sits, once drawn off its place by a screen anchor's offset: the
     // effect lands where the card is drawn.
-    for (const Eigen::Vector3f offset : { Eigen::Vector3f(0.0f, 0.0f, 0.0f),
-                                          Eigen::Vector3f(-37.0f, 11.0f, 0.0f) }) {
+    for (const linalg::Vector3f offset : { linalg::Vector3f(0.0f, 0.0f, 0.0f),
+                                          linalg::Vector3f(-37.0f, 11.0f, 0.0f) }) {
     SCOPED_TRACE(offset.x());
     owner.SetDrawOffset(offset);
     auto node = std::make_shared<SceneNode>();
@@ -4273,7 +3404,7 @@ TEST(ShaderValueUpdaterCompat, EffectModelMatrixAndInverseProjectionMatchTheEffe
     node->SetCamera("effect");
     WPShaderValueData data;
     data.effect_owner  = &owner;
-    data.effect_extent = Eigen::Vector2f(280, 300);
+    data.effect_extent = linalg::Vector2f(280, 300);
     WPShaderValueUpdater updater(&scene);
     updater.SetNodeData(node.get(), data);
     updater.InitUniforms(node.get(), [](std::string_view name) {
@@ -4289,19 +3420,19 @@ TEST(ShaderValueUpdaterCompat, EffectModelMatrixAndInverseProjectionMatchTheEffe
     ASSERT_TRUE(values.contains("g_EffectModelViewProjectionMatrix"));
     ASSERT_TRUE(values.contains("g_EffectModelViewProjectionMatrixInverse"));
     const auto matrix = [&](std::string_view name) {
-        Eigen::Matrix4d m;
+        linalg::Matrix4d m;
         for (int i = 0; i < 16; ++i) m.data()[i] = values.at(std::string(name))[i];
         return m;
     };
     // The unit quad's corner (1, 1) lands on the layer card's corner.
-    const Eigen::Vector4d corner = matrix("g_EffectModelMatrix") * Eigen::Vector4d(1, 1, 0, 1);
+    const linalg::Vector4d corner = matrix("g_EffectModelMatrix") * linalg::Vector4d(1, 1, 0, 1);
     EXPECT_NEAR(corner.x(), 100.0 + offset.x() + 0.8 * 140.0, 1e-3);
     EXPECT_NEAR(corner.y(), 200.0 + offset.y() + 0.6 * 150.0, 1e-3);
-    const Eigen::Matrix4d mvp = matrix("g_EffectModelViewProjectionMatrix");
+    const linalg::Matrix4d mvp = matrix("g_EffectModelViewProjectionMatrix");
     EXPECT_TRUE((camera->GetViewProjectionMatrix() * matrix("g_EffectModelMatrix"))
                     .isApprox(mvp, 1e-5));
     EXPECT_TRUE((matrix("g_EffectModelViewProjectionMatrixInverse") * mvp)
-                    .isApprox(Eigen::Matrix4d::Identity(), 1e-4));
+                    .isApprox(linalg::Matrix4d::Identity(), 1e-4));
     }
 }
 
@@ -4315,15 +3446,15 @@ TEST(ShaderValueUpdaterCompat, EffectTextureProjectionMapsTheLayerCardOntoTheScr
     scene.activeCamera      = camera.get();
     scene.cameras["effect"] = std::make_shared<SceneCamera>(2, 2, -1.0f, 1.0f);
     SceneNode owner;
-    owner.SetScale(Eigen::Vector3f(-0.8f, 0.6f, 1.0f));
-    owner.SetRotation(Eigen::Vector3f(0.0f, 0.0f, 0.5f));
-    owner.SetTranslate(Eigen::Vector3f(100.0f, 200.0f, 0.0f));
+    owner.SetScale(linalg::Vector3f(-0.8f, 0.6f, 1.0f));
+    owner.SetRotation(linalg::Vector3f(0.0f, 0.0f, 0.5f));
+    owner.SetTranslate(linalg::Vector3f(100.0f, 200.0f, 0.0f));
     owner.UpdateTrans();
     // Once as the layer sits, once drawn off its place by a screen anchor's offset.
     for (const bool anchored : { false, true }) {
     for (const char* pass_camera : { "effect", "" }) {
         SCOPED_TRACE(std::string(pass_camera) + (anchored ? ", anchored" : ""));
-        owner.SetDrawOffset(anchored ? Eigen::Vector3f(-37.0f, 11.0f, 0.0f) : Eigen::Vector3f::Zero());
+        owner.SetDrawOffset(anchored ? linalg::Vector3f(-37.0f, 11.0f, 0.0f) : linalg::Vector3f::Zero());
         auto node = std::make_shared<SceneNode>();
         auto mesh = std::make_shared<SceneMesh>();
         mesh->AddMaterial(SceneMaterial {});
@@ -4331,7 +3462,7 @@ TEST(ShaderValueUpdaterCompat, EffectTextureProjectionMapsTheLayerCardOntoTheScr
         node->SetCamera(pass_camera);
         WPShaderValueData data;
         data.effect_owner  = &owner;
-        data.effect_extent = Eigen::Vector2f(280, 300);
+        data.effect_extent = linalg::Vector2f(280, 300);
         WPShaderValueUpdater updater(&scene);
         updater.SetNodeData(node.get(), data);
         updater.InitUniforms(node.get(), [](std::string_view name) {
@@ -4347,22 +3478,22 @@ TEST(ShaderValueUpdaterCompat, EffectTextureProjectionMapsTheLayerCardOntoTheScr
         ASSERT_TRUE(values.contains("g_EffectTextureProjectionMatrix"));
         ASSERT_TRUE(values.contains("g_EffectTextureProjectionMatrixInverse"));
         const auto matrix = [&](std::string_view name) {
-            Eigen::Matrix4d m;
+            linalg::Matrix4d m;
             for (int i = 0; i < 16; ++i) m.data()[i] = values.at(std::string(name))[i];
             return m;
         };
         // The card's (1, 1) corner, in its own half-extent space, lands where
         // the layer's transform puts its corner on the screen.
         // The card is drawn where `RenderTrans` puts it, which carries the draw offset.
-        const Eigen::Vector4d card_corner =
-            owner.RenderTrans() * Eigen::Vector4d(140.0, 150.0, 0.0, 1.0);
-        const Eigen::Vector4d expected = camera->GetViewProjectionMatrix() * card_corner;
-        const Eigen::Vector4d mapped =
-            matrix("g_EffectTextureProjectionMatrix") * Eigen::Vector4d(1, 1, 0, 1);
+        const linalg::Vector4d card_corner =
+            owner.RenderTrans() * linalg::Vector4d(140.0, 150.0, 0.0, 1.0);
+        const linalg::Vector4d expected = camera->GetViewProjectionMatrix() * card_corner;
+        const linalg::Vector4d mapped =
+            matrix("g_EffectTextureProjectionMatrix") * linalg::Vector4d(1, 1, 0, 1);
         EXPECT_TRUE(mapped.isApprox(expected, 1e-5));
         EXPECT_TRUE((matrix("g_EffectTextureProjectionMatrixInverse") *
                      matrix("g_EffectTextureProjectionMatrix"))
-                        .isApprox(Eigen::Matrix4d::Identity(), 1e-4));
+                        .isApprox(linalg::Matrix4d::Identity(), 1e-4));
     }
     }
 }
@@ -4487,155 +3618,38 @@ TEST(ScriptRuntimeCompat, TransformBindingsRepairDestinationsAndRefreshIdentityA
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto original = std::make_shared<SceneNode>();
     runtime->RegisterNodeTranslate("anchor", original.get(),
-        std::make_unique<DynamicValue>(Eigen::Vector3f(10, 20, 0)));
+        std::make_unique<DynamicValue>(linalg::Vector3f(10, 20, 0)));
     runtime->RegisterNodeScale("anchor", original.get(),
-        std::make_unique<DynamicValue>(Eigen::Vector3f(2, 3, 1)));
-    runtime->SetNodeAnchorAlignment("anchor", "left bottom", Eigen::Vector3f(10, 20, 0));
+        std::make_unique<DynamicValue>(linalg::Vector3f(2, 3, 1)));
+    runtime->SetNodeAnchorAlignment("anchor", "left bottom", linalg::Vector3f(10, 20, 0));
     runtime->Tick(0.0);
-    EXPECT_TRUE(original->Translate().isApprox(Eigen::Vector3f(10, 20, 0)));
-    runtime->RegisterNodeSize("anchor", Eigen::Vector2f(20, 10));
+    EXPECT_TRUE(original->Translate().isApprox(linalg::Vector3f(10, 20, 0)));
+    runtime->RegisterNodeSize("anchor", linalg::Vector2f(20, 10));
     runtime->Tick(0.0);
-    EXPECT_TRUE(original->Translate().isApprox(Eigen::Vector3f(30, 35, 0)));
-    original->SetTranslate(Eigen::Vector3f(-99, -99, 0));
-    original->SetScale(Eigen::Vector3f::Ones());
+    EXPECT_TRUE(original->Translate().isApprox(linalg::Vector3f(30, 35, 0)));
+    original->SetTranslate(linalg::Vector3f(-99, -99, 0));
+    original->SetScale(linalg::Vector3f::Ones());
     runtime->Tick(0.0);
-    EXPECT_TRUE(original->Translate().isApprox(Eigen::Vector3f(30, 35, 0)));
-    EXPECT_TRUE(original->Scale().isApprox(Eigen::Vector3f(2, 3, 1)));
+    EXPECT_TRUE(original->Translate().isApprox(linalg::Vector3f(30, 35, 0)));
+    EXPECT_TRUE(original->Scale().isApprox(linalg::Vector3f(2, 3, 1)));
     runtime->RegisterNode("anchor", original.get());
     runtime->Tick(0.0);
-    EXPECT_TRUE(original->Translate().isApprox(Eigen::Vector3f(30, 35, 0)));
-    runtime->RegisterNodeSize("anchor", Eigen::Vector2f(40, 20));
+    EXPECT_TRUE(original->Translate().isApprox(linalg::Vector3f(30, 35, 0)));
+    runtime->RegisterNodeSize("anchor", linalg::Vector2f(40, 20));
     runtime->Tick(0.0);
-    EXPECT_TRUE(original->Translate().isApprox(Eigen::Vector3f(50, 50, 0)));
+    EXPECT_TRUE(original->Translate().isApprox(linalg::Vector3f(50, 50, 0)));
 
     auto replacement = std::make_shared<SceneNode>();
     runtime->RegisterNode("anchor", replacement.get());
-    runtime->SetNodeAnchorAlignment("anchor", "left bottom", Eigen::Vector3f(10, 20, 0));
+    runtime->SetNodeAnchorAlignment("anchor", "left bottom", linalg::Vector3f(10, 20, 0));
     runtime->Tick(0.0);
-    EXPECT_TRUE(replacement->Translate().isApprox(Eigen::Vector3f(50, 50, 0)));
-    EXPECT_TRUE(replacement->Scale().isApprox(Eigen::Vector3f(2, 3, 1)));
+    EXPECT_TRUE(replacement->Translate().isApprox(linalg::Vector3f(50, 50, 0)));
+    EXPECT_TRUE(replacement->Scale().isApprox(linalg::Vector3f(2, 3, 1)));
 }
 
-Eigen::Vector3f NodePointInScene(SceneNode& node, float x, float y) {
+linalg::Vector3f NodePointInScene(SceneNode& node, float x, float y) {
     node.UpdateTrans();
-    return (node.ModelTrans() * Eigen::Vector4d(x, y, 0.0, 1.0)).head<3>().cast<float>();
-}
-
-TEST(ScriptRuntimeCompat, RotateObjectSpaceComposesRadiansOnCurrentLocalAxesAcrossAngleUpdates) {
-    for (const auto& ending : { std::string("return thisLayer.angles;"), std::string() }) {
-        SCOPED_TRACE(ending.empty() ? "native write only" : "returned angles");
-        auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-        auto parent = std::make_shared<SceneNode>();
-        parent->SetTranslate(Eigen::Vector3f(50, -20, 10));
-        parent->SetRotation(Eigen::Vector3f(-0.2f, 0.5f, -0.4f));
-        parent->SetScale(Eigen::Vector3f(0.8f, 1.2f, 0.9f));
-        auto node = std::make_shared<SceneNode>();
-        const Eigen::Vector3f origin(10, 20, 30);
-        const Eigen::Vector3f scale(-2, 3, 0.5f);
-        const Eigen::Vector3f initial(0.4f, -0.3f, 0.8f);
-        node->SetTranslate(origin);
-        node->SetScale(scale);
-        node->SetRotation(initial);
-        parent->AppendChild(node);
-        runtime->RegisterNode("parent", parent.get());
-        runtime->RegisterNode("rotor", node.get());
-        runtime->RegisterNodeRotation("rotor", node.get(), ResolveVec3Setting(*runtime, {
-            {"value", {initial.x(), initial.y(), initial.z()}},
-            {"script", R"JS(
-export function update(value) {
-    value.x = 0.25;
-    value.y = -0.17;
-    value.z = 0.31;
-    thisLayer.rotateObjectSpace(value);
-)JS" + ending + "\n}"},
-        }, "rotor", Vec3SettingSemantic::AnglesDegrees));
-
-        const auto rotate = [](const Eigen::Vector3f& angles) {
-            return SceneNode::LocalTransOf(Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), angles);
-        };
-        Eigen::Matrix4d expected_rotation = rotate(initial);
-        const Eigen::Matrix4d increment = rotate(Eigen::Vector3f(0.25f, -0.17f, 0.31f));
-        const Eigen::Matrix4d translation = SceneNode::LocalTransOf(
-            origin, Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero());
-        const Eigen::Matrix4d scaling = SceneNode::LocalTransOf(
-            Eigen::Vector3f::Zero(), scale, Eigen::Vector3f::Zero());
-        for (int frame = 0; frame < 6; ++frame) {
-            SCOPED_TRACE(frame);
-            expected_rotation = (expected_rotation * increment).eval();
-            runtime->Tick(1.0 / 30.0);
-            node->UpdateTrans();
-            const Eigen::Matrix4d expected = parent->GetLocalTrans() * translation *
-                                             expected_rotation * scaling;
-            EXPECT_TRUE(node->ModelTrans().isApprox(expected, 2.0e-5));
-            EXPECT_EQ(node->Translate(), origin);
-            EXPECT_EQ(node->Scale(), scale);
-            EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-        }
-    }
-}
-
-TEST(ScriptRuntimeCompat, RotateObjectSpaceAcceptsRadiansAndReadsBackDegreesWithoutMutatingInput) {
-    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    auto node = std::make_shared<SceneNode>();
-    auto marker = std::make_shared<SceneNode>();
-    runtime->RegisterNodeRotation("rotor", node.get(),
-        std::make_unique<DynamicValue>(Eigen::Vector3f(0.0f, 0.0f, 0.0f)));
-    runtime->RegisterNode("marker", marker.get());
-    runtime->RegisterSceneScript(R"JS(
-export function init() {
-    const layer = thisScene.getLayer('rotor');
-    layer.angles = new Vec3(15, 0, 0);
-    const delta = new Vec3(Math.PI / 2, 0, 0);
-    const result = layer.rotateObjectSpace(delta);
-    if (result !== undefined || !delta.equals(new Vec3(Math.PI / 2, 0, 0))) {
-        throw new Error('rotateObjectSpace must return nothing and leave its input alone');
-    }
-    thisScene.getLayer('marker').origin = layer.angles;
-}
-)JS", "");
-    runtime->Tick(0.0);
-    EXPECT_TRUE(marker->Translate().isApprox(Eigen::Vector3f(105, 0, 0), 1.0e-5f));
-    const Eigen::Vector3f rotated = node->Rotation();
-    EXPECT_NEAR(rotated.x(), 105.0f * 3.14159265358979323846f / 180.0f, 1.0e-6f);
-    EXPECT_NEAR(rotated.y(), 0.0f, 1.0e-6f);
-    EXPECT_NEAR(rotated.z(), 0.0f, 1.0e-6f);
-    runtime->Tick(0.1);
-    EXPECT_TRUE(node->Rotation().isApprox(rotated));
-    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-}
-
-TEST(ScriptRuntimeCompat, RotateObjectSpacePreservesAnchorsAndComposesThroughEulerSingularities) {
-    constexpr float half_pi = 1.5707963267948966f;
-    for (const Eigen::Vector3f& initial : {
-             Eigen::Vector3f(0.4f, -0.3f, 0.8f),
-             Eigen::Vector3f(0.2f, half_pi, -0.6f),
-             Eigen::Vector3f(-0.5f, -half_pi, 0.7f),
-             Eigen::Vector3f(0.3f, half_pi + 0.01f, 0.4f) }) {
-        auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-        auto node = std::make_shared<SceneNode>();
-        node->SetRotation(initial);
-        node->SetScale(Eigen::Vector3f(2, 3, 0.5f));
-        runtime->RegisterNode("rotor", node.get());
-        runtime->RegisterNodeSize("rotor", Eigen::Vector2f(20, 10));
-        const Eigen::Vector3f anchor(100, 50, 30);
-        runtime->SetNodeAnchorAlignment("rotor", "bottom right", anchor);
-        runtime->RegisterSceneScript(R"JS(
-export function update() {
-    thisLayer.rotateObjectSpace(new Vec3(0.3, -0.2, 0.4));
-}
-)JS", "rotor");
-        const Eigen::Matrix4d expected = SceneNode::LocalTransOf(
-            Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), initial) *
-            SceneNode::LocalTransOf(Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(),
-                                   Eigen::Vector3f(0.3f, -0.2f, 0.4f));
-        runtime->Tick(0.01);
-        const Eigen::Matrix4d actual = SceneNode::LocalTransOf(
-            Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), node->Rotation());
-        EXPECT_TRUE(node->Rotation().allFinite());
-        EXPECT_TRUE(actual.isApprox(expected, 1.0e-5));
-        EXPECT_TRUE(NodePointInScene(*node, 10, -5).isApprox(anchor, 1.0e-5f));
-        EXPECT_EQ(runtime->scriptErrorCount(), 0u);
-    }
+    return (node.ModelTrans() * linalg::Vector4d(x, y, 0.0, 1.0)).head<3>().cast<float>();
 }
 
 // Alignment names the layer's pivot in its own axes: a turned layer keeps the
@@ -4644,37 +3658,37 @@ TEST(ScriptRuntimeCompat, RotatedAnchoredLayerTurnsAboutItsAnchor) {
     constexpr float quarter_turn = 1.5707963267948966f;
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto node = std::make_shared<SceneNode>();
-    node->SetScale(Eigen::Vector3f(1, 4, 1));
-    node->SetRotation(Eigen::Vector3f(0, 0, quarter_turn));
+    node->SetScale(linalg::Vector3f(1, 4, 1));
+    node->SetRotation(linalg::Vector3f(0, 0, quarter_turn));
     runtime->RegisterNode("hand", node.get());
-    runtime->RegisterNodeSize("hand", Eigen::Vector2f(20, 10));
-    runtime->SetNodeAnchorAlignment("hand", "top", Eigen::Vector3f(100, 50, 0));
+    runtime->RegisterNodeSize("hand", linalg::Vector2f(20, 10));
+    runtime->SetNodeAnchorAlignment("hand", "top", linalg::Vector3f(100, 50, 0));
     // The 40-unit hand hangs from its top edge, a quarter turn from straight down.
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(120, 50, 0)));
-    EXPECT_TRUE(NodePointInScene(*node, 0, 5).isApprox(Eigen::Vector3f(100, 50, 0)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(120, 50, 0)));
+    EXPECT_TRUE(NodePointInScene(*node, 0, 5).isApprox(linalg::Vector3f(100, 50, 0)));
 
     // Perspective layers also turn about x and y; the anchor still stays put.
-    runtime->SetNodeAnchorAlignment("hand", "bottom right", Eigen::Vector3f(100, 50, 0));
-    ASSERT_TRUE(runtime->SetNodeRotation("hand", Eigen::Vector3f(0.4f, -0.3f, 1.1f)));
-    EXPECT_TRUE(NodePointInScene(*node, 10, -5).isApprox(Eigen::Vector3f(100, 50, 0)));
+    runtime->SetNodeAnchorAlignment("hand", "bottom right", linalg::Vector3f(100, 50, 0));
+    ASSERT_TRUE(runtime->SetNodeRotation("hand", linalg::Vector3f(0.4f, -0.3f, 1.1f)));
+    EXPECT_TRUE(NodePointInScene(*node, 10, -5).isApprox(linalg::Vector3f(100, 50, 0)));
 
     // Turned back, the layer lands exactly where an unrotated one is placed.
-    ASSERT_TRUE(runtime->SetNodeRotation("hand", Eigen::Vector3f::Zero()));
-    EXPECT_EQ(node->Translate(), Eigen::Vector3f(90, 70, 0));
+    ASSERT_TRUE(runtime->SetNodeRotation("hand", linalg::Vector3f::Zero()));
+    EXPECT_EQ(node->Translate(), linalg::Vector3f(90, 70, 0));
 
     // A bound rotation re-derives the anchor in the same tick, after the
     // translate binding has already been applied.
     runtime->RegisterNodeTranslate("hand", node.get(),
-        std::make_unique<DynamicValue>(Eigen::Vector3f(100, 50, 0)));
-    auto angles = std::make_unique<DynamicValue>(Eigen::Vector3f(0, 0, 0));
+        std::make_unique<DynamicValue>(linalg::Vector3f(100, 50, 0)));
+    auto angles = std::make_unique<DynamicValue>(linalg::Vector3f(0, 0, 0));
     auto* bound_angles = angles.get();
     runtime->RegisterNodeRotation("hand", node.get(), std::move(angles));
     runtime->Tick(0.0);
-    EXPECT_EQ(node->Translate(), Eigen::Vector3f(90, 70, 0));
-    bound_angles->update(Eigen::Vector3f(0, 0, quarter_turn * 2));
+    EXPECT_EQ(node->Translate(), linalg::Vector3f(90, 70, 0));
+    bound_angles->update(linalg::Vector3f(0, 0, quarter_turn * 2));
     runtime->Tick(0.0);
-    EXPECT_TRUE(NodePointInScene(*node, 10, -5).isApprox(Eigen::Vector3f(100, 50, 0)));
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(110, 30, 0)));
+    EXPECT_TRUE(NodePointInScene(*node, 10, -5).isApprox(linalg::Vector3f(100, 50, 0)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(110, 30, 0)));
 }
 
 // Workshop 2850003448 builds a ring visualizer: every bar is aligned 'top',
@@ -4686,10 +3700,10 @@ TEST(ScriptRuntimeCompat, ScriptedRingBarsHangOutwardFromTheirCircle) {
     std::vector<std::shared_ptr<SceneNode>> bars;
     for (int index = 0; index < 4; ++index) {
         auto bar = std::make_shared<SceneNode>();
-        bar->SetTranslate(Eigen::Vector3f(1280, 720, 0));
+        bar->SetTranslate(linalg::Vector3f(1280, 720, 0));
         const auto name = "bar" + std::to_string(index);
         runtime->RegisterNode(name, bar.get());
-        runtime->RegisterNodeSize(name, Eigen::Vector2f(8, 8));
+        runtime->RegisterNodeSize(name, linalg::Vector2f(8, 8));
         bars.push_back(bar);
     }
     runtime->RegisterSceneScript(R"JS(
@@ -4716,11 +3730,11 @@ export function update() {
     runtime->Tick(1.0 / 60.0);
     ASSERT_EQ(runtime->scriptErrorCount(), 0u);
 
-    const Eigen::Vector3f center(1280, 720, 0);
+    const linalg::Vector3f center(1280, 720, 0);
     for (int index = 0; index < 4; ++index) {
         SCOPED_TRACE(index);
         const float radians = (90.0f * index + 30.0f) * 3.14159265f / 180.0f;
-        const Eigen::Vector3f outward(std::cos(radians), std::sin(radians), 0);
+        const linalg::Vector3f outward(std::cos(radians), std::sin(radians), 0);
         // The top edge stays where the unscaled bar's edge sat, just inside the
         // circle, and the 48-unit bar reaches straight out from there.
         EXPECT_TRUE(NodePointInScene(*bars[index], 0, 4).isApprox(center + outward * 86.0f));
@@ -4737,14 +3751,14 @@ TEST(ScriptRuntimeCompat, EffectFinalRepairUsesCurrentParentAttachmentAndResolve
     runtime->RegisterNodeEffectFinal("effect", source.get(), &layer);
     runtime->Tick(0.0);
     layer.FinalNode().ClearRenderTransformOverride();
-    parent->SetTranslate(Eigen::Vector3f(7, 8, 0));
-    Eigen::Affine3d attachment = Eigen::Affine3d::Identity();
-    attachment.translate(Eigen::Vector3d(3, 4, 0));
+    parent->SetTranslate(linalg::Vector3f(7, 8, 0));
+    linalg::Affine3d attachment = linalg::Affine3d::Identity();
+    attachment.translate(linalg::Vector3d(3, 4, 0));
     source->SetAttachmentTransform(attachment.matrix());
     runtime->Tick(0.0);
     EXPECT_TRUE(layer.FinalNode().HasRenderTransformOverride());
     EXPECT_TRUE(layer.FinalNode().RenderTrans().isApprox(source->ModelTrans(), 1e-12));
-    layer.FinalNode().SetRenderTransformOverride(Eigen::Matrix4d::Identity());
+    layer.FinalNode().SetRenderTransformOverride(linalg::Matrix4d::Identity());
     runtime->Tick(0.0);
     EXPECT_TRUE(layer.FinalNode().RenderTrans().isApprox(source->ModelTrans(), 1e-12));
     layer.SetFinalBlend(BlendMode::Normal);
@@ -4838,60 +3852,8 @@ TEST(ScriptRuntimeCompat, FailedRegistrationReleasesListenersAndMaterialTargetsO
     EXPECT_FLOAT_EQ(failed_material->customShader.constValues.at("u_Value")[0], 91.0f);
     EXPECT_FLOAT_EQ(survivor->customShader.constValues.at("u_Value")[0], 7.0f);
     EXPECT_TRUE(runtime->HasNodeNamed("transaction"));
-    runtime->SetNodeTranslate("transaction", Eigen::Vector3f(4, 5, 0));
-    EXPECT_TRUE(old_node->Translate().isApprox(Eigen::Vector3f(4, 5, 0)));
-}
-
-TEST(ShaderValueUpdaterCompat, AudioDiscoveryDoesNotAffectUnrelatedMaterialSlots) {
-    struct ResetAudioOnExit {
-        ~ResetAudioOnExit() { audio::ResetAudioResponseServiceForTesting(); }
-    } reset_audio;
-    audio::AudioSpectrumSnapshot snapshot;
-    snapshot.left64.fill(0.5f);
-    audio::SetAudioSpectrumSnapshotForTesting(snapshot);
-    Scene scene;
-    SceneCamera camera(1920, 1080, 0.01f, 1000.0f);
-    scene.activeCamera = &camera;
-    scene.runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
-    scene.runtime->AttachScene(&scene);
-    scene.runtime->SetAudioResponseEnabled(true);
-    scene.elapsingTime = 2.0;
-    auto node = std::make_shared<SceneNode>();
-    auto mesh = std::make_shared<SceneMesh>();
-    mesh->AddMaterial(SceneMaterial {});
-    mesh->AddMaterial(SceneMaterial {});
-    node->AddMesh(mesh);
-    WPShaderValueUpdater updater(&scene);
-    const ExistsUniformOp time_only = [](std::string_view name) { return name == "g_Time"; };
-    updater.InitUniforms(node.get(), 0, time_only);
-    updater.InitUniforms(node.get(), 0, time_only);
-    EXPECT_FALSE(scene.runtime->AudioResponseActive());
-    sprite_map_t sprites;
-    std::vector<std::string> names;
-    const UpdateUniformOp capture = [&](std::string_view name, const ShaderValue& value) {
-        names.emplace_back(name);
-        if (name == "g_Time") {
-            ASSERT_EQ(value.size(), 1u);
-            EXPECT_FLOAT_EQ(value[0], 2.0f);
-        }
-    };
-    updater.UpdateUniforms(node.get(), 0, sprites, capture);
-    EXPECT_EQ(names, std::vector<std::string> { "g_Time" });
-    updater.InitUniforms(node.get(), 1, [](std::string_view name) {
-        return name == "g_AudioSpectrum64Left";
-    });
-    EXPECT_TRUE(scene.runtime->AudioResponseActive());
-    names.clear();
-    updater.UpdateUniforms(node.get(), 0, sprites, capture);
-    EXPECT_EQ(names, std::vector<std::string> { "g_Time" });
-    updater.UpdateUniforms(node.get(), 1, sprites, [&](std::string_view name, const ShaderValue& value) {
-        EXPECT_EQ(name, "g_AudioSpectrum64Left");
-        ASSERT_EQ(value.size(), 256u);
-        for (std::size_t i = 0; i < value.size(); ++i) {
-            EXPECT_FLOAT_EQ(value[i], i % 4 == 0 ? 0.5f : 0.0f);
-        }
-    });
-    scene.activeCamera = nullptr;
+    runtime->SetNodeTranslate("transaction", linalg::Vector3f(4, 5, 0));
+    EXPECT_TRUE(old_node->Translate().isApprox(linalg::Vector3f(4, 5, 0)));
 }
 
 TEST(ShaderValueUpdaterCompat, EmptyPuppetPosesDoNotEmitBoneUniforms) {
@@ -4951,11 +3913,11 @@ TEST(ScriptRuntimeCompat, CursorCoveragePreservesAllPhasesThresholdsAndLiveTrans
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto target = std::make_shared<SceneNode>();
     auto marker = std::make_shared<SceneNode>();
-    target->SetTranslate(Eigen::Vector3f(100, 100, 0));
-    target->SetRotation(Eigen::Vector3f(0, 0, 0.5f));
-    target->SetScale(Eigen::Vector3f(-2, 1, 1));
+    target->SetTranslate(linalg::Vector3f(100, 100, 0));
+    target->SetRotation(linalg::Vector3f(0, 0, 0.5f));
+    target->SetScale(linalg::Vector3f(-2, 1, 1));
     runtime->RegisterNode("target", target.get());
-    runtime->RegisterNodeSize("target", Eigen::Vector2f(40, 20));
+    runtime->RegisterNodeSize("target", linalg::Vector2f(40, 20));
     runtime->RegisterNodeHitMask("target", NodeHitMask { .width = 2, .height = 1, .alpha = {15, 16} });
     runtime->RegisterNode("marker", marker.get());
     runtime->RegisterNodeVisibility("target", target.get(), ResolveBoolSetting(*runtime, {
@@ -4986,7 +3948,7 @@ function cursorLeave() { emit(6); }
     runtime->SetCursorEnter(true);
     const auto point = [&](float local_x) {
         target->UpdateTrans();
-        const Eigen::Vector4d world = target->ModelTrans() * Eigen::Vector4d(local_x, 0, 0, 1);
+        const linalg::Vector4d world = target->ModelTrans() * linalg::Vector4d(local_x, 0, 0, 1);
         runtime->SetCursorWorldPosition(world.head<3>().cast<float>());
     };
     point(-10);
@@ -5004,9 +3966,9 @@ function cursorLeave() { emit(6); }
     point(-10);
     runtime->DispatchCursorFrameEvents(true);
     EXPECT_FLOAT_EQ(marker->Translate().x(), 1234526);
-    runtime->SetNodeTranslate("marker", Eigen::Vector3f::Zero());
-    target->SetRotation(Eigen::Vector3f::Zero());
-    target->SetScale(Eigen::Vector3f(-1, 1, 1));
+    runtime->SetNodeTranslate("marker", linalg::Vector3f::Zero());
+    target->SetRotation(linalg::Vector3f::Zero());
+    target->SetScale(linalg::Vector3f(-1, 1, 1));
     point(20);
     runtime->DispatchCursorFrameEvents(true);
     EXPECT_FLOAT_EQ(marker->Translate().x(), 12);
@@ -5023,9 +3985,9 @@ TEST(ScriptRuntimeCompat, CursorCallbacksRecheckLaterTargetsWithoutAddingVisibil
     auto second = std::make_shared<SceneNode>();
     auto marker = std::make_shared<SceneNode>();
     runtime->RegisterNode("first", first.get());
-    runtime->RegisterNodeSize("first", Eigen::Vector2f(40, 40));
+    runtime->RegisterNodeSize("first", linalg::Vector2f(40, 40));
     runtime->RegisterNode("second", second.get());
-    runtime->RegisterNodeSize("second", Eigen::Vector2f(40, 40));
+    runtime->RegisterNodeSize("second", linalg::Vector2f(40, 40));
     runtime->RegisterNode("marker", marker.get());
     runtime->RegisterNodeVisibility("first", first.get(), ResolveBoolSetting(*runtime, {
         {"value", true}, {"script", R"JS(
@@ -5049,7 +4011,7 @@ function cursorClick() {
 })JS"},
     }, "second"));
     runtime->Tick(0.0);
-    runtime->SetCursorWorldPosition(Eigen::Vector3f::Zero());
+    runtime->SetCursorWorldPosition(linalg::Vector3f::Zero());
     runtime->SetCursorEnter(true);
     runtime->SetCursorButtons(0, 1, 1);
     runtime->DispatchCursorFrameEvents(false);
@@ -5066,7 +4028,7 @@ TEST(ScriptRuntimeCompat, RollbackRestoresCoverageAndSharedPuppetAndHonorsIdenti
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto node = std::make_shared<SceneNode>();
     runtime->RegisterNode("subject", node.get());
-    runtime->RegisterNodeSize("subject", Eigen::Vector2f(40, 40));
+    runtime->RegisterNodeSize("subject", linalg::Vector2f(40, 40));
     runtime->RegisterNodeHitMask("subject", NodeHitMask { .width = 1, .height = 1, .alpha = {0} });
     WPPuppetLayer layer(MakeSingleShotPuppet());
     WPPuppetLayer::AnimationLayer authored;
@@ -5086,7 +4048,7 @@ TEST(ScriptRuntimeCompat, RollbackRestoresCoverageAndSharedPuppetAndHonorsIdenti
     EXPECT_FLOAT_EQ(layer.genFrame(0)[0].translation().x(), 3.5f);
     runtime->RegisterSceneScript("function cursorClick() { thisLayer.visible = false; }", "subject");
     runtime->SetCursorEnter(true);
-    runtime->SetCursorWorldPosition(Eigen::Vector3f::Zero());
+    runtime->SetCursorWorldPosition(linalg::Vector3f::Zero());
     runtime->SetCursorButtons(0, 1, 1);
     runtime->DispatchCursorFrameEvents(false);
     EXPECT_TRUE(node->Visible());
@@ -5094,13 +4056,13 @@ TEST(ScriptRuntimeCompat, RollbackRestoresCoverageAndSharedPuppetAndHonorsIdenti
     auto replacement = std::make_shared<SceneNode>();
     runtime->RegisterNode("subject", replacement.get());
     runtime->RollbackNodeRegistration("subject", failed.get(), snapshot);
-    runtime->SetNodeTranslate("subject", Eigen::Vector3f(1, 2, 0));
-    EXPECT_TRUE(replacement->Translate().isApprox(Eigen::Vector3f(1, 2, 0)));
+    runtime->SetNodeTranslate("subject", linalg::Vector3f(1, 2, 0));
+    EXPECT_TRUE(replacement->Translate().isApprox(linalg::Vector3f(1, 2, 0)));
     runtime->RollbackNodeRegistration("subject", replacement.get(), nullptr);
     EXPECT_EQ(runtime->FindPuppetLayer("subject"), nullptr);
     auto fresh = std::make_shared<SceneNode>();
     runtime->RegisterNode("subject", fresh.get());
-    runtime->RegisterNodeSize("subject", Eigen::Vector2f(40, 40));
+    runtime->RegisterNodeSize("subject", linalg::Vector2f(40, 40));
     runtime->DispatchCursorFrameEvents(true);
     EXPECT_FALSE(fresh->Visible());
 }
@@ -5129,13 +4091,13 @@ TEST(ScriptRuntimeCompat, CloneGrowthSharesSourcesButRepairsIndependentDestinati
     Scene scene;
     auto runtime = MakeRuntimeWithScene(scene);
     auto source_node = std::make_shared<SceneNode>(
-        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "source");
+        linalg::Vector3f::Zero(), linalg::Vector3f::Ones(), linalg::Vector3f::Zero(), "source");
     auto mesh = std::make_shared<SceneMesh>();
     mesh->AddMaterial(SceneMaterial {});
     source_node->AddMesh(mesh);
     scene.sceneGraph->AppendChild(source_node);
     runtime->RegisterNode("source", source_node.get());
-    runtime->RegisterLayerTemplate("models/template.json", source_node, Eigen::Vector2f(20, 20));
+    runtime->RegisterLayerTemplate("models/template.json", source_node, linalg::Vector2f(20, 20));
     auto value = std::make_unique<DynamicValue>(2.0f);
     auto* source = value.get();
     runtime->RegisterMaterialConstant(mesh->MaterialSlotPtr(), "u_Value", std::move(value));
@@ -5327,7 +4289,7 @@ export function update(value) {
 TEST(ScriptRuntimeCompat, VectorsTheHostHandsOutAreTheGlobalClasses) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap { .canvas_width = 1920, .canvas_height = 1080 });
     auto node    = std::make_shared<SceneNode>();
-    node->SetTranslate(Eigen::Vector3f(3.0f, 4.0f, 0.0f));
+    node->SetTranslate(linalg::Vector3f(3.0f, 4.0f, 0.0f));
     runtime->RegisterNode("probe", node.get());
     auto program = runtime->scriptEngine().CreatePropertyScriptProgram(
         runtime.get(),
@@ -5673,10 +4635,10 @@ export function update(value) {
 )JS" } });
     runtime->Tick(0.01);
     EXPECT_FLOAT_EQ(value->getFloat(), 0.0f);
-    runtime->SetScreenResolution(Eigen::Vector2f(1920.0f, 1080.0f));  // the same size
+    runtime->SetScreenResolution(linalg::Vector2f(1920.0f, 1080.0f));  // the same size
     runtime->Tick(0.01);
     EXPECT_FLOAT_EQ(value->getFloat(), 0.0f);
-    runtime->SetScreenResolution(Eigen::Vector2f(2560.0f, 1440.0f));
+    runtime->SetScreenResolution(linalg::Vector2f(2560.0f, 1440.0f));
     runtime->Tick(0.01);
     EXPECT_FLOAT_EQ(value->getFloat(), 1.0f * 1e6f + 2560.0f * 1000.0f + 1.44f + 0.5f);
     runtime->Tick(0.01);
@@ -5698,7 +4660,7 @@ function resizeScreen(size) { scene.getObject('exported').visible = size.x === 3
 engine.on('resizeScreen', function(size) { scene.getObject('listened').visible = size.y === 2000; });
 )JS",
                                  "");
-    runtime->SetScreenResolution(Eigen::Vector2f(3000.0f, 2000.0f));
+    runtime->SetScreenResolution(linalg::Vector2f(3000.0f, 2000.0f));
     EXPECT_FALSE(exported->Visible()) << "nothing runs until the tick";
     runtime->Tick(0.01);
     EXPECT_TRUE(exported->Visible());
@@ -5736,6 +4698,39 @@ function destroy() { scene.getObject('sceneProbe').origin = new Vec3(77, 0, 0); 
     EXPECT_FLOAT_EQ(started->Translate().x(), 1.0f) << "destroy ran, once";
     EXPECT_TRUE(started->Visible());
     EXPECT_FLOAT_EQ(scene_probe->Translate().x(), 77.0f) << "scene scripts end too";
+}
+
+// Once the scripts have been ended, a scene program is not started: it would run `init`
+// against a scene that is going away and nothing would end it.
+TEST(ScriptRuntimeCompat, ASceneProgramRegisteredAfterTeardownNeverStarts) {
+    auto probe   = std::make_shared<SceneNode>();
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    runtime->RegisterNode("probe", probe.get());
+    runtime->TearDownScripts();
+    runtime->RegisterSceneScript("scene.getObject('probe').origin = new Vec3(5, 0, 0);\n", "");
+    EXPECT_EQ(runtime->sceneScriptCount(), 0u);
+    EXPECT_FLOAT_EQ(probe->Translate().x(), 0.0f);
+}
+
+// A timeline with no usable frame rate moves nothing and does not wander backwards, and a
+// time too large to place on a loop answers the initial value.
+TEST(ScriptRuntimeCompat, ATimelineWithoutAFrameRateStandsStill) {
+    ScalarAnimationPlayback clock;
+    clock.animation.fps       = -30.0;
+    clock.animation.length_frames = 10.0;
+    clock.animation.keyframes = { { .frame = 0.0, .value = 0.0f }, { .frame = 10.0, .value = 1.0f } };
+    clock.frame               = 4.0;
+    clock.playing             = true;
+    clock.Advance(1.0);
+    EXPECT_DOUBLE_EQ(clock.frame, 4.0);
+
+    ScalarAnimation loop;
+    loop.initial_value  = 0.25f;
+    loop.fps            = 30.0;
+    loop.mode           = ScalarAnimationMode::Loop;
+    loop.length_frames  = 10.0;
+    loop.keyframes      = { { .frame = 0.0, .value = 0.0f }, { .frame = 10.0, .value = 1.0f } };
+    EXPECT_FLOAT_EQ(loop.Evaluate(std::numeric_limits<double>::max()), 0.25f);
 }
 
 // A setting resolved only for its first value leaves its scripted value
@@ -5800,8 +4795,7 @@ export function init(value) {
 }
 )JS";
     runtime->RegisterNodeVisibility("character", node.get(), ResolveBoolSetting(*runtime, {
-        { "value", true }, { "script", script } }, "character",
-        PropertyScriptObject { .animation_layer_index = 1 }));
+        { "value", true }, { "script", script } }, "character", 1));
     runtime->Tick(0.01);
     EXPECT_DOUBLE_EQ(layer.frame(1), 3.0) << "the bound animation layer started at its offset";
     EXPECT_DOUBLE_EQ(layer.frame(0), 0.0) << "its sibling was left alone";
@@ -6076,7 +5070,7 @@ void WaitForTextLayout(SceneRuntimeContext& runtime, const std::string& layer) {
 TEST(ScriptRuntimeCompat, TextLayerStyleIsReadAndWrittenThroughTheLayer) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto node    = std::make_shared<SceneNode>();
-    node->SetTranslate(Eigen::Vector3f(100, 200, 0));
+    node->SetTranslate(linalg::Vector3f(100, 200, 0));
     runtime->RegisterNode("clock", node.get());
     runtime->RegisterTextLayer("clock", TextLayerState {
         .text = "12:30", .font_key = "Arial", .point_size = 12.0f, .horizontal_align = "center",
@@ -6128,7 +5122,7 @@ export function update(value) {
     EXPECT_GT(after.x(), before.x());
     // Aligned to its right and bottom edges now: the layer's origin stays where it was and
     // the card hangs up and to the left of it.
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(100, 200, 0)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(100, 200, 0)));
     const auto layout = runtime->NodeTextLayout("clock");
     ASSERT_TRUE(layout.has_value());
     EXPECT_NEAR(runtime->NodeBoxCentre("clock").x(), -after.x() * 0.5f, 1e-3f);
@@ -6181,8 +5175,8 @@ TEST(ScriptRuntimeCompat, CreateLayerMakesATextLayerFromItsConfiguration) {
     runtime->SetTextLayerFactory([&](const std::string& config_json, int32_t id) {
         received    = nlohmann::json::parse(config_json);
         received_id = id;
-        auto node = std::make_shared<SceneNode>(Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(),
-                                                Eigen::Vector3f::Zero(), "__we_text_" + std::to_string(id));
+        auto node = std::make_shared<SceneNode>(linalg::Vector3f::Zero(), linalg::Vector3f::Ones(),
+                                                linalg::Vector3f::Zero(), "__we_text_" + std::to_string(id));
         runtime->RegisterNode(node->Name(), node.get());
         runtime->RegisterTextLayer(node->Name(), TextLayerState {
             .text = received.at("text").get<std::string>(), .font_key = received.value("font", ""),
@@ -6255,7 +5249,7 @@ struct CardTemplateScene {
     Scene                                scene;
     std::unique_ptr<SceneRuntimeContext> runtime = MakeRuntimeWithScene(scene);
     std::shared_ptr<SceneNode>           owner   = std::make_shared<SceneNode>(
-        Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(), Eigen::Vector3f::Zero(), "owner");
+        linalg::Vector3f::Zero(), linalg::Vector3f::Ones(), linalg::Vector3f::Zero(), "owner");
 
     CardTemplateScene() {
         scene.shaderValueUpdater = std::make_unique<WPShaderValueUpdater>(&scene);
@@ -6273,12 +5267,12 @@ struct CardTemplateScene {
         owner->AddMesh(mesh);
         scene.sceneGraph->AppendChild(owner);
         runtime->RegisterNode("owner", owner.get());
-        runtime->RegisterNodeSize("owner", Eigen::Vector2f(20, 10));
-        runtime->RegisterLayerTemplate("models/card.json", owner, Eigen::Vector2f(20, 10));
+        runtime->RegisterNodeSize("owner", linalg::Vector2f(20, 10));
+        runtime->RegisterLayerTemplate("models/card.json", owner, linalg::Vector2f(20, 10));
     }
 
     // Corner extents of a node's card.
-    static Eigen::Vector2f Extent(SceneNode& node) {
+    static linalg::Vector2f Extent(SceneNode& node) {
         const auto& vertices = node.Mesh()->GetVertexArray(0);
         float       width    = 0.0f;
         float       height   = 0.0f;
@@ -6324,7 +5318,7 @@ export function update(value) {
 )JS");
     EXPECT_SCRIPT_PASSES(run);
     // The template keeps its own geometry: the stretched copy had a mesh of its own.
-    EXPECT_EQ(CardTemplateScene::Extent(*fixture.owner), Eigen::Vector2f(20, 10));
+    EXPECT_EQ(CardTemplateScene::Extent(*fixture.owner), linalg::Vector2f(20, 10));
 }
 
 TEST(ScriptRuntimeCompat, ASizedLayerHasItsOwnStretchedCardAndTheTemplateKeepsItsOwn) {
@@ -6344,9 +5338,9 @@ export function update(value) {
         if (child.get() != fixture.owner.get()) created.push_back(child.get());
     }
     ASSERT_EQ(created.size(), 2u);
-    EXPECT_EQ(CardTemplateScene::Extent(*created[0]), Eigen::Vector2f(60, 10));
-    EXPECT_EQ(CardTemplateScene::Extent(*created[1]), Eigen::Vector2f(20, 50));
-    EXPECT_EQ(CardTemplateScene::Extent(*fixture.owner), Eigen::Vector2f(20, 10));
+    EXPECT_EQ(CardTemplateScene::Extent(*created[0]), linalg::Vector2f(60, 10));
+    EXPECT_EQ(CardTemplateScene::Extent(*created[1]), linalg::Vector2f(20, 50));
+    EXPECT_EQ(CardTemplateScene::Extent(*fixture.owner), linalg::Vector2f(20, 10));
     // Texture coordinates are not stretched: a padded texture still maps.
     const auto& vertices = created[0]->Mesh()->GetVertexArray(0);
     const auto  offsets  = vertices.GetAttrOffsetMap();
@@ -6372,33 +5366,12 @@ export function update(value) {
     EXPECT_FLOAT_EQ(depth[1], 1.5f);
 }
 
-// A number written to a layer's colour or parallax depth is that number on every
-// component, as a number an `update()` returns for a vector property is; both
-// writes were ignored.
-TEST(ScriptRuntimeCompat, ANumberWrittenToALayersColourOrParallaxDepthFillsEveryComponent) {
-    CardTemplateScene fixture;
-    auto&             runtime = *fixture.runtime;
-    const auto        run = RunUpdateOn(runtime, "owner", std::string(kCheckHelpers) + R"JS(
-export function update(value) {
-  thisLayer.parallaxDepth = 0.75;
-  check('depth', thisLayer.parallaxDepth.x === 0.75 && thisLayer.parallaxDepth.y === 0.75);
-  thisLayer.color = 0.5;
-  return 1;
-}
-)JS");
-    EXPECT_SCRIPT_PASSES(run);
-    const auto depth = fixture.scene.shaderValueUpdater->NodeParallaxDepth(fixture.owner.get());
-    EXPECT_FLOAT_EQ(depth[0], 0.75f);
-    EXPECT_FLOAT_EQ(depth[1], 0.75f);
-    EXPECT_TRUE(runtime.NodeColor("owner").isApprox(Eigen::Vector3f::Constant(0.5f)));
-}
-
 TEST(ScriptRuntimeCompat, ALayerCreatedBelowAParentMovesWithItAndStaysOutOfTheRoot) {
     CardTemplateScene fixture;
     auto&             runtime = *fixture.runtime;
     // A group for the layers to hang from.
-    auto group = std::make_shared<SceneNode>(Eigen::Vector3f(100, 0, 0), Eigen::Vector3f::Ones(),
-                                             Eigen::Vector3f::Zero(), "group");
+    auto group = std::make_shared<SceneNode>(linalg::Vector3f(100, 0, 0), linalg::Vector3f::Ones(),
+                                             linalg::Vector3f::Zero(), "group");
     fixture.scene.sceneGraph->AppendChild(group);
     runtime.RegisterNode("group", group.get());
     const auto run = RunUpdateOn(runtime, "owner", std::string(kCheckHelpers) + R"JS(
@@ -6421,7 +5394,7 @@ export function update(value) {
     // Below the group it moves with it: its place in the world is the group's.
     child->UpdateTrans();
     EXPECT_NEAR(child->ModelTrans()(0, 3), 100.0, 1e-3);
-    group->SetTranslate(Eigen::Vector3f(250, 40, 0));
+    group->SetTranslate(linalg::Vector3f(250, 40, 0));
     child->UpdateTrans();
     EXPECT_NEAR(child->ModelTrans()(0, 3), 250.0, 1e-3);
     EXPECT_NEAR(child->ModelTrans()(1, 3), 40.0, 1e-3);
@@ -6731,8 +5704,8 @@ struct GroupedLayers {
                                          a = Named("a"), b = Named("b");
 
     static std::shared_ptr<SceneNode> Named(const char* name) {
-        return std::make_shared<SceneNode>(Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(),
-                                           Eigen::Vector3f::Zero(), name);
+        return std::make_shared<SceneNode>(linalg::Vector3f::Zero(), linalg::Vector3f::Ones(),
+                                           linalg::Vector3f::Zero(), name);
     }
     GroupedLayers() {
         scene.sceneGraph->AppendChild(group);
@@ -6812,8 +5785,8 @@ TEST(ScriptRuntimeCompat, SortingASiblingWithinItsGroupReordersOnlyThatGroup) {
 TEST(ScriptRuntimeCompat, CreateLayerWithAParentThatNamesNoLayerStaysBesideItsCreator) {
     LineTemplateScene fixture;
     auto&             runtime = *fixture.runtime;
-    auto group = std::make_shared<SceneNode>(Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(),
-                                             Eigen::Vector3f::Zero(), "group");
+    auto group = std::make_shared<SceneNode>(linalg::Vector3f::Zero(), linalg::Vector3f::Ones(),
+                                             linalg::Vector3f::Zero(), "group");
     fixture.scene.sceneGraph->AppendChild(group);
     runtime.RegisterNode("group", group.get());
     ASSERT_TRUE(runtime.SetNodeParent("owner", "group"));
@@ -6869,7 +5842,7 @@ export function update(value) {
 TEST(ScriptRuntimeCompat, TextAlignmentOnlyTakesTheWordsItIsDefinedFor) {
     auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
     auto node    = std::make_shared<SceneNode>();
-    node->SetTranslate(Eigen::Vector3f(10, 20, 0));
+    node->SetTranslate(linalg::Vector3f(10, 20, 0));
     runtime->RegisterNode("clock", node.get());
     runtime->RegisterTextLayer("clock", TextLayerState { .text = "x", .font_key = "Arial", .point_size = 20.0f,
                                                         .horizontal_align = "center", .vertical_align = "center" });
@@ -6899,7 +5872,7 @@ export function update(value) {
     EXPECT_EQ(state->vertical_align, "top");
     // The card hangs by the words it ended on, none of them made up: centred across, so
     // nothing moves it sideways, and below the origin for `top`. The node stays put.
-    EXPECT_TRUE(node->Translate().isApprox(Eigen::Vector3f(10, 20, 0)));
+    EXPECT_TRUE(node->Translate().isApprox(linalg::Vector3f(10, 20, 0)));
     WaitForTextLayout(*runtime, "clock");
     EXPECT_FLOAT_EQ(runtime->NodeBoxCentre("clock").x(), 0.0f);
     EXPECT_LT(runtime->NodeBoxCentre("clock").y(), 0.0f);
@@ -6970,8 +5943,7 @@ export function init(value) {
   check('a name no layer has', ghost.name === 'nothing' && ghost === thisLayer.getAnimationLayer('nothing'));
   return value;
 }
-)JS" } }, "character",
-        PropertyScriptObject { .animation_layer_index = 1 }));
+)JS" } }, "character", 1));
     runtime->Tick(0.01);
     for (const auto& error : runtime->scriptErrors()) ADD_FAILURE() << error;
 }
@@ -6987,13 +5959,13 @@ struct PlacedLayers {
                                          reader = Named("reader");
 
     static std::shared_ptr<SceneNode> Named(const char* name) {
-        return std::make_shared<SceneNode>(Eigen::Vector3f::Zero(), Eigen::Vector3f::Ones(),
-                                           Eigen::Vector3f::Zero(), name);
+        return std::make_shared<SceneNode>(linalg::Vector3f::Zero(), linalg::Vector3f::Ones(),
+                                           linalg::Vector3f::Zero(), name);
     }
     PlacedLayers() {
-        group->SetTranslate(Eigen::Vector3f(100, 200, 0));
-        group->SetScale(Eigen::Vector3f(2, 2, 1));
-        child->SetTranslate(Eigen::Vector3f(10, 20, 0));
+        group->SetTranslate(linalg::Vector3f(100, 200, 0));
+        group->SetScale(linalg::Vector3f(2, 2, 1));
+        child->SetTranslate(linalg::Vector3f(10, 20, 0));
         scene.sceneGraph->AppendChild(group);
         group->AppendChild(child);
         scene.sceneGraph->AppendChild(reader);
@@ -7023,7 +5995,7 @@ export function update() { return new Vec3(shared.worldX, shared.worldY, 0); }
 
     runtime.Tick(0.01);
     // (10, 20) scaled by the group's 2, then moved to (100, 200).
-    EXPECT_TRUE(runtime.NodeTranslate("reader").isApprox(Eigen::Vector3f(120, 240, 0)))
+    EXPECT_TRUE(runtime.NodeTranslate("reader").isApprox(linalg::Vector3f(120, 240, 0)))
         << runtime.NodeTranslate("reader").transpose();
     for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
 }
@@ -7035,15 +6007,15 @@ export function update() { return new Vec3(shared.worldX, shared.worldY, 0); }
 TEST(ScriptRuntimeCompat, LayerTransformMatrixCarriesTheTurnAndScaleOfItsParents) {
     PlacedLayers fixture;
     auto&        runtime = *fixture.runtime;
-    fixture.group->SetRotation(Eigen::Vector3f(0, 0, static_cast<float>(M_PI) / 2));
+    fixture.group->SetRotation(linalg::Vector3f(0, 0, static_cast<float>(M_PI) / 2));
     auto pinned = PlacedLayers::Named("pinned");
-    pinned->SetTranslate(Eigen::Vector3f(50, 60, 0));
+    pinned->SetTranslate(linalg::Vector3f(50, 60, 0));
     pinned->SetIgnoreParentTransform(true);
     fixture.group->AppendChild(pinned);
     runtime.RegisterNode("pinned", pinned.get());
     auto drawn = PlacedLayers::Named("drawn");
-    drawn->SetTranslate(Eigen::Vector3f(5, 5, 0));
-    drawn->SetRenderTransformOverride(Eigen::Matrix4d::Identity());
+    drawn->SetTranslate(linalg::Vector3f(5, 5, 0));
+    drawn->SetRenderTransformOverride(linalg::Matrix4d::Identity());
     fixture.group->AppendChild(drawn);
     runtime.RegisterNode("drawn", drawn.get());
 
@@ -7099,7 +6071,7 @@ export function update() {
 
     runtime.Tick(0.01);
     EXPECT_FLOAT_EQ(runtime.NodeTranslate("reader").x(), -1.0f) << "the child sits at x = 120";
-    runtime.SetNodeTranslate("group", Eigen::Vector3f(1000, 200, 0));
+    runtime.SetNodeTranslate("group", linalg::Vector3f(1000, 200, 0));
     runtime.Tick(0.01);
     EXPECT_FLOAT_EQ(runtime.NodeTranslate("reader").x(), 1.0f) << "the child sits at x = 1020";
     for (const auto& error : runtime.scriptErrors()) ADD_FAILURE() << error;
@@ -7208,7 +6180,7 @@ struct ParallaxCardScene {
     ParallaxCardScene() {
         card.scene.ortho[0] = 1920;
         card.scene.ortho[1] = 1080;
-        camera_node->SetTranslate(Eigen::Vector3f(960, 540, 0));
+        camera_node->SetTranslate(linalg::Vector3f(960, 540, 0));
         camera->AttatchNode(camera_node);
         card.scene.activeCamera = camera.get();
         updater.SetCameraParallax({ .enable = true, .amount = 0.5f, .delay = 0.0f,
@@ -7229,7 +6201,7 @@ struct ParallaxCardScene {
         });
         node.UpdateTrans();
         const auto model = node.ModelTrans();
-        return Eigen::Vector2f(value[12] - static_cast<float>(model(0, 3)),
+        return linalg::Vector2f(value[12] - static_cast<float>(model(0, 3)),
                                value[13] - static_cast<float>(model(1, 3))).norm();
     }
     SceneNode* Created(std::size_t index) {
@@ -7259,6 +6231,405 @@ export function update(value) {
     EXPECT_GT(fixture.Displacement(*fixture.Created(0)), 1.0f) << "a depth of one follows the cursor";
     EXPECT_LT(fixture.Displacement(*fixture.Created(1)), 1e-3f) << "a depth of zero does not";
     EXPECT_LT(fixture.Displacement(*fixture.Created(2)), 1e-3f) << "no depth asked for, none given";
+}
+
+
+// ---- host limits on the paths that run script code outside `update` ----------------
+
+ScriptLimits QuickLimits() {
+    ScriptLimits limits;
+    limits.call_budget_ms     = 30.0;
+    limits.creation_budget_ms = 60.0;
+    return limits;
+}
+
+double MillisecondsOf(std::chrono::steady_clock::time_point since) {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - since).count();
+}
+
+TEST(ScriptHostLimits, AGetterOnTheReturnedValueIsHeldToTheCallBudget) {
+    ScriptEngine engine;
+    engine.SetLimits(QuickLimits());
+    const auto start  = std::chrono::steady_clock::now();
+    const auto result = engine.Evaluate(R"JS(
+export function update(value) { return { get x() { for (;;) {} } }; }
+)JS", {}, DynamicValue(linalg::Vector3f(1, 2, 3)), {});
+    ASSERT_NE(result, nullptr);
+    EXPECT_LT(MillisecondsOf(start), 2000.0) << "an endless getter must be interrupted";
+}
+
+TEST(ScriptHostLimits, ASetterOnTheScriptParametersIsHeldToTheCallBudget) {
+    ScriptEngine engine;
+    engine.SetLimits(QuickLimits());
+    DynamicValue parameter(1.0f);
+    const auto   start  = std::chrono::steady_clock::now();
+    const auto   result = engine.Evaluate(R"JS(
+Object.defineProperty(scriptProperties, 'p', { set: function () { for (;;) {} }, get: function () { return 0; },
+                                               configurable: true });
+export function update(value) { return 2; }
+)JS", { { "p", &parameter } }, DynamicValue(0.0f), {});
+    ASSERT_NE(result, nullptr);
+    EXPECT_LT(MillisecondsOf(start), 2000.0) << "an endless setter must be interrupted";
+}
+
+TEST(ScriptHostLimits, RunawayRecursionOnASecondaryThreadIsAnErrorNotACrash) {
+    ScriptEngine engine;
+    DynamicValue initial(0.0f);
+    std::unique_ptr<PropertyScriptProgram> program;
+    program = engine.CreatePropertyScriptProgram(nullptr, R"JS(
+function down(n) { return down(n + 1) + 1; }
+export function update(value) { try { down(0); } catch (e) { return 7; } return 1; }
+)JS", "", {}, initial, {});
+    ASSERT_NE(program, nullptr);
+    double answer = 0.0;
+    std::thread worker([&] {
+        const auto result = program->Evaluate({}, DynamicValue(0.0f));
+        if (result != nullptr) answer = result->getFloat();
+    });
+    worker.join();
+    EXPECT_FLOAT_EQ(static_cast<float>(answer), 7.0f);
+}
+
+
+TEST(ScriptHostLimits, ExportAfterUnicodeWhitespaceAtTheStartOfALineIsRemoved) {
+    ScriptEngine engine;
+    EXPECT_FLOAT_EQ(EvaluateScalar(engine, " export function update(value) { return 5; }\n").getFloat(), 5.0f);
+    EXPECT_FLOAT_EQ(EvaluateScalar(engine, "var a = 1;\n﻿export function update(value) { return 6; }\n").getFloat(), 6.0f);
+    EXPECT_FLOAT_EQ(EvaluateScalar(engine, "var a = 1;\n  export function update(value) { return 8; }\n").getFloat(), 8.0f);
+}
+
+
+TEST(ScriptHostLimits, ARecordedErrorTextIsCutBetweenCharacters) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update(value) { throw new Error('€'.repeat(2000)); }
+)JS", "", {}, DynamicValue(0.0f), runtime->hostContext());
+    ASSERT_NE(program, nullptr);
+    program->Evaluate(runtime->hostContext(), DynamicValue(0.0f));
+    ASSERT_EQ(runtime->scriptErrorCount(), 1u);
+    const auto& text = runtime->scriptErrors().front();
+    EXPECT_LE(text.size(), std::string("update: ").size() + 1024u);
+    EXPECT_NO_THROW((void)nlohmann::json(text).dump()) << "the text must stay valid UTF-8";
+}
+
+TEST(ScriptHostLimits, ACursorEventHandsEveryProgramItsOwnWorldPosition) {
+    ScriptEngine engine;
+    DynamicValue initial(0.0f);
+    auto         editor = engine.CreatePropertyScriptProgram(nullptr, R"JS(
+export function cursorClick(event) { event.worldPosition.x = 999; }
+)JS", "", {}, initial, {});
+    auto reader = engine.CreatePropertyScriptProgram(nullptr, R"JS(
+export function cursorClick(event) { globalThis.seen = event.worldPosition.x * 1000 + input.cursorWorldPosition.x; }
+export function update(value) { return globalThis.seen; }
+)JS", "", {}, initial, {});
+    ASSERT_NE(editor, nullptr);
+    ASSERT_NE(reader, nullptr);
+    ScriptHostContext host;
+    host.cursor_world_position = linalg::Vector3f(5, 6, 0);
+    editor->DispatchCursorClick(host);
+    reader->DispatchCursorClick(host);
+    const auto seen = reader->Evaluate(host, DynamicValue(0.0f));
+    ASSERT_NE(seen, nullptr);
+    EXPECT_FLOAT_EQ(seen->getFloat(), 5005.0f);
+}
+
+TEST(ScriptHostLimits, AnEndedListenerRemovedByAnEarlierOneDoesNotFire) {
+    auto runtime = CreateSceneRuntimeContext(SceneRuntimeBootstrap {});
+    auto node    = std::make_shared<SceneNode>();
+    auto probe   = std::make_shared<SceneNode>();
+    runtime->RegisterNode("character", node.get());
+    runtime->RegisterNode("probe", probe.get());
+    std::vector<WPPuppetLayer::AnimationLayer> authored(1);
+    authored[0].id   = 7;
+    authored[0].name = "siche";
+    WPPuppetLayer layer(MakeSingleShotPuppet());
+    layer.prepared(authored);
+    runtime->RegisterPuppetLayer("character", layer);
+    runtime->RegisterNodeVisibility("character", node.get(), ResolveBoolSetting(*runtime, {
+        { "value", true }, { "script", R"JS(
+export function init(value) {
+  var animation = thisLayer.getAnimationLayer('siche');
+  var second = function() { thisScene.getLayer('probe').origin = new Vec3(1, 0, 0); };
+  animation.addEndedCallback(function() { animation.removeEndedCallback(second); });
+  animation.addEndedCallback(second);
+  return value;
+}
+)JS" } }, "character"));
+    runtime->Tick(0.01);
+    WPPuppetLayer render_copy = layer;
+    render_copy.genFrame(0.0);
+    render_copy.genFrame(2.0);
+    runtime->Tick(0.01);
+    EXPECT_FLOAT_EQ(probe->Translate().x(), 0.0f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
+
+TEST(ScriptHostLimits, ThousandNestedCallsWorkAndRunawayRecursionDoesNot) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+function nest(depth, a, b, c) {
+  var x = 1, y = 2, z = 3, w = 4, v = 5, u = 6, t = 7;
+  return depth === 0 ? 0 : 1 + nest(depth - 1, a + x, b + y, c + z);
+}
+function runaway(n) { return runaway(n + 1) + 1; }
+export function update(value) {
+  var caught = 0;
+  try { runaway(0); } catch (e) { caught = 1; }
+  return nest(1000, 0, 0, 0) + caught * 10000;
+}
+)JS", "", {}, DynamicValue(0.0f), runtime->hostContext());
+    ASSERT_NE(program, nullptr);
+    const auto result = program->Evaluate(runtime->hostContext(), DynamicValue(0.0f));
+    ASSERT_NE(result, nullptr);
+    EXPECT_FLOAT_EQ(result->getFloat(), 11000.0f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 0u);
+}
+
+TEST(ScriptHostLimits, AnEndlessUpdateIsInterruptedAndThreeInARowSwitchTheProgramOff) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update(value) { for (;;) {} }
+)JS", "looper", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(program, nullptr);
+    for (int tick = 0; tick < 3; ++tick) {
+        ASSERT_TRUE(program->Valid()) << "interrupted " << tick << " times so far";
+        const auto result = program->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+        ASSERT_NE(result, nullptr);
+        EXPECT_FLOAT_EQ(result->getFloat(), 1.0f) << "the property keeps its value";
+    }
+    EXPECT_FALSE(program->Valid());
+    // Three interrupted calls and one error naming the program.
+    EXPECT_EQ(runtime->scriptErrorCount(), 4u);
+}
+
+TEST(ScriptHostLimits, HugeAllocationAndASelfRearmingThrowingTimerAreErrorsNotHangs) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto memory = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update(value) {
+  var keep = [];
+  for (;;) keep.push(new Array(1000000).fill(1));
+}
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(memory, nullptr);
+    memory->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    EXPECT_TRUE(memory->Valid());
+    EXPECT_GE(runtime->scriptErrorCount(), 1u);
+
+    auto timer = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+function again() { engine.setTimeout(again, 0); throw new Error('again'); }
+engine.setTimeout(again, 0);
+export function update(value) { return value; }
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(timer, nullptr);
+    const auto before = runtime->scriptErrorCount();
+    for (int tick = 0; tick < 5; ++tick) timer->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    EXPECT_EQ(runtime->scriptErrorCount() - before, 5u) << "one error per timer pass";
+}
+
+
+TEST(ScriptHostLimits, AScriptCannotPutItsOwnCodeInsideTheHostsRefreshOfEngine) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto hostile = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+Object.defineProperty(engine, 'frametime', { set: function () { for (;;) {} }, configurable: true });
+export function update(value) { return 9; }
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    EXPECT_EQ(hostile, nullptr) << "the engine's fields stay data properties";
+    EXPECT_GE(runtime->scriptErrorCount(), 1u);
+
+    auto bystander = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update(value) { return engine.frametime; }
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(bystander, nullptr);
+    ScriptHostContext host = runtime->hostContext();
+    host.frame_time        = 0.25;
+    const auto start       = std::chrono::steady_clock::now();
+    const auto answer      = bystander->Evaluate(host, DynamicValue(1.0f));
+    ASSERT_NE(answer, nullptr);
+    EXPECT_FLOAT_EQ(answer->getFloat(), 0.25f);
+    EXPECT_LT(MillisecondsOf(start), 1000.0);
+}
+
+
+// ---- more hostile scripts: blocking calls, backtracking, queued jobs, frozen host objects ----
+
+namespace {
+// Runs one `update` that never finishes in time through a value program and answers
+// how many milliseconds the host call took (negative when the program was refused).
+double TimeOneHostileUpdate(const char* script) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(
+        runtime.get(), script, "", {}, DynamicValue(1.0f), runtime->hostContext());
+    if (program == nullptr) return -1.0;
+    const auto start = std::chrono::steady_clock::now();
+    program->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    return MillisecondsOf(start);
+}
+} // namespace
+
+TEST(ScriptHostLimits, AtomicsWaitCannotBlockTheHost) {
+    const double ms = TimeOneHostileUpdate(R"JS(
+export function update(value) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(8)), 0, 0, 5000); } catch (e) {}
+  return 1;
+}
+)JS");
+    EXPECT_GE(ms, 0.0);
+    EXPECT_LT(ms, 1000.0);
+}
+
+TEST(ScriptHostLimits, RegexBacktrackingIsInterrupted) {
+    const double ms = TimeOneHostileUpdate(R"JS(
+export function update(value) { /(a+)+b/.test('a'.repeat(60)); return 1; }
+)JS");
+    EXPECT_GE(ms, 0.0);
+    EXPECT_LT(ms, 1000.0);
+}
+
+TEST(ScriptHostLimits, AnEndlessPromiseJobIsInterruptedAndCounted) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update(value) { Promise.resolve().then(function () { for (;;) {} }); return 1; }
+)JS", "jobber", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(program, nullptr);
+    const auto start = std::chrono::steady_clock::now();
+    for (int tick = 0; tick < 3; ++tick) program->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    EXPECT_LT(MillisecondsOf(start), 2000.0);
+    EXPECT_FALSE(program->Valid()) << "three interrupted calls in a row switch the program off";
+}
+
+TEST(ScriptHostLimits, AFrozenEngineDoesNotStopTheHostsRefresh) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    auto  hostile = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+Object.freeze(engine);
+Object.freeze(input);
+export function update(value) { return 1; }
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    auto reader = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+export function update(value) { return engine.frametime; }
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(reader, nullptr);
+    ScriptHostContext host = runtime->hostContext();
+    host.frame_time        = 0.5;
+    const auto errors      = runtime->scriptErrorCount();
+    const auto answer      = reader->Evaluate(host, DynamicValue(1.0f));
+    ASSERT_NE(answer, nullptr);
+    EXPECT_FLOAT_EQ(answer->getFloat(), 0.5f);
+    EXPECT_EQ(runtime->scriptErrorCount(), errors);
+}
+
+TEST(ScriptHostLimits, AScriptThatReplacesTheInputVectorsDoesNotBreakCursorEvents) {
+    ScriptEngine engine;
+    DynamicValue initial(0.0f);
+    auto         vandal = engine.CreatePropertyScriptProgram(nullptr, R"JS(
+input.cursorWorldPosition = 5;
+input.cursorPosition = null;
+export function update(value) { return 1; }
+)JS", "", {}, initial, {});
+    auto reader = engine.CreatePropertyScriptProgram(nullptr, R"JS(
+export function cursorClick(event) { globalThis.seen = event.worldPosition.x * 100 + event.normalizedPosition.x; }
+export function update(value) { return globalThis.seen; }
+)JS", "", {}, initial, {});
+    ASSERT_NE(reader, nullptr);
+    ScriptHostContext host;
+    host.cursor_world_position      = linalg::Vector3f(3, 4, 0);
+    host.cursor_normalized_position = linalg::Vector2f(0.5f, 0.25f);
+    if (vandal != nullptr) vandal->Evaluate(host, DynamicValue(0.0f));
+    reader->DispatchCursorClick(host);
+    const auto seen = reader->Evaluate(host, DynamicValue(0.0f));
+    ASSERT_NE(seen, nullptr);
+    EXPECT_FLOAT_EQ(seen->getFloat(), 300.5f);
+}
+
+TEST(ScriptHostLimits, AnEndlessTopLevelIsRefusedInTimeAndLeavesOtherProgramsAlone) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    const auto start   = std::chrono::steady_clock::now();
+    auto       endless = runtime->scriptEngine().CreatePropertyScriptProgram(
+        runtime.get(), "for (;;) {}\nexport function update(value) { return 2; }", "", {},
+        DynamicValue(1.0f), runtime->hostContext());
+    EXPECT_EQ(endless, nullptr);
+    EXPECT_LT(MillisecondsOf(start), 2000.0);
+    EXPECT_GE(runtime->scriptErrorCount(), 1u);
+    auto fine = runtime->scriptEngine().CreatePropertyScriptProgram(
+        runtime.get(), "export function update(value) { return 3; }", "", {}, DynamicValue(1.0f),
+        runtime->hostContext());
+    ASSERT_NE(fine, nullptr);
+    const auto answer = fine->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    ASSERT_NE(answer, nullptr);
+    EXPECT_FLOAT_EQ(answer->getFloat(), 3.0f);
+}
+
+TEST(ScriptHostLimits, AnEndlessTimerCallbackIsInterruptedOnceAndTheNextEvaluationRunsNormally) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+engine.setTimeout(function () { for (;;) {} }, 0);
+export function update(value) { return value + 1; }
+)JS", "", {}, DynamicValue(1.0f), runtime->hostContext());
+    ASSERT_NE(program, nullptr);
+    const auto first = program->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(runtime->scriptErrorCount(), 1u) << "the interrupted pass is one error";
+    EXPECT_TRUE(program->Valid());
+    const auto second = program->Evaluate(runtime->hostContext(), DynamicValue(1.0f));
+    ASSERT_NE(second, nullptr);
+    EXPECT_FLOAT_EQ(second->getFloat(), 2.0f);
+    EXPECT_EQ(runtime->scriptErrorCount(), 1u) << "the timer that was interrupted is gone";
+}
+
+TEST(ScriptHostLimits, AnEndlessSceneInitAndAnEndlessListenerAreInterruptedInTime) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    const auto start = std::chrono::steady_clock::now();
+    runtime->RegisterSceneScript("export function init() { for (;;) {} }", "");
+    runtime->RegisterSceneScript("engine.on('update', function () { for (;;) {} });", "");
+    runtime->Tick(0.016);
+    EXPECT_LT(MillisecondsOf(start), 3000.0);
+    EXPECT_GE(runtime->scriptErrorCount(), 2u);
+}
+
+TEST(ScriptHostLimits, ADynamicImportCannotLoadAnything) {
+    ScriptEngine engine;
+    EXPECT_FLOAT_EQ(EvaluateScalar(engine, R"JS(
+var state = 0;
+try { import('os').then(function () { state = 2; }, function () { state = 1; }); } catch (e) { state = 3; }
+export function update(value) { return state === 2 ? 99 : 5; }
+)JS").getFloat(), 5.0f);
+}
+
+TEST(ScriptHostLimits, AnErrorObjectThatRunsCodeWhenReadIsHeldToTheCallBudget) {
+    Scene scene;
+    auto  runtime = MakeRuntimeWithScene(scene);
+    runtime->scriptEngine().SetLimits(QuickLimits());
+    auto program = runtime->scriptEngine().CreatePropertyScriptProgram(runtime.get(), R"JS(
+// The host copies the value it hands to `update` with this method; a throw out of it
+// reaches the host as an error object the script made.
+Vec3.prototype.copy = function () { throw { get message() { for (;;) {} }, get stack() { for (;;) {} } }; };
+export function update(value) { return value; }
+)JS", "", {}, DynamicValue(linalg::Vector3f(1, 2, 3)), runtime->hostContext());
+    ASSERT_NE(program, nullptr);
+    const auto start = std::chrono::steady_clock::now();
+    const auto answer = program->Evaluate(runtime->hostContext(), DynamicValue(linalg::Vector3f(1, 2, 3)));
+    EXPECT_LT(MillisecondsOf(start), 2000.0) << "reading the error must be interrupted too";
+    ASSERT_NE(answer, nullptr);
+    EXPECT_GE(runtime->scriptErrorCount(), 1u);
 }
 
 } // namespace

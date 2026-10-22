@@ -1,13 +1,6 @@
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 
-set(SPIRV_REFLECT_STATIC_LIB  ON  CACHE INTERNAL "")
-set(SPIRV_REFLECT_EXECUTABLE  OFF CACHE INTERNAL "")
-set(SPIRV_REFLECT_BUILD_TESTS OFF CACHE INTERNAL "")
-set(SPIRV_REFLECT_EXAMPLES    OFF CACHE INTERNAL "")
-set(SPIRV_REFLECT_INSTALL     OFF CACHE INTERNAL "")
-
 find_package(PkgConfig REQUIRED)
-find_package(Eigen3 CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(argparse CONFIG REQUIRED)
 
@@ -41,7 +34,6 @@ if(NOT qjs_DIR)
 endif()
 
 find_package(qjs CONFIG REQUIRED)
-find_package(glslang CONFIG REQUIRED)
 
 function(promote_imported_target target_name)
     if(TARGET ${target_name})
@@ -52,15 +44,9 @@ function(promote_imported_target target_name)
     endif()
 endfunction()
 
-promote_imported_target(Eigen3::Eigen)
 promote_imported_target(nlohmann_json::nlohmann_json)
 promote_imported_target(qjs)
 promote_imported_target(qjs::qjs)
-promote_imported_target(glslang::glslang)
-promote_imported_target(glslang::SPIRV)
-
-add_subdirectory(glad)
-add_subdirectory(spirv_reflect EXCLUDE_FROM_ALL)
 
 if(TARGET nlohmann_json::nlohmann_json AND NOT TARGET nlohmann_json)
     add_library(nlohmann_json INTERFACE)
@@ -73,13 +59,16 @@ elseif(TARGET qjs::qjs AND NOT TARGET quickjs::quickjs)
     add_library(quickjs::quickjs ALIAS qjs::qjs)
 endif()
 
-if(TARGET glslang::glslang AND NOT TARGET glslang)
-    add_library(glslang ALIAS glslang::glslang)
-endif()
-
-if(TARGET glslang::SPIRV AND NOT TARGET SPIRV)
-    add_library(SPIRV ALIAS glslang::SPIRV)
-endif()
-
 add_library(miniaudio INTERFACE)
 target_include_directories(miniaudio SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/miniaudio)
+
+# stb_vorbis 1.22 (public domain or MIT, unchanged): the Ogg Vorbis decoder behind
+# scene sounds (Renderer/Sound/Vorbis). It decodes from memory with the pull API
+# only, so the stdio and push-data parts are compiled out; the same definitions
+# reach every user of the header-only declarations.
+add_library(stb_vorbis STATIC stb_vorbis/stb_vorbis.c)
+target_compile_definitions(stb_vorbis PUBLIC STB_VORBIS_NO_STDIO STB_VORBIS_NO_PUSHDATA_API)
+target_include_directories(stb_vorbis SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/stb_vorbis)
+# Vendored code is built as shipped: its warnings are not ours to fix.
+target_compile_options(stb_vorbis PRIVATE -w)
+set_property(TARGET stb_vorbis PROPERTY POSITION_INDEPENDENT_CODE ON)

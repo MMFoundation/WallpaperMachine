@@ -27,7 +27,7 @@ use crate::owe::scene_demand::{SurfaceHealth, SurfaceStopReason};
 /// What one recovery attempt does to the scene.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecoveryStep {
-    /// Rebuild only the Vulkan surface and swapchain under the live scene.
+    /// Rebuild only the renderer's layer binding under the live scene.
     /// Cheap and keeps the compiled scene, but needs the renderer's device to
     /// still be usable.
     Reconfigure,

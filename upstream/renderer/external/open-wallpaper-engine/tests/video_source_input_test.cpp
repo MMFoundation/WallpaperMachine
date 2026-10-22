@@ -1,43 +1,35 @@
-// What a pure-video wallpaper is allowed to do with the user's media file.
+// What a video source is allowed to do with a media file.
 //
 // A plain local file is decode input, not a payload: it must be opened where it
 // lies, never read into the process and never copied into the shared cache.
-// Media that only exists inside a package still has to be extracted, and that
-// extraction must be published whole so a second opener cannot observe a
-// half-written file. Everything below drives the production construction path -
-// `CreateVideoProjectImage` followed by `CreateVideoTextureSource` - over media
-// the test encodes for itself.
+// Embedded media is read where it lies too, from memory or from an anonymous
+// file, and no file with a name is ever written for it. Everything below drives
+// `CreateVideoTextureSource` over media the test encodes for itself, on an image
+// that names its file the way the engine once built one for a video project
+// (`video_project_image.hpp`). The native backend (the project's own container
+// readers and VideoToolbox) is the only decoder, so a medium it cannot play
+// fails with its own reason and nothing else is tried.
 //
 // The last group is the clock a consumer gives a source: a source opened when
 // the scene is already some way into the clip, and what a jump of that clock
 // costs the decoder.
 
-#include "Fs/PhysicalFs.h"
-#include "Fs/VFS.h"
 #include "Image.hpp"
-#include "Scene/Parse/WPTexImageParser.hpp"
-#include "Scene/WPPkgFs.hpp"
-#include "Video/FfmpegVideoTextureSource.hpp"
+#include "Media/IsoBmff/IsoBmffReader.hpp"
+#include "Video/NativeVideoBackend.hpp"
+#include "Video/VideoMedia.hpp"
+#include "video_project_image.hpp"
 #include "Video/VideoSeekPolicy.hpp"
 #include "Video/VideoTextureSource.hpp"
-#include "Video/VideoMetadata.hpp"
-#include "Scene/SceneWallpaper.hpp"
+#include "embedded_clips.hpp"
 #include "synthetic_video.hpp"
 #include "video_orientation_cases.hpp"
 
 #include <gtest/gtest.h>
 
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavutil/frame.h>
-}
-
-#include <CoreVideo/CoreVideo.h>
 #include <mach/mach.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -59,9 +51,10 @@ namespace wallpaper::video
 namespace
 {
 
+namespace wm = wallpaper::media;
 using testing_media::kFrameHeight;
 using testing_media::kFrameWidth;
-using testing_media::SharedGop;
+using testing_media::EncoderAvailable;
 using testing_media::WriteSyntheticVideo;
 
 std::vector<char> ReadWholeFile(const std::filesystem::path& path) {
@@ -125,10 +118,10 @@ uint64_t PhysicalFootprintBytes() {
     return info.phys_footprint;
 }
 
-class VideoSourceInput : public ::testing::Test {
+class VideoSourceInputBase : public ::testing::Test {
 protected:
     void SetUp() override {
-        ASSERT_FALSE(SharedGop().packets.empty())
+        ASSERT_TRUE(EncoderAvailable())
             << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
         static std::atomic<uint64_t> serial { 0 };
         project_dir = std::filesystem::temp_directory_path() /
@@ -140,9 +133,13 @@ protected:
         std::filesystem::create_directories(temp);
         ASSERT_EQ(setenv("TMPDIR", temp.c_str(), 1), 0);
         tmpdir_overridden = true;
+        // Cases set the payload spill threshold; each starts and ends on the default.
+        if (const char* spill = std::getenv("WALLPAPER_MACHINE_VIDEO_SPILL_BYTES")) previous_spill = spill;
     }
 
     void TearDown() override {
+        if (previous_spill) setenv("WALLPAPER_MACHINE_VIDEO_SPILL_BYTES", previous_spill->c_str(), 1);
+        else unsetenv("WALLPAPER_MACHINE_VIDEO_SPILL_BYTES");
         if (tmpdir_overridden) {
             if (previous_tmpdir) setenv("TMPDIR", previous_tmpdir->c_str(), 1);
             else unsetenv("TMPDIR");
@@ -174,7 +171,26 @@ protected:
     std::filesystem::path           project_dir;
     std::filesystem::path           outside_dir;
     std::optional<std::string> previous_tmpdir;
+    std::optional<std::string> previous_spill;
     bool tmpdir_overridden { false };
+};
+
+/// A case over a source and its media.
+class VideoSourceInput : public VideoSourceInputBase {};
+
+/// How an embedded payload reaches the decoder: from memory, or from an anonymous
+/// file when it is large, and never from a named one.
+class NativePayloads : public VideoSourceInputBase {
+protected:
+    /// Every entry under the private temporary directory, which a staged file would be in.
+    std::set<std::filesystem::path> TemporaryEntries() {
+        std::set<std::filesystem::path> entries;
+        std::error_code                 ec;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(project_dir / "tmp", ec)) {
+            entries.insert(entry.path());
+        }
+        return entries;
+    }
 };
 
 TEST_F(VideoSourceInput, DisplayMatrixSurvivesMetadataProbeAndFrameExtraction) {
@@ -185,7 +201,7 @@ TEST_F(VideoSourceInput, DisplayMatrixSurvivesMetadataProbeAndFrameExtraction) {
         std::string error;
         auto image = CreateVideoProjectImage(project_dir, name, &error);
         ASSERT_NE(image, nullptr) << error;
-        auto source = CreateVideoTextureSource(*image, &error);
+        auto source = CreateVideoTextureSource(image, &error);
         ASSERT_NE(source, nullptr) << error;
         ASSERT_TRUE(source->prime(&error)) << error;
         const auto frame = source->currentFrame();
@@ -218,7 +234,7 @@ TEST_F(VideoSourceInput, PlainLocalFileIsDecodedWhereItLies) {
     EXPECT_EQ(image->header.width, kFrameWidth);
     EXPECT_EQ(image->header.height, kFrameHeight);
 
-    auto source = CreateVideoTextureSource(*image, &error);
+    auto source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     ASSERT_TRUE(source->prime(&error)) << error;
     EXPECT_TRUE(source->currentFrame().valid());
@@ -242,15 +258,15 @@ TEST_F(VideoSourceInput, LargeLocalFileIsNeverResident) {
     std::string error;
     auto        image = CreateVideoProjectImage(project_dir, "large.mp4", &error);
     ASSERT_NE(image, nullptr) << error;
-    auto source = CreateVideoTextureSource(*image, &error);
+    auto source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     ASSERT_TRUE(source->prime(&error)) << error;
     ASSERT_TRUE(source->currentFrame().valid());
 
     const uint64_t after  = PhysicalFootprintBytes();
     const uint64_t growth = after > before ? after - before : 0;
-    // Decoded 640x360 frames and FFmpeg's own buffers are megabytes; a copy of
-    // the media would be tens of them, twice over.
+    // Decoded 640x360 frames and the decoder's own buffers are megabytes; a copy
+    // of the media would be tens of them, twice over.
     EXPECT_LT(growth, 16u * 1024u * 1024u)
         << "opening a " << media_size << " byte file grew the footprint by " << growth << " bytes";
     EXPECT_TRUE(CacheEntriesAddedSince(cache_before).empty());
@@ -270,7 +286,7 @@ TEST_F(VideoSourceInput, ConcurrentOpensOfOneFileEachGetTheirOwnDecoder) {
         threads.emplace_back([&, index]() {
             auto image = CreateVideoProjectImage(project_dir, "shared.mp4", &errors[index]);
             if (image == nullptr) return;
-            auto source = CreateVideoTextureSource(*image, &errors[index]);
+            auto source = CreateVideoTextureSource(image, &errors[index]);
             if (source == nullptr) return;
             if (!source->prime(&errors[index])) return;
             instance_ids[index] = source->sourceStats().instance_id;
@@ -304,7 +320,7 @@ TEST_F(VideoSourceInput, MissingMediaIsReportedAndNotOpened) {
     auto image = CreateVideoProjectImage(project_dir, "vanishing.mp4", &error);
     ASSERT_NE(image, nullptr) << error;
     std::filesystem::remove(media);
-    auto source = CreateVideoTextureSource(*image, &error);
+    auto source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     error.clear();
     EXPECT_FALSE(source->prime(&error));
@@ -321,7 +337,7 @@ TEST_F(VideoSourceInput, EmptyMediaIsReported) {
     EXPECT_NE(error.find("video project media file is empty"), std::string::npos) << error;
 }
 
-TEST_F(VideoSourceInput, CorruptMediaFailsWithoutTouchingTheCache) {
+TEST_F(VideoSourceInput, CorruptMediaFailsWithoutWritingAFile) {
     const auto media = project_dir / "corrupt.mp4";
     {
         std::ofstream output(media, std::ios::binary);
@@ -339,18 +355,15 @@ TEST_F(VideoSourceInput, CorruptMediaFailsWithoutTouchingTheCache) {
     // an unchecked decode.
     auto image  = MakeInlinePayloadImage("corrupt-inline", ReadWholeFile(media));
     error.clear();
-    auto source = CreateVideoTextureSource(*image, &error);
+    auto source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     error.clear();
     EXPECT_FALSE(source->prime(&error));
     EXPECT_FALSE(error.empty());
     source.reset();
 
-    // A rejected payload may leave its extraction behind, but never a partial
-    // one: nothing staged is allowed to survive under the ".part" name.
-    for (const auto& path : CacheEntriesAddedSince(cache_before)) {
-        EXPECT_NE(path.extension(), ".part") << path;
-    }
+    // A rejected payload leaves nothing behind: no file is staged for it.
+    EXPECT_TRUE(CacheEntriesAddedSince(cache_before).empty());
 }
 
 TEST_F(VideoSourceInput, MediaOutsideTheProjectIsRejected) {
@@ -387,94 +400,75 @@ TEST_F(VideoSourceInput, MediaOutsideTheProjectIsRejected) {
     EXPECT_EQ(image->videoFilePath, std::filesystem::canonical(inside).string());
 }
 
-TEST_F(VideoSourceInput, InPackagePayloadIsPublishedWhole) {
-    const auto media = project_dir / "packaged.mp4";
-    ASSERT_TRUE(WriteSyntheticVideo(media, 2, "packaged-" + std::to_string(::getpid())));
+TEST_F(VideoSourceInput, ASourceSharesAnInlinePayloadInsteadOfCopyingIt) {
+    const auto media = project_dir / "shared-payload.mp4";
+    ASSERT_TRUE(WriteSyntheticVideo(media, 96, "shared-payload"));
     const auto payload = ReadWholeFile(media);
-    ASSERT_FALSE(payload.empty());
-    const auto cache_before = VideoCacheEntries();
+    ASSERT_GT(payload.size(), 32u * 1024u * 1024u);
+    // The image is built before the footprint is read, so what is measured is
+    // what making a source adds to a payload that is already resident.
+    auto image = MakeInlinePayloadImage("shared-payload.mp4", payload);
 
-    auto        image = MakeInlinePayloadImage("packaged.mp4", payload);
-    std::string error;
-    auto        source = CreateVideoTextureSource(*image, &error);
+    const uint64_t before = PhysicalFootprintBytes();
+    std::string    error;
+    auto           source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
-    ASSERT_TRUE(source->prime(&error)) << error;
-    EXPECT_TRUE(source->currentFrame().valid());
-
-    const auto added = CacheEntriesAddedSince(cache_before);
-    ASSERT_EQ(added.size(), 1u);
-    const auto& published = *added.begin();
-    EXPECT_EQ(published.extension(), ".mp4");
-    EXPECT_EQ(std::filesystem::file_size(published), payload.size());
+    const uint64_t after  = PhysicalFootprintBytes();
+    const uint64_t growth = after > before ? after - before : 0;
+    EXPECT_LT(growth, 16u * 1024u * 1024u)
+        << "a source on a " << payload.size() << " byte payload grew the footprint by " << growth
+        << " bytes";
 }
 
-TEST_F(VideoSourceInput, ConcurrentPackagedOpensPublishExactlyOneFile) {
-    const auto media = project_dir / "packaged-race.mp4";
-    ASSERT_TRUE(WriteSyntheticVideo(media, 2, "race-" + std::to_string(::getpid())));
+TEST_F(VideoSourceInput, TwoSourcesOnOnePayloadPlayIndependently) {
+    const auto media = project_dir / "twice.mp4";
+    ASSERT_TRUE(WriteSyntheticVideo(media, 2, "twice-" + std::to_string(::getpid())));
     const auto payload = ReadWholeFile(media);
     ASSERT_FALSE(payload.empty());
-    const auto cache_before = VideoCacheEntries();
 
-    constexpr int            kOpeners = 4;
-    std::vector<std::thread> threads;
-    std::vector<std::string> errors(kOpeners);
-    std::atomic<int>         primed { 0 };
-    for (int index = 0; index < kOpeners; ++index) {
-        threads.emplace_back([&, index]() {
-            auto image  = MakeInlinePayloadImage("packaged-race.mp4", payload);
-            auto source = CreateVideoTextureSource(*image, &errors[index]);
-            if (source == nullptr) return;
-            if (!source->prime(&errors[index])) return;
-            if (!source->currentFrame().valid()) return;
-            primed.fetch_add(1);
-        });
+    auto        image = MakeInlinePayloadImage("twice.mp4", payload);
+    std::string error;
+    auto        first  = CreateVideoTextureSource(image, &error);
+    auto        second = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(first, nullptr) << error;
+    ASSERT_NE(second, nullptr) << error;
+    image.reset();
+
+    ASSERT_TRUE(first->prime(&error)) << error;
+    first.reset();
+    // The first source's teardown left the shared bytes alone.
+    ASSERT_TRUE(second->prime(&error)) << error;
+    EXPECT_TRUE(second->currentFrame().valid());
+}
+
+// B-frames: the order the samples are stored in is not the order they are shown in, and the first
+// pictures of the file are decoded before the ones that precede them in time.
+TEST_F(VideoSourceInput, AClipWithBFramesPlaysFromItsFirstFrameInDisplayOrder) {
+    ASSERT_TRUE(testing_media::WriteReorderedVideo(project_dir / "reordered.mp4", "reordered-" + std::to_string(::getpid())));
+    std::string error;
+    auto        image = CreateVideoProjectImage(project_dir, "reordered.mp4", &error);
+    ASSERT_NE(image, nullptr) << error;
+    auto source = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(source, nullptr) << error;
+    ASSERT_TRUE(source->prime(&error)) << error;
+    EXPECT_NEAR(source->currentFrame().pts_seconds, 0.0, 0.001) << "the first picture shown is not the first of the clip";
+    EXPECT_NEAR(source->durationSeconds(), testing_media::kReorderedFrames / 30.0, 0.05);
+
+    double last_pts = -1.0;
+    for (int frame = 0; frame < testing_media::kReorderedFrames; ++frame) {
+        const double clock = frame / 30.0;
+        ASSERT_TRUE(source->syncPlayback(VideoPlaybackState { false, 1.0f, clock }, &error)) << error;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        do {
+            ASSERT_TRUE(source->refreshFrame(&error)) << error;
+            if (std::abs(source->currentFrame().pts_seconds - clock) < 0.034) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        } while (std::chrono::steady_clock::now() < deadline);
+        const double pts = source->currentFrame().pts_seconds;
+        EXPECT_NEAR(pts, clock, 0.034) << "frame " << frame;
+        EXPECT_GE(pts + 1e-9, last_pts) << "frame " << frame << " came out of display order";
+        last_pts = pts;
     }
-    for (auto& thread : threads) thread.join();
-
-    EXPECT_EQ(primed.load(), kOpeners) << errors[0] << "|" << errors[1] << "|" << errors[2] << "|"
-                                       << errors[3];
-    const auto added = CacheEntriesAddedSince(cache_before);
-    ASSERT_EQ(added.size(), 1u) << "racing extractions must converge on one published file";
-    EXPECT_EQ(std::filesystem::file_size(*added.begin()), payload.size());
-}
-
-TEST_F(VideoSourceInput, EvictingTheCacheDoesNotDisturbAnOpenSource) {
-    const auto media = project_dir / "evicted.mp4";
-    ASSERT_TRUE(WriteSyntheticVideo(media, 2, "evicted-" + std::to_string(::getpid())));
-    const auto payload = ReadWholeFile(media);
-    ASSERT_FALSE(payload.empty());
-    const auto cache_before = VideoCacheEntries();
-
-    auto        image = MakeInlinePayloadImage("evicted.mp4", payload);
-    std::string error;
-    auto        source = CreateVideoTextureSource(*image, &error);
-    ASSERT_NE(source, nullptr) << error;
-    ASSERT_TRUE(source->prime(&error)) << error;
-
-    const auto added = CacheEntriesAddedSince(cache_before);
-    ASSERT_EQ(added.size(), 1u);
-    const auto published = *added.begin();
-    ASSERT_TRUE(std::filesystem::remove(published));
-
-    // The decoder holds the file open, so deleting the cache entry underneath it
-    // must not interrupt playback.
-    VideoPlaybackState state;
-    state.scene_elapsed_seconds = 0.5;
-    error.clear();
-    EXPECT_TRUE(source->syncPlayback(state, &error)) << error;
-    error.clear();
-    EXPECT_TRUE(source->refreshFrame(&error)) << error;
-    EXPECT_TRUE(source->currentFrame().valid());
-
-    // A later opener of the same payload re-publishes it rather than inheriting
-    // the hole left by the eviction.
-    auto second_image  = MakeInlinePayloadImage("evicted.mp4", payload);
-    error.clear();
-    auto second_source = CreateVideoTextureSource(*second_image, &error);
-    ASSERT_NE(second_source, nullptr) << error;
-    ASSERT_TRUE(second_source->prime(&error)) << error;
-    ASSERT_TRUE(std::filesystem::exists(published));
-    EXPECT_EQ(std::filesystem::file_size(published), payload.size());
 }
 
 TEST_F(VideoSourceInput, DestroyingASourceMidDecodeCancelsPromptly) {
@@ -485,7 +479,7 @@ TEST_F(VideoSourceInput, DestroyingASourceMidDecodeCancelsPromptly) {
     std::string error;
     auto        image = CreateVideoProjectImage(project_dir, "cancelled.mp4", &error);
     ASSERT_NE(image, nullptr) << error;
-    auto source = CreateVideoTextureSource(*image, &error);
+    auto source = CreateVideoTextureSource(image, &error);
     ASSERT_NE(source, nullptr) << error;
     ASSERT_TRUE(source->prime(&error)) << error;
 
@@ -499,7 +493,7 @@ TEST_F(VideoSourceInput, DestroyingASourceMidDecodeCancelsPromptly) {
     // A source that is dropped before it is ever primed opens nothing at all.
     auto unprimed_image  = CreateVideoProjectImage(project_dir, "cancelled.mp4", &error);
     ASSERT_NE(unprimed_image, nullptr) << error;
-    auto unprimed_source = CreateVideoTextureSource(*unprimed_image, &error);
+    auto unprimed_source = CreateVideoTextureSource(unprimed_image, &error);
     ASSERT_NE(unprimed_source, nullptr) << error;
     unprimed_source.reset();
 
@@ -515,7 +509,7 @@ protected:
         auto        image = CreateVideoProjectImage(project_dir, name, &error);
         EXPECT_NE(image, nullptr) << error;
         if (image == nullptr) return nullptr;
-        auto source = CreateVideoTextureSource(*image, &error);
+        auto source = CreateVideoTextureSource(image, &error);
         EXPECT_NE(source, nullptr) << error;
         return source;
     }
@@ -548,7 +542,7 @@ protected:
 
 // A scene whose graph is rebuilt keeps its videos open, but one that is opened
 // while its clock is already some way into the clip still happens: a scene that
-// falls back to the other renderer, a surface split off a shared decoder. The open
+// is rebuilt after a failure, a surface split off a shared decoder. The open
 // costs what opening at the head costs, however far in the clock is: it waits for
 // no seek, and the seek to the clock is asked for once, on the first call that
 // gives the source that clock after it has opened, and left to land. A source that
@@ -676,375 +670,376 @@ TEST(VideoSeekPolicy, ALandingThatCameLateIsCaughtUpWithByDecodingOn) {
     EXPECT_DOUBLE_EQ(ForwardResyncSeconds(1.0 / 30.0, 8.0, ClockRunOnSeconds(3.6, 1.0)), 4.6);
 }
 
-// A plain video wallpaper has no material, particle, uniform or script that
-// could read system audio, so it must never ask for the system-audio tap.
-TEST_F(VideoSourceInput, PlainVideoProjectNeverReportsAnAudioRequirement) {
-    ASSERT_TRUE(WriteSyntheticVideo(project_dir / "media.mp4", 2, "audio-requirement"));
-    const auto project_json = project_dir / "project.json";
-    std::ofstream(project_json) << R"({"type":"video","file":"media.mp4","title":"clip"})";
+// ---------------------------------------------------------------------------
+// The native backend: how an embedded payload reaches it, what it does when a
+// stream breaks or a medium is one nobody here plays, and the clip's own numbers.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+std::string SpillBytes(uint64_t bytes) { return std::to_string(bytes); }
+} // namespace
+
+TEST_F(NativePayloads, InPackagePayloadIsDecodedFromMemoryAndWritesNoFile) {
+    // Once with the payload kept in memory and once moved into an anonymous file:
+    // neither may leave a file anywhere a staged one would be.
+    for (const uint64_t spill_threshold : { uint64_t { 1ULL << 40 }, uint64_t { 0 } }) {
+        SCOPED_TRACE(spill_threshold);
+        setenv("WALLPAPER_MACHINE_VIDEO_SPILL_BYTES", SpillBytes(spill_threshold).c_str(), 1);
+        const auto media = project_dir / ("packaged-" + std::to_string(spill_threshold) + ".mp4");
+        ASSERT_TRUE(WriteSyntheticVideo(media, 2, "memory-" + std::to_string(spill_threshold)));
+        const auto payload = ReadWholeFile(media);
+        ASSERT_FALSE(payload.empty());
+        const auto cache_before = VideoCacheEntries();
+        const auto temp_before  = TemporaryEntries();
+
+        auto        image = MakeInlinePayloadImage("packaged.mp4", payload);
+        std::string error;
+        auto        source = CreateVideoTextureSource(image, &error);
+        ASSERT_NE(source, nullptr) << error;
+        ASSERT_TRUE(source->prime(&error)) << error;
+        EXPECT_TRUE(source->currentFrame().valid());
+        EXPECT_GT(source->durationSeconds(), 0.0);
+
+        EXPECT_EQ(TemporaryEntries(), temp_before) << "the payload was staged in a visible file";
+        EXPECT_TRUE(CacheEntriesAddedSince(cache_before).empty());
+    }
+}
+
+TEST_F(NativePayloads, ConcurrentPackagedOpensShareNoState) {
+    const auto media = project_dir / "packaged-race.mp4";
+    ASSERT_TRUE(WriteSyntheticVideo(media, 2, "race-native-" + std::to_string(::getpid())));
+    const auto payload = ReadWholeFile(media);
+    ASSERT_FALSE(payload.empty());
+    for (const uint64_t spill_threshold : { uint64_t { 1ULL << 40 }, uint64_t { 0 } }) {
+        SCOPED_TRACE(spill_threshold);
+        setenv("WALLPAPER_MACHINE_VIDEO_SPILL_BYTES", SpillBytes(spill_threshold).c_str(), 1);
+        const auto temp_before = TemporaryEntries();
+
+        constexpr int            kOpeners = 4;
+        std::vector<std::thread> threads;
+        std::vector<std::string> errors(kOpeners);
+        std::vector<uint64_t>    instance_ids(kOpeners, 0);
+        std::atomic<int>         primed { 0 };
+        for (int index = 0; index < kOpeners; ++index) {
+            threads.emplace_back([&, index]() {
+                auto image  = MakeInlinePayloadImage("packaged-race.mp4", payload);
+                auto source = CreateVideoTextureSource(image, &errors[index]);
+                if (source == nullptr) return;
+                if (!source->prime(&errors[index])) return;
+                if (!source->currentFrame().valid()) return;
+                instance_ids[index] = source->sourceStats().instance_id;
+                primed.fetch_add(1);
+            });
+        }
+        for (auto& thread : threads) thread.join();
+
+        EXPECT_EQ(primed.load(), kOpeners) << errors[0] << "|" << errors[1] << "|" << errors[2] << "|" << errors[3];
+        const std::set<uint64_t> distinct(instance_ids.begin(), instance_ids.end());
+        EXPECT_EQ(distinct.size(), static_cast<size_t>(kOpeners));
+        EXPECT_EQ(TemporaryEntries(), temp_before);
+    }
+}
+
+TEST_F(NativePayloads, ReleasingThePayloadBufferKeepsAnOpenSourcePlaying) {
+    const auto media = project_dir / "released.mp4";
+    ASSERT_TRUE(WriteSyntheticVideo(media, 2, "released-" + std::to_string(::getpid())));
+    const auto payload = ReadWholeFile(media);
+    ASSERT_FALSE(payload.empty());
+
+    for (const bool moved_out : { false, true }) {
+        SCOPED_TRACE(moved_out ? "moved to an anonymous file" : "kept in memory");
+        setenv("WALLPAPER_MACHINE_VIDEO_SPILL_BYTES", moved_out ? "0" : "1099511627776", 1);
+        auto                 image   = MakeInlinePayloadImage("released.mp4", payload);
+        std::weak_ptr<Image> watcher = image;
+        std::string          error;
+        auto                 source = CreateVideoTextureSource(image, &error);
+        ASSERT_NE(source, nullptr) << error;
+        // A source a graph rebuild holds is opened later, with the scene's image long gone.
+        image.reset();
+        EXPECT_FALSE(watcher.expired()) << "the source dropped bytes it has not read yet";
+        ASSERT_TRUE(source->prime(&error)) << error;
+        EXPECT_TRUE(source->currentFrame().valid());
+        // A payload that moved into a file no longer needs the buffer, and a source that
+        // kept it would hold a second copy of the video for as long as it plays.
+        EXPECT_EQ(watcher.expired(), moved_out);
+
+        // The payload still plays on: forward, and back across a seek.
+        VideoPlaybackState state;
+        for (const double seconds : { 0.5, 1.5, 0.2 }) {
+            state.scene_elapsed_seconds = seconds;
+            error.clear();
+            ASSERT_TRUE(source->syncPlayback(state, &error)) << error;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            error.clear();
+            EXPECT_TRUE(source->refreshFrame(&error)) << error;
+            EXPECT_TRUE(source->currentFrame().valid());
+        }
+    }
+}
+
+TEST_F(NativePayloads, AStreamThatBreaksPartWayStopsPlayingAndKeepsItsLastPicture) {
+    const auto media = project_dir / "broken.mp4";
+    ASSERT_TRUE(testing_media::WriteLongGopVideo(media, "broken-" + std::to_string(::getpid())));
+    auto bytes = ReadWholeFile(media);
+    ASSERT_FALSE(bytes.empty());
+
+    // Overwrite the compressed data of every sample from the tenth on with noise.
+    {
+        wm::Error error;
+        auto source = wm::OpenFileByteSource(media.string(), &error);
+        ASSERT_NE(source, nullptr) << wm::Describe(error);
+        auto reader = wm::IsoBmffReader::Open(source, &error);
+        ASSERT_NE(reader, nullptr) << wm::Describe(error);
+        ASSERT_GT(reader->samples().size(), 200u);
+        uint32_t state = 7;
+        for (size_t index = 10; index < reader->samples().size(); ++index) {
+            const auto& sample = reader->samples()[index];
+            for (uint32_t offset = 0; offset < sample.size; ++offset) {
+                state = state * 1664525u + 1013904223u;
+                bytes[sample.offset + offset] = static_cast<char>(state >> 24);
+            }
+        }
+    }
+    auto        image = MakeInlinePayloadImage("broken.mp4", bytes);
+    std::string error;
+    auto        source = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(source, nullptr) << error;
+    ASSERT_TRUE(source->prime(&error)) << error;
+    ASSERT_TRUE(source->currentFrame().valid());
+
+    // The decoder gives up on a stream that keeps failing, and says so.
+    bool        stopped = false;
+    std::string reason;
+    VideoPlaybackState state;
+    for (int step = 0; step < 400 && !stopped; ++step) {
+        state.scene_elapsed_seconds = 0.05 * step;
+        std::string step_error;
+        if (!source->syncPlayback(state, &step_error)) {
+            stopped = true;
+            reason  = step_error;
+        } else {
+            // Frames are taken as the clock reaches them, which is what lets the decoder run on.
+            std::string refresh_error;
+            source->refreshFrame(&refresh_error);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    EXPECT_TRUE(stopped) << "a stream of undecodable samples played on forever";
+    EXPECT_FALSE(reason.empty());
+    // The picture on screen stays.
+    EXPECT_TRUE(source->currentFrame().valid());
+}
+
+TEST_F(NativePayloads, AFragmentedMp4IsRefusedWithItsReason) {
+    // A movie fragment box after the movie's own tables is what a reader of
+    // progressive files has to refuse. Nothing else plays it: the reason says so,
+    // and the source holds nothing.
+    const auto media = project_dir / "fragmented.mp4";
+    ASSERT_TRUE(WriteSyntheticVideo(media, 2, "fragmented"));
+    auto payload = ReadWholeFile(media);
+    ASSERT_FALSE(payload.empty());
+    const unsigned char moof[] = { 0, 0, 0, 24, 'm', 'o', 'o', 'f', 0, 0, 0, 16, 'm', 'f', 'h', 'd',
+                                   0, 0, 0, 0, 0, 0, 0, 1 };
+    payload.insert(payload.end(), reinterpret_cast<const char*>(moof), reinterpret_cast<const char*>(moof) + sizeof(moof));
+    {
+        // The fixture has to be what the case says it is.
+        wm::Error error;
+        auto      source = wm::MakeMemoryByteSource(std::vector<std::uint8_t>(payload.begin(), payload.end()));
+        EXPECT_EQ(wm::IsoBmffReader::Open(source, &error), nullptr);
+        ASSERT_EQ(error.kind, wm::ErrorKind::Unsupported) << wm::Describe(error);
+    }
 
     std::string error;
-    auto        scene = SceneWallpaperInputTestAccess::CreateVideoProjectScene(
-        project_json.string(), &error);
-    ASSERT_NE(scene, nullptr) << error;
-
-    std::mutex              mutex;
-    std::condition_variable changed;
-    std::vector<bool>       audio;
-    int                     commits = 0;
-    SceneWallpaper          wallpaper;
-    ASSERT_TRUE(wallpaper.init());
-    wallpaper.setPropertyObject(PROPERTY_AUDIO_REQUIREMENT_CALLBACK,
-        std::make_shared<AudioRequirementCallback>([&](bool requires_audio) {
-            std::lock_guard lock(mutex);
-            audio.push_back(requires_audio);
-            changed.notify_all();
-        }));
-    // The pointer report follows the audio report of the same commit on the
-    // same looper, so seeing it means the audio report has been handled.
-    wallpaper.setPropertyObject(PROPERTY_POINTER_INPUT_CALLBACK,
-        std::make_shared<PointerInputCallback>([&](bool) {
-            std::lock_guard lock(mutex);
-            ++commits;
-            changed.notify_all();
-        }));
-    SceneWallpaperInputTestAccess::PostScene(wallpaper, scene);
-    {
-        std::unique_lock lock(mutex);
-        ASSERT_TRUE(changed.wait_for(lock, std::chrono::seconds(5), [&] { return commits >= 2; }));
-    }
-    wallpaper.shutdown();
-    std::lock_guard lock(mutex);
-    EXPECT_EQ(audio, (std::vector<bool> { false }));
+    const auto  decoders_before = OpenVideoDecoderCount();
+    auto        image           = MakeInlinePayloadImage("fragmented.mp4", payload);
+    auto        source          = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(source, nullptr) << error;
+    EXPECT_FALSE(source->prime(&error));
+    EXPECT_NE(error.find("fragmented"), std::string::npos) << error;
+    EXPECT_EQ(OpenVideoDecoderCount(), decoders_before);
+    EXPECT_FALSE(source->currentFrame().valid());
 }
 
-// A video a scene names as a texture comes in three shapes: a loose file next
-// to the scene, an entry of the scene's package, and a payload packed into a
-// `.tex`. Each one must reach the decoder with the metadata and the first frame
-// that decoding the media file itself gives, and only the packed-in one may be
-// held in memory: a loose file is opened where it lies, and a package entry is
-// streamed into the cache rather than read whole.
-
-/// Forwards a stream and records the largest single read asked of it.
-class ObservedStream final : public fs::IBinaryStream {
-public:
-    ObservedStream(std::shared_ptr<fs::IBinaryStream> inner, std::shared_ptr<usize> largest_read)
-        : m_inner(std::move(inner)), m_largestRead(std::move(largest_read)) {}
-
-    usize Read(void* buffer, usize size) override {
-        *m_largestRead = std::max(*m_largestRead, size);
-        return m_inner->Read(buffer, size);
-    }
-    char* Gets(char* buffer, usize size) override { return m_inner->Gets(buffer, size); }
-    idx   Tell() const override { return m_inner->Tell(); }
-    bool  SeekSet(idx offset) override { return m_inner->SeekSet(offset); }
-    bool  SeekCur(idx offset) override { return m_inner->SeekCur(offset); }
-    bool  SeekEnd(idx offset) override { return m_inner->SeekEnd(offset); }
-    isize Size() const override { return m_inner->Size(); }
-
-protected:
-    usize Write_impl(const void*, usize) override { return 0; }
-
-private:
-    std::shared_ptr<fs::IBinaryStream> m_inner;
-    std::shared_ptr<usize>             m_largestRead;
-};
-
-/// Forwards to a real file system and records what was read through it.
-class ObservedFs final : public fs::Fs {
-public:
-    explicit ObservedFs(std::unique_ptr<fs::Fs> inner): m_inner(std::move(inner)) {}
-
-    bool Contains(std::string_view path) const override { return m_inner->Contains(path); }
-    std::shared_ptr<fs::IBinaryStream> Open(std::string_view path) override {
-        opened.emplace_back(path);
-        auto stream = m_inner->Open(path);
-        if (stream == nullptr) return nullptr;
-        return std::make_shared<ObservedStream>(std::move(stream), largest_read);
-    }
-    std::shared_ptr<fs::IBinaryStreamW> OpenW(std::string_view) override { return nullptr; }
-    std::string HostPath(std::string_view path) const override { return m_inner->HostPath(path); }
-
-    std::vector<std::string> opened;
-    std::shared_ptr<usize>   largest_read { std::make_shared<usize>(0) };
-
-private:
-    std::unique_ptr<fs::Fs> m_inner;
-};
-
-/// What a consumer gets from a video: its first picture and its timing.
-struct FirstPicture {
-    uint32_t width { 0 };
-    uint32_t height { 0 };
-    double   pts_seconds { 0.0 };
-    uint64_t content { 0 };
-    double   duration_seconds { 0.0 };
-    double   frame_duration_seconds { 0.0 };
-
-    bool operator==(const FirstPicture&) const = default;
-};
-
-/// FNV-1a over the first plane, so two decodes can be told to show one picture.
-uint64_t PictureContent(const VideoTextureFrame& frame) {
-    auto* buffer = static_cast<CVPixelBufferRef>(frame.pixel_buffer);
-    if (buffer == nullptr) return 0;
-    if (CVPixelBufferLockBaseAddress(buffer, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) return 0;
-    const bool planar = CVPixelBufferIsPlanar(buffer);
-    const auto* base = static_cast<const uint8_t*>(
-        planar ? CVPixelBufferGetBaseAddressOfPlane(buffer, 0) : CVPixelBufferGetBaseAddress(buffer));
-    const size_t stride = planar ? CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
-                                 : CVPixelBufferGetBytesPerRow(buffer);
-    const size_t rows = planar ? CVPixelBufferGetHeightOfPlane(buffer, 0) : CVPixelBufferGetHeight(buffer);
-    const size_t row_bytes = planar ? CVPixelBufferGetWidthOfPlane(buffer, 0)
-                                    : CVPixelBufferGetWidth(buffer) * 4;
-    uint64_t content = 1469598103934665603ull;
-    for (size_t row = 0; base != nullptr && row < rows; ++row) {
-        for (size_t column = 0; column < row_bytes; ++column) {
-            content = (content ^ base[row * stride + column]) * 1099511628211ull;
-        }
-    }
-    CVPixelBufferUnlockBaseAddress(buffer, kCVPixelBufferLock_ReadOnly);
-    return content;
-}
-
-std::optional<FirstPicture> Decode(const Image& image, std::string* error) {
-    auto source = CreateVideoTextureSource(image, error);
-    if (source == nullptr || ! source->prime(error)) return std::nullopt;
-    const auto frame = source->currentFrame();
-    if (! frame.valid() || frame.pixel_buffer == nullptr) return std::nullopt;
-    return FirstPicture {
-        frame.displayWidth(),         frame.displayHeight(),     frame.pts_seconds,
-        PictureContent(frame),        source->durationSeconds(), source->frameDurationSeconds(),
-    };
-}
-
-class SceneVideoInput : public VideoSourceInput {
-protected:
-    void SetUp() override {
-        VideoSourceInput::SetUp();
-        scene_dir = project_dir / "scene";
-        std::filesystem::create_directories(scene_dir / "materials");
-    }
-
-    /// Encodes a clip outside the scene and records what decoding that file
-    /// itself gives: the result every scene shape has to reproduce.
-    std::vector<char> Clip(const std::string& label, int seconds) {
-        const auto media = project_dir / (label + ".mp4");
-        EXPECT_TRUE(WriteSyntheticVideo(media, seconds, label));
-        std::string error;
-        EXPECT_TRUE(ProbeVideoFileMetadata(media.string(), &expected_metadata, &error)) << error;
-        auto image = CreateVideoProjectImage(project_dir, media.filename().string(), &error);
-        EXPECT_NE(image, nullptr) << error;
-        if (image != nullptr) {
-            auto picture = Decode(*image, &error);
-            EXPECT_TRUE(picture.has_value()) << error;
-            if (picture.has_value()) expected_picture = *picture;
-        }
-        return ReadWholeFile(media);
-    }
-
-    void ExpectClipHeader(const ImageHeader& header) const {
-        EXPECT_TRUE(header.isVideo);
-        EXPECT_EQ(header.durationSeconds, expected_metadata.duration_seconds);
-        EXPECT_GT(header.durationSeconds, 0.0);
-    }
-
-    void ExpectLooseClipHeader(const ImageHeader& header) const {
-        ExpectClipHeader(header);
-        EXPECT_EQ(header.width, static_cast<i32>(expected_metadata.width));
-        EXPECT_EQ(header.height, static_cast<i32>(expected_metadata.height));
-    }
-
-    void ExpectClipPicture(const Image& image) const {
-        std::string error;
-        const auto  picture = Decode(image, &error);
-        ASSERT_TRUE(picture.has_value()) << error;
-        EXPECT_EQ(*picture, expected_picture);
-    }
-
-    ObservedFs& Mount(fs::VFS& vfs, std::unique_ptr<fs::Fs> inner) {
-        auto  observed = std::make_unique<ObservedFs>(std::move(inner));
-        auto& handle   = *observed;
-        EXPECT_TRUE(vfs.Mount("/assets", std::move(observed)));
-        return handle;
-    }
-
-    std::filesystem::path WritePackage(const std::string& entry, const std::vector<char>& payload) {
-        const auto path = project_dir / "scene.pkg";
-        std::ofstream out(path, std::ios::binary | std::ios::trunc);
-        auto write_i32 = [&](int32_t value) { out.write(reinterpret_cast<const char*>(&value), sizeof(value)); };
-        const std::string version = "PKGV0001";
-        write_i32(static_cast<int32_t>(version.size()));
-        out.write(version.data(), static_cast<std::streamsize>(version.size()));
-        write_i32(1);
-        write_i32(static_cast<int32_t>(entry.size()));
-        out.write(entry.data(), static_cast<std::streamsize>(entry.size()));
-        write_i32(0);
-        write_i32(static_cast<int32_t>(payload.size()));
-        out.write(payload.data(), static_cast<std::streamsize>(payload.size()));
-        return path;
-    }
-
-    /// A `.tex` carrying `payload` as its one mip: flagged as a video (texb 2),
-    /// or recognised as one from its bytes (texb 3 of unknown type).
-    void WriteVideoTex(const std::string& name, const std::vector<char>& payload, bool flagged) {
-        std::vector<char> tex;
-        auto raw = [&](const void* data, size_t size) {
-            tex.insert(tex.end(), static_cast<const char*>(data), static_cast<const char*>(data) + size);
-        };
-        auto i32_ = [&](int32_t value) { raw(&value, sizeof(value)); };
-        auto stamp = [&](char kind, int version) {
-            char text[9] {};
-            std::snprintf(text, sizeof(text), "TEX%c%04d", kind, version);
-            raw(text, sizeof(text));
-        };
-        stamp('V', 5);
-        stamp('I', 1);
-        i32_(0);
-        i32_(flagged ? 1 << 5 : 0);
-        for (const int32_t size : { kFrameWidth, kFrameHeight, kFrameWidth, kFrameHeight }) i32_(size);
-        i32_(0);
-        stamp('B', flagged ? 2 : 3);
-        i32_(1);
-        if (! flagged) i32_(static_cast<int32_t>(ImageType::UNKNOWN));
-        i32_(1);
-        i32_(kFrameWidth);
-        i32_(kFrameHeight);
-        i32_(0);
-        i32_(0);
-        i32_(static_cast<int32_t>(payload.size()));
-        raw(payload.data(), payload.size());
-        std::ofstream(scene_dir / "materials" / (name + ".tex"), std::ios::binary)
-            .write(tex.data(), static_cast<std::streamsize>(tex.size()));
-    }
-
-    std::filesystem::path scene_dir;
-    VideoMetadata         expected_metadata;
-    FirstPicture          expected_picture;
-};
-
-TEST_F(SceneVideoInput, ALooseVideoIsOpenedWhereItLies) {
-    const auto payload = Clip("loose", 2);
-    const auto media   = scene_dir / "materials" / "clip.mp4";
-    std::ofstream(media, std::ios::binary).write(payload.data(), static_cast<std::streamsize>(payload.size()));
+TEST_F(NativePayloads, AContainerTheReadersDoNotKnowIsRefusedByName) {
+    // An AVI file: a container the project's readers do not read and nothing else
+    // here does either. The reason says the format is not supported, so the
+    // failure is clear, and no file is staged for another demuxer.
+    std::vector<char> payload(4096, 0);
+    const char        riff[] = { 'R', 'I', 'F', 'F', 0, 0x10, 0, 0, 'A', 'V', 'I', ' ', 'L', 'I', 'S', 'T' };
+    std::copy(std::begin(riff), std::end(riff), payload.begin());
     const auto cache_before = VideoCacheEntries();
 
-    fs::VFS          vfs;
-    auto&            observed = Mount(vfs, fs::CreatePhysicalFs(scene_dir.string()));
-    WPTexImageParser parser(&vfs);
-    ExpectLooseClipHeader(parser.ParseHeader("clip"));
-    auto image = parser.Parse("clip");
-    ASSERT_NE(image, nullptr);
-    ExpectLooseClipHeader(image->header);
-    EXPECT_EQ(image->videoFilePath, media.string());
-    EXPECT_TRUE(image->slots.empty());
-    ExpectClipPicture(*image);
+    std::string error;
+    auto        image  = MakeInlinePayloadImage("movie.avi", payload);
+    auto        source = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(source, nullptr) << error;
+    EXPECT_FALSE(source->prime(&error));
+    EXPECT_NE(error.find("format not supported"), std::string::npos) << error;
+    EXPECT_TRUE(CacheEntriesAddedSince(cache_before).empty());
+    EXPECT_TRUE(TemporaryEntries().empty());
+}
 
-    // Never read: the parser and the decoder both open the file by its path.
-    EXPECT_TRUE(observed.opened.empty()) << observed.opened.front();
+/// A video image whose payload is `bytes`, as the texture parser hands over an embedded WebM or Matroska file.
+std::shared_ptr<Image> MakeEmbeddedClipImage(const std::string& key, const unsigned char* bytes, std::size_t size) {
+    const std::vector<char> payload(reinterpret_cast<const char*>(bytes), reinterpret_cast<const char*>(bytes) + size);
+    auto image = MakeInlinePayloadImage(key, payload);
+    image->header.width  = testing_media::kVp9WebmWidth;
+    image->header.height = testing_media::kVp9WebmHeight;
+    return image;
+}
+
+TEST_F(NativePayloads, AWebmPayloadPlaysAndLoops) {
+    auto        image = MakeEmbeddedClipImage("clip.webm", testing_media::kVp9Webm, sizeof(testing_media::kVp9Webm));
+    std::string error;
+    auto        source = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(source, nullptr) << error;
+    ASSERT_TRUE(source->prime(&error)) << error;
+    EXPECT_NEAR(source->durationSeconds(), 1.0, 0.05);
+    const auto frame = source->currentFrame();
+    ASSERT_TRUE(frame.valid());
+    EXPECT_EQ(frame.width, static_cast<uint32_t>(testing_media::kVp9WebmWidth));
+    EXPECT_EQ(frame.height, static_cast<uint32_t>(testing_media::kVp9WebmHeight));
+    // The clip is a second long: run the clock a pass and a half and it comes round once.
+    double last_pts = frame.pts_seconds;
+    const auto begin = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - begin < std::chrono::milliseconds(1700) && source->loopCount() < 1) {
+        const double clock = std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
+        ASSERT_TRUE(source->syncPlayback(VideoPlaybackState { false, 1.0f, clock }, &error)) << error;
+        ASSERT_TRUE(source->refreshFrame(&error)) << error;
+        EXPECT_GE(source->currentFrame().pts_seconds + 1e-9, last_pts);
+        last_pts = source->currentFrame().pts_seconds;
+        std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    }
+    EXPECT_GE(source->loopCount(), 1u);
+}
+
+TEST_F(NativePayloads, AMatroskaPayloadWithBFramesPlaysInDisplayOrder) {
+    auto        image = MakeEmbeddedClipImage("clip.mkv", testing_media::kH264Matroska, sizeof(testing_media::kH264Matroska));
+    std::string error;
+    auto        source = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(source, nullptr) << error;
+    ASSERT_TRUE(source->prime(&error)) << error;
+    EXPECT_NEAR(source->durationSeconds(), 1.2, 0.05);
+    // Step the clock a frame at a time: every shown time must follow the clock, in order.
+    double last_pts = -1.0;
+    for (int frame = 0; frame < testing_media::kH264MatroskaFrames; ++frame) {
+        const double clock = frame / 30.0;
+        ASSERT_TRUE(source->syncPlayback(VideoPlaybackState { false, 1.0f, clock }, &error)) << error;
+        // The decoder runs on its own thread; give the frame for this time a moment to arrive.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        do {
+            ASSERT_TRUE(source->refreshFrame(&error)) << error;
+            if (std::abs(source->currentFrame().pts_seconds - clock) < 0.034) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        } while (std::chrono::steady_clock::now() < deadline);
+        const double pts = source->currentFrame().pts_seconds;
+        EXPECT_NEAR(pts, clock, 0.034) << "frame " << frame;
+        EXPECT_GE(pts + 1e-9, last_pts) << "frame " << frame << " came out of display order";
+        last_pts = pts;
+    }
+}
+
+TEST_F(NativePayloads, ACodecThisMacCannotDecodeIsRefusedByName) {
+    // A Matroska file whose video is VP8: the reader says so, and nothing plays it.
+    // Built from the VP9 clip by changing the codec id in place ("V_VP9" -> "V_VP8").
+    std::vector<unsigned char> clip(testing_media::kVp9Webm, testing_media::kVp9Webm + sizeof(testing_media::kVp9Webm));
+    const unsigned char        id[] = { 'V', '_', 'V', 'P', '9' };
+    const auto                 at   = std::search(clip.begin(), clip.end(), std::begin(id), std::end(id));
+    ASSERT_NE(at, clip.end());
+    *(at + 4) = '8';
+    auto        image = MakeEmbeddedClipImage("vp8.webm", clip.data(), clip.size());
+    std::string error;
+    auto        source = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(source, nullptr) << error;
+    EXPECT_FALSE(source->prime(&error));
+    EXPECT_NE(error.find("format not supported"), std::string::npos) << error;
+    EXPECT_NE(error.find("VP8"), std::string::npos) << error;
+}
+
+TEST_F(NativePayloads, AClipReportsItsOwnLengthFrameRateAndPictureSize) {
+    const auto media = project_dir / "numbers.mp4";
+    ASSERT_TRUE(WriteSyntheticVideo(media, 3, "numbers"));
+    std::string error;
+    auto        image = CreateVideoProjectImage(project_dir, "numbers.mp4", &error);
+    ASSERT_NE(image, nullptr) << error;
+    auto source = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(source, nullptr) << error;
+    ASSERT_TRUE(source->prime(&error)) << error;
+    // Play on until the pacing estimator has seen enough frames.
+    VideoPlaybackState state;
+    for (int step = 0; step < 100 && source->sourceStats().observed_samples < 12; ++step) {
+        state.scene_elapsed_seconds = step / 30.0;
+        ASSERT_TRUE(source->syncPlayback(state, &error)) << error;
+        ASSERT_TRUE(source->refreshFrame(&error)) << error;
+        std::this_thread::sleep_for(std::chrono::milliseconds(15));
+    }
+    // The clip is three seconds at thirty frames a second, 640x360.
+    EXPECT_NEAR(source->durationSeconds(), 3.0, 0.05);
+    EXPECT_NEAR(source->sourceStats().observed_period_seconds, 1.0 / 30.0, 1e-3);
+    EXPECT_EQ(source->currentFrame().displayWidth(), kFrameWidth);
+    EXPECT_EQ(source->currentFrame().displayHeight(), kFrameHeight);
+}
+
+// What a scene gets for an embedded payload: it is played where it lies.
+TEST_F(VideoSourceInputBase, AnEmbeddedPayloadIsPlayedWithoutStagingAFile) {
+    const auto media = project_dir / "default.mp4";
+    ASSERT_TRUE(WriteSyntheticVideo(media, 2, "default-" + std::to_string(::getpid())));
+    const auto payload = ReadWholeFile(media);
+    ASSERT_FALSE(payload.empty());
+    const auto cache_before = VideoCacheEntries();
+
+    auto        image = MakeInlinePayloadImage("default.mp4", payload);
+    std::string error;
+    auto        source = CreateVideoTextureSource(image, &error);
+    ASSERT_NE(source, nullptr) << error;
+    ASSERT_TRUE(source->prime(&error)) << error;
+    EXPECT_TRUE(source->currentFrame().valid());
+    EXPECT_TRUE(CacheEntriesAddedSince(cache_before).empty()) << "the decoder staged the payload in a file";
+
+    // A WebM payload is played by the same decoder.
+    auto webm = MakeEmbeddedClipImage("default.webm", testing_media::kVp9Webm, sizeof(testing_media::kVp9Webm));
+    auto webm_source = CreateVideoTextureSource(webm, &error);
+    ASSERT_NE(webm_source, nullptr) << error;
+    ASSERT_TRUE(webm_source->prime(&error)) << error;
+    EXPECT_TRUE(webm_source->currentFrame().valid());
     EXPECT_TRUE(CacheEntriesAddedSince(cache_before).empty());
 }
 
-TEST_F(SceneVideoInput, APackagedVideoIsStreamedIntoTheCache) {
-    const auto payload = Clip("packaged-scene-" + std::to_string(::getpid()), 8);
-    ASSERT_GT(payload.size(), 2u * 1024u * 1024u);
-    const auto cache_before = VideoCacheEntries();
+// A clip that runs on past its end starts over, in the clip's own time and in
+// the count of passes. The seam is where one pass ends and the next begins, and
+// what time the first frame of the next one has.
+TEST_F(VideoSourceClock, TheClockRunningPastTheEndStartsTheClipOverAndCountsThePass) {
+    auto source = Open("seam.mp4", 3);
+    ASSERT_NE(source, nullptr);
+    std::string error;
+    ASSERT_TRUE(source->prime(&error)) << error;
+    EXPECT_NEAR(source->durationSeconds(), 3.0, 0.05);
+    EXPECT_EQ(source->loopCount(), 0u);
 
-    fs::VFS vfs;
-    auto&   observed = Mount(vfs, fs::WPPkgFs::CreatePkgFs(WritePackage("materials/clip.mp4", payload).string()));
-    WPTexImageParser parser(&vfs);
-    ExpectLooseClipHeader(parser.ParseHeader("clip"));
-    auto image = parser.Parse("clip");
-    ASSERT_NE(image, nullptr);
-    ExpectLooseClipHeader(image->header);
-    EXPECT_TRUE(image->slots.empty());
-    ExpectClipPicture(*image);
-
-    const std::filesystem::path published = image->videoFilePath;
-    EXPECT_EQ(published.parent_path(), VideoCacheDirectory());
-    EXPECT_EQ(published.extension(), ".mp4");
-    EXPECT_EQ(ReadWholeFile(published), payload);
-    EXPECT_EQ(CacheEntriesAddedSince(cache_before), (std::set<std::filesystem::path> { published }));
-    // Read in pieces, never as one allocation the size of the video.
-    EXPECT_LT(*observed.largest_read, payload.size() / 2);
-
-    // The cache file is named by its content: a second load finds it.
-    auto again = parser.Parse("clip");
-    ASSERT_NE(again, nullptr);
-    EXPECT_EQ(again->videoFilePath, image->videoFilePath);
-}
-
-TEST_F(SceneVideoInput, APackedInVideoKeepsItsMetadataAndFirstFrame) {
-    const auto payload = Clip("packed-in", 2);
-    for (const bool flagged : { true, false }) {
-        SCOPED_TRACE(flagged ? "flagged" : "recognised");
-        WriteVideoTex("clip", payload, flagged);
-
-        fs::VFS          vfs;
-        Mount(vfs, fs::CreatePhysicalFs(scene_dir.string()));
-        WPTexImageParser parser(&vfs);
-        ExpectClipHeader(parser.ParseHeader("clip"));
-        auto image = parser.Parse("clip");
-        ASSERT_NE(image, nullptr);
-        ExpectClipHeader(image->header);
-        EXPECT_TRUE(image->videoFilePath.empty());
-        ASSERT_EQ(image->slots.size(), 1u);
-        ASSERT_EQ(image->slots.front().mipmaps.size(), 1u);
-        const auto& mip = image->slots.front().mipmaps.front();
-        ASSERT_EQ(mip.size, static_cast<isize>(payload.size()));
-        EXPECT_EQ(std::memcmp(mip.data.get(), payload.data(), payload.size()), 0);
-        ExpectClipPicture(*image);
+    // Run the clock across the seam in real time, from a second before it.
+    EXPECT_TRUE(FollowsTheClock(*source, 2.0, 0.15, std::chrono::seconds(2)))
+        << "the frame on offer stayed at " << source->currentFrame().pts_seconds;
+    double last_pts = source->currentFrame().pts_seconds;
+    const auto begin = std::chrono::steady_clock::now();
+    bool crossed = false;
+    while (std::chrono::steady_clock::now() - begin < std::chrono::milliseconds(2500)) {
+        const double clock = 2.0 + std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
+        ASSERT_TRUE(source->syncPlayback(VideoPlaybackState { false, 1.0f, clock }, &error)) << error;
+        ASSERT_TRUE(source->refreshFrame(&error)) << error;
+        const double pts = source->currentFrame().pts_seconds;
+        // Absolute times only ever move on: across the seam they carry on from the pass before.
+        EXPECT_GE(pts + 1e-9, last_pts) << "the frame time went backwards at clock " << clock;
+        last_pts = pts;
+        if (source->loopCount() >= 1) crossed = true;
+        if (crossed && clock > 3.6) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-}
-
-TEST_F(SceneVideoInput, ABrokenVideoFailsInEveryShape) {
-    const auto clip = Clip("broken", 2);
-    std::vector<char> noise(64 * 1024);
-    for (size_t i = 0; i < noise.size(); ++i) noise[i] = static_cast<char>(i * 31 + 7);
-    const std::vector<std::pair<const char*, std::vector<char>>> payloads {
-        { "truncated", std::vector<char>(clip.begin(), clip.begin() + static_cast<long>(clip.size() / 2)) },
-        { "noise", noise },
-        { "empty", {} },
-    };
-    for (const auto& [label, payload] : payloads) {
-        SCOPED_TRACE(label);
-        std::filesystem::remove_all(scene_dir / "materials");
-        std::filesystem::create_directories(scene_dir / "materials");
-        std::ofstream(scene_dir / "materials" / "bad.mp4", std::ios::binary)
-            .write(payload.data(), static_cast<std::streamsize>(payload.size()));
-        {
-            SCOPED_TRACE("loose");
-            fs::VFS          vfs;
-            Mount(vfs, fs::CreatePhysicalFs(scene_dir.string()));
-            WPTexImageParser parser(&vfs);
-            EXPECT_FALSE(parser.ParseHeader("bad").isVideo);
-            EXPECT_EQ(parser.Parse("bad"), nullptr);
-        }
-        {
-            SCOPED_TRACE("packaged");
-            fs::VFS          vfs;
-            Mount(vfs, fs::WPPkgFs::CreatePkgFs(WritePackage("materials/bad.mp4", payload).string()));
-            WPTexImageParser parser(&vfs);
-            EXPECT_FALSE(parser.ParseHeader("bad").isVideo);
-            EXPECT_EQ(parser.Parse("bad"), nullptr);
-        }
-        if (payload.empty()) continue;
-        {
-            SCOPED_TRACE("packed in");
-            WriteVideoTex("bad", payload, true);
-            fs::VFS          vfs;
-            Mount(vfs, fs::CreatePhysicalFs(scene_dir.string()));
-            WPTexImageParser parser(&vfs);
-            EXPECT_EQ(parser.ParseHeader("bad").durationSeconds, 0.0);
-            auto image = parser.Parse("bad");
-            ASSERT_NE(image, nullptr);
-            EXPECT_TRUE(image->header.isVideo);
-            EXPECT_EQ(image->header.durationSeconds, 0.0);
-            std::string error;
-            EXPECT_FALSE(Decode(*image, &error).has_value());
-            EXPECT_FALSE(error.empty());
-        }
-    }
+    EXPECT_TRUE(crossed);
+    EXPECT_GE(source->loopCount(), 1u);
+    // The clip's own time is the wrapped one.
+    EXPECT_LT(source->playbackSeconds(), 1.5);
+    EXPECT_GT(last_pts, 3.0);
 }
 
 } // namespace

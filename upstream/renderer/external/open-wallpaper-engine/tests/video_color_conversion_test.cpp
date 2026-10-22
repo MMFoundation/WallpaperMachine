@@ -214,5 +214,67 @@ TEST(VideoColorConversion, FullSwingChromaSpansTheWholeCodeRange)
     EXPECT_NEAR(limited.chroma_scale, 255.0f / 224.0f, 1e-6f);
 }
 
+TEST(VideoColorConversion, GamutRotationIntoBt709IsDerivedFromThePrimaries)
+{
+    // The published BT.2087 matrix for BT.2020 to BT.709 linear light, which is
+    // what chromaticities and a shared D65 white point have to produce.
+    YuvColorDescription description {};
+    description.primaries = ColorPrimaries::Bt2020;
+    description.transfer = YuvTransfer::Pq;
+    const auto rec2020 = MakeHdrConversionParams(description);
+    EXPECT_EQ(rec2020.convert_gamut, 1u);
+    const float bt2087[3][3] = {
+        { 1.6605f, -0.5876f, -0.0728f },
+        { -0.1246f, 1.1329f, -0.0083f },
+        { -0.0182f, -0.1006f, 1.1187f },
+    };
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            EXPECT_NEAR(rec2020.gamut[row][column], bt2087[row][column], 2e-4f) << row << "," << column;
+        }
+        // White stays white: a rotation between primaries that share a white
+        // point maps (1, 1, 1) to (1, 1, 1).
+        EXPECT_NEAR(rec2020.gamut[row][0] + rec2020.gamut[row][1] + rec2020.gamut[row][2], 1.0f, 1e-4f);
+    }
+
+    description.primaries = ColorPrimaries::P3D65;
+    const auto p3 = MakeHdrConversionParams(description);
+    const float p3_to_709[3][3] = {
+        { 1.2249f, -0.2247f, 0.0f },
+        { -0.0420f, 1.0419f, 0.0f },
+        { -0.0197f, -0.0786f, 1.0979f },
+    };
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            EXPECT_NEAR(p3.gamut[row][column], p3_to_709[row][column], 5e-4f) << row << "," << column;
+        }
+    }
+
+    // BT.709 needs no rotation, and says so instead of multiplying by identity.
+    description.primaries = ColorPrimaries::Bt709;
+    EXPECT_EQ(MakeHdrConversionParams(description).convert_gamut, 0u);
+}
+
+TEST(VideoColorConversion, TheToneMapStartsFromTheStatedPeakElseOneThousandNits)
+{
+    YuvColorDescription description {};
+    description.transfer = YuvTransfer::Pq;
+    EXPECT_EQ(MakeHdrConversionParams(description).source_peak_nits, kDefaultHdrPeakNits);
+    EXPECT_EQ(MakeHdrConversionParams(description).transfer, 1u);
+    description.transfer = YuvTransfer::Hlg;
+    EXPECT_EQ(MakeHdrConversionParams(description).transfer, 2u);
+
+    description.peak_nits = 600.0f;
+    EXPECT_EQ(MakeHdrConversionParams(description).source_peak_nits, 600.0f);
+    // The curves cannot express more than 10000 nits, so a stream that says
+    // otherwise is not believed.
+    description.peak_nits = 40000.0f;
+    EXPECT_EQ(MakeHdrConversionParams(description).source_peak_nits, kMaximumHdrPeakNits);
+    EXPECT_EQ(MakeHdrConversionParams(description).reference_white_nits, kReferenceWhiteNits);
+
+    description.transfer = YuvTransfer::Sdr;
+    EXPECT_EQ(MakeHdrConversionParams(description).transfer, 0u);
+}
+
 } // namespace
 } // namespace wallpaper::video

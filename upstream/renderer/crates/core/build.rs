@@ -1,166 +1,199 @@
+// Clean-room implementation from the WallpaperMachine spec r1c-core-media.md; written without access to the original source.
+//! Build script: generates the Rust declarations of the engine's C ABI, builds the
+//! engine's CMake target and tells cargo how to link the resulting archives.
+
 use std::{
     env,
+    ffi::OsString,
     path::{Path, PathBuf},
 };
 
-fn main() {
-    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
-        return;
-    }
+/// Environment variables whose change must re-run this script.
+const WATCHED_VARIABLES: [&str; 4] = [
+    "CMAKE",
+    "CMAKE_BUILD_TYPE",
+    "OWE_NIX_LIBRARY_PATH",
+    "OWE_MACOSX_DEPLOYMENT_TARGET",
+];
 
-    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let workspace_root = manifest_dir
-        .parent()
-        .and_then(Path::parent)
-        .expect("wallpaper-core lives under crates/")
-        .to_path_buf();
-    let owe_source = workspace_root.join("external/open-wallpaper-engine");
-    let owe_bindings_header = owe_source.join("src/Platform/Apple/SceneWallpaperBindings.h");
-    let owe_bindings_source = owe_source.join("src/Platform/Apple/SceneWallpaperBindings.mm");
-    let cmake_out_dir =
-        PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("open_wallpaper_engine");
-    let cmake_build_dir = cmake_out_dir.join("build");
+/// Static archives, each listed before the archives it depends on.
+const STATIC_ARCHIVES: [&str; 15] = [
+    "wescene-renderer",
+    "wpAudio",
+    "wmSound",
+    "stb_vorbis",
+    "wpLooper",
+    "wpMetalRender",
+    "wpRenderCommon",
+    "wpScene",
+    "wpRGraph",
+    "wpParticle",
+    "wpTimer",
+    "wpUtils",
+    "wmMediaApple",
+    "wmMedia",
+    "wmSurface",
+];
 
-    println!("cargo:rerun-if-env-changed=CMAKE");
-    println!("cargo:rerun-if-env-changed=CMAKE_BUILD_TYPE");
-    println!("cargo:rerun-if-env-changed=OWE_NIX_LIBRARY_PATH");
-    println!("cargo:rerun-if-changed={}", owe_source.display());
-    println!("cargo:rerun-if-changed={}", owe_bindings_header.display());
-    println!("cargo:rerun-if-changed={}", owe_bindings_source.display());
+const SHARED_LIBRARIES: [&str; 4] = ["c++", "lz4", "freetype", "qjs"];
 
-    // Generate bindings before CMake so Rust compilation sees the exact header
-    // that the static OWE archive is about to build. The wrapper header exposes
-    // only primitive C-compatible parameters around OWE renderer methods.
-    generate_owe_backend_bindings(&owe_bindings_header);
+const FRAMEWORKS: [&str; 12] = [
+    "Accelerate",
+    "AppKit",
+    "AudioToolbox",
+    "CoreGraphics",
+    "CoreMedia",
+    "CoreVideo",
+    "Foundation",
+    "IOSurface",
+    "Metal",
+    "OpenGL",
+    "QuartzCore",
+    "VideoToolbox",
+];
 
-    // The deployment target is passed under its own name rather than through
-    // MACOSX_DEPLOYMENT_TARGET. Cargo also builds proc-macro crates for the
-    // host and dlopens them in the running compiler, and a host dylib linked
-    // against a pinned target is rejected at load -- reported as `can't find
-    // crate`, which takes out every crate behind a derive. Keeping the pin out
-    // of cargo's environment and re-supplying it here leaves the C++ engine
-    // built for the same minimum as the app that links it.
-    println!("cargo:rerun-if-env-changed=OWE_MACOSX_DEPLOYMENT_TARGET");
-    let mut config = cmake::Config::new(&owe_source);
-    config
-        .out_dir(&cmake_out_dir)
-        .define("BUILD_TESTING", "OFF")
-        .define("BUILD_TESTS", "OFF")
-        .define("RUST_SHADER_FFI", "ON");
-    if let Some(target) = env::var_os("OWE_MACOSX_DEPLOYMENT_TARGET") {
-        config.define("CMAKE_OSX_DEPLOYMENT_TARGET", target);
-    }
-    let dst = config.build_target("wescene-renderer").build();
-    debug_assert_eq!(dst, cmake_out_dir);
+/// Folders of the CMake build tree (relative to it) that hold the archives above.
+const ARCHIVE_FOLDERS: [&str; 15] = [
+    "src",
+    "src/Audio",
+    "src/Looper",
+    "src/Scene",
+    "src/Scene/Particle",
+    "src/Scene/RenderCommon",
+    "src/Scene/RenderGraph",
+    "src/Scene/Timer",
+    "src/Scene/MetalRender",
+    "src/Utils",
+    "third_party",
+    "Renderer/Sound",
+    "Renderer/Media",
+    "Renderer/Media/Apple",
+    "Renderer/Surface",
+];
 
-    emit_static_link_flags(&cmake_build_dir);
+/// Where everything this script reads or writes lives.
+struct Layout {
+    engine_dir: PathBuf,
+    project_renderer_dir: PathBuf,
+    wrapper_header: PathBuf,
+    wrapper_impl: PathBuf,
+    out_dir: PathBuf,
 }
 
-fn generate_owe_backend_bindings(header: &Path) {
-    let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let bindings_path = out_dir.join("owe_backend_bindings.rs");
+impl Layout {
+    fn discover() -> Self {
+        let crate_dir = PathBuf::from(
+            env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+        );
+        let workspace = crate_dir
+            .ancestors()
+            .nth(2)
+            .expect("the core crate sits two levels below the workspace root");
+        let engine_dir = workspace.join("external/open-wallpaper-engine");
+        let apple = engine_dir.join("src/Platform/Apple");
+        Self {
+            wrapper_header: apple.join("SceneWallpaperBindings.h"),
+            wrapper_impl: apple.join("SceneWallpaperBindings.mm"),
+            project_renderer_dir: workspace.join("../../Renderer"),
+            out_dir: PathBuf::from(env::var_os("OUT_DIR").expect("cargo sets OUT_DIR")),
+            engine_dir,
+        }
+    }
 
-    let bindings = bindgen::Builder::default()
-        .header(header.display().to_string())
+    fn cmake_prefix(&self) -> PathBuf {
+        self.out_dir.join("open_wallpaper_engine")
+    }
+}
+
+fn main() {
+    if env::var("CARGO_CFG_TARGET_OS").map_or(true, |os| os != "macos") {
+        return;
+    }
+    let layout = Layout::discover();
+
+    announce_rerun_triggers(&layout);
+    write_abi_declarations(&layout);
+    build_engine(&layout);
+    announce_link_inputs(&layout.cmake_prefix().join("build"));
+}
+
+fn announce_rerun_triggers(layout: &Layout) {
+    for variable in WATCHED_VARIABLES {
+        println!("cargo:rerun-if-env-changed={variable}");
+    }
+    let watched_paths = [
+        &layout.engine_dir,
+        &layout.project_renderer_dir,
+        &layout.wrapper_header,
+        &layout.wrapper_impl,
+    ];
+    for path in watched_paths {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
+}
+
+/// The declarations must exist before rustc runs, and they must come from the very
+/// header the archive is built against.
+fn write_abi_declarations(layout: &Layout) {
+    let target = layout.out_dir.join("owe_backend_bindings.rs");
+    bindgen::Builder::default()
+        .header(layout.wrapper_header.to_string_lossy())
         .allowlist_function("owe_.*")
         .allowlist_type("owe_.*")
         .derive_default(true)
         .generate_comments(true)
         .layout_tests(false)
-        // OWE can unwind across this boundary. Safe Rust wrappers catch the
-        // unwind and convert it to EngineError::Crash.
+        // The engine may unwind through these calls; the safe wrappers catch it.
         .override_abi(bindgen::Abi::CUnwind, "owe_.*")
         .generate()
-        .expect("failed to generate open-wallpaper-engine backend bindings");
-
-    bindings
-        .write_to_file(&bindings_path)
-        .expect("failed to write open-wallpaper-engine backend bindings");
+        .expect("bindgen could not process the engine's C header")
+        .write_to_file(&target)
+        .expect("could not write the generated engine declarations");
 }
 
-fn emit_static_link_flags(build_dir: &Path) {
-    for path in static_link_search_paths(build_dir)
-        .into_iter()
-        .chain(nix_link_search_paths())
-    {
-        println!("cargo:rustc-link-search=native={}", path.display());
-    }
+/// Builds the renderer target. The deployment target travels under a private variable
+/// name: setting `MACOSX_DEPLOYMENT_TARGET` for cargo would also reach host-side
+/// proc-macro builds, whose dylibs the compiler then refuses to load.
+fn build_engine(layout: &Layout) {
+    let minimum_os: Option<OsString> = env::var_os("OWE_MACOSX_DEPLOYMENT_TARGET");
+    let prefix = layout.cmake_prefix();
 
-    // Dependents are listed before their archive dependencies. This keeps the
-    // final link compatible with linkers that resolve static archives in order.
-    // CMake's wpFs target is INTERFACE-only, so no libwpFs.a is emitted.
-    for lib in [
-        "wescene-renderer",
-        "wpAudio",
-        "wpLooper",
-        // Before wpVulkanRender: the Metal backend reuses that library's pass
-        // analysis and camera helpers, so it has to be resolved first.
-        "wpMetalRender",
-        "wpVulkanRender",
-        "wpScene",
-        "wpVulkan",
-        "wpRGraph",
-        "wpParticle",
-        "wpTimer",
-        "wpUtils",
-        "spirv-reflect-static",
+    let mut cmake_config = cmake::Config::new(&layout.engine_dir);
+    cmake_config.out_dir(&prefix);
+    for (name, value) in [
+        ("BUILD_TESTING", "OFF"),
+        ("BUILD_TESTS", "OFF"),
+        ("RUST_SHADER_FFI", "ON"),
     ] {
-        println!("cargo:rustc-link-lib=static={lib}");
+        cmake_config.define(name, value);
     }
-
-    for lib in [
-        "c++",
-        "vulkan",
-        "lz4",
-        "freetype",
-        "avformat",
-        "avcodec",
-        "avutil",
-        "swresample",
-        "qjs",
-        "glslang",
-        "SPIRV",
-        "glslang-default-resource-limits",
-    ] {
-        println!("cargo:rustc-link-lib=dylib={lib}");
+    if let Some(minimum_os) = minimum_os {
+        cmake_config.define("CMAKE_OSX_DEPLOYMENT_TARGET", minimum_os);
     }
-
-    for framework in [
-        "Accelerate",
-        "AppKit",
-        "CoreGraphics",
-        "CoreMedia",
-        "CoreVideo",
-        "Foundation",
-        "IOSurface",
-        "Metal",
-        "OpenGL",
-        "QuartzCore",
-        "VideoToolbox",
-    ] {
-        println!("cargo:rustc-link-lib=framework={framework}");
-    }
+    let produced = cmake_config.build_target("wescene-renderer").build();
+    debug_assert_eq!(produced, prefix);
 }
 
-fn static_link_search_paths(build_dir: &Path) -> Vec<PathBuf> {
-    vec![
-        build_dir.join("src"),
-        build_dir.join("src/Audio"),
-        build_dir.join("src/Looper"),
-        build_dir.join("src/Scene"),
-        build_dir.join("src/Scene/Particle"),
-        build_dir.join("src/Scene/RenderGraph"),
-        build_dir.join("src/Scene/Timer"),
-        build_dir.join("src/Scene/MetalRender"),
-        build_dir.join("src/Scene/VulkanRender"),
-        build_dir.join("src/Utils"),
-        build_dir.join("src/Vulkan"),
-        build_dir.join("third_party/spirv_reflect"),
-    ]
-}
+fn announce_link_inputs(build_tree: &Path) {
+    let extra_dirs = env::var_os("OWE_NIX_LIBRARY_PATH")
+        .map(|joined| env::split_paths(&joined).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let search_dirs = ARCHIVE_FOLDERS
+        .iter()
+        .map(|folder| build_tree.join(folder))
+        .chain(extra_dirs);
+    for dir in search_dirs {
+        println!("cargo:rustc-link-search=native={}", dir.display());
+    }
 
-fn nix_link_search_paths() -> Vec<PathBuf> {
-    env::var_os("OWE_NIX_LIBRARY_PATH")
-        .map(|paths| env::split_paths(&paths).collect())
-        .unwrap_or_default()
+    let kinds: [(&str, &[&str]); 3] = [
+        ("static", &STATIC_ARCHIVES),
+        ("dylib", &SHARED_LIBRARIES),
+        ("framework", &FRAMEWORKS),
+    ];
+    for (kind, names) in kinds {
+        for name in names {
+            println!("cargo:rustc-link-lib={kind}={name}");
+        }
+    }
 }

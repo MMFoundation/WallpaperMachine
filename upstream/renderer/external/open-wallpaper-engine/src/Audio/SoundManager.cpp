@@ -1,11 +1,14 @@
+// Clean-room implementation from the WallpaperMachine spec e5-text-audio-video-runtime.md; written without access to the original source.
 #include "Audio/SoundManager.h"
-#include "Audio/FfmpegSoundStream.hpp"
+#include "Audio/SoundStreamFactory.hpp"
 #include "miniaudio-wrapper.hpp"
 #include "Fs/IBinaryStream.h"
 #include "Core/Literals.hpp"
 #include "Utils/Logging.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
@@ -16,166 +19,140 @@
 using namespace wallpaper;
 using namespace wallpaper::audio;
 
+// One mounted stream, decoded ahead of the device on its own worker so a slow or failing
+// stream never delays the audio thread or the other streams. The decoded audio waits in a
+// small set of equal blocks (together just under half a second at the device rate). The
+// worker fills a block that nobody reads and then publishes it; the audio thread consumes
+// published blocks from the front. Neither side waits for the other.
 class Channel_Impl : public miniaudio::Channel {
+    static constexpr size_t kBlockCount   = 12;
+    static constexpr size_t kBlocksPerSec = 25; // a block is 1/25 s of device time
+
 public:
-    explicit Channel_Impl(std::shared_ptr<SoundStream> ss): m_ss(std::move(ss)) {}
-    ~Channel_Impl() override { StopWorker(); }
+    explicit Channel_Impl(std::shared_ptr<SoundStream> stream): m_ss { std::move(stream) } {}
+    ~Channel_Impl() override { HaltWorker(); }
 
     ma_uint64 NextPcmData(void* pData, ma_uint32 frameCount) override {
-        const auto channel_count = m_desc.phyChannels;
-        if (pData == nullptr || frameCount == 0 || channel_count == 0) return frameCount;
+        const size_t width = m_width.load(std::memory_order_relaxed);
+        if (pData == nullptr || frameCount == 0 || width == 0) return frameCount;
+        float* const dst = static_cast<float*>(pData);
 
-        const auto requested_samples = static_cast<std::size_t>(frameCount) * channel_count;
-        audio::ClearInterleavedF32(pData, requested_samples);
-
-        std::unique_lock<std::mutex> lock { m_mutex, std::try_to_lock };
-        if (! lock.owns_lock() || m_ring.empty()) return frameCount;
-
-        const auto frames_to_copy =
-            std::min<std::size_t>(frameCount, BufferedFramesLocked());
-        ReadFramesLocked(static_cast<float*>(pData), frames_to_copy);
-        // Wake the decoder only once it has a full chunk of room to fill;
-        // the worker's wait predicate would reject any earlier wake.
-        const bool wake_worker = FreeFramesLocked() >= DecodeChunkFrames(m_desc);
-        lock.unlock();
-        if (wake_worker) m_cv.notify_one();
+        // The layout owner (PassDeviceDesc) may be rebuilding the blocks: play silence then.
+        std::unique_lock<std::mutex> layout { m_layout_mutex, std::try_to_lock };
+        size_t                       copied = 0;
+        if (layout.owns_lock() && m_width_laid_out == width) copied = Drain(dst, frameCount, width);
+        std::fill(dst + copied * width, dst + static_cast<size_t>(frameCount) * width, 0.0f);
+        // A block was freed (or the buffer ran dry): wake the sleeping worker. Every cycle
+        // that finds room tries again, so a notification skipped because the worker held
+        // the mutex is made up one device cycle later.
+        if (m_ready.load(std::memory_order_acquire) < kBlockCount) WakeWorker();
         return frameCount;
     }
 
     void PassDeviceDesc(const miniaudio::DeviceDesc& desc) override {
-        StopWorker();
-        m_ss->PassDesc({ .channels = desc.phyChannels, .sampleRate = desc.sampleRate });
+        HaltWorker();
+        if (m_ss) m_ss->PassDesc({ desc.phyChannels, desc.sampleRate });
+        const bool usable = desc.phyChannels != 0 && desc.sampleRate != 0;
         {
-            std::lock_guard<std::mutex> lock { m_mutex };
-            m_desc = desc;
-            m_read_frame = 0;
-            m_buffered_frames = 0;
-            const auto capacity_frames = BufferCapacityFrames(desc);
-            m_ring.assign(static_cast<std::size_t>(capacity_frames) * desc.phyChannels, 0.0f);
+            std::lock_guard<std::mutex> layout { m_layout_mutex };
+            m_ready.store(0, std::memory_order_relaxed);
+            m_read_block = m_write_block = m_read_offset = 0;
+            m_width_laid_out                            = desc.phyChannels;
+            m_block_frames = usable ? std::max<size_t>(desc.sampleRate / kBlocksPerSec, 1) : 0;
+            m_storage.assign(usable ? kBlockCount * m_block_frames * desc.phyChannels : 0, 0.0f);
         }
-        if (desc.phyChannels != 0 && desc.sampleRate != 0) StartWorker();
+        m_width.store(desc.phyChannels, std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> wake { m_wake_mutex };
+            m_halt = false;
+        }
+        if (usable && m_ss) m_worker = std::thread([this] { DecodeBlocks(); });
     }
 
 private:
-    static ma_uint32 BufferCapacityFrames(const miniaudio::DeviceDesc& desc) {
-        if (desc.sampleRate == 0) return 0;
-        return std::max<ma_uint32>(desc.sampleRate / 2, 2048);
-    }
-
-    static ma_uint32 DecodeChunkFrames(const miniaudio::DeviceDesc& desc) {
-        if (desc.sampleRate == 0) return 512;
-        return std::max<ma_uint32>(512, std::min<ma_uint32>(desc.sampleRate / 50, 2048));
-    }
-
-    void StartWorker() {
-        {
-            std::lock_guard<std::mutex> lock { m_mutex };
-            m_stop_worker = false;
+    // Audio side. Moves up to `want` buffered frames into dst; returns how many.
+    size_t Drain(float* dst, size_t want, size_t width) {
+        size_t got = 0;
+        while (got < want && m_ready.load(std::memory_order_acquire) > 0) {
+            const float* src   = m_storage.data() + m_read_block * m_block_frames * width;
+            const size_t avail = m_block_frames - m_read_offset;
+            const size_t n     = std::min(avail, want - got);
+            std::memcpy(dst + got * width, src + m_read_offset * width, n * width * sizeof(float));
+            got += n;
+            m_read_offset += n;
+            if (m_read_offset == m_block_frames) {
+                m_read_offset = 0;
+                m_read_block  = (m_read_block + 1) % kBlockCount;
+                m_ready.fetch_sub(1, std::memory_order_release);
+            }
         }
-        m_worker = std::thread([this] {
-            WorkerLoop();
-        });
+        return got;
     }
 
-    void StopWorker() {
-        {
-            std::lock_guard<std::mutex> lock { m_mutex };
-            m_stop_worker = true;
+    // Never blocks: if the worker holds the mutex it is about to look at the count anyway,
+    // and the next audio cycle asks again.
+    void WakeWorker() {
+        std::unique_lock<std::mutex> wake { m_wake_mutex, std::try_to_lock };
+        if (wake.owns_lock()) {
+            wake.unlock();
+            m_wake.notify_one();
         }
-        m_cv.notify_all();
+    }
+
+    void HaltWorker() {
+        {
+            std::lock_guard<std::mutex> wake { m_wake_mutex };
+            m_halt = true;
+        }
+        m_wake.notify_all();
         if (m_worker.joinable()) m_worker.join();
     }
 
-    void WorkerLoop() {
-        while (true) {
-            miniaudio::DeviceDesc desc {};
-            ma_uint32             frames_to_decode = 0;
+    // Worker thread: runs while the layout is usable. It sleeps, with no timer, while every
+    // block is full.
+    void DecodeBlocks() {
+        const size_t width = m_width_laid_out;
+        for (;;) {
             {
-                std::unique_lock<std::mutex> lock { m_mutex };
-                m_cv.wait(lock, [this] {
-                    return m_stop_worker || FreeFramesLocked() >= DecodeChunkFrames(m_desc);
+                std::unique_lock<std::mutex> wake { m_wake_mutex };
+                m_wake.wait(wake, [this] {
+                    return m_halt || m_ready.load(std::memory_order_acquire) < kBlockCount;
                 });
-                if (m_stop_worker) return;
-                desc = m_desc;
-                frames_to_decode = std::min<ma_uint32>(
-                    DecodeChunkFrames(desc),
-                    static_cast<ma_uint32>(FreeFramesLocked()));
+                if (m_halt) return;
+                if (m_ready.load(std::memory_order_acquire) >= kBlockCount) continue;
             }
-
-            if (desc.phyChannels == 0 || frames_to_decode == 0) continue;
-
-            // Zero-filled like the old per-chunk vector: a short or empty
-            // read still queues silence for the unread frames.
-            m_decoded.assign(static_cast<std::size_t>(frames_to_decode) * desc.phyChannels,
-                             0.0f);
-            uint64_t frames_read = m_ss->NextPcmData(m_decoded.data(), frames_to_decode);
-            if (frames_read == 0) frames_read = frames_to_decode;
-            frames_read = std::min<uint64_t>(frames_read, frames_to_decode);
-
-            {
-                std::lock_guard<std::mutex> lock { m_mutex };
-                if (m_stop_worker) return;
-                WriteFramesLocked(m_decoded.data(), static_cast<std::size_t>(frames_read));
-            }
-            m_cv.notify_all();
+            float* const slot = m_storage.data() + m_write_block * m_block_frames * width;
+            // Whatever the stream does not deliver (a short read, an ended, empty or
+            // failing stream) stays silence, and the block still counts as decoded time.
+            const size_t read = std::min<size_t>(
+                m_ss->NextPcmData(slot, static_cast<uint32_t>(m_block_frames)), m_block_frames);
+            std::fill(slot + read * width, slot + m_block_frames * width, 0.0f);
+            m_write_block = (m_write_block + 1) % kBlockCount;
+            m_ready.fetch_add(1, std::memory_order_release);
         }
     }
 
-    std::size_t CapacityFramesLocked() const {
-        if (m_desc.phyChannels == 0) return 0;
-        return m_ring.size() / m_desc.phyChannels;
-    }
-
-    std::size_t BufferedFramesLocked() const { return m_buffered_frames; }
-
-    std::size_t FreeFramesLocked() const {
-        return CapacityFramesLocked() - BufferedFramesLocked();
-    }
-
-    void ReadFramesLocked(float* output, std::size_t frame_count) {
-        const auto channel_count = static_cast<std::size_t>(m_desc.phyChannels);
-        const auto capacity = CapacityFramesLocked();
-        for (std::size_t copied = 0; copied < frame_count;) {
-            const auto frames_until_wrap = capacity - m_read_frame;
-            const auto frames_now = std::min(frame_count - copied, frames_until_wrap);
-            std::memcpy(
-                output + copied * channel_count,
-                m_ring.data() + m_read_frame * channel_count,
-                frames_now * channel_count * sizeof(float));
-            m_read_frame = (m_read_frame + frames_now) % capacity;
-            copied += frames_now;
-            m_buffered_frames -= frames_now;
-        }
-    }
-
-    void WriteFramesLocked(const float* input, std::size_t frame_count) {
-        const auto channel_count = static_cast<std::size_t>(m_desc.phyChannels);
-        const auto capacity = CapacityFramesLocked();
-        const auto frames_to_write = std::min(frame_count, FreeFramesLocked());
-        std::size_t write_frame = (m_read_frame + m_buffered_frames) % capacity;
-        for (std::size_t written = 0; written < frames_to_write;) {
-            const auto frames_until_wrap = capacity - write_frame;
-            const auto frames_now = std::min(frames_to_write - written, frames_until_wrap);
-            std::memcpy(
-                m_ring.data() + write_frame * channel_count,
-                input + written * channel_count,
-                frames_now * channel_count * sizeof(float));
-            write_frame = (write_frame + frames_now) % capacity;
-            written += frames_now;
-            m_buffered_frames += frames_now;
-        }
-    }
-
-    miniaudio::DeviceDesc        m_desc;
     std::shared_ptr<SoundStream> m_ss;
-    std::mutex                   m_mutex;
-    std::condition_variable      m_cv;
-    std::thread                  m_worker;
-    std::vector<float>           m_ring;
-    std::vector<float>           m_decoded; // worker-thread decode scratch
-    std::size_t                  m_read_frame { 0 };
-    std::size_t                  m_buffered_frames { 0 };
-    bool                         m_stop_worker { false };
+
+    std::thread m_worker;
+
+    // Wake-up of the worker (stop request and "a block was freed").
+    std::mutex              m_wake_mutex;
+    std::condition_variable m_wake;
+    bool                    m_halt { false };
+
+    // Layout and storage: rebuilt only while the worker is joined.
+    std::mutex                m_layout_mutex;
+    std::vector<float>        m_storage;
+    size_t                    m_block_frames { 0 };
+    size_t                    m_width_laid_out { 0 };
+    std::atomic<size_t>       m_width { 0 };
+
+    // Block cursors: the reader owns read_*, the worker owns write_block, `ready` links them.
+    std::atomic<size_t> m_ready { 0 };
+    size_t              m_read_block { 0 };
+    size_t              m_read_offset { 0 };
+    size_t              m_write_block { 0 };
 };
 
 std::unique_ptr<SoundStream>
@@ -183,13 +160,13 @@ wallpaper::audio::CreateSoundStream(std::shared_ptr<wallpaper::fs::IBinaryStream
                                     const SoundStream::Desc&                      desc,
                                     SoundStream::Options options) {
     std::string error;
-    auto        sound_stream = CreateFfmpegSoundStream(std::move(stream), &error, options);
-    if (sound_stream == nullptr) {
-        LOG_ERROR("failed to create FFmpeg sound stream: %s", error.c_str());
+    auto        sound = CreateSceneSoundStream(std::move(stream), &error, options);
+    if (sound == nullptr) {
+        LOG_ERROR("failed to create sound stream: %s", error.c_str());
         return nullptr;
     }
-    sound_stream->PassDesc(desc);
-    return sound_stream;
+    sound->PassDesc(desc);
+    return sound;
 }
 
 class SoundManager::impl : NoCopy, NoMove {

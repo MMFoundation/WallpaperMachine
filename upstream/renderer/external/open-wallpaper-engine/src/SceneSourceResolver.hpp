@@ -26,15 +26,10 @@ struct SceneSourceResolution {
     SceneSourcePaths          scene_source;
 };
 
-bool ResolveSceneSourcePaths(
-    const std::string&      source,
-    SceneSourceResolution*  resolved,
-    std::string*            error);
-
-bool ResolveSceneSourcePaths(
-    const std::string& source,
-    SceneSourcePaths* resolved,
-    std::string* error);
+bool ResolveSceneSourcePaths(const std::string& source, SceneSourceResolution* resolved,
+                             std::string* error);
+bool ResolveSceneSourcePaths(const std::string& source, SceneSourcePaths* resolved,
+                             std::string* error);
 
 namespace fs
 {

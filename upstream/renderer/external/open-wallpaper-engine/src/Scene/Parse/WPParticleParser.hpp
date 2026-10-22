@@ -11,7 +11,7 @@ namespace wallpaper
 /// override is measured against.
 struct ParticleColorDefinition {
     /// Representative colour of the file (the last colour source found), in 0-1.
-    Eigen::Vector3f defaultColor { 1.0f, 1.0f, 1.0f };
+    linalg::Vector3f defaultColor { 1.0f, 1.0f, 1.0f };
     /// Whether any colour initializer or colour operator exists. A file without
     /// one takes the override colour as a plain tint.
     bool hasColor { false };

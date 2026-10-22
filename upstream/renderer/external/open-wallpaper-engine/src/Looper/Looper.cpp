@@ -1,263 +1,273 @@
+// Clean-room implementation from the WallpaperMachine spec e7-small-units.md; written without access to the original source.
 #include "Looper.hpp"
+
 #include <algorithm>
+#include <deque>
+#include <limits>
+#include <system_error>
 
-#include "Core/Visitors.hpp"
-#include "Utils/Logging.h"
-
-#include <cassert>
-#if defined(__APPLE__)
-#include <pthread.h>
+#ifdef __APPLE__
+#    include <pthread.h>
 #endif
+
+#include "Utils/Logging.h"
 
 using namespace wallpaper::looper;
 
-using Lock = std::unique_lock<std::mutex>;
+namespace
+{
+// An identifier no other registration of this process has, never 0.
+handler_id NextHandlerId() {
+    static std::atomic<uint32_t> counter { 0 };
+    const uint32_t               n = counter.fetch_add(1, std::memory_order_relaxed);
+    return static_cast<handler_id>(n % static_cast<uint32_t>(std::numeric_limits<handler_id>::max())) + 1;
+}
 
-void Looper::setName(std::string_view name) { m_name.assign(name); }
+void NameCurrentThread(const std::string& name) {
+#ifdef __APPLE__
+    // The platform keeps 63 bytes and a longer name makes the call fail.
+    pthread_setname_np(name.substr(0, 63).c_str());
+#else
+    (void)name;
+#endif
+}
+} // namespace
+
+struct Looper::Shared {
+    std::mutex                             mutex;
+    std::condition_variable                wake;
+    std::deque<std::shared_ptr<Message>>   queue;
+    std::map<handler_id, std::weak_ptr<Handler>> handlers;
+    bool                                   running { false };
+    uint64_t                               generation { 0 };
+    std::thread                            thread;
+};
+
+Looper::Looper(): m_shared(std::make_shared<Shared>()) {}
+
+Looper::~Looper() { stop(); }
+
+void Looper::setName(std::string_view name) {
+    std::lock_guard lock(m_shared->mutex);
+    m_name = std::string(name);
+}
 
 void Looper::setLogScope(uint64_t scope) { m_log_scope = scope; }
 
 const std::string_view Looper::name() const { return m_name; }
 
-Looper::Looper() {}
-Looper::~Looper() { stop(); }
-
-bool Looper::loop() {
-    MessageWrapper msg;
-    {
-        Lock lock(m_mutex);
-        if (! m_running) return false;
-        if (m_msg_queue.empty()) {
-            m_condition.wait(lock);
-            return true;
-        }
-        msg = *m_msg_queue.begin();
-        m_msg_queue.erase(m_msg_queue.begin());
-    }
-    msg.msg->deliver();
-    if (msg.msg->cleanAfterDeliver()) {
-        msg.msg->cleanContent();
-    }
-    return true;
-}
-
 status_t Looper::start() {
-    Lock lock(m_mutex);
-    if (m_running) return status_t::INVALID_OPERATION;
-    m_running = true;
-    // using weak_ptr to allow looper deleted at looper->loop() end
-    std::weak_ptr<Looper> wlooper = shared_from_this();
-    std::string           name { m_name };
-    const uint64_t        log_scope { m_log_scope };
-    m_thread                      = std::thread(
-        [](std::weak_ptr<Looper> wlooper, std::string name, uint64_t log_scope) {
-            SetWallpaperLogScope(log_scope);
-#if defined(__APPLE__)
-            std::string thread_name = "owe-" + name;
-            pthread_setname_np(thread_name.substr(0, 63).c_str());
-#endif
-            Looper* looper = nullptr;
-            {
-                auto locked = wlooper.lock();
-                if (locked == nullptr) {
-                    LOG_ERROR("%s looper could not start because owner expired", name.c_str());
+    std::lock_guard lock(m_shared->mutex);
+    if (m_shared->running) return status_t::INVALID_OPERATION;
+
+    const uint64_t generation = ++m_shared->generation;
+    m_shared->running         = true;
+    try {
+        m_shared->thread = std::thread(
+            [shared = m_shared, owner = weak_from_this(), name = m_name, scope = m_log_scope, generation] {
+                SetWallpaperLogScope(scope);
+                NameCurrentThread(name);
+                if (owner.expired()) {
+                    LOG_ERROR("looper \"%s\" lost its owner before its thread began", name.c_str());
                     return;
                 }
-                looper = locked.get();
-                LOG_INFO("%s looper started", looper->name().data());
-            }
-            // expired is safe here
-            // 1. looper deleted at another thread, will join this, expired() allways true
-            // 2. looper deleted at this thread, only in loop(), expired() reliable
-            while (! wlooper.expired() && looper->m_running && looper->loop()) {
-            }
-            LOG_INFO("%s looper stopped", name.c_str());
-        },
-        wlooper,
-        name,
-        log_scope);
+                LOG_INFO("looper \"%s\" started", name.c_str());
+                for (;;) {
+                    std::shared_ptr<Message> message;
+                    {
+                        std::unique_lock lk(shared->mutex);
+                        shared->wake.wait(lk, [&] {
+                            return ! shared->running || shared->generation != generation ||
+                                   ! shared->queue.empty();
+                        });
+                        if (! shared->running || shared->generation != generation) break;
+                        message = std::move(shared->queue.front());
+                        shared->queue.pop_front();
+                    }
+                    // Held for this one delivery only: when the handler lets go of the
+                    // last other owner, the looper ends here, on its own thread.
+                    const std::shared_ptr<Looper> self = owner.lock();
+                    if (! self) break;
+                    self->deliver(message);
+                }
+                LOG_INFO("looper \"%s\" stopped", name.c_str());
+            });
+    } catch (const std::system_error& e) {
+        m_shared->running = false;
+        LOG_ERROR("looper \"%s\" can't start its thread: %s", m_name.c_str(), e.what());
+        return status_t::INVALID_OPERATION;
+    }
     return status_t::OK;
 }
 
 void Looper::stop() {
-    if (! m_running) return;
-
-    std::thread thd;
+    std::thread worker;
     {
-        Lock lock(m_mutex);
-        m_thread.swap(thd);
-        m_running = false;
-        m_condition.notify_one();
+        std::lock_guard lock(m_shared->mutex);
+        if (! m_shared->running) return;
+        m_shared->running = false;
+        worker            = std::move(m_shared->thread);
     }
-    if (thd.joinable()) {
-        if (std::this_thread::get_id() == thd.get_id()) {
-            LOG_INFO("detach %s looper", m_name.c_str());
-            thd.detach();
-        } else {
-            thd.join();
-        }
+    m_shared->wake.notify_all();
+    if (! worker.joinable()) return;
+    if (worker.get_id() == std::this_thread::get_id()) {
+        // A handler is taking down its own looper: the thread finishes the message
+        // it is in and leaves.
+        LOG_INFO("looper \"%s\" stopped from its own thread, detaching it", m_name.c_str());
+        worker.detach();
+    } else {
+        worker.join();
     }
 }
 
 void Looper::post(const std::shared_ptr<Message>& msg) {
+    if (! msg) return;
     {
-        Lock lock(m_mutex);
-        m_msg_queue.insert(m_msg_queue.end(), { msg });
+        std::lock_guard lock(m_shared->mutex);
+        m_shared->queue.push_back(msg);
     }
-    m_condition.notify_one();
+    m_shared->wake.notify_one();
+}
+
+void Looper::deliver(const std::shared_ptr<Message>& msg) {
+    const std::shared_ptr<Handler> handler = msg->m_route.to.lock();
+    // Only a handler that still exists and is still registered here hears it.
+    if (! handler || ! handler->isBoundTo(this, msg->m_route.at.id)) return;
+    handler->onMessageReceived(msg);
 }
 
 handler_id Looper::registerHandler(const std::shared_ptr<Handler>& handler) {
-    static std::atomic<handler_id> next_handle_id { 1 };
-    if (handler->setID(next_handle_id++, shared_from_this())) {
-        Lock lock(m_mutex);
-        m_reg_handler[handler->id()] = handler;
-        return handler->id();
+    if (! handler) return Handler::INVALID_HANDLER_ID;
+    std::weak_ptr<Looper> self = weak_from_this();
+    if (self.expired()) {
+        LOG_ERROR("a looper that nobody owns can't register handlers");
+        return Handler::INVALID_HANDLER_ID;
     }
-    return Handler::INVALID_HANDLER_ID;
+    const handler_id id = NextHandlerId();
+    std::lock_guard  lock(m_shared->mutex);
+    if (! handler->setID(id, self)) return Handler::INVALID_HANDLER_ID;
+    m_shared->handlers[id] = handler;
+    return id;
 }
 
 void Looper::unregisterHandler(handler_id id) {
-    Lock lock(m_mutex);
-    if (m_reg_handler.count(id) > 0) {
-        auto handle = m_reg_handler[id].lock();
-        if (handle != nullptr) {
-            handle->setID(id, {});
-        }
-        m_reg_handler.erase(id);
+    std::weak_ptr<Handler> entry;
+    {
+        std::lock_guard lock(m_shared->mutex);
+        const auto      it = m_shared->handlers.find(id);
+        if (it == m_shared->handlers.end()) return;
+        entry = std::move(it->second);
+        m_shared->handlers.erase(it);
     }
+    if (const auto handler = entry.lock()) handler->clearID(id);
 }
 
 Handler::Handler(): m_id(INVALID_HANDLER_ID) {}
 
-int32_t               Handler::id() const { return m_id; }
-std::weak_ptr<Looper> Handler::getLooper() const { return m_looper; };
-
-bool Handler::setID(handler_id id, std::weak_ptr<Looper> looper) {
-    handler_id iv = INVALID_HANDLER_ID;
-    if (m_id.compare_exchange_weak(iv, id)) {
-        m_looper = looper;
-        return true;
-    }
-    return false;
+int32_t Handler::id() const {
+    std::lock_guard lock(m_bind_mutex);
+    return m_id.load();
+}
+std::weak_ptr<Looper> Handler::getLooper() const {
+    std::lock_guard lock(m_bind_mutex);
+    return m_looper;
 }
 
-void Handler::deliverMessage(const std::shared_ptr<Message>& msg) { onMessageReceived(msg); }
+Handler::Binding Handler::binding() const {
+    std::lock_guard lock(m_bind_mutex);
+    return Binding { m_id.load(), m_looper };
+}
 
-Message::Message(): m_what(0), m_target(Handler::INVALID_HANDLER_ID) {}
+bool Handler::setID(handler_id id, std::weak_ptr<Looper> looper) {
+    std::lock_guard lock(m_bind_mutex);
+    if (m_id.load() != INVALID_HANDLER_ID) return false;
+    m_looper = std::move(looper);
+    m_id.store(id);
+    return true;
+}
+
+void Handler::clearID(handler_id id) {
+    std::lock_guard lock(m_bind_mutex);
+    handler_id      expected = id;
+    if (m_id.compare_exchange_strong(expected, INVALID_HANDLER_ID)) m_looper.reset();
+}
+
+bool Handler::isBoundTo(const Looper* looper, handler_id id) const {
+    std::lock_guard lock(m_bind_mutex);
+    return id != INVALID_HANDLER_ID && m_id.load() == id && m_looper.lock().get() == looper;
+}
+
+Message::Message() {}
 Message::Message(uint32_t what, const std::shared_ptr<Handler>& handler): m_what(what) {
     setTarget(handler);
 }
 
-uint32_t Message::what() const { return m_what; };
+uint32_t Message::what() const { return m_what; }
 
-std::shared_ptr<Message> Message::create() {
-    struct Message_sp : public Message {};
-    return std::make_shared<Message_sp>();
-}
+std::shared_ptr<Message> Message::create() { return std::shared_ptr<Message>(new Message()); }
 std::shared_ptr<Message> Message::create(uint32_t what, const std::shared_ptr<Handler>& handler) {
     return std::shared_ptr<Message>(new Message(what, handler));
 }
 
 void Message::setTarget(const std::shared_ptr<Handler>& handler) {
-    if (handler == nullptr) {
-        m_target = Handler::INVALID_HANDLER_ID;
-        m_handler.reset();
-        m_looper.reset();
-    } else {
-        m_target  = handler->id();
-        m_handler = handler;              // weak
-        m_looper  = handler->getLooper(); // weak
-    }
+    m_route = handler ? Route { handler, handler->binding() } : Route {};
 }
 
 void Message::setWhat(uint32_t what) { m_what = what; }
 
 status_t Message::post() {
-    auto looper = m_looper.lock();
-    if (looper != nullptr) {
-        looper->post(shared_from_this());
-        return status_t::OK;
-    }
-    return status_t::NOT_FOUND;
+    // An address taken before the handler was registered leads nowhere.
+    const auto looper = m_route.at.looper.lock();
+    if (m_route.at.id == Handler::INVALID_HANDLER_ID || ! looper) return status_t::NOT_FOUND;
+    looper->post(shared_from_this());
+    return status_t::OK;
 }
 
-void Message::deliver() {
-    auto handler = m_handler.lock();
-    if (handler != nullptr) {
-        handler->deliverMessage(shared_from_this());
-    }
-}
-
-void Message::Item::setName(std::string_view name) { this->name.assign(name); }
-
-int32_t Message::countEntries() const { return m_num_items; }
-
-const Message::Item* Message::getEntryAt(int32_t index) const {
-    if (index < 0 || index >= m_num_items || index >= MaxNumItems) return nullptr;
-    return &m_items[(size_t)index];
-}
-
-template<typename T>
-const Message::Item* Message::findItem(std::string_view name) const {
-    auto end = m_items.begin() + m_num_items;
-    auto it  = std::find_if(m_items.begin(), end, [name](const Item& item) {
-        bool ok = item.name == name && std::holds_alternative<T>(item.value);
-        return ok;
-    });
-    return it != end ? &*it : nullptr;
-}
-
-Message::Item* Message::allocateItem(std::string_view name) {
-    Item* item { nullptr };
-    if (m_num_items >= MaxNumItems) return item;
-    auto end = m_items.begin() + m_num_items;
-    auto it  = std::find_if(m_items.begin(), end, [name](const Item& item) {
-        return item.name == name;
-    });
-    item     = &*it;
-    if (it == end) {
-        item->name.assign(name);
-        m_num_items++;
-    }
-
-    return item;
-}
-
-#define BASIC_TYPE(NAME, TYPENAME)                                           \
-    bool Message::set##NAME(std::string_view name, TYPENAME value) {         \
-        Item* item = allocateItem(name);                                     \
-        if (item == nullptr) return false;                                   \
-                                                                             \
-        item->value = value;                                                 \
-        return true;                                                         \
-    }                                                                        \
-                                                                             \
-    bool Message::find##NAME(std::string_view name, TYPENAME* value) const { \
-        const Item* item = findItem<TYPENAME>(name);                         \
-        if (item) {                                                          \
-            auto* iv = std::get_if<TYPENAME>(&(item->value));                \
-            if (iv == nullptr) return false;                                 \
-            *value = *iv;                                                    \
-            return true;                                                     \
-        }                                                                    \
-        return false;                                                        \
-    }
-
-BASIC_TYPE(Bool, bool)
-BASIC_TYPE(Int32, int32_t)
-BASIC_TYPE(Float, float)
-BASIC_TYPE(String, std::string)
-
-bool Message::setObject(std::string_view name, const std::shared_ptr<void>& value) {
-    Item* item = allocateItem(name);
-    if (item == nullptr) return false;
-    item->value = value;
+bool Message::setBool(std::string_view name, bool value) {
+    m_values.insert_or_assign(std::string(name), Value(value));
     return true;
 }
 
-template const Message::Item* Message::findItem<std::shared_ptr<void>>(std::string_view) const;
+bool Message::setInt32(std::string_view name, int32_t value) {
+    m_values.insert_or_assign(std::string(name), Value(value));
+    return true;
+}
 
-bool Message::cleanAfterDeliver() const { return m_clean_after_dliver; }
-void Message::setCleanAfterDeliver(bool v) { m_clean_after_dliver = v; };
-void Message::cleanContent() { m_items.fill({}); }
+bool Message::setFloat(std::string_view name, float value) {
+    m_values.insert_or_assign(std::string(name), Value(value));
+    return true;
+}
+
+bool Message::setString(std::string_view name, std::string value) {
+    m_values.insert_or_assign(std::string(name), Value(std::move(value)));
+    return true;
+}
+
+bool Message::setObject(std::string_view name, const std::shared_ptr<void>& value) {
+    m_values.insert_or_assign(std::string(name), Value(value));
+    return true;
+}
+
+// An entry answers only a query of exactly its own kind.
+template<typename T>
+bool Message::findValue(std::string_view name, T* out) const {
+    if (out == nullptr) return false;
+    const auto it = m_values.find(name);
+    if (it == m_values.end()) return false;
+    const T* held = std::get_if<T>(&it->second);
+    if (held == nullptr) return false;
+    *out = *held;
+    return true;
+}
+
+bool Message::findBool(std::string_view name, bool* value) const { return findValue(name, value); }
+bool Message::findInt32(std::string_view name, int32_t* value) const { return findValue(name, value); }
+bool Message::findFloat(std::string_view name, float* value) const { return findValue(name, value); }
+bool Message::findString(std::string_view name, std::string* value) const {
+    return findValue(name, value);
+}
+
+const std::shared_ptr<void>* Message::findStoredObject(std::string_view name) const {
+    const auto it = m_values.find(name);
+    return it == m_values.end() ? nullptr : std::get_if<std::shared_ptr<void>>(&it->second);
+}

@@ -1,9 +1,7 @@
+// Clean-room implementation from the WallpaperMachine spec r1c-core-media.md; written without access to the original source.
 use std::path::{Path, PathBuf};
 
 use super::{ProjectManifest, WallpaperProjectType, validate_relative_normal_path};
-
-const PROJECT_FILE_NAME: &str = "project.json";
-const DEFAULT_SCENE_ENTRY: &str = "scene.json";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SceneSourcePaths {
@@ -25,59 +23,62 @@ pub enum SceneSourceResolution {
 }
 
 impl SceneSourceResolution {
-    /// Resolves a project manifest or scene file into renderer source paths.
-    ///
     /// # Errors
     ///
-    /// Returns [`crate::EngineError::InvalidInput`] if the source path is
-    /// empty, the manifest cannot be loaded, or the scene entry is not a
-    /// safe relative path.
+    /// Returns `InvalidInput` for an empty path, an unreadable manifest or an unsafe entry.
     pub fn load<T: AsRef<Path>>(project_path: T) -> Result<Self, crate::EngineError> {
-        let source_path = project_path.as_ref();
-        if source_path.as_os_str().is_empty() {
+        let path = project_path.as_ref();
+        if path.as_os_str().is_empty() {
             return Err(crate::EngineError::InvalidInput(
-                "scene source must not be empty".to_string(),
+                "scene source path must not be empty".to_owned(),
             ));
         }
 
-        if source_path.file_name().and_then(|name| name.to_str()) == Some(PROJECT_FILE_NAME) {
-            let manifest = ProjectManifest::load(source_path)?;
+        let manifest = if path.file_name().is_some_and(|name| name == "project.json") {
+            let manifest = ProjectManifest::load(path)?;
             if manifest.project_type() != WallpaperProjectType::Scene {
                 return Ok(Self::NotSceneProject { manifest });
             }
-
-            let entry = if manifest.file().is_empty() {
-                PathBuf::from(DEFAULT_SCENE_ENTRY)
-            } else {
-                PathBuf::from(manifest.file())
+            manifest
+        } else {
+            let Some(file_name) = path.file_name() else {
+                return Err(crate::EngineError::InvalidInput(
+                    "scene source must include a file name".to_owned(),
+                ));
             };
-            let scene_source = Self::resolve_scene_entry(source_path, &entry)?;
-            return Ok(Self::Scene {
-                manifest,
-                scene_source,
-            });
-        }
-
-        let mut manifest = ProjectManifest::default();
-        manifest.set_project_type(WallpaperProjectType::Scene);
-        manifest.set_file(
-            source_path
-                .file_name()
-                .map(|value| value.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-        );
-        manifest.set_workshop_id(
-            source_path
+            let mut manifest = ProjectManifest::default();
+            manifest.assign_project_type(WallpaperProjectType::Scene);
+            manifest.assign_file(file_name.to_string_lossy().into_owned());
+            let parent_name = path
                 .parent()
                 .and_then(Path::file_name)
-                .map(|value| value.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-        );
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            manifest.assign_workshop_id(parent_name);
+            manifest
+        };
 
-        let entry = source_path.file_name().map(PathBuf::from).ok_or_else(|| {
-            crate::EngineError::InvalidInput("scene source must include a file name".to_string())
-        })?;
-        let scene_source = Self::resolve_scene_entry(source_path, &entry)?;
+        let entry = if manifest.file().is_empty() {
+            "scene.json"
+        } else {
+            manifest.file()
+        };
+        validate_relative_normal_path(Path::new(entry), "project scene entry")?;
+
+        let pkg_dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let scene_id = pkg_dir
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let scene_source = SceneSourcePaths {
+            pkg_path: pkg_dir.join(entry).with_extension("pkg"),
+            pkg_entry: Path::new(entry)
+                .with_extension("json")
+                .to_string_lossy()
+                .replace('\\', "/"),
+            pkg_dir,
+            scene_id,
+        };
         Ok(Self::Scene {
             manifest,
             scene_source,
@@ -91,45 +92,18 @@ impl SceneSourceResolution {
             Self::NotSceneProject { .. } => None,
         }
     }
-
-    fn resolve_scene_entry(
-        source_path: &Path,
-        entry_path: &Path,
-    ) -> Result<SceneSourcePaths, crate::EngineError> {
-        validate_relative_normal_path(entry_path, "project scene entry")?;
-
-        let pkg_dir = source_path
-            .parent()
-            .unwrap_or_else(|| Path::new(""))
-            .to_path_buf();
-        let mut pkg_path = pkg_dir.join(entry_path);
-        pkg_path.set_extension("pkg");
-
-        let mut pkg_entry = entry_path.to_path_buf();
-        pkg_entry.set_extension("json");
-
-        Ok(SceneSourcePaths {
-            pkg_path,
-            pkg_entry: pkg_entry.to_string_lossy().replace('\\', "/"),
-            scene_id: pkg_dir
-                .file_name()
-                .map(|value| value.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-            pkg_dir,
-        })
-    }
 }
 
 impl ProjectManifest {
     pub fn set_project_type(&mut self, project_type: WallpaperProjectType) {
-        self.project_type = project_type;
+        self.assign_project_type(project_type);
     }
 
     pub fn set_file(&mut self, file: String) {
-        self.file = file;
+        self.assign_file(file);
     }
 
     pub fn set_workshop_id(&mut self, workshop_id: String) {
-        self.workshop_id = workshop_id;
+        self.assign_workshop_id(workshop_id);
     }
 }

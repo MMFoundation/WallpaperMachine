@@ -5,8 +5,9 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 
+#include "MetalBackdrop.hpp"
 #include "MetalPosterCapture.hpp"
-#include "MetalWallpaperBackdrop.hpp"
+#include "MetalSharedImages.hpp"
 #include "MetalVideoTextures.hpp"
 
 #include "MetalRender/MetalBlend.hpp"
@@ -15,17 +16,15 @@
 #include "MetalRender/MetalProjection.hpp"
 #include "MetalRender/MetalShaderReflection.hpp"
 #include "MetalRender/SceneMetalProgram.hpp"
-#include "Shader/RustShaderBridge.hpp"
+#include "Shader/RustShaderIdentity.hpp"
 #include "MetalRender/ScenePassDescription.hpp"
 
-#include "CopyPass.hpp"
-#include "CustomShaderPass.hpp"
-#include "PassCommon.hpp"
-#include "PrePass.hpp"
 #include "RenderGraph/RenderGraph.hpp"
-#include "VulkanRender/CopyElision.hpp"
-#include "VulkanRender/StaticSubgraphCache.hpp"
-#include "VulkanRender/UnchangedPresent.hpp"
+#include "RenderCommon/CopyElision.hpp"
+#include "RenderCommon/CustomShaderSlots.hpp"
+#include "RenderCommon/SceneRaster.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
+#include "RenderCommon/UnchangedPresent.hpp"
 
 #include "Image.hpp"
 #include "Interface/IImageParser.h"
@@ -35,7 +34,7 @@
 #include "Utils/AutoDeletor.hpp"
 #include "Utils/Logging.h"
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -121,8 +120,8 @@ namespace
 constexpr NSUInteger kFramesInFlight = 2;
 
 /// Vertex buffers are bound from the top of Metal's buffer argument table
-/// downwards, because the translated shader's own resources are placed at their
-/// SPIR-V binding indices, which start at zero. A collision is detected at
+/// downwards, because the translated shader's own resources are placed at the
+/// binding indices their GLSL declarations carry, which start at zero. A collision is detected at
 /// prepare time rather than assumed away.
 constexpr NSUInteger kVertexBufferTopIndex = 30;
 
@@ -143,9 +142,7 @@ MTLPixelFormat SceneTargetFormat(TextureFormat format)
 }
 
 /// Ceiling on the pixels this backend keeps alive only so they can be reused.
-/// The same number the compatibility backend uses, so the two report one
-/// budget and one `pinned_bytes` total rather than two that happen to be added
-/// together.
+/// One budget and one `pinned_bytes` total for the whole scene.
 constexpr uint64_t kStaticCacheBudgetBytes = 192ULL * 1024ULL * 1024ULL;
 
 constexpr std::string_view kPresentShaderSource = R"(
@@ -192,9 +189,7 @@ struct PresentVertex
 
 /// A triangle strip covering the target, with the texture's top row at the top
 /// of the image. Metal's normalized device coordinates put -1 at the bottom and
-/// its textures put v = 0 at the top, so v = 1 belongs with y = -1. These are
-/// the same four vertices the compatibility backend's final blit uses, which is
-/// what makes the two backends present the same orientation.
+/// its textures put v = 0 at the top, so v = 1 belongs with y = -1. 
 constexpr PresentVertex kPresentVertices[4] = {
     { { -1.0f, -1.0f }, { 0.0f, 1.0f } },
     { { -1.0f, 1.0f }, { 0.0f, 0.0f } },
@@ -265,7 +260,7 @@ MTLSamplerMinMagFilter ToMetalFilter(TextureFilter filter)
 
 /// Uncompressed formats only. Block-compressed source images are rejected
 /// rather than decoded here: silently expanding them would change memory use
-/// and filtering behaviour relative to the compatibility backend.
+/// and filtering behaviour.
 /// `block_bytes` is non-zero for a block-compressed format, where a row is
 /// counted in 4x4 blocks rather than pixels and `bytes_per_pixel` means nothing.
 bool ToMetalImageFormat(TextureFormat format, bool block_compression, MTLPixelFormat& out,
@@ -289,8 +284,7 @@ bool ToMetalImageFormat(TextureFormat format, bool block_compression, MTLPixelFo
         out             = MTLPixelFormatR8Unorm;
         bytes_per_pixel = 1;
         return true;
-    // The same three formats the compatibility backend hands to the same GPU
-    // through MoltenVK, uploaded as the blocks the file already holds. A device
+    // The three block-compressed formats, uploaded as the blocks the file already holds. A device
     // without them refuses the image, and with it the scene, rather than
     // decoding on the CPU into a texture four to eight times the size.
     case TextureFormat::BC1:
@@ -413,8 +407,8 @@ std::string BuildMetalResourcePlan(const std::vector<SceneMetalStage>& stages,
 {
     out.texture_slots.assign(texture_count, MetalRenderTextureSlotBinding {});
     // A slot the shader declares but never samples needs no texture behind it:
-    // the GLSL preprocessor already dropped it from SPIR-V, Vulkan skips an
-    // empty material name, and Metal leaves an unused argument unbound. Naga's
+    // the GLSL preprocessor already dropped it and Metal leaves an
+    // unused argument unbound. Naga's
     // MSL writer may still name that argument. One the shader does sample, with
     // nothing in the material to bind, is a genuine failure and stays one.
     const auto sampled = [&active_texture_slots](std::size_t slot) {
@@ -427,9 +421,9 @@ std::string BuildMetalResourcePlan(const std::vector<SceneMetalStage>& stages,
             if (binding.set != 0) {
                 return "a shader binds a resource outside descriptor set 0";
             }
-            // SPIR-V drops an unused uniform block; Naga's MSL writer may still
-            // name `GlobalUniforms` as a buffer argument. Vulkan has nothing to
-            // bind then. Match that: bind the block when reflection kept it,
+            // Analysis drops an unused uniform block; Naga's MSL writer may still
+            // name `GlobalUniforms` as a buffer argument. There is nothing to
+            // bind then: bind the block when reflection kept it,
             // otherwise leave the argument unbound.
             if (binding.name == "GlobalUniforms" ||
                 (uniform_block != nullptr && binding.name == uniform_block->name)) {
@@ -468,7 +462,7 @@ std::string BuildMetalResourcePlan(const std::vector<SceneMetalStage>& stages,
                     static_cast<int>(binding.slot);
                 continue;
             }
-            const auto texture_slot = vulkan::detail::CustomShaderTextureSlot(binding.name);
+            const auto texture_slot = render::CustomShaderTextureSlot(binding.name);
             if (texture_slot.has_value()) {
                 if (! sampled(*texture_slot)) continue;
                 if (*texture_slot >= out.texture_slots.size()) {
@@ -487,7 +481,7 @@ std::string BuildMetalResourcePlan(const std::vector<SceneMetalStage>& stages,
                 }
                 continue;
             }
-            const auto sampler_slot = vulkan::detail::CustomShaderSamplerSlot(binding.name);
+            const auto sampler_slot = render::CustomShaderSamplerSlot(binding.name);
             if (sampler_slot.has_value()) {
                 if (! sampled(*sampler_slot)) continue;
                 if (*sampler_slot >= out.texture_slots.size()) {
@@ -577,23 +571,64 @@ public:
     /// Lets every write already scheduled run, keeping the open archives.
     void finishArchiveWrites() { waitForArchiveWrites(); }
 
-    void suspendArchiveQueue(bool suspended)
-    {
-        if (suspended) dispatch_suspend(m_archive_queue);
-        else dispatch_resume(m_archive_queue);
-    }
-
-    MetalRender::PipelineArchiveCountsForTests archiveCounts() const
+    [[nodiscard]] MetalRender::ArchiveResidency archiveResidency() const
     {
         const std::lock_guard lock { m_mutex };
-        MetalRender::PipelineArchiveCountsForTests counts {
-            m_archives.size(), m_archive_write_generations.size(), 0
-        };
+        MetalRender::ArchiveResidency residency;
+        residency.stores              = m_archives.size();
+        residency.generation_records  = m_archive_write_generations.size();
+        return residency;
+    }
+
+    [[nodiscard]] MetalRender::ArchiveStoreState archiveStore(std::string_view root) const
+    {
+        MetalRender::ArchiveStoreState state;
+        const std::lock_guard lock { m_mutex };
         for (const auto& [archive_id, entry] : m_archives) {
-            (void)archive_id;
-            counts.descriptors += entry.descriptors.size();
+            if (archive_id.second != root || ! entry.attempted) continue;
+            state.open        = true;
+            state.descriptors = entry.descriptors.size();
+            state.identity    = entry.identity;
+            state.writes      = entry.writes;
+            state.collector   = (__bridge const void*)entry.collector;
         }
-        return counts;
+        return state;
+    }
+
+    /// While suspended nothing queued on the archive queue runs.
+    void suspendArchiveQueue(bool suspended)
+    {
+        if (suspended == m_archive_queue_suspended) return;
+        m_archive_queue_suspended = suspended;
+        if (suspended) {
+            dispatch_suspend(m_archive_queue);
+        } else {
+            dispatch_resume(m_archive_queue);
+        }
+    }
+
+    bool buildArchivedPipeline(std::string_view archive_root, uint32_t variant)
+    {
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+        if (device == nil) return false;
+        static const char kSource[] =
+            "#include <metal_stdlib>\nusing namespace metal;\n"
+            "vertex float4 archive_vertex(uint i [[vertex_id]]) {\n"
+            "  float2 p[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };\n"
+            "  return float4(p[i], 0.0, 1.0);\n}\n"
+            "fragment half4 archive_fragment() { return half4(1.0h); }\n";
+        std::vector<SceneMetalStage> stages(2);
+        stages[0].kind        = SceneMetalStageKind::Vertex;
+        stages[0].source      = kSource;
+        stages[0].entry_point = "archive_vertex";
+        stages[1].kind        = SceneMetalStageKind::Fragment;
+        stages[1].source      = kSource;
+        stages[1].entry_point = "archive_fragment";
+        MetalPipelineKey key;
+        key.program_id   = 0xA4C41FEull + variant;
+        key.color_format = MetalPixelFormat::BGRA8Unorm;
+        std::string error;
+        return pipelineFor(device, key, stages, nil, archive_root, &error) != nil;
     }
 #endif
 
@@ -855,6 +890,14 @@ private:
         NSURL*                                 url { nil };
         id<MTLDevice>                          device { nil };
         bool                                   attempted { false };
+        /// Names this opening of the store. A store that is let go and opened again under
+        /// the same path is a different store with a different collector, and work captured
+        /// for the first must not reach the second. Zero while the store is not open.
+        uint64_t                               identity { 0 };
+#ifdef WESCENE_BUILD_TESTS
+        /// Writes started for this opening of the store.
+        uint64_t                               writes { 0 };
+#endif
         std::unordered_set<MetalPipelineKey, MetalPipelineKeyHash> keys;
         std::vector<MTLRenderPipelineDescriptor*>                  descriptors;
     };
@@ -870,6 +913,8 @@ private:
     /// wallpaper one recompile on a later launch and nothing else.
     void rememberStoreLocked(const ArchiveId& archive_id)
     {
+        // A store opened again after being forgotten is in the order once, at the end.
+        std::erase(m_archive_order, archive_id);
         m_archive_order.push_back(archive_id);
         while (m_archive_order.size() > kMaxArchiveStores) {
             const auto oldest = m_archive_order.front();
@@ -889,6 +934,7 @@ private:
             entry.loaded    = nil;
             entry.collector = nil;
             entry.attempted = false;
+            entry.identity  = 0;
             entry.keys.clear();
         }
     }
@@ -982,8 +1028,8 @@ private:
         // dispatched against it is not lost when this one is discarded.
         if (entry.attempted) return entry.loaded;
         entry.attempted = true;
+        entry.identity  = ++m_archive_identities;
         rememberStoreLocked(archive_id);
-        m_archive_write_generations.try_emplace(archive_id, 0);
         entry.device    = device;
         entry.url       = url;
         entry.loaded    = loaded;
@@ -1005,8 +1051,10 @@ private:
         if (device == nil || archive_root.empty()) return;
         const ArchiveId      archive_id { device.registryID, std::string(archive_root) };
         id<MTLBinaryArchive> collector = nil;
+        uint64_t             identity  = 0;
         {
             const std::lock_guard lock { m_mutex };
+            // Looked up, not made: a store that is not open stays closed.
             const auto found = m_archives.find(archive_id);
             if (found == m_archives.end()) return;
             auto& entry = found->second;
@@ -1014,6 +1062,7 @@ private:
             if (entry.keys.size() >= kMaxArchivedPipelines) return;
             if (! entry.keys.insert(key).second) return;
             collector = entry.collector;
+            identity  = entry.identity;
         }
 
         // Copied, and without the archives it was created against: what is
@@ -1033,10 +1082,11 @@ private:
             }
             {
                 const std::lock_guard lock { m_mutex };
+                // This completion belongs to the store it was captured for. If that
+                // store was let go meanwhile (and perhaps opened again under the same
+                // path) there is nothing left to tell.
                 const auto found = m_archives.find(archive_id);
-                // An evicted store may already have been reopened at the same
-                // path. This completion belongs only to its original collector.
-                if (found == m_archives.end() || found->second.collector != collector) return;
+                if (found == m_archives.end() || found->second.identity != identity) return;
                 auto& entry = found->second;
                 // Bounded on its own account: `keys` is emptied when the store
                 // is reopened, and this must not grow with every reopen.
@@ -1044,7 +1094,7 @@ private:
                     entry.descriptors.push_back(stored);
                 }
             }
-            scheduleArchiveWrite(archive_id, collector);
+            scheduleArchiveWrite(archive_id, identity);
         });
     }
 
@@ -1054,7 +1104,10 @@ private:
     /// The generation is per store, not global: a Mac with two GPUs, or two
     /// wallpapers with their own caches, must not have one store's pending
     /// write cancelled by an addition to another.
-    void scheduleArchiveWrite(const ArchiveId& requested, id<MTLBinaryArchive> collector)
+    ///
+    /// `identity` is the opening of the store the addition was made to. A record
+    /// is kept, and a write scheduled, only while that same opening is open.
+    void scheduleArchiveWrite(const ArchiveId& requested, uint64_t identity)
     {
         // Copied into a local before the block is built. A block that names a
         // reference parameter captures the reference, not the referent, and
@@ -1063,11 +1116,9 @@ private:
         uint64_t        generation = 0;
         {
             const std::lock_guard lock { m_mutex };
-            const auto store = m_archives.find(archive_id);
-            const auto write = m_archive_write_generations.find(archive_id);
-            if (store == m_archives.end() || store->second.collector != collector ||
-                write == m_archive_write_generations.end()) return;
-            generation = ++write->second;
+            const auto found = m_archives.find(archive_id);
+            if (found == m_archives.end() || found->second.identity != identity) return;
+            generation = ++m_archive_write_generations[archive_id];
         }
         m_archive_writes_pending.fetch_add(1, std::memory_order_relaxed);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(2 * NSEC_PER_SEC)),
@@ -1076,24 +1127,30 @@ private:
                            bool current = false;
                            {
                                const std::lock_guard lock { m_mutex };
-                               const auto write = m_archive_write_generations.find(archive_id);
-                               current = write != m_archive_write_generations.end() &&
-                                         write->second == generation;
+                               const auto found      = m_archives.find(archive_id);
+                               const auto generation_record = m_archive_write_generations.find(archive_id);
+                               current = found != m_archives.end() && found->second.identity == identity &&
+                                         generation_record != m_archive_write_generations.end() &&
+                                         generation_record->second == generation;
                            }
-                           if (current) writeArchive(archive_id, collector);
+                           if (current) writeArchive(archive_id, identity);
                            m_archive_writes_pending.fetch_sub(1, std::memory_order_relaxed);
                        });
     }
 
     /// Runs only on `m_archive_queue`.
-    void writeArchive(const ArchiveId& archive_id, id<MTLBinaryArchive> expected_collector)
+    void writeArchive(const ArchiveId& archive_id, uint64_t identity)
     {
         id<MTLBinaryArchive> collector = nil;
         NSURL*               url       = nil;
         {
             const std::lock_guard lock { m_mutex };
             auto found = m_archives.find(archive_id);
-            if (found == m_archives.end() || found->second.collector != expected_collector) return;
+            // Only the store this write was scheduled for is published by it.
+            if (found == m_archives.end() || found->second.identity != identity) return;
+#ifdef WESCENE_BUILD_TESTS
+            ++found->second.writes;
+#endif
             collector = found->second.collector;
             url       = found->second.url;
         }
@@ -1190,250 +1247,18 @@ private:
     std::unordered_map<ArchiveId, ArchiveEntry, ArchiveIdHash> m_archives;
     std::unordered_map<ArchiveId, uint64_t, ArchiveIdHash>     m_archive_write_generations;
     std::deque<ArchiveId>                                      m_archive_order;
+    /// Hands out `ArchiveEntry::identity`. Guarded by `m_mutex`.
+    uint64_t                                                   m_archive_identities { 0 };
     std::atomic<uint64_t>                     m_compiles { 0 };
     dispatch_queue_t                          m_archive_queue { nullptr };
     std::atomic<uint64_t>                     m_archive_collected { 0 };
     std::atomic<uint64_t>                     m_archive_published { 0 };
     std::atomic<uint64_t>                     m_archive_writes_pending { 0 };
+#ifdef WESCENE_BUILD_TESTS
+    bool                                      m_archive_queue_suspended { false };
+#endif
     /// Names each write's scratch file. Touched only on `m_archive_queue`.
     uint64_t                                  m_archive_scratch_serial { 0 };
-};
-
-/// One slot of an imported image, uploaded. Whoever holds the last reference
-/// frees the texture.
-struct MetalImportedImage
-{
-    id<MTLTexture> texture;
-};
-
-/// Imported images, uploaded once per device and shared by every renderer that
-/// imports the same pixels: the displays showing one wallpaper hold one copy of
-/// each picture between them, not one each.
-///
-/// Held weakly. A renderer keeps what it imported alive through its own
-/// `images`; this only remembers where those are, so a texture is freed with
-/// the last renderer that lets go of it and an unloaded scene leaves nothing
-/// behind here. Bounded by what renderers hold: a key whose textures are all
-/// gone is dropped the next time anything is imported.
-///
-/// Keyed by device, name, sprite slot, pixel format and the exact levels the
-/// texture keeps, so a display that dropped a different number of leading
-/// mips gets a texture of its own. The key alone is not trusted to mean the
-/// same picture -- a name is relative to its wallpaper, and the file behind it
-/// can change between two loads -- so a texture is handed out only when its
-/// pixels equal the image just parsed. That comparison reads the shared texture
-/// back once per import on a further display; a single display pays only for
-/// the lookup.
-///
-/// Only for images nothing writes after the upload. Render targets, images the
-/// runtime replaces and video frames have owners of their own.
-class MetalImageCache
-{
-public:
-    struct Format
-    {
-        MTLPixelFormat pixel_format { MTLPixelFormatInvalid };
-        uint32_t       bytes_per_pixel { 0 };
-        uint32_t       block_bytes { 0 };
-    };
-
-    static MetalImageCache& shared()
-    {
-        static MetalImageCache cache;
-        return cache;
-    }
-
-    /// Slot `slot_index` of the image `name` as a texture on `device`: the one
-    /// a renderer already holds when its pixels are `slot`'s, else a new upload
-    /// that later imports can share. Null when Metal cannot create it.
-    std::shared_ptr<const MetalImportedImage> acquire(id<MTLDevice> device, const std::string& name,
-                                                      std::size_t slot_index, const Image::Slot& slot,
-                                                      const Format& format)
-    {
-        Key key { device.registryID, name, slot_index, format.pixel_format, slot.width,
-                  slot.height, {} };
-        key.levels.reserve(slot.mipmaps.size());
-        for (const auto& mip : slot.mipmaps) {
-            key.levels.push_back(
-                { mip.width, mip.height, mip.data != nullptr ? static_cast<int64_t>(mip.size) : -1 });
-        }
-
-        std::shared_ptr<Bucket> bucket;
-        {
-            const std::lock_guard lock { m_mutex };
-            forgetUnusedLocked();
-            auto& entry = m_buckets[key];
-            if (entry == nullptr) entry = std::make_shared<Bucket>();
-            bucket = entry;
-        }
-        // Held through the comparison and the upload, so a display importing
-        // the same image at the same moment -- every display does, when a
-        // wallpaper starts on all of them -- waits for this upload and shares
-        // it rather than making a copy of its own. Other images go on meanwhile.
-        const std::lock_guard lock { bucket->mutex };
-        std::erase_if(bucket->images, [](const auto& image) { return image.expired(); });
-        for (const auto& held : bucket->images) {
-            auto image = held.lock();
-            if (image != nullptr && SamePixels(image->texture, slot, format)) return image;
-        }
-        auto image = own(device, slot, format);
-        if (image != nullptr) bucket->images.push_back(image);
-        return image;
-    }
-
-    /// `slot` uploaded into a texture nobody else is handed.
-    static std::shared_ptr<const MetalImportedImage> own(id<MTLDevice> device,
-                                                         const Image::Slot& slot, const Format& format)
-    {
-        MTLTextureDescriptor* descriptor =
-            [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format.pixel_format
-                                                               width:(NSUInteger)slot.width
-                                                              height:(NSUInteger)slot.height
-                                                           mipmapped:slot.mipmaps.size() > 1];
-        descriptor.mipmapLevelCount = slot.mipmaps.size();
-        descriptor.usage            = MTLTextureUsageShaderRead;
-        // Shared storage, so the pixels are written straight into the texture,
-        // and a later import can compare against them without a blit. A staging
-        // buffer plus a blit would need the frame to wait on an upload, which is
-        // exactly what the per-frame path must never do.
-        descriptor.storageMode = MTLStorageModeShared;
-
-        id<MTLTexture> texture = [device newTextureWithDescriptor:descriptor];
-        if (texture == nil) return nullptr;
-        if (! UploadImageLevels(texture, slot, format.bytes_per_pixel, format.block_bytes)) {
-            return nullptr;
-        }
-        return std::make_shared<const MetalImportedImage>(MetalImportedImage { texture });
-    }
-
-#ifdef WESCENE_BUILD_TESTS
-    MetalRender::ImportedImagesForTests residency()
-    {
-        MetalRender::ImportedImagesForTests counts;
-        const std::lock_guard lock { m_mutex };
-        for (const auto& [key, bucket] : m_buckets) {
-            (void)key;
-            const std::lock_guard bucket_lock { bucket->mutex };
-            for (const auto& held : bucket->images) {
-                const auto image = held.lock();
-                if (image == nullptr) continue;
-                ++counts.textures;
-                counts.bytes += image->texture.allocatedSize;
-            }
-        }
-        return counts;
-    }
-#endif
-
-private:
-    struct Level
-    {
-        int32_t width { 0 };
-        int32_t height { 0 };
-        /// Bytes the parser produced for the level; -1 when it has none and
-        /// the upload leaves the level unwritten.
-        int64_t size { 0 };
-        bool    operator==(const Level&) const = default;
-    };
-    struct Key
-    {
-        uint64_t           device { 0 };
-        std::string        name;
-        std::size_t        slot { 0 };
-        MTLPixelFormat     format { MTLPixelFormatInvalid };
-        int32_t            width { 0 };
-        int32_t            height { 0 };
-        std::vector<Level> levels;
-        bool               operator==(const Key&) const = default;
-    };
-    struct KeyHash
-    {
-        std::size_t operator()(const Key& key) const
-        {
-            std::size_t seed = std::hash<std::string> {}(key.name);
-            const auto  mix  = [&seed](uint64_t value) {
-                seed ^= std::hash<uint64_t> {}(value) + 0x9e3779b97f4a7c15ULL + (seed << 6) +
-                        (seed >> 2);
-            };
-            mix(key.device);
-            mix(key.slot);
-            mix(static_cast<uint64_t>(key.format));
-            mix(static_cast<uint64_t>(static_cast<uint32_t>(key.width)) << 32 |
-                static_cast<uint32_t>(key.height));
-            mix(key.levels.size());
-            return seed;
-        }
-    };
-    /// The textures uploaded under one key. More than one only when the same
-    /// name held different pixels for two scenes that are both still loaded.
-    struct Bucket
-    {
-        std::mutex                                           mutex;
-        std::vector<std::weak_ptr<const MetalImportedImage>> images;
-    };
-
-    /// Whether `texture`, uploaded from a slot with the same levels, holds
-    /// exactly `slot`'s bytes. Read back a band of rows at a time, so the check
-    /// needs a small fixed buffer however large the picture, and stops at the
-    /// first difference.
-    static bool SamePixels(id<MTLTexture> texture, const Image::Slot& slot, const Format& format)
-    {
-        constexpr NSUInteger kBandBytes = 1u << 20;
-        std::vector<uint8_t> band;
-        for (std::size_t level = 0; level < slot.mipmaps.size(); ++level) {
-            const auto& mip = slot.mipmaps[level];
-            // Never written into either texture: nothing to compare.
-            if (mip.data == nullptr || mip.width <= 0 || mip.height <= 0) continue;
-            const NSUInteger width  = (NSUInteger)mip.width;
-            const NSUInteger height = (NSUInteger)mip.height;
-            // A row of texels, or of 4x4 blocks for a block-compressed format,
-            // laid out exactly as `UploadImageLevels` read them.
-            const NSUInteger texels_per_row = format.block_bytes > 0 ? 4 : 1;
-            const NSUInteger bytes_per_row  = format.block_bytes > 0
-                                                  ? (width + 3) / 4 * format.block_bytes
-                                                  : width * format.bytes_per_pixel;
-            const NSUInteger rows = (height + texels_per_row - 1) / texels_per_row;
-            if (bytes_per_row == 0 || mip.size < 0 ||
-                (NSUInteger)mip.size < bytes_per_row * rows) {
-                return false;
-            }
-            const NSUInteger band_rows = std::max<NSUInteger>(1, kBandBytes / bytes_per_row);
-            band.resize(std::min(band_rows, rows) * bytes_per_row);
-            for (NSUInteger row = 0; row < rows; row += band_rows) {
-                const NSUInteger count = std::min(band_rows, rows - row);
-                const NSUInteger top   = row * texels_per_row;
-                const NSUInteger tall  = std::min(count * texels_per_row, height - top);
-                [texture getBytes:band.data()
-                      bytesPerRow:bytes_per_row
-                       fromRegion:MTLRegionMake2D(0, top, width, tall)
-                      mipmapLevel:level];
-                if (std::memcmp(band.data(), mip.data.get() + row * bytes_per_row,
-                                count * bytes_per_row) != 0) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    /// Drops the keys whose textures are all gone. A bucket some import is
-    /// using right now is left for a later call.
-    void forgetUnusedLocked()
-    {
-        std::erase_if(m_buckets, [](const auto& entry) {
-            const auto& bucket = entry.second;
-            // Buckets are only handed out under `m_mutex`, so one nobody else
-            // holds a reference to stays that way until this returns.
-            if (bucket.use_count() != 1 || ! bucket->mutex.try_lock()) return false;
-            const bool gone = std::all_of(bucket->images.begin(), bucket->images.end(),
-                                          [](const auto& image) { return image.expired(); });
-            bucket->mutex.unlock();
-            return gone;
-        });
-    }
-
-    std::mutex                                                m_mutex;
-    std::unordered_map<Key, std::shared_ptr<Bucket>, KeyHash> m_buckets;
 };
 
 bool FoldsOnLeft(std::string_view name)
@@ -1523,10 +1348,9 @@ struct MetalRender::Impl
 
     // ---- host services
     MetalPosterCapture poster;
-    /// The blurred fill of a FIT_BLURRED layout. Its pipelines are built when
-    /// the mode is chosen and its images while a composition needs them.
-    MetalWallpaperBackdrop backdrop;
-    bool                   backdrop_failure_logged { false };
+    /// The blurred copy "Fit with blurred backdrop" fills the bars with. Holds nothing in any
+    /// other mode.
+    MetalBackdrop      backdrop;
     MetalVideoTextures video;
     /// Whether the graph currently compiled has produced a frame. A poster
     /// composed before that would publish an empty image as the wallpaper.
@@ -1534,8 +1358,8 @@ struct MetalRender::Impl
     /// The last composition that actually reached the layer, and scratch for
     /// the frame being decided. A frame whose passes were all reused and whose
     /// composition inputs match takes no drawable and presents nothing.
-    vulkan::UnchangedPresentGate present_gate;
-    vulkan::PresentationKey      present_key;
+    render::UnchangedPresentGate present_gate;
+    render::PresentationKey      present_key;
 
     // ---- host configuration
     uint32_t             output_width { 0 };
@@ -1668,8 +1492,7 @@ struct MetalRender::Impl
         uint32_t                           vertex_count { 0 };
         /// A texture slot the shader samples names nothing: the render graph
         /// found no producer for it (a layer texture whose layer draws no
-        /// composite). The compatibility backend then neither draws nor clears
-        /// the step, every frame, and neither does this one.
+        /// composite). The step is neither drawn nor cleared, every frame.
         bool                               unproduced_input { false };
 
         // ---- geometry the runtime rewrites every frame (particles)
@@ -1695,8 +1518,7 @@ struct MetalRender::Impl
         std::size_t                        dynamic_index_capacity { 0 };
         std::vector<std::vector<SceneVertexArray::SceneVertexAttribute>> dynamic_vertex_attributes;
         /// One entry per material texture slot that names a sprite sheet, copied
-        /// from the scene's texture table the way the compatibility backend's
-        /// graph builder copies it. The shared value updater advances these and
+        /// from the scene's texture table. The shared value updater advances these and
         /// writes the frame's rotation and translation uniforms; the sheet
         /// itself is one uploaded image (or one per `imageId`), never a
         /// per-frame upload.
@@ -1725,10 +1547,8 @@ struct MetalRender::Impl
     std::unordered_map<uint32_t, id<MTLDepthStencilState>> depth_stencil_states;
     /// Every slot of an imported image, in file order. A plain image has one;
     /// a sprite sheet spread over several images has one per sheet, and the
-    /// frame's `imageId` chooses between them. Usually shared with the other
-    /// displays showing the same pixels (`MetalImageCache`); holding them here
-    /// is what keeps them alive.
-    std::unordered_map<std::string, std::vector<std::shared_ptr<const MetalImportedImage>>> images;
+    /// frame's `imageId` chooses between them.
+    std::unordered_map<std::string, std::vector<id<MTLTexture>>> images;
 
     // ---- images the runtime replaces while the scene plays
     /// One replaceable image's storage: the same picture in one texture per
@@ -1746,12 +1566,6 @@ struct MetalRender::Impl
         std::vector<id<MTLTexture>> slots;
         /// The content version each slot holds; zero means "never filled".
         std::vector<uint64_t>       slot_versions;
-        /// Whether each slot holds a track's cover rather than the empty texel
-        /// a cover name starts as. Read only where a cover is bound over a
-        /// render target (`ScenePassDescription::cover_keys`), and taken from
-        /// the image uploaded into that slot, so the choice and the pixels
-        /// always agree.
-        std::vector<bool>           slot_covers;
         /// The newest version seen, which is what the reuse analysis folds in.
         uint64_t                    version { 0 };
         uint32_t                    width { 0 };
@@ -1764,6 +1578,10 @@ struct MetalRender::Impl
         uint32_t                    block_bytes { 0 };
         uint32_t                    levels { 1 };
         TextureSample               sample {};
+        /// The image uploaded last is a track's cover, not the transparent texel a
+        /// cover name holds while nothing plays. A slot that stands in for a layer's
+        /// composite shows the cover only while this is set.
+        bool                        shows_cover { false };
     };
     std::unordered_map<std::string, RuntimeImageRing> runtime_image_rings;
     /// How many times pixels have actually been written into one of those
@@ -1779,7 +1597,7 @@ struct MetalRender::Impl
     uint32_t                   uniform_ring_size { 0 };
     bool                       graph_ready { false };
     uint32_t                   demand_reasons {
-        static_cast<uint32_t>(vulkan::DynamicReason::UnknownInput)
+        static_cast<uint32_t>(render::DynamicReason::UnknownInput)
     };
 
     // ---- direct NV12 plane sampling
@@ -1827,16 +1645,15 @@ struct MetalRender::Impl
     std::vector<uint8_t>       video_plane_active;
 
     // ---- scene optimisation
-    /// The same analysis the compatibility backend runs, over this backend's
-    /// own pass list. Reusing the class rather than reimplementing it is what
-    /// keeps "which target may be reused" one rule with one set of tests; only
-    /// the resources it governs are Metal's.
-    vulkan::StaticSubgraphCache           static_cache;
-    std::vector<vulkan::StaticPassSample> static_samples;
+    /// The static-reuse analysis, over this backend's own pass list. It is a
+    /// class of its own so "which target may be reused" is one rule with one
+    /// set of tests; only the resources it governs are Metal's.
+    render::StaticSubgraphCache           static_cache;
+    std::vector<render::StaticPassSample> static_samples;
     std::vector<uint8_t>                  static_skip;
     /// One entry per description, in the same order. `None` for anything that
     /// is not a copy.
-    std::vector<vulkan::CopyElision>      copy_elision;
+    std::vector<render::CopyElision>      copy_elision;
     /// Render-target keys that share another key's texture after elision.
     std::unordered_map<std::string, std::string> target_aliases;
     uint64_t                              static_pinned_bytes { 0 };
@@ -1968,11 +1785,22 @@ struct MetalRender::Impl
     bool buildPresentation();
     id<MTLRenderPipelineState> presentPipelineFor(MTLPixelFormat format);
     bool ensurePresentPipeline(MTLPixelFormat format);
+    /// `frame` is true for the composition a drawn frame presents: the one whose layout decides
+    /// whether the blurred backdrop still has room to fill.
     bool encodeComposition(id<MTLCommandBuffer> command, id<MTLTexture> destination,
-                           const Scene& scene);
+                           const Scene& scene, bool frame = false);
+    /// Builds what the scaling mode needs for the blurred backdrop, or lets go of it when the
+    /// mode is any other. Between frames only.
+    void prepareBackdrop();
     bool encodeScaledCopy(id<MTLCommandBuffer> command, id<MTLTexture> source,
                           id<MTLTexture> destination);
     bool compile(Scene& scene, rg::RenderGraph& graph);
+    /// Gives the compiled graph the render target sizes the scene holds now, keeping
+    /// everything else of it: the prepared passes, their pipelines and vertex buffers, the
+    /// uploaded images, the videos and the uniform storage. The targets, the copy plan,
+    /// the reuse table and the texture trades are made again exactly as `compile` makes
+    /// them, so the frame after it draws what a full compile would have drawn.
+    bool resizeTargets(Scene& scene);
     void resolveTargetSizes(Scene& scene);
     bool prepareTargets(Scene& scene);
     /// One scene target's image, labelled with its key; nil if Metal refuses it.
@@ -1987,8 +1815,8 @@ struct MetalRender::Impl
     /// The uniform write, the geometry upload and the encoder all ask this one
     /// question, so they cannot disagree about a pass.
     bool passDraws(std::size_t index) const;
-    /// Whether the step's clear applies this frame. A step the compatibility
-    /// backend drops for an input nothing produces drops its clear with it.
+    /// Whether the step's clear applies this frame. A step dropped for an input
+    /// nothing produces drops its clear with it.
     bool passClears(std::size_t index) const;
     /// Decides which copies are replaced by a trade of textures. Called after
     /// the reuse table is built, because a reused image must keep its texture.
@@ -2021,10 +1849,15 @@ struct MetalRender::Impl
     /// current setting, at a frame boundary. Clears for targets that regain an
     /// image of their own are encoded into `command`, so nothing waits.
     bool applySceneOptimizationSetting(Scene& scene, id<MTLCommandBuffer> command);
-    vulkan::StaticPassSample frameSample(Scene& scene, std::size_t index) const;
+    render::StaticPassSample frameSample(Scene& scene, std::size_t index) const;
     /// Fills `static_skip` for this frame. False means nothing may be skipped.
     bool planStaticSkips(Scene& scene);
     bool clearTargetsOnce();
+    /// Targets a resize made, to be cleared by the next frame's own command buffer
+    /// ahead of every pass in it: nothing waits on the GPU for a resize.
+    std::vector<id<MTLTexture>> pending_target_clears;
+    /// Set while `resizeTargets` allocates, so `prepareTargets` leaves the clear to the frame.
+    bool defer_target_clears { false };
     bool prepareDraw(Scene& scene, std::size_t index, PreparedPass& out);
     /// Collects finished optional builds and starts the ones now wanted.
     ///
@@ -2088,11 +1921,6 @@ struct MetalRender::Impl
     /// means the first, which is what every non-sprite texture has.
     id<MTLTexture> resolveTexture(Scene& scene, const std::string& key,
                                   id<MTLSamplerState>* sampler_out, int image_slot = -1);
-    /// The cover slot `slot` of `desc` shows over its render target this frame
-    /// (`ScenePassDescription::cover_keys`), with its sampler; nil while no
-    /// cover is published, when the slot samples the target it names.
-    id<MTLTexture> publishedCover(const ScenePassDescription& desc, std::size_t slot,
-                                  id<MTLSamplerState>* sampler_out);
     /// Names the replaceable images this graph binds. Called once per compiled
     /// graph, because the answer cannot change inside one.
     void collectRuntimeImageKeys(Scene& scene);
@@ -2101,6 +1929,9 @@ struct MetalRender::Impl
     /// which is the ordinary case for a text layer standing still.
     void refreshRuntimeImages(Scene& scene);
     id<MTLSamplerState> samplerFor(const TextureSample& sample);
+    /// Whether slot `slot` of `desc` samples a published cover this frame instead of the
+    /// layer composite it names; see `SceneMaterial::cover_slots`.
+    bool coverShown(const ScenePassDescription& desc, std::size_t slot) const;
     /// The same wrap modes with linear filtering, for the chroma plane.
     id<MTLSamplerState> chromaSamplerFor(const TextureSample& sample);
     id<MTLRenderPipelineState> pipelineFor(const MetalPipelineKey& key,
@@ -2112,15 +1943,12 @@ struct MetalRender::Impl
                        uint8_t* destination);
     WallpaperScalingLayout scalingLayout(const Scene& scene, uint32_t width,
                                          uint32_t height) const;
-    /// Builds the blurred fill's pipelines once its mode is chosen and the
-    /// drawable's format is known; anything else releases its images.
-    void prepareBackdrop();
 };
 
 void MetalRender::Impl::releaseSceneOptimization()
 {
     if (static_pinned_bytes != 0) {
-        vulkan::AdjustSceneOptimizationPinnedBytes(-static_cast<int64_t>(static_pinned_bytes));
+        render::AdjustSceneOptimizationPinnedBytes(-static_cast<int64_t>(static_pinned_bytes));
         static_pinned_bytes = 0;
     }
     static_cache.Reset();
@@ -2141,6 +1969,7 @@ void MetalRender::Impl::releaseGraph()
     present_gate.Invalidate();
     descriptions.clear();
     prepared.clear();
+    pending_target_clears.clear();
     targets.clear();
     depth_targets.clear();
     pass_targets.clear();
@@ -2171,7 +2000,7 @@ void MetalRender::Impl::releaseGraph()
     uniform_rings.clear();
     uniform_ring_size = 0;
     graph_ready       = false;
-    demand_reasons    = static_cast<uint32_t>(vulkan::DynamicReason::UnknownInput);
+    demand_reasons    = static_cast<uint32_t>(render::DynamicReason::UnknownInput);
 }
 
 void MetalRender::Impl::releasePresentation()
@@ -2180,7 +2009,6 @@ void MetalRender::Impl::releasePresentation()
     // on the layer, and a scaled copy still needs its own one after a display
     // reconfiguration has released the surface.
     poster.invalidate();
-    backdrop.release();
     frame_drawn              = false;
     present_gate.Invalidate();
     present_library          = nil;
@@ -2188,6 +2016,19 @@ void MetalRender::Impl::releasePresentation()
     present_vertices_flipped = nil;
     present_sampler          = nil;
     layer                    = nil;
+}
+
+void MetalRender::Impl::prepareBackdrop()
+{
+    if (scaling_mode != WallpaperScalingMode::FIT_BLURRED) {
+        backdrop.release();
+        return;
+    }
+    // Before the renderer has a device the pipelines wait for `buildPresentation`.
+    if (device == nil || present_library == nil) return;
+    if (! backdrop.buildPipelines(device, drawable_format)) {
+        LOG_ERROR("metal render: the blurred backdrop is off: %s", backdrop.error().c_str());
+    }
 }
 
 bool MetalRender::Impl::buildPresentation()
@@ -2301,7 +2142,8 @@ bool MetalRender::Impl::encodeScaledCopy(id<MTLCommandBuffer> command, id<MTLTex
 /// wallpaper it claims to be a picture of. The layout is computed from the
 /// destination's own size, which is the only thing that differs between them.
 bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
-                                          id<MTLTexture> destination, const Scene& scene)
+                                          id<MTLTexture> destination, const Scene& scene,
+                                          bool frame)
 {
     if (command == nil || destination == nil) return false;
     const auto output = targets.find(scene.ResolveRenderTargetName(SpecTex_Default));
@@ -2311,20 +2153,19 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
 
     const auto layout =
         scalingLayout(scene, (uint32_t)destination.width, (uint32_t)destination.height);
-    // The blurred copy is drawn first, into images of its own, so the room
-    // around the picture can be filled from it below. Without room it costs
-    // nothing and holds nothing.
-    bool backdrop_ready = false;
-    if (layout.backdrop) {
-        backdrop_ready = backdrop.encodeBlur(device, command, output->second, present_sampler);
-        if (! backdrop_ready && ! backdrop_failure_logged) {
-            // The picture is still drawn, with plain bars around it.
-            LOG_ERROR("the blurred fill could not be drawn: %s", backdrop.lastError().c_str());
-            backdrop_failure_logged = true;
+
+    // The copy for the bars is made first, so the composition below can read it. It exists
+    // while a composition has room to fill: the first frame that has none lets it go.
+    bool draw_backdrop = false;
+    if (scaling_mode == WallpaperScalingMode::FIT_BLURRED) {
+        if (layout.backdrop) {
+            draw_backdrop = backdrop.canDraw(destination.pixelFormat) &&
+                            backdrop.encodeMaking(command, output->second);
+        } else if (frame) {
+            backdrop.releaseImages();
         }
-    } else {
-        backdrop.release();
     }
+
     MTLRenderPassDescriptor* present = [MTLRenderPassDescriptor renderPassDescriptor];
     present.colorAttachments[0].texture     = destination;
     // Cleared, so the letterbox around a fitted image is black rather than
@@ -2335,13 +2176,24 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
 
     id<MTLRenderCommandEncoder> encoder = [command renderCommandEncoderWithDescriptor:present];
     if (encoder == nil) return false;
-    encoder.label = @"wallpaper composition";
-    if (backdrop_ready) {
-        (void)backdrop.drawBands(device, encoder, destination.pixelFormat,
-                                 (uint32_t)destination.width, (uint32_t)destination.height, layout,
-                                 horizontal_flip, present_sampler);
+    if (draw_backdrop) {
+        encoder.label = @"Wallpaper composition with blurred backdrop";
+        // Only the room around the picture: its own pixels are the ones Fit draws.
+        const PixelRect display { 0, 0, (int32_t)std::min<NSUInteger>(std::max(0, layout.scissor_px.width), destination.width),
+                                  (int32_t)std::min<NSUInteger>(std::max(0, layout.scissor_px.height), destination.height) };
+        const FlippedViewportBox copy_box {
+            .x      = (double)layout.backdrop_px.x,
+            .y      = (double)(layout.backdrop_px.y + std::max(1, layout.backdrop_px.height)),
+            .width  = (double)std::max(1, layout.backdrop_px.width),
+            .height = -(double)std::max(1, layout.backdrop_px.height),
+        };
+        const auto copy_viewport = ToMetalViewport(copy_box);
+        backdrop.encodeBands(encoder, ComputeSurroundBands(display, layout.viewport_px),
+                             (MTLViewport) { copy_viewport.origin_x, copy_viewport.origin_y,
+                                             copy_viewport.width, copy_viewport.height, 0.0, 1.0 },
+                             horizontal_flip);
     }
-    const VulkanViewportBox viewport {
+    const FlippedViewportBox viewport {
         .x      = (double)layout.viewport_px.x,
         .y      = (double)(layout.viewport_px.y + std::max(1, layout.viewport_px.height)),
         .width  = (double)std::max(1, layout.viewport_px.width),
@@ -2417,7 +2269,7 @@ void MetalRender::Impl::collectRuntimeImageKeys(Scene& scene)
         dynamic_cast<const RuntimeImageSource*>(scene.imageParser.get());
     if (runtime_images == nullptr) return;
 
-    const auto collect = [&](const std::string& key) {
+    const auto note = [&](const std::string& key) {
         if (key.empty() || IsSpecTex(key)) return;
         if (! runtime_images->IsRuntimeImage(key)) return;
         if (std::find(runtime_image_keys.begin(), runtime_image_keys.end(), key) ==
@@ -2426,11 +2278,16 @@ void MetalRender::Impl::collectRuntimeImageKeys(Scene& scene)
         }
     };
     for (const auto& desc : descriptions) {
-        for (const auto& key : desc.texture_keys) collect(key);
-        // A cover a slot shows over its render target is uploaded like any
-        // other, though the slot itself names the target.
-        for (const auto& key : desc.cover_keys) collect(key);
+        for (const auto& key : desc.texture_keys) note(key);
+        for (const auto& key : desc.cover_keys) note(key);
     }
+}
+
+bool MetalRender::Impl::coverShown(const ScenePassDescription& desc, std::size_t slot) const
+{
+    if (slot >= desc.cover_keys.size() || desc.cover_keys[slot].empty()) return false;
+    const auto ring = runtime_image_rings.find(desc.cover_keys[slot]);
+    return ring != runtime_image_rings.end() && ! ring->second.slots.empty() && ring->second.shows_cover;
 }
 
 void MetalRender::Impl::refreshRuntimeImages(Scene& scene)
@@ -2500,7 +2357,6 @@ void MetalRender::Impl::refreshRuntimeImages(Scene& scene)
             if (rebuilt.size() != kFramesInFlight) continue;
             ring.slots           = std::move(rebuilt);
             ring.slot_versions.assign(kFramesInFlight, 0);
-            ring.slot_covers.assign(kFramesInFlight, false);
             ring.width           = width;
             ring.height          = height;
             ring.format          = format;
@@ -2509,8 +2365,7 @@ void MetalRender::Impl::refreshRuntimeImages(Scene& scene)
             ring.levels          = levels;
         }
 
-        // The sampler follows the image the name shows now, as the compatibility
-        // backend's does: a cover slot shows its author's picture, sampled as the
+        // The sampler follows the image the name shows now: a cover slot shows its author's picture, sampled as the
         // file says, and then a track's cover, clamped and linear.
         ring.sample = parsed->header.sample;
 
@@ -2518,35 +2373,21 @@ void MetalRender::Impl::refreshRuntimeImages(Scene& scene)
         // buffer is still reading. A level the image does not hold stays as it was.
         if (! UploadImageLevels(ring.slots[slot], source, bytes_per_pixel, block_bytes)) continue;
         ring.slot_versions[slot] = version;
-        ring.slot_covers[slot]   = ! RuntimeImageSource::IsEmptyCover(*parsed);
+        ring.shows_cover         = ! RuntimeImageSource::IsEmptyCover(*parsed);
         ++runtime_image_uploads;
     }
-}
-
-id<MTLTexture> MetalRender::Impl::publishedCover(const ScenePassDescription& desc,
-                                                 std::size_t slot,
-                                                 id<MTLSamplerState>* sampler_out)
-{
-    if (slot >= desc.cover_keys.size() || desc.cover_keys[slot].empty()) return nil;
-    const auto ring = runtime_image_rings.find(desc.cover_keys[slot]);
-    if (ring == runtime_image_rings.end() || ring->second.slots.empty()) return nil;
-    const std::size_t frame = static_cast<std::size_t>(frame_slot) % kFramesInFlight;
-    if (frame >= ring->second.slot_covers.size() || ! ring->second.slot_covers[frame]) return nil;
-    if (sampler_out != nullptr) *sampler_out = samplerFor(ring->second.sample);
-    return ring->second.slots[frame];
 }
 
 id<MTLTexture> MetalRender::Impl::resolveTexture(Scene& scene, const std::string& key,
                                                  id<MTLSamplerState>* sampler_out, int image_slot)
 {
     if (key.empty()) return nil;
-    const auto pick = [image_slot](const std::vector<std::shared_ptr<const MetalImportedImage>>& slots)
-        -> id<MTLTexture> {
+    const auto pick = [image_slot](const std::vector<id<MTLTexture>>& slots) -> id<MTLTexture> {
         if (slots.empty()) return nil;
         if (image_slot < 0 || static_cast<std::size_t>(image_slot) >= slots.size()) {
-            return slots.front()->texture;
+            return slots.front();
         }
-        return slots[static_cast<std::size_t>(image_slot)]->texture;
+        return slots[static_cast<std::size_t>(image_slot)];
     };
 
     // A video key never reaches the image parser: its placeholder still would
@@ -2598,16 +2439,17 @@ id<MTLTexture> MetalRender::Impl::resolveTexture(Scene& scene, const std::string
         return nil;
     }
 
-    MetalImageCache::Format format {};
-    if (! ToMetalImageFormat(parsed->header.format, device.supportsBCTextureCompression,
-                             format.pixel_format, format.bytes_per_pixel, format.block_bytes)) {
+    MTLPixelFormat format {};
+    uint32_t       bytes_per_pixel = 0;
+    uint32_t       block_bytes     = 0;
+    if (! ToMetalImageFormat(parsed->header.format, device.supportsBCTextureCompression, format,
+                             bytes_per_pixel, block_bytes)) {
         return nil;
     }
 
     // Every slot for a sprite sheet, the first one for anything else. A sheet
     // whose frames are spread over several images names the one it wants
-    // through the frame's `imageId`, exactly as the compatibility backend's
-    // texture slots do, and importing only one would play the whole animation
+    // through the frame's `imageId`, and importing only one would play the whole animation
     // out of the first sheet. A texture that is not a sheet has no way to reach
     // a second slot, so uploading one would be memory nothing can sample.
     const auto  scene_texture = scene.textures.find(key);
@@ -2615,26 +2457,45 @@ id<MTLTexture> MetalRender::Impl::resolveTexture(Scene& scene, const std::string
         scene_texture != scene.textures.end() ? scene_texture->second.isSprite
                                               : parsed->header.isSprite;
     const std::size_t wanted = is_sprite ? parsed->slots.size() : 1;
-    // A name the runtime fills is not a file: what it holds is whatever the
-    // runtime last produced for this scene, so another display is never
-    // handed it. Everything else is a picture another display may already
-    // hold.
-    const auto* runtime_images = dynamic_cast<const RuntimeImageSource*>(scene.imageParser.get());
-    const bool  shareable      = runtime_images == nullptr || ! runtime_images->IsRuntimeImage(key);
-    std::vector<std::shared_ptr<const MetalImportedImage>> slot_images;
-    slot_images.reserve(wanted);
-    for (std::size_t index = 0; index < wanted; ++index) {
-        const auto& slot = parsed->slots[index];
+    std::vector<id<MTLTexture>> slot_textures;
+    slot_textures.reserve(wanted);
+    for (std::size_t slot_index = 0; slot_index < wanted; ++slot_index) {
+        const auto& slot = parsed->slots[slot_index];
         if (slot.mipmaps.empty() || slot.width <= 0 || slot.height <= 0) break;
-        auto image = shareable
-                         ? MetalImageCache::shared().acquire(device, key, index, slot, format)
-                         : MetalImageCache::own(device, slot, format);
-        if (image == nullptr) break;
-        slot_images.push_back(std::move(image));
-    }
-    if (slot_images.empty()) return nil;
+        // The same picture on the same GPU is one texture, whichever display asked: a texture
+        // another display holds is bound as it is, once its pixels are confirmed equal to the
+        // ones parsed here.
+        SharedImageRequest request;
+        request.device          = device;
+        request.name            = key;
+        request.slot_index      = slot_index;
+        request.format          = format;
+        request.slot            = &slot;
+        request.bytes_per_pixel = bytes_per_pixel;
+        request.block_bytes     = block_bytes;
+        id<MTLTexture> texture = SharedImageCache::shared().import(request, [&]() -> id<MTLTexture> {
+            MTLTextureDescriptor* descriptor =
+                [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
+                                                                   width:(NSUInteger)slot.width
+                                                                  height:(NSUInteger)slot.height
+                                                               mipmapped:slot.mipmaps.size() > 1];
+            descriptor.mipmapLevelCount = slot.mipmaps.size();
+            descriptor.usage            = MTLTextureUsageShaderRead;
+            // Shared storage, so the pixels are written straight into the texture.
+            // A staging buffer plus a blit would need the frame to wait on an
+            // upload, which is exactly what the per-frame path must never do.
+            descriptor.storageMode = MTLStorageModeShared;
 
-    const auto inserted = images.emplace(key, std::move(slot_images)).first;
+            id<MTLTexture> made = [device newTextureWithDescriptor:descriptor];
+            if (made == nil) return nil;
+            return UploadImageLevels(made, slot, bytes_per_pixel, block_bytes) ? made : nil;
+        });
+        if (texture == nil) break;
+        slot_textures.push_back(texture);
+    }
+    if (slot_textures.empty()) return nil;
+
+    const auto inserted = images.emplace(key, std::move(slot_textures)).first;
     if (sampler_out != nullptr) {
         const auto found = scene.textures.find(key);
         *sampler_out     = samplerFor(found != scene.textures.end() ? found->second.sample
@@ -2660,7 +2521,7 @@ void MetalRender::SetPipelineArchivePath(std::string_view path)
     pImpl->pipeline_archive_root = std::string(path);
 }
 
-/// Sizes every render target the way the compatibility backend does.
+/// Sizes every render target.
 ///
 /// The three sizings are different questions and must not be flattened into
 /// one. A screen-bound target follows the raster extent; a target the author
@@ -2672,13 +2533,13 @@ void MetalRender::SetPipelineArchivePath(std::string_view path)
 /// of one overwriting the other.
 void MetalRender::Impl::resolveTargetSizes(Scene& scene)
 {
-    const VkExtent2D fallback { std::max<uint32_t>(1, output_width),
-                                std::max<uint32_t>(1, output_height) };
-    const auto extents      = vulkan::ResolveScreenBoundRenderTargetSizes(
+    const Extent2D fallback { std::max<uint32_t>(1, output_width),
+                              std::max<uint32_t>(1, output_height) };
+    const auto extents      = render::ResolveScreenBoundRenderTargetSizes(
         scene, fallback,
-        vulkan::SceneRasterSurface { .display_scale_factor = NormalizeScaleFactor(display_scale_factor),
+        render::SceneRasterSurface { .display_scale_factor = NormalizeScaleFactor(display_scale_factor),
                                      .max_dimension        = MaxTextureDimension(device) });
-    const auto render_scale = vulkan::ResolveSceneRenderScale(scene);
+    const auto render_scale = render::ResolveSceneRenderScale(scene);
     raster_width            = std::max(1u, extents.raster.width);
     raster_height           = std::max(1u, extents.raster.height);
 
@@ -2686,7 +2547,7 @@ void MetalRender::Impl::resolveTargetSizes(Scene& scene)
         if (name == SpecTex_Default) continue;
         if (target.bind.screen && target.bind.enable) continue;
         if (! target.bind.enable) {
-            vulkan::ResolveRenderScaledSize(target, render_scale);
+            render::ResolveRenderScaledSize(target, render_scale);
             continue;
         }
         const auto bound = scene.renderTargets.find(target.bind.name);
@@ -2707,15 +2568,16 @@ void MetalRender::Impl::resolveTargetSizes(Scene& scene)
 static std::unordered_set<std::string> ReferencedRenderTargets(
     const Scene& scene, const std::vector<ScenePassDescription>& descriptions)
 {
-    std::unordered_set<std::string> required { scene.ResolveRenderTargetName(SpecTex_Default) };
-    // Include hidden draws and elided copies: animation can reveal them, and
-    // disabling optimization can restore a copy without recompiling the graph.
-    for (const auto& pass : descriptions) {
-        if (! pass.target_key.empty()) required.insert(pass.target_key);
-        if (! pass.source_key.empty()) required.insert(pass.source_key);
-        required.insert(pass.texture_keys.begin(), pass.texture_keys.end());
+    std::unordered_set<std::string> keys;
+    keys.insert(scene.ResolveRenderTargetName(SpecTex_Default));
+    for (const auto& description : descriptions) {
+        if (! description.target_key.empty()) keys.insert(description.target_key);
+        if (! description.source_key.empty()) keys.insert(description.source_key);
+        for (const auto& texture : description.texture_keys) {
+            if (! texture.empty()) keys.insert(texture);
+        }
     }
-    return required;
+    return keys;
 }
 
 id<MTLTexture> MetalRender::Impl::newSceneTarget(const std::string&       name,
@@ -3102,7 +2964,7 @@ void MetalRender::Impl::planFeedbackSwaps()
     opening_copies.clear();
     // Part of the copy plan, and switched with it: with scene optimisation off,
     // every copy the graph asks for is made as a copy.
-    if (! vulkan::SceneOptimizationEnabled() || FeedbackCopiesForcedByEnvironment()) {
+    if (! render::SceneOptimizationEnabled() || FeedbackCopiesForcedByEnvironment()) {
         return;
     }
 
@@ -3132,7 +2994,7 @@ void MetalRender::Impl::planFeedbackSwaps()
     for (std::size_t i = 0; i < descriptions.size(); ++i) {
         const auto& copy = descriptions[i];
         if (copy.kind != MetalPassKind::Copy || copy.source_key == copy.target_key) continue;
-        if (i < copy_elision.size() && copy_elision[i] != vulkan::CopyElision::None) continue;
+        if (i < copy_elision.size() && copy_elision[i] != render::CopyElision::None) continue;
         id<MTLTexture> source      = exclusive(copy.source_key);
         id<MTLTexture> destination = exclusive(copy.target_key);
         if (source == nil || destination == nil) continue;
@@ -3231,6 +3093,7 @@ id<MTLDepthStencilState> MetalRender::Impl::depthStencilFor(bool test, bool writ
 /// memory, which is neither black nor the same twice.
 bool MetalRender::Impl::clearTargetsOnce()
 {
+    if (defer_target_clears) return true;
     id<MTLCommandBuffer> command = [queue commandBuffer];
     if (command == nil) return fail("a Metal command buffer could not be created");
     std::unordered_set<const void*> cleared;
@@ -3335,7 +3198,7 @@ bool MetalRender::Impl::prepareDraw(Scene& scene, std::size_t index, PreparedPas
         if (desc.texture_keys[i].empty()) {
             if (! out.unproduced_input) {
                 LOG_INFO("metal render: %s samples slot %zu, which nothing in the scene produces; "
-                         "the step is skipped as on the compatibility renderer",
+                         "the step is skipped",
                          material->name.c_str(), i);
             }
             out.unproduced_input = true;
@@ -3433,8 +3296,7 @@ bool MetalRender::Impl::prepareDraw(Scene& scene, std::size_t index, PreparedPas
                         input.format);
         }
         // The buffer that actually carries this attribute, falling back to the
-        // first one exactly as the compatibility backend does when a shader
-        // declares an input the mesh does not provide.
+        // first one when a shader declares an input the mesh does not provide.
         std::size_t source   = 0;
         std::size_t offset   = 0;
         bool        provided = false;
@@ -3951,8 +3813,8 @@ void MetalRender::Impl::writeUniforms(Scene& scene, const ScenePassDescription& 
         const float*          data  = value.data();
         std::size_t           count = value.size();
         if (count == 16 && slot.fold != 0) {
-            Eigen::Matrix4f matrix = Eigen::Map<const Eigen::Matrix4f>(value.data());
-            const Eigen::Matrix4f fold = MetalClipSpaceFold().cast<float>();
+            linalg::Matrix4f matrix = linalg::Map<const linalg::Matrix4f>(value.data());
+            const linalg::Matrix4f fold = MetalClipSpaceFold().cast<float>();
             matrix = slot.fold == 1 ? (fold * matrix).eval() : (matrix * fold).eval();
             std::memcpy(folded.data(), matrix.data(), sizeof(folded));
             data = folded.data();
@@ -4086,8 +3948,8 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
 {
     (void)graph;
     // Derived from this backend's OWN pass descriptions, not from the render
-    // graph's Vulkan pass objects. The Metal path never instantiates those, so
-    // walking the graph found nothing, concluded nothing was dynamic, and
+    // graph's pass objects, which this path never instantiates: walking the
+    // graph would find nothing, concluded nothing was dynamic, and
     // reported a provably-still scene — which would let on-demand updating stop
     // the clock on an animating wallpaper. An empty answer is the dangerous
     // answer here, so every path that cannot account for a pass adds
@@ -4114,27 +3976,27 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
                                                     desc.camera_override)
                     : frame_varying_uniform::kAll;
             if ((varying & (frame_varying_uniform::kTime | frame_varying_uniform::kDayTime)) != 0)
-                reasons |= vulkan::DynamicReason::TimeUniform;
+                reasons |= render::DynamicReason::TimeUniform;
             if ((varying & frame_varying_uniform::kAudio) != 0)
-                reasons |= vulkan::DynamicReason::AudioUniform;
+                reasons |= render::DynamicReason::AudioUniform;
             if ((varying & (frame_varying_uniform::kPointer | frame_varying_uniform::kParallax)) !=
                 0)
-                reasons |= vulkan::DynamicReason::PointerUniform;
+                reasons |= render::DynamicReason::PointerUniform;
             if ((varying & frame_varying_uniform::kBones) != 0)
-                reasons |= vulkan::DynamicReason::BoneUniform;
+                reasons |= render::DynamicReason::BoneUniform;
 
             if (runtime_images != nullptr) {
                 for (const auto& texture : desc.texture_keys) {
                     if (texture.empty()) continue;
                     if (runtime_images->IsRuntimeImage(texture)) {
-                        reasons |= vulkan::DynamicReason::RuntimeImage;
+                        reasons |= render::DynamicReason::RuntimeImage;
                         break;
                     }
                 }
-            }
-            if (std::any_of(desc.cover_keys.begin(), desc.cover_keys.end(),
-                            [](const std::string& cover) { return ! cover.empty(); })) {
-                reasons |= vulkan::DynamicReason::RuntimeImage;
+                // A slot that may swap to a cover reads an image the runtime replaces.
+                for (const auto& cover : desc.cover_keys) {
+                    if (! cover.empty()) reasons |= render::DynamicReason::RuntimeImage;
+                }
             }
             // A sheet with more than one frame and a mesh the runtime rewrites
             // both change the picture without any uniform this reflection
@@ -4145,7 +4007,7 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
                 for (const auto& [slot, sprite] : prepared[index].sprites) {
                     (void)slot;
                     if (sprite.numFrames() > 1) {
-                        reasons |= vulkan::DynamicReason::AnimatedSprite;
+                        reasons |= render::DynamicReason::AnimatedSprite;
                         break;
                     }
                 }
@@ -4153,8 +4015,8 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
             if (desc.node != nullptr && desc.node->Mesh() != nullptr &&
                 desc.node->Mesh()->Dynamic()) {
                 reasons |= desc.node->Mesh()->UpdatesOnEvent()
-                               ? vulkan::DynamicReason::EventMesh
-                               : vulkan::DynamicReason::DynamicMesh;
+                               ? render::DynamicReason::EventMesh
+                               : render::DynamicReason::DynamicMesh;
             }
             break;
         }
@@ -4170,7 +4032,7 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
     // with nothing else changing, so the clock has to keep running for it.
     for (const auto& [name, target] : scene.renderTargets) {
         if (target.carriesPreviousFrame && targets.contains(name)) {
-            reasons |= vulkan::DynamicReason::Feedback;
+            reasons |= render::DynamicReason::Feedback;
             break;
         }
     }
@@ -4178,13 +4040,13 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
     // A compiled graph that yielded no shader pass is not a still scene; it is
     // a graph this analysis did not understand.
     if (! saw_shader_pass || ! understood_every_pass) {
-        reasons |= vulkan::DynamicReason::UnknownInput;
+        reasons |= render::DynamicReason::UnknownInput;
     }
     demand_reasons = reasons;
 }
 
-/// Decides which copies this backend can reduce, using the compatibility
-/// backend's rule rather than a second one.
+/// Decides which copies this backend can reduce, by the shared
+/// `CopyElision` rule rather than a second one.
 ///
 /// The rule is not relaxed for Metal: a copy that resamples, that generates the
 /// destination's mip chain, or whose destination anything else writes or reads
@@ -4193,23 +4055,23 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
 /// a name is never what decides.
 void MetalRender::Impl::planCopyElision(Scene& scene)
 {
-    copy_elision.assign(descriptions.size(), vulkan::CopyElision::None);
+    copy_elision.assign(descriptions.size(), render::CopyElision::None);
     target_aliases.clear();
     elided_copies = 0;
-    if (! vulkan::SceneOptimizationEnabled()) return;
+    if (! render::SceneOptimizationEnabled()) return;
 
     const auto mip_levels = [&scene](const std::string& key) -> uint32_t {
         const auto* target = scene.FindRenderTarget(key);
         return target != nullptr ? std::max<uint32_t>(1, target->mipmap_level) : 1u;
     };
 
-    std::vector<vulkan::ElisionPassDesc> elision;
+    std::vector<render::ElisionPassDesc> elision;
     elision.reserve(descriptions.size() + 1);
     for (const auto& desc : descriptions) {
-        vulkan::ElisionPassDesc entry;
+        render::ElisionPassDesc entry;
         switch (desc.kind) {
         case MetalPassKind::Copy: {
-            entry.kind   = vulkan::ElisionPassDesc::Kind::Copy;
+            entry.kind   = render::ElisionPassDesc::Kind::Copy;
             entry.writes = desc.target_key;
             entry.reads  = { desc.source_key };
             const auto* source = scene.FindRenderTarget(desc.source_key);
@@ -4223,40 +4085,40 @@ void MetalRender::Impl::planCopyElision(Scene& scene)
             break;
         }
         case MetalPassKind::Clear:
-            entry.kind   = vulkan::ElisionPassDesc::Kind::Clear;
+            entry.kind   = render::ElisionPassDesc::Kind::Clear;
             entry.writes = desc.target_key;
             break;
         case MetalPassKind::CustomShader:
-            entry.kind   = vulkan::ElisionPassDesc::Kind::Custom;
+            entry.kind   = render::ElisionPassDesc::Kind::Custom;
             entry.writes = desc.target_key;
             for (const auto& key : desc.texture_keys) {
                 if (! key.empty()) entry.reads.push_back(key);
             }
             break;
         case MetalPassKind::Virtual:
-        case MetalPassKind::Unsupported: entry.kind = vulkan::ElisionPassDesc::Kind::Custom; break;
+        case MetalPassKind::Unsupported: entry.kind = render::ElisionPassDesc::Kind::Custom; break;
         }
         elision.push_back(std::move(entry));
     }
     // The composition draw, and the poster that re-composes from the same
     // image, both read the scene's output. Without this entry a scene whose
     // last step is a copy into the output would look like a copy nobody wants.
-    elision.push_back(vulkan::ElisionPassDesc {
-        .kind  = vulkan::ElisionPassDesc::Kind::Present,
+    elision.push_back(render::ElisionPassDesc {
+        .kind  = render::ElisionPassDesc::Kind::Present,
         .reads = { scene.ResolveRenderTargetName(SpecTex_Default) },
     });
 
-    const auto plan = vulkan::PlanCopyElision(elision);
+    const auto plan = render::PlanCopyElision(elision);
     for (std::size_t i = 0; i < descriptions.size() && i < plan.size(); ++i) {
         if (descriptions[i].kind != MetalPassKind::Copy) continue;
-        if (plan[i] == vulkan::CopyElision::None) continue;
+        if (plan[i] == render::CopyElision::None) continue;
         copy_elision[i] = plan[i];
         ++elided_copies;
-        if (plan[i] == vulkan::CopyElision::Alias) {
+        if (plan[i] == render::CopyElision::Alias) {
             target_aliases[descriptions[i].target_key] = descriptions[i].source_key;
         }
     }
-    vulkan::RecordElidedCopies(elided_copies);
+    render::RecordElidedCopies(elided_copies);
 }
 
 /// Builds the target table this backend reuses pixels from.
@@ -4283,7 +4145,7 @@ static std::string ResolveAliasRoot(const std::unordered_map<std::string, std::s
 
 bool MetalRender::Impl::applySceneOptimizationSetting(Scene& scene, id<MTLCommandBuffer> command)
 {
-    const bool enabled = vulkan::SceneOptimizationEnabled();
+    const bool enabled = render::SceneOptimizationEnabled();
     if (enabled == optimization_applied) return true;
     // Targets are reallocated and cleared in this frame's own command buffer,
     // so the frame after a change always composes and presents.
@@ -4362,28 +4224,28 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
     // changes, and a total that is only ever zeroed here would count the same
     // pixels into the process-wide budget once per change.
     if (static_pinned_bytes != 0) {
-        vulkan::AdjustSceneOptimizationPinnedBytes(-static_cast<int64_t>(static_pinned_bytes));
+        render::AdjustSceneOptimizationPinnedBytes(-static_cast<int64_t>(static_pinned_bytes));
         static_pinned_bytes = 0;
     }
     optimization_compiled = false;
-    if (! vulkan::SceneOptimizationEnabled()) return;
+    if (! render::SceneOptimizationEnabled()) return;
 
     const auto* updater = scene.shaderValueUpdater.get();
     const auto* runtime_images =
         dynamic_cast<const RuntimeImageSource*>(scene.imageParser.get());
 
-    std::vector<vulkan::StaticPassDesc> descs;
+    std::vector<render::StaticPassDesc> descs;
     descs.reserve(descriptions.size());
     for (std::size_t i = 0; i < descriptions.size(); ++i) {
         const auto& desc = descriptions[i];
-        vulkan::StaticPassDesc out;
+        render::StaticPassDesc out;
         switch (desc.kind) {
         case MetalPassKind::Copy:
             // An elided copy executes nothing, so it is neither a writer of its
             // destination nor a reason for it to be redrawn.
-            if (copy_elision[i] == vulkan::CopyElision::None) {
+            if (copy_elision[i] == render::CopyElision::None) {
                 out.target = desc.target_key;
-                out.inputs = { vulkan::ResolveCopyAliasKey(target_aliases, desc.source_key) };
+                out.inputs = { render::ResolveCopyAliasKey(target_aliases, desc.source_key) };
             }
             break;
         case MetalPassKind::Clear:
@@ -4399,7 +4261,7 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
                 // plan folded onto its source has no writer of its own, and a
                 // read of the bare name would look like a read of something
                 // nothing in this frame produces.
-                out.inputs.push_back(vulkan::ResolveCopyAliasKey(target_aliases, key));
+                out.inputs.push_back(render::ResolveCopyAliasKey(target_aliases, key));
             }
             uint32_t reasons = 0;
             const uint32_t varying =
@@ -4408,25 +4270,23 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
                                                     desc.camera_override)
                     : frame_varying_uniform::kAll;
             if ((varying & (frame_varying_uniform::kTime | frame_varying_uniform::kDayTime)) != 0)
-                reasons |= vulkan::DynamicReason::TimeUniform;
+                reasons |= render::DynamicReason::TimeUniform;
             if ((varying & frame_varying_uniform::kAudio) != 0)
-                reasons |= vulkan::DynamicReason::AudioUniform;
+                reasons |= render::DynamicReason::AudioUniform;
             if ((varying & (frame_varying_uniform::kPointer | frame_varying_uniform::kParallax)) !=
                 0)
-                reasons |= vulkan::DynamicReason::PointerUniform;
+                reasons |= render::DynamicReason::PointerUniform;
             if ((varying & frame_varying_uniform::kBones) != 0)
-                reasons |= vulkan::DynamicReason::BoneUniform;
+                reasons |= render::DynamicReason::BoneUniform;
             for (const auto& key : desc.texture_keys) {
                 if (key.empty()) continue;
-                if (video.owns(key)) reasons |= vulkan::DynamicReason::VideoInput;
+                if (video.owns(key)) reasons |= render::DynamicReason::VideoInput;
                 if (runtime_images != nullptr && runtime_images->IsRuntimeImage(key))
-                    reasons |= vulkan::DynamicReason::RuntimeImage;
+                    reasons |= render::DynamicReason::RuntimeImage;
             }
-            // A cover bound over a render target changes the picture whenever
-            // a track brings one, though the target alone may be still.
-            if (std::any_of(desc.cover_keys.begin(), desc.cover_keys.end(),
-                            [](const std::string& cover) { return ! cover.empty(); })) {
-                reasons |= vulkan::DynamicReason::RuntimeImage;
+            // A slot that may swap to a cover reads an image the runtime replaces.
+            for (const auto& cover : desc.cover_keys) {
+                if (! cover.empty()) reasons |= render::DynamicReason::RuntimeImage;
             }
             // A mesh the runtime rewrites every frame -- a particle system --
             // is never reusable. Its geometry is uploaded per frame and the
@@ -4439,8 +4299,8 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
                 // one level up, where the scene decides whether to keep the
                 // clock.
                 reasons |= desc.node->Mesh()->UpdatesOnEvent()
-                               ? vulkan::DynamicReason::EventMesh
-                               : vulkan::DynamicReason::DynamicMesh;
+                               ? render::DynamicReason::EventMesh
+                               : render::DynamicReason::DynamicMesh;
             }
             // Sprite sheets are deliberately absent: the frame this pass draws
             // is folded into its per-frame sample below, taken after the sprite
@@ -4455,14 +4315,14 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
         case MetalPassKind::Unsupported:
             // Not reachable: an unsupported pass fails the graph rejection. If
             // it ever were, it must not be reusable.
-            out.dynamic_reasons = static_cast<uint32_t>(vulkan::DynamicReason::UnknownInput);
+            out.dynamic_reasons = static_cast<uint32_t>(render::DynamicReason::UnknownInput);
             break;
         }
         descs.push_back(std::move(out));
     }
 
     static_cache.Compile(descs);
-    static_samples.assign(descriptions.size(), vulkan::StaticPassSample {});
+    static_samples.assign(descriptions.size(), render::StaticPassSample {});
 
     pinned_target_keys.clear();
     std::unordered_map<const void*, uint32_t> keys_per_image;
@@ -4495,18 +4355,18 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
         pinned_target_keys.insert(key);
     }
     if (static_pinned_bytes != 0) {
-        vulkan::AdjustSceneOptimizationPinnedBytes(static_cast<int64_t>(static_pinned_bytes));
+        render::AdjustSceneOptimizationPinnedBytes(static_cast<int64_t>(static_pinned_bytes));
     }
     optimization_compiled = true;
 }
 
-vulkan::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_t index) const
+render::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_t index) const
 {
-    vulkan::StaticPassSample sample;
+    render::StaticPassSample sample;
     const auto&              desc = descriptions[index];
     if (desc.kind != MetalPassKind::CustomShader) {
         if (desc.uses_scene_clear_color) {
-            sample.hash = vulkan::StaticHashBytes(0xcbf29ce484222325ULL,
+            sample.hash = render::StaticHashBytes(0xcbf29ce484222325ULL,
                 desc.clear_color.data(), sizeof(float) * desc.clear_color.size());
         }
         return sample;
@@ -4518,40 +4378,40 @@ vulkan::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
 
     uint64_t hash = 0xcbf29ce484222325ULL;
     if (desc.uses_scene_clear_color) {
-        hash = vulkan::StaticHashBytes(hash, desc.clear_color.data(), sizeof(float) * desc.clear_color.size());
+        hash = render::StaticHashBytes(hash, desc.clear_color.data(), sizeof(float) * desc.clear_color.size());
     }
     if (desc.node != nullptr) {
         // Idempotent, and the transform has to be current before it is
         // compared: a parent moved by a script updates lazily.
         desc.node->UpdateTrans();
         const auto model = desc.node->ModelTrans();
-        hash = vulkan::StaticHashBytes(hash, model.data(), sizeof(double) * 16);
+        hash = render::StaticHashBytes(hash, model.data(), sizeof(double) * 16);
         // Where the node is drawn, when that is not where its world matrix puts it: a
         // layer a screen anchor shifts, or a final card drawn through an override that
         // carries the shift.
         if (desc.node->HasRenderTransformOverride() || ! desc.node->DrawOffset().isZero()) {
             const auto drawn = desc.node->RenderTrans();
-            hash = vulkan::StaticHashBytes(hash, drawn.data(), sizeof(double) * 16);
+            hash = render::StaticHashBytes(hash, drawn.data(), sizeof(double) * 16);
         }
         if (auto* mesh = desc.node->Mesh(); mesh != nullptr) {
-            hash = vulkan::StaticHashMix(hash, mesh->DirtyGeneration());
+            hash = render::StaticHashMix(hash, mesh->DirtyGeneration());
             if (const auto* material = mesh->MaterialForSlot(desc.material_slot);
                 material != nullptr) {
                 for (const auto& [name, value] : material->customShader.constValues) {
-                    hash = vulkan::StaticHashBytes(hash, name.data(), name.size());
-                    hash = vulkan::StaticHashBytes(hash, value.data(),
+                    hash = render::StaticHashBytes(hash, name.data(), name.size());
+                    hash = render::StaticHashBytes(hash, value.data(),
                                                    value.size() * sizeof(float));
                 }
             }
         }
         // Lights move, fade and switch without touching this node or material.
         if (const auto* updater = scene.shaderValueUpdater.get(); updater != nullptr) {
-            hash = vulkan::StaticHashMix(hash,
+            hash = render::StaticHashMix(hash,
                                          updater->LightStateHash(desc.node, desc.material_slot));
         }
     }
 
-    hash = vulkan::FoldPassCameras(hash, scene, desc.camera_override, desc.node);
+    hash = render::FoldPassCameras(hash, scene, desc.camera_override, desc.node);
 
     // What a replaceable image currently holds. Its geometry can be unchanged
     // while its pixels are not -- a clock redrawing the same number of glyphs,
@@ -4559,33 +4419,41 @@ vulkan::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
     // only moving input is that image would otherwise be called unchanged and
     // keep showing the previous picture.
     if (! runtime_image_rings.empty()) {
-        const auto fold = [&](const std::string& key) {
-            if (key.empty()) return;
+        for (const auto& key : desc.texture_keys) {
+            if (key.empty()) continue;
             const auto ring = runtime_image_rings.find(key);
-            if (ring == runtime_image_rings.end()) return;
-            hash = vulkan::StaticHashBytes(hash, key.data(), key.size());
-            hash = vulkan::StaticHashMix(hash, ring->second.version);
-        };
-        for (const auto& key : desc.texture_keys) fold(key);
-        for (const auto& key : desc.cover_keys) fold(key);
+            if (ring == runtime_image_rings.end()) continue;
+            hash = render::StaticHashBytes(hash, key.data(), key.size());
+            hash = render::StaticHashMix(hash, ring->second.version);
+        }
+        // A slot over a composite shows a cover from the moment one is published.
+        for (std::size_t slot = 0; slot < desc.cover_keys.size(); ++slot) {
+            const auto& key = desc.cover_keys[slot];
+            if (key.empty()) continue;
+            const auto ring = runtime_image_rings.find(key);
+            if (ring == runtime_image_rings.end()) continue;
+            hash = render::StaticHashBytes(hash, key.data(), key.size());
+            hash = render::StaticHashMix(hash, ring->second.version);
+            hash = render::StaticHashMix(hash, coverShown(desc, slot) ? 1u : 0u);
+        }
     }
 
     // The sprite frame as it will actually be sampled, not its index: two
     // frames of one sheet differ by their rectangle and axes, and that is
     // exactly what reaches the shader.
     for (const auto& [slot, sprite] : prepared[index].sprites) {
-        hash = vulkan::StaticHashMix(hash, static_cast<uint64_t>(slot));
+        hash = render::StaticHashMix(hash, static_cast<uint64_t>(slot));
         if (sprite.numFrames() == 0) continue;
         const auto& frame = sprite.GetCurFrame();
-        hash = vulkan::StaticHashMix(hash, static_cast<uint64_t>(frame.imageId));
+        hash = render::StaticHashMix(hash, static_cast<uint64_t>(frame.imageId));
         const std::array<float, 9> rect { frame.x,        frame.y,        frame.width,
                                           frame.height,   frame.rate,     frame.xAxis[0],
                                           frame.xAxis[1], frame.yAxis[0], frame.yAxis[1] };
-        hash = vulkan::StaticHashBytes(hash, rect.data(), rect.size() * sizeof(float));
+        hash = render::StaticHashBytes(hash, rect.data(), rect.size() * sizeof(float));
     }
 
-    hash = vulkan::StaticHashMix(hash, desc.target_width);
-    hash = vulkan::StaticHashMix(hash, desc.target_height);
+    hash = render::StaticHashMix(hash, desc.target_width);
+    hash = render::StaticHashMix(hash, desc.target_height);
     sample.hash = hash;
     return sample;
 }
@@ -4596,7 +4464,7 @@ bool MetalRender::Impl::planStaticSkips(Scene& scene)
         static_skip.assign(descriptions.size(), uint8_t { 0 });
     }
     std::fill(static_skip.begin(), static_skip.end(), uint8_t { 0 });
-    if (! optimization_compiled || ! vulkan::SceneOptimizationEnabled() ||
+    if (! optimization_compiled || ! render::SceneOptimizationEnabled() ||
         static_cache.TargetCount() == 0) {
         // Dropped, not merely unused. While reuse is off every target is
         // redrawn from whatever this frame's inputs are, and the table still
@@ -4618,17 +4486,17 @@ bool MetalRender::Impl::planStaticSkips(Scene& scene)
         for (const auto& desc : descriptions) {
             if (desc.kind != MetalPassKind::Virtual) ++executed;
         }
-        vulkan::RecordSceneOptimizationFrame(executed, 0);
+        render::RecordSceneOptimizationFrame(executed, 0);
         return false;
     }
     if (static_samples.size() != descriptions.size()) {
-        static_samples.assign(descriptions.size(), vulkan::StaticPassSample {});
+        static_samples.assign(descriptions.size(), render::StaticPassSample {});
     }
     // Only the writers of a cacheable target fold into a signature; the rest
     // execute whatever their sample would say.
     for (std::size_t i = 0; i < descriptions.size(); ++i) {
         static_samples[i] =
-            static_cache.PassSampled(i) ? frameSample(scene, i) : vulkan::StaticPassSample {};
+            static_cache.PassSampled(i) ? frameSample(scene, i) : render::StaticPassSample {};
     }
     static_cache.Plan(static_samples, static_skip);
 
@@ -4641,7 +4509,7 @@ bool MetalRender::Impl::planStaticSkips(Scene& scene)
         else
             ++executed;
     }
-    vulkan::RecordSceneOptimizationFrame(executed, skipped);
+    render::RecordSceneOptimizationFrame(executed, skipped);
     return skipped != 0;
 }
 
@@ -4651,9 +4519,16 @@ bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
     // The videos a rebuild set aside and this graph does not take back are the
     // ones it no longer uses: closed with the compile, however it ends.
     AUTO_DELETER(held_videos, [this]() { video.closeHeld(); });
+    // The image parser decides how many levels of a texture to keep from the size of the
+    // surface it ends up on; a display-sized scene has no surface of its own, so no cap.
     if (scene.imageParser != nullptr) {
-        scene.imageParser->SetTextureSurfaceSize(scene.display_sized ? 0 : output_width,
-                                                 scene.display_sized ? 0 : output_height);
+        uint32_t cap_width  = 0;
+        uint32_t cap_height = 0;
+        if (! scene.display_sized) {
+            cap_width  = output_width;
+            cap_height = output_height;
+        }
+        scene.imageParser->SetTextureSurfaceSize(cap_width, cap_height);
     }
 
     if (auto reason = MetalGraphRejection(scene, graph); ! reason.empty()) {
@@ -4685,7 +4560,7 @@ bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
         // runs, and the copy would then execute in a frame that must not stop
         // to compile anything.
         if (target == targets.end()) {
-            if (copy_elision[i] != vulkan::CopyElision::None) continue;
+            if (copy_elision[i] != render::CopyElision::None) continue;
             return fail("a copy step targets an image that does not exist");
         }
         if (! ensurePresentPipeline(target->second.pixelFormat)) return false;
@@ -4773,23 +4648,91 @@ bool MetalRender::Impl::compile(Scene& scene, rg::RenderGraph& graph)
     planFeedbackSwaps();
     planPooledTrades(scene);
     refreshPassTargets(scene);
-    optimization_applied = vulkan::SceneOptimizationEnabled();
+    optimization_applied = render::SceneOptimizationEnabled();
     graph_ready = true;
     last_error.clear();
     return true;
 }
 
-void MetalRender::Impl::prepareBackdrop()
+bool MetalRender::Impl::resizeTargets(Scene& scene)
 {
-    if (scaling_mode != WallpaperScalingMode::FIT_BLURRED) {
-        backdrop.release();
-        return;
+    if (! inited || ! graph_ready) return fail("there is no compiled graph to resize");
+
+    // What belongs to the targets, as `releaseGraph` drops it. Nothing that the passes own
+    // goes: those are the cost a rebuild repeats.
+    poster.invalidate();
+    releaseSceneOptimization();
+    frame_drawn = false;
+    present_gate.Invalidate();
+    pending_target_clears.clear();
+    targets.clear();
+    owned_targets.clear();
+    depth_targets.clear();
+    pass_targets.clear();
+    pass_depths.clear();
+    pass_reads_own_target.clear();
+    scene_output_target = nil;
+    scene_output_key.clear();
+    feedback_swaps.clear();
+    frame_swaps.clear();
+    opening_copies.clear();
+    pooled_trades.clear();
+    pooled_copy_at.clear();
+    pooled_release_at.clear();
+    pooled_snapshot.clear();
+
+    resolveTargetSizes(scene);
+
+    // The only sizes a lowered step holds: the extents of the images it reads and writes.
+    const auto extent = [&scene](const std::string& key, uint32_t& width, uint32_t& height) {
+        const auto* target = scene.FindRenderTarget(key);
+        if (target == nullptr || target->width <= 0 || target->height <= 0) return;
+        width  = static_cast<uint32_t>(target->width);
+        height = static_cast<uint32_t>(target->height);
+    };
+    for (auto& desc : descriptions) {
+        if (! desc.target_key.empty()) extent(desc.target_key, desc.target_width, desc.target_height);
+        if (desc.kind == MetalPassKind::Copy && ! desc.source_key.empty()) {
+            extent(desc.source_key, desc.source_width, desc.source_height);
+        }
     }
-    if (device == nil || present_library == nil) return;
-    if (! backdrop.prepare(device, drawable_format) && ! backdrop_failure_logged) {
-        LOG_ERROR("the blurred fill could not be prepared: %s", backdrop.lastError().c_str());
-        backdrop_failure_logged = true;
+
+    planCopyElision(scene);
+    defer_target_clears = true;
+    const bool allocated = prepareTargets(scene) && prepareDepthTargets();
+    defer_target_clears = false;
+    if (! allocated) return false;
+
+    for (std::size_t i = 0; i < descriptions.size(); ++i) {
+        if (descriptions[i].kind != MetalPassKind::Copy) continue;
+        const auto target = targets.find(descriptions[i].target_key);
+        if (target == targets.end()) {
+            if (copy_elision[i] != render::CopyElision::None) continue;
+            return fail("a copy step targets an image that does not exist");
+        }
+        if (! ensurePresentPipeline(target->second.pixelFormat)) return false;
     }
+    refreshPassTargets(scene);
+
+    compileStaticCache(scene);
+    shareTargetImages(scene);
+    refreshPassTargets(scene);
+    planFeedbackSwaps();
+    planPooledTrades(scene);
+    refreshPassTargets(scene);
+
+    // Every image the frame will touch starts from a defined state, as a compile leaves
+    // it: cleared in the next frame's command buffer, ahead of its passes.
+    std::unordered_set<const void*> seen;
+    for (const auto& [name, texture] : targets) {
+        (void)name;
+        if (texture != nil && seen.insert((__bridge const void*)texture).second) {
+            pending_target_clears.push_back(texture);
+        }
+    }
+    optimization_applied = render::SceneOptimizationEnabled();
+    last_error.clear();
+    return true;
 }
 
 WallpaperScalingLayout MetalRender::Impl::scalingLayout(const Scene& scene, uint32_t width,
@@ -4797,7 +4740,7 @@ WallpaperScalingLayout MetalRender::Impl::scalingLayout(const Scene& scene, uint
 {
     const double scale_factor = NormalizeScaleFactor(display_scale_factor);
     const auto   source_extent =
-        vulkan::ResolveSceneSourceExtent(scene, { std::max(1u, width), std::max(1u, height) });
+        render::ResolveSceneSourceExtent(scene, { std::max(1u, width), std::max(1u, height) });
     const uint32_t logical_width = std::max(
         1u, static_cast<uint32_t>(std::lround(static_cast<double>(width) / scale_factor)));
     const uint32_t logical_height = std::max(
@@ -4866,6 +4809,7 @@ void MetalRender::destroy()
         pImpl->releaseGraph();
         pImpl->video.closeHeld();
         pImpl->releasePresentation();
+        pImpl->backdrop.release();
         pImpl->present_pipelines.clear();
         pImpl->queue  = nil;
         pImpl->device = nil;
@@ -4947,11 +4891,17 @@ bool MetalRender::compileRenderGraph(Scene& scene, rg::RenderGraph& graph)
     }
 }
 
+bool MetalRender::ResizeRenderTargets(Scene& scene)
+{
+    @autoreleasepool {
+        return pImpl->resizeTargets(scene);
+    }
+}
+
 bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double scale,
                                    SceneResolution resolution)
 {
-    // The same guard the compatibility backend has, and for a sharper reason
-    // here: `compile` starts by releasing the graph, which drops every uploaded
+    // A guard, for a sharp reason: `compile` starts by releasing the graph, which drops every uploaded
     // image and sets every video aside for the new graph to take back. The host
     // pushes this as a live property to every open scene whenever the value
     // *might* have moved — on scene creation, and on each power-source change
@@ -4959,7 +4909,7 @@ bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double 
     // drags does not reparse the project. Acting on an unchanged value would turn
     // every plug and unplug into exactly that.
     if (! std::isfinite(scale) || scale <= 0.0) return true;
-    const double clamped = std::min(1.0, std::max(vulkan::kMinRenderScale, scale));
+    const double clamped = std::min(1.0, std::max(render::kMinRenderScale, scale));
     if (scene.render_scale == clamped && scene.resolution == resolution) return true;
 
     // A resolution that this scene has no canvas to apply to changes nothing
@@ -4967,7 +4917,7 @@ bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double 
     // compiled graph either.
     const bool resizes =
         scene.render_scale != clamped ||
-        (scene.resolution != resolution && vulkan::SceneResolutionAffectsRaster(scene));
+        (scene.resolution != resolution && render::SceneResolutionAffectsRaster(scene));
     scene.render_scale = clamped;
     scene.resolution   = resolution;
     if (! resizes) return true;
@@ -4979,7 +4929,7 @@ bool MetalRender::ApplyRenderScale(Scene& scene, rg::RenderGraph& graph, double 
 
 void MetalRender::UpdateCameraFillMode(Scene& scene, FillMode fillmode)
 {
-    vulkan::ApplyCameraFillMode(scene, fillmode, pImpl->output_width, pImpl->output_height);
+    render::ApplyCameraFillMode(scene, fillmode, pImpl->output_width, pImpl->output_height);
     // The camera moved: reuse signatures see it, but the gate must not let a
     // frame decided before that change stand in for one after it.
     pImpl->present_gate.Invalidate();
@@ -4988,8 +4938,8 @@ void MetalRender::UpdateCameraFillMode(Scene& scene, FillMode fillmode)
 void MetalRender::SetWallpaperScalingMode(WallpaperScalingMode mode)
 {
     pImpl->scaling_mode = mode;
-    pImpl->present_gate.Invalidate();
     pImpl->prepareBackdrop();
+    pImpl->present_gate.Invalidate();
 }
 
 void MetalRender::SetWallpaperScalingFactor(double factor)
@@ -5028,18 +4978,13 @@ void MetalRender::SetVideoPlaybackRate(float rate)
 
 VideoFramePath MetalRender::VideoPath() const { return pImpl->reported_path.load(); }
 
-double MetalRender::ShortestVideoFramePeriod() const
-{
-    return pImpl->video.shortestFramePeriod();
-}
-
 uint32_t MetalRender::ShaderUpdateDemandReasons() const
 {
     uint32_t reasons = pImpl->demand_reasons;
     // Asked now rather than latched at compile: pausing playback stops the
     // frames without rebuilding the graph, and a paused video must not keep
     // the clock running.
-    if (pImpl->video.advancesOnItsOwn()) reasons |= vulkan::DynamicReason::VideoInput;
+    if (pImpl->video.advancesOnItsOwn()) reasons |= render::DynamicReason::VideoInput;
     return reasons;
 }
 
@@ -5095,6 +5040,23 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             return false;
         }
 
+        // Targets a resize allocated since the last frame, cleared ahead of every pass in
+        // this buffer: the queue runs them in order, so no pass reads one first.
+        for (id<MTLTexture> texture : impl.pending_target_clears) {
+            MTLRenderPassDescriptor* descriptor = [MTLRenderPassDescriptor renderPassDescriptor];
+            descriptor.colorAttachments[0].texture     = texture;
+            descriptor.colorAttachments[0].loadAction  = MTLLoadActionClear;
+            descriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
+            descriptor.colorAttachments[0].clearColor  = MTLClearColorMake(0.0, 0.0, 0.0, 0.0);
+            id<MTLRenderCommandEncoder> encoder =
+                [command renderCommandEncoderWithDescriptor:descriptor];
+            if (encoder == nil) {
+                dispatch_semaphore_signal(impl.inflight);
+                return impl.fail("a resized render target could not be cleared");
+            }
+            [encoder endEncoding];
+        }
+
         // Before any pass samples one, and before the reuse plan reads their
         // versions: a text layer that re-rendered itself, or a media thumbnail
         // that arrived, has new pixels that this frame must see.
@@ -5131,8 +5093,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         id<MTLBuffer> uniforms = impl.uniform_rings[impl.frame_slot];
         auto*         uniform_base = static_cast<uint8_t*>(uniforms.contents);
 
-        // `FrameBegin` is the host's, once per frame before it draws, as for
-        // the compatibility backend: it steps the parallax cursor's smoothing
+        // `FrameBegin` is the host's, once per frame before it draws: it steps the parallax cursor's smoothing
         // by the frame time and places puppet attachments. Calling it here as
         // well stepped the smoothing twice per frame, so the parallax on this
         // backend chased the cursor twice as fast.
@@ -5140,8 +5101,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             auto&       pass = impl.prepared[i];
             const auto& desc = impl.descriptions[i];
             // A pass that draws nothing this frame needs no uniforms: nothing
-            // reads them, the way the compatibility backend skips the update
-            // of a hidden layer.
+            // reads them, as for a hidden layer.
             if (! impl.passDraws(i)) continue;
             const bool planes_active =
                 i < impl.video_plane_active.size() && impl.video_plane_active[i] != 0;
@@ -5227,8 +5187,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             ++impl.frame_encodes.blit_passes;
         };
 
-        // Consecutive passes that render into one image share one render pass,
-        // the rule the compatibility backend batches by. Every render pass
+        // Consecutive passes that render into one image share one render pass. Every render pass
         // stores its whole target and the next one loads it back, and at the
         // scene's size that memory traffic, not the draws, is what a frame of
         // many layers costs. A pass starts a new render pass when it renders
@@ -5286,7 +5245,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 // has no consumer, or the destination now shares the source's
                 // texture and a byte-for-byte duplicate would change nothing.
                 if (i < impl.copy_elision.size() &&
-                    impl.copy_elision[i] != vulkan::CopyElision::None) {
+                    impl.copy_elision[i] != render::CopyElision::None) {
                     continue;
                 }
                 const auto source = impl.targets.find(desc.source_key);
@@ -5432,9 +5391,9 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                 open.clear_color      = desc.clear_color;
                 ++impl.frame_encodes.render_passes;
                 if (target == impl.scene_output_target) ++impl.frame_encodes.scene_output_passes;
-                // Culling follows the compatibility backend: none for a pass
+                // Culling: none for a pass
                 // without depth, the material's for one with it, against the
-                // same front faces. Each draw sets the mode it needs below.
+                // counter-clockwise front faces. Each draw sets the mode it needs below.
                 [open.encoder setCullMode:static_cast<MTLCullMode>(kSceneCullMode)];
                 [open.encoder setFrontFacingWinding:kSceneFrontFaceCounterClockwise
                                                         ? MTLWindingCounterClockwise
@@ -5574,18 +5533,18 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                     // image is bound; its rectangle inside that image arrives
                     // through the rotation and translation uniforms written
                     // above.
+                    if (impl.coverShown(desc, t)) {
+                        const auto& ring = impl.runtime_image_rings.at(desc.cover_keys[t]);
+                        bind_texture(slot,
+                                     ring.slots[static_cast<std::size_t>(impl.frame_slot) %
+                                                kFramesInFlight],
+                                     impl.samplerFor(ring.sample));
+                        continue;
+                    }
                     int image_slot = -1;
                     if (const auto sprite = pass.sprites.find(t);
                         sprite != pass.sprites.end() && sprite->second.numFrames() > 0) {
                         image_slot = sprite->second.GetCurFrame().imageId;
-                    }
-                    // A cover published over the slot's render target is bound
-                    // in its place, sampled as a cover is.
-                    id<MTLSamplerState> cover_sampler = nil;
-                    if (id<MTLTexture> cover = impl.publishedCover(desc, t, &cover_sampler);
-                        cover != nil) {
-                        bind_texture(slot, cover, cover_sampler);
-                        continue;
                     }
                     bind_texture(slot,
                                  impl.resolveTexture(scene, desc.texture_keys[t], nullptr,
@@ -5663,13 +5622,13 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         impl.present_key.Add(static_cast<uint64_t>(static_cast<uint32_t>(layout.scissor_px.width)));
         impl.present_key.Add(static_cast<uint64_t>(static_cast<uint32_t>(layout.scissor_px.height)));
         impl.present_key.Add(impl.horizontal_flip ? 1u : 0u);
-        // Fit and its blurred variant place the picture identically.
+        // The copy's rectangle, which no other word of the key follows: it moves with the
+        // display and the mode, never with the picture.
         impl.present_key.Add(layout.backdrop ? 1u : 0u);
-        if (layout.backdrop) {
-            const auto& rect = layout.backdrop_px;
-            impl.present_key.Add((uint64_t(uint32_t(rect.x)) << 32) | uint32_t(rect.y));
-            impl.present_key.Add((uint64_t(uint32_t(rect.width)) << 32) | uint32_t(rect.height));
-        }
+        impl.present_key.Add(layout.backdrop ? static_cast<uint64_t>(static_cast<uint32_t>(layout.backdrop_px.x)) : 0u);
+        impl.present_key.Add(layout.backdrop ? static_cast<uint64_t>(static_cast<uint32_t>(layout.backdrop_px.y)) : 0u);
+        impl.present_key.Add(layout.backdrop ? static_cast<uint64_t>(static_cast<uint32_t>(layout.backdrop_px.width)) : 0u);
+        impl.present_key.Add(layout.backdrop ? static_cast<uint64_t>(static_cast<uint32_t>(layout.backdrop_px.height)) : 0u);
 
         // Every pass reused or drawing nothing, no feedback trade and no video
         // to import: the scene output holds exactly the pixels the last
@@ -5678,8 +5637,8 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         const bool nothing_encoded = impl.frame_encodes.render_passes == 0 &&
                                      impl.frame_encodes.blit_passes == 0 &&
                                      impl.frame_swaps.empty() && impl.pooled_moves == 0 &&
-                                     impl.video.empty();
-        if (vulkan::SceneOptimizationEnabled() && nothing_encoded &&
+                                     impl.video.empty() && impl.pending_target_clears.empty();
+        if (render::SceneOptimizationEnabled() && nothing_encoded &&
             impl.present_gate.Matches(impl.present_key, {})) {
             // The buffer holds nothing and is dropped uncommitted, so the slot
             // is released here and the uniform ring does not advance: the next
@@ -5703,11 +5662,12 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
               dispatch_semaphore_signal(semaphore);
             }];
             [command commit];
+            impl.pending_target_clears.clear();
             impl.frame_slot  = (impl.frame_slot + 1) % kFramesInFlight;
             impl.frame_drawn = true;
             return true;
         }
-        impl.encodeComposition(command, drawable.texture, scene);
+        impl.encodeComposition(command, drawable.texture, scene, true);
 
         // The poster draws the same composition into a texture this process
         // owns. It costs nothing unless a request is pending, and it never
@@ -5727,12 +5687,14 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         }];
         [command presentDrawable:drawable];
         [command commit];
+        // Committed, so the clears of a resize have run ahead of everything else in it.
+        impl.pending_target_clears.clear();
 
         impl.frame_slot = (impl.frame_slot + 1) % kFramesInFlight;
         impl.frame_drawn = true;
         // With scene optimisation off nothing is remembered, so turning it
         // back on starts from a real present.
-        if (vulkan::SceneOptimizationEnabled()) {
+        if (render::SceneOptimizationEnabled()) {
             impl.present_gate.Record(impl.present_key, {});
         } else {
             impl.present_gate.Invalidate();
@@ -5886,36 +5848,18 @@ uint64_t MetalRender::RenderTargetBytesForTests() const
     return bytes + pImpl->backdrop.allocatedBytes();
 }
 
-void* MetalRender::ImportedTextureForTests(const std::string& key, std::size_t slot) const
+uint64_t MetalRender::ProgramCompilesForTests() { return MetalProgramCache::shared().compileCount(); }
+
+const void* MetalRender::ImportedImageForTests(const std::string& key, std::size_t slot) const
 {
-    if (pImpl == nullptr) return nullptr;
     const auto found = pImpl->images.find(key);
     if (found == pImpl->images.end() || slot >= found->second.size()) return nullptr;
-    return (__bridge void*)found->second[slot]->texture;
+    return (__bridge const void*)found->second[slot];
 }
 
-uint64_t MetalRender::ImportedImageBytesForTests() const
-{
-    if (pImpl == nullptr) return 0;
-    std::unordered_set<const void*> counted;
-    uint64_t                        bytes = 0;
-    for (const auto& [key, slots] : pImpl->images) {
-        (void)key;
-        for (const auto& image : slots) {
-            id<MTLTexture> texture = image->texture;
-            if (! counted.insert((__bridge const void*)texture).second) continue;
-            bytes += texture.allocatedSize;
-        }
-    }
-    return bytes;
-}
-
-MetalRender::ImportedImagesForTests MetalRender::SharedImportedImagesForTests()
-{
-    return MetalImageCache::shared().residency();
-}
-
-uint64_t MetalRender::ProgramCompilesForTests() { return MetalProgramCache::shared().compileCount(); }
+uint64_t MetalRender::SharedImageBytesForTests() { return SharedImageCache::shared().liveBytes(); }
+std::size_t MetalRender::SharedImageEntriesForTests() { return SharedImageCache::shared().entries(); }
+uint64_t MetalRender::ImageUploadsForTests() { return SharedImageCache::shared().uploads(); }
 
 bool MetalRender::PipelineArchiveServesEverySeenPipelineForTests()
 {
@@ -5927,14 +5871,24 @@ void MetalRender::WaitForPipelineArchiveWritesForTests()
     MetalProgramCache::shared().finishArchiveWrites();
 }
 
-void MetalRender::SetPipelineArchiveQueueSuspendedForTests(bool suspended)
+MetalRender::ArchiveResidency MetalRender::PipelineArchiveResidencyForTests()
+{
+    return MetalProgramCache::shared().archiveResidency();
+}
+
+MetalRender::ArchiveStoreState MetalRender::PipelineArchiveStoreForTests(std::string_view archive_root)
+{
+    return MetalProgramCache::shared().archiveStore(archive_root);
+}
+
+void MetalRender::SuspendPipelineArchiveQueueForTests(bool suspended)
 {
     MetalProgramCache::shared().suspendArchiveQueue(suspended);
 }
 
-MetalRender::PipelineArchiveCountsForTests MetalRender::GetPipelineArchiveCountsForTests()
+bool MetalRender::BuildArchivedPipelineForTests(std::string_view archive_root, uint32_t variant)
 {
-    return MetalProgramCache::shared().archiveCounts();
+    return MetalProgramCache::shared().buildArchivedPipeline(archive_root, variant);
 }
 #endif
 

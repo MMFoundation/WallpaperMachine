@@ -1,0 +1,19 @@
+# Workspace for the Rust side of the renderer rewrite. The shader crate is the
+# first member. Licence is GPL-3.0-only.
+
+[workspace]
+resolver = "2"
+members = ["Shader"]
+
+[workspace.package]
+edition = "2024"
+license = "GPL-3.0-only"
+publish = false
+
+[workspace.dependencies]
+# Vendored, unmodified naga (MIT OR Apache-2.0). Only the GLSL front end and the
+# Metal back end are enabled: no SPIR-V output and no codespan diagnostics.
+naga = { path = "../upstream/naga", default-features = false, features = ["glsl-in", "msl-out"] }
+
+# The static library is called from C++ across a C ABI, so panics must unwind
+# to be caught at the boundary: never set panic = "abort" here.

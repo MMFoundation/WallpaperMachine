@@ -6,44 +6,64 @@
 namespace wallpaper
 {
 
-/// Which renderer the user asked for.
+/// What stopped a scene from being drawn.
 ///
-/// A preference, never an outcome. Asking for the native backend does not make
-/// a scene use it: the scene is checked against what that backend can actually
-/// draw, and one it cannot draw runs on the compatibility backend and says why.
-enum class SceneRendererPreference : uint8_t
+/// Native Metal is the only renderer there is. A scene it cannot draw is not
+/// handed to another one: the surface keeps its last picture (or shows the
+/// project's still preview when it has drawn nothing), and the failure and its
+/// reason are reported.
+///
+/// A category, never the whole explanation: the host words each one for the
+/// user in their language and shows the engine's own `failure_reason` beside it.
+enum class SceneFailureStage : uint8_t
 {
-    Compatibility = 0,
-    NativeMetalPreferred = 1,
+    None = 0,
+    /// The scene uses something the native backend does not support, found
+    /// before any renderer was created: a refused admission.
+    Unsupported = 1,
+    /// The native renderer could not be created on the surface.
+    Prepare = 2,
+    /// The scene's shaders or pipelines did not compile for Metal.
+    Compile = 3,
+    /// A frame failed after the scene had been set up.
+    Frame = 4,
+    /// The surface could not be re-established after a display change.
+    Surface = 5,
 };
 
-/// Which renderer actually drew a scene.
-enum class SceneBackend : uint8_t
+/// Stable lowercase name for logs and the bridge.
+[[nodiscard]] constexpr const char* ToString(SceneFailureStage stage)
 {
-    LegacyVulkan = 0,
-    NativeMetal = 1,
-};
+    switch (stage) {
+    case SceneFailureStage::None: return "";
+    case SceneFailureStage::Unsupported: return "unsupported";
+    case SceneFailureStage::Prepare: return "prepare";
+    case SceneFailureStage::Compile: return "compile";
+    case SceneFailureStage::Frame: return "frame";
+    case SceneFailureStage::Surface: return "surface";
+    }
+    return "";
+}
 
-void SetSceneRendererPreference(SceneRendererPreference preference);
-SceneRendererPreference CurrentSceneRendererPreference();
-
-/// Why a scene is not on the preferred backend.
+/// Whether a scene can be drawn, and when not, why.
 ///
-/// Empty means it is. Every rejection carries a specific, user-readable reason:
-/// "unsupported" with no reason is indistinguishable from a bug, and this is
-/// the string a user will quote when asking why their wallpaper did not switch.
+/// A failure always carries a specific, user-readable reason: "unsupported"
+/// with no reason is indistinguishable from a bug, and this is the string a
+/// user will quote when asking why their wallpaper does not play.
 struct SceneBackendSelection
 {
-    SceneBackend backend { SceneBackend::LegacyVulkan };
-    std::string  fallback_reason;
-
     /// False while this is still only a decision, true once a renderer has
-    /// actually been created for it. A surface whose scene has not been parsed
-    /// yet has no backend at all, and reporting the default as if it were the
-    /// answer would name a renderer that is not drawing.
+    /// actually been created for it (or the scene has been held). A surface
+    /// whose scene has not been parsed yet has no renderer at all, and
+    /// reporting one as if it existed would name a renderer that is not
+    /// drawing.
     bool created { false };
 
-    [[nodiscard]] bool fell_back() const { return ! fallback_reason.empty(); }
+    /// Set when the scene is not being drawn.
+    SceneFailureStage failure_stage { SceneFailureStage::None };
+    std::string       failure_reason;
+
+    [[nodiscard]] bool failed() const { return failure_stage != SceneFailureStage::None; }
 };
 
 } // namespace wallpaper

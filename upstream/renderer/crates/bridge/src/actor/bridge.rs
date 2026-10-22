@@ -1,3 +1,10 @@
+#[cfg(test)]
+pub(crate) mod lifecycle_test_support;
+#[cfg(test)]
+mod operation_test_access;
+mod operation_access;
+mod operations;
+
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     fs,
@@ -5,14 +12,14 @@ use std::{
 };
 
 use kameo::{
-    actor::{ActorRef, Spawn},
+    actor::WeakActorRef,
     error::SendError,
     message::{Context, Message},
-    reply::{DelegatedReply, Reply},
+    reply::DelegatedReply,
 };
 use wallpaper_core::{
-    DisplayIdentity, DisplaySelector, DisplaySnapshotEntry, PropertyPreview,
-    SceneRendererPreference, SceneResolution, WallpaperAssignment,
+    DisplaySnapshotEntry, PropertyPreview,
+    SceneResolution, WallpaperAssignment,
     media::audio::AudioVolume,
     project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SerdeValudeExt},
     render::{
@@ -22,59 +29,57 @@ use wallpaper_core::{
 
 use crate::{
     actor::{
+        fixture_values,
         messages::{
-            self, ApplyWallpaperOptions, AudioRequirementChanged, Bootstrap, CancelWallpaperOptions,
+            self, AudioRequirementChanged, Bootstrap,
             ClearShaderCache,
-            CommitApplyAfterReconcile, CommitDisplayAfterReconcile, CompleteAudioResponse,
-            CompleteRestoreAfterReconcile, EditProperty, EjectWallpaperFromDisplay,
+            CompleteAudioResponse, EditProperty,
             GetAllSnapshots, GetAppSnapshot, GetLibrarySnapshot, GetLockScreenScenes, GetWallpaperPreview,
             GetMonitorInformationSnapshot, GetSettingsSnapshot, GetWallpaperOptionsSnapshot,
             GetWebWallpapers,
             InitialFrameReady, InjectDisplayForTest, InjectSceneProjectForTest,
             InjectSceneWallpaperConfigForTest, InjectWallpaperForTest, PollMousePosition,
-            GetNativeVideoWallpapers, ReconcileFailed, RefreshDisplays, RefreshLibrary,
+            GetNativeVideoWallpapers, RefreshDisplays, RefreshLibrary,
             PreviewDisplayPosition, PreviewWallpaperProperties, ReleaseHeldWallpaper,
-            RejectNativeVideo, RendererCounters,
+            RendererCounters,
             ReplaceLibraryForTest,
             ReplaceWallpaperConfigForTest, RestoreAllPropertyDefaults, RestorePropertyDefault,
             SelectWallpaper,
-            SetAudioResponseEnabled, SetBatteryQualityProfile, SetContentPacingEnabled,
-            SetDisplayConfigEnabled, SetDisplayEnabled, SetDisplayMode, SetDisplayPosition,
+            SetAudioResponseEnabled, SetBatteryQualityProfile,
+            SetDisplayConfigEnabled, SetDisplayPosition,
             SetDisplayPresentationSuspended,
             FanOutSystemMediaArtwork, FanOutSystemMediaEvent, GetSystemMediaConsentHandles,
             GetSystemMediaSceneHandles, SetFilter,
             SetFrameRateCap, SetGlobalPlayback, SetQualityThrottle,
             SetLaunchAtLogin, SetMediaIntegrationEnabled,
-            SetMirrorMuted, SetMirrorScalingFactor,
-            SetMirrorScalingMode, SetMirrorTarget, SetMirrorTargetFps, SetMirrorVolume, SetMuted,
-            SetAudioSuppressed, SetBatteryMode, SetLabelLanguages, SetPowerSource,
+            SetMuted, SetAudioSuppressed, SetBatteryMode, SetLabelLanguages, SetPowerSource,
             SetPresentationSuspended, SetPresentationUnloaded, SetPropertyPath,
             SetRenderScale,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
-            SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneRenderer,
-            SetSceneResolution, SetSceneVideoPlaneSamplingEnabled, SetSharedVideoDecodeEnabled,
-            SetTargetFps, SetVerboseLogging, SetVideoBackend, SetVolume, SetWebAudioSubscribed,
+            SetSceneOnDemandEnabled, SetSceneOptimizationEnabled,
+            SetSceneResolution, SetSceneVideoPlaneSamplingEnabled,
+            SetTargetFps, SetVerboseLogging, SetVolume, SetWebAudioSubscribed,
             Shutdown,
         },
         state::BridgeActorState,
+        transport::BridgeActorHandle,
     },
     api::{
-        BridgeAppSnapshot, BridgeDisplayMode, BridgeDisplayMutationBundle,
-        BridgeDisplaySettingsRow, BridgeError, BridgeLibraryScanStatus, BridgeLibrarySnapshot,
+        BridgeAppSnapshot, BridgeDisplayMutationBundle,
+        BridgeError, BridgeLibrarySnapshot,
         BridgeLockScreenScene, BridgeNativeVideoWallpaper, BridgePlaybackState,
-        BridgePropertyEdit,
+        BridgePropertyEdit, FirstFrameDelivery, FirstFrameTarget,
         BridgeRendererCountersReport, BridgeRendererSurfaceCounters, BridgeScalingMode,
-        BridgeSnapshotBundle, BridgeWallpaperEntry, BridgeWallpaperKind,
+        BridgeSnapshotBundle, BridgeWallpaperKind,
         BridgeWallpaperMutationBundle, BridgeWallpaperPreview, BridgeWebWallpaper, MousePollingControl,
     },
     config::{
-        AppConfig, ConfigStore, FramingCfg, SceneRendererModeCfg, SceneResolutionCfg,
-        SerializedSelector, VideoBackendModeCfg, WallpaperConfig,
+        ConfigStore, FramingCfg, SceneResolutionCfg,
+        SerializedSelector, WallpaperConfig,
     },
     display::{DisplaySelectorExt, DisplaySnapshotExt},
     engine::{
-        ActivationInputs, AudioCaptureDemand, EngineFacade, LoadJournal, NativeVideoRejection,
-        NativeVideoRejections, displays_awaiting_first_frame,
+        ActivationInputs, AudioCaptureDemand, EngineFacade, LoadJournal,
     },
     library::scan,
     login::LaunchAtLoginController,
@@ -83,23 +88,15 @@ use crate::{
         DirectoryMode, FileMedia, ProjectModel, ProjectProperty, PropertyKind, PropertyMetadata,
         PropertyValue,
     },
-    state::drafts::{WallpaperOptionsDraft, moved_framing, saved_framing},
+    state::drafts::{moved_framing, saved_framing},
 };
 
-const PRIMARY_DISPLAY_ID: &str = "primary";
-const IDENTITY_DISPLAY_ID_PREFIX: &str = "identity:";
-const INDEPENDENT_DISPLAY_MODE: &str = "independent";
 const MIRROR_DISPLAY_MODE: &str = "mirror";
 
 #[derive(kameo::Actor)]
 pub struct BridgeActor<E: EngineFacade> {
     pub state: BridgeActorState,
-    generation: u64,
-    latest_reconcile_generation: u64,
-    reconciled_generation: u64,
-    repair_after_reconcile_generation: Option<u64>,
-    active_restore_generation: Option<u64>,
-    restore_requested_after_active: bool,
+    operation_state: operations::OperationState,
     pending_audio_changes: HashSet<String>,
     #[allow(dead_code)]
     pub engine: E,
@@ -129,151 +126,78 @@ pub struct BridgeActor<E: EngineFacade> {
     previewed_properties: HashSet<String>,
 }
 
-/// What a reconcile needs to keep the load journal honest: the journal to
-/// record the scenes it is about to open in, and the wallpapers to leave
-/// out because the journal already holds them back.
-#[derive(Clone)]
-struct LoadGuard {
-    journal: LoadJournal,
-    held: BTreeSet<String>,
-}
-
 enum PlaybackChangeOrigin {
     Manual,
     Power,
 }
 
-#[derive(Clone)]
-pub struct BridgeActorHandle<E: EngineFacade> {
-    actor: ActorRef<BridgeActor<E>>,
-    runtime: Option<Arc<tokio::runtime::Runtime>>,
+
+pub(crate) struct WeakFirstFrameTarget<E: EngineFacade + Clone> {
+    actor: WeakActorRef<BridgeActor<E>>,
 }
 
-impl<E: EngineFacade> Drop for BridgeActorHandle<E> {
-    fn drop(&mut self) {
-        let Some(runtime) = self.runtime.take() else {
-            return;
+impl<E: EngineFacade + Clone> FirstFrameTarget for WeakFirstFrameTarget<E> {
+    async fn deliver(&self, _handle: SceneHandle) -> FirstFrameDelivery {
+        let Some(actor) = self.actor.upgrade() else {
+            return FirstFrameDelivery::TargetGone;
         };
-
-        match Arc::try_unwrap(runtime) {
-            Ok(runtime) => runtime.shutdown_background(),
-            Err(runtime) => {
-                self.runtime = Some(runtime);
-            }
+        match actor.ask(InitialFrameReady).await.map_err(map_send_error) {
+            Ok(_) => FirstFrameDelivery::Delivered,
+            Err(error) => FirstFrameDelivery::Failed(error),
         }
     }
 }
 
-impl<E: EngineFacade> BridgeActorHandle<E> {
-    #[allow(clippy::single_call_fn)]
-    pub fn spawn(
-        state: BridgeActorState,
-        engine: E,
-        config_store: Option<ConfigStore>,
-        launch_at_login: LaunchAtLoginController,
-        paths: BridgePaths,
-        mouse_polling: Arc<MousePollingControl>,
-        load_journal: LoadJournal,
-    ) -> Result<Self, BridgeError> {
-        let actor = BridgeActor {
-            state,
-            generation: 0,
-            latest_reconcile_generation: 0,
-            reconciled_generation: 0,
-            repair_after_reconcile_generation: None,
-            active_restore_generation: None,
-            restore_requested_after_active: false,
-            pending_audio_changes: HashSet::new(),
-            engine,
-            config_store,
-            launch_at_login,
-            paths,
-            mouse_polling,
-            load_journal,
-            previewed_framing: HashSet::new(),
-            previewed_properties: HashSet::new(),
-        };
-        actor.refresh_mouse_polling_policy();
 
-        let runtime = Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .thread_name("wallpaper-bridge-actor-runtime")
-                .build()
-                .map_err(|error| {
-                    BridgeError::engine(format!("failed to start bridge actor runtime: {error}"))
-                })?,
-        );
-        let actor = {
-            let _guard = runtime.enter();
-            BridgeActor::spawn_in_thread(actor)
-        };
-
-        Ok(Self {
-            actor,
-            runtime: Some(runtime),
-        })
-    }
-
-    pub async fn ask<M, T>(&self, message: M) -> Result<T, BridgeError>
-    where
-        BridgeActor<E>: Message<M>,
-        <BridgeActor<E> as Message<M>>::Reply: kameo::reply::Reply<Ok = T, Error = BridgeError>,
-        M: Send + 'static,
-        T: Send + 'static,
-    {
-        self.actor.ask(message).await.map_err(map_send_error)
-    }
-
-    /// Runs `future` on the runtime that drives this bridge's actor, and
-    /// waits for it. For work that waits on a timer and so cannot run on
-    /// whatever executor the host happens to poll a call with.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the runtime has been shut down or the task
-    /// panicked.
-    pub async fn run_on_runtime<F, T>(&self, future: F) -> Result<T, BridgeError>
-    where
-        F: std::future::Future<Output = T> + Send + 'static,
-        T: Send + 'static,
-    {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| BridgeError::engine("the bridge runtime has shut down"))?;
-        runtime
-            .spawn(future)
-            .await
-            .map_err(|error| BridgeError::engine(format!("a background check failed: {error}")))
-    }
-
-    pub fn blocking_ask<M, T>(&self, message: M) -> Result<T, BridgeError>
-    where
-        BridgeActor<E>: Message<M>,
-        <BridgeActor<E> as Message<M>>::Reply: Reply<Ok = T, Error = BridgeError>,
-        M: Send + 'static,
-        T: Send + 'static,
-    {
-        self.actor
-            .ask(message)
-            .blocking_send()
-            .map_err(map_send_error)
-    }
+pub(super) fn assemble_actor<E: EngineFacade>(
+    state: BridgeActorState,
+    engine: E,
+    config_store: Option<ConfigStore>,
+    launch_at_login: LaunchAtLoginController,
+    paths: BridgePaths,
+    mouse_polling: Arc<MousePollingControl>,
+    load_journal: LoadJournal,
+) -> BridgeActor<E> {
+    let actor = BridgeActor {
+        state,
+        operation_state: operations::OperationState::default(),
+        pending_audio_changes: HashSet::new(),
+        engine,
+        config_store,
+        launch_at_login,
+        paths,
+        mouse_polling,
+        load_journal,
+        previewed_framing: HashSet::new(),
+        previewed_properties: HashSet::new(),
+    };
+    actor.refresh_mouse_polling_policy();
+    actor
 }
 
 impl<E: EngineFacade + Clone> BridgeActorHandle<E> {
+    pub(crate) fn first_frame_handoff_inputs(
+        &self,
+    ) -> Result<(tokio::runtime::Handle, crate::actor::WeakFirstFrameTarget<E>), BridgeError> {
+        Ok((
+            self.runtime_handle()?,
+            WeakFirstFrameTarget {
+                actor: self.weak_actor(),
+            },
+        ))
+    }
+
     /// The sink for the engine's audio-requirement changes. The engine calls
     /// it under a lock on its actor thread, so it only records the handle and
     /// wakes one task on this actor's runtime, which asks the actor to re-sync
     /// capture. Coalescing: a burst of reports is one delivery, and the
     /// pending set is bounded by the number of live scenes. Nothing polls.
     pub(crate) fn audio_requirement_relay(&self) -> Option<wallpaper_core::AudioRequirementCallback> {
-        let runtime = self.runtime.as_ref()?;
+        let runtime = self.runtime_handle().ok()?;
         let pending = Arc::new(std::sync::Mutex::new(HashSet::<SceneHandle>::new()));
         let notify = Arc::new(tokio::sync::Notify::new());
         // Weak, so the relay never keeps the actor (or its runtime) alive.
-        let actor = self.actor.downgrade();
+        let actor = self.weak_actor();
         let task_pending = Arc::clone(&pending);
         let task_notify = Arc::clone(&notify);
         let _task = runtime.spawn(async move {
@@ -366,17 +290,15 @@ async fn register_audio_capture<E: EngineFacade>(
     Ok(())
 }
 
+/// The error a failed engine call reaches the caller as.
+fn engine_failed(error: wallpaper_core::EngineError) -> BridgeError {
+    BridgeError::engine(error.to_string())
+}
+
 fn map_send_error<M>(error: SendError<M, BridgeError>) -> BridgeError {
     match error {
         SendError::HandlerError(error) => error,
         other => BridgeError::engine(other.to_string()),
-    }
-}
-
-fn duplicate_error(error: &BridgeError) -> BridgeError {
-    BridgeError::Error {
-        kind: error.kind(),
-        message: error.message().to_string(),
     }
 }
 
@@ -513,49 +435,12 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
     }
 
     fn library_snapshot(&self) -> BridgeLibrarySnapshot {
-        let selected_wallpaper_id = self.state.selected_wallpaper_id.as_deref();
-        let active_wallpaper_ids = self.state.active_wallpaper_ids.clone();
-        let all_wallpapers = self
-            .state
-            .library
-            .iter()
-            .map(|entry| {
-                let mut entry = entry.clone();
-                entry.selected = selected_wallpaper_id == Some(entry.id.as_str());
-                entry.active = active_wallpaper_ids.iter().any(|id| id == &entry.id);
-                entry
-            })
-            .collect::<Vec<_>>();
-        let wallpapers = all_wallpapers
-            .iter()
-            .filter(|entry| self.state.filter_enabled(entry.kind))
-            .cloned()
-            .collect::<Vec<_>>();
-
-        BridgeLibrarySnapshot {
-            scene_count: all_wallpapers
-                .iter()
-                .filter(|entry| entry.kind == BridgeWallpaperKind::ProjectScene)
-                .count() as u64,
-            video_count: all_wallpapers
-                .iter()
-                .filter(|entry| entry.kind == BridgeWallpaperKind::Video)
-                .count() as u64,
-            webpage_count: all_wallpapers
-                .iter()
-                .filter(|entry| entry.kind == BridgeWallpaperKind::Webpage)
-                .count() as u64,
-            unknown_count: all_wallpapers
-                .iter()
-                .filter(|entry| entry.kind == BridgeWallpaperKind::Unknown)
-                .count() as u64,
-            wallpapers,
-            scan_status: BridgeLibraryScanStatus {
-                scanning: false,
-                done: 0,
-                total: 0,
-            },
-        }
+        crate::actor::projection_values::library_snapshot(
+            &self.state.library,
+            self.state.selected_wallpaper_id.as_deref(),
+            &self.state.active_wallpaper_ids,
+            |kind| self.state.filter_enabled(kind),
+        )
     }
 
     fn all_snapshots(&self) -> BridgeSnapshotBundle {
@@ -570,22 +455,28 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 .as_ref()
                 .and_then(|id| self.state.options(&displays, id.clone(), &self.paths).ok()),
             monitor_information: self.state.monitor_info(&displays),
-            settings: self.state.settings(&displays, launch_at_login, &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports()),
+            settings: self.state.settings(&displays, launch_at_login, &self.paths, &self.engine.scene_runtime_reports()),
         }
     }
 
+    /// Everything the panel shows, with the options of `wallpaper_id`. Unlike
+    /// `all_snapshots`, a wallpaper whose options cannot be built fails the call.
     fn snapshots_with_options(
         &self,
         wallpaper_id: String,
     ) -> Result<BridgeSnapshotBundle, BridgeError> {
+        // The engine and the login item are each read once for the whole bundle.
         let displays = self.engine.display_snapshot();
         let launch_at_login = self.launch_at_login.status();
+        let options = self.state.options(&displays, wallpaper_id, &self.paths)?;
+        let reports = self.engine.scene_runtime_reports();
+        let settings = self.state.settings(&displays, launch_at_login, &self.paths, &reports);
         Ok(BridgeSnapshotBundle {
             app: self.app_snapshot(),
             library: self.library_snapshot(),
-            wallpaper_options: Some(self.state.options(&displays, wallpaper_id, &self.paths)?),
+            wallpaper_options: Some(options),
             monitor_information: self.state.monitor_info(&displays),
-            settings: self.state.settings(&displays, launch_at_login, &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports()),
+            settings,
         })
     }
 
@@ -600,7 +491,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             library: self.library_snapshot(),
             wallpaper_options: self.state.options(&displays, wallpaper_id, &self.paths)?,
             monitor_information: self.state.monitor_info(&displays),
-            settings: self.state.settings(&displays, launch_at_login, &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports()),
+            settings: self.state.settings(&displays, launch_at_login, &self.paths, &self.engine.scene_runtime_reports()),
         })
     }
 
@@ -611,84 +502,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             app: self.app_snapshot(),
             library: self.library_snapshot(),
             monitor_information: self.state.monitor_info(&displays),
-            settings: self.state.settings(&displays, launch_at_login, &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports()),
-        }
-    }
-
-    fn bump_generation(&mut self) {
-        self.generation = self.generation.wrapping_add(1);
-        self.refresh_mouse_polling_policy();
-    }
-
-    fn reserve_reconcile(&mut self) -> u64 {
-        self.bump_generation();
-        self.latest_reconcile_generation = self.generation;
-        self.repair_after_reconcile_generation = None;
-        self.generation
-    }
-
-    fn finish_reconcile(&mut self, generation: u64, actor: ActorRef<BridgeActor<E>>) {
-        self.reconciled_generation = generation;
-        self.refresh_mouse_polling_policy();
-        if self.active_restore_generation == Some(generation) {
-            self.active_restore_generation = None;
-            if self.restore_requested_after_active {
-                self.restore_requested_after_active = false;
-                self.spawn_restore(actor);
-                return;
-            }
-        }
-        if self.repair_after_reconcile_generation == Some(generation) {
-            self.spawn_restore(actor);
-        }
-    }
-
-    fn reconcile_current(&self, generation: u64) -> bool {
-        generation == self.generation && generation == self.latest_reconcile_generation
-    }
-
-    fn stale_reconcile(&mut self, generation: u64, actor: ActorRef<BridgeActor<E>>) {
-        self.refresh_mouse_polling_policy();
-        if self.active_restore_generation == Some(generation) {
-            self.active_restore_generation = None;
-            if self.restore_requested_after_active {
-                self.restore_requested_after_active = false;
-                self.spawn_restore(actor);
-                return;
-            }
-        }
-
-        let latest_generation = self.latest_reconcile_generation;
-        if latest_generation == 0 {
-            return;
-        }
-
-        if generation == latest_generation || self.reconciled_generation == latest_generation {
-            self.spawn_restore(actor);
-        } else {
-            self.repair_after_reconcile_generation = Some(latest_generation);
-        }
-    }
-
-    #[allow(clippy::needless_pass_by_value)]
-    fn reconcile_failure(
-        &mut self,
-        generation: u64,
-        error: BridgeError,
-        actor: ActorRef<BridgeActor<E>>,
-    ) {
-        self.refresh_mouse_polling_policy();
-        self.state.errors.push(error.message().to_string());
-
-        if self.reconcile_current(generation) {
-            self.spawn_restore(actor);
-            return;
-        }
-
-        if self.active_restore_generation.is_some() {
-            self.restore_requested_after_active = true;
-        } else {
-            self.spawn_restore(actor);
+            settings: self.state.settings(&displays, launch_at_login, &self.paths, &self.engine.scene_runtime_reports()),
         }
     }
 
@@ -833,7 +647,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             }
             PlaybackChangeOrigin::Power => {}
         }
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(())
     }
 
@@ -887,13 +701,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         capped_frame_rate(rate, self.active_target_fps_cap())
     }
 
-    fn quality_runtime(&self) -> QualityRuntime {
-        QualityRuntime {
-            render_scale: self.effective_render_scale(),
-            target_fps_cap: self.active_target_fps_cap(),
-        }
-    }
-
     /// Puts the quality settings the current power source and any quality
     /// throttle call for into effect on everything already running.
     ///
@@ -941,7 +748,7 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                 .await
                 .map_err(|error| BridgeError::engine(error.to_string()))?;
         }
-        self.release_stale_native_video().await
+        Ok(())
     }
 
     async fn apply_power_policy(&mut self) -> Result<(), BridgeError> {
@@ -968,80 +775,75 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             return Ok(());
         }
 
+        use crate::power::PowerSource;
         match self.state.power_source {
-            crate::power::PowerSource::Battery => {
-                if self.state.playback_state == BridgePlaybackState::Playing
-                    && !self.state.battery_pause_suppressed
-                {
-                    if self.state.pending_battery_pause_after_initial_frame {
-                        return Ok(());
-                    }
-                    log::info!("pausing wallpaper playback on battery power");
-                    self.set_playback(BridgePlaybackState::Paused, PlaybackChangeOrigin::Power)
-                        .await?;
-                    self.state.auto_paused_for_battery = true;
-                }
-            }
-            crate::power::PowerSource::External => {
+            PowerSource::Unknown => return Ok(()),
+            PowerSource::External => {
                 self.state.battery_pause_suppressed = false;
                 self.state.pending_battery_pause_after_initial_frame = false;
                 if self.state.auto_paused_for_battery {
-                    log::info!("resuming wallpaper playback on external power");
+                    log::info!("back on external power: resuming wallpaper playback");
                     self.set_playback(BridgePlaybackState::Playing, PlaybackChangeOrigin::Power)
                         .await?;
                     self.state.auto_paused_for_battery = false;
                 }
+                return Ok(());
             }
-            crate::power::PowerSource::Unknown => {}
+            PowerSource::Battery => {}
         }
+        let already_paused = self.state.playback_state != BridgePlaybackState::Playing;
+        if already_paused || self.state.battery_pause_suppressed {
+            return Ok(());
+        }
+        if self.state.pending_battery_pause_after_initial_frame {
+            // The pause waits for the first frame; the pending flag says so.
+            return Ok(());
+        }
+        log::info!("on battery power: pausing wallpaper playback");
+        self.set_playback(BridgePlaybackState::Paused, PlaybackChangeOrigin::Power)
+            .await?;
+        self.state.auto_paused_for_battery = true;
         Ok(())
     }
 
+    /// The scene a saved independent monitor shows `wallpaper_id` on, if the
+    /// display is connected and has one.
     fn display_handle(
         &self,
         wallpaper_id: &str,
         selector: &SerializedSelector,
     ) -> Option<SceneHandle> {
         let displays = self.engine.display_snapshot();
-
-        self.state
-            .app_config
-            .monitors
-            .iter()
-            .find(|monitor| {
-                monitor.enabled
-                    && !monitor.mode.eq_ignore_ascii_case(MIRROR_DISPLAY_MODE)
-                    && monitor.wallpaper.as_deref() == Some(wallpaper_id)
-                    && &monitor.selector == selector
-            })
-            .and_then(|monitor| monitor.selector.to_selector().resolve_display(&displays))
-            .and_then(|snapshot| snapshot.handle)
+        let monitor = self.state.app_config.monitors.iter().find(|monitor| {
+            monitor.enabled
+                && !monitor.mode.eq_ignore_ascii_case(MIRROR_DISPLAY_MODE)
+                && monitor.wallpaper.as_deref() == Some(wallpaper_id)
+                && monitor.selector == *selector
+        })?;
+        monitor
+            .selector
+            .to_selector()
+            .resolve_display(&displays)
+            .and_then(|display| display.handle)
     }
 
+    /// The scene of the mirror monitor saved for `selector`, looked up in
+    /// `displays`.
     fn mirror_display_handle(
         &self,
         selector: &SerializedSelector,
         displays: &[DisplaySnapshotEntry],
     ) -> Option<SceneHandle> {
-        self.state
-            .app_config
-            .monitors
-            .iter()
-            .find(|monitor| {
-                monitor.enabled
-                    && monitor.mode.eq_ignore_ascii_case(MIRROR_DISPLAY_MODE)
-                    && &monitor.selector == selector
-            })
-            .and_then(|monitor| monitor.selector.to_selector().resolve_display(displays))
-            .and_then(|snapshot| snapshot.handle)
-    }
-
-    fn commit_app_config(&mut self, app_config: AppConfig) -> Result<(), BridgeError> {
-        if let Some(store) = &self.config_store {
-            store.save_app_config(&app_config)?;
-        }
-        self.state.app_config = app_config;
-        Ok(())
+        let monitor = self.state.app_config.monitors.iter().find(|monitor| {
+            monitor.enabled
+                && monitor.mode.eq_ignore_ascii_case(MIRROR_DISPLAY_MODE)
+                && monitor.selector == *selector
+        })?;
+        monitor
+            .selector
+            .to_selector()
+            .resolve_display(displays)
+            .and_then(|display| display.handle)
     }
 
     fn save_wallpaper(
@@ -1133,44 +935,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         Ok(())
     }
 
-    async fn reconcile_configured(&mut self) -> Result<(), BridgeError> {
-        self.load_wallpapers()?;
-        if self.state.presentation_unloaded {
-            // A refresh or a repair must not reopen what unload closed, and
-            // must close anything a raced reconcile opened. Active marks stay.
-            let displays = self.engine.display_snapshot();
-            if displays.iter().any(|entry| entry.handle.is_some()) {
-                let app_config = self.state.app_config.clone();
-                let wallpaper_configs = self.state.wallpaper_configs.clone();
-                let _scenes = self.reconcile_engine(app_config, wallpaper_configs).await?;
-            }
-            self.refresh_mouse_polling_policy();
-            return Ok(());
-        }
-        let has_configured_wallpapers = !self.state.configured_ids().is_empty();
-        let displays = self.engine.display_snapshot();
-        if !has_configured_wallpapers || displays.is_empty() {
-            self.refresh_mouse_polling_policy();
-            return Ok(());
-        }
-        if let Some(scenes) = self.unchanged_configured_scenes(&displays)? {
-            self.sync_reconciled_pause().await?;
-            self.state.set_active_ids_from_scenes(&scenes);
-            self.refresh_mouse_polling_policy();
-            return Ok(());
-        }
-
-        let app_config = self.state.app_config.clone();
-        let wallpaper_configs = self.state.wallpaper_configs.clone();
-        let result = self
-            .reconcile_engine(app_config.clone(), wallpaper_configs)
-            .await;
-        self.refresh_mouse_polling_policy();
-        let scenes = result?;
-        self.state.set_active_ids_from_scenes(&scenes);
-        Ok(())
-    }
-
     /// Learns which wallpapers the previous sessions died while opening and
     /// leaves them out of every plan from here on.
     ///
@@ -1190,13 +954,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
     }
 
-    fn load_guard(&self) -> LoadGuard {
-        LoadGuard {
-            journal: self.load_journal.clone(),
-            held: self.state.held_wallpapers.clone(),
-        }
-    }
-
     fn activation_inputs<'a>(
         &'a self,
         displays: &'a [DisplaySnapshotEntry],
@@ -1212,104 +969,14 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             paths: &self.paths,
             force_shader_refresh: false,
             project_models: &self.state.project_models,
-            native_video_enabled: self.state.app_config.video_backend == VideoBackendModeCfg::NativePreferred,
-            native_video_rejected: &self.state.native_video_rejected,
             frame_rate_cap: self.active_target_fps_cap(),
             audio_suppressed: self.state.audio_suppressed,
             held: &self.state.held_wallpapers,
         }
     }
 
-    /// Every admission key the live configuration currently produces, per
-    /// wallpaper id. Recorded refusals are ignored, so a repeat refusal for a
-    /// configuration that is already excluded still reads as current.
-    fn native_video_admission_keys(&self) -> BTreeMap<String, BTreeSet<u64>> {
-        let displays = self.engine.display_snapshot();
-        self.activation_inputs(&displays, self.playback_paused())
-            .native_video_admission_keys()
-    }
-
-    /// Drops refusals whose configuration is gone, reporting whether any went.
-    ///
-    /// [`ActivationInputs`] already ignores a record whose key matches no live
-    /// slot, so dropping it does not by itself change routing; what the return
-    /// value buys is knowing that routing just changed, because a slot that
-    /// was excluded is offered natively again and the scene engine has to let
-    /// go of it. Without this the map would also keep dead records for the
-    /// rest of the session.
-    ///
-    /// A wallpaper's records are checked against *all* of its live keys, one
-    /// per display slot: the same clip on two displays at different target
-    /// rates has two keys, and a record matching either of them is alive.
-    /// A wallpaper with no live key at all — unassigned, or with missing media
-    /// — is left alone, because nothing has been shown to have changed.
-    fn prune_stale_native_video_rejections(&mut self) -> bool {
-        if self.state.native_video_rejected.is_empty() {
-            return false;
-        }
-        let live_keys = self.native_video_admission_keys();
-        let mut pruned = false;
-        self.state.native_video_rejected.retain(|wallpaper_id, by_key| {
-            let Some(live) = live_keys.get(wallpaper_id) else {
-                return true;
-            };
-            by_key.retain(|admission_key, record| {
-                if live.contains(admission_key) {
-                    return true;
-                }
-                pruned = true;
-                log::info!(
-                    "native video wallpaper {wallpaper_id} refusal for admission key \
-                     {admission_key} no longer applies and is dropped (was: {})",
-                    record.reason
-                );
-                false
-            });
-            !by_key.is_empty()
-        });
-        pruned
-    }
-
-    /// Hands a clip back to the native player once the refusal that kept it on
-    /// the scene engine describes a configuration that is gone.
-    ///
-    /// The frame-rate ceiling is part of a native video's admission key, so a
-    /// change of it makes the refusal recorded at the old rate stale. The
-    /// refusal is dropped and the scene list is rebuilt, which is what lets the
-    /// engine give up a clip the native player is about to be offered; left
-    /// alone, both would decode and play it.
-    ///
-    /// This does not compare the keys before and after one change, because a
-    /// change that fails halfway has already been made when it is asked for
-    /// again, and the second attempt would then find nothing different. What is
-    /// stale is read from the refusals themselves, and a rebuild that is owed
-    /// stays owed until one succeeds ([`BridgeActorState::native_video_release_owed`]),
-    /// so a repeated request, any other change of quality and the host's next
-    /// ask for the native list all finish what an earlier attempt did not.
-    async fn release_stale_native_video(&mut self) -> Result<(), BridgeError> {
-        if self.prune_stale_native_video_rejections() {
-            self.state.native_video_release_owed = true;
-        }
-        if !self.state.native_video_release_owed {
-            return Ok(());
-        }
-        // Nothing is drawn while presentation is unloaded, and loading it again
-        // rebuilds the scene list from the refusals as they stand now.
-        if !self.state.presentation_unloaded {
-            let app_config = self.state.app_config.clone();
-            let wallpaper_configs = self.state.wallpaper_configs.clone();
-            let scenes = self.reconcile_engine(app_config, wallpaper_configs).await?;
-            self.state.set_active_ids_from_scenes(&scenes);
-        }
-        self.state.native_video_release_owed = false;
-        Ok(())
-    }
-
-    /// Committed web wallpapers for connected displays, rendered by the host.
-    /// Committed plain-video wallpapers routed to the native player.
-    ///
-    /// Empty whenever the backend is off, so the host creates nothing and the
-    /// scene engine keeps every wallpaper.
+    /// Committed plain-video wallpapers, played by the host's own player. Empty only while
+    /// presentation is unloaded.
     fn native_video_wallpapers(&self) -> Result<Vec<BridgeNativeVideoWallpaper>, BridgeError> {
         if self.state.presentation_unloaded {
             return Ok(Vec::new());
@@ -1335,13 +1002,12 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     })?;
                 Ok(BridgeNativeVideoWallpaper {
                     display_id: desc.display.display_id,
-                    startup_revision: self.latest_reconcile_generation,
+                    startup_revision: self.reserved_startup_revision(),
                     wallpaper_id: desc.wallpaper_id,
                     title,
                     media_path,
-                    fps: desc.fps,
-                    admission_fps: desc.admission_fps,
                     admission_key: desc.admission_key,
+                    framing: desc.framing.into(),
                     paused: desc.paused,
                     volume: desc.volume,
                     muted: desc.muted,
@@ -1406,10 +1072,12 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     .state
                     .wallpaper_configs
                     .get(&desc.wallpaper_id)
-                    .is_some_and(|config| config.media_integration_enabled);
+                    .map_or(crate::config::MEDIA_INTEGRATION_DEFAULT, |config| {
+                        config.media_integration_enabled
+                    });
                 Ok(BridgeWebWallpaper {
                     display_id: desc.display.display_id,
-                    startup_revision: self.latest_reconcile_generation,
+                    startup_revision: self.reserved_startup_revision(),
                     display_key: desc.display_key,
                     audio_source_display_id: desc.audio_source_display_id,
                     wallpaper_id: desc.wallpaper_id,
@@ -1486,13 +1154,14 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         let no_suspended_displays = BTreeSet::new();
         let inputs = ActivationInputs {
             suspended_displays: &no_suspended_displays,
-            native_video_enabled: false,
             frame_rate_cap: self.active_target_fps_cap(),
             ..self.activation_inputs(&displays, self.state.playback_state == BridgePlaybackState::Paused)
         };
 
+        // Plain videos included: the extension plays each with its own players, and holds the
+        // clip with the failure when they cannot.
         let mut scenes = inputs
-            .build()?
+            .build_lock_screen()?
             .into_iter()
             .map(|mut scene| {
                 let wallpaper_id = std::path::Path::new(&scene.scene_path)
@@ -1666,18 +1335,6 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
     }
 
-    fn save_configs(
-        &self,
-        app_config: &AppConfig,
-        wallpaper_config: &WallpaperConfig,
-    ) -> Result<(), BridgeError> {
-        if let Some(store) = &self.config_store {
-            store.save_app_config(app_config)?;
-            store.save_wallpaper(wallpaper_config)?;
-        }
-        Ok(())
-    }
-
     /// System audio capture only needs to run while something that is actually
     /// presenting consumes it. Volume and mute are separate controls: silencing
     /// a wallpaper does not switch off its audio response, and an
@@ -1770,508 +1427,35 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         Ok(())
     }
 
-    fn spawn_restore(&mut self, actor: ActorRef<BridgeActor<E>>) {
-        if self.active_restore_generation.is_some() {
-            self.restore_requested_after_active = true;
-            return;
-        }
-        let generation = self.reserve_reconcile();
-        self.active_restore_generation = Some(generation);
-        let engine = self.engine.clone();
-        let app_config = self.state.app_config.clone();
-        let wallpaper_configs = self.state.wallpaper_configs.clone();
-        let library = self.state.scanned_library().map(<[_]>::to_vec);
-        let project_models = self.state.configured_project_models(&app_config);
-        let paused = self.playback_paused();
-        let suspended_displays = self.state.suspended_displays.clone();
-        let native_video_rejected_snapshot = self.state.native_video_rejected.clone();
-        let quality = self.quality_runtime();
-        let paths = self.paths.clone();
-        let presentation_unloaded = self.state.presentation_unloaded;
-        let audio_suppressed = self.state.audio_suppressed;
-        let load_guard = self.load_guard();
-        tokio::spawn(async move {
-            let result = reconcile_with(
-                engine,
-                app_config,
-                wallpaper_configs,
-                library,
-                project_models,
-                paused,
-                suspended_displays,
-                paths,
-                false,
-                native_video_rejected_snapshot,
-                quality,
-                presentation_unloaded,
-                audio_suppressed,
-                load_guard,
-            )
-            .await;
-            let _ = actor
-                .ask(CompleteRestoreAfterReconcile { result, generation })
-                .await;
-        });
-    }
-
-    #[allow(clippy::needless_pass_by_value)]
-    fn commit_display_settings(
-        &mut self,
-        app_config: AppConfig,
-        display_settings: BTreeMap<String, BridgeDisplaySettingsRow>,
-        scenes: Vec<SceneDesc>,
-    ) -> Result<(), BridgeError> {
-        self.refresh_mouse_polling_policy();
-        if let Some(store) = &self.config_store {
-            store.save_app_config(&app_config)?;
-        }
-        self.state.app_config = app_config;
-        self.state.display_settings = display_settings;
-        self.state.set_active_ids_from_scenes(&scenes);
-        self.state.rebase_drafts();
-        self.refresh_mouse_polling_policy();
-        Ok(())
-    }
-
-    async fn reconcile_engine(
-        &mut self,
-        app_config: AppConfig,
-        wallpaper_configs: BTreeMap<String, WallpaperConfig>,
-    ) -> Result<Vec<SceneDesc>, BridgeError> {
-        self.reconcile_engine_with(app_config, wallpaper_configs, false).await
-    }
-
-    /// Reconciles, optionally forcing every scene to be rebuilt.
+    /// Puts every live scene whose pause differs from the playback policy in
+    /// force now back on it: paused while every display is (the user's Pause
+    /// included) or while its own display is suspended, playing otherwise.
     ///
-    /// A descriptor carries what a scene is, not which renderer draws it, so a
-    /// change that only alters renderer selection produces identical
-    /// descriptors and `RuntimeRefreshMode::from_transition` reports
-    /// `Unchanged` — nothing is rebuilt and the setting appears to do nothing
-    /// until the wallpaper is changed. `force_shader_refresh` is the existing
-    /// flag that already means "rebuild regardless", so the renderer
-    /// preference reuses it rather than adding a second rebuild trigger.
-    async fn reconcile_engine_with(
-        &mut self,
-        app_config: AppConfig,
-        wallpaper_configs: BTreeMap<String, WallpaperConfig>,
-        force_shader_refresh: bool,
-    ) -> Result<Vec<SceneDesc>, BridgeError> {
-        let project_models = self.state.configured_project_models(&app_config);
-        let scenes = reconcile_with(
-            self.engine.clone(),
-            app_config,
-            wallpaper_configs,
-            self.state.scanned_library().map(<[_]>::to_vec),
-            project_models,
-            self.playback_paused(),
-            self.state.suspended_displays.clone(),
-            self.paths.clone(),
-            force_shader_refresh,
-            self.state.native_video_rejected.clone(),
-            self.quality_runtime(),
-            self.state.presentation_unloaded,
-            self.state.audio_suppressed,
-            self.load_guard(),
-        )
-        .await?;
-        self.sync_reconciled_pause().await?;
-        Ok(scenes)
-    }
-
-    /// Reasserts the current presentation policy after the core has reused or
-    /// reopened its windows. The core preserves live pause overrides across
-    /// those operations, so a scene's initial descriptor alone cannot release
-    /// a pause retained from an older display assignment.
-    ///
-    /// Runs in the actor, after a delegated reconcile's generation is checked:
-    /// a worker's captured policy must never undo a newer pause or resume.
-    async fn sync_reconciled_pause(&self) -> Result<(), BridgeError> {
-        let global_pause = self.playback_paused();
-        for display in self.engine.display_snapshot() {
-            if display.handle.is_none() { continue; }
-            let paused = global_pause
-                || self.state.suspended_displays.contains(&display.desc.display_id);
-            if display.paused != paused {
-                self.engine.set_display_paused(display.desc.display_id, paused).await
-                    .map_err(|error| BridgeError::engine(error.to_string()))?;
-            }
-        }
-        Ok(())
-    }
-
-    fn delegate_display(
-        &mut self,
-        app_config: AppConfig,
-        display_settings: BTreeMap<String, BridgeDisplaySettingsRow>,
-        ctx: &mut Context<Self, DelegatedReply<messages::DisplayMutationReply>>,
-    ) -> DelegatedReply<messages::DisplayMutationReply> {
-        let wallpaper_configs = self.state.wallpaper_configs.clone();
-        let library = self.state.scanned_library().map(<[_]>::to_vec);
-        let project_models = self.state.configured_project_models(&app_config);
-        let generation = self.reserve_reconcile();
+    /// Runs on this actor after a successful reconcile. The engine keeps a
+    /// scene's pause across a rebuild, so a renderer can come back holding a
+    /// pause its display no longer has, or running where its display should
+    /// not. Only a scene that differs gets a command, one display at a time,
+    /// so a covered display cannot stop a visible one. A command that fails is
+    /// logged and leaves the reconcile's result standing.
+    async fn align_live_pause_with_policy(&self) {
         let paused = self.playback_paused();
-        let suspended_displays = self.state.suspended_displays.clone();
-        let actor = ctx.actor_ref().clone();
-        let engine = self.engine.clone();
-        let native_video_rejected_snapshot = self.state.native_video_rejected.clone();
-        let quality = self.quality_runtime();
-        let paths = self.paths.clone();
-        let presentation_unloaded = self.state.presentation_unloaded;
-        let audio_suppressed = self.state.audio_suppressed;
-        let load_guard = self.load_guard();
-        ctx.spawn(async move {
-            let scenes = match reconcile_with(
-                engine,
-                app_config.clone(),
-                wallpaper_configs.clone(),
-                library,
-                project_models,
-                paused,
-                suspended_displays,
-                paths,
-                false,
-                native_video_rejected_snapshot,
-                quality,
-                presentation_unloaded,
-                audio_suppressed,
-                load_guard,
-            )
-            .await
-            {
-                Ok(scenes) => scenes,
-                Err(error) => {
-                    let _ = actor
-                        .ask(ReconcileFailed {
-                            error: duplicate_error(&error),
-                            generation,
-                            restore_hold: None,
-                        })
-                        .await;
-                    return Err(error);
-                }
-            };
-            actor
-                .ask(CommitDisplayAfterReconcile {
-                    app_config,
-                    wallpaper_configs,
-                    display_settings,
-                    scenes,
-                    generation,
-                })
-                .await
-                .map_err(map_send_error)
-        })
-    }
-
-    fn selector_for(
-        &self,
-        display_id: &str,
-        displays: &[DisplaySnapshotEntry],
-    ) -> Result<SerializedSelector, BridgeError> {
-        if display_id == PRIMARY_DISPLAY_ID {
-            if displays.is_empty() && !self.state.display_settings.contains_key(display_id) {
-                return Err(BridgeError::invalid_input(format!(
-                    "unknown display id {display_id}"
-                )));
-            }
-            return Ok(SerializedSelector::Primary);
-        }
-
-        if let Some(encoded) = display_id.strip_prefix(IDENTITY_DISPLAY_ID_PREFIX) {
-            let identity = serde_json::from_str::<DisplayIdentity>(encoded).map_err(|error| {
-                BridgeError::invalid_input(format!("invalid display identity selector: {error}"))
-            })?;
-            let selector = SerializedSelector::from_selector(&DisplaySelector::Identity(identity));
-            if displays.is_empty() {
-                return Ok(selector);
-            }
-            // The panel's id can predate a renumbering; edits belong to the
-            // block saved under the display's current selector.
-            if let Some(display) = displays
-                .iter()
-                .find(|display| selector.to_selector().matches_display(display))
-            {
-                return Ok(display.connected_selector());
-            }
-            return Err(BridgeError::invalid_input(format!(
-                "unknown display id {display_id}"
-            )));
-        }
-
-        if displays.is_empty() {
-            return if self.state.display_settings.contains_key(display_id) {
-                Ok(SerializedSelector::LiveDisplayId {
-                    display_id: Self::parse_display_id(display_id)?,
-                })
-            } else {
-                Err(BridgeError::invalid_input(format!(
-                    "unknown display id {display_id}"
-                )))
-            };
-        }
-
-        let display_id_u32 = Self::parse_display_id(display_id)?;
-        let display = displays
-            .iter()
-            .find(|display| display.desc.display_id == display_id_u32)
-            .ok_or_else(|| {
-                BridgeError::invalid_input(format!("unknown display id {display_id}"))
-            })?;
-        if displays
-            .first()
-            .is_some_and(|primary| display.matches_primary(primary))
-        {
-            return Ok(SerializedSelector::Primary);
-        }
-
-        Ok(display.connected_selector())
-    }
-
-    fn normalized_config(&self, displays: &[DisplaySnapshotEntry]) -> AppConfig {
-        self.state.app_config.normalized(displays)
-    }
-
-    fn display_rows(
-        &self,
-        app_config: &AppConfig,
-        displays: &[DisplaySnapshotEntry],
-    ) -> BTreeMap<String, BridgeDisplaySettingsRow> {
-        if displays.is_empty() {
-            return self
-                .state
-                .display_settings
-                .iter()
-                .map(|(display_id, row)| {
-                    let mut row = row.clone();
-                    if let Some(monitor) = display_id.parse::<u32>().ok().and_then(|display_id| {
-                        app_config.monitors.iter().find(|monitor| {
-                            monitor.selector == SerializedSelector::LiveDisplayId { display_id }
-                        })
-                    }) {
-                        row.enabled = monitor.enabled;
-                        row.mode = if monitor.mode.eq_ignore_ascii_case(MIRROR_DISPLAY_MODE) {
-                            BridgeDisplayMode::Mirror
-                        } else {
-                            BridgeDisplayMode::Standalone
-                        };
-                        row.selected_mirror_target =
-                            monitor
-                                .mirror_target
-                                .as_ref()
-                                .map(|selector| match selector {
-                                    SerializedSelector::LiveDisplayId { display_id } => {
-                                        display_id.to_string()
-                                    }
-                                    SerializedSelector::Primary => PRIMARY_DISPLAY_ID.to_string(),
-                                    SerializedSelector::Identity { .. } => {
-                                        let DisplaySelector::Identity(identity) =
-                                            selector.to_selector()
-                                        else {
-                                            unreachable!(
-                                                "identity selector must convert to identity"
-                                            )
-                                        };
-                                        format!(
-                                            "{IDENTITY_DISPLAY_ID_PREFIX}{}",
-                                            serde_json::to_string(&identity).expect(
-                                                "display identity selector should serialize"
-                                            )
-                                        )
-                                    }
-                                });
-                    } else if display_id == PRIMARY_DISPLAY_ID {
-                        row.enabled = true;
-                        row.mode = BridgeDisplayMode::Standalone;
-                        row.selected_mirror_target = None;
-                    }
-                    (display_id.clone(), row)
-                })
-                .collect();
-        }
-
-        let mut candidate_state = self.state.clone();
-        candidate_state.app_config = app_config.clone();
-        candidate_state
-            .settings(displays, self.launch_at_login.status(), &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports())
-            .displays
-            .into_iter()
-            .map(|row| (row.display_id.clone(), row))
-            .collect()
-    }
-
-    fn validate_display_settings(
-        app_config: &AppConfig,
-        displays: &[DisplaySnapshotEntry],
-        display_settings: &BTreeMap<String, BridgeDisplaySettingsRow>,
-    ) -> Result<(), BridgeError> {
-        let valid_ids = if displays.is_empty() {
-            display_settings
-                .keys()
-                .filter_map(|display_id| display_id.parse::<u32>().ok())
-                .collect::<Vec<_>>()
-        } else {
-            displays
-                .iter()
-                .map(|display| display.desc.display_id)
-                .collect::<Vec<_>>()
-        };
-
-        for monitor in &app_config.monitors {
-            let source_id = match &monitor.selector {
-                SerializedSelector::Primary => valid_ids.first().copied(),
-                SerializedSelector::LiveDisplayId { display_id } => {
-                    valid_ids.contains(display_id).then_some(*display_id)
-                }
-                SerializedSelector::Identity { .. } => displays
-                    .iter()
-                    .find(|display| monitor.selector.to_selector().matches_display(display))
-                    .map(|display| display.desc.display_id),
-            };
-            let Some(source_id) = source_id else {
-                continue;
-            };
-
-            if monitor.mode != MIRROR_DISPLAY_MODE {
+        for entry in self.engine.display_snapshot() {
+            if entry.handle.is_none() {
                 continue;
             }
-
-            let target = monitor.mirror_target.as_ref().ok_or_else(|| {
-                BridgeError::invalid_input(format!(
-                    "mirror mode for display {source_id} requires a target"
-                ))
-            })?;
-            if Self::valid_target(target, source_id, displays, &valid_ids).is_none() {
-                return Err(BridgeError::invalid_input(format!(
-                    "unknown mirror target for display {source_id}"
-                )));
+            let display_id = entry.desc.display_id;
+            let target = paused || self.state.suspended_displays.contains(&display_id);
+            if entry.paused == target {
+                continue;
             }
-            app_config.validate_mirror_change(&monitor.selector, target)?;
-        }
-
-        Ok(())
-    }
-
-    fn valid_target(
-        selector: &SerializedSelector,
-        display_id: u32,
-        displays: &[DisplaySnapshotEntry],
-        valid_ids: &[u32],
-    ) -> Option<u32> {
-        match selector {
-            SerializedSelector::LiveDisplayId {
-                display_id: target_id,
-            } => valid_ids
-                .contains(target_id)
-                .then_some(*target_id)
-                .filter(|target_id| *target_id != display_id),
-            SerializedSelector::Primary => displays
-                .first()
-                .map(|display| display.desc.display_id)
-                .or_else(|| valid_ids.first().copied())
-                .filter(|target_id| *target_id != display_id),
-            SerializedSelector::Identity { .. } => displays
-                .iter()
-                .find(|display| {
-                    display.desc.display_id != display_id
-                        && selector.to_selector().matches_display(display)
-                })
-                .map(|display| display.desc.display_id),
+            if let Err(error) = self.engine.set_display_paused(display_id, target).await {
+                log::warn!(
+                    "display {display_id}: could not {} its scene after a reconcile: {error}",
+                    if target { "pause" } else { "resume" }
+                );
+            }
         }
     }
-
-    fn source_display_id(
-        &self,
-        selector: &SerializedSelector,
-        displays: &[DisplaySnapshotEntry],
-    ) -> Result<u32, BridgeError> {
-        match selector {
-            SerializedSelector::Primary => displays
-                .first()
-                .map(|display| display.desc.display_id)
-                .or_else(|| {
-                    self.state
-                        .display_settings
-                        .get(PRIMARY_DISPLAY_ID)
-                        .and_then(|row| {
-                            row.title
-                                .rsplit_once(" - Primary)")?
-                                .0
-                                .rsplit_once('(')?
-                                .1
-                                .parse()
-                                .ok()
-                        })
-                })
-                .ok_or_else(|| BridgeError::invalid_input("unknown display id primary")),
-            SerializedSelector::LiveDisplayId { display_id } => Ok(*display_id),
-            SerializedSelector::Identity { .. } => displays
-                .iter()
-                .find(|display| selector.to_selector().matches_display(display))
-                .map(|display| display.desc.display_id)
-                .ok_or_else(|| BridgeError::invalid_input("unknown display identity")),
-        }
-    }
-
-    fn parse_display_id(display_id: &str) -> Result<u32, BridgeError> {
-        display_id
-            .parse::<u32>()
-            .map_err(|_| BridgeError::invalid_input(format!("invalid display id {display_id}")))
-    }
-
-    fn monitor_settings_mut(
-        app_config: &mut AppConfig,
-        selector: SerializedSelector,
-    ) -> &mut crate::config::MonitorSettingsCfg {
-        if let Some(index) = app_config
-            .monitor_settings
-            .iter()
-            .position(|settings| settings.selector == selector)
-        {
-            return &mut app_config.monitor_settings[index];
-        }
-
-        app_config
-            .monitor_settings
-            .push(crate::config::MonitorSettingsCfg {
-                selector,
-                ..crate::config::MonitorSettingsCfg::default()
-            });
-        app_config
-            .monitor_settings
-            .last_mut()
-            .expect("settings entry was just inserted")
-    }
-
-    fn require_mirror_monitor<'a>(
-        app_config: &'a AppConfig,
-        selector: &SerializedSelector,
-    ) -> Result<&'a crate::config::MonitorCfg, BridgeError> {
-        let monitor = app_config
-            .monitors
-            .iter()
-            .find(|monitor| &monitor.selector == selector)
-            .ok_or_else(|| BridgeError::invalid_input("unknown mirror display"))?;
-        if monitor.enabled && monitor.mode.eq_ignore_ascii_case(MIRROR_DISPLAY_MODE) {
-            Ok(monitor)
-        } else {
-            Err(BridgeError::invalid_input(
-                "display is not configured for mirror mode",
-            ))
-        }
-    }
-}
-
-/// The quality settings a reconcile puts into effect.
-///
-/// The frame-rate ceiling goes into every descriptor the reconcile hands the
-/// engine. The render scale is not part of a descriptor and a freshly opened
-/// scene rasterizes at native size, so it is re-asserted on each scene.
-/// Without either, a wallpaper change would silently discard the render scale
-/// or the active power profile.
-#[derive(Clone, Copy, Debug)]
-struct QualityRuntime {
-    render_scale: f32,
-    target_fps_cap: Option<u32>,
 }
 
 /// The saved rate, never above the ceiling in force.
@@ -2293,112 +1477,6 @@ fn live_scene(mut scene: SceneDesc, fps_cap: Option<u32>, audio_suppressed: bool
     scene
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn reconcile_with<E: EngineFacade>(
-    engine: E,
-    app_config: AppConfig,
-    wallpaper_configs: BTreeMap<String, WallpaperConfig>,
-    library: Option<Vec<BridgeWallpaperEntry>>,
-    project_models: BTreeMap<String, ProjectModel>,
-    paused: bool,
-    suspended_displays: BTreeSet<u32>,
-    paths: BridgePaths,
-    force_shader_refresh: bool,
-    native_video_rejected: NativeVideoRejections,
-    quality: QualityRuntime,
-    presentation_unloaded: bool,
-    audio_suppressed: bool,
-    load_guard: LoadGuard,
-) -> Result<Vec<SceneDesc>, BridgeError> {
-    let displays = engine.display_snapshot();
-    let owned: Vec<(SceneDesc, String)> = if presentation_unloaded {
-        Vec::new()
-    } else {
-        ActivationInputs {
-            app_config: &app_config,
-            wallpapers: &wallpaper_configs,
-            library: library.as_deref(),
-            suspended_displays: &suspended_displays,
-            displays: &displays,
-            paused,
-            paths: &paths,
-            force_shader_refresh,
-            project_models: &project_models,
-            native_video_enabled: app_config.video_backend == VideoBackendModeCfg::NativePreferred,
-            native_video_rejected: &native_video_rejected,
-            frame_rate_cap: quality.target_fps_cap,
-            audio_suppressed,
-            held: &load_guard.held,
-        }
-        .build_owned()?
-        .into_iter()
-        .map(|(scene, owner)| (live_scene(scene, quality.target_fps_cap, audio_suppressed), owner))
-        .collect()
-    };
-    let scenes: Vec<SceneDesc> = owned.iter().map(|(scene, _)| scene.clone()).collect();
-
-    // Record the wallpapers the engine is about to open or replace, and only
-    // those: a scene that is already running is no suspect. The record has to
-    // cover everything below the first frame, because a crash can also come
-    // from what follows the scene, such as applying a render scale to it.
-    let opening = displays_awaiting_first_frame(&displays, &scenes);
-    let ticket = load_guard.journal.begin(
-        owned
-            .iter()
-            .filter(|(scene, _)| opening.contains(&scene.display.display_id))
-            .map(|(scene, owner)| (owner.clone(), scene.display.display_id))
-            .collect(),
-    );
-
-    let results = engine
-        .reconcile_scenes(scenes.clone())
-        .await
-        .map_err(|error| BridgeError::engine(error.to_string()))?;
-
-    // Sync audios
-    let mut audio_handles = Vec::new();
-    let mut used_display_ids = HashSet::new();
-    for scene in &scenes {
-        let Some(result) = results
-            .iter()
-            .find(|result| result.display_id == scene.display.display_id)
-        else {
-            continue;
-        };
-
-        if used_display_ids.contains(&result.display_id) {
-            continue;
-        }
-
-        audio_handles.push((scene, result.handle));
-        used_display_ids.insert(result.display_id);
-    }
-    for (scene, handle) in audio_handles {
-        engine
-            .set_audio_volume(handle, scene.audio_volume)
-            .await
-            .map_err(|error| BridgeError::engine(error.to_string()))?;
-        engine
-            .set_audio_muted(handle, scene.audio_muted)
-            .await
-            .map_err(|error| BridgeError::engine(error.to_string()))?;
-        register_audio_capture(&engine, handle, scene.audio_response_enabled)
-            .await
-            .map_err(|error| BridgeError::engine(error.to_string()))?;
-        // A newly opened scene already rasterizes at native size, so only a
-        // reduced scale has anything to assert here.
-        if quality.render_scale < crate::config::app::MAX_RENDER_SCALE {
-            engine
-                .set_render_scale(handle, quality.render_scale)
-                .await
-                .map_err(|error| BridgeError::engine(error.to_string()))?;
-        }
-    }
-
-    ticket.succeed();
-    Ok(scenes)
-}
-
 impl<E: EngineFacade + Clone> Message<Bootstrap> for BridgeActor<E> {
     type Reply = messages::BootstrapReply;
 
@@ -2413,18 +1491,6 @@ impl<E: EngineFacade + Clone> Message<Bootstrap> for BridgeActor<E> {
         // a persisted opt-in only survives a restart if it is pushed back in
         // before anything opens.
         let experimental = self.state.app_config.experimental;
-        if let Err(error) = self
-            .engine
-            .set_content_pacing_enabled(experimental.content_pacing)
-        {
-            self.state.errors.push(error.to_string());
-        }
-        if let Err(error) = self
-            .engine
-            .set_shared_video_decode_enabled(experimental.shared_video_decode)
-        {
-            self.state.errors.push(error.to_string());
-        }
         if let Err(error) = self
             .engine
             .set_scene_optimization_enabled(self.state.app_config.quality.scene_optimization_enabled)
@@ -2451,14 +1517,6 @@ impl<E: EngineFacade + Clone> Message<Bootstrap> for BridgeActor<E> {
         {
             self.state.errors.push(error.to_string());
         }
-        if let Err(error) = self
-            .engine
-            .set_scene_renderer_preference(scene_renderer_preference(
-                self.state.app_config.scene_renderer,
-            ))
-        {
-            self.state.errors.push(error.to_string());
-        }
 
         if let Err(error) = self.refresh_displays().await {
             self.state.errors.push(error.message().to_string());
@@ -2470,7 +1528,7 @@ impl<E: EngineFacade + Clone> Message<Bootstrap> for BridgeActor<E> {
             self.state.errors.push(error.message().to_string());
         }
         self.hold_back_crashing_wallpapers();
-        if let Err(error) = self.reconcile_configured().await {
+        if let Err(error) = self.reconcile_configured_operation().await {
             self.state.errors.push(error.message().to_string());
             self.state.pending_battery_pause_after_initial_frame = false;
         }
@@ -2481,7 +1539,7 @@ impl<E: EngineFacade + Clone> Message<Bootstrap> for BridgeActor<E> {
             self.apply_power_policy().await?;
         }
 
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -2571,7 +1629,7 @@ impl<E: EngineFacade + Clone> Message<GetSettingsSnapshot> for BridgeActor<E> {
         let displays = self.engine.display_snapshot();
         Ok(self
             .state
-            .settings(&displays, self.launch_at_login.status(), &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports()))
+            .settings(&displays, self.launch_at_login.status(), &self.paths, &self.engine.scene_runtime_reports()))
     }
 }
 
@@ -2621,16 +1679,18 @@ impl<E: EngineFacade + Clone> Message<ClearShaderCache> for BridgeActor<E> {
         self.load_wallpapers()?;
         let app_config = self.state.app_config.clone();
         let wallpaper_configs = self.state.wallpaper_configs.clone();
-        let result = self.reconcile_engine_with(app_config, wallpaper_configs, true).await;
+        let result = self
+            .reconcile_snapshot_operation(app_config, wallpaper_configs, true)
+            .await;
         self.refresh_mouse_polling_policy();
         let scenes = result?;
         self.state.set_active_ids_from_scenes(&scenes);
-        self.bump_generation();
+        self.invalidate_operations();
 
         let displays = self.engine.display_snapshot();
         Ok(self
             .state
-            .settings(&displays, self.launch_at_login.status(), &self.paths, self.engine.video_pipeline_state(), &self.engine.scene_runtime_reports()))
+            .settings(&displays, self.launch_at_login.status(), &self.paths, &self.engine.scene_runtime_reports()))
     }
 }
 
@@ -2663,21 +1723,8 @@ impl<E: EngineFacade + Clone> Message<InjectWallpaperForTest> for BridgeActor<E>
         msg: InjectWallpaperForTest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.state.library.push(BridgeWallpaperEntry {
-            id: msg.id,
-            title: msg.title,
-            kind: msg.kind,
-            supported: matches!(
-                msg.kind,
-                BridgeWallpaperKind::ProjectScene
-                    | BridgeWallpaperKind::Video
-                    | BridgeWallpaperKind::Webpage
-            ),
-            active: false,
-            selected: false,
-            preview_path: None,
-        });
-        self.bump_generation();
+        fixture_values::add_entry(&mut self.state.library, msg.id, msg.title, msg.kind);
+        self.invalidate_operations();
         Ok(())
     }
 }
@@ -2690,22 +1737,14 @@ impl<E: EngineFacade + Clone> Message<InjectSceneWallpaperConfigForTest> for Bri
         msg: InjectSceneWallpaperConfigForTest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let config = WallpaperConfig::new_for(&msg.id, "scene");
-        self.state.library.push(BridgeWallpaperEntry {
-            id: msg.id.clone(),
-            title: msg.title,
-            kind: BridgeWallpaperKind::ProjectScene,
-            supported: true,
-            active: false,
-            selected: false,
-            preview_path: None,
-        });
-        self.state.wallpaper_drafts.insert(
-            msg.id.clone(),
-            WallpaperOptionsDraft::from_committed(config.clone()),
+        fixture_values::add_scene_configuration(
+            &mut self.state.library,
+            &mut self.state.wallpaper_configs,
+            &mut self.state.wallpaper_drafts,
+            msg.id,
+            msg.title,
         );
-        self.state.wallpaper_configs.insert(msg.id, config);
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(())
     }
 }
@@ -2718,30 +1757,16 @@ impl<E: EngineFacade + Clone> Message<InjectSceneProjectForTest> for BridgeActor
         msg: InjectSceneProjectForTest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let model = ProjectModel::parse(&msg.id, &msg.project_json)
-            .map_err(|error| BridgeError::invalid_input(error.to_string()))?;
-        let entry = BridgeWallpaperEntry {
-            id: msg.id.clone(),
-            title: if msg.title.is_empty() {
-                model.title.clone()
-            } else {
-                msg.title
-            },
-            kind: BridgeWallpaperKind::from(model.project_type),
-            supported: true,
-            active: false,
-            selected: false,
-            preview_path: None,
-        };
-        let config = WallpaperConfig::new_for(&msg.id, "scene");
-        self.state.library.push(entry);
-        self.state.project_models.insert(msg.id.clone(), model);
-        self.state.wallpaper_drafts.insert(
-            msg.id.clone(),
-            WallpaperOptionsDraft::from_committed(config.clone()),
-        );
-        self.state.wallpaper_configs.insert(msg.id, config);
-        self.bump_generation();
+        fixture_values::add_project(
+            &mut self.state.library,
+            &mut self.state.project_models,
+            &mut self.state.wallpaper_configs,
+            &mut self.state.wallpaper_drafts,
+            msg.id,
+            msg.title,
+            &msg.project_json,
+        )?;
+        self.invalidate_operations();
         Ok(())
     }
 }
@@ -2754,51 +1779,13 @@ impl<E: EngineFacade + Clone> Message<InjectDisplayForTest> for BridgeActor<E> {
         msg: InjectDisplayForTest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let selector = SerializedSelector::LiveDisplayId {
-            display_id: Self::parse_display_id(&msg.display_id)?,
-        };
-        self.state.app_config.ensure_monitor(selector);
-        let mirror_targets = self
-            .state
-            .display_settings
-            .keys()
-            .filter(|target| target.as_str() != msg.display_id)
-            .cloned()
-            .collect();
-        self.state.display_settings.insert(
-            msg.display_id.clone(),
-            BridgeDisplaySettingsRow {
-                display_id: msg.display_id.clone(),
-                title: msg.title,
-                enabled: true,
-                mode: BridgeDisplayMode::Standalone,
-                mirror_targets,
-                selected_mirror_target: None,
-                scaling_mode: BridgeScalingMode::from(ScalingMode::default()),
-                scaling_factor: 1.0,
-                // No refresh was injected with this synthetic display, so 60/60
-                // is an unknown-refresh placeholder, not a saved rate that
-                // should follow a native refresh this row does not have.
-                target_fps: 60,
-                max_fps: 60,
-                muted: false,
-                volume: 1.0,
-            },
-        );
-        let ids = self
-            .state
-            .display_settings
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        for row in self.state.display_settings.values_mut() {
-            row.mirror_targets = ids
-                .iter()
-                .filter(|target| target.as_str() != row.display_id)
-                .cloned()
-                .collect();
-        }
-        self.bump_generation();
+        fixture_values::add_display(
+            &mut self.state.app_config,
+            &mut self.state.display_settings,
+            msg.display_id,
+            msg.title,
+        )?;
+        self.invalidate_operations();
         Ok(())
     }
 }
@@ -2811,8 +1798,13 @@ impl<E: EngineFacade + Clone> Message<ReplaceLibraryForTest> for BridgeActor<E> 
         msg: ReplaceLibraryForTest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.state.replace_library(msg.entries);
-        self.bump_generation();
+        fixture_values::replace_library(
+            &mut self.state.library,
+            &mut self.state.selected_wallpaper_id,
+            &mut self.state.app_config,
+            msg.entries,
+        );
+        self.invalidate_operations();
         Ok(())
     }
 }
@@ -2825,12 +1817,13 @@ impl<E: EngineFacade + Clone> Message<ReplaceWallpaperConfigForTest> for BridgeA
         msg: ReplaceWallpaperConfigForTest,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.state.wallpaper_drafts.insert(
-            msg.id.clone(),
-            WallpaperOptionsDraft::from_committed(msg.config.clone()),
+        fixture_values::replace_configuration(
+            &mut self.state.wallpaper_configs,
+            &mut self.state.wallpaper_drafts,
+            msg.id,
+            msg.config,
         );
-        self.state.wallpaper_configs.insert(msg.id, msg.config);
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(())
     }
 }
@@ -2863,7 +1856,7 @@ impl<E: EngineFacade + Clone> Message<SelectWallpaper> for BridgeActor<E> {
         }
         self.state.app_config.general.last_selected_wallpaper = Some(msg.id.clone());
         self.state.selected_wallpaper_id = Some(msg.id.clone());
-        self.generation = self.generation.wrapping_add(1);
+        self.invalidate_operations();
         self.snapshots_with_options(msg.id)
     }
 }
@@ -2877,7 +1870,7 @@ impl<E: EngineFacade + Clone> Message<RefreshLibrary> for BridgeActor<E> {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.refresh_library()?;
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -2891,8 +1884,8 @@ impl<E: EngineFacade + Clone> Message<RefreshDisplays> for BridgeActor<E> {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.refresh_displays().await?;
-        self.reconcile_configured().await?;
-        self.bump_generation();
+        self.reconcile_configured_operation().await?;
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -2912,13 +1905,13 @@ impl<E: EngineFacade + Clone> Message<ReleaseHeldWallpaper> for BridgeActor<E> {
         // The journal keeps its strikes until the wallpaper has been handed to
         // the engine, so a crash during this very attempt holds it again at
         // the next launch instead of counting as a first offence.
-        if let Err(error) = self.reconcile_configured().await {
+        if let Err(error) = self.reconcile_configured_operation().await {
             // Nothing was opened, so it is still held back.
             self.state.held_wallpapers.insert(msg.wallpaper_id);
             return Err(error);
         }
         let _ = self.load_journal.forgive(&msg.wallpaper_id);
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -2937,395 +1930,8 @@ impl<E: EngineFacade + Clone> Message<SetFilter> for BridgeActor<E> {
             BridgeWallpaperKind::Webpage => self.state.filter_webpage = msg.enabled,
             BridgeWallpaperKind::Unknown => self.state.filter_unknown = msg.enabled,
         }
-        self.generation = self.generation.wrapping_add(1);
+        self.invalidate_operations();
         Ok(self.all_snapshots())
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetDisplayEnabled> for BridgeActor<E> {
-    type Reply = DelegatedReply<messages::SetDisplayEnabledReply>;
-
-    async fn handle(
-        &mut self,
-        msg: SetDisplayEnabled,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        macro_rules! reply_try {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(value) => value,
-                    Err(error) => return ctx.reply(Err(error)),
-                }
-            };
-        }
-
-        let displays = self.engine.display_snapshot();
-        let selector = reply_try!(self.selector_for(&msg.display_id, &displays));
-        let mut app_config = self.normalized_config(&displays);
-        let enabled = if selector == SerializedSelector::Primary {
-            true
-        } else {
-            msg.enabled
-        };
-        let monitor = app_config.ensure_monitor(selector.clone());
-        monitor.enabled = enabled;
-        if monitor.selector == SerializedSelector::Primary {
-            monitor.mode = INDEPENDENT_DISPLAY_MODE.to_string();
-            monitor.mirror_target = None;
-        }
-        let display_settings = self.display_rows(&app_config, &displays);
-        reply_try!(Self::validate_display_settings(
-            &app_config,
-            &displays,
-            &display_settings,
-        ));
-        self.delegate_display(app_config, display_settings, ctx)
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetDisplayMode> for BridgeActor<E> {
-    type Reply = DelegatedReply<messages::SetDisplayModeReply>;
-
-    async fn handle(
-        &mut self,
-        msg: SetDisplayMode,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        macro_rules! reply_try {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(value) => value,
-                    Err(error) => return ctx.reply(Err(error)),
-                }
-            };
-        }
-
-        let displays = self.engine.display_snapshot();
-        let selector = reply_try!(self.selector_for(&msg.display_id, &displays));
-        if selector == SerializedSelector::Primary && msg.mode == BridgeDisplayMode::Mirror {
-            return ctx.reply(Err(BridgeError::invalid_input(
-                "primary display cannot use mirror mode",
-            )));
-        }
-        let source_display_id = reply_try!(self.source_display_id(&selector, &displays));
-        let mut app_config = self.normalized_config(&displays);
-        let valid_ids = if displays.is_empty() {
-            self.state
-                .display_settings
-                .keys()
-                .filter_map(|display_id| display_id.parse::<u32>().ok())
-                .collect::<Vec<_>>()
-        } else {
-            self.normalized_config(&displays)
-                .monitor_rows(&displays)
-                .into_iter()
-                .filter(|row| row.connected)
-                .filter_map(|row| row.display_index.and_then(|index| displays.get(index)))
-                .map(|display| display.desc.display_id)
-                .collect::<Vec<_>>()
-        };
-
-        match msg.mode {
-            BridgeDisplayMode::Standalone => {
-                let monitor = app_config.ensure_monitor(selector.clone());
-                monitor.mode = INDEPENDENT_DISPLAY_MODE.to_string();
-                monitor.mirror_target = None;
-                if monitor.selector == SerializedSelector::Primary {
-                    monitor.enabled = true;
-                }
-            }
-            BridgeDisplayMode::Mirror => {
-                let target_display_id = if let Some(target) = app_config
-                    .monitors
-                    .iter()
-                    .find(|monitor| monitor.selector == selector)
-                    .and_then(|monitor| monitor.mirror_target.as_ref())
-                    .and_then(|target| {
-                        Self::valid_target(target, source_display_id, &displays, &valid_ids)
-                    }) {
-                    target
-                } else {
-                    reply_try!(
-                        valid_ids
-                            .iter()
-                            .copied()
-                            .find(|target| *target != source_display_id)
-                            .ok_or_else(|| {
-                                BridgeError::invalid_input("mirror mode requires another display")
-                            })
-                    )
-                };
-                let target =
-                    reply_try!(self.selector_for(&target_display_id.to_string(), &displays));
-                reply_try!(app_config.validate_mirror_change(&selector, &target));
-                let monitor = app_config.ensure_monitor(selector);
-                monitor.enabled = true;
-                monitor.mode = MIRROR_DISPLAY_MODE.to_string();
-                monitor.mirror_target = Some(target);
-            }
-        }
-
-        let display_settings = self.display_rows(&app_config, &displays);
-        reply_try!(Self::validate_display_settings(
-            &app_config,
-            &displays,
-            &display_settings,
-        ));
-        self.delegate_display(app_config, display_settings, ctx)
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetMirrorTarget> for BridgeActor<E> {
-    type Reply = DelegatedReply<messages::SetMirrorTargetReply>;
-
-    async fn handle(
-        &mut self,
-        msg: SetMirrorTarget,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        macro_rules! reply_try {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(value) => value,
-                    Err(error) => return ctx.reply(Err(error)),
-                }
-            };
-        }
-
-        let displays = self.engine.display_snapshot();
-        let selector = reply_try!(self.selector_for(&msg.display_id, &displays));
-        if selector == SerializedSelector::Primary {
-            return ctx.reply(Err(BridgeError::invalid_input(
-                "primary display cannot use mirror mode",
-            )));
-        }
-        let target = reply_try!(self.selector_for(&msg.target_display_id, &displays));
-        let mut app_config = self.normalized_config(&displays);
-        reply_try!(app_config.validate_mirror_change(&selector, &target));
-        let monitor = app_config.ensure_monitor(selector);
-        monitor.enabled = true;
-        monitor.mode = MIRROR_DISPLAY_MODE.to_string();
-        monitor.mirror_target = Some(target);
-        let display_settings = self.display_rows(&app_config, &displays);
-        reply_try!(Self::validate_display_settings(
-            &app_config,
-            &displays,
-            &display_settings,
-        ));
-        self.delegate_display(app_config, display_settings, ctx)
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetMirrorScalingMode> for BridgeActor<E> {
-    type Reply = DelegatedReply<messages::SetMirrorScalingModeReply>;
-
-    async fn handle(
-        &mut self,
-        msg: SetMirrorScalingMode,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        macro_rules! reply_try {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(value) => value,
-                    Err(error) => return ctx.reply(Err(error)),
-                }
-            };
-        }
-
-        let displays = self.engine.display_snapshot();
-        let selector = reply_try!(self.selector_for(&msg.display_id, &displays));
-        let handle = self.mirror_display_handle(&selector, &displays);
-        let mut app_config = self.normalized_config(&displays);
-        reply_try!(Self::require_mirror_monitor(&app_config, &selector));
-        let scaling_mode = ScalingMode::from(msg.mode);
-        Self::monitor_settings_mut(&mut app_config, selector).scaling_mode =
-            scaling_mode.to_string();
-        reply_try!(self.commit_app_config(app_config));
-        if let Some(handle) = handle {
-            reply_try!(
-                self.engine
-                    .set_scaling_mode(handle, scaling_mode)
-                    .await
-                    .map_err(|error| BridgeError::engine(error.to_string()))
-            );
-        }
-        self.bump_generation();
-        ctx.reply(Ok(self.display_bundle()))
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetMirrorScalingFactor> for BridgeActor<E> {
-    type Reply = DelegatedReply<messages::SetMirrorScalingFactorReply>;
-
-    async fn handle(
-        &mut self,
-        msg: SetMirrorScalingFactor,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        macro_rules! reply_try {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(value) => value,
-                    Err(error) => return ctx.reply(Err(error)),
-                }
-            };
-        }
-
-        if !msg.factor.is_finite() || msg.factor <= 0.0 {
-            return ctx.reply(Err(BridgeError::invalid_input(
-                "scaling factor must be greater than 0",
-            )));
-        }
-        let displays = self.engine.display_snapshot();
-        let selector = reply_try!(self.selector_for(&msg.display_id, &displays));
-        let handle = self.mirror_display_handle(&selector, &displays);
-        let mut app_config = self.normalized_config(&displays);
-        reply_try!(Self::require_mirror_monitor(&app_config, &selector));
-        Self::monitor_settings_mut(&mut app_config, selector).scaling_factor = msg.factor;
-        reply_try!(self.commit_app_config(app_config));
-        if let Some(handle) = handle {
-            reply_try!(
-                self.engine
-                    .set_scaling_factor(handle, msg.factor)
-                    .await
-                    .map_err(|error| BridgeError::engine(error.to_string()))
-            );
-        }
-        self.bump_generation();
-        ctx.reply(Ok(self.display_bundle()))
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetMirrorTargetFps> for BridgeActor<E> {
-    type Reply = DelegatedReply<messages::SetMirrorTargetFpsReply>;
-
-    async fn handle(
-        &mut self,
-        msg: SetMirrorTargetFps,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        macro_rules! reply_try {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(value) => value,
-                    Err(error) => return ctx.reply(Err(error)),
-                }
-            };
-        }
-
-        let displays = self.engine.display_snapshot();
-        let selector = reply_try!(self.selector_for(&msg.display_id, &displays));
-        let source_display_id = reply_try!(self.source_display_id(&selector, &displays));
-        let max_fps = reply_try!(
-            displays
-                .iter()
-                .find(|display| display.desc.display_id == source_display_id)
-                .map(|display| display.desc.refresh_rate_hz.max(1))
-                .ok_or_else(|| {
-                    BridgeError::invalid_input(format!("unknown display id {source_display_id}"))
-                })
-        );
-        let handle = self.mirror_display_handle(&selector, &displays);
-        let mut app_config = self.normalized_config(&displays);
-        reply_try!(Self::require_mirror_monitor(&app_config, &selector));
-        let settings = Self::monitor_settings_mut(&mut app_config, selector);
-        settings.frame_rate = crate::config::stored_frame_rate(msg.fps, max_fps);
-        let resolved = settings.fps_on(max_fps);
-        reply_try!(self.commit_app_config(app_config));
-        if let Some(handle) = handle {
-            reply_try!(
-                self.engine
-                    .set_fps(handle, self.live_target_fps(resolved))
-                    .await
-                    .map_err(|error| BridgeError::engine(error.to_string()))
-            );
-        }
-        self.bump_generation();
-        ctx.reply(Ok(self.display_bundle()))
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetMirrorVolume> for BridgeActor<E> {
-    type Reply = DelegatedReply<messages::SetMirrorVolumeReply>;
-
-    async fn handle(
-        &mut self,
-        msg: SetMirrorVolume,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        macro_rules! reply_try {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(value) => value,
-                    Err(error) => return ctx.reply(Err(error)),
-                }
-            };
-        }
-
-        if !(0.0..=1.0).contains(&msg.volume) {
-            return ctx.reply(Err(BridgeError::invalid_input(
-                "mirror volume must be between 0 and 1",
-            )));
-        }
-        let volume = reply_try!(
-            AudioVolume::try_from(msg.volume)
-                .map_err(|error| BridgeError::invalid_input(error.to_string()))
-        );
-        let displays = self.engine.display_snapshot();
-        let selector = reply_try!(self.selector_for(&msg.display_id, &displays));
-        let handle = self.mirror_display_handle(&selector, &displays);
-        let mut app_config = self.normalized_config(&displays);
-        reply_try!(Self::require_mirror_monitor(&app_config, &selector));
-        Self::monitor_settings_mut(&mut app_config, selector).volume = msg.volume;
-        reply_try!(self.commit_app_config(app_config));
-        if let Some(handle) = handle {
-            reply_try!(
-                self.engine
-                    .set_audio_volume(handle, volume)
-                    .await
-                    .map_err(|error| BridgeError::engine(error.to_string()))
-            );
-        }
-        self.bump_generation();
-        ctx.reply(Ok(self.display_bundle()))
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetMirrorMuted> for BridgeActor<E> {
-    type Reply = DelegatedReply<messages::SetMirrorMutedReply>;
-
-    async fn handle(
-        &mut self,
-        msg: SetMirrorMuted,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        macro_rules! reply_try {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(value) => value,
-                    Err(error) => return ctx.reply(Err(error)),
-                }
-            };
-        }
-
-        let displays = self.engine.display_snapshot();
-        let selector = reply_try!(self.selector_for(&msg.display_id, &displays));
-        let handle = self.mirror_display_handle(&selector, &displays);
-        let mut app_config = self.normalized_config(&displays);
-        reply_try!(Self::require_mirror_monitor(&app_config, &selector));
-        Self::monitor_settings_mut(&mut app_config, selector).muted = msg.muted;
-        reply_try!(self.commit_app_config(app_config));
-        if let Some(handle) = handle {
-            reply_try!(
-                self.engine
-                    .set_audio_muted(handle, msg.muted || self.state.audio_suppressed)
-                    .await
-                    .map_err(|error| BridgeError::engine(error.to_string()))
-            );
-        }
-        self.bump_generation();
-        ctx.reply(Ok(self.display_bundle()))
     }
 }
 
@@ -3358,7 +1964,7 @@ impl<E: EngineFacade + Clone> Message<SetBatteryMode> for BridgeActor<E> {
         // in this step, not on the next power sample.
         self.apply_quality_profile().await?;
         self.apply_power_policy().await?;
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -3376,7 +1982,7 @@ impl<E: EngineFacade + Clone> Message<SetFrameRateCap> for BridgeActor<E> {
             store.save_app_config(&self.state.app_config)?;
         }
         self.apply_quality_profile().await?;
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -3396,7 +2002,7 @@ impl<E: EngineFacade + Clone> Message<SetQualityThrottle> for BridgeActor<E> {
         // unchanged scale or rate is free in the renderer, and handing a clip
         // back to the native player is owed until it has been done.
         self.apply_quality_profile().await?;
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -3414,28 +2020,16 @@ impl<E: EngineFacade + Clone> Message<SetPresentationUnloaded> for BridgeActor<E
         }
         let previous = self.state.presentation_unloaded;
         self.state.presentation_unloaded = msg.unloaded;
-        let generation = self.reserve_reconcile();
-        let reconciled = if msg.unloaded {
-            let app_config = self.state.app_config.clone();
-            let wallpaper_configs = self.state.wallpaper_configs.clone();
-            self.reconcile_engine(app_config, wallpaper_configs)
-                .await
-                .map(|_| ())
-        } else {
-            self.reconcile_configured().await
-        };
+        let ticket = self.reserve_operation();
+        let reconciled = self.reconcile_inline_operation().await;
         match reconciled {
             Ok(()) => {
-                self.finish_reconcile(generation, ctx.actor_ref().clone());
+                self.complete_inline_operation(ticket, ctx.actor_ref().clone());
                 Ok(self.all_snapshots())
             }
             Err(error) => {
                 self.state.presentation_unloaded = previous;
-                self.reconcile_failure(
-                    generation,
-                    duplicate_error(&error),
-                    ctx.actor_ref().clone(),
-                );
+                self.fail_inline_operation(ticket, &error, ctx.actor_ref().clone());
                 Err(error)
             }
         }
@@ -3468,7 +2062,7 @@ impl<E: EngineFacade + Clone> Message<SetAudioSuppressed> for BridgeActor<E> {
                 .await
                 .map_err(|error| BridgeError::engine(error.to_string()))?;
         }
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -3486,7 +2080,7 @@ impl<E: EngineFacade + Clone> Message<SetVerboseLogging> for BridgeActor<E> {
             store.save_app_config(&self.state.app_config)?;
         }
         crate::logging::ApplicationLogger::set_verbose(msg.enabled);
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -3527,7 +2121,7 @@ impl<E: EngineFacade + Clone> Message<SetPresentationSuspended> for BridgeActor<
             self.state.presentation_suspended = !msg.suspended;
             return Err(error);
         }
-        self.bump_generation();
+        self.invalidate_operations();
         log::info!(
             "presentation {}",
             if msg.suspended { "suspended" } else { "resumed" }
@@ -3593,64 +2187,12 @@ impl<E: EngineFacade + Clone> Message<SetDisplayPresentationSuspended> for Bridg
             return Err(BridgeError::engine(message));
         }
         self.refresh_mouse_polling_policy();
-        self.bump_generation();
+        self.invalidate_operations();
         log::info!(
             "display {display_id} presentation {}",
             if msg.suspended { "suspended" } else { "resumed" }
         );
         Ok(())
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetVideoBackend> for BridgeActor<E> {
-    type Reply = messages::SetVideoBackendReply;
-
-    async fn handle(
-        &mut self,
-        msg: SetVideoBackend,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        if self.state.app_config.video_backend == msg.mode {
-            return Ok(self.all_snapshots());
-        }
-        let mut app_config = self.state.app_config.clone();
-        app_config.video_backend = msg.mode;
-        // Changing the backend moves wallpapers between renderers, so the
-        // refusals recorded against the previous setting no longer describe
-        // anything: keeping them would permanently exclude a wallpaper that was
-        // only ever refused by a configuration the user has since changed.
-        let previous_rejections = std::mem::take(&mut self.state.native_video_rejected);
-        let generation = self.reserve_reconcile();
-        // A wallpaper that changes backend must stop being rendered by the old
-        // one in the same transition, so the scene list is rebuilt before the
-        // new setting is committed: a failure leaves the previous backend
-        // running rather than nothing at all.
-        let wallpaper_configs = self.state.wallpaper_configs.clone();
-        let result = self.reconcile_engine(app_config.clone(), wallpaper_configs).await
-            .and_then(|scenes| {
-                if let Some(store) = &self.config_store { store.save_app_config(&app_config)?; }
-                Ok(scenes)
-            });
-        let scenes = match result {
-            Ok(scenes) => scenes,
-            Err(error) => {
-                self.state.native_video_rejected = previous_rejections;
-                self.reconcile_failure(generation, BridgeError::engine(error.message().to_owned()), ctx.actor_ref().clone());
-                return Err(error);
-            }
-        };
-        self.state.app_config = app_config;
-        self.state.set_active_ids_from_scenes(&scenes);
-        self.finish_reconcile(generation, ctx.actor_ref().clone());
-        Ok(self.all_snapshots())
-    }
-}
-
-/// The renderer-facing spelling of the saved scene renderer preference.
-fn scene_renderer_preference(mode: SceneRendererModeCfg) -> SceneRendererPreference {
-    match mode {
-        SceneRendererModeCfg::Compatibility => SceneRendererPreference::Compatibility,
-        SceneRendererModeCfg::NativeMetalPreferred => SceneRendererPreference::NativeMetalPreferred,
     }
 }
 
@@ -3686,50 +2228,7 @@ impl<E: EngineFacade + Clone> Message<SetSceneResolution> for BridgeActor<E> {
             .set_scene_resolution(scene_resolution(msg.resolution))
             .map_err(|error| BridgeError::engine(error.to_string()))?;
         self.apply_effective_render_scale().await?;
-        self.bump_generation();
-        Ok(self.all_snapshots())
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetSceneRenderer> for BridgeActor<E> {
-    type Reply = messages::SetSceneRendererReply;
-
-    async fn handle(
-        &mut self,
-        msg: SetSceneRenderer,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        if self.state.app_config.scene_renderer == msg.mode {
-            return Ok(self.all_snapshots());
-        }
-        // The renderer picks a backend when a scene is opened, so the process
-        // switch has to be in place before anything is rebuilt against it.
-        self.engine
-            .set_scene_renderer_preference(scene_renderer_preference(msg.mode))
-            .map_err(|error| BridgeError::engine(error.to_string()))?;
-        let mut app_config = self.state.app_config.clone();
-        app_config.scene_renderer = msg.mode;
-        // A scene already on screen keeps the backend it was opened with, so
-        // the scene list is rebuilt for the new preference before it is
-        // committed: a failure leaves the previous renderer running rather
-        // than nothing at all. The descriptors are rebuilt from actor state
-        // this change never touches, so a wallpaper the user paused and a
-        // display whose presentation is suspended stay that way.
-        let wallpaper_configs = self.state.wallpaper_configs.clone();
-        // Forced: the descriptors are identical across a renderer-preference
-        // change, so without this the reconcile is a no-op and the setting has
-        // no effect until the wallpaper is changed or the app restarts. The
-        // rebuild is also what re-runs shader translation, which is gated on
-        // the preference at parse time.
-        let scenes = self
-            .reconcile_engine_with(app_config.clone(), wallpaper_configs, true)
-            .await?;
-        if let Some(store) = &self.config_store {
-            store.save_app_config(&app_config)?;
-        }
-        self.state.app_config = app_config;
-        self.state.set_active_ids_from_scenes(&scenes);
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -3751,7 +2250,7 @@ impl<E: EngineFacade + Clone> Message<SetRenderScale> for BridgeActor<E> {
         // already in force keeps its own scale until the machine leaves
         // battery power.
         self.apply_effective_render_scale().await?;
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -3773,58 +2272,7 @@ impl<E: EngineFacade + Clone> Message<SetBatteryQualityProfile> for BridgeActor<
         // A machine already on reduced quality has to pick the new scale and
         // rate up now. Leaving that mode is `SetBatteryMode`'s restore.
         self.apply_quality_profile().await?;
-        self.bump_generation();
-        Ok(self.all_snapshots())
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetContentPacingEnabled> for BridgeActor<E> {
-    type Reply = messages::SetContentPacingEnabledReply;
-
-    async fn handle(
-        &mut self,
-        msg: SetContentPacingEnabled,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        self.state.app_config.experimental.content_pacing = msg.enabled;
-        if let Some(store) = &self.config_store {
-            store.save_app_config(&self.state.app_config)?;
-        }
-        self.engine
-            .set_content_pacing_enabled(msg.enabled)
-            .map_err(|error| BridgeError::engine(error.to_string()))?;
-        self.bump_generation();
-        Ok(self.all_snapshots())
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<SetSharedVideoDecodeEnabled> for BridgeActor<E> {
-    type Reply = messages::SetSharedVideoDecodeEnabledReply;
-
-    async fn handle(
-        &mut self,
-        msg: SetSharedVideoDecodeEnabled,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        if self.state.app_config.experimental.shared_video_decode == msg.enabled {
-            return Ok(self.all_snapshots());
-        }
-        self.state.app_config.experimental.shared_video_decode = msg.enabled;
-        if let Some(store) = &self.config_store {
-            store.save_app_config(&self.state.app_config)?;
-        }
-        self.engine
-            .set_shared_video_decode_enabled(msg.enabled)
-            .map_err(|error| BridgeError::engine(error.to_string()))?;
-        // A decoder is chosen when its source is opened, so a wallpaper that is
-        // already running keeps the decoder it started with. Rebuilding the
-        // scene list is what makes the new setting describe what is on screen
-        // rather than only what the next wallpaper change will get.
-        let app_config = self.state.app_config.clone();
-        let wallpaper_configs = self.state.wallpaper_configs.clone();
-        let scenes = self.reconcile_engine(app_config, wallpaper_configs).await?;
-        self.state.set_active_ids_from_scenes(&scenes);
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -3846,7 +2294,7 @@ impl<E: EngineFacade + Clone> Message<SetSceneOptimizationEnabled> for BridgeAct
         self.engine
             .set_scene_optimization_enabled(msg.enabled)
             .map_err(|error| BridgeError::engine(error.to_string()))?;
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -3869,7 +2317,7 @@ impl<E: EngineFacade + Clone> Message<SetSceneOnDemandEnabled> for BridgeActor<E
         self.engine
             .set_scene_on_demand_enabled(msg.enabled)
             .map_err(|error| BridgeError::engine(error.to_string()))?;
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -3896,7 +2344,7 @@ impl<E: EngineFacade + Clone> Message<SetSceneVideoPlaneSamplingEnabled> for Bri
         self.engine
             .set_scene_video_plane_sampling_enabled(msg.enabled)
             .map_err(|error| BridgeError::engine(error.to_string()))?;
-        self.bump_generation();
+        self.invalidate_operations();
         Ok(self.all_snapshots())
     }
 }
@@ -4005,7 +2453,7 @@ impl<E: EngineFacade + Clone> Message<SetMediaIntegrationEnabled> for BridgeActo
                     .map_err(|error| BridgeError::engine(error.to_string()))?;
             }
         }
-        self.bump_generation();
+        self.invalidate_operations();
         let handles = self.wallpaper_handles(&msg.wallpaper_id, true);
         for handle in handles {
             if let Err(error) = self
@@ -4234,7 +2682,7 @@ impl<E: EngineFacade + Clone> Message<SetPropertyPath> for BridgeActor<E> {
             .wallpaper_draft_mut(&msg.wallpaper_id)?
             .set_property_path_immediate(&model, &msg.property_id, msg.path);
         self.save_wallpaper(msg.wallpaper_id.clone(), wallpaper_config)?;
-        self.bump_generation();
+        self.invalidate_operations();
         self.wallpaper_bundle(msg.wallpaper_id)
     }
 }
@@ -4247,71 +2695,7 @@ impl<E: EngineFacade + Clone> Message<GetNativeVideoWallpapers> for BridgeActor<
         _msg: GetNativeVideoWallpapers,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        // This is where the host asks what to play, so it is where a refusal
-        // that has outlived its configuration expires. The wallpaper goes back
-        // to the native player, so the scene engine has to let go of it in the
-        // same step or both would render it.
-        self.release_stale_native_video().await?;
         self.native_video_wallpapers()
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<RejectNativeVideo> for BridgeActor<E> {
-    type Reply = messages::RejectNativeVideoReply;
-
-    async fn handle(
-        &mut self,
-        msg: RejectNativeVideo,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        let live_keys = self.native_video_admission_keys();
-        let current = live_keys.get(&msg.wallpaper_id);
-        if !current.is_some_and(|keys| keys.contains(&msg.admission_key)) {
-            // The host judged a configuration that no longer exists: the user
-            // changed the target rate, an option or the media file while the
-            // refusal was in flight. Recording it would kill a configuration
-            // nothing has actually refused.
-            log::info!(
-                "native video wallpaper {} refused for admission key {} that is no longer \
-                 current ({}); the configuration changed while the refusal was in flight, so \
-                 the refusal is dropped",
-                msg.wallpaper_id,
-                msg.admission_key,
-                msg.reason
-            );
-            return Ok(());
-        }
-        // Recorded once per admission key and never retried, so a wallpaper the
-        // player cannot honour cannot bounce between the two backends. Keyed by
-        // admission key rather than by wallpaper id: another display's refusal
-        // of the same clip is a different decision and must not be overwritten.
-        let record = NativeVideoRejection {
-            reason: msg.reason.clone(),
-        };
-        if self
-            .state
-            .native_video_rejected
-            .entry(msg.wallpaper_id.clone())
-            .or_default()
-            .insert(msg.admission_key, record)
-            .is_some()
-        {
-            return Ok(());
-        }
-        log::info!(
-            "native video wallpaper {} refused for admission key {}: {}; falling back to the \
-             scene engine",
-            msg.wallpaper_id,
-            msg.admission_key,
-            msg.reason
-        );
-        // The scene engine has to take it back now, or the display shows
-        // nothing until something else triggers a reconcile.
-        let app_config = self.state.app_config.clone();
-        let wallpaper_configs = self.state.wallpaper_configs.clone();
-        let scenes = self.reconcile_engine(app_config, wallpaper_configs).await?;
-        self.state.set_active_ids_from_scenes(&scenes);
-        Ok(())
     }
 }
 
@@ -4356,7 +2740,7 @@ impl<E: EngineFacade + Clone> Message<RendererCounters> for BridgeActor<E> {
                 RendererSharedCounterKind::AudioAcceptedFrames,
             ),
             audio_active_consumers: self.audio_consumer_count(),
-            // MoltenVK over a CAMetalLayer swapchain exposes no presentation
+            // The renderer presents through a CAMetalLayer and exposes no presentation
             // feedback here. Present requests are reported as requests; the
             // frames the compositor actually showed are not observable, and are
             // never approximated by the request count.
@@ -4462,7 +2846,7 @@ impl<E: EngineFacade + Clone> Message<messages::ReportHostWallpaperStartup> for 
         msg: messages::ReportHostWallpaperStartup,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        if msg.startup_revision != self.latest_reconcile_generation {
+        if msg.startup_revision != self.reserved_startup_revision() {
             return Ok(self.all_snapshots());
         }
         let current = if let Some(key) = msg.native_admission_key {
@@ -4482,69 +2866,6 @@ impl<E: EngineFacade + Clone> Message<messages::ReportHostWallpaperStartup> for 
             self.apply_power_policy().await?;
         }
         Ok(self.all_snapshots())
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<EjectWallpaperFromDisplay> for BridgeActor<E> {
-    type Reply = DelegatedReply<messages::EjectWallpaperFromDisplayReply>;
-
-    async fn handle(
-        &mut self,
-        msg: EjectWallpaperFromDisplay,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        macro_rules! reply_try {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(value) => value,
-                    Err(error) => return ctx.reply(Err(error)),
-                }
-            };
-        }
-
-        let displays = self.engine.display_snapshot();
-        let selector = reply_try!(self.selector_for(&msg.display_id, &displays));
-        let mut app_config = self.normalized_config(&displays);
-        let Some(monitor) = app_config
-            .monitors
-            .iter_mut()
-            .find(|monitor| monitor.selector == selector)
-        else {
-            return ctx.reply(Err(BridgeError::invalid_input(format!(
-                "unknown display id {}",
-                msg.display_id
-            ))));
-        };
-
-        if monitor.wallpaper.as_deref() != Some(msg.wallpaper_id.as_str()) {
-            return ctx.reply(Err(BridgeError::invalid_input(format!(
-                "wallpaper {} is not active on display {}",
-                msg.wallpaper_id, msg.display_id
-            ))));
-        }
-
-        monitor.wallpaper = None;
-        if monitor.selector == SerializedSelector::Primary {
-            monitor.enabled = true;
-            monitor.mode = INDEPENDENT_DISPLAY_MODE.to_string();
-            monitor.mirror_target = None;
-            if let Some(primary) = displays.first() {
-                for alias in app_config.monitors.iter_mut().filter(|candidate| {
-                    candidate.selector != SerializedSelector::Primary
-                        && candidate
-                            .selector
-                            .to_selector()
-                            .matches_primary(primary, &displays)
-                }) {
-                    if alias.wallpaper.as_deref() == Some(msg.wallpaper_id.as_str()) {
-                        alias.wallpaper = None;
-                    }
-                }
-            }
-        }
-
-        let display_settings = self.display_rows(&app_config, &displays);
-        self.delegate_display(app_config, display_settings, ctx)
     }
 }
 
@@ -4610,21 +2931,23 @@ impl<E: EngineFacade + Clone> Message<SetVolume> for BridgeActor<E> {
         msg: SetVolume,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let volume = AudioVolume::try_from(msg.volume)
+        let SetVolume { wallpaper_id, volume } = msg;
+        let level = AudioVolume::try_from(volume)
             .map_err(|error| BridgeError::invalid_input(error.to_string()))?;
-        let wallpaper_config = self
+        let saved = self
             .state
-            .wallpaper_draft_mut(&msg.wallpaper_id)?
-            .set_volume_immediate(msg.volume)?;
-        self.save_wallpaper(msg.wallpaper_id.clone(), wallpaper_config)?;
-        for handle in self.wallpaper_handles(&msg.wallpaper_id, false) {
+            .wallpaper_draft_mut(&wallpaper_id)?
+            .set_volume_immediate(volume)?;
+        self.save_wallpaper(wallpaper_id.clone(), saved)?;
+        // Mirrors follow their source, so only the scenes of their own are told.
+        for handle in self.wallpaper_handles(&wallpaper_id, false) {
             self.engine
-                .set_audio_volume(handle, volume)
+                .set_audio_volume(handle, level)
                 .await
-                .map_err(|error| BridgeError::engine(error.to_string()))?;
+                .map_err(engine_failed)?;
         }
-        self.bump_generation();
-        self.wallpaper_bundle(msg.wallpaper_id)
+        self.invalidate_operations();
+        self.wallpaper_bundle(wallpaper_id)
     }
 }
 
@@ -4647,7 +2970,7 @@ impl<E: EngineFacade + Clone> Message<SetMuted> for BridgeActor<E> {
                 .await
                 .map_err(|error| BridgeError::engine(error.to_string()))?;
         }
-        self.bump_generation();
+        self.invalidate_operations();
         self.wallpaper_bundle(msg.wallpaper_id)
     }
 }
@@ -4682,7 +3005,7 @@ impl<E: EngineFacade + Clone> Message<SetAudioResponseEnabled> for BridgeActor<E
                 .set_audio_response_enabled_immediate(previous_enabled);
             return ctx.reply(Err(error));
         }
-        self.bump_generation();
+        self.invalidate_operations();
         let handles = self.wallpaper_handles(&msg.wallpaper_id, true);
         self.pending_audio_changes.insert(msg.wallpaper_id.clone());
         let actor = ctx.actor_ref().clone();
@@ -4747,7 +3070,7 @@ impl<E: EngineFacade + Clone> Message<CompleteAudioResponse> for BridgeActor<E> 
                 .set_audio_capture_demand(self.audio_capture_demand(self.playback_paused())).await {
                 log::warn!("could not restore audio demand: {rollback}");
             }
-            self.bump_generation();
+            self.invalidate_operations();
             return Err(error);
         }
         self.wallpaper_bundle(msg.wallpaper_id)
@@ -4757,31 +3080,35 @@ impl<E: EngineFacade + Clone> Message<CompleteAudioResponse> for BridgeActor<E> 
 impl<E: EngineFacade + Clone> Message<SetDisplayConfigEnabled> for BridgeActor<E> {
     type Reply = messages::WallpaperMutationReply;
 
+    /// Edits the draft only; Apply is what saves it and tells the engine.
     async fn handle(
         &mut self,
         msg: SetDisplayConfigEnabled,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let displays = self.engine.display_snapshot();
-        let selector = self.selector_for(&msg.display_id, &displays)?;
+        let selector = self.resolve_operation_selector(&msg.display_id, &displays)?;
+        // Read before the edit: the draft seeds its assignment from what is saved.
         let enabled_displays = self.state.enabled_selectors(&msg.wallpaper_id);
-        let mut selector_aliases = vec![selector.clone()];
+        // The same display can be saved under several selectors, so the switch
+        // has to reach every one a later primary change or reconnect may use.
+        let mut aliases = vec![selector.clone()];
         if let Some(display) = selector.to_selector().resolve_display(&displays) {
             if displays
                 .first()
                 .is_some_and(|primary| display.matches_primary(primary))
             {
-                selector_aliases.push(SerializedSelector::Primary);
+                aliases.push(SerializedSelector::Primary);
             }
-            if let Some(identity_selector) = display.stable_identity_selector() {
-                selector_aliases.push(identity_selector);
+            if let Some(identity) = display.stable_identity_selector() {
+                aliases.push(identity);
             }
-            selector_aliases.dedup();
+            aliases.dedup();
         }
         self.state
             .wallpaper_draft_mut(&msg.wallpaper_id)?
-            .set_display_aliases_enabled(&selector_aliases, msg.enabled, &enabled_displays);
-        self.bump_generation();
+            .set_display_aliases_enabled(&aliases, msg.enabled, &enabled_displays);
+        self.invalidate_operations();
         self.wallpaper_bundle(msg.wallpaper_id)
     }
 }
@@ -4789,51 +3116,56 @@ impl<E: EngineFacade + Clone> Message<SetDisplayConfigEnabled> for BridgeActor<E
 impl<E: EngineFacade + Clone> Message<SetScalingMode> for BridgeActor<E> {
     type Reply = messages::WallpaperMutationReply;
 
+    /// The mode is committed at once, saved and pushed to a running scene.
     async fn handle(
         &mut self,
         msg: SetScalingMode,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        let SetScalingMode { wallpaper_id, display_id, mode } = msg;
         let displays = self.engine.display_snapshot();
-        let selector = self.selector_for(&msg.display_id, &displays)?;
-        let scaling_mode = ScalingMode::from(msg.mode);
-        let wallpaper_config = self
+        let selector = self.resolve_operation_selector(&display_id, &displays)?;
+        let mode = ScalingMode::from(mode);
+        let saved = self
             .state
-            .wallpaper_draft_mut(&msg.wallpaper_id)?
-            .set_scaling_mode_immediate(selector.clone(), scaling_mode);
-        self.save_wallpaper(msg.wallpaper_id.clone(), wallpaper_config)?;
-        if let Some(handle) = self.display_handle(&msg.wallpaper_id, &selector) {
+            .wallpaper_draft_mut(&wallpaper_id)?
+            .set_scaling_mode_immediate(selector.clone(), mode);
+        self.save_wallpaper(wallpaper_id.clone(), saved)?;
+        if let Some(handle) = self.display_handle(&wallpaper_id, &selector) {
             self.engine
-                .set_scaling_mode(handle, scaling_mode)
+                .set_scaling_mode(handle, mode)
                 .await
-                .map_err(|error| BridgeError::engine(error.to_string()))?;
+                .map_err(engine_failed)?;
         }
-        self.bump_generation();
-        self.wallpaper_bundle(msg.wallpaper_id)
+        self.invalidate_operations();
+        self.wallpaper_bundle(wallpaper_id)
     }
 }
 
 impl<E: EngineFacade + Clone> Message<SetScalingFactor> for BridgeActor<E> {
     type Reply = messages::WallpaperMutationReply;
 
+    /// A draft edit held behind Apply; a running scene previews it live.
     async fn handle(
         &mut self,
         msg: SetScalingFactor,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        let SetScalingFactor { wallpaper_id, display_id, factor } = msg;
         let displays = self.engine.display_snapshot();
-        let selector = self.selector_for(&msg.display_id, &displays)?;
+        let selector = self.resolve_operation_selector(&display_id, &displays)?;
+        // Validation happens in the draft, before the engine hears anything.
         self.state
-            .wallpaper_draft_mut(&msg.wallpaper_id)?
-            .set_scaling_factor(selector.clone(), msg.factor)?;
-        if let Some(handle) = self.display_handle(&msg.wallpaper_id, &selector) {
+            .wallpaper_draft_mut(&wallpaper_id)?
+            .set_scaling_factor(selector.clone(), factor)?;
+        if let Some(handle) = self.display_handle(&wallpaper_id, &selector) {
             self.engine
-                .set_scaling_factor(handle, msg.factor)
+                .set_scaling_factor(handle, factor)
                 .await
-                .map_err(|error| BridgeError::engine(error.to_string()))?;
+                .map_err(engine_failed)?;
         }
-        self.bump_generation();
-        self.wallpaper_bundle(msg.wallpaper_id)
+        self.invalidate_operations();
+        self.wallpaper_bundle(wallpaper_id)
     }
 }
 
@@ -4853,7 +3185,7 @@ impl<E: EngineFacade + Clone> Message<SetDisplayPosition> for BridgeActor<E> {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let displays = self.engine.display_snapshot();
-        let selector = self.selector_for(&msg.display_id, &displays)?;
+        let selector = self.resolve_operation_selector(&msg.display_id, &displays)?;
         let update = self
             .state
             .wallpaper_draft_mut(&msg.wallpaper_id)?
@@ -4902,7 +3234,7 @@ impl<E: EngineFacade + Clone> Message<SetDisplayPosition> for BridgeActor<E> {
                 .map_err(|error| BridgeError::engine(error.to_string()))?;
             self.previewed_framing.remove(&handle);
         }
-        self.bump_generation();
+        self.invalidate_operations();
         self.wallpaper_bundle(msg.wallpaper_id)
     }
 }
@@ -4930,7 +3262,7 @@ impl<E: EngineFacade + Clone> Message<PreviewDisplayPosition> for BridgeActor<E>
         moved_framing(FramingCfg::default(), msg.pan_x, msg.pan_y)?;
         self.state.ensure_wallpaper_exists(&msg.wallpaper_id)?;
         let displays = self.engine.display_snapshot();
-        let Ok(selector) = self.selector_for(&msg.display_id, &displays) else {
+        let Ok(selector) = self.resolve_operation_selector(&msg.display_id, &displays) else {
             return Ok(());
         };
         let Some(handle) = self.display_handle(&msg.wallpaper_id, &selector) else {
@@ -4978,8 +3310,8 @@ impl<E: EngineFacade + Clone> Message<SetTargetFps> for BridgeActor<E> {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let displays = self.engine.display_snapshot();
-        let selector = self.selector_for(&msg.display_id, &displays)?;
-        let source_display_id = self.source_display_id(&selector, &displays)?;
+        let selector = self.resolve_operation_selector(&msg.display_id, &displays)?;
+        let source_display_id = self.operation_source_id(&selector, &displays)?;
         let max_fps = displays
             .iter()
             .find(|display| display.desc.display_id == source_display_id)
@@ -5002,7 +3334,7 @@ impl<E: EngineFacade + Clone> Message<SetTargetFps> for BridgeActor<E> {
                 .await
                 .map_err(|error| BridgeError::engine(error.to_string()))?;
         }
-        self.bump_generation();
+        self.invalidate_operations();
         self.wallpaper_bundle(msg.wallpaper_id)
     }
 }
@@ -5020,7 +3352,7 @@ impl<E: EngineFacade + Clone> Message<EditProperty> for BridgeActor<E> {
         self.state
             .wallpaper_draft_mut(&msg.wallpaper_id)?
             .edit_property(&model, &msg.property_id, PropertyValue::from(msg.value));
-        self.bump_generation();
+        self.invalidate_operations();
         self.wallpaper_bundle(msg.wallpaper_id)
     }
 }
@@ -5048,7 +3380,7 @@ impl<E: EngineFacade + Clone> Message<RestorePropertyDefault> for BridgeActor<E>
         self.state
             .wallpaper_draft_mut(&msg.wallpaper_id)?
             .restore_property_default(&msg.property_id);
-        self.bump_generation();
+        self.invalidate_operations();
         self.wallpaper_bundle(msg.wallpaper_id)
     }
 }
@@ -5068,332 +3400,7 @@ impl<E: EngineFacade + Clone> Message<RestoreAllPropertyDefaults> for BridgeActo
         self.state
             .wallpaper_draft_mut(&msg.wallpaper_id)?
             .restore_all_property_defaults(&keep);
-        self.bump_generation();
-        self.wallpaper_bundle(msg.wallpaper_id)
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<ApplyWallpaperOptions> for BridgeActor<E> {
-    type Reply = DelegatedReply<messages::WallpaperMutationReply>;
-
-    async fn handle(
-        &mut self,
-        msg: ApplyWallpaperOptions,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        macro_rules! reply_try {
-            ($expr:expr) => {
-                match $expr {
-                    Ok(value) => value,
-                    Err(error) => return ctx.reply(Err(error)),
-                }
-            };
-        }
-
-        let displays = self.engine.display_snapshot();
-        let primary_identity_selector = displays
-            .first()
-            .and_then(DisplaySnapshotExt::stable_identity_selector);
-        let candidates = reply_try!(
-            self.state
-                .apply_candidates(&msg.wallpaper_id, primary_identity_selector.as_ref())
-        );
-        // The user applying a wallpaper again is the way back from a hold.
-        // Nothing about its draft changed, so the usual "nothing to reconcile"
-        // shortcut would leave it unopened. A playlist, rule or schedule
-        // reaching the same wallpaper leaves the journal alone: it neither
-        // lifts a hold nor starts a count over, or a wallpaper that crashes
-        // the app would be reopened every time the rotation came round to it.
-        //
-        // Only the in-memory hold is lifted here, so that this reconcile plans
-        // the wallpaper. The journal keeps its strikes until the reconcile has
-        // succeeded, the way Try again does: a crash during this very load then
-        // earns the wallpaper a third strike and holds it again at the next
-        // launch instead of counting as a first offence. A failure puts the
-        // hold back.
-        let lifts_hold = msg.user_initiated && self.state.held_wallpapers.remove(&msg.wallpaper_id);
-        let app_config = candidates.app_config.clone();
-        let wallpaper_configs = candidates.wallpaper_configs.clone();
-        let library = self.state.scanned_library().map(<[_]>::to_vec);
-        let requires_reconcile = candidates.requires_reconcile || lifts_hold;
-        let paused = self.playback_paused();
-        let suspended_displays = self.state.suspended_displays.clone();
-        let predicted_scenes = match requires_reconcile
-            .then(|| {
-                ActivationInputs {
-                    app_config: &app_config,
-                    wallpapers: &wallpaper_configs,
-                    library: self.state.scanned_library(),
-                    displays: &displays,
-                    paused,
-                    suspended_displays: &suspended_displays,
-                    paths: &self.paths,
-                    force_shader_refresh: false,
-                    project_models: &self.state.project_models,
-                    native_video_enabled: app_config.video_backend == VideoBackendModeCfg::NativePreferred,
-                    native_video_rejected: &self.state.native_video_rejected,
-                    frame_rate_cap: self.active_target_fps_cap(),
-                    audio_suppressed: self.state.audio_suppressed,
-                    held: &self.state.held_wallpapers,
-                }
-                .build()
-            })
-            .transpose()
-        {
-            Ok(scenes) => scenes,
-            Err(error) => {
-                // Nothing was handed to the engine, so it is still held back.
-                if lifts_hold {
-                    self.state.held_wallpapers.insert(msg.wallpaper_id);
-                }
-                return ctx.reply(Err(error));
-            }
-        };
-        let project_models = self.state.configured_project_models(&app_config);
-
-        if requires_reconcile {
-            let generation = self.reserve_reconcile();
-            let actor = ctx.actor_ref().clone();
-            let engine = self.engine.clone();
-            let wallpaper_id = msg.wallpaper_id;
-            let restore_hold = lifts_hold.then(|| wallpaper_id.clone());
-            let forgive_when_opened = msg.user_initiated;
-            let journal = self.load_journal.clone();
-            let native_video_rejected_snapshot = self.state.native_video_rejected.clone();
-            let quality = self.quality_runtime();
-            let paths = self.paths.clone();
-            let presentation_unloaded = self.state.presentation_unloaded;
-            let audio_suppressed = self.state.audio_suppressed;
-            let load_guard = self.load_guard();
-            return ctx.spawn(async move {
-                let scenes = match reconcile_with(
-                    engine,
-                    app_config,
-                    wallpaper_configs,
-                    library,
-                    project_models,
-                    paused,
-                    suspended_displays,
-                    paths,
-                    false,
-                    native_video_rejected_snapshot,
-                    quality,
-                    presentation_unloaded,
-                    audio_suppressed,
-                    load_guard,
-                )
-                .await
-                {
-                    Ok(scenes) => scenes,
-                    Err(error) => {
-                        let _ = actor
-                            .ask(ReconcileFailed {
-                                error: duplicate_error(&error),
-                                generation,
-                                restore_hold,
-                            })
-                            .await;
-                        return Err(error);
-                    }
-                };
-                // The scenes are open, and the journal has them on record
-                // through the settle window: from here a crash is counted
-                // against the wallpaper afresh, not on top of the strikes
-                // that held it.
-                if forgive_when_opened {
-                    let _ = journal.forgive(&wallpaper_id);
-                }
-                actor
-                    .ask(CommitApplyAfterReconcile {
-                        wallpaper_id,
-                        candidates,
-                        scenes,
-                        generation,
-                    })
-                    .await
-                    .map_err(map_send_error)
-            });
-        }
-
-        reply_try!(self.sync_reconciled_pause().await);
-        reply_try!(self.save_configs(&candidates.app_config, &candidates.wallpaper_config,));
-        reply_try!(
-            self.state
-                .commit_apply_candidates(msg.wallpaper_id.clone(), candidates, false)
-        );
-        if msg.user_initiated {
-            // Nothing was handed to the engine, so there is no load to wait
-            // for: the user choosing the wallpaper again starts its count over.
-            let _ = self.load_journal.forgive(&msg.wallpaper_id);
-        }
-        self.state.refresh_active_ids();
-        if let Some(predicted_scenes) = predicted_scenes.as_deref() {
-            self.state.set_active_ids_from_scenes(predicted_scenes);
-        }
-
-        self.bump_generation();
-        ctx.reply(self.wallpaper_bundle(msg.wallpaper_id))
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<CommitApplyAfterReconcile> for BridgeActor<E> {
-    type Reply = messages::CommitApplyAfterReconcileReply;
-
-    async fn handle(
-        &mut self,
-        msg: CommitApplyAfterReconcile,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        if !self.reconcile_current(msg.generation) {
-            self.stale_reconcile(msg.generation, ctx.actor_ref().clone());
-            return self.wallpaper_bundle(msg.wallpaper_id);
-        }
-        if let Err(error) = self.sync_reconciled_pause().await {
-            self.reconcile_failure(msg.generation, duplicate_error(&error), ctx.actor_ref().clone());
-            return Err(error);
-        }
-
-        // The wallpaper's scenes were opened again from the configuration that
-        // is saved now, so none of them shows an edit that was only pending.
-        self.previewed_properties.remove(&msg.wallpaper_id);
-        if let Err(error) =
-            self.save_configs(&msg.candidates.app_config, &msg.candidates.wallpaper_config)
-        {
-            // Reconciliation already changed the renderer. Publish its assignment even
-            // when persistence fails, but keep the draft's committed property baseline.
-            // A display refresh reconciles the saved wallpaper config; Apply can retry
-            // the retained draft without reporting the old desktop as still active.
-            self.state.app_config = msg.candidates.app_config;
-            self.state.set_active_ids_from_scenes(&msg.scenes);
-            self.finish_reconcile(msg.generation, ctx.actor_ref().clone());
-            return Err(error);
-        }
-        self.state
-            .commit_apply_candidates(msg.wallpaper_id.clone(), msg.candidates, false)?;
-        self.state.set_active_ids_from_scenes(&msg.scenes);
-        self.finish_reconcile(msg.generation, ctx.actor_ref().clone());
-        self.wallpaper_bundle(msg.wallpaper_id)
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<CommitDisplayAfterReconcile> for BridgeActor<E> {
-    type Reply = messages::CommitDisplayAfterReconcileReply;
-
-    async fn handle(
-        &mut self,
-        msg: CommitDisplayAfterReconcile,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        if !self.reconcile_current(msg.generation)
-            || self.state.wallpaper_configs != msg.wallpaper_configs
-        {
-            self.stale_reconcile(msg.generation, ctx.actor_ref().clone());
-            return Ok(self.display_bundle());
-        }
-        if let Err(error) = self.sync_reconciled_pause().await {
-            self.reconcile_failure(msg.generation, duplicate_error(&error), ctx.actor_ref().clone());
-            return Err(error);
-        }
-
-        let generation = msg.generation;
-        self.commit_display_settings(msg.app_config, msg.display_settings, msg.scenes)?;
-        self.finish_reconcile(generation, ctx.actor_ref().clone());
-        Ok(self.display_bundle())
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<CompleteRestoreAfterReconcile> for BridgeActor<E> {
-    type Reply = messages::CompleteRestoreAfterReconcileReply;
-
-    async fn handle(
-        &mut self,
-        msg: CompleteRestoreAfterReconcile,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        if !self.reconcile_current(msg.generation) {
-            self.stale_reconcile(msg.generation, ctx.actor_ref().clone());
-            return Ok(());
-        }
-
-        let result = match msg.result {
-            Ok(scenes) => self.sync_reconciled_pause().await.map(|()| scenes),
-            Err(error) => Err(error),
-        };
-        match result {
-            Ok(scenes) => {
-                self.state.set_active_ids_from_scenes(&scenes);
-                self.finish_reconcile(msg.generation, ctx.actor_ref().clone());
-                Ok(())
-            }
-            Err(error) => {
-                self.refresh_mouse_polling_policy();
-                self.state.errors.push(error.message().to_string());
-                self.active_restore_generation = None;
-                if std::mem::take(&mut self.restore_requested_after_active) {
-                    self.spawn_restore(ctx.actor_ref().clone());
-                }
-                Err(error)
-            }
-        }
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<ReconcileFailed> for BridgeActor<E> {
-    type Reply = messages::ReconcileFailedReply;
-
-    async fn handle(
-        &mut self,
-        msg: ReconcileFailed,
-        ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        if let Some(wallpaper_id) = msg.restore_hold {
-            // Before the repair `reconcile_failure` starts, which plans from
-            // the held set: it must not open what this attempt could not.
-            self.state.held_wallpapers.insert(wallpaper_id);
-        }
-        self.reconcile_failure(msg.generation, msg.error, ctx.actor_ref().clone());
-        Ok(())
-    }
-}
-
-impl<E: EngineFacade + Clone> Message<CancelWallpaperOptions> for BridgeActor<E> {
-    type Reply = messages::WallpaperMutationReply;
-
-    async fn handle(
-        &mut self,
-        msg: CancelWallpaperOptions,
-        _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Self::Reply {
-        let draft = self.state.wallpaper_draft_mut(&msg.wallpaper_id)?.clone();
-        // The saved look goes back first, so that a scene the engine refuses
-        // leaves the draft and every other preview exactly as they were and
-        // Revert can simply be asked again.
-        self.show_wallpaper_properties(&msg.wallpaper_id, false, Vec::new())
-            .await?;
-        let preview = draft.current().monitors.clone();
-        let mut restored = draft;
-        restored.cancel();
-        let updates: Vec<_> = preview.iter().filter_map(|render| {
-            let committed = restored.current().monitors.iter()
-                .find(|value| value.selector == render.selector)
-                .map_or_else(|| crate::config::MonitorRender::default().scaling_factor,
-                    |value| value.scaling_factor);
-            if render.scaling_factor == committed { return None; }
-            self.display_handle(&msg.wallpaper_id, &render.selector)
-                .map(|handle| (handle, render.scaling_factor, committed))
-        }).collect();
-        for (index, &(handle, _, committed)) in updates.iter().enumerate() {
-            if let Err(error) = self.engine.set_scaling_factor(handle, committed).await {
-                for &(handle, previous, _) in &updates[..=index] {
-                    if let Err(rollback) = self.engine.set_scaling_factor(handle, previous).await {
-                        log::warn!("could not restore scaling preview after failed cancel: {rollback}");
-                    }
-                }
-                return Err(BridgeError::engine(error.to_string()));
-            }
-        }
-        self.state.wallpaper_draft_mut(&msg.wallpaper_id)?.cancel();
-        self.bump_generation();
+        self.invalidate_operations();
         self.wallpaper_bundle(msg.wallpaper_id)
     }
 }

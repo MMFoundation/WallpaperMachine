@@ -6,6 +6,7 @@
 #include "Fs/Fs.h"
 #include "Fs/MemBinaryStream.h"
 #include "Fs/VFS.h"
+#include "support/byte_fs.hpp"
 #include "Image.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Scene/Scene.h"
@@ -13,10 +14,10 @@
 #include "Scene/SceneLayerReference.hpp"
 #include "SpecTexs.hpp"
 #include "WPSceneParser.hpp"
-#include "VulkanRender/CopyPass.hpp"
-#include "VulkanRender/CustomShaderPass.hpp"
+#include "RenderCommon/ScenePass.hpp"
+#include "RenderCommon/SceneRaster.hpp"
 #include "RenderGraph/RenderGraph.hpp"
-#include "VulkanRender/SceneToRenderGraph.hpp"
+#include "RenderCommon/SceneToRenderGraph.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -34,26 +35,12 @@ namespace
 {
 using namespace wallpaper;
 
-class MemoryFs final : public fs::Fs {
-public:
-    explicit MemoryFs(std::map<std::string, std::string> files): m_files(std::move(files)) {}
-
-    bool Contains(std::string_view path) const override {
-        return m_files.contains(std::string(path));
-    }
-
-    std::shared_ptr<fs::IBinaryStream> Open(std::string_view path) override {
-        const auto it = m_files.find(std::string(path));
-        if (it == m_files.end()) return nullptr;
-        const auto& s = it->second;
-        return std::make_shared<fs::MemBinaryStream>(std::vector<uint8_t>(s.begin(), s.end()));
-    }
-
-    std::shared_ptr<fs::IBinaryStreamW> OpenW(std::string_view) override { return nullptr; }
-
-private:
-    std::map<std::string, std::string> m_files;
-};
+// The in-memory file space the tests mount; text goes in, the project's byte map serves it.
+std::unique_ptr<fs::Fs> MakeTextFs(const std::map<std::string, std::string>& files) {
+    test::MapFs::Files bytes;
+    for (const auto& [path, text] : files) bytes[path].assign(text.begin(), text.end());
+    return std::make_unique<test::MapFs>(std::move(bytes));
+}
 
 constexpr std::string_view kVert = R"(attribute vec3 a_Position;
 attribute vec2 a_TexCoord;
@@ -94,7 +81,7 @@ void MountFiles(fs::VFS& vfs, std::map<std::string, std::string> extra = {}) {
         { "/materials/solid.tex", "" },
     };
     for (auto& [path, content] : extra) files[path] = std::move(content);
-    ASSERT_TRUE(vfs.Mount("/assets", std::make_unique<MemoryFs>(std::move(files))));
+    ASSERT_TRUE(vfs.Mount("/assets", MakeTextFs(files)));
 }
 
 /// With `properties`, parsed with a runtime as the wallpaper is, so a layer the
@@ -110,10 +97,10 @@ std::shared_ptr<Scene> ParseScene(fs::VFS& vfs, std::string_view objects,
         SceneJson(objects), vfs, sound);
 }
 
-const vulkan::CustomShaderPass* FindPassByNode(
+const rg::DrawPass* FindPassByNode(
     const rg::RenderGraph& graph, std::string_view name) {
     for (const auto id : graph.topologicalOrder()) {
-        auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
+        auto* pass = dynamic_cast<const rg::DrawPass*>(graph.getPass(id));
         if (pass != nullptr && pass->desc().node != nullptr &&
             pass->desc().node->Name() == name) {
             return pass;
@@ -125,7 +112,7 @@ const vulkan::CustomShaderPass* FindPassByNode(
 size_t PassIndexByNode(const rg::RenderGraph& graph, std::string_view name) {
     size_t index = 0;
     for (const auto id : graph.topologicalOrder()) {
-        auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
+        auto* pass = dynamic_cast<const rg::DrawPass*>(graph.getPass(id));
         if (pass != nullptr && pass->desc().node != nullptr &&
             pass->desc().node->Name() == name) {
             return index;
@@ -135,19 +122,19 @@ size_t PassIndexByNode(const rg::RenderGraph& graph, std::string_view name) {
     return static_cast<size_t>(-1);
 }
 
-const vulkan::CopyPass* FindLinkCopy(const rg::RenderGraph& graph, std::string_view dst) {
+const rg::CopyPass* FindLinkCopy(const rg::RenderGraph& graph, std::string_view dst) {
     for (const auto id : graph.topologicalOrder()) {
-        auto* pass = dynamic_cast<const vulkan::CopyPass*>(graph.getPass(id));
+        auto* pass = dynamic_cast<const rg::CopyPass*>(graph.getPass(id));
         if (pass != nullptr && pass->desc().dst == dst) return pass;
     }
     return nullptr;
 }
 
-const vulkan::CustomShaderPass* FindPassByOutput(const rg::RenderGraph& graph,
+const rg::DrawPass* FindPassByOutput(const rg::RenderGraph& graph,
                                                  std::string_view output) {
-    const vulkan::CustomShaderPass* found = nullptr;
+    const rg::DrawPass* found = nullptr;
     for (const auto id : graph.topologicalOrder()) {
-        auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
+        auto* pass = dynamic_cast<const rg::DrawPass*>(graph.getPass(id));
         if (pass != nullptr && pass->desc().output == output) found = pass;
     }
     return found;
@@ -186,7 +173,7 @@ void AddScreenTarget(Scene& scene) {
 /// Asks the value updater, as a backend does before drawing `pass`, for the
 /// uniforms named in `wanted`, through the camera the pass draws with.
 std::map<std::string, ShaderValue, std::less<>> PassUniforms(
-    Scene& scene, const vulkan::CustomShaderPass& pass, std::vector<std::string_view> wanted) {
+    Scene& scene, const rg::DrawPass& pass, std::vector<std::string_view> wanted) {
     auto*          node = pass.desc().node;
     const uint32_t slot = pass.desc().material_slot;
     auto&          updater = *scene.shaderValueUpdater;
@@ -205,21 +192,21 @@ std::map<std::string, ShaderValue, std::less<>> PassUniforms(
 }
 
 /// Where `pass` puts a corner of its card, in normalised device coordinates.
-Eigen::Vector2d CardCornerNdc(Scene& scene, const vulkan::CustomShaderPass& pass,
-                              Eigen::Vector2d corner) {
+linalg::Vector2d CardCornerNdc(Scene& scene, const rg::DrawPass& pass,
+                              linalg::Vector2d corner) {
     const auto uniforms = PassUniforms(scene, pass, { "g_ModelViewProjectionMatrix" });
     const auto found    = uniforms.find("g_ModelViewProjectionMatrix");
     if (found == uniforms.end() || found->second.size() != 16) {
         ADD_FAILURE() << "the pass was given no model-view-projection matrix";
-        return Eigen::Vector2d::Constant(std::nan(""));
+        return linalg::Vector2d::Constant(std::nan(""));
     }
-    const Eigen::Matrix4f mvp  = Eigen::Map<const Eigen::Matrix4f>(found->second.data());
-    const Eigen::Vector4f clip = mvp * Eigen::Vector4f(corner.x(), corner.y(), 0.0f, 1.0f);
+    const linalg::Matrix4f mvp  = linalg::Map<const linalg::Matrix4f>(found->second.data());
+    const linalg::Vector4f clip = mvp * linalg::Vector4f(corner.x(), corner.y(), 0.0f, 1.0f);
     return { clip.x() / clip.w(), clip.y() / clip.w() };
 }
 
-void ExpectCardFillsItsTarget(Scene& scene, const vulkan::CustomShaderPass& pass,
-                              Eigen::Vector2d lower_left_corner, Eigen::Vector2d upper_right_corner) {
+void ExpectCardFillsItsTarget(Scene& scene, const rg::DrawPass& pass,
+                              linalg::Vector2d lower_left_corner, linalg::Vector2d upper_right_corner) {
     const auto lower_left  = CardCornerNdc(scene, pass, lower_left_corner);
     const auto upper_right = CardCornerNdc(scene, pass, upper_right_corner);
     EXPECT_NEAR(lower_left.x(), -1.0, 1e-4);
@@ -228,25 +215,25 @@ void ExpectCardFillsItsTarget(Scene& scene, const vulkan::CustomShaderPass& pass
     EXPECT_NEAR(upper_right.y(), 1.0, 1e-4);
 }
 
-void ExpectCardFillsItsTarget(Scene& scene, const vulkan::CustomShaderPass& pass,
-                              Eigen::Vector2d half_extent) {
+void ExpectCardFillsItsTarget(Scene& scene, const rg::DrawPass& pass,
+                              linalg::Vector2d half_extent) {
     ExpectCardFillsItsTarget(scene, pass, -half_extent, half_extent);
 }
 
 /// The lower-left and upper-right corners of a card mesh, in the space it is
 /// authored in.
-std::pair<Eigen::Vector2d, Eigen::Vector2d> CardCorners(const SceneMesh& mesh) {
+std::pair<linalg::Vector2d, linalg::Vector2d> CardCorners(const SceneMesh& mesh) {
     const auto& vertices = mesh.GetVertexArray(0);
     const auto  offsets  = vertices.GetAttrOffsetMap();
     const auto  position = offsets.find(std::string(WE_IN_POSITION));
-    Eigen::Vector2d lower = Eigen::Vector2d::Constant(std::numeric_limits<double>::infinity());
-    Eigen::Vector2d upper = -lower;
+    linalg::Vector2d lower = linalg::Vector2d::Constant(std::numeric_limits<double>::infinity());
+    linalg::Vector2d upper = -lower;
     if (position == offsets.end()) return { lower, upper };
     for (std::size_t vertex = 0; vertex < vertices.VertexCount(); ++vertex) {
         const float* xy = vertices.Data() + vertex * vertices.OneSize() +
                           position->second.offset / sizeof(float);
-        lower = lower.cwiseMin(Eigen::Vector2d(xy[0], xy[1]));
-        upper = upper.cwiseMax(Eigen::Vector2d(xy[0], xy[1]));
+        lower = lower.cwiseMin(linalg::Vector2d(xy[0], xy[1]));
+        upper = upper.cwiseMax(linalg::Vector2d(xy[0], xy[1]));
     }
     return { lower, upper };
 }
@@ -333,6 +320,24 @@ TEST(LayerTextureReference, SelfBInItsOwnEffectsIsNotAReference) {
     const auto refs  = CollectLayerTextureRefs(objects, index, nullptr);
     EXPECT_TRUE(refs.empty());
     EXPECT_TRUE(ClassifyLayerTextureReferences(refs, index).empty());
+}
+
+TEST(LayerTextureReference, ALayersOwnCompositeOutsideItsEffectsIsNotARefusal) {
+    // Its own `_a` or `_b` outside its effects is the composite as the frame before left it,
+    // which the render graph keeps for it; neither slot is a reason to refuse a scene,
+    // and neither is a reference to another layer.
+    for (const char* slot : { "a", "b" }) {
+        SCOPED_TRACE(slot);
+        const auto objects = nlohmann::json::parse(
+            R"([{"id":7,"name":"self","image":"image.json","textures":["_rt_imageLayerComposite_7_)" +
+            std::string(slot) + R"("]}])");
+        const auto index = BuildLayerObjectIndex(objects);
+        const auto refs  = CollectLayerTextureRefs(objects, index, nullptr);
+        ASSERT_EQ(refs.size(), 1u);
+        EXPECT_EQ(refs.front().consumer_id, 7);
+        EXPECT_EQ(refs.front().source_id, 7);
+        EXPECT_TRUE(ClassifyLayerTextureReferences(refs, index).empty());
+    }
 }
 
 TEST(LayerTextureReference, FileNameIsNotALayerEvenWhenNamesMatch) {
@@ -833,8 +838,9 @@ TEST(LayerTextureReference, AReferencedLayerIsItsCardWhereverTheSceneShowsIt) {
     ASSERT_NE(composite, nullptr);
     ExpectCardFillsItsTarget(*parsed, *composite, { 32.0, 16.0 });
     // Nor does the cursor: the composite is not kept out of reuse for parallax.
-    EXPECT_FALSE(composite->staticPassDesc(*parsed).dynamic_reasons &
-                 vulkan::DynamicReason::PointerUniform);
+    const auto varying = parsed->shaderValueUpdater->FrameVaryingUniforms(
+        composite->desc().node, composite->desc().material_slot, composite->desc().camera_override);
+    EXPECT_EQ(varying & (frame_varying_uniform::kPointer | frame_varying_uniform::kParallax), 0u);
 }
 
 // A layer's composite is copied into its link texture while the graph is
@@ -883,12 +889,11 @@ TEST(LayerTextureReference, AReferencedCompositeIsSampledAtItsRealSize) {
     parsed->renderTargets[GenLinkTex(159)] =
         parsed->renderTargets.at(LayerCompositeTargetKey(159));
     const auto live = PassUniforms(*parsed, *consumer, { "g_Texture0Resolution" });
-    // The backends upload in opposite orders: Metal writes the material's
-    // constants and then the value updater's live values, Vulkan the live
-    // values and then the constants. Whichever lands last, the shader must
-    // read the composite's real size.
+    // Metal writes the material's constants and then the value updater's live
+    // values; the other order is checked too, so the shader reads the composite's
+    // real size whichever lands last.
     for (const bool constants_last : { false, true }) {
-        SCOPED_TRACE(constants_last ? "constants uploaded last, as Vulkan does"
+        SCOPED_TRACE(constants_last ? "constants uploaded last"
                                     : "live values uploaded last, as Metal does");
         std::map<std::string, ShaderValue, std::less<>> uploaded;
         const auto upload = [&uploaded](const auto& values) {
@@ -988,10 +993,10 @@ TEST(LayerTextureReference, AProjectLayerTakesTheCanvasSizeAndKeepsItsOrigin) {
     ASSERT_NE(parsed, nullptr);
     ASSERT_NE(parsed->runtime, nullptr);
     // The scene's canvas is 64 by 32.
-    EXPECT_TRUE(parsed->runtime->NodeSize("project").isApprox(Eigen::Vector2f(64.0f, 32.0f)));
-    EXPECT_TRUE(parsed->runtime->NodeTranslate("project").isApprox(Eigen::Vector3f(40.0f, 12.0f, 0.0f)));
+    EXPECT_TRUE(parsed->runtime->NodeSize("project").isApprox(linalg::Vector2f(64.0f, 32.0f)));
+    EXPECT_TRUE(parsed->runtime->NodeTranslate("project").isApprox(linalg::Vector3f(40.0f, 12.0f, 0.0f)));
     // `autosize` alone sizes from the texture, which the scene file's size already is.
-    EXPECT_TRUE(parsed->runtime->NodeSize("plain").isApprox(Eigen::Vector2f(10.0f, 10.0f)));
+    EXPECT_TRUE(parsed->runtime->NodeSize("plain").isApprox(linalg::Vector2f(10.0f, 10.0f)));
 }
 
 // What a `shape` object needs of an effect: its shader only compiles with the
@@ -1098,8 +1103,8 @@ TEST(LayerTextureReference, AShapeDrawsItsLastEffectAdditivelyOntoTheScene) {
     // Without the four corners it is the whole square, as tall as the canvas.
     ASSERT_NE(whole->Mesh(), nullptr);
     const auto [lower, upper] = CardCorners(*whole->Mesh());
-    EXPECT_TRUE(lower.isApprox(Eigen::Vector2d(-16.0, -16.0)));
-    EXPECT_TRUE(upper.isApprox(Eigen::Vector2d(16.0, 16.0)));
+    EXPECT_TRUE(lower.isApprox(linalg::Vector2d(-16.0, -16.0)));
+    EXPECT_TRUE(upper.isApprox(linalg::Vector2d(16.0, 16.0)));
 
     // And it reaches the scene's own target as a pass of its own.
     AddScreenTarget(*parsed);
@@ -1141,7 +1146,7 @@ TEST(LayerTextureReference, ABareComposeLayerAnotherSamplesIsDrawnOnlyIntoItsCom
 
     std::vector<std::string> behind_outputs;
     for (const auto id : graph->topologicalOrder()) {
-        auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph->getPass(id));
+        auto* pass = dynamic_cast<const rg::DrawPass*>(graph->getPass(id));
         if (pass != nullptr && pass->desc().node != nullptr &&
             pass->desc().node->Name() == "behind") {
             behind_outputs.push_back(pass->desc().output);
@@ -1176,7 +1181,7 @@ TEST(LayerTextureReference, ABareComposeLayerAnotherSamplesIsDrawnOnlyIntoItsCom
 // solid card a script tints, kept as a palette -- while that child is also
 // part of what the compose layer shows. Inside a compose layer the child was
 // drawn only into the compose target, never into a composite of its own, so
-// the effect found nothing to sample and was skipped on both backends.
+// the effect found nothing to sample and was skipped.
 TEST(LayerTextureReference, AComposeLayersEffectCanSampleItsOwnChild) {
     constexpr std::string_view kTintFrag = R"(uniform sampler2D g_Texture0;
 uniform sampler2D g_Texture1;
@@ -1231,9 +1236,9 @@ void main() {
 
         const auto graph = sceneToRenderGraph(*parsed);
         ASSERT_NE(graph, nullptr);
-        const vulkan::CustomShaderPass* tint = nullptr;
+        const rg::DrawPass* tint = nullptr;
         for (const auto id : graph->topologicalOrder()) {
-            auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph->getPass(id));
+            auto* pass = dynamic_cast<const rg::DrawPass*>(graph->getPass(id));
             if (pass == nullptr) continue;
             const auto& textures = pass->desc().textures;
             if (std::find(textures.begin(), textures.end(), GenLinkTex(2)) != textures.end())
@@ -1247,9 +1252,9 @@ void main() {
         // The palette is its own card in its composite, and still part of the
         // compose layer's picture wherever it shows.
         std::vector<std::string> outputs;
-        const vulkan::CustomShaderPass* composite = nullptr;
+        const rg::DrawPass* composite = nullptr;
         for (const auto id : graph->topologicalOrder()) {
-            auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph->getPass(id));
+            auto* pass = dynamic_cast<const rg::DrawPass*>(graph->getPass(id));
             if (pass == nullptr || pass->desc().node == nullptr ||
                 pass->desc().node->Name() != "palette")
                 continue;
@@ -1316,8 +1321,8 @@ TEST(LayerTextureReference, ASampledTextLayerIsItsCardInItsOwnComposite) {
                 // The pass that draws the title into its composite, and the card it
                 // draws there.
                 struct Composite {
-                    const vulkan::CustomShaderPass* pass { nullptr };
-                    Eigen::Vector2d                 lower, upper;
+                    const rg::DrawPass* pass { nullptr };
+                    linalg::Vector2d                 lower, upper;
                 };
                 const auto find_composite = [&](const rg::RenderGraph& graph) {
                     Composite found;
@@ -1380,8 +1385,10 @@ TEST(LayerTextureReference, ASampledTextLayerIsItsCardInItsOwnComposite) {
                 ASSERT_TRUE(runtime.SetNodeText("title", "Wind over the river"));
                 ASSERT_TRUE(PumpTextLayout(runtime, "title"))
                     << "a hidden text layer another samples was never laid out again";
-                EXPECT_TRUE(runtime.ConsumeSceneGraphMutationFlag())
-                    << "the composite outgrew its target and nothing asked for a new graph";
+                EXPECT_FALSE(runtime.ConsumeSceneGraphMutationFlag())
+                    << "a wider card rebuilt a graph that only needs its target resized";
+                EXPECT_TRUE(runtime.ConsumeRenderTargetResizeFlag())
+                    << "the composite outgrew its target and nothing asked for it to be resized";
                 graph = sceneToRenderGraph(*parsed);
                 ASSERT_NE(graph, nullptr);
                 const auto after = find_composite(*graph);
@@ -1469,9 +1476,9 @@ void main() {
             const auto graph = sceneToRenderGraph(*parsed);
             ASSERT_NE(graph, nullptr);
             const auto passes_of = [&](const SceneNode* node) {
-                std::vector<const vulkan::CustomShaderPass*> found;
+                std::vector<const rg::DrawPass*> found;
                 for (const auto id : graph->topologicalOrder()) {
-                    auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph->getPass(id));
+                    auto* pass = dynamic_cast<const rg::DrawPass*>(graph->getPass(id));
                     if (pass != nullptr && pass->desc().node == node) found.push_back(pass);
                 }
                 return found;
@@ -1602,7 +1609,7 @@ TEST(HiddenLayers, ALayerItsPropertiesHideStaysOutOfTheGraphUntilSomethingShowsI
     const auto passes_of = [](const rg::RenderGraph& graph, std::string_view name) {
         std::size_t count = 0;
         for (const auto id : graph.topologicalOrder()) {
-            auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
+            auto* pass = dynamic_cast<const rg::DrawPass*>(graph.getPass(id));
             if (pass == nullptr) continue;
             const auto* owner = pass->desc().visibility_node != nullptr
                                     ? pass->desc().visibility_node
@@ -1710,7 +1717,7 @@ TEST(HiddenLayers, APropertyPreviewRevealsALayerWithOneGraphRebuildAndAGraphBuil
     const auto passes_of = [](const rg::RenderGraph& graph, std::string_view name) {
         std::size_t count = 0;
         for (const auto id : graph.topologicalOrder()) {
-            auto* pass = dynamic_cast<const vulkan::CustomShaderPass*>(graph.getPass(id));
+            auto* pass = dynamic_cast<const rg::DrawPass*>(graph.getPass(id));
             if (pass == nullptr) continue;
             const auto* owner = pass->desc().visibility_node != nullptr
                                     ? pass->desc().visibility_node
@@ -1858,7 +1865,7 @@ TEST(CameraFraming, AFullscreenEffectCoversAPerspectiveScene) {
     ASSERT_NE(graph, nullptr);
     const auto* post = FindPassByOutput(*graph, SpecTex_Default);
     ASSERT_NE(post, nullptr);
-    const Eigen::Vector2d half_extent(parsed->scene_extent[0] / 2.0,
+    const linalg::Vector2d half_extent(parsed->scene_extent[0] / 2.0,
                                       parsed->scene_extent[1] / 2.0);
     ExpectCardFillsItsTarget(*parsed, *post, half_extent);
     parsed->activeCamera->SetFov(75);
@@ -2008,7 +2015,7 @@ TEST(CameraFraming, TheChildrenOfAFullscreenLayerAreSavedAgainstItsSavedTransfor
         const char* name;
         const char* post_fields;
         const char* group;
-        Eigen::Vector3d expected;  // the child's world position
+        linalg::Vector3d expected;  // the child's world position
     };
     const std::array<Case, 4> cases { {
         { "no origin", "", "", { 7.0, 9.0, 0.0 } },
@@ -2034,7 +2041,7 @@ TEST(CameraFraming, TheChildrenOfAFullscreenLayerAreSavedAgainstItsSavedTransfor
         ASSERT_NE(parsed, nullptr);
         ASSERT_NE(parsed->runtime, nullptr);
         for (int tick = 0; tick < 2; ++tick) parsed->runtime->Tick(1.0 / 60.0);
-        const Eigen::Matrix4d picture = parsed->runtime->NodeTransformMatrix("picture");
+        const linalg::Matrix4d picture = parsed->runtime->NodeTransformMatrix("picture");
         EXPECT_NEAR(picture(0, 3), item.expected.x(), 1.0e-4);
         EXPECT_NEAR(picture(1, 3), item.expected.y(), 1.0e-4);
         // The layer itself still covers the screen, whatever was saved for it.
@@ -2073,10 +2080,10 @@ TEST(CameraFraming, APerspectiveCameraKeepsItsLensAndFollowsEveryWayTheCanvasIsF
         EXPECT_NEAR(eye.z(), (canvas.VisibleHeight() / 2.0) / std::tan(fov * M_PI / 360.0), 1e-3);
         for (const auto& [fx, fy] : {std::pair { -0.5, -0.5 }, std::pair { 0.5, 0.5 },
                                      std::pair { 0.3, -0.2 }}) {
-            const Eigen::Vector4d point(centre.x() + fx * canvas.VisibleWidth(),
+            const linalg::Vector4d point(centre.x() + fx * canvas.VisibleWidth(),
                                         centre.y() + fy * canvas.VisibleHeight(), 0.0, 1.0);
-            const Eigen::Vector4d flat = canvas.GetViewProjectionMatrix() * point;
-            const Eigen::Vector4d deep = perspective.GetViewProjectionMatrix() * point;
+            const linalg::Vector4d flat = canvas.GetViewProjectionMatrix() * point;
+            const linalg::Vector4d deep = perspective.GetViewProjectionMatrix() * point;
             EXPECT_NEAR(deep.x() / deep.w(), flat.x() / flat.w(), 1e-5);
             EXPECT_NEAR(deep.y() / deep.w(), flat.y() / flat.w(), 1e-5);
         }
@@ -2094,12 +2101,12 @@ TEST(CameraFraming, APerspectiveCameraKeepsItsLensAndFollowsEveryWayTheCanvasIsF
                                 Output { FillMode::ASPECTFIT, "fit tall", 100, 400 },
                                 Output { FillMode::ASPECTCROP, "crop wide", 400, 100 },
                                 Output { FillMode::ASPECTCROP, "crop tall", 100, 400 } }) {
-        vulkan::ApplyCameraFillMode(*parsed, output.mode, output.width, output.height);
+        render::ApplyCameraFillMode(*parsed, output.mode, output.width, output.height);
         expect_framed(output.name);
     }
-    parsed->FrameCanvas(2.0, Eigen::Vector2f(8.0f, 4.0f));
+    parsed->FrameCanvas(2.0, linalg::Vector2f(8.0f, 4.0f));
     expect_framed("zoomed and panned");
-    parsed->FrameCanvas(1.0, Eigen::Vector2f(0.0f, 0.0f));
+    parsed->FrameCanvas(1.0, linalg::Vector2f(0.0f, 0.0f));
     expect_framed("back to the whole canvas");
 }
 
@@ -2119,9 +2126,13 @@ TEST(CameraFraming, MovingTheCameraChangesTheStaticSampleOfAPassItDraws) {
     const auto* backdrop = FindPassByNode(*graph, "backdrop");
     ASSERT_NE(backdrop, nullptr);
 
-    const auto still = backdrop->frameSample(*parsed).hash;
-    EXPECT_EQ(backdrop->frameSample(*parsed).hash, still) << "an unchanged pass must be reusable";
-    parsed->FrameCanvas(2.0, Eigen::Vector2f(8.0f, 4.0f));
-    EXPECT_NE(backdrop->frameSample(*parsed).hash, still)
-        << "the view moved and the pass would still be reused";
+    // The camera fold both the sample of a pass and the reuse cache are built on.
+    const auto sample = [&] {
+        return render::FoldPassCameras(0xcbf29ce484222325ULL, *parsed,
+                                       backdrop->desc().camera_override, backdrop->desc().node);
+    };
+    const auto still = sample();
+    EXPECT_EQ(sample(), still) << "an unchanged pass must be reusable";
+    parsed->FrameCanvas(2.0, linalg::Vector2f(8.0f, 4.0f));
+    EXPECT_NE(sample(), still) << "the view moved and the pass would still be reused";
 }

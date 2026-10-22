@@ -10,7 +10,7 @@
 #include "Text/TextLayer.hpp"
 #include "Video/VideoTextureSource.hpp"
 
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include <array>
 #include <atomic>
@@ -39,9 +39,9 @@ class SceneScriptProgram;
 struct SceneMaterial;
 class ScriptedDynamicValue;
 class SceneNode;
+class SceneMesh;
 class SceneImageEffectLayer;
 struct SceneImageEffect;
-struct PassthroughCard;
 class Scene;
 class WPSoundStream;
 struct ScriptHostContext;
@@ -70,21 +70,10 @@ struct ProjectPropertyPreview {
 // world = origin + (x, 1 - y) * size. `content` is the part of that rectangle
 // the wallpaper draws; input outside it is over letterbox bars, not the scene.
 struct CursorViewport {
-    Eigen::Vector2f origin { Eigen::Vector2f::Zero() };
-    Eigen::Vector2f size { Eigen::Vector2f::Zero() };
-    Eigen::Vector2f content_origin { Eigen::Vector2f::Zero() };
-    Eigen::Vector2f content_size { Eigen::Vector2f::Zero() };
-};
-
-struct RuntimePreparedTextLayerImage {
-    std::string     name;
-    uint64_t        revision { 0 };
-    TextLayerState  state;
-    TextLayerLayout layout;
-    TextLayerRenderFrame render_frame {};
-    uint32_t        width { 0 };
-    uint32_t        height { 0 };
-    std::vector<uint8_t> rgba;
+    linalg::Vector2f origin { linalg::Vector2f::Zero() };
+    linalg::Vector2f size { linalg::Vector2f::Zero() };
+    linalg::Vector2f content_origin { linalg::Vector2f::Zero() };
+    linalg::Vector2f content_size { linalg::Vector2f::Zero() };
 };
 
 struct RuntimePendingTextLayerJob {
@@ -108,7 +97,7 @@ struct NodeHitMask {
 
 class SceneRuntimeContext {
 public:
-    struct NodeRegistrationSnapshot;
+    struct LayerRegistrationMemo;
 
     explicit SceneRuntimeContext(SceneRuntimeBootstrap bootstrap);
     ~SceneRuntimeContext();
@@ -150,14 +139,14 @@ public:
     void          AttachScene(Scene* scene);
     /// Puts the cursor at a scene position, canvas units for hit tests and
     /// scripts alike, whatever the camera: the probes' way to click a layer.
-    void          SetCursorWorldPosition(const Eigen::Vector3f& value);
+    void          SetCursorWorldPosition(const linalg::Vector3f& value);
     // World rectangle the window shows, so window-normalized cursor input lands
     // where the presented wallpaper actually draws each layer.
     void          SetCursorViewport(const CursorViewport& viewport);
     /// The display's pixel resolution, which `engine.screenResolution` reports.
     /// Distinct from the cursor viewport above, which is scene world units,
     /// and from the rasterization size, which internal quality may reduce.
-    void          SetScreenResolution(const Eigen::Vector2f& resolution);
+    void          SetScreenResolution(const linalg::Vector2f& resolution);
     /// The interface language scripts are told about in `applyGeneralSettings`,
     /// as a lower-case BCP-47 tag (`en-us`, `zh-cn`). A tag in any case, or with
     /// `_` for `-`, is normalized; nothing more is: mapping an operating-system
@@ -172,6 +161,11 @@ public:
     void          SetCursorButtons(uint32_t down, uint32_t pressed, uint32_t released);
     void          BeginFrame();
     DynamicValue* FindPropertyValue(std::string_view name) const;
+    /// The live value a setting bound to property `name` follows. A name the table does not
+    /// declare gets a value that holds `authored` until a property document supplies the
+    /// name, so a binding made before the name appeared follows it once it does (a name
+    /// `FindPropertyValue` still answers nothing for until then).
+    DynamicValue* FollowProperty(std::string_view name, const DynamicValue& authored);
     void          RegisterScriptedValue(ScriptedDynamicValue* value);
     /// A scripted value that goes away (a setting resolved only to read its first
     /// value, a rolled-back layer) leaves the registry, so nothing reaches it
@@ -205,10 +199,13 @@ public:
     /// which is what a script's `layer.name` reads. A layer whose authored name is
     /// shared or empty is registered under a generated key; this is its own
     /// name (possibly empty). A layer with no authored name on record answers
-    /// with the name it is registered under. The name may be recorded before
-    /// the layer is registered; unregistering the layer forgets it.
+    /// with the name it is registered under.
     void          RegisterLayerAuthoredName(std::string runtime_name, std::string authored_name);
     std::string   LayerAuthoredName(std::string_view runtime_name) const;
+    /// Records the name the scene file gives a layer, and the name lookup that finds it, before
+    /// the layer itself is registered. The parser declares every layer so that a script that
+    /// compiles early (and looks later layers up while it does) already sees the names.
+    void          DeclareLayerName(std::string runtime_name, std::string authored_name);
     /// Puts the registered layers in the scene file's declaration order. Names
     /// not listed keep the order they were registered in, after the listed ones.
     void          SetLayerOrder(const std::vector<std::string>& names);
@@ -231,10 +228,10 @@ public:
     void          RollbackNodeRegistration(
                      std::string_view name,
                      SceneNode* node,
-                     std::shared_ptr<const NodeRegistrationSnapshot> previous);
-    [[nodiscard]] std::shared_ptr<NodeRegistrationSnapshot>
+                     std::shared_ptr<const LayerRegistrationMemo> previous);
+    [[nodiscard]] std::shared_ptr<LayerRegistrationMemo>
                   CaptureNodeRegistration(std::string_view name) const;
-    void          RegisterNodeSize(std::string name, Eigen::Vector2f value);
+    void          RegisterNodeSize(std::string name, linalg::Vector2f value);
     void          RegisterNodeHitMask(std::string name, NodeHitMask mask);
     // The copy shares playback state with the render passes that own it.
     void          RegisterPuppetLayer(std::string name, WPPuppetLayer layer);
@@ -253,10 +250,14 @@ public:
     std::string   PuppetAnimationLayerName(std::string_view layer_name,
                                            std::string_view animation_layer);
     void          RegisterLayerTemplate(std::string template_path, std::shared_ptr<SceneNode> node,
-                                        Eigen::Vector2f size);
+                                        linalg::Vector2f size);
     // Called synchronously on a registry miss. The loader registers the requested
     // normalized template without attaching a drawable source to the scene graph.
     void          SetLayerTemplateLoader(std::function<bool(std::string_view)> loader);
+    /// Called by the loader when the model at `template_path` exists but is of a shape that
+    /// cannot be copied (a passthrough or compose model), so the refusal that follows is
+    /// logged as that and not as a missing template.
+    void          ReportUnsupportedLayerTemplate(std::string_view template_path);
     void          RegisterNodeVisibility(std::string name, SceneNode* node,
                                          std::unique_ptr<DynamicValue> value);
     /// An effect whose `visible` a script decides, as Wallpaper Engine's
@@ -265,6 +266,24 @@ public:
     /// effects that run and rebuilds the render graph before the next frame.
     void          RegisterEffectVisibility(std::shared_ptr<SceneImageEffect> effect,
                                            std::unique_ptr<DynamicValue> value);
+    /// Makes `effect`, an effect of layer `layer_key`, the `thisObject` of the script that decides
+    /// its visibility and returns the reference that script's program is made with. Called
+    /// before the script exists, so the effect is there when the script's top level runs;
+    /// `RegisterEffectVisibility` then ties the script's value to it.
+    std::string   RegisterEffectObject(std::string_view layer_key,
+                                       std::shared_ptr<SceneImageEffect> effect);
+    /// What a script reads from, and writes to, `thisObject.visible` of an effect object. A write
+    /// goes through the effect's visibility value when it has one, so the script's next run and
+    /// the effect agree, and the scene graph is rebuilt; an unknown reference reads false.
+    bool          EffectObjectVisible(std::string_view reference) const;
+    bool          SetEffectObjectVisible(std::string_view reference, bool visible);
+    /// A clock that belongs to one setting a script sits on (`thisObject.getAnimation()` with no
+    /// name answers it), and the reference scripts reach it by.
+    std::string   RegisterSettingAnimation(std::shared_ptr<ScalarAnimationPlayback> animation);
+    /// The clock of a keyed setting that a script drives: it runs with the others, but belongs to
+    /// the setting and no layer's name lookup finds it.
+    std::shared_ptr<ScalarAnimationPlayback> RegisterSettingClock(ScalarAnimation animation);
+    ScalarAnimationPlayback* FindSettingAnimation(std::string_view reference) const;
     /// What follows a text layer's effects as a script switches them, and what follows its card.
     /// Wallpaper Engine counts the visible effect passes of a text layer afresh whenever an
     /// effect's visibility changes: the card is padded, and drawn as a composite, only while one
@@ -325,7 +344,7 @@ public:
         std::optional<ScalarAnimation>                zoom;
         std::array<std::optional<ScalarAnimation>, 3> origin;
         bool                                          origin_relative { false };
-        Eigen::Vector3f                               origin_base { Eigen::Vector3f::Zero() };
+        linalg::Vector3f                               origin_base { linalg::Vector3f::Zero() };
     };
     /// A camera layer of a scene projected by its canvas. Shots are kept in
     /// authored order and the last visible one frames the view -- its zoom
@@ -340,14 +359,25 @@ public:
                             CameraShotTimeline timeline, bool origin_bound);
     void RegisterPerspectiveCameraShot(std::shared_ptr<SceneNode> node, SceneCamera* camera,
                                        double fov, CameraPathPlayback path);
+    // `replay_current` false registers only future assignments (including an
+    // assignment of the held value), without making a static value a driver.
     void RegisterDynamicValueListener(std::unique_ptr<DynamicValue> value,
-                                      std::function<void(const DynamicValue&)> callback);
-    /// `passthrough_card`, for a pass-through layer drawn through effects, is the
-    /// card that copies the screen where the layer is drawn: laid out again,
-    /// with the final card, whenever the layer is drawn somewhere else.
+                                      std::function<void(const DynamicValue&)> callback,
+                                      bool replay_current = true);
     void RegisterNodeEffectFinal(std::string name, SceneNode* node, SceneImageEffectLayer* layer,
-                                 TextLayerRenderFrame             target_frame     = {},
-                                 std::shared_ptr<PassthroughCard> passthrough_card = nullptr);
+                                 TextLayerRenderFrame target_frame = {});
+    /// Lays a pass-through layer's card out again from where `matrix` puts the layer
+    /// (its world transform, y up, canvas units), into `mesh`.
+    using PassthroughCardLayout = std::function<void(SceneMesh& mesh, const linalg::Matrix4d& matrix)>;
+    /// A pass-through layer's card copies the part of the screen the layer is drawn over. The
+    /// loader laid it out from `laid_out_from`; from then on every tick lays it out again
+    /// when the layer's world transform differs from the one it was last laid out from, and
+    /// not otherwise. A mesh that was not made to be rewritten is rewritten in place and
+    /// the render graph asked to be built again.
+    void RegisterPassthroughCard(std::shared_ptr<SceneNode> node, std::shared_ptr<SceneMesh> mesh,
+                                 PassthroughCardLayout layout, const linalg::Matrix4d& laid_out_from);
+    /// How many times a registered card was laid out again after the scene loaded.
+    uint64_t PassthroughCardLayoutCount() const { return m_passthrough_card_layouts; }
     void RegisterMaterialAlphaAnimation(std::shared_ptr<SceneMaterial> material,
                                         std::shared_ptr<ScalarAnimationPlayback> animation);
     // A scripted or user-bound image `alpha` is not an animation timeline.
@@ -358,9 +388,13 @@ public:
     // draws with: its own and each effect pass. One value feeds them all, and
     // the alpha in `g_Color4` is left to the alpha bindings. What a script
     // writes to `thisLayer.color` becomes that value (see `SetNodeColor`).
+    // Static multi-material recipients use replay_current=false: explicit writes
+    // still reach the existing recipient set, but registration changes no tint.
+    // Both forms reuse the same live value, listener and m_node_color entry.
     void BindMaterialColor(std::string layer_name,
                            std::vector<std::shared_ptr<SceneMaterial>> materials,
-                           std::unique_ptr<DynamicValue> value);
+                           std::unique_ptr<DynamicValue> value,
+                           bool replay_current = true);
     // A user-bound or scripted image `brightness` multiplies the colour of every
     // material the layer tints with, and only in an HDR scene: with no material
     // given the value is kept for its script alone.
@@ -377,11 +411,6 @@ public:
     // `scene.getAnimation(name)` is not scoped to a layer: the authored name is
     // matched across every registered timeline.
     ScalarAnimationPlayback* FindAnimationByName(std::string_view animation_name) const;
-    /// Gives the timeline bound to one setting a handle of its own, which the
-    /// setting's script reaches as `thisObject.getAnimation()` with no name
-    /// (`PropertyScriptObject::property_animation`). Never 0.
-    uint64_t                 RegisterPropertyAnimation(std::shared_ptr<ScalarAnimationPlayback> playback);
-    ScalarAnimationPlayback* FindPropertyAnimation(uint64_t handle) const;
     void RegisterSceneScript(std::string script_source, std::string layer_name);
     void RegisterNodeVideoTexture(std::string name, std::string texture_key);
     void RegisterSoundLayer(std::string name, std::shared_ptr<WPSoundStream> stream);
@@ -404,6 +433,10 @@ public:
     /// Covers both halves: a job this thread has queued but the worker has not
     /// finished, and a result the worker has finished but no frame has applied.
     [[nodiscard]] bool TextLayoutInFlight() const;
+    /// Blocks until the text worker has no job queued or running, so that the next
+    /// `PumpTextLayerCache` applies every layout a tick asked for. A test that compares two
+    /// runs of one scene needs the layouts to land on the same frames in both.
+    void WaitForTextLayoutForTests() const;
 
     /// Called when work that finished off the render thread has produced
     /// something a frame would show.
@@ -413,22 +446,29 @@ public:
     /// thread and must not touch scene state -- asking for one frame is all it
     /// is for. Passing an empty function detaches it.
     void SetContentWakeHandler(std::function<void()> handler);
-    bool            HasNodeNamed(std::string_view name) const;
-    bool            HasSoundLayer(std::string_view name) const;
-    bool            PlaySoundLayer(std::string_view name);
-    bool            PauseSoundLayer(std::string_view name);
-    bool            StopSoundLayer(std::string_view name);
-    bool            SoundLayerPlaying(std::string_view name) const;
-    bool            SetSoundLayerVolume(std::string_view name, float volume);
-    float           SoundLayerVolume(std::string_view name) const;
-    bool            SetSoundLayerMuted(std::string_view name, bool muted);
-    bool            SoundLayerMuted(std::string_view name) const;
-    int             NodeSiblingIndex(std::string_view name) const;
-    // `script_workshop_id` is the `__workshopId` the calling script declares,
-    // if any; it locates that item's assets once the plain path finds nothing.
-    std::string     CreateLayerFromTemplate(std::string_view requested_template_path,
-                                            std::string_view current_layer_name,
-                                            std::string_view script_workshop_id = {});
+    /// Does a node, or a sound layer, answer to this name?
+    bool HasNodeNamed(std::string_view node_name) const;
+    bool HasSoundLayer(std::string_view layer_name) const;
+
+    /// Sound layers by name. Each returns false when no such layer exists.
+    bool  PlaySoundLayer(std::string_view layer_name);
+    bool  PauseSoundLayer(std::string_view layer_name);
+    bool  StopSoundLayer(std::string_view layer_name);
+    bool  SoundLayerPlaying(std::string_view layer_name) const;
+    bool  SetSoundLayerVolume(std::string_view layer_name, float volume);
+    float SoundLayerVolume(std::string_view layer_name) const;
+    bool  SetSoundLayerMuted(std::string_view layer_name, bool muted);
+    bool  SoundLayerMuted(std::string_view layer_name) const;
+
+    /// Position of the named node among its siblings.
+    int NodeSiblingIndex(std::string_view name) const;
+
+    /// Instantiates a layer from a template file and returns its runtime name. The calling
+    /// script's own `__workshopId`, when it declares one, goes in `script_workshop_id`: it
+    /// finds that item's assets when the plain path leads nowhere.
+    std::string CreateLayerFromTemplate(std::string_view requested_template_path,
+                                        std::string_view current_layer_name,
+                                        std::string_view script_workshop_id = {});
     // Removes a layer `CreateLayerFromTemplate` (or `CreateTextLayer`) made: it
     // leaves the scene graph and every registry at once, so whatever a script
     // still holds for it reaches nothing. So does every layer registered below it
@@ -438,8 +478,8 @@ public:
     // before still points at them. A layer the scene file made, or an unknown
     // name, is left alone and answers false.
     bool            DestroyLayer(std::string_view name, std::vector<std::string>* destroyed = nullptr);
-    Eigen::Vector3f NodeColor(std::string_view name) const;
-    bool            SetNodeColor(std::string_view name, const Eigen::Vector3f& color);
+    linalg::Vector3f NodeColor(std::string_view name) const;
+    bool            SetNodeColor(std::string_view name, const linalg::Vector3f& color);
     bool            SortNode(std::string_view name, int index);
     bool            NodeVisible(std::string_view name) const;
     // A layer's parent as scripts address layers: by name. Empty when the layer
@@ -464,17 +504,21 @@ public:
     std::optional<float> NodeAlpha(std::string_view name) const;
     bool            SetNodeAlpha(std::string_view name, float value);
     bool            SetNodeVisible(std::string_view name, bool visible);
-    bool            SetNodeTranslate(std::string_view name, const Eigen::Vector3f& value);
-    bool            SetNodeScale(std::string_view name, const Eigen::Vector3f& value);
+    bool            SetNodeTranslate(std::string_view name, const linalg::Vector3f& value);
+    bool            SetNodeScale(std::string_view name, const linalg::Vector3f& value);
     bool            SetNodeAlignment(std::string_view name, std::string alignment);
     // Authored anchor alignment: the origin is the anchor point, so the runtime
     // re-derives the offset whenever a dynamic origin or scale replaces it.
     bool            SetNodeAnchorAlignment(std::string_view name, std::string alignment,
-                                           const Eigen::Vector3f& origin);
+                                           const linalg::Vector3f& origin);
     // A text layer's `anchor`: pins it to an edge or corner of the area the
     // display shows (`SetCursorViewport`), on top of wherever its origin puts it.
     bool            SetNodeScreenAnchor(std::string_view name, TextScreenAnchor anchor);
-    bool            SetNodeRotation(std::string_view name, const Eigen::Vector3f& value);
+    bool            SetNodeRotation(std::string_view name, const linalg::Vector3f& value);
+    /// `layer.rotateObjectSpace(Vec3)`: turns the layer by `increment` (Euler angles in radians,
+    /// composed as the layer's own angles are: z, then y, then x) about its own axes, on top of
+    /// the orientation it has now. A layer that is not registered is left alone.
+    bool            RotateNodeObjectSpace(std::string_view name, const linalg::Vector3f& increment);
     // How the cursor treats a layer: only image, text and model layers that are
     // `solid` are hit-tested, and a visible one under the cursor with
     // `disablepropagation` hides every layer behind it from the cursor. A layer
@@ -487,18 +531,18 @@ public:
         bool blocks { false };
     };
     std::optional<NodeCursorTarget> NodeCursorTargetOf(std::string_view name) const;
-    Eigen::Vector3f NodeTranslate(std::string_view name) const;
-    Eigen::Vector3f NodeScale(std::string_view name) const;
+    linalg::Vector3f NodeTranslate(std::string_view name) const;
+    linalg::Vector3f NodeScale(std::string_view name) const;
     /// Where the layer stands in the scene: its own placement with every
     /// ancestor's applied, in canvas units. A name with no node is nowhere in
     /// particular and answers the identity.
-    Eigen::Matrix4d NodeTransformMatrix(std::string_view name) const;
-    Eigen::Vector3f NodeRotation(std::string_view name) const;
-    Eigen::Vector2f NodeSize(std::string_view name) const;
+    linalg::Matrix4d NodeTransformMatrix(std::string_view name) const;
+    linalg::Vector3f NodeRotation(std::string_view name) const;
+    linalg::Vector2f NodeSize(std::string_view name) const;
     /// Where the centre of the layer's box (`NodeSize` across) lies from its origin, in
     /// its own plane, y up: zero for a layer centred on its origin, and for a text layer
     /// the card's offset from it (`TextLayerLayout::centre`).
-    Eigen::Vector2f NodeBoxCentre(std::string_view name) const;
+    linalg::Vector2f NodeBoxCentre(std::string_view name) const;
     std::string     NodeText(std::string_view name) const;
     bool            NodeTextDirty(std::string_view name) const;
     std::optional<TextLayerState> NodeTextState(std::string_view name) const;
@@ -552,14 +596,14 @@ public:
     /// a script made, and the same properties of any layer afterwards.
     bool                          NameLayer(std::string_view runtime_name, std::string authored_name);
     bool                          SetNodeParent(std::string_view name, std::string_view parent_name);
-    bool                          SetNodeSize(std::string_view name, const Eigen::Vector2f& size);
+    bool                          SetNodeSize(std::string_view name, const linalg::Vector2f& size);
     /// `parallaxDepth`: how far the cursor moves a layer. A write reaches the
     /// layer, its effect passes and the layers below it (Wallpaper Engine moves
     /// a whole tree by its outermost layer's depth, so a write on a child
     /// changes only that child's drift), and a layer that starts or stops
     /// following the cursor asks for a new render graph.
-    Eigen::Vector2f               NodeParallaxDepth(std::string_view name) const;
-    bool                          SetNodeParallaxDepth(std::string_view name, const Eigen::Vector2f& depth);
+    linalg::Vector2f               NodeParallaxDepth(std::string_view name) const;
+    bool                          SetNodeParallaxDepth(std::string_view name, const linalg::Vector2f& depth);
     bool                          ClearNodeTextDirty(std::string_view name);
     void                          PumpTextLayerCache();
     bool                          SetNodeTextureFrame(std::string_view name, double frame);
@@ -582,31 +626,44 @@ public:
     double                        NodeTextureAnimationRate(std::string_view name) const;
     /// The frame the sheet is on: the one a script pinned, else the one last drawn.
     double                        NodeTextureAnimationFrame(std::string_view name) const;
-    bool                          NodeHasVideoTexture(std::string_view name) const;
-    bool                          NodeVideoTextureIsPlaying(std::string_view name) const;
-    bool                          PlayNodeVideoTexture(std::string_view name);
-    bool                          PauseNodeVideoTexture(std::string_view name);
-    bool   SetNodeVideoTextureCurrentTime(std::string_view name, double seconds);
-    double NodeVideoTextureCurrentTime(std::string_view name) const;
-    bool   SetNodeVideoTextureRate(std::string_view name, float rate);
-    float  NodeVideoTextureRate(std::string_view name) const;
-    double NodeVideoTextureDuration(std::string_view name) const;
-    void   SetVideoTextureDuration(std::string_view texture_key, double seconds);
+    /// A node's video texture, looked up by the node's name.
+    bool NodeHasVideoTexture(std::string_view node_name) const;
+    // Transport.
+    bool PlayNodeVideoTexture(std::string_view node_name);
+    bool PauseNodeVideoTexture(std::string_view node_name);
+    bool NodeVideoTextureIsPlaying(std::string_view node_name) const;
+    // Position and speed, in seconds and as a multiple of normal.
+    bool   SetNodeVideoTextureCurrentTime(std::string_view node_name, double seconds);
+    double NodeVideoTextureCurrentTime(std::string_view node_name) const;
+    bool   SetNodeVideoTextureRate(std::string_view node_name, float rate);
+    float  NodeVideoTextureRate(std::string_view node_name) const;
+    double NodeVideoTextureDuration(std::string_view node_name) const;
+
+    /// The texture itself, by key: its length once known, and the playback state a frame
+    /// should show (falling back to the scene clock when nothing drives it).
+    void SetVideoTextureDuration(std::string_view texture_key, double seconds);
     video::VideoPlaybackState
-                                 ResolveVideoPlaybackState(std::string_view texture_key,
-                                                           double           fallback_scene_elapsed_seconds) const;
-    void                         DispatchCursorClick(int button = 0);
-    void                         DispatchCursorDown(int button = 0);
-    void                         DispatchCursorEnter();
-    void                         DispatchCursorLeave();
-    void                         DispatchCursorMove();
-    void                         DispatchCursorUp(int button = 0);
-    bool                         DispatchCursorFrameEvents(bool cursor_was_in_window);
-    void                         DispatchMediaThumbnailChanged(const Eigen::Vector3f& primary_color,
-                                                               const Eigen::Vector3f& text_color);
-    void                         SetMediaIntegrationEnabled(bool enabled);
-    bool                         MediaIntegrationEnabled() const;
-    void                         DispatchMediaEventJson(std::string_view event_json);
+    ResolveVideoPlaybackState(std::string_view texture_key,
+                              double fallback_scene_elapsed_seconds) const;
+
+    /// Cursor events for the scripts that listen. The button-carrying ones default to the
+    /// primary button.
+    void DispatchCursorClick(int which_button = 0);
+    void DispatchCursorDown(int which_button = 0);
+    void DispatchCursorUp(int which_button = 0);
+    // Pointer entered, left or moved over a layer.
+    void DispatchCursorEnter();
+    void DispatchCursorLeave();
+    void DispatchCursorMove();
+    /// One frame's worth of them; true when a listener took part.
+    bool DispatchCursorFrameEvents(bool cursor_was_in_window);
+
+    /// Media integration: the artwork colours, the consent switch and the raw event feed.
+    void DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
+                                       const linalg::Vector3f& text_color);
+    void SetMediaIntegrationEnabled(bool enabled);
+    bool MediaIntegrationEnabled() const;
+    void DispatchMediaEventJson(std::string_view event_json);
     /// Records a wallpaper's request to run the action its user bound to a
     /// `usershortcut` property.
     ///
@@ -632,6 +689,23 @@ public:
     bool                         AudioResponseEnabled() const;
     bool                         AudioResponseActive() const;
     bool                         ConsumeSceneGraphMutationFlag();
+    /// Whether a change gave render targets another size and asked for nothing else: the
+    /// buffers an effect chain draws into follow a text card's size in texels. The graph is
+    /// as it was, so the renderer resizes its targets under it
+    /// (`MetalRender::ResizeRenderTargets`) instead of building the graph again, which drops
+    /// every uploaded image and every vertex buffer. A host that built the graph again for
+    /// `ConsumeSceneGraphMutationFlag` in the same frame has the new sizes already; it
+    /// consumes this flag first or after and does not resize a second time.
+    bool                         ConsumeRenderTargetResizeFlag();
+    /// How many times each kind of change asked for a new render graph, for a test or a
+    /// probe that wants to know what made a scene rebuild.
+    const std::map<std::string, int>& SceneGraphMutationReasonsForTests() const {
+        return m_scene_graph_mutation_reasons;
+    }
+    /// The same for the changes that only resized render targets.
+    const std::map<std::string, int>& RenderTargetResizeReasonsForTests() const {
+        return m_render_target_resize_reasons;
+    }
     audio::AudioSpectrumSnapshot CurrentAudioSpectrumSnapshot() const;
     /// Runs `destroy()` in every script that started, once, while everything
     /// the scripts could reach still exists. `Scene` calls it first thing in its
@@ -648,24 +722,29 @@ private:
     struct NodeVisibilityBinding {
         SceneNode*    node { nullptr };
         DynamicValue* value { nullptr };
+        /// The value's change counter when the layer last took its flag.
+        uint64_t      observed_generation { 0 };
     };
     struct NodeAlignmentBinding {
         std::string     alignment;
-        Eigen::Vector3f origin { Eigen::Vector3f::Zero() };
-        Eigen::Vector3f scale { Eigen::Vector3f::Ones() };
+        linalg::Vector3f origin { linalg::Vector3f::Zero() };
+        linalg::Vector3f scale { linalg::Vector3f::Ones() };
+        /// The scale the layer had when a script gave it an alignment: the offset of such an
+        /// anchor grows with the scale from there.
+        linalg::Vector3f base_scale { linalg::Vector3f::Ones() };
         bool            size_anchor { false };
         bool transform_dirty { true };
-        Eigen::Vector3f cached_translate { Eigen::Vector3f::Zero() };
+        linalg::Vector3f cached_translate { linalg::Vector3f::Zero() };
         /// Node rotation `cached_translate` was derived for; the anchor sits
         /// in the layer's own axes, so turning the layer moves the offset.
-        Eigen::Vector3f rotation { Eigen::Vector3f::Zero() };
+        linalg::Vector3f rotation { linalg::Vector3f::Zero() };
         /// The edge or corner of the presented area the node is pinned to, and
         /// the shift that puts it there. The shift is a translation in world space
         /// added to where the node is drawn (`SceneNode::SetDrawOffset`), so the
         /// node's own scale and rotation do not touch it and neither does anything
         /// that is parented to the node or reads its origin.
         TextScreenAnchor screen_anchor { TextScreenAnchor::None };
-        Eigen::Vector2f  screen_offset { Eigen::Vector2f::Zero() };
+        linalg::Vector2f  screen_offset { linalg::Vector2f::Zero() };
     };
     /// What the cursor walk makes of a layer: under the cursor, not under it, or
     /// never reached because a layer in front of it stopped the walk.
@@ -680,24 +759,17 @@ private:
         DynamicValue* value { nullptr };
         SceneNode* transform_node { nullptr };
         NodeAlignmentBinding* alignment { nullptr };
-        const Eigen::Vector2f* size { nullptr };
+        const linalg::Vector2f* size { nullptr };
         std::shared_ptr<const NodeVec3Animation> animation;
         double sampled_animation_frame { std::numeric_limits<double>::quiet_NaN() };
+        /// The value's change counter when the layer last took it.
+        uint64_t observed_generation { std::numeric_limits<uint64_t>::max() };
     };
     static void ApplyNodeVec3Animation(NodeVec3Binding& binding);
-    /// Called when a layer has just become visible: if that shows one the
-    /// render graph left out (`Scene::render_excluded_nodes`), the graph is
-    /// marked mutated so the next frame builds one that draws it.
-    void RequestGraphForShownLayers();
-    struct NodeEffectFinalBinding {
-        SceneNode*             node { nullptr };
-        SceneImageEffectLayer* layer { nullptr };
-        TextLayerRenderFrame   target_frame {};
-        std::shared_ptr<PassthroughCard> passthrough_card;
-    };
     struct MaterialAlphaBinding {
         std::weak_ptr<SceneMaterial> material;
         std::shared_ptr<ScalarAnimationPlayback> animation;
+        double sampled_animation_frame { std::numeric_limits<double>::quiet_NaN() };
     };
     struct MaterialColorBinding {
         std::vector<std::weak_ptr<SceneMaterial>> materials;
@@ -718,41 +790,63 @@ private:
     struct TextValueBinding {
         std::string   name;
         DynamicValue* value { nullptr };
+        /// The value's change counter when the layer last took its text.
+        uint64_t      observed_generation { 0 };
     };
-    struct DynamicValueListenerBinding {
-        DynamicValue*         value { nullptr };
-        std::function<void()> deregister;
+    /// A layer whose picture goes through an effect chain: the chain's last card follows the
+    /// layer wherever the layer is.
+    struct EffectCardLink {
+        SceneNode*             node { nullptr };
+        SceneImageEffectLayer* layer { nullptr };
+        TextLayerRenderFrame   target_frame {};
+    };
+    struct PassthroughCard {
+        std::weak_ptr<SceneNode> node;
+        std::shared_ptr<SceneMesh> mesh;
+        PassthroughCardLayout    layout;
+        linalg::Matrix4d         laid_out_from;
+    };
+    /// A layer a script can copy (`createLayer`), as registered by the loader.
+    struct LayerTemplate {
+        std::shared_ptr<SceneNode> node;
+        linalg::Vector2f           size { linalg::Vector2f::Zero() };
+    };
+    /// What the text worker finished for one layer.
+    struct FinishedTextLayout {
+        std::string     name;
+        std::string     cache_identity;
+        uint64_t        revision { 0 };
+        TextLayerLayout layout;
+        uint32_t        raster_width { 0 };
+        uint32_t        raster_height { 0 };
+        std::vector<uint8_t> rgba;
     };
 public:
-    struct NodeRegistrationSnapshot {
-        bool                                    has_node { false };
-        /// Where the layer stood in `LayerNameAt` order, so a rollback puts it back there.
-        std::size_t                             order_index { static_cast<std::size_t>(-1) };
-        SceneNode*                              node { nullptr };
-        std::optional<NodeVisibilityBinding>    visibility;
-        std::optional<NodeVec3Binding>          translate;
-        std::optional<NodeVec3Binding>          scale;
-        std::optional<NodeVec3Binding>          rotation;
-        std::optional<NodeEffectFinalBinding>   effect_final;
-        std::optional<Eigen::Vector2f>          size;
-        std::optional<NodeHitMask>              hit_mask;
-        std::optional<WPPuppetLayer>            puppet_layer;
-        std::optional<TextLayer>                text_layer;
-        std::optional<TextEffectGate>           text_effect_gate;
-        std::vector<TextValueBinding>           text_values;
-        std::optional<NodeAlignmentBinding>     alignment;
-        std::optional<NodeCursorTarget>         cursor_target;
-        std::optional<std::string>              template_path;
-        std::vector<std::string>                video_textures;
-        std::weak_ptr<WPSoundStream>            sound_layer;
-        bool                                    has_sound_layer { false };
-        std::size_t                             owned_values_size { 0 };
-        std::size_t                             scripted_values_size { 0 };
-        std::size_t material_constants_size { 0 };
-        std::size_t dynamic_value_listeners_size { 0 };
-        std::size_t material_alpha_size { 0 };
-        std::size_t material_colors_size { 0 };
-        std::size_t scalar_animations_size { 0 };
+    /// The runtime-wide lists a layer build can append to, in the order a rollback cuts them
+    /// (what reads another list goes first, the live values last).
+    enum class RuntimeList : std::size_t {
+        Listeners,
+        ScriptedValues,
+        SceneScripts,
+        MaterialConstants,
+        MaterialAlpha,
+        MaterialColors,
+        Clocks,
+        OwnedValues,
+        Count,
+    };
+    /// What `CaptureNodeRegistration` remembers about one layer key so a layer whose build
+    /// failed can be taken back out: where the key stood, one closure per per-layer record that
+    /// existed (each puts its record back), and how long each runtime-wide list was. Opaque to
+    /// the loader.
+    struct LayerRegistrationMemo {
+        SceneNode*                 node { nullptr };
+        // SIZE_MAX cannot be an index in the layer-order vector. Replacing the
+        // optional rank leaves room for the pre-node colour pointer at no cost.
+        std::size_t                rank { std::numeric_limits<std::size_t>::max() };
+        DynamicValue*              color { nullptr };
+        std::vector<std::function<void(SceneRuntimeContext&)>> put_back;
+        std::array<std::size_t, static_cast<std::size_t>(RuntimeList::Count)> lengths {};
     };
 
 private:
@@ -779,48 +873,34 @@ private:
             if (script != nullptr) callback(script);
         }
     }
-    struct LayerTemplateBinding {
-        std::string                canonical_path;
-        std::shared_ptr<SceneNode> node;
-        Eigen::Vector2f            size { Eigen::Vector2f::Zero() };
-    };
-    std::shared_ptr<WPSoundStream> LockSoundLayer(std::string_view name) const;
-    void DispatchMediaPlaybackChanged(std::string_view name, bool playing);
     /// Tells the scripts nothing is playing, once, for whatever no real media
     /// event has said by the time the scene first runs. See `Tick`.
     void DispatchIdleMediaState();
     /// Notes which media event types a real event has already told the scripts,
     /// until the idle state has been decided.
     void NoteMediaEventTold(std::string_view event_json);
-    void ApplyNodeTransform(std::string_view name);
-    void ApplyAnchoredNodeTransform(std::string_view name);
     /// Re-derives the presented margins from the cursor viewport and moves every
     /// layer pinned to a screen anchor if they changed.
     void UpdatePresentedMargins();
     void RefreshNodeTransformBindings(const std::string& name);
-    void ApplyNodeTransform(SceneNode& node, NodeAlignmentBinding& binding, const Eigen::Vector2f& size);
     /// Frees the layers `DestroyLayer` retired once the mutation they caused
     /// has been consumed, that is once no compiled graph can still draw them.
     void ReleaseRetiredLayers();
-    void ApplyMaterialConstantBinding(MaterialConstantBinding& binding);
     void ApplySceneZoomAnimation();
     void ApplySceneZoom(double zoom);
     void ApplyCameraShots();
     void ApplyPerspectiveCameraShots(double seconds);
     void DispatchPendingAnimationEvents();
     bool                           CursorInsidePresentedContent() const;
-    Eigen::Vector3f ScriptCursorWorldPosition() const;
+    linalg::Vector3f ScriptCursorWorldPosition() const;
     bool CursorHitsLayer(std::string_view name) const;
     bool CursorHitsLayerGeometry(std::string_view name) const;
     CursorVisit VisitCursorLayer(std::string_view name) const;
     bool CursorBlockedByLayerInFront(std::string_view name) const;
     std::optional<std::size_t> NodeRank(std::string_view name) const;
     std::optional<std::size_t> FrontmostCursorBlocker() const;
-    bool CursorHitsScriptLayer(const ScriptedDynamicValue& value) const;
-    bool CursorHitsScriptLayer(const SceneScriptProgram& script) const;
     CursorVisit VisitScriptLayer(const ScriptedDynamicValue& value) const;
     CursorVisit VisitScriptLayer(const SceneScriptProgram& script) const;
-    void StartTextWorker();
     void StopTextWorker();
     /// Whether this text layer's pending layout is being worked on at all.
     ///
@@ -829,19 +909,23 @@ private:
     /// while it is hidden. Shared with `PumpTextLayerCache` so "in flight" and
     /// "the pump will do it" cannot drift apart.
     [[nodiscard]] bool TextLayerIsBeingPrepared(const std::string& name) const;
-    void EnqueueTextLayerPreparation(std::string name, const TextLayer& layer);
-    void CollectPreparedTextLayers();
-    bool ApplyPreparedTextLayer(const RuntimePreparedTextLayerImage& prepared);
     /// Works the gate of the text layer `name` out from its effects as they stand.
     void RefreshTextEffectGate(const std::string& name);
     /// Moves the composite of a text layer another layer samples onto `card`,
     /// the card a relayout left it with, and resizes the target to it.
     void FitTextLayerComposite(SceneNode& node, const TextLayerRenderFrame& card);
-    void TextWorkerLoop();
     // Makes `next_properties` the table in effect, refreshes every binding and
     // tells the scripts. Returns the sorted names whose value changed.
     std::vector<std::string> ApplyProjectProperties(ProjectProperties next_properties);
 
+    // Looked up by name every frame the cursor is in the window, so the maps
+    // below take a `string_view` without making a string of it.
+    struct StringHash {
+        using is_transparent = void;
+        std::size_t operator()(std::string_view value) const noexcept {
+            return std::hash<std::string_view> {}(value);
+        }
+    };
     std::unique_ptr<ScriptEngine>                                  m_script_engine;
     std::unique_ptr<ScriptHostContext>                             m_host_context;
     Scene*                                                         m_scene { nullptr };
@@ -849,17 +933,14 @@ private:
     // The cursor in the canvas plane, where the viewport maps the window pointer
     // (z = 0). Layers are hit in it and particles follow it. It is not what a
     // perspective scene's scripts read as `input.cursorWorldPosition`.
-    Eigen::Vector3f                                                m_cursor_plane_position { Eigen::Vector3f::Zero() };
-    ProjectProperties                                              m_default_project_properties;
-    ProjectProperties                                              m_project_property_overrides;
+    linalg::Vector3f                                                m_cursor_plane_position { linalg::Vector3f::Zero() };
     ProjectProperties                                              m_project_properties;
     // The properties read only while the scene loaded, each with the value it
     // was read with (empty: the table did not name it).
     std::map<std::string, std::optional<RuntimeScalarValue>>       m_load_only_properties;
     bool                                                           m_project_properties_changing { false };
-    std::unordered_map<std::string, std::unique_ptr<DynamicValue>> m_property_values;
     std::vector<std::unique_ptr<DynamicValue>>                     m_owned_values;
-    std::unordered_map<std::string, SceneNode*>                    m_nodes;
+    std::unordered_map<std::string, SceneNode*, StringHash, std::equal_to<>> m_nodes;
     /// Registration order of `m_nodes`, which `SetLayerOrder` reorders to the
     /// scene file's and `SortLayer` changes.
     std::vector<std::string>                                       m_node_order;
@@ -879,7 +960,6 @@ private:
     std::unordered_map<std::string, NodeVec3Binding>               m_node_translate;
     std::unordered_map<std::string, NodeVec3Binding>               m_node_scale;
     std::unordered_map<std::string, NodeVec3Binding>               m_node_rotation;
-    std::unordered_map<std::string, NodeEffectFinalBinding>        m_node_effect_final;
     std::vector<MaterialAlphaBinding>                              m_material_alpha;
     std::vector<MaterialColorBinding>                              m_material_colors;
     struct CameraShake {
@@ -901,8 +981,6 @@ private:
         std::shared_ptr<ScalarAnimationPlayback> playback;
     };
     std::vector<ScalarAnimationBinding> m_scalar_animations;
-    /// `RegisterPropertyAnimation`: handle - 1 is the index.
-    std::vector<std::weak_ptr<ScalarAnimationPlayback>> m_property_animations;
     std::shared_ptr<ScalarAnimationPlayback> m_scene_zoom_animation;
     struct CameraShotBinding {
         SceneNode*         node { nullptr };
@@ -928,26 +1006,16 @@ private:
     SceneCamera* m_fallback_active_camera { nullptr };
     std::size_t m_perspective_shot_count { 0 };
     /// What the view was last framed with, so an unchanged shot costs nothing.
-    std::optional<std::pair<double, Eigen::Vector2f>> m_framed_camera_shot;
+    std::optional<std::pair<double, linalg::Vector2f>> m_framed_camera_shot;
     std::vector<MaterialConstantBinding>                           m_material_constants;
     std::vector<TextValueBinding>                                  m_text_values;
     OwnTextWrite*                                                  m_own_text_write { nullptr };
-    std::vector<DynamicValueListenerBinding>                       m_dynamic_value_listeners;
-    std::unordered_map<std::string, Eigen::Vector2f>               m_node_size;
-    std::unordered_map<std::string, NodeHitMask>                   m_node_hit_masks;
+    std::unordered_map<std::string, linalg::Vector2f, StringHash, std::equal_to<>> m_node_size;
+    std::unordered_map<std::string, NodeHitMask, StringHash, std::equal_to<>> m_node_hit_masks;
     std::unordered_map<std::string, WPPuppetLayer>                 m_puppet_layers;
-    std::unordered_map<std::string, TextLayer>                     m_text_layers;
+    std::unordered_map<std::string, TextLayer, StringHash, std::equal_to<>> m_text_layers;
     std::unordered_map<std::string, TextEffectGate>                m_text_effect_gates;
-    std::unordered_map<std::string, uint64_t>                      m_queued_text_revisions;
     std::unordered_map<std::string, NodeAlignmentBinding>          m_node_alignment;
-    // Looked up by name every frame the cursor is in the window, so the maps
-    // below take a `string_view` without making a string of it.
-    struct StringHash {
-        using is_transparent = void;
-        std::size_t operator()(std::string_view value) const noexcept {
-            return std::hash<std::string_view> {}(value);
-        }
-    };
     std::unordered_map<std::string, NodeCursorTarget, StringHash, std::equal_to<>>
         m_node_cursor_targets;
     // Set once any layer is registered as one that stops the cursor walk; the
@@ -964,19 +1032,15 @@ private:
     mutable bool                                                   m_cursor_blocker_cached { false };
     mutable std::optional<std::size_t>                             m_cursor_blocker_rank;
     PresentedMargins                                               m_presented_margins {};
-    std::unordered_map<std::string, std::string>                   m_node_template_paths;
-    std::unordered_map<std::string, LayerTemplateBinding>          m_layer_templates;
     std::function<bool(std::string_view)>                          m_layer_template_loader;
     std::unordered_set<std::string>                               m_loading_layer_templates;
     std::unordered_set<std::string>                               m_failed_layer_templates;
-    std::unordered_map<std::string, std::vector<std::string>>      m_node_video_textures;
+    std::unordered_set<std::string>                               m_unsupported_layer_templates;
     std::unordered_map<std::string, VideoTexturePlaybackBinding, StringHash, std::equal_to<>>
         m_video_texture_playback;
     std::unordered_map<std::string, std::weak_ptr<WPSoundStream>>  m_sound_layers;
     std::shared_ptr<void>                                          m_scripted_value_registry { std::make_shared<char>() };
     std::vector<ScriptedDynamicValue*>                             m_scripted_values;
-    /// How many of `m_scripted_values`, from the front, `Tick` has started.
-    std::size_t                                                    m_scripted_values_started { 0 };
     std::unordered_map<ScriptedDynamicValue*, bool>                m_scripted_value_cursor_inside;
     // Who took each button's press, so its release reaches them wherever the
     // cursor has since gone. A button that shrinks while held -- these
@@ -985,16 +1049,12 @@ private:
     std::unordered_map<uint32_t, std::vector<ScriptedDynamicValue*>> m_scripted_value_cursor_held;
     std::unordered_map<uint32_t, std::vector<std::size_t>>           m_scene_script_cursor_held;
     std::vector<SceneScriptBinding>                                m_scene_scripts;
-    std::vector<std::string>                                       m_script_errors;
     mutable std::mutex                                             m_text_worker_mutex;
-    std::condition_variable                                        m_text_worker_cv;
-    std::thread                                                    m_text_worker;
+    /// Jobs the worker has taken off the queue and not yet published. Guarded by the mutex.
+    int                                                            m_text_jobs_running { 0 };
     std::deque<RuntimePendingTextLayerJob>                         m_pending_text_jobs;
-    std::vector<RuntimePreparedTextLayerImage>                     m_prepared_text_layers;
-    bool                                                           m_stop_text_worker { false };
     /// Guarded by `m_text_worker_mutex`, alongside the queues it describes.
     std::function<void()>                                          m_content_wake_handler;
-    uint64_t                                                       m_next_generated_layer_id { 1 };
     /// Names of the layers scripts created and have not destroyed.
     std::unordered_set<std::string>                                m_script_created_layers;
     /// Destroyed layers no longer in the scene graph, kept alive until
@@ -1018,17 +1078,110 @@ private:
     /// audio. Guarded so installing it and marking cannot both miss.
     std::mutex            m_audio_requirement_mutex;
     std::function<void()> m_audio_requirement_listener;
-    bool m_media_integration_enabled { false };
     /// The scene has not yet been told what it is like to have no player. The
     /// first tick does, for each of the two states a widget hides itself on that
     /// no real event reported first; real events after it replace it as usual.
     bool m_media_idle_pending { true };
     bool m_media_playback_told { false };
     bool m_media_properties_told { false };
+    void MarkSceneGraphMutated(const char* reason);
+    void MarkRenderTargetsResized(const char* reason);
     bool m_scene_graph_mutated { false };
+    std::map<std::string, int> m_scene_graph_mutation_reasons;
+    bool m_render_targets_resized { false };
+    std::map<std::string, int> m_render_target_resize_reasons;
     /// The display's size or the language changed since the scripts were told.
+    /// `TearDownScripts` has run: no program starts from then on.
+    bool m_scripts_torn_down { false };
     bool m_screen_resize_pending { false };
     bool m_general_settings_pending { false };
+
+    // ---- State added with the clean-room rewrite ----------------------------------------
+    /// What the project declares: the table a document is applied over.
+    ProjectProperties m_default_properties;
+    /// The live value of each property, owned by `m_owned_values`.
+    std::unordered_map<std::string, DynamicValue*, StringHash, std::equal_to<>> m_property_values;
+    /// Values standing in for properties no table has declared yet, adopted by the first
+    /// document that supplies the name.
+    std::unordered_map<std::string, DynamicValue*, StringHash, std::equal_to<>> m_absent_property_values;
+    std::vector<std::string> m_script_errors;
+    /// Ends the subscription a registered listener made, in registration order.
+    std::vector<std::function<void()>> m_listener_ends;
+    std::unordered_map<std::string, EffectCardLink> m_effect_card_links;
+    std::vector<PassthroughCard> m_passthrough_cards;
+    uint64_t                     m_passthrough_card_layouts { 0 };
+    struct EffectObject {
+        std::string                       layer;
+        std::shared_ptr<SceneImageEffect> effect;
+        DynamicValue*                     visibility { nullptr };
+    };
+    /// The effects whose visibility a script decides, by the reference their script is made with.
+    std::unordered_map<std::string, EffectObject> m_effect_objects;
+    std::unordered_map<std::string, std::shared_ptr<ScalarAnimationPlayback>> m_setting_animations;
+    uint64_t m_next_object_reference { 1 };
+    std::unordered_map<std::string, LayerTemplate> m_layer_templates;
+    /// Layer key -> the template path the layer was made from (or the path a template node
+    /// was registered under, which is how a script in a workshop layer finds its siblings).
+    std::unordered_map<std::string, std::string> m_node_template_paths;
+    uint64_t m_next_generated_layer_key { 1 };
+    int32_t  m_next_generated_layer_id { 0x50000000 };
+    /// The texture keys of each layer's video textures, in the order they were registered.
+    std::unordered_map<std::string, std::vector<std::string>, StringHash, std::equal_to<>>
+        m_node_video_textures;
+    /// Every clock registered by `RegisterScalarAnimation`, so a clock that is also held by
+    /// another registry is stepped once.
+    std::unordered_set<const ScalarAnimationPlayback*> m_registered_clocks;
+    double m_scene_zoom_sampled_frame { std::numeric_limits<double>::quiet_NaN() };
+    std::atomic<bool> m_media_integration_enabled { false };
+
+    // The text worker: one thread, one queue (`m_pending_text_jobs`, guarded by
+    // `m_text_worker_mutex` like everything below it) and the newest result of every layer.
+    std::thread                                  m_text_worker;
+    std::condition_variable                      m_text_worker_wake;
+    bool                                         m_text_worker_stop { false };
+    std::vector<FinishedTextLayout>              m_finished_text_layouts;
+    /// The revision of the job last queued for a layer.
+    std::unordered_map<std::string, uint64_t>    m_revision_queued_for_layer;
+    enum class Vec3Key
+    {
+        Origin,
+        Scale,
+        Angles,
+    };
+    void ApplyVec3Binding(Vec3Key key, const std::string& name, NodeVec3Binding& binding);
+    void SyncMaterialConstant(MaterialConstantBinding& binding);
+    void TextWorkerLoop();
+    /// Blocks until the worker has a job to take (counting it as running) or is told to stop.
+    std::optional<RuntimePendingTextLayerJob> AwaitTextJob();
+    /// Files a finished job and tells the content wake handler; drops it once stopping.
+    void PublishFinishedText(FinishedTextLayout done);
+    bool ApplyFinishedTextLayout(FinishedTextLayout& finished);
+    /// Re-fits everything that depends on a text layer's card after its card changed.
+    void ReshapeTextCard(const std::string& name, TextLayer& layer, SceneNode* node);
+    void RefitCardMesh(SceneMesh& mesh, const TextLayerRenderFrame& frame);
+    void ResizeEffectChain(EffectCardLink& link, SceneNode* node,
+                           const TextLayerRenderFrame& effect_frame);
+    void PublishTextRaster(const TextLayer& layer, const FinishedTextLayout& done);
+    std::size_t RuntimeListLength(RuntimeList list) const;
+    void TrimRuntimeLists(const std::array<std::size_t, static_cast<std::size_t>(RuntimeList::Count)>& lengths);
+    void QueueTextJobs();
+    void RequestShownLayerGraph();
+    void AdvanceClocks(double seconds);
+    /// Starts the value scripts that have not started, as a scene starts them: every script's
+    /// `init` in the scene's order, then every script told the user properties for the first
+    /// time. Only then does any script's `update` run.
+    void StartPendingScripts();
+    void ApplyNodeVisibilityBindings();
+    void ApplyNodeTransformBindings();
+    void ApplyTextValueBindings();
+    void ApplyEffectFinalBindings();
+    void ApplyPassthroughCards();
+    void ApplyMaterialConstantBindings();
+    void ApplyMaterialAlphaBindings();
+    void ApplyAnchoredTransform(const std::string& name);
+    void ApplyScreenAnchor(const std::string& name);
+    void ForgetLayerScripts(const std::string& name);
+    std::size_t TrimScriptsTo(std::size_t value_count, std::size_t script_count);
 };
 
 std::unique_ptr<SceneRuntimeContext> CreateSceneRuntimeContext(SceneRuntimeBootstrap bootstrap);

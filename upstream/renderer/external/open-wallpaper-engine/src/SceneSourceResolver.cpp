@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e7-small-units.md; written without access to the original source.
 #include "SceneSourceResolver.hpp"
 
 #include "Fs/PhysicalFs.h"
@@ -6,6 +7,7 @@
 #include "WPPkgFs.hpp"
 #include "Utils/Logging.h"
 
+#include <algorithm>
 #include <filesystem>
 
 namespace wallpaper
@@ -14,40 +16,31 @@ namespace wallpaper
 namespace
 {
 
-constexpr const char* kProjectFileName = "project.json";
-constexpr const char* kDefaultSceneEntry = "scene.json";
-
-bool resolve_scene_entry(
-    const std::filesystem::path& source_path,
-    const std::filesystem::path& entry_path,
-    SceneSourcePaths*            resolved,
-    std::string*                 error)
+bool Fail(std::string* error, std::string message)
 {
-    if (resolved == nullptr) {
-        if (error != nullptr) *error = "resolved scene source must not be null";
-        return false;
-    }
-    if (entry_path.empty()) {
-        if (error != nullptr) *error = "scene entry path must not be empty";
-        return false;
-    }
-    if (entry_path.is_absolute()) {
-        if (error != nullptr) *error = "project scene entry must be a relative path";
-        return false;
-    }
+    LOG_ERROR("scene source: %s", message.c_str());
+    if (error != nullptr) *error = std::move(message);
+    return false;
+}
 
-    const std::filesystem::path pkg_dir_fs = source_path.parent_path();
-    auto                        pkg_path_fs = pkg_dir_fs / entry_path;
-    auto                        pkg_entry_fs = entry_path;
+bool LeavesFolder(const std::filesystem::path& entry)
+{
+    return std::any_of(entry.begin(), entry.end(), [](const std::filesystem::path& part) {
+        return part == "..";
+    });
+}
 
-    pkg_path_fs.replace_extension("pkg");
-    pkg_entry_fs.replace_extension("json");
-
-    resolved->pkg_path = pkg_path_fs.native();
-    resolved->pkg_entry = pkg_entry_fs.generic_string();
-    resolved->pkg_dir = pkg_dir_fs.native();
-    resolved->scene_id = pkg_dir_fs.filename().native();
-    return true;
+// The four path strings of a scene whose entry name inside its folder is `entry`.
+void FillPaths(const std::filesystem::path& folder, const std::string& entry, SceneSourcePaths* out)
+{
+    std::filesystem::path pkg_name { entry };
+    pkg_name.replace_extension(".pkg");
+    std::filesystem::path json_name { entry };
+    json_name.replace_extension(".json");
+    out->pkg_path  = (folder / pkg_name).string();
+    out->pkg_entry = json_name.generic_string();
+    out->pkg_dir   = folder.string();
+    out->scene_id  = folder.filename().string();
 }
 
 } // namespace
@@ -57,38 +50,42 @@ bool ResolveSceneSourcePaths(
     SceneSourceResolution* resolved,
     std::string*           error)
 {
-    if (resolved == nullptr) {
-        if (error != nullptr) *error = "resolved scene source must not be null";
-        return false;
-    }
-    if (source.empty()) {
-        if (error != nullptr) *error = "scene source must not be empty";
-        return false;
-    }
+    if (resolved == nullptr) return Fail(error, "scene source output must not be null");
+    // Whatever happens next, a failure leaves nothing half filled.
+    *resolved = SceneSourceResolution {};
+    if (source.empty()) return Fail(error, "no scene source was given");
 
-    const std::filesystem::path source_path { source };
-    resolved->scene_source = {};
-    resolved->manifest = {};
+    const std::filesystem::path path { source };
+    const std::filesystem::path folder = path.parent_path();
+    const std::string           file   = path.filename().string();
 
-    if (source_path.filename() == kProjectFileName) {
-        if (!ParseProjectManifest(source, &resolved->manifest, error)) return false;
-        if (resolved->manifest.type != WallpaperProjectType::Scene) {
-            resolved->kind = SceneSourceResolutionKind::NotSceneProject;
+    SceneSourceResolution result;
+    std::string           entry;
+    if (file == "project.json") {
+        std::string reason;
+        if (! ParseProjectManifest(source, &result.manifest, &reason)) return Fail(error, reason);
+        if (result.manifest.type != WallpaperProjectType::Scene) {
+            result.kind = SceneSourceResolutionKind::NotSceneProject;
+            *resolved   = std::move(result);
             return true;
         }
-
-        const auto entry_path = resolved->manifest.file.empty()
-            ? std::filesystem::path(kDefaultSceneEntry)
-            : std::filesystem::path(resolved->manifest.file);
-        resolved->kind = SceneSourceResolutionKind::Scene;
-        return resolve_scene_entry(source_path, entry_path, &resolved->scene_source, error);
+        entry = result.manifest.file.empty() ? "scene.json" : result.manifest.file;
+    } else {
+        // Not a project file: the source is the scene entry itself.
+        result.manifest.type        = WallpaperProjectType::Scene;
+        result.manifest.file        = file;
+        result.manifest.workshop_id = folder.filename().string();
+        entry                       = file;
     }
 
-    resolved->kind = SceneSourceResolutionKind::Scene;
-    resolved->manifest.type = WallpaperProjectType::Scene;
-    resolved->manifest.file = source_path.filename().generic_string();
-    resolved->manifest.workshop_id = source_path.parent_path().filename().native();
-    return resolve_scene_entry(source_path, source_path.filename(), &resolved->scene_source, error);
+    if (entry.empty()) return Fail(error, "scene entry must not be empty");
+    if (entry.front() == '/') return Fail(error, "scene entry must be relative: " + entry);
+    if (LeavesFolder(entry)) return Fail(error, "scene entry leaves its folder: " + entry);
+
+    result.kind = SceneSourceResolutionKind::Scene;
+    FillPaths(folder, entry, &result.scene_source);
+    *resolved = std::move(result);
+    return true;
 }
 
 bool ResolveSceneSourcePaths(
@@ -96,21 +93,14 @@ bool ResolveSceneSourcePaths(
     SceneSourcePaths*  resolved,
     std::string*       error)
 {
+    if (resolved == nullptr) return Fail(error, "scene source output must not be null");
+    *resolved = SceneSourcePaths {};
+
     SceneSourceResolution resolution;
-    if (!ResolveSceneSourcePaths(source, &resolution, error)) return false;
-    if (resolution.kind != SceneSourceResolutionKind::Scene) {
-        if (error != nullptr) {
-            *error = std::string("project is not a scene wallpaper: ") +
-                     ToString(resolution.manifest.type);
-        }
-        return false;
-    }
-
-    if (resolved == nullptr) {
-        if (error != nullptr) *error = "resolved scene source must not be null";
-        return false;
-    }
-
+    if (! ResolveSceneSourcePaths(source, &resolution, error)) return false;
+    if (resolution.kind != SceneSourceResolutionKind::Scene)
+        return Fail(error,
+                    std::string("project is not a scene: ") + ToString(resolution.manifest.type));
     *resolved = std::move(resolution.scene_source);
     return true;
 }

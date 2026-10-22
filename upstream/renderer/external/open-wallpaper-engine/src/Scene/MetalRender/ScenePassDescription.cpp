@@ -1,9 +1,7 @@
 #include "MetalRender/ScenePassDescription.hpp"
 
-#include "CopyPass.hpp"
-#include "CustomShaderPass.hpp"
-#include "PassCommon.hpp"
-#include "PrePass.hpp"
+#include "RenderCommon/ScenePass.hpp"
+#include "RenderGraph/Pass.hpp"
 #include "RenderGraph/RenderGraph.hpp"
 #include "Scene/Scene.h"
 #include "SpecTexs.hpp"
@@ -40,10 +38,10 @@ bool TargetExtent(const Scene& scene, const std::string& key, uint32_t& width, u
 
 /// Declares a copy's destination when the graph invented the name.
 ///
-/// The same rule `vulkan::CopyPass::prepare` applies: the destination inherits
+/// The destination inherits
 /// the source's shape and becomes reusable. Inventing a different shape here
-/// would size the link texture or the feedback-break copy differently in the
-/// two backends, and every effect that samples it would then sample at a
+/// would size the link texture or the feedback-break copy differently from
+/// the authored one, and every effect that samples it would then sample at a
 /// different texel step.
 void EnsureCopyDestination(Scene& scene, const std::string& source, const std::string& destination)
 {
@@ -71,13 +69,11 @@ void ForEachRead(const ScenePassDescription& desc, const std::function<void(cons
 /// Clears the scene's own image before a pass that reads it ahead of anything
 /// drawing into it this frame.
 ///
-/// The compatibility backend clears that image to the background at the start
-/// of every frame; this one clears it in the first pass that draws into it. A
+/// The image is cleared to the background in the first pass that draws into it. A
 /// pass that samples or copies it before then -- a layer blending with the
 /// screen, or reading the frame buffer, ahead of any other layer -- would read
 /// whatever the image held: nothing on the first frame, and the previous
-/// frame's picture after it, where the compatibility backend reads the
-/// background.
+/// frame's picture after it, where the background belongs.
 void ClearSceneBeforeAnEarlyRead(Scene& scene, std::vector<ScenePassDescription>& out)
 {
     const auto scene_key = scene.ResolveRenderTargetName(std::string(SpecTex_Default));
@@ -181,14 +177,15 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             return set_error("the render graph contains a step the native renderer does not "
                              "recognise");
         case MetalPassKind::Clear: {
-            auto* pre = dynamic_cast<vulkan::PrePass*>(pass);
-            if (pre == nullptr) return set_error("a clear step has an unexpected shape");
+            const auto* clear = dynamic_cast<const rg::ClearPass*>(pass);
+            if (clear == nullptr) return set_error("a clear step has an unexpected shape");
+            const auto& pre = clear->desc();
             ScenePassDescription desc;
             desc.kind        = MetalPassKind::Clear;
             desc.name        = std::string(pass_node->name());
-            desc.target_key  = scene.ResolveRenderTargetName(pre->desc().result);
+            desc.target_key  = scene.ResolveRenderTargetName(pre.result);
             desc.load_action = MetalLoadAction::Clear;
-            if (pre->desc().transparent) {
+            if (pre.transparent) {
                 desc.clear_color = { 0.0f, 0.0f, 0.0f, 0.0f };
             } else {
                 desc.uses_scene_clear_color = true;
@@ -202,13 +199,14 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             continue;
         }
         case MetalPassKind::Copy: {
-            auto* copy = dynamic_cast<vulkan::CopyPass*>(pass);
-            if (copy == nullptr) return set_error("a copy step has an unexpected shape");
+            const auto* step = dynamic_cast<const rg::CopyPass*>(pass);
+            if (step == nullptr) return set_error("a copy step has an unexpected shape");
+            const auto& copy = step->desc();
             ScenePassDescription desc;
             desc.kind        = MetalPassKind::Copy;
             desc.name        = std::string(pass_node->name());
-            desc.source_key  = scene.ResolveRenderTargetName(copy->desc().src);
-            desc.target_key  = scene.ResolveRenderTargetName(copy->desc().dst);
+            desc.source_key  = scene.ResolveRenderTargetName(copy.src);
+            desc.target_key  = scene.ResolveRenderTargetName(copy.dst);
             desc.load_action = MetalLoadAction::DontCare;
             if (! TargetExtent(scene, desc.source_key, desc.source_width, desc.source_height)) {
                 return set_error("a copy step reads an image with no size");
@@ -221,7 +219,7 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             continue;
         }
         case MetalPassKind::CustomShader: {
-            auto* custom = dynamic_cast<vulkan::CustomShaderPass*>(pass);
+            const auto* custom = dynamic_cast<const rg::DrawPass*>(pass);
             if (custom == nullptr) return set_error("a draw step has an unexpected shape");
             const auto& src = custom->desc();
             if (src.node == nullptr || src.node->Mesh() == nullptr) {
@@ -242,7 +240,7 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             desc.material_slot   = src.material_slot;
             desc.submesh_index   = src.submesh_index;
             desc.camera_override = src.camera_override;
-            desc.blend           = src.blend_override.value_or(material->blenmode);
+            desc.blend           = src.replace_target ? BlendMode::Disable : material->blenmode;
             desc.write_alpha     = src.write_alpha;
             desc.target_key      = scene.ResolveRenderTargetName(src.output);
             {
@@ -274,7 +272,10 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
                                                 ? std::string {}
                                                 : scene.ResolveRenderTargetName(texture));
             }
-            desc.cover_keys = src.texture_covers;
+            if (!material->cover_slots.empty()) {
+                desc.cover_keys = material->cover_slots;
+                desc.cover_keys.resize(desc.texture_keys.size());
+            }
             out.push_back(std::move(desc));
             continue;
         }

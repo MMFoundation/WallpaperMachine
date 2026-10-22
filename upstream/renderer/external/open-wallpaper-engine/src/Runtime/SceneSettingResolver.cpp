@@ -1,6 +1,8 @@
+// Clean-room implementation from the WallpaperMachine spec e2-runtime-animation.md; written without access to the original source.
 #include "Runtime/SceneSettingResolver.hpp"
 
 #include "Runtime/DynamicValue.hpp"
+#include "Runtime/NumberText.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Runtime/ScriptedDynamicValue.hpp"
 #include "Scripting/ScriptModuleSyntax.hpp"
@@ -10,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iterator>
 #include <sstream>
 
 namespace wallpaper
@@ -17,210 +20,225 @@ namespace wallpaper
 namespace
 {
 
-const nlohmann::json& unwrap_value(const nlohmann::json& value)
-{
-    if (value.is_object() && value.contains("value")) return value.at("value");
-    return value;
+// ---------------------------------------------------------------------------
+// Reading an authored value. Every reader first looks through one level of
+// `{"value": ...}`.
+// ---------------------------------------------------------------------------
+
+const nlohmann::json& Unwrapped(const nlohmann::json& node) {
+    if (node.is_object()) {
+        const auto value = node.find("value");
+        if (value != node.end()) return *value;
+    }
+    return node;
 }
 
-Eigen::Vector3f parse_vec3(const nlohmann::json& value)
-{
-    const auto& source = unwrap_value(value);
-    if (source.is_array() && source.size() >= 3) {
-        return Eigen::Vector3f(
-            source.at(0).get<float>(),
-            source.at(1).get<float>(),
-            source.at(2).get<float>());
+float NumberOf(const nlohmann::json& value) {
+    if (value.is_number()) {
+        const auto number = static_cast<float>(value.get<double>());
+        return std::isfinite(number) ? number : 0.0f;
     }
-    if (source.is_number()) {
-        const float scalar = source.get<float>();
-        return Eigen::Vector3f(scalar, scalar, scalar);
-    }
-    if (source.is_string()) {
-        std::istringstream stream(source.get<std::string>());
-        float x = 0.0f;
-        float y = 0.0f;
-        float z = 0.0f;
-        stream >> x >> y >> z;
-        return Eigen::Vector3f(x, y, z);
-    }
-    return Eigen::Vector3f::Zero();
-}
-
-float parse_float(const nlohmann::json& value)
-{
-    const auto& source = unwrap_value(value);
-    if (source.is_number()) return source.get<float>();
-    if (source.is_boolean()) return source.get<bool>() ? 1.0f : 0.0f;
-    if (source.is_string()) {
-        try {
-            return std::stof(source.get<std::string>());
-        } catch (...) {
-            return 0.0f;
-        }
-    }
+    if (value.is_boolean()) return value.get<bool>() ? 1.0f : 0.0f;
+    if (value.is_string()) return LeadingNumberOrZero(value.get_ref<const std::string&>());
     return 0.0f;
 }
 
-// Vector settings carry one initial value per component, either as an array or
-// as a space-separated string. Scalars keep the plain single-value reading.
-float parse_component(const nlohmann::json& value, std::size_t component)
-{
-    const auto& source = unwrap_value(value);
-    if (source.is_array()) {
-        return component < source.size() && source.at(component).is_number()
-                   ? source.at(component).get<float>()
-                   : 0.0f;
-    }
-    if (source.is_string()) {
-        std::istringstream stream(source.get<std::string>());
-        float              parsed = 0.0f;
-        for (std::size_t index = 0; index <= component; ++index) {
-            if (! (stream >> parsed)) return 0.0f;
-        }
-        return parsed;
-    }
-    return component == 0 ? parse_float(value) : 0.0f;
-}
+float read_number(const nlohmann::json& setting) { return NumberOf(Unwrapped(setting)); }
 
-bool parse_bool(const nlohmann::json& value)
-{
-    const auto& source = unwrap_value(value);
-    if (source.is_boolean()) return source.get<bool>();
-    if (source.is_number()) return source.get<float>() != 0.0f;
-    if (source.is_string()) return source.get<std::string>() == "true" || source.get<std::string>() == "1";
+bool parse_bool(const nlohmann::json& setting) {
+    const auto& value = Unwrapped(setting);
+    if (value.is_boolean()) return value.get<bool>();
+    if (value.is_number()) return value.get<double>() != 0.0;
+    if (value.is_string()) {
+        const auto& text = value.get_ref<const std::string&>();
+        return text == "true" || text == "1";
+    }
     return false;
 }
 
-std::string parse_string(const nlohmann::json& value)
-{
-    const auto& source = unwrap_value(value);
-    if (source.is_string()) return source.get<std::string>();
-    if (source.is_object() && source.contains("text") && source.at("text").is_string()) {
-        return source.at("text").get<std::string>();
+std::string read_text(const nlohmann::json& setting) {
+    const auto& value = Unwrapped(setting);
+    if (value.is_string()) return value.get<std::string>();
+    if (value.is_object()) {
+        const auto text = value.find("text");
+        if (text != value.end() && text->is_string()) return text->get<std::string>();
     }
-    return source.dump();
+    return {};
 }
 
-std::optional<ConditionInfo> parse_condition(const nlohmann::json& setting, std::string* user_name)
-{
-    if (!setting.is_object() || !setting.contains("user")) return std::nullopt;
-
-    const auto& user = setting.at("user");
-    if (user.is_string()) {
-        *user_name = user.get<std::string>();
-        return std::nullopt;
+// One lane of a vector setting: an array element that is a number, the n-th number of a text,
+// or, for lane 0, a lone number.
+float read_lane(const nlohmann::json& setting, std::size_t lane) {
+    const auto& value = Unwrapped(setting);
+    if (value.is_array()) {
+        return lane < value.size() && value[lane].is_number() ? NumberOf(value[lane]) : 0.0f;
     }
-    if (user.is_object() && user.contains("name") && user.at("name").is_string()) {
-        *user_name = user.at("name").get<std::string>();
-        if (user.contains("condition") && user.at("condition").is_string()) {
-            return ConditionInfo {
-                .name = *user_name,
-                .condition = user.at("condition").get<std::string>(),
-            };
+    if (value.is_string() && lane < 4) {
+        float lanes[4];
+        ReadNumberList(value.get_ref<const std::string&>(), lanes, lane + 1);
+        return lanes[lane];
+    }
+    if (lane == 0 && (value.is_number() || value.is_boolean())) return NumberOf(value);
+    return 0.0f;
+}
+
+// The lanes of a two- or four-component constant: a lone number fills every lane.
+template<std::size_t N>
+std::array<float, N> read_lanes(const nlohmann::json& setting) {
+    std::array<float, N> lanes {};
+    const auto&          value = Unwrapped(setting);
+    for (std::size_t i = 0; i < N; ++i) lanes[i] = value.is_number() ? NumberOf(value) : read_lane(value, i);
+    return lanes;
+}
+
+linalg::Vector3f parse_vec3(const nlohmann::json& setting) {
+    const auto& value = Unwrapped(setting);
+    if (value.is_array()) {
+        if (value.size() < 3) return linalg::Vector3f::Zero();
+        for (std::size_t i = 0; i < 3; ++i) {
+            if (!value[i].is_number()) return linalg::Vector3f::Zero();
         }
+        return linalg::Vector3f(NumberOf(value[0]), NumberOf(value[1]), NumberOf(value[2]));
     }
-    return std::nullopt;
+    if (value.is_number()) {
+        const float lane = NumberOf(value);
+        return linalg::Vector3f(lane, lane, lane);
+    }
+    if (value.is_string()) {
+        float lanes[3];
+        ReadNumberList(value.get_ref<const std::string&>(), lanes, 3);
+        return linalg::Vector3f(lanes[0], lanes[1], lanes[2]);
+    }
+    return linalg::Vector3f::Zero();
 }
 
-DynamicValueUniquePtr resolve_auto_setting(SceneRuntimeContext& context, const nlohmann::json& setting);
-DynamicValueUniquePtr resolve_auto_setting(
-    SceneRuntimeContext& context,
-    const nlohmann::json& setting,
-    std::string_view current_layer_name);
-
-void bind_user_property(SceneRuntimeContext& context, const nlohmann::json& setting, DynamicValue& value)
+// What a setting's `user` member asks for: the property to follow, in either authored form, and
+// a condition that only the object form can carry (it needs a text name and a text condition).
+struct UserLink
 {
-    std::string user_name;
-    const auto  condition = parse_condition(setting, &user_name);
-    if (user_name.empty()) return;
+    std::string                  property;
+    std::optional<ConditionInfo> condition;
+};
 
-    if (condition.has_value()) value.attachCondition(*condition);
-
-    if (auto* property_value = context.FindPropertyValue(user_name); property_value != nullptr) {
-        value.connect(property_value);
+UserLink ReadUserLink(const nlohmann::json& setting) {
+    UserLink link;
+    if (!setting.is_object()) return link;
+    const auto user = setting.find("user");
+    if (user == setting.end()) return link;
+    if (user->is_string()) {
+        link.property = user->get<std::string>();
+        return link;
     }
+    if (!user->is_object()) return link;
+    const auto name = user->find("name");
+    if (name == user->end() || !name->is_string()) return link;
+    link.property = name->get<std::string>();
+    const auto condition = user->find("condition");
+    if (condition != user->end() && condition->is_string()) {
+        link.condition = ConditionInfo { link.property, condition->get<std::string>() };
+    }
+    return link;
 }
 
-void bind_vec3_user_property(
-    SceneRuntimeContext& context,
-    const nlohmann::json& setting,
-    DynamicValue& value)
-{
-    std::string user_name;
-    const auto  condition = parse_condition(setting, &user_name);
-    if (user_name.empty()) return;
+// How a value reads its property: as one whole value, or as the three lanes of a vector.
+enum class FollowShape { Whole, Vec3 };
 
-    if (condition.has_value()) value.attachCondition(*condition);
-
-    auto* property_value = context.FindPropertyValue(user_name);
-    if (property_value == nullptr) return;
-
-    value.connectVec3(property_value);
-}
-
-DynamicValueUniquePtr wrap_script_if_needed(
-    SceneRuntimeContext& context,
-    const nlohmann::json& setting,
-    std::string_view     current_layer_name,
-    DynamicValueUniquePtr value,
-    ScriptedValueSemantic semantic = ScriptedValueSemantic::Generic,
-    PropertyScriptObject object = {})
-{
-    if (!setting.is_object() || !setting.contains("script") || !setting.at("script").is_string()) {
-        return value;
-    }
-
-    const auto script_source = setting.at("script").get<std::string>();
-    const bool scene_events = script_source.find("engine.on(") != std::string::npos ||
-                              script_source.find("scene.on(") != std::string::npos ||
-                              script_source.find("thisScene.on(") != std::string::npos;
-    if (scene_events && ! ExportsFunction(script_source, "update")) {
-        return value;
-    }
-
-    std::map<std::string, DynamicValueUniquePtr> script_properties;
-    if (setting.contains("scriptproperties") && setting.at("scriptproperties").is_object()) {
-        for (const auto& [name, property] : setting.at("scriptproperties").items()) {
-            script_properties.emplace(name, resolve_auto_setting(context, property, current_layer_name));
-        }
-    }
-
-    auto scripted_value = std::make_unique<ScriptedDynamicValue>(
-        context,
-        script_source,
-        std::string(current_layer_name),
-        std::move(script_properties),
-        *value,
-        semantic,
-        object);
-    context.RegisterScriptedValue(scripted_value.get());
-    return scripted_value;
-}
-
-DynamicValueUniquePtr resolve_auto_setting(SceneRuntimeContext& context, const nlohmann::json& setting)
-{
-    return resolve_auto_setting(context, setting, {});
-}
-
-DynamicValueUniquePtr resolve_auto_setting(
-    SceneRuntimeContext& context,
-    const nlohmann::json& setting,
-    std::string_view current_layer_name)
-{
-    const auto& source = unwrap_value(setting);
-    if (source.is_boolean()) return ResolveBoolSetting(context, setting, current_layer_name);
-
-    DynamicValueUniquePtr value;
-    if (source.is_number()) {
-        value = std::make_unique<DynamicValue>(parse_float(setting));
-    } else if (source.is_string()) {
-        value = std::make_unique<DynamicValue>(parse_string(setting));
+// Makes `value` follow the property its setting names, if any. The condition goes on before the
+// first read. A property the table does not declare yet is followed once a document supplies it.
+void FollowUserProperty(SceneRuntimeContext& context, const nlohmann::json& setting,
+                        FollowShape shape, DynamicValue& value) {
+    const UserLink link = ReadUserLink(setting);
+    if (link.property.empty()) return;
+    DynamicValue* target = context.FollowProperty(link.property, value);
+    if (target == nullptr) return;
+    if (link.condition) value.attachCondition(*link.condition);
+    if (shape == FollowShape::Vec3) {
+        value.connectVec3(target);
     } else {
-        value = std::make_unique<DynamicValue>();
+        value.connect(target);
     }
-    bind_user_property(context, setting, *value);
-    return value;
+}
+
+bool mentions_scene_event_registration(const std::string& script) {
+    for (const char* call : { "engine.on(", "scene.on(", "thisScene.on(" }) {
+        if (script.find(call) != std::string::npos) return true;
+    }
+    return false;
+}
+
+// Where a value script lives, which the script host needs to pick its `thisObject`.
+struct ScriptSite
+{
+    std::string_view      layer_name;
+    ScriptedValueSemantic semantic { ScriptedValueSemantic::Generic };
+    int                   animation_layer { -1 };
+    // The effect whose visibility the script decides, and the clock of the keyed setting it
+    // sits on.
+    std::string                              effect_reference;
+    std::shared_ptr<ScalarAnimationPlayback> own_animation;
+};
+
+DynamicValueUniquePtr resolve_auto_setting(SceneRuntimeContext& context, const nlohmann::json& setting,
+                                           std::string_view current_layer_name = {});
+
+// The scripted value for a setting that carries a value script, seeded with `seed`; null when
+// the setting has none. A script that only registers scene events is not a value script.
+DynamicValueUniquePtr MakeScriptedValue(SceneRuntimeContext& context, const nlohmann::json& setting,
+                                        const DynamicValue& seed, const ScriptSite& site) {
+    const auto* source = [&]() -> const std::string* {
+        if (!setting.is_object()) return nullptr;
+        const auto script = setting.find("script");
+        if (script == setting.end() || !script->is_string()) return nullptr;
+        return &script->get_ref<const std::string&>();
+    }();
+    if (source == nullptr) return nullptr;
+    if (!ExportsFunction(*source, "update") && mentions_scene_event_registration(*source)) {
+        return nullptr;
+    }
+
+    std::map<std::string, DynamicValueUniquePtr> owned;
+    if (const auto declared = setting.find("scriptproperties");
+        declared != setting.end() && declared->is_object()) {
+        for (const auto& [key, item] : declared->items()) {
+            owned.emplace(key, resolve_auto_setting(context, item, site.layer_name));
+        }
+    }
+    std::string animation_reference;
+    if (site.own_animation != nullptr) animation_reference = context.RegisterSettingAnimation(site.own_animation);
+    auto scripted = std::make_unique<ScriptedDynamicValue>(
+        context, *source, std::string(site.layer_name), std::move(owned), seed, site.semantic,
+        site.animation_layer, site.effect_reference, std::move(animation_reference));
+    context.RegisterScriptedValue(scripted.get());
+    return scripted;
+}
+
+// Finishes a resolver: lets a value script take over from the literal, then binds the property
+// last so that a property change overwrites what a script produced.
+DynamicValueUniquePtr Finish(SceneRuntimeContext& context, const nlohmann::json& setting,
+                             DynamicValueUniquePtr literal, const ScriptSite& site,
+                             FollowShape shape) {
+    if (auto scripted = MakeScriptedValue(context, setting, *literal, site)) {
+        literal = std::move(scripted);
+    }
+    FollowUserProperty(context, setting, shape, *literal);
+    return literal;
+}
+
+// A script property is resolved by the kind its authored value has.
+DynamicValueUniquePtr resolve_auto_setting(SceneRuntimeContext& context, const nlohmann::json& setting,
+                                           std::string_view current_layer_name) {
+    const auto& value = Unwrapped(setting);
+    if (value.is_boolean()) return ResolveBoolSetting(context, setting, current_layer_name);
+    DynamicValueUniquePtr resolved;
+    if (value.is_number()) {
+        resolved = std::make_unique<DynamicValue>(NumberOf(value));
+    } else if (value.is_string()) {
+        resolved = std::make_unique<DynamicValue>(value.get<std::string>());
+    } else {
+        resolved = std::make_unique<DynamicValue>();
+    }
+    FollowUserProperty(context, setting, FollowShape::Whole, *resolved);
+    return resolved;
 }
 
 } // namespace
@@ -232,68 +250,82 @@ bool InitialBoolSetting(const nlohmann::json& setting)
 
 std::string UserPropertyName(const nlohmann::json& setting)
 {
-    std::string user_name;
-    parse_condition(setting, &user_name);
-    return user_name;
+    return ReadUserLink(setting).property;
 }
 
-float ScalarAnimation::Evaluate(double seconds) const
+namespace
 {
-    if (!(fps > 0.0) || keyframes.empty() || !std::isfinite(seconds) || seconds < 0.0) {
-        return initial_value;
+// Cubic Bernstein form in power basis: p0 (1-u)^3 + 3 p1 u (1-u)^2 + 3 p2 u^2 (1-u) + p3 u^3.
+struct Cubic
+{
+    double c0, c1, c2, c3;
+    Cubic(double p0, double p1, double p2, double p3)
+        : c0(p0), c1(3.0 * (p1 - p0)), c2(3.0 * (p2 - 2.0 * p1 + p0)),
+          c3(p3 - 3.0 * p2 + 3.0 * p1 - p0) {}
+    double At(double u) const { return ((c3 * u + c2) * u + c1) * u + c0; }
+    double Slope(double u) const { return (3.0 * c3 * u + 2.0 * c2) * u + c1; }
+};
+
+// The curve parameter in 0..1 at which the time cubic (0, x1, x2, 1) reaches `time`. Time never
+// decreases with the parameter, so the root stays inside a shrinking bracket; Newton steps
+// converge fast and a step that leaves the bracket (or a flat spot) falls back to its midpoint.
+double ParameterAtTime(const Cubic& clock, double time) {
+    double lo = 0.0;
+    double hi = 1.0;
+    double u  = std::clamp(time, 0.0, 1.0);
+    for (int round = 0; round < 64; ++round) {
+        const double miss = clock.At(u) - time;
+        if (miss == 0.0) return u;
+        (miss < 0.0 ? lo : hi) = u;
+        if (hi - lo < 1e-12) break;
+        const double slope = clock.Slope(u);
+        double       next  = slope > 1e-12 ? u - miss / slope : -1.0;
+        if (!(next > lo && next < hi)) next = 0.5 * (lo + hi);
+        if (std::abs(next - u) < 1e-13) return next;
+        u = next;
     }
+    return 0.5 * (lo + hi);
+}
 
-    double frame = seconds * fps;
-    const double animation_length =
-        length_frames > 0.0 ? length_frames : keyframes.back().frame;
+// The value between two keys at `along` (0..1 of their interval), `span` frames apart.
+double ValueBetween(const ScalarAnimationKeyframe& from, const ScalarAnimationKeyframe& to,
+                    double span, double along) {
+    const double a = from.value;
+    const double b = to.value;
+    if (!from.front.enabled && !to.back.enabled) return a + (b - a) * along;
+    const double x1 = from.front.enabled ? std::clamp(from.front.x / span, 0.0, 1.0) : 1.0 / 3.0;
+    const double x2 = to.back.enabled ? std::clamp(1.0 + to.back.x / span, x1, 1.0) : 2.0 / 3.0;
+    const double y1 = from.front.enabled ? a + from.front.y : a + (b - a) / 3.0;
+    const double y2 = to.back.enabled ? b + to.back.y : b - (b - a) / 3.0;
+    const double u  = ParameterAtTime(Cubic(0.0, x1, x2, 1.0), along);
+    return Cubic(a, y1, y2, b).At(u);
+}
+} // namespace
 
-    if (mode == ScalarAnimationMode::Loop && animation_length > 0.0) {
-        frame = std::fmod(frame, animation_length);
-        if (frame < 0.0) frame += animation_length;
-    } else {
-        if (frame < keyframes.front().frame) return initial_value;
-        if (frame >= keyframes.back().frame) return keyframes.back().value;
-    }
+float ScalarAnimation::Evaluate(double seconds) const {
+    if (keyframes.empty() || std::isnan(fps) || fps <= 0.0) return initial_value;
+    if (!std::isfinite(seconds) || seconds < 0.0) return initial_value;
 
-    const auto upper = std::upper_bound(
-        keyframes.begin(),
-        keyframes.end(),
-        frame,
-        [](double target, const ScalarAnimationKeyframe& keyframe) {
-            return target < keyframe.frame;
-        });
+    const double total   = FrameCount();
+    const bool   looping = mode == ScalarAnimationMode::Loop && total > 0.0;
+    double       frame   = seconds * fps;
+    if (looping) frame = std::fmod(frame, total);
+    // A time so large that it overflows the frame position has no position in the loop.
+    if (std::isnan(frame)) return initial_value;
+    if (frame < keyframes.front().frame) return looping ? keyframes.front().value : initial_value;
 
-    if (upper == keyframes.begin()) return keyframes.front().value;
-    if (upper == keyframes.end()) return keyframes.back().value;
-
-    const auto& left  = *(upper - 1);
-    const auto& right = *upper;
-    if (frame == left.frame) return left.value;
-    const double span = right.frame - left.frame;
-    if (span <= 0.0) return right.value;
-
-    const double factor = std::clamp((frame - left.frame) / span, 0.0, 1.0);
-    if (left.front.enabled || right.back.enabled) {
-        const double x1 = left.front.enabled ? std::clamp(left.front.x / span, 0.0, 1.0) : 1.0 / 3.0;
-        const double x2 = right.back.enabled ? std::clamp(1.0 + right.back.x / span, x1, 1.0) : 2.0 / 3.0;
-        const double y1 = left.front.enabled ? left.value + left.front.y
-                                             : left.value + (right.value - left.value) / 3.0;
-        const double y2 = right.back.enabled ? right.value + right.back.y
-                                             : right.value - (right.value - left.value) / 3.0;
-        const auto cubic = [](double a, double b, double c, double d, double t) {
-            const double u = 1.0 - t;
-            return u * u * u * a + 3.0 * u * u * t * b + 3.0 * u * t * t * c + t * t * t * d;
-        };
-        double low = 0.0;
-        double high = 1.0;
-        for (int iteration = 0; iteration < 24; ++iteration) {
-            const double t = (low + high) * 0.5;
-            if (cubic(0.0, x1, x2, 1.0, t) < factor) low = t;
-            else high = t;
-        }
-        return static_cast<float>(cubic(left.value, y1, y2, right.value, (low + high) * 0.5));
-    }
-    return static_cast<float>(left.value + (right.value - left.value) * factor);
+    // `later` is the first key beyond the playhead (of keys sharing a frame, the last one wins).
+    const auto later = std::partition_point(keyframes.begin(), keyframes.end(),
+                                            [frame](const ScalarAnimationKeyframe& key) {
+                                                return key.frame <= frame;
+                                            });
+    if (later == keyframes.end()) return keyframes.back().value;
+    const ScalarAnimationKeyframe& to   = *later;
+    const ScalarAnimationKeyframe& from = *std::prev(later);
+    if (frame == from.frame) return from.value;
+    const double span = to.frame - from.frame;
+    if (!(span > 0.0)) return to.value;
+    return static_cast<float>(ValueBetween(from, to, span, (frame - from.frame) / span));
 }
 
 double ScalarAnimation::FrameCount() const
@@ -360,6 +392,8 @@ void CollectCrossedEvents(const ScalarAnimation& animation, double previous, dou
 void ScalarAnimationPlayback::Advance(double seconds)
 {
     if (!playing || !std::isfinite(seconds) || seconds <= 0.0) return;
+    // A clock of no (or a negative) frame rate moves nothing.
+    if (!(animation.fps > 0.0)) return;
     const double length = animation.FrameCount();
     const double previous = frame;
     const double next = frame + seconds * animation.fps * rate;
@@ -402,36 +436,23 @@ std::unique_ptr<DynamicValue> ResolveBoolSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& setting,
     std::string_view current_layer_name,
-    PropertyScriptObject object)
-{
-    auto value = std::make_unique<DynamicValue>(parse_bool(setting));
-    value      = wrap_script_if_needed(
-        context,
-        setting,
-        current_layer_name,
-        std::move(value),
-        ScriptedValueSemantic::Generic,
-        object);
-    bind_user_property(context, setting, *value);
-    return value;
+    int animation_layer_index,
+    std::string effect_reference) {
+    ScriptSite site { current_layer_name, ScriptedValueSemantic::Generic, animation_layer_index };
+    site.effect_reference = std::move(effect_reference);
+    return Finish(context, setting, std::make_unique<DynamicValue>(parse_bool(setting)), site,
+                  FollowShape::Whole);
 }
 
 std::unique_ptr<DynamicValue> ResolveFloatSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& setting,
     std::string_view current_layer_name,
-    PropertyScriptObject object)
-{
-    auto value = std::make_unique<DynamicValue>(parse_float(setting));
-    value      = wrap_script_if_needed(
-        context,
-        setting,
-        current_layer_name,
-        std::move(value),
-        ScriptedValueSemantic::Generic,
-        object);
-    bind_user_property(context, setting, *value);
-    return value;
+    int animation_layer_index) {
+    const ScriptSite site { current_layer_name, ScriptedValueSemantic::Generic,
+                            animation_layer_index };
+    return Finish(context, setting, std::make_unique<DynamicValue>(read_number(setting)), site,
+                  FollowShape::Whole);
 }
 
 std::unique_ptr<DynamicValue> ResolveVec3Setting(
@@ -439,22 +460,15 @@ std::unique_ptr<DynamicValue> ResolveVec3Setting(
     const nlohmann::json& setting,
     std::string_view current_layer_name,
     Vec3SettingSemantic semantic,
-    PropertyScriptObject object)
-{
-    auto value = std::make_unique<DynamicValue>(parse_vec3(setting));
-    const auto scripted_semantic =
-        semantic == Vec3SettingSemantic::AnglesDegrees
-        ? ScriptedValueSemantic::AnglesDegrees
-        : ScriptedValueSemantic::Generic;
-    value      = wrap_script_if_needed(
-        context,
-        setting,
-        current_layer_name,
-        std::move(value),
-        scripted_semantic,
-        object);
-    bind_vec3_user_property(context, setting, *value);
-    return value;
+    std::shared_ptr<ScalarAnimationPlayback> own_animation) {
+    ScriptSite site;
+    site.layer_name    = current_layer_name;
+    site.own_animation = std::move(own_animation);
+    if (semantic == Vec3SettingSemantic::AnglesDegrees) {
+        site.semantic = ScriptedValueSemantic::AnglesDegrees;
+    }
+    return Finish(context, setting, std::make_unique<DynamicValue>(parse_vec3(setting)), site,
+                  FollowShape::Vec3);
 }
 
 std::unique_ptr<DynamicValue> ResolveVectorSetting(
@@ -462,53 +476,34 @@ std::unique_ptr<DynamicValue> ResolveVectorSetting(
     const nlohmann::json& setting,
     std::size_t components,
     std::string_view current_layer_name,
-    PropertyScriptObject object)
-{
+    std::shared_ptr<ScalarAnimationPlayback> own_animation) {
     if (components == 3) {
-        return ResolveVec3Setting(context, setting, current_layer_name,
-                                  Vec3SettingSemantic::Generic, object);
+        return ResolveVec3Setting(context, setting, current_layer_name, Vec3SettingSemantic::Generic,
+                                  std::move(own_animation));
     }
-    if (components != 2 && components != 4) {
-        return ResolveFloatSetting(context, setting, current_layer_name, object);
-    }
-
-    // A single authored number fills every component, matching parse_vec3.
-    const auto& source = unwrap_value(setting);
-    const auto  component = [&](std::size_t index) {
-        return source.is_number() ? parse_float(setting) : parse_component(setting, index);
-    };
-    auto value = components == 2
-                     ? std::make_unique<DynamicValue>(
-                           Eigen::Vector2f(component(0), component(1)))
-                     : std::make_unique<DynamicValue>(
-                           Eigen::Vector4f(component(0), component(1), component(2), component(3)));
-    value = wrap_script_if_needed(
-        context,
-        setting,
-        current_layer_name,
-        std::move(value),
-        ScriptedValueSemantic::Generic,
-        object);
-    bind_user_property(context, setting, *value);
-    return value;
+    auto literal = [&]() -> DynamicValueUniquePtr {
+        if (components == 2) {
+            const auto lanes = read_lanes<2>(setting);
+            return std::make_unique<DynamicValue>(linalg::Vector2f(lanes[0], lanes[1]));
+        }
+        if (components == 4) {
+            const auto lanes = read_lanes<4>(setting);
+            return std::make_unique<DynamicValue>(
+                linalg::Vector4f(lanes[0], lanes[1], lanes[2], lanes[3]));
+        }
+        return std::make_unique<DynamicValue>(read_number(setting));
+    }();
+    ScriptSite site { current_layer_name };
+    site.own_animation = std::move(own_animation);
+    return Finish(context, setting, std::move(literal), site, FollowShape::Whole);
 }
 
 std::unique_ptr<DynamicValue> ResolveStringSetting(
     SceneRuntimeContext& context,
     const nlohmann::json& setting,
-    std::string_view current_layer_name,
-    PropertyScriptObject object)
-{
-    auto value = std::make_unique<DynamicValue>(parse_string(setting));
-    value      = wrap_script_if_needed(
-        context,
-        setting,
-        current_layer_name,
-        std::move(value),
-        ScriptedValueSemantic::Generic,
-        object);
-    bind_user_property(context, setting, *value);
-    return value;
+    std::string_view current_layer_name) {
+    return Finish(context, setting, std::make_unique<DynamicValue>(read_text(setting)),
+                  ScriptSite { current_layer_name }, FollowShape::Whole);
 }
 
 namespace
@@ -644,6 +639,17 @@ void RegisterNodeTransformSettings(SceneRuntimeContext& context, SceneNode* node
             layer_name, Vec3TimelineClock(*timelines[i], group_last_frame[i]));
     }
 
+    // A setting a script drives is not played from its timeline, but the script reaches the
+    // timeline's clock as its own (`thisObject.getAnimation()`).
+    std::array<std::shared_ptr<ScalarAnimationPlayback>, 3> own_clock;
+    for (std::size_t i = 0; i < settings.size(); ++i) {
+        const auto& setting = *settings[i];
+        if (!bound[i] || !setting.is_object() || !setting.contains("script")) continue;
+        if (const auto keyed = ReadVec3Timeline(setting)) {
+            own_clock[i] = context.RegisterSettingClock(Vec3TimelineClock(*keyed, keyed->last_frame));
+        }
+    }
+
     const auto animation_of = [&](std::size_t property) {
         return timelines[property]
                    ? std::shared_ptr<const NodeVec3Animation>(
@@ -651,19 +657,22 @@ void RegisterNodeTransformSettings(SceneRuntimeContext& context, SceneNode* node
                    : nullptr;
     };
     if (bound[0] || timelines[0]) {
-        context.RegisterNodeTranslate(name, node, ResolveVec3Setting(context, origin, layer_name),
-                                      animation_of(0));
+        context.RegisterNodeTranslate(
+            name, node,
+            ResolveVec3Setting(context, origin, layer_name, Vec3SettingSemantic::Generic, own_clock[0]),
+            animation_of(0));
     }
     if (bound[1] || timelines[1]) {
         context.RegisterNodeScale(name, node,
                                   ResolveVec3Setting(context, scale, layer_name,
-                                                     Vec3SettingSemantic::Generic),
+                                                     Vec3SettingSemantic::Generic, own_clock[1]),
                                   animation_of(1));
     }
     if (bound[2] || timelines[2]) {
         context.RegisterNodeRotation(name, node,
                                      ResolveVec3Setting(context, angles, layer_name,
-                                                        Vec3SettingSemantic::AnglesDegrees),
+                                                        Vec3SettingSemantic::AnglesDegrees,
+                                                        own_clock[2]),
                                      animation_of(2));
     }
 }
@@ -708,98 +717,87 @@ void CloseCurveAtLoopLength(ScalarAnimation& curve)
 }
 } // namespace
 
-std::optional<ScalarAnimation> ResolveScalarAnimation(const nlohmann::json& setting,
-                                                      std::size_t component)
+namespace
 {
-    static constexpr std::array<const char*, 4> curve_keys { "c0", "c1", "c2", "c3" };
-    if (component >= curve_keys.size()) return std::nullopt;
-    if (!setting.is_object() || !setting.contains("animation")) return std::nullopt;
+float LenientNumber(const nlohmann::json& node, const char* key) {
+    const auto found = node.find(key);
+    return found == node.end() ? 0.0f : NumberOf(*found);
+}
 
-    const auto& animation = setting.at("animation");
-    if (!animation.is_object()) return std::nullopt;
+double LenientDouble(const nlohmann::json& node, const char* key) {
+    const auto found = node.find(key);
+    if (found == node.end()) return 0.0;
+    if (found->is_number()) {
+        const double number = found->get<double>();
+        return std::isfinite(number) ? number : 0.0;
+    }
+    return NumberOf(*found);
+}
 
-    const auto options_iterator = animation.find("options");
-    const auto curve_iterator   = animation.find(curve_keys[component]);
-    if (options_iterator == animation.end() || curve_iterator == animation.end()) {
-        return std::nullopt;
-    }
-    if (!options_iterator->is_object() || !curve_iterator->is_array() || curve_iterator->empty()) {
-        return std::nullopt;
-    }
+ScalarAnimationHandle ReadHandle(const nlohmann::json& key, const char* member) {
+    ScalarAnimationHandle handle;
+    const auto            found = key.find(member);
+    if (found == key.end() || !found->is_object()) return handle;
+    const auto enabled = found->find("enabled");
+    handle.enabled     = enabled != found->end() && parse_bool(*enabled);
+    handle.x           = LenientDouble(*found, "x");
+    handle.y           = LenientDouble(*found, "y");
+    return handle;
+}
+} // namespace
 
-    ScalarAnimation result;
-    result.initial_value = parse_component(setting, component);
+std::optional<ScalarAnimation> ResolveScalarAnimation(const nlohmann::json& setting,
+                                                      std::size_t component) {
+    if (component >= 4 || !setting.is_object()) return std::nullopt;
+    const auto animation = setting.find("animation");
+    if (animation == setting.end() || !animation->is_object()) return std::nullopt;
+    const auto options = animation->find("options");
+    if (options == animation->end() || !options->is_object()) return std::nullopt;
+    const auto lane = animation->find("c" + std::to_string(component));
+    if (lane == animation->end() || !lane->is_array() || lane->empty()) return std::nullopt;
 
-    const auto& options = *options_iterator;
-    if (options.contains("fps")) {
-        result.fps = static_cast<double>(parse_float(options.at("fps")));
+    ScalarAnimation curve;
+    for (const auto& entry : *lane) {
+        if (!entry.is_object() || !entry.contains("frame") || !entry.contains("value")) continue;
+        ScalarAnimationKeyframe key;
+        key.frame = LenientDouble(entry, "frame");
+        key.value = LenientNumber(entry, "value");
+        key.front = ReadHandle(entry, "front");
+        key.back  = ReadHandle(entry, "back");
+        curve.keyframes.push_back(key);
     }
-    if (options.contains("length")) {
-        result.length_frames = static_cast<double>(parse_float(options.at("length")));
+    if (curve.keyframes.empty()) return std::nullopt;
+    std::stable_sort(curve.keyframes.begin(), curve.keyframes.end(),
+                     [](const auto& left, const auto& right) { return left.frame < right.frame; });
+
+    curve.initial_value = read_lane(setting, component);
+    curve.fps           = LenientDouble(*options, "fps");
+    curve.length_frames = LenientDouble(*options, "length");
+    const auto mode = options->find("mode");
+    if (mode != options->end() && mode->is_string() && mode->get_ref<const std::string&>() == "loop") {
+        curve.mode = ScalarAnimationMode::Loop;
     }
-    if (options.contains("mode") && options.at("mode").is_string()) {
-        result.mode = options.at("mode").get<std::string>() == "loop"
-                          ? ScalarAnimationMode::Loop
-                          : ScalarAnimationMode::Single;
-    }
-    if (options.contains("name") && options.at("name").is_string()) {
-        result.name = options.at("name").get<std::string>();
-    }
-    if (options.contains("startpaused")) result.start_paused = parse_bool(options.at("startpaused"));
-    if (const auto events = options.find("events");
-        events != options.end() && events->is_array()) {
+    const auto name = options->find("name");
+    if (name != options->end() && name->is_string()) curve.name = name->get<std::string>();
+    const auto paused = options->find("startpaused");
+    curve.start_paused = paused != options->end() && parse_bool(*paused);
+
+    const auto events = options->find("events");
+    if (events != options->end() && events->is_array()) {
         for (const auto& entry : *events) {
-            if (!entry.is_object() || !entry.contains("name") || !entry.at("name").is_string()) {
-                continue;
-            }
-            ScalarAnimationEvent parsed;
-            parsed.name = entry.at("name").get<std::string>();
-            if (entry.contains("frame")) {
-                parsed.frame = static_cast<double>(parse_float(entry.at("frame")));
-            }
-            result.events.push_back(std::move(parsed));
+            if (!entry.is_object()) continue;
+            const auto event_name = entry.find("name");
+            if (event_name == entry.end() || !event_name->is_string()) continue;
+            curve.events.push_back(
+                ScalarAnimationEvent { LenientDouble(entry, "frame"), event_name->get<std::string>() });
         }
-        std::sort(result.events.begin(),
-                  result.events.end(),
-                  [](const ScalarAnimationEvent& left, const ScalarAnimationEvent& right) {
-                      return left.frame < right.frame;
-                  });
+        std::stable_sort(curve.events.begin(), curve.events.end(),
+                         [](const auto& left, const auto& right) { return left.frame < right.frame; });
     }
 
-    for (const auto& keyframe : *curve_iterator) {
-        if (!keyframe.is_object() || !keyframe.contains("frame") || !keyframe.contains("value")) {
-            continue;
-        }
-
-        ScalarAnimationKeyframe parsed;
-        parsed.frame = static_cast<double>(parse_float(keyframe.at("frame")));
-        parsed.value = parse_float(keyframe.at("value"));
-        const auto parse_handle = [](const nlohmann::json& source, const char* key) {
-            ScalarAnimationHandle handle;
-            const auto iterator = source.find(key);
-            if (iterator == source.end() || !iterator->is_object()) return handle;
-            if (iterator->contains("enabled")) handle.enabled = parse_bool(iterator->at("enabled"));
-            if (iterator->contains("x")) handle.x = parse_float(iterator->at("x"));
-            if (iterator->contains("y")) handle.y = parse_float(iterator->at("y"));
-            return handle;
-        };
-        parsed.back = parse_handle(keyframe, "back");
-        parsed.front = parse_handle(keyframe, "front");
-        result.keyframes.push_back(parsed);
-    }
-
-    if (result.keyframes.empty()) return std::nullopt;
-
-    std::sort(
-        result.keyframes.begin(),
-        result.keyframes.end(),
-        [](const ScalarAnimationKeyframe& left, const ScalarAnimationKeyframe& right) {
-            return left.frame < right.frame;
-        });
-    if (options.contains("wraploop") && parse_bool(options.at("wraploop"))) {
-        CloseCurveAtLoopLength(result);
-    }
-    return result;
+    const auto wrap = options->find("wraploop");
+    if (wrap != options->end() && parse_bool(*wrap)) CloseCurveAtLoopLength(curve);
+    return curve;
 }
 
 } // namespace wallpaper

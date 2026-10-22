@@ -149,9 +149,10 @@ pub struct BridgeWebWallpaper {
     pub volume: f32,
     pub muted: bool,
     pub audio_response_enabled: bool,
-    /// Whether this wallpaper opted in to system media integration. The host
-    /// still has to find a usable system media source; this is only the user's
-    /// consent to look.
+    /// Whether this wallpaper shares system media integration: on by default,
+    /// off once the user turns it off for this wallpaper. The host still has to
+    /// find a usable system media source; this is only the user's consent to
+    /// look.
     pub media_integration_enabled: bool,
     /// Wallpaper Engine `applyUserProperties` payload for every user-editable
     /// property, overrides applied over defaults. Each entry is
@@ -341,6 +342,9 @@ pub struct BridgeDisplayConfigRow {
     pub can_restore_defaults: bool,
 }
 
+/// Range and granularity of a slider property.
+/// A host draws the control from these numbers.
+/// `precision` is the number of decimals to show.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct BridgeSliderMetadata {
     pub min: f64,
@@ -349,92 +353,163 @@ pub struct BridgeSliderMetadata {
     pub precision: u32,
 }
 
+/// One entry of a combo property: what the user reads and the value stored
+/// when it is picked.
+/// The value keeps the project's own type, so numeric combos stay numeric.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct BridgeComboOption {
     pub label: String,
     pub value: BridgePropertyValue,
 }
 
+/// One row of a wallpaper's property editor, with everything a host needs to
+/// draw and edit it without reading the project file itself.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct BridgePropertyDescriptor {
+    /// The property's key in the project.
     pub id: String,
+    /// Which control the property is edited with.
+    /// Kinds this build does not know are reported as `Unknown`
+    /// instead of being dropped from the list.
     pub kind: BridgePropertyKind,
+    /// The label as authored; it may carry HTML markup.
     pub label_html: String,
+    /// The current value of the property.
+    /// It includes edits that have not been applied yet,
+    /// which is why `dirty` exists next to it.
     pub value: BridgePropertyValue,
+    /// The value the wallpaper's author shipped, as authored.
+    /// Edits never change it; it is what the property is compared
+    /// with and returned to.
     pub default_value: BridgePropertyValue,
+    /// Present for sliders only.
     pub slider: Option<BridgeSliderMetadata>,
+    /// Empty unless the property is a combo.
     pub combo_options: Vec<BridgeComboOption>,
-    /// Present only on file and directory properties, and only when the
-    /// project declared a file-type option.
+    /// Present on file and directory properties, and only when the project
+    /// declared a file-type option.
     pub file_filter: Option<BridgeFileFilter>,
-    /// Present only on directory properties.
+    /// Present on directory properties only.
     pub directory_mode: Option<BridgeDirectoryMode>,
+    /// Edited but not applied yet.
     pub dirty: bool,
+    /// Reported for the restore-defaults control of the host's editor.
+    /// The bridge decides it so that every host offers the action
+    /// under the same conditions.
     pub can_restore_defaults: bool,
     /// False while an authored visibility rule hides the property. The row is
-    /// still listed, with the value the renderer is using, so a host can show only
-    /// the enabled rows and still reach the rest. A rule the bridge cannot read
-    /// never disables a property.
+    /// still listed, with the value the renderer uses; a rule that cannot be
+    /// read never disables a property.
     pub enabled: bool,
-    /// File and directory properties only: the app holds its own copy of this
-    /// property's assets in managed storage, so deleting or re-downloading the
-    /// wallpaper does not lose them. Always false for every other kind.
+    /// File and directory properties: the app keeps its own managed copy of
+    /// the property's assets. False for every other kind.
     pub asset_managed: bool,
-    /// File and directory properties only: the property names something, and
-    /// neither the user's own path nor a managed copy resolves any more. An
-    /// unset property is not missing.
+    /// File and directory properties: the property names something and neither
+    /// the user's own path nor a managed copy resolves any more. A property
+    /// that is not set is not missing.
     pub asset_missing: bool,
-    /// The user's own path, for display. `None` when the property is unset.
+    /// The user's own path, for display; `None` when the property is not set.
     pub asset_source_path: Option<String>,
 }
 
+/// The options page of one wallpaper: its properties, where it runs, and its
+/// audio switches, as the user sees them before pressing Apply.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct BridgeWallpaperOptionsSnapshot {
     pub wallpaper_id: String,
     pub title: String,
+    /// Scene, video or web page; decides which options exist at all.
+    /// Only scenes take property edits.
+    /// The rest of the page is the same for every kind.
     pub kind: BridgeWallpaperKind,
+    /// Whether the bridge supports applying this wallpaper at all.
+    /// A host should not offer Apply for one it does not support.
+    /// The reason is not part of this record.
     pub supported: bool,
+    /// Edits exist on this page that have not been applied.
+    /// They are kept by the bridge, so every host sees the same answer.
+    /// Per-property flags are on the rows of `properties`.
     pub dirty: bool,
     pub properties: Vec<BridgePropertyDescriptor>,
     pub display_configurations: Vec<BridgeDisplayConfigRow>,
     pub audio_response_enabled: bool,
     /// The user's consent to look for a system media source for this
-    /// wallpaper. Consent, not availability.
+    /// wallpaper; on until switched off. It says nothing about whether a
+    /// source exists.
     pub media_integration_enabled: bool,
     pub muted: bool,
     pub volume: f32,
 }
 
+/// One display's line in the monitor-information view.
+/// The text fields are ready to show, so the view does no lookups
+/// of its own.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct BridgeMonitorInfoRow {
     pub display_id: String,
     pub title: String,
+    /// The wallpaper shown on this display.
+    /// Its title follows in `wallpaper_title`.
+    /// The two always describe the same wallpaper.
     pub wallpaper_id: String,
     pub wallpaper_title: String,
+    /// Set when this display mirrors another one.
+    /// It names the source display by the id the settings rows use,
+    /// and `mirror_target_title` carries that display's title.
     pub mirror_target_display_id: Option<String>,
     pub mirror_target_title: Option<String>,
+    /// The scaling mode, as text for display.
+    /// The settings rows carry the same setting as a typed value
+    /// (`BridgeDisplaySettingsRow::scaling_mode`).
     pub scaling_mode: String,
+    /// The frame rate in effect, as text for display.
+    /// The settings rows carry it as a number
+    /// (`BridgeDisplaySettingsRow::target_fps`).
     pub target_fps: String,
+    /// Whether the wallpaper on this display reacts to system audio.
     pub audio_response: bool,
 }
 
+/// All rows of the monitor-information view.
+/// They follow the order of the settings page, so the two views
+/// list the displays the same way.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct BridgeMonitorInformationSnapshot {
     pub rows: Vec<BridgeMonitorInfoRow>,
 }
 
+/// One display's block on the settings page.
+/// It holds floats, so it derives `PartialEq` but not `Eq`.
+/// The id is what the display mutations take as their first argument.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct BridgeDisplaySettingsRow {
+    /// The key of the display in the display mutations: "primary", a live
+    /// display id, or an identity selector. The settings rows and the
+    /// monitor-information rows use the same keys.
     pub display_id: String,
     pub title: String,
+    /// Whether wallpapers are shown on this display at all.
     pub enabled: bool,
+    /// Standalone shows a wallpaper of its own; Mirror repeats another display.
     pub mode: BridgeDisplayMode,
+    /// The display ids this display may be set to mirror.
+    /// They use the same keys as `display_id`.
+    /// `selected_mirror_target` names the one in use, if any.
     pub mirror_targets: Vec<String>,
     pub selected_mirror_target: Option<String>,
     pub scaling_mode: BridgeScalingMode,
+    /// Scale applied on top of the scaling mode; 1.0 is the neutral value.
+    /// It must be finite and positive to be accepted.
+    /// Changes wait for Apply, like the other scene edits.
     pub scaling_factor: f64,
+    /// The frame rate in effect for this display.
+    /// The monitor-information view shows it as text
+    /// (`BridgeMonitorInfoRow::target_fps`).
     pub target_fps: u32,
+    /// The highest frame rate offered for this display.
+    /// It is the upper end of the range a host lets the user pick from.
+    /// `target_fps` is chosen within it.
     pub max_fps: u32,
     pub muted: bool,
     pub volume: f32,
@@ -449,6 +524,9 @@ pub enum BridgeLogLevel {
     Error,
 }
 
+/// Where the logs are kept and which file is being written.
+/// `active_session` names the current run of the app.
+/// The size is that of the active file at the time of the read.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct BridgeLogStatus {
     pub logs_root: String,
@@ -457,6 +535,9 @@ pub struct BridgeLogStatus {
     pub active_file_size_bytes: u64,
 }
 
+/// Disk use shown on the settings page.
+/// The shader cache is the compiled-shader directory.
+/// The log status describes the current log file.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct BridgeStorageStatus {
     pub shader_cache_size_bytes: u64,
@@ -502,12 +583,10 @@ pub struct BridgeSceneUpdateModeReport {
     pub reasons: Vec<String>,
 }
 
-/// Which renderer actually drew the scene on one display.
+/// Whether a renderer is drawing the scene on one display.
 ///
-/// `backend` is what ran, not what was asked for. `fallback_reason` is present
-/// only when the user preferred the native Metal backend and this scene did
-/// not get it, so its absence on a compatibility row means the user never
-/// asked rather than that no reason was recorded.
+/// `backend` is `"native_metal"` while Native Metal is drawing it, and
+/// `"unknown"` while the scene is still being read or is held in a failure.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct BridgeSceneBackendReport {
     pub display_id: u32,
@@ -515,11 +594,21 @@ pub struct BridgeSceneBackendReport {
     pub wallpaper_id: String,
     pub wallpaper_title: String,
     pub backend: String,
-    pub fallback_reason: Option<String>,
+    /// Why the scene is held and not drawn, when Native Metal could not draw
+    /// it: the stage (`"unsupported"`, `"prepare"`, `"compile"`, `"frame"` or
+    /// `"surface"`), a category the host words for the user, and the renderer's
+    /// own English explanation for diagnostics. Both are `None` for a scene
+    /// that is drawing, and `backend` is `"unknown"` while they are set:
+    /// nothing is drawing the scene, and the display shows its last frame or
+    /// the project's preview picture.
+    pub failure_stage: Option<String>,
+    pub failure_reason: Option<String>,
     /// How this scene's video textures reached the shaders that sample them on
     /// the last frame it drew: `"none"`, `"bgra"`, `"nv12_direct"`,
-    /// `"nv12_converted"` or `"nv12_mixed"`. A read-back, not a preference: a
-    /// scene with no video, or one still starting, reports `"none"`.
+    /// `"nv12_converted"`, `"nv12_mixed"`, `"nv12_converted_preparing"` or
+    /// `"yuv10_converted"` (10-bit video, HDR tone mapped to SDR). A read-back,
+    /// not a preference: a scene with no video, or one still starting, reports
+    /// `"none"`.
     pub video_path: String,
     /// Whether this scene is really running under the saved
     /// `scene_optimization_enabled` value, rather than still carrying the plan
@@ -545,17 +634,7 @@ pub struct BridgeSettingsSnapshot {
     pub core_version: String,
     pub shader_pipeline_version: String,
     pub storage: BridgeStorageStatus,
-    /// `"compatibility"` or `"native_preferred"`: the user's choice, which for
-    /// a given display may or may not be what `video_backends` reports.
-    pub video_backend: String,
     pub video_backends: Vec<BridgeVideoBackendReport>,
-    /// Read back from the renderer process, not from the saved preference.
-    pub content_pacing_enabled: bool,
-    pub shared_video_decode_enabled: bool,
-    /// Live decoder instances, and the surfaces consuming them. Sharing is
-    /// consumers exceeding sessions; the setting being on does not imply it.
-    pub shared_video_decode_sessions: u32,
-    pub shared_video_decode_consumers: u32,
     /// The saved preference for the scene renderer's static-subgraph caching
     /// and copy-pass elimination. On by default. Unlike the video pipeline
     /// fields above this is the preference, not a renderer read-back: the
@@ -570,10 +649,6 @@ pub struct BridgeSettingsSnapshot {
     /// the `video_path` of each `scene_renderers` row is what actually
     /// happened.
     pub scene_video_plane_sampling_enabled: bool,
-    /// `"compatibility"` or `"native_metal_preferred"`: the user's choice,
-    /// which for a given scene may or may not be what `scene_renderers`
-    /// reports. A saved preference, not a read-back.
-    pub scene_renderer: String,
     /// `"display"` or `"canvas"`: how many pixels a 2D scene is rasterized
     /// with before the render scale divides them. The saved preference, which
     /// every running 2D scene follows; perspective scenes and plain videos
@@ -611,15 +686,19 @@ pub struct BridgeSettingsSnapshot {
     pub render_scale_supported: bool,
 }
 
+/// Everything the panel shows, in one answer.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct BridgeSnapshotBundle {
     pub app: BridgeAppSnapshot,
     pub library: BridgeLibrarySnapshot,
+    /// `None` when no wallpaper is selected or its options cannot be built.
     pub wallpaper_options: Option<BridgeWallpaperOptionsSnapshot>,
     pub monitor_information: BridgeMonitorInformationSnapshot,
     pub settings: BridgeSettingsSnapshot,
 }
 
+/// The reply to a wallpaper mutation, carrying the options of the affected
+/// wallpaper.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct BridgeWallpaperMutationBundle {
     pub app: BridgeAppSnapshot,
@@ -629,6 +708,7 @@ pub struct BridgeWallpaperMutationBundle {
     pub settings: BridgeSettingsSnapshot,
 }
 
+/// The reply to a display mutation.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct BridgeDisplayMutationBundle {
     pub app: BridgeAppSnapshot,
@@ -702,7 +782,7 @@ pub struct BridgeRendererSurfaceCounters {
     /// cache is keeping alive, and the most it ever kept alive. Gauges, not
     /// running totals, and an allocation ledger over those destination
     /// textures alone: decode pixel buffers, Core Video plane wrappers, the
-    /// Vulkan images aliasing them and the swapchain are all outside it, so
+    /// the drawables the layer hands out are all outside it, so
     /// neither figure is a residency or process-footprint measurement.
     pub video_conversion_live_bytes: u64,
     pub video_conversion_peak_live_bytes: u64,
@@ -744,15 +824,13 @@ pub struct BridgeSurfaceCheck {
     pub frames_after: u64,
 }
 
-/// A plain local video routed to the native platform player instead of the
-/// scene engine.
+/// A plain local video, played by the host's own player.
 ///
-/// Only the declared subset appears here. `fps` is this display's own target
-/// rate and is a requirement, not a hint. Admission, however, is judged against
-/// `admission_fps`, which is the strictest target across the mirror group this
-/// display belongs to: the host must refuse the wallpaper rather than play any
-/// member at a rate its own target does not allow, and a refusal sends the
-/// whole group back to the scene engine, which supports everything.
+/// Every plain video with a resolvable media file appears here; the scene engine is never given
+/// one. The player plays a clip at the clip's own frame rate: the frame-rate cap applies to scenes
+/// and web wallpapers, so no rate travels with this descriptor and none decides whether the host may
+/// take the clip. A file the host cannot play is the host's to report as a failed state of that
+/// display (the display keeps its previous picture); nothing else plays it instead.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct BridgeNativeVideoWallpaper {
     pub display_id: u32,
@@ -763,25 +841,16 @@ pub struct BridgeNativeVideoWallpaper {
     /// Absolute path to the media file, already containment-checked against the
     /// project directory.
     pub media_path: String,
-    /// This display's own target frame rate: what the player runs at here.
-    pub fps: u32,
-    /// The target rate the accept-or-refuse decision must be judged against:
-    /// the strictest `fps` across this display's mirror group, equal to `fps`
-    /// when the display mirrors nothing and is mirrored by nothing.
-    ///
-    /// A mirror is only ever given a scene by copying its source's, so it
-    /// cannot fall back to the scene engine on its own; the group is admitted
-    /// or refused as a unit and is only safe at its strictest member's rate.
-    /// Probing `fps` on a mirror would accept a verdict taken for a faster
-    /// source and play this display above its own target without ever asking.
-    pub admission_fps: u32,
-    /// Identifies the exact configuration this descriptor was produced from:
-    /// the media file, its length and modification time, and `admission_fps`.
-    /// Identical for every member of a mirror group. The host must pass it back
-    /// to `reject_native_video` when it refuses, so that a refusal arriving
-    /// after the user changed something is discarded instead of killing a
-    /// configuration the host never judged.
+    /// Identifies the media file this descriptor plays: its path, length and
+    /// modification time. Identical for every member of a mirror group. The host
+    /// keeps its verdict on the file, and the surface it opened for it, under this
+    /// key, so a replaced file is judged afresh and an unchanged one is not read
+    /// again.
     pub admission_key: u64,
+    /// Where the picture sits on this display when it is larger or smaller than
+    /// it, as the saved Position of this wallpaper on this display; centred for a
+    /// mirror, as the scene engine draws it. The host places the picture with it.
+    pub framing: BridgeFraming,
     /// Presentation suspension or the user's own pause, already combined for
     /// this display by the activation rules.
     pub paused: bool,

@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e1b-scene-model.md; written without access to the original source.
 #pragma once
 #include <vector>
 #include <list>
@@ -5,6 +6,9 @@
 #include <optional>
 #include <cstdint>
 #include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include "Core/Literals.hpp"
 #include "SceneMaterial.h"
 #include "Type.hpp"
@@ -59,16 +63,20 @@ class SceneImageEffectLayer {
 public:
     SceneImageEffectLayer(SceneNode* node, float w, float h, std::string_view pingpong_a,
                           std::string_view pingpong_b);
+    ~SceneImageEffectLayer();
+    SceneImageEffectLayer(const SceneImageEffectLayer&)            = delete;
+    SceneImageEffectLayer& operator=(const SceneImageEffectLayer&) = delete;
 
-    void AddEffect(const std::shared_ptr<SceneImageEffect>& node) { m_effects.push_back(node); }
-    std::size_t EffectCount() const { return m_effects.size(); }
-    auto&       GetEffect(std::size_t index) { return m_effects.at(index); }
-    const auto& FirstTarget() const { return m_pingpong_a; }
-    SceneMesh&  FinalMesh() const { return *m_final_mesh; }
-    SceneNode&  FinalNode() const { return *m_final_node; }
-    SceneNode*  ResolvedFinalRenderNode() const { return m_resolved_final_render_node; }
+    void AddEffect(const std::shared_ptr<SceneImageEffect>& node);
+    std::size_t EffectCount() const;
+    std::shared_ptr<SceneImageEffect>& GetEffect(std::size_t index);
+    const std::string& FirstTarget() const;
+    const std::string& SecondTarget() const;
+    SceneMesh&  FinalMesh() const;
+    SceneNode&  FinalNode() const;
+    SceneNode*  ResolvedFinalRenderNode() const;
     void        SetFinalMeshDynamic(MeshUpdate update);
-    void        SetFinalBlend(BlendMode m) { m_final_blend = m; }
+    void        SetFinalBlend(BlendMode m);
     /// The depth test and depth write the last pass draws with. The chain's
     /// last pass is what puts the layer into the scene, and Wallpaper Engine
     /// draws it with the ones the layer authored for its own material, as it
@@ -86,32 +94,28 @@ public:
     /// scene; a fullscreen layer's result is the screen and must cover it
     /// however a camera layer frames the scene.
     void        SetFinalCamera(std::string camera) { m_final_camera = std::move(camera); }
-    /// The chain's result goes only into the layer's own composite, which
-    /// another layer samples, and never onto the scene: the layer's card has
-    /// no area on screen (`SceneNode::CompositeOnly` on the last pass).
-    void        SetFinalCompositeOnly(bool only) { m_final_composite_only = only; }
 
     void ResolveEffect(const SceneMesh& defualt_mesh, std::string_view effect_cam);
 
 private:
-    SceneNode*  m_worldNode;
-    std::string m_pingpong_a;
-    std::string m_pingpong_b;
+    std::string                                    m_pingpong_a;
+    std::string                                    m_pingpong_b;
+    std::vector<std::shared_ptr<SceneImageEffect>> m_effects;
+    std::unique_ptr<SceneMesh>                     m_final_mesh;
+    std::unique_ptr<SceneNode>                     m_final_node;
+    BlendMode                                      m_final_blend { BlendMode::Normal };
+    SceneNode*                                     m_resolved_final { nullptr };
+    /// Which authored names `ResolveEffect` has recorded already: nodes by address,
+    /// and for each effect how many of its commands.
+    std::unordered_set<const SceneImageEffectNode*>      m_recorded_nodes;
+    std::unordered_map<const SceneImageEffect*, std::size_t> m_recorded_commands;
+    bool                                           m_logged_missing_material { false };
 
     std::string m_final_camera;
-    //    std::vector<float> m_size;
-    std::unique_ptr<SceneMesh> m_final_mesh;
-    std::unique_ptr<SceneNode> m_final_node;
-    SceneNode*                 m_resolved_final_render_node { nullptr };
-    BlendMode                  m_final_blend;
     std::optional<BlendMode>   m_idle_final_blend;
 
     /// The depth test and write the last pass is drawn with; empty keeps the
     /// ones its own material authored.
     std::optional<SceneDepthState> m_final_depth;
-    bool                           m_final_composite_only { false };
-
-    std::vector<std::shared_ptr<SceneImageEffect>> m_effects;
-    bool                                           m_authored_captured { false };
 };
 } // namespace wallpaper

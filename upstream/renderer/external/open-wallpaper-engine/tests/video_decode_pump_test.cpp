@@ -39,7 +39,7 @@ public:
     DecodeStatus ReadPacket(std::string* /*error*/) override
     {
         EXPECT_FALSE(m_packet_held) << "the pump must not read over a held packet";
-        // Packets of other streams are consumed here, exactly as the FFmpeg
+        // Packets of other streams are consumed here, exactly as a demuxer-backed
         // implementation does, and never surface to the pump.
         while (m_other_stream_remaining > 0) {
             --m_other_stream_remaining;

@@ -1,5 +1,5 @@
+// Clean-room implementation from the WallpaperMachine spec e6-platform-host-api.md; written without access to the original source.
 #include "Presentation/WallpaperScaling.hpp"
-#include "Presentation/WallpaperBackdrop.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -7,21 +7,14 @@
 namespace wallpaper
 {
 
-namespace
+std::optional<WallpaperScalingMode> WallpaperScalingModeFromValue(int64_t value)
 {
-
-int32_t round_px(double value)
-{
-    return static_cast<int32_t>(std::lround(value));
+    if (value < static_cast<int64_t>(WallpaperScalingMode::NONE) ||
+        value > static_cast<int64_t>(WallpaperScalingMode::FIT_BLURRED)) {
+        return std::nullopt;
+    }
+    return static_cast<WallpaperScalingMode>(value);
 }
-
-double normalize_scale_factor(double factor)
-{
-    if (!std::isfinite(factor) || factor <= 0.0) return 1.0;
-    return factor;
-}
-
-} // namespace
 
 WallpaperScalingLayout ComputeWallpaperScalingLayout(
     WallpaperScalingMode mode,
@@ -34,162 +27,64 @@ WallpaperScalingLayout ComputeWallpaperScalingLayout(
     double pan_x,
     double pan_y)
 {
-    WallpaperScalingLayout layout {};
-    layout.scene_width = std::max<uint32_t>(1, scene_width);
-    layout.scene_height = std::max<uint32_t>(1, scene_height);
-    layout.display_logical_width = std::max<uint32_t>(1, display_logical_width);
-    layout.display_logical_height = std::max<uint32_t>(1, display_logical_height);
+    const auto usable = [](double v) { return std::isfinite(v) && v > 0.0 ? v : 1.0; };
+    const double user_factor = usable(wallpaper_scale_factor);
+    const double dpr         = usable(display_scale_factor);
+    const WallpaperFraming pan = NormalizeWallpaperFraming(WallpaperFraming { pan_x, pan_y });
 
-    const double sx = layout.display_logical_width / layout.scene_width;
-    const double sy = layout.display_logical_height / layout.scene_height;
+    const double scene_w   = std::max<uint32_t>(1, scene_width);
+    const double scene_h   = std::max<uint32_t>(1, scene_height);
+    const double display_w = std::max<uint32_t>(1, display_logical_width);
+    const double display_h = std::max<uint32_t>(1, display_logical_height);
+    const double ratio_x   = display_w / scene_w;
+    const double ratio_y   = display_h / scene_h;
 
+    double scale_x = 1.0;
+    double scale_y = 1.0;
     switch (mode) {
-    case WallpaperScalingMode::NONE:
-        layout.scale_x = 1.0;
-        layout.scale_y = 1.0;
-        break;
     case WallpaperScalingMode::STRETCH:
-        layout.scale_x = sx;
-        layout.scale_y = sy;
+        scale_x = ratio_x;
+        scale_y = ratio_y;
         break;
     case WallpaperScalingMode::FIT:
-    case WallpaperScalingMode::FIT_BLURRED: {
-        const double scale = std::min(sx, sy);
-        layout.scale_x = scale;
-        layout.scale_y = scale;
-        break;
+    case WallpaperScalingMode::FIT_BLURRED: scale_x = scale_y = std::min(ratio_x, ratio_y); break;
+    case WallpaperScalingMode::FILL: scale_x = scale_y = std::max(ratio_x, ratio_y); break;
+    case WallpaperScalingMode::NONE:
+    default: break;
     }
-    case WallpaperScalingMode::FILL: {
-        const double scale = std::max(sx, sy);
-        layout.scale_x = scale;
-        layout.scale_y = scale;
-        break;
-    }
-    }
+    scale_x *= user_factor;
+    scale_y *= user_factor;
 
-    const double user_factor = normalize_scale_factor(wallpaper_scale_factor);
-    layout.scale_x *= user_factor;
-    layout.scale_y *= user_factor;
+    const double content_w = scene_w * scale_x;
+    const double content_h = scene_h * scale_y;
+    const double x         = (display_w - content_w) * pan.pan_x;
+    const double y         = (display_h - content_h) * pan.pan_y;
+    const auto   px        = [](double v) { return static_cast<int32_t>(std::lround(v)); };
 
-    const double logical_width = layout.scene_width * layout.scale_x;
-    const double logical_height = layout.scene_height * layout.scale_y;
-    // The slack is what the display has left after the wallpaper, negative when
-    // the wallpaper overflows it, so one expression places both a letterboxed
-    // and a cropped wallpaper. `viewport_px.y` is measured from the window top,
-    // so a pan of 0 puts the wallpaper's top edge on the display's top. A
-    // mirrored wallpaper is flipped inside this rectangle by the backends, so
-    // the position places the rectangle, not the mirrored picture.
-    const WallpaperFraming framing = NormalizeWallpaperFraming({ pan_x, pan_y });
-    const double logical_x = (layout.display_logical_width - logical_width) * framing.pan_x;
-    const double logical_y = (layout.display_logical_height - logical_height) * framing.pan_y;
+    WallpaperScalingLayout layout;
+    layout.scene_width            = scene_w;
+    layout.scene_height           = scene_h;
+    layout.display_logical_width  = display_w;
+    layout.display_logical_height = display_h;
+    layout.scale_x                = scale_x;
+    layout.scale_y                = scale_y;
+    layout.viewport_px = PixelRect { px(x * dpr), px(y * dpr), px(content_w * dpr),
+                                     px(content_h * dpr) };
+    layout.scissor_px  = PixelRect { 0, 0, px(display_w * dpr), px(display_h * dpr) };
 
-    layout.viewport_px = PixelRect {
-        round_px(logical_x * display_scale_factor),
-        round_px(logical_y * display_scale_factor),
-        round_px(logical_width * display_scale_factor),
-        round_px(logical_height * display_scale_factor),
-    };
-    layout.scissor_px = PixelRect {
-        0,
-        0,
-        round_px(layout.display_logical_width * display_scale_factor),
-        round_px(layout.display_logical_height * display_scale_factor),
-    };
     if (mode == WallpaperScalingMode::FIT_BLURRED) {
-        const double fill   = std::max(sx, sy);
-        const double width  = layout.scene_width * fill;
-        const double height = layout.scene_height * fill;
-        layout.backdrop_px  = PixelRect {
-            round_px((layout.display_logical_width - width) * 0.5 * display_scale_factor),
-            round_px((layout.display_logical_height - height) * 0.5 * display_scale_factor),
-            round_px(width * display_scale_factor),
-            round_px(height * display_scale_factor),
-        };
-        const auto& picture = layout.viewport_px;
-        const auto& window  = layout.scissor_px;
-        layout.backdrop     = picture.x > window.x + 1 || picture.y > window.y + 1 ||
-                          picture.x + picture.width < window.x + window.width - 1 ||
-                          picture.y + picture.height < window.y + window.height - 1;
+        // The copy covers the display the way Fill at a factor of 1 would and stays centred:
+        // neither the picture's position nor its factor moves it.
+        const double fill_scale = std::max(ratio_x, ratio_y);
+        const double fill_w     = scene_w * fill_scale;
+        const double fill_h     = scene_h * fill_scale;
+        layout.backdrop_px = PixelRect { px((display_w - fill_w) * 0.5 * dpr), px((display_h - fill_h) * 0.5 * dpr),
+                                         px(fill_w * dpr), px(fill_h * dpr) };
+        // One pixel of gap is what rounding leaves when the shapes match: no room.
+        layout.backdrop = layout.scissor_px.width - layout.viewport_px.width > 1 ||
+                          layout.scissor_px.height - layout.viewport_px.height > 1;
     }
     return layout;
-}
-
-WallpaperBackdropExtent ComputeWallpaperBackdropExtent(uint32_t source_width,
-                                                       uint32_t source_height)
-{
-    const uint32_t width   = std::max<uint32_t>(1, source_width);
-    const uint32_t height  = std::max<uint32_t>(1, source_height);
-    const uint32_t longest = std::max(width, height);
-    if (longest <= kWallpaperBackdropLongSide) return { width, height };
-    const double shrink = static_cast<double>(kWallpaperBackdropLongSide) / longest;
-    return {
-        static_cast<uint32_t>(std::max(1L, std::lround(width * shrink))),
-        static_cast<uint32_t>(std::max(1L, std::lround(height * shrink))),
-    };
-}
-
-WallpaperBackdropDownsample ComputeWallpaperBackdropDownsample(uint32_t source_width,
-                                                               uint32_t source_height,
-                                                               WallpaperBackdropExtent extent)
-{
-    WallpaperBackdropDownsample downsample;
-    downsample.block_x = static_cast<float>(std::max<uint32_t>(1, source_width)) /
-                         static_cast<float>(std::max<uint32_t>(1, extent.width));
-    downsample.block_y = static_cast<float>(std::max<uint32_t>(1, source_height)) /
-                         static_cast<float>(std::max<uint32_t>(1, extent.height));
-    // A bilinear tap averages two texels a side; taps at most four texels
-    // apart read at least every other pair on each axis. See
-    // kWallpaperBackdropTapSpacing.
-    const float spacing = static_cast<float>(kWallpaperBackdropTapSpacing);
-    downsample.taps_x =
-        static_cast<uint32_t>(std::max(1.0f, std::ceil(downsample.block_x / spacing)));
-    downsample.taps_y =
-        static_cast<uint32_t>(std::max(1.0f, std::ceil(downsample.block_y / spacing)));
-    return downsample;
-}
-
-WallpaperBackdropPlan ComputeWallpaperBackdropPlan(uint32_t source_width, uint32_t source_height)
-{
-    WallpaperBackdropPlan plan;
-    const uint32_t width  = std::max<uint32_t>(1, source_width);
-    const uint32_t height = std::max<uint32_t>(1, source_height);
-    plan.extent = ComputeWallpaperBackdropExtent(width, height);
-    const auto eighth = [](uint32_t size) {
-        return (size + kWallpaperBackdropFirstStep - 1) / kWallpaperBackdropFirstStep;
-    };
-    plan.reduced = { std::max(plan.extent.width, eighth(width)),
-                     std::max(plan.extent.height, eighth(height)) };
-    plan.two_steps = width > plan.extent.width * kWallpaperBackdropFirstStep ||
-                     height > plan.extent.height * kWallpaperBackdropFirstStep;
-    if (! plan.two_steps) {
-        plan.reduced = plan.extent;
-        plan.second  = ComputeWallpaperBackdropDownsample(width, height, plan.extent);
-        return plan;
-    }
-    plan.first  = ComputeWallpaperBackdropDownsample(width, height, plan.reduced);
-    plan.second = ComputeWallpaperBackdropDownsample(plan.reduced.width, plan.reduced.height,
-                                                     plan.extent);
-    return plan;
-}
-
-WallpaperBackdropBands ComputeWallpaperBackdropBands(const WallpaperScalingLayout& layout)
-{
-    WallpaperBackdropBands bands;
-    if (! layout.backdrop) return bands;
-    const auto& window = layout.scissor_px;
-    const auto& vp     = layout.viewport_px;
-    const int32_t left   = std::clamp(vp.x, window.x, window.x + window.width);
-    const int32_t right  = std::clamp(vp.x + vp.width, window.x, window.x + window.width);
-    const int32_t top    = std::clamp(vp.y, window.y, window.y + window.height);
-    const int32_t bottom = std::clamp(vp.y + vp.height, window.y, window.y + window.height);
-    const auto add = [&bands](int32_t x, int32_t y, int32_t width, int32_t height) {
-        if (width > 0 && height > 0) bands.rects[bands.count++] = PixelRect { x, y, width, height };
-    };
-    add(window.x, window.y, window.width, top - window.y);
-    add(window.x, bottom, window.width, window.y + window.height - bottom);
-    add(window.x, top, left - window.x, bottom - top);
-    add(right, top, window.x + window.width - right, bottom - top);
-    return bands;
 }
 
 WallpaperCursorMapping ComputeWallpaperCursorMapping(const WallpaperScalingLayout& layout,
@@ -230,32 +125,6 @@ WallpaperCursorMapping ComputeWallpaperCursorMapping(const WallpaperScalingLayou
         .content_size_x   = camera_width,
         .content_size_y   = camera_height,
         .valid            = true,
-    };
-}
-
-VkViewport MakeWallpaperViewport(const WallpaperScalingLayout& layout)
-{
-    const int32_t viewport_width = std::max(1, layout.viewport_px.width);
-    const int32_t viewport_height = std::max(1, layout.viewport_px.height);
-
-    return VkViewport {
-        .x = static_cast<float>(layout.viewport_px.x),
-        .y = static_cast<float>(layout.viewport_px.y + viewport_height),
-        .width = static_cast<float>(viewport_width),
-        .height = -static_cast<float>(viewport_height),
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f,
-    };
-}
-
-VkRect2D MakeWallpaperScissor(const WallpaperScalingLayout& layout)
-{
-    return VkRect2D {
-        .offset = { layout.scissor_px.x, layout.scissor_px.y },
-        .extent = {
-            static_cast<uint32_t>(std::max(1, layout.scissor_px.width)),
-            static_cast<uint32_t>(std::max(1, layout.scissor_px.height)),
-        },
     };
 }
 

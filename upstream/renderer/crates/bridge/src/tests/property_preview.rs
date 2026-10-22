@@ -719,10 +719,10 @@ async fn a_wallpaper_no_display_shows_a_video_and_a_web_wallpaper_are_silent() {
     show(&bridge).await.unwrap();
     show_saved(&bridge).await.unwrap();
 
-    // A video the scene engine plays has a scene, and a property document does
-    // not reach a plain video.
+    // A plain video is played by the host, never by the engine, and a property
+    // document does not reach it.
     show_wallpaper(&bridge, &engine, "400", VIDEO, &[1]).await;
-    assert_eq!(engine.rendered_scenes().len(), 1);
+    assert_eq!(engine.rendered_scenes().len(), 0);
     bridge
         .edit_property("400".into(), "alpha".into(), number(0.5))
         .await

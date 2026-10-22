@@ -50,6 +50,11 @@ final class LockScreenWallpaperService {
   @ObservationIgnored private var work: Task<Void, Never>?
   @ObservationIgnored private var extensionPreparation: Task<Void, Error>?
   @ObservationIgnored private var copyRecoveryAttempted = false
+  /// What the extension said about scenes it holds because Native Metal is the only renderer and could not
+  /// draw them (`LockScreenReadiness.held`), by display, for the revision it was read for. The extension
+  /// words it in its own language, so it is shown as written. Not a failure: the surface exists and shows
+  /// a picture, so the lock screen stays on it and the note rides on the status.
+  @ObservationIgnored private var heldNotices: (revision: String, byDisplay: [UInt32: String]) = ("", [:])
   /// The last activation stopped because macOS has the renderer switched off, so a Retry may
   /// switch it on again. Cleared by any other outcome and when nothing is requested any more.
   @ObservationIgnored private var electionRepairOffered = false
@@ -86,7 +91,9 @@ final class LockScreenWallpaperService {
   @ObservationIgnored private let watchProcessExit: (Int32, @escaping @MainActor () -> Void) -> () -> Void
   @ObservationIgnored private let displaysAreAway: () -> Bool
 
-  convenience init(bridge: WallpaperBridge, contentRevision: @escaping () -> UInt64 = { 0 }) {
+  convenience init(
+    bridge: WallpaperBridge, contentRevision: @escaping () -> UInt64 = { 0 }
+  ) {
     let registration = LockScreenExtensionRegistration(processes: .live)
     self.init(
       prepareExtension: { try await registration.prepare() },
@@ -638,11 +645,21 @@ final class LockScreenWallpaperService {
         : hasWebWallpapers
           ? String(localized: "Not applicable — web wallpapers have no lock-screen support")
           : String(localized: "Waiting for an applied video or live scene on a connected display")
+    if isEnabled, errorMessage == nil, let held = heldNotice(for: configuration) {
+      status += " — " + held
+    }
     let count = configuration.scenes.count
     screenSaverStatus = !screenSaverRequested ? String(localized: "Off") : screenSaverEnabled
       ? String(localized: "Selected for \(count) display(s) — starts when macOS is idle")
       : String(localized: "Waiting for an applied wallpaper on a connected display")
     screenSaverError = nil
+  }
+
+  /// The first note a display of `configuration` is held with, in display order, when the extension wrote one.
+  private func heldNotice(for configuration: LockScreenConfiguration) -> String? {
+    guard heldNotices.revision == configuration.revision else { return nil }
+    let notices = heldNotices.byDisplay
+    return configuration.scenes.lazy.compactMap { notices[$0.displayID] }.first
   }
 
   private func checkReadinessFailures(_ configuration: LockScreenConfiguration) throws {
@@ -803,6 +820,7 @@ final class LockScreenWallpaperService {
       try Task.checkCancellation()
       try checkExtensionFailure(configuration)
       var ready = true
+      var noted: [UInt32: String] = [:]
       for scene in configuration.scenes where scene.webEntryFile == nil {
         let file = exchange.appendingPathComponent("ready-\(scene.displayID).json")
         guard let data = try? Data(contentsOf: file),
@@ -813,8 +831,12 @@ final class LockScreenWallpaperService {
           continue
         }
         if let error = state.error { throw LockScreenWallpaperFailure(message: error) }
+        if let held = state.held { noted[scene.displayID] = held }
       }
-      if ready { return }
+      if ready {
+        heldNotices = (configuration.revision, noted)
+        return
+      }
       try await Task.sleep(for: .milliseconds(100))
     }
     try Task.checkCancellation()
@@ -973,6 +995,8 @@ private enum LockScreenAssetPublisher {
           projectRevision: projectRevision, properties: properties, exchange: exchange, reused: &sources)
         assetsRevision = projectRevision
       }
+      let isVideo = type.lowercased() == "video"
+      let nativeVideoFile = isVideo ? nativeVideoMedia(in: source, metadata: metadata) : nil
       scenes.append(
         LockScreenScene(
           displayID: input.displayID, title: input.title,
@@ -981,11 +1005,28 @@ private enum LockScreenAssetPublisher {
           fps: input.fps, scalingMode: input.scalingMode, scalingFactor: input.scalingFactor,
           propertiesJSON: properties, paused: input.paused, webEntryFile: webEntry,
           // A web page fills its window, so it has no position to carry.
-          framing: isWeb ? nil : input.framing))
+          framing: isWeb ? nil : input.framing,
+          plainVideo: isVideo ? true : nil, nativeVideoFile: nativeVideoFile))
     }
     return Prepared(
       configuration: LockScreenConfiguration(scenes: scenes),
       referencedRevisions: Set(sources.values), hasWebWallpapers: hasWebWallpapers)
+  }
+
+  /// The media file of a video project the extension may open natively: the project's `file`
+  /// when it names a regular file, not a link, inside the project folder. Anything else is nil,
+  /// and the extension holds that video and reports that the clip is missing.
+  private static func nativeVideoMedia(in project: URL, metadata: [String: Any]) -> String? {
+    guard let file = metadata["file"] as? String, !file.isEmpty, !file.hasPrefix("/") else {
+      return nil
+    }
+    let parts = file.split(separator: "/", omittingEmptySubsequences: false)
+    guard !parts.contains(".."), !parts.contains("."), !parts.contains("") else { return nil }
+    let url = project.appendingPathComponent(file)
+    guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+      values.isRegularFile == true, values.isSymbolicLink != true
+    else { return nil }
+    return file
   }
 
   /// WebKit's read grant covers exactly this project and its referenced imports,
@@ -1247,9 +1288,21 @@ private enum LockScreenAssetPublisher {
           message: String(localized: "Native wallpaper assets cannot contain symbolic links or special files: \(file.path)")
         )
       }
+      // Enumeration may resolve an ancestor alias differently from source.path.
+      // Depth identifies the relative suffix without copying path-component arrays.
+      let path = file.path
+      var relativeStart = path.endIndex
+      for _ in 0..<enumerator.level {
+        guard let separator = path[..<relativeStart].lastIndex(of: "/") else {
+          throw LockScreenWallpaperFailure(
+            message: String(localized: "Cannot enumerate wallpaper assets: \(source.path)"))
+        }
+        relativeStart = separator
+      }
+      let relative = String(path[path.index(after: relativeStart)...])
       result.append(
         Item(
-          relative: String(file.path.dropFirst(source.path.count + 1)),
+          relative: relative,
           directory: values.isDirectory == true, size: values.fileSize ?? 0,
           modified: values.contentModificationDate ?? .distantPast))
     }

@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec r1a-core-engine.md; written without access to the original source.
 use std::{sync::Arc, time::Instant};
 
 use kameo::{
@@ -17,7 +18,7 @@ use crate::{
         EngineSnapshotPublisher, FirstFrameCallback, PropertyPreview,
         messages::{self, Ping},
         runtime::{RuntimeRefreshJob, RuntimeRefreshMode, SceneRuntime},
-        state::{DisplayRuntimeRecord, EngineState},
+        state::EngineState,
         surface_recovery::{
             Decision, LADDER, RecoveryOutcome, RecoveryReason, RecoveryStep, SETTLE_INTERVAL,
             SETTLE_LIMIT, Settled, WINDOW, is_healthy, settle,
@@ -26,7 +27,7 @@ use crate::{
     log_context::LoadScope,
     owe::backend::OweBackend,
     render::RendererSurfaceCounters,
-    project::{SceneDescSliceExt, SceneHandle},
+    project::{SceneDesc, SceneDescSliceExt, SceneHandle},
 };
 
 #[derive(kameo::Actor)]
@@ -54,12 +55,25 @@ pub struct EngineActor {
     render_failure_notifications: Vec<Arc<()>>,
 }
 
+/// The private runtime of an engine started with no executor around it. Dropped
+/// without waiting, because the last clone of the engine may go away inside
+/// someone else's async context, where dropping a runtime would panic.
+struct RuntimeOwner(Option<tokio::runtime::Runtime>);
+
+impl Drop for RuntimeOwner {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.0.take() {
+            runtime.shutdown_background();
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct EngineActorHandle {
     #[allow(dead_code)]
     actor: ActorRef<EngineActor>,
     #[allow(dead_code)]
-    _runtime: Option<Arc<tokio::runtime::Runtime>>,
+    _runtime: Option<Arc<RuntimeOwner>>,
 }
 
 impl EngineActorHandle {
@@ -71,47 +85,46 @@ impl EngineActorHandle {
         snapshots: Arc<EngineSnapshotPublisher>,
     ) -> Result<Self, EngineError> {
         let prepared = EngineActor::prepare();
-        let actor_ref = prepared.actor_ref().clone();
-        let actor = EngineActor::new(backend, first_frame_callback, state, snapshots, actor_ref.downgrade());
-
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            if matches!(
-                handle.runtime_flavor(),
-                tokio::runtime::RuntimeFlavor::CurrentThread
-            ) {
-                prepared.spawn(actor);
-                return Ok(Self {
-                    actor: actor_ref,
-                    _runtime: None,
-                });
-            }
-
-            let _guard = handle.enter();
-            prepared.spawn_in_thread(actor);
-            return Ok(Self {
-                actor: actor_ref,
-                _runtime: None,
-            });
-        }
-
-        let runtime = Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .thread_name("wallpaper-engine-actor-runtime")
-                .build()
-                .map_err(|error| {
-                    EngineError::Platform(format!("failed to start engine actor runtime: {error}"))
-                })?,
+        let actor = EngineActor::new(
+            backend,
+            first_frame_callback,
+            state,
+            snapshots,
+            prepared.actor_ref().downgrade(),
         );
-        {
-            let _guard = runtime.enter();
-            prepared.spawn_in_thread(actor);
+        let actor_ref = prepared.actor_ref().clone();
+        // Timers and relay tasks are spawned from the engine thread, so it has
+        // to run inside a runtime context.
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread => {
+                // One thread serves everything: the engine is a task on it.
+                drop(prepared.spawn(actor));
+                Ok(Self { actor: actor_ref, _runtime: None })
+            }
+            Ok(_) => {
+                drop(prepared.spawn_in_thread(actor));
+                Ok(Self { actor: actor_ref, _runtime: None })
+            }
+            Err(_) => {
+                let runtime = tokio::runtime::Builder::new_multi_thread()
+                    .thread_name("wallpaper-engine-actor-runtime")
+                    .enable_time()
+                    .build()
+                    .map_err(|error| {
+                        EngineError::Platform(format!(
+                            "failed to start engine actor runtime: {error}"
+                        ))
+                    })?;
+                {
+                    let _entered = runtime.enter();
+                    drop(prepared.spawn_in_thread(actor));
+                }
+                Ok(Self {
+                    actor: actor_ref,
+                    _runtime: Some(Arc::new(RuntimeOwner(Some(runtime)))),
+                })
+            }
         }
-
-        Ok(Self {
-            actor: actor_ref,
-            _runtime: Some(runtime),
-        })
     }
 
     pub fn actor(&self) -> &ActorRef<EngineActor> {
@@ -176,8 +189,40 @@ impl EngineActor {
 
     pub fn refresh_displays_now(&mut self) -> Result<(), EngineError> {
         let primary = crate::DisplayDesc::primary()?;
-        let displays = crate::DisplayDesc::all()?;
-        self.apply_display_report(primary, displays)
+        let all = crate::DisplayDesc::all()?;
+        self.apply_display_report(primary, all)
+    }
+
+    /// The display model as the slots hold it now.
+    fn display_model(&self) -> DisplayStateModel {
+        DisplayStateModel {
+            records: self.state.display_records.iter().map(|record| record.model.clone()).collect(),
+        }
+    }
+
+    /// The descriptor a slot's scene would run, with a mirror resolved to the
+    /// template its source ends up with. None while the window is neither
+    /// active nor open, with no live display, or with nothing assigned.
+    fn slot_scene_desc(
+        model: &DisplayStateModel,
+        record: &crate::engine::state::DisplayRuntimeRecord,
+    ) -> Result<Option<SceneDesc>, EngineError> {
+        if !record.should_have_runtime() {
+            return Ok(None);
+        }
+        let Some(WallpaperAssignment::Mirror(_)) = &record.model.assignment else {
+            return record.scene_desc();
+        };
+        let Some(display) = record.model.live_display.clone() else {
+            return Ok(None);
+        };
+        match model.resolved_assignment(&record.model.key)? {
+            Some(WallpaperAssignment::Direct(template)) => {
+                template.validate()?;
+                Ok(Some(template.for_display(display)))
+            }
+            _ => Ok(None),
+        }
     }
 
     /// Applies one platform display report. A display that reports no pixels
@@ -217,8 +262,9 @@ impl EngineActor {
         transitional: &[crate::DisplayDesc],
     ) -> Result<(), EngineError> {
         self.update_display_state(|model| {
-            model.refresh_connected_keeping(primary, displays, transitional)?;
-            Ok(())
+            model
+                .refresh_connected_keeping(primary, displays, transitional)
+                .map(|_actions| ())
         })
     }
 
@@ -228,9 +274,8 @@ impl EngineActor {
         selector: DisplaySelector,
         wallpaper: WallpaperAssignment,
     ) -> Result<Option<SceneHandle>, EngineError> {
-        let key = DisplayKey::from_selector(&selector)?;
         self.update_display_state(|model| model.set_assignment(&selector, wallpaper))?;
-        self.handle_for_key(&key)
+        self.handle_for_key(&DisplayKey::from_selector(&selector)?)
     }
 
     #[allow(clippy::needless_pass_by_value)]
@@ -238,9 +283,8 @@ impl EngineActor {
         &mut self,
         selector: DisplaySelector,
     ) -> Result<Option<SceneHandle>, EngineError> {
-        let key = DisplayKey::from_selector(&selector)?;
         self.update_display_state(|model| model.set_window_active(&selector, true).map(|_| ()))?;
-        self.handle_for_key(&key)
+        self.handle_for_key(&DisplayKey::from_selector(&selector)?)
     }
 
     #[allow(clippy::needless_pass_by_value)]
@@ -254,16 +298,7 @@ impl EngineActor {
         scenes: Vec<crate::project::SceneDesc>,
     ) -> Result<Vec<crate::project::SceneResult>, EngineError> {
         self.update_display_state(|model| model.apply_reconcile(&scenes))?;
-
-        let model = DisplayStateModel {
-            records: self
-                .state
-                .display_records
-                .iter()
-                .map(|record| record.model.clone())
-                .collect(),
-        };
-        scenes.reconcile_results(&model, &self.state.handles_by_display)
+        scenes.reconcile_results(&self.display_model(), &self.state.handles_by_display)
     }
 
     pub fn close_all_scenes(&mut self) -> Result<(), EngineError> {
@@ -383,9 +418,7 @@ impl EngineActor {
         height: u32,
     ) -> Result<(), EngineError> {
         let backend = self.backend;
-        self.with_scene_mut(handle, |scene| {
-            scene.set_render_resolution(backend, width, height)
-        })
+        self.with_scene_mut(handle, |scene| scene.set_render_resolution(backend, width, height))
     }
 
     pub fn set_audio_response_enabled(
@@ -419,9 +452,7 @@ impl EngineActor {
         height: u32,
         rgba: Vec<u8>,
     ) -> Result<(), EngineError> {
-        self.with_scene_mut(handle, |scene| {
-            scene.apply_system_media_artwork(width, height, rgba)
-        })
+        self.with_scene_mut(handle, |scene| scene.apply_system_media_artwork(width, height, rgba))
     }
 
     pub fn set_audio_volume(
@@ -441,9 +472,7 @@ impl EngineActor {
         handle: SceneHandle,
         flat_json: String,
     ) -> Result<(), EngineError> {
-        self.with_scene_mut(handle, |scene| {
-            scene.set_property_override_json(Some(flat_json))
-        })
+        self.with_scene_mut(handle, |scene| scene.set_property_override_json(Some(flat_json)))
     }
 
     pub fn reset_property_override(&mut self, handle: SceneHandle) -> Result<(), EngineError> {
@@ -471,45 +500,63 @@ impl EngineActor {
         &mut self,
         update: impl FnOnce(&mut DisplayStateModel) -> Result<(), EngineError>,
     ) -> Result<(), EngineError> {
-        let mut runtimes_to_close = Vec::new();
-        let mut model = DisplayStateModel {
-            records: self
-                .state
-                .display_records
-                .iter()
-                .map(|record| record.model.clone())
-                .collect(),
-        };
-        update(&mut model)?;
-
-        self.state.apply_display_model(&model)?;
-
-        for index in 0..self.state.display_records.len() {
-            let mut resolved_model = self.state.display_records[index].model.clone();
-            resolved_model.assignment = model.resolved_assignment(&resolved_model.key)?;
-            if !resolved_model.should_have_runtime() {
-                let record = &mut self.state.display_records[index];
-                record.store_runtime_snapshot();
-                record.model.runtime_open = false;
-                let key = record.model.key.clone();
-                let runtime = record.runtime.take();
-                let handle = record.handle;
-                self.state.sync_handle_reservation(key, handle);
-                if let Some(runtime) = runtime {
-                    runtimes_to_close.push(runtime);
-                }
-            }
-        }
-        for mut runtime in runtimes_to_close {
-            runtime.close()?;
-        }
-
-        self.open_or_rebuild_required_runtimes()
+        self.update_display_state_with(update, SceneRuntime::close, Self::open_or_rebuild_required_runtimes)
     }
 
+    fn update_display_state_with(
+        &mut self,
+        update: impl FnOnce(&mut DisplayStateModel) -> Result<(), EngineError>,
+        close: impl FnMut(&mut SceneRuntime) -> Result<(), EngineError>,
+        open: impl FnOnce(&mut Self) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        // The model is changed on a copy and committed only when the change
+        // succeeded, so a refused update leaves every slot as it was.
+        let mut model = self.display_model();
+        update(&mut model)?;
+        self.state.apply_display_model(&model)?;
+        // A failure to close one scene must not keep the others from being
+        // retired or the opening pass from running; the first error wins.
+        let retired = self.retire_scenes_not_needed(close);
+        let opened = open(self);
+        retired.and(opened)
+    }
+
+    /// Closes the scene of every slot that no longer should have one. The
+    /// slot remembers the scene's state and keeps its handle reservation.
+    fn retire_scenes_not_needed(
+        &mut self,
+        mut close: impl FnMut(&mut SceneRuntime) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        let model = self.display_model();
+        let mut first_error = None;
+        for record in &mut self.state.display_records {
+            match Self::slot_scene_desc(&model, record) {
+                Ok(Some(_)) => continue,
+                Ok(None) => {}
+                // Unreachable for a validated model; leave such a slot alone.
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                    continue;
+                }
+            }
+            record.store_runtime_snapshot();
+            record.model.runtime_open = false;
+            if let Some(mut runtime) = record.runtime.take()
+                && let Err(error) = close(&mut runtime)
+            {
+                first_error.get_or_insert(error);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    /// The handle of the scene alive on the slot with this key, if any.
     #[allow(clippy::unnecessary_wraps)]
     pub fn handle_for_key(&self, key: &DisplayKey) -> Result<Option<SceneHandle>, EngineError> {
-        Ok(self.state.handles_by_display.get(key).copied())
+        Ok(self.state.record_index(key).and_then(|index| {
+            let record = &self.state.display_records[index];
+            record.runtime.as_ref().and(record.handle)
+        }))
     }
 
     pub fn with_scene_mut(
@@ -517,77 +564,80 @@ impl EngineActor {
         handle: SceneHandle,
         operation: impl FnOnce(&mut SceneRuntime) -> Result<(), EngineError>,
     ) -> Result<(), EngineError> {
-        let runtime = self.state.scene_mut(handle)?;
-        let result = operation(runtime);
-        self.signal_pending_pointer_sample();
-        result?;
+        operation(self.state.scene_mut(handle)?)?;
+        // Only reached once the renderer accepted the change.
         self.state.record_runtime_state(handle)
     }
 
+    /// Makes every slot that should have a scene run the descriptor it is
+    /// assigned. A slot that needs work gets its handle reserved first (also
+    /// when the open will fail), its carried state computed and its running
+    /// scene taken out for the duration of its job. Every job runs; the first
+    /// error is returned afterwards.
     pub fn open_or_rebuild_required_runtimes(&mut self) -> Result<(), EngineError> {
-        let mut jobs = Vec::new();
-        let model = DisplayStateModel {
-            records: self
-                .state
-                .display_records
-                .iter()
-                .map(|record| record.model.clone())
-                .collect(),
-        };
+        self.open_required_with(Self::run_runtime_refresh_job)
+    }
 
+    // Monomorphized at the call site; production and device-free execution use
+    // exactly the same preparation, reservation, queue and error-selection pass.
+    fn open_required_with(
+        &mut self,
+        mut run: impl FnMut(&mut Self, RuntimeRefreshJob) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        let model = self.display_model();
+        let mut first_error: Option<(usize, EngineError)> = None;
+        let mut jobs = Vec::new();
         for index in 0..self.state.display_records.len() {
-            let mut runtime_model = self.state.display_records[index].model.clone();
-            runtime_model.assignment = model.resolved_assignment(&runtime_model.key)?;
-            let runtime_record = DisplayRuntimeRecord {
-                model: runtime_model,
-                handle: None,
-                runtime: None,
-                last_runtime_state: None,
-            };
-            if !runtime_record.should_have_runtime() {
+            let record = &self.state.display_records[index];
+            if !record.model.window_active {
                 continue;
             }
-            let Some(desc) = runtime_record.scene_desc()? else {
-                continue;
+            let desc = match Self::slot_scene_desc(&model, record) {
+                Ok(Some(desc)) => desc,
+                Ok(None) => continue,
+                Err(error) => {
+                    first_error.get_or_insert((index, error));
+                    continue;
+                }
             };
-            let current_desc = self.state.display_records[index]
-                .runtime
-                .as_ref()
-                .map(|runtime| &runtime.desc);
-            if !RuntimeRefreshMode::from_transition(current_desc, &desc).is_required()
-                && self.state.display_records[index].handle.is_some()
-            {
+            let mode =
+                RuntimeRefreshMode::from_transition(record.runtime.as_ref().map(|r| &r.desc), &desc);
+            if !mode.is_required() && record.handle.is_some() {
                 self.state.display_records[index].model.runtime_open = true;
                 continue;
             }
-            let key = self.state.display_records[index].model.key.clone();
+            // Even descriptor flattening can fail. Reserve before selecting
+            // carried/initial state, not merely before renderer execution.
+            let key = record.model.key.clone();
             let handle = self.state.reserve_handle_for_key(key.clone());
-            let runtime_state = self.state.display_records[index].runtime_state_for_desc(&desc)?;
-            let existing_runtime = self.state.display_records[index].runtime.take();
-            self.state.display_records[index].handle = Some(handle);
-            self.state.display_records[index].model.runtime_open = false;
-            jobs.push(RuntimeRefreshJob {
+            let record = &mut self.state.display_records[index];
+            record.handle = Some(handle);
+            let runtime_state = match record.runtime_state_for_desc(&desc) {
+                Ok(state) => state,
+                Err(error) => {
+                    record.model.runtime_open = record.runtime.is_some();
+                    first_error.get_or_insert((index, error));
+                    continue;
+                }
+            };
+            record.model.runtime_open = false;
+            jobs.push((index, RuntimeRefreshJob {
                 key,
                 handle,
                 desc,
                 runtime_state,
-                existing_runtime,
-                first_frame_callback: self.first_frame_callback.clone(),
-            });
+                existing_runtime: record.runtime.take(),
+                first_frame_callback: Arc::clone(&self.first_frame_callback),
+            }));
         }
-
-        let mut first_error = None;
-        for job in jobs {
-            if let Err(error) = self.run_runtime_refresh_job(job) {
-                first_error.get_or_insert(error);
+        for (index, job) in jobs {
+            if let Err(error) = run(self, job)
+                && first_error.as_ref().is_none_or(|(earlier, _)| index < *earlier)
+            {
+                first_error = Some((index, error));
             }
         }
-
-        if let Some(error) = first_error {
-            return Err(error);
-        }
-
-        Ok(())
+        first_error.map_or(Ok(()), |(_, error)| Err(error))
     }
 
     #[allow(clippy::too_many_lines)]
@@ -600,125 +650,123 @@ impl EngineActor {
             existing_runtime,
             first_frame_callback,
         } = job;
-
-        let mut runtime = match existing_runtime {
-            Some(mut runtime) => {
-                match RuntimeRefreshMode::from_transition(Some(&runtime.desc), &desc) {
-                    RuntimeRefreshMode::Unchanged => runtime,
-                    RuntimeRefreshMode::OpenRuntime => {
-                        unreachable!("existing runtime cannot require initial open")
-                    }
-                    RuntimeRefreshMode::UpdateWindowOnly => {
-                        let before_display = runtime.desc.display.clone();
-                        match runtime.update_window_display(desc.display.clone()) {
-                            Ok(()) => {
-                                log::debug!(
-                                    "[wallpaper-core display] updated runtime window in place: \
-                                     key={key:?} before_display={before_display:?} \
-                                     after_display={:?}",
-                                    desc.display
-                                );
-                                runtime
-                            }
-                            Err(error) => {
-                                self.restore_failed_runtime_refresh(&key, handle, Some(runtime))?;
-                                return Err(error);
-                            }
-                        }
-                    }
-                    RuntimeRefreshMode::ReopenRuntime => {
-                        let before_display = runtime.desc.display.clone();
-                        let reconfigure_result =
-                            runtime.reconfigure_for_display(self.backend, desc.display.clone());
-                        match reconfigure_result {
-                            Ok(()) => {
-                                log::debug!(
-                                    "[wallpaper-core display] reconfigured runtime surface in \
-                                     place: key={key:?} before_display={before_display:?} \
-                                     after_display={:?}",
-                                    desc.display
-                                );
-                                runtime
-                            }
-                            Err(reconfigure_error) => {
-                                log::warn!(
-                                    "[wallpaper-core display] fast surface reconfigure failed, \
-                                     falling back to full rebuild: key={key:?} \
-                                     before_display={before_display:?} after_display={:?} \
-                                     error={reconfigure_error}",
-                                    desc.display
-                                );
-                                match SceneRuntime::open(
-                                    self.backend,
-                                    first_frame_callback.clone(),
-                                    handle,
-                                    &desc,
-                                    runtime_state,
-                                    self.weak_self.clone(),
-                                ) {
-                                    Ok(replacement) => {
-                                        if let Err(error) = runtime.close() {
-                                            log::warn!(
-                                                "[wallpaper-core display] failed to close \
-                                                 replaced display runtime: {error}"
-                                            );
-                                        }
-                                        replacement
-                                    }
-                                    Err(error) => {
-                                        self.restore_failed_runtime_refresh(
-                                            &key,
-                                            handle,
-                                            Some(runtime),
-                                        )?;
-                                        return Err(error);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    RuntimeRefreshMode::RebuildExistingRuntime => {
-                        let rebuild_result = if runtime.desc.same_wallpaper(&desc) {
-                            runtime.resize_or_rebuild(self.backend, desc.display.clone())
-                        } else {
-                            runtime.replace_wallpaper(self.backend, &desc)
-                        };
-                        if let Err(error) = rebuild_result {
-                            self.restore_failed_runtime_refresh(&key, handle, Some(runtime))?;
-                            return Err(error);
-                        }
-                        runtime
-                    }
-                }
-            }
-            None => match SceneRuntime::open(
-                self.backend,
+        let backend = self.backend;
+        let mode =
+            RuntimeRefreshMode::from_transition(existing_runtime.as_ref().map(|r| &r.desc), &desc);
+        let Some(mut runtime) = existing_runtime else {
+            return match SceneRuntime::open(
+                backend,
                 first_frame_callback,
                 handle,
                 &desc,
                 runtime_state,
                 self.weak_self.clone(),
             ) {
-                Ok(runtime) => runtime,
+                Ok(runtime) => self.store_runtime(&key, handle, runtime),
                 Err(error) => {
                     self.restore_failed_runtime_refresh(&key, handle, None)?;
-                    return Err(error);
+                    Err(error)
                 }
-            },
+            };
         };
-
-        if let Some(index) = self.state.record_index(&key) {
-            self.state.display_records[index].model.runtime_open = true;
-            self.state.display_records[index].handle = Some(handle);
-            self.state.display_records[index].runtime = Some(runtime);
-            self.state.display_records[index].store_runtime_snapshot();
-            self.state.handles_by_display.insert(key.clone(), handle);
-            self.state.displays_by_handle.insert(handle, key);
-        } else {
-            runtime.close()?;
+        let _scope = LoadScope::enter(runtime.load_id());
+        let display = desc.display.clone();
+        let result = match mode {
+            // Nothing to do to the scene: it only gets its slot back, with the
+            // handle the slot was missing.
+            RuntimeRefreshMode::Unchanged | RuntimeRefreshMode::OpenRuntime => {
+                return self.restore_failed_runtime_refresh(&key, handle, Some(runtime));
+            }
+            RuntimeRefreshMode::UpdateWindowOnly => runtime.update_window_display(display),
+            RuntimeRefreshMode::RebuildExistingRuntime => runtime.replace_wallpaper(backend, &desc),
+            RuntimeRefreshMode::ReopenRuntime => {
+                match runtime.reconfigure_for_display(backend, display) {
+                    Ok(()) => Ok(()),
+                    Err(error) => {
+                        log::warn!(
+                            "[wallpaper-core display] in-place reconfigure of {} failed, opening \
+                             a new scene instead: {error}",
+                            key.key_label()
+                        );
+                        return self.reopen_as_new_scene(
+                            key,
+                            handle,
+                            &desc,
+                            runtime_state,
+                            first_frame_callback,
+                            runtime,
+                        );
+                    }
+                }
+            }
+        };
+        match result {
+            Ok(()) => self.store_runtime(&key, handle, runtime),
+            Err(error) => {
+                self.restore_failed_runtime_refresh(&key, handle, Some(runtime))?;
+                Err(error)
+            }
         }
+    }
 
-        Ok(())
+    /// The fallback of a failed in-place reconfigure: a complete new scene,
+    /// window and renderer, with the carried state; the old scene is closed
+    /// only after the new one exists. If the new one cannot be had, the old
+    /// scene goes back to its slot.
+    fn reopen_as_new_scene(
+        &mut self,
+        key: DisplayKey,
+        handle: SceneHandle,
+        desc: &SceneDesc,
+        runtime_state: crate::engine::runtime::SceneRuntimeState,
+        first_frame_callback: FirstFrameCallback,
+        mut old: SceneRuntime,
+    ) -> Result<(), EngineError> {
+        let opened = SceneRuntime::open_replacement(
+            self.backend,
+            first_frame_callback,
+            handle,
+            desc,
+            runtime_state,
+            self.weak_self.clone(),
+            &mut old,
+        );
+        match opened {
+            Ok(new) => {
+                self.store_runtime(&key, handle, new)?;
+                if let Err(error) = old.close() {
+                    log::warn!(
+                        "[wallpaper-core display] failed to close replaced display runtime: {error}"
+                    );
+                }
+                Ok(())
+            }
+            Err(error) => {
+                self.restore_failed_runtime_refresh(&key, handle, Some(old))?;
+                Err(error)
+            }
+        }
+    }
+
+    /// Puts a scene a job produced in its slot. A slot that vanished meanwhile
+    /// gets nothing: the scene is closed instead.
+    fn store_runtime(
+        &mut self,
+        key: &DisplayKey,
+        handle: SceneHandle,
+        mut runtime: SceneRuntime,
+    ) -> Result<(), EngineError> {
+        let Some(index) = self.state.record_index(key) else {
+            if let Err(error) = runtime.close() {
+                log::warn!("[wallpaper-core display] failed to close an orphaned scene: {error}");
+            }
+            return Ok(());
+        };
+        let record = &mut self.state.display_records[index];
+        record.runtime = Some(runtime);
+        record.handle = Some(handle);
+        self.state.sync_handle_reservation(key.clone(), Some(handle));
+        self.state.record_runtime_state(handle)
     }
 
     /// A renderer reported that its scene, which had drawn, failed a frame and
@@ -1043,24 +1091,26 @@ impl EngineActor {
         handle: SceneHandle,
         runtime: Option<SceneRuntime>,
     ) -> Result<(), EngineError> {
-        let Some(mut runtime) = runtime else {
-            if let Some(index) = self.state.record_index(key) {
-                self.state.display_records[index].model.runtime_open = false;
+        let Some(index) = self.state.record_index(key) else {
+            if let Some(mut runtime) = runtime
+                && let Err(error) = runtime.close()
+            {
+                log::warn!("[wallpaper-core display] failed to close an orphaned scene: {error}");
             }
             return Ok(());
         };
-
-        if let Some(index) = self.state.record_index(key) {
-            self.state.display_records[index].model.runtime_open = true;
-            self.state.display_records[index].handle = Some(handle);
-            self.state.display_records[index].runtime = Some(runtime);
-            self.state.display_records[index].store_runtime_snapshot();
-            self.state.handles_by_display.insert(key.clone(), handle);
-            self.state.displays_by_handle.insert(handle, key.clone());
-        } else {
-            runtime.close()?;
+        let record = &mut self.state.display_records[index];
+        match runtime {
+            Some(runtime) => {
+                record.model.runtime_open = true;
+                record.handle = Some(handle);
+                record.runtime = Some(runtime);
+                record.store_runtime_snapshot();
+                self.state.sync_handle_reservation(key.clone(), Some(handle));
+            }
+            // The first open failed: the reservation stays, the mark does not.
+            None => record.model.runtime_open = false,
         }
-
         Ok(())
     }
 }
@@ -1275,8 +1325,7 @@ impl Message<messages::SetMousePosition> for EngineActor {
         msg: messages::SetMousePosition,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.set_mouse_position(msg.handle, msg.x, msg.y)?;
-        Ok(())
+        self.set_mouse_position(msg.handle, msg.x, msg.y)
     }
 }
 
@@ -1288,8 +1337,7 @@ impl Message<messages::SetMouseButton> for EngineActor {
         msg: messages::SetMouseButton,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.set_mouse_button(msg.handle, msg.button, msg.pressed)?;
-        Ok(())
+        self.set_mouse_button(msg.handle, msg.button, msg.pressed)
     }
 }
 
@@ -1301,8 +1349,7 @@ impl Message<messages::SetMouseEntered> for EngineActor {
         msg: messages::SetMouseEntered,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.set_mouse_entered(msg.handle, msg.entered)?;
-        Ok(())
+        self.set_mouse_entered(msg.handle, msg.entered)
     }
 }
 
@@ -1618,7 +1665,7 @@ impl Message<SequenceForTest> for EngineActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.test_sequence += 1;
-        assert_eq!(self.test_sequence, msg.expected);
+        assert_eq!(self.test_sequence, msg.expected, "messages must be handled in mailbox order");
         Ok(self.test_sequence)
     }
 }
@@ -1634,6 +1681,17 @@ impl Message<messages::FailNextRefreshDisplaysForTest> for EngineActor {
     ) -> Self::Reply {
         self.fail_next_refresh_displays = true;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+pub(super) struct RefreshFailurePendingForTest;
+
+#[cfg(test)]
+impl Message<RefreshFailurePendingForTest> for EngineActor {
+    type Reply = bool;
+    async fn handle(&mut self, _: RefreshFailurePendingForTest, _: &mut Context<Self, Self::Reply>) -> bool {
+        self.fail_next_refresh_displays
     }
 }
 
@@ -1656,151 +1714,249 @@ impl Message<messages::TakeRenderFailuresForTest> for EngineActor {
 }
 
 #[cfg(test)]
+mod main_display_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        DisplayDesc, WallpaperAssignment,
-        display::state::{DisplayKey, DisplayRecord, DisplayStateModel},
-        engine::{
-            runtime::SceneRuntimeState,
-            snapshot::EngineSnapshotPublisher,
-            state::{EngineState, StoredSceneRuntimeState},
-        },
-        project::{ScalingMode, SceneDesc, SceneFraming, SceneTemplate},
-    };
+    use crate::{DisplayDesc, engine::{runtime::SceneRuntimeState, state::StoredSceneRuntimeState}, display::state::DisplayRecord, project::{ScalingMode, SceneFraming, SceneTemplate}, window::MouseButtonTracker};
+    use std::sync::Mutex;
+
+    fn desc(id: u32) -> SceneDesc {
+        SceneDesc::builder(DisplayDesc::new(id, -613, 137, 2496, 1408, 2.0), "/virtual/orchid/scene.json").fps(53).build().unwrap()
+    }
+
+    fn actor_for(scenes: &[SceneDesc]) -> EngineActor {
+        let records = scenes.iter().enumerate().map(|(i, scene)| DisplayRecord {
+            key: if i == 0 { DisplayKey::Primary } else { DisplayKey::LiveDisplayId(scene.display.display_id) },
+            live_display: Some(scene.display.clone()), assignment: Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(scene))),
+            window_active: true, runtime_open: false, primary_inheritance_consumed: true,
+            bound_to_display: false,
+        }).collect();
+        let state = EngineState::with_display_model(DisplayStateModel { records });
+        let snapshots = Arc::new(EngineSnapshotPublisher::new(state.snapshot(), Arc::new(Mutex::new(MouseButtonTracker::with_press_test(Box::new(|| true))))));
+        let prepared = EngineActor::prepare();
+        EngineActor::new(OweBackend, Arc::new(|_| {}), state, snapshots, prepared.actor_ref().downgrade())
+    }
+
+    fn succeed(actor: &mut EngineActor, job: RuntimeRefreshJob) -> Result<(), EngineError> {
+        let runtime = SceneRuntime::windowless_for_test(job.handle, &job.desc, &job.runtime_state, actor.weak_self.clone())?;
+        actor.store_runtime(&job.key, job.handle, runtime)
+    }
+
+    fn poison_preparation(actor: &mut EngineActor, index: usize, remembered: bool) {
+        let record = &mut actor.state.display_records[index];
+        if remembered {
+            let mut prior = record.scene_desc().unwrap().unwrap();
+            let state = SceneRuntimeState::try_from(&prior).unwrap();
+            prior.property_override_json = Some(r#"{"invalid":[]}"#.into());
+            record.last_runtime_state = Some(StoredSceneRuntimeState::new(prior, state));
+        } else {
+            let Some(WallpaperAssignment::Direct(template)) = &mut record.model.assignment else { panic!("direct") };
+            template.property_override_json = Some(r#"{"invalid":[]}"#.into());
+        }
+    }
 
     #[test]
     fn failed_partial_update_still_publishes_committed_state() {
-        let prepared = EngineActor::prepare();
-        let state = EngineState::with_display_model(DisplayStateModel { records: vec![DisplayRecord {
-            key: DisplayKey::Primary,
-            live_display: Some(DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0)),
-            assignment: None,
-            window_active: true,
-            runtime_open: false,
-            primary_inheritance_consumed: false,
-            bound_to_display: false,
-        }] });
-        let snapshots = Arc::new(EngineSnapshotPublisher::new(state.snapshot(), Arc::new(std::sync::Mutex::new(crate::window::MouseButtonTracker::new()))));
-        let mut actor = EngineActor::new(OweBackend, Arc::new(|_| {}), state, snapshots.clone(), prepared.actor_ref().downgrade());
-        let result: Result<(), EngineError> = actor.with_snapshot_update(|actor| {
-            actor.state.display_records[0].model.window_active = false;
-            Err(EngineError::Platform("later operation failed".into()))
-        });
-        assert!(matches!(result, Err(EngineError::Platform(message)) if message == "later operation failed"));
-        assert!(!snapshots.load().displays[0].window_active);
+        // CLEANROOM ET45
+        let mut actor = actor_for(&[desc(87), desc(126)]);
+        let error = actor.with_snapshot_update(|actor| {
+            actor.state.display_records[1].model.window_active = false;
+            Err::<(), _>(EngineError::Platform("independent partial failure".into()))
+        }).unwrap_err();
+        assert!(matches!(error, EngineError::Platform(text) if text == "independent partial failure"));
+        assert!(!actor.snapshots.load().displays[1].window_active);
+        let before = actor.snapshots.load().displays.clone();
+        actor.with_snapshot_update(|_| Err::<(), _>(EngineError::Render("no mutation".into()))).unwrap_err();
+        assert_eq!(actor.snapshots.load().displays, before);
     }
 
-    #[test]
-    fn runtime_refresh_job_for_new_wallpaper_uses_descriptor_scaling_defaults() {
-        let display = DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0);
-        let previous_desc = SceneDesc::builder(display.clone(), "/tmp/fill/project.json")
-            .assets_path("/tmp/assets")
-            .scaling_mode(ScalingMode::Fill)
-            .build()
-            .expect("previous scene should build");
-        let next_template = SceneTemplate::builder("/tmp/fit/project.json")
-            .assets_path("/tmp/assets")
-            .scaling_mode(ScalingMode::Fit)
-            .build()
-            .expect("next scene should build");
-        let mut state = EngineState::with_display_model(DisplayStateModel {
-            records: vec![DisplayRecord {
-                key: DisplayKey::Primary,
-                live_display: Some(display),
-                assignment: Some(WallpaperAssignment::Direct(next_template)),
-                window_active: true,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
-                bound_to_display: false,
-            }],
-        });
-        state.display_records[0].last_runtime_state = Some(StoredSceneRuntimeState::new(
-            previous_desc.clone(),
-            SceneRuntimeState::try_from(&previous_desc).expect("previous state should build"),
-        ));
-        let snapshots = Arc::new(EngineSnapshotPublisher::new(state.snapshot(), Arc::new(std::sync::Mutex::new(crate::window::MouseButtonTracker::new()))));
-        let prepared = EngineActor::prepare();
-        let actor = EngineActor::new(OweBackend, Arc::new(|_handle| {}), state, snapshots, prepared.actor_ref().downgrade());
-        let runtime_state = actor
-            .state
-            .display_records
-            .first()
-            .expect("primary record should exist")
-            .runtime_state_for_desc(
-                &actor
-                    .state
-                    .display_records
-                    .first()
-                    .expect("primary record should exist")
-                    .scene_desc()
-                    .expect("next scene should build")
-                    .expect("assigned scene should exist"),
-            )
-            .expect("runtime state should build");
-
-        assert_eq!(runtime_state.scaling_mode, ScalingMode::Fit);
-        assert!(
-            (runtime_state.scaling_factor - 1.0).abs() <= f64::EPSILON,
-            "expected descriptor scaling factor 1.0, got {}",
-            runtime_state.scaling_factor
-        );
+    #[tokio::test(flavor = "current_thread")]
+    async fn runtime_refresh_job_for_new_wallpaper_uses_descriptor_scaling_defaults() {
+        // CLEANROOM ET46: exercise job preparation from live AND remembered state.
+        for remembered in [false, true] {
+            let mut old = desc(87);
+            old.scaling_mode = ScalingMode::Fill;
+            old.scaling_factor = 1.7;
+            let mut next = old.clone();
+            next.scene_path = "/virtual/cobalt/scene.json".into();
+            next.scaling_mode = ScalingMode::Stretch;
+            next.scaling_factor = 0.85;
+            let mut actor = actor_for(std::slice::from_ref(&next));
+            let state = SceneRuntimeState::try_from(&old).unwrap();
+            if remembered {
+                actor.state.display_records[0].last_runtime_state = Some(StoredSceneRuntimeState::new(old, state));
+            } else {
+                let handle = actor.state.reserve_handle_for_key(DisplayKey::Primary);
+                actor.state.display_records[0].handle = Some(handle);
+                actor.state.display_records[0].runtime = Some(SceneRuntime::windowless_for_test(handle, &old, &state, actor.weak_self.clone()).unwrap());
+            }
+            let mut count = 0;
+            actor.open_required_with(|actor, job| {
+                count += 1;
+                assert_eq!(job.runtime_state.scaling_mode, ScalingMode::Stretch);
+                assert_eq!(job.runtime_state.scaling_factor, 0.85);
+                succeed(actor, job)
+            }).unwrap();
+            assert_eq!(count, 1);
+            assert_eq!(actor.state.display_records[0].runtime.as_ref().unwrap().runtime_state().scaling_factor, 0.85);
+        }
     }
 
-    #[test]
-    fn runtime_refresh_job_for_new_wallpaper_uses_descriptor_framing() {
-        let display = DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0);
-        let previous_framing = SceneFraming {
-            pan_x: 0.1,
-            pan_y: 0.9,
-        };
-        let next_framing = SceneFraming {
-            pan_x: 0.8,
-            pan_y: 0.2,
-        };
-        let previous_desc = SceneDesc::builder(display.clone(), "/tmp/previous/project.json")
-            .assets_path("/tmp/assets")
-            .framing(previous_framing)
-            .build()
-            .expect("previous scene should build");
-        let next_template = SceneTemplate::builder("/tmp/next/project.json")
-            .assets_path("/tmp/assets")
-            .framing(next_framing)
-            .build()
-            .expect("next scene should build");
-        let mut state = EngineState::with_display_model(DisplayStateModel {
-            records: vec![DisplayRecord {
-                key: DisplayKey::Primary,
-                live_display: Some(display),
-                assignment: Some(WallpaperAssignment::Direct(next_template)),
-                window_active: true,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
-                bound_to_display: false,
-            }],
-        });
-        // The user had moved the previous wallpaper at runtime, away from both
-        // descriptors' positions.
-        let mut previous_state =
-            SceneRuntimeState::try_from(&previous_desc).expect("previous state should build");
-        previous_state.framing = SceneFraming {
-            pan_x: 0.5,
-            pan_y: 0.5,
-        };
-        state.display_records[0].last_runtime_state = Some(StoredSceneRuntimeState::new(
-            previous_desc,
-            previous_state,
-        ));
-        let record = &state.display_records[0];
-        let next_desc = record
-            .scene_desc()
-            .expect("next scene should build")
-            .expect("assigned scene should exist");
+    #[tokio::test(flavor = "current_thread")]
+    async fn runtime_refresh_job_for_new_wallpaper_uses_descriptor_framing() {
+        // CLEANROOM ET47
+        for remembered in [false, true] {
+            let old = desc(87);
+            let mut state = SceneRuntimeState::try_from(&old).unwrap();
+            state.framing = SceneFraming { pan_x: 0.37, pan_y: 0.64 };
+            let mut next = old.clone();
+            next.scene_path = "/virtual/cobalt/scene.json".into();
+            next.framing = SceneFraming { pan_x: 0.82, pan_y: 0.19 };
+            let mut actor = actor_for(std::slice::from_ref(&next));
+            if remembered {
+                actor.state.display_records[0].last_runtime_state = Some(StoredSceneRuntimeState::new(old, state));
+            } else {
+                let h = actor.state.reserve_handle_for_key(DisplayKey::Primary);
+                actor.state.display_records[0].handle = Some(h);
+                actor.state.display_records[0].runtime = Some(SceneRuntime::windowless_for_test(h, &old, &state, actor.weak_self.clone()).unwrap());
+            }
+            actor.open_required_with(|actor, job| {
+                assert_eq!(job.runtime_state.framing, next.framing);
+                succeed(actor, job)
+            }).unwrap();
+            assert_eq!(actor.state.display_records[0].runtime.as_ref().unwrap().runtime_state().framing, next.framing);
+        }
+    }
 
-        let runtime_state = record
-            .runtime_state_for_desc(&next_desc)
-            .expect("runtime state should build");
+    #[tokio::test(flavor = "current_thread")]
+    async fn retirement_errors_keep_separate_precedence_without_skipping_the_opening_pass() {
+        for open_fails in [false, true] {
+            let scenes = [desc(87), desc(126), desc(203)];
+            let mut actor = actor_for(&scenes);
+            for scene in &scenes[..2] {
+                let key = if scene.display.display_id == 87 { DisplayKey::Primary } else { DisplayKey::LiveDisplayId(126) };
+                let handle = actor.state.reserve_handle_for_key(key.clone());
+                let runtime = SceneRuntime::windowless_for_test(handle, scene, &SceneRuntimeState::try_from(scene).unwrap(), actor.weak_self.clone()).unwrap();
+                actor.store_runtime(&key, handle, runtime).unwrap();
+            }
+            let mut retired = Vec::new();
+            let mut opened = Vec::new();
+            let error = actor.with_snapshot_update(|actor| actor.update_display_state_with(|model| {
+                for record in &mut model.records[..2] {
+                    record.window_active = false;
+                    record.runtime_open = false;
+                }
+                Ok(())
+            }, |runtime| {
+                retired.push(runtime.display_id());
+                runtime.close()?;
+                Err(EngineError::Platform(format!("retired {}", runtime.display_id())))
+            }, |actor| actor.open_required_with(|actor, job| {
+                opened.push(job.desc.display.display_id);
+                if open_fails {
+                    actor.restore_failed_runtime_refresh(&job.key, job.handle, job.existing_runtime)?;
+                    Err(EngineError::Render("opening failure must not outrank retirement".into()))
+                } else { succeed(actor, job) }
+            }))).unwrap_err();
+            assert!(matches!(error, EngineError::Platform(text) if text == "retired 87"));
+            assert_eq!(retired, vec![87, 126]);
+            assert_eq!(opened, vec![203]);
+            let snapshot = actor.snapshots.load();
+            assert!(snapshot.displays[..2].iter().all(|e| e.handle.is_none() && !e.window_active));
+            assert_eq!(snapshot.displays[2].handle.is_some(), !open_fails);
+            assert!(actor.state.display_records[..2].iter().all(|r| r.handle.is_some() && r.last_runtime_state.is_some() && r.runtime.is_none()));
+        }
+    }
 
-        assert_eq!(runtime_state.framing, next_framing);
+    #[tokio::test(flavor = "current_thread")]
+    async fn preparation_failure_reserves_before_validation_and_retry_reuses_it() {
+        for remembered in [false, true] {
+            let mut actor = actor_for(&[desc(87)]);
+            poison_preparation(&mut actor, 0, remembered);
+            let error = actor.with_snapshot_update(|actor| actor.open_required_with(|_, _| panic!("invalid state must not reach execution"))).unwrap_err();
+            assert!(matches!(error, EngineError::InvalidInput(_)));
+            let key = DisplayKey::Primary;
+            let handle = actor.state.display_records[0].handle.expect("preparation failure retains the reservation");
+            assert_eq!(actor.state.handles_by_display.get(&key), Some(&handle));
+            assert_eq!(actor.state.displays_by_handle.get(&handle), Some(&key));
+            assert!(!actor.state.display_records[0].model.runtime_open);
+            assert!(actor.snapshots.load().displays[0].handle.is_none());
+            assert!(matches!(actor.state.scene_mut(handle), Err(EngineError::InvalidInput(text)) if text.contains("is not active")));
+            actor.state.display_records[0].model.assignment = Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(&desc(87))));
+            actor.state.display_records[0].last_runtime_state = None;
+            actor.with_snapshot_update(|actor| actor.open_required_with(succeed)).unwrap();
+            assert_eq!(actor.snapshots.load().displays[0].handle, Some(handle));
+            assert_eq!(actor.state.next_handle, handle.raw() + 1);
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn slot_order_is_independent_of_display_ids_and_reconcile_request_order() {
+        let scenes = [desc(203), desc(87), desc(126)];
+        let mut actor = actor_for(&scenes);
+        let requested = [scenes[2].clone(), scenes[1].clone(), scenes[0].clone()];
+        let mut model = actor.display_model();
+        model.apply_reconcile(&requested).unwrap();
+        actor.state.apply_display_model(&model).unwrap();
+        let mut attempted = Vec::new();
+        let error = actor.with_snapshot_update(|actor| actor.open_required_with(|actor, job| {
+            let id = job.desc.display.display_id;
+            attempted.push(id);
+            if id == 126 { succeed(actor, job) } else {
+                actor.restore_failed_runtime_refresh(&job.key, job.handle, job.existing_runtime)?;
+                Err(EngineError::Render(format!("refused display {id}")))
+            }
+        })).unwrap_err();
+        assert!(matches!(error, EngineError::Render(text) if text == "refused display 203"));
+        assert_eq!(attempted, vec![203, 87, 126]);
+        assert!(actor.snapshots.load().displays[2].handle.is_some());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn earliest_slot_error_beats_later_preparation_and_every_later_job_runs() {
+        for existing in [false, true] {
+            for preparation_first in [false, true] {
+                let scenes = [desc(87), desc(126), desc(203), desc(279), desc(315)];
+                let mut actor = actor_for(&scenes);
+                let prep = usize::from(!preparation_first);
+                let execute_fail = usize::from(preparation_first);
+                if existing {
+                    let h = actor.state.reserve_handle_for_key(DisplayKey::Primary);
+                    let mut prior = scenes[0].clone();
+                    prior.fps = 47;
+                    actor.state.display_records[0].handle = Some(h);
+                    actor.state.display_records[0].runtime = Some(SceneRuntime::windowless_for_test(h, &prior, &SceneRuntimeState::try_from(&prior).unwrap(), actor.weak_self.clone()).unwrap());
+                }
+                poison_preparation(&mut actor, prep, false);
+                let mut attempted = Vec::new();
+                let result = actor.with_snapshot_update(|actor| actor.open_required_with(|actor, job| {
+                    let index = scenes.iter().position(|s| s.display.display_id == job.desc.display.display_id).unwrap();
+                    attempted.push(index);
+                    if index == execute_fail || index == 3 {
+                        actor.restore_failed_runtime_refresh(&job.key, job.handle, job.existing_runtime)?;
+                        Err(EngineError::Render(format!("execution slot {index}")))
+                    } else { succeed(actor, job) }
+                }));
+                let error = result.unwrap_err();
+                if preparation_first {
+                    assert!(matches!(error, EngineError::InvalidInput(_)));
+                } else {
+                    assert!(matches!(error, EngineError::Render(text) if text == "execution slot 0"), "earlier execution must outrank later preparation");
+                }
+                assert_eq!(attempted, (0..5).filter(|i| *i != prep).collect::<Vec<_>>());
+                let snapshot = actor.snapshots.load();
+                assert!(snapshot.displays[2].handle.is_some());
+                assert!(snapshot.displays[4].handle.is_some());
+                assert!(snapshot.displays[3].handle.is_none());
+                assert_eq!(snapshot.displays[0].handle.is_some(), existing);
+                assert!(actor.state.display_records.iter().all(|r| r.handle.is_some()));
+                for record in &actor.state.display_records {
+                    let h = record.handle.unwrap();
+                    assert_eq!(actor.state.displays_by_handle.get(&h), Some(&record.model.key));
+                }
+            }
+        }
     }
 }

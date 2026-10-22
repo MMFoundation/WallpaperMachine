@@ -51,9 +51,14 @@ ASSETS = APP_HOME / "SceneAssets"
 BINARY = RENDERER_ARTIFACTS / "bin/tests/metal_scene_draw_smoke"
 # The Mac's address on the Parallels "Shared" network, the VM's default gateway.
 HOST, PORT = "10.211.55.2", 8765
-SHOT_DELAYS = (8, 7)            # seconds after opening, then after the first shot
+# Seconds after opening, then after the first shot. Wallpaper Engine in the VM can take more
+# than 15 s to show a heavy scene; shooting earlier catches the previous wallpaper or black.
+SHOT_DELAYS = (30, 15)
 DEFAULT_TIMES = (8.0, 15.0)     # scene time of each shot when a capture did not record it
 STEP = 1.0 / 30.0
+# The harness test that draws a local project as a poster, and its name in binaries built
+# before the Vulkan path went (they write `*-native.ppm`), so a "before" binary still renders.
+POSTER_TESTS = "*LocalProjectsDrawAPosterPicture*:*DrawTheSamePictureOnBothRenderers*"
 SHEET_WIDTH, METRIC_WIDTH = 640, 256
 WALLPAPER_ENGINE_APP = "431960"
 # SteamCMD output that means the saved sign-in is no longer accepted; fetch never answers it.
@@ -471,7 +476,7 @@ def unpack(args) -> int:
 
 
 def capture(args) -> int:
-    run = CaptureRun([resolve(w) for w in args.wallpapers], args.shots)
+    run = CaptureRun([resolve(w) for w in args.wallpapers], args.shots, delays=args.delays)
     server = f"http://{args.host}:{args.port}"
     try:
         httpd = ThreadingHTTPServer((args.host, args.port), handler(run, server, args.shots / "capture.log"))
@@ -546,11 +551,11 @@ def render(args) -> int:
                        WE_TEST_INPUT_JSON='[{"frame":0,"x":0.5,"y":0.5,"inside":true}]', WE_TEST_OUTPUT=str(work))
             if "opened" in meta:
                 env["TZ"] = reference_tz(meta["opened"], time.time(), time.localtime().tm_gmtoff)
-            result = subprocess.run([str(args.binary), "--gtest_filter=*DrawTheSamePictureOnBothRenderers*"], env=env,
+            result = subprocess.run([str(args.binary), f"--gtest_filter={POSTER_TESTS}"], env=env,
                                     capture_output=True, text=True, errors="replace")
             log = out / f"{folder.name}-{k}.log"
             log.write_text(result.stdout + result.stderr)
-            pictures = sorted(work.glob("*-native.ppm"))
+            pictures = sorted(work.glob("*-native.ppm")) or sorted(work.glob("*.ppm"))
             if pictures:
                 subprocess.run(["sips", "-s", "format", "png", str(pictures[0]), "--out", str(out / f"{folder.name}-{k}.png")],
                                check=True, capture_output=True)
@@ -702,6 +707,8 @@ def main(argv=None) -> int:
     grab.add_argument("--host", default=HOST, help="address to listen on (default: %(default)s, the Parallels network)")
     grab.add_argument("--port", type=int, default=PORT)
     grab.add_argument("--timeout", type=float, default=1800, help="seconds to wait for the VM (default: %(default)s)")
+    grab.add_argument("--delays", type=float, nargs=2, metavar=("FIRST", "SECOND"), default=SHOT_DELAYS,
+                      help="seconds from opening to the first shot, then to the second (default: %(default)s)")
     draw = commands.add_parser("render", help="render the wallpapers as the screenshots show them")
     draw.add_argument("wallpapers", nargs="+")
     draw.add_argument("--label", default="ours", help="name of this set of renders, e.g. before/after (default: %(default)s)")

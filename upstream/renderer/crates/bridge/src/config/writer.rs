@@ -1,48 +1,70 @@
-use std::{io, path::Path};
+use std::fs;
+use std::io::{self, Write};
+use std::path::Path;
 
-use tempfile::NamedTempFile;
-
-/// # Errors
-///
-/// Returns an error when the parent directory cannot be created, the temporary
-/// file cannot be written and synced, or the final persist operation fails.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let parent = match path.parent() {
-        Some(parent) if parent.as_os_str().is_empty() => Path::new("."),
-        Some(parent) => parent,
-        None => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "path has no parent",
-            ));
-        }
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "configuration target has no parent",
+        )
+    })?;
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
     };
-
-    std::fs::create_dir_all(parent)?;
-
-    let mut temp = NamedTempFile::new_in(parent)?;
-    io::Write::write_all(&mut temp, bytes)?;
-    temp.as_file_mut().sync_all()?;
-    temp.persist(path).map_err(|err| err.error)?;
-
+    fs::create_dir_all(parent)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    let write_result = temporary.write_all(bytes);
+    #[cfg(test)]
+    let write_result = fault::check(fault::Stage::Write, write_result);
+    write_result?;
+    let sync_result = temporary.as_file().sync_all();
+    #[cfg(test)]
+    let sync_result = fault::check(fault::Stage::Sync, sync_result);
+    sync_result?;
+    temporary.persist(path).map_err(|failure| failure.error)?;
     Ok(())
 }
 
+// Fault controls and their call sites do not exist in a delivered non-test build.
+// Tests replace a successful operation result before the shared error-propagation step.
 #[cfg(test)]
-mod tests {
-    use std::{fs, path::Path};
+pub(super) mod fault {
+    use std::cell::Cell;
+    use std::io;
 
-    use tempfile::TempDir;
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Stage {
+        Write,
+        Sync,
+    }
 
-    use super::*;
+    thread_local! {
+        static NEXT: Cell<Option<Stage>> = const { Cell::new(None) };
+    }
 
-    #[test]
-    fn atomic_write_creates_parent_directories() {
-        let temp = TempDir::new().unwrap();
-        let path = temp.path().join(Path::new("nested/app.toml"));
+    pub(super) fn check(stage: Stage, actual: io::Result<()>) -> io::Result<()> {
+        actual?;
+        NEXT.with(|next| {
+            if next.get() == Some(stage) {
+                next.set(None);
+                Err(io::Error::other("injected temporary-file IO failure"))
+            } else {
+                Ok(())
+            }
+        })
+    }
 
-        atomic_write(&path, b"ok").unwrap();
-
-        assert_eq!(fs::read(path).unwrap(), b"ok");
+    pub(crate) fn during<T>(stage: Stage, action: impl FnOnce() -> T) -> T {
+        struct Restore(Option<Stage>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                NEXT.with(|next| next.set(self.0));
+            }
+        }
+        let _restore = Restore(NEXT.with(|next| next.replace(Some(stage))));
+        action()
     }
 }

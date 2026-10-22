@@ -1,4 +1,17 @@
 mod error;
+mod first_frame_handoff;
+#[cfg(test)]
+pub(crate) mod lifecycle_test_support;
+#[cfg(test)]
+pub(crate) mod mounted_lifecycle;
+#[cfg(test)]
+mod mounted_state;
+#[cfg(test)]
+pub(crate) mod operation_contract_test_support;
+#[cfg(test)]
+mod operation_contract_tests;
+#[cfg(test)]
+mod small_library_contract_tests;
 mod types;
 
 use std::{
@@ -8,6 +21,8 @@ use std::{
 };
 
 pub use error::{BridgeError, BridgeErrorKind};
+use first_frame_handoff::FirstFrameHandoff;
+pub(crate) use first_frame_handoff::{FirstFrameDelivery, FirstFrameTarget};
 use futures_util::Future;
 pub use types::{
     BridgeAppSnapshot, BridgeAudioSpectrum, BridgeComboOption, BridgeDirectoryMode,
@@ -54,7 +69,7 @@ use wallpaper_core::{
 
 #[cfg(test)]
 use crate::actor::messages::{
-    InjectDisplayForTest, InjectSceneProjectForTest, InjectSceneWallpaperConfigForTest,
+    InitialFrameReady, InjectDisplayForTest, InjectSceneProjectForTest, InjectSceneWallpaperConfigForTest,
     InjectWallpaperForTest, ReplaceLibraryForTest, ReplaceWallpaperConfigForTest, SetPowerSource,
 };
 #[cfg(test)]
@@ -68,8 +83,8 @@ use crate::{
             ApplyWallpaperOptions, Bootstrap, CancelWallpaperOptions, ClearShaderCache,
             EditProperty, EjectWallpaperFromDisplay, GetAllSnapshots, GetAppSnapshot,
             GetLibrarySnapshot, GetLockScreenScenes, GetWallpaperPreview, GetMonitorInformationSnapshot,
-            GetSettingsSnapshot, GetWallpaperOptionsSnapshot, GetWebWallpapers, InitialFrameReady,
-            GetNativeVideoWallpapers, PollMousePosition, RejectNativeVideo, RendererCounters,
+            GetSettingsSnapshot, GetWallpaperOptionsSnapshot, GetWebWallpapers,
+            GetNativeVideoWallpapers, PollMousePosition, RendererCounters,
             RefreshDisplays, RefreshLibrary, ReleaseHeldWallpaper, RestoreAllPropertyDefaults,
             RestorePropertyDefault,
             SelectWallpaper,
@@ -78,25 +93,24 @@ use crate::{
             SetDisplayPresentationSuspended,
             SetFilter, SetGlobalPlayback, SetLaunchAtLogin, SetMirrorMuted, SetMirrorScalingFactor,
             SetMirrorScalingMode, SetMirrorTarget, SetMirrorTargetFps, SetMirrorVolume, SetMuted,
-            SetAudioSuppressed, SetBatteryMode, SetBatteryQualityProfile, SetContentPacingEnabled,
+            SetAudioSuppressed, SetBatteryMode, SetBatteryQualityProfile,
             SetFrameRateCap, SetLabelLanguages, SetMediaIntegrationEnabled,
             SetPresentationUnloaded, SetPresentationSuspended, SetPropertyPath,
             SetQualityThrottle, SetRenderScale,
             SetVerboseLogging,
             SetRendererCountersEnabled, SetScalingFactor, SetScalingMode,
-            SetSceneOnDemandEnabled, SetSceneOptimizationEnabled, SetSceneRenderer,
-            SetSceneResolution, SetSceneVideoPlaneSamplingEnabled, SetSharedVideoDecodeEnabled,
-            SetTargetFps, SetVideoBackend, SetVolume,
+            SetSceneOnDemandEnabled, SetSceneOptimizationEnabled,
+            SetSceneResolution, SetSceneVideoPlaneSamplingEnabled,
+            SetTargetFps, SetVolume,
             SetWebAudioSubscribed, Shutdown,
         },
         state::BridgeActorState,
     },
-    config::{ConfigStore, SceneRendererModeCfg, SceneResolutionCfg, VideoBackendModeCfg},
+    config::{ConfigStore, SceneResolutionCfg},
     engine::{EngineFacade, LoadJournal, RealEngineFacade},
-    login::LaunchAtLoginController,
     media::SystemMediaStore,
     paths::BridgePaths,
-    power::{PowerSource, PowerWatcher, SystemPowerSource},
+    power::PowerWatcher,
 };
 
 /// Validates an imported configuration before any restore publication; no engine is initialized.
@@ -126,56 +140,63 @@ pub(crate) fn bridge_log_status(status: crate::logging::LogStatus) -> BridgeLogS
     }
 }
 
-pub struct BridgeBuilder<E: EngineFacade> {
+pub struct BridgeBuilder<E: crate::engine::EngineFacade> {
     engine: E,
-    state: Option<BridgeActorState>,
-    config_store: Option<ConfigStore>,
-    launch_at_login: LaunchAtLoginController,
-    paths: BridgePaths,
+    state: Option<crate::actor::state::BridgeActorState>,
+    config_store: Option<crate::config::ConfigStore>,
+    #[cfg(test)]
+    journal_for_tests: Option<crate::engine::LoadJournal>,
+    launch_at_login: crate::login::LaunchAtLoginController,
+    paths: crate::paths::BridgePaths,
     mouse_polling_enabled: bool,
     power_watching_enabled: bool,
-    startup_power_source: Option<PowerSource>,
-    wake_check_grace: Duration,
-    /// Where the power watcher reads the power source from.
-    power_reader: Arc<dyn Fn() -> PowerSource + Send + Sync>,
+    startup_power_source: Option<crate::power::PowerSource>,
+    wake_check_grace: std::time::Duration,
+    power_reader: std::sync::Arc<
+        dyn Fn() -> crate::power::PowerSource + Send + Sync + 'static,
+    >,
 }
 
-impl<E: EngineFacade> BridgeBuilder<E> {
-    #[allow(clippy::single_call_fn)]
+impl<E: crate::engine::EngineFacade> BridgeBuilder<E> {
     pub fn new(engine: E) -> Self {
         Self {
             engine,
             state: None,
             config_store: None,
-            launch_at_login: LaunchAtLoginController::default(),
-            paths: BridgePaths::new(),
+            #[cfg(test)]
+            journal_for_tests: None,
+            launch_at_login: crate::login::LaunchAtLoginController::default(),
+            paths: crate::paths::BridgePaths::new(),
             mouse_polling_enabled: true,
             power_watching_enabled: !cfg!(test),
             startup_power_source: None,
             wake_check_grace: crate::engine::revalidate::GRACE,
-            power_reader: Arc::new(SystemPowerSource::current),
+            power_reader: std::sync::Arc::new(crate::power::SystemPowerSource::current),
         }
     }
 
-    #[cfg(test)]
-    pub fn with_state(mut self, state: BridgeActorState) -> Self {
-        self.state = Some(state);
+    pub fn with_config_store(mut self, store: crate::config::ConfigStore) -> Self {
+        self.config_store = Some(store);
         self
     }
 
-    pub fn with_config_store(mut self, config_store: ConfigStore) -> Self {
-        self.config_store = Some(config_store);
-        self
-    }
-
-    pub fn with_paths(mut self, paths: BridgePaths) -> Self {
+    pub fn with_paths(mut self, paths: crate::paths::BridgePaths) -> Self {
         self.paths = paths;
         self
     }
 
     #[cfg(test)]
-    pub fn with_launch_at_login(mut self, launch_at_login: LaunchAtLoginController) -> Self {
-        self.launch_at_login = launch_at_login;
+    pub fn with_state(mut self, state: crate::actor::state::BridgeActorState) -> Self {
+        self.state = Some(state);
+        self
+    }
+
+    #[cfg(test)]
+    pub fn with_launch_at_login(
+        mut self,
+        controller: crate::login::LaunchAtLoginController,
+    ) -> Self {
+        self.launch_at_login = controller;
         self
     }
 
@@ -192,14 +213,13 @@ impl<E: EngineFacade> BridgeBuilder<E> {
     }
 
     #[cfg(test)]
-    pub fn with_startup_power_source(mut self, source: PowerSource) -> Self {
+    pub fn with_startup_power_source(mut self, source: crate::power::PowerSource) -> Self {
         self.startup_power_source = Some(source);
         self
     }
 
-    /// How long the check after a wake waits between its two readings.
     #[cfg(test)]
-    pub fn with_wake_check_grace(mut self, grace: Duration) -> Self {
+    pub fn with_wake_check_grace(mut self, grace: std::time::Duration) -> Self {
         self.wake_check_grace = grace;
         self
     }
@@ -207,142 +227,252 @@ impl<E: EngineFacade> BridgeBuilder<E> {
     #[cfg(test)]
     pub fn with_power_reader(
         mut self,
-        reader: Arc<dyn Fn() -> PowerSource + Send + Sync>,
+        reader: std::sync::Arc<
+            dyn Fn() -> crate::power::PowerSource + Send + Sync + 'static,
+        >,
     ) -> Self {
         self.power_reader = reader;
         self
     }
 
     pub fn build(self) -> Result<WallpaperBridge, BridgeError> {
-        let startup_power_source = if cfg!(test) {
-            self.startup_power_source
-        } else {
-            Some(
-                self.startup_power_source
-                    .unwrap_or_else(SystemPowerSource::current),
-            )
-        };
-        let loaded_store = if let Some(store) = &self.config_store {
-            Some(store.load()?)
-        } else {
-            None
-        };
+        use crate::engine::EngineFacade;
 
-        let mut state = self.state.unwrap_or_else(|| {
-            if let Some(loaded_store) = loaded_store {
-                BridgeActorState::from_app_config(loaded_store.config)
-            } else {
-                BridgeActorState::default()
-            }
-        });
+        let Self {
+            engine,
+            state,
+            config_store,
+            #[cfg(test)]
+            journal_for_tests,
+            launch_at_login,
+            paths,
+            mouse_polling_enabled,
+            power_watching_enabled,
+            startup_power_source,
+            wake_check_grace,
+            power_reader,
+        } = self;
+
+        // The initial sample is independent of watcher enablement and its reader.
+        #[cfg(not(test))]
+        let startup_power_source = Some(
+            startup_power_source.unwrap_or_else(crate::power::SystemPowerSource::current),
+        );
+
+        // Loading is unconditional when a store was supplied, even with explicit state.
+        let loaded_config = match config_store.as_ref() {
+            Some(store) => Some(store.load()?.config),
+            None => None,
+        };
+        let mut state = match state {
+            Some(state) => state,
+            None => match loaded_config {
+                Some(config) => crate::actor::state::BridgeActorState::from_app_config(config),
+                None => crate::actor::state::BridgeActorState::default(),
+            },
+        };
         if let Some(source) = startup_power_source {
             state.apply_startup_power_source(source);
-            log::info!("startup power source sampled: {source:?}");
-        }
-        {
-            let config = &state.app_config;
-            crate::logging::ApplicationLogger::set_verbose(config.diagnostics.verbose_logging);
-            // What the renderer was asked to do, so a report says which
-            // preferences were in force when a wallpaper misbehaved.
-            log::info!(
-                "configuration: scene renderer {:?}, video backend {:?}, render scale {}, \
-                 battery mode {:?} ({} fps, scale {}), frame-rate cap {}, scene optimization \
-                 {}, on-demand {}, scene resolution {:?}, content pacing {}, shared video \
-                 decode {}, video plane sampling {}",
-                config.scene_renderer,
-                config.video_backend,
-                config.quality.render_scale,
-                config.power.on_battery,
-                config.quality.battery.target_fps,
-                config.quality.battery.render_scale,
-                config
-                    .quality
-                    .frame_rate_cap
-                    .map_or_else(|| "none".to_string(), |cap| cap.to_string()),
-                config.quality.scene_optimization_enabled,
-                config.quality.scene_on_demand_enabled,
-                config.quality.scene_resolution,
-                config.experimental.content_pacing,
-                config.experimental.shared_video_decode,
-                config.experimental.scene_video_plane_sampling,
-            );
+            log::info!("Startup power source: {:?}", source);
         }
 
-        let engine = ArcEngineFacade::new(self.engine);
-        let mouse_polling = Arc::new(MousePollingControl::new());
-        let weak_polling = Arc::downgrade(&mouse_polling);
-        engine.set_pointer_consumer_callback(Some(Arc::new(move |has_consumers| {
-            if let Some(control) = weak_polling.upgrade() {
+        let config = &state.app_config;
+        crate::logging::ApplicationLogger::set_verbose(config.diagnostics.verbose_logging);
+        log::info!("Requested render scale: {}", config.quality.render_scale);
+        log::info!("Requested battery mode: {:?}", config.power.on_battery);
+        log::info!(
+            "Requested battery profile: target FPS {}, render scale {}",
+            config.quality.battery.target_fps,
+            config.quality.battery.render_scale,
+        );
+        match config.quality.frame_rate_cap {
+            Some(cap) => log::info!("Requested frame-rate cap: {}", cap),
+            None => log::info!("Requested frame-rate cap: no cap"),
+        }
+        log::info!(
+            "Requested scene optimization: {}",
+            config.quality.scene_optimization_enabled,
+        );
+        log::info!(
+            "Requested on-demand rendering: {}",
+            config.quality.scene_on_demand_enabled,
+        );
+        log::info!(
+            "Requested scene resolution: {:?}",
+            config.quality.scene_resolution,
+        );
+        log::info!(
+            "Requested video-plane sampling: {}",
+            config.experimental.scene_video_plane_sampling,
+        );
+
+        let engine = ArcEngineFacade::new(engine);
+        let pointer_control = std::sync::Arc::new(MousePollingControl::new());
+        let consumer_control = std::sync::Arc::downgrade(&pointer_control);
+        engine.set_pointer_consumer_callback(Some(std::sync::Arc::new(move |has_consumers| {
+            if let Some(control) = consumer_control.upgrade() {
                 control.set_has_consumers(has_consumers);
             }
         })));
-        let weak_polling = Arc::downgrade(&mouse_polling);
-        engine.set_pointer_activity_callback(Some(Arc::new(move |activity| {
-            if let Some(control) = weak_polling.upgrade() {
+        let activity_control = std::sync::Arc::downgrade(&pointer_control);
+        engine.set_pointer_activity_callback(Some(std::sync::Arc::new(move |activity| {
+            if let Some(control) = activity_control.upgrade() {
                 control.record_activity(activity);
             }
         })));
-        // Kept beside the configuration it protects, so an isolated support
-        // root has its own journal.
-        let load_journal = LoadJournal::open(
-            self.config_store.as_ref().map(ConfigStore::root),
+
+        #[cfg(test)]
+        let journal = journal_for_tests.unwrap_or_else(|| crate::engine::LoadJournal::open(
+            config_store.as_ref().map(|store| store.root()),
+            &crate::engine::build_stamp(),
+        ));
+        #[cfg(not(test))]
+        let journal = crate::engine::LoadJournal::open(
+            config_store.as_ref().map(|store| store.root()),
             &crate::engine::build_stamp(),
         );
-        let actor = BridgeActorHandle::spawn(
+        let actor = crate::actor::BridgeActorHandle::spawn(
             state,
             engine.clone(),
-            self.config_store.clone(),
-            self.launch_at_login,
-            self.paths,
-            Arc::clone(&mouse_polling),
-            load_journal.clone(),
+            config_store.clone(),
+            launch_at_login,
+            paths,
+            pointer_control.clone(),
+            journal.clone(),
         )?;
-        let first_frame_notifier = FirstFrameNotifier {
-            actor: actor.clone(),
-        };
-        engine.set_first_frame_callback(first_frame_notifier.callback());
-        // A scene that reads no audio must not keep the system-audio tap open,
-        // and one that starts reading later must open it without a reconcile.
+        let (runtime, target) = actor.first_frame_handoff_inputs()?;
+        let handoff = FirstFrameHandoff::start(&runtime, target);
+        engine.set_first_frame_callback(handoff.callback());
         engine.set_audio_requirement_callback(actor.audio_requirement_relay());
-        let mouse_poller = if self.mouse_polling_enabled {
-            Some(MousePoller::spawn(actor.clone(), mouse_polling, engine.clone()))
+
+        let mouse_poller = if mouse_polling_enabled {
+            Some(MousePoller::spawn(
+                actor.clone(),
+                pointer_control,
+                engine.clone(),
+            ))
         } else {
             None
         };
-        let power_watcher = if self.power_watching_enabled {
-            let power_reader = self.power_reader;
-            Some(PowerWatcher::spawn(actor.clone(), move || power_reader()))
+        let power_watcher = if power_watching_enabled {
+            Some(crate::power::PowerWatcher::spawn(actor.clone(), move || {
+                power_reader()
+            }))
         } else {
             None
         };
 
-        // Small: a user cannot press faster than the app takes them, and a
-        // backlog nobody has taken is presses already stopped being waited on.
-        let (shortcut_sender, shortcut_receiver) = tokio::sync::mpsc::channel(8);
-        engine.set_user_shortcut_callback(Some(Arc::new(move |handle, property, value| {
-            let event = BridgeUserShortcut {
-                scene_handle: handle.raw(),
-                property,
-                value,
-            };
-            if shortcut_sender.try_send(event).is_err() {
-                log::warn!("dropped a user shortcut nobody had taken yet");
-            }
-        })));
+        let (shortcut_callback, shortcuts) = builder_shortcut_channel();
+        engine.set_user_shortcut_callback(Some(shortcut_callback));
 
         Ok(WallpaperBridge {
+            first_frame_handoff: handoff,
             actor,
             mouse_poller,
             power_watcher,
             system_media: SystemMediaStore::default(),
             system_media_submission: tokio::sync::Mutex::new(()),
             engine,
-            _config_store: self.config_store,
-            load_journal,
-            user_shortcuts: tokio::sync::Mutex::new(shortcut_receiver),
-            wake_check_turn: Arc::default(),
-            wake_check_grace: self.wake_check_grace,
+            _config_store: config_store,
+            load_journal: journal,
+            user_shortcuts: tokio::sync::Mutex::new(shortcuts),
+            wake_check_turn: Arc::new(tokio::sync::Mutex::new(())),
+            wake_check_grace,
         })
+    }
+}
+
+// Keep the actual admission callback independently exercisable without creating an actor.
+fn builder_shortcut_channel() -> (
+    wallpaper_core::UserShortcutObserverCallback,
+    tokio::sync::mpsc::Receiver<BridgeUserShortcut>,
+) {
+    let (sender, receiver) = tokio::sync::mpsc::channel(8);
+    let callback: wallpaper_core::UserShortcutObserverCallback =
+        std::sync::Arc::new(move |scene, property, value| {
+            let event = BridgeUserShortcut {
+                scene_handle: scene.raw(),
+                property,
+                value,
+            };
+            if let Err(error) = sender.try_send(event) {
+                log::warn!("Dropping user shortcut after admission failure: {}", error);
+            }
+        });
+    (callback, receiver)
+}
+
+#[cfg(test)]
+mod api_assembly_tests {
+    use super::*;
+
+    fn callback_batch_finishes(action: impl FnOnce() + Send + 'static) {
+        let (finished, completion) = std::sync::mpsc::sync_channel(1);
+        let worker = std::thread::spawn(move || {
+            action();
+            let _ = finished.send(());
+        });
+        completion
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("shortcut callback batch did not finish");
+        worker.join().expect("shortcut callback batch panicked");
+    }
+
+    #[test]
+    fn shortcut_callback_preserves_handle_extremes_and_owned_strings() {
+        let (callback, mut receiver) = builder_shortcut_channel();
+        for (handle, property, value) in [
+            (0, String::new(), "\0\n\t".to_owned()),
+            (u64::MAX, "任意.property\0".to_owned(), " {\"raw\": true} ".to_owned()),
+        ] {
+            let expected = BridgeUserShortcut {
+                scene_handle: handle,
+                property: property.clone(),
+                value: value.clone(),
+            };
+            let callback = callback.clone();
+            callback_batch_finishes(move || {
+                callback(wallpaper_core::project::SceneHandle::new(handle), property, value);
+            });
+            assert_eq!(receiver.try_recv().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn shortcut_capacity_is_eight_and_full_admission_preserves_fifo() {
+        let (callback, mut receiver) = builder_shortcut_channel();
+        let producer = callback.clone();
+        callback_batch_finishes(move || {
+            for handle in 0..9 {
+                producer(
+                    wallpaper_core::project::SceneHandle::new(handle),
+                    format!("property-{handle}"),
+                    format!("value-{handle}"),
+                );
+            }
+        });
+        for handle in 0..8 {
+            assert_eq!(
+                receiver.try_recv().unwrap(),
+                BridgeUserShortcut {
+                    scene_handle: handle,
+                    property: format!("property-{handle}"),
+                    value: format!("value-{handle}"),
+                },
+            );
+        }
+        assert_eq!(
+            receiver.try_recv().unwrap_err(),
+            tokio::sync::mpsc::error::TryRecvError::Empty,
+        );
+        callback_batch_finishes(move || {
+            callback(
+                wallpaper_core::project::SceneHandle::new(9),
+                "after-drain".to_owned(),
+                "still-live".to_owned(),
+            );
+        });
+        assert_eq!(receiver.try_recv().unwrap().scene_handle, 9);
     }
 }
 
@@ -530,29 +660,6 @@ impl MousePollingControl {
     }
 }
 
-struct FirstFrameNotifier {
-    actor: BridgeActorHandle<ArcEngineFacade>,
-}
-
-impl FirstFrameNotifier {
-    fn callback(&self) -> FirstFrameCallback {
-        let actor = self.actor.clone();
-        Arc::new(move |handle| {
-            log::info!("first frame ready for scene handle {}", handle.raw());
-            let actor = actor.clone();
-            let _ = std::thread::Builder::new()
-                .name("wallpaper-bridge-first-frame".to_string())
-                .spawn(move || {
-                    let result: Result<BridgeSnapshotBundle, BridgeError> =
-                        actor.blocking_ask(InitialFrameReady);
-                    if let Err(error) = result {
-                        log::debug!("initial-frame notification skipped: {error}");
-                    }
-                });
-        })
-    }
-}
-
 impl MousePoller {
     /// Minimum spacing between samples. Input that arrives inside it is
     /// coalesced into one sample at its end; input after a quiet period is
@@ -607,6 +714,7 @@ impl Drop for MousePoller {
 
 #[derive(uniffi::Object)]
 pub struct WallpaperBridge {
+    first_frame_handoff: FirstFrameHandoff,
     actor: BridgeActorHandle<ArcEngineFacade>,
     #[allow(dead_code)]
     mouse_poller: Option<MousePoller>,
@@ -634,6 +742,19 @@ pub struct WallpaperBridge {
     wake_check_turn: Arc<tokio::sync::Mutex<()>>,
     wake_check_grace: Duration,
 }
+
+impl Drop for WallpaperBridge {
+    fn drop(&mut self) {
+        // Cancel before actor/runtime teardown without touching the shared callback slot.
+        self.first_frame_handoff.close();
+    }
+}
+
+/// What a forwarded engine call returns: the wrapped engine's own boxed
+/// future, the same type as `EngineFuture` of the facade trait.
+type ForwardedUnit = Pin<Box<dyn Future<Output = Result<(), wallpaper_core::EngineError>> + Send>>;
+type ForwardedHandle =
+    Pin<Box<dyn Future<Output = Result<Option<SceneHandle>, wallpaper_core::EngineError>> + Send>>;
 
 #[derive(Clone)]
 struct ArcEngineFacade(Arc<dyn EngineFacade>);
@@ -697,20 +818,6 @@ impl EngineFacade for ArcEngineFacade {
         self.0.set_renderer_counters_enabled(enabled)
     }
 
-    fn set_content_pacing_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<(), wallpaper_core::EngineError> {
-        self.0.set_content_pacing_enabled(enabled)
-    }
-
-    fn set_shared_video_decode_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<(), wallpaper_core::EngineError> {
-        self.0.set_shared_video_decode_enabled(enabled)
-    }
-
     fn set_scene_optimization_enabled(
         &self,
         enabled: bool,
@@ -730,13 +837,6 @@ impl EngineFacade for ArcEngineFacade {
         enabled: bool,
     ) -> Result<(), wallpaper_core::EngineError> {
         self.0.set_scene_video_plane_sampling_enabled(enabled)
-    }
-
-    fn set_scene_renderer_preference(
-        &self,
-        preference: wallpaper_core::SceneRendererPreference,
-    ) -> Result<(), wallpaper_core::EngineError> {
-        self.0.set_scene_renderer_preference(preference)
     }
 
     fn set_scene_resolution(
@@ -767,10 +867,6 @@ impl EngineFacade for ArcEngineFacade {
         &self,
     ) -> Result<Option<wallpaper_core::AudioSpectrum128>, wallpaper_core::EngineError> {
         self.0.current_audio_spectrum()
-    }
-
-    fn video_pipeline_state(&self) -> crate::engine::RendererVideoPipelineState {
-        self.0.video_pipeline_state()
     }
 
     fn renderer_counters(
@@ -938,20 +1034,13 @@ impl EngineFacade for ArcEngineFacade {
         self.0.set_mouse_button(handle, button, pressed)
     }
 
-    fn set_mouse_entered(
-        &self,
-        handle: SceneHandle,
-        entered: bool,
-    ) -> Pin<Box<dyn Future<Output = Result<(), wallpaper_core::EngineError>> + Send>> {
+    // The next three calls pass straight through: the wrapped engine's future
+    // is returned as it is, with no extra await, mapping or logging.
+    fn set_mouse_entered(&self, handle: SceneHandle, entered: bool) -> ForwardedUnit {
         self.0.set_mouse_entered(handle, entered)
     }
 
-    fn create_window_for_display(
-        &self,
-        selector: DisplaySelector,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<Option<SceneHandle>, wallpaper_core::EngineError>> + Send>,
-    > {
+    fn create_window_for_display(&self, selector: DisplaySelector) -> ForwardedHandle {
         self.0.create_window_for_display(selector)
     }
 
@@ -959,9 +1048,7 @@ impl EngineFacade for ArcEngineFacade {
         &self,
         selector: DisplaySelector,
         assignment: WallpaperAssignment,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<Option<SceneHandle>, wallpaper_core::EngineError>> + Send>,
-    > {
+    ) -> ForwardedHandle {
         self.0.set_wallpaper_for_display(selector, assignment)
     }
 
@@ -1855,54 +1942,6 @@ impl WallpaperBridge {
             .collect())
     }
 
-    /// Chooses which renderer plays plain local videos.
-    ///
-    /// `"compatibility"` keeps everything on the scene engine, which supports
-    /// every wallpaper. `"native_preferred"` hands a video to the platform
-    /// player where its project and options fall inside the supported subset;
-    /// everything else, and anything the host refuses, stays on the scene
-    /// engine. The snapshot's `video_backends` reports what each display
-    /// actually got.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when `mode` is not one of the two names, or when the
-    /// scene list cannot be rebuilt for the new routing, in which case the
-    /// previous backend keeps running.
-    pub async fn set_video_backend(
-        &self,
-        mode: String,
-    ) -> Result<BridgeSnapshotBundle, BridgeError> {
-        let mode = match mode.as_str() {
-            "compatibility" => VideoBackendModeCfg::Compatibility,
-            "native_preferred" => VideoBackendModeCfg::NativePreferred,
-            other => {
-                return Err(BridgeError::invalid_input(format!(
-                    "unknown video backend mode {other}"
-                )));
-            }
-        };
-        self.actor.ask(SetVideoBackend { mode }).await
-    }
-
-    /// Turns the experimental native video backend on or off.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the scene list cannot be rebuilt for the new
-    /// routing, in which case the previous backend keeps running.
-    pub async fn set_native_video_backend_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<BridgeSnapshotBundle, BridgeError> {
-        let mode = if enabled {
-            VideoBackendModeCfg::NativePreferred
-        } else {
-            VideoBackendModeCfg::Compatibility
-        };
-        self.actor.ask(SetVideoBackend { mode }).await
-    }
-
     /// Sets the internal rasterization scale the user prefers.
     ///
     /// Clamped to the range the renderer honours. This is a preference: while
@@ -1940,38 +1979,6 @@ impl WallpaperBridge {
                 target_fps,
             })
             .await
-    }
-
-    /// Turns content pacing on or off for the renderer process.
-    ///
-    /// Off by default.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the setting cannot be saved or the renderer
-    /// rejects the call.
-    pub async fn set_content_pacing_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<BridgeSnapshotBundle, BridgeError> {
-        self.actor.ask(SetContentPacingEnabled { enabled }).await
-    }
-
-    /// Turns shared video decoding on or off for the renderer process.
-    ///
-    /// Off by default. Turning it on permits sharing; it does not by itself
-    /// mean any decode is shared. The snapshot's session and consumer counts
-    /// are where that shows up.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the setting cannot be saved or the renderer
-    /// rejects the call.
-    pub async fn set_shared_video_decode_enabled(
-        &self,
-        enabled: bool,
-    ) -> Result<BridgeSnapshotBundle, BridgeError> {
-        self.actor.ask(SetSharedVideoDecodeEnabled { enabled }).await
     }
 
     /// Turns the scene renderer's static-subgraph caching and redundant
@@ -2021,9 +2028,9 @@ impl WallpaperBridge {
     /// were both compiled with the scene's graph, so a running scene picks it
     /// up at its next frame boundary without being reparsed or restarted. A
     /// material with no usable plane variant, and any frame that is not 8-bit
-    /// NV12, keeps converting whatever this says; nothing here changes which
-    /// backend draws a scene. The snapshot's `scene_renderers` reports the
-    /// path each running scene's video textures actually took.
+    /// NV12, keeps converting whatever this says. The snapshot's
+    /// `scene_renderers` reports the path each running scene's video textures
+    /// actually took.
     ///
     /// # Errors
     ///
@@ -2036,36 +2043,6 @@ impl WallpaperBridge {
         self.actor
             .ask(SetSceneVideoPlaneSamplingEnabled { enabled })
             .await
-    }
-
-    /// Chooses which renderer draws scene wallpapers.
-    ///
-    /// `"compatibility"` keeps every scene on the established Vulkan/MoltenVK
-    /// path. `"native_metal_preferred"` asks for the native Metal backend
-    /// where the whole scene falls inside the subset it can draw, and falls
-    /// back as a whole scene otherwise. Independent of the video backend: a
-    /// scene is not a plain video. The snapshot's `scene_renderers` reports
-    /// what each display actually got.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when `mode` is not one of the two names, or when the
-    /// scene list cannot be rebuilt for the new routing, in which case the
-    /// previous renderer keeps running.
-    pub async fn set_scene_renderer(
-        &self,
-        mode: String,
-    ) -> Result<BridgeSnapshotBundle, BridgeError> {
-        let mode = match mode.as_str() {
-            "compatibility" => SceneRendererModeCfg::Compatibility,
-            "native_metal_preferred" => SceneRendererModeCfg::NativeMetalPreferred,
-            other => {
-                return Err(BridgeError::invalid_input(format!(
-                    "unknown scene renderer mode {other}"
-                )));
-            }
-        };
-        self.actor.ask(SetSceneRenderer { mode }).await
     }
 
     /// Chooses how many pixels a 2D scene wallpaper is rasterized with.
@@ -2154,8 +2131,8 @@ impl WallpaperBridge {
 
     /// Turns system media integration on or off for one wallpaper.
     ///
-    /// On by default; saved choices are preserved. Enabling it allows a search
-    /// for a system media source, not a promise that one exists.
+    /// On by default; a saved choice is kept. Turning it on allows a search for
+    /// a system media source, not a promise that one exists.
     ///
     /// # Errors
     ///
@@ -2358,34 +2335,6 @@ impl WallpaperBridge {
         self.actor.ask(GetNativeVideoWallpapers).await
     }
 
-    /// Hands a wallpaper back to the scene engine because the native player
-    /// cannot honour it — an unsupported target frame rate, for example.
-    ///
-    /// `admission_key` is the key of the descriptor the host judged. The
-    /// refusal is recorded against that key and holds for the rest of the
-    /// session, so a wallpaper cannot oscillate between the two backends; it
-    /// stops applying as soon as the configuration it describes changes. A key
-    /// that already does not match the live configuration is a refusal that
-    /// lost a race with the user and is dropped.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the scene list cannot be rebuilt.
-    pub async fn reject_native_video(
-        &self,
-        wallpaper_id: String,
-        admission_key: u64,
-        reason: String,
-    ) -> Result<(), BridgeError> {
-        self.actor
-            .ask(RejectNativeVideo {
-                wallpaper_id,
-                admission_key,
-                reason,
-            })
-            .await
-    }
-
     /// # Errors
     ///
     /// Returns an error when the wallpaper id, property id, or value is
@@ -2543,6 +2492,12 @@ impl WallpaperBridge {
 
 #[cfg(test)]
 impl WallpaperBridge {
+    pub(crate) async fn mounted_state_for_test(&self) -> Result<BridgeActorState, BridgeError> {
+        self.actor
+            .ask(crate::actor::lifecycle_test_support::MountedStateObservation)
+            .await
+    }
+
     /// # Panics
     ///
     /// Panics if the test bridge actor cannot be spawned.
@@ -2714,19 +2669,20 @@ impl From<ScalingMode> for BridgeScalingMode {
 }
 
 impl From<&crate::project::PropertyKind> for BridgePropertyKind {
-    fn from(value: &crate::project::PropertyKind) -> Self {
-        match value {
-            crate::project::PropertyKind::Slider => Self::Slider,
-            crate::project::PropertyKind::Combo => Self::Combo,
-            crate::project::PropertyKind::Bool => Self::Bool,
-            crate::project::PropertyKind::Color => Self::Color,
-            crate::project::PropertyKind::TextInput => Self::TextInput,
-            crate::project::PropertyKind::Text => Self::Text,
-            crate::project::PropertyKind::Group => Self::Group,
-            crate::project::PropertyKind::File => Self::File,
-            crate::project::PropertyKind::Directory => Self::Directory,
-            crate::project::PropertyKind::Texture => Self::Texture,
-            crate::project::PropertyKind::Unknown(_) => Self::Unknown,
+    fn from(kind: &crate::project::PropertyKind) -> Self {
+        use crate::project::PropertyKind;
+        match kind {
+            PropertyKind::Slider => Self::Slider,
+            PropertyKind::Combo => Self::Combo,
+            PropertyKind::Bool => Self::Bool,
+            PropertyKind::Color => Self::Color,
+            PropertyKind::TextInput => Self::TextInput,
+            PropertyKind::Text => Self::Text,
+            PropertyKind::Group => Self::Group,
+            PropertyKind::File => Self::File,
+            PropertyKind::Directory => Self::Directory,
+            PropertyKind::Texture => Self::Texture,
+            PropertyKind::Unknown(_) => Self::Unknown,
         }
     }
 }
@@ -2747,17 +2703,21 @@ impl From<crate::project::PropertyValue> for BridgePropertyValue {
     }
 }
 
+/// The reverse of the widening conversion above. Colour channels narrow with a
+/// plain cast and are not clamped, so a value that came from an `f32` returns
+/// to it exactly.
 #[allow(clippy::cast_possible_truncation)]
 impl From<BridgePropertyValue> for crate::project::PropertyValue {
     fn from(value: BridgePropertyValue) -> Self {
+        use BridgePropertyValue as Bridge;
         match value {
-            BridgePropertyValue::Bool { value } => Self::Bool(value),
-            BridgePropertyValue::Number { value } => Self::Number(value),
-            BridgePropertyValue::String { value } => Self::String(value),
-            BridgePropertyValue::ColorRgb { red, green, blue } => {
+            Bridge::Empty => Self::Null,
+            Bridge::Number { value } => Self::Number(value),
+            Bridge::Bool { value } => Self::Bool(value),
+            Bridge::String { value } => Self::String(value),
+            Bridge::ColorRgb { red, green, blue } => {
                 Self::ColorRgb(red as f32, green as f32, blue as f32)
             }
-            BridgePropertyValue::Empty => Self::Null,
         }
     }
 }

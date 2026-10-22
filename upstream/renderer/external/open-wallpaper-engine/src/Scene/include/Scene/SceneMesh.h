@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e1b-scene-model.md; written without access to the original source.
 #pragma once
 #include <vector>
 #include <memory>
@@ -7,6 +8,7 @@
 #include <atomic>
 #include <span>
 #include <string>
+#include <utility>
 
 #include "SceneVertexArray.h"
 #include "SceneIndexArray.h"
@@ -45,42 +47,43 @@ public:
 
 	class Submesh {
 	public:
-		std::size_t VertexCount() const { return m_vertexArrays.size(); }
-		std::size_t IndexCount() const { return m_indexArrays.size(); }
+		/// How many vertex arrays and index arrays it holds, not how many vertices.
+		std::size_t VertexCount() const { return m_vertices.size(); }
+		std::size_t IndexCount() const { return m_indices.size(); }
 
-		const SceneVertexArray& GetVertexArray(const std::size_t index) const { return m_vertexArrays[index]; }
-		const SceneIndexArray& GetIndexArray(const std::size_t index) const { return m_indexArrays[index]; }
-
-		SceneVertexArray& GetVertexArray(const std::size_t index) { return m_vertexArrays[index]; }
-		SceneIndexArray& GetIndexArray(const std::size_t index) { return m_indexArrays[index]; }
-
-		void AddIndexArray(SceneIndexArray&& array) {
-			m_indexArrays.emplace_back(std::move(array));
+		const SceneVertexArray& GetVertexArray(const std::size_t index) const {
+			return m_vertices.at(index);
 		}
-		void AddVertexArray(SceneVertexArray&& array) {
-			m_vertexArrays.emplace_back(std::move(array));
+		const SceneIndexArray& GetIndexArray(const std::size_t index) const {
+			return m_indices.at(index);
 		}
 
-		const std::vector<DrawRange>& DrawRanges() const { return m_drawRanges; }
-		std::vector<DrawRange>& DrawRanges() { return m_drawRanges; }
+		SceneVertexArray& GetVertexArray(const std::size_t index) { return m_vertices.at(index); }
+		SceneIndexArray& GetIndexArray(const std::size_t index) { return m_indices.at(index); }
+
+		void AddIndexArray(SceneIndexArray&& array) { m_indices.push_back(std::move(array)); }
+		void AddVertexArray(SceneVertexArray&& array) { m_vertices.push_back(std::move(array)); }
+
+		const std::vector<DrawRange>& DrawRanges() const { return m_ranges; }
+		std::vector<DrawRange>& DrawRanges() { return m_ranges; }
 		void SetDrawRanges(std::span<const DrawRange> ranges) {
-			m_drawRanges.assign(ranges.begin(), ranges.end());
+			m_ranges.assign(ranges.begin(), ranges.end());
 		}
 
 		uint32_t material_slot {0};
 		std::string output_override;
 
 	private:
-		std::vector<SceneVertexArray> m_vertexArrays;
-		std::vector<SceneIndexArray> m_indexArrays;
-		std::vector<DrawRange> m_drawRanges;
+		std::vector<SceneVertexArray> m_vertices;
+		std::vector<SceneIndexArray> m_indices;
+		std::vector<DrawRange> m_ranges;
 	};
 
-	explicit SceneMesh(MeshUpdate update = MeshUpdate::Fixed):m_update(update),m_dirty(false),
-		m_data(std::make_shared<Data>()) {}
+	explicit SceneMesh(MeshUpdate update = MeshUpdate::Fixed)
+		: m_update(update), m_geometry(std::make_shared<std::vector<Submesh>>()) {}
 
-	std::size_t VertexCount() const { return HasSubmeshZero() ? SubmeshZero().VertexCount() : 0; }
-	std::size_t IndexCount() const { return HasSubmeshZero() ? SubmeshZero().IndexCount() : 0; }
+	std::size_t VertexCount() const { return m_geometry->empty() ? 0 : m_geometry->front().VertexCount(); }
+	std::size_t IndexCount() const { return m_geometry->empty() ? 0 : m_geometry->front().IndexCount(); }
 
 	MeshPrimitive Primitive() const { return m_primitive; }
 	uint32_t PointSize() const { return m_pointSize; }
@@ -94,90 +97,80 @@ public:
 	bool UpdatesOnEvent() const { return m_update == MeshUpdate::OnEvent; }
 	const auto& Dirty() const { return m_dirty; }
 	auto& Dirty() { return m_dirty; }
+	/// Marks the geometry changed: the flag is raised and the generation moves on.
 	void SetDirty() {
-		m_dirty.store(true);
-		m_dirty_generation.fetch_add(1);
+		m_generation.fetch_add(1, std::memory_order_acq_rel);
+		m_dirty.store(true, std::memory_order_release);
 	}
-	uint64_t DirtyGeneration() const { return m_dirty_generation.load(); }
+	uint64_t DirtyGeneration() const { return m_generation.load(std::memory_order_acquire); }
 
-	uint32_t ID() const { return m_id; };
-	void SetID(uint32_t v) { m_id = v; };
+	uint32_t ID() const { return m_id; }
+	void SetID(uint32_t v) { m_id = v; }
 
-	const SceneVertexArray& GetVertexArray(const std::size_t index) const { return SubmeshZero().GetVertexArray(index); }
-	const SceneIndexArray& GetIndexArray(const std::size_t index) const { return SubmeshZero().GetIndexArray(index); }
-
-	SceneVertexArray& GetVertexArray(const std::size_t index) { return SubmeshZero().GetVertexArray(index); }
-	SceneIndexArray& GetIndexArray(const std::size_t index) { return SubmeshZero().GetIndexArray(index); }
-
-
-	void AddIndexArray(SceneIndexArray&& array) {
-		SubmeshZero().AddIndexArray(std::move(array));
+	// The geometry calls below speak for submesh 0. The writing forms start one when
+	// there is none; the reading forms of a mesh without one are caller errors.
+	const SceneVertexArray& GetVertexArray(const std::size_t index) const {
+		return m_geometry->at(0).GetVertexArray(index);
 	}
-	void AddVertexArray(SceneVertexArray&& array) {
-		SubmeshZero().AddVertexArray(std::move(array));
+	const SceneIndexArray& GetIndexArray(const std::size_t index) const {
+		return m_geometry->at(0).GetIndexArray(index);
 	}
+
+	SceneVertexArray& GetVertexArray(const std::size_t index) { return First().GetVertexArray(index); }
+	SceneIndexArray& GetIndexArray(const std::size_t index) { return First().GetIndexArray(index); }
+
+	void AddIndexArray(SceneIndexArray&& array) { First().AddIndexArray(std::move(array)); }
+	void AddVertexArray(SceneVertexArray&& array) { First().AddVertexArray(std::move(array)); }
 	void AddMaterial(SceneMaterial&& material) {
-		m_materialSlots.emplace_back(std::make_shared<SceneMaterial>(std::move(material)));
+		m_materials.push_back(std::make_shared<SceneMaterial>(std::move(material)));
 	}
 
-	void SetPrimitive(MeshPrimitive v) {  m_primitive = v; }
+	void SetPrimitive(MeshPrimitive v) { m_primitive = v; }
 	void SetPointSize(uint32_t v) { m_pointSize = v; }
 
-
-	SceneMaterial* Material() { return m_materialSlots.empty() ? nullptr : m_materialSlots[0].get(); }
+	SceneMaterial* Material() { return MaterialForSlot(0); }
 	const SceneMaterial* Material() const { return MaterialForSlot(0); }
 	SceneMaterial* MaterialForSlot(uint32_t slot) {
-		if (slot >= m_materialSlots.size()) return nullptr;
-		if (m_materialSlots[slot] == nullptr) return nullptr;
-		return m_materialSlots[slot].get();
+		return slot < m_materials.size() ? m_materials[slot].get() : nullptr;
 	}
 	const SceneMaterial* MaterialForSlot(uint32_t slot) const {
-		if (slot >= m_materialSlots.size()) return nullptr;
-		if (m_materialSlots[slot] == nullptr) return nullptr;
-		return m_materialSlots[slot].get();
+		return slot < m_materials.size() ? m_materials[slot].get() : nullptr;
 	}
 
-	const std::vector<Submesh>& Submeshes() const { return m_data->submeshes; }
-	std::vector<Submesh>& Submeshes() { return m_data->submeshes; }
+	const std::vector<Submesh>& Submeshes() const { return *m_geometry; }
+	std::vector<Submesh>& Submeshes() { return *m_geometry; }
 
-	const std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() const { return m_materialSlots; }
-	std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() { return m_materialSlots; }
+	const std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() const { return m_materials; }
+	std::vector<std::shared_ptr<SceneMaterial>>& MaterialSlots() { return m_materials; }
 	std::shared_ptr<SceneMaterial> MaterialSlotPtr(std::size_t index = 0) const {
-		return (index < m_materialSlots.size()) ? m_materialSlots[index] : nullptr;
+		return index < m_materials.size() ? m_materials[index] : nullptr;
 	}
 
 	const std::vector<DrawRange>& DrawRanges() const {
-		static const std::vector<DrawRange> kEmpty;
-		return HasSubmeshZero() ? SubmeshZero().DrawRanges() : kEmpty;
+		static const std::vector<DrawRange> none;
+		return m_geometry->empty() ? none : m_geometry->front().DrawRanges();
 	}
-	std::vector<DrawRange>& DrawRanges() { return SubmeshZero().DrawRanges(); }
-	void SetDrawRanges(std::span<const DrawRange> ranges) { SubmeshZero().SetDrawRanges(ranges); }
+	std::vector<DrawRange>& DrawRanges() { return First().DrawRanges(); }
+	void SetDrawRanges(std::span<const DrawRange> ranges) { First().SetDrawRanges(ranges); }
 
-	void ChangeMeshDataFrom(const SceneMesh& o) {
-		m_data = o.m_data;
-	}
+	/// Both meshes then read and write one store of submeshes; everything else a
+	/// mesh holds (materials, primitive, point size, id, driver, dirty state) stays its own.
+	void ChangeMeshDataFrom(const SceneMesh& o) { m_geometry = o.m_geometry; }
 
 private:
-	struct Data {
-		std::vector<Submesh> submeshes;
-	};
-
-	bool HasSubmeshZero() const { return ! m_data->submeshes.empty(); }
-	const Submesh& SubmeshZero() const { return m_data->submeshes[0]; }
-	Submesh& SubmeshZero() {
-		if (m_data->submeshes.empty()) m_data->submeshes.emplace_back();
-		return m_data->submeshes[0];
+	Submesh& First() {
+		if (m_geometry->empty()) m_geometry->emplace_back();
+		return m_geometry->front();
 	}
 
-	uint32_t m_id { std::numeric_limits<uint32_t>::max() };
+	MeshUpdate m_update;
 	MeshPrimitive m_primitive {MeshPrimitive::TRIANGLE};
 	uint32_t m_pointSize {1};
-	MeshUpdate m_update;
-	std::atomic<bool> m_dirty;
-	std::atomic<uint64_t> m_dirty_generation {0};
-
-	std::shared_ptr<Data> m_data;
-	std::vector<std::shared_ptr<SceneMaterial>> m_materialSlots;
+	uint32_t m_id {0xFFFFFFFFu};
+	std::shared_ptr<std::vector<Submesh>> m_geometry;
+	std::vector<std::shared_ptr<SceneMaterial>> m_materials;
+	std::atomic<bool> m_dirty {false};
+	std::atomic<uint64_t> m_generation {0};
 };
 
 }

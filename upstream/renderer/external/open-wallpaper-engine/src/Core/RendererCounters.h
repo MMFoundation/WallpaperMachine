@@ -93,7 +93,7 @@ typedef enum owe_renderer_counter {
      * The ledger covers the converted BGRA8 destination textures alone —
      * cached for reuse, checked out to an import, or referenced by a live
      * imported frame. Decode pixel buffers, Core Video plane wrappers, the
-     * Vulkan images that alias these textures and the swapchain are all
+     * drawables the layer hands out are all
      * outside it. It is an allocation total, not a residency measurement, and
      * not a process footprint.
      */
@@ -156,7 +156,9 @@ typedef enum owe_scene_demand_reason {
     OWE_SCENE_DEMAND_SOUND = 1 << 11,
     OWE_SCENE_DEMAND_NODE_BINDING = 1 << 12,
     OWE_SCENE_DEMAND_UNKNOWN_INPUT = 1 << 13,
-    OWE_SCENE_DEMAND_NO_FRAME_YET = 1 << 14
+    OWE_SCENE_DEMAND_NO_FRAME_YET = 1 << 14,
+    /* A text layer's new layout is still being produced or not yet applied. */
+    OWE_SCENE_DEMAND_TEXT_LAYOUT_PENDING = 1 << 15
 } owe_scene_demand_reason;
 
 /*

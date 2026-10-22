@@ -22,8 +22,6 @@ async fn host_startup_completion_applies_battery_pause_and_rejects_stale_identit
             state.app_config.power.on_battery = crate::config::BatteryModeCfg::Pause;
             state.apply_startup_power_source(crate::power::PowerSource::Battery);
             let manifest = if native {
-                state.app_config.video_backend =
-                    crate::config::VideoBackendModeCfg::NativePreferred;
                 let project = BridgePaths::for_home(home.path())
                     .steam_workshop_root()
                     .join("100");
@@ -268,7 +266,6 @@ async fn battery_fps_caps_web_and_native_descriptors() {
     s.power_source = crate::power::PowerSource::Battery;
     s.app_config.power.on_battery = crate::config::BatteryModeCfg::ReducedQuality;
     s.app_config.quality.battery.target_fps = 24;
-    s.app_config.video_backend = crate::config::VideoBackendModeCfg::NativePreferred;
     s.project_models.insert(
         "100".into(),
         crate::project::ProjectModel::parse("100", r#"{"type":"web","file":"index.html"}"#)
@@ -293,22 +290,19 @@ async fn battery_fps_caps_web_and_native_descriptors() {
     let b = build(&e, s, &home);
     let web = b.web_wallpapers().await.unwrap();
     let native = b.native_video_wallpapers().await.unwrap();
-    assert_eq!(
-        (web[0].fps, native[0].fps, native[0].admission_fps),
-        (24, 24, 24),
-        "Host descriptors ignored effective battery ceiling"
-    );
+    let key = native[0].admission_key;
+    assert_eq!(web[0].fps, 24, "Host descriptors ignored effective battery ceiling");
     b.set_frame_rate_cap(Some(15)).await.unwrap();
     assert_eq!(b.web_wallpapers().await.unwrap()[0].fps, 15);
     assert_eq!(
-        b.native_video_wallpapers().await.unwrap()[0].admission_fps,
-        15
+        b.native_video_wallpapers().await.unwrap()[0].admission_key,
+        key,
+        "a frame-rate ceiling leaves a native video's identity alone: it plays at its own rate"
     );
     b.set_power_source_for_test(crate::power::PowerSource::External)
         .await;
     b.set_frame_rate_cap(None).await.unwrap();
     assert_eq!(b.web_wallpapers().await.unwrap()[0].fps, 60);
-    assert_eq!(b.native_video_wallpapers().await.unwrap()[0].fps, 60);
 }
 #[tokio::test]
 async fn scene_audio_enable_recomputes_demand() {
@@ -347,36 +341,6 @@ async fn scene_audio_enable_recomputes_demand() {
         &e,
         &[SceneHandle::new(1)]
     ));
-}
-#[tokio::test]
-async fn video_backend_survives_older_apply_completion() {
-    let home = tempfile::tempdir().unwrap();
-    let e = FakeEngineFacade::default();
-    e.set_snapshot(vec![display(7, 1)]);
-    let b = Arc::new(build(&e, state(), &home));
-    b.inject_scene_wallpaper_config_for_test("200", "Next")
-        .await;
-    b.set_display_config_enabled("200".into(), "7".into(), true)
-        .await
-        .unwrap();
-    let gate = e.block_next_reconcile();
-    let other = b.clone();
-    let job = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(other.apply_wallpaper_options("200".into(), true))
-    });
-    assert!(gate.wait_until_blocked(Duration::from_secs(2)));
-    b.set_video_backend("native_preferred".into())
-        .await
-        .unwrap();
-    gate.release();
-    job.join().unwrap().unwrap();
-    assert_eq!(
-        b.settings_snapshot().await.unwrap().video_backend,
-        "native_preferred",
-        "Older Apply overwrote newer video backend preference"
-    );
 }
 #[tokio::test]
 async fn failed_repair_does_not_block_future_repairs() {

@@ -1,13 +1,7 @@
-use std::{
-    fs::{self, File, OpenOptions},
-    io::{self, Write},
-    path::{Path, PathBuf},
-    str::FromStr,
-    sync::{Arc, Mutex, OnceLock},
-};
+use std::{fs, io::Write as _, path::Path, str::FromStr};
 
 use chrono::{DateTime, Local, TimeZone};
-use log::{Level, LevelFilter, Log, Metadata, Record};
+use log::{Level, LevelFilter};
 use wallpaper_core::log_context;
 
 use crate::{BridgeError, BridgeErrorKind, paths::BridgePaths};
@@ -24,27 +18,56 @@ const MAX_OLD_SESSION_BYTES: u64 = 100 * 1024 * 1024;
 /// Overrides the level for the process, whatever the verbose-logging setting.
 const LEVEL_ENV: &str = "WALLPAPER_ENGINE_LOG_LEVEL";
 
-static LOGGER_STATE: OnceLock<Arc<Mutex<LoggerState>>> = OnceLock::new();
-
+/// A snapshot of the application's selected log destination and tracked size.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogStatus {
-    pub logs_root: PathBuf,
+    pub logs_root: std::path::PathBuf,
     pub active_session: String,
-    pub active_file: PathBuf,
+    pub active_file: std::path::PathBuf,
     pub active_file_size_bytes: u64,
 }
 
+/// An independently usable logger; construction alone does not install it.
 pub struct ApplicationLogger {
-    inner: Arc<Mutex<LoggerState>>,
+    lifecycle: std::sync::Mutex<LifecycleState>,
 }
 
-struct LoggerState {
-    logs_root: PathBuf,
-    active_session: String,
-    active_file_id: u64,
-    active_file: PathBuf,
-    active_file_size_bytes: u64,
-    file: Option<File>,
+static LIFECYCLE_APPLICATION: std::sync::OnceLock<ApplicationLogger> =
+    std::sync::OnceLock::new();
+
+struct LifecycleState {
+    status: LogStatus,
+    file_id: u64,
+    destination: Option<std::fs::File>,
+    io: LifecycleIo,
+}
+
+#[derive(Clone, Copy)]
+enum LifecycleOpen {
+    Initial,
+    Clear,
+    Rotation,
+}
+
+struct LifecycleIo {
+    #[cfg(test)]
+    control: Option<std::sync::Arc<lifecycle_tests::Control>>,
+}
+
+impl Default for LifecycleIo {
+    fn default() -> Self {
+        Self {
+            #[cfg(test)]
+            control: lifecycle_tests::current_control(),
+        }
+    }
+}
+
+fn lifecycle_error(error: impl std::fmt::Display) -> BridgeError {
+    BridgeError::Error {
+        kind: BridgeErrorKind::Io,
+        message: error.to_string(),
+    }
 }
 
 /// Where one line came from; everything the formatted prefix needs.
@@ -57,48 +80,166 @@ struct LineOrigin<'a> {
 }
 
 impl ApplicationLogger {
-    /// # Errors
-    ///
-    /// Returns an error when the log session directory or initial file cannot
-    /// be created.
     pub fn new(paths: &BridgePaths) -> Result<Self, BridgeError> {
-        let logs_root = paths.logs_root();
-        let state = LoggerState::new(logs_root)?;
+        Self::lifecycle_construct(paths.logs_root(), LifecycleIo::default())
+    }
+
+    fn lifecycle_construct(
+        root: std::path::PathBuf,
+        io: LifecycleIo,
+    ) -> Result<Self, BridgeError> {
+        io.create_root(&root).map_err(lifecycle_error)?;
+        prune_old_sessions(&root, MAX_OLD_SESSIONS, MAX_OLD_SESSION_BYTES);
+        let (session, directory) = io.select_session(&root);
+        io.create_session(&directory, false)
+            .map_err(lifecycle_error)?;
+        let active_file = directory.join("0.log");
+        let destination = io
+            .open(&active_file, LifecycleOpen::Initial)
+            .map_err(lifecycle_error)?;
+        let size = io.file_len(&destination, &active_file).unwrap_or(0);
         Ok(Self {
-            inner: Arc::new(Mutex::new(state)),
+            lifecycle: std::sync::Mutex::new(LifecycleState {
+                status: LogStatus {
+                    logs_root: root,
+                    active_session: session,
+                    active_file,
+                    active_file_size_bytes: size,
+                },
+                file_id: 0,
+                destination: Some(destination),
+                io,
+            }),
         })
     }
 
-    /// # Errors
-    ///
-    /// Returns an error when the log session cannot be initialized.
     pub fn install(paths: &BridgePaths) -> Result<(), BridgeError> {
-        let logger = Self::new(paths)?;
-        let inner = Arc::clone(&logger.inner);
-        if LOGGER_STATE.set(inner).is_err() {
+        // Even a losing/repeated install must finish its filesystem work first.
+        let candidate = Self::new(paths)?;
+        if LIFECYCLE_APPLICATION.set(candidate).is_err() {
             return Ok(());
         }
-
-        log::set_boxed_logger(Box::new(logger)).map_err(|error| BridgeError::Error {
-            kind: BridgeErrorKind::Io,
-            message: format!("failed to install application logger: {error}"),
+        let logger = Self::lifecycle_published()
+            .expect("a successfully published logger remains present");
+        // Publication intentionally survives a registration failure.
+        log::set_logger(logger).map_err(|error| {
+            lifecycle_error(format!("failed to install application logger: {error}"))
         })?;
-
         let (level, source) = level_for(false);
         log::set_max_level(level);
         log::info!(
-            "log session started: pid {}, level {level} ({source})",
-            std::process::id()
+            "application logger started: pid={} level={} source={}",
+            std::process::id(),
+            level,
+            source,
         );
         Ok(())
     }
 
+    pub fn status() -> Option<LogStatus> {
+        Self::lifecycle_published()?.lifecycle_snapshot()
+    }
+
+    pub fn logs_root() -> Option<std::path::PathBuf> {
+        let logger = Self::lifecycle_published()?;
+        let state = logger.lifecycle.lock().ok()?;
+        Some(state.status.logs_root.clone())
+    }
+
+    pub fn clear() -> Result<LogStatus, BridgeError> {
+        Self::lifecycle_published()
+            .ok_or_else(|| lifecycle_error("application logger is not installed"))?
+            .lifecycle_clear()
+    }
+
+    // Narrow integration surface for the parent-retained verbose/host helpers.
+    // Presence is deliberately different from successful registration or lock access.
+    fn lifecycle_published() -> Option<&'static Self> {
+        LIFECYCLE_APPLICATION.get()
+    }
+
+    fn lifecycle_dispatch_global(level: log::Level, formatted: &str) {
+        if let Some(logger) = Self::lifecycle_published() {
+            logger.lifecycle_dispatch(level, formatted);
+        }
+    }
+
+    fn lifecycle_dispatch(&self, level: log::Level, formatted: &str) {
+        let Ok(mut state) = self.lifecycle.lock() else {
+            return;
+        };
+        state.dispatch(level, formatted);
+    }
+
+    #[cfg(test)]
+    fn lifecycle_write_instance(&self, formatted: &str) {
+        self.lifecycle
+            .lock()
+            .unwrap()
+            .dispatch(log::Level::Info, formatted);
+    }
+
+    fn lifecycle_snapshot(&self) -> Option<LogStatus> {
+        self.lifecycle.lock().ok().map(|state| state.status.clone())
+    }
+
+    fn lifecycle_clear(&self) -> Result<LogStatus, BridgeError> {
+        let mut state = self
+            .lifecycle
+            .lock()
+            .map_err(|_| lifecycle_error("application logger state is poisoned"))?;
+        let old_paths = state
+            .io
+            .root_entries(&state.status.logs_root)
+            .map_err(lifecycle_error)?;
+        let (session, directory) = state.io.select_session(&state.status.logs_root);
+        state
+            .io
+            .create_session(&directory, true)
+            .map_err(lifecycle_error)?;
+        let active_file = directory.join("0.log");
+        let destination = state
+            .io
+            .open(&active_file, LifecycleOpen::Clear)
+            .map_err(lifecycle_error)?;
+
+        let retired = state.destination.replace(destination);
+        state.file_id = 0;
+        state.status.active_session = session;
+        state.status.active_file = active_file;
+        // Unlike construction and rotation, clear deliberately starts at zero.
+        state.status.active_file_size_bytes = 0;
+        drop(retired);
+
+        for old_path in old_paths {
+            if old_path == directory {
+                continue;
+            }
+            if let Err(error) = state.io.remove_old_path(&old_path) {
+                eprintln!("failed to remove old log path {}: {error}", old_path.display());
+            }
+        }
+        Ok(state.status.clone())
+    }
+
+    #[cfg(test)]
+    fn instance_status(&self) -> Option<LogStatus> {
+        self.lifecycle_snapshot()
+    }
+
+    #[cfg(test)]
+    fn clear_instance(&self) -> Result<LogStatus, BridgeError> {
+        self.lifecycle_clear()
+    }
+}
+
+impl ApplicationLogger {
     /// Applies the persisted verbose-logging choice. `WALLPAPER_ENGINE_LOG_LEVEL`
     /// still wins when set, so a developer's override is not undone by the
     /// setting. Does nothing until the logger is installed, which keeps tests
     /// that build a bridge from changing the process-wide level.
     pub fn set_verbose(verbose: bool) {
-        if LOGGER_STATE.get().is_none() {
+        if Self::lifecycle_published().is_none() {
             return;
         }
         let (level, source) = level_for(verbose);
@@ -133,72 +274,22 @@ impl ApplicationLogger {
             line: Some(line),
         };
         let line = format_record(&origin, &format_args!("{message}"));
-        if let Some(inner) = LOGGER_STATE.get()
-            && let Ok(mut state) = inner.lock()
-        {
-            state.write_line(level, &line);
-        }
+        Self::lifecycle_dispatch_global(level, &line);
     }
 
-    #[must_use]
-    pub fn status() -> Option<LogStatus> {
-        LOGGER_STATE
-            .get()
-            .and_then(|inner| inner.lock().ok().map(|state| state.status()))
-    }
-
-    #[must_use]
-    pub fn logs_root() -> Option<PathBuf> {
-        Self::status().map(|status| status.logs_root)
-    }
-
-    /// # Errors
-    ///
-    /// Returns an error when a new active log session cannot be created.
-    pub fn clear() -> Result<LogStatus, BridgeError> {
-        let inner = LOGGER_STATE.get().ok_or_else(|| BridgeError::Error {
-            kind: BridgeErrorKind::Io,
-            message: "application logger is not installed".to_string(),
-        })?;
-        let mut state = inner.lock().map_err(|_| BridgeError::Error {
-            kind: BridgeErrorKind::Io,
-            message: "application logger state is poisoned".to_string(),
-        })?;
-        state.clear()
-    }
-
-    #[cfg(test)]
-    fn instance_status(&self) -> Option<LogStatus> {
-        self.inner.lock().ok().map(|state| state.status())
-    }
-
-    #[cfg(test)]
-    fn clear_instance(&self) -> Result<LogStatus, BridgeError> {
-        self.inner
-            .lock()
-            .map_err(|_| BridgeError::Error {
-                kind: BridgeErrorKind::Io,
-                message: "application logger state is poisoned".to_string(),
-            })?
-            .clear()
-    }
 
     #[cfg(test)]
     fn write_instance(&self, line: &str) {
-        self.inner.lock().unwrap().write_line(Level::Info, line);
+        self.lifecycle_write_instance(line);
     }
 }
 
-impl Log for ApplicationLogger {
-    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        metadata.level() <= Level::Trace
+impl log::Log for ApplicationLogger {
+    fn enabled(&self, _metadata: &log::Metadata<'_>) -> bool {
+        true
     }
 
-    fn log(&self, record: &Record<'_>) {
-        if !self.enabled(record.metadata()) {
-            return;
-        }
-
+    fn log(&self, record: &log::Record<'_>) {
         let origin = LineOrigin {
             time: Local::now(),
             level: record.level(),
@@ -207,9 +298,7 @@ impl Log for ApplicationLogger {
             line: record.line(),
         };
         let line = format_record(&origin, record.args());
-        if let Ok(mut state) = self.inner.lock() {
-            state.write_line(record.level(), &line);
-        }
+        self.lifecycle_dispatch(record.level(), &line);
     }
 
     fn flush(&self) {}
@@ -248,131 +337,221 @@ fn format_record(origin: &LineOrigin<'_>, args: &std::fmt::Arguments<'_>) -> Str
     }
 }
 
-impl LoggerState {
-    #[allow(clippy::single_call_fn)]
-    fn new(logs_root: PathBuf) -> Result<Self, BridgeError> {
-        fs::create_dir_all(&logs_root).map_err(|error| BridgeError::Error {
-            kind: BridgeErrorKind::Io,
-            message: error.to_string(),
-        })?;
-        prune_old_sessions(&logs_root, MAX_OLD_SESSIONS, MAX_OLD_SESSION_BYTES);
-        let active_session = unique_session_name(&logs_root);
-        let session_root = logs_root.join(&active_session);
-        fs::create_dir_all(&session_root).map_err(|error| BridgeError::Error {
-            kind: BridgeErrorKind::Io,
-            message: error.to_string(),
-        })?;
-        let active_file = session_root.join("0.log");
-        let file = open_log_file(&active_file).map_err(|error| BridgeError::Error {
-            kind: BridgeErrorKind::Io,
-            message: error.to_string(),
-        })?;
-        let active_file_size_bytes = file.metadata().map_or(0, |metadata| metadata.len());
-
-        Ok(Self {
-            logs_root,
-            active_session,
-            active_file_id: 0,
-            active_file,
-            active_file_size_bytes,
-            file: Some(file),
-        })
-    }
-
-    fn status(&self) -> LogStatus {
-        LogStatus {
-            logs_root: self.logs_root.clone(),
-            active_session: self.active_session.clone(),
-            active_file: self.active_file.clone(),
-            active_file_size_bytes: self.active_file_size_bytes,
-        }
-    }
-
-    fn clear(&mut self) -> Result<LogStatus, BridgeError> {
-        let old_sessions = fs::read_dir(&self.logs_root)
-            .map_err(|error| BridgeError::Error {
-                kind: BridgeErrorKind::Io,
-                message: error.to_string(),
-            })?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .collect::<Vec<_>>();
-
-        let active_session = unique_session_name(&self.logs_root);
-        let session_root = self.logs_root.join(&active_session);
-        fs::create_dir_all(&session_root).map_err(|error| BridgeError::Error {
-            kind: BridgeErrorKind::Io,
-            message: error.to_string(),
-        })?;
-        let active_file = session_root.join("0.log");
-        let file = open_log_file(&active_file).map_err(|error| BridgeError::Error {
-            kind: BridgeErrorKind::Io,
-            message: error.to_string(),
-        })?;
-
-        self.file = Some(file);
-        self.active_session = active_session;
-        self.active_file_id = 0;
-        self.active_file = active_file;
-        self.active_file_size_bytes = 0;
-
-        for path in old_sessions {
-            if path == session_root {
-                continue;
-            }
-            let result = if path.is_dir() {
-                fs::remove_dir_all(&path)
-            } else {
-                fs::remove_file(&path)
-            };
-            if let Err(error) = result {
-                eprintln!("ERROR logging.rs:0 failed to remove old log path: {error}");
-            }
-        }
-
-        Ok(self.status())
-    }
-
-    fn rotate(&mut self) -> io::Result<()> {
-        self.active_file_id = self.active_file_id.saturating_add(1);
-        let session_root = self.logs_root.join(&self.active_session);
-        self.active_file = session_root.join(format!("{}.log", self.active_file_id));
-        let file = open_log_file(&self.active_file)?;
-        self.active_file_size_bytes = file.metadata().map_or(0, |metadata| metadata.len());
-        self.file = Some(file);
-        if let Some(expired) = self.active_file_id.checked_sub(MAX_FILES_PER_SESSION) {
-            // Only ever the one file that just fell out of the window: the
-            // ones before it went on earlier rotations.
-            let _ = fs::remove_file(session_root.join(format!("{expired}.log")));
-        }
-        Ok(())
-    }
-
-    fn write_line(&mut self, level: Level, line: &str) {
+impl LifecycleState {
+    fn dispatch(&mut self, level: log::Level, formatted: &str) {
         match level {
-            Level::Error | Level::Warn => eprint!("{line}"),
-            Level::Info | Level::Debug | Level::Trace => print!("{line}"),
+            log::Level::Error | log::Level::Warn => eprint!("{formatted}"),
+            log::Level::Info | log::Level::Debug | log::Level::Trace => print!("{formatted}"),
         }
-
-        if let Err(error) = self.write_line_to_file(line) {
-            eprintln!("ERROR logging.rs:0 failed to persist log: {error}");
+        if let Err(error) = self.persist(formatted.as_bytes()) {
+            eprintln!("failed to persist application log: {error}");
         }
     }
 
-    fn write_line_to_file(&mut self, line: &str) -> io::Result<()> {
-        let line_len = u64::try_from(line.len()).unwrap_or(u64::MAX);
-        if self.active_file_size_bytes > 0
-            && self.active_file_size_bytes.saturating_add(line_len) > MAX_LOG_FILE_BYTES
-        {
-            self.rotate()?;
+    fn persist(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        if self.destination.is_none() {
+            return Ok(());
         }
-
-        if let Some(file) = &mut self.file {
-            file.write_all(line.as_bytes())?;
-            file.flush()?;
-            self.active_file_size_bytes = self.active_file_size_bytes.saturating_add(line_len);
+        let incoming = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        if self.status.active_file_size_bytes != 0
+            && self.status.active_file_size_bytes.saturating_add(incoming)
+                > MAX_LOG_FILE_BYTES
+        {
+            // Failed opens deliberately leave this advanced identity visible while
+            // retaining the old destination and its previous tracked byte count.
+            self.file_id = self.file_id.saturating_add(1);
+            self.status.active_file = self
+                .status
+                .active_file
+                .with_file_name(format!("{}.log", self.file_id));
+            let destination = self
+                .io
+                .open(&self.status.active_file, LifecycleOpen::Rotation)?;
+            let size = self
+                .io
+                .file_len(&destination, &self.status.active_file)
+                .unwrap_or(0);
+            self.destination = Some(destination);
+            self.status.active_file_size_bytes = size;
+            retain_rotated_files(
+                self.status
+                    .active_file
+                    .parent()
+                    .expect("numbered logs always have a session directory"),
+                self.file_id,
+            );
+        }
+        if let Some(destination) = self.destination.as_mut() {
+            self.io.write_record(destination, bytes)?;
+            self.io.flush_record(destination)?;
+            self.status.active_file_size_bytes = self
+                .status
+                .active_file_size_bytes
+                .saturating_add(incoming);
         }
         Ok(())
+    }
+}
+
+impl LifecycleIo {
+    fn create_root(&self, path: &std::path::Path) -> std::io::Result<()> {
+        #[cfg(test)]
+        self.check(lifecycle_tests::Point::RootDirectory, path)?;
+        std::fs::create_dir_all(path)
+    }
+
+    fn create_session(&self, path: &std::path::Path, _clear: bool) -> std::io::Result<()> {
+        #[cfg(test)]
+        self.check(
+            if _clear {
+                lifecycle_tests::Point::ClearDirectory
+            } else {
+                lifecycle_tests::Point::SessionDirectory
+            },
+            path,
+        )?;
+        std::fs::create_dir_all(path)
+    }
+
+    fn select_session(&self, root: &std::path::Path) -> (String, std::path::PathBuf) {
+        let now = {
+            #[cfg(test)]
+            {
+                self.control
+                    .as_ref()
+                    .and_then(|control| control.now())
+                    .unwrap_or_else(chrono::Local::now)
+            }
+            #[cfg(not(test))]
+            {
+                chrono::Local::now()
+            }
+        };
+        let stem = now.format("%Y%m%d-%H%M%S").to_string();
+        let path = root.join(&stem);
+        if !path.exists() {
+            return (stem, path);
+        }
+        let mut suffix = 1_u64;
+        loop {
+            let name = format!("{stem}-{suffix}");
+            let path = root.join(&name);
+            if !path.exists() {
+                return (name, path);
+            }
+            suffix += 1;
+        }
+    }
+
+    fn open(
+        &self,
+        path: &std::path::Path,
+        _purpose: LifecycleOpen,
+    ) -> std::io::Result<std::fs::File> {
+        #[cfg(test)]
+        {
+            let point = match _purpose {
+                LifecycleOpen::Initial => lifecycle_tests::Point::InitialOpen,
+                LifecycleOpen::Clear => lifecycle_tests::Point::ClearOpen,
+                LifecycleOpen::Rotation => lifecycle_tests::Point::RotationOpen,
+            };
+            self.check(point, path)?;
+            if let Some(control) = &self.control {
+                control.seed_open(point, path)?;
+            }
+        }
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+    }
+
+    fn file_len(&self, file: &std::fs::File, _path: &std::path::Path) -> std::io::Result<u64> {
+        #[cfg(test)]
+        self.check(lifecycle_tests::Point::Metadata, _path)?;
+        Ok(file.metadata()?.len())
+    }
+
+    fn root_entries(&self, root: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>> {
+        #[cfg(test)]
+        self.check(lifecycle_tests::Point::ClearEnumeration, root)?;
+        let mut paths = Vec::new();
+        for entry in std::fs::read_dir(root)? {
+            let path = entry.map(|entry| entry.path());
+            #[cfg(test)]
+            let path = path.and_then(|path| {
+                if self.control.as_ref().is_some_and(|control| control.skip_entry(&path)) {
+                    Err(lifecycle_tests::injected_error())
+                } else {
+                    Ok(path)
+                }
+            });
+            if let Ok(path) = path {
+                paths.push(path);
+            }
+        }
+        #[cfg(test)]
+        if let Some(control) = &self.control {
+            control.after_enumeration()?;
+        }
+        Ok(paths)
+    }
+
+    fn remove_old_path(&self, path: &std::path::Path) -> std::io::Result<()> {
+        #[cfg(test)]
+        self.check(lifecycle_tests::Point::Delete, path)?;
+        if path.is_dir() {
+            std::fs::remove_dir_all(path)
+        } else {
+            std::fs::remove_file(path)
+        }
+    }
+
+    fn write_record(&self, file: &mut std::fs::File, bytes: &[u8]) -> std::io::Result<()> {
+        #[cfg(test)]
+        if let Some(control) = &self.control {
+            if let Some(failure) = control.take_failure(lifecycle_tests::Point::Write, None) {
+                file.write_all(&bytes[..failure.prefix.min(bytes.len())])?;
+                return Err(lifecycle_tests::injected_error());
+            }
+        }
+        file.write_all(bytes)
+    }
+
+    fn flush_record(&self, file: &mut std::fs::File) -> std::io::Result<()> {
+        #[cfg(test)]
+        if let Some(control) = &self.control {
+            if control
+                .take_failure(lifecycle_tests::Point::Flush, None)
+                .is_some()
+            {
+                return Err(lifecycle_tests::injected_error());
+            }
+        }
+        file.flush()
+    }
+
+    #[cfg(test)]
+    fn check(
+        &self,
+        point: lifecycle_tests::Point,
+        path: &std::path::Path,
+    ) -> std::io::Result<()> {
+        if self.control.as_ref().is_some_and(|control| {
+            control.take_failure(point, Some(path)).is_some()
+        }) {
+            Err(lifecycle_tests::injected_error())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn retain_rotated_files(session_dir: &Path, active_file_id: u64) {
+    if let Some(expired) = active_file_id.checked_sub(MAX_FILES_PER_SESSION) {
+        // Only ever the one file that just fell out of the window: the
+        // ones before it went on earlier rotations.
+        let _ = fs::remove_file(session_dir.join(format!("{expired}.log")));
     }
 }
 
@@ -432,24 +611,10 @@ fn directory_bytes(path: &Path) -> u64 {
     })
 }
 
-fn unique_session_name(logs_root: &Path) -> String {
-    let base = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
-    if !logs_root.join(&base).exists() {
-        return base;
-    }
 
-    for suffix in 1.. {
-        let candidate = format!("{base}-{suffix}");
-        if !logs_root.join(&candidate).exists() {
-            return candidate;
-        }
-    }
-    unreachable!("unbounded suffix loop must return");
-}
-
-fn open_log_file(path: &Path) -> io::Result<File> {
-    OpenOptions::new().create(true).append(true).open(path)
-}
+#[cfg(test)]
+#[path = "logging/lifecycle_tests.rs"]
+mod lifecycle_tests;
 
 #[cfg(test)]
 mod tests {
@@ -497,22 +662,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn clear_switches_to_new_session_and_removes_old_sessions() {
-        let root = tempfile::tempdir().unwrap();
-        let paths = BridgePaths::for_home(root.path());
-        let logger = ApplicationLogger::new(&paths).unwrap();
-        let before = logger.instance_status().unwrap();
-        let old = before.logs_root.join("old-session");
-        fs::create_dir_all(&old).unwrap();
-        fs::write(old.join("ignored.log"), b"old").unwrap();
-
-        let after = logger.clear_instance().unwrap();
-
-        assert_ne!(before.active_session, after.active_session);
-        assert!(after.active_file.exists());
-        assert_eq!(fs::read_dir(&after.logs_root).unwrap().count(), 1);
-    }
 
     fn session(root: &Path, name: &str, bytes: usize) {
         fs::create_dir_all(root.join(name)).unwrap();

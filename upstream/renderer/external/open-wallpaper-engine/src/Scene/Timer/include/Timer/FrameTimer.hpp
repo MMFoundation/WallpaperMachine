@@ -3,17 +3,15 @@
 #include "Core/RendererCounters.hpp"
 #include "ThreadTimer.hpp"
 #include <deque>
+#include <limits>
 
 namespace wallpaper
 {
 class FrameTimer : NoCopy, NoMove {
-    constexpr static usize FRAMETIME_QUEUE_SIZE { 5 };
-
 public:
     FrameTimer(std::function<void()> callback = {});
     ~FrameTimer();
 
-    // call brefore run
     void SetCallback(const std::function<void()>&);
 
     void Run();
@@ -94,24 +92,23 @@ public:
     /// `Run`; the timer thread only reads the pointer.
     void SetCounters(RendererCounters* counters);
 
-    // only used with one render
     void FrameBegin();
     void FrameEnd();
 
 private:
-    void ResetFrameTiming();
+    friend struct TimerAdmissionTestAccess;
+
     void AddFrametime(std::chrono::microseconds);
     void UpdateFrametime();
     void FrameBegin(std::chrono::steady_clock::time_point now);
     void FrameEnd(std::chrono::steady_clock::time_point now);
     std::chrono::microseconds ResolveInterval();
+    /// The thread timer's tick, on the timer thread: asks for a draw unless one is in flight.
+    void OnTick();
 
-    std::function<void()>                 m_callback;
-    std::deque<std::chrono::microseconds> m_frametime_queue;
     std::atomic<RendererCounters*>        m_counters { nullptr };
 
     std::atomic<u16>                        m_req_fps;
-    std::atomic<std::chrono::microseconds> m_frametime;
     std::atomic<std::chrono::microseconds> m_ideatime;
     std::atomic<std::chrono::microseconds> m_elapsed_frametime;
     std::atomic<std::chrono::microseconds> m_tick_interval;
@@ -128,13 +125,19 @@ private:
     /// by a tick that a still-running draw suppressed.
     std::atomic<bool>                      m_frame_requested { false };
     std::atomic<i32>                       m_frame_busy_count;
-    /// When a tick was dropped because the previous draw was still running;
-    /// the epoch while none is owed.
-    std::atomic<std::chrono::steady_clock::time_point> m_owed_tick {};
+    /// Moment of a tick a still-running draw suppressed, or `kNoOwedTick`.
+    static constexpr int64_t               kNoOwedTick { std::numeric_limits<int64_t>::min() };
+    std::atomic<int64_t>                   m_owed_tick_ns { kNoOwedTick };
+
+    /// The cost of the last five draws, and their mean in `m_frame_cost`.
+    mutable std::mutex                     m_costs_mutex;
+    std::deque<std::chrono::microseconds>  m_costs;
+    std::atomic<std::chrono::microseconds> m_frame_cost;
+
+    std::function<void()> m_draw;
 
     ThreadTimer m_timer;
 
-    // out of time thread
     std::chrono::time_point<std::chrono::steady_clock> m_clock;
 };
 } // namespace wallpaper

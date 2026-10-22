@@ -7,18 +7,17 @@
 #include "Core/RendererCounters.hpp"
 #include "Image.hpp"
 #include "Interface/IImageParser.h"
-#include "Platform/Apple/FfmpegVideoInterop.hpp"
+#include "Platform/Apple/VideoFrameInterop.hpp"
 #include "Runtime/SceneRuntimeContext.hpp"
 #include "Scene/Scene.h"
 #include "Utils/Logging.h"
-#include "Video/SharedVideoSession.hpp"
 #include "Video/VideoColorConversion.hpp"
 #include "Video/VideoConversionMetal.hpp"
 #include "Video/VideoFramePacing.hpp"
 // For `ResolveEffectiveVideoPlaybackState`: the global/per-layer combination is
 // part of what playback means, and a second copy of it here would be a second
-// definition that can drift from the compatibility backend's.
-#include "Vulkan/TextureCache.hpp"
+// definition that can drift from the playback code's.
+#include "Video/VideoTextureSource.hpp"
 
 #include <algorithm>
 #include <array>
@@ -52,34 +51,52 @@ bool SetError(std::string* error, std::string message)
     return false;
 }
 
-std::string DescribePixelFormat(std::uint32_t pixel_format)
+std::string DescribePixelFormat(std::uint32_t code)
 {
-    const char chars[5] {
-        static_cast<char>((pixel_format >> 24) & 0xff),
-        static_cast<char>((pixel_format >> 16) & 0xff),
-        static_cast<char>((pixel_format >> 8) & 0xff),
-        static_cast<char>(pixel_format & 0xff),
-        0,
-    };
-    return std::string(chars);
+    // The four characters of a pixel-format code, most significant byte first.
+    std::string text;
+    for (int shift = 24; shift >= 0; shift -= 8) {
+        const auto byte = static_cast<char>((code >> shift) & 0xFFu);
+        if (byte == '\0') break;
+        text.push_back(byte);
+    }
+    return text;
 }
 
-/// SDR 8-bit only, and deliberately so: 10-bit, HDR transfer functions and
-/// every other chroma layout need colour handling this path does not have, and
-/// guessing one would show wrong colours rather than fall back.
-bool SupportedPixelFormat(std::uint32_t pixel_format, bool* is_nv12)
+/// How a decoded frame reaches the shaders, decided by its pixel format.
+enum class PixelKind {
+    /// One BGRA image, imported as it is.
+    Bgra,
+    /// 8-bit biplanar 4:2:0 (NV12): two planes, converted or sampled directly.
+    Nv12,
+    /// 10-bit biplanar 4:2:0 (P010, `x420`): two 16-bit planes, always converted,
+    /// because the conversion is also where HDR is tone mapped to SDR.
+    TenBit,
+};
+
+/// BGRA, 8-bit NV12 and 10-bit biplanar 4:2:0. Every other chroma layout and
+/// depth needs colour handling this path does not have, and guessing one would
+/// show wrong colours rather than fall back.
+bool SupportedPixelFormat(std::uint32_t pixel_format, PixelKind* kind)
 {
+    PixelKind found = PixelKind::Bgra;
     switch (pixel_format) {
     case kCVPixelFormatType_32BGRA:
-        if (is_nv12 != nullptr) *is_nv12 = false;
-        return true;
+        found = PixelKind::Bgra;
+        break;
     case kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange:
     case kCVPixelFormatType_420YpCbCr8BiPlanarFullRange:
-        if (is_nv12 != nullptr) *is_nv12 = true;
-        return true;
+        found = PixelKind::Nv12;
+        break;
+    case kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange:
+    case kCVPixelFormatType_420YpCbCr10BiPlanarFullRange:
+        found = PixelKind::TenBit;
+        break;
     default:
         return false;
     }
+    if (kind != nullptr) *kind = found;
+    return true;
 }
 
 } // namespace
@@ -109,6 +126,11 @@ struct FrameBundle {
     id<MTLTexture>           luma { nil };
     id<MTLTexture>           chroma { nil };
     video::YuvColorParams    color {};
+    /// 10-bit frames only: the constants of the HDR/SDR conversion. The planes
+    /// above are then 16-bit and belong to the conversion alone, which is why
+    /// `planes()` does not offer them.
+    bool                     ten_bit { false };
+    video::HdrConversionParams hdr {};
     /// Cleared when this bundle dies, which is after the command buffer that
     /// read `destination` completed. Until then the slot is not offered again.
     std::shared_ptr<std::atomic<bool>> slot_busy;
@@ -162,6 +184,10 @@ struct VideoSourceEntry {
     /// changes -- the setting toggled, a material's variant became usable --
     /// re-imports the same generation rather than waiting for the next one.
     VideoConsumerDemand                        satisfied {};
+    /// Set when `current` is a 10-bit frame, whose one converted image serves
+    /// every demand, so that a demand that changes is not a reason to import and
+    /// convert it again.
+    bool                                       demand_independent { false };
     std::array<DestinationSlot, kDestinationSlots> slots {};
     /// What the last `syncPlayback` actually asked for, which is what decides
     /// whether this source still changes on its own.
@@ -180,6 +206,10 @@ struct MetalVideoTextures::State {
     CVMetalTextureCacheRef      texture_cache { nullptr };
     id<MTLComputePipelineState> nv12_pipeline { nil };
     id<MTLComputePipelineState> bgra_pipeline { nil };
+    /// Built the first time a source's frames are 10-bit, never for 8-bit video:
+    /// the library it comes from is a second compile of the 10-bit kernel and
+    /// what it shares with the NV12 one.
+    id<MTLComputePipelineState> ten_bit_pipeline { nil };
     /// Why the conversion pipeline is missing, kept from `configure` so the
     /// first frame that needs it can say something better than "no pipeline".
     std::string                 pipeline_error;
@@ -213,6 +243,7 @@ struct MetalVideoTextures::State {
         }
         nv12_pipeline = nil;
         bgra_pipeline = nil;
+        ten_bit_pipeline = nil;
         device        = nil;
     }
 
@@ -256,6 +287,34 @@ struct MetalVideoTextures::State {
         bgra_pipeline = pipeline(@"bgra_transform");
     }
 
+    /// The 10-bit conversion pipeline, compiled on first need. False with `error`
+    /// set when Metal refuses the kernel, which fails the scene's compile like any other unsupported video.
+    bool ensureTenBitPipeline(std::string* error)
+    {
+        if (ten_bit_pipeline != nil) return true;
+        if (device == nil) return SetError(error, "no Metal device for 10-bit video textures");
+        NSString* source = [NSString stringWithFormat:@"%s%s", video::kVideoConversionMetalSource,
+                                                      video::kVideoTenBitConversionMetalSource];
+        NSError* library_error = nil;
+        id<MTLLibrary> library = [device newLibraryWithSource:source options:nil error:&library_error];
+        id<MTLFunction> function = library != nil ? [library newFunctionWithName:@"p010_to_bgra"] : nil;
+        if (function == nil) {
+            return SetError(error, library_error != nil
+                                       ? "failed to compile the 10-bit video conversion: " +
+                                             std::string([[library_error localizedDescription] UTF8String])
+                                       : std::string("failed to load the 10-bit video conversion function"));
+        }
+        NSError* pipeline_error_object = nil;
+        ten_bit_pipeline = [device newComputePipelineStateWithFunction:function error:&pipeline_error_object];
+        if (ten_bit_pipeline == nil) {
+            return SetError(error, pipeline_error_object != nil
+                                       ? "failed to create the 10-bit video conversion pipeline: " +
+                                             std::string([[pipeline_error_object localizedDescription] UTF8String])
+                                       : std::string("failed to create the 10-bit video conversion pipeline"));
+        }
+        return true;
+    }
+
     /// What a key's source is asked to play right now: the layer's own clock and
     /// controls, under the renderer's pause and rate. The one answer for the
     /// frame being drawn and for a source being opened, which must not start from
@@ -270,7 +329,7 @@ struct MetalVideoTextures::State {
         video::VideoPlaybackState global_state {};
         global_state.paused = paused;
         global_state.rate   = rate;
-        return vulkan::ResolveEffectiveVideoPlaybackState(global_state, layer_state);
+        return video::ResolveEffectiveVideoPlaybackState(global_state, layer_state);
     }
 
     void reportSourceWork(VideoSourceEntry& entry, std::uint64_t generation)
@@ -336,6 +395,7 @@ struct MetalVideoTextures::State {
                                                  width:width
                                                 height:height
                                              mipmapped:NO];
+                if (descriptor == nil) return nil;
                 descriptor.usage           = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite;
                 descriptor.storageMode     = MTLStorageModePrivate;
                 descriptor.resourceOptions = MTLResourceStorageModePrivate;
@@ -429,10 +489,8 @@ bool MetalVideoTextures::prepare(Scene&                          scene,
             // the ordinary texture path and are simply not ours.
             if (! image->header.isVideo) continue;
 
-            // Through the registry, exactly as the compatibility backend's texture
-            // cache does: with shared decode off this is a private source per
-            // call, and with it on an equivalent running decoder is reused.
-            auto source = video::AcquireVideoTextureSource(*image, &source_error);
+            // A private source per call: every surface decodes its own clip.
+            auto source = video::CreateVideoTextureSource(image, &source_error);
             if (! source) {
                 return SetError(error,
                                 "failed to open video texture \"" + key + "\": " + source_error);
@@ -460,12 +518,16 @@ bool MetalVideoTextures::prepare(Scene&                          scene,
         if (! frame.valid()) {
             return SetError(error, "video texture \"" + key + "\" produced no first frame");
         }
-        bool is_nv12 = false;
-        if (! SupportedPixelFormat(frame.pixel_format, &is_nv12)) {
+        PixelKind kind = PixelKind::Bgra;
+        if (! SupportedPixelFormat(frame.pixel_format, &kind)) {
             return SetError(error,
                             "video texture \"" + key + "\" decodes to the unsupported pixel " +
                                 "format " + DescribePixelFormat(frame.pixel_format));
         }
+        // The kernel is compiled here, at graph compile, for a 10-bit video, so
+        // that the first frame does not stall on it.
+        if (kind == PixelKind::TenBit && ! state.ensureTenBitPipeline(error)) return false;
+        const bool is_nv12 = kind == PixelKind::Nv12;
         if (is_nv12 && state.nv12_pipeline == nil) {
             return SetError(error,
                             state.pipeline_error.empty()
@@ -473,7 +535,7 @@ bool MetalVideoTextures::prepare(Scene&                          scene,
                                 : state.pipeline_error);
         }
 
-        if (! is_nv12 && frame.needsDisplayTransform() && state.bgra_pipeline == nil) {
+        if (kind == PixelKind::Bgra && frame.needsDisplayTransform() && state.bgra_pipeline == nil) {
             return SetError(error,
                             state.pipeline_error.empty()
                                 ? std::string("no BGRA display-transform pipeline for video textures")
@@ -500,11 +562,13 @@ bool MetalVideoTextures::prepareForTests(const std::string&                     
     if (! source->prime(error) || ! source->refreshFrame(error)) return false;
     const auto frame = source->currentFrame();
     if (! frame.valid()) return SetError(error, "the test video source produced no first frame");
-    if (! SupportedPixelFormat(frame.pixel_format, nullptr)) {
+    PixelKind kind = PixelKind::Bgra;
+    if (! SupportedPixelFormat(frame.pixel_format, &kind)) {
         return SetError(error,
                         "the test video source decodes to the unsupported pixel format " +
                             DescribePixelFormat(frame.pixel_format));
     }
+    if (kind == PixelKind::TenBit && ! state.ensureTenBitPipeline(error)) return false;
     VideoSourceEntry entry;
     entry.source = std::move(source);
     state.sources.insert_or_assign(key, std::move(entry));
@@ -517,6 +581,11 @@ std::uint64_t MetalVideoTextures::conversionsEncodedForTests() const
 }
 
 std::uint64_t MetalVideoTextures::importsForTests() const { return m_state->imports; }
+
+bool MetalVideoTextures::tenBitPipelineBuiltForTests() const
+{
+    return m_state->ten_bit_pipeline != nil;
+}
 #endif
 
 void MetalVideoTextures::release()
@@ -569,21 +638,6 @@ void MetalVideoTextures::setDemand(std::map<std::string, VideoConsumerDemand> de
     m_state->demand = std::move(demand);
 }
 
-double MetalVideoTextures::shortestFramePeriod() const
-{
-    double shortest = 0.0;
-    for (const auto& [key, entry] : m_state->sources) {
-        (void)key;
-        if (! entry.source) continue;
-        const double period = entry.source->frameDurationSeconds();
-        // A source that cannot report its rate makes the whole answer unknown:
-        // pacing on the others could skip its changes.
-        if (! (period > 0.0)) return 0.0;
-        if (shortest == 0.0 || period < shortest) shortest = period;
-    }
-    return shortest;
-}
-
 bool MetalVideoTextures::advancesOnItsOwn() const
 {
     for (const auto& [key, entry] : m_state->sources) {
@@ -605,6 +659,9 @@ VideoFramePlanes MetalVideoTextures::planes(const std::string& key) const
     if (iterator == m_state->sources.end() || ! iterator->second.current) return {};
     const auto& bundle = *iterator->second.current;
     if (bundle.luma == nil || bundle.chroma == nil) return {};
+    // A 10-bit frame's planes are 16-bit and belong to its conversion: a shader
+    // written for the 8-bit planes would read them as the wrong numbers.
+    if (bundle.ten_bit) return {};
     return VideoFramePlanes {
         .luma   = bundle.luma,
         .chroma = bundle.chroma,
@@ -658,8 +715,11 @@ bool MetalVideoTextures::beginFrame(Scene& scene, id<MTLCommandBuffer> command, 
     auto pending = std::make_shared<PendingFrames>();
     id<MTLComputeCommandEncoder> encoder = nil;
     const auto convert = [&](VideoSourceEntry& entry, const std::shared_ptr<FrameBundle>& bundle,
-                              const video::VideoTextureFrame& frame, bool nv12) -> int {
-        auto pipeline = nv12 ? state.nv12_pipeline : state.bgra_pipeline;
+                              const video::VideoTextureFrame& frame, PixelKind kind) -> int {
+        const bool nv12 = kind != PixelKind::Bgra;
+        auto pipeline = kind == PixelKind::TenBit ? state.ten_bit_pipeline
+                        : nv12                     ? state.nv12_pipeline
+                                                   : state.bgra_pipeline;
         if (pipeline == nil) {
             SetError(error, state.pipeline_error.empty() ? "video conversion pipeline is unavailable" : state.pipeline_error);
             return -1;
@@ -686,6 +746,10 @@ bool MetalVideoTextures::beginFrame(Scene& scene, id<MTLCommandBuffer> command, 
         if (nv12) {
             const auto color = bundle->color;
             [encoder setBytes:&color length:sizeof(color) atIndex:0];
+        }
+        if (kind == PixelKind::TenBit) {
+            const auto hdr = bundle->hdr;
+            [encoder setBytes:&hdr length:sizeof(hdr) atIndex:2];
         }
         const auto transform = video::VideoTransformConstants(frame.display_transform);
         [encoder setBytes:&transform length:sizeof(transform) atIndex:1];
@@ -730,7 +794,8 @@ bool MetalVideoTextures::beginFrame(Scene& scene, id<MTLCommandBuffer> command, 
             // or a material's variant became usable. Passes that sample it
             // several times share this one import; nothing is converted twice.
             if (entry.has_import && entry.imported_generation == current.generation &&
-                entry.satisfied.planes == demand.planes && entry.satisfied.rgb == demand.rgb) {
+                (entry.demand_independent ||
+                 (entry.satisfied.planes == demand.planes && entry.satisfied.rgb == demand.rgb))) {
                 // Retained into this command buffer even though nothing was
                 // imported for it: the plane and image textures this frame
                 // samples are vended from that bundle's Core Video wrappers,
@@ -752,13 +817,13 @@ bool MetalVideoTextures::beginFrame(Scene& scene, id<MTLCommandBuffer> command, 
                                     "\"");
             }
             const auto& frame = bundle->frame;
-            bool        is_nv12 = false;
-            if (! SupportedPixelFormat(frame.pixel_format, &is_nv12)) {
+            PixelKind   kind = PixelKind::Bgra;
+            if (! SupportedPixelFormat(frame.pixel_format, &kind)) {
                 return SetError(error,
                                 "video texture \"" + key + "\" changed to the unsupported pixel " +
                                     "format " + DescribePixelFormat(frame.pixel_format));
             }
-            auto pixel_buffer = reinterpret_cast<CVPixelBufferRef>(frame.pixel_buffer);
+            CVPixelBufferRef pixel_buffer = static_cast<CVPixelBufferRef>(frame.pixel_buffer);
             if (pixel_buffer == nullptr) {
                 return SetError(error,
                                 "video texture \"" + key + "\" produced a frame with no pixel "
@@ -770,7 +835,7 @@ bool MetalVideoTextures::beginFrame(Scene& scene, id<MTLCommandBuffer> command, 
             // VideoToolbox hands back NV12 for the same file, and either can
             // take over mid-playback.
             VideoFramePath path = VideoFramePath::None;
-            if (! is_nv12) {
+            if (kind == PixelKind::Bgra) {
                 const CVReturn result =
                     CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault,
                                                               state.texture_cache,
@@ -794,13 +859,72 @@ bool MetalVideoTextures::beginFrame(Scene& scene, id<MTLCommandBuffer> command, 
                 }
                 path = VideoFramePath::Bgra;
                 if (frame.needsDisplayTransform()) {
-                    const int converted = convert(entry, bundle, frame, false);
+                    const int converted = convert(entry, bundle, frame, PixelKind::Bgra);
                     if (converted < 0) return false;
                     if (converted == 0) {
                         if (entry.current) pending->bundles.push_back(entry.current);
                         continue;
                     }
                 }
+            } else if (kind == PixelKind::TenBit) {
+                // 10-bit samples sit in the top bits of 16-bit words, imported as
+                // they are. Plane sampling stays 8-bit only, so the conversion is
+                // not optional here whatever the consumers asked for: it is also
+                // what tone maps an HDR picture, and the one image it writes is
+                // all any consumer ever samples.
+                if (! state.ensureTenBitPipeline(error)) return false;
+                // The planes' own sizes, not half the luma's: a buffer whose width
+                // is odd has a chroma plane one column wider than that.
+                const std::size_t luma_width    = CVPixelBufferGetWidthOfPlane(pixel_buffer, 0);
+                const std::size_t luma_height   = CVPixelBufferGetHeightOfPlane(pixel_buffer, 0);
+                const std::size_t chroma_width  = CVPixelBufferGetWidthOfPlane(pixel_buffer, 1);
+                const std::size_t chroma_height = CVPixelBufferGetHeightOfPlane(pixel_buffer, 1);
+                const CVReturn luma_result =
+                    CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault,
+                                                              state.texture_cache,
+                                                              pixel_buffer,
+                                                              nullptr,
+                                                              MTLPixelFormatR16Unorm,
+                                                              luma_width,
+                                                              luma_height,
+                                                              0,
+                                                              &bundle->wrappers[0]);
+                const CVReturn chroma_result =
+                    CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault,
+                                                              state.texture_cache,
+                                                              pixel_buffer,
+                                                              nullptr,
+                                                              MTLPixelFormatRG16Unorm,
+                                                              chroma_width,
+                                                              chroma_height,
+                                                              1,
+                                                              &bundle->wrappers[1]);
+                if (luma_result != kCVReturnSuccess || bundle->wrappers[0] == nullptr ||
+                    chroma_result != kCVReturnSuccess || bundle->wrappers[1] == nullptr) {
+                    return SetError(error,
+                                    "failed to import the 10-bit planes of video texture \"" + key +
+                                        "\"");
+                }
+                bundle->luma   = CVMetalTextureGetTexture(bundle->wrappers[0]);
+                bundle->chroma = CVMetalTextureGetTexture(bundle->wrappers[1]);
+                if (bundle->luma == nil || bundle->chroma == nil) {
+                    return SetError(error,
+                                    "Core Video returned no plane textures for video texture \"" +
+                                        key + "\"");
+                }
+                const auto description = video::AppleVideoFrameColorDescription(frame);
+                video::ReportTenBitColor(description);
+                bundle->ten_bit = true;
+                bundle->color   = video::MakeYuvColorParams(description);
+                bundle->hdr     = video::MakeHdrConversionParams(description);
+
+                const int converted = convert(entry, bundle, frame, PixelKind::TenBit);
+                if (converted < 0) return false;
+                if (converted == 0) {
+                    if (entry.current) pending->bundles.push_back(entry.current);
+                    continue;
+                }
+                path = VideoFramePath::Yuv10Converted;
             } else {
                 // Both planes, whichever path the consumers take: the direct
                 // one samples them and the conversion reads them.
@@ -820,8 +944,8 @@ bool MetalVideoTextures::beginFrame(Scene& scene, id<MTLCommandBuffer> command, 
                                                               pixel_buffer,
                                                               nullptr,
                                                               MTLPixelFormatRG8Unorm,
-                                                              frame.width / 2u,
-                                                              frame.height / 2u,
+                                                              frame.width / 2,
+                                                              frame.height / 2,
                                                               1,
                                                               &bundle->wrappers[1]);
                 if (luma_result != kCVReturnSuccess || bundle->wrappers[0] == nullptr ||
@@ -844,7 +968,7 @@ bool MetalVideoTextures::beginFrame(Scene& scene, id<MTLCommandBuffer> command, 
                     // acquired, none is allocated and no conversion is encoded.
                     path = VideoFramePath::Nv12Direct;
                 } else {
-                    const int converted = convert(entry, bundle, frame, true);
+                    const int converted = convert(entry, bundle, frame, PixelKind::Nv12);
                     if (converted < 0) return false;
                     if (converted == 0) {
                         if (entry.current) pending->bundles.push_back(entry.current);
@@ -868,6 +992,7 @@ bool MetalVideoTextures::beginFrame(Scene& scene, id<MTLCommandBuffer> command, 
             entry.frame_height        = frame.displayHeight();
             entry.path                = path;
             entry.satisfied           = demand;
+            entry.demand_independent  = kind == PixelKind::TenBit;
             // The previous bundle is dropped here, which frees its slot unless
             // a command buffer still holds it through `pending`.
             entry.current = bundle;

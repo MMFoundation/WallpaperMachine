@@ -182,21 +182,18 @@ impl SceneUpdateMode {
     }
 }
 
-/// Which renderer actually drew a scene.
+/// The renderer that draws a scene. Native Metal is the only one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SceneBackend {
-    /// The Vulkan/MoltenVK backend.
-    LegacyVulkan,
     /// The native Metal backend.
     NativeMetal,
 }
 
 impl SceneBackend {
-    /// Maps a raw `owe_scene_backend`; negative means not reported.
+    /// Maps a raw `owe_scene_backend`; negative or unknown means not reported.
     #[must_use]
     pub const fn from_raw(raw: i32) -> Option<Self> {
         match raw {
-            0 => Some(Self::LegacyVulkan),
             1 => Some(Self::NativeMetal),
             _ => None,
         }
@@ -206,42 +203,7 @@ impl SceneBackend {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::LegacyVulkan => "legacy_vulkan",
             Self::NativeMetal => "native_metal",
-        }
-    }
-}
-
-/// Which renderer the user asked for.
-///
-/// A preference, not an outcome: a scene the Metal backend cannot draw falls
-/// back, and the fallback is reported rather than silently satisfying the
-/// preference.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum SceneRendererPreference {
-    /// Always use the Vulkan/MoltenVK backend.
-    #[default]
-    Compatibility,
-    /// Use the native Metal backend for scenes it fully supports.
-    NativeMetalPreferred,
-}
-
-impl SceneRendererPreference {
-    /// Raw value for `owe_set_scene_renderer_preference`.
-    #[must_use]
-    pub const fn as_raw(self) -> i32 {
-        match self {
-            Self::Compatibility => 0,
-            Self::NativeMetalPreferred => 1,
-        }
-    }
-
-    /// Stable lowercase name used by config and the panel.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Compatibility => "compatibility",
-            Self::NativeMetalPreferred => "native_metal_preferred",
         }
     }
 }
@@ -303,8 +265,10 @@ pub struct SceneRuntimeReport {
     pub demand_reasons: SceneDemandReasons,
     /// `None` when the renderer reported nothing.
     pub backend: Option<SceneBackend>,
-    /// Why the active backend is not the preferred one, when it is not.
-    pub fallback_reason: Option<String>,
+    /// Why the scene is held and not drawn: Native Metal is the only renderer
+    /// and cannot draw it. `backend` is `None` while this is set: nothing is
+    /// drawing the scene.
+    pub failure: Option<SceneFailure>,
     /// How this scene's video textures reached the shaders sampling them on the
     /// last frame it drew.
     pub video_path: SceneVideoPath,
@@ -315,6 +279,62 @@ pub struct SceneRuntimeReport {
     /// failure. `None` when the renderer returned no reading, which is not the
     /// same as a healthy surface.
     pub surface: Option<SurfaceHealth>,
+}
+
+/// What stopped a scene from being drawn.
+///
+/// Mirrors `owe_scene_failure_stage`: a category the host words for the user in
+/// their language, shown beside the renderer's own explanation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SceneFailureStage {
+    /// The scene uses something the native backend does not support: a refused
+    /// admission, found before any renderer was created.
+    Unsupported,
+    /// The native renderer could not be created on the surface.
+    Prepare,
+    /// The scene's shaders or pipelines did not compile for Metal.
+    Compile,
+    /// A frame failed after the scene was set up.
+    Frame,
+    /// The surface could not be re-established after a display change.
+    Surface,
+}
+
+impl SceneFailureStage {
+    /// Maps a raw `owe_scene_failure_stage`. Zero is no failure, and a value
+    /// this build does not name yields `None` as well: the renderer is linked
+    /// from the same header as this crate.
+    #[must_use]
+    pub const fn from_raw(raw: i32) -> Option<Self> {
+        match raw {
+            1 => Some(Self::Unsupported),
+            2 => Some(Self::Prepare),
+            3 => Some(Self::Compile),
+            4 => Some(Self::Frame),
+            5 => Some(Self::Surface),
+            _ => None,
+        }
+    }
+
+    /// Stable lowercase name used by the bridge and logs.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unsupported => "unsupported",
+            Self::Prepare => "prepare",
+            Self::Compile => "compile",
+            Self::Frame => "frame",
+            Self::Surface => "surface",
+        }
+    }
+}
+
+/// Why a scene is held instead of drawn: the stage, and the renderer's own
+/// English explanation for diagnostics.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SceneFailure {
+    pub stage: SceneFailureStage,
+    pub reason: String,
 }
 
 /// Why a scene surface stopped drawing although nobody asked it to.
@@ -423,6 +443,9 @@ pub enum SceneVideoPath {
     /// Converted, with the optional direct program still being prepared. The
     /// wallpaper is playing; only the second program is still coming.
     Nv12ConvertedPreparing,
+    /// 10-bit video converted once into one image: HDR tone mapped to SDR, or
+    /// 10-bit SDR carried over. Its planes are never sampled directly.
+    Yuv10Converted,
 }
 
 impl SceneVideoPath {
@@ -436,6 +459,7 @@ impl SceneVideoPath {
             3 => Self::Nv12Converted,
             4 => Self::Nv12Mixed,
             5 => Self::Nv12ConvertedPreparing,
+            6 => Self::Yuv10Converted,
             _ => Self::None,
         }
     }
@@ -450,6 +474,7 @@ impl SceneVideoPath {
             Self::Nv12Converted => "nv12_converted",
             Self::Nv12Mixed => "nv12_mixed",
             Self::Nv12ConvertedPreparing => "nv12_converted_preparing",
+            Self::Yuv10Converted => "yuv10_converted",
         }
     }
 }
@@ -555,7 +580,7 @@ mod tests {
         // optional program is still being prepared: folding it into the plain
         // converting path would tell a user "this content will not use direct
         // sampling" when the answer is "not yet".
-        let named: Vec<&str> = (0..=5).map(|raw| SceneVideoPath::from_raw(raw).name()).collect();
+        let named: Vec<&str> = (0..=6).map(|raw| SceneVideoPath::from_raw(raw).name()).collect();
         assert_eq!(named, vec![
             "none",
             "bgra",
@@ -563,9 +588,26 @@ mod tests {
             "nv12_converted",
             "nv12_mixed",
             "nv12_converted_preparing",
+            "yuv10_converted",
         ]);
+        // The two ends agree on the numbers: the header's enumerators are what
+        // the renderer returns, and these are what the host reads them as.
+        use crate::owe::sys;
+        for (path, raw) in [
+            (SceneVideoPath::Bgra, sys::owe_scene_video_path_OWE_SCENE_VIDEO_PATH_BGRA),
+            (SceneVideoPath::Nv12Direct, sys::owe_scene_video_path_OWE_SCENE_VIDEO_PATH_NV12_DIRECT),
+            (SceneVideoPath::Nv12Converted, sys::owe_scene_video_path_OWE_SCENE_VIDEO_PATH_NV12_CONVERTED),
+            (SceneVideoPath::Nv12Mixed, sys::owe_scene_video_path_OWE_SCENE_VIDEO_PATH_NV12_MIXED),
+            (
+                SceneVideoPath::Nv12ConvertedPreparing,
+                sys::owe_scene_video_path_OWE_SCENE_VIDEO_PATH_NV12_CONVERTED_PREPARING,
+            ),
+            (SceneVideoPath::Yuv10Converted, sys::owe_scene_video_path_OWE_SCENE_VIDEO_PATH_YUV10_CONVERTED),
+        ] {
+            assert_eq!(SceneVideoPath::from_raw(raw as i32), path);
+        }
         // A renderer newer than this binary must not be read as a path this
         // build happens to know.
-        assert_eq!(SceneVideoPath::from_raw(6), SceneVideoPath::None);
+        assert_eq!(SceneVideoPath::from_raw(7), SceneVideoPath::None);
     }
 }

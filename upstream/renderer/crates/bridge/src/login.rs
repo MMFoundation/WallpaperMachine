@@ -3,10 +3,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use objc2_foundation::NSBundle;
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
 use crate::api::BridgeError;
+
+mod operations;
+#[cfg(test)]
+mod transition_tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LaunchAtLoginStatus {
@@ -89,9 +92,7 @@ impl LaunchAtLoginController {
     #[cfg(test)]
     #[must_use]
     pub fn fake(status: LaunchAtLoginStatus) -> Self {
-        Self::new(Arc::new(FakeLaunchAtLogin {
-            status: Mutex::new(status),
-        }))
+        Self::new(Arc::new(operations::SyntheticLoginStatus::new(status)))
     }
 }
 
@@ -119,19 +120,7 @@ struct SystemLoginItem;
 
 impl LoginItemService for SystemLoginItem {
     fn can_register(&self) -> bool {
-        let bundle = NSBundle::mainBundle();
-        let Some(bundle_path) = bundle
-            .bundleURL()
-            .path()
-            .map(|path| std::path::PathBuf::from(path.to_string()))
-        else {
-            return false;
-        };
-
-        let installed_in_system_applications = bundle_path.starts_with("/Applications");
-        let installed_in_user_applications =
-            dirs::home_dir().is_some_and(|home| bundle_path.starts_with(home.join("Applications")));
-        installed_in_system_applications || installed_in_user_applications
+        operations::current_location_is_eligible()
     }
 
     fn state(&self) -> ServiceState {
@@ -182,56 +171,26 @@ impl LaunchAtLoginImpl for SystemLaunchAtLogin {
     }
 
     fn set_enabled(&self, enabled: bool) -> Result<LaunchAtLoginStatus, BridgeError> {
-        match self.status()? {
-            LaunchAtLoginStatus::Available { enabled: current } if current == enabled => {
-                return Ok(LaunchAtLoginStatus::Available { enabled });
-            }
-            // Registering leaves a switched-off item switched off, so there is
-            // nothing to ask the system for; the panel explains what the user
-            // has to do. Turning it off again does unregister it.
-            LaunchAtLoginStatus::RequiresApproval if enabled => {
-                return Ok(LaunchAtLoginStatus::RequiresApproval);
-            }
-            LaunchAtLoginStatus::Available { .. } | LaunchAtLoginStatus::RequiresApproval => {}
-            LaunchAtLoginStatus::Unavailable => {
-                return Err(BridgeError::invalid_input(
-                    "launch at login is available only when the app is installed in Applications",
-                ));
-            }
-        }
-
-        if enabled {
-            self.service.register()?;
-        } else {
-            self.service.unregister()?;
-        }
-        self.status()
+        // Registering leaves a switched-off item switched off, so there is
+        // nothing to ask the system for; the panel explains what the user
+        // has to do. Turning it off again does unregister it.
+        operations::change_enabled(
+            enabled,
+            || self.status(),
+            || self.service.register(),
+            || self.service.unregister(),
+        )
     }
 }
 
 #[cfg(test)]
-struct FakeLaunchAtLogin {
-    status: Mutex<LaunchAtLoginStatus>,
-}
-
-#[cfg(test)]
-impl LaunchAtLoginImpl for FakeLaunchAtLogin {
+impl LaunchAtLoginImpl for operations::SyntheticLoginStatus {
     fn status(&self) -> Result<LaunchAtLoginStatus, BridgeError> {
-        Ok(*self.status.lock().expect("fake status lock poisoned"))
+        self.observe()
     }
 
     fn set_enabled(&self, enabled: bool) -> Result<LaunchAtLoginStatus, BridgeError> {
-        let mut status = self.status.lock().expect("fake status lock poisoned");
-        match *status {
-            LaunchAtLoginStatus::RequiresApproval if enabled => Ok(*status),
-            LaunchAtLoginStatus::Available { .. } | LaunchAtLoginStatus::RequiresApproval => {
-                *status = LaunchAtLoginStatus::Available { enabled };
-                Ok(*status)
-            }
-            LaunchAtLoginStatus::Unavailable => Err(BridgeError::invalid_input(
-                "launch at login is available only when the app is installed in Applications",
-            )),
-        }
+        self.change_enabled(enabled)
     }
 }
 

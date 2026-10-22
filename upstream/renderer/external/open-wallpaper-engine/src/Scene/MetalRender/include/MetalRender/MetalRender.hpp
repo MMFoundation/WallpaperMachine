@@ -6,11 +6,11 @@
 #include "Scene/include/Scene/SceneResolution.hpp"
 #include "Type.hpp"
 
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace wallpaper
@@ -29,8 +29,7 @@ namespace metal
 ///
 /// `metal_layer` is the `CAMetalLayer` the host created for this wallpaper
 /// window, never the `NSView`. The backend takes the layer over: it owns the
-/// drawable for as long as it is running, because a Vulkan swapchain and a
-/// Metal drawable loop cannot share one layer.
+/// drawable for as long as it is running, because two drawable loops cannot share one layer.
 struct MetalRenderInitInfo
 {
     void*                 metal_layer { nullptr };
@@ -87,16 +86,14 @@ struct MetalPipelineArchiveStatus
 
 /// Native Metal scene renderer.
 ///
-/// Mirrors the entry points `vulkan::VulkanRender` exposes so the scene's
-/// render handler can hold either behind one interface. It replaces the draw
-/// backend only: parsing, the scene graph, materials, shaders, animation,
+/// The scene's render handler holds it behind `SceneRendererHandle`. It is the
+/// draw backend only: parsing, the scene graph, materials, shaders, animation,
 /// scripts, resource resolution and pause policy are all unchanged and shared.
 ///
 /// There is no clock in here. The scene's existing `FrameTimer` remains the
 /// single clock; this acquires one drawable per `drawFrame` call and never
 /// starts a display link of its own, so the configured frame-rate ceiling and
-/// the on-demand idle path keep working exactly as they do for the
-/// compatibility backend.
+/// the on-demand idle path keep working.
 class MetalRender {
 public:
     MetalRender();
@@ -127,6 +124,15 @@ public:
     /// again. Only for a compile of the scene that was drawing, which must follow.
     bool clearLastRenderGraphForRebuild();
     bool compileRenderGraph(Scene& scene, rg::RenderGraph& graph);
+    /// Gives an already compiled graph the render target sizes the scene holds now, for a
+    /// change that only resized targets (the buffers an effect chain draws into follow the
+    /// size of the text it is applied to). The prepared passes, their pipelines and vertex
+    /// buffers, the uploaded images and the videos are kept, which is what a rebuild repeats
+    /// and a scene with heavy models and textures pays for dearly; the targets, the copy plan
+    /// and the reuse table are made again as a compile makes them, so the next frame draws
+    /// what a compile would have drawn. The targets are cleared in that frame's own command
+    /// buffer and nothing waits on the GPU. False leaves the graph unusable: build it again.
+    bool ResizeRenderTargets(Scene& scene);
     /// Applies a new internal rasterization scale, and the resolution the scene
     /// is rasterized at, to an already compiled graph. Render targets and the
     /// pipelines attached to them are rebuilt, and only when one of the two
@@ -164,6 +170,8 @@ public:
     /// the cursor mapping and a poster all take it from the one layout, so they
     /// agree. Takes effect on the next frame; no pass or target is rebuilt.
     void SetWallpaperFraming(const WallpaperFraming& framing);
+    /// Mirrors the presented wallpaper left to right from the next frame on. No pass or target
+    /// is rebuilt.
     void SetWallpaperHorizontalFlip(bool enabled);
 
     /// Where this surface keeps the compiled pipelines it can rebuild.
@@ -180,14 +188,9 @@ public:
     /// there.
     void SetPipelineArchivePath(std::string_view path);
     /// Forwarded to the video textures this scene binds, and remembered for
-    /// textures prepared later, so the host's pause policy has one shape for
-    /// both backends.
+    /// textures prepared later, so the host's pause policy has one shape.
     void SetVideoPlaybackPaused(bool paused);
     void SetVideoPlaybackRate(float rate);
-    /// The shortest frame period among the scene's video textures, or 0.0 when
-    /// it binds none -- in which case the frame clock keeps its configured
-    /// cadence.
-    [[nodiscard]] double ShortestVideoFramePeriod() const;
 
     /// How this scene's video textures reached the shaders that sample them on
     /// the last frame drawn. A report, not a request: a scene with no video, or
@@ -195,7 +198,7 @@ public:
     [[nodiscard]] VideoFramePath VideoPath() const;
 
     /// Scene-level demand bits for the graph currently compiled, in the same
-    /// `vulkan::DynamicReason` vocabulary the compatibility backend reports, so
+    /// `render::DynamicReason` vocabulary, so
     /// the on-demand mapping has one vocabulary to consume.
     ///
     /// Reports `UnknownInput` before any graph has been analysed, and for any
@@ -256,25 +259,6 @@ public:
     /// device's own counter is process-wide and moves with the drawable pool.
     [[nodiscard]] uint64_t RenderTargetBytesForTests() const;
 
-    /// The texture this renderer binds for slot `slot` of the imported image
-    /// `key`, unretained, or null when it has imported none under that name.
-    ///
-    /// Test-only, and the only way to tell one texture shared by two displays
-    /// from two textures holding the same pixels: both draw the same picture.
-    [[nodiscard]] void* ImportedTextureForTests(const std::string& key, std::size_t slot = 0) const;
-    /// Bytes Metal allocated for this renderer's imported images, each texture
-    /// counted once. A texture shared with another display counts here too.
-    [[nodiscard]] uint64_t ImportedImageBytesForTests() const;
-    /// Imported images the process-wide cache can still hand out, and their
-    /// bytes: every one is held by at least one renderer, and the total is what
-    /// all displays together keep resident for their pictures.
-    struct ImportedImagesForTests
-    {
-        std::size_t textures { 0 };
-        uint64_t    bytes { 0 };
-    };
-    [[nodiscard]] static ImportedImagesForTests SharedImportedImagesForTests();
-
     /// Whether render targets whose lifetimes in a frame do not overlap share
     /// one image, for graphs compiled from now on. On unless
     /// `WALLPAPER_MACHINE_METAL_TARGET_SHARING=0`; process-wide, test-only.
@@ -287,6 +271,19 @@ public:
     /// not compile a program that is already compiled.
     [[nodiscard]] static uint64_t ProgramCompilesForTests();
 
+    /// The texture this renderer binds for picture slot `slot` of the scene texture
+    /// `key`, as an opaque handle (null when it has none). Two renderers that answer the
+    /// same handle show one texture.
+    [[nodiscard]] const void* ImportedImageForTests(const std::string& key, std::size_t slot = 0) const;
+    /// Source bytes of the imported pictures alive in this process, each counted once
+    /// however many renderers bind it.
+    [[nodiscard]] static uint64_t SharedImageBytesForTests();
+    /// Entries the process-wide picture cache holds, dead ones included until the next
+    /// import prunes them.
+    [[nodiscard]] static std::size_t SharedImageEntriesForTests();
+    /// Picture slots uploaded to a GPU by any renderer since the process started.
+    [[nodiscard]] static uint64_t ImageUploadsForTests();
+
     /// Whether the pipeline archive can supply every pipeline this process has
     /// created so far, asked strictly.
     ///
@@ -298,16 +295,43 @@ public:
     [[nodiscard]] static bool PipelineArchiveServesEverySeenPipelineForTests();
     /// Returns once every pipeline-archive write already scheduled has run.
     static void WaitForPipelineArchiveWritesForTests();
-    /// Balanced suspend/resume calls hold additions and writes pending while a
-    /// test opens enough stores to evict one. Never wait while suspended.
-    static void SetPipelineArchiveQueueSuspendedForTests(bool suspended);
-    struct PipelineArchiveCountsForTests
+
+    /// What the process-wide pipeline-archive bookkeeping holds right now.
+    struct ArchiveResidency
     {
+        /// Stores kept open at once (never more than eight).
         std::size_t stores { 0 };
-        std::size_t write_generations { 0 };
-        std::size_t descriptors { 0 };
+        /// Stores that carry a write-generation record. A record exists only for an
+        /// open store and goes with it, so this never exceeds `stores`.
+        std::size_t generation_records { 0 };
     };
-    [[nodiscard]] static PipelineArchiveCountsForTests GetPipelineArchiveCountsForTests();
+    [[nodiscard]] static ArchiveResidency PipelineArchiveResidencyForTests();
+
+    /// One open store, by the directory it lives in, on the default device.
+    struct ArchiveStoreState
+    {
+        bool        open { false };
+        /// Pipeline descriptors the store has accepted from completed compiles.
+        std::size_t descriptors { 0 };
+        /// Names the store this answer is about: it changes whenever a store is opened
+        /// again after having been let go.
+        uint64_t    identity { 0 };
+        /// Writes of the file this store has started.
+        uint64_t    writes { 0 };
+        /// The object additions are made on and that a write publishes.
+        const void* collector { nullptr };
+    };
+    [[nodiscard]] static ArchiveStoreState PipelineArchiveStoreForTests(std::string_view archive_root);
+
+    /// Holds back (or lets run) the queue the archive's additions and writes
+    /// complete on. While held, nothing completes; everything queued runs on release.
+    static void SuspendPipelineArchiveQueueForTests(bool suspended);
+
+    /// Builds one small pipeline, distinct for every `variant`, for the default
+    /// device as a scene would: it opens the store of `archive_root` if that is
+    /// not open and hands the pipeline to it. False if the machine has no device
+    /// or Metal refuses the pipeline.
+    static bool BuildArchivedPipelineForTests(std::string_view archive_root, uint32_t variant);
 #endif
 
 private:

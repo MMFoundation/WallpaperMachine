@@ -193,40 +193,6 @@ TEST(VideoFramePacing, ResetForgetsThePreviousStreamsEvidence) {
     EXPECT_NEAR(estimator.PeriodSeconds(), kMetadata30, 1e-12);
 }
 
-TEST(VideoFramePacing, PlaybackSpeedMapsTheContentPeriodOntoTheWallClock) {
-    // At 2x a 30 fps clip delivers a new frame every 16.7 ms of real time.
-    // Ignoring speed — which the first version of this optimisation did — would
-    // pace the clock at 33.3 ms and drop every other frame.
-    EXPECT_NEAR(ResolveContentPeriodSeconds(kMetadata30, 2.0), kMetadata30 / 2.0, 1e-12);
-    EXPECT_NEAR(ResolveContentPeriodSeconds(kMetadata30, 1.0), kMetadata30, 1e-12);
-    EXPECT_NEAR(ResolveContentPeriodSeconds(kMetadata30, 0.5), kMetadata30 * 2.0, 1e-12);
-}
-
-TEST(VideoFramePacing, AnUnusableSourcePeriodOrSpeedReportsUnknown) {
-    EXPECT_DOUBLE_EQ(ResolveContentPeriodSeconds(0.0, 1.0), 0.0);
-    EXPECT_DOUBLE_EQ(ResolveContentPeriodSeconds(-1.0, 1.0), 0.0);
-    EXPECT_DOUBLE_EQ(ResolveContentPeriodSeconds(std::nan(""), 1.0), 0.0);
-    // A stopped clock says nothing about how often the content changes, so it
-    // falls back to the fixed cadence rather than to an infinite period.
-    EXPECT_DOUBLE_EQ(ResolveContentPeriodSeconds(kMetadata30, 0.0), 0.0);
-    EXPECT_DOUBLE_EQ(ResolveContentPeriodSeconds(kMetadata30, -1.0), 0.0);
-    EXPECT_DOUBLE_EQ(ResolveContentPeriodSeconds(kMetadata30, std::nan("")), 0.0);
-}
-
-TEST(VideoFramePacing, PacingIsOffUnlessTheEnvironmentExplicitlyOptsIn) {
-    // Demand-driven pacing cannot promise it adds no visible frame loss: the
-    // period only reaches the clock after a completed frame, so a rate that
-    // turns out to be tighter than the interval being waited out loses every
-    // frame produced during the remainder of it. Until the source can wake the
-    // clock itself, the default must be the safe baseline.
-    EXPECT_FALSE(ContentPacingEnabledByEnvironment(nullptr));
-    EXPECT_FALSE(ContentPacingEnabledByEnvironment(""));
-    EXPECT_FALSE(ContentPacingEnabledByEnvironment("0"));
-    EXPECT_FALSE(ContentPacingEnabledByEnvironment("false"));
-    EXPECT_TRUE(ContentPacingEnabledByEnvironment("1"));
-    EXPECT_TRUE(ContentPacingEnabledByEnvironment("yes"));
-}
-
 TEST(VideoFrameSelection, ANewGenerationIsSelectedAndARepeatIsReused) {
     VideoFrameSelectionTracker tracker;
 

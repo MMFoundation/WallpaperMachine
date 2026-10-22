@@ -1,6 +1,8 @@
+// Clean-room implementation from the WallpaperMachine spec e7-small-units.md; written without access to the original source.
 #pragma once
 #include <memory>
 #include <atomic>
+#include <cerrno>
 #include <cstdint>
 #include <mutex>
 #include <condition_variable>
@@ -24,9 +26,7 @@ enum class status_t
 {
     OK                = 0,
     INVALID_OPERATION = -ENOSYS,
-    NOT_FOUND         = -ENOENT,
-    NO_MEM            = -ENOMEM,
-    BUSY              = -EBUSY
+    NOT_FOUND         = -ENOENT
 };
 using handler_id = int32_t;
 class Handler;
@@ -49,20 +49,16 @@ public:
     void                   setLogScope(uint64_t scope);
 
 private:
-    struct MessageWrapper {
-        std::shared_ptr<Message> msg;
-    };
-    bool loop();
+    // Queue, running mark and thread live in a state the worker thread shares with
+    // the looper, so a waiting thread never keeps the looper itself alive.
+    struct Shared;
 
-    bool                    m_running { false };
+    // Whether the message may still be delivered by this looper, and delivery.
+    void deliver(const std::shared_ptr<Message>&);
+
+    std::shared_ptr<Shared> m_shared;
     std::string             m_name { "unknown" };
     uint64_t                m_log_scope { 0 };
-    std::mutex              m_mutex;
-    std::condition_variable m_condition;
-
-    std::thread                                  m_thread;
-    std::list<MessageWrapper>                    m_msg_queue;
-    std::map<handler_id, std::weak_ptr<Handler>> m_reg_handler;
 };
 
 class Handler : NoCopy, public std::enable_shared_from_this<Handler> {
@@ -81,11 +77,21 @@ private:
     friend class Looper;
     friend class Message;
 
-    // compare and set
+    // One registration as seen at a single moment: identifier and looper read together.
+    struct Binding {
+        handler_id            id { INVALID_HANDLER_ID };
+        std::weak_ptr<Looper> looper;
+    };
+    Binding binding() const;
+
     bool setID(handler_id id, std::weak_ptr<Looper> looper);
+    // Unbinds the handler again when it still carries `id`, so it may be registered anew.
+    void clearID(handler_id id);
+    // Whether the handler is bound to exactly this looper under exactly this id.
+    bool isBoundTo(const Looper* looper, handler_id id) const;
 
-    void deliverMessage(const std::shared_ptr<Message>& msg);
-
+    // Identifier and looper change together, under this lock.
+    mutable std::mutex      m_bind_mutex;
     std::atomic<handler_id> m_id;
     std::weak_ptr<Looper>   m_looper;
 };
@@ -103,67 +109,49 @@ public:
     void                            setTarget(const std::shared_ptr<Handler>&);
     void                            setWhat(uint32_t);
     status_t                        post();
-    // status_t postAndWaitResponse(const std::shared_ptr<Message>&);
 
-private:
-    std::weak_ptr<Handler> m_handler;
-    std::weak_ptr<Looper>  m_looper;
-
-    uint32_t   m_what;
-    handler_id m_target;
-
-    void deliver();
-
-public:
-    using ItemValue =
-        std::variant<bool, int32_t, float, std::string, std::shared_ptr<void>, visitor::NoType>;
-
-    struct Item {
-        ItemValue   value { visitor::NoType() };
-        std::string name;
-        void        setName(std::string_view name);
-    };
-
-    int32_t     countEntries() const;
-    const Item* getEntryAt(int32_t index) const;
-
+    // Stores a value under `name`, replacing whatever was there. True on success.
     bool setBool(std::string_view, bool);
     bool setInt32(std::string_view, int32_t);
     bool setFloat(std::string_view, float);
     bool setString(std::string_view, std::string);
+    bool setObject(std::string_view, const std::shared_ptr<void>&);
 
-    bool findBool(std::string_view, bool*) const;
-    bool findInt32(std::string_view, int32_t*) const;
-    bool findFloat(std::string_view, float*) const;
-    bool findString(std::string_view, std::string*) const;
+    // Reads a value back. True, with `*out` written, only when `name` holds a
+    // value of exactly that type; otherwise false and `*out` is left alone.
+    bool findBool(std::string_view name, bool* out) const;
+    bool findInt32(std::string_view name, int32_t* out) const;
+    bool findFloat(std::string_view name, float* out) const;
+    bool findString(std::string_view name, std::string* out) const;
 
-    bool setObject(std::string_view name, const std::shared_ptr<void>&);
-
+    // The object stored under `name`, as a `T` pointer: `T` has to be the type the
+    // pointer had when it was stored.
     template<typename T>
     bool findObject(std::string_view name, std::shared_ptr<T>* value) const {
-        const Item* item = findItem<std::shared_ptr<void>>(name);
-        if (item) {
-            auto* iv = std::get_if<std::shared_ptr<void>>(&(item->value));
-            if (iv == nullptr) return false;
-            *value = *(reinterpret_cast<const std::shared_ptr<T>*>(iv));
-            return true;
-        }
-        return false;
+        if (value == nullptr) return false;
+        const std::shared_ptr<void>* stored = findStoredObject(name);
+        if (stored == nullptr) return false;
+        *value = std::static_pointer_cast<T>(*stored);
+        return true;
     }
 
-    bool cleanAfterDeliver() const;
-    void setCleanAfterDeliver(bool v);
-    void cleanContent();
-
 private:
-    template<typename T>
-    const Item* findItem(std::string_view name) const;
-    Item*       allocateItem(std::string_view name);
+    using Value = std::variant<bool, int32_t, float, std::string, std::shared_ptr<void>>;
 
-    constexpr static int32_t      MaxNumItems = 64;
-    std::array<Item, MaxNumItems> m_items;
-    int32_t                       m_num_items { 0 };
-    bool                          m_clean_after_dliver { false };
+    const std::shared_ptr<void>* findStoredObject(std::string_view name) const;
+    template<typename T>
+    bool findValue(std::string_view name, T* out) const;
+
+    // Where the message goes: the handler and the registration it had when it was
+    // addressed. A default record addresses nobody.
+    struct Route {
+        std::weak_ptr<Handler> to;
+        Handler::Binding       at;
+    };
+
+    uint32_t                        m_what { 0 };
+    Route                           m_route;
+    std::map<std::string, Value, std::less<>> m_values;
 };
 
 } // namespace looper

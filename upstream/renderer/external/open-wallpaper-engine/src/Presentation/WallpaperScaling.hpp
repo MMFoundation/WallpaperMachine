@@ -3,7 +3,7 @@
 #include "Presentation/WallpaperFraming.hpp"
 
 #include <cstdint>
-#include <vulkan/vulkan.h>
+#include <optional>
 
 namespace wallpaper
 {
@@ -14,15 +14,12 @@ enum class WallpaperScalingMode : std::uint8_t
     STRETCH = 1,
     FIT = 2,
     FILL = 3,
-    // FIT's picture, with the room around it filled by a blurred, darkened copy
-    // of the same picture as FILL would place it (see WallpaperBackdrop.hpp).
+    /// Fit, with a blurred copy of the picture in the room the picture leaves.
     FIT_BLURRED = 4,
 };
 
-// Whether a raw property value names a scaling mode.
-constexpr bool IsWallpaperScalingMode(int32_t value) {
-    return value >= 0 && value <= static_cast<int32_t>(WallpaperScalingMode::FIT_BLURRED);
-}
+/// The mode a host value names, or nothing when no mode has that value.
+std::optional<WallpaperScalingMode> WallpaperScalingModeFromValue(int64_t value);
 
 struct PixelRect {
     int32_t x { 0 };
@@ -40,13 +37,11 @@ struct WallpaperScalingLayout {
     double scale_y { 1.0 };
     PixelRect viewport_px {};
     PixelRect scissor_px {};
-    // FIT_BLURRED only: whether the picture leaves room on the display for the
-    // blurred copy, which is drawn over `backdrop_px` -- the picture as FILL at
-    // a scale factor of 1 places it, centred whatever the position -- and only
-    // where `viewport_px` does not cover. A gap of one pixel, the most rounding
-    // leaves on a side when the shapes match, is no room.
-    bool      backdrop { false };
+    /// Where the backdrop's picture sits: what Fill at a factor of 1 gives the picture,
+    /// centred whatever the picture's position. Empty unless the mode has a backdrop.
     PixelRect backdrop_px {};
+    /// Whether the picture leaves room (more than a pixel on an axis) for the backdrop.
+    bool      backdrop { false };
 };
 
 // `pan_x` and `pan_y` are `WallpaperFraming` fractions and are clamped the same
@@ -84,8 +79,5 @@ struct WallpaperCursorMapping {
 WallpaperCursorMapping ComputeWallpaperCursorMapping(const WallpaperScalingLayout& layout,
                                                      double camera_center_x, double camera_center_y,
                                                      double camera_width, double camera_height);
-
-VkViewport MakeWallpaperViewport(const WallpaperScalingLayout& layout);
-VkRect2D   MakeWallpaperScissor(const WallpaperScalingLayout& layout);
 
 } // namespace wallpaper

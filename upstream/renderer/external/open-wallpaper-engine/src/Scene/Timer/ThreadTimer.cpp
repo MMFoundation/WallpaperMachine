@@ -1,224 +1,187 @@
+// Clean-room implementation from the WallpaperMachine spec e2-runtime-animation.md; written without access to the original source.
 #include "ThreadTimer.hpp"
 
 #include "Utils/Logging.h"
 
 #include <algorithm>
 #include <cassert>
+#include <pthread.h>
 
 using namespace wallpaper;
 using micros = std::chrono::microseconds;
 
-ThreadTimer::ThreadTimer(std::function<void()> cb)
-    : m_callback(std::move(cb)),
-      m_interval(micros(0)),
-      m_running(false) {}
+ThreadTimer::ThreadTimer(std::function<void()> cb) : m_callback(std::move(cb)) {}
+
 ThreadTimer::~ThreadTimer() { Stop(); }
 
-bool ThreadTimer::Running() const { return m_running; }
+bool ThreadTimer::Running() const { return m_running.load(std::memory_order_acquire); }
 
 void ThreadTimer::SetInterval(micros v) {
-    m_interval = v;
-    // The wait already in progress has to see this. A clock paced to slow
-    // content sits in a long wait by design; if a tighter content rate or a
-    // higher target FPS could not cut that wait short, every frame produced
-    // during the remainder of it is superseded before it is ever displayed.
-    std::unique_lock<std::mutex> lock(m_cond_mutex);
-    m_condition.notify_all();
+    {
+        std::lock_guard lock(m_mutex);
+        m_interval = std::max(v, micros(1));
+    }
+    // The wait in progress was computed from the old period.
+    m_wake.notify_all();
 }
 
 void ThreadTimer::SetMinInterval(micros v) {
-    m_min_interval = v;
-    // A ceiling that just got looser has to shorten a wait taken under the old
-    // one; a tighter ceiling is picked up on the next re-check either way.
-    std::unique_lock<std::mutex> lock(m_cond_mutex);
-    m_condition.notify_all();
+    {
+        std::lock_guard lock(m_mutex);
+        m_min_interval = std::max(v, micros::zero());
+    }
+    m_wake.notify_all();
 }
 
 void ThreadTimer::SetIdle(bool idle) {
-    std::unique_lock<std::mutex> lock(m_cond_mutex);
-    if (m_idle == idle) return;
-    m_idle = idle;
-    // Leaving idle has to rebase the cadence, or the thread would compare now
-    // against a deadline from before the scene went quiet and fire a burst of
-    // ticks to "catch up" on time when nothing was being drawn. A pending
-    // appointment is dropped with it: the cadence supersedes it.
-    if (! idle) {
-        m_rebase = true;
-        m_wake_at.reset();
+    {
+        std::lock_guard lock(m_mutex);
+        if (m_idle == idle) return;
+        m_idle = idle;
+        if (! idle) {
+            // Back from idle the cadence starts afresh from this moment: no burst to catch up
+            // with the time spent waiting, and an appointment made for the idle time is moot.
+            m_cadence_anchor = Clock::now();
+            m_appointment.reset();
+        }
     }
-    // Without this the thread keeps whatever wait it is already in: entering
-    // idle would not take effect until the pending deadline, and leaving idle
-    // would never take effect at all, because an idle wait has no deadline.
-    m_condition.notify_all();
+    m_wake.notify_all();
 }
 
 bool ThreadTimer::Idle() const {
-    std::unique_lock<std::mutex> lock(m_cond_mutex);
+    std::lock_guard lock(m_mutex);
     return m_idle;
 }
 
 void ThreadTimer::WakeOnce() {
-    std::unique_lock<std::mutex> lock(m_cond_mutex);
-    // A second request before the tick consumes the first changes nothing: the
-    // latch is already set, and another notify cannot move a deadline that is
-    // already the ceiling. A continuous clock already running at that ceiling
-    // has the same property — the request is absorbed by the next tick — so it
-    // is latched without waking the thread at all.
-    if (m_wake_once || (!m_idle && m_interval.load() <= m_min_interval.load())) {
-        m_wake_once = true;
-        return;
+    bool notify = false;
+    {
+        std::lock_guard lock(m_mutex);
+        if (! m_request) m_request_time = Clock::now();
+        m_request = true;
+        // A cadence that already ticks at the ceiling takes the request with its next tick, so
+        // the thread need not be woken for it.
+        notify = m_idle || m_interval > m_min_interval;
     }
-    m_wake_once = true;
-    m_condition.notify_all();
+    if (notify) m_wake.notify_all();
 }
 
 void ThreadTimer::WakeAt(std::chrono::steady_clock::time_point when) {
-    std::unique_lock<std::mutex> lock(m_cond_mutex);
-    m_wake_at = when;
-    m_condition.notify_all();
+    {
+        std::lock_guard lock(m_mutex);
+        m_appointment = when;
+    }
+    m_wake.notify_all();
 }
 
 void ThreadTimer::FireNow() {
-    std::unique_lock<std::mutex> lock(m_cond_mutex);
-    m_fire_now = true;
-    m_condition.notify_all();
+    {
+        std::lock_guard lock(m_mutex);
+        m_fire_now = true;
+    }
+    m_wake.notify_all();
 }
 
 void ThreadTimer::Start() {
-    std::unique_lock<std::mutex> lock(m_op_mutex);
-
-    if (Running()) return;
-    m_running = true;
-    m_timer_thread = std::thread([this]() {
-        LOG_INFO("thread timer started");
-        // The deadline is derived from the last tick and the *current*
-        // interval, recomputed on every wake, so an interval that shrank moves
-        // the deadline closer and one that grew moves it out. Waking early is
-        // not a tick: the loop re-checks the deadline instead.
-        auto last_tick = std::chrono::steady_clock::now();
-        while (Running()) {
-            // When the tick about to run was due. A cadence tick is anchored to
-            // its deadline, not to when the thread happened to wake: taking the
-            // wake time added every wait's 2-4 ms of timer slack to the period,
-            // so a 60 fps ceiling delivered about 50 frames a second and 120
-            // about 100. A tick more than a whole interval late restarts the
-            // cadence from now rather than bursting to catch up.
-            auto tick_at = std::chrono::steady_clock::now();
-            {
-                std::unique_lock<std::mutex> lock(m_cond_mutex);
-                while (Running()) {
-                    if (m_rebase) {
-                        m_rebase = false;
-                        last_tick = std::chrono::steady_clock::now();
-                    }
-                    if (m_fire_now) {
-                        // The frame owed a dropped tick: the cadence restarts
-                        // here, so the next tick is a whole interval away.
-                        m_fire_now = false;
-                        m_wake_once = false;
-                        tick_at = std::chrono::steady_clock::now();
-                        break;
-                    }
-                    // The user's FPS ceiling is a floor on the gap between two
-                    // callbacks, and it binds every path into one — not only
-                    // the cadence. The cadence alone cannot carry it: content
-                    // pacing makes `m_interval` *longer* than the ceiling, so
-                    // an interval of 1s says nothing about how close together
-                    // two event-driven frames may run.
-                    //
-                    // Before this, a one-shot request was honoured immediately
-                    // whenever the clock was idle, so anything that asks for a
-                    // frame — pointer movement, at the pointer sample rate —
-                    // drove the scene at the rate the events arrived at rather
-                    // than at the rate the user configured.
-                    const auto earliest = last_tick + m_min_interval.load();
-
-                    if (m_idle) {
-                        // An idle clock has no cadence, so the only deadlines
-                        // are the ones something asked for. A request is due at
-                        // the ceiling: after a long sleep that moment is
-                        // already past and the frame runs at once, and during a
-                        // burst the requests coalesce into one frame per
-                        // period instead of one frame each.
-                        std::optional<std::chrono::steady_clock::time_point> due;
-                        if (m_wake_once) {
-                            due = earliest;
-                        } else if (m_wake_at.has_value()) {
-                            // An appointment already past is owed, not urgent:
-                            // clamping it to the ceiling is what stops a
-                            // deadline that keeps being re-armed in the past
-                            // from spinning the thread.
-                            due = std::max(*m_wake_at, earliest);
-                        }
-                        if (! due.has_value()) {
-                            // No deadline at all. This is the difference
-                            // between an idle scene and a slow one: a slow
-                            // scene still wakes to find nothing to do.
-                            m_condition.wait(lock);
-                            continue;
-                        }
-                        const auto now = std::chrono::steady_clock::now();
-                        if (now >= *due) {
-                            // An event-driven frame has no cadence to keep.
-                            tick_at = now;
-                            m_wake_once = false;
-                            // Only a kept appointment is consumed. One that is
-                            // still in the future survives a frame that ran for
-                            // another reason, so a layer that asked to redraw
-                            // on the minute still redraws on the minute.
-                            if (m_wake_at.has_value() && now >= *m_wake_at) m_wake_at.reset();
-                            break;
-                        }
-                        m_condition.wait_until(lock, *due);
-                        continue;
-                    }
-
-                    auto deadline = last_tick + m_interval.load();
-                    // A pending request may cut a long content-paced wait
-                    // short, because the event is new content the period did
-                    // not predict — but only as far as the ceiling, never past
-                    // it. When the cadence is the ceiling this changes nothing.
-                    if (m_wake_once && earliest < deadline) deadline = earliest;
-                    const auto now = std::chrono::steady_clock::now();
-                    if (now >= deadline) {
-                        // Late by more than the step this deadline took — the
-                        // interval, or the ceiling when a request cut the wait
-                        // short — restarts from now, so an old anchor cannot
-                        // let requests through faster than the ceiling.
-                        tick_at = now - deadline < deadline - last_tick ? deadline : now;
-                        // The tick satisfies any pending request: the frame it
-                        // is about to run is the frame that was asked for.
-                        // Clearing here rather than discarding at the request
-                        // site is what keeps the latch meaningful — a request
-                        // is never dropped, only absorbed by a real frame.
-                        m_wake_once = false;
-                        break;
-                    }
-                    m_condition.wait_until(lock, deadline);
-                }
-            }
-            if (!Running()) break;
-            last_tick = tick_at;
-            if (m_callback) m_callback();
-        }
-        LOG_INFO("thread timer exited");
+    std::lock_guard control(m_control_mutex);
+    if (m_running.load()) return;
+    if (m_thread.joinable()) m_thread.join();
+    {
+        std::lock_guard lock(m_mutex);
+        const auto now   = Clock::now();
+        m_cadence_anchor = now;
+        // No tick has happened yet, so the first request is honoured at once.
+        m_last_due       = now - m_min_interval;
+        m_fire_now       = false;
+        m_running.store(true, std::memory_order_release);
+    }
+    m_thread = std::thread([this] {
+        pthread_setname_np("wp-frame-timer");
+        Loop();
     });
 }
 
 void ThreadTimer::Stop() {
-    std::unique_lock<std::mutex> lock(m_op_mutex);
-    assert(std::this_thread::get_id() != m_timer_thread.get_id());
-
-    if (! Running()) return;
-    m_running = false;
-    LOG_INFO("thread timer stopping");
-
+    std::lock_guard control(m_control_mutex);
     {
-        std::unique_lock<std::mutex> lock(m_cond_mutex);
-        m_condition.notify_all();
+        std::lock_guard lock(m_mutex);
+        m_running.store(false, std::memory_order_release);
     }
+    m_wake.notify_all();
+    if (! m_thread.joinable()) return;
+    if (m_thread.get_id() == std::this_thread::get_id()) {
+        // The tick asked for its own timer to stop: the loop ends once the tick returns.
+        m_thread.detach();
+        return;
+    }
+    m_thread.join();
+}
 
-    if (m_timer_thread.joinable()) {
-        m_timer_thread.join();
+// Each pass works out the earliest moment something may run, sleeps until then (or until
+// something changes the answer) and runs the callback once.
+void ThreadTimer::Loop() {
+    std::unique_lock lock(m_mutex);
+    while (m_running.load(std::memory_order_acquire)) {
+        const auto now   = Clock::now();
+        const auto floor = m_last_due + m_min_interval;
+
+        std::optional<Clock::time_point> cadence;
+        if (! m_idle) cadence = std::max(m_cadence_anchor + m_interval, floor);
+        const bool absorbed = ! m_idle && m_interval <= m_min_interval;
+
+        std::optional<Clock::time_point> other;
+        if (m_request && ! absorbed) other = std::max(m_request_time, floor);
+        if (m_appointment) {
+            const auto appointed = std::max(*m_appointment, floor);
+            other                = other ? std::min(*other, appointed) : appointed;
+        }
+
+        std::optional<Clock::time_point> due;
+        if (m_fire_now) {
+            due = now;
+        } else if (cadence) {
+            due = other ? std::min(*cadence, *other) : *cadence;
+        } else {
+            due = other;
+        }
+
+        if (! due) {
+            m_wake.wait(lock);
+            continue;
+        }
+        if (*due > now) {
+            m_wake.wait_until(lock, *due);
+            continue;
+        }
+
+        // Run a tick. One that woke late by less than a whole step is counted as having
+        // happened when it was due, so scheduling slack does not pile up into the period; one
+        // later than that restarts from now instead of firing a burst.
+        const auto step = m_interval;
+        if (m_fire_now) {
+            m_fire_now       = false;
+            m_last_due       = now;
+            m_cadence_anchor = now;
+        } else {
+            m_last_due = now - *due > step ? now : *due;
+            if (cadence && *cadence <= now) {
+                m_cadence_anchor =
+                    now - *cadence > step ? now : m_cadence_anchor + m_interval;
+            }
+            if (m_appointment && *m_appointment <= now) m_appointment.reset();
+        }
+        m_request = false;
+
+        lock.unlock();
+        if (m_callback) {
+            try {
+                m_callback();
+            } catch (const std::exception& error) {
+                LOG_ERROR("ThreadTimer: tick failed: %s", error.what());
+            } catch (...) {
+                LOG_ERROR("ThreadTimer: tick failed");
+            }
+        }
+        lock.lock();
     }
 }

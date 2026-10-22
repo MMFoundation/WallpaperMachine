@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Runtime/DynamicValue.hpp"
-#include "Runtime/PropertyScriptObject.hpp"
 #include "Project/ProjectProperties.hpp"
 
 #include <map>
@@ -29,18 +28,21 @@ public:
                          std::map<std::string, DynamicValueUniquePtr> script_properties,
                          DynamicValue                                 base_value,
                          ScriptedValueSemantic semantic = ScriptedValueSemantic::Generic,
-                         PropertyScriptObject object = {});
+                         int animation_layer_index = -1, std::string effect_reference = {},
+                         std::string setting_animation_reference = {});
     ~ScriptedDynamicValue() override;
 
     const std::string& LayerName() const { return m_current_layer_name; }
     uint8_t CursorHandlerMask() const noexcept;
 
-    /// Runs the script's `init` if it has not run. The runtime starts every
-    /// script it holds, then delivers their first user properties, before the
-    /// first `reevaluate` of any of them.
-    void Start();
-    void DeliverInitialUserProperties();
     void reevaluate();
+    /// The two steps a script starts in (see `PropertyScriptProgram::RunInit`). The runtime runs
+    /// the first of every script of the scene, then the second of every script, then the
+    /// scripts' `update`. What `init` returns becomes this value, converted as the result of
+    /// `update` is; nothing, an exception or an object for a flag leave it alone.
+    bool Initialised() const noexcept;
+    void RunInit();
+    void RunUserNotices();
     void ApplyProjectProperties(const ProjectProperties& project_properties,
                                 const ProjectProperties& changed_properties);
     void DispatchCursorClick(const ScriptHostContext& host_context);
@@ -51,8 +53,8 @@ public:
     void DispatchCursorUp(const ScriptHostContext& host_context);
     void DispatchAnimationEvent(const ScriptHostContext& host_context,
                                 std::string_view event_name, double frame);
-    void DispatchMediaThumbnailChanged(const Eigen::Vector3f& primary_color,
-                                       const Eigen::Vector3f& text_color);
+    void DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
+                                       const linalg::Vector3f& text_color);
     void DispatchMediaEventJson(std::string_view event_json);
     void DispatchResizeScreen(const ScriptHostContext& host_context);
     void DispatchGeneralSettings(const ScriptHostContext& host_context);
@@ -61,16 +63,12 @@ public:
     void Destroy();
 
 private:
-    /// Takes what the script wrote to its effect's `visible` as this value
-    /// (`PropertyScriptObject::effect_visibility`), after anything that ran it.
-    void applyOwnWrite();
-
     SceneRuntimeContext*                         m_runtime = nullptr;
     std::weak_ptr<void>                          m_registry;
     std::string                                  m_current_layer_name;
+    // The script's parameters. They outlive the program, which is declared after them.
     std::map<std::string, DynamicValueUniquePtr> m_script_properties;
     std::unique_ptr<PropertyScriptProgram>       m_program;
-    ScriptedValueSemantic                        m_semantic { ScriptedValueSemantic::Generic };
 };
 
 } // namespace wallpaper

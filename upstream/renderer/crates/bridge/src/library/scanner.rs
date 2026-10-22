@@ -1,90 +1,79 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::fs;
+use std::path::{Path, PathBuf};
 
-use crate::{BridgeError, BridgeErrorKind, library::WallpaperEntry, project::ProjectModel};
+use crate::project::ProjectModel;
+use crate::{BridgeError, BridgeErrorKind};
 
-/// # Errors
-///
-/// Returns an error when the workshop root is missing or unreadable.
+use super::entry::{WallpaperEntry, modified_time};
+
 pub fn scan(root: &Path) -> Result<Vec<WallpaperEntry>, BridgeError> {
     if !root.exists() {
         return Err(BridgeError::Error {
             kind: BridgeErrorKind::Library,
-            message: format!("workshop root missing: {}", root.display()),
+            message: format!("Library root does not exist: {}", root.display()),
         });
     }
 
-    let children = fs::read_dir(root).map_err(|error| BridgeError::Error {
-        kind: BridgeErrorKind::Io,
-        message: format!("workshop root unreadable: {}: {error}", root.display()),
+    let children = fs::read_dir(root);
+    #[cfg(test)]
+    let children = test_controls::listing(root, children);
+    let children = children.map_err(|error| {
+        BridgeError::from(std::io::Error::new(
+            error.kind(),
+            format!("Cannot list library root {}: {error}", root.display()),
+        ))
     })?;
-    let mut entries = Vec::new();
 
+    let mut entries = Vec::new();
     for child in children {
+        #[cfg(test)]
+        let child = test_controls::enumeration(child);
         let child = match child {
             Ok(child) => child,
             Err(error) => {
-                log::warn!(
-                    "skipped unreadable workshop child root={} error={error}",
-                    root.display()
-                );
+                log::warn!("Skipping a child of {}: {error}", root.display());
                 continue;
             }
         };
-
-        let file_type = match child.file_type() {
+        let file_type = child.file_type();
+        #[cfg(test)]
+        let file_type = test_controls::file_type(&child.path(), file_type);
+        let file_type = match file_type {
             Ok(file_type) => file_type,
             Err(error) => {
-                log::warn!(
-                    "skipped workshop child with unreadable file type path={} error={error}",
-                    child.path().display()
-                );
+                log::warn!("Cannot inspect {}: {error}", child.path().display());
                 continue;
             }
         };
-
         if !file_type.is_dir() {
-            log::debug!(
-                "skipped non-directory workshop child path={}",
-                child.path().display()
-            );
+            log::debug!("Skipping non-directory child {}", child.path().display());
             continue;
         }
 
-        let folder = child.path();
-        let project_json = folder.join("project.json");
-        if !project_json.is_file() {
+        let manifest = child.path().join("project.json");
+        if !manifest.is_file() {
             log::debug!(
-                "skipped workshop folder without project.json path={}",
-                folder.display()
+                "Skipping child without regular manifest {}",
+                manifest.display()
             );
             continue;
         }
-
-        let workshop_id = child.file_name().to_string_lossy().into_owned();
-        let model = match ProjectModel::load(&workshop_id, &project_json) {
+        let file_name = child.file_name();
+        #[cfg(test)]
+        let file_name = test_controls::file_name(&child.path(), file_name);
+        let id = file_name.to_string_lossy().into_owned();
+        let model = match ProjectModel::load(&id, &manifest) {
             Ok(model) => model,
             Err(error) => {
-                log::warn!(
-                    "skipped workshop folder with unloadable project.json workshop_id={} path={} \
-                     error={error}",
-                    workshop_id,
-                    project_json.display()
-                );
+                log::warn!("Cannot load {}: {error}", manifest.display());
                 continue;
             }
         };
-
         let mut entry = WallpaperEntry::from_model(&model);
-        entry.project_json_mtime = fs::metadata(&project_json)
-            .ok()
-            .and_then(|metadata| metadata.modified().ok());
+        entry.project_json_mtime = modified_time(&manifest);
         entries.push(entry);
     }
-
-    entries.sort_by(|left, right| {
+    entries.sort_unstable_by(|left, right| {
         left.workshop_id
             .cmp(&right.workshop_id)
             .then_with(|| left.title.cmp(&right.title))
@@ -96,125 +85,113 @@ pub fn scan(root: &Path) -> Result<Vec<WallpaperEntry>, BridgeError> {
 pub fn resolve_preview(workshop_folder: &Path) -> Option<PathBuf> {
     ["preview.gif", "preview.jpg", "preview.jpeg", "preview.png"]
         .into_iter()
-        .map(|file_name| workshop_folder.join(file_name))
-        .find(|path| path.is_file())
+        .map(|name| workshop_folder.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 #[cfg(test)]
-mod tests {
-    use tempfile::TempDir;
-    use wallpaper_core::project::WallpaperProjectType;
+pub(super) mod test_controls {
+    use std::cell::RefCell;
+    use std::ffi::OsString;
+    use std::fs::{DirEntry, FileType, Metadata, ReadDir};
+    use std::io;
+    use std::path::{Path, PathBuf};
+    use std::time::SystemTime;
 
-    use super::*;
-
-    const VALID_MANIFEST: &str = r#"{
-        "type": "scene",
-        "title": "Valid Wallpaper",
-        "preview": "preview.png"
-    }"#;
-
-    fn write_manifest(dir: &Path, contents: &str) {
-        std::fs::write(dir.join("project.json"), contents).unwrap();
+    #[derive(Default)]
+    pub(crate) struct Failures {
+        pub(crate) listing: Option<PathBuf>,
+        pub(crate) enumeration: Option<PathBuf>,
+        pub(crate) file_type: Option<PathBuf>,
+        pub(crate) metadata: Option<PathBuf>,
+        pub(crate) modified: Option<PathBuf>,
+        pub(crate) file_names: Vec<(PathBuf, OsString)>,
     }
 
-    #[test]
-    fn scan_skips_folders_without_manifest() {
-        let temp = TempDir::new().unwrap();
-        std::fs::create_dir(temp.path().join("123")).unwrap();
-
-        let entries = scan(temp.path()).unwrap();
-
-        assert!(entries.is_empty());
+    std::thread_local! {
+        static ACTIVE: RefCell<Failures> = RefCell::new(Failures::default());
     }
 
-    #[test]
-    fn scan_returns_workshop_missing_for_missing_root() {
-        let temp = TempDir::new().unwrap();
-        let missing = temp.path().join("missing");
+    struct Restore(Option<Failures>);
 
-        let err = scan(&missing).unwrap_err();
-
-        assert_eq!(err.kind(), BridgeErrorKind::Library);
-        assert!(err.message().contains(&missing.display().to_string()));
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take().expect("failure scope owns its prior state");
+            ACTIVE.with(|active| {
+                active.replace(previous);
+            });
+        }
     }
 
-    #[test]
-    fn scan_skips_malformed_manifests() {
-        let temp = TempDir::new().unwrap();
-        let malformed = temp.path().join("123");
-        let valid = temp.path().join("456");
-        std::fs::create_dir(&malformed).unwrap();
-        std::fs::create_dir(&valid).unwrap();
-        write_manifest(&malformed, "not-json");
-        write_manifest(&valid, VALID_MANIFEST);
-
-        let entries = scan(temp.path()).unwrap();
-
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].workshop_id, "456");
-        assert_eq!(entries[0].title, "Valid Wallpaper");
-        assert!(entries[0].project_json_mtime.is_some());
+    pub(crate) fn with_failures<T>(failures: Failures, operation: impl FnOnce() -> T) -> T {
+        let previous = ACTIVE.with(|active| active.replace(failures));
+        let _restore = Restore(Some(previous));
+        operation()
     }
 
-    #[test]
-    fn scan_skips_non_directory_children() {
-        let temp = TempDir::new().unwrap();
-        std::fs::write(temp.path().join("not-a-workshop"), b"file").unwrap();
-        let valid = temp.path().join("456");
-        std::fs::create_dir(&valid).unwrap();
-        write_manifest(&valid, VALID_MANIFEST);
-
-        let entries = scan(temp.path()).unwrap();
-
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].workshop_id, "456");
+    pub(crate) fn file_name(path: &Path, observed: OsString) -> OsString {
+        ACTIVE.with(|active| {
+            let controls = active.borrow();
+            match controls
+                .file_names
+                .iter()
+                .find(|(selected, _)| selected == path)
+            {
+                Some((_, supplied)) => supplied.clone(),
+                None => observed,
+            }
+        })
     }
 
-    #[test]
-    fn scan_populates_entry_from_valid_manifest() {
-        let temp = TempDir::new().unwrap();
-        let folder = temp.path().join("456");
-        std::fs::create_dir(&folder).unwrap();
-        write_manifest(&folder, VALID_MANIFEST);
-        std::fs::write(folder.join("preview.png"), b"preview").unwrap();
-
-        let entries = scan(temp.path()).unwrap();
-
-        assert_eq!(entries.len(), 1);
-        let entry = &entries[0];
-        assert_eq!(entry.project_type, WallpaperProjectType::Scene);
-        assert!(entry.supported);
-        assert_eq!(entry.preview_path, Some(folder.join("preview.png")));
-        assert!(entry.preview_mtime.is_some());
+    fn denied<T>() -> io::Result<T> {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "scoped operation-result failure",
+        ))
     }
 
-    #[test]
-    fn resolve_preview_prefers_gif() {
-        let temp = TempDir::new().unwrap();
-        std::fs::write(temp.path().join("preview.png"), b"png").unwrap();
-        std::fs::write(temp.path().join("preview.gif"), b"gif").unwrap();
-
-        let preview = resolve_preview(temp.path());
-
-        assert_eq!(preview, Some(temp.path().join("preview.gif")));
+    pub(crate) fn listing(path: &Path, result: io::Result<ReadDir>) -> io::Result<ReadDir> {
+        if ACTIVE.with(|active| active.borrow().listing.as_deref() == Some(path)) {
+            denied()
+        } else {
+            result
+        }
     }
 
-    #[test]
-    fn resolve_preview_returns_none_when_absent() {
-        let temp = TempDir::new().unwrap();
-
-        let preview = resolve_preview(temp.path());
-
-        assert_eq!(preview, None);
+    pub(crate) fn enumeration(result: io::Result<DirEntry>) -> io::Result<DirEntry> {
+        match result {
+            Ok(entry)
+                if ACTIVE.with(|active| {
+                    active.borrow().enumeration.as_deref() == Some(entry.path().as_path())
+                }) =>
+            {
+                denied()
+            }
+            other => other,
+        }
     }
 
-    #[test]
-    fn resolve_preview_ignores_directories() {
-        let temp = TempDir::new().unwrap();
-        std::fs::create_dir(temp.path().join("preview.gif")).unwrap();
+    pub(crate) fn file_type(path: &Path, result: io::Result<FileType>) -> io::Result<FileType> {
+        if ACTIVE.with(|active| active.borrow().file_type.as_deref() == Some(path)) {
+            denied()
+        } else {
+            result
+        }
+    }
 
-        let preview = resolve_preview(temp.path());
+    pub(crate) fn metadata(path: &Path, result: io::Result<Metadata>) -> io::Result<Metadata> {
+        if ACTIVE.with(|active| active.borrow().metadata.as_deref() == Some(path)) {
+            denied()
+        } else {
+            result
+        }
+    }
 
-        assert_eq!(preview, None);
+    pub(crate) fn modified(path: &Path, result: io::Result<SystemTime>) -> io::Result<SystemTime> {
+        if ACTIVE.with(|active| active.borrow().modified.as_deref() == Some(path)) {
+            denied()
+        } else {
+            result
+        }
     }
 }

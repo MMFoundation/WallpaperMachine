@@ -1,19 +1,19 @@
-//! Shader cache invalidation policy for scene wallpapers.
-//!
-//! Open Wallpaper Engine consumes a scene-specific cache directory. Rust owns
-//! the policy for choosing that directory and deciding when it must be purged,
-//! based on source file modification times and explicit refresh requests.
-
+// Clean-room implementation from the WallpaperMachine spec r1c-core-media.md; written without access to the original source.
 use std::{
-    ffi::OsStr,
     fs,
+    io::ErrorKind,
     path::{Component, Path, PathBuf},
     time::UNIX_EPOCH,
 };
 
 use serde_json::{Value, json};
 
-/// Inputs needed to prepare one scene's shader cache directory.
+const MANIFEST_FILE: &str = "manifest.json";
+
+#[cfg(test)]
+#[path = "cache_link_tests.rs"]
+mod link_tests;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShaderCacheInputs {
     scene_id: String,
@@ -26,10 +26,6 @@ pub struct ShaderCacheInputs {
 }
 
 impl ShaderCacheInputs {
-    /// Starts building cache inputs for `scene_id` under `cache_root`.
-    ///
-    /// `scene_id` must be a single path component. This prevents a malformed
-    /// workshop ID from escaping the cache root.
     #[must_use]
     pub fn builder(
         scene_id: impl Into<String>,
@@ -53,7 +49,6 @@ impl AsRef<ShaderCacheInputs> for ShaderCacheInputs {
     }
 }
 
-/// Builder for [`ShaderCacheInputs`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShaderCacheInputsBuilder {
     scene_id: String,
@@ -66,14 +61,12 @@ pub struct ShaderCacheInputsBuilder {
 }
 
 impl ShaderCacheInputsBuilder {
-    /// Sets the `project.json` path used for cache manifest freshness.
     #[must_use]
     pub fn project_json_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.project_json_path = Some(path.into());
         self
     }
 
-    /// Sets the `scene.pkg` path used for cache manifest freshness.
     #[must_use]
     pub fn scene_pkg_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.scene_pkg_path = Some(path.into());
@@ -87,70 +80,41 @@ impl ShaderCacheInputsBuilder {
         self
     }
 
-    /// Sets the project property override JSON used for cache freshness.
     #[must_use]
     pub fn property_override_json(mut self, json: Option<impl Into<String>>) -> Self {
         self.property_override_json = json.map(Into::into);
         self
     }
 
-    /// Forces the scene cache directory to be recreated.
     #[must_use]
     pub fn force_refresh(mut self, force_refresh: bool) -> Self {
         self.force_refresh = force_refresh;
         self
     }
 
-    /// Validates `self.scene_id`. Kept as a named method (rather than inlined
-    /// into `build()`) because the validation is substantive (~20 lines) and
-    /// the dedicated name documents its safety purpose: preventing a malformed
-    /// workshop id from escaping `cache_root`.
-    #[allow(clippy::single_call_fn)]
-    fn validate_scene_id(&self) -> Result<(), crate::EngineError> {
-        if self.scene_id.is_empty() {
-            return Err(crate::EngineError::InvalidInput(
-                "scene_id must not be empty".to_string(),
-            ));
-        }
-        if self.scene_id.contains('/') || self.scene_id.contains('\\') {
-            return Err(crate::EngineError::InvalidInput(
-                "scene_id must be a single path component".to_string(),
-            ));
-        }
-
-        let mut components = Path::new(&self.scene_id).components();
-        match (components.next(), components.next()) {
-            (Some(Component::Normal(component)), None)
-                if component == OsStr::new(&self.scene_id) =>
-            {
-                Ok(())
-            }
-            _ => Err(crate::EngineError::InvalidInput(
-                "scene_id must be a single path component".to_string(),
-            )),
-        }
-    }
-
-    /// Validates and returns the completed cache inputs.
-    ///
     /// # Errors
     ///
     /// Returns an error if the scene id, cache root, project path, or package
     /// path is invalid or missing.
     pub fn build(self) -> Result<ShaderCacheInputs, crate::EngineError> {
-        self.validate_scene_id()?;
-        if self.cache_root.as_os_str().is_empty() {
-            return Err(crate::EngineError::InvalidInput(
-                "cache_root must not be empty".to_string(),
+        let invalid = |message: &str| crate::EngineError::InvalidInput(message.to_owned());
+
+        if !is_single_component(&self.scene_id) {
+            return Err(invalid(
+                "scene id must be a single path component without separators",
             ));
         }
-
-        let project_json_path = self.project_json_path.ok_or_else(|| {
-            crate::EngineError::InvalidInput("project_json_path must be set".to_string())
-        })?;
-        let scene_pkg_path = self.scene_pkg_path.ok_or_else(|| {
-            crate::EngineError::InvalidInput("scene_pkg_path must be set".to_string())
-        })?;
+        if self.cache_root.as_os_str().is_empty() {
+            return Err(invalid("shader cache root must not be empty"));
+        }
+        let project_json_path = self
+            .project_json_path
+            .filter(|path| !path.as_os_str().is_empty())
+            .ok_or_else(|| invalid("shader cache needs the project.json path"))?;
+        let scene_pkg_path = self
+            .scene_pkg_path
+            .filter(|path| !path.as_os_str().is_empty())
+            .ok_or_else(|| invalid("shader cache needs the scene package path"))?;
 
         Ok(ShaderCacheInputs {
             scene_id: self.scene_id,
@@ -164,7 +128,19 @@ impl ShaderCacheInputsBuilder {
     }
 }
 
-/// Result of preparing a scene shader cache directory.
+/// A scene id may only name one ordinary folder: no separator of either kind, and
+/// neither `.` nor `..`.
+fn is_single_component(scene_id: &str) -> bool {
+    if scene_id.is_empty() || scene_id.contains(['/', '\\']) {
+        return false;
+    }
+    let mut components = Path::new(scene_id).components();
+    matches!(
+        (components.next(), components.next()),
+        (Some(Component::Normal(_)), None)
+    )
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShaderCacheDecision {
     scene_cache_path: PathBuf,
@@ -172,128 +148,187 @@ pub struct ShaderCacheDecision {
 }
 
 impl ShaderCacheDecision {
-    /// Prepares the cache directory and returns the decision that was applied.
-    ///
-    /// If the manifest changed or `force_refresh` is set, the existing scene
-    /// cache is removed before the manifest is rewritten.
-    ///
     /// # Errors
     ///
     /// Returns an error if cache metadata cannot be read/written or the cache
     /// directory cannot be prepared.
     pub fn prepare<T: AsRef<ShaderCacheInputs>>(inputs: T) -> Result<Self, crate::EngineError> {
         let inputs = inputs.as_ref();
-        let next_manifest = json!({
+        let scene_cache_path = inputs.cache_root.join(&inputs.scene_id);
+
+        let wanted = json!({
             "project_mtime": modified_timestamp(&inputs.project_json_path, "project.json")?,
-            "source": source_manifest(inputs)?,
+            "source": source_fingerprint(inputs)?,
             "property_override_json": inputs.property_override_json,
         });
-        let scene_cache_path = inputs.cache_root.join(&inputs.scene_id);
-        let manifest_path = scene_cache_path.join("manifest.json");
+        let manifest_path = scene_cache_path.join(MANIFEST_FILE);
 
-        let mut purge = inputs.force_refresh || !manifest_path.exists();
-        if !purge {
-            let current_manifest = fs::read_to_string(&manifest_path)
+        let up_to_date = !inputs.force_refresh
+            && fs::read_to_string(&manifest_path)
                 .ok()
-                .and_then(|content| serde_json::from_str::<Value>(&content).ok());
-            purge = current_manifest.as_ref() != Some(&next_manifest);
-        }
+                .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                .is_some_and(|stored| stored == wanted);
 
-        if purge && scene_cache_path.exists() {
-            fs::remove_dir_all(&scene_cache_path).map_err(|error| {
-                crate::EngineError::Render(format!("failed to clear scene shader cache: {error}"))
-            })?;
+        let purged_cache = !up_to_date;
+        if purged_cache {
+            match fs::remove_dir_all(&scene_cache_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(crate::EngineError::Render(format!(
+                        "failed to clear scene shader cache: {error}"
+                    )));
+                }
+            }
         }
-
         fs::create_dir_all(&scene_cache_path).map_err(|error| {
             crate::EngineError::Render(format!(
                 "failed to create scene shader cache directory: {error}"
             ))
         })?;
-        let manifest_json = serde_json::to_string_pretty(&next_manifest).map_err(|error| {
-            crate::EngineError::Render(format!("failed to encode shader cache manifest: {error}"))
+        let text = serde_json::to_string_pretty(&wanted).map_err(|error| {
+            crate::EngineError::Render(format!("failed to write shader cache manifest: {error}"))
         })?;
-        fs::write(&manifest_path, manifest_json).map_err(|error| {
+        fs::write(&manifest_path, text).map_err(|error| {
             crate::EngineError::Render(format!("failed to write shader cache manifest: {error}"))
         })?;
 
         Ok(Self {
             scene_cache_path,
-            purged_cache: purge,
+            purged_cache,
         })
     }
 
-    /// Directory OWE should use for this scene's shader cache.
     #[must_use]
     pub fn scene_cache_path(&self) -> &Path {
         &self.scene_cache_path
     }
 
-    /// Whether an existing cache directory was removed during preparation.
     #[must_use]
     pub fn purged_cache(&self) -> bool {
         self.purged_cache
     }
 }
 
-fn source_manifest(inputs: &ShaderCacheInputs) -> Result<Value, crate::EngineError> {
-    match fs::metadata(&inputs.scene_pkg_path) {
-        Ok(metadata) => Ok(json!({
-            "kind": "package",
-            "mtime": modified_timestamp(&inputs.scene_pkg_path, "scene package")?,
-            "size": metadata.len(),
-        })),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let Some((entry, root)) = &inputs.unpacked_source else {
-                return Err(crate::EngineError::Render(format!("failed to stat scene package: {error}")));
-            };
-            let entry_mtime = modified_timestamp(entry, "unpacked scene entry")?;
-            fs::create_dir_all(&inputs.cache_root).map_err(cache_source_error)?;
-            let cache = fs::canonicalize(&inputs.cache_root).map_err(cache_source_error)?;
-            let root = fs::canonicalize(root).map_err(cache_source_error)?;
-            let mut files = Vec::new();
-            let mut directories = vec![root.clone()];
-            while let Some(directory) = directories.pop() {
-                for item in fs::read_dir(&directory).map_err(cache_source_error)? {
-                    let item = item.map_err(cache_source_error)?;
-                    let path = item.path();
-                    if path.starts_with(&cache) { continue; }
-                    let kind = item.file_type().map_err(cache_source_error)?;
-                    if kind.is_dir() {
-                        directories.push(path);
-                    } else if kind.is_file() || kind.is_symlink() {
-                        let metadata = match fs::metadata(&path) {
-                            Ok(metadata) => metadata,
-                            Err(error) if kind.is_symlink() && error.kind() == std::io::ErrorKind::NotFound => continue,
-                            Err(error) => return Err(cache_source_error(error)),
-                        };
-                        if metadata.is_file() {
-                            files.push((path.strip_prefix(&root).unwrap().to_string_lossy().into_owned(),
-                                modified_timestamp(&path, "unpacked scene resource")?, metadata.len()));
-                        }
-                    }
-                }
+/// Describes the scene's source for the manifest: the package file when there is one,
+/// otherwise the unpacked entry plus every resource file under its root.
+fn source_fingerprint(inputs: &ShaderCacheInputs) -> Result<Value, crate::EngineError> {
+    let package = match fs::metadata(&inputs.scene_pkg_path) {
+        Ok(found) => Some(found),
+        Err(missing) if missing.kind() == ErrorKind::NotFound => {
+            if inputs.unpacked_source.is_none() {
+                return Err(crate::EngineError::Render(format!(
+                    "failed to stat scene package: {missing}"
+                )));
             }
-            files.sort();
-            Ok(json!({"kind": "unpacked", "entry": entry, "entry_mtime": entry_mtime, "files": files}))
+            None
         }
-        Err(error) => Err(cache_source_error(error)),
+        Err(other) => return Err(source_inspection_failed(other)),
+    };
+    if let Some(found) = package {
+        return Ok(json!({
+            "kind": "package",
+            "mtime": stamp_of(&found, "scene package")?,
+            "size": found.len(),
+        }));
     }
+    let (entry, resource_root) = inputs
+        .unpacked_source
+        .as_ref()
+        .expect("the missing-package branch above guarantees an unpacked source");
+    let entry_mtime = modified_timestamp(entry, "unpacked scene entry")?;
+    let resources = resource_stamps(resource_root, &inputs.cache_root)?;
+    Ok(json!({
+        "kind": "unpacked",
+        "entry": entry,
+        "entry_mtime": entry_mtime,
+        "files": resources,
+    }))
 }
 
-fn cache_source_error(error: std::io::Error) -> crate::EngineError {
-    crate::EngineError::Render(format!("failed to inspect scene cache source: {error}"))
+/// Every regular file below `resource_root` as `[relative path, mtime, size]`, sorted,
+/// leaving out whatever lives under `cache_root` (the cache must not invalidate itself).
+fn resource_stamps(
+    resource_root: &Path,
+    cache_root: &Path,
+) -> Result<Vec<(String, String, u64)>, crate::EngineError> {
+    // The cache root has to exist before it can be resolved and excluded.
+    fs::create_dir_all(cache_root).map_err(source_inspection_failed)?;
+    let excluded = fs::canonicalize(cache_root).map_err(source_inspection_failed)?;
+    let base = fs::canonicalize(resource_root).map_err(source_inspection_failed)?;
+    let mut stamps = Vec::new();
+    visit_directory(&base, &base, &excluded, &mut stamps)?;
+    stamps.sort();
+    Ok(stamps)
 }
 
+fn visit_directory(
+    directory: &Path,
+    base: &Path,
+    excluded: &Path,
+    stamps: &mut Vec<(String, String, u64)>,
+) -> Result<(), crate::EngineError> {
+    for entry in fs::read_dir(directory).map_err(source_inspection_failed)? {
+        let path = entry.map_err(source_inspection_failed)?.path();
+        if path.starts_with(excluded) {
+            continue;
+        }
+        let own = fs::symlink_metadata(&path).map_err(source_inspection_failed)?;
+        if own.is_dir() {
+            // A directory reached through a link is never entered: `own` does not follow links.
+            visit_directory(&path, base, excluded, stamps)?;
+            continue;
+        }
+        let is_link = own.file_type().is_symlink();
+        if !own.is_file() && !is_link {
+            continue;
+        }
+        // A link outside the cache may still name one of its own outputs.
+        // Resolve links before fingerprinting, but keep their lexical source names.
+        let target = if is_link {
+            match fs::canonicalize(&path) {
+                Ok(target) if target.starts_with(excluded) => continue,
+                Ok(target) => Some(target),
+                Err(gone) if gone.kind() == ErrorKind::NotFound => continue,
+                Err(other) => return Err(source_inspection_failed(other)),
+            }
+        } else {
+            None
+        };
+        let resolved = match fs::metadata(target.as_deref().unwrap_or(&path)) {
+            Ok(resolved) => resolved,
+            Err(gone) if is_link && gone.kind() == ErrorKind::NotFound => continue,
+            Err(other) => return Err(source_inspection_failed(other)),
+        };
+        if !resolved.is_file() {
+            continue;
+        }
+        let relative = path.strip_prefix(base).unwrap_or(&path);
+        stamps.push((
+            relative.to_string_lossy().into_owned(),
+            stamp_of(&resolved, "unpacked scene resource")?,
+            resolved.len(),
+        ));
+    }
+    Ok(())
+}
+
+fn source_inspection_failed(cause: std::io::Error) -> crate::EngineError {
+    crate::EngineError::Render(format!("failed to inspect scene cache source ({cause})"))
+}
+
+/// Modification time as `<seconds>.<nine-digit nanoseconds>` since the epoch; a time
+/// before the epoch reads as zero.
 fn modified_timestamp(path: &Path, label: &str) -> Result<String, crate::EngineError> {
-    let modified = fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
+    let metadata = fs::metadata(path)
         .map_err(|error| crate::EngineError::Render(format!("failed to stat {label}: {error}")))?;
+    stamp_of(&metadata, label)
+}
 
-    let duration = modified.duration_since(UNIX_EPOCH).unwrap_or_default();
-    Ok(format!(
-        "{}.{:09}",
-        duration.as_secs(),
-        duration.subsec_nanos()
-    ))
+fn stamp_of(metadata: &fs::Metadata, label: &str) -> Result<String, crate::EngineError> {
+    let modified = metadata
+        .modified()
+        .map_err(|error| crate::EngineError::Render(format!("failed to stat {label}: {error}")))?;
+    let elapsed = modified.duration_since(UNIX_EPOCH).unwrap_or_default();
+    Ok(format!("{}.{:09}", elapsed.as_secs(), elapsed.subsec_nanos()))
 }

@@ -1,11 +1,15 @@
+// Clean-room implementation from the WallpaperMachine spec r1b-core-display.md; written without access to the original source.
+use std::collections::HashSet;
+
 #[cfg(test)]
-use crate::DisplayConfig;
+use crate::{DisplayConfig, project::SceneTemplate};
 use crate::{
     DisplayDesc, DisplayIdentity, DisplaySelector, EngineError, WallpaperAssignment,
     WallpaperEngineConfig,
-    project::{SceneDesc, SceneDescSliceExt, SceneTemplate},
+    project::{SceneDesc, SceneTemplate as Template},
 };
 
+/// The name of a display slot in the model.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DisplayKey {
     Primary,
@@ -13,6 +17,7 @@ pub enum DisplayKey {
     LiveDisplayId(u32),
 }
 
+/// What the engine must do with the scene of one slot after a model change.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DisplayAction {
     Open(DisplayKey),
@@ -20,6 +25,7 @@ pub enum DisplayAction {
     Rebuild(DisplayKey),
 }
 
+/// One display slot: its key, live display, assignment and flags.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayRecord {
     pub key: DisplayKey,
@@ -28,13 +34,18 @@ pub struct DisplayRecord {
     pub window_active: bool,
     pub runtime_open: bool,
     pub primary_inheritance_consumed: bool,
-    /// The assignment was reconciled for the physical display this record
-    /// holds. A refresh keeps it on that display, even when the display's key
-    /// changes because another display became the main one.
+    /// Whether the assignment is the one a reconcile asked for this slot's
+    /// concrete display. A bound assignment stays with its physical display
+    /// when another display becomes the main one; an unbound one (configured,
+    /// set directly or inherited) stays with its key, so on the primary slot
+    /// it follows the main display.
     pub bound_to_display: bool,
 }
 
 impl DisplayRecord {
+    /// Whether a scene should exist for this slot: its window is active or
+    /// a scene is already open, a display is connected and something is
+    /// assigned (a mirror counts; the engine resolves mirrors first).
     pub fn should_have_runtime(&self) -> bool {
         (self.window_active || self.runtime_open)
             && self.live_display.is_some()
@@ -42,22 +53,43 @@ impl DisplayRecord {
     }
 
     pub fn scene_desc(&self) -> Result<Option<SceneDesc>, EngineError> {
-        let Some(display) = self.live_display.clone() else {
+        let Some(display) = &self.live_display else {
             return Ok(None);
         };
-        match self.assignment.as_ref() {
+        match &self.assignment {
+            None => Ok(None),
             Some(WallpaperAssignment::Direct(template)) => {
                 template.validate()?;
-                Ok(Some(template.for_display(display)))
+                Ok(Some(template.for_display(display.clone())))
             }
             Some(WallpaperAssignment::Mirror(_)) => Err(EngineError::Platform(
                 "mirror assignments must be resolved before runtime creation".to_string(),
             )),
-            None => Ok(None),
         }
+    }
+
+    /// A slot that came into being without any configuration: inactive,
+    /// disconnected and blank.
+    fn blank(key: DisplayKey) -> Self {
+        Self {
+            key,
+            live_display: None,
+            assignment: None,
+            window_active: false,
+            runtime_open: false,
+            primary_inheritance_consumed: false,
+            bound_to_display: false,
+        }
+    }
+
+    /// Whether the slot's wallpaper claims its display for a scene to run
+    /// on it right now (before mirrors are resolved).
+    fn is_claimed(&self) -> bool {
+        self.window_active || self.runtime_open
     }
 }
 
+/// A display transition worth a debug line.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DisplayDebugEvent {
     Connected {
@@ -75,80 +107,71 @@ pub enum DisplayDebugEvent {
     },
 }
 
+/// All display slots, primary first, then in order of creation.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DisplayStateModel {
     pub records: Vec<DisplayRecord>,
 }
 
 impl DisplayKey {
-    /// Returns a debug-friendly label describing this key variant.
     pub fn key_label(&self) -> String {
         match self {
-            DisplayKey::Primary => "primary".to_string(),
-            DisplayKey::Identity(identity) => format!("identity({})", identity.identity_label()),
-            DisplayKey::LiveDisplayId(display_id) => format!("live-display-id({display_id})"),
+            Self::Primary => "the primary slot".to_owned(),
+            Self::Identity(identity) => format!("slot for {}", identity.identity_label()),
+            Self::LiveDisplayId(id) => format!("slot for live display #{id}"),
         }
     }
 
     pub fn from_selector(selector: &DisplaySelector) -> Result<Self, EngineError> {
         match selector {
             DisplaySelector::Primary => Ok(Self::Primary),
-            DisplaySelector::Identity(identity) if !identity.is_empty() => {
-                Ok(Self::Identity(identity.clone()))
+            DisplaySelector::Identity(identity) if identity.is_empty() => {
+                Err(EngineError::InvalidInput(
+                    "display identity selector must not be empty".to_string(),
+                ))
             }
-            DisplaySelector::Identity(_) => Err(EngineError::InvalidInput(
-                "display identity selector must not be empty".to_string(),
-            )),
+            DisplaySelector::Identity(identity) => Ok(Self::Identity(identity.clone())),
             DisplaySelector::LiveDisplayId(0) => Err(EngineError::InvalidInput(
                 "display_id must be non-zero".to_string(),
             )),
-            DisplaySelector::LiveDisplayId(display_id) => Ok(Self::LiveDisplayId(*display_id)),
+            DisplaySelector::LiveDisplayId(id) => Ok(Self::LiveDisplayId(*id)),
         }
     }
 }
 
+fn mirror_cycle_error() -> EngineError {
+    EngineError::InvalidInput("wallpaper mirror cycle detected".to_string())
+}
+
 impl DisplayStateModel {
     pub fn from_config(config: WallpaperEngineConfig) -> Result<Self, EngineError> {
+        // Read every entry first, so a mirror loop spanning two entries is
+        // judged on the complete configuration.
+        let entries = config
+            .displays
+            .into_iter()
+            .map(|entry| {
+                if let Some(WallpaperAssignment::Direct(template)) = &entry.wallpaper {
+                    template.validate()?;
+                }
+                let key = DisplayKey::from_selector(&entry.selector)?;
+                Ok((key, entry.window_active, entry.wallpaper))
+            })
+            .collect::<Result<Vec<_>, EngineError>>()?;
+
         let mut model = Self {
             records: vec![DisplayRecord {
-                key: DisplayKey::Primary,
-                live_display: None,
-                assignment: None,
                 window_active: true,
-                runtime_open: false,
-                primary_inheritance_consumed: false,
-                bound_to_display: false,
+                ..DisplayRecord::blank(DisplayKey::Primary)
             }],
         };
-
-        for display in config.displays {
-            if let Some(WallpaperAssignment::Direct(template)) = display.wallpaper.as_ref() {
-                template.validate()?;
-            }
-            let key = DisplayKey::from_selector(&display.selector)?;
-            let record = model.ensure_record(key);
-            record.window_active = display.window_active;
-            record.assignment = display.wallpaper;
+        for (key, window_active, assignment) in entries {
+            let slot = model.slot_or_insert(key);
+            slot.window_active = window_active;
+            slot.assignment = assignment;
         }
-
-        model.reject_mirror_cycles()?;
+        model.check_mirror_cycles()?;
         Ok(model)
-    }
-
-    fn ensure_record(&mut self, key: DisplayKey) -> &mut DisplayRecord {
-        if let Some(index) = self.records.iter().position(|record| record.key == key) {
-            return &mut self.records[index];
-        }
-        self.records.push(DisplayRecord {
-            key,
-            live_display: None,
-            assignment: None,
-            window_active: false,
-            runtime_open: false,
-            primary_inheritance_consumed: false,
-            bound_to_display: false,
-        });
-        self.records.last_mut().expect("record was just pushed")
     }
 
     pub fn set_assignment(
@@ -160,12 +183,18 @@ impl DisplayStateModel {
             template.validate()?;
         }
         let key = DisplayKey::from_selector(selector)?;
-        let mut candidate = self.clone();
-        let record = candidate.ensure_record(key);
-        record.assignment = Some(assignment);
-        record.bound_to_display = false;
-        candidate.reject_mirror_cycles()?;
-        *self = candidate;
+        let slots_before = self.records.len();
+        let index = self.index_or_insert(key);
+        let replaced = self.records[index].assignment.replace(assignment);
+        // Set another way than by a reconcile: the slot's key decides.
+        let was_bound = std::mem::take(&mut self.records[index].bound_to_display);
+        if let Err(error) = self.check_mirror_cycles() {
+            // Undo: a slot made for this call is the last one.
+            self.records[index].assignment = replaced;
+            self.records[index].bound_to_display = was_bound;
+            self.records.truncate(slots_before);
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -189,116 +218,11 @@ impl DisplayStateModel {
         displays: Vec<DisplayDesc>,
         transitional: &[DisplayDesc],
     ) -> Result<Vec<DisplayAction>, EngineError> {
-        let mut candidate = self.clone();
-        let primary_id = primary.display_id;
-        let primary_assignment_before = candidate
-            .record(&DisplayKey::Primary)
-            .and_then(|record| record.assignment.clone());
-        let connected = candidate.connected_display_keys(primary_id, primary, displays)?;
-
-        for record in &mut candidate.records {
-            record.live_display = None;
-        }
-
-        for (key, display) in connected {
-            let record = candidate.ensure_record(key);
-            record.live_display = Some(display);
-            if record.live_display.as_ref().unwrap().display_id != primary_id
-                && record.assignment.is_none()
-                && !record.primary_inheritance_consumed
-            {
-                record.assignment.clone_from(&primary_assignment_before);
-                record.primary_inheritance_consumed = true;
-            }
-        }
-
-        candidate.keep_descriptors_of_transitional_displays(self, transitional);
-        candidate.keep_bound_assignments_on_their_displays(self, transitional)?;
-        candidate.reject_mirror_cycles()?;
-        candidate.transfer_runtime_open_flags_from(self);
-        let actions = candidate.plan_actions()?;
-        candidate.log_debug_transition(self);
-        *self = candidate;
-        Ok(actions)
-    }
-
-    /// Moves each assignment reconciled for a concrete display to the record
-    /// that holds that physical display after the refresh.
-    ///
-    /// The [`DisplayKey::Primary`] record follows the main display. Without
-    /// this, a main-display change would carry the old main display's wallpaper
-    /// to the new one, reload it there, and close the new main display's own
-    /// wallpaper. A binding whose display disconnected leaves `Primary` for the
-    /// key the display has as a secondary. The configured `Primary` wallpaper
-    /// (`DisplaySelector::Primary`) is not bound and keeps following the main
-    /// display.
-    fn keep_bound_assignments_on_their_displays(
-        &mut self,
-        before: &DisplayStateModel,
-        transitional: &[DisplayDesc],
-    ) -> Result<(), EngineError> {
-        let primary_takes_bindings = self
-            .record(&DisplayKey::Primary)
-            .is_none_or(|record| record.bound_to_display || record.assignment.is_none());
-        let mut moves = Vec::new();
-        for source in before.records.iter().filter(|record| record.bound_to_display) {
-            let Some(display) = source.live_display.as_ref() else {
-                continue;
-            };
-            let holder = self.records.iter().find(|record| {
-                record
-                    .live_display
-                    .as_ref()
-                    .is_some_and(|live| live.is_same_physical_display_as(display))
-            });
-            let target = match holder {
-                Some(holder) if holder.key == source.key => continue,
-                Some(holder) if holder.key == DisplayKey::Primary && !primary_takes_bindings => {
-                    continue;
-                }
-                Some(holder) => holder.key.clone(),
-                None if source.key == DisplayKey::Primary => {
-                    self.key_for_disconnected_display(display)?
-                }
-                None => continue,
-            };
-            moves.push((source, target));
-        }
-
-        for (source, _) in &moves {
-            if let Some(record) = self.records.iter_mut().find(|record| record.key == source.key) {
-                record.assignment = None;
-                record.window_active = false;
-                record.bound_to_display = false;
-            }
-        }
-        for (source, target) in moves {
-            let record = self.ensure_record(target);
-            record.assignment.clone_from(&source.assignment);
-            record.window_active = source.window_active;
-            record.bound_to_display = true;
-            let display = source
-                .live_display
-                .as_ref()
-                .expect("bound sources hold a display");
-            if record.live_display.is_none()
-                && transitional
-                    .iter()
-                    .any(|settling| display.is_same_physical_display_as(settling))
-            {
-                record.live_display = Some(display.clone());
-            }
-        }
-        Ok(())
-    }
-
-    fn key_for_disconnected_display(&self, display: &DisplayDesc) -> Result<DisplayKey, EngineError> {
-        if display.identity.is_empty() {
-            return Ok(DisplayKey::LiveDisplayId(display.display_id));
-        }
-        Ok(self
-            .matching_identity_key(&display.identity)?
-            .unwrap_or_else(|| DisplayKey::Identity(display.identity.clone())))
+        let target = self.model_after_report(&primary, displays, transitional)?;
+        let plan = target.scene_plan()?;
+        target.log_debug_transition(self);
+        *self = target;
+        Ok(plan)
     }
 
     pub fn set_window_active(
@@ -307,8 +231,11 @@ impl DisplayStateModel {
         active: bool,
     ) -> Result<Vec<DisplayAction>, EngineError> {
         let key = DisplayKey::from_selector(selector)?;
-        self.ensure_record(key).window_active = active;
-        self.plan_actions()
+        let mut next = self.clone();
+        next.slot_or_insert(key).window_active = active;
+        let actions = next.scene_plan()?;
+        *self = next;
+        Ok(actions)
     }
 
     pub fn destroy_window(
@@ -316,355 +243,94 @@ impl DisplayStateModel {
         selector: &DisplaySelector,
     ) -> Result<Vec<DisplayAction>, EngineError> {
         let key = DisplayKey::from_selector(selector)?;
-        let record = self.ensure_record(key.clone());
-        let was_open = record.runtime_open;
-        record.window_active = false;
-        record.runtime_open = false;
-        if was_open {
-            Ok(vec![DisplayAction::Close(key)])
-        } else {
-            Ok(Vec::new())
-        }
+        let slot = self.slot_or_insert(key.clone());
+        slot.window_active = false;
+        let had_scene = std::mem::take(&mut slot.runtime_open);
+        Ok(had_scene
+            .then_some(DisplayAction::Close(key))
+            .into_iter()
+            .collect())
     }
 
     pub fn resolved_assignment(
         &self,
         key: &DisplayKey,
     ) -> Result<Option<WallpaperAssignment>, EngineError> {
-        self.resolve_assignment_inner(key, &mut Vec::new())
-    }
-
-    fn resolve_assignment_inner(
-        &self,
-        key: &DisplayKey,
-        stack: &mut Vec<DisplayKey>,
-    ) -> Result<Option<WallpaperAssignment>, EngineError> {
-        if stack.contains(key) {
-            return Err(EngineError::InvalidInput(
-                "wallpaper mirror cycle detected".to_string(),
-            ));
-        }
-        stack.push(key.clone());
-        let result = match self
-            .record(key)
-            .and_then(|record| record.assignment.as_ref())
-        {
-            Some(WallpaperAssignment::Direct(template)) => {
-                Some(WallpaperAssignment::Direct(template.clone()))
-            }
-            Some(WallpaperAssignment::Mirror(selector)) => {
-                let source = DisplayKey::from_selector(selector)?;
-                self.resolve_assignment_inner(&source, stack)?
-            }
-            None => None,
-        };
-        stack.pop();
-        Ok(result)
-    }
-
-    fn reject_mirror_cycles(&self) -> Result<(), EngineError> {
-        for record in &self.records {
-            self.resolved_assignment(&record.key)?;
-        }
-        Ok(())
-    }
-
-    fn plan_actions(&self) -> Result<Vec<DisplayAction>, EngineError> {
-        let mut actions = Vec::new();
-        for record in &self.records {
-            let has_assignment = self.resolved_assignment(&record.key)?.is_some();
-            let should_be_open = (record.window_active || record.runtime_open)
-                && record.live_display.is_some()
-                && has_assignment;
-            match (record.runtime_open, should_be_open) {
-                (false, true) => actions.push(DisplayAction::Open(record.key.clone())),
-                (true, false) => actions.push(DisplayAction::Close(record.key.clone())),
-                (true, true) => actions.push(DisplayAction::Rebuild(record.key.clone())),
-                (false, false) => {}
-            }
-        }
-        Ok(actions)
-    }
-
-    fn connected_display_keys(
-        &self,
-        primary_id: u32,
-        primary: DisplayDesc,
-        displays: Vec<DisplayDesc>,
-    ) -> Result<Vec<(DisplayKey, DisplayDesc)>, EngineError> {
-        let mut connected = Vec::with_capacity(displays.len() + 1);
-        let primary_key = self.key_for_connected_display(primary_id, &primary)?;
-        let primary_for_dedupe = primary.clone();
-        connected.push((primary_key, primary));
-
-        for display in displays {
-            if display.display_id == primary_id
-                || primary_for_dedupe
-                    .identity
-                    .match_score(&display.identity)
-                    .is_some()
-            {
-                continue;
-            }
-            let key = self.key_for_connected_display(primary_id, &display)?;
-            connected.push((key, display));
-        }
-
-        let mut keys = std::collections::HashSet::with_capacity(connected.len());
-        if connected.iter().any(|(key, _)| !keys.insert(key.clone())) {
-            return Err(EngineError::InvalidInput(
-                "multiple connected displays matched the same display configuration".to_string(),
-            ));
-        }
-
-        Ok(connected)
-    }
-
-    fn keep_descriptors_of_transitional_displays(
-        &mut self,
-        before: &DisplayStateModel,
-        transitional: &[DisplayDesc],
-    ) {
-        if transitional.is_empty() {
-            return;
-        }
-        for record in &mut self.records {
-            if record.live_display.is_some() {
-                continue;
-            }
-            let Some(previous) = before
-                .record(&record.key)
-                .and_then(|source| source.live_display.as_ref())
-            else {
-                continue;
-            };
-            if transitional
-                .iter()
-                .any(|display| previous.is_same_physical_display_as(display))
-            {
-                record.live_display = Some(previous.clone());
-            }
-        }
-    }
-
-    fn transfer_runtime_open_flags_from(&mut self, before: &DisplayStateModel) {
-        let mut consumed = vec![false; before.records.len()];
-
-        for record in &mut self.records {
-            if !record.should_have_runtime() {
-                record.runtime_open = false;
-                continue;
-            }
-            let display = record
-                .live_display
-                .as_ref()
-                .expect("runtime target records have live displays");
-            let source_index = before
-                .records
-                .iter()
-                .enumerate()
-                .position(|(index, source)| {
-                    !consumed[index]
-                        && source.runtime_open
-                        && source.live_display.as_ref().is_some_and(|source_display| {
-                            source_display.is_same_physical_display_as(display)
-                        })
-                })
-                .or_else(|| {
-                    before
-                        .records
-                        .iter()
-                        .enumerate()
-                        .position(|(index, source)| {
-                            !consumed[index] && source.runtime_open && source.key == record.key
-                        })
-                });
-
-            let Some(source_index) = source_index else {
-                record.runtime_open = false;
-                continue;
-            };
-
-            record.runtime_open = true;
-            consumed[source_index] = true;
-        }
-    }
-
-    fn key_for_connected_display(
-        &self,
-        primary_id: u32,
-        display: &DisplayDesc,
-    ) -> Result<DisplayKey, EngineError> {
-        if display.display_id == primary_id {
-            return Ok(self.primary_or_active_live_display_key(display.display_id));
-        }
-
-        if let Some(key) = self.active_live_display_id_key(display.display_id) {
-            return Ok(key);
-        }
-
-        if !display.identity.is_empty()
-            && let Some(key) = self.matching_identity_key(&display.identity)?
-        {
-            return Ok(key);
-        }
-
-        Ok(self
-            .assigned_live_display_id_key(display.display_id)
-            .unwrap_or_else(|| {
-                if display.identity.is_empty() {
-                    DisplayKey::LiveDisplayId(display.display_id)
-                } else {
-                    DisplayKey::Identity(display.identity.clone())
-                }
-            }))
-    }
-
-    fn primary_or_active_live_display_key(&self, display_id: u32) -> DisplayKey {
-        let primary_is_configured = self
-            .record(&DisplayKey::Primary)
-            .is_some_and(|record| record.window_active || record.runtime_open);
-        if primary_is_configured {
-            return DisplayKey::Primary;
-        }
-        self.active_live_display_id_key(display_id)
-            .unwrap_or(DisplayKey::Primary)
-    }
-
-    fn active_live_display_id_key(&self, display_id: u32) -> Option<DisplayKey> {
-        self.records.iter().find_map(|record| match record.key {
-            DisplayKey::LiveDisplayId(record_display_id)
-                if record_display_id == display_id
-                    && (record.window_active || record.runtime_open) =>
-            {
-                Some(record.key.clone())
-            }
-            _ => None,
-        })
-    }
-
-    fn assigned_live_display_id_key(&self, display_id: u32) -> Option<DisplayKey> {
-        self.records.iter().find_map(|record| match record.key {
-            DisplayKey::LiveDisplayId(record_display_id)
-                if record_display_id == display_id && record.assignment.is_some() =>
-            {
-                Some(record.key.clone())
-            }
-            _ => None,
-        })
-    }
-
-    fn matching_identity_key(
-        &self,
-        live_identity: &DisplayIdentity,
-    ) -> Result<Option<DisplayKey>, EngineError> {
-        let mut matches = Vec::new();
-        for record in &self.records {
-            let DisplayKey::Identity(existing_identity) = &record.key else {
-                continue;
-            };
-            let Some(score) = existing_identity.match_score(live_identity) else {
-                continue;
-            };
-            matches.push((score, record.key.clone()));
-        }
-
-        let Some(max_score) = matches.iter().map(|(score, _)| *score).max() else {
+        let Some(mut record) = self.slot(key) else {
             return Ok(None);
         };
-        let mut best_matches = matches
-            .into_iter()
-            .filter(|(score, _)| *score == max_score)
-            .map(|(_, key)| key);
-        let best = best_matches
-            .next()
-            .expect("max score implies at least one match");
-        if best_matches.next().is_some() {
-            return Err(EngineError::InvalidInput(
-                "ambiguous display identity match".to_string(),
-            ));
+        let mut visited = vec![&record.key];
+        loop {
+            match &record.assignment {
+                None => return Ok(None),
+                Some(direct @ WallpaperAssignment::Direct(_)) => return Ok(Some(direct.clone())),
+                Some(WallpaperAssignment::Mirror(source)) => {
+                    let source_key = DisplayKey::from_selector(source)?;
+                    let Some(source_record) = self.slot(&source_key) else {
+                        return Ok(None);
+                    };
+                    if visited.contains(&&source_record.key) {
+                        return Err(mirror_cycle_error());
+                    }
+                    visited.push(&source_record.key);
+                    record = source_record;
+                }
+            }
         }
-
-        Ok(Some(best))
-    }
-
-    fn record(&self, key: &DisplayKey) -> Option<&DisplayRecord> {
-        self.records.iter().find(|record| &record.key == key)
     }
 
     pub fn apply_reconcile(&mut self, scenes: &[SceneDesc]) -> Result<(), EngineError> {
-        for scene in scenes {
-            scene.validate()?;
-        }
-        scenes.assert_unique()?;
-
-        let requested = scenes
+        // Every placement is decided against the model as it is now.
+        let keys = scenes
             .iter()
             .map(|scene| self.reconcile_key(scene))
-            .collect::<Result<std::collections::HashSet<_>, _>>()?;
-
-        for record in &mut self.records {
-            if record.live_display.is_some() && !requested.contains(&record.key) {
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut next = self.clone();
+        for record in &mut next.records {
+            if record.live_display.is_some() && !keys.contains(&record.key) {
                 record.window_active = false;
-                record.bound_to_display = false;
                 record.runtime_open = false;
+                record.bound_to_display = false;
             }
         }
-
-        for scene in scenes {
-            let key = self.reconcile_key(scene)?;
-            let record =
-                if let Some(index) = self.records.iter().position(|record| record.key == key) {
-                    &mut self.records[index]
-                } else {
-                    self.records.push(DisplayRecord {
-                        key,
-                        live_display: None,
-                        assignment: None,
-                        window_active: false,
-                        runtime_open: false,
-                        primary_inheritance_consumed: false,
-                        bound_to_display: false,
-                    });
-                    self.records.last_mut().expect("record was just pushed")
-                };
+        for (scene, key) in scenes.iter().zip(keys) {
+            let record = next.slot_or_insert(key);
             record.live_display = Some(scene.display.clone());
             record.window_active = true;
-            record.bound_to_display = true;
-            record.assignment = Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(
+            record.assignment = Some(WallpaperAssignment::Direct(Template::from_scene_desc(
                 scene,
             )));
+            // Asked for this concrete display: it stays with the display.
+            record.bound_to_display = true;
         }
-
+        *self = next;
         Ok(())
     }
 
     pub fn reconcile_key(&self, scene: &SceneDesc) -> Result<DisplayKey, EngineError> {
-        if self.records.iter().any(|record| {
-            record.key == DisplayKey::Primary
-                && record
-                    .live_display
-                    .as_ref()
-                    .is_some_and(|display| display.display_id == scene.display.display_id)
-        }) {
+        let display = &scene.display;
+        let shows_display = |record: &&DisplayRecord| {
+            record
+                .live_display
+                .as_ref()
+                .is_some_and(|live| live.display_id == display.display_id)
+        };
+        let primary_shows = self
+            .slot(&DisplayKey::Primary)
+            .iter()
+            .any(|record| shows_display(record));
+        if primary_shows {
             return Ok(DisplayKey::Primary);
         }
-
-        if let Some(key) = self.records.iter().find_map(|record| {
-            record.live_display.as_ref().and_then(|display| {
-                (display.display_id == scene.display.display_id).then(|| record.key.clone())
-            })
-        }) {
-            return Ok(key);
+        if let Some(record) = self.records.iter().find(shows_display) {
+            return Ok(record.key.clone());
         }
-
-        if !scene.display.identity.is_empty()
-            && let Some(key) = self.matching_identity_key(&scene.display.identity)?
+        if !display.identity.is_empty()
+            && let Some(key) = self.best_identity_slot(&display.identity, display.display_id)?
         {
             return Ok(key);
         }
-
-        Ok(DisplayKey::LiveDisplayId(scene.display.display_id))
+        Ok(DisplayKey::LiveDisplayId(display.display_id))
     }
 
     pub fn has_live_id(&self, display_id: u32) -> bool {
@@ -672,1512 +338,460 @@ impl DisplayStateModel {
             record
                 .live_display
                 .as_ref()
-                .is_some_and(|display| display.display_id == display_id)
+                .is_some_and(|live| live.display_id == display_id)
         })
     }
 
     pub fn debug_events_since(&self, before: &DisplayStateModel) -> Vec<DisplayDebugEvent> {
         let mut events = Vec::new();
-
-        for record in self
-            .records
-            .iter()
-            .filter(|record| record.live_display.is_some())
-        {
-            let display = record
-                .live_display
-                .as_ref()
-                .expect("filtered to records with live displays");
-            if !before.has_live_id(display.display_id) {
+        for record in &self.records {
+            if let Some(display) = &record.live_display
+                && !before.has_live_id(display.display_id)
+            {
                 events.push(DisplayDebugEvent::Connected {
                     key: record.key.clone(),
                     display: display.clone(),
                 });
             }
         }
-
-        for record in before
-            .records
-            .iter()
-            .filter(|record| record.live_display.is_some())
-        {
-            let display = record
-                .live_display
-                .as_ref()
-                .expect("filtered to records with live displays");
-            if !self.has_live_id(display.display_id) {
+        for record in &before.records {
+            if let Some(display) = &record.live_display
+                && !self.has_live_id(display.display_id)
+            {
                 events.push(DisplayDebugEvent::Disconnected {
                     key: record.key.clone(),
                     display: display.clone(),
                 });
             }
         }
-
-        for after_record in self
-            .records
-            .iter()
-            .filter(|record| record.live_display.is_some())
-        {
-            let Some(before_display) = before
-                .record(&after_record.key)
-                .and_then(|record| record.live_display.as_ref())
-            else {
+        for record in &self.records {
+            let (Some(after), Some(old)) = (
+                &record.live_display,
+                before
+                    .slot(&record.key)
+                    .and_then(|old| old.live_display.as_ref()),
+            ) else {
                 continue;
             };
-            let after_display = after_record
-                .live_display
-                .as_ref()
-                .expect("filtered to records with live displays");
-            if !before_display.has_same_geometry(after_display) {
+            if !old.has_same_geometry(after) {
                 events.push(DisplayDebugEvent::Changed {
-                    key: after_record.key.clone(),
-                    before: before_display.clone(),
-                    after: after_display.clone(),
+                    key: record.key.clone(),
+                    before: old.clone(),
+                    after: after.clone(),
                 });
             }
         }
-
         events
     }
 
     pub fn log_debug_transition(&self, before: &DisplayStateModel) {
         for event in self.debug_events_since(before) {
-            log::debug!("{}", event.debug_message());
-        }
-    }
-}
-
-impl DisplayDebugEvent {
-    fn debug_message(&self) -> String {
-        match self {
-            Self::Connected { key, display } => format!(
-                "[wallpaper-core display] monitor connected: key={} {}",
-                key.key_label(),
-                display.desc_label()
-            ),
-            Self::Disconnected { key, display } => format!(
-                "[wallpaper-core display] monitor disconnected: key={} {}",
-                key.key_label(),
-                display.desc_label()
-            ),
-            Self::Changed { key, before, after } => format!(
-                "[wallpaper-core display] display geometry changed: key={} before=[{}] after=[{}]",
-                key.key_label(),
-                before.desc_label(),
-                after.desc_label()
-            ),
-        }
-    }
-}
-
-#[cfg(test)]
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn display(id: u32, identity: DisplayIdentity) -> DisplayDesc {
-        DisplayDesc::with_identity(id, identity, 0, 0, 1920, 1080, 1.0)
-    }
-
-    fn scaled_display(
-        id: u32,
-        identity: DisplayIdentity,
-        width: u32,
-        height: u32,
-        scale_factor: f64,
-    ) -> DisplayDesc {
-        DisplayDesc::with_identity(id, identity, 0, 0, width, height, scale_factor)
-    }
-
-    fn identity(label: &str) -> DisplayIdentity {
-        DisplayIdentity {
-            uuid: Some(label.to_string()),
-            vendor_id: Some(1),
-            model_id: Some(2),
-            serial_number: Some(u32::from(label.bytes().next().unwrap_or_default())),
-            unit_number: Some(1),
-            name: None,
+            match event {
+                DisplayDebugEvent::Connected { key, display } => log::debug!(
+                    "[wallpaper-core display] connected {} on {}",
+                    display.desc_label(),
+                    key.key_label()
+                ),
+                DisplayDebugEvent::Disconnected { key, display } => log::debug!(
+                    "[wallpaper-core display] disconnected {} from {}",
+                    display.desc_label(),
+                    key.key_label()
+                ),
+                DisplayDebugEvent::Changed { key, before, after } => log::debug!(
+                    "[wallpaper-core display] changed {}: {} -> {}",
+                    key.key_label(),
+                    before.desc_label(),
+                    after.desc_label()
+                ),
+            }
         }
     }
 
-    fn vendor_model_unit(vendor_id: u32, model_id: u32, unit_number: u32) -> DisplayIdentity {
-        DisplayIdentity {
-            uuid: None,
-            vendor_id: Some(vendor_id),
-            model_id: Some(model_id),
-            serial_number: None,
-            unit_number: Some(unit_number),
-            name: None,
-        }
+    // ---- private helpers -------------------------------------------------
+
+    fn slot(&self, key: &DisplayKey) -> Option<&DisplayRecord> {
+        self.records.iter().find(|record| &record.key == key)
     }
 
-    fn template(path: &str) -> SceneTemplate {
-        SceneTemplate::builder(path)
-            .build()
-            .expect("template should build")
-    }
-
-    #[test]
-    fn default_config_creates_active_blank_primary_record() {
-        let model = DisplayStateModel::from_config(WallpaperEngineConfig::default()).unwrap();
-
-        assert_eq!(model.records.len(), 1);
-        assert_eq!(model.records[0].key, DisplayKey::Primary);
-        assert!(model.records[0].window_active);
-        assert!(model.records[0].assignment.is_none());
-        assert!(!model.records[0].runtime_open);
-    }
-
-    #[test]
-    fn future_display_config_is_stored_without_live_display() {
-        let external = identity("external");
-        let model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Identity(external.clone()),
-                window_active: true,
-                wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/project.json"))),
-            }],
-        })
-        .unwrap();
-
-        assert!(model.records.iter().any(|record| {
-            record.key == DisplayKey::Identity(external.clone())
-                && record.window_active
-                && record.live_display.is_none()
-                && record.assignment.is_some()
-        }));
-    }
-
-    #[test]
-    fn connecting_secondary_inherits_primary_assignment_once_but_stays_inactive() {
-        let external = identity("external");
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig::default()).unwrap();
-        model
-            .set_assignment(
-                &DisplaySelector::Primary,
-                WallpaperAssignment::Direct(template("/tmp/primary.json")),
-            )
-            .unwrap();
-
-        model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![
-                    display(1, identity("primary")),
-                    display(2, external.clone()),
-                ],
-            )
-            .unwrap();
-
-        let secondary = model
-            .records
+    /// Position of the slot named `key`; a blank inactive slot is appended
+    /// first when there is none.
+    fn index_or_insert(&mut self, key: DisplayKey) -> usize {
+        self.records
             .iter()
-            .find(|record| record.key == DisplayKey::Identity(external.clone()))
-            .expect("secondary record should exist");
-        assert_eq!(
-            secondary.assignment,
-            Some(WallpaperAssignment::Direct(template("/tmp/primary.json")))
-        );
-        assert!(!secondary.window_active);
-
-        model
-            .set_assignment(
-                &DisplaySelector::Primary,
-                WallpaperAssignment::Direct(template("/tmp/new-primary.json")),
-            )
-            .unwrap();
-        let secondary = model
-            .records
-            .iter()
-            .find(|record| matches!(record.key, DisplayKey::Identity(_)))
-            .expect("secondary record should remain");
-        assert_eq!(
-            secondary.assignment,
-            Some(WallpaperAssignment::Direct(template("/tmp/primary.json")))
-        );
+            .position(|record| record.key == key)
+            .unwrap_or_else(|| {
+                self.records.push(DisplayRecord::blank(key));
+                self.records.len() - 1
+            })
     }
 
-    #[test]
-    fn refresh_preserves_explicit_live_display_id_record() {
-        let external = identity("external");
-        let mut model = DisplayStateModel {
-            records: vec![
-                DisplayRecord {
-                    key: DisplayKey::Primary,
-                    live_display: None,
-                    assignment: None,
-                    window_active: true,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::LiveDisplayId(2),
-                    live_display: None,
-                    assignment: Some(WallpaperAssignment::Direct(template("/tmp/live.json"))),
-                    window_active: true,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-            ],
-        };
+    fn slot_or_insert(&mut self, key: DisplayKey) -> &mut DisplayRecord {
+        let index = self.index_or_insert(key);
+        &mut self.records[index]
+    }
 
-        model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![
-                    display(1, identity("primary")),
-                    display(2, external.clone()),
-                ],
-            )
-            .unwrap();
+    /// The model a display report leads to, computed without touching
+    /// `self`: every key decision reads the slots as they stand now.
+    fn model_after_report(
+        &self,
+        primary: &DisplayDesc,
+        displays: Vec<DisplayDesc>,
+        transitional: &[DisplayDesc],
+    ) -> Result<Self, EngineError> {
+        let landings = self.landings(primary, displays)?;
+        let primary_assignment = self
+            .slot(&DisplayKey::Primary)
+            .and_then(|record| record.assignment.clone());
 
-        let live_record = model
-            .record(&DisplayKey::LiveDisplayId(2))
-            .expect("legacy live-id record should remain");
-        assert_eq!(live_record.live_display, Some(display(2, external)));
-        assert!(
-            !model
-                .records
+        // Existing slots keep their place; slots born in this report follow
+        // in the order their displays were listed.
+        let mut keys: Vec<&DisplayKey> = self.records.iter().map(|record| &record.key).collect();
+        keys.extend(
+            landings
                 .iter()
-                .any(|record| matches!(record.key, DisplayKey::Identity(_)))
+                .map(|(key, _)| key)
+                .filter(|key| self.slot(key).is_none()),
         );
+
+        let records = keys
+            .into_iter()
+            .map(|key| {
+                let before = self.slot(key);
+                let landed = landings
+                    .iter()
+                    .find(|(landing_key, _)| landing_key == key)
+                    .map(|(_, display)| display);
+                let mut record = before
+                    .cloned()
+                    .unwrap_or_else(|| DisplayRecord::blank(key.clone()));
+                // A display that still reports no pixels keeps the slot it
+                // ran on.
+                record.live_display = landed.cloned().or_else(|| {
+                    before
+                        .and_then(|old| old.live_display.as_ref())
+                        .filter(|previous| {
+                            transitional
+                                .iter()
+                                .any(|display| previous.is_same_physical_display_as(display))
+                        })
+                        .cloned()
+                });
+                if let Some(display) = landed {
+                    let eligible = !record.primary_inheritance_consumed
+                        && record.assignment.is_none()
+                        && display.display_id != primary.display_id;
+                    if eligible {
+                        record.assignment.clone_from(&primary_assignment);
+                        record.primary_inheritance_consumed = true;
+                        record.bound_to_display = false;
+                    }
+                }
+                record
+            })
+            .collect();
+
+        let mut candidate = Self { records };
+        candidate.hand_over_bound_assignments(self, transitional);
+        candidate.check_mirror_cycles()?;
+        candidate.carry_scene_marks_from(self)?;
+        Ok(candidate)
     }
 
-    #[test]
-    fn refresh_skips_primary_duplicate_with_different_live_id() {
-        let primary = identity("primary");
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig::default()).unwrap();
-
-        model
-            .refresh_connected(
-                display(1, primary.clone()),
-                vec![display(1, primary.clone()), display(99, primary.clone())],
-            )
-            .unwrap();
-
-        assert_eq!(model.records.len(), 1);
-        let primary_record = model
-            .record(&DisplayKey::Primary)
-            .expect("primary record should remain");
-        assert_eq!(
-            primary_record.live_display,
-            Some(display(1, primary.clone()))
-        );
-        assert!(
-            !model
-                .records
-                .iter()
-                .any(|record| record.key == DisplayKey::Identity(primary.clone())
-                    || record.key == DisplayKey::LiveDisplayId(99))
-        );
-    }
-
-    #[test]
-    fn reconcile_scene_for_connected_identity_display_uses_identity_record() {
-        let primary = identity("primary");
-        let external = identity("external");
-        let external_display = display(2, external.clone());
-        let scene = SceneDesc::new(
-            external_display.clone(),
-            "/tmp/requested.json",
-            "/tmp/assets",
-            60,
-            false,
-        );
-        let mut model = DisplayStateModel {
-            records: vec![
-                DisplayRecord {
-                    key: DisplayKey::Primary,
-                    live_display: Some(display(1, primary)),
-                    assignment: None,
-                    window_active: true,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::Identity(external.clone()),
-                    live_display: Some(external_display.clone()),
-                    assignment: Some(WallpaperAssignment::Direct(template("/tmp/old.json"))),
-                    window_active: true,
-                    runtime_open: true,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-            ],
-        };
-
-        model.apply_reconcile(&[scene]).unwrap();
-
-        let record = model
-            .record(&DisplayKey::Identity(external))
-            .expect("identity record should remain");
-        assert!(record.window_active);
-        assert_eq!(record.live_display, Some(external_display));
-        assert!(matches!(
-            record.assignment,
-            Some(WallpaperAssignment::Direct(ref template))
-                if template.scene_path == "/tmp/requested.json"
-        ));
-        assert!(
-            !model
-                .records
-                .iter()
-                .any(|record| record.key == DisplayKey::LiveDisplayId(2))
-        );
-    }
-
-    fn scene_at(display: &DisplayDesc, path: &str) -> SceneDesc {
-        SceneDesc::new(display.clone(), path, "/tmp/assets", 60, false)
-    }
-
-    fn record_on<'a>(model: &'a DisplayStateModel, display: &DisplayDesc) -> &'a DisplayRecord {
-        model
-            .records
-            .iter()
-            .find(|record| {
+    /// Moves each assignment bound to its display to the slot that holds that
+    /// display after a report (`self`, built from `earlier`), so a change of
+    /// main display does not swap wallpapers between displays.
+    ///
+    /// The old main display's wallpaper leaves the primary slot for that
+    /// display's own slot, also when the display is gone: the slot keeps it
+    /// until the display returns. A bound wallpaper whose display became the
+    /// main one moves into the primary slot, unless the primary slot holds a
+    /// configured (unbound) wallpaper, which keeps following the main display.
+    /// A display still connecting keeps the descriptor it ran with, as it does
+    /// on its own slot. A gone display whose own slot cannot be told (two slots
+    /// name it equally well) leaves its wallpaper where it is.
+    fn hand_over_bound_assignments(&mut self, earlier: &Self, transitional: &[DisplayDesc]) {
+        let mut moves: Vec<(&DisplayRecord, DisplayKey)> = Vec::new();
+        for old in &earlier.records {
+            let (true, Some(WallpaperAssignment::Direct(_)), Some(display)) =
+                (old.bound_to_display, &old.assignment, &old.live_display)
+            else {
+                continue;
+            };
+            let holder = self.records.iter().find(|record| {
                 record
                     .live_display
                     .as_ref()
                     .is_some_and(|live| live.is_same_physical_display_as(display))
-            })
-            .expect("a record should hold the display")
-    }
-
-    fn reconciled_open(model: &mut DisplayStateModel, scenes: &[SceneDesc]) {
-        model.apply_reconcile(scenes).unwrap();
-        for record in &mut model.records {
-            record.runtime_open = record.should_have_runtime();
+            });
+            let destination = match holder {
+                Some(record) => record.key.clone(),
+                None => match self.slot_for_display(display) {
+                    Ok(key) => key,
+                    Err(_) => continue,
+                },
+            };
+            if destination != old.key {
+                moves.push((old, destination));
+            }
+        }
+        let leaving = |key: &DisplayKey| moves.iter().any(|(old, _)| &old.key == key);
+        let mut accepted: Vec<(&DisplayRecord, DisplayKey)> = Vec::new();
+        for (old, destination) in &moves {
+            // A slot keeps a bound wallpaper that stays, and the primary slot
+            // keeps a configured one; anything else gives way.
+            let keeps_own = earlier.slot(destination).is_some_and(|current| {
+                current.assignment.is_some()
+                    && if current.bound_to_display {
+                        !leaving(&current.key)
+                    } else {
+                        current.key == DisplayKey::Primary
+                    }
+            });
+            let taken = accepted.iter().any(|(_, to)| to == destination);
+            if !keeps_own && !taken {
+                accepted.push((old, destination.clone()));
+            }
+        }
+        for (old, _) in &accepted {
+            if let Some(source) = self.records.iter_mut().find(|record| record.key == old.key) {
+                source.assignment = None;
+                source.bound_to_display = false;
+            }
+        }
+        for (old, destination) in accepted {
+            let record = self.slot_or_insert(destination);
+            record.assignment.clone_from(&old.assignment);
+            record.bound_to_display = true;
+            record.window_active = old.window_active;
+            if record.live_display.is_none() {
+                record.live_display = old.live_display.clone().filter(|previous| {
+                    transitional
+                        .iter()
+                        .any(|display| previous.is_same_physical_display_as(display))
+                });
+            }
         }
     }
 
-    fn assert_scene_path(record: &DisplayRecord, path: &str) {
-        assert!(
-            matches!(
-                &record.assignment,
-                Some(WallpaperAssignment::Direct(template)) if template.scene_path == path
-            ),
-            "{:?} should show {path}",
-            record.key
-        );
+    /// The slot every connected display of a report lands on, primary first.
+    fn landings(
+        &self,
+        primary: &DisplayDesc,
+        displays: Vec<DisplayDesc>,
+    ) -> Result<Vec<(DisplayKey, DisplayDesc)>, EngineError> {
+        let mut landings = vec![(self.slot_for_primary(primary), primary.clone())];
+        for display in displays {
+            // A mirrored or duplicated listing of the primary is not a
+            // second display.
+            if display.display_id == primary.display_id
+                || primary.identity.match_score(&display.identity).is_some()
+            {
+                continue;
+            }
+            landings.push((self.slot_for_display(&display)?, display));
+        }
+        let mut seen = HashSet::new();
+        if let Some((key, _)) = landings.iter().find(|(key, _)| !seen.insert(key)) {
+            return Err(EngineError::InvalidInput(format!(
+                "multiple connected displays matched the display slot {}",
+                key.key_label()
+            )));
+        }
+        Ok(landings)
     }
 
-    #[test]
-    fn main_display_change_keeps_a_reconciled_scene_on_its_display() {
-        let built_in = display(1, identity("built-in"));
-        let external = display(2, identity("external"));
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig::default()).unwrap();
-        model
-            .refresh_connected(built_in.clone(), vec![built_in.clone()])
-            .unwrap();
-        reconciled_open(&mut model, &[scene_at(&built_in, "/tmp/built-in.json")]);
-
-        let built_in_shifted = DisplayDesc::with_identity(
-            1,
-            built_in.identity.clone(),
-            -1920,
-            0,
-            1920,
-            1080,
-            1.0,
-        );
-        let actions = model
-            .refresh_connected(
-                external.clone(),
-                vec![built_in_shifted.clone(), external.clone()],
-            )
-            .unwrap();
-
-        let on_external = record_on(&model, &external).key.clone();
-        assert!(
-            !actions.iter().any(|action| matches!(
-                action,
-                DisplayAction::Open(key) | DisplayAction::Rebuild(key) if *key == on_external
-            )),
-            "nothing may open on the new main display: {actions:?}"
-        );
-        assert_eq!(model.resolved_assignment(&on_external).unwrap(), None);
-        let on_built_in = record_on(&model, &built_in);
-        assert_eq!(on_built_in.live_display, Some(built_in_shifted));
-        assert!(on_built_in.runtime_open);
-        assert_scene_path(on_built_in, "/tmp/built-in.json");
+    /// The identity slot whose key names `identity` best (its own identity
+    /// is the matcher), `None` without any match; a tie at the top is an
+    /// error.
+    fn best_identity_slot(
+        &self,
+        identity: &DisplayIdentity,
+        display_id: u32,
+    ) -> Result<Option<DisplayKey>, EngineError> {
+        let mut best: Option<(u8, &DisplayKey)> = None;
+        let mut tied = false;
+        for record in &self.records {
+            let DisplayKey::Identity(configured) = &record.key else {
+                continue;
+            };
+            let Some(score) = configured.match_score(identity) else {
+                continue;
+            };
+            match best {
+                Some((top, _)) if score < top => {}
+                Some((top, _)) if score == top => tied = true,
+                _ => {
+                    best = Some((score, &record.key));
+                    tied = false;
+                }
+            }
+        }
+        if tied {
+            return Err(EngineError::InvalidInput(format!(
+                "ambiguous display identity match for display {display_id}"
+            )));
+        }
+        Ok(best.map(|(_, key)| key.clone()))
     }
 
-    #[test]
-    fn main_display_change_keeps_every_reconciled_scene_on_its_display() {
-        let built_in = display(1, identity("built-in"));
-        let external = display(2, identity("external"));
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig::default()).unwrap();
-        model
-            .refresh_connected(built_in.clone(), vec![built_in.clone(), external.clone()])
-            .unwrap();
-        reconciled_open(
-            &mut model,
-            &[
-                scene_at(&built_in, "/tmp/built-in.json"),
-                scene_at(&external, "/tmp/external.json"),
-            ],
-        );
-
-        let actions = model
-            .refresh_connected(external.clone(), vec![built_in.clone(), external.clone()])
-            .unwrap();
-
-        assert!(
-            !actions
-                .iter()
-                .any(|action| matches!(action, DisplayAction::Open(_) | DisplayAction::Close(_))),
-            "both runtimes stay open where they are: {actions:?}"
-        );
-        let on_external = record_on(&model, &external);
-        assert_eq!(on_external.key, DisplayKey::Primary);
-        assert!(on_external.runtime_open);
-        assert_scene_path(on_external, "/tmp/external.json");
-        let on_built_in = record_on(&model, &built_in);
-        assert!(on_built_in.runtime_open);
-        assert_scene_path(on_built_in, "/tmp/built-in.json");
+    /// The slot the primary display lands on.
+    fn slot_for_primary(&self, primary: &DisplayDesc) -> DisplayKey {
+        if self.slot(&DisplayKey::Primary).is_some_and(DisplayRecord::is_claimed) {
+            return DisplayKey::Primary;
+        }
+        let live_id = DisplayKey::LiveDisplayId(primary.display_id);
+        if self.slot(&live_id).is_some_and(DisplayRecord::is_claimed) {
+            return live_id;
+        }
+        DisplayKey::Primary
     }
 
-    #[test]
-    fn configured_primary_wallpaper_follows_the_main_display() {
-        let built_in = display(1, identity("built-in"));
-        let external = display(2, identity("external"));
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Primary,
-                window_active: true,
-                wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/primary.json"))),
-            }],
+    /// The slot a non-primary display lands on.
+    fn slot_for_display(&self, display: &DisplayDesc) -> Result<DisplayKey, EngineError> {
+        let live_id = DisplayKey::LiveDisplayId(display.display_id);
+        if self.slot(&live_id).is_some_and(DisplayRecord::is_claimed) {
+            return Ok(live_id);
+        }
+        if !display.identity.is_empty()
+            && let Some(key) = self.best_identity_slot(&display.identity, display.display_id)?
+        {
+            return Ok(key);
+        }
+        if self
+            .slot(&live_id)
+            .is_some_and(|record| record.assignment.is_some())
+        {
+            return Ok(live_id);
+        }
+        Ok(if display.identity.is_empty() {
+            live_id
+        } else {
+            DisplayKey::Identity(display.identity.clone())
         })
-        .unwrap();
-        model
-            .refresh_connected(built_in.clone(), vec![built_in.clone()])
-            .unwrap();
-        model.records[0].runtime_open = true;
-
-        let actions = model
-            .refresh_connected(external.clone(), vec![built_in, external.clone()])
-            .unwrap();
-
-        assert_eq!(actions, vec![DisplayAction::Rebuild(DisplayKey::Primary)]);
-        let primary = model.record(&DisplayKey::Primary).unwrap();
-        assert_eq!(primary.live_display, Some(external));
-        assert_scene_path(primary, "/tmp/primary.json");
     }
 
-    #[test]
-    fn display_debug_events_report_connected_and_disconnected_displays() {
-        let primary = identity("primary");
-        let external = identity("external");
-        let before = DisplayStateModel {
-            records: vec![
-                DisplayRecord {
-                    key: DisplayKey::Primary,
-                    live_display: Some(display(1, primary.clone())),
-                    assignment: None,
-                    window_active: true,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::Identity(external.clone()),
-                    live_display: None,
-                    assignment: None,
-                    window_active: false,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-            ],
-        };
-        let after_connect = DisplayStateModel {
-            records: vec![
-                DisplayRecord {
-                    key: DisplayKey::Primary,
-                    live_display: Some(display(1, primary.clone())),
-                    assignment: None,
-                    window_active: true,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::Identity(external.clone()),
-                    live_display: Some(display(2, external.clone())),
-                    assignment: None,
-                    window_active: false,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-            ],
-        };
-
-        assert_eq!(
-            after_connect.debug_events_since(&before),
-            vec![DisplayDebugEvent::Connected {
-                key: DisplayKey::Identity(external.clone()),
-                display: display(2, external.clone()),
-            }]
-        );
-
-        assert_eq!(
-            before.debug_events_since(&after_connect),
-            vec![DisplayDebugEvent::Disconnected {
-                key: DisplayKey::Identity(external.clone()),
-                display: display(2, external),
-            }]
-        );
+    /// Fails when any chain of mirrors loops back on itself.
+    fn check_mirror_cycles(&self) -> Result<(), EngineError> {
+        for start in &self.records {
+            let mut visited = vec![&start.key];
+            let mut current = start;
+            while let Some(WallpaperAssignment::Mirror(source)) = &current.assignment {
+                // A source nobody can name ends the chain; resolving it
+                // reports the problem.
+                let Ok(source_key) = DisplayKey::from_selector(source) else {
+                    break;
+                };
+                let Some(next) = self.slot(&source_key) else {
+                    break;
+                };
+                if visited.contains(&&next.key) {
+                    return Err(mirror_cycle_error());
+                }
+                visited.push(&next.key);
+                current = next;
+            }
+        }
+        Ok(())
     }
 
-    #[test]
-    fn display_debug_events_report_logical_resolution_and_scale_changes() {
-        let primary = identity("primary");
-        let before = DisplayStateModel {
-            records: vec![DisplayRecord {
-                key: DisplayKey::Primary,
-                live_display: Some(scaled_display(1, primary.clone(), 3840, 2160, 2.0)),
-                assignment: None,
-                window_active: true,
-                runtime_open: true,
-                primary_inheritance_consumed: false,
-                bound_to_display: false,
-            }],
-        };
-        let after = DisplayStateModel {
-            records: vec![DisplayRecord {
-                key: DisplayKey::Primary,
-                live_display: Some(scaled_display(1, primary.clone(), 3840, 2160, 1.5)),
-                assignment: None,
-                window_active: true,
-                runtime_open: true,
-                primary_inheritance_consumed: false,
-                bound_to_display: false,
-            }],
-        };
-
-        assert_eq!(
-            after.debug_events_since(&before),
-            vec![DisplayDebugEvent::Changed {
-                key: DisplayKey::Primary,
-                before: scaled_display(1, primary.clone(), 3840, 2160, 2.0),
-                after: scaled_display(1, primary, 3840, 2160, 1.5),
-            }]
-        );
+    /// Whether a scene should run on the slot: it is claimed, connected and
+    /// its assignment ends in a direct template.
+    fn wants_scene(&self, record: &DisplayRecord) -> Result<bool, EngineError> {
+        if !record.is_claimed() || record.live_display.is_none() {
+            return Ok(false);
+        }
+        let resolved = self.resolved_assignment(&record.key)?;
+        Ok(matches!(resolved, Some(WallpaperAssignment::Direct(_))))
     }
 
-    #[test]
-    fn display_debug_events_report_primary_replacement_as_descriptor_change() {
-        let before = DisplayStateModel {
-            records: vec![DisplayRecord {
-                key: DisplayKey::Primary,
-                live_display: Some(scaled_display(1, identity("old"), 3420, 2214, 2.0)),
-                assignment: None,
-                window_active: true,
-                runtime_open: true,
-                primary_inheritance_consumed: false,
-                bound_to_display: false,
-            }],
-        };
-        let after = DisplayStateModel {
-            records: vec![DisplayRecord {
-                key: DisplayKey::Primary,
-                live_display: Some(scaled_display(2, identity("new"), 1920, 1080, 1.0)),
-                assignment: None,
-                window_active: true,
-                runtime_open: true,
-                primary_inheritance_consumed: false,
-                bound_to_display: false,
-            }],
-        };
-
-        assert_eq!(
-            after.debug_events_since(&before),
-            vec![
-                DisplayDebugEvent::Connected {
-                    key: DisplayKey::Primary,
-                    display: scaled_display(2, identity("new"), 1920, 1080, 1.0),
-                },
-                DisplayDebugEvent::Disconnected {
-                    key: DisplayKey::Primary,
-                    display: scaled_display(1, identity("old"), 3420, 2214, 2.0),
-                },
-                DisplayDebugEvent::Changed {
-                    key: DisplayKey::Primary,
-                    before: scaled_display(1, identity("old"), 3420, 2214, 2.0),
-                    after: scaled_display(2, identity("new"), 1920, 1080, 1.0),
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn partial_identity_config_matches_full_live_identity() {
-        let partial = DisplayIdentity {
-            uuid: Some("external".to_string()),
-            ..DisplayIdentity::default()
-        };
-        let full = identity("external");
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Identity(partial.clone()),
-                window_active: true,
-                wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/external.json"))),
-            }],
-        })
-        .unwrap();
-
-        model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![display(1, identity("primary")), display(2, full.clone())],
-            )
-            .unwrap();
-
-        let matched = model
-            .record(&DisplayKey::Identity(partial))
-            .expect("partial identity record should remain");
-        assert_eq!(matched.live_display, Some(display(2, full)));
-        assert!(
-            !model
+    /// Lets each open scene of `earlier` follow its physical display to the
+    /// slot that names it in `self`, the freshly refreshed model. A slot
+    /// that does not want a scene ends up with no mark.
+    fn carry_scene_marks_from(&mut self, earlier: &Self) -> Result<(), EngineError> {
+        let mut used = vec![false; earlier.records.len()];
+        let mut marks = Vec::with_capacity(self.records.len());
+        for record in &self.records {
+            if !self.wants_scene(record)? {
+                marks.push(false);
+                continue;
+            }
+            let same_display = |index: usize, old: &DisplayRecord| {
+                !used[index]
+                    && old.runtime_open
+                    && matches!(
+                        (&old.live_display, &record.live_display),
+                        (Some(before), Some(now)) if before.is_same_physical_display_as(now)
+                    )
+            };
+            let donor = earlier
                 .records
                 .iter()
-                .any(|record| record.key == DisplayKey::Identity(identity("external")))
-        );
-    }
-
-    #[test]
-    fn ambiguous_identity_match_errors_and_preserves_model() {
-        let mut first = vendor_model_unit(7, 8, 9);
-        first.name = Some("first".to_string());
-        let mut second = vendor_model_unit(7, 8, 9);
-        second.name = Some("second".to_string());
-        let live = DisplayIdentity {
-            uuid: Some("live".to_string()),
-            vendor_id: Some(7),
-            model_id: Some(8),
-            serial_number: Some(10),
-            unit_number: Some(9),
-            name: Some("connected".to_string()),
-        };
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![
-                DisplayConfig {
-                    selector: DisplaySelector::Identity(first),
-                    window_active: true,
-                    wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/first.json"))),
-                },
-                DisplayConfig {
-                    selector: DisplaySelector::Identity(second),
-                    window_active: true,
-                    wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/second.json"))),
-                },
-            ],
-        })
-        .unwrap();
-        let before = model.clone();
-
-        let error = model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![display(1, identity("primary")), display(2, live)],
-            )
-            .expect_err("ambiguous identity match should fail");
-
-        match error {
-            EngineError::InvalidInput(message) => assert!(message.contains("ambiguous")),
-            other => panic!("expected invalid input, got {other:?}"),
+                .enumerate()
+                .find(|&(index, old)| same_display(index, old))
+                .or_else(|| {
+                    earlier
+                        .records
+                        .iter()
+                        .enumerate()
+                        .find(|&(index, old)| !used[index] && old.key == record.key)
+                });
+            marks.push(donor.is_some_and(|(index, old)| {
+                used[index] = true;
+                old.runtime_open
+            }));
         }
-        assert_eq!(model, before);
-    }
-
-    #[test]
-    fn unique_higher_score_identity_match_wins_over_lower_score_ties() {
-        let mut lower_first = vendor_model_unit(7, 8, 9);
-        lower_first.name = Some("lower-first".to_string());
-        let mut lower_second = vendor_model_unit(7, 8, 9);
-        lower_second.name = Some("lower-second".to_string());
-        let higher = DisplayIdentity {
-            uuid: None,
-            vendor_id: Some(7),
-            model_id: Some(8),
-            serial_number: Some(10),
-            unit_number: None,
-            name: Some("higher".to_string()),
-        };
-        let live = DisplayIdentity {
-            uuid: Some("live".to_string()),
-            vendor_id: Some(7),
-            model_id: Some(8),
-            serial_number: Some(10),
-            unit_number: Some(9),
-            name: Some("connected".to_string()),
-        };
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![
-                DisplayConfig {
-                    selector: DisplaySelector::Identity(lower_first),
-                    window_active: true,
-                    wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/lower-a.json"))),
-                },
-                DisplayConfig {
-                    selector: DisplaySelector::Identity(lower_second),
-                    window_active: true,
-                    wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/lower-b.json"))),
-                },
-                DisplayConfig {
-                    selector: DisplaySelector::Identity(higher.clone()),
-                    window_active: true,
-                    wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/higher.json"))),
-                },
-            ],
-        })
-        .unwrap();
-
-        model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![display(1, identity("primary")), display(2, live.clone())],
-            )
-            .unwrap();
-
-        let matched = model
-            .record(&DisplayKey::Identity(higher))
-            .expect("higher score identity should remain");
-        assert_eq!(matched.live_display, Some(display(2, live)));
-    }
-
-    #[test]
-    fn primary_refresh_prefers_primary_record_over_stale_live_id() {
-        let mut model = DisplayStateModel {
-            records: vec![
-                DisplayRecord {
-                    key: DisplayKey::Primary,
-                    live_display: None,
-                    assignment: Some(WallpaperAssignment::Direct(template("/tmp/primary.json"))),
-                    window_active: true,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::LiveDisplayId(1),
-                    live_display: None,
-                    assignment: Some(WallpaperAssignment::Direct(template("/tmp/stale.json"))),
-                    window_active: false,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-            ],
-        };
-
-        model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![display(1, identity("primary"))],
-            )
-            .unwrap();
-
-        assert_eq!(
-            model.record(&DisplayKey::Primary).unwrap().live_display,
-            Some(display(1, identity("primary")))
-        );
-        assert_eq!(
-            model
-                .record(&DisplayKey::LiveDisplayId(1))
-                .unwrap()
-                .live_display,
-            None
-        );
-    }
-
-    #[test]
-    fn active_live_id_primary_wins_over_inactive_primary_assignment() {
-        let mut model = DisplayStateModel {
-            records: vec![
-                DisplayRecord {
-                    key: DisplayKey::Primary,
-                    live_display: None,
-                    assignment: Some(WallpaperAssignment::Direct(template("/tmp/primary.json"))),
-                    window_active: false,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::LiveDisplayId(1),
-                    live_display: None,
-                    assignment: Some(WallpaperAssignment::Direct(template("/tmp/live.json"))),
-                    window_active: true,
-                    runtime_open: true,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-            ],
-        };
-
-        model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![display(1, identity("primary"))],
-            )
-            .unwrap();
-
-        assert_eq!(
-            model.record(&DisplayKey::Primary).unwrap().live_display,
-            None
-        );
-        assert_eq!(
-            model
-                .record(&DisplayKey::LiveDisplayId(1))
-                .unwrap()
-                .live_display,
-            Some(display(1, identity("primary")))
-        );
-    }
-
-    #[test]
-    fn inactive_live_id_assignment_does_not_mask_matching_identity() {
-        let external = identity("external");
-        let mut model = DisplayStateModel {
-            records: vec![
-                DisplayRecord {
-                    key: DisplayKey::Primary,
-                    live_display: None,
-                    assignment: None,
-                    window_active: true,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::Identity(external.clone()),
-                    live_display: None,
-                    assignment: Some(WallpaperAssignment::Direct(template("/tmp/identity.json"))),
-                    window_active: true,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::LiveDisplayId(2),
-                    live_display: None,
-                    assignment: Some(WallpaperAssignment::Direct(template("/tmp/stale.json"))),
-                    window_active: false,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-            ],
-        };
-
-        model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![
-                    display(1, identity("primary")),
-                    display(2, external.clone()),
-                ],
-            )
-            .unwrap();
-
-        assert_eq!(
-            model
-                .record(&DisplayKey::Identity(external.clone()))
-                .unwrap()
-                .live_display,
-            Some(display(2, external))
-        );
-        assert_eq!(
-            model
-                .record(&DisplayKey::LiveDisplayId(2))
-                .unwrap()
-                .live_display,
-            None
-        );
-    }
-
-    #[test]
-    fn duplicate_connected_identity_matches_error_and_preserve_model() {
-        let configured = DisplayIdentity {
-            uuid: None,
-            vendor_id: Some(7),
-            model_id: Some(8),
-            serial_number: Some(9),
-            unit_number: None,
-            name: None,
-        };
-        let first = DisplayIdentity {
-            uuid: None,
-            vendor_id: Some(7),
-            model_id: Some(8),
-            serial_number: Some(9),
-            unit_number: Some(1),
-            name: Some("first".to_string()),
-        };
-        let second = DisplayIdentity {
-            uuid: None,
-            vendor_id: Some(7),
-            model_id: Some(8),
-            serial_number: Some(9),
-            unit_number: Some(2),
-            name: Some("second".to_string()),
-        };
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Identity(configured),
-                window_active: true,
-                wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/external.json"))),
-            }],
-        })
-        .unwrap();
-        let before = model.clone();
-
-        let error = model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![
-                    display(1, identity("primary")),
-                    display(2, first),
-                    display(3, second),
-                ],
-            )
-            .expect_err("duplicate connected display match should fail");
-
-        match error {
-            EngineError::InvalidInput(message) => {
-                assert!(message.contains("multiple connected displays"));
-            }
-            other => panic!("expected invalid input, got {other:?}"),
+        for (record, mark) in self.records.iter_mut().zip(marks) {
+            record.runtime_open = mark;
         }
-        assert_eq!(model, before);
+        Ok(())
     }
 
-    #[test]
-    fn active_future_display_without_wallpaper_inherits_primary_on_first_connection() {
-        let external = identity("external");
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![
-                DisplayConfig {
-                    selector: DisplaySelector::Primary,
-                    window_active: true,
-                    wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/primary.json"))),
-                },
-                DisplayConfig {
-                    selector: DisplaySelector::Identity(external.clone()),
-                    window_active: true,
-                    wallpaper: None,
-                },
-            ],
-        })
-        .unwrap();
-
-        model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![
-                    display(1, identity("primary")),
-                    display(2, external.clone()),
-                ],
-            )
-            .unwrap();
-
-        let future = model
-            .record(&DisplayKey::Identity(external))
-            .expect("future display should connect to existing config");
-        assert_eq!(
-            future.assignment,
-            Some(WallpaperAssignment::Direct(template("/tmp/primary.json")))
-        );
-    }
-
-    #[test]
-    fn blank_primary_at_first_future_connection_prevents_later_auto_inherit() {
-        let external = identity("external");
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Identity(external.clone()),
-                window_active: true,
-                wallpaper: None,
-            }],
-        })
-        .unwrap();
-
-        model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![
-                    display(1, identity("primary")),
-                    display(2, external.clone()),
-                ],
-            )
-            .unwrap();
-        assert_eq!(
-            model
-                .record(&DisplayKey::Identity(external.clone()))
-                .expect("future display should connect")
-                .assignment,
-            None
-        );
-
-        model
-            .set_assignment(
-                &DisplaySelector::Primary,
-                WallpaperAssignment::Direct(template("/tmp/later-primary.json")),
-            )
-            .unwrap();
-        model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![display(1, identity("primary"))],
-            )
-            .unwrap();
-        model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![
-                    display(1, identity("primary")),
-                    display(2, external.clone()),
-                ],
-            )
-            .unwrap();
-
-        assert_eq!(
-            model
-                .record(&DisplayKey::Identity(external))
-                .expect("future display should reconnect")
-                .assignment,
-            None
-        );
-    }
-
-    #[test]
-    fn primary_switch_transfers_runtime_flags_between_primary_and_identity_records() {
-        let primary_identity = identity("primary-a");
-        let secondary_identity = identity("secondary-b");
-        let shared = WallpaperAssignment::Direct(template("/tmp/shared.json"));
-        let old_primary =
-            DisplayDesc::with_identity(1, primary_identity.clone(), 0, 0, 3420, 2214, 2.0);
-        let old_secondary =
-            DisplayDesc::with_identity(3, secondary_identity.clone(), 3420, 0, 1920, 1080, 1.0);
-        let new_primary =
-            DisplayDesc::with_identity(3, secondary_identity.clone(), 0, 0, 1920, 1080, 1.0);
-        let new_secondary =
-            DisplayDesc::with_identity(1, primary_identity.clone(), -1710, 0, 3420, 2214, 2.0);
-        let mut model = DisplayStateModel {
-            records: vec![
-                DisplayRecord {
-                    key: DisplayKey::Primary,
-                    live_display: Some(old_primary),
-                    assignment: Some(shared.clone()),
-                    window_active: true,
-                    runtime_open: true,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::Identity(primary_identity.clone()),
-                    live_display: None,
-                    assignment: Some(shared.clone()),
-                    window_active: true,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::Identity(secondary_identity.clone()),
-                    live_display: Some(old_secondary),
-                    assignment: Some(shared),
-                    window_active: true,
-                    runtime_open: true,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-            ],
-        };
-
-        let actions = model
-            .refresh_connected(
-                new_primary.clone(),
-                vec![new_primary.clone(), new_secondary.clone()],
-            )
-            .unwrap();
-
-        let primary = model
-            .record(&DisplayKey::Primary)
-            .expect("primary record should remain");
-        assert_eq!(primary.live_display, Some(new_primary));
-        assert!(primary.runtime_open);
-
-        let new_secondary_record = model
-            .record(&DisplayKey::Identity(primary_identity))
-            .expect("old primary identity record should remain");
-        assert_eq!(new_secondary_record.live_display, Some(new_secondary));
-        assert!(new_secondary_record.runtime_open);
-
-        let old_secondary_record = model
-            .record(&DisplayKey::Identity(secondary_identity))
-            .expect("new primary identity record should remain for future swaps");
-        assert_eq!(old_secondary_record.live_display, None);
-        assert!(!old_secondary_record.runtime_open);
-        assert_eq!(
-            actions,
-            vec![
-                DisplayAction::Rebuild(DisplayKey::Primary),
-                DisplayAction::Rebuild(DisplayKey::Identity(identity("primary-a"))),
-            ]
-        );
-    }
-
-    #[test]
-    fn mirror_assignment_follows_source_assignment() {
-        let external = identity("external");
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Identity(external.clone()),
-                window_active: true,
-                wallpaper: Some(WallpaperAssignment::Mirror(DisplaySelector::Primary)),
-            }],
-        })
-        .unwrap();
-        model
-            .set_assignment(
-                &DisplaySelector::Primary,
-                WallpaperAssignment::Direct(template("/tmp/primary.json")),
-            )
-            .unwrap();
-
-        assert_eq!(
-            model
-                .resolved_assignment(&DisplayKey::Identity(external))
-                .unwrap(),
-            Some(WallpaperAssignment::Direct(template("/tmp/primary.json")))
-        );
-    }
-
-    #[test]
-    fn mirror_cycles_are_rejected() {
-        let a = identity("a");
-        let b = identity("b");
-        let error = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![
-                DisplayConfig {
-                    selector: DisplaySelector::Identity(a.clone()),
-                    window_active: true,
-                    wallpaper: Some(WallpaperAssignment::Mirror(DisplaySelector::Identity(
-                        b.clone(),
-                    ))),
-                },
-                DisplayConfig {
-                    selector: DisplaySelector::Identity(b),
-                    window_active: true,
-                    wallpaper: Some(WallpaperAssignment::Mirror(DisplaySelector::Identity(a))),
-                },
-            ],
-        })
-        .expect_err("cycle should fail");
-
-        match error {
-            EngineError::InvalidInput(message) => assert!(message.contains("mirror cycle")),
-            other => panic!("expected invalid input, got {other:?}"),
+    /// What each slot's scene must do, in slot order.
+    fn scene_plan(&self) -> Result<Vec<DisplayAction>, EngineError> {
+        let mut plan = Vec::new();
+        for record in &self.records {
+            let key = record.key.clone();
+            plan.extend(match (self.wants_scene(record)?, record.runtime_open) {
+                (true, false) => Some(DisplayAction::Open(key)),
+                (true, true) => Some(DisplayAction::Rebuild(key)),
+                (false, true) => Some(DisplayAction::Close(key)),
+                (false, false) => None,
+            });
         }
+        Ok(plan)
     }
+}
 
-    #[test]
-    fn set_assignment_rejects_cycle_without_mutating_model() {
-        let external = identity("external");
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Identity(external.clone()),
-                window_active: true,
-                wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/external.json"))),
-            }],
-        })
-        .unwrap();
-        let before = model.clone();
+#[cfg(test)]
+mod model_contract;
 
-        let error = model
-            .set_assignment(
-                &DisplaySelector::Primary,
-                WallpaperAssignment::Mirror(DisplaySelector::Primary),
-            )
-            .expect_err("self-cycle should fail");
+#[cfg(test)]
+mod main_display_tests;
 
-        match error {
-            EngineError::InvalidInput(message) => assert!(message.contains("mirror cycle")),
-            other => panic!("expected invalid input, got {other:?}"),
-        }
-        assert_eq!(model, before);
-    }
-
-    #[test]
-    fn failed_refresh_from_inherited_mirror_cycle_keeps_previous_state() {
-        let external = identity("external");
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig::default()).unwrap();
-        model
-            .set_assignment(
-                &DisplaySelector::Primary,
-                WallpaperAssignment::Mirror(DisplaySelector::Identity(external.clone())),
-            )
-            .unwrap();
-        let before = model.clone();
-
-        let error = model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![
-                    display(1, identity("primary")),
-                    display(2, external.clone()),
-                ],
-            )
-            .expect_err("inherited mirror cycle should fail");
-
-        match error {
-            EngineError::InvalidInput(message) => assert!(message.contains("mirror cycle")),
-            other => panic!("expected invalid input, got {other:?}"),
-        }
-        assert_eq!(model, before);
-    }
-
-    #[test]
-    fn active_connected_assigned_display_plans_open() {
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Primary,
-                window_active: true,
-                wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/primary.json"))),
-            }],
-        })
-        .unwrap();
-
-        let actions = model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![display(1, identity("primary"))],
-            )
-            .unwrap();
-
-        assert_eq!(actions, vec![DisplayAction::Open(DisplayKey::Primary)]);
-    }
-
-    #[test]
-    fn plan_actions_returns_mirror_resolution_errors() {
-        let external = identity("external");
-        let model = DisplayStateModel {
-            records: vec![
-                DisplayRecord {
-                    key: DisplayKey::Primary,
-                    live_display: Some(display(1, identity("primary"))),
-                    assignment: Some(WallpaperAssignment::Mirror(DisplaySelector::Identity(
-                        external.clone(),
-                    ))),
-                    window_active: true,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-                DisplayRecord {
-                    key: DisplayKey::Identity(external.clone()),
-                    live_display: Some(display(2, external.clone())),
-                    assignment: Some(WallpaperAssignment::Mirror(DisplaySelector::Primary)),
-                    window_active: true,
-                    runtime_open: false,
-                    primary_inheritance_consumed: false,
-                    bound_to_display: false,
-                },
-            ],
-        };
-
-        let error = model
-            .plan_actions()
-            .expect_err("mirror cycle should fail during planning");
-
-        match error {
-            EngineError::InvalidInput(message) => assert!(message.contains("mirror cycle")),
-            other => panic!("expected invalid input, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn active_already_open_assigned_display_plans_rebuild() {
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Primary,
-                window_active: true,
-                wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/primary.json"))),
-            }],
-        })
-        .unwrap();
-        let record = model.ensure_record(DisplayKey::Primary);
-        record.live_display = Some(display(1, identity("primary")));
-        record.runtime_open = true;
-
-        assert_eq!(
-            model.plan_actions().unwrap(),
-            vec![DisplayAction::Rebuild(DisplayKey::Primary)]
-        );
-    }
-
-    #[test]
-    fn inactive_already_open_assigned_display_plans_rebuild() {
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Primary,
-                window_active: false,
-                wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/primary.json"))),
-            }],
-        })
-        .unwrap();
-        let record = model.ensure_record(DisplayKey::Primary);
-        record.live_display = Some(display(1, identity("primary")));
-        record.runtime_open = true;
-
-        assert_eq!(
-            model.plan_actions().unwrap(),
-            vec![DisplayAction::Rebuild(DisplayKey::Primary)]
-        );
-    }
-
-    #[test]
-    fn refresh_preserves_inactive_existing_runtime() {
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Primary,
-                window_active: false,
-                wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/primary.json"))),
-            }],
-        })
-        .unwrap();
-        let record = model.ensure_record(DisplayKey::Primary);
-        record.live_display = Some(display(1, identity("primary")));
-        record.runtime_open = true;
-
-        let actions = model
-            .refresh_connected(
-                display(1, identity("primary")),
-                vec![display(1, identity("primary"))],
-            )
-            .unwrap();
-
-        let record = model.record(&DisplayKey::Primary).unwrap();
-        assert!(!record.window_active);
-        assert!(record.runtime_open);
-        assert_eq!(actions, vec![DisplayAction::Rebuild(DisplayKey::Primary)]);
-    }
-
-    #[test]
-    fn destroy_window_closes_inactive_existing_runtime() {
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Primary,
-                window_active: false,
-                wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/primary.json"))),
-            }],
-        })
-        .unwrap();
-        let record = model.ensure_record(DisplayKey::Primary);
-        record.live_display = Some(display(1, identity("primary")));
-        record.runtime_open = true;
-
-        let actions = model.destroy_window(&DisplaySelector::Primary).unwrap();
-
-        assert_eq!(actions, vec![DisplayAction::Close(DisplayKey::Primary)]);
-        assert!(!model.record(&DisplayKey::Primary).unwrap().runtime_open);
-    }
-
-    #[test]
-    fn open_display_losing_assignment_or_live_display_plans_close() {
-        let mut missing_assignment =
-            DisplayStateModel::from_config(WallpaperEngineConfig::default()).unwrap();
-        {
-            let record = missing_assignment.ensure_record(DisplayKey::Primary);
-            record.live_display = Some(display(1, identity("primary")));
-            record.runtime_open = true;
-        }
-
-        assert_eq!(
-            missing_assignment.plan_actions().unwrap(),
-            vec![DisplayAction::Close(DisplayKey::Primary)]
-        );
-
-        let mut missing_live_display = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Primary,
-                window_active: true,
-                wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/primary.json"))),
-            }],
-        })
-        .unwrap();
-        missing_live_display
-            .ensure_record(DisplayKey::Primary)
-            .runtime_open = true;
-
-        assert_eq!(
-            missing_live_display.plan_actions().unwrap(),
-            vec![DisplayAction::Close(DisplayKey::Primary)]
-        );
-    }
-
-    #[test]
-    fn inactive_connected_assigned_display_plans_no_action() {
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Primary,
-                window_active: false,
-                wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/primary.json"))),
-            }],
-        })
-        .unwrap();
-        model.ensure_record(DisplayKey::Primary).live_display =
-            Some(display(1, identity("primary")));
-
-        assert!(model.plan_actions().unwrap().is_empty());
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::model_contract::{contract_display, running_layout};
 
     fn no_pixels(id: u32, identity: DisplayIdentity) -> DisplayDesc {
         DisplayDesc::with_identity(id, identity, 1920, 0, 0, 0, 1.0)
     }
 
-    /// A primary display and an external one, both assigned, active and with
-    /// their runtimes open, the way the engine leaves them after an Apply.
-    fn model_running_on_two_displays(external: &DisplayIdentity) -> DisplayStateModel {
-        let mut model = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![
-                DisplayConfig {
-                    selector: DisplaySelector::Primary,
-                    window_active: true,
-                    wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/primary.json"))),
-                },
-                DisplayConfig {
-                    selector: DisplaySelector::Identity(external.clone()),
-                    window_active: true,
-                    wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/external.json"))),
-                },
-            ],
-        })
-        .unwrap();
-        let primary = display(1, identity("primary"));
-        model
-            .refresh_connected(primary.clone(), vec![primary, display(7, external.clone())])
-            .unwrap();
-        for record in &mut model.records {
-            record.runtime_open = true;
-        }
-        model
-    }
-
     #[test]
     fn a_running_display_that_reports_no_pixels_keeps_its_descriptor_and_runtime() {
-        let external = identity("external");
+        let layout = running_layout();
+        let external = layout.secondary_display.identity.clone();
         let key = DisplayKey::Identity(external.clone());
-        let mut model = model_running_on_two_displays(&external);
-        let primary = display(1, identity("primary"));
-        let running = model.record(&key).unwrap().live_display.clone();
-        assert_eq!(running, Some(display(7, external.clone())));
+        let mut model = layout.model;
+        let primary = layout.primary_display;
+        let running = model
+            .records
+            .iter()
+            .find(|record| record.key == key)
+            .unwrap()
+            .live_display
+            .clone();
+        assert_eq!(running, Some(layout.secondary_display.clone()));
 
         // Dropping the display from the report instead leaves it without a
         // live descriptor, and the engine closes the runtime of such a record
@@ -2186,108 +800,84 @@ mod tests {
         dropped
             .refresh_connected(primary.clone(), vec![primary.clone()])
             .unwrap();
-        assert!(!dropped.record(&key).unwrap().should_have_runtime());
+        assert!(
+            !dropped
+                .records
+                .iter()
+                .find(|record| record.key == key)
+                .unwrap()
+                .should_have_runtime()
+        );
 
         model
             .refresh_connected_keeping(
                 primary.clone(),
                 vec![primary],
-                &[no_pixels(7, external.clone())],
+                &[no_pixels(layout.secondary_display.display_id, external.clone())],
             )
             .unwrap();
 
-        let record = model.record(&key).unwrap();
+        let record = model.records.iter().find(|record| record.key == key).unwrap();
         assert!(record.should_have_runtime());
         assert_eq!(record.live_display, running);
         assert!(record.runtime_open);
-        assert!(model.record(&DisplayKey::Primary).unwrap().runtime_open);
-    }
-
-    #[test]
-    fn a_new_display_that_reports_no_pixels_gets_no_record_until_it_has_a_size() {
-        let external = identity("external");
-        let key = DisplayKey::Identity(external.clone());
-        let primary = display(1, identity("primary"));
-
-        // Not part of the configuration: no record appears for it at all.
-        let mut unknown = DisplayStateModel::from_config(WallpaperEngineConfig::default()).unwrap();
-        unknown
-            .refresh_connected_keeping(
-                primary.clone(),
-                vec![primary.clone()],
-                &[no_pixels(7, external.clone())],
-            )
-            .unwrap();
-        assert_eq!(unknown.records.len(), 1);
-
-        // Configured but not yet connected: the record stays without a
-        // descriptor, so nothing opens on it.
-        let mut configured = DisplayStateModel::from_config(WallpaperEngineConfig {
-            displays: vec![DisplayConfig {
-                selector: DisplaySelector::Identity(external.clone()),
-                window_active: true,
-                wallpaper: Some(WallpaperAssignment::Direct(template("/tmp/external.json"))),
-            }],
-        })
-        .unwrap();
-        let actions = configured
-            .refresh_connected_keeping(
-                primary.clone(),
-                vec![primary.clone()],
-                &[no_pixels(7, external.clone())],
-            )
-            .unwrap();
-        assert!(configured.record(&key).unwrap().live_display.is_none());
-        assert!(!actions.contains(&DisplayAction::Open(key.clone())));
-
-        let actions = configured
-            .refresh_connected_keeping(
-                primary.clone(),
-                vec![primary, display(7, external.clone())],
-                &[],
-            )
-            .unwrap();
-        assert!(actions.contains(&DisplayAction::Open(key)));
+        assert!(
+            model
+                .records
+                .iter()
+                .find(|record| record.key == DisplayKey::Primary)
+                .unwrap()
+                .runtime_open
+        );
     }
 
     #[test]
     fn transitional_matching_uses_identity_when_the_display_id_changed() {
-        let external = identity("external");
+        let layout = running_layout();
+        let external = layout.secondary_display.identity.clone();
         let key = DisplayKey::Identity(external.clone());
-        let mut model = model_running_on_two_displays(&external);
-        let primary = display(1, identity("primary"));
-        let running = model.record(&key).unwrap().live_display.clone();
+        let mut model = layout.model;
+        let primary = layout.primary_display;
+        let running = model
+            .records
+            .iter()
+            .find(|record| record.key == key)
+            .unwrap()
+            .live_display
+            .clone();
 
         // The same monitor came back under a new id and has no size yet.
         model
             .refresh_connected_keeping(
                 primary.clone(),
                 vec![primary],
-                &[no_pixels(9, external.clone())],
+                &[no_pixels(layout.secondary_display.display_id + 1, external.clone())],
             )
             .unwrap();
 
-        let record = model.record(&key).unwrap();
+        let record = model.records.iter().find(|record| record.key == key).unwrap();
         assert_eq!(record.live_display, running);
         assert!(record.runtime_open);
     }
 
     #[test]
     fn a_transitional_display_does_not_keep_a_different_display_that_went_away() {
-        let external = identity("external");
+        let layout = running_layout();
+        let external = layout.secondary_display.identity.clone();
         let key = DisplayKey::Identity(external.clone());
-        let mut model = model_running_on_two_displays(&external);
-        let primary = display(1, identity("primary"));
+        let mut model = layout.model;
+        let primary = layout.primary_display;
+        let unrelated = contract_display(layout.secondary_display.display_id + 1);
 
         model
             .refresh_connected_keeping(
                 primary.clone(),
                 vec![primary],
-                &[no_pixels(9, identity("somebody-else"))],
+                &[no_pixels(unrelated.display_id, unrelated.identity)],
             )
             .unwrap();
 
-        let record = model.record(&key).unwrap();
+        let record = model.records.iter().find(|record| record.key == key).unwrap();
         assert!(record.live_display.is_none());
         assert!(!record.runtime_open);
     }

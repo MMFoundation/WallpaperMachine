@@ -19,8 +19,8 @@ use std::{
 
 use super::{
     scene_demand::{
-        SceneBackend, SceneDemandReasons, SceneRuntimeReport, SceneUpdateMode, SceneVideoPath,
-        SurfaceHealth,
+        SceneBackend, SceneDemandReasons, SceneFailure, SceneFailureStage, SceneRuntimeReport,
+        SceneUpdateMode, SceneVideoPath, SurfaceHealth,
     },
     sys,
 };
@@ -95,12 +95,11 @@ impl SceneRegistry {
                 // SAFETY: the entry is alive for as long as this lock is held,
                 // and each of these reads is a relaxed atomic load in the
                 // renderer with no further locking.
-                let (mode, reasons, backend, fallback, video_path, optimization_applied, surface) = unsafe {
+                let (mode, reasons, backend, video_path, optimization_applied, surface) = unsafe {
                     (
                         sys::owe_scene_wallpaper_update_mode(raw),
                         sys::owe_scene_wallpaper_demand_reasons(raw),
                         sys::owe_scene_wallpaper_backend(raw),
-                        read_fallback_reason(raw),
                         sys::owe_scene_wallpaper_video_path(raw),
                         sys::owe_scene_wallpaper_scene_optimization_applied(raw),
                         read_surface_health(raw),
@@ -112,7 +111,8 @@ impl SceneRegistry {
                     update_mode: SceneUpdateMode::from_raw(mode),
                     demand_reasons: SceneDemandReasons::from_raw(reasons),
                     backend: SceneBackend::from_raw(backend),
-                    fallback_reason: fallback,
+                    // SAFETY: as above, the entry is alive while the lock is held.
+                    failure: unsafe { read_failure(raw) },
                     video_path: SceneVideoPath::from_raw(video_path),
                     // Anything the renderer cannot answer stays unknown rather
                     // than becoming "applied", which would read as evidence.
@@ -159,32 +159,36 @@ pub(super) unsafe fn read_surface_health(raw: *mut std::ffi::c_void) -> Option<S
     ))
 }
 
-/// Reads the backend fallback reason into an owned string.
+/// Reads why the scene is held, when it is.
+///
+/// `None` for a scene that is drawing, one that fell back, and a stage this build
+/// does not name. A stage without a reason still reports, with an empty reason:
+/// the category is the part the host words for the user.
 ///
 /// # Safety
 ///
 /// `raw` must point to a live scene.
-unsafe fn read_fallback_reason(raw: *mut std::ffi::c_void) -> Option<String> {
-    // Two calls: the first sizes, the second fills. A reason is a short static
-    // phrase, so one round trip of a few dozen bytes is the whole cost.
-    let needed = unsafe { sys::owe_scene_wallpaper_backend_fallback_reason(raw, std::ptr::null_mut(), 0) };
-    if needed == 0 {
-        return None;
+unsafe fn read_failure(raw: *mut std::ffi::c_void) -> Option<SceneFailure> {
+    let stage = SceneFailureStage::from_raw(unsafe { sys::owe_scene_wallpaper_backend_failure(raw) })?;
+    let needed =
+        unsafe { sys::owe_scene_wallpaper_backend_failure_reason(raw, std::ptr::null_mut(), 0) };
+    let mut reason = String::new();
+    if needed > 0 {
+        let mut buffer = vec![0u8; needed + 1];
+        let written = unsafe {
+            sys::owe_scene_wallpaper_backend_failure_reason(
+                raw,
+                buffer.as_mut_ptr().cast::<std::os::raw::c_char>(),
+                buffer.len(),
+            )
+        };
+        if written > 0 {
+            let end = buffer.iter().position(|byte| *byte == 0).unwrap_or(buffer.len());
+            buffer.truncate(end);
+            reason = String::from_utf8_lossy(&buffer).into_owned();
+        }
     }
-    let mut buffer = vec![0u8; needed + 1];
-    let written = unsafe {
-        sys::owe_scene_wallpaper_backend_fallback_reason(
-            raw,
-            buffer.as_mut_ptr().cast::<std::os::raw::c_char>(),
-            buffer.len(),
-        )
-    };
-    if written == 0 {
-        return None;
-    }
-    let end = buffer.iter().position(|byte| *byte == 0).unwrap_or(buffer.len());
-    buffer.truncate(end);
-    String::from_utf8(buffer).ok().filter(|text| !text.is_empty())
+    Some(SceneFailure { stage, reason })
 }
 
 #[cfg(test)]

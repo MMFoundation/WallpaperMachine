@@ -16,16 +16,16 @@
 #include "Presentation/WallpaperScaling.hpp"
 #include "Scene/Scene.h"
 #include "Scene/SpecTexs.hpp"
-#include "VulkanRender/PassCommon.hpp"
+#include "RenderCommon/SceneRaster.hpp"
 
 #include <gtest/gtest.h>
 
-namespace wallpaper::vulkan
+namespace wallpaper::render
 {
 namespace
 {
 
-constexpr VkExtent2D kOutput { 3840, 2160 };
+constexpr Extent2D kOutput { 3840, 2160 };
 
 /// The shape a parsed authored scene has: a default target at the author's
 /// canvas size, a screen-bound half-size effect target, and an unbound scratch
@@ -69,7 +69,7 @@ TEST(RenderScale, PerspectiveRasterFollowsTheSurfaceWithoutChangingTheCanvasFall
     scene.display_sized = true;
     scene.cameras["global_perspective"] =
         std::make_shared<SceneCamera>(16.0f / 9.0f, 0.01f, 1000.0f, 50.0f);
-    for (const auto output : { kOutput, VkExtent2D { 1800, 1200 } }) {
+    for (const auto output : { kOutput, Extent2D { 1800, 1200 } }) {
         for (const double scale : { 1.0, 0.5, 1.0 }) {
             scene.render_scale = scale;
             const auto extents = ResolveScreenBoundRenderTargetSizes(scene, output);
@@ -138,36 +138,6 @@ TEST(RenderScale, ReturningToFullScaleRestoresTheExactAuthoredSize) {
     EXPECT_EQ(scene.renderTargets[std::string(SpecTex_Default)].height, 1080);
     EXPECT_EQ(scene.renderTargets["_rt_bloom_mip1"].width, 960);
     EXPECT_EQ(scene.renderTargets["_rt_4FrameBuffer"].width, 480);
-}
-
-TEST(RenderScale, MediaSizedTargetsKeepTheirOwnResolution) {
-    Scene scene;
-    scene.scene_extent[0] = 1280;
-    scene.scene_extent[1] = 720;
-    scene.renderTargets[std::string(SpecTex_Default)] = SceneRenderTarget {
-        .width           = 1280,
-        .height          = 720,
-        .authored_width  = 1280,
-        .authored_height = 720,
-        .media_sized     = true,
-        .bind            = { .enable = true, .screen = true },
-    };
-    scene.render_scale = 0.5;
-
-    ResolveScreenBoundRenderTargetSizes(scene, kOutput);
-
-    // The frame was already decoded at this size. Shrinking the target it is
-    // copied into would resample it twice for no saving upstream.
-    EXPECT_EQ(scene.renderTargets[std::string(SpecTex_Default)].width, 1280);
-    EXPECT_EQ(scene.renderTargets[std::string(SpecTex_Default)].height, 720);
-}
-
-TEST(RenderScale, PlainVideoScenesReportTheScaleAsNotApplied) {
-    Scene scene;
-    scene.single_video_source = true;
-    scene.render_scale        = 0.5;
-
-    EXPECT_DOUBLE_EQ(ResolveSceneRenderScale(scene), 1.0);
 }
 
 TEST(RenderScale, ScalesBelowTheFloorAreClampedRatherThanHonoured) {
@@ -244,7 +214,7 @@ TEST(RenderScale, AScreenBoundTargetsResolutionReachesTheMaterialThatSamplesIt) 
 // 2D scene resolution: the Display raster.
 
 /// A 3456x2234 panel backed at 2x, the display class this setting is for.
-constexpr VkExtent2D kLaptop { 3456, 2234 };
+constexpr Extent2D kLaptop { 3456, 2234 };
 
 SceneRasterSurface Surface(double display_scale_factor, uint32_t max_dimension = 16384) {
     return SceneRasterSurface { .display_scale_factor = display_scale_factor,
@@ -253,7 +223,7 @@ SceneRasterSurface Surface(double display_scale_factor, uint32_t max_dimension =
 
 /// The output pixels the presentation lays the canvas over: the FILL layout the
 /// renderers present with, scaled by the display's backing factor.
-VkExtent2D PresentedCanvas(VkExtent2D canvas, VkExtent2D output, double display_scale_factor) {
+Extent2D PresentedCanvas(Extent2D canvas, Extent2D output, double display_scale_factor) {
     const auto logical_width = static_cast<uint32_t>(std::lround(output.width / display_scale_factor));
     const auto logical_height =
         static_cast<uint32_t>(std::lround(output.height / display_scale_factor));
@@ -370,7 +340,7 @@ TEST(RasterResolution, ADisplaySmallerThanTheCanvasRasterizesFewerPixels) {
     scene.resolution = SceneResolution::Display;
 
     const auto extents =
-        ResolveScreenBoundRenderTargetSizes(scene, VkExtent2D { 1280, 720 }, Surface(1.0));
+        ResolveScreenBoundRenderTargetSizes(scene, Extent2D { 1280, 720 }, Surface(1.0));
 
     EXPECT_EQ(extents.raster.width, 1280u);
     EXPECT_EQ(extents.raster.height, 720u);
@@ -386,7 +356,7 @@ TEST(RasterResolution, AnAspectThatDoesNotMatchKeepsTheFillCrop) {
     // the canvas is laid over 1778x1000 and the presentation crops it. The
     // raster keeps the canvas aspect instead of becoming the display's.
     const auto extents =
-        ResolveScreenBoundRenderTargetSizes(scene, VkExtent2D { 1000, 1000 }, Surface(1.0));
+        ResolveScreenBoundRenderTargetSizes(scene, Extent2D { 1000, 1000 }, Surface(1.0));
 
     EXPECT_EQ(extents.raster.width, 1778u);
     EXPECT_EQ(extents.raster.height, 1000u);
@@ -398,7 +368,7 @@ TEST(RasterResolution, TheRasterNeverExceedsWhatTheDeviceCanHold) {
     scene.resolution = SceneResolution::Display;
 
     const auto extents =
-        ResolveScreenBoundRenderTargetSizes(scene, VkExtent2D { 7680, 4320 }, Surface(1.0, 4096));
+        ResolveScreenBoundRenderTargetSizes(scene, Extent2D { 7680, 4320 }, Surface(1.0, 4096));
 
     // Both sides shrink together, so the canvas aspect survives the cap.
     EXPECT_EQ(extents.raster.width, 4096u);
@@ -407,7 +377,7 @@ TEST(RasterResolution, TheRasterNeverExceedsWhatTheDeviceCanHold) {
 
     // Without a known limit nothing is capped.
     const auto uncapped =
-        ResolveScreenBoundRenderTargetSizes(scene, VkExtent2D { 7680, 4320 }, Surface(1.0, 0));
+        ResolveScreenBoundRenderTargetSizes(scene, Extent2D { 7680, 4320 }, Surface(1.0, 0));
     EXPECT_EQ(uncapped.raster.width, 7680u);
 }
 
@@ -447,34 +417,7 @@ TEST(RasterResolution, PerspectiveScenesAreAlreadyDisplaySized) {
     }
 }
 
-TEST(RasterResolution, AMediaSizedDefaultTargetKeepsTheFramesOwnSize) {
-    for (const bool single_video_source : { false, true }) {
-        Scene scene;
-        scene.scene_extent[0] = 1280;
-        scene.scene_extent[1] = 720;
-        scene.renderTargets[std::string(SpecTex_Default)] = SceneRenderTarget {
-            .width           = 1280,
-            .height          = 720,
-            .authored_width  = 1280,
-            .authored_height = 720,
-            .media_sized     = true,
-            .bind            = { .enable = true, .screen = true },
-        };
-        scene.single_video_source = single_video_source;
-        scene.resolution          = SceneResolution::Display;
-
-        ResolveScreenBoundRenderTargetSizes(scene, kLaptop, Surface(2.0));
-
-        EXPECT_EQ(scene.renderTargets[std::string(SpecTex_Default)].width, 1280);
-        EXPECT_EQ(scene.renderTargets[std::string(SpecTex_Default)].height, 720);
-    }
-}
-
 TEST(RasterResolution, TheResolutionOnlyMattersToASceneWithACanvasToRasterize) {
-    Scene video;
-    video.single_video_source = true;
-    EXPECT_FALSE(SceneResolutionAffectsRaster(video));
-
     Scene perspective;
     perspective.display_sized = true;
     EXPECT_FALSE(SceneResolutionAffectsRaster(perspective));
@@ -483,4 +426,4 @@ TEST(RasterResolution, TheResolutionOnlyMattersToASceneWithACanvasToRasterize) {
 }
 
 } // namespace
-} // namespace wallpaper::vulkan
+} // namespace wallpaper::render

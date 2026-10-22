@@ -84,7 +84,7 @@ VideoDecodePump::Outcome VideoDecodePump::NextFrame(std::string* error)
 
         ++m_stats.stalled_steps;
         if (++m_no_progress_steps >= m_no_progress_budget) {
-            fail("FFmpeg video decoder made no progress within its budget", error);
+            fail("video decoder made no progress within its budget", error);
             return Outcome::Failed;
         }
     }

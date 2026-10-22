@@ -1,5 +1,7 @@
 #pragma once
 #include <bitset>
+#include <cstddef>
+#include <type_traits>
 
 namespace wallpaper
 {
@@ -14,13 +16,13 @@ public:
     constexpr BitFlags() noexcept: bits_(0u) {}
     constexpr BitFlags(UnderlyingT val) noexcept: bits_(val) {}
 
-    BitFlags& set(EnumT e, bool value = true) noexcept {
-        bits_.set(underlying(e), value);
+    BitFlags& set(EnumT flag, bool value = true) noexcept {
+        bits_.set(underlying(flag), value);
         return *this;
     }
 
-    BitFlags& reset(EnumT e) noexcept {
-        set(e, false);
+    BitFlags& reset(EnumT flag) noexcept {
+        bits_.reset(underlying(flag));
         return *this;
     }
 
@@ -39,14 +41,17 @@ public:
 
     [[nodiscard]] std::size_t count() const noexcept { return bits_.count(); }
 
-    constexpr bool operator[](EnumT e) const { return bits_[underlying(e)]; }
+    constexpr bool operator[](EnumT flag) const { return bits_[underlying(flag)]; }
 
     constexpr bool operator[](UnderlyingT t) const { return bits_[t]; }
 
     auto to_string() const { return bits_.to_string(); }
 
 private:
-    static constexpr UnderlyingT underlying(EnumT e) { return static_cast<UnderlyingT>(e); }
+    // The enumerators are bit positions, not masks.
+    static constexpr UnderlyingT underlying(EnumT flag) {
+        return static_cast<UnderlyingT>(flag);
+    }
 
 private:
     std::bitset<sizeof(UnderlyingT) * 8> bits_;

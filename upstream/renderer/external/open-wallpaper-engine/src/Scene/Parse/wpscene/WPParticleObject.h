@@ -21,11 +21,8 @@ class ParticleControlpoint {
 public:
     enum class FlagEnum
     {
-        link_mouse = 0, // 1
-        // this control point will follow the mouse cursor.
-        worldspace = 1, // 2
-        // the control point will always be at the same position in the world, independent from the
-        // position of the particle system.
+        link_mouse = 0,
+        worldspace = 1,
     };
     using EFlags = BitFlags<FlagEnum>;
 
@@ -33,7 +30,6 @@ public:
     EFlags               flags { 0 };
     i32                  id { -1 };
     std::array<float, 3> offset { 0, 0, 0 };
-    // a static offset relative to the position of the particle system.
 };
 
 class ParticleRender {
@@ -87,7 +83,7 @@ public:
     float                  speedmin { 0 };
     float                  speedmax { 0 };
     u32                    audioprocessingmode { 0 };
-    // Serialized emitter defaults: linux-wallpaperengine ObjectParser::parseParticleEmitter.
+    // What the audio-processing keys read when a particle file leaves them out.
     std::array<float, 2> audioprocessingbounds { 0.8f, 1.0f };
     float                audioprocessingexponent { 2.0f };
     i32                  audioprocessingfrequencystart { 0 };
@@ -114,17 +110,17 @@ class Particle {
 public:
     enum class FlagEnum
     {
-        wordspace             = 0, // 1
-        spritenoframeblending = 1, // 2
-        perspective           = 2, // 4
+        wordspace             = 0,
+        spritenoframeblending = 1,
+        perspective           = 2,
         // The file keeps the scene object's `instanceoverride.speed` away from
         // its emitters, movement, turbulence, vortex, control point attraction
         // and position oscillation (the editor's "ignore speed override").
-        ignorespeedoverride   = 4, // 16
+        ignorespeedoverride   = 4,
         // The file keeps the scene object's `instanceoverride.size` away from its
         // `sizerandom` draws and its `sizechange` ramps (the editor's "ignore size
         // override").
-        ignoresizeoverride    = 7, // 128
+        ignoresizeoverride    = 7,
     };
     using EFlags = BitFlags<FlagEnum>;
 
@@ -170,15 +166,10 @@ class ParticleChild {
 public:
     bool FromJson(const nlohmann::json&, fs::VFS&);
 
-    // static
-    // eventfollow
-    // eventspawn
-    // eventdeath
     std::string type { "static" };
     std::string name;
     i32         maxcount { 20 };
 
-    // flags
     i32   controlpointstartindex { 0 };
     float probability { 1.0f };
 
@@ -232,23 +223,49 @@ public:
     // Wallpaper Engine's default for an object that leaves the key out.
     std::array<float, 2>     parallaxDepth { 1.0f, 1.0f };
     bool                     visible { true };
-    bool                     dynamic_origin { false };
-    bool                     dynamic_visible { false };
-    nlohmann::json           origin_setting;
-    nlohmann::json           scale_setting;
-    nlohmann::json           angles_setting;
-    nlohmann::json           visible_setting;
-    std::string              particle;
-    Particle                 particleObj;
+    // True when a script or property drives the value; the setting below is then bound.
+    bool dynamic_origin { false };
+    bool dynamic_visible { false };
+
+    // The settings as authored, whole.
+    nlohmann::json origin_setting;
+    nlohmann::json scale_setting;
+    nlohmann::json angles_setting;
+    nlohmann::json visible_setting;
+
+    std::string              particle;           // path of the particle file
+    Particle                 particleObj;        // that file, parsed
     ParticleInstanceoverride instanceoverride;
     std::vector<int32_t>     dependencies;
     nlohmann::json           field_bindings;
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Initializer, name, max, min);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Emitter, name, distancemax, distancemin, rate, directions);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Particle, initializers, operators, emitters);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPParticleObject, name, origin, angles, scale, visible, particle,
-                                   particleObj);
+// JSON round trips (from_json throws on a missing key; the parsers never call it).
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
+    Initializer,
+    name,
+    max,
+    min);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
+    Emitter,
+    name,
+    distancemax,
+    distancemin,
+    rate,
+    directions);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
+    Particle,
+    initializers,
+    operators,
+    emitters);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
+    WPParticleObject,
+    name,
+    origin,
+    angles,
+    scale,
+    visible,
+    particle,
+    particleObj);
 } // namespace wpscene
 } // namespace wallpaper

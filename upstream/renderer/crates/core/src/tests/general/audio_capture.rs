@@ -1,12 +1,6 @@
-use std::sync::{Arc, Mutex};
-
-use crate::{
-    media::audio::{
-        AudioCaptureBackend, AudioCaptureError, AudioFrameConsumer, AudioInputError,
-        AudioResponseBlock, AudioResponseController, AudioResponseEngine, AudioResponseResampler,
-        InterleavedStereoF32, MonoPcmF32, PlatformAudioCaptureBackend,
-    },
-    project::SceneHandle,
+use crate::media::audio::{
+    AudioCaptureBackend, AudioCaptureError, AudioInputError, AudioResponseBlock,
+    AudioResponseResampler, InterleavedStereoF32, MonoPcmF32, PlatformAudioCaptureBackend,
 };
 
 /// Collects emitted blocks as owned samples so assertions can outlive the
@@ -30,26 +24,6 @@ impl CollectedBlocks {
             }
         }
     }
-}
-
-#[test]
-pub fn case_audio_capture_controller_starts_and_stops_backend() {
-    let engine = Arc::new(FakeEngine::default());
-    let backend = FakeBackend::default();
-    let mut controller = AudioResponseController::new(engine, backend);
-    let handle = SceneHandle::new(42);
-
-    controller
-        .set_scene_enabled(handle, true)
-        .expect("enabling audio response should start capture");
-    assert!(controller.is_capturing());
-    assert_eq!(controller.active_scene_count(), 1);
-
-    controller
-        .set_scene_enabled(handle, false)
-        .expect("disabling final scene should stop capture");
-    assert!(!controller.is_capturing());
-    assert_eq!(controller.active_scene_count(), 0);
 }
 
 #[test]
@@ -207,69 +181,5 @@ pub fn case_platform_audio_backend_constructs_or_reports_unsupported() {
         Ok(backend) => assert!(!backend.is_running()),
         Err(AudioCaptureError::UnsupportedPlatform) => {}
         Err(error) => panic!("unexpected platform backend error: {error}"),
-    }
-}
-
-#[derive(Default)]
-struct FakeEngine {
-    stereo_frames: Mutex<usize>,
-    mono_frames: Mutex<usize>,
-}
-
-impl AudioFrameConsumer for FakeEngine {
-    fn submit_audio_frames(
-        &self,
-        frames: InterleavedStereoF32<'_>,
-    ) -> Result<(), AudioCaptureError> {
-        *self
-            .stereo_frames
-            .lock()
-            .expect("frames lock should be valid") += frames.frame_count() as usize;
-        Ok(())
-    }
-
-    fn submit_mono_audio_frames(&self, frames: MonoPcmF32<'_>) -> Result<(), AudioCaptureError> {
-        *self.mono_frames.lock().expect("frames lock should be valid") +=
-            frames.frame_count() as usize;
-        Ok(())
-    }
-}
-
-impl AudioResponseEngine for FakeEngine {
-    fn set_audio_response_enabled(
-        &self,
-        _handle: SceneHandle,
-        _enabled: bool,
-    ) -> Result<(), AudioCaptureError> {
-        Ok(())
-    }
-}
-
-#[derive(Default)]
-struct FakeBackend {
-    running: bool,
-}
-
-impl AudioCaptureBackend for FakeBackend {
-    fn has_permission(&self) -> Result<bool, AudioCaptureError> {
-        Ok(true)
-    }
-
-    fn request_permission(&mut self) -> Result<bool, AudioCaptureError> {
-        Ok(true)
-    }
-
-    fn start(&mut self, _consumer: Arc<dyn AudioFrameConsumer>) -> Result<(), AudioCaptureError> {
-        self.running = true;
-        Ok(())
-    }
-
-    fn stop(&mut self) -> Result<(), AudioCaptureError> {
-        self.running = false;
-        Ok(())
-    }
-
-    fn is_running(&self) -> bool {
-        self.running
     }
 }

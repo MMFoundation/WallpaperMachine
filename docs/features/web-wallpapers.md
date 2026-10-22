@@ -455,7 +455,8 @@ callback.
 
 ## Media integration
 
-On by default, per wallpaper; saved choices are preserved. Web pages register
+On by default, per wallpaper; saved choices are preserved, and a page whose
+wallpaper never saved one is told the setting is on. Web pages register
 `wallpaperRegisterMedia*` listeners as above. The now-playing source is shared through `DesktopMediaSession`
 and also feeds Scene wallpapers that have the same toggle on; sources, lifetime and
 lock-screen policy are in [media-integration.md](media-integration.md).
@@ -603,7 +604,7 @@ that mix it into CSS pixel math also need an authorized desktop run. So does a r
 smoothing visualizer (bars that decay per callback) after the system audio stops, and
 a comparison with Wallpaper Engine's own behavior in silence if a Windows reference is
 ever available. Whether the on-screen compositor lifts a page's `<video>` the way the
-offscreen snapshot does (see Limits), and what the native video backend's `AVPlayerLayer`
+offscreen snapshot does (see Limits), and what the native video player's `AVPlayerLayer`
 does with the same clips, need an authorized desktop run. A real Workshop page that hosts
 its player in an iframe needs an authorized
 desktop run, as does a page that makes its local requests from a worker. That

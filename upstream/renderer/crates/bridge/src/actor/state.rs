@@ -1,14 +1,11 @@
-pub mod drafts {
-    pub use crate::state::drafts::*;
-}
-
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{Arc, Mutex},
     time::Instant,
 };
 
-use drafts::WallpaperOptionsDraft;
+use super::state_values::{self, PreparedApply};
+use crate::state::drafts::{self, WallpaperOptionsDraft};
 use wallpaper_core::project::{SceneDesc, WallpaperProjectType};
 
 use crate::{
@@ -18,7 +15,6 @@ use crate::{
         BridgeWallpaperEntry, BridgeWallpaperKind,
     },
     config::{AppConfig, QualityInForce, SerializedSelector, WallpaperConfig},
-    engine::NativeVideoRejections,
     project::{ProjectModel, localization::FALLBACK_LOCALE},
 };
 
@@ -55,24 +51,6 @@ pub struct BridgeActorState {
     /// Whether a diagnostic session asked the renderer to count its work. Off
     /// by default; nothing counts and nothing is reported until it is on.
     pub renderer_counters_enabled: bool,
-    /// Refusals the native video player recorded, per wallpaper id and then
-    /// per admission key — one key per display slot, so two displays showing
-    /// the same clip at different target rates are refused independently and
-    /// neither refusal erases the other. A refusal excludes only the
-    /// configuration it describes: raise the target frame rate, restore an
-    /// unsupported setting or replace the media file and that slot is offered
-    /// natively again. Within one configuration it holds for the session, so a
-    /// wallpaper cannot oscillate between the two backends, and the scene
-    /// engine — which supports everything — takes it back.
-    pub native_video_rejected: NativeVideoRejections,
-    /// A refusal was dropped because the configuration it described is gone
-    /// (the frame-rate ceiling moved), and the scene list has not been rebuilt
-    /// since, so the engine may still hold a scene for a clip the native player
-    /// is offered again. Set when the refusal goes and cleared only by the
-    /// rebuild that hands the clip back: a rebuild that failed leaves it set, so
-    /// the next change of quality, or the host's next ask for the native list,
-    /// owes the same rebuild instead of finding nothing left to drop.
-    pub native_video_release_owed: bool,
     /// Wallpapers the load journal holds back: the app died while opening
     /// them in consecutive sessions. Activation plans skip them until the
     /// user applies one again. Nothing here is persisted; the journal is.
@@ -84,17 +62,51 @@ pub struct BridgeActorState {
     /// Whether `library` came from a successful scan of the workshop root.
     /// Only then does a wallpaper missing from it mean the files are gone.
     pub library_scanned: bool,
+    /// The saved application settings.
+    /// The display blocks, the power policy and the UI preferences
+    /// are all part of it.
     pub app_config: AppConfig,
+    /// The saved settings of each wallpaper, keyed by workshop id.
+    /// Drafts start from these and write back to them.
+    /// A wallpaper without an entry has never been configured.
     pub wallpaper_configs: BTreeMap<String, WallpaperConfig>,
+    /// The editor's working copy per wallpaper: the saved settings plus the
+    /// edits that wait for Apply. Each draft keeps both copies side by side
+    /// so a cancel can return to the saved one.
     pub wallpaper_drafts: BTreeMap<String, WallpaperOptionsDraft>,
+    /// The parsed project of each library wallpaper, keyed by workshop id.
+    /// The property editor and the scene builder both read it.
+    /// It is filled when the library is scanned.
     pub project_models: BTreeMap<String, ProjectModel>,
+    /// The display rows as last published, keyed by display id.
+    /// A display operation falls back to them when the engine lists no
+    /// displays at all, so a request can still be resolved then.
     pub display_settings: BTreeMap<String, BridgeDisplaySettingsRow>,
+    /// Where the machine gets its power from, as last sampled.
     pub power_source: crate::power::PowerSource,
+    /// Playback was paused by the battery policy, not by the user.
+    /// Only a pause the policy made is undone when it lets go.
+    /// A pause the user made stays.
     pub auto_paused_for_battery: bool,
+    /// While set, the battery policy does not pause playback.
+    /// External power clears it, and so does leaving the pause mode.
+    /// The policy sets and reads it; the host does not.
     pub battery_pause_suppressed: bool,
+    /// The first power sample has been applied.
+    /// Until it has, `power_source` is only its default.
+    /// See `apply_startup_power_source`.
     pub startup_power_sample_received: bool,
+    /// A scene has presented its first frame.
+    /// The startup pause on battery waits for it.
+    /// It is reported by the host through the first-frame callback.
     pub initial_frame_ready: bool,
+    /// Started on battery with the pause mode: the pause waits for the first
+    /// frame. It is set by `apply_startup_power_source`
+    /// and cleared when the frame arrives.
     pub pending_battery_pause_after_initial_frame: bool,
+    /// The library filter: whether wallpapers of each kind are listed.
+    /// They are saved with the app settings, and `filter_enabled`
+    /// answers for a kind.
     pub filter_scene: bool,
     pub filter_video: bool,
     pub filter_webpage: bool,
@@ -120,25 +132,41 @@ impl Default for BridgeActorState {
             label_locales: vec![FALLBACK_LOCALE.to_owned()],
             suspended_displays: BTreeSet::new(),
             renderer_counters_enabled: false,
-            native_video_rejected: BTreeMap::new(),
-            native_video_release_owed: false,
             held_wallpapers: BTreeSet::new(),
             selected_wallpaper_id: None,
             active_wallpaper_ids: Vec::new(),
             errors: Vec::new(),
             library: Vec::new(),
             library_scanned: false,
+            // Nothing is saved or staged yet, and no project has been read:
+            // the maps fill in when the library is scanned and as the user
+            // opens wallpapers.
             app_config: AppConfig::default(),
             wallpaper_configs: BTreeMap::new(),
-            wallpaper_drafts: BTreeMap::new(),
             project_models: BTreeMap::new(),
+            // Drafts exist only while an editor holds a wallpaper, and the
+            // settings rows are filled by the first display refresh. Until
+            // then a display operation has no cached row to fall back on.
+            wallpaper_drafts: BTreeMap::new(),
             display_settings: BTreeMap::new(),
+            // External power until the first sample says otherwise, so the
+            // battery policy has nothing to act on at startup.
+            // The startup sample sets the flag below when it arrives.
             power_source: crate::power::PowerSource::External,
+            startup_power_sample_received: false,
+            // The policy has paused nothing yet, and the user has not
+            // overridden it. Both flags matter only while on battery
+            // and are cleared again on external power.
             auto_paused_for_battery: false,
             battery_pause_suppressed: false,
-            startup_power_sample_received: false,
+            // No frame has been presented and no pause is waiting for one.
+            // Starting on battery with the pause mode sets the pending flag
+            // later, once the startup sample has said where the power comes from.
             initial_frame_ready: false,
             pending_battery_pause_after_initial_frame: false,
+            // Every kind of wallpaper is listed until the saved filter, which
+            // `from_app_config` applies, says otherwise.
+            // A fresh state therefore hides nothing.
             filter_scene: true,
             filter_video: true,
             filter_webpage: true,
@@ -148,18 +176,10 @@ impl Default for BridgeActorState {
     }
 }
 
-pub struct ApplyCandidates {
-    pub app_config: AppConfig,
-    pub wallpaper_config: WallpaperConfig,
-    pub wallpaper_configs: BTreeMap<String, WallpaperConfig>,
-    pub enabled_displays: Vec<SerializedSelector>,
-    pub requires_reconcile: bool,
-}
-
 impl BridgeActorState {
     #[allow(clippy::single_call_fn)]
     pub fn from_app_config(app_config: AppConfig) -> Self {
-        let active_wallpaper_ids = Self::active_ids(&app_config);
+        let active_wallpaper_ids = state_values::configured_ids(&app_config);
         Self {
             filter_scene: app_config.ui.filter.scene,
             filter_video: app_config.ui.filter.video,
@@ -172,32 +192,30 @@ impl BridgeActorState {
         }
     }
 
+    /// Records the power source the first sample reported. On battery with the
+    /// pause mode and no frame up yet, the pause waits for the first frame.
     pub fn apply_startup_power_source(&mut self, source: crate::power::PowerSource) {
+        use crate::{config::BatteryModeCfg, power::PowerSource};
+        let pause_policy = matches!(self.app_config.power.on_battery, BatteryModeCfg::Pause);
+        let on_battery = matches!(source, PowerSource::Battery);
         self.power_source = source;
         self.startup_power_sample_received = true;
-        self.pending_battery_pause_after_initial_frame = source
-            == crate::power::PowerSource::Battery
-            && self.app_config.power.on_battery == crate::config::BatteryModeCfg::Pause
-            && !self.initial_frame_ready;
+        self.pending_battery_pause_after_initial_frame =
+            on_battery && pause_policy && !self.initial_frame_ready;
     }
 
     pub fn filter_enabled(&self, kind: BridgeWallpaperKind) -> bool {
+        use BridgeWallpaperKind as Kind;
         match kind {
-            BridgeWallpaperKind::ProjectScene => self.filter_scene,
-            BridgeWallpaperKind::Video => self.filter_video,
-            BridgeWallpaperKind::Webpage => self.filter_webpage,
-            BridgeWallpaperKind::Unknown => self.filter_unknown,
+            Kind::ProjectScene => self.filter_scene,
+            Kind::Video => self.filter_video,
+            Kind::Webpage => self.filter_webpage,
+            Kind::Unknown => self.filter_unknown,
         }
     }
 
     pub fn ensure_wallpaper_exists(&self, wallpaper_id: &str) -> Result<(), BridgeError> {
-        self.library
-            .iter()
-            .any(|entry| entry.id == wallpaper_id)
-            .then_some(())
-            .ok_or_else(|| {
-                BridgeError::invalid_input(format!("unknown wallpaper id {wallpaper_id}"))
-            })
+        state_values::ensure_present(&self.library, wallpaper_id)
     }
 
     /// The documents of a scene wallpaper's pending property edits, or `None`
@@ -244,142 +262,56 @@ impl BridgeActorState {
     }
 
     pub fn project_model(&self, wallpaper_id: &str) -> Result<&ProjectModel, BridgeError> {
-        self.ensure_wallpaper_exists(wallpaper_id)?;
-        self.project_models.get(wallpaper_id).ok_or_else(|| {
-            BridgeError::invalid_input(format!(
-                "no project model loaded for wallpaper id {wallpaper_id}"
-            ))
-        })
+        state_values::model_for(&self.library, &self.project_models, wallpaper_id)
     }
 
     pub fn wallpaper_draft(
         &self,
         wallpaper_id: &str,
     ) -> Result<WallpaperOptionsDraft, BridgeError> {
-        self.ensure_wallpaper_exists(wallpaper_id)?;
-        Ok(self
-            .wallpaper_drafts
-            .get(wallpaper_id)
-            .cloned()
-            .or_else(|| {
-                self.wallpaper_configs
-                    .get(wallpaper_id)
-                    .cloned()
-                    .map(|config| {
-                        WallpaperOptionsDraft::from_committed_with_enabled_displays(
-                            config,
-                            self.enabled_selectors(wallpaper_id),
-                        )
-                    })
-            })
-            .unwrap_or_else(|| {
-                WallpaperOptionsDraft::from_committed_with_enabled_displays(
-                    WallpaperConfig::new_for(wallpaper_id, "scene"),
-                    self.enabled_selectors(wallpaper_id),
-                )
-            }))
+        state_values::draft_for(
+            &self.library,
+            &self.app_config,
+            &self.wallpaper_configs,
+            &self.wallpaper_drafts,
+            wallpaper_id,
+        )
     }
 
-    pub fn apply_candidates(
+    pub fn prepare_apply(
         &self,
         wallpaper_id: &str,
         primary_identity_selector: Option<&SerializedSelector>,
-    ) -> Result<ApplyCandidates, BridgeError> {
-        let draft = self.wallpaper_draft(wallpaper_id)?;
-        let active_enabled_displays = self.enabled_selectors(wallpaper_id);
-        let requires_reconcile = draft.requires_reconcile(&active_enabled_displays);
-        let wallpaper_config = draft.current().clone();
-        let mut wallpaper_config = wallpaper_config;
-        let enabled_displays = draft.effective_enabled_displays(&active_enabled_displays);
-        let mut app_config = self.app_config.clone();
-
-        for monitor in &mut app_config.monitors {
-            if monitor.wallpaper.as_deref() == Some(wallpaper_id) {
-                monitor.wallpaper = None;
-            }
-        }
-
-        for selector in &enabled_displays {
-            let monitor = app_config.ensure_monitor(selector.clone());
-            monitor.enabled = true;
-            monitor.mode = "independent".to_string();
-            monitor.wallpaper = Some(wallpaper_id.to_string());
-        }
-
-        if let Some(identity_selector) = primary_identity_selector {
-            if let Some(primary_index) = app_config
-                .monitors
-                .iter()
-                .position(|monitor| monitor.selector == SerializedSelector::Primary)
-            {
-                let mut identity_monitor = app_config.monitors[primary_index].clone();
-                identity_monitor.selector = identity_selector.clone();
-                match app_config
-                    .monitors
-                    .iter()
-                    .position(|monitor| &monitor.selector == identity_selector)
-                {
-                    Some(identity_index) => app_config.monitors[identity_index] = identity_monitor,
-                    None => app_config.monitors.push(identity_monitor),
-                }
-            }
-
-            if let Some(primary_index) = wallpaper_config
-                .monitors
-                .iter()
-                .position(|render| render.selector == SerializedSelector::Primary)
-            {
-                let mut identity_render = wallpaper_config.monitors[primary_index].clone();
-                identity_render.selector = identity_selector.clone();
-                match wallpaper_config
-                    .monitors
-                    .iter()
-                    .position(|render| &render.selector == identity_selector)
-                {
-                    Some(identity_index) => {
-                        wallpaper_config.monitors[identity_index] = identity_render;
-                    }
-                    None => wallpaper_config.monitors.push(identity_render),
-                }
-            }
-        }
-
-        let mut wallpaper_configs = self.wallpaper_configs.clone();
-        wallpaper_configs.insert(wallpaper_id.to_string(), wallpaper_config.clone());
-
-        Ok(ApplyCandidates {
-            app_config,
-            wallpaper_config,
-            wallpaper_configs,
-            enabled_displays,
-            requires_reconcile,
-        })
+    ) -> Result<PreparedApply, BridgeError> {
+        state_values::prepare_apply(
+            &self.library,
+            &self.app_config,
+            &self.wallpaper_configs,
+            &self.wallpaper_drafts,
+            wallpaper_id,
+            primary_identity_selector,
+        )
     }
 
-    pub fn commit_apply_candidates(
+    pub fn publish_apply(
         &mut self,
         wallpaper_id: String,
-        candidates: ApplyCandidates,
+        prepared: PreparedApply,
         active_from_config: bool,
     ) -> Result<(), BridgeError> {
-        self.ensure_wallpaper_exists(&wallpaper_id)?;
-        self.app_config = candidates.app_config;
-        self.wallpaper_configs = candidates.wallpaper_configs;
+        let (app_config, wallpaper_configs, draft) =
+            prepared.into_publication(&self.library, &wallpaper_id)?;
+        self.app_config = app_config;
+        self.wallpaper_configs = wallpaper_configs;
         if active_from_config {
             self.refresh_active_ids();
         }
-        self.wallpaper_drafts.insert(
-            wallpaper_id,
-            WallpaperOptionsDraft::from_committed_with_enabled_displays(
-                candidates.wallpaper_config,
-                candidates.enabled_displays,
-            ),
-        );
+        self.wallpaper_drafts.insert(wallpaper_id, draft);
         Ok(())
     }
 
     pub fn refresh_active_ids(&mut self) {
-        self.active_wallpaper_ids = Self::active_ids(&self.app_config);
+        self.active_wallpaper_ids = state_values::configured_ids(&self.app_config);
     }
 
     /// Active ids are the engine-rendered scenes plus every configured web
@@ -391,25 +323,14 @@ impl BridgeActorState {
         if self.presentation_unloaded && scenes.is_empty() {
             return;
         }
-        let mut ids = scenes
-            .iter()
-            .filter_map(|scene| {
-                let path = std::path::Path::new(&scene.scene_path);
-                path.parent()?
-                    .file_name()?
-                    .to_str()
-                    .filter(|id| !id.is_empty())
-                    .map(ToString::to_string)
-            })
-            .chain(
-                Self::active_ids(&self.app_config)
-                    .into_iter()
-                    .filter(|id| self.is_web_wallpaper(id)),
-            )
-            .collect::<Vec<_>>();
-        ids.sort();
-        ids.dedup();
-        self.active_wallpaper_ids = ids;
+        let configured_ids = state_values::configured_ids(&self.app_config);
+        self.active_wallpaper_ids = state_values::active_ids_from_scenes(
+            scenes.iter().map(|scene| scene.scene_path.as_str()),
+            configured_ids
+                .iter()
+                .filter(|id| self.is_web_wallpaper(id))
+                .map(String::as_str),
+        );
     }
 
     pub fn is_web_wallpaper(&self, wallpaper_id: &str) -> bool {
@@ -441,27 +362,13 @@ impl BridgeActorState {
         &mut self,
         wallpaper_id: &str,
     ) -> Result<&mut WallpaperOptionsDraft, BridgeError> {
-        self.ensure_wallpaper_exists(wallpaper_id)?;
-        if !self.wallpaper_drafts.contains_key(wallpaper_id) {
-            let committed = self
-                .wallpaper_configs
-                .get(wallpaper_id)
-                .cloned()
-                .unwrap_or_else(|| WallpaperConfig::new_for(wallpaper_id, "scene"));
-            let enabled_displays = self.enabled_selectors(wallpaper_id);
-            self.wallpaper_drafts.insert(
-                wallpaper_id.to_string(),
-                WallpaperOptionsDraft::from_committed_with_enabled_displays(
-                    committed,
-                    enabled_displays,
-                ),
-            );
-        }
-
-        Ok(self
-            .wallpaper_drafts
-            .get_mut(wallpaper_id)
-            .expect("draft exists after insertion"))
+        state_values::draft_for_mut(
+            &self.library,
+            &self.app_config,
+            &self.wallpaper_configs,
+            &mut self.wallpaper_drafts,
+            wallpaper_id,
+        )
     }
 
     /// Displays showing `wallpaper_id` as their own wallpaper. A mirror keeps
@@ -469,20 +376,11 @@ impl BridgeActorState {
     /// source instead; counting it here would let the next Apply of that
     /// wallpaper quietly turn the mirror back into an independent display.
     pub fn enabled_selectors(&self, wallpaper_id: &str) -> Vec<SerializedSelector> {
-        self.app_config
-            .monitors
-            .iter()
-            .filter(|monitor| {
-                monitor.enabled
-                    && monitor.mode != "mirror"
-                    && monitor.wallpaper.as_deref() == Some(wallpaper_id)
-            })
-            .map(|monitor| monitor.selector.clone())
-            .collect()
+        state_values::enabled_selectors(&self.app_config, wallpaper_id)
     }
 
     pub fn configured_ids(&self) -> Vec<String> {
-        Self::active_ids(&self.app_config)
+        state_values::configured_ids(&self.app_config)
     }
 
     /// The held wallpapers a display is assigned to, sorted. A hold on a
@@ -507,42 +405,17 @@ impl BridgeActorState {
 
     pub fn replace_library(&mut self, library: Vec<BridgeWallpaperEntry>) {
         self.library = library;
-        if let Some(selected_wallpaper_id) = &self.selected_wallpaper_id
-            && !self
-                .library
-                .iter()
-                .any(|entry| entry.id == *selected_wallpaper_id)
-        {
-            self.selected_wallpaper_id = None;
-            self.app_config.general.last_selected_wallpaper = None;
-        }
+        state_values::clear_missing_selection(
+            &self.library,
+            &mut self.selected_wallpaper_id,
+            &mut self.app_config,
+        );
     }
 
     pub fn rebase_drafts(&mut self) {
-        let enabled_by_wallpaper = self
-            .wallpaper_drafts
-            .keys()
-            .map(|wallpaper_id| (wallpaper_id.clone(), self.enabled_selectors(wallpaper_id)))
-            .collect::<Vec<_>>();
-
-        for (wallpaper_id, enabled_displays) in enabled_by_wallpaper {
-            if let Some(draft) = self.wallpaper_drafts.get_mut(&wallpaper_id) {
-                draft.rebase_enabled_displays(enabled_displays);
-            }
-        }
+        state_values::rebase_existing_drafts(&self.app_config, &mut self.wallpaper_drafts);
     }
 
-    fn active_ids(app_config: &AppConfig) -> Vec<String> {
-        let mut ids = app_config
-            .monitors
-            .iter()
-            .filter(|monitor| monitor.enabled && monitor.mode != "mirror")
-            .filter_map(|monitor| monitor.wallpaper.clone())
-            .collect::<Vec<_>>();
-        ids.sort();
-        ids.dedup();
-        ids
-    }
 }
 
 impl BridgeActorState {
@@ -550,8 +423,12 @@ impl BridgeActorState {
     /// battery mode the user saved while the Mac is on battery, and the
     /// causes the host asked for.
     pub(super) fn quality_in_force(&self) -> QualityInForce {
+        self.quality_in_force_for_app(&self.app_config)
+    }
+
+    pub(super) fn quality_in_force_for_app(&self, app_config: &AppConfig) -> QualityInForce {
         QualityInForce {
-            battery_profile: self.app_config.power.on_battery
+            battery_profile: app_config.power.on_battery
                 == crate::config::BatteryModeCfg::ReducedQuality
                 && self.power_source == crate::power::PowerSource::Battery,
             throttled: !self.quality_throttle.is_empty(),
@@ -563,9 +440,13 @@ impl BridgeActorState {
     /// quality profile's rate while the battery mode or a throttle holds it,
     /// or the stricter of the two. It only ever lowers what the user chose.
     pub(super) fn active_target_fps_cap(&self) -> Option<u32> {
-        let quality = &self.app_config.quality;
+        self.active_target_fps_cap_for_app(&self.app_config)
+    }
+
+    pub(super) fn active_target_fps_cap_for_app(&self, app_config: &AppConfig) -> Option<u32> {
+        let quality = &app_config.quality;
         let global = quality.frame_rate_cap.map(|cap| cap.max(1));
-        let in_force = self.quality_in_force();
+        let in_force = self.quality_in_force_for_app(app_config);
         let profile = (in_force.battery_profile || in_force.throttled)
             .then(|| quality.battery.target_fps.max(1));
         match (global, profile) {

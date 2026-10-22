@@ -266,9 +266,6 @@ std::string ClassifyLayerTextureReferences(const std::vector<LayerTextureRef>& r
             return std::string(kLayerTextureMissingTarget);
         }
         if (count->second > 1) return std::string(kLayerTextureDuplicateId);
-        if (ref.consumer_id == ref.source_id && ref.slot == LayerCompositeSlot::B) {
-            return std::string(kLayerTextureHistoryFeedback);
-        }
         if (ref.consumer_id != 0 && ref.consumer_id != ref.source_id) {
             edges[ref.consumer_id].push_back(ref.source_id);
         }

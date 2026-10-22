@@ -14,9 +14,17 @@ raise the conflict rather than reformatting someone else's code in passing.
   (`Shell/`, `Library/`, `Inspector/`, `Discover/`, `Downloads/`, `Pixiv/`,
   `Settings/`, `Welcome/`) beside the shared `Model/`, `Components/`, `Theme/`,
   `Localization/` and `Images/`.
-- Third-party renderer sources stay under `upstream/renderer/`. Do not add
-  first-party app code there, and do not change vendored sources without
-  recording the revision in `upstream/provenance.json`.
+- Third-party sources stay under `upstream/` (the renderer in `upstream/renderer/`,
+  the patched `naga` crate in `upstream/naga/`). Do not add first-party app code
+  there, and do not change vendored sources without recording the revision in
+  `upstream/provenance.json`.
+- Renderer code this project writes itself goes in `Renderer/<Area>/`, never
+  under `upstream/`: pure C++17 until a layer needs a platform API, written from
+  public specifications rather than copied from another implementation, with its
+  tests in `Renderer/<Area>/tests/` registered in `scripts/check_renderer.py`
+  (today `Renderer/Media/`, `Renderer/Sound/` and `Renderer/Surface/`, see
+  [container-readers.md](container-readers.md), [sound-decoding.md](sound-decoding.md) and
+  [scene rendering](features/scene-rendering.md#when-native-metal-cannot-draw-a-scene)).
 - Tests go in `Tests/Unit/<Domain>/` (non-interactive) or `Tests/UI/`
   (XCUITest, takes over the desktop).
 - Developer commands go in `scripts/`; their shared helpers in `scripts/lib/`;

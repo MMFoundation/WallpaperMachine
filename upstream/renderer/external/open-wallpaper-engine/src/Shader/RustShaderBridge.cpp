@@ -1,8 +1,9 @@
+// Clean-room implementation from the WallpaperMachine spec e6-platform-host-api.md; written without access to the original source.
 #include "Shader/RustShaderBridge.hpp"
 
 #include <algorithm>
-#include <cstdlib>
-#include <cstring>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 
 namespace wallpaper::shader
@@ -10,9 +11,6 @@ namespace wallpaper::shader
 namespace
 {
 
-constexpr uint32_t SPIRV_MAGIC = 0x07230203u;
-constexpr int RS_SHADER_TARGET_VULKAN_SPIRV = 0;
-constexpr int RS_SHADER_TARGET_METAL_MSL    = 1;
 
 struct RsShaderOwnedBytes {
     uint8_t* ptr;
@@ -23,87 +21,27 @@ struct RsShaderOwnedBytes {
 
 struct RsShaderProgram;
 
-using RsShaderIncludeCallback = RsShaderOwnedBytes (*)(const char*, void*);
+// Called back while a compile runs, for every `#include`d path the shader names.
+using RsShaderIncludeCallback = RsShaderOwnedBytes (*)(const char* path, void* user_data);
 
 #ifdef WESCENE_HAS_RUST_SHADER_FFI
-extern "C"
-{
-int rs_shader_compile_program(
-    const char* request_json,
-    RsShaderIncludeCallback include_callback,
-    void* include_user_data,
-    RsShaderProgram** out_program);
-size_t rs_shader_program_stage_count(const RsShaderProgram* program);
-int rs_shader_program_stage_kind(const RsShaderProgram* program, size_t stage_index);
-const uint32_t* rs_shader_program_stage_spv_words(
-    const RsShaderProgram* program,
-    size_t stage_index);
-size_t rs_shader_program_stage_spv_word_count(const RsShaderProgram* program, size_t stage_index);
-int rs_shader_program_stage_target(const RsShaderProgram* program, size_t stage_index);
-const char* rs_shader_program_stage_msl_source(
-    const RsShaderProgram* program,
-    size_t stage_index);
-const char* rs_shader_program_stage_metal_json(
-    const RsShaderProgram* program,
-    size_t stage_index);
+extern "C" {
+int rs_shader_compile_program(const char* request_json, RsShaderIncludeCallback include_callback,
+                              void* include_user_data, RsShaderProgram** out_program);
+size_t      rs_shader_program_stage_count(const RsShaderProgram* program);
+int         rs_shader_program_stage_kind(const RsShaderProgram* program, size_t stage_index);
+int         rs_shader_program_stage_target(const RsShaderProgram* program, size_t stage_index);
+const char* rs_shader_program_stage_msl_source(const RsShaderProgram* program, size_t stage_index);
+const char* rs_shader_program_stage_metal_json(const RsShaderProgram* program, size_t stage_index);
 const char* rs_shader_program_metadata_json(const RsShaderProgram* program);
 const char* rs_shader_program_reflection_json(const RsShaderProgram* program);
 const char* rs_shader_program_diagnostics_json(const RsShaderProgram* program);
 const char* rs_shader_program_cache_key(const RsShaderProgram* program);
-void rs_shader_program_free(RsShaderProgram* program);
+void        rs_shader_program_free(RsShaderProgram* program);
 const char* rs_shader_last_error();
 const char* rs_shader_cache_identity();
 }
 #endif
-
-struct ProgramHandle {
-    RsShaderProgram* ptr { nullptr };
-
-    ~ProgramHandle()
-    {
-#ifdef WESCENE_HAS_RUST_SHADER_FFI
-        if (ptr != nullptr) {
-            rs_shader_program_free(ptr);
-        }
-#endif
-    }
-};
-
-const char* ToStageKind(ShaderType type)
-{
-    switch (type) {
-    case ShaderType::VERTEX: return "vertex";
-    case ShaderType::FRAGMENT: return "fragment";
-    default: throw std::runtime_error("unsupported Rust shader stage");
-    }
-}
-
-ShaderType FromRustStageKind(int kind)
-{
-    switch (kind) {
-    case 0: return ShaderType::VERTEX;
-    case 1: return ShaderType::FRAGMENT;
-    default: throw std::runtime_error("Rust shader returned an invalid stage kind");
-    }
-}
-
-const char* ToTargetName(RustShaderTarget target)
-{
-    switch (target) {
-    case RustShaderTarget::VulkanSpirv: return "vulkan_spirv";
-    case RustShaderTarget::MetalMsl: return "metal_msl";
-    }
-    throw std::runtime_error("unsupported Rust shader target");
-}
-
-int ToRustTarget(RustShaderTarget target)
-{
-    switch (target) {
-    case RustShaderTarget::VulkanSpirv: return RS_SHADER_TARGET_VULKAN_SPIRV;
-    case RustShaderTarget::MetalMsl: return RS_SHADER_TARGET_METAL_MSL;
-    }
-    throw std::runtime_error("unsupported Rust shader target");
-}
 
 RustShaderMetalSlotKind FromMetalSlotKind(std::string_view slot_kind)
 {
@@ -119,304 +57,248 @@ RustShaderMetalSlotKind FromMetalSlotKind(std::string_view slot_kind)
     throw std::runtime_error("Rust shader returned an unknown metal slot kind");
 }
 
-VkShaderStageFlags ToVkStageFlags(const nlohmann::json& stages)
+const char* StageKindName(ShaderType kind)
 {
-    VkShaderStageFlags flags = 0;
-    for (const auto& stage : stages) {
-        const auto name = stage.get<std::string>();
-        if (name == "vertex") {
-            flags |= VK_SHADER_STAGE_VERTEX_BIT;
-        } else if (name == "fragment") {
-            flags |= VK_SHADER_STAGE_FRAGMENT_BIT;
-        }
+    switch (kind) {
+    case ShaderType::VERTEX: return "vertex";
+    case ShaderType::FRAGMENT: return "fragment";
+    default: break;
     }
-    return flags;
+    throw std::runtime_error("shader stage kind must be vertex or fragment");
 }
 
-VkDescriptorType ToVkDescriptorType(std::string_view descriptor)
+ShaderValue ShaderValueFromDefault(const nlohmann::json& value)
 {
-    if (descriptor == "uniform_buffer") {
-        return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    }
-    if (descriptor == "sampled_image") {
-        return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    }
-    if (descriptor == "combined_image_sampler") {
-        return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    }
-    if (descriptor == "sampler") {
-        return VK_DESCRIPTOR_TYPE_SAMPLER;
-    }
-    throw std::runtime_error("unsupported Rust descriptor kind");
-}
-
-VkFormat ToVkVertexFormat(std::string_view format)
-{
-    if (format == "r32_sfloat") {
-        return VK_FORMAT_R32_SFLOAT;
-    }
-    if (format == "r32g32_sfloat") {
-        return VK_FORMAT_R32G32_SFLOAT;
-    }
-    if (format == "r32g32b32_sfloat") {
-        return VK_FORMAT_R32G32B32_SFLOAT;
-    }
-    if (format == "r32g32b32a32_sfloat") {
-        return VK_FORMAT_R32G32B32A32_SFLOAT;
-    }
-    if (format == "r32_uint") {
-        return VK_FORMAT_R32_UINT;
-    }
-    if (format == "r32g32_uint") {
-        return VK_FORMAT_R32G32_UINT;
-    }
-    if (format == "r32g32b32_uint") {
-        return VK_FORMAT_R32G32B32_UINT;
-    }
-    if (format == "r32g32b32a32_uint") {
-        return VK_FORMAT_R32G32B32A32_UINT;
-    }
-    if (format == "r32_sint") {
-        return VK_FORMAT_R32_SINT;
-    }
-    if (format == "r32g32_sint") {
-        return VK_FORMAT_R32G32_SINT;
-    }
-    if (format == "r32g32b32_sint") {
-        return VK_FORMAT_R32G32B32_SINT;
-    }
-    if (format == "r32g32b32a32_sint") {
-        return VK_FORMAT_R32G32B32A32_SINT;
-    }
-    throw std::runtime_error("unsupported Rust vertex input format");
-}
-
-void FreeOwnedBytes(uint8_t* ptr, size_t, void*)
-{
-    std::free(ptr);
-}
-
-RsShaderOwnedBytes IncludeCallback(const char* path, void* user_data)
-{
-    if (path == nullptr || user_data == nullptr) {
-        return {};
-    }
-
-    auto* include_reader = static_cast<const RustShaderIncludeReader*>(user_data);
-    const auto bytes = (*include_reader)(path);
-    if (! bytes.has_value()) {
-        return {};
-    }
-
-    const auto allocation_size = std::max<std::size_t>(bytes->size(), 1);
-    auto*      buffer = static_cast<uint8_t*>(std::malloc(allocation_size));
-    if (buffer == nullptr) {
-        return {};
-    }
-    if (! bytes->empty()) {
-        std::memcpy(buffer, bytes->data(), bytes->size());
-    }
-
-    return RsShaderOwnedBytes {
-        .ptr            = buffer,
-        .len            = bytes->size(),
-        .free           = FreeOwnedBytes,
-        .free_user_data = nullptr,
-    };
-}
-
-std::string BorrowedString(const char* value)
-{
-    return value == nullptr ? std::string {} : std::string { value };
-}
-
-void ApplyActiveTextureSlots(const nlohmann::json& json, WPPreprocessorInfo& info)
-{
-    for (const auto& slot : json.value("active_texture_slots", nlohmann::json::array())) {
-        info.active_tex_slots.insert(slot.get<uint>());
-    }
-}
-
-ShaderValue ToShaderValue(const nlohmann::json& value)
-{
-    const auto kind = value.value("kind", std::string {});
-    if (kind == "number") {
-        return ShaderValue { value.at("value").get<float>() };
-    }
-    if (kind == "bool") {
-        return ShaderValue { value.at("value").get<bool>() ? 1.0f : 0.0f };
-    }
+    const auto& kind = value.at("kind").get_ref<const std::string&>();
+    const auto& body = value.at("value");
+    if (kind == "number") return ShaderValue(body.get<float>());
+    if (kind == "bool") return ShaderValue(body.get<bool>() ? 1.0f : 0.0f);
     if (kind == "vec2" || kind == "vec3" || kind == "vec4" || kind == "matrix4") {
-        const auto& array = value.at("value");
-        std::vector<float> values;
-        values.reserve(array.size());
-        for (const auto& item : array) {
-            values.push_back(item.get<float>());
-        }
-        return ShaderValue { values };
+        const auto floats = body.get<std::vector<float>>();
+        return ShaderValue(floats.data(), floats.size());
     }
     return ShaderValue {};
 }
+
+void MergeActiveSlots(const nlohmann::json& document, RustShaderOutput& output)
+{
+    const auto slots = document.value("active_texture_slots", nlohmann::json::array());
+    for (const auto& slot : slots) {
+        output.fragment_preprocessor_info.active_tex_slots.insert(slot.get<uint>());
+    }
+}
+
+#ifdef WESCENE_HAS_RUST_SHADER_FFI
+std::string CopyCString(const char* text)
+{
+    return text ? std::string(text) : std::string();
+}
+
+// Owns the compiler's program for the span of one compile.
+class ScopedCompilerProgram {
+public:
+    explicit ScopedCompilerProgram(RsShaderProgram* program) noexcept: m_program(program) {}
+    ScopedCompilerProgram(const ScopedCompilerProgram&)            = delete;
+    ScopedCompilerProgram& operator=(const ScopedCompilerProgram&) = delete;
+    ~ScopedCompilerProgram()
+    {
+        if (m_program != nullptr) rs_shader_program_free(m_program);
+    }
+    const RsShaderProgram* get() const noexcept { return m_program; }
+    explicit operator bool() const noexcept { return m_program != nullptr; }
+
+private:
+    RsShaderProgram* m_program;
+};
+
+// An include reply owns its text as a heap string; the compiler's release call deletes it.
+void DeleteIncludeText(uint8_t*, size_t, void* owner)
+{
+    delete static_cast<std::string*>(owner);
+}
+
+RsShaderOwnedBytes NoInclude()
+{
+    return RsShaderOwnedBytes { nullptr, 0, nullptr, nullptr };
+}
+
+RsShaderOwnedBytes ServeInclude(const char* path, void* user_data)
+{
+    const auto* reader = static_cast<const RustShaderIncludeReader*>(user_data);
+    if (reader == nullptr || ! static_cast<bool>(*reader) || path == nullptr) return NoInclude();
+
+    std::unique_ptr<std::string> text;
+    try {
+        std::optional<std::string> found = (*reader)(path);
+        if (found) text = std::make_unique<std::string>(std::move(*found));
+    } catch (...) {
+        // a reader fault or an allocation failure is "not available" to the compiler
+    }
+    if (! text) return NoInclude();
+
+    // std::string::data() is never null, so an empty include stays distinguishable from a missing one.
+    auto* bytes = reinterpret_cast<uint8_t*>(text->data());
+    const size_t length = text->size();
+    return RsShaderOwnedBytes { bytes, length, &DeleteIncludeText, text.release() };
+}
+
+// What reading a compiler program produced: a complete output, or nothing usable.
+struct ProgramReading {
+    bool             usable { false };
+    RustShaderOutput output;
+};
+
+ProgramReading ReadProgram(const RsShaderProgram* program)
+{
+    ProgramReading reading;
+    try {
+        RustShaderOutput gathered;
+        const size_t count = rs_shader_program_stage_count(program);
+        gathered.metal_stages.reserve(count);
+        for (size_t index = 0; index < count; ++index) {
+            const char* source = rs_shader_program_stage_msl_source(program, index);
+            if (source == nullptr || source[0] == '\0') return reading;
+            if (rs_shader_program_stage_target(program, index) != 1) return reading;
+            const int  kind  = rs_shader_program_stage_kind(program, index);
+            const bool is_vs = kind == 0;
+            if (! is_vs && kind != 1) return reading;
+
+            RustShaderMetalStage stage;
+            ApplyRustShaderMetalStageJson(CopyCString(rs_shader_program_stage_metal_json(program, index)),
+                                          source,
+                                          is_vs ? ShaderType::VERTEX : ShaderType::FRAGMENT,
+                                          stage);
+            gathered.metal_stages.push_back(std::move(stage));
+        }
+
+        gathered.cache_key        = CopyCString(rs_shader_program_cache_key(program));
+        gathered.diagnostics_json = CopyCString(rs_shader_program_diagnostics_json(program));
+        gathered.reflection_json  = CopyCString(rs_shader_program_reflection_json(program));
+        gathered.metadata_json    = CopyCString(rs_shader_program_metadata_json(program));
+        ApplyRustShaderReflectionJson(gathered.reflection_json, gathered);
+        ApplyRustShaderMetadataJson(gathered.metadata_json, gathered);
+
+        reading.output = std::move(gathered);
+        reading.usable = true;
+    } catch (...) {
+        reading = ProgramReading {};
+    }
+    return reading;
+}
+
+bool CompileRequestText(const std::string& request_text,
+                        RustShaderOutput& output,
+                        const RustShaderIncludeReader& include_reader)
+{
+    RsShaderProgram* produced = nullptr;
+    RsShaderIncludeCallback callback = include_reader ? &ServeInclude : nullptr;
+    const int status = rs_shader_compile_program(
+        request_text.c_str(), callback, const_cast<RustShaderIncludeReader*>(&include_reader), &produced);
+    const ScopedCompilerProgram program(produced);
+
+    ProgramReading reading;
+    if (status == 0 && program) reading = ReadProgram(program.get());
+
+    output = reading.usable ? std::move(reading.output) : RustShaderOutput {};
+    return reading.usable;
+}
+#endif
 
 } // namespace
 
 nlohmann::json BuildRustShaderRequestJson(const RustShaderRequest& request)
 {
-    nlohmann::json stages = nlohmann::json::array();
+    using nlohmann::json;
+    json document = json::object();
+    document["shader_name"] = request.shader_name;
+    document["target"]      = "metal_msl";
+    if (request.cache_enabled) {
+        document["cache_policy"] = { { "mode", "enabled" }, { "scene_id", request.scene_id } };
+    } else {
+        document["cache_policy"] = { { "mode", "disabled" } };
+    }
+
+    json stages = json::array();
     for (const auto& stage : request.stages) {
-        stages.push_back({
-            { "kind", ToStageKind(stage.kind) },
-            { "source", stage.source },
-        });
+        stages.push_back({ { "kind", StageKindName(stage.kind) }, { "source", stage.source } });
     }
+    document["stages"] = std::move(stages);
 
-    nlohmann::json combos = nlohmann::json::array();
+    json combos = json::array();
     for (const auto& [name, value] : request.combos) {
-        combos.push_back({
-            { "name", name },
-            { "value", value },
-        });
+        combos.push_back({ { "name", name }, { "value", value } });
     }
+    document["combos"] = std::move(combos);
 
-    nlohmann::json textures = nlohmann::json::array();
+    json textures = json::array();
     for (const auto& texture : request.textures) {
-        nlohmann::json entry {
+        json entry = {
             { "slot", texture.slot },
             { "present", texture.present },
             { "enabled", texture.enabled },
             { "format", texture.format },
-            {
-                "components",
-                {
-                    { "compo1", texture.components[0] },
-                    { "compo2", texture.components[1] },
-                    { "compo3", texture.components[2] },
-                    { "compo4", texture.components[3] },
-                },
-            },
+            { "components",
+              { { "compo1", texture.components[0] },
+                { "compo2", texture.components[1] },
+                { "compo3", texture.components[2] },
+                { "compo4", texture.components[3] } } },
         };
-        // Written only when a slot really is compiled as planes, so an
-        // ordinary texture's request JSON -- and the program cache key derived
-        // from it -- is byte for byte the one this bridge always produced.
         if (texture.video_planes == RustShaderVideoPlanes::Nv12Biplanar) {
             entry["video_planes"] = "nv12_biplanar";
         }
         textures.push_back(std::move(entry));
     }
+    document["textures"] = std::move(textures);
 
-    nlohmann::json properties = nlohmann::json::array();
+    json properties = json::array();
     for (const auto& property : request.properties) {
-        properties.push_back({
-            { "name", property.name },
-            {
-                "value",
-                {
-                    { "kind", property.value.kind },
-                    { "value", property.value.value },
-                },
-            },
-        });
+        properties.push_back({ { "name", property.name },
+                               { "value",
+                                 { { "kind", property.value.kind },
+                                   { "value", property.value.value } } } });
     }
-
-    nlohmann::json cache_policy = { { "mode", request.cache_enabled ? "enabled" : "disabled" } };
-    if (request.cache_enabled) {
-        cache_policy["scene_id"] = request.scene_id;
-    }
-
-    return {
-        { "shader_name", request.shader_name },
-        { "target", ToTargetName(request.target) },
-        { "cache_policy", std::move(cache_policy) },
-        { "stages", std::move(stages) },
-        { "combos", std::move(combos) },
-        { "textures", std::move(textures) },
-        { "properties", std::move(properties) },
-    };
+    document["properties"] = std::move(properties);
+    return document;
 }
 
 void ApplyRustShaderMetadataJson(std::string_view metadata_json, RustShaderOutput& output)
 {
-    const auto metadata = nlohmann::json::parse(metadata_json);
+    const auto document = nlohmann::json::parse(metadata_json);
+    const auto& none    = nlohmann::json::array();
+    // Decode everything first so a malformed element leaves the output as it was.
+    Combos                                combos;
+    WPAliasValueDict                      aliases;
+    ShaderValueMap                        uniforms;
+    WPDefaultTexs                         textures;
+    for (const auto& entry : document.value("combos", none)) {
+        combos[entry.at("name").get<std::string>()] = entry.at("value").get<std::string>();
+    }
+    for (const auto& entry : document.value("aliases", none)) {
+        aliases[entry.at("material").get<std::string>()] = entry.at("uniform").get<std::string>();
+    }
+    for (const auto& entry : document.value("default_uniforms", none)) {
+        uniforms.insert_or_assign(entry.at("name").get<std::string>(),
+                                  ShaderValueFromDefault(entry.at("value")));
+    }
+    for (const auto& entry : document.value("default_textures", none)) {
+        textures.emplace_back(entry.at("slot").get<i32>(), entry.at("path").get<std::string>());
+    }
+    std::vector<uint> slots;
+    for (const auto& slot : document.value("active_texture_slots", none)) {
+        slots.push_back(slot.get<uint>());
+    }
 
-    for (const auto& combo : metadata.value("combos", nlohmann::json::array())) {
-        output.shader_info.combos[combo.at("name").get<std::string>()] =
-            combo.at("value").get<std::string>();
-    }
-    for (const auto& alias : metadata.value("aliases", nlohmann::json::array())) {
-        output.shader_info.alias[alias.at("material").get<std::string>()] =
-            alias.at("uniform").get<std::string>();
-    }
-    for (const auto& uniform : metadata.value("default_uniforms", nlohmann::json::array())) {
-        output.shader_info.svs[uniform.at("name").get<std::string>()] =
-            ToShaderValue(uniform.at("value"));
-    }
-    for (const auto& texture : metadata.value("default_textures", nlohmann::json::array())) {
-        output.shader_info.defTexs.emplace_back(
-            texture.at("slot").get<i32>(),
-            texture.at("path").get<std::string>());
-    }
-
-    ApplyActiveTextureSlots(metadata, output.fragment_preprocessor_info);
+    auto& info = output.shader_info;
+    for (auto& [k, v] : combos) info.combos[k] = std::move(v);
+    for (auto& [k, v] : aliases) info.alias[k] = std::move(v);
+    for (auto& [k, v] : uniforms) info.svs.insert_or_assign(k, std::move(v));
+    for (auto& t : textures) info.defTexs.push_back(std::move(t));
+    output.fragment_preprocessor_info.active_tex_slots.insert(slots.begin(), slots.end());
 }
 
 void ApplyRustShaderReflectionJson(std::string_view reflection_json, RustShaderOutput& output)
 {
-    const auto reflection = nlohmann::json::parse(reflection_json);
-
-    output.reflection.binding_map.clear();
-    for (const auto& descriptor : reflection.value("descriptor_bindings", nlohmann::json::array())) {
-        if (descriptor.value("set", 0u) != 0u) {
-            throw std::runtime_error("Rust shader descriptors must use descriptor set 0");
-        }
-        if (descriptor.value("count", 1u) != 1u) {
-            throw std::runtime_error("Rust shader descriptor arrays are not supported");
-        }
-
-        VkDescriptorSetLayoutBinding binding {};
-        binding.binding         = descriptor.at("binding").get<uint32_t>();
-        binding.descriptorType  = ToVkDescriptorType(descriptor.at("descriptor").get<std::string>());
-        binding.descriptorCount = descriptor.value("count", 1u);
-        binding.stageFlags      = ToVkStageFlags(descriptor.value("stages", nlohmann::json::array()));
-        output.reflection.binding_map[descriptor.at("name").get<std::string>()] = binding;
-    }
-
-    output.reflection.blocks.clear();
-    int block_index = 0;
-    for (const auto& block_json : reflection.value("uniform_blocks", nlohmann::json::array())) {
-        vulkan::ShaderReflected::Block block {
-            .index      = block_index,
-            .size       = block_json.at("size").get<uint>(),
-            .binding    = block_json.value("binding", 0u),
-            .name       = block_json.at("name").get<std::string>(),
-            .member_map = {},
-        };
-
-        for (const auto& member : block_json.value("members", nlohmann::json::array())) {
-            block.member_map[member.at("name").get<std::string>()] =
-                vulkan::ShaderReflected::BlockedUniform {
-                    .block_index  = block_index,
-                    .offset       = member.at("offset").get<uint>(),
-                    .size         = member.at("size").get<size_t>(),
-                    .num          = member.value("element_count", 1u),
-                    .array_count  = member.value("array_count", 0u),
-                    .array_stride = member.value("array_stride", 0u),
-                };
-        }
-
-        output.reflection.blocks.push_back(std::move(block));
-        block_index++;
-    }
-
-    output.reflection.input_location_map.clear();
-    for (const auto& input : reflection.value("vertex_inputs", nlohmann::json::array())) {
-        output.reflection.input_location_map[input.at("name").get<std::string>()] =
-            vulkan::ShaderReflected::Input {
-                .location = input.at("location").get<uint>(),
-                .format   = ToVkVertexFormat(input.at("format").get<std::string>()),
-            };
-    }
-
-    ApplyActiveTextureSlots(reflection, output.fragment_preprocessor_info);
+    MergeActiveSlots(nlohmann::json::parse(reflection_json), output);
 }
 
 void ApplyRustShaderMetalStageJson(
@@ -454,119 +336,40 @@ void ApplyRustShaderMetalStageJson(
     };
 }
 
-namespace
-{
-
-bool CompileRustShaderProgramJson(
-    const std::string& request_json,
-    RustShaderTarget target,
-    RustShaderOutput& output,
-    const RustShaderIncludeReader& include_reader)
-{
-#ifndef WESCENE_HAS_RUST_SHADER_FFI
-    (void)request_json;
-    (void)target;
-    (void)output;
-    (void)include_reader;
-    output = {};
-    return false;
-#else
-    RustShaderOutput next_output;
-
-    ProgramHandle program;
-    const int status = rs_shader_compile_program(
-        request_json.c_str(),
-        include_reader ? IncludeCallback : nullptr,
-        include_reader ? const_cast<RustShaderIncludeReader*>(&include_reader) : nullptr,
-        &program.ptr);
-    if (status != 0 || program.ptr == nullptr) {
-        output = {};
-        return false;
-    }
-
-    const int    expected_target = ToRustTarget(target);
-    const size_t stage_count     = rs_shader_program_stage_count(program.ptr);
-    if (target == RustShaderTarget::MetalMsl) {
-        next_output.metal_stages.reserve(stage_count);
-    } else {
-        next_output.codes.reserve(stage_count);
-    }
-
-    for (size_t i = 0; i < stage_count; ++i) {
-        const auto kind = FromRustStageKind(rs_shader_program_stage_kind(program.ptr, i));
-        if (rs_shader_program_stage_target(program.ptr, i) != expected_target) {
-            output = {};
-            return false;
-        }
-
-        if (target == RustShaderTarget::MetalMsl) {
-            const auto metal_json = BorrowedString(
-                rs_shader_program_stage_metal_json(program.ptr, i));
-            const auto msl_source = BorrowedString(
-                rs_shader_program_stage_msl_source(program.ptr, i));
-            if (msl_source.empty()) {
-                output = {};
-                return false;
-            }
-            RustShaderMetalStage metal_stage;
-            ApplyRustShaderMetalStageJson(metal_json, msl_source, kind, metal_stage);
-            next_output.metal_stages.push_back(std::move(metal_stage));
-            continue;
-        }
-
-        const auto* words = rs_shader_program_stage_spv_words(program.ptr, i);
-        const auto  count = rs_shader_program_stage_spv_word_count(program.ptr, i);
-        if (words == nullptr || count == 0 || words[0] != SPIRV_MAGIC) {
-            output = {};
-            return false;
-        }
-        next_output.codes.emplace_back(words, words + count);
-    }
-
-    next_output.metadata_json    = BorrowedString(rs_shader_program_metadata_json(program.ptr));
-    next_output.reflection_json  = BorrowedString(rs_shader_program_reflection_json(program.ptr));
-    next_output.diagnostics_json = BorrowedString(rs_shader_program_diagnostics_json(program.ptr));
-    next_output.cache_key        = BorrowedString(rs_shader_program_cache_key(program.ptr));
-    // Reflection is target-independent: the Metal path consumes exactly the
-    // same uniform-block layout, descriptor names and texture slots the Vulkan
-    // path does.
-    ApplyRustShaderMetadataJson(next_output.metadata_json, next_output);
-    ApplyRustShaderReflectionJson(next_output.reflection_json, next_output);
-
-    output = std::move(next_output);
-    return true;
-#endif
-}
-
-} // namespace
-
 bool CompileRustShaderProgram(
     const RustShaderRequest& request,
     RustShaderOutput& output,
     const RustShaderIncludeReader& include_reader)
 {
-    return CompileRustShaderProgramJson(
-        BuildRustShaderRequestJson(request).dump(),
-        request.target,
-        output,
-        include_reader);
+#ifdef WESCENE_HAS_RUST_SHADER_FFI
+    try {
+        return CompileRequestText(BuildRustShaderRequestJson(request).dump(), output, include_reader);
+    } catch (...) {
+        output = RustShaderOutput {};
+        return false;
+    }
+#else
+    (void)request, (void)include_reader;
+    output = RustShaderOutput {};
+    return false;
+#endif
 }
 
 std::string RustShaderCacheIdentity()
 {
 #ifdef WESCENE_HAS_RUST_SHADER_FFI
-    return BorrowedString(rs_shader_cache_identity());
+    return CopyCString(rs_shader_cache_identity());
 #else
-    return "ffi-disabled";
+    return "wallpaper-machine-shader-compiler-not-linked";
 #endif
 }
 
 std::string LastRustShaderError()
 {
-#ifndef WESCENE_HAS_RUST_SHADER_FFI
-    return "Rust shader FFI is disabled";
+#ifdef WESCENE_HAS_RUST_SHADER_FFI
+    return CopyCString(rs_shader_last_error());
 #else
-    return BorrowedString(rs_shader_last_error());
+    return "the shader compiler is not linked into this build";
 #endif
 }
 
@@ -576,13 +379,18 @@ bool CompileRustShaderProgramWithBridgeJson(
     RustShaderOutput& output,
     const RustShaderIncludeReader& include_reader)
 {
-    return CompileRustShaderProgramJson(
-        request_json.dump(),
-        request_json.value("target", std::string { "vulkan_spirv" }) == "metal_msl"
-            ? RustShaderTarget::MetalMsl
-            : RustShaderTarget::VulkanSpirv,
-        output,
-        include_reader);
+#ifdef WESCENE_HAS_RUST_SHADER_FFI
+    try {
+        return CompileRequestText(request_json.dump(), output, include_reader);
+    } catch (...) {
+        output = RustShaderOutput {};
+        return false;
+    }
+#else
+    (void)request_json, (void)include_reader;
+    output = RustShaderOutput {};
+    return false;
+#endif
 }
 #endif
 

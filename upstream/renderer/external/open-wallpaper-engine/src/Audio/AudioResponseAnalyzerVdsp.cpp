@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e5-text-audio-video-runtime.md; written without access to the original source.
 #include "AudioResponseAnalyzerVdsp.hpp"
 
 #include <Accelerate/Accelerate.h>
@@ -34,7 +35,7 @@ struct AnalyzerResources
     // amplitude a sine of that frequency has in the input.
     float amplitude_scale { 0.0f };
     std::array<uint16_t, kBandCount64 + 1u> edges {};
-    FFTSetup fft_setup { nullptr };
+    FFTSetup fft { nullptr };
 
     AnalyzerResources()
     {
@@ -42,7 +43,7 @@ struct AnalyzerResources
         float window_sum = 0.0f;
         vDSP_sve(window.data(), 1, &window_sum, static_cast<vDSP_Length>(kWindowSize));
         amplitude_scale = 1.0f / window_sum;
-        fft_setup = vDSP_create_fftsetup(kFftLog2, FFT_RADIX2);
+        fft = vDSP_create_fftsetup(kFftLog2, kFFTRadix2);
 
         const double ratio =
             std::pow(static_cast<double>(kTopBin) / (kLinearBands + 1u), 1.0 / (kBandCount64 - kLinearBands));
@@ -58,10 +59,9 @@ struct AnalyzerResources
 
     ~AnalyzerResources()
     {
-        if (fft_setup != nullptr) {
-            vDSP_destroy_fftsetup(fft_setup);
-        }
+        if (fft != nullptr) vDSP_destroy_fftsetup(fft);
     }
+
 };
 
 AnalyzerResources& Resources()
@@ -98,10 +98,9 @@ ChannelLevels AnalyzeChannel(const float* pcm)
 
     vDSP_vmul(pcm, 1, resources.window.data(), 1, windowed.data(), 1,
               static_cast<vDSP_Length>(kWindowSize));
+    // One NaN or infinity would spread through the whole transform.
     for (uint32_t index = 0; index < kWindowSize; ++index) {
-        if (! std::isfinite(windowed[index])) {
-            windowed[index] = 0.0f;
-        }
+        if (! std::isfinite(windowed[index])) windowed[index] = 0.0f;
     }
 
     // Real FFT input is packed as even samples in realp and odd samples in imagp.
@@ -110,7 +109,10 @@ ChannelLevels AnalyzeChannel(const float* pcm)
         imagp[index] = windowed[(index * 2u) + 1u];
     }
     DSPSplitComplex split { .realp = realp.data(), .imagp = imagp.data() };
-    vDSP_fft_zrip(resources.fft_setup, &split, 1, kFftLog2, FFT_FORWARD);
+    if (resources.fft == nullptr) {
+        return {};
+    }
+    vDSP_fft_zrip(resources.fft, &split, 1, kFftLog2, kFFTDirection_Forward);
     // Slot 0 mixes DC with Nyquist; no bucket reads it.
     vDSP_zvmags(&split, 1, power.data(), 1, static_cast<vDSP_Length>(power.size()));
 
@@ -190,21 +192,28 @@ void AnalyzeAudioResponseStereoBlock(
     snapshot->stereo = true;
 }
 
+namespace
+{
+template<size_t N>
+void Silence(std::array<float, N>& bands)
+{
+    std::fill(bands.begin(), bands.end(), 0.0f);
+}
+} // namespace
+
 void ClearAudioResponseSnapshot(AudioSpectrumSnapshot* snapshot)
 {
-    if (snapshot == nullptr) {
-        return;
-    }
-
-    snapshot->left64.fill(0.0f);
-    snapshot->right64.fill(0.0f);
-    snapshot->average64.fill(0.0f);
-    snapshot->left32.fill(0.0f);
-    snapshot->right32.fill(0.0f);
-    snapshot->average32.fill(0.0f);
-    snapshot->left16.fill(0.0f);
-    snapshot->right16.fill(0.0f);
-    snapshot->average16.fill(0.0f);
+    if (snapshot == nullptr) return;
+    // Only the levels go quiet; the counters and the stereo flag describe the stream.
+    Silence(snapshot->left64);
+    Silence(snapshot->right64);
+    Silence(snapshot->average64);
+    Silence(snapshot->left32);
+    Silence(snapshot->right32);
+    Silence(snapshot->average32);
+    Silence(snapshot->left16);
+    Silence(snapshot->right16);
+    Silence(snapshot->average16);
 }
 
 } // namespace wallpaper::audio

@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e5-text-audio-video-runtime.md; written without access to the original source.
 #pragma once
 #include <memory>
 #include <vector>
@@ -17,6 +18,13 @@
 #define MA_NO_DSOUND
 #define MA_NO_WINMM
 #define MA_NO_ENCODING
+// Only the output device is used: sounds are decoded by the project's own path
+// (Renderer/Sound), so miniaudio's decoders and the resource manager, node graph and
+// engine built on them are left out. The standalone miniaudio test builds the same.
+#define MA_NO_DECODING
+#define MA_NO_RESOURCE_MANAGER
+#define MA_NO_NODE_GRAPH
+#define MA_NO_ENGINE
 #define MINIAUDIO_IMPLEMENTATION
 #include <miniaudio.h>
 
@@ -84,12 +92,12 @@ public:
     void MountChannel(std::shared_ptr<Channel> chn) {
         std::lock_guard<std::mutex> control { m_control_mutex };
         if (! IsInited()) InitLocked({});
-        ChannelWrap chnw;
-        chnw.chn = chn;
-        chnw.chn->PassDeviceDesc(GetDesc());
-        {
+        if (chn) {
+            // The stream learns the layout before the mix can read it; a device that did
+            // not open reports zeros, which keeps the stream from starting.
+            chn->PassDeviceDesc(GetDesc());
             std::unique_lock<std::mutex> lock { m_mutex };
-            m_channels.push_back(chnw);
+            m_channels.push_back(std::move(chn));
         }
         UpdateOutputLocked();
     }
@@ -99,8 +107,8 @@ public:
         UpdateOutputLocked();
     }
     DeviceDesc GetDesc() const {
-        return DeviceDesc { .phyChannels = m_device.playback.channels,
-                            .sampleRate  = m_device.sampleRate };
+        if (! IsInited()) return { 0, 0 };
+        return { m_device.playback.channels, m_device.sampleRate };
     }
 
 private:
@@ -156,67 +164,58 @@ private:
 private:
     static void data_callback(ma_device* pMaDevice, void* pOutput, const void* pInput,
                               ma_uint32 frameCount) {
-        Device* pDevice = static_cast<Device*>(pMaDevice->pUserData);
-        if (! pDevice->IsInited()) return;
-        pDevice->data_callback(pOutput, pInput, frameCount);
+        if (pMaDevice == nullptr) return;
+        auto* self = static_cast<Device*>(pMaDevice->pUserData);
+        if (self != nullptr) self->data_callback(pOutput, pInput, frameCount);
     }
+    // One cycle: the output holds silence unless the host is playing, unmuted and the
+    // stream list could be read without waiting; MixStreams only adds on top of silence.
     void data_callback(void* pOutput, const void* pInput, ma_uint32 frameCount) {
         (void)pInput;
-        const auto phyChannels = m_device.playback.channels;
-        if (phyChannels == 0) return;
-        const auto framesSize     = frameCount * phyChannels;
-        const auto framesByteSize = framesSize * sizeof(float);
-        wallpaper::audio::ClearInterleavedF32(pOutput, framesSize);
-        if (! m_running.load(std::memory_order_relaxed) ||
-            m_muted.load(std::memory_order_relaxed)) {
+        if (pOutput == nullptr || ! IsInited()) return;
+        const std::size_t width = m_device.playback.channels;
+        if (width == 0) return;
+        auto* dst = static_cast<float*>(pOutput);
+        wallpaper::audio::ClearInterleavedF32(dst, static_cast<std::size_t>(frameCount) * width);
+        if (! m_running.load(std::memory_order_relaxed) || m_muted.load(std::memory_order_relaxed))
             return;
-        }
-        {
-            if (m_frameBuffer.size() < framesByteSize) m_frameBuffer.resize(framesByteSize);
-        }
-        {
-            std::unique_lock<std::mutex> lock { m_mutex, std::try_to_lock };
-            if (! lock.owns_lock()) return;
+        MixStreams(dst, frameCount, width);
+    }
+    // Adds every mounted stream to dst (already silent). Returns without waiting when a
+    // control thread owns the list. Streams that deliver nothing are dropped afterwards.
+    void MixStreams(float* dst, ma_uint32 frames, std::size_t width) {
+        std::unique_lock<std::mutex> list_lock { m_mutex, std::try_to_lock };
+        if (! list_lock.owns_lock() || m_channels.empty()) return;
 
-            float*      pOutput_float = static_cast<float*>(pOutput);
-            float*      pBuffer_float = reinterpret_cast<float*>(m_frameBuffer.data());
-            const float volume        = m_volume.load(std::memory_order_relaxed);
-            for (ma_uint32 i = 0; i < m_channels.size(); i++) {
-                wallpaper::audio::ClearInterleavedF32(m_frameBuffer.data(), framesSize);
-                ma_uint64 framesReaded =
-                    m_channels[i].chn->NextPcmData(m_frameBuffer.data(), frameCount);
-                if (framesReaded == 0) {
-                    m_channels[i].end = true;
-                } else {
-                    const auto framesToMix = static_cast<std::size_t>(
-                        std::min<ma_uint64>(framesReaded, frameCount) * phyChannels);
-                    wallpaper::audio::MixInterleavedF32(
-                        pOutput_float, pBuffer_float, framesToMix, volume);
-                }
-            }
-            m_channels.erase(std::remove_if(m_channels.begin(),
-                                            m_channels.end(),
-                                            [](auto& c) {
-                                                return c.end;
-                                            }),
-                             m_channels.end());
+        const std::size_t samples = static_cast<std::size_t>(frames) * width;
+        if (m_scratch.size() < samples) m_scratch.resize(samples);
+        float*      tmp  = m_scratch.data();
+        const float gain = m_volume.load(std::memory_order_relaxed);
+
+        std::size_t kept = 0;
+        for (std::size_t i = 0; i < m_channels.size(); ++i) {
+            wallpaper::audio::ClearInterleavedF32(tmp, samples);
+            const ma_uint64 delivered = m_channels[i]->NextPcmData(tmp, frames);
+            if (delivered == 0) continue; // finished: not carried over
+            const std::size_t used = static_cast<std::size_t>(std::min<ma_uint64>(delivered, frames));
+            wallpaper::audio::MixInterleavedF32(dst, tmp, used * width, gain);
+            if (kept != i) m_channels[kept] = std::move(m_channels[i]);
+            ++kept;
         }
+        m_channels.resize(kept);
     }
     ma_device_config GenMaDeviceConfig(const DeviceDesc& d) {
-        ma_device_config config  = ma_device_config_init(ma_device_type_playback);
-        config.sampleRate        = d.sampleRate;
-        config.playback.format   = ma_format_f32;
+        ma_device_config config = ma_device_config_init(ma_device_type_playback);
+        // 0 channels and rate 0 mean the system's default output as it is.
+        config.playback.format   = DeviceDesc::format;
         config.playback.channels = d.phyChannels;
-        config.dataCallback      = data_callback;
-        config.pUserData         = (void*)this;
+        config.sampleRate        = d.sampleRate;
+        config.dataCallback      = &Device::data_callback;
+        config.pUserData         = this;
         return config;
     }
 
 private:
-    struct ChannelWrap {
-        bool                     end { false };
-        std::shared_ptr<Channel> chn;
-    };
     ma_context*       m_context { nullptr };
     ma_device         m_device {}; // must init c struct
     std::mutex        m_mutex;     // for operating channel vector
@@ -226,8 +225,8 @@ private:
     std::atomic<float> m_volume { 1.0f };
     std::atomic<bool>  m_muted { false };
 
-    std::vector<ChannelWrap> m_channels;
-    std::vector<uint8_t>     m_frameBuffer;
+    std::vector<std::shared_ptr<Channel>> m_channels;
+    std::vector<float>                    m_scratch; // one stream's cycle, grown on demand
 };
 
 } // namespace miniaudio

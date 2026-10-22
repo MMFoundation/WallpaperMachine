@@ -1,10 +1,13 @@
+// Clean-room implementation from the WallpaperMachine spec p1-scene-structure.md; written without access to the original source.
 #pragma once
 
 #include "WPJson.hpp"
 #include "WPImageObject.h"
 #include "WPObjectSchema.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -24,12 +27,48 @@ namespace wpscene
 {
 
 inline const nlohmann::json& UnwrapMiscSettingValue(const nlohmann::json& value) {
-    if (value.is_object() && value.contains("value")) return value.at("value");
-    return value;
+    return UnwrapSetting(value);
 }
 
-inline bool HasDynamicMiscSetting(const nlohmann::json& value) {
-    return value.is_object() && (value.contains("script") || value.contains("user"));
+/// A two-lane text value: a number fills both lanes, a string holds two numbers
+/// of which a missing second one means 0, an array is not read.
+inline void ReadMiscPairSetting(const nlohmann::json& json, const char* key,
+                                std::array<float, 2>& out) {
+    if (! json.contains(key)) return;
+    const auto& value = UnwrapSetting(json.at(key));
+    if (value.is_number()) {
+        out = { value.get<float>(), value.get<float>() };
+    } else if (value.is_string()) {
+        std::istringstream words(value.get<std::string>());
+        float              first = 0.0f, second = 0.0f;
+        if (! (words >> first)) return;
+        if (! (words >> second)) second = 0.0f;
+        out = { first, second };
+    }
+}
+
+/// Reads the `effects` list of an object. An effect that cannot be read builds
+/// nothing and is left out; the object keeps the rest.
+inline void ReadMiscEffects(const nlohmann::json& json, fs::VFS& vfs,
+                            std::vector<WPImageEffect>& effects) {
+    if (! json.contains("effects") || ! json.at("effects").is_array()) return;
+    for (const auto& entry : json.at("effects")) {
+        if (! entry.is_object()) continue;
+        WPImageEffect effect;
+        if (effect.FromJson(entry, vfs)) effects.push_back(std::move(effect));
+    }
+}
+
+inline void ReadMiscFlag(const nlohmann::json& json, const char* key, bool& out) {
+    if (json.contains(key)) ReadFlagSetting(json.at(key), out);
+}
+
+inline void ReadMiscNumber(const nlohmann::json& json, const char* key, float& out) {
+    if (json.contains(key)) ReadNumberSetting(json.at(key), out);
+}
+
+inline void ReadMiscString(const nlohmann::json& json, const char* key, std::string& out) {
+    if (json.contains(key)) ReadStringSetting(json.at(key), out);
 }
 
 // A setting Wallpaper Engine registers as an enumeration, read as the word it
@@ -45,57 +84,6 @@ inline void ReadMiscEnumWord(const nlohmann::json& json, const char* key, const 
     word               = source.is_string() ? source.get<std::string>() : std::string(first_entry);
 }
 
-inline void ReadMiscVec3Setting(const nlohmann::json& json, const char* key,
-                                std::array<float, 3>* destination,
-                                nlohmann::json* setting, bool* dynamic) {
-    if (! json.contains(key) || destination == nullptr || setting == nullptr) return;
-
-    *setting = json.at(key);
-    if (dynamic != nullptr) *dynamic = HasDynamicMiscSetting(*setting);
-
-    const auto& source = UnwrapMiscSettingValue(*setting);
-    if (source.is_array() && source.size() >= 3) {
-        (*destination)[0] = source.at(0).get<float>();
-        (*destination)[1] = source.at(1).get<float>();
-        (*destination)[2] = source.at(2).get<float>();
-        return;
-    }
-    if (source.is_number()) {
-        const float scalar = source.get<float>();
-        *destination       = { scalar, scalar, scalar };
-        return;
-    }
-    if (source.is_string()) {
-        std::istringstream stream(source.get<std::string>());
-        stream >> (*destination)[0] >> (*destination)[1] >> (*destination)[2];
-    }
-}
-
-/// A two-lane setting as Wallpaper Engine's Vec2 properties read it. A number
-/// sets both lanes. A string is "x y": the first number is lane x and the one
-/// after the first space is lane y, so a lone "x" leaves y at 0. An object is
-/// read through its `value`, as a property or script binding wraps one. A JSON
-/// array is not a form the reference reads, and leaves the default.
-inline void ReadMiscVec2Setting(const nlohmann::json& json, const char* key,
-                                std::array<float, 2>& destination) {
-    if (! json.contains(key)) return;
-    const auto& source = UnwrapMiscSettingValue(json.at(key));
-    if (source.is_number()) {
-        const float scalar = source.get<float>();
-        destination        = { scalar, scalar };
-    } else if (source.is_string()) {
-        const auto  text  = source.get<std::string>();
-        const char* begin = text.c_str();
-        char*       end   = nullptr;
-        destination       = { std::strtof(begin, &end), 0.0f };
-        const char* space = std::strchr(begin, ' ');
-        if (space != nullptr) {
-            while (*space == ' ') ++space;
-            if (*space != '\0') destination[1] = std::strtof(space, nullptr);
-        }
-    }
-}
-
 struct WPMiscObjectBase {
     int32_t              id { 0 };
     int32_t              parent_id { -1 };
@@ -106,39 +94,55 @@ struct WPMiscObjectBase {
     // Wallpaper Engine's default for an object that leaves the key out.
     std::array<float, 2> parallaxDepth { 1.0f, 1.0f };
     bool                 visible { true };
-    bool                 locktransforms { false };
-    bool                 muteineditor { false };
-    bool                 nointerpolation { false };
-    bool                 dynamic_origin { false };
-    bool                 dynamic_visible { false };
-    std::vector<int32_t> dependencies;
+    // Editor-side flags the file stores for the object.
+    bool locktransforms { false };
+    bool muteineditor { false };
+    bool nointerpolation { false };
+
+    // True when a script or property drives the value (the setting below is then bound).
+    bool dynamic_origin { false };
+    bool dynamic_visible { false };
+
+    std::vector<int32_t> dependencies;   // ids this object needs loaded first
     nlohmann::json       instance;
-    nlohmann::json       origin_setting;
-    nlohmann::json       scale_setting;
-    nlohmann::json       angles_setting;
-    nlohmann::json       visible_setting;
-    nlohmann::json       field_bindings;
+
+    // The settings as authored, whole.
+    nlohmann::json origin_setting;
+    nlohmann::json scale_setting;
+    nlohmann::json angles_setting;
+    nlohmann::json visible_setting;
+    nlohmann::json field_bindings;
 
     void FromCommonJson(const nlohmann::json& json) {
-        GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
-        GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
-        ReadMiscVec3Setting(json, "origin", &origin, &origin_setting, &dynamic_origin);
-        ReadMiscVec3Setting(json, "scale", &scale, &scale_setting, nullptr);
-        ReadMiscVec3Setting(json, "angles", &angles, &angles_setting, nullptr);
-        GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
-        GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
+        if (! json.is_object()) return;
+        if (json.contains("id")) ReadInt32(json.at("id"), id);
+        if (json.contains("parent")) ReadInt32(json.at("parent"), parent_id);
+        ReadMiscString(json, "name", name);
+
+        const auto read_vec3 = [&json](const char* key, std::array<float, 3>& lanes,
+                                       nlohmann::json& setting) {
+            if (! json.contains(key)) return false;
+            setting = json.at(key);
+            ReadTolerantVec3(setting, lanes);
+            return true;
+        };
+        if (read_vec3("origin", origin, origin_setting)) dynamic_origin = SettingIsDriven(origin_setting);
+        read_vec3("scale", scale, scale_setting);
+        read_vec3("angles", angles, angles_setting);
+        if (json.contains("parallaxDepth")) ReadStrictVec(json.at("parallaxDepth"), parallaxDepth);
+
         if (json.contains("visible")) {
-            visible_setting  = json.at("visible");
-            dynamic_visible = visible_setting.is_object() &&
-                              (visible_setting.contains("script") ||
-                               visible_setting.contains("user"));
+            visible_setting = json.at("visible");
+            ReadFlagSetting(visible_setting, visible);
+            dynamic_visible = VisibilityIsBound(visible_setting);
         }
-        GET_JSON_NAME_VALUE_NOWARN(json, "locktransforms", locktransforms);
-        GET_JSON_NAME_VALUE_NOWARN(json, "muteineditor", muteineditor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "nointerpolation", nointerpolation);
-        GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent_id);
+        ReadMiscFlag(json, "locktransforms", locktransforms);
+        ReadMiscFlag(json, "muteineditor", muteineditor);
+        ReadMiscFlag(json, "nointerpolation", nointerpolation);
         ParseDependencies(json, dependencies);
-        if (json.contains("instance")) instance = json.at("instance");
+        if (const auto block = json.find("instance"); block != json.end() && block->is_object()) {
+            instance = *block;
+        }
         AbsorbFieldBindings(json, field_bindings);
     }
 };
@@ -204,55 +208,53 @@ struct WPTextObject : WPMiscObjectBase {
     std::vector<WPImageEffect> effects;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+        if (! json.is_object()) return false;
         FromCommonJson(json);
         if (json.contains("text")) text = json.at("text");
         if (json.contains("font")) font = json.at("font");
-        GET_JSON_NAME_VALUE_NOWARN(json, "pointsize", pointsize);
-        ReadMiscVec2Setting(json, "padding", padding);
-        ReadMiscVec2Setting(json, "spacing", spacing);
-        // A key that is there but not a string takes the registry's first entry,
-        // which is `left` for the horizontal registry and `center` for the vertical.
+        ReadMiscNumber(json, "pointsize", pointsize);
+        ReadMiscPairSetting(json, "padding", padding);
+        ReadMiscPairSetting(json, "spacing", spacing);
         ReadMiscEnumWord(json, "horizontalalign", "left", horizontalalign);
         ReadMiscEnumWord(json, "verticalalign", "center", verticalalign);
-        GET_JSON_NAME_VALUE_NOWARN(json, "anchor", anchor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "maxrows", maxrows);
-        GET_JSON_NAME_VALUE_NOWARN(json, "maxwidth", maxwidth);
-        GET_JSON_NAME_VALUE_NOWARN(json, "limitrows", limitrows);
-        GET_JSON_NAME_VALUE_NOWARN(json, "limitwidth", limitwidth);
-        GET_JSON_NAME_VALUE_NOWARN(json, "limituseellipsis", limituseellipsis);
-        GET_JSON_NAME_VALUE_NOWARN(json, "blockalign", blockalign);
-        GET_JSON_NAME_VALUE_NOWARN(json, "color", color);
-        GET_JSON_NAME_VALUE_NOWARN(json, "alpha", alpha);
-        GET_JSON_NAME_VALUE_NOWARN(json, "brightness", brightness);
-        GET_JSON_NAME_VALUE_NOWARN(json, "colorBlendMode", colorBlendMode);
-        GET_JSON_NAME_VALUE_NOWARN(json, "size", size);
-        GET_JSON_NAME_VALUE_NOWARN(json, "clampuvs", clampuvs);
-        GET_JSON_NAME_VALUE_NOWARN(json, "perspective", perspective);
-        GET_JSON_NAME_VALUE_NOWARN(json, "copybackground", copybackground);
-        GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
-        GET_JSON_NAME_VALUE_NOWARN(json, "disablepropagation", disablepropagation);
-        GET_JSON_NAME_VALUE_NOWARN(json, "opaquebackground", opaquebackground);
-        GET_JSON_NAME_VALUE_NOWARN(json, "ledsource", ledsource);
-        GET_JSON_NAME_VALUE_NOWARN(json, "backgroundcolor", backgroundcolor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "backgroundbrightness", backgroundbrightness);
-        GET_JSON_NAME_VALUE_NOWARN(json, "msdf", msdf);
-        GET_JSON_NAME_VALUE_NOWARN(json, "outline", outline);
-        GET_JSON_NAME_VALUE_NOWARN(json, "outlinethickness", outlinethickness);
-        GET_JSON_NAME_VALUE_NOWARN(json, "outlinecolor", outlinecolor);
-        GET_JSON_NAME_VALUE_NOWARN(json, "blur", blur);
-        GET_JSON_NAME_VALUE_NOWARN(json, "blursize", blursize);
-        GET_JSON_NAME_VALUE_NOWARN(json, "dropshadow", dropshadow);
-        GET_JSON_NAME_VALUE_NOWARN(json, "dropshadowsize", dropshadowsize);
-        GET_JSON_NAME_VALUE_NOWARN(json, "dropshadowopacity", dropshadowopacity);
-        ReadMiscVec2Setting(json, "dropshadowoffset", dropshadowoffset);
-        GET_JSON_NAME_VALUE_NOWARN(json, "dropshadowcolor", dropshadowcolor);
-        if (json.contains("effects")) {
-            for (const auto& jE : json.at("effects")) {
-                WPImageEffect effect;
-                effect.FromJson(jE, vfs);
-                effects.push_back(std::move(effect));
+        ReadMiscEnumWord(json, "anchor", "none", anchor);
+        if (json.contains("maxrows")) {
+            double rows = 0.0;
+            if (ReadNumberSetting(json.at("maxrows"), rows) && std::isfinite(rows) && rows >= 0.0) {
+                maxrows = static_cast<uint32_t>(std::min(rows, 4294967295.0));
             }
         }
+        ReadMiscNumber(json, "maxwidth", maxwidth);
+        ReadMiscFlag(json, "limitrows", limitrows);
+        ReadMiscFlag(json, "limitwidth", limitwidth);
+        ReadMiscFlag(json, "limituseellipsis", limituseellipsis);
+        ReadMiscFlag(json, "blockalign", blockalign);
+        if (json.contains("color")) ReadStrictVec(json.at("color"), color);
+        ReadMiscNumber(json, "alpha", alpha);
+        ReadMiscNumber(json, "brightness", brightness);
+        if (json.contains("colorBlendMode")) ReadNumberSetting(json.at("colorBlendMode"), colorBlendMode);
+        if (json.contains("size")) ReadStrictVec(json.at("size"), size);
+        ReadMiscFlag(json, "clampuvs", clampuvs);
+        ReadMiscFlag(json, "perspective", perspective);
+        ReadMiscFlag(json, "copybackground", copybackground);
+        ReadMiscFlag(json, "solid", solid);
+        ReadMiscFlag(json, "disablepropagation", disablepropagation);
+        ReadMiscFlag(json, "opaquebackground", opaquebackground);
+        ReadMiscFlag(json, "ledsource", ledsource);
+        if (json.contains("backgroundcolor")) ReadStrictVec(json.at("backgroundcolor"), backgroundcolor);
+        ReadMiscNumber(json, "backgroundbrightness", backgroundbrightness);
+        ReadMiscFlag(json, "msdf", msdf);
+        ReadMiscFlag(json, "outline", outline);
+        ReadMiscNumber(json, "outlinethickness", outlinethickness);
+        if (json.contains("outlinecolor")) ReadStrictVec(json.at("outlinecolor"), outlinecolor);
+        ReadMiscFlag(json, "blur", blur);
+        ReadMiscNumber(json, "blursize", blursize);
+        ReadMiscFlag(json, "dropshadow", dropshadow);
+        ReadMiscNumber(json, "dropshadowsize", dropshadowsize);
+        ReadMiscNumber(json, "dropshadowopacity", dropshadowopacity);
+        ReadMiscPairSetting(json, "dropshadowoffset", dropshadowoffset);
+        if (json.contains("dropshadowcolor")) ReadStrictVec(json.at("dropshadowcolor"), dropshadowcolor);
+        ReadMiscEffects(json, vfs, effects);
         return true;
     }
 };
@@ -267,14 +269,18 @@ struct WPModelObject : WPMiscObjectBase {
     std::vector<nlohmann::json> puppet_layer_settings;
 
     bool FromJson(const nlohmann::json& json, fs::VFS&) {
+        if (! json.is_object()) return false;
         FromCommonJson(json);
-        GET_JSON_NAME_VALUE_NOWARN(json, "model", model);
-        GET_JSON_NAME_VALUE_NOWARN(json, "attachment", attachment);
-        GET_JSON_NAME_VALUE_NOWARN(json, "perspective", perspective);
-        GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
-        GET_JSON_NAME_VALUE_NOWARN(json, "disablepropagation", disablepropagation);
-        ParsePuppetAnimationLayers(json, puppet_layers, puppet_layer_settings);
-        return true;
+        ReadMiscString(json, "model", model);
+        ReadMiscString(json, "attachment", attachment);
+        ReadMiscFlag(json, "perspective", perspective);
+        ReadMiscFlag(json, "solid", solid);
+        ReadMiscFlag(json, "disablepropagation", disablepropagation);
+        if (json.contains("animationlayers")) {
+            ParsePuppetAnimationLayers(json.at("animationlayers"), puppet_layers,
+                                       puppet_layer_settings);
+        }
+        return ! model.empty();
     }
 };
 
@@ -287,15 +293,10 @@ struct WPShapeObject : WPMiscObjectBase {
     std::vector<WPImageEffect> effects;
 
     bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
+        if (! json.is_object()) return false;
         FromCommonJson(json);
-        GET_JSON_NAME_VALUE_NOWARN(json, "shape", shape);
-        if (json.contains("effects")) {
-            for (const auto& jE : json.at("effects")) {
-                WPImageEffect effect;
-                effect.FromJson(jE, vfs);
-                effects.push_back(std::move(effect));
-            }
-        }
+        ReadMiscString(json, "shape", shape);
+        ReadMiscEffects(json, vfs, effects);
         return true;
     }
 };
@@ -314,15 +315,18 @@ struct WPCameraObject : WPMiscObjectBase {
     bool        disablepropagation { false };
 
     bool FromJson(const nlohmann::json& json, fs::VFS&) {
+        if (! json.is_object()) return false;
         FromCommonJson(json);
-        GET_JSON_NAME_VALUE_NOWARN(json, "camera", camera);
-        GET_JSON_NAME_VALUE_NOWARN(json, "path", path);
-        GET_JSON_NAME_VALUE_NOWARN(json, "queuemode", queuemode);
-        GET_JSON_NAME_VALUE_NOWARN(json, "fov", fov);
-        GET_JSON_NAME_VALUE_NOWARN(json, "zoom", zoom);
-        if (json.contains("zoom")) zoom_setting = json.at("zoom");
-        GET_JSON_NAME_VALUE_NOWARN(json, "solid", solid);
-        GET_JSON_NAME_VALUE_NOWARN(json, "disablepropagation", disablepropagation);
+        ReadMiscString(json, "camera", camera);
+        ReadMiscString(json, "path", path);
+        ReadMiscString(json, "queuemode", queuemode);
+        ReadMiscNumber(json, "fov", fov);
+        if (json.contains("zoom")) {
+            zoom_setting = json.at("zoom");
+            ReadNumberSetting(zoom_setting, zoom);
+        }
+        ReadMiscFlag(json, "solid", solid);
+        ReadMiscFlag(json, "disablepropagation", disablepropagation);
         return true;
     }
 };

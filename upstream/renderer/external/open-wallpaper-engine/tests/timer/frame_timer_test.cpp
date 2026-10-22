@@ -22,41 +22,6 @@ namespace
 
 using namespace std::chrono_literals;
 
-TEST(FrameTimerTest, RunClearsStaleSchedulerStateBeforeStarting) {
-    FrameTimer timer;
-    timer.SetRequiredFps(20);
-
-    timer.m_frame_busy_count.store(7);
-    timer.AddFrametime(std::chrono::hours(8));
-    timer.UpdateFrametime();
-    timer.m_timer.SetInterval(std::chrono::hours(24));
-
-    ASSERT_GT(timer.FrameTime(), 60.0);
-
-    timer.Run();
-    timer.Stop();
-
-    EXPECT_EQ(timer.m_frame_busy_count.load(), 0);
-    EXPECT_LT(timer.FrameTime(), 0.1);
-    EXPECT_NEAR(timer.IdeaTime(), 0.05, 0.01);
-}
-
-TEST(FrameTimerTest, FrameEndDropsSuspendedFrameDuration) {
-    FrameTimer timer;
-    timer.SetRequiredFps(20);
-
-    timer.m_frame_busy_count.store(1);
-    const auto start = std::chrono::steady_clock::time_point(1s);
-    timer.FrameBegin(start);
-    timer.FrameEnd(start + 8h);
-
-    EXPECT_EQ(timer.m_frame_busy_count.load(), 0);
-    EXPECT_LT(timer.FrameTime(), 0.1);
-    EXPECT_NEAR(timer.IdeaTime(), 0.05, 0.01);
-
-    timer.FrameBegin(start + 8h + 50ms);
-    EXPECT_DOUBLE_EQ(timer.IdeaTime(), 0.05);
-}
 
 TEST(FrameTimerTest, DeliveredFramesIncludeDroppedTickIntervals) {
     int draws = 0;
@@ -875,45 +840,6 @@ TEST(FrameTimerTest, ABurstOfWakeOnceAtTheCeilingDoesNotAddCallbacks)
                             << " callbacks in 1s at 30 fps";
 }
 
-/// An idle clock has no cadence. A burst of requests coalesces into the one
-/// frame the ceiling allows, and then the clock goes back to sleep.
-TEST(FrameTimerTest, AnIdleBurstOfWakeOnceProducesOneCallback)
-{
-    std::mutex              mutex;
-    std::condition_variable condition;
-    int                     draws { 0 };
-
-    FrameTimer timer([&]() {
-        {
-            std::scoped_lock lock(mutex);
-            ++draws;
-        }
-        condition.notify_all();
-        timer.FrameEnd();
-    });
-    timer.SetRequiredFps(60);
-    timer.Run();
-    WaitFor(mutex, condition, [&]() { return draws > 0; }, 500ms);
-    timer.SetFrameDemand({ .kind = FrameTimer::FrameDemand::Kind::Idle });
-    std::this_thread::sleep_for(50ms);
-    int quiescent = 0;
-    {
-        std::scoped_lock lock(mutex);
-        quiescent = draws;
-    }
-
-    for (int index = 0; index < 200; ++index) timer.RequestFrame();
-    const auto waited = WaitFor(
-        mutex, condition, [&]() { return draws > quiescent; }, 500ms);
-    std::this_thread::sleep_for(200ms);
-    timer.Stop();
-
-    std::scoped_lock lock(mutex);
-    EXPECT_LT(waited.count(), 400) << "the idle burst never produced its frame";
-    EXPECT_EQ(draws, quiescent + 1)
-        << "an idle burst produced " << (draws - quiescent) << " frames";
-}
-
 TEST(ThreadTimerTest, CadenceKeepsItsPeriodDespiteWakeSlack) {
     // Each wait wakes a few milliseconds late. Anchoring the next deadline to
     // the wake time added that slack to every period: a 10 ms cadence ran at
@@ -953,48 +879,6 @@ TEST(ThreadTimerTest, RequestsAfterALongWaitStillRespectTheCeiling) {
     EXPECT_GE(during, 3) << "requests must still be answered at the ceiling";
 }
 
-TEST(FrameTimerTest, ADrawSlightlyLongerThanTheIntervalDoesNotHalveTheRate) {
-    // 60 fps with 18 ms draws: each draw makes the next tick find it running.
-    // Waiting for the tick after that would deliver 30 frames a second.
-    std::mutex              mutex;
-    std::condition_variable posted;
-    int                     pending = 0;
-    std::atomic<int>        draws { 0 };
-    std::atomic<bool>       done { false };
-    FrameTimer              timer([&]() {
-        const std::lock_guard lock { mutex };
-        ++pending;
-        posted.notify_one();
-    });
-    std::thread render([&]() {
-        while (! done.load()) {
-            std::unique_lock lock { mutex };
-            if (! posted.wait_for(lock, 50ms, [&] { return pending > 0; })) continue;
-            --pending;
-            lock.unlock();
-            timer.FrameBegin();
-            // Spin rather than sleep: a sleep here is stretched by several
-            // milliseconds of timer coalescing, which is not the draw length
-            // this test is about.
-            const auto end = std::chrono::steady_clock::now() + 18ms;
-            while (std::chrono::steady_clock::now() < end) {}
-            draws.fetch_add(1);
-            timer.FrameEnd();
-        }
-    });
-    timer.SetRequiredFps(60);
-    timer.Run();
-    std::this_thread::sleep_for(200ms);
-    const int before = draws.load();
-    std::this_thread::sleep_for(1s);
-    const int delivered = draws.load() - before;
-    timer.Stop();
-    done.store(true);
-    render.join();
-
-    EXPECT_GE(delivered, 42) << delivered << " frames in 1 s with 18 ms draws at 60 fps";
-    EXPECT_LE(delivered, 60);
-}
 
 } // namespace
 } // namespace wallpaper

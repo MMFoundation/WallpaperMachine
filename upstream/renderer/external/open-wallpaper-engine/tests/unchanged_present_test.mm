@@ -1,27 +1,23 @@
-// The compatibility backend leaves out a frame that would put back exactly the
-// picture already on the surface: no drawable, no submission, no present.
+// Native Metal leaves out a frame that would put back exactly the picture
+// already on the surface: no drawable and no present.
 //
 // Driven end to end through `SceneWallpaper` -- the real frame clock, draw
-// handler, texture cache and swapchain -- on a `CAMetalLayer` that is never
-// attached to a window, so no desktop is involved. The renderer counters are
-// the evidence: submissions against selected video frames show that every new
-// frame still reaches the surface, and the selection and skip counts show the
-// playback timeline is the one the unskipped path produces.
+// handler and drawable loop -- on a `CAMetalLayer` that is never attached to a
+// window, so no desktop is involved. The renderer counters are the evidence:
+// draws executed against presents requested and presents skipped show which
+// frames reached the surface. (A plain video is never drawn by the engine, so
+// no video wallpaper appears here.)
 
 #include "Core/RendererCounters.hpp"
 #include "Presentation/WallpaperScaling.hpp"
 #include "Scene/SceneResolution.hpp"
 #include "Scene/SceneWallpaper.hpp"
 #include "Scene/SceneWallpaperSurface.hpp"
-#include "VulkanRender/StaticSubgraphCache.hpp"
-#include "synthetic_video.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
 
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <objc/runtime.h>
-
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_metal.h>
 
 #include <gtest/gtest.h>
 
@@ -34,9 +30,8 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
-#include <memory>
 #include <map>
-#include <optional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -55,7 +50,6 @@ extern "C" int proc_listcoalitions(int flavor, int coalition_type, void* buffer,
 
 using namespace wallpaper;
 using namespace std::chrono_literals;
-namespace testing_media = wallpaper::video::testing_media;
 
 namespace
 {
@@ -286,46 +280,10 @@ std::filesystem::path WriteHistoryScene(const std::filesystem::path& root)
     return project;
 }
 
-/// A 30 fps clip as a plain video wallpaper.
-std::filesystem::path WriteVideoProject(const std::filesystem::path& root)
-{
-    std::filesystem::create_directories(root);
-    EXPECT_TRUE(testing_media::WriteSyntheticVideo(root / "clip.mp4", 4, "unchanged-present"));
-    WriteText(root / "project.json", R"({"title":"Clip","type":"video","file":"clip.mp4"})");
-    return root / "project.json";
-}
-
-/// One video frame the compatibility backend presented.
-struct PresentedFrame
-{
-    uint64_t generation { 0 };
-    double   pts { 0.0 };
-
-    bool operator==(const PresentedFrame&) const = default;
-};
-
-std::ostream& operator<<(std::ostream& out, const PresentedFrame& frame)
-{
-    return out << "{gen " << frame.generation << ", pts " << frame.pts << "}";
-}
-
-/// Presented frames with consecutive repeats of one generation collapsed: the
-/// sequence of distinct pictures that reached the surface.
-std::vector<PresentedFrame> DistinctSequence(const std::vector<PresentedFrame>& presented)
-{
-    std::vector<PresentedFrame> distinct;
-    for (const auto& frame : presented) {
-        if (distinct.empty() || distinct.back().generation != frame.generation)
-            distinct.push_back(frame);
-    }
-    return distinct;
-}
-
 /// A running wallpaper on a layer no window owns.
 class RunningWallpaper {
 public:
-    RunningWallpaper(const std::filesystem::path& project, const std::filesystem::path& scratch,
-                     std::optional<WallpaperScalingMode> scaling = std::nullopt)
+    RunningWallpaper(const std::filesystem::path& project, const std::filesystem::path& scratch)
     {
         m_layer                 = [CAMetalLayer layer];
         m_layer.device          = MTLCreateSystemDefaultDevice();
@@ -341,10 +299,7 @@ public:
                                           m_first_frame = true;
                                           m_changed.notify_all();
                                       }));
-        m_wallpaper.initVulkan(MakeSurface());
-        if (scaling) {
-            m_wallpaper.setPropertyInt32(PROPERTY_SCALINGMODE, static_cast<int32_t>(*scaling));
-        }
+        m_wallpaper.initSurface(MakeSurface());
 
         std::filesystem::create_directories(scratch / "assets");
         SceneWallpaperConfig config;
@@ -380,12 +335,6 @@ public:
         return m_first_frame;
     }
 
-    std::vector<PresentedFrame> Presented() const
-    {
-        std::scoped_lock lock(m_presented->mutex);
-        return m_presented->frames;
-    }
-
     /// Rebuilds the surface and swapchain at a new size, the way the host
     /// does when the display it covers changes resolution.
     bool Resize(uint16_t width, uint16_t height)
@@ -400,42 +349,14 @@ private:
     static constexpr uint16_t kWidth  = 1280;
     static constexpr uint16_t kHeight = 720;
 
-    struct PresentedLog
-    {
-        mutable std::mutex          mutex;
-        std::vector<PresentedFrame> frames;
-    };
-
     RenderInitInfo MakeSurface(uint16_t width = kWidth, uint16_t height = kHeight)
     {
         RenderInitInfo info;
-        void*          handle = (__bridge void*)m_layer;
-        info.metal_layer      = handle;
+        info.metal_layer      = (__bridge void*)m_layer;
         info.width            = width;
         info.height           = height;
         info.render_width     = width;
         info.render_height    = height;
-        auto presented        = m_presented;
-        info.video_frame_presented = [presented](uint64_t generation, double pts) {
-            std::scoped_lock lock(presented->mutex);
-            presented->frames.push_back({ generation, pts });
-        };
-        info.surface_info.instanceExts = {
-            VK_KHR_SURFACE_EXTENSION_NAME,
-            VK_EXT_METAL_SURFACE_EXTENSION_NAME,
-        };
-        info.surface_info.createSurfaceOp = [handle](VkInstance instance, VkSurfaceKHR* surface) {
-            auto* create = reinterpret_cast<PFN_vkCreateMetalSurfaceEXT>(
-                vkGetInstanceProcAddr(instance, "vkCreateMetalSurfaceEXT"));
-            if (create == nullptr) return VK_ERROR_EXTENSION_NOT_PRESENT;
-            const VkMetalSurfaceCreateInfoEXT create_info {
-                .sType  = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
-                .pNext  = nullptr,
-                .flags  = 0,
-                .pLayer = (__bridge CAMetalLayer*)handle,
-            };
-            return create(instance, &create_info, nullptr, surface);
-        };
         auto poster       = m_poster;
         info.bind_poster_wake = [poster](std::function<void()> wake) {
             std::scoped_lock lock(poster->mutex);
@@ -446,10 +367,6 @@ private:
             const bool wanted = poster->requested;
             poster->requested = false;
             return wanted;
-        };
-        info.poster_pending = [poster] {
-            std::scoped_lock lock(poster->mutex);
-            return poster->requested;
         };
         info.poster_ready = [poster](std::span<const uint8_t> pixels, uint32_t, uint32_t, bool) {
             std::scoped_lock lock(poster->mutex);
@@ -462,7 +379,6 @@ private:
 
     CAMetalLayer*                m_layer { nil };
     std::shared_ptr<PosterProbe> m_poster { std::make_shared<PosterProbe>() };
-    std::shared_ptr<PresentedLog> m_presented { std::make_shared<PresentedLog>() };
     SceneWallpaper               m_wallpaper;
     std::mutex                   m_mutex;
     std::condition_variable      m_changed;
@@ -487,9 +403,8 @@ protected:
 
     void TearDown() override
     {
-        vulkan::SetSceneOptimizationEnabled(true);
+        render::SetSceneOptimizationEnabled(true);
         SetSceneOnDemandEnabled(false);
-        SetSceneRendererPreference(SceneRendererPreference::Compatibility);
         RendererCounters::SetEnabled(false);
         std::error_code ignored;
         std::filesystem::remove_all(root_, ignored);
@@ -502,224 +417,17 @@ protected:
 
 TEST_F(UnchangedPresent, PinnedTargetAccountingReturnsToBaselineWhenScenesClose)
 {
-    vulkan::SetSceneOptimizationEnabled(true);
-    const auto baseline = vulkan::CurrentSceneOptimizationTotals().pinned_bytes;
+    render::SetSceneOptimizationEnabled(true);
+    const auto baseline = render::CurrentSceneOptimizationTotals().pinned_bytes;
     const auto project = WriteStaticScene(root_ / "static");
     for (int load = 0; load < 2; ++load) {
         {
             RunningWallpaper running(project, root_ / ("load-" + std::to_string(load)));
             ASSERT_TRUE(running.WaitForFirstFrame());
-            EXPECT_GT(vulkan::CurrentSceneOptimizationTotals().pinned_bytes, baseline);
+            EXPECT_GT(render::CurrentSceneOptimizationTotals().pinned_bytes, baseline);
         }
-        EXPECT_EQ(vulkan::CurrentSceneOptimizationTotals().pinned_bytes, baseline);
+        EXPECT_EQ(render::CurrentSceneOptimizationTotals().pinned_bytes, baseline);
     }
-}
-
-// Fit with blurred backdrop keeps a plain video's repeats skipped: the fill is
-// made from the picture, so a frame that repeats the picture repeats the fill,
-// and its rectangle fits in the presentation key beside everything else.
-TEST_F(UnchangedPresent, ABlurredBackdropStillLetsAPlainVideoSkipItsRepeats)
-{
-    ASSERT_FALSE(testing_media::SharedGop().packets.empty())
-        << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
-    const auto project = WriteVideoProject(root_ / "video");
-    vulkan::SetSceneOptimizationEnabled(true);
-    RunningWallpaper running(project, root_ / "blurred", WallpaperScalingMode::FIT_BLURRED);
-    ASSERT_TRUE(running.WaitForFirstFrame()) << "the video never reached the surface";
-    // Wider than the 16:9 clip, so there is room either side to fill.
-    ASSERT_TRUE(running.Resize(1280, 480));
-    std::this_thread::sleep_for(500ms);
-    const auto before = running.Read();
-    std::this_thread::sleep_for(2000ms);
-    const auto counts = Delta(before, running.Read());
-    Print("blurred backdrop, skip on:  ", counts);
-
-    EXPECT_GT(counts[OWE_RC_PRESENTS_SKIPPED_UNCHANGED], 0u);
-    EXPECT_EQ(counts[OWE_RC_RENDER_FAILURES], 0u);
-    EXPECT_LE(counts[OWE_RC_RENDER_SUBMISSIONS], counts[OWE_RC_VIDEO_FRAMES_SELECTED] + 1)
-        << "a repeated frame was drawn again";
-    EXPECT_GE(counts[OWE_RC_RENDER_SUBMISSIONS] + 1, counts[OWE_RC_VIDEO_FRAMES_SELECTED]);
-}
-
-TEST_F(UnchangedPresent, APlainVideoPresentsEveryNewFrameAndNothingElse)
-{
-    ASSERT_FALSE(testing_media::SharedGop().packets.empty())
-        << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
-    const auto project = WriteVideoProject(root_ / "video");
-
-    constexpr auto kWindow = 2000ms;
-    Counters       baseline {};
-    Counters       skipping {};
-    for (const bool optimise : { false, true }) {
-        vulkan::SetSceneOptimizationEnabled(optimise);
-        RunningWallpaper running(project, root_ / (optimise ? "on" : "off"));
-        ASSERT_TRUE(running.WaitForFirstFrame()) << "the video never reached the surface";
-        std::this_thread::sleep_for(500ms);
-        const auto before = running.Read();
-        std::this_thread::sleep_for(kWindow);
-        (optimise ? skipping : baseline) = Delta(before, running.Read());
-    }
-    Print("baseline (optimisation off):", baseline);
-    Print("unchanged-present skip on:  ", skipping);
-
-    // The baseline draws, submits and presents on every tick.
-    EXPECT_EQ(baseline[OWE_RC_PRESENTS_SKIPPED_UNCHANGED], 0u);
-    ExpectWithinOneDraw(baseline[OWE_RC_RENDER_SUBMISSIONS], baseline[OWE_RC_DRAWS_EXECUTED],
-                        "baseline submissions against draws");
-    EXPECT_EQ(baseline[OWE_RC_RENDER_FAILURES], 0u);
-    ASSERT_GT(baseline[OWE_RC_VIDEO_FRAMES_REUSED], 0u)
-        << "the clock never outran the clip, so this run proves nothing about repeats";
-
-    // With the skip, a tick either presents or is counted as skipped -- never
-    // both, never lost -- and repeats are the only ticks skipped.
-    EXPECT_GT(skipping[OWE_RC_PRESENTS_SKIPPED_UNCHANGED], 0u);
-    ExpectWithinOneDraw(
-        skipping[OWE_RC_RENDER_SUBMISSIONS] + skipping[OWE_RC_PRESENTS_SKIPPED_UNCHANGED],
-        skipping[OWE_RC_DRAWS_EXECUTED], "every draw either presented or counted as a repeat");
-    ExpectWithinOneDraw(skipping[OWE_RC_RENDER_SUBMISSIONS], skipping[OWE_RC_PRESENT_REQUESTS],
-                        "submissions against present requests");
-    EXPECT_EQ(skipping[OWE_RC_RENDER_FAILURES], 0u);
-    EXPECT_LE(skipping[OWE_RC_PRESENTS_SKIPPED_UNCHANGED], skipping[OWE_RC_VIDEO_FRAMES_REUSED] + 1)
-        << "a tick that selected a new frame was skipped";
-    // Every newly selected frame was presented on the tick that selected it.
-    // One either way covers a window edge that splits a draw.
-    EXPECT_GE(skipping[OWE_RC_RENDER_SUBMISSIONS] + 1, skipping[OWE_RC_VIDEO_FRAMES_SELECTED]);
-    EXPECT_LE(skipping[OWE_RC_RENDER_SUBMISSIONS], skipping[OWE_RC_VIDEO_FRAMES_SELECTED] + 1);
-
-    // The playback timeline is the baseline's: no decoded frame went unshown
-    // in either run, and both selected the clip's own rate.
-    EXPECT_EQ(baseline[OWE_RC_VIDEO_FRAMES_SKIPPED], 0u);
-    EXPECT_EQ(skipping[OWE_RC_VIDEO_FRAMES_SKIPPED], 0u);
-    const double seconds = std::chrono::duration<double>(kWindow).count();
-    const double baseline_rate =
-        static_cast<double>(baseline[OWE_RC_VIDEO_FRAMES_SELECTED]) / seconds;
-    const double skipping_rate =
-        static_cast<double>(skipping[OWE_RC_VIDEO_FRAMES_SELECTED]) / seconds;
-    EXPECT_NEAR(baseline_rate, 30.0, 3.0);
-    EXPECT_NEAR(skipping_rate, 30.0, 3.0);
-}
-
-// P02 standard for R1/R4: the skip changes how often a picture is presented,
-// never which pictures are presented. The distinct generations that reached
-// the surface, and their PTS, are the same sequence with the skip on and off.
-TEST_F(UnchangedPresent, TheSkipPresentsTheSameVideoFramesInTheSameOrder)
-{
-    ASSERT_FALSE(testing_media::SharedGop().packets.empty())
-        << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
-    const auto project = WriteVideoProject(root_ / "video");
-
-    std::array<std::vector<PresentedFrame>, 2> presented;
-    for (const bool optimise : { false, true }) {
-        vulkan::SetSceneOptimizationEnabled(optimise);
-        RunningWallpaper running(project, root_ / (optimise ? "on" : "off"));
-        ASSERT_TRUE(running.WaitForFirstFrame()) << "the video never reached the surface";
-        // Well inside the four-second clip, so no loop restarts the timeline.
-        std::this_thread::sleep_for(2500ms);
-        presented[optimise ? 1 : 0] = running.Presented();
-    }
-    const auto& baseline = presented[0];
-    const auto& skipping = presented[1];
-    const auto  baseline_distinct = DistinctSequence(baseline);
-    const auto  skipping_distinct = DistinctSequence(skipping);
-    std::cout << "presents: baseline=" << baseline.size() << " (" << baseline_distinct.size()
-              << " distinct), skip on=" << skipping.size() << " (" << skipping_distinct.size()
-              << " distinct)" << std::endl;
-
-    ASSERT_GT(baseline.size(), baseline_distinct.size())
-        << "the clock never outran the clip, so the baseline repeated nothing";
-    // Only the start may present the first generation twice (observed: the
-    // frame after the first is still drawn in full). From then on no
-    // generation is presented twice.
-    std::size_t repeats_after_start = 0;
-    for (std::size_t i = 2; i < skipping.size(); ++i) {
-        if (skipping[i].generation == skipping[i - 1].generation) ++repeats_after_start;
-    }
-    EXPECT_EQ(repeats_after_start, 0u)
-        << "with the skip on, a generation already on the surface was presented again";
-
-    // Both runs are compared over the frames both reached; the wall-clock
-    // window ends a frame or two apart.
-    const std::size_t common = std::min(baseline_distinct.size(), skipping_distinct.size());
-    ASSERT_GE(common, 60u) << "too short a run to compare";
-    EXPECT_LE(std::max(baseline_distinct.size(), skipping_distinct.size()) - common, 3u);
-    const std::vector<PresentedFrame> baseline_prefix(baseline_distinct.begin(),
-                                                      baseline_distinct.begin() + common);
-    const std::vector<PresentedFrame> skipping_prefix(skipping_distinct.begin(),
-                                                      skipping_distinct.begin() + common);
-    EXPECT_EQ(baseline_prefix, skipping_prefix)
-        << "the skip changed which video frames reached the surface";
-
-    // And that sequence is the clip itself: every frame, in PTS order, none
-    // left out -- so equality above is not two runs dropping alike.
-    for (std::size_t i = 1; i < common; ++i) {
-        EXPECT_EQ(skipping_prefix[i].generation, skipping_prefix[i - 1].generation + 1) << i;
-        EXPECT_NEAR(skipping_prefix[i].pts - skipping_prefix[i - 1].pts, 1.0 / 30.0, 1e-3) << i;
-    }
-}
-
-TEST_F(UnchangedPresent, ARepeatedVideoFramePresentsAgainOnlyWhenSomethingChanges)
-{
-    ASSERT_FALSE(testing_media::SharedGop().packets.empty())
-        << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
-    const auto project = WriteVideoProject(root_ / "video");
-    vulkan::SetSceneOptimizationEnabled(true);
-    RunningWallpaper running(project, root_ / "run");
-    ASSERT_TRUE(running.WaitForFirstFrame());
-
-    // Speed zero holds the clip on one frame while the clock keeps ticking.
-    running.wallpaper().setPropertyFloat(PROPERTY_SPEED, 0.0f);
-    std::this_thread::sleep_for(500ms);
-    const auto held_start = running.Read();
-    std::this_thread::sleep_for(700ms);
-    const auto held = running.Read();
-    const auto quiet = Delta(held_start, held);
-    Print("held frame:", quiet);
-    EXPECT_EQ(quiet[OWE_RC_RENDER_SUBMISSIONS], 0u) << "a held frame was submitted again";
-    EXPECT_EQ(quiet[OWE_RC_PRESENT_REQUESTS], 0u);
-    EXPECT_GE(quiet[OWE_RC_PRESENTS_SKIPPED_UNCHANGED], 10u);
-    ExpectWithinOneDraw(quiet[OWE_RC_PRESENTS_SKIPPED_UNCHANGED], quiet[OWE_RC_DRAWS_EXECUTED],
-                        "every held tick counted as a repeat");
-
-    // A layout change moves the picture without a new video frame.
-    running.wallpaper().setPropertyBool(PROPERTY_HORIZONTAL_FLIP, true);
-    std::this_thread::sleep_for(400ms);
-    const auto flipped = running.Read();
-    EXPECT_EQ(Delta(held, flipped)[OWE_RC_RENDER_SUBMISSIONS], 1u)
-        << "a flip must present exactly once and then repeat again";
-
-    // So does moving the picture inside the room the layout leaves around it,
-    // set through the scene's own entry point, which reaches the renderer by
-    // the same message every live setting takes.
-    running.wallpaper().setFraming({ 0.0, 1.0 });
-    std::this_thread::sleep_for(400ms);
-    const auto panned = running.Read();
-    EXPECT_EQ(Delta(flipped, panned)[OWE_RC_RENDER_SUBMISSIONS], 1u)
-        << "a position change must present exactly once and then repeat again";
-    EXPECT_GE(Delta(flipped, panned)[OWE_RC_PRESENTS_SKIPPED_UNCHANGED], 5u)
-        << "the held frame did not go back to repeating after the position change";
-
-    // A poster can only be exported from a presented frame, so a pending
-    // request is answered by drawing, once.
-    running.poster().Request();
-    ASSERT_TRUE(running.poster().WaitDelivered(1)) << "a poster requested during a held frame "
-                                                      "was never exported";
-    std::this_thread::sleep_for(300ms);
-    const auto postered = running.Read();
-    EXPECT_EQ(Delta(panned, postered)[OWE_RC_RENDER_SUBMISSIONS], 1u);
-    {
-        std::scoped_lock lock(running.poster().mutex);
-        EXPECT_EQ(running.poster().delivered, 1);
-        EXPECT_FALSE(running.poster().pixels.empty());
-    }
-
-    // The first frame after a resume presents: something else may have been
-    // on the surface while the wallpaper was stopped.
-    running.wallpaper().pause();
-    std::this_thread::sleep_for(300ms);
-    running.wallpaper().play();
-    std::this_thread::sleep_for(400ms);
-    const auto resumed = running.Read();
-    EXPECT_EQ(Delta(postered, resumed)[OWE_RC_RENDER_SUBMISSIONS], 1u);
 }
 
 TEST_F(UnchangedPresent, AStaticSceneStopsPresentingOnceEveryPassIsReused)
@@ -728,7 +436,7 @@ TEST_F(UnchangedPresent, AStaticSceneStopsPresentingOnceEveryPassIsReused)
 
     std::array<std::vector<uint8_t>, 2> pictures;
     for (const bool optimise : { false, true }) {
-        vulkan::SetSceneOptimizationEnabled(optimise);
+        render::SetSceneOptimizationEnabled(optimise);
         RunningWallpaper running(project, root_ / (optimise ? "on" : "off"));
         ASSERT_TRUE(running.WaitForFirstFrame()) << "the scene never reached the surface";
         std::this_thread::sleep_for(600ms);
@@ -761,19 +469,19 @@ TEST_F(UnchangedPresent, AStaticSceneStopsPresentingOnceEveryPassIsReused)
                                  "baseline presents against draws executed");
         }
         if (optimise) {
-            EXPECT_EQ(delta[OWE_RC_RENDER_SUBMISSIONS], 0u)
+            EXPECT_EQ(delta[OWE_RC_PRESENT_REQUESTS], 0u)
                 << "a scene with every pass reused was still submitted";
             ExpectWithinOneDraw(delta[OWE_RC_PRESENTS_SKIPPED_UNCHANGED],
                                 delta[OWE_RC_DRAWS_EXECUTED], "every reused tick skipped");
         } else {
-            ExpectWithinOneDraw(delta[OWE_RC_RENDER_SUBMISSIONS], delta[OWE_RC_DRAWS_EXECUTED],
+            ExpectWithinOneDraw(delta[OWE_RC_PRESENT_REQUESTS], delta[OWE_RC_DRAWS_EXECUTED],
                                 "baseline submissions against draws");
             EXPECT_EQ(delta[OWE_RC_PRESENTS_SKIPPED_UNCHANGED], 0u);
         }
 
         // The presented picture, read back through the poster path: with the
         // skip on it is the frame the reused passes produced.
-        running.poster().Request();
+        running.poster().Request(true);
         ASSERT_TRUE(running.poster().WaitDelivered(1));
         {
             std::scoped_lock lock(running.poster().mutex);
@@ -785,8 +493,9 @@ TEST_F(UnchangedPresent, AStaticSceneStopsPresentingOnceEveryPassIsReused)
             running.wallpaper().setPropertyInt32(PROPERTY_SCALINGMODE, 2);
             std::this_thread::sleep_for(400ms);
             const auto rescaled = Delta(after, running.Read());
-            // One for the poster, one for the scaling change.
-            EXPECT_EQ(rescaled[OWE_RC_RENDER_SUBMISSIONS], 2u);
+            // The scaling change presents once; the poster is read back from the
+            // last finished composition and presents nothing.
+            EXPECT_EQ(rescaled[OWE_RC_PRESENT_REQUESTS], 1u);
         }
     }
     ASSERT_FALSE(pictures[0].empty());
@@ -797,9 +506,8 @@ TEST_F(UnchangedPresent, AStaticSceneStopsPresentingOnceEveryPassIsReused)
 // "Update only when the scene changes": a history loop keeps changing the
 // picture with nothing else changing -- a trail keeps fading, an accumulation
 // keeps converging -- so it must keep the clock running although no shader
-// reads the time, with pixel reuse off and on, on either renderer. The same
-// card without the loop is the control: it goes idle, so the loop is what
-// keeps the clock.
+// reads the time, with pixel reuse off and on. The same card without the loop
+// is the control: it goes idle, so the loop is what keeps the clock.
 TEST_F(UnchangedPresent, AHistoryLoopKeepsTheClockRunningWithoutATimeUniform)
 {
     SetSceneOnDemandEnabled(true);
@@ -808,24 +516,18 @@ TEST_F(UnchangedPresent, AHistoryLoopKeepsTheClockRunningWithoutATimeUniform)
         const char* name;
         bool        history;
         bool        optimise;
-        bool        native;
     };
-    for (const auto& run : { Case { "still card", false, true, false },
-                             Case { "history loop, reuse off", true, false, false },
-                             Case { "history loop, reuse on", true, true, false },
-                             Case { "still card, native", false, true, true },
-                             Case { "history loop, native", true, true, true } }) {
+    for (const auto& run : { Case { "still card", false, true },
+                             Case { "history loop, reuse off", true, false },
+                             Case { "history loop, reuse on", true, true } }) {
         SCOPED_TRACE(run.name);
-        vulkan::SetSceneOptimizationEnabled(run.optimise);
-        SetSceneRendererPreference(run.native ? SceneRendererPreference::NativeMetalPreferred
-                                              : SceneRendererPreference::Compatibility);
+        render::SetSceneOptimizationEnabled(run.optimise);
         const auto scene = root_ / (std::string(run.name) + " scene");
         const auto project = run.history ? WriteHistoryScene(scene) : WriteStaticScene(scene);
         RunningWallpaper running(project, root_ / (std::string(run.name) + " run"));
         ASSERT_TRUE(running.WaitForFirstFrame()) << "the scene never reached the surface";
-        ASSERT_EQ(running.wallpaper().sceneBackendSelection().backend,
-                  run.native ? SceneBackend::NativeMetal : SceneBackend::LegacyVulkan)
-            << running.wallpaper().sceneBackendSelection().fallback_reason;
+        ASSERT_FALSE(running.wallpaper().sceneBackendSelection().failed())
+            << running.wallpaper().sceneBackendSelection().failure_reason;
         std::this_thread::sleep_for(600ms);
 
         const uint32_t reasons = running.wallpaper().sceneDemandReasons();
@@ -851,10 +553,9 @@ TEST_F(UnchangedPresent, AHistoryLoopKeepsTheClockRunningWithoutATimeUniform)
 
 // The 2D scene resolution is a process-wide choice with no message of its own:
 // the host sets it and re-sends the render scale every open scene already has,
-// and a running scene resizes its targets in place, on either renderer, with
-// nothing reloaded. The scene's own shader reports the raster it was drawn
+// and a running scene resizes its targets in place, with nothing reloaded. The scene's own shader reports the raster it was drawn
 // into, so the poster says what was rasterized rather than what was asked for.
-TEST_F(UnchangedPresent, ARunningSceneTakesTheResolutionTheHostChoosesOnBothRenderers)
+TEST_F(UnchangedPresent, ARunningSceneTakesTheResolutionTheHostChooses)
 {
     struct Restore
     {
@@ -862,16 +563,12 @@ TEST_F(UnchangedPresent, ARunningSceneTakesTheResolutionTheHostChoosesOnBothRend
     } restore;
     const auto project = WriteRasterProbeScene(root_ / "probe");
 
-    for (const bool native : { false, true }) {
-        SCOPED_TRACE(native ? "native Metal" : "compatibility");
-        SetSceneRendererPreference(native ? SceneRendererPreference::NativeMetalPreferred
-                                          : SceneRendererPreference::Compatibility);
+    {
         SetSceneResolution(SceneResolution::Canvas);
-        RunningWallpaper running(project, root_ / (native ? "native" : "compat"));
+        RunningWallpaper running(project, root_ / "run");
         ASSERT_TRUE(running.WaitForFirstFrame());
-        ASSERT_EQ(running.wallpaper().sceneBackendSelection().backend == SceneBackend::NativeMetal,
-                  native)
-            << running.wallpaper().sceneBackendSelection().fallback_reason;
+        ASSERT_FALSE(running.wallpaper().sceneBackendSelection().failed())
+            << running.wallpaper().sceneBackendSelection().failure_reason;
 
         // The colour at the middle of the 1280 x 720 poster.
         int delivered = 0;
@@ -924,7 +621,7 @@ TEST_F(UnchangedPresent, APropertyPreviewShowsOnAStillSceneAndWakesAnIdleOneForO
         ~RestoreOnDemand() { SetSceneOnDemandEnabled(was); }
     } restore;
     const auto project = WriteSliderScene(root_ / "slider");
-    vulkan::SetSceneOptimizationEnabled(true);
+    render::SetSceneOptimizationEnabled(true);
 
     for (const bool on_demand : { false, true }) {
         SCOPED_TRACE(on_demand ? "on-demand clock" : "fixed cadence");
@@ -938,7 +635,7 @@ TEST_F(UnchangedPresent, APropertyPreviewShowsOnAStillSceneAndWakesAnIdleOneForO
         // the clock runs, and the stopped one is judged by what it presented.
         std::vector<uint8_t> before;
         if (! on_demand) {
-            running.poster().Request();
+            running.poster().Request(true);
             ASSERT_TRUE(running.poster().WaitDelivered(1));
             std::scoped_lock lock(running.poster().mutex);
             before = running.poster().pixels;
@@ -950,7 +647,7 @@ TEST_F(UnchangedPresent, APropertyPreviewShowsOnAStillSceneAndWakesAnIdleOneForO
                                               R"({"opacity":0.5})");
         std::this_thread::sleep_for(400ms);
         const auto previewed = running.Read();
-        EXPECT_EQ(Delta(still, previewed)[OWE_RC_RENDER_SUBMISSIONS], 1u)
+        EXPECT_EQ(Delta(still, previewed)[OWE_RC_PRESENT_REQUESTS], 1u)
             << "a previewed slider must present exactly once and then repeat again";
         if (on_demand) {
             EXPECT_EQ(Delta(still, previewed)[OWE_RC_DRAWS_EXECUTED], 1u)
@@ -959,7 +656,7 @@ TEST_F(UnchangedPresent, APropertyPreviewShowsOnAStillSceneAndWakesAnIdleOneForO
 
         std::this_thread::sleep_for(400ms);
         const auto settled = running.Read();
-        EXPECT_EQ(Delta(previewed, settled)[OWE_RC_RENDER_SUBMISSIONS], 0u)
+        EXPECT_EQ(Delta(previewed, settled)[OWE_RC_PRESENT_REQUESTS], 0u)
             << "the scene did not go back to repeating";
         if (on_demand) {
             EXPECT_EQ(Delta(previewed, settled)[OWE_RC_DRAWS_EXECUTED], 0u)
@@ -967,7 +664,7 @@ TEST_F(UnchangedPresent, APropertyPreviewShowsOnAStillSceneAndWakesAnIdleOneForO
         }
 
         if (! on_demand) {
-            running.poster().Request();
+            running.poster().Request(true);
             ASSERT_TRUE(running.poster().WaitDelivered(2));
             std::scoped_lock lock(running.poster().mutex);
             ASSERT_FALSE(before.empty());
@@ -975,55 +672,6 @@ TEST_F(UnchangedPresent, APropertyPreviewShowsOnAStillSceneAndWakesAnIdleOneForO
                 << "the previewed slider changed nothing that was presented";
         }
     }
-}
-
-// The triggers ARepeatedVideoFramePresentsAgainOnlyWhenSomethingChanges does
-// not cover: each changes the presented picture without a new video frame, so
-// each must present once -- the held frame, again -- and then repeat again.
-TEST_F(UnchangedPresent, OutputChangesOnAHeldVideoFramePresentOnceEach)
-{
-    ASSERT_FALSE(testing_media::SharedGop().packets.empty())
-        << "VideoToolbox H.264 encoding is unavailable, so no synthetic media can be made";
-    const auto project = WriteVideoProject(root_ / "video");
-    vulkan::SetSceneOptimizationEnabled(true);
-    RunningWallpaper running(project, root_ / "run");
-    ASSERT_TRUE(running.WaitForFirstFrame());
-
-    running.wallpaper().setPropertyFloat(PROPERTY_SPEED, 0.0f);
-    std::this_thread::sleep_for(500ms);
-
-    const auto expect_one_present = [&](const char* what, const auto& change) {
-        const auto before       = running.Read();
-        const auto presented_at = running.Presented().size();
-        change();
-        std::this_thread::sleep_for(400ms);
-        const auto delta     = Delta(before, running.Read());
-        const auto presented = running.Presented();
-        EXPECT_EQ(delta[OWE_RC_RENDER_SUBMISSIONS], 1u) << what << " must present exactly once";
-        EXPECT_GE(delta[OWE_RC_PRESENTS_SKIPPED_UNCHANGED], 5u)
-            << what << ": the held frame did not go back to repeating";
-        ASSERT_EQ(presented.size(), presented_at + 1) << what;
-        ASSERT_GT(presented_at, 0u);
-        EXPECT_EQ(presented.back(), presented[presented_at - 1])
-            << what << " presented a different video frame, not the held one";
-    };
-
-    // Crop and fill: the user's zoom, and the fill mode.
-    expect_one_present("a scaling-factor (crop) change", [&] {
-        running.wallpaper().setPropertyFloat(PROPERTY_SCALINGFACTOR, 1.5f);
-    });
-    expect_one_present("a position change", [&] {
-        running.wallpaper().setFraming({ 1.0, 0.0 });
-    });
-    expect_one_present("a render-scale change", [&] {
-        running.wallpaper().setPropertyFloat(PROPERTY_RENDER_SCALE, 0.5f);
-    });
-    // 4:3, so fitting and stretching the 16:9 clip differ afterwards.
-    expect_one_present("a surface resize", [&] { ASSERT_TRUE(running.Resize(1024, 768)); });
-    expect_one_present("a fill-mode change", [&] {
-        running.wallpaper().setPropertyInt32(PROPERTY_FILLMODE,
-                                             static_cast<int32_t>(FillMode::STRETCH));
-    });
 }
 
 // A surface that has been drawing and then fails a frame stops, says so, and
@@ -1105,8 +753,7 @@ namespace
 {
 
 /// GPU time of every Metal command buffer this process commits, whichever
-/// renderer made it: Compatibility's come from MoltenVK and the native
-/// backend's from itself, but both are command buffers of the one device.
+/// code made it: they are all command buffers of the one device.
 /// Counted from each buffer's own GPU start and end, so other processes'
 /// work on the GPU is not in it.
 std::atomic<uint64_t> g_command_buffer_gpu_ns { 0 };
@@ -1218,10 +865,6 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
         const char* value = std::getenv(name);
         return value != nullptr ? std::strtod(value, nullptr) : fallback;
     };
-    const std::string_view renderer =
-        std::getenv("WE_TEST_ENERGY_RENDERER") != nullptr ? std::getenv("WE_TEST_ENERGY_RENDERER")
-                                                          : "compatibility";
-    const bool native = renderer == "native";
     // The 2D scene resolution the run draws at, and the backing scale of the
     // surface it draws on: a 3456 x 2234 surface at 2 is a laptop panel.
     const char* resolution_name = std::getenv("WE_TEST_ENERGY_RESOLUTION");
@@ -1252,9 +895,7 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
 
     // Production defaults: counting off, scene optimisation on.
     RendererCounters::SetEnabled(false);
-    vulkan::SetSceneOptimizationEnabled(true);
-    SetSceneRendererPreference(native ? SceneRendererPreference::NativeMetalPreferred
-                                      : SceneRendererPreference::Compatibility);
+    render::SetSceneOptimizationEnabled(true);
     SetSceneResolution(display ? SceneResolution::Display : SceneResolution::Canvas);
     struct RestoreResolution
     {
@@ -1275,6 +916,10 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
 
     SceneWallpaper wallpaper;
     ASSERT_TRUE(wallpaper.init());
+    // A measurement makes no sound, whatever the scene mounts: muted before the
+    // scene exists, so no output device is ever started for it.
+    wallpaper.setPropertyBool(PROPERTY_MUTED, true);
+    wallpaper.setPropertyFloat(PROPERTY_VOLUME, 0.0f);
     wallpaper.setPropertyObject(PROPERTY_FIRST_FRAME_CALLBACK,
                                 std::make_shared<FirstFrameCallback>([&] {
                                     std::scoped_lock lock(mutex);
@@ -1282,28 +927,13 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
                                     changed.notify_all();
                                 }));
     RenderInitInfo info;
-    void*          handle = (__bridge void*)layer;
-    info.metal_layer      = handle;
+    info.metal_layer      = (__bridge void*)layer;
     info.width            = width;
     info.height           = height;
     info.render_width     = width;
     info.render_height    = height;
     info.display_scale_factor = scale_factor;
-    info.surface_info.instanceExts = { VK_KHR_SURFACE_EXTENSION_NAME,
-                                       VK_EXT_METAL_SURFACE_EXTENSION_NAME };
-    info.surface_info.createSurfaceOp = [handle](VkInstance instance, VkSurfaceKHR* surface) {
-        auto* create = reinterpret_cast<PFN_vkCreateMetalSurfaceEXT>(
-            vkGetInstanceProcAddr(instance, "vkCreateMetalSurfaceEXT"));
-        if (create == nullptr) return VK_ERROR_EXTENSION_NOT_PRESENT;
-        const VkMetalSurfaceCreateInfoEXT create_info {
-            .sType  = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
-            .pNext  = nullptr,
-            .flags  = 0,
-            .pLayer = (__bridge CAMetalLayer*)handle,
-        };
-        return create(instance, &create_info, nullptr, surface);
-    };
-    wallpaper.initVulkan(info);
+    wallpaper.initSurface(info);
     if (scaling_name != "default") {
         wallpaper.setPropertyInt32(PROPERTY_SCALINGMODE,
                                    static_cast<int32_t>(scaling_modes.at(scaling_name)));
@@ -1331,10 +961,10 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
     const double seconds = std::chrono::duration<double>(after.at - before.at).count();
     const uint64_t completed = after.health.frames_completed - before.health.frames_completed;
     const uint64_t presented = after.health.frames_presented - before.health.frames_presented;
-    std::cout << "ENERGY {\"renderer\":\"" << renderer << "\",\"scaling\":\"" << scaling_name
+    std::cout << "ENERGY {\"renderer\":\"native\",\"scaling\":\"" << scaling_name
               << "\",\"resolution\":\""
               << (display ? "display" : "canvas") << "\",\"backend\":\""
-              << (selection.backend == SceneBackend::NativeMetal ? "native" : "compatibility")
+              << (selection.failed() ? "held" : "native")
               << "\",\"seconds\":" << seconds
               << ",\"cpu_seconds\":" << (after.cpu_seconds - before.cpu_seconds)
               << ",\"cpu_mj\":" << double(after.cpu_energy_nj - before.cpu_energy_nj) / 1e6
@@ -1345,7 +975,7 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
               << ",\"frames_completed\":" << completed << ",\"frames_presented\":" << presented
               << ",\"footprint_mb\":" << double(after.footprint) / 1048576.0
               << ",\"failed_frames\":" << after.health.failed_frames << "}" << std::endl;
-    EXPECT_EQ(selection.backend == SceneBackend::NativeMetal, native) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
     EXPECT_GT(completed, 0u) << "the wallpaper stopped drawing during the window";
     EXPECT_EQ(after.health.failed_frames, 0u);
 }

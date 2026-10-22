@@ -252,9 +252,9 @@ final class InspectorPolicyTests: InspectorTestCase {
     }
   }
 
-  // MARK: Position
+  // MARK: Frame rate
 
-  func testOnlyTheDisplayTheNativePlayerDrawsOnSaysSoAndOffersPerformance() {
+  func testADisplayTheNativePlayerDrawsOnHasNoFrameRateToSet() {
     let snapshot = BridgeSnapshotFixtures.options(
       wallpaperId: "clip", kind: .video,
       displayConfigurations: [
@@ -264,7 +264,9 @@ final class InspectorPolicyTests: InspectorTestCase {
     var inputs = InspectorOptions.Inputs()
     inputs.nativePlayerDisplays = [1]
     let displays = InspectorOptions.make(snapshot, inputs: inputs).displays
-    XCTAssertEqual(displays.map(InspectorPolicy.positionNote(for:)), [.nativePlayer, .explains])
+    XCTAssertEqual(
+      displays.map(InspectorPolicy.offersFrameRate(for:)), [false, true],
+      "a clip plays at its own rate on the native player; another display of it keeps the row")
   }
 
   func testFitWithBlurredBackdropIsOfferedWhereAScalingModeMovesThePicture() {

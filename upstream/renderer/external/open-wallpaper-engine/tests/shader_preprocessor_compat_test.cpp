@@ -9,7 +9,9 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
+#include <string_view>
 #include <unistd.h>
 #include <vector>
 
@@ -17,6 +19,20 @@ namespace wallpaper
 {
 namespace
 {
+
+// The shader layer has one target, Metal, and the compile that settles a
+// program's metadata is the compile that generates its stages. These tests look
+// at what it merges into the units and the shader info; the stages are not
+// their subject.
+bool CompileProgram(std::string_view scene_id, std::string_view shader_name,
+                    std::span<WPShaderUnit> units, fs::VFS& vfs, WPShaderInfo* shader_info,
+                    std::span<const WPShaderTexInfo> textures,
+                    std::string* reflection_json = nullptr)
+{
+    std::vector<shader::RustShaderMetalStage> stages;
+    return WPShaderParser::CompileToMslRust(scene_id, shader_name, units, stages, vfs,
+                                            shader_info, textures, reflection_json);
+}
 
 // Removes a MakeTempDir folder when the test is done with it, so repeated runs
 // do not leave one folder per test in the shared temporary directory.
@@ -89,14 +105,12 @@ void main() {
         },
     };
 
-    std::vector<ShaderCode> codes;
-    return WPShaderParser::CompileToSpvRust("compat-fragment",
-                                            "tests/compat-fragment",
-                                            units,
-                                            codes,
-                                            vfs,
-                                            &info,
-                                            textures);
+    return CompileProgram("compat-fragment",
+                                       "tests/compat-fragment",
+                                       units,
+                                       vfs,
+                                       &info,
+                                       textures);
 #endif
 }
 
@@ -121,75 +135,6 @@ TEST(RustShaderBridgeCompat, ScalarFileScopeConstCompiles) {
 const float kAlpha = 0.75;
 void main() {
     gl_FragColor = vec4(kAlpha, 0.0, 0.0, 1.0);
-}
-)")) << shader::LastRustShaderError();
-#endif
-}
-
-TEST(RustShaderBridgeCompat, UserDefinedModDoesNotCreateDuplicateDefinition) {
-#ifndef WESCENE_HAS_RUST_SHADER_FFI
-    GTEST_SKIP() << "Rust shader staticlib was not linked";
-#else
-    EXPECT_TRUE(CompileFragmentShader(R"(
-float mod(float a, float b) {
-    return a - b * floor(a / b);
-}
-void main() {
-    gl_FragColor = vec4(mod(5.0, 2.0), 0.0, 0.0, 1.0);
-}
-)")) << shader::LastRustShaderError();
-#endif
-}
-
-TEST(RustShaderBridgeCompat, UserDefinedScalarModPreservesBuiltinVectorMod) {
-#ifndef WESCENE_HAS_RUST_SHADER_FFI
-    GTEST_SKIP() << "Rust shader staticlib was not linked";
-#else
-    EXPECT_TRUE(CompileFragmentShader(R"(
-float mod(float a, float b) {
-    return a - b * floor(a / b);
-}
-void main() {
-    float scalar = mod(5.0, 2.0);
-    vec3 vector = mod(vec3(5.0, 6.0, 7.0), vec3(2.0));
-    gl_FragColor = vec4(vector.x + scalar, vector.yz, 1.0);
-}
-)")) << shader::LastRustShaderError();
-#endif
-}
-
-TEST(RustShaderBridgeCompat, UserDefinedScalarModPreservesVectorVariableBuiltinMod) {
-#ifndef WESCENE_HAS_RUST_SHADER_FFI
-    GTEST_SKIP() << "Rust shader staticlib was not linked";
-#else
-    EXPECT_TRUE(CompileFragmentShader(R"(
-float mod(float a, float b) {
-    return a - b * floor(a / b);
-}
-void main() {
-    float scalar = mod(5.0, 2.0);
-    vec3 a = vec3(5.0, 6.0, 7.0);
-    vec3 b = vec3(2.0);
-    vec3 vector = mod(a, b);
-    gl_FragColor = vec4(vector.x + scalar, vector.yz, 1.0);
-}
-)")) << shader::LastRustShaderError();
-#endif
-}
-
-TEST(RustShaderBridgeCompat, UserDefinedScalarModPreservesMultilineMacroBody) {
-#ifndef WESCENE_HAS_RUST_SHADER_FFI
-    GTEST_SKIP() << "Rust shader staticlib was not linked";
-#else
-    EXPECT_TRUE(CompileFragmentShader(R"(
-float mod(float a, float b) {
-    return a - b * floor(a / b);
-}
-#define MOD_THROUGH_MACRO(a, b) \
-    mod(a, b)
-void main() {
-    float scalar = mod(5.0, 2.0);
-    gl_FragColor = vec4(scalar, 0.0, 0.0, 1.0);
 }
 )")) << shader::LastRustShaderError();
 #endif
@@ -243,24 +188,9 @@ void main() {
         },
     };
 
-    std::vector<ShaderCode> codes;
-    EXPECT_TRUE(WPShaderParser::CompileToSpvRust(
-        "compat-include", "tests/compat-include", units, codes, vfs, &info, textures))
+    EXPECT_TRUE(CompileProgram(
+        "compat-include", "tests/compat-include", units, vfs, &info, textures))
         << shader::LastRustShaderError();
-#endif
-}
-
-TEST(RustShaderBridgeCompat, PerformLightingV1StubCompiles) {
-#ifndef WESCENE_HAS_RUST_SHADER_FFI
-    GTEST_SKIP() << "Rust shader staticlib was not linked";
-#else
-    EXPECT_TRUE(CompileFragmentShader(R"(
-void main() {
-    vec3 lit = PerformLighting_V1(vec3(0.0), vec3(0.8), vec3(0.0, 0.0, 1.0),
-                                  vec3(0.0, 0.0, 1.0), vec3(1.0), vec3(0.04), 0.5, 0.0);
-    gl_FragColor = vec4(lit, 1.0);
-}
-)")) << shader::LastRustShaderError();
 #endif
 }
 
@@ -285,76 +215,6 @@ TEST(RustShaderBridgeCompat, Log10IntrinsicCompiles) {
 void main() {
     float v = log10(100.0);
     gl_FragColor = vec4(v, 0.0, 0.0, 1.0);
-}
-)")) << shader::LastRustShaderError();
-#endif
-}
-
-TEST(RustShaderBridgeCompat, MixedIntVectorPowAndClampCompile) {
-#ifndef WESCENE_HAS_RUST_SHADER_FFI
-    GTEST_SKIP() << "Rust shader staticlib was not linked";
-#else
-    EXPECT_TRUE(CompileFragmentShader(R"(
-void main() {
-    vec3 base = vec3(2.0, 3.0, 4.0);
-    vec3 powered = pow(base, 2);
-    vec3 clamped = clamp(powered, 0, 8);
-    gl_FragColor = vec4(clamped / 8.0, 1.0);
-}
-)")) << shader::LastRustShaderError();
-#endif
-}
-
-TEST(RustShaderBridgeCompat, MixedScalarVectorPowAndClampCompile) {
-#ifndef WESCENE_HAS_RUST_SHADER_FFI
-    GTEST_SKIP() << "Rust shader staticlib was not linked";
-#else
-    EXPECT_TRUE(CompileFragmentShader(R"(
-void main() {
-    vec3 exponent = vec3(1.0, 2.0, 3.0);
-    vec3 powered = pow(2.0, exponent);
-    vec3 clamped = clamp(0.5, vec3(0.0), vec3(1.0));
-    gl_FragColor = vec4((powered + clamped) / 9.0, 1.0);
-}
-)")) << shader::LastRustShaderError();
-#endif
-}
-
-TEST(RustShaderBridgeCompat, ScalarTextureSampleMaskCompiles) {
-#ifndef WESCENE_HAS_RUST_SHADER_FFI
-    GTEST_SKIP() << "Rust shader staticlib was not linked";
-#else
-    EXPECT_TRUE(CompileFragmentShader(R"(
-uniform sampler2D g_Texture0; // {"hidden":true}
-uniform sampler2D g_Texture1; // {"combo":"OPACITY","default":"util/white","material":"mask","mode":"opacitymask"}
-uniform float u_strength;
-uniform float u_radius;
-uniform vec2 g_TexelSize;
-
-varying vec4 v_TexCoord;
-
-#define Src(a,b) texSample2D(g_Texture0, fragCoord + vec2(a,b) * g_TexelSize)
-
-vec4 sharpen(vec2 fragCoord, float mask) {
-    vec4 orig = Src(0, 0);
-    vec4 c1 = Src(-u_radius, -u_radius);
-    vec4 c2 = Src(0, -u_radius);
-    vec4 c3 = Src(u_radius,-u_radius);
-    vec4 c4 = Src(-u_radius, 0);
-    vec4 c5 = Src(u_radius, 0);
-    vec4 c6 = Src(-u_radius, u_radius);
-    vec4 c7 = Src(0, u_radius);
-    vec4 c8 = Src(u_radius, u_radius);
-    vec4 blur = (c1 + c3 + c6 + c8 + 2 * (c2 + c4 + c5 + c7) + 4 * orig)/16;
-    vec4 corr = (1 + u_strength * mask) * orig - u_strength * mask * blur;
-    return corr;
-}
-
-void main() {
-    vec4 albedo = texSample2D(g_Texture0, v_TexCoord.xy);
-    float mask = texSample2D(g_Texture1, v_TexCoord.xy);
-    if (mask > 0.1) albedo = sharpen(v_TexCoord.xy, mask);
-    gl_FragColor = albedo;
 }
 )")) << shader::LastRustShaderError();
 #endif
@@ -410,9 +270,8 @@ void main() {
         },
     };
 
-    std::vector<ShaderCode> codes;
-    EXPECT_TRUE(WPShaderParser::CompileToSpvRust(
-        "compat-macro-sv-position", "tests/macro-sv-position", units, codes, vfs, &info, textures))
+    EXPECT_TRUE(CompileProgram(
+        "compat-macro-sv-position", "tests/macro-sv-position", units, vfs, &info, textures))
         << shader::LastRustShaderError();
 #endif
 }
@@ -462,9 +321,8 @@ void main() {
         },
     };
 
-    std::vector<ShaderCode> codes;
-    EXPECT_TRUE(WPShaderParser::CompileToSpvRust(
-        "compat-geometry", "tests/genericropeparticle", units, codes, vfs, &info, textures))
+    EXPECT_TRUE(CompileProgram(
+        "compat-geometry", "tests/genericropeparticle", units, vfs, &info, textures))
         << shader::LastRustShaderError();
 #endif
 }

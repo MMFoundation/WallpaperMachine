@@ -5,51 +5,78 @@
 #include <array>
 #include <limits>
 
-namespace wallpaper::audio
-{
-namespace
-{
-
 TEST(AudioSampleMathTest, ClampVolumeRejectsInvalidValues) {
-    EXPECT_FLOAT_EQ(ClampVolume(-0.25f), 0.0f);
-    EXPECT_FLOAT_EQ(ClampVolume(0.5f), 0.5f);
-    EXPECT_FLOAT_EQ(ClampVolume(1.25f), 1.0f);
-    EXPECT_FLOAT_EQ(ClampVolume(std::numeric_limits<float>::infinity()), 1.0f);
-    EXPECT_FLOAT_EQ(ClampVolume(std::numeric_limits<float>::quiet_NaN()), 1.0f);
+    using wallpaper::audio::ClampVolume;
+
+    EXPECT_FLOAT_EQ(ClampVolume(-3.5F), 0.0F);
+    EXPECT_FLOAT_EQ(ClampVolume(0.0F), 0.0F);
+    EXPECT_FLOAT_EQ(ClampVolume(0.375F), 0.375F);
+    EXPECT_FLOAT_EQ(ClampVolume(1.0F), 1.0F);
+    EXPECT_FLOAT_EQ(ClampVolume(2.75F), 1.0F);
+    EXPECT_FLOAT_EQ(ClampVolume(std::numeric_limits<float>::quiet_NaN()), 1.0F);
+    EXPECT_FLOAT_EQ(ClampVolume(std::numeric_limits<float>::infinity()), 1.0F);
+    EXPECT_FLOAT_EQ(ClampVolume(-std::numeric_limits<float>::infinity()), 1.0F);
 }
 
 TEST(AudioSampleMathTest, ClearInterleavedF32WritesSilence) {
-    std::array<float, 6> output { 1.0f, -1.0f, 0.5f, 0.25f, -0.5f, 2.0f };
+    std::array<float, 7> samples{17.0F, -2.5F, 6.0F, -0.125F, 3.75F, -9.0F, 21.0F};
 
-    ClearInterleavedF32(output.data(), output.size());
+    wallpaper::audio::ClearInterleavedF32(samples.data() + 1, 5);
 
-    for (float sample : output) {
-        EXPECT_FLOAT_EQ(sample, 0.0f);
-    }
+    const std::array<float, 7> silent_window{17.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 21.0F};
+    EXPECT_EQ(samples, silent_window);
+
+    wallpaper::audio::ClearInterleavedF32(samples.data(), 0);
+    EXPECT_EQ(samples, silent_window);
 }
 
 TEST(AudioSampleMathTest, ApplyVolumeF32ScalesSamplesInPlace) {
-    std::array<float, 4> samples { 1.0f, -1.0f, 0.5f, -0.5f };
+    std::array<float, 6> samples{-13.0F, -6.0F, 1.5F, 10.0F, -0.25F, 19.0F};
 
-    ApplyVolumeF32(samples.data(), samples.size(), 0.5f);
+    wallpaper::audio::ApplyVolumeF32(samples.data() + 1, 4, 0.5F);
 
-    EXPECT_FLOAT_EQ(samples[0], 0.5f);
-    EXPECT_FLOAT_EQ(samples[1], -0.5f);
-    EXPECT_FLOAT_EQ(samples[2], 0.25f);
-    EXPECT_FLOAT_EQ(samples[3], -0.25f);
+    const std::array<float, 6> scaled{-13.0F, -3.0F, 0.75F, 5.0F, -0.125F, 19.0F};
+    EXPECT_EQ(samples, scaled);
+
+    wallpaper::audio::ApplyVolumeF32(samples.data() + 2, 0, 0.0F);
+    EXPECT_EQ(samples, scaled);
+
+    std::array<float, 3> bounded_gain{-2.0F, 0.25F, 4.0F};
+    const auto original = bounded_gain;
+    wallpaper::audio::ApplyVolumeF32(bounded_gain.data(), bounded_gain.size(), 1.75F);
+    EXPECT_EQ(bounded_gain, original);
+    wallpaper::audio::ApplyVolumeF32(bounded_gain.data(), bounded_gain.size(),
+                                     std::numeric_limits<float>::quiet_NaN());
+    EXPECT_EQ(bounded_gain, original);
+    wallpaper::audio::ApplyVolumeF32(bounded_gain.data(), bounded_gain.size(), -0.5F);
+    const std::array<float, 3> silence{};
+    EXPECT_EQ(bounded_gain, silence);
 }
 
 TEST(AudioSampleMathTest, MixInterleavedF32AddsScaledInput) {
-    std::array<float, 4> output { 0.25f, 0.25f, -0.25f, -0.25f };
-    std::array<float, 4> input { 1.0f, -1.0f, 0.5f, -0.5f };
+    std::array<float, 6> input{23.0F, -3.0F, 2.0F, 0.5F, -4.0F, 29.0F};
+    const auto unchanged_input = input;
+    std::array<float, 6> output{-31.0F, 1.0F, -1.0F, 2.0F, 0.25F, 37.0F};
 
-    MixInterleavedF32(output.data(), input.data(), input.size(), 0.5f);
+    wallpaper::audio::MixInterleavedF32(output.data() + 1, input.data() + 1, 4, 0.5F);
 
-    EXPECT_FLOAT_EQ(output[0], 0.75f);
-    EXPECT_FLOAT_EQ(output[1], -0.25f);
-    EXPECT_FLOAT_EQ(output[2], 0.0f);
-    EXPECT_FLOAT_EQ(output[3], -0.5f);
+    const std::array<float, 6> mixed{-31.0F, -0.5F, 0.0F, 2.25F, -1.75F, 37.0F};
+    EXPECT_EQ(output, mixed);
+    EXPECT_EQ(input, unchanged_input);
+
+    wallpaper::audio::MixInterleavedF32(output.data(), input.data(), 0, 1.0F);
+    wallpaper::audio::MixInterleavedF32(output.data(), nullptr, output.size(), 1.0F);
+    EXPECT_EQ(output, mixed);
+    EXPECT_EQ(input, unchanged_input);
+
+    std::array<float, 2> gain_output{1.0F, -2.0F};
+    std::array<float, 2> gain_input{3.0F, 4.0F};
+    const std::array<float, 2> before_gain{1.0F, -2.0F};
+    wallpaper::audio::MixInterleavedF32(gain_output.data(), gain_input.data(), 2, -0.25F);
+    EXPECT_EQ(gain_output, before_gain);
+    wallpaper::audio::MixInterleavedF32(gain_output.data(), gain_input.data(), 2, 1.5F);
+    const std::array<float, 2> full_gain{4.0F, 2.0F};
+    EXPECT_EQ(gain_output, full_gain);
+    const std::array<float, 2> original_gain_input{3.0F, 4.0F};
+    EXPECT_EQ(gain_input, original_gain_input);
 }
-
-} // namespace
-} // namespace wallpaper::audio

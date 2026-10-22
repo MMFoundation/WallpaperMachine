@@ -1,81 +1,32 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use wallpaper_core::{
-    DisplayDesc, DisplayIdentity, DisplaySelector, DisplaySnapshotEntry,
+    DisplaySelector, DisplaySnapshotEntry,
     project::{ScalingMode, SceneFraming},
+};
+
+use super::{
+    fixture_observations::assert_owner,
+    fixture_values::{anonymous, identified},
 };
 
 use crate::{
     api::{BridgeWallpaperEntry, BridgeWallpaperKind},
     config::{
-        AppConfig, FramingCfg, MonitorCfg, MonitorRender, MonitorSettingsCfg, SerializedSelector,
+        AppConfig, FramingCfg, MonitorCfg, MonitorRender, SerializedSelector,
         WallpaperConfig,
     },
-    engine::{ActivationInputs, NativeVideoRejection},
+    engine::ActivationInputs,
     paths::BridgePaths,
 };
-
-fn assert_f32_close(actual: f32, expected: f32) {
-    assert!(
-        (actual - expected).abs() <= f32::EPSILON,
-        "expected {actual} to be within f32::EPSILON of {expected}"
-    );
-}
-
-#[test]
-fn activation_plan_marks_scenes_paused_when_global_playback_is_paused() {
-    let mut config = AppConfig::default();
-    config.monitors.push(MonitorCfg {
-        selector: SerializedSelector::Primary,
-        enabled: true,
-        mode: "independent".to_string(),
-        wallpaper: Some("100".to_string()),
-        mirror_target: None,
-    });
-    let mut wallpapers = BTreeMap::new();
-    wallpapers.insert("100".to_string(), WallpaperConfig::new_for("100", "scene"));
-    let display = DisplayDesc::with_identity(1, DisplayIdentity::default(), 0, 0, 1920, 1080, 2.0);
-    let displays = vec![DisplaySnapshotEntry {
-        identity: DisplayIdentity::default(),
-        desc: display,
-        handle: None,
-        accepts_pointer_input: false,
-        paused: false,
-        window_active: true,
-        assignment: None,
-    }];
-    let paths = BridgePaths::for_home("/Users/example");
-
-    let scenes = ActivationInputs {
-        app_config: &config,
-        wallpapers: &wallpapers,
-        library: None,
-        displays: &displays,
-        suspended_displays: &BTreeSet::new(),
-        held: &BTreeSet::new(),
-        paused: true,
-        paths: &paths,
-        force_shader_refresh: false,
-        project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
-        frame_rate_cap: None,
-        audio_suppressed: false,
-    }
-    .build()
-    .unwrap();
-
-    assert_eq!(scenes.len(), 1);
-    assert!(scenes[0].paused);
-}
 
 #[test]
 fn activation_plan_leaves_display_empty_when_assigned_wallpaper_left_the_library() {
     // A wallpaper deleted while its display was disconnected keeps its
     // assignment. Planning a scene for it would fail the whole reconcile and
     // block applying anything to any other display.
-    let display_a = identified_display("a", 1);
-    let display_b = identified_display("b", 3);
+    let display_a = identified("a", 1, 60);
+    let display_b = identified("b", 3, 60);
     let mut config = AppConfig::default();
     for (display, wallpaper) in [(&display_a, "100"), (&display_b, "gone")] {
         config.monitors.push(MonitorCfg {
@@ -108,8 +59,6 @@ fn activation_plan_leaves_display_empty_when_assigned_wallpaper_left_the_library
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -117,193 +66,7 @@ fn activation_plan_leaves_display_empty_when_assigned_wallpaper_left_the_library
     .unwrap();
 
     assert_eq!(scenes.len(), 1);
-    assert_scene(&scenes, 1, "100");
-}
-
-#[test]
-fn activation_plan_gives_primary_wallpaper_to_current_primary_display() {
-    let display_a = identified_display("a", 1);
-    let display_b = identified_display("b", 3);
-    let selector_a =
-        SerializedSelector::from_selector(&DisplaySelector::Identity(display_a.identity.clone()));
-    let selector_b =
-        SerializedSelector::from_selector(&DisplaySelector::Identity(display_b.identity.clone()));
-    let mut config = AppConfig::default();
-    config.monitors.push(MonitorCfg {
-        selector: selector_a,
-        enabled: true,
-        mode: "independent".to_string(),
-        wallpaper: Some("100".to_string()),
-        mirror_target: None,
-    });
-    config.monitors.push(MonitorCfg {
-        selector: selector_b,
-        enabled: true,
-        mode: "independent".to_string(),
-        wallpaper: Some("200".to_string()),
-        mirror_target: None,
-    });
-    config.monitors.push(MonitorCfg {
-        selector: SerializedSelector::Primary,
-        enabled: true,
-        mode: "independent".to_string(),
-        wallpaper: Some("300".to_string()),
-        mirror_target: None,
-    });
-    let mut wallpapers = BTreeMap::new();
-    for id in ["100", "200", "300"] {
-        wallpapers.insert(id.to_string(), WallpaperConfig::new_for(id, "scene"));
-    }
-
-    let displays = vec![display_a.clone(), display_b.clone()];
-    let paths = BridgePaths::for_home("/Users/example");
-    let scenes = ActivationInputs {
-        app_config: &config,
-        wallpapers: &wallpapers,
-        library: None,
-        displays: &displays,
-        suspended_displays: &BTreeSet::new(),
-        held: &BTreeSet::new(),
-        paused: false,
-        paths: &paths,
-        force_shader_refresh: false,
-        project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
-        frame_rate_cap: None,
-        audio_suppressed: false,
-    }
-    .build()
-    .unwrap();
-    assert_eq!(scenes.len(), 2);
-    assert_scene(&scenes, 1, "300");
-    assert_scene(&scenes, 3, "200");
-
-    let displays = vec![display_b, display_a];
-    let scenes = ActivationInputs {
-        app_config: &config,
-        wallpapers: &wallpapers,
-        library: None,
-        displays: &displays,
-        suspended_displays: &BTreeSet::new(),
-        held: &BTreeSet::new(),
-        paused: false,
-        paths: &paths,
-        force_shader_refresh: false,
-        project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
-        frame_rate_cap: None,
-        audio_suppressed: false,
-    }
-    .build()
-    .unwrap();
-    assert_eq!(scenes.len(), 2);
-    assert_scene(&scenes, 3, "300");
-    assert_scene(&scenes, 1, "100");
-}
-
-#[test]
-fn activation_plan_uses_primary_render_override_for_identity_primary_monitor() {
-    let display = identified_display("primary", 1);
-    let identity_selector =
-        SerializedSelector::from_selector(&DisplaySelector::Identity(display.identity.clone()));
-    let app_config = AppConfig {
-        monitors: vec![MonitorCfg {
-            selector: identity_selector,
-            enabled: true,
-            mode: "independent".to_string(),
-            wallpaper: Some("3539559752".to_string()),
-            mirror_target: None,
-        }],
-        ..AppConfig::default()
-    };
-    let mut wallpaper = WallpaperConfig::new_for("3539559752", "scene");
-    wallpaper.monitors.push(MonitorRender {
-        selector: SerializedSelector::Primary,
-        scaling_mode: "fill".to_string(),
-        ..MonitorRender::default()
-    });
-    let wallpapers = BTreeMap::from([("3539559752".to_string(), wallpaper)]);
-    let paths = BridgePaths::for_home("/Users/example");
-
-    let scenes = ActivationInputs {
-        app_config: &app_config,
-        wallpapers: &wallpapers,
-        library: None,
-        displays: &[display],
-        suspended_displays: &BTreeSet::new(),
-        held: &BTreeSet::new(),
-        paused: false,
-        paths: &paths,
-        force_shader_refresh: false,
-        project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
-        frame_rate_cap: None,
-        audio_suppressed: false,
-    }
-    .build()
-    .unwrap();
-
-    assert_eq!(scenes.len(), 1);
-    assert_eq!(
-        scenes[0].scaling_mode,
-        ScalingMode::Fill,
-        "a single-monitor identity assignment must still inherit the saved Primary render override"
-    );
-}
-
-#[test]
-fn activation_plan_uses_identity_render_override_for_primary_monitor() {
-    let display = identified_display("primary", 1);
-    let identity_selector =
-        SerializedSelector::from_selector(&DisplaySelector::Identity(display.identity.clone()));
-    let app_config = AppConfig {
-        monitors: vec![MonitorCfg {
-            selector: SerializedSelector::Primary,
-            enabled: true,
-            mode: "independent".to_string(),
-            wallpaper: Some("3539559752".to_string()),
-            mirror_target: None,
-        }],
-        ..AppConfig::default()
-    };
-    let mut wallpaper = WallpaperConfig::new_for("3539559752", "scene");
-    wallpaper.monitors.push(MonitorRender {
-        selector: identity_selector,
-        scaling_mode: "fill".to_string(),
-        ..MonitorRender::default()
-    });
-    let wallpapers = BTreeMap::from([("3539559752".to_string(), wallpaper)]);
-    let paths = BridgePaths::for_home("/Users/example");
-
-    let scenes = ActivationInputs {
-        app_config: &app_config,
-        wallpapers: &wallpapers,
-        library: None,
-        displays: &[display],
-        suspended_displays: &BTreeSet::new(),
-        held: &BTreeSet::new(),
-        paused: false,
-        paths: &paths,
-        force_shader_refresh: false,
-        project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
-        frame_rate_cap: None,
-        audio_suppressed: false,
-    }
-    .build()
-    .unwrap();
-
-    assert_eq!(scenes.len(), 1);
-    assert_eq!(
-        scenes[0].scaling_mode,
-        ScalingMode::Fill,
-        "a Primary assignment must inherit the saved identity render override for the same \
-         primary display"
-    );
+    assert_owner(&scenes, 1, "100");
 }
 
 /// Library entries for every configured wallpaper, so the plan treats them as installed.
@@ -322,151 +85,13 @@ fn installed(wallpapers: &BTreeMap<String, WallpaperConfig>) -> Vec<BridgeWallpa
         .collect()
 }
 
-fn assert_scene(scenes: &[wallpaper_core::project::SceneDesc], display_id: u32, workshop_id: &str) {
-    let scene = scenes
-        .iter()
-        .find(|scene| scene.display.display_id == display_id)
-        .unwrap_or_else(|| panic!("missing scene for display {display_id}"));
-    assert!(
-        scene.scene_path.contains(&format!("/{workshop_id}/")),
-        "display {display_id} should use wallpaper {workshop_id}, got {}",
-        scene.scene_path
-    );
-}
-
-#[test]
-fn mirror_scene_follows_source_wallpaper_with_monitor_overrides() {
-    let mut wallpapers = BTreeMap::new();
-    let mut wallpaper = WallpaperConfig::new_for("100", "scene");
-    wallpaper.audio.response_enabled = true;
-    wallpaper.audio.volume = 0.4;
-    wallpaper.audio.muted = false;
-    wallpapers.insert("100".to_string(), wallpaper);
-    let app_config = AppConfig {
-        monitors: vec![
-            MonitorCfg {
-                selector: SerializedSelector::Primary,
-                enabled: true,
-                wallpaper: Some("100".to_string()),
-                ..MonitorCfg::default()
-            },
-            MonitorCfg {
-                selector: SerializedSelector::LiveDisplayId { display_id: 2 },
-                enabled: true,
-                mode: "mirror".to_string(),
-                mirror_target: Some(SerializedSelector::Primary),
-                ..MonitorCfg::default()
-            },
-        ],
-        monitor_settings: vec![MonitorSettingsCfg {
-            selector: SerializedSelector::LiveDisplayId { display_id: 2 },
-            scaling_mode: "fill".to_string(),
-            scaling_factor: 1.25,
-            frame_rate: Some(30),
-            volume: 0.2,
-            muted: true,
-        }],
-        ..AppConfig::default()
-    };
-    let displays = vec![display_snapshot(1), display_snapshot(2)];
-    let paths = BridgePaths::for_home("/tmp/test-home");
-
-    let scenes = ActivationInputs {
-        app_config: &app_config,
-        wallpapers: &wallpapers,
-        library: None,
-        displays: &displays,
-        suspended_displays: &BTreeSet::new(),
-        held: &BTreeSet::new(),
-        paused: false,
-        paths: &paths,
-        force_shader_refresh: false,
-        project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
-        frame_rate_cap: None,
-        audio_suppressed: false,
-    }
-    .build()
-    .unwrap();
-
-    let primary = scenes
-        .iter()
-        .find(|scene| scene.display.display_id == 1)
-        .expect("primary scene should be active");
-    let mirror = scenes
-        .iter()
-        .find(|scene| scene.display.display_id == 2)
-        .expect("mirror scene should be active");
-    assert_eq!(scenes.len(), 2);
-    assert!(primary.audio_response_enabled);
-    assert!(mirror.audio_response_enabled);
-    assert_f32_close(f32::from(primary.audio_volume), 0.4);
-    assert_f32_close(f32::from(mirror.audio_volume), 0.2);
-    assert!(!primary.audio_muted);
-    assert!(mirror.audio_muted);
-    assert_eq!(
-        mirror.scaling_mode,
-        wallpaper_core::project::ScalingMode::Fill
-    );
-    assert!(
-        (mirror.scaling_factor - 1.25).abs() <= f64::EPSILON,
-        "expected {} to be within f64::EPSILON of 1.25",
-        mirror.scaling_factor
-    );
-    assert_eq!(mirror.fps, 30);
-    assert_scene(&scenes, 2, "100");
-}
-
-fn identified_display(uuid: &str, display_id: u32) -> DisplaySnapshotEntry {
-    let identity = DisplayIdentity {
-        uuid: Some(uuid.to_string()),
-        vendor_id: Some(10),
-        model_id: Some(display_id),
-        serial_number: Some(100 + display_id),
-        unit_number: Some(display_id),
-        name: Some(format!("Display {uuid}")),
-    };
-    DisplaySnapshotEntry {
-        identity: identity.clone(),
-        desc: DisplayDesc::with_identity(display_id, identity, 0, 0, 1920, 1080, 2.0),
-        handle: None,
-        accepts_pointer_input: false,
-        paused: false,
-        window_active: true,
-        assignment: None,
-    }
-}
-
-fn display_snapshot(display_id: u32) -> DisplaySnapshotEntry {
-    DisplaySnapshotEntry {
-        identity: DisplayIdentity::default(),
-        desc: DisplayDesc::with_identity(
-            display_id,
-            DisplayIdentity::default(),
-            0,
-            0,
-            1920,
-            1080,
-            2.0,
-        ),
-        handle: None,
-        accepts_pointer_input: false,
-        paused: false,
-        window_active: true,
-        assignment: None,
-    }
-}
-
 /// The routing rules themselves, with no actor and no host query in the way.
 ///
-/// Every reconcile runs through `build()`/`build_native_video()`, including the
-/// ones the bridge spawns for unrelated reasons, so a recorded refusal has to
-/// be re-evaluated here rather than only in the bookkeeping that runs when the
-/// host asks what to play. Otherwise a wallpaper whose configuration changed
-/// would be rendered by both backends until the host happened to ask again.
+/// Every plain video is played by the host's own player, so a Video project never gets a scene
+/// and always gets a descriptor when its file is there; the scene engine has no say in it. Only
+/// the lock-screen export asks for the video as a scene as well.
 #[test]
-fn a_rejection_recorded_for_another_admission_key_does_not_route_a_video_to_the_engine() {
+fn a_plain_video_is_never_a_scene_and_is_always_a_native_descriptor_when_its_file_exists() {
     let temp = tempfile::tempdir().unwrap();
     let paths = BridgePaths::for_home(temp.path().to_path_buf());
     let project_dir = paths.steam_workshop_root().join("500");
@@ -492,90 +117,51 @@ fn a_rejection_recorded_for_another_admission_key_does_not_route_a_video_to_the_
         )
         .unwrap(),
     );
-    let displays = vec![display_snapshot(1)];
+    let displays = vec![anonymous(1, 2.0, 60, true)];
     let suspended = BTreeSet::new();
-
-    fn plan<'a>(
-        app_config: &'a AppConfig,
-        wallpapers: &'a BTreeMap<String, WallpaperConfig>,
-        displays: &'a [DisplaySnapshotEntry],
-        suspended_displays: &'a BTreeSet<u32>,
-        paths: &'a BridgePaths,
-        project_models: &'a BTreeMap<String, crate::project::ProjectModel>,
-        native_video_rejected: &'a crate::engine::NativeVideoRejections,
-    ) -> ActivationInputs<'a> {
-        ActivationInputs {
-            app_config,
-            wallpapers,
-            library: None,
-            displays,
-            suspended_displays,
-            paused: false,
-            paths,
-            force_shader_refresh: false,
-            project_models,
-            native_video_enabled: true,
-            native_video_rejected,
-            frame_rate_cap: None,
-            audio_suppressed: false,
-            held: &NONE_HELD,
-        }
-    }
+    let plan = || ActivationInputs {
+        app_config: &config,
+        wallpapers: &wallpapers,
+        library: None,
+        displays: &displays,
+        suspended_displays: &suspended,
+        paused: false,
+        paths: &paths,
+        force_shader_refresh: false,
+        project_models: &project_models,
+        frame_rate_cap: None,
+        audio_suppressed: false,
+        held: &NONE_HELD,
+    };
     static NONE_HELD: BTreeSet<String> = BTreeSet::new();
-    macro_rules! inputs {
-        ($rejected:expr) => {
-            plan(
-                &config,
-                &wallpapers,
-                &displays,
-                &suspended,
-                &paths,
-                &project_models,
-                $rejected,
-            )
-        };
-    }
 
-    let empty = BTreeMap::new();
-    let live_key = inputs!(&empty).build_native_video().unwrap()[0].admission_key;
-
-    let matching: crate::engine::NativeVideoRejections = [(
-        "500".to_string(),
-        [(
-            live_key,
-            NativeVideoRejection {
-                reason: "unsupported".to_string(),
-            },
-        )]
-        .into(),
-    )]
-    .into();
-    assert!(inputs!(&matching).build_native_video().unwrap().is_empty());
+    assert_eq!(plan().build_native_video().unwrap().len(), 1);
+    assert!(plan().build().unwrap().is_empty(), "the engine is not given a video it has no part in");
+    assert_eq!(plan().render_backends().videos[0].problem, None);
     assert_eq!(
-        inputs!(&matching).build().unwrap().len(),
+        plan().build_lock_screen().unwrap().len(),
         1,
-        "a refusal that describes the live configuration puts the wallpaper on the engine"
+        "the lock-screen export describes the video for the extension's own players"
     );
+    // The key is the file's identity: a replaced file is a different key, a frame-rate cap is not.
+    let key = plan().build_native_video().unwrap()[0].admission_key;
+    let capped = ActivationInputs { frame_rate_cap: Some(15), ..plan() };
+    assert_eq!(capped.build_native_video().unwrap()[0].admission_key, key);
+    std::fs::write(project_dir.join("clip.mp4"), b"a longer clip than before").unwrap();
+    assert_ne!(plan().build_native_video().unwrap()[0].admission_key, key);
 
-    let stale: crate::engine::NativeVideoRejections = [(
-        "500".to_string(),
-        [(
-            live_key ^ 1,
-            NativeVideoRejection {
-                reason: "unsupported".to_string(),
-            },
-        )]
-        .into(),
-    )]
-    .into();
+    // A video whose file is gone gets neither descriptor nor scene, and the report says why.
+    std::fs::remove_file(project_dir.join("clip.mp4")).unwrap();
+    assert!(plan().build_native_video().unwrap().is_empty());
+    assert!(plan().build().unwrap().is_empty(), "no scene stands in for a file that cannot be found");
     assert_eq!(
-        inputs!(&stale).build_native_video().unwrap().len(),
+        plan().build_lock_screen().unwrap().len(),
         1,
-        "a refusal for a configuration that no longer exists must not exclude this one"
+        "the lock screen still names the video, so its extension holds the missing clip with a reason"
     );
-    assert!(
-        inputs!(&stale).build().unwrap().is_empty(),
-        "and the engine must not also be handed a scene for it"
+    assert_eq!(
+        plan().render_backends().videos[0].problem.as_deref(),
+        Some("the project's video file could not be found")
     );
 }
 fn independent(display_id: u32, wallpaper: &str) -> MonitorCfg {
@@ -598,7 +184,6 @@ struct HeldFixture {
     models: BTreeMap<String, crate::project::ProjectModel>,
     displays: Vec<DisplaySnapshotEntry>,
     suspended: BTreeSet<u32>,
-    rejected: crate::engine::NativeVideoRejections,
 }
 
 impl HeldFixture {
@@ -635,9 +220,8 @@ impl HeldFixture {
             config,
             wallpapers,
             models,
-            displays: vec![display_snapshot(1), display_snapshot(2), display_snapshot(3)],
+            displays: vec![anonymous(1, 2.0, 60, true), anonymous(2, 2.0, 60, true), anonymous(3, 2.0, 60, true)],
             suspended: BTreeSet::new(),
-            rejected: BTreeMap::new(),
         }
     }
 
@@ -652,8 +236,6 @@ impl HeldFixture {
             paths: &self.paths,
             force_shader_refresh: false,
             project_models: &self.models,
-            native_video_enabled: true,
-            native_video_rejected: &self.rejected,
             frame_rate_cap: None,
             audio_suppressed: false,
             held,
@@ -686,7 +268,7 @@ fn held_wallpaper_gets_no_scene_web_or_native_video_descriptor() {
     // The hold belongs to one wallpaper; the others on screen are untouched.
     let only_page: BTreeSet<String> = ["300".to_string()].into();
     let partly = fixture.inputs(&only_page);
-    assert_scene(&partly.build().unwrap(), 1, "100");
+    assert_owner(&partly.build().unwrap(), 1, "100");
     assert!(partly.build_web().unwrap().is_empty());
     assert_eq!(partly.build_native_video().unwrap().len(), 1);
 }
@@ -716,9 +298,9 @@ fn build_owned_maps_each_display_to_its_wallpaper_including_mirrors() {
         ],
         ..AppConfig::default()
     };
-    let displays = vec![display_snapshot(1), display_snapshot(2), display_snapshot(3)];
+    let displays = vec![anonymous(1, 2.0, 60, true), anonymous(2, 2.0, 60, true), anonymous(3, 2.0, 60, true)];
     let paths = BridgePaths::for_home("/tmp/test-home");
-    let (suspended, models, rejected) = (BTreeSet::new(), BTreeMap::new(), BTreeMap::new());
+    let (suspended, models) = (BTreeSet::new(), BTreeMap::new());
     let inputs = |held| ActivationInputs {
         app_config: &config,
         wallpapers: &wallpapers,
@@ -729,8 +311,6 @@ fn build_owned_maps_each_display_to_its_wallpaper_including_mirrors() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &models,
-        native_video_enabled: false,
-        native_video_rejected: &rejected,
         frame_rate_cap: None,
         audio_suppressed: false,
         held,
@@ -799,8 +379,8 @@ fn scene_framing(scenes: &[wallpaper_core::project::SceneDesc], display_id: u32)
 #[test]
 fn a_saved_position_reaches_only_the_scene_built_for_its_display() {
     let (left, right) = (
-        identified_display("left", 1),
-        identified_display("right", 2),
+        identified("left", 1, 60),
+        identified("right", 2, 60),
     );
     let selector_of = |display: &DisplaySnapshotEntry| {
         SerializedSelector::from_selector(&DisplaySelector::Identity(display.identity.clone()))
@@ -838,8 +418,6 @@ fn a_saved_position_reaches_only_the_scene_built_for_its_display() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -865,7 +443,7 @@ fn a_saved_position_reaches_only_the_scene_built_for_its_display() {
 /// Primary by one record and by identity by another is still one display.
 #[test]
 fn a_saved_position_follows_the_display_across_the_ways_it_is_addressed() {
-    let display = identified_display("primary", 1);
+    let display = identified("primary", 1, 60);
     let identity_selector =
         SerializedSelector::from_selector(&DisplaySelector::Identity(display.identity.clone()));
     for (monitor_selector, render_selector) in [
@@ -902,8 +480,6 @@ fn a_saved_position_follows_the_display_across_the_ways_it_is_addressed() {
             paths: &paths,
             force_shader_refresh: false,
             project_models: &BTreeMap::new(),
-            native_video_enabled: false,
-            native_video_rejected: &BTreeMap::new(),
             frame_rate_cap: None,
             audio_suppressed: false,
         }
@@ -949,7 +525,7 @@ fn a_mirror_is_centred_even_when_its_source_is_positioned() {
         ],
         ..AppConfig::default()
     };
-    let displays = vec![display_snapshot(1), display_snapshot(2)];
+    let displays = vec![anonymous(1, 2.0, 60, true), anonymous(2, 2.0, 60, true)];
     let paths = BridgePaths::for_home("/tmp/test-home");
 
     let scenes = ActivationInputs {
@@ -963,8 +539,6 @@ fn a_mirror_is_centred_even_when_its_source_is_positioned() {
         paths: &paths,
         force_shader_refresh: false,
         project_models: &BTreeMap::new(),
-        native_video_enabled: false,
-        native_video_rejected: &BTreeMap::new(),
         frame_rate_cap: None,
         audio_suppressed: false,
     }
@@ -982,16 +556,16 @@ fn a_mirror_is_centred_even_when_its_source_is_positioned() {
     assert_eq!(scene_framing(&scenes, 2), SceneFraming::default());
 }
 
-/// The native player ignores a position, so moving a clip must not look like a
-/// change to it: the descriptor it is handed and the key its admission is
-/// judged by stay what they were, and the clip does not fall back to the engine.
+/// The native player places its picture by the saved position, so the
+/// descriptor it is handed carries it. A position says nothing about the file,
+/// so the key the host judges the file by stays what it was.
 #[test]
-fn a_position_does_not_change_what_the_native_video_player_is_handed() {
+fn a_position_reaches_the_native_video_player_without_changing_its_key() {
     let mut fixture = HeldFixture::new();
     let none = BTreeSet::new();
     let before = fixture.inputs(&none).build_native_video().unwrap();
-    let keys_before = fixture.inputs(&none).native_video_admission_keys();
     assert_eq!(before.len(), 1);
+    assert_eq!(before[0].framing, SceneFraming::default(), "centred until moved");
 
     let clip_on_display_3 = SerializedSelector::LiveDisplayId { display_id: 3 };
     fixture
@@ -1004,23 +578,23 @@ fn a_position_does_not_change_what_the_native_video_player_is_handed() {
             framing: framing(0.1, 0.9),
             ..MonitorRender::default()
         });
+    let moved = fixture.inputs(&none).build_native_video().unwrap();
+    assert_eq!(moved.len(), 1);
     assert_eq!(
-        fixture.inputs(&none).build_native_video().unwrap(),
-        before,
-        "the player is handed the same clip with the same settings"
+        moved[0].framing,
+        framing(0.1, 0.9).to_scene(),
+        "the player is handed where the user put the picture"
     );
-    assert_eq!(
-        fixture.inputs(&none).native_video_admission_keys(),
-        keys_before
-    );
+    let mut recentred = moved[0].clone();
+    recentred.framing = SceneFraming::default();
+    assert_eq!(recentred, before[0], "and nothing else about the descriptor moved");
+    assert_eq!(moved[0].admission_key, before[0].admission_key, "a position says nothing about the file");
     assert_eq!(
         fixture.inputs(&none).build().unwrap().len(),
         1,
         "and the engine is still given only the scene wallpaper"
     );
 
-    // The same record does reach the player once it holds something the
-    // player honours, so the equality above is not a record that was never found.
     fixture.wallpapers.get_mut("500").unwrap().monitors[0].scaling_mode = "fit".to_string();
     let fitted = fixture.inputs(&none).build_native_video().unwrap();
     assert_eq!(fitted[0].scaling_mode, ScalingMode::Fit);

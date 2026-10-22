@@ -12,7 +12,6 @@
 #include "Scene/include/Scene/SceneResolution.hpp"
 #include "Scene/include/Scene/SceneVideoPath.hpp"
 #include "Scene/include/Scene/SceneUpdateDemand.hpp"
-#include "Swapchain/ExSwapchain.hpp"
 
 #if defined(WESCENE_BUILD_TESTS) && defined(__APPLE__)
 struct owe_scene_wallpaper;
@@ -55,17 +54,33 @@ constexpr std::string_view PROPERTY_FRAMING                   = "framing";
 /// Internal rasterization scale in (0,1]. Distinct from PROPERTY_SCALINGFACTOR,
 /// which scales the presented image on the output.
 constexpr std::string_view PROPERTY_RENDER_SCALE              = "render_scale";
-constexpr std::string_view PROPERTY_HORIZONTAL_FLIP            = "horizontal_flip";
-constexpr std::string_view PROPERTY_SPEED                     = "speed";
-constexpr std::string_view PROPERTY_GRAPHIVZ                  = "graphivz";
-constexpr std::string_view PROPERTY_VOLUME                    = "volume";
-constexpr std::string_view PROPERTY_MUTED                     = "muted";
-constexpr std::string_view PROPERTY_AUDIO_RESPONSE_ENABLED    = "audio_response_enabled";
-constexpr std::string_view PROPERTY_MEDIA_INTEGRATION_ENABLED = "media_integration_enabled";
-constexpr std::string_view PROPERTY_MEDIA_EVENT_JSON          = "media_event_json";
+/// Bool property: mirrors the presented wallpaper left to right, and the pointer with it.
+constexpr std::string_view PROPERTY_HORIZONTAL_FLIP =
+    "horizontal_flip";
+/// Float property: playback rate multiplier.
+constexpr std::string_view PROPERTY_SPEED =
+    "speed";
+/// Developer switch; accepted and ignored.
+constexpr std::string_view PROPERTY_GRAPHIVZ =
+    "graphivz";
+/// Sound output: volume (float) and mute (bool).
+constexpr std::string_view PROPERTY_VOLUME =
+    "volume";
+constexpr std::string_view PROPERTY_MUTED =
+    "muted";
+/// Bool consents: audio-driven effects, and media integration.
+constexpr std::string_view PROPERTY_AUDIO_RESPONSE_ENABLED =
+    "audio_response_enabled";
+constexpr std::string_view PROPERTY_MEDIA_INTEGRATION_ENABLED =
+    "media_integration_enabled";
+/// String property: one media event as JSON.
+constexpr std::string_view PROPERTY_MEDIA_EVENT_JSON =
+    "media_event_json";
+/// The user's property overrides as a flat JSON object (string), and the bool that clears them.
 constexpr std::string_view PROPERTY_PROJECT_PROPERTY_OVERRIDE_JSON =
     "project_property_override_json";
-constexpr std::string_view PROPERTY_PROJECT_PROPERTY_RESET = "project_property_reset";
+constexpr std::string_view PROPERTY_PROJECT_PROPERTY_RESET =
+    "project_property_reset";
 /// String property: a flat JSON object holding the whole property state to show
 /// on the scene that is running (the same shape as the override JSON above),
 /// without loading it again. Unlike the override it is never remembered: a
@@ -109,33 +124,29 @@ public:
     /// `init()`; see `SetWallpaperLogScope`.
     void setLogScope(uint64_t scope);
 
-    void initVulkan(const RenderInitInfo&);
+    void initSurface(const RenderInitInfo&);
     void applyConfig(const SceneWallpaperConfig&);
 
-    /// Pauses rendering and releases the Vulkan surface + swapchain on the
-    /// render thread. Blocks until the render thread confirms completion.
-    /// The scene, shaders, render graph, audio, and runtime state remain
-    /// loaded. Returns false on any internal failure.
     bool beginSurfaceReconfigure();
 
-    /// Rebuilds the Vulkan surface + swapchain on the render thread from a
-    /// new RenderInitInfo and resumes rendering. Blocks until the render
-    /// thread confirms completion.
-    /// Preconditions: `beginSurfaceReconfigure` has returned true since the
-    /// last successful init/finish. Returns false on failure.
     bool finishSurfaceReconfigure(const RenderInitInfo& info);
 
     void play();
     void pause();
-    void setPaused(bool paused);
-    void setSceneSource(std::string source);
-    void setAssetsPath(std::string assets);
-    void setCachePath(std::string cache_path);
-    void setTargetFps(uint32_t fps);
-    void mouseInput(double x, double y);
-    void mouseButton(int button, bool pressed);
-    void mouseButtonBaseline(uint32_t down);
-    void mouseEnter(bool entered);
+    // Playback and the scene to show.
+    void setPaused(bool is_paused);
+    void setSceneSource(std::string scene_source);
+    void setAssetsPath(std::string assets_path);
+    void setCachePath(std::string cache_directory);
+    void setTargetFps(uint32_t frames_per_second);
+
+    // Pointer input, in 0..1 across the surface; buttons as a press/release and as a level.
+    void mouseInput(double unit_x, double unit_y);
+    void mouseButton(int which, bool is_down);
+    void mouseButtonBaseline(uint32_t held_mask);
+    void mouseEnter(bool inside);
+
+    // Artwork of the current media item (RGBA8), or the clear value.
     void applySystemMediaArtwork(uint32_t width, uint32_t height, const uint8_t* rgba,
                                  std::size_t rgba_len);
 
@@ -156,11 +167,11 @@ public:
     /// reports `Running`.
     [[nodiscard]] SurfaceHealthSnapshot surfaceHealth() const;
 
-    /// Which renderer actually drew this scene, and why it is not the
-    /// preferred one.
+    /// Whether this scene has a renderer drawing it and, when it has none,
+    /// why it is held instead.
     ///
-    /// Reports the backend in use, never the preference: a scene that fell
-    /// back has to look like it fell back.
+    /// Reports what is the case now: a scene held in a failure has no
+    /// renderer, whatever it had before.
     [[nodiscard]] SceneBackendSelection sceneBackendSelection() const;
     /// How this scene's video textures reached the shaders sampling them on the
     /// last frame drawn.
@@ -187,14 +198,6 @@ public:
     /// frame: the value is kept and applied when the surface exists.
     void setFraming(const WallpaperFraming&);
 
-    ExSwapchain* exSwapchain() const;
-
-    // Ownership-transfer getter for the dma_fence sync_file fd that
-    // was exported after the most recent completed offscreen frame.
-    // Returns -1 if no frame has completed since the last call (or
-    // export failed). The caller MUST close() the returned fd.
-    int takeLastFrameSyncFd();
-
     /// Copies the renderer work counters for this surface. Returns how many
     /// values were written, which is never more than `len`. Safe to call from
     /// any thread: every counter is an independent atomic, so the result is a
@@ -202,15 +205,11 @@ public:
     std::size_t counters(uint64_t* out, std::size_t len) const;
 
 private:
-    bool m_inited { false };
-
-private:
     friend class MainHandler;
 #ifdef WESCENE_BUILD_TESTS
     friend struct SceneWallpaperInputTestAccess;
 #endif
 
-    bool                         m_offscreen { false };
     std::shared_ptr<MainHandler> m_main_handler;
 };
 
@@ -228,14 +227,6 @@ struct SceneWallpaperInputTestAccess {
     /// How many property-preview commands the render thread has handled. A burst
     /// of documents is one pending command plus the one it was waiting behind.
     static uint64_t PropertyPreviewCommandsHandled(SceneWallpaper&);
-    /// The production plain-video project scene for `project_json`, built the
-    /// way `loadScene` builds it, without needing a render surface.
-    static std::shared_ptr<Scene> CreateVideoProjectScene(const std::string& project_json,
-                                                          std::string*       error);
-    /// The production plain-video layer -- its quad and its copy shader --
-    /// sampling `texture`, without a media file to probe.
-    static std::shared_ptr<SceneNode> CreateVideoProjectNode(const std::string& texture,
-                                                             std::string*       error);
 #if defined(__APPLE__)
     static SceneWallpaper& FromNative(owe_scene_wallpaper&);
 #endif

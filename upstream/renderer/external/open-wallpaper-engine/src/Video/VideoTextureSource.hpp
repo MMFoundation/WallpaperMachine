@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -12,8 +13,6 @@ struct Image;
 
 namespace video
 {
-struct VideoMetadata;
-
 struct VideoTextureFrame {
     uint32_t width { 0 };
     uint32_t height { 0 };
@@ -42,6 +41,17 @@ struct VideoPlaybackState {
     float  rate { 1.0f };
     double scene_elapsed_seconds { 0.0 };
 };
+
+/// What a source is asked to play: the layer's own clock and controls under
+/// the renderer's pause and rate. Every caller shares this one
+/// definition, so none can disagree about what a global pause means.
+inline VideoPlaybackState ResolveEffectiveVideoPlaybackState(const VideoPlaybackState& global_state,
+                                                             const VideoPlaybackState& layer_state) {
+    VideoPlaybackState effective_state = layer_state;
+    effective_state.paused = global_state.paused || layer_state.paused;
+    effective_state.rate = std::max(0.0f, global_state.rate) * std::max(0.0f, layer_state.rate);
+    return effective_state;
+}
 
 /// What a source has actually done, as running totals.
 ///
@@ -97,15 +107,27 @@ public:
     [[nodiscard]] virtual VideoSourceStats sourceStats() const { return {}; }
 };
 
-std::shared_ptr<VideoTextureSource> CreateVideoTextureSource(const Image& image,
+/// Opens a source on the media `image` describes: the file it names, or the
+/// payload in its first mip.
+///
+/// A payload is shared, not copied: the source holds a reference on `image`
+/// for as long as it still needs the bytes, so the caller may drop its own
+/// reference, and a source that is held across a rebuild of the render graph
+/// before anything has opened it still has what it was given. `image` must not
+/// be modified while a source shares it.
+std::shared_ptr<VideoTextureSource> CreateVideoTextureSource(std::shared_ptr<const Image> image,
                                                              std::string* error);
-bool ProbeVideoFileDimensions(std::string_view media_path,
-                              uint32_t*        width,
-                              uint32_t*        height,
-                              std::string*     error);
-bool ProbeVideoFileMetadata(std::string_view media_path,
-                            VideoMetadata*   out,
-                            std::string*     error);
+
+/// How many clocked sources have a decoder open right now: primed successfully
+/// and not yet destroyed. A source holds its media and decoder for as long as it
+/// lives, so this is what tells a video that was closed from one that was only
+/// set aside, whichever decoder plays it.
+[[nodiscard]] int OpenVideoDecoderCount();
+
+/// Opens a source directly on a media file, without an `Image`. Needed when a
+/// consumer is split off a shared session: by then the `Image` that started the
+/// first decoder is gone.
+std::shared_ptr<VideoTextureSource> CreateVideoTextureSourceForFile(std::string media_path, std::string* error);
 
 } // namespace video
 } // namespace wallpaper

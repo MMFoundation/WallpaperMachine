@@ -19,9 +19,8 @@
 #include "Scene/Scene.h"
 #include "SpriteAnimation.hpp"
 #include "SpecTexs.hpp"
-#include "Utils/Eigen.h"
-#include "VulkanRender/CopyPass.hpp"
-#include "VulkanRender/CustomShaderPass.hpp"
+#include "Utils/Linalg.hpp"
+#include "RenderCommon/ScenePass.hpp"
 
 #include <gtest/gtest.h>
 
@@ -183,7 +182,7 @@ struct ImageScene
 
 std::string RejectionFor(ImageScene& fixture)
 {
-    return EvaluateMetalSupport(fixture.scene).fallback_reason;
+    return EvaluateMetalSupport(fixture.scene).failure_reason;
 }
 
 /// The mesh shape the particle generator writes into: one dynamic vertex
@@ -202,71 +201,6 @@ std::shared_ptr<SceneMesh> ParticleMesh(std::string_view shader_name, std::size_
     // What `SetParticleMesh` marks: the sprite-particle generator owns this
     // vertex stream. Rope and text meshes never carry it.
     if (shader_name != "text") mesh->GetVertexArray(0).SetOption(WE_PRENDER_SPRITE, true);
-
-    SceneMaterial material;
-    material.name     = std::string(shader_name);
-    material.textures = { "materials/card.tex" };
-    material.blenmode = BlendMode::Additive;
-    material.customShader.shader                = std::make_shared<SceneShader>();
-    material.customShader.shader->name          = std::string(shader_name);
-    material.customShader.shader->metal_program = TranslatedProgram();
-    mesh->AddMaterial(std::move(material));
-    return mesh;
-}
-
-/// What `SetParticleMesh` builds with the thick format: the velocity in
-/// `a_TexCoordVec4C1` is what a sprite trail's author shader stretches from.
-std::shared_ptr<SceneMesh> ThickSpriteMesh(std::string_view shader_name = "genericparticle",
-                                           std::size_t      count       = 64)
-{
-    auto mesh = std::make_shared<SceneMesh>(MeshUpdate::PerFrame);
-    std::vector<SceneVertexArray::SceneVertexAttribute> attributes {
-        { std::string(WE_IN_POSITION), VertexType::FLOAT3 },
-        { std::string(WE_IN_TEXCOORDVEC4), VertexType::FLOAT4 },
-        { std::string(WE_IN_COLOR), VertexType::FLOAT4 },
-        { std::string(WE_IN_TEXCOORDVEC4C1), VertexType::FLOAT4 },
-        { std::string(WE_IN_TEXCOORDC2), VertexType::FLOAT2 },
-    };
-    mesh->AddVertexArray(SceneVertexArray(attributes, count * 4));
-    mesh->AddIndexArray(SceneIndexArray(count));
-    mesh->GetVertexArray(0).SetOption(WE_PRENDER_SPRITE, true);
-    mesh->GetVertexArray(0).SetOption(WE_CB_THICK_FORMAT, true);
-
-    SceneMaterial material;
-    material.name     = std::string(shader_name);
-    material.textures = { "materials/card.tex" };
-    material.blenmode = BlendMode::Additive;
-    material.customShader.shader                = std::make_shared<SceneShader>();
-    material.customShader.shader->name          = std::string(shader_name);
-    material.customShader.shader->metal_program = TranslatedProgram();
-    mesh->AddMaterial(std::move(material));
-    return mesh;
-}
-
-/// What `SetRopeParticleMesh` builds. Thin and thick differ in the extra
-/// texcoord attributes; a rope trail is the thick layout plus the trail flags.
-std::shared_ptr<SceneMesh> RopeMesh(bool thick, std::string_view shader_name = "genericropeparticle",
-                                    std::size_t count = 64)
-{
-    auto mesh = std::make_shared<SceneMesh>(MeshUpdate::PerFrame);
-    std::vector<SceneVertexArray::SceneVertexAttribute> attributes {
-        { std::string(WE_IN_POSITIONVEC4), VertexType::FLOAT4 },
-        { std::string(WE_IN_TEXCOORDVEC4), VertexType::FLOAT4 },
-        { std::string(WE_IN_TEXCOORDVEC4C1), VertexType::FLOAT4 },
-    };
-    if (thick) {
-        attributes.push_back({ std::string(WE_IN_TEXCOORDVEC4C2), VertexType::FLOAT4 });
-        attributes.push_back({ std::string(WE_IN_TEXCOORDVEC4C3), VertexType::FLOAT4 });
-        attributes.push_back({ std::string(WE_IN_TEXCOORDC4), VertexType::FLOAT4 });
-    } else {
-        attributes.push_back({ std::string(WE_IN_TEXCOORDVEC3C2), VertexType::FLOAT4 });
-        attributes.push_back({ std::string(WE_IN_TEXCOORDC3), VertexType::FLOAT4 });
-    }
-    attributes.push_back({ std::string(WE_IN_COLOR), VertexType::FLOAT4 });
-    mesh->AddVertexArray(SceneVertexArray(attributes, count * 4));
-    mesh->AddIndexArray(SceneIndexArray(count));
-    mesh->GetVertexArray(0).SetOption(WE_PRENDER_ROPE, true);
-    mesh->GetVertexArray(0).SetOption(WE_CB_THICK_FORMAT, thick);
 
     SceneMaterial material;
     material.name     = std::string(shader_name);
@@ -330,9 +264,9 @@ rg::TexNode::Desc TexDesc(const std::string& key)
 void AddDraw(rg::RenderGraph& graph, const std::string& output,
              const std::vector<std::string>& inputs)
 {
-    graph.addPass<vulkan::CustomShaderPass>(
+    graph.addPass<rg::DrawPass>(
         "draw", rg::PassNode::Type::CustomShader,
-        [&output, &inputs](rg::RenderGraphBuilder& builder, vulkan::CustomShaderPass::Desc& desc) {
+        [&output, &inputs](rg::RenderGraphBuilder& builder, rg::DrawPass::Desc& desc) {
             desc.output = output;
             for (const auto& input : inputs) {
                 auto* node = builder.createTexNode(TexDesc(input));
@@ -346,9 +280,9 @@ void AddDraw(rg::RenderGraph& graph, const std::string& output,
 
 void AddCopy(rg::RenderGraph& graph, const std::string& source, const std::string& destination)
 {
-    graph.addPass<vulkan::CopyPass>(
+    graph.addPass<rg::CopyPass>(
         "copy", rg::PassNode::Type::Copy,
-        [&source, &destination](rg::RenderGraphBuilder& builder, vulkan::CopyPass::Desc& desc) {
+        [&source, &destination](rg::RenderGraphBuilder& builder, rg::CopyPass::Desc& desc) {
             auto* in  = builder.createTexNode(TexDesc(source));
             auto* out = builder.createTexNode(TexDesc(destination), true);
             builder.read(in);
@@ -367,9 +301,9 @@ TEST(MetalCapability, AcceptsAMinimalTwoDimensionalImageScene)
 {
     ImageScene fixture;
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-    EXPECT_TRUE(selection.fallback_reason.empty());
-    EXPECT_FALSE(selection.fell_back());
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
+    EXPECT_TRUE(selection.failure_reason.empty());
+    EXPECT_FALSE(selection.failed());
 }
 
 TEST(MetalCapability, AnUnusedPerspectiveCameraDoesNotRejectTheScene)
@@ -382,7 +316,7 @@ TEST(MetalCapability, AnUnusedPerspectiveCameraDoesNotRejectTheScene)
     ASSERT_TRUE(fixture.scene.cameras["global_perspective"]->IsPerspective());
     ASSERT_EQ(fixture.scene.activeCamera, fixture.global.get());
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, ASupportedLayerWithAPerspectiveCameraIsAccepted)
@@ -391,7 +325,7 @@ TEST(MetalCapability, ASupportedLayerWithAPerspectiveCameraIsAccepted)
     fixture.node->SetCamera("global_perspective");
     ASSERT_NE(fixture.scene.activeCamera, fixture.global_perspective.get());
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, AnActivePerspectiveCameraIsAcceptedForSupportedLayers)
@@ -399,7 +333,7 @@ TEST(MetalCapability, AnActivePerspectiveCameraIsAcceptedForSupportedLayers)
     ImageScene fixture;
     fixture.scene.activeCamera = fixture.global_perspective.get();
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, ASpriteParticleLayerWithAPerspectiveCameraIsAccepted)
@@ -412,52 +346,13 @@ TEST(MetalCapability, ASpriteParticleLayerWithAPerspectiveCameraIsAccepted)
     fixture.scene.sceneGraph->AppendChild(node);
     fixture.scene.paritileSys->subsystems.push_back(nullptr);
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, EveryUnsupportedConstructHasItsOwnReason)
 {
     std::vector<std::pair<std::string, std::string>> reasons;
 
-    {
-        ImageScene fixture;
-        auto       mesh = ParticleMesh("genericparticle");
-        mesh->GetVertexArray(0).SetOption(WE_PRENDER_TRAIL, true);
-        AttachParticleLayer(fixture, std::move(mesh));
-        reasons.emplace_back("sprite trail without velocity", RejectionFor(fixture));
-    }
-    {
-        ImageScene fixture;
-        auto       mesh = ParticleMesh("genericropeparticle");
-        mesh->GetVertexArray(0).SetOption(WE_PRENDER_SPRITE, false);
-        mesh->GetVertexArray(0).SetOption(WE_PRENDER_ROPE, true);
-        AttachParticleLayer(fixture, std::move(mesh));
-        reasons.emplace_back("rope-marked sprite layout", RejectionFor(fixture));
-    }
-    {
-        ImageScene fixture;
-        auto       mesh = RopeMesh(false);
-        mesh->GetVertexArray(0).SetOption(WE_PRENDER_TRAIL, true);
-        mesh->GetVertexArray(0).SetOption(WE_PRENDER_ROPETRAIL, true);
-        AttachParticleLayer(fixture, std::move(mesh));
-        reasons.emplace_back("thin rope trail", RejectionFor(fixture));
-    }
-    {
-        // Every other mesh the runtime rewrites per frame -- a text layer's
-        // card, most obviously -- is still refused: nothing has checked the
-        // shape of its upload.
-        ImageScene fixture;
-        auto       mesh = ParticleMesh("text");
-        AttachParticleLayer(fixture, std::move(mesh));
-        reasons.emplace_back("other dynamic mesh", RejectionFor(fixture));
-    }
-    {
-        // A plain video wallpaper has its own host path; a scene that merely
-        // binds a video texture is decided by the video module instead.
-        ImageScene fixture;
-        fixture.scene.single_video_source = true;
-        reasons.emplace_back("video wallpaper", RejectionFor(fixture));
-    }
     {
         // A sheet that is also a video would need both the uploaded-image and
         // the decoded-frame path at once.
@@ -528,64 +423,19 @@ TEST(MetalCapability, AcceptsAPlainSpriteSheetTexture)
     fixture.scene.textures["materials/card.tex"] = std::move(sheet);
 
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, AcceptsAStandardTwoDimensionalSpriteParticleLayer)
 {
-    // Presence of an emitter is no longer the question. The simulation belongs
-    // to the shared runtime either way; what is decided here is whether the
-    // geometry it produces is a shape the draw path can feed.
+    // The simulation belongs to the shared runtime either way, and the geometry
+    // it produces is whatever layout the parser built: nothing about a particle
+    // layer is a reason to refuse the scene.
     ImageScene fixture;
     AttachParticleLayer(fixture, ParticleMesh("genericparticle"));
 
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-}
-
-TEST(MetalCapability, AcceptsAThickSpriteTrail)
-{
-    ImageScene fixture;
-    auto       mesh = ThickSpriteMesh();
-    mesh->GetVertexArray(0).SetOption(WE_PRENDER_TRAIL, true);
-    AttachParticleLayer(fixture, std::move(mesh));
-
-    const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-    EXPECT_TRUE(selection.fallback_reason.empty());
-}
-
-TEST(MetalCapability, AcceptsAThinRopeParticleLayer)
-{
-    ImageScene fixture;
-    AttachParticleLayer(fixture, RopeMesh(false));
-
-    const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-    EXPECT_TRUE(selection.fallback_reason.empty());
-}
-
-TEST(MetalCapability, AcceptsAThickRopeParticleLayer)
-{
-    ImageScene fixture;
-    AttachParticleLayer(fixture, RopeMesh(true));
-
-    const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-    EXPECT_TRUE(selection.fallback_reason.empty());
-}
-
-TEST(MetalCapability, AcceptsARopeTrail)
-{
-    ImageScene fixture;
-    auto       mesh = RopeMesh(true);
-    mesh->GetVertexArray(0).SetOption(WE_PRENDER_TRAIL, true);
-    mesh->GetVertexArray(0).SetOption(WE_PRENDER_ROPETRAIL, true);
-    AttachParticleLayer(fixture, std::move(mesh));
-
-    const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-    EXPECT_TRUE(selection.fallback_reason.empty());
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, AcceptsASkinnedMeshWithAPuppetShader)
@@ -594,8 +444,8 @@ TEST(MetalCapability, AcceptsASkinnedMeshWithAPuppetShader)
     fixture.node->AddMesh(SkinnedMesh(kBonesReflectionJson));
 
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
-    EXPECT_TRUE(selection.fallback_reason.empty());
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
+    EXPECT_TRUE(selection.failure_reason.empty());
 }
 
 namespace
@@ -653,7 +503,7 @@ TEST(MetalCapability, APuppetUnderAnEffectChainIsJudgedByTheMeshTheChainResolves
     // puppet that has an effect; what it will be drawn with is the final mesh.
     PuppetEffectChain resolved(/*skinned_node=*/1, /*final_mesh_has_weights=*/true);
     const auto        selection = EvaluateMetalSupport(resolved.fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 
     // A final mesh without bone weights leaves the skinning shader nothing to read.
     PuppetEffectChain plain_final(1, false);
@@ -667,36 +517,15 @@ TEST(MetalCapability, APuppetUnderAnEffectChainIsJudgedByTheMeshTheChainResolves
               "a puppet shader is bound to a mesh without bone weights");
 }
 
-TEST(MetalCapability, AParticleLayerWithNoLiveParticlesIsStillAccepted)
-{
-    // Emptiness is a moment in a simulation, not a property of the scene: the
-    // mesh carries the capacity its emitter will use, and refusing it here
-    // would make the backend depend on when the question was asked.
-    ImageScene fixture;
-    auto       mesh = ParticleMesh("genericparticle");
-    EXPECT_EQ(mesh->GetVertexArray(0).DataSizeOf(), 0u);
-    AttachParticleLayer(fixture, std::move(mesh));
-
-    EXPECT_EQ(EvaluateMetalSupport(fixture.scene).backend, SceneBackend::NativeMetal);
-}
-
-TEST(MetalCapability, AZeroCapacityDynamicMeshIsRefusedRatherThanDrawnEmpty)
-{
-    ImageScene fixture;
-    AttachParticleLayer(fixture, ParticleMesh("genericparticle", 0));
-
-    EXPECT_NE(EvaluateMetalSupport(fixture.scene).backend, SceneBackend::NativeMetal);
-}
-
 TEST(MetalCapability, ASceneWithLightsIsAccepted)
 {
     // Lighting is the author's shader reading uniforms the shared value updater
     // writes for either backend; a light on its own asks nothing else of it.
     ImageScene fixture;
     fixture.scene.lights.push_back(
-        std::make_unique<SceneLight>(Eigen::Vector3f { 1.0f, 1.0f, 1.0f }, 100.0f, 1.0f));
+        std::make_unique<SceneLight>(linalg::Vector3f { 1.0f, 1.0f, 1.0f }, 100.0f, 1.0f));
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 }
 
 TEST(MetalCapability, AnImageEffectChainIsNoLongerRejectedBeforeTheGraphExists)
@@ -710,13 +539,13 @@ TEST(MetalCapability, AnImageEffectChainIsNoLongerRejectedBeforeTheGraphExists)
         fixture.node.get(), 1920.0f, 1080.0f, "_rt_effect_pingpong_a_0",
         "_rt_effect_pingpong_b_0"));
     const auto selection = EvaluateMetalSupport(fixture.scene);
-    EXPECT_EQ(selection.backend, SceneBackend::NativeMetal) << selection.fallback_reason;
+    EXPECT_FALSE(selection.failed()) << selection.failure_reason;
 
     ImageScene post;
     post.scene.post_processes.push_back(std::make_shared<ScenePostProcess>());
     const auto post_selection = EvaluateMetalSupport(post.scene);
-    EXPECT_EQ(post_selection.backend, SceneBackend::NativeMetal)
-        << post_selection.fallback_reason;
+    EXPECT_FALSE(post_selection.failed())
+        << post_selection.failure_reason;
 }
 
 TEST(MetalGraph, SequentialEffectPassesAreAccepted)
@@ -756,29 +585,6 @@ TEST(MetalGraph, ReadingATargetThatIsOnlyWrittenLaterIsAcceptedAsHistory)
     AddCopy(graph, std::string(SpecTex_Default), std::string(WE_MIP_MAPPED_FRAME_BUFFER));
 
     EXPECT_EQ(MetalGraphRejection(fixture.scene, graph), "");
-}
-
-TEST(MetalGraph, ATargetThisBackendCannotAllocateRejectsTheWholeScene)
-{
-    ImageScene fixture;
-    fixture.scene.renderTargets["_rt_msaa"] = SceneRenderTarget {
-        .width = 1920, .height = 1080, .sample_count = 4,
-    };
-    rg::RenderGraph graph;
-    AddDraw(graph, "_rt_msaa", { "materials/card.tex" });
-    AddDraw(graph, std::string(SpecTex_Default), { "_rt_msaa" });
-
-    EXPECT_EQ(MetalGraphRejection(fixture.scene, graph),
-              "an effect uses a render-target format the native renderer cannot create");
-}
-
-TEST(MetalGraph, ADepthAttachmentOnAColourTargetIsNotARefusal)
-{
-    ImageScene fixture;
-    fixture.scene.renderTargets[std::string(SpecTex_Default)].withDepth = true;
-    rg::RenderGraph graph;
-    AddDraw(graph, std::string(SpecTex_Default), { "materials/card.tex" });
-    EXPECT_TRUE(MetalGraphRejection(fixture.scene, graph).empty());
 }
 
 TEST(MetalCapability, RecognisedPassKindsAreClassifiedAndAnythingElseFallsBack)
@@ -861,9 +667,9 @@ TEST(MetalBlend, EachModeProducesTheAuthoredFactors)
 
 TEST(MetalBlend, SceneDrawsAreRasterizedWithoutCulling)
 {
-    // The compatibility backend rasterizes with VK_CULL_MODE_NONE, and any
-    // clip-space fold reverses triangle winding. Culling here would either
-    // disagree with the other backend or silently eat half a scene.
+    // Wallpaper Engine rasterizes scene draws without culling, and any
+    // clip-space fold reverses triangle winding. Culling here would silently
+    // eat half a scene.
     EXPECT_EQ(kSceneCullMode, MetalCullMode::None);
 }
 
@@ -912,41 +718,41 @@ TEST(MetalPipelineKey, DistinguishesBlendModesAndTargetFormats)
 // ---------------------------------------------------------------------------
 // Clip space
 
-TEST(MetalProjection, LandsAuthorGeometryOnTheSameWindowPixelAsTheCompatibilityBackend)
+TEST(MetalProjection, LandsAuthorGeometryOnTheSameWindowPixelAsTheFlippedViewportConvention)
 {
-    // The presentation viewport the compatibility backend builds: a letterboxed
-    // region written with a negative height, which is how Vulkan is made to
-    // agree with the coordinate system the authored shaders use.
+    // The reference presentation viewport: a letterboxed region written with a
+    // negative height, the convention that agrees with the coordinate system
+    // the authored shaders use.
     const auto layout = ComputeWallpaperScalingLayout(WallpaperScalingMode::FIT, 1920, 1080, 1000,
                                                       1000, 1.0, 1.0);
-    const VulkanViewportBox vulkan_viewport {
+    const FlippedViewportBox flipped_viewport {
         .x      = static_cast<double>(layout.viewport_px.x),
         .y      = static_cast<double>(layout.viewport_px.y + layout.viewport_px.height),
         .width  = static_cast<double>(layout.viewport_px.width),
         .height = -static_cast<double>(layout.viewport_px.height),
     };
-    ASSERT_LT(vulkan_viewport.height, 0.0) << "the compatibility viewport must be the flipped one";
-    const auto metal_viewport = ToMetalViewport(vulkan_viewport);
+    ASSERT_LT(flipped_viewport.height, 0.0) << "the reference viewport must be the flipped one";
+    const auto metal_viewport = ToMetalViewport(flipped_viewport);
     EXPECT_GT(metal_viewport.height, 0.0) << "Metal has no negative-height viewport";
 
     // The scene's own camera, built the way the parser builds it.
     SceneCamera camera(1920, 1080, -1.0, 1.0);
-    const Eigen::Matrix4d compatibility_vp = camera.GetViewProjectionMatrix();
-    const Eigen::Matrix4d metal_vp         = MetalViewProjection(compatibility_vp);
+    const linalg::Matrix4d reference_vp = camera.GetViewProjectionMatrix();
+    const linalg::Matrix4d metal_vp         = MetalViewProjection(reference_vp);
 
     // The author's canvas corners plus its centre and an off-centre point, so a
     // sign error cannot cancel against symmetry.
-    const std::array<Eigen::Vector4d, 5> author_points {
-        Eigen::Vector4d { -960.0, -540.0, 0.0, 1.0 }, Eigen::Vector4d { -960.0, 540.0, 0.0, 1.0 },
-        Eigen::Vector4d { 960.0, -540.0, 0.0, 1.0 },  Eigen::Vector4d { 960.0, 540.0, 0.0, 1.0 },
-        Eigen::Vector4d { -300.0, 210.0, 0.0, 1.0 },
+    const std::array<linalg::Vector4d, 5> author_points {
+        linalg::Vector4d { -960.0, -540.0, 0.0, 1.0 }, linalg::Vector4d { -960.0, 540.0, 0.0, 1.0 },
+        linalg::Vector4d { 960.0, -540.0, 0.0, 1.0 },  linalg::Vector4d { 960.0, 540.0, 0.0, 1.0 },
+        linalg::Vector4d { -300.0, 210.0, 0.0, 1.0 },
     };
 
     for (const auto& point : author_points) {
-        const Eigen::Vector4d compatibility_clip = compatibility_vp * point;
-        const Eigen::Vector4d metal_clip         = metal_vp * point;
+        const linalg::Vector4d reference_clip = reference_vp * point;
+        const linalg::Vector4d metal_clip         = metal_vp * point;
 
-        const auto want = ClipToWindowVulkan(compatibility_clip, vulkan_viewport);
+        const auto want = ClipToWindowFlipped(reference_clip, flipped_viewport);
         const auto got  = ClipToWindowMetal(metal_clip, metal_viewport);
         EXPECT_NEAR(want.x(), got.x(), 1e-9);
         EXPECT_NEAR(want.y(), got.y(), 1e-9);
@@ -958,10 +764,10 @@ TEST(MetalProjection, LandsAuthorGeometryOnTheSameWindowPixelAsTheCompatibilityB
 
     // A y-flip inserted anywhere in the fold is exactly the regression this
     // guards: with it, the top and bottom canvas edges swap window rows.
-    Eigen::Matrix4d flipped_fold = Eigen::Matrix4d::Identity();
+    linalg::Matrix4d flipped_fold = linalg::Matrix4d::Identity();
     flipped_fold(1, 1)           = -1.0;
-    const Eigen::Matrix4d wrong_vp = flipped_fold * metal_vp;
-    const Eigen::Vector4d top      = author_points[1];
+    const linalg::Matrix4d wrong_vp = flipped_fold * metal_vp;
+    const linalg::Vector4d top      = author_points[1];
     const auto correct = ClipToWindowMetal(metal_vp * top, metal_viewport);
     const auto wrong   = ClipToWindowMetal(wrong_vp * top, metal_viewport);
     EXPECT_GT(std::abs(correct.y() - wrong.y()), 1.0)
@@ -970,7 +776,7 @@ TEST(MetalProjection, LandsAuthorGeometryOnTheSameWindowPixelAsTheCompatibilityB
 
 TEST(MetalProjection, NegativeHeightViewportsCoverTheSameWindowRows)
 {
-    const VulkanViewportBox negative { .x = 12.0, .y = 40.0 + 200.0, .width = 320.0,
+    const FlippedViewportBox negative { .x = 12.0, .y = 40.0 + 200.0, .width = 320.0,
                                        .height = -200.0 };
     const auto              metal = ToMetalViewport(negative);
     EXPECT_DOUBLE_EQ(metal.origin_x, 12.0);
@@ -985,34 +791,34 @@ TEST(MetalProjection, PerspectiveUsesFovAspectNearFarAndAHomogeneousDivide)
     // front of the authored canvas, far plane well beyond it.
     SceneCamera camera(16.0f / 9.0f, 0.1f, 10000.0f, 50.0f);
     auto        node = std::make_shared<SceneNode>(
-        Eigen::Vector3f { 0.0f, 0.0f, 1000.0f }, Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-        Eigen::Vector3f::Zero());
+        linalg::Vector3f { 0.0f, 0.0f, 1000.0f }, linalg::Vector3f { 1.0f, 1.0f, 1.0f },
+        linalg::Vector3f::Zero());
     camera.AttatchNode(node);
 
-    const Eigen::Matrix4d vp = camera.GetViewProjectionMatrix();
-    const Eigen::Vector4d centre = vp * Eigen::Vector4d { 0.0, 0.0, 0.0, 1.0 };
+    const linalg::Matrix4d vp = camera.GetViewProjectionMatrix();
+    const linalg::Vector4d centre = vp * linalg::Vector4d { 0.0, 0.0, 0.0, 1.0 };
     ASSERT_NE(centre.w(), 0.0);
     EXPECT_GT(std::abs(centre.w() - 1.0), 1e-6) << "a perspective projection must not be affine";
     EXPECT_NEAR(centre.x() / centre.w(), 0.0, 1e-9);
     EXPECT_NEAR(centre.y() / centre.w(), 0.0, 1e-9);
     EXPECT_TRUE(MetalDepthInClipRange(centre.z(), centre.w()));
 
-    const Eigen::Vector4d off = vp * Eigen::Vector4d { 100.0, 0.0, 0.0, 1.0 };
+    const linalg::Vector4d off = vp * linalg::Vector4d { 100.0, 0.0, 0.0, 1.0 };
     const double          ndc_x = off.x() / off.w();
 
     SceneCamera tighter(16.0f / 9.0f, 0.1f, 10000.0f, 20.0f);
     tighter.AttatchNode(node);
-    const Eigen::Vector4d tight =
-        tighter.GetViewProjectionMatrix() * Eigen::Vector4d { 100.0, 0.0, 0.0, 1.0 };
+    const linalg::Vector4d tight =
+        tighter.GetViewProjectionMatrix() * linalg::Vector4d { 100.0, 0.0, 0.0, 1.0 };
     EXPECT_GT(std::abs(tight.x() / tight.w()), std::abs(ndc_x))
         << "a narrower FOV must enlarge the same world offset";
 
     // 0.05 in front of the camera, nearer than the 0.1 near plane.
-    const Eigen::Vector4d close = vp * Eigen::Vector4d { 0.0, 0.0, 999.95, 1.0 };
+    const linalg::Vector4d close = vp * linalg::Vector4d { 0.0, 0.0, 999.95, 1.0 };
     EXPECT_FALSE(MetalDepthInClipRange(close.z(), close.w()))
         << "a point in front of the near plane must fail the clip range";
 
-    const Eigen::Matrix4d metal_vp = MetalViewProjection(vp);
+    const linalg::Matrix4d metal_vp = MetalViewProjection(vp);
     EXPECT_TRUE(metal_vp.isApprox(vp, 1e-12))
         << "the Metal clip-space fold is the identity; a flip or scale here is a second correction";
 }
@@ -1021,20 +827,20 @@ TEST(MetalProjection, UnprojectingNdcHitsTheLayerPlane)
 {
     SceneCamera camera(16.0f / 9.0f, 0.1f, 10000.0f, 50.0f);
     auto        cam_node = std::make_shared<SceneNode>(
-        Eigen::Vector3f { 0.0f, 0.0f, 1000.0f }, Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-        Eigen::Vector3f::Zero());
+        linalg::Vector3f { 0.0f, 0.0f, 1000.0f }, linalg::Vector3f { 1.0f, 1.0f, 1.0f },
+        linalg::Vector3f::Zero());
     camera.AttatchNode(cam_node);
 
-    SceneNode layer(Eigen::Vector3f::Zero(), Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-                    Eigen::Vector3f::Zero());
+    SceneNode layer(linalg::Vector3f::Zero(), linalg::Vector3f { 1.0f, 1.0f, 1.0f },
+                    linalg::Vector3f::Zero());
     const auto centre = IntersectNdcWithNodePlane(camera, layer, 0.0, 0.0);
     ASSERT_TRUE(centre.has_value());
     EXPECT_NEAR(centre->x(), 0.0, 1e-6);
     EXPECT_NEAR(centre->y(), 0.0, 1e-6);
     EXPECT_NEAR(centre->z(), 0.0, 1e-6);
 
-    const Eigen::Vector4d world { 40.0, -15.0, 0.0, 1.0 };
-    const Eigen::Vector4d clip = camera.GetViewProjectionMatrix() * world;
+    const linalg::Vector4d world { 40.0, -15.0, 0.0, 1.0 };
+    const linalg::Vector4d clip = camera.GetViewProjectionMatrix() * world;
     ASSERT_NE(clip.w(), 0.0);
     const auto hit =
         IntersectNdcWithNodePlane(camera, layer, clip.x() / clip.w(), clip.y() / clip.w());
@@ -1043,8 +849,8 @@ TEST(MetalProjection, UnprojectingNdcHitsTheLayerPlane)
     EXPECT_NEAR(hit->y(), -15.0, 1e-4);
     EXPECT_NEAR(hit->z(), 0.0, 1e-4);
 
-    SceneNode rotated(Eigen::Vector3f { 0.0f, 0.0f, 0.0f }, Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-                      Eigen::Vector3f { 0.4f, 0.0f, 0.0f });
+    SceneNode rotated(linalg::Vector3f { 0.0f, 0.0f, 0.0f }, linalg::Vector3f { 1.0f, 1.0f, 1.0f },
+                      linalg::Vector3f { 0.4f, 0.0f, 0.0f });
     const auto rotated_hit = IntersectNdcWithNodePlane(camera, rotated, 0.0, 0.0);
     ASSERT_TRUE(rotated_hit.has_value());
     EXPECT_NEAR(rotated_hit->z(), 0.0, 1e-6);
@@ -1054,17 +860,17 @@ TEST(MetalProjection, TheLayerPlaneIsWhereTheLayerIsDrawn)
 {
     SceneCamera camera(16.0f / 9.0f, 0.1f, 10000.0f, 50.0f);
     auto        cam_node = std::make_shared<SceneNode>(
-        Eigen::Vector3f { 0.0f, 0.0f, 1000.0f }, Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-        Eigen::Vector3f::Zero());
+        linalg::Vector3f { 0.0f, 0.0f, 1000.0f }, linalg::Vector3f { 1.0f, 1.0f, 1.0f },
+        linalg::Vector3f::Zero());
     camera.AttatchNode(cam_node);
 
     // A layer a screen anchor draws 25 right and 10 down of where its node is: the point
     // under the cursor is that far from the layer's own origin.
-    SceneNode layer(Eigen::Vector3f::Zero(), Eigen::Vector3f { 2.0f, 2.0f, 1.0f },
-                    Eigen::Vector3f::Zero());
-    layer.SetDrawOffset(Eigen::Vector3f { 25.0f, -10.0f, 0.0f });
-    const Eigen::Vector4d world { 40.0, -15.0, 0.0, 1.0 };
-    const Eigen::Vector4d clip = camera.GetViewProjectionMatrix() * world;
+    SceneNode layer(linalg::Vector3f::Zero(), linalg::Vector3f { 2.0f, 2.0f, 1.0f },
+                    linalg::Vector3f::Zero());
+    layer.SetDrawOffset(linalg::Vector3f { 25.0f, -10.0f, 0.0f });
+    const linalg::Vector4d world { 40.0, -15.0, 0.0, 1.0 };
+    const linalg::Vector4d clip = camera.GetViewProjectionMatrix() * world;
     ASSERT_NE(clip.w(), 0.0);
     const auto hit =
         IntersectNdcWithNodePlane(camera, layer, clip.x() / clip.w(), clip.y() / clip.w());
@@ -1078,8 +884,8 @@ TEST(MetalProjection, CameraAxesFollowTheAttachedNode)
 {
     SceneCamera camera(16.0f / 9.0f, 0.1f, 1000.0f, 50.0f);
     auto        node = std::make_shared<SceneNode>(
-        Eigen::Vector3f { 10.0f, 20.0f, 30.0f }, Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
-        Eigen::Vector3f { 0.0f, static_cast<float>(EIGEN_PI / 2.0), 0.0f });
+        linalg::Vector3f { 10.0f, 20.0f, 30.0f }, linalg::Vector3f { 1.0f, 1.0f, 1.0f },
+        linalg::Vector3f { 0.0f, static_cast<float>(linalg::Pi / 2.0), 0.0f });
     camera.AttatchNode(node);
     const auto axes = camera.GetAxes();
     EXPECT_NEAR(axes.right.x(), 0.0, 1e-5);
@@ -1132,7 +938,7 @@ TEST(MetalDevice, TranslatedShaderConventionsAreWhatTheBackendBindsAgainst)
     }
 
     // The two conventions the backend depends on and cannot re-derive: the
-    // entry point is renamed, and a resource's Metal slot is its SPIR-V
+    // entry point is renamed, and a resource's Metal slot is the GLSL
     // binding index within its own argument-table namespace.
     const auto program = TranslatedProgram();
     for (const auto& stage : program->stages) {

@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e2-runtime-animation.md; written without access to the original source.
 #include "FrameTimer.hpp"
 #include "Utils//Logging.h"
 
@@ -18,50 +19,28 @@ constexpr auto MAX_FRAME_DURATION = seconds(5);
 /// suspension feed hours into scene simulation.
 constexpr i32  SUSPENSION_INTERVAL_SLACK { 3 };
 constexpr u16  DEFAULT_REQUIRED_FPS { 30 };
+/// How many draws the render-cost statistic averages.
+constexpr std::size_t COST_WINDOW { 5 };
 }
 
 FrameTimer::FrameTimer(std::function<void()> cb)
-    : m_callback(cb), m_frame_busy_count(0), m_timer([this]() {
-          // Fixed-rate clock. The callback only posts CMD_DRAW to the render
-          // looper, so the tick period must be the ideal frame time; halving it
-          // when a frame runs long makes a slow scene render flat out instead of
-          // degrading to its achievable rate. Content that can prove it changes
-          // less often than that lengthens the period, never shortens it.
-          m_timer.SetInterval(ResolveInterval());
-
-          auto* counters = m_counters.load(std::memory_order_relaxed);
-          if (counters != nullptr) counters->Add(OWE_RC_TIMER_WAKEUPS);
-
-          // At most one DRAW may be in flight. A slow frame drops ticks rather
-          // than queueing work the display will never show.
-          if (m_callback && m_frame_busy_count.load() < 1) {
-              m_owed_tick.store(steady_clock::time_point {});
-              m_frame_busy_count++;
-              // Cleared before the draw is posted, so an event arriving while
-              // it runs is a new request rather than one this frame already
-              // answered.
-              m_frame_requested.store(false);
-              if (counters != nullptr) counters->Add(OWE_RC_DRAW_REQUESTS);
-              m_callback();
-          } else {
-              // The request itself is not dropped with the tick: it stays
-              // outstanding until a draw actually consumes it, and the
-              // in-flight draw re-arms the clock when it ends. The tick is
-              // owed too, if that draw ends soon enough (see FrameEnd).
-              if (m_callback) m_owed_tick.store(steady_clock::now());
-              if (counters != nullptr) counters->Add(OWE_RC_DRAW_TICKS_SUPPRESSED);
-          }
-      }) {
-    SetRequiredFps(DEFAULT_REQUIRED_FPS);
-    ResetFrameTiming();
+    : m_draw(std::move(cb)), m_timer([this] { OnTick(); }) {
+    m_req_fps  = DEFAULT_REQUIRED_FPS;
+    m_ideatime = microseconds(1'000'000 / DEFAULT_REQUIRED_FPS);
+    m_elapsed_frametime = m_ideatime.load();
+    m_frame_busy_count  = 0;
+    m_frame_cost        = m_ideatime.load();
+    m_costs.assign(COST_WINDOW, m_ideatime.load());
+    m_timer.SetMinInterval(m_ideatime.load());
+    m_timer.SetInterval(ResolveInterval());
 }
 
-FrameTimer::~FrameTimer() {};
+FrameTimer::~FrameTimer() { m_timer.Stop(); }
 
-u16 FrameTimer::RequiredFps() const { return m_req_fps; }
+u16 FrameTimer::RequiredFps() const { return m_req_fps.load(); }
 
 double FrameTimer::FrameTime() const {
-    return duration_cast<duration<double>>(m_frametime.load()).count();
+    return duration_cast<duration<double>>(m_frame_cost.load()).count();
 }
 
 double FrameTimer::IdeaTime() const {
@@ -69,20 +48,16 @@ double FrameTimer::IdeaTime() const {
 }
 
 void FrameTimer::UpdateFrametime() {
-    m_frametime.store(std::accumulate(m_frametime_queue.begin(),
-                                      m_frametime_queue.end(),
-                                      duration_cast<microseconds>(0s)) /
-                      m_frametime_queue.size());
+    std::lock_guard lock(m_costs_mutex);
+    if (m_costs.empty()) return;
+    const auto sum = std::accumulate(m_costs.begin(), m_costs.end(), micros::zero());
+    m_frame_cost.store(sum / static_cast<micros::rep>(m_costs.size()));
 }
 
-void FrameTimer::ResetFrameTiming() {
-    m_frametime_queue.clear();
-    for (usize i = 0; i < FrameTimer::FRAMETIME_QUEUE_SIZE; i++) {
-        AddFrametime(m_ideatime.load());
-    }
-    UpdateFrametime();
-    m_elapsed_frametime.store(m_ideatime.load());
-    m_reset_frame_clock.store(true);
+void FrameTimer::AddFrametime(micros t) {
+    std::lock_guard lock(m_costs_mutex);
+    m_costs.push_back(t);
+    while (m_costs.size() > COST_WINDOW) m_costs.pop_front();
 }
 
 void FrameTimer::SetRequiredFps(u16 value) {
@@ -185,13 +160,6 @@ std::chrono::microseconds FrameTimer::ResolveInterval() {
     return interval;
 }
 
-void FrameTimer::AddFrametime(micros t) {
-    m_frametime_queue.push_back(t);
-    while (m_frametime_queue.size() > FrameTimer::FRAMETIME_QUEUE_SIZE) {
-        m_frametime_queue.pop_front();
-    }
-}
-
 void FrameTimer::FrameBegin() { FrameBegin(steady_clock::now()); }
 void FrameTimer::FrameBegin(steady_clock::time_point now) {
     const auto elapsed = duration_cast<microseconds>(now - m_clock);
@@ -208,56 +176,89 @@ void FrameTimer::FrameBegin(steady_clock::time_point now) {
 }
 void FrameTimer::FrameEnd() { FrameEnd(steady_clock::now()); }
 void FrameTimer::FrameEnd(steady_clock::time_point now) {
-    auto elapsed = duration_cast<microseconds>(now - m_clock);
-    if (elapsed > MAX_FRAME_DURATION) {
-        ResetFrameTiming();
+    const auto cost = duration_cast<microseconds>(now - m_clock);
+    if (cost > MAX_FRAME_DURATION) {
+        // The process was suspended inside this frame: its length says nothing about the cost
+        // of drawing, and the next frame starts afresh.
+        {
+            std::lock_guard lock(m_costs_mutex);
+            m_costs.assign(COST_WINDOW, m_ideatime.load());
+        }
+        UpdateFrametime();
+        m_elapsed_frametime.store(m_ideatime.load());
+        m_reset_frame_clock.store(true);
     } else {
-        AddFrametime(elapsed);
+        AddFrametime(cost);
         UpdateFrametime();
     }
 
-    i32 expected = m_frame_busy_count.load();
-    while (expected > 0) {
-        if (m_frame_busy_count.compare_exchange_weak(expected, expected - 1)) {
-            break;
+    // One draw less in flight, never below none.
+    auto busy = m_frame_busy_count.load();
+    while (busy > 0 && ! m_frame_busy_count.compare_exchange_weak(busy, busy - 1)) {}
+
+    // A tick that was dropped because this draw was still running is owed, and taken now when
+    // the draw ended soon after it was due: a frame that overruns by a millisecond does not
+    // halve the rate. The dropped tick was itself a whole interval after the last one, so this
+    // cannot outrun the ceiling.
+    const auto owed = m_owed_tick_ns.exchange(kNoOwedTick);
+    if (owed != kNoOwedTick) {
+        const auto late = now.time_since_epoch() - nanoseconds(owed);
+        if (late >= nanoseconds::zero() && late <= m_tick_interval.load() / 4) {
+            m_timer.FireNow();
+            return;
         }
     }
-
-    // A request that arrived while this draw was running, or one whose tick
-    // this draw suppressed, is still owed a frame. The clock is re-armed from
-    // here — the edge where the draw actually finished — rather than by a
-    // retry that wakes once per frame period to find the draw still running.
-    // This is also the only place that can cover the handover: the scene
-    // decides whether it goes idle *after* this returns, so a request left
-    // outstanding by a continuous tick would otherwise have no later tick to
-    // notice it.
-    // A frame slightly longer than the interval made the next tick find it
-    // still running. Waiting for the tick after that would halve the rate for
-    // a scene that misses by a millisecond, so a draw that ends within a
-    // quarter interval of the dropped tick runs the owed frame at once. A
-    // draw that ends later keeps the grid, so a scene that cannot keep up
-    // degrades to a steady fraction of the rate instead of running flat out.
-    const auto owed = m_owed_tick.exchange(steady_clock::time_point {});
-    if (owed != steady_clock::time_point {} && Running() && now >= owed &&
-        now - owed <= m_tick_interval.load() / 4) {
-        m_timer.FireNow();
-        return;
-    }
-
-    if (m_frame_requested.load() && Running()) m_timer.WakeOnce();
+    if (m_frame_requested.load() && m_timer.Running()) m_timer.WakeOnce();
 }
 
 void FrameTimer::SetCallback(const std::function<void()>& cb) {
-    if (! Running()) m_callback = cb;
+    if (! m_timer.Running()) m_draw = cb;
 }
+
 void FrameTimer::Run() {
-    if (! Running()) {
-        ResetFrameTiming();
-        m_frame_busy_count.store(0);
-        m_owed_tick.store(steady_clock::time_point {});
-        m_timer.SetInterval(ResolveInterval());
+    if (m_timer.Running()) return;
+    // A start is a fresh clock: the first frame counts one ideal interval, nothing inherits a
+    // draw that will never complete, and no tick is owed.
+    const auto ideal = m_ideatime.load();
+    {
+        std::lock_guard lock(m_costs_mutex);
+        m_costs.assign(COST_WINDOW, ideal);
     }
+    UpdateFrametime();
+    m_elapsed_frametime.store(ideal);
+    m_reset_frame_clock.store(true);
+    m_frame_busy_count.store(0);
+    m_owed_tick_ns.store(kNoOwedTick);
+    m_timer.SetInterval(ResolveInterval());
     m_timer.Start();
 }
+
 void FrameTimer::Stop() { m_timer.Stop(); }
+
 bool FrameTimer::Running() const { return m_timer.Running(); }
+
+void FrameTimer::OnTick() {
+    // Claim the single draw slot first; every other effect of the tick follows from whether the
+    // claim succeeded.
+    const bool has_draw = static_cast<bool>(m_draw);
+    bool       admitted = false;
+    if (has_draw) {
+        i32 none_in_flight = 0;
+        admitted           = m_frame_busy_count.compare_exchange_strong(none_in_flight, 1);
+    }
+
+    if (admitted) {
+        m_frame_requested.store(false);
+        m_owed_tick_ns.store(kNoOwedTick);
+    } else if (has_draw) {
+        m_owed_tick_ns.store(steady_clock::now().time_since_epoch().count());
+    }
+
+    if (auto* sink = m_counters.load(std::memory_order_relaxed); sink != nullptr) {
+        sink->Add(OWE_RC_TIMER_WAKEUPS);
+        sink->Add(admitted ? OWE_RC_DRAW_REQUESTS : OWE_RC_DRAW_TICKS_SUPPRESSED);
+    }
+    m_timer.SetInterval(ResolveInterval());
+
+    if (admitted) m_draw();
+}

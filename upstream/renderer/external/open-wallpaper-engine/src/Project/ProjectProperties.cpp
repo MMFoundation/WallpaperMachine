@@ -1,40 +1,21 @@
+// Clean-room implementation from the WallpaperMachine spec e7-small-units.md; written without access to the original source.
 #include "Project/ProjectProperties.hpp"
 
 #include <algorithm>
 #include <cctype>
-#include <filesystem>
+#include <cerrno>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
+#include <iterator>
+#include <limits>
 #include <nlohmann/json.hpp>
-#include <sstream>
+
+#include "Utils/Logging.h"
 
 namespace wallpaper
 {
-namespace
-{
-
-bool read_file(const std::filesystem::path& path, std::string* content)
-{
-    if (content == nullptr) return false;
-
-    std::ifstream input(path);
-    if (!input.good()) return false;
-
-    std::ostringstream buffer;
-    buffer << input.rdbuf();
-    *content = buffer.str();
-    return input.good() || input.eof();
-}
-
-RuntimeScalarValue parse_scalar_value(const nlohmann::json& value)
-{
-    if (value.is_boolean()) return RuntimeScalarValue::Bool(value.get<bool>());
-    if (value.is_number()) return RuntimeScalarValue::Float(value.get<float>());
-    if (value.is_string()) return RuntimeScalarValue::String(value.get<std::string>());
-    if (value.is_null()) return RuntimeScalarValue::String("");
-    return RuntimeScalarValue::String(value.dump());
-}
-
-} // namespace
 
 bool StringIsTrue(std::string_view value)
 {
@@ -48,59 +29,105 @@ bool StringIsTrue(std::string_view value)
            });
 }
 
-RuntimeScalarValue RuntimeScalarValue::Bool(bool value)
+namespace
 {
-    RuntimeScalarValue result;
-    result.kind         = Kind::Bool;
-    result.bool_value   = value;
-    result.float_value  = value ? 1.0f : 0.0f;
-    result.string_value = value ? "true" : "false";
-    return result;
+
+// The C library's `%f` form of a number, every digit kept.
+std::string FixedText(float value)
+{
+    char text[96];
+    const int n = std::snprintf(text, sizeof(text), "%f", static_cast<double>(value));
+    if (n < 0) return {};
+    return std::string(text, std::min<std::size_t>(static_cast<std::size_t>(n), sizeof(text) - 1));
 }
 
-RuntimeScalarValue RuntimeScalarValue::Float(float value)
+bool ReadWholeFile(const std::string& path, std::string* text)
 {
-    RuntimeScalarValue result;
-    result.kind         = Kind::Float;
-    result.bool_value   = value != 0.0f;
-    result.float_value  = value;
-    result.string_value = std::to_string(value);
-    return result;
+    std::ifstream in(path, std::ios::binary);
+    if (! in) return false;
+    text->assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    return ! in.bad();
 }
 
-RuntimeScalarValue RuntimeScalarValue::String(std::string value)
+bool Fail(std::string* error, std::string message)
 {
-    RuntimeScalarValue result;
-    result.kind         = Kind::String;
-    result.bool_value   = StringIsTrue(value);
-    result.float_value  = 0.0f;
-    result.string_value = std::move(value);
-    return result;
+    LOG_ERROR("project properties: %s", message.c_str());
+    if (error != nullptr) *error = std::move(message);
+    return false;
 }
 
-bool RuntimeScalarValue::asBool() const
+// A JSON number as a single-precision value; one beyond the range becomes an
+// infinity instead of an undefined narrowing.
+float NumberToFloat(const nlohmann::json& number)
 {
-    switch (kind) {
-    case Kind::Bool: return bool_value;
-    case Kind::Float: return float_value != 0.0f;
-    case Kind::String: return StringIsTrue(string_value);
+    const double wide = number.get<double>();
+    if (std::isnan(wide)) return std::numeric_limits<float>::quiet_NaN();
+    constexpr double kMost = std::numeric_limits<float>::max();
+    if (wide > kMost) return std::numeric_limits<float>::infinity();
+    if (wide < -kMost) return -std::numeric_limits<float>::infinity();
+    return static_cast<float>(wide);
+}
+
+RuntimeScalarValue ValueFromJson(const nlohmann::json& node)
+{
+    if (node.is_boolean()) return RuntimeScalarValue::Bool(node.get<bool>());
+    if (node.is_number()) return RuntimeScalarValue::Float(NumberToFloat(node));
+    if (node.is_string()) return RuntimeScalarValue::String(node.get<std::string>());
+    if (node.is_null()) return RuntimeScalarValue::String({});
+    return RuntimeScalarValue::String(node.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
+}
+
+// Strict parse; on failure the library's own message, when there is one.
+bool ParseDocument(const std::string& text, nlohmann::json* root, std::string* reason)
+{
+    *root = nlohmann::json::parse(text, nullptr, false);
+    if (! root->is_discarded()) return true;
+    *reason = "not valid JSON";
+    try {
+        (void)nlohmann::json::parse(text);
+    } catch (const nlohmann::json::exception& e) {
+        *reason = e.what();
     }
     return false;
 }
 
+} // namespace
+
+RuntimeScalarValue RuntimeScalarValue::Bool(bool value)
+{
+    return RuntimeScalarValue { Kind::Bool, value, value ? 1.0f : 0.0f, value ? "true" : "false" };
+}
+
+RuntimeScalarValue RuntimeScalarValue::Float(float value)
+{
+    // A flag by comparison: NaN differs from 0, so it is true.
+    return RuntimeScalarValue { Kind::Float, value != 0.0f, value, FixedText(value) };
+}
+
+RuntimeScalarValue RuntimeScalarValue::String(std::string value)
+{
+    const bool flag = StringIsTrue(value);
+    return RuntimeScalarValue { Kind::String, flag, 0.0f, std::move(value) };
+}
+
+bool RuntimeScalarValue::asBool() const
+{
+    return kind == Kind::String ? StringIsTrue(string_value) : bool_value;
+}
+
 float RuntimeScalarValue::asFloat() const
 {
-    switch (kind) {
-    case Kind::Bool: return bool_value ? 1.0f : 0.0f;
-    case Kind::Float: return float_value;
-    case Kind::String:
-        try {
-            return std::stof(string_value);
-        } catch (...) {
-            return 0.0f;
-        }
-    }
-    return 0.0f;
+    if (kind != Kind::String) return float_value;
+    // The C library's reader, at single precision: it skips leading white space,
+    // takes the longest number it finds and ignores whatever follows.
+    errno              = 0;
+    const char* begin  = string_value.c_str();
+    char*       end    = nullptr;
+    const float number = std::strtof(begin, &end);
+    if (end == begin) return 0.0f;
+    // A magnitude beyond the range is not read as infinity (the literal `inf` is).
+    if (errno == ERANGE && std::isinf(number)) return 0.0f;
+    return number;
 }
 
 const std::string& RuntimeScalarValue::asString() const
@@ -113,47 +140,35 @@ bool ParseProjectProperties(
     ProjectProperties* properties,
     std::string*       error)
 {
-    if (properties == nullptr) {
-        if (error != nullptr) *error = "project properties output must not be null";
-        return false;
-    }
-    if (project_path.empty()) {
-        if (error != nullptr) *error = "project properties path must not be empty";
-        return false;
-    }
+    if (properties == nullptr) return Fail(error, "property table output must not be null");
+    if (project_path.empty()) return Fail(error, "project path must not be empty");
 
-    std::string content;
-    if (!read_file(project_path, &content)) {
-        if (error != nullptr) *error = "failed to read project properties source";
-        return false;
-    }
+    std::string text;
+    if (! ReadWholeFile(project_path, &text))
+        return Fail(error, "can't read project file: " + project_path);
 
-    nlohmann::json project;
-    try {
-        project = nlohmann::json::parse(content);
-    } catch (const nlohmann::json::exception& exception) {
-        if (error != nullptr) *error = exception.what();
-        return false;
-    }
+    nlohmann::json root;
+    std::string    reason;
+    if (! ParseDocument(text, &root, &reason)) return Fail(error, reason);
 
-    if (!project.contains("general") || !project.at("general").is_object()) {
-        if (error != nullptr) *error = "project must contain an object `general`";
-        return false;
+    const auto general = root.is_object() ? root.find("general") : root.end();
+    if (root.is_object() && general != root.end() && general->is_object()) {
+        const auto declared = general->find("properties");
+        if (declared != general->end() && declared->is_object()) {
+            ProjectProperties table;
+            for (const auto& [name, member] : declared->items()) {
+                // A directory or group property has no value to carry.
+                if (! member.is_object()) continue;
+                const auto value = member.find("value");
+                if (value == member.end()) continue;
+                table.insert_or_assign(name, ValueFromJson(*value));
+            }
+            *properties = std::move(table);
+            return true;
+        }
+        return Fail(error, "project has no general.properties object: " + project_path);
     }
-    const auto& general = project.at("general");
-    if (!general.contains("properties") || !general.at("properties").is_object()) {
-        if (error != nullptr) *error = "project general section must contain object `properties`";
-        return false;
-    }
-
-    ProjectProperties parsed;
-    for (const auto& [name, property] : general.at("properties").items()) {
-        if (!property.is_object() || !property.contains("value")) continue;
-        parsed.emplace(name, parse_scalar_value(property.at("value")));
-    }
-
-    *properties = std::move(parsed);
-    return true;
+    return Fail(error, "project has no general object: " + project_path);
 }
 
 bool ParseFlatProjectPropertyOverrideJson(
@@ -161,30 +176,16 @@ bool ParseFlatProjectPropertyOverrideJson(
     ProjectProperties* properties,
     std::string*       error)
 {
-    if (properties == nullptr) {
-        if (error != nullptr) *error = "override property output must not be null";
-        return false;
-    }
+    if (properties == nullptr) return Fail(error, "property table output must not be null");
 
-    nlohmann::json parsed;
-    try {
-        parsed = nlohmann::json::parse(json);
-    } catch (const nlohmann::json::exception& exception) {
-        if (error != nullptr) *error = exception.what();
-        return false;
-    }
+    nlohmann::json root;
+    std::string    reason;
+    if (! ParseDocument(std::string(json), &root, &reason)) return Fail(error, reason);
+    if (! root.is_object()) return Fail(error, "property document must be a JSON object");
 
-    if (!parsed.is_object()) {
-        if (error != nullptr) *error = "override json must be an object";
-        return false;
-    }
-
-    ProjectProperties result;
-    for (const auto& [name, value] : parsed.items()) {
-        result.emplace(name, parse_scalar_value(value));
-    }
-
-    *properties = std::move(result);
+    ProjectProperties table;
+    for (const auto& [name, member] : root.items()) table.insert_or_assign(name, ValueFromJson(member));
+    *properties = std::move(table);
     return true;
 }
 
@@ -193,9 +194,7 @@ ProjectProperties MergeProjectProperties(
     const ProjectProperties& overrides)
 {
     ProjectProperties merged = defaults;
-    for (const auto& [name, value] : overrides) {
-        merged[name] = value;
-    }
+    for (const auto& [name, value] : overrides) merged.insert_or_assign(name, value);
     return merged;
 }
 

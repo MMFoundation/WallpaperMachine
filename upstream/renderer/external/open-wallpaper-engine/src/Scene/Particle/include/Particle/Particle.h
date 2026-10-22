@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Eigen/Core>
+#include "Utils/Linalg.hpp"
 
 namespace wallpaper
 {
@@ -21,24 +21,24 @@ inline constexpr float kParticleStartAlpha = 1.0f;
 
 struct Particle {
     struct InitValue {
-        Eigen::Vector3f color { 1.0f, 1.0f, 1.0f };
+        linalg::Vector3f color { 1.0f, 1.0f, 1.0f };
         float           alpha { kParticleStartAlpha };
         float           size { kParticleStartSize };
         float           lifetime { 1.0f };
         /// Fixed per particle, in [0, 1). Picks a `randomframe` sprite.
         float           frame { 0.0f };
     };
-    Eigen::Vector3f position { 0.0f, 0.0f, 0.0f };
-    Eigen::Vector3f color { 1.0f, 1.0f, 1.0f };
+    linalg::Vector3f position { 0.0f, 0.0f, 0.0f };
+    linalg::Vector3f color { 1.0f, 1.0f, 1.0f };
     float           alpha { kParticleStartAlpha };
     float           size { kParticleStartSize };
     float           lifetime { 1.0f };
 
-    Eigen::Vector3f rotation { 0.0f, 0.0f, 0.0f }; // radian  z x y
-    Eigen::Vector3f velocity { 0.0f, 0.0f, 0.0f };
-    Eigen::Vector3f acceleration { 0.0f, 0.0f, 0.0f };
-    Eigen::Vector3f angularVelocity { 0.0f, 0.0f, 0.0f };
-    Eigen::Vector3f angularAcceleration { 0.0f, 0.0f, 0.0f };
+    linalg::Vector3f rotation { 0.0f, 0.0f, 0.0f }; // radian  z x y
+    linalg::Vector3f velocity { 0.0f, 0.0f, 0.0f };
+    linalg::Vector3f acceleration { 0.0f, 0.0f, 0.0f };
+    linalg::Vector3f angularVelocity { 0.0f, 0.0f, 0.0f };
+    linalg::Vector3f angularAcceleration { 0.0f, 0.0f, 0.0f };
 
     /// Fixed per particle, in [0, 1). One draw at spawn that every operator
     /// reading "this particle's random" shares (oscillators, turbulence),
@@ -49,7 +49,7 @@ struct Particle {
     /// last step, kept only while an operator asks for it (a control point
     /// attraction that removes particles it passes). Equal to the spawn
     /// position until the first step.
-    Eigen::Vector3f prev_position { 0.0f, 0.0f, 0.0f };
+    linalg::Vector3f prev_position { 0.0f, 0.0f, 0.0f };
 
     bool      mark_new { true };
     InitValue init {};

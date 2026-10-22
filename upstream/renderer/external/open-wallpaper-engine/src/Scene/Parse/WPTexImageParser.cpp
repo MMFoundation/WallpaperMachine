@@ -1,11 +1,10 @@
+// Clean-room implementation from the WallpaperMachine spec p6-textures-packages.md; written without access to the original source.
 #include "WPTexImageParser.hpp"
 #include "ImageOrientation.hpp"
 
 #include "Type.hpp"
-#include "Fs/LimitedBinaryStream.h"
-#include "Video/VideoMetadata.hpp"
+#include "Video/VideoContainerProbe.hpp"
 #include "Video/VideoTextureSource.hpp"
-#include "Video/VideoPayloadCache.hpp"
 #include "WPCommon.hpp"
 #include <cstdint>
 #include <lz4.h>
@@ -14,6 +13,9 @@
 #include "Utils/Algorism.h"
 #include "Fs/VFS.h"
 #include "Utils/BitFlags.hpp"
+#include "Fs/CBinaryStream.h"
+#include "Media/ByteSource.hpp"
+#include "WPVideoCache.hpp"
 
 #if (defined(__aarch64__) || defined(__arm64__)) && !defined(STBI_NO_SIMD)
 #define STBI_NEON
@@ -21,229 +23,50 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+#include <algorithm>
+#include <array>
+#include <climits>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 using namespace wallpaper;
 
-enum class WPTexFlagEnum : uint32_t
-{
-    // true for no bilinear
-    noInterpolation = 0,
-    // true for no repeat
-    clampUVs = 1,
-    sprite   = 2,
-    video    = 5,
-
-    compo1 = 20,
-    compo2 = 21,
-    compo3 = 22,
-    compo4 = 23
-};
-using WPTexFlags = BitFlags<WPTexFlagEnum>;
-
 namespace
 {
-struct EmbeddedImageType
+constexpr std::array<std::string_view, 9> kImageExtensions { "png", "jpg", "jpeg", "jpe", "bmp",
+                                                            "gif", "tga", "targa", "webp" };
+constexpr std::array<std::string_view, 6> kVideoExtensions { "mp4", "m4v", "mov", "webm", "avi", "mkv" };
+
+// `extension` carries its leading dot; the comparison ignores ASCII case.
+bool ExtensionIn(std::string_view extension, std::span<const std::string_view> list)
 {
-    ImageType type { ImageType::UNKNOWN };
-    bool      isVideo { false };
-};
-
-struct LooseAssetCandidate
-{
-    std::string path;
-    bool        isVideo { false };
-    ImageType   imageType { ImageType::UNKNOWN };
-    /// Where `path` has to be read from. A mounted path is absolute too —
-    /// `/assets/materials/foo.png` — so the origin travels with the candidate
-    /// rather than being guessed back out of the string.
-    bool        isHost { false };
-};
-
-char* Lz4Decompress(const char* src, int size, int decompressed_size) {
-    char* dst       = new char[(usize)decompressed_size];
-    int   load_size = LZ4_decompress_safe(src, dst, size, decompressed_size);
-    if (load_size < decompressed_size) {
-        LOG_ERROR("lz4 decompress failed");
-        delete[] dst;
-        return nullptr;
-    }
-    return dst;
-}
-
-EmbeddedImageType DetectEmbeddedImageType(const unsigned char* data, usize size)
-{
-    if (size >= 8 && std::memcmp(data, "\x89PNG\r\n\x1a\n", 8) == 0) {
-        return { ImageType::PNG, false };
-    }
-    if (size >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff) {
-        return { ImageType::JPEG, false };
-    }
-    if (size >= 6 &&
-        (std::memcmp(data, "GIF87a", 6) == 0 || std::memcmp(data, "GIF89a", 6) == 0)) {
-        return { ImageType::GIF, false };
-    }
-    if (size >= 2 && data[0] == 'B' && data[1] == 'M') return { ImageType::BMP, false };
-    if (size >= 4 &&
-        ((data[0] == 'I' && data[1] == 'I' && data[2] == 0x2a && data[3] == 0x00) ||
-         (data[0] == 'M' && data[1] == 'M' && data[2] == 0x00 && data[3] == 0x2a))) {
-        return { ImageType::TIFF, false };
-    }
-    if (size >= 12 && std::memcmp(data + 4, "ftyp", 4) == 0) {
-        return { ImageType::UNKNOWN, true };
-    }
-    if (size >= 4 && data[0] == 0x1a && data[1] == 0x45 &&
-        data[2] == 0xdf && data[3] == 0xa3) {
-        return { ImageType::UNKNOWN, true };
-    }
-    return {};
-}
-
-std::optional<std::vector<char>> ReadTexMipPayloadPrefix(
-    fs::IBinaryStream& file,
-    i32               src_size,
-    usize             max_bytes)
-{
-    if (src_size <= 0) return std::nullopt;
-    const idx payload_start = file.Tell();
-    const idx remaining = file.Size() - payload_start;
-    if (remaining < src_size) return std::nullopt;
-
-    std::vector<char> payload(std::min<usize>(static_cast<usize>(src_size), max_bytes));
-    if (!payload.empty()) {
-        file.Read(payload.data(), payload.size());
-    }
-    file.SeekSet(payload_start + src_size);
-    return payload;
-}
-
-TextureFormat ToTexFormate(int type) {
-    /*
-        type
-        RGBA8888 = 0,
-        DXT5 = 4,
-        DXT3 = 6,
-        DXT1 = 7,
-        RG88 = 8,
-        R8 = 9,
-    */
-    switch (type) {
-    case 0: return TextureFormat::RGBA8;
-    case 4: return TextureFormat::BC3;
-    case 6: return TextureFormat::BC2;
-    case 7: return TextureFormat::BC1;
-    case 8: return TextureFormat::RG8;
-    case 9: return TextureFormat::R8;
-    default:
-        LOG_ERROR("ERROR::ToTexFormate Unkown image type: %d", type);
-        return TextureFormat::RGBA8;
-    }
-}
-void LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
-    header.extraHeader["texv"].val = ReadTexVesion(file);
-    header.extraHeader["texi"].val = ReadTexVesion(file);
-
-    header.format = ToTexFormate(file.ReadInt32());
-    WPTexFlags flags(file.ReadUint32());
-    {
-        header.isSprite     = flags[WPTexFlagEnum::sprite];
-        header.isVideo      = flags[WPTexFlagEnum::video];
-        header.sample.wrapS = header.sample.wrapT =
-            flags[WPTexFlagEnum::clampUVs] ? TextureWrap::CLAMP_TO_EDGE : TextureWrap::REPEAT;
-        header.sample.minFilter = header.sample.magFilter =
-            flags[WPTexFlagEnum::noInterpolation] ? TextureFilter::NEAREST : TextureFilter::LINEAR;
-        // The reference builds the sampler of a file texture from these flags: with
-        // `noInterpolation` it is point sampling for min, mag and the mip level.
-        header.sample.mipFilter = header.sample.magFilter;
-        header.extraHeader["compo1"].val = flags[WPTexFlagEnum::compo1];
-        header.extraHeader["compo2"].val = flags[WPTexFlagEnum::compo2];
-        header.extraHeader["compo3"].val = flags[WPTexFlagEnum::compo3];
-        header.extraHeader["compo4"].val = flags[WPTexFlagEnum::compo4];
-    }
-
-    /*
-        picture:
-        width, height --> pow of 2 (tex size)
-        mapw, maph    --> pic size
-        mips
-        mipw,miph     --> pow of 2
-
-        sprites:
-        width, height --> piece of sprite sheet
-        mapw, maph    --> same
-        1 mip
-        mipw,mimp     --> tex size
-    */
-
-    header.width  = file.ReadInt32();
-    header.height = file.ReadInt32();
-    // in sprite this mean one pic
-    header.mapWidth  = file.ReadInt32();
-    header.mapHeight = file.ReadInt32();
-
-    file.ReadInt32(); // unknown
-
-    header.extraHeader["texb"].val = ReadTexVesion(file);
-
-    header.count = file.ReadInt32();
-
-    if (header.extraHeader["texb"].val >= 3) {
-        header.type = static_cast<ImageType>(file.ReadInt32());
-    }
-    if (header.extraHeader["texb"].val >= 4) {
-        header.extraHeader["texb_reserved"].val = file.ReadInt32();
-    }
-}
-
-void SetHeaderPow2(ImageHeader& header, i32 mip_0_w, i32 mip_0_h) {
-    header.mipmap_pow2   = algorism::IsPowOfTwo((u32)mip_0_w) || algorism::IsPowOfTwo((u32)mip_0_h);
-    header.mipmap_larger = mip_0_w * mip_0_h > header.mapWidth * header.mapHeight;
-}
-
-std::string Lowercase(std::string value)
-{
-    std::transform(
-        value.begin(),
-        value.end(),
-        value.begin(),
-        [](const unsigned char ch) {
-            return static_cast<char>(std::tolower(ch));
-        });
-    return value;
-}
-
-ImageType GuessImageTypeFromExtension(std::string_view extension)
-{
-    const std::string ext = Lowercase(std::string(extension));
-    if (ext == ".png") return ImageType::PNG;
-    if (ext == ".jpg" || ext == ".jpeg" || ext == ".jpe") return ImageType::JPEG;
-    if (ext == ".bmp") return ImageType::BMP;
-    if (ext == ".gif") return ImageType::GIF;
-    if (ext == ".tga" || ext == ".targa") return ImageType::TARGA;
-    if (ext == ".webp") return ImageType::UNKNOWN;
-    return ImageType::UNKNOWN;
+    if (extension.size() < 2 || extension.front() != '.') return false;
+    extension.remove_prefix(1);
+    return std::any_of(list.begin(), list.end(), [&](std::string_view known) {
+        return known.size() == extension.size() &&
+               std::equal(known.begin(), known.end(), extension.begin(), [](char a, char b) {
+                   return a == (b >= 'A' && b <= 'Z' ? static_cast<char>(b - 'A' + 'a') : b);
+               });
+    });
 }
 
 bool IsLooseImageExtension(std::string_view extension)
 {
-    const std::string ext = Lowercase(std::string(extension));
-    return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".jpe" ||
-           ext == ".bmp" || ext == ".gif" || ext == ".tga" || ext == ".targa" ||
-           ext == ".webp";
+    return ExtensionIn(extension, kImageExtensions);
 }
 
 bool IsLooseVideoExtension(std::string_view extension)
 {
-    const std::string ext = Lowercase(std::string(extension));
-    return ext == ".mp4" || ext == ".m4v" || ext == ".mov" || ext == ".webm" ||
-           ext == ".avi" || ext == ".mkv";
+    return ExtensionIn(extension, kVideoExtensions);
 }
 
 // A `scenetexture` property can name a picture the user picked from their own
@@ -263,653 +86,935 @@ bool IsHostAssetPath(std::string_view name)
     return static_cast<bool>(std::ifstream { path, std::ios::binary });
 }
 
-std::optional<LooseAssetCandidate> ResolveLooseAsset(fs::VFS& vfs, std::string_view name)
+// ---- the .tex container ------------------------------------------------------
+
+constexpr u32 kFlagPoint  = 1u << 0;
+constexpr u32 kFlagClamp  = 1u << 1;
+constexpr u32 kFlagSprite = 1u << 2;
+constexpr u32 kFlagVideo  = 1u << 5;
+constexpr int kFirstComponentBit = 20;
+
+// Largest level a compressed block may expand to, unless the format needs more.
+constexpr i64 kExpandCeiling = i64 { 1 } << 30;
+// A block-compressed level can never expand by more than this factor.
+constexpr i64 kLz4MaxRatio = 255;
+// What the description reads of a payload to recognise it.
+constexpr i64 kSniffBytes = 64;
+// How much of a loose JPEG is searched for its orientation.
+constexpr i64 kOrientationWindow = i64 { 1 } << 20;
+
+struct Container {
+    int texv { 0 };
+    int texi { 0 };
+    int texb { 0 };
+
+    i32 formatCode { 0 };
+    u32 flags { 0 };
+    i32 textureWidth { 0 };
+    i32 textureHeight { 0 };
+    i32 imageWidth { 0 };
+    i32 imageHeight { 0 };
+
+    i32  pictures { 0 };
+    i32  imageType { -1 }; // FreeImage id, -1 when none is declared
+    i32  reserved { 0 };
+    bool hasReserved { false };
+
+    TextureFormat format { TextureFormat::RGBA8 };
+
+    bool sprite() const { return (flags & kFlagSprite) != 0; }
+    bool video() const { return (flags & kFlagVideo) != 0; }
+    bool declaresPicture() const { return texb >= 3 && imageType != -1; }
+};
+
+i64 BytesLeft(const fs::IBinaryStream& file) { return file.Size() - file.Tell(); }
+
+// A nine-byte stamp: `TEX`, the expected fourth letter, four digits and (when
+// asked) a NUL. The version, or -1 when the bytes are anything else.
+int ReadStamp(fs::IBinaryStream& file, char letter, bool needNul)
 {
-    if (IsHostAssetPath(name)) {
-        const std::string extension = std::filesystem::path(name).extension().string();
-        const bool        is_video  = IsLooseVideoExtension(extension);
-        return LooseAssetCandidate {
-            .path = std::string(name),
-            .isVideo = is_video,
-            .imageType = is_video ? ImageType::UNKNOWN : GuessImageTypeFromExtension(extension),
-            .isHost = true,
-        };
+    std::array<char, 9> stamp {};
+    if (file.Read(stamp.data(), stamp.size()) != stamp.size()) return -1;
+    if (std::memcmp(stamp.data(), "TEX", 3) != 0 || stamp[3] != letter) return -1;
+    if (needNul && stamp[8] != '\0') return -1;
+    int version = 0;
+    for (std::size_t i = 4; i < 8; ++i) {
+        if (stamp[i] < '0' || stamp[i] > '9') return -1;
+        version = version * 10 + (stamp[i] - '0');
     }
+    return version;
+}
 
-    const std::array prefixes {
-        std::string("/assets/materials/") + std::string(name),
-        std::string("/assets/") + std::string(name),
+bool FormatOfCode(i32 code, TextureFormat& format)
+{
+    switch (code) {
+    case 0: format = TextureFormat::RGBA8; return true;
+    case 4: format = TextureFormat::BC3; return true;
+    case 6: format = TextureFormat::BC2; return true;
+    case 7: format = TextureFormat::BC1; return true;
+    case 8: format = TextureFormat::RG8; return true;
+    case 9: format = TextureFormat::R8; return true;
+    default: return false;
+    }
+}
+
+// Reads the fixed part of the container. False (with the reason logged) for a
+// file that is not a texture this reader understands.
+bool ReadContainer(fs::IBinaryStream& file, Container& c)
+{
+    c.texv = ReadStamp(file, 'V', false);
+    c.texi = ReadStamp(file, 'I', false);
+    if (c.texv < 0 || c.texi < 0) {
+        LOG_ERROR("texture: the stamps are not TEXV and TEXI");
+        return false;
+    }
+    // format, flags, four sizes, a colour and the TEXB stamp.
+    if (BytesLeft(file) < 4 * 7 + 9) {
+        LOG_ERROR("texture: the header is cut short");
+        return false;
+    }
+    c.formatCode    = file.ReadInt32();
+    c.flags         = file.ReadUint32();
+    c.textureWidth  = file.ReadInt32();
+    c.textureHeight = file.ReadInt32();
+    c.imageWidth    = file.ReadInt32();
+    c.imageHeight   = file.ReadInt32();
+    file.ReadInt32(); // a packed colour that nothing needs
+    c.texb = ReadStamp(file, 'B', true);
+    if (c.texb < 1) {
+        LOG_ERROR("texture: no TEXB stamp where one belongs");
+        return false;
+    }
+    if (c.texb > 4) LOG_INFO("texture: TEXB%04d is newer than any known, read as TEXB0004", c.texb);
+    const i64 more = 4 + (c.texb >= 3 ? 4 : 0) + (c.texb >= 4 ? 4 : 0);
+    if (BytesLeft(file) < more) {
+        LOG_ERROR("texture: the header is cut short");
+        return false;
+    }
+    c.pictures = file.ReadInt32();
+    if (c.texb >= 3) c.imageType = file.ReadInt32();
+    if (c.texb >= 4) {
+        c.reserved    = file.ReadInt32();
+        c.hasReserved = true;
+    }
+    if (! FormatOfCode(c.formatCode, c.format)) {
+        LOG_ERROR("texture: unknown pixel format code %d", c.formatCode);
+        return false;
+    }
+    return true;
+}
+
+ImageType DeclaredType(const Container& c)
+{
+    if (! c.declaresPicture() || c.imageType < 0 || c.imageType > 34) return ImageType::UNKNOWN;
+    return static_cast<ImageType>(c.imageType);
+}
+
+// What the container header alone says: sizes, sampler, flags, stamps.
+ImageHeader HeaderOf(const Container& c)
+{
+    ImageHeader h;
+    h.width     = c.textureWidth;
+    h.height    = c.textureHeight;
+    h.mapWidth  = c.imageWidth;
+    h.mapHeight = c.imageHeight;
+    h.count     = c.pictures;
+    h.format    = c.format;
+    h.type      = DeclaredType(c);
+    h.isSprite  = c.sprite();
+    h.isVideo   = c.video();
+
+    const TextureFilter filter = (c.flags & kFlagPoint) != 0 ? TextureFilter::NEAREST : TextureFilter::LINEAR;
+    h.sample.minFilter         = filter;
+    h.sample.magFilter         = filter;
+    h.sample.mipFilter         = filter;
+    const TextureWrap wrap     = (c.flags & kFlagClamp) != 0 ? TextureWrap::CLAMP_TO_EDGE : TextureWrap::REPEAT;
+    h.sample.wrapS             = wrap;
+    h.sample.wrapT             = wrap;
+
+    h.extraHeader["texv"].val = c.texv;
+    h.extraHeader["texi"].val = c.texi;
+    h.extraHeader["texb"].val = c.texb;
+    if (c.hasReserved) h.extraHeader["texb_reserved"].val = c.reserved;
+    for (int i = 0; i < 4; ++i) {
+        h.extraHeader["compo" + std::to_string(i + 1)].val =
+            (c.flags >> (kFirstComponentBit + i)) & 1u ? 1 : 0;
+    }
+    return h;
+}
+
+// The first level of the first picture, as it was authored, decides whether the
+// texture is padded; the product is taken in 64 bits.
+void NoteFirstLevel(ImageHeader& h, i32 width, i32 height)
+{
+    h.mipmap_larger = h.mapWidth > 0 && h.mapHeight > 0 && width > 0 && height > 0 &&
+                      i64 { width } * height > i64 { h.mapWidth } * h.mapHeight;
+    h.mipmap_pow2 = width > 0 && height > 0 && algorism::IsPowOfTwo(static_cast<u32>(width)) &&
+                    algorism::IsPowOfTwo(static_cast<u32>(height));
+}
+
+// ---- levels ---------------------------------------------------------------
+
+struct LevelHead {
+    i32  width { 0 };
+    i32  height { 0 };
+    bool compressed { false };
+    i32  expanded { 0 };
+    i32  stored { 0 };
+};
+
+// The fields of one level header; false when the file ends inside them.
+bool ReadLevelHead(fs::IBinaryStream& file, int texb, LevelHead& head)
+{
+    if (BytesLeft(file) < (texb >= 2 ? 20 : 12)) return false;
+    head.width  = file.ReadInt32();
+    head.height = file.ReadInt32();
+    if (texb >= 2) {
+        head.compressed = file.ReadInt32() == 1;
+        head.expanded   = file.ReadInt32();
+    }
+    head.stored = file.ReadInt32();
+    return true;
+}
+
+// A level whose header can be believed: the payload lies inside the file.
+bool LevelUsable(const fs::IBinaryStream& file, int texb, const LevelHead& head)
+{
+    return head.width > 0 && head.height > 0 && head.stored > 0 && head.stored <= BytesLeft(file) &&
+           (texb < 2 || head.expanded >= 0);
+}
+
+// How many bytes of a raw or block-compressed level of this size the format needs.
+u64 RawBytes(TextureFormat format, i32 width, i32 height)
+{
+    if (width <= 0 || height <= 0) return 0;
+    const u64 w = static_cast<u64>(width);
+    const u64 h = static_cast<u64>(height);
+    const u64 blocks = ((w + 3) / 4) * ((h + 3) / 4);
+    switch (format) {
+    case TextureFormat::RGBA8: return w * h * 4;
+    case TextureFormat::RG8: return w * h * 2;
+    case TextureFormat::R8: return w * h;
+    case TextureFormat::BC1: return blocks * 8;
+    case TextureFormat::BC2:
+    case TextureFormat::BC3: return blocks * 16;
+    default: return w * h * 4;
+    }
+}
+
+// The longer side of the level header that follows a payload of `payload` bytes
+// from the current position, read ahead without moving the stream. 0 when the file
+// ends first or the sizes are not positive.
+u64 NextLevelLongest(fs::IBinaryStream& file, i32 payload)
+{
+    const idx at = file.Tell();
+    if (! file.SeekSet(at + payload)) return 0;
+    u64 longest = 0;
+    if (BytesLeft(file) >= 8) {
+        const i32 width  = file.ReadInt32();
+        const i32 height = file.ReadInt32();
+        if (width > 0 && height > 0) longest = static_cast<u64>(std::max(width, height));
+    }
+    file.SeekSet(at);
+    return longest;
+}
+
+using Bytes = std::unique_ptr<uint8_t[]>;
+
+Bytes MakeBytes(u64 size) { return Bytes(new (std::nothrow) uint8_t[size]); }
+
+ImageDataPtr OwnArray(Bytes bytes)
+{
+    return ImageDataPtr(bytes.release(), [](uint8_t* p) { delete[] p; });
+}
+
+// The bytes of one level, expanded when the level is compressed. The compressed
+// bytes are dropped as soon as they have been expanded.
+Bytes ReadLevelBytes(fs::IBinaryStream& file, const LevelHead& head, TextureFormat format, i64& size)
+{
+    if (! head.compressed) {
+        Bytes bytes = MakeBytes(static_cast<u64>(head.stored));
+        if (! bytes || file.Read(bytes.get(), static_cast<usize>(head.stored)) !=
+                           static_cast<usize>(head.stored))
+            return nullptr;
+        size = head.stored;
+        return bytes;
+    }
+    const u64 ceiling = std::max<u64>(static_cast<u64>(kExpandCeiling), RawBytes(format, head.width, head.height));
+    if (head.expanded <= 0 || static_cast<u64>(head.expanded) > ceiling ||
+        i64 { head.expanded } > i64 { head.stored } * kLz4MaxRatio + kLz4MaxRatio) {
+        LOG_ERROR("texture: a compressed level claims an impossible size");
+        return nullptr;
+    }
+    Bytes packed = MakeBytes(static_cast<u64>(head.stored));
+    if (! packed || file.Read(packed.get(), static_cast<usize>(head.stored)) != static_cast<usize>(head.stored))
+        return nullptr;
+    Bytes bytes = MakeBytes(static_cast<u64>(head.expanded));
+    if (! bytes) return nullptr;
+    const int got = LZ4_decompress_safe(reinterpret_cast<const char*>(packed.get()),
+                                        reinterpret_cast<char*>(bytes.get()),
+                                        head.stored,
+                                        head.expanded);
+    if (got != head.expanded) {
+        LOG_ERROR("texture: a compressed level does not expand to its stated size");
+        return nullptr;
+    }
+    size = head.expanded;
+    return bytes;
+}
+
+// ---- recognising payloads ---------------------------------------------------
+
+enum class Magic { None, Png, Jpeg, Gif, Bmp, Tiff, Mp4, Matroska };
+
+Magic SniffMagic(const uint8_t* p, std::size_t n)
+{
+    const auto starts = [&](std::initializer_list<int> bytes) {
+        if (n < bytes.size()) return false;
+        std::size_t i = 0;
+        for (const int b : bytes) {
+            if (p[i++] != b) return false;
+        }
+        return true;
     };
+    if (starts({ 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a })) return Magic::Png;
+    if (starts({ 0xff, 0xd8, 0xff })) return Magic::Jpeg;
+    if (starts({ 'G', 'I', 'F', '8', '7', 'a' }) || starts({ 'G', 'I', 'F', '8', '9', 'a' })) return Magic::Gif;
+    if (starts({ 'B', 'M' })) return Magic::Bmp;
+    if (starts({ 'I', 'I', '*', 0 }) || starts({ 'M', 'M', 0, '*' })) return Magic::Tiff;
+    if (n >= 12 && std::memcmp(p + 4, "ftyp", 4) == 0) return Magic::Mp4;
+    if (starts({ 0x1a, 0x45, 0xdf, 0xa3 })) return Magic::Matroska;
+    return Magic::None;
+}
 
-    for (const auto& prefix : prefixes) {
-        const std::filesystem::path prefix_path(prefix);
-        if (vfs.Contains(prefix)) {
-            const std::string extension = prefix_path.extension().string();
-            if (IsLooseImageExtension(extension)) {
-                return LooseAssetCandidate {
-                    .path = prefix,
-                    .isVideo = false,
-                    .imageType = GuessImageTypeFromExtension(extension),
-                };
-            }
-            if (IsLooseVideoExtension(extension)) {
-                return LooseAssetCandidate {
-                    .path = prefix,
-                    .isVideo = true,
-                    .imageType = ImageType::UNKNOWN,
-                };
-            }
-        }
+ImageType PictureTypeOf(Magic magic)
+{
+    switch (magic) {
+    case Magic::Png: return ImageType::PNG;
+    case Magic::Jpeg: return ImageType::JPEG;
+    case Magic::Gif: return ImageType::GIF;
+    case Magic::Bmp: return ImageType::BMP;
+    case Magic::Tiff: return ImageType::TIFF;
+    default: return ImageType::UNKNOWN;
+    }
+}
 
-        if (prefix_path.has_extension()) continue;
+bool IsVideoMagic(Magic magic) { return magic == Magic::Mp4 || magic == Magic::Matroska; }
 
-        for (const auto& extension : {
-                 ".png",
-                 ".jpg",
-                 ".jpeg",
-                 ".jpe",
-                 ".bmp",
-                 ".gif",
-                 ".tga",
-                 ".targa",
-                 ".webp",
-                 ".mp4",
-                 ".m4v",
-                 ".mov",
-                 ".webm",
-                 ".avi",
-                 ".mkv",
-             }) {
-            const std::string candidate = prefix + extension;
-            if (!vfs.Contains(candidate)) continue;
-            if (IsLooseImageExtension(extension)) {
-                return LooseAssetCandidate {
-                    .path = candidate,
-                    .isVideo = false,
-                    .imageType = GuessImageTypeFromExtension(extension),
-                };
-            }
-            return LooseAssetCandidate {
-                .path = candidate,
-                .isVideo = true,
-                .imageType = ImageType::UNKNOWN,
-            };
+// ---- pictures -----------------------------------------------------------------
+
+// Decodes a picture to 8-bit RGBA, rows top first, and turns a JPEG upright.
+// The input is released as soon as it has been decoded.
+bool DecodePicture(Bytes bytes, i64 size, ImageData& out)
+{
+    if (! bytes || size <= 0 || size > INT_MAX) return false;
+    int      width = 0, height = 0, channels = 0;
+    uint8_t* pixels = stbi_load_from_memory(bytes.get(), static_cast<int>(size), &width, &height, &channels, 4);
+    if (pixels == nullptr) return false;
+    const int orientation = JpegOrientation(std::span<const uint8_t>(bytes.get(), static_cast<usize>(size)));
+    bytes.reset();
+    ImageDataPtr owner(pixels, [](uint8_t* p) { stbi_image_free(p); });
+    if (orientation > 1) OrientRGBA(pixels, width, height, orientation);
+    out.width  = width;
+    out.height = height;
+    out.size   = static_cast<isize>(width) * height * 4;
+    out.data   = std::move(owner);
+    return true;
+}
+
+enum class Kind { Raw, Picture, Video };
+
+struct DecodedLevel {
+    ImageData data;
+    Kind      kind { Kind::Raw };
+    ImageType sniffed { ImageType::UNKNOWN };
+};
+
+// Decides what a level's bytes are (raw pixels, an embedded picture or a clip) and
+// produces the level's data. False when the level cannot be used.
+bool BuildLevel(const Container& c, const LevelHead& head, Bytes bytes, i64 size, DecodedLevel& out)
+{
+    const u64 needed = RawBytes(c.format, head.width, head.height);
+    if (c.video()) {
+        out.kind = Kind::Video;
+    } else if (c.declaresPicture()) {
+        out.kind = Kind::Picture;
+    } else if (c.texb >= 3 && static_cast<u64>(size) != needed) {
+        // No declared type: bytes that are exactly the pixels of the level are pixels.
+        const Magic magic = SniffMagic(bytes.get(), static_cast<usize>(size));
+        if (IsVideoMagic(magic)) {
+            out.kind = Kind::Video;
+        } else if (magic != Magic::None) {
+            out.kind    = Kind::Picture;
+            out.sniffed = PictureTypeOf(magic);
         }
     }
 
+    switch (out.kind) {
+    case Kind::Picture:
+        if (! DecodePicture(std::move(bytes), size, out.data)) {
+            LOG_ERROR("texture: an embedded picture does not decode");
+            return false;
+        }
+        return true;
+    case Kind::Video:
+        out.data.width  = head.width;
+        out.data.height = head.height;
+        out.data.size   = static_cast<isize>(size);
+        out.data.data   = OwnArray(std::move(bytes));
+        return true;
+    case Kind::Raw:
+        if (static_cast<u64>(size) < needed) {
+            LOG_ERROR("texture: a level is shorter than its size needs");
+            return false;
+        }
+        out.data.width  = head.width;
+        out.data.height = head.height;
+        out.data.size   = static_cast<isize>(size);
+        out.data.data   = OwnArray(std::move(bytes));
+        return true;
+    }
+    return false;
+}
+
+// ---- the sprite frame table -------------------------------------------------
+
+using PictureDims = std::vector<std::pair<i32, i32>>; // first authored level; 0 x 0 = none
+
+// Reads the frame table that follows the pictures and appends the valid frames.
+void ReadFrameTable(fs::IBinaryStream& file, const PictureDims& pictures, SpriteAnimation& frames)
+{
+    const int version = ReadStamp(file, 'S', false);
+    if (version <= 0 || BytesLeft(file) < 4) return;
+    const i32 count = file.ReadInt32();
+    if (version == 3) {
+        if (BytesLeft(file) < 8) return;
+        file.ReadInt32(); // the cell size, which the frames repeat
+        file.ReadInt32();
+    }
+    if (version > 3) LOG_INFO("texture: TEXS%04d is newer than any known, read as TEXS0003", version);
+    if (count <= 0) return;
+    constexpr i64 kRowBytes = 32; // index, time and six numbers
+    const i64     rows      = std::min<i64>(count, BytesLeft(file) / kRowBytes);
+    for (i64 r = 0; r < rows; ++r) {
+        const i32   index = file.ReadInt32();
+        const float time  = file.ReadFloat();
+        std::array<float, 6> v {};
+        for (float& value : v) value = version == 1 ? static_cast<float>(file.ReadInt32()) : file.ReadFloat();
+        if (index < 0 || static_cast<std::size_t>(index) >= pictures.size()) continue;
+        const auto [pw, ph] = pictures[static_cast<std::size_t>(index)];
+        if (pw <= 0 || ph <= 0) continue;
+        const float w = static_cast<float>(pw);
+        const float h = static_cast<float>(ph);
+
+        SpriteFrame frame;
+        frame.imageId   = index;
+        frame.frametime = time;
+        frame.x         = v[0] / w;
+        frame.y         = v[1] / h;
+        frame.xAxis     = { v[2] / w, v[3] / h };
+        frame.yAxis     = { v[4] / w, v[5] / h };
+        frame.width     = std::hypot(v[2], v[3]);
+        frame.height    = std::hypot(v[4], v[5]);
+        frame.rate      = frame.width > 0.0f ? frame.height / frame.width : 1.0f;
+        frames.AppendFrame(frame);
+    }
+}
+
+// ---- reading video through a stream ---------------------------------------
+
+// A window of a stream as the container readers' byte source. Reads are
+// serialised, since the stream has one position.
+// The most that is asked of a stream in one read when a window of it is probed.
+constexpr std::size_t kStreamReadPiece = std::size_t { 1 } << 20;
+
+class StreamByteSource final : public media::ByteSource {
+public:
+    StreamByteSource(std::shared_ptr<fs::IBinaryStream> stream, u64 start, u64 size)
+        : m_stream(std::move(stream)), m_start(start), m_size(size) {}
+
+    std::uint64_t size() const override { return m_size; }
+    std::size_t   readAt(std::uint64_t offset, void* destination, std::size_t length) const override {
+        if (offset >= m_size || length == 0) return 0;
+        length = static_cast<std::size_t>(std::min<u64>(length, m_size - offset));
+        std::lock_guard lock(m_mutex);
+        if (! m_stream->SeekSet(static_cast<idx>(m_start + offset))) {
+            m_failed = true;
+            return 0;
+        }
+        // However much a reader asks for at once, the stream is read in bounded pieces.
+        auto*       out  = static_cast<uint8_t*>(destination);
+        std::size_t done = 0;
+        while (done < length) {
+            const std::size_t piece = std::min(length - done, kStreamReadPiece);
+            const std::size_t got   = m_stream->Read(out + done, piece);
+            done += got;
+            if (got < piece) break;
+        }
+        return done;
+    }
+    bool ioFailed() const override { return m_failed; }
+
+private:
+    std::shared_ptr<fs::IBinaryStream> m_stream;
+    u64                                m_start;
+    u64                                m_size;
+    mutable std::mutex                 m_mutex;
+    mutable bool                       m_failed { false };
+};
+
+std::optional<video::VideoMetadata> ProbeStreamWindow(std::shared_ptr<fs::IBinaryStream> stream, u64 start, u64 size)
+{
+    if (size == 0) return std::nullopt;
+    auto source = std::make_shared<StreamByteSource>(std::move(stream), start, size);
+    return video::ProbeVideoMetadataFromSource(source);
+}
+
+std::optional<video::VideoMetadata> ProbeBytes(const uint8_t* data, i64 size)
+{
+    return video::ProbeVideoMetadataFromMemory(
+        std::span<const char>(reinterpret_cast<const char*>(data), static_cast<usize>(size)));
+}
+
+// ---- describing a container ---------------------------------------------------
+
+ImageHeader DescribeContainer(std::shared_ptr<fs::IBinaryStream> stream)
+{
+    fs::IBinaryStream& file = *stream;
+    Container          c;
+    if (! ReadContainer(file, c)) return {};
+    ImageHeader h = HeaderOf(c);
+
+    if (c.sprite()) {
+        // Every level table is walked (payloads are skipped) so the frame table is found.
+        if (c.pictures < 1 || c.pictures > BytesLeft(file) / 4) return h;
+        PictureDims pictures(static_cast<std::size_t>(c.pictures));
+        for (auto& dims : pictures) {
+            if (BytesLeft(file) < 4) return h;
+            const i32 levels = file.ReadInt32();
+            if (levels < 0 || levels > BytesLeft(file) / 12) return h;
+            for (i32 i = 0; i < levels; ++i) {
+                LevelHead head;
+                if (! ReadLevelHead(file, c.texb, head) || ! LevelUsable(file, c.texb, head) ||
+                    ! file.SeekCur(head.stored))
+                    return h;
+                if (i == 0) dims = { head.width, head.height };
+            }
+        }
+        if (pictures.front().first > 0) NoteFirstLevel(h, pictures.front().first, pictures.front().second);
+        ReadFrameTable(file, pictures, h.spriteAnim);
+        return h;
+    }
+
+    if (c.pictures < 1 || BytesLeft(file) < 4) return h;
+    const i32 levels = file.ReadInt32();
+    if (levels < 1 || levels > BytesLeft(file) / 12) return h;
+    LevelHead head;
+    if (! ReadLevelHead(file, c.texb, head)) return h;
+    NoteFirstLevel(h, head.width, head.height);
+
+    const bool usable = head.stored > 0 && head.stored <= BytesLeft(file);
+    if (! usable) return h;
+    const idx payload = file.Tell();
+
+    if (c.video()) {
+        // A clip is measured where it lies; a compressed one has to be expanded first.
+        if (! head.compressed) {
+            if (const auto meta = ProbeStreamWindow(stream, static_cast<u64>(payload), static_cast<u64>(head.stored)))
+                h.durationSeconds = meta->duration_seconds;
+        } else {
+            i64   size  = 0;
+            Bytes bytes = ReadLevelBytes(file, head, c.format, size);
+            if (bytes) {
+                if (const auto meta = ProbeBytes(bytes.get(), size)) h.durationSeconds = meta->duration_seconds;
+            }
+        }
+        return h;
+    }
+
+    if (c.texb >= 3 && c.imageType == -1 && ! head.compressed) {
+        std::array<uint8_t, kSniffBytes> prefix {};
+        const usize want = static_cast<usize>(std::min<i64>(head.stored, kSniffBytes));
+        if (file.Read(prefix.data(), want) == want) {
+            const Magic magic = SniffMagic(prefix.data(), want);
+            if (IsVideoMagic(magic)) {
+                h.isVideo = true;
+                if (const auto meta = ProbeStreamWindow(stream, static_cast<u64>(payload), static_cast<u64>(head.stored)))
+                    h.durationSeconds = meta->duration_seconds;
+            } else if (magic != Magic::None) {
+                h.type = PictureTypeOf(magic);
+            }
+        }
+    }
+    return h;
+}
+
+// ---- loose pictures and videos ----------------------------------------------
+
+struct LooseFile {
+    bool        host { false }; // read from the disk rather than the file space
+    std::string path;
+    bool        video { false };
+};
+
+// The extension of the last path component, with its dot; empty when there is none.
+std::string ExtensionOfName(std::string_view name)
+{
+    const std::size_t slash = name.rfind('/');
+    const std::string_view part = slash == std::string_view::npos ? name : name.substr(slash + 1);
+    if (part.empty() || part.find_first_not_of('.') == std::string_view::npos) return {};
+    const std::size_t dot = part.rfind('.');
+    if (dot == std::string_view::npos || dot == 0) return {};
+    return std::string(part.substr(dot));
+}
+
+bool HasLooseExtension(std::string_view extension)
+{
+    return IsLooseImageExtension(extension) || IsLooseVideoExtension(extension);
+}
+
+std::optional<LooseFile> ResolveInFileSpace(fs::VFS* vfs, const std::string& name)
+{
+    if (vfs == nullptr || name.empty()) return std::nullopt;
+    static constexpr std::array<std::string_view, 15> kGuess { "png", "jpg", "jpeg", "jpe", "bmp",
+                                                              "gif", "tga", "targa", "webp", "mp4",
+                                                              "m4v", "mov",  "webm",  "avi",  "mkv" };
+    const std::string extension = ExtensionOfName(name);
+    for (const std::string_view prefix : { "/assets/materials/", "/assets/" }) {
+        const std::string path = std::string(prefix) + name;
+        if (HasLooseExtension(extension) && vfs->Contains(path)) {
+            return LooseFile { false, path, IsLooseVideoExtension(extension) };
+        }
+        if (! extension.empty()) continue;
+        for (const std::string_view guess : kGuess) {
+            const std::string candidate = path + "." + std::string(guess);
+            if (vfs->Contains(candidate)) {
+                return LooseFile { false, candidate, IsLooseVideoExtension("." + std::string(guess)) };
+            }
+        }
+    }
     return std::nullopt;
 }
 
-std::optional<std::vector<char>> LoadLooseAssetPayload(fs::VFS& vfs,
-                                                       const LooseAssetCandidate& candidate)
+std::shared_ptr<fs::IBinaryStream> OpenLoose(fs::VFS* vfs, const LooseFile& file)
 {
-    if (candidate.isHost) {
-        std::ifstream file { std::filesystem::path(candidate.path), std::ios::binary };
-        if (! file) return std::nullopt;
-        return std::vector<char>(std::istreambuf_iterator<char>(file),
-                                 std::istreambuf_iterator<char>());
-    }
-
-    auto stream = vfs.Open(candidate.path);
-    if (!stream) return std::nullopt;
-
-    std::vector<char> payload(stream->Usize());
-    if (stream->Read(payload.data(), payload.size()) != payload.size()) return std::nullopt;
-    return payload;
+    if (file.host) return fs::CreateCBinaryStream(file.path);
+    return vfs != nullptr ? vfs->Open(file.path) : nullptr;
 }
 
-/// The file a decoder opens for a loose video: the file itself when it lies on
-/// this machine's disk, otherwise -- an entry of a package -- its cache file,
-/// streamed there. Empty for a missing or empty file.
-std::string LooseVideoFile(fs::VFS&                   vfs,
-                           const LooseAssetCandidate& candidate,
-                           std::string_view           debug_label)
+ImageType TypeOfExtension(std::string_view extension)
 {
-    const std::string host_path = candidate.isHost ? candidate.path : vfs.HostPath(candidate.path);
-    if (!host_path.empty()) {
-        std::error_code ec;
-        const auto      size = std::filesystem::file_size(host_path, ec);
-        return ec || size == 0 ? std::string() : host_path;
-    }
-
-    auto stream = vfs.Open(candidate.path);
-    if (!stream || stream->Size() <= 0) return {};
-    std::string error;
-    const auto  media = video::PublishVideoPayload(
-        debug_label, std::filesystem::path(candidate.path).extension().string(), *stream, &error);
-    if (media.empty()) {
-        LOG_ERROR("failed to extract video \"%s\": %s",
-                  std::string(debug_label).c_str(),
-                  error.c_str());
-    }
-    return media.string();
+    std::string lower(extension);
+    for (char& c : lower) c = c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+    if (lower == ".png") return ImageType::PNG;
+    if (lower == ".jpg" || lower == ".jpeg" || lower == ".jpe") return ImageType::JPEG;
+    if (lower == ".bmp") return ImageType::BMP;
+    if (lower == ".gif") return ImageType::GIF;
+    if (lower == ".tga" || lower == ".targa") return ImageType::TARGA;
+    return ImageType::UNKNOWN;
 }
 
-std::optional<video::VideoMetadata> ProbeVideoFile(std::string_view debug_label,
-                                                   const std::string& media_path)
+ImageHeader LooseHeader(i32 width, i32 height, ImageType type)
 {
-    video::VideoMetadata metadata;
-    std::string          error;
-    if (!video::ProbeVideoFileMetadata(media_path, &metadata, &error)) {
-        LOG_ERROR("failed to probe video metadata for \"%s\": %s",
-                  std::string(debug_label).c_str(),
-                  error.c_str());
-        return std::nullopt;
+    ImageHeader h;
+    h.width     = width;
+    h.height    = height;
+    h.mapWidth  = width;
+    h.mapHeight = height;
+    h.count     = 1;
+    h.format    = TextureFormat::RGBA8;
+    h.type      = type;
+    h.sample.wrapS     = TextureWrap::CLAMP_TO_EDGE;
+    h.sample.wrapT     = TextureWrap::CLAMP_TO_EDGE;
+    h.sample.minFilter = TextureFilter::LINEAR;
+    h.sample.magFilter = TextureFilter::LINEAR;
+    h.sample.mipFilter = TextureFilter::LINEAR;
+    for (int i = 1; i <= 4; ++i) h.extraHeader["compo" + std::to_string(i)].val = 1;
+    return h;
+}
+
+// Callbacks that let stb read the size of a picture from a stream.
+int StbRead(void* user, char* data, int size)
+{
+    return static_cast<int>(static_cast<fs::IBinaryStream*>(user)->Read(data, static_cast<usize>(size)));
+}
+void StbSkip(void* user, int n)
+{
+    auto* stream = static_cast<fs::IBinaryStream*>(user);
+    if (! stream->SeekCur(n)) stream->SeekEnd(0);
+}
+int StbEof(void* user)
+{
+    const auto* stream = static_cast<fs::IBinaryStream*>(user);
+    return stream->Tell() >= stream->Size() ? 1 : 0;
+}
+
+// The size a loose picture will have once decoded, from its header alone.
+bool LoosePictureSize(fs::IBinaryStream& stream, i32& width, i32& height)
+{
+    if (stream.Size() <= 0) return false;
+    int orientation = 1;
+    if (stream.Size() >= 2) {
+        // Only a JPEG can be turned, and its orientation sits in the first segments.
+        std::array<uint8_t, 2> start {};
+        if (stream.SeekSet(0) && stream.Read(start.data(), 2) == 2 && start[0] == 0xff && start[1] == 0xd8) {
+            const usize want = static_cast<usize>(std::min<i64>(stream.Size(), kOrientationWindow));
+            std::vector<uint8_t> prefix(want);
+            if (stream.SeekSet(0)) {
+                prefix.resize(stream.Read(prefix.data(), want));
+                orientation = JpegOrientation(prefix);
+            }
+        }
     }
-    return metadata;
-}
-
-/// Probes video held in memory, through the cache file it is published to.
-std::optional<video::VideoMetadata> ProbeVideoPayload(std::string_view      debug_label,
-                                                      std::span<const char> payload)
-{
-    std::string error;
-    const auto  media = video::PublishVideoPayload(debug_label, ".mp4", payload, &error);
-    if (media.empty()) {
-        LOG_ERROR("failed to extract video \"%s\": %s",
-                  std::string(debug_label).c_str(),
-                  error.c_str());
-        return std::nullopt;
-    }
-    return ProbeVideoFile(debug_label, media.string());
-}
-
-/// Probes the uncompressed video of `size` bytes at `offset` in `file`,
-/// streamed into its cache file rather than read into memory.
-std::optional<video::VideoMetadata> ProbeVideoPayload(std::string_view                   debug_label,
-                                                      std::shared_ptr<fs::IBinaryStream> file,
-                                                      idx                                offset,
-                                                      i32                                size)
-{
-    if (size <= 0 || size > file->Size() - offset) return std::nullopt;
-    fs::LimitedBinaryStream window(std::move(file), offset, size);
-    std::string             error;
-    const auto media = video::PublishVideoPayload(debug_label, ".mp4", window, &error);
-    if (media.empty()) {
-        LOG_ERROR("failed to extract video \"%s\": %s",
-                  std::string(debug_label).c_str(),
-                  error.c_str());
-        return std::nullopt;
-    }
-    return ProbeVideoFile(debug_label, media.string());
-}
-
-ImageHeader BuildLooseAssetHeader(
-    int32_t width,
-    int32_t height,
-    bool    is_video,
-    ImageType image_type,
-    double duration_seconds = 0.0)
-{
-    ImageHeader header;
-    header.width = width;
-    header.height = height;
-    header.mapWidth = width;
-    header.mapHeight = height;
-    header.count = 1;
-    header.isVideo = is_video;
-    header.videoAudioEnabled = false;
-    header.durationSeconds = duration_seconds;
-    header.type = image_type;
-    header.format = TextureFormat::RGBA8;
-    header.sample.wrapS = TextureWrap::CLAMP_TO_EDGE;
-    header.sample.wrapT = TextureWrap::CLAMP_TO_EDGE;
-    header.sample.minFilter = TextureFilter::LINEAR;
-    header.sample.magFilter = TextureFilter::LINEAR;
-    header.extraHeader["compo1"].val = 1;
-    header.extraHeader["compo2"].val = 1;
-    header.extraHeader["compo3"].val = 1;
-    header.extraHeader["compo4"].val = 1;
-    SetHeaderPow2(header, width, height);
-    return header;
-}
-
-// The longest side of the level after the one whose payload of `payload_size`
-// bytes starts at the stream's position. Its header follows that payload (width
-// and height come first in every container version), so it is read ahead
-// without moving the stream; 0 when the file ends before it.
-uint64_t NextLevelLongestSide(fs::IBinaryStream& file, i32 payload_size) {
-    const auto at = file.Tell();
-    if (! file.SeekSet(at + payload_size)) return 0;
-    const i32 width  = file.ReadInt32();
-    const i32 height = file.ReadInt32();
-    file.SeekSet(at);
-    return uint64_t(std::max<i32>(std::max(width, height), 0));
+    if (! stream.SeekSet(0)) return false;
+    const stbi_io_callbacks callbacks { StbRead, StbSkip, StbEof };
+    int                     w = 0, h = 0, channels = 0;
+    if (! stbi_info_from_callbacks(&callbacks, &stream, &w, &h, &channels) || w <= 0 || h <= 0) return false;
+    width  = orientation >= 5 ? h : w;
+    height = orientation >= 5 ? w : h;
+    return true;
 }
 
 } // namespace
 
 bool wallpaper::HostLooseAssetIsReadable(std::string_view name) { return IsHostAssetPath(name); }
 
-std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
-    if (name == kNullTexture) {
-        auto image = std::make_shared<Image>();
-        image->key = name;
-        image->header = ParseHeader(name);
-        image->slots.resize(1);
-        auto& slot = image->slots.front();
-        slot.width = slot.height = 1;
-        slot.mipmaps.resize(1);
-        auto& mip = slot.mipmaps.front();
-        mip.width = mip.height = 1;
-        mip.size = 4;
-        mip.data = ImageDataPtr(new uint8_t[4] {}, [](uint8_t* data) { delete[] data; });
-        return image;
-    }
-    // A picture of the user's own is not in the package, and probing the mount
-    // for it logs a missing-file error for every slot on every load.
-    if (IsHostAssetPath(name)) return ParseLooseAsset(name);
-    std::string            path    = "/assets/materials/" + name + ".tex";
-    std::shared_ptr<Image> img_ptr = std::make_shared<Image>();
-    auto&                  img     = *img_ptr;
-    img.key                        = name;
-    // std::ifstream file = fs::GetFileFstream(vfs, path);
-    auto pfile = m_vfs->Open(path);
-    if (! pfile) return ParseLooseAsset(name);
-    auto& file     = *pfile;
-    auto  startpos = file.Tell();
-    LoadHeader(file, img.header);
-
-    // image
-    i32 _image_count = img.header.count;
-    if (_image_count < 0) return nullptr;
-    usize image_count = (usize)_image_count;
-
-    img.slots.resize(image_count);
-    for (usize i_image = 0; i_image < image_count; i_image++) {
-        auto& img_slot = img.slots[i_image];
-        auto& mipmaps  = img_slot.mipmaps;
-
-        usize mipmap_count = (usize)std::max<i32>(file.ReadInt32(), 0);
-        mipmaps.resize(mipmap_count);
-        usize first_mip = 0;
-        // Use the authored mip chain, without decoding or uploading discarded
-        // levels. Atlases, videos and unknown containers keep their full layout.
-        const bool limit_mips = m_texture_surface_longest_side != 0 && image_count == 1 &&
-            !img.header.isSprite && !img.header.isVideo &&
-            (img.header.extraHeader["texb"].val < 3 || img.header.type != ImageType::UNKNOWN);
-        // load image
-        for (usize i_mipmap = 0; i_mipmap < mipmap_count; i_mipmap++) {
-            auto& mipmap  = mipmaps.at(i_mipmap);
-            mipmap.width  = file.ReadInt32();
-            mipmap.height = file.ReadInt32();
-            if (i_mipmap == 0) {
-                img_slot.width  = mipmap.width;
-                img_slot.height = mipmap.height;
-                SetHeaderPow2(img.header, mipmap.width, mipmap.height);
-            }
-
-            bool    LZ4_compressed    = false;
-            int32_t decompressed_size = 0;
-            // check compress
-            if (img.header.extraHeader["texb"].val > 1) {
-                LZ4_compressed    = file.ReadInt32() == 1;
-                decompressed_size = file.ReadInt32();
-            }
-
-            i32 src_size = file.ReadInt32();
-            if (src_size <= 0 || mipmap.width <= 0 || mipmap.height <= 0 || decompressed_size < 0)
-                return nullptr;
-            if (src_size > file.Size() - file.Tell()) return nullptr;
-            // Drop a leading level only while the next still covers the surface,
-            // so what is kept is never magnified to fill it.
-            if (limit_mips && i_mipmap == first_mip && i_mipmap + 1 < mipmap_count &&
-                NextLevelLongestSide(file, src_size) >= m_texture_surface_longest_side) {
-                file.SeekSet(file.Tell() + src_size);
-                ++first_mip;
-                continue;
-            }
-
-            char* result;
-            result = new char[(usize)src_size];
-            file.Read(result, (usize)src_size);
-
-            // is LZ4 compress
-            if (LZ4_compressed) {
-                char* decompressed_char = Lz4Decompress(result, src_size, decompressed_size);
-                src_size                = decompressed_size;
-                if (decompressed_char != nullptr) {
-                    delete[] result;
-                    result = decompressed_char;
-                } else {
-                    LOG_ERROR("lz4 decompress failed");
-                    delete[] result;
-                    return nullptr;
-                }
-            }
-            EmbeddedImageType embedded { img.header.type, img.header.isVideo };
-            if (img.header.extraHeader["texb"].val >= 3 &&
-                img.header.type == ImageType::UNKNOWN) {
-                embedded = DetectEmbeddedImageType(
-                    reinterpret_cast<const unsigned char*>(result),
-                    static_cast<usize>(src_size));
-                img.header.type = embedded.type;
-                if (embedded.isVideo) img.header.isVideo = true;
-            }
-
-            // is image container
-            if (img.header.extraHeader["texb"].val >= 3 && !img.header.isVideo &&
-                embedded.type != ImageType::UNKNOWN) {
-                int32_t w, h, n;
-                auto*   data =
-                    stbi_load_from_memory((const unsigned char*)result, src_size, &w, &h, &n, 4);
-                if (data == nullptr || w <= 0 || h <= 0) {
-                    LOG_ERROR("stbi decode failed");
-                    delete[] result;
-                    return nullptr;
-                }
-                OrientRGBA(data, w, h, JpegOrientation(std::span(
-                    reinterpret_cast<const uint8_t*>(result), static_cast<size_t>(src_size))));
-                mipmap.data = ImageDataPtr((uint8_t*)data, [](uint8_t* data) {
-                    stbi_image_free((unsigned char*)data);
-                });
-                mipmap.width  = w;
-                mipmap.height = h;
-                if (i_mipmap == 0) {
-                    img_slot.width  = w;
-                    img_slot.height = h;
-                    SetHeaderPow2(img.header, w, h);
-                }
-                img.header.format = TextureFormat::RGBA8;
-                src_size    = w * h * 4;
-            } else {
-                if (img.header.isVideo && i_image == 0 && i_mipmap == 0) {
-                    const auto metadata =
-                        ProbeVideoPayload(name, std::span(result, static_cast<std::size_t>(src_size)));
-                    if (metadata.has_value()) {
-                        img.header.durationSeconds = metadata->duration_seconds;
-                    }
-                }
-                // The bytes read above become the mip: handed over, not copied.
-                mipmap.data = ImageDataPtr(reinterpret_cast<uint8_t*>(std::exchange(result, nullptr)),
-                                           [](uint8_t* data) { delete[] reinterpret_cast<char*>(data); });
-            }
-            mipmap.size = src_size * (i32)sizeof(uint8_t);
-            delete[] result;
-        }
-        if (first_mip != 0) {
-            mipmaps.erase(mipmaps.begin(), mipmaps.begin() + first_mip);
-            img_slot.width = mipmaps.front().width;
-            img_slot.height = mipmaps.front().height;
-        }
-    }
-    return img_ptr;
-}
-
-ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
-    if (name == kNullTexture) return BuildLooseAssetHeader(1, 1, false, ImageType::UNKNOWN);
-    if (IsHostAssetPath(name)) return ParseLooseAssetHeader(name);
-    ImageHeader header;
-    std::string path  = "/assets/materials/" + name + ".tex";
-    auto        pfile = m_vfs->Open(path);
-    if (! pfile) return ParseLooseAssetHeader(name);
-    auto& file = *pfile;
-
-    LoadHeader(file, header);
-    if (header.count < 0) return header;
-
-    usize image_count = (usize)header.count;
-
-    // load sprite info
-    if (header.isSprite) {
-        // bypass image data, store width and height
-        std::vector<std::vector<float>> imageDatas(image_count);
-        for (usize i_image = 0; i_image < image_count; i_image++) {
-            int mipmap_count = file.ReadInt32();
-            for (int32_t i_mipmap = 0; i_mipmap < mipmap_count; i_mipmap++) {
-                int32_t width  = file.ReadInt32();
-                int32_t height = file.ReadInt32();
-                if (i_mipmap == 0) {
-                    imageDatas.at(i_image) = { (float)width, (float)height };
-                    header.mipmap_pow2     = algorism::IsPowOfTwo((u32)(width * height));
-                }
-                if (header.extraHeader["texb"].val > 1) {
-                    int32_t LZ4_compressed    = file.ReadInt32();
-                    int32_t decompressed_size = file.ReadInt32();
-                    (void)LZ4_compressed;
-                    (void)decompressed_size;
-                }
-                long src_size = file.ReadInt32();
-                file.SeekCur(src_size);
-            }
-        }
-        // sprite pos
-        int32_t texs       = ReadTexVesion(file);
-        int32_t framecount = file.ReadInt32();
-        if (texs > 3) {
-            LOG_ERROR("Unkown texs version");
-        }
-        if (texs == 3) {
-            i32 width  = file.ReadInt32();
-            i32 height = file.ReadInt32();
-            (void)width;
-            (void)height;
-        }
-
-        for (int32_t i = 0; i < framecount; i++) {
-            SpriteFrame sf;
-            sf.imageId = file.ReadInt32();
-            const auto bad_image_id =
-                sf.imageId < 0 ||
-                static_cast<usize>(sf.imageId) >= imageDatas.size() ||
-                imageDatas[static_cast<usize>(sf.imageId)].size() < 2;
-            if (bad_image_id) {
-                LOG_ERROR("invalid sprite image id: %d", sf.imageId);
-                file.ReadFloat();
-                for (int j = 0; j < 6; ++j) {
-                    if (texs == 1) file.ReadInt32();
-                    else file.ReadFloat();
-                }
-                continue;
-            }
-            float spriteWidth  = imageDatas[static_cast<usize>(sf.imageId)][0];
-            float spriteHeight = imageDatas[static_cast<usize>(sf.imageId)][1];
-
-            sf.frametime = file.ReadFloat();
-            if (texs == 1) {
-                sf.x        = (float)file.ReadInt32() / spriteWidth;
-                sf.y        = (float)file.ReadInt32() / spriteHeight;
-                sf.xAxis[0] = (float)file.ReadInt32();
-                sf.xAxis[1] = (float)file.ReadInt32();
-                sf.yAxis[0] = (float)file.ReadInt32();
-                sf.yAxis[1] = (float)file.ReadInt32();
-            } else {
-                sf.x        = file.ReadFloat() / spriteWidth;
-                sf.y        = file.ReadFloat() / spriteHeight;
-                sf.xAxis[0] = file.ReadFloat();
-                sf.xAxis[1] = file.ReadFloat();
-                sf.yAxis[0] = file.ReadFloat();
-                sf.yAxis[1] = file.ReadFloat();
-            }
-            sf.width  = (float)std::sqrt(std::pow(sf.xAxis[0], 2) + std::pow(sf.xAxis[1], 2));
-            sf.height = (float)std::sqrt(std::pow(sf.yAxis[0], 2) + std::pow(sf.yAxis[1], 2));
-            sf.xAxis[0] /= spriteWidth;
-            sf.xAxis[1] /= spriteWidth;
-            sf.yAxis[0] /= spriteHeight;
-            sf.yAxis[1] /= spriteHeight;
-            sf.rate = sf.height / sf.width;
-            header.spriteAnim.AppendFrame(sf);
-        }
-    } else {
-        i32 mipmap_count = file.ReadInt32();
-        if (mipmap_count <= 0) return header;
-        i32 width  = file.ReadInt32();
-        i32 height = file.ReadInt32();
-        SetHeaderPow2(header, width, height);
-        if (header.extraHeader["texb"].val >= 3 && header.type == ImageType::UNKNOWN &&
-            !header.isVideo) {
-            bool    lz4_compressed = false;
-            int32_t decompressed_size = 0;
-            if (header.extraHeader["texb"].val > 1) {
-                lz4_compressed = file.ReadInt32() == 1;
-                decompressed_size = file.ReadInt32();
-            }
-            i32 src_size = file.ReadInt32();
-            std::optional<std::vector<char>> sniff_payload;
-            if (!lz4_compressed) {
-                sniff_payload = ReadTexMipPayloadPrefix(file, src_size, 64);
-            } else {
-                file.SeekCur(src_size);
-            }
-            if (sniff_payload.has_value()) {
-                const auto embedded = DetectEmbeddedImageType(
-                    reinterpret_cast<const unsigned char*>(sniff_payload->data()),
-                    sniff_payload->size());
-                if (embedded.type != ImageType::UNKNOWN) header.type = embedded.type;
-                if (embedded.isVideo) header.isVideo = true;
-                // Only an uncompressed payload is sniffed, so the video is
-                // streamed from the texture into its cache file to be probed.
-                // The size limit is the one header reads have always probed under.
-                constexpr i32 kMaxHeaderVideoProbeBytes = 64 * 1024 * 1024;
-                if (embedded.isVideo && src_size <= kMaxHeaderVideoProbeBytes) {
-                    const auto metadata =
-                        ProbeVideoPayload(name, pfile, file.Tell() - src_size, src_size);
-                    if (metadata.has_value()) {
-                        header.durationSeconds = metadata->duration_seconds;
-                    }
-                }
-            }
-            return header;
-        }
-        if (header.isVideo && mipmap_count > 0) {
-            bool    lz4_compressed = false;
-            int32_t decompressed_size = 0;
-            if (header.extraHeader["texb"].val > 1) {
-                lz4_compressed = file.ReadInt32() == 1;
-                decompressed_size = file.ReadInt32();
-            }
-            i32 src_size = file.ReadInt32();
-            std::optional<video::VideoMetadata> metadata;
-            if (lz4_compressed && decompressed_size > 0) {
-                // A compressed payload has to be in memory to be decompressed.
-                std::unique_ptr<char[]> decompressed;
-                if (src_size > 0) {
-                    std::vector<char> compressed(static_cast<std::size_t>(src_size));
-                    file.Read(compressed.data(), compressed.size());
-                    decompressed.reset(Lz4Decompress(compressed.data(), src_size, decompressed_size));
-                }
-                if (decompressed != nullptr) {
-                    metadata = ProbeVideoPayload(
-                        name,
-                        std::span<const char>(decompressed.get(),
-                                              static_cast<std::size_t>(decompressed_size)));
-                }
-            } else {
-                metadata = ProbeVideoPayload(name, pfile, file.Tell(), src_size);
-            }
-            if (metadata.has_value()) {
-                header.durationSeconds = metadata->duration_seconds;
-            }
-        }
-    }
-    return header;
-}
-
-std::shared_ptr<Image> WPTexImageParser::ParseLooseAsset(const std::string& name)
+namespace
 {
-    const auto candidate = ResolveLooseAsset(*m_vfs, name);
-    if (!candidate.has_value()) return nullptr;
+// The picture or clip a name stands for, from the host disk when the name is a
+// host path and from the file space otherwise.
+std::optional<LooseFile> ResolveLooseFile(fs::VFS* vfs, const std::string& name)
+{
+    if (IsHostAssetPath(name)) return LooseFile { true, name, IsLooseVideoExtension(ExtensionOfName(name)) };
+    return ResolveInFileSpace(vfs, name);
+}
 
-    if (candidate->isVideo) {
-        // The decoder opens this file; the image carries no copy of the video.
-        const auto media = LooseVideoFile(*m_vfs, *candidate, name);
-        if (media.empty()) return nullptr;
-        const auto metadata = ProbeVideoFile(name, media);
-        if (!metadata.has_value()) return nullptr;
+// A texture container found in the file space.
+std::shared_ptr<Image> LoadContainer(std::shared_ptr<fs::IBinaryStream> stream, const std::string& name,
+                                     uint64_t surfaceLongestSide)
+{
+    fs::IBinaryStream& file = *stream;
+    Container          c;
+    if (! ReadContainer(file, c)) return nullptr;
+    const auto fail = [&](const char* why) -> std::shared_ptr<Image> {
+        LOG_ERROR("texture \"%s\": %s", name.c_str(), why);
+        return nullptr;
+    };
+    if (c.pictures < 1 || c.pictures > BytesLeft(file) / 4) return fail("the picture count is not usable");
 
-        auto image = std::make_shared<Image>();
-        image->key = name;
-        image->header = BuildLooseAssetHeader(
-            static_cast<int32_t>(metadata->width),
-            static_cast<int32_t>(metadata->height),
-            true,
-            ImageType::UNKNOWN,
-            metadata->duration_seconds);
-        image->videoFilePath = media;
-        return image;
-    }
-
-    const auto payload = LoadLooseAssetPayload(*m_vfs, *candidate);
-    if (!payload.has_value() || payload->empty()) return nullptr;
+    // Only a single-picture, plain texture whose levels are raw pixels or declared
+    // pictures may lose levels to the display.
+    const bool eligible = c.pictures == 1 && ! c.sprite() && ! c.video() && (c.texb < 3 || c.declaresPicture());
+    const std::size_t loaded = c.sprite() ? static_cast<std::size_t>(c.pictures) : 1;
 
     auto image = std::make_shared<Image>();
     image->key = name;
+    ImageHeader header = HeaderOf(c);
+    PictureDims dims(static_cast<std::size_t>(c.pictures));
 
-    int width = 0;
-    int height = 0;
-    int channels = 0;
-    unsigned char* decoded = stbi_load_from_memory(
-        reinterpret_cast<const unsigned char*>(payload->data()),
-        static_cast<int>(payload->size()),
-        &width,
-        &height,
-        &channels,
-        4);
-    if (decoded == nullptr || width <= 0 || height <= 0) {
-        if (decoded != nullptr) stbi_image_free(decoded);
-        return nullptr;
+    for (std::size_t p = 0; p < loaded; ++p) {
+        if (BytesLeft(file) < 4) return fail("the file ends inside the level tables");
+        const i32 levels = file.ReadInt32();
+        if (levels < 0 || levels > BytesLeft(file) / 12) return fail("the level count is not usable");
+        if (p == 0 && levels == 0) return fail("the first picture has no levels");
+
+        Image::Slot slot;
+        for (i32 i = 0; i < levels; ++i) {
+            LevelHead head;
+            if (! ReadLevelHead(file, c.texb, head) || ! LevelUsable(file, c.texb, head))
+                return fail("a level header is not usable");
+            if (i == 0) {
+                dims[p] = { head.width, head.height };
+                if (p == 0) NoteFirstLevel(header, head.width, head.height);
+            }
+            // The level behind this one can cover the surface by itself: this one is
+            // not needed. Its payload is skipped, never decoded.
+            if (eligible && surfaceLongestSide > 0 && i + 1 < levels &&
+                NextLevelLongest(file, head.stored) >= surfaceLongestSide) {
+                if (! file.SeekCur(head.stored)) return fail("a level lies outside the file");
+                continue;
+            }
+
+            i64   size  = 0;
+            Bytes bytes = ReadLevelBytes(file, head, c.format, size);
+            if (! bytes) return fail("a level cannot be read");
+            DecodedLevel level;
+            if (! BuildLevel(c, head, std::move(bytes), size, level)) return fail("a level cannot be used");
+
+            if (p == 0 && slot.mipmaps.empty()) {
+                if (level.kind == Kind::Picture) {
+                    // Decoded pictures are unpadded: the decoded size is the allocated one.
+                    header.format = TextureFormat::RGBA8;
+                    if (i == 0) NoteFirstLevel(header, level.data.width, level.data.height);
+                    if (level.sniffed != ImageType::UNKNOWN) header.type = level.sniffed;
+                } else if (level.kind == Kind::Video) {
+                    header.isVideo = true;
+                    header.format  = TextureFormat::RGBA8;
+                }
+            }
+            if (slot.mipmaps.empty()) {
+                slot.width  = level.data.width;
+                slot.height = level.data.height;
+            }
+            slot.mipmaps.push_back(std::move(level.data));
+        }
+        image->slots.push_back(std::move(slot));
     }
 
-    OrientRGBA(decoded, width, height, JpegOrientation(std::span(
-        reinterpret_cast<const uint8_t*>(payload->data()), payload->size())));
-    image->header = BuildLooseAssetHeader(
-        width,
-        height,
-        false,
-        candidate->imageType);
+    if (c.sprite()) ReadFrameTable(file, dims, header.spriteAnim);
+    if (header.isVideo && ! image->slots.empty() && ! image->slots.front().mipmaps.empty()) {
+        const auto& clip = image->slots.front().mipmaps.front();
+        if (clip.data) {
+            if (const auto meta = ProbeBytes(clip.data.get(), static_cast<i64>(clip.size)))
+                header.durationSeconds = meta->duration_seconds;
+        }
+    }
+    image->header = std::move(header);
+    return image;
+}
+} // namespace
+
+std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
+    // A picture of the user's own is not in the package, and probing the mount
+    // for it logs a missing-file error for every slot on every load.
+    if (IsHostAssetPath(name)) return ParseLooseAsset(name);
+    if (name.empty() || m_vfs == nullptr) return nullptr;
+    // A packaged container, when there is one, is the texture; a broken one is not
+    // replaced by a loose picture of the same name.
+    const std::string container = "/assets/materials/" + name + ".tex";
+    if (m_vfs->Contains(container)) {
+        auto stream = m_vfs->Open(container);
+        return stream ? LoadContainer(std::move(stream), name, m_texture_surface_longest_side) : nullptr;
+    }
+    return ParseLooseAsset(name);
+}
+
+ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
+    if (IsHostAssetPath(name)) return ParseLooseAssetHeader(name);
+    if (name.empty() || m_vfs == nullptr) return {};
+    const std::string container = "/assets/materials/" + name + ".tex";
+    if (m_vfs->Contains(container)) {
+        auto stream = m_vfs->Open(container);
+        return stream ? DescribeContainer(std::move(stream)) : ImageHeader {};
+    }
+    return ParseLooseAssetHeader(name);
+}
+
+namespace
+{
+ImageHeader VideoHeader(const video::VideoMetadata& meta)
+{
+    ImageHeader h = LooseHeader(static_cast<i32>(meta.width), static_cast<i32>(meta.height), ImageType::UNKNOWN);
+    h.isVideo         = true;
+    h.durationSeconds = meta.duration_seconds;
+    return h;
+}
+
+// Where the clip is a file on the host disk: a path the user gave, or a file of a folder mount.
+std::string HostPathOf(fs::VFS* vfs, const LooseFile& file)
+{
+    if (file.host) return file.path;
+    std::string path;
+    if (vfs != nullptr && vfs->PhysicalPath(file.path, &path)) return path;
+    return {};
+}
+
+// The clip on the host disk, measured where it lies.
+std::optional<video::VideoMetadata> ProbeHostFile(const std::string& path)
+{
+    media::Error error;
+    auto         source = media::OpenFileByteSource(path, &error);
+    if (! source || source->size() == 0) return std::nullopt;
+    return video::ProbeVideoMetadataFromSource(source);
+}
+
+// A clip is played from a file. One that lies on the host disk (a path the user picked, or a
+// file of a folder mount) is probed and opened there, and nothing is read through the file
+// space. One inside a package is measured through its stream, then streamed in bounded pieces
+// to a cache file named by its content.
+std::shared_ptr<Image> ParseLooseVideo(fs::VFS* vfs, const std::string& name, const LooseFile& file)
+{
+    const auto fail = [&name]() -> std::shared_ptr<Image> {
+        LOG_ERROR("texture \"%s\": the clip cannot be read", name.c_str());
+        return nullptr;
+    };
+    auto image = std::make_shared<Image>();
+    image->key = name;
+
+    if (const std::string host = HostPathOf(vfs, file); ! host.empty()) {
+        const auto meta = ProbeHostFile(host);
+        if (! meta) return fail();
+        image->header        = VideoHeader(*meta);
+        image->videoFilePath = host;
+        return image;
+    }
+
+    auto stream = OpenLoose(vfs, file);
+    if (! stream || stream->Size() <= 0) return nullptr;
+    const auto meta = ProbeStreamWindow(stream, 0, static_cast<u64>(stream->Size()));
+    if (! meta) return fail();
+    std::string cached = CacheVideoByContent(*stream, ExtensionOfName(file.path));
+    if (cached.empty()) return fail();
+    image->header        = VideoHeader(*meta);
+    image->videoFilePath = std::move(cached);
+    return image;
+}
+} // namespace
+
+std::shared_ptr<Image> WPTexImageParser::ParseLooseAsset(const std::string& name)
+{
+    const auto found = ResolveLooseFile(m_vfs, name);
+    if (! found) {
+        LOG_ERROR("texture \"%s\" not found", name.c_str());
+        return nullptr;
+    }
+    // A clip is never read whole: it is played where it lies, or from a cache file.
+    if (found->video) return ParseLooseVideo(m_vfs, name, *found);
+
+    auto stream = OpenLoose(m_vfs, *found);
+    if (! stream || stream->Size() <= 0 || ! stream->SeekSet(0)) return nullptr;
+
+    // The picture is read straight into the buffer it is decoded from.
+    const i64 size = stream->Size();
+    if (size > INT_MAX) return nullptr;
+    Bytes bytes = MakeBytes(static_cast<u64>(size));
+    if (! bytes || stream->Read(bytes.get(), static_cast<usize>(size)) != static_cast<usize>(size)) return nullptr;
+    ImageData level;
+    if (! DecodePicture(std::move(bytes), size, level)) {
+        LOG_ERROR("texture \"%s\": the picture does not decode", name.c_str());
+        return nullptr;
+    }
+    ImageHeader header = LooseHeader(level.width, level.height, TypeOfExtension(ExtensionOfName(found->path)));
 
     Image::Slot slot;
-    slot.width = width;
-    slot.height = height;
+    slot.width  = level.width;
+    slot.height = level.height;
+    slot.mipmaps.push_back(std::move(level));
 
-    ImageData mip;
-    mip.width = width;
-    mip.height = height;
-    mip.size = static_cast<isize>(width * height * 4);
-    mip.data = ImageDataPtr(reinterpret_cast<uint8_t*>(decoded), [](uint8_t* data) {
-        stbi_image_free(data);
-    });
-    slot.mipmaps.push_back(std::move(mip));
+    auto image    = std::make_shared<Image>();
+    image->key    = name;
+    image->header = std::move(header);
     image->slots.push_back(std::move(slot));
     return image;
 }
 
 ImageHeader WPTexImageParser::ParseLooseAssetHeader(const std::string& name)
 {
-    const auto candidate = ResolveLooseAsset(*m_vfs, name);
-    if (!candidate.has_value()) return {};
-
-    if (candidate->isVideo) {
-        const auto media = LooseVideoFile(*m_vfs, *candidate, name);
-        if (media.empty()) return {};
-        const auto metadata = ProbeVideoFile(name, media);
-        if (!metadata.has_value()) return {};
-        return BuildLooseAssetHeader(
-            static_cast<int32_t>(metadata->width),
-            static_cast<int32_t>(metadata->height),
-            true,
-            ImageType::UNKNOWN,
-            metadata->duration_seconds);
+    const auto found = ResolveLooseFile(m_vfs, name);
+    if (! found) return {};
+    if (found->video) {
+        if (const std::string host = HostPathOf(m_vfs, *found); ! host.empty()) {
+            const auto meta = ProbeHostFile(host);
+            return meta ? VideoHeader(*meta) : ImageHeader {};
+        }
+        auto stream = OpenLoose(m_vfs, *found);
+        if (! stream) return {};
+        const auto meta = ProbeStreamWindow(stream, 0, static_cast<u64>(stream->Size()));
+        return meta ? VideoHeader(*meta) : ImageHeader {};
     }
-
-    const auto payload = LoadLooseAssetPayload(*m_vfs, *candidate);
-    if (!payload.has_value() || payload->empty()) return {};
-
-    int width = 0;
-    int height = 0;
-    int channels = 0;
-    if (stbi_info_from_memory(
-            reinterpret_cast<const unsigned char*>(payload->data()),
-            static_cast<int>(payload->size()),
-            &width,
-            &height,
-            &channels) == 0 ||
-        width <= 0 ||
-        height <= 0) {
-        return {};
-    }
-
-    if (JpegOrientation(std::span(reinterpret_cast<const uint8_t*>(payload->data()),
-                                  payload->size())) >= 5) std::swap(width, height);
-    return BuildLooseAssetHeader(width, height, false, candidate->imageType);
+    auto stream = OpenLoose(m_vfs, *found);
+    if (! stream) return {};
+    i32 width = 0, height = 0;
+    if (! LoosePictureSize(*stream, width, height)) return {};
+    return LooseHeader(width, height, TypeOfExtension(ExtensionOfName(found->path)));
 }

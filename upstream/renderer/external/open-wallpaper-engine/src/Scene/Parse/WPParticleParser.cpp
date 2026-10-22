@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e4-particle-simulation.md; written without access to the original source.
 #include "WPParticleParser.hpp"
 #include "Particle/ParticleEmitter.h"
 #include "Particle/ParticleModify.h"
@@ -9,115 +10,23 @@
 #include <optional>
 #include <limits>
 #include <sstream>
+#include <mutex>
+#include <string>
+#include <unordered_set>
+#include <map>
 
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
+#include "Utils/Linalg.hpp"
 
 #include "Utils/Logging.h"
 #include "Utils/Algorism.h"
-#include "Core/Random.hpp"
+#include "Utils/Random.hpp"
 
 using namespace wallpaper;
-using namespace Eigen;
+using namespace wallpaper::linalg;
 namespace PM = ParticleModify;
 
 namespace
 {
-
-/// The level an `audioprocessing*` block turns the spectrum into, in [0, 1].
-/// The loudest band of the selected range decides (not the mean), then the
-/// bounds, a smoothstep and the exponent shape it.
-std::function<float()>
-MakeAudioLevel(u32 mode, i32 start, i32 end, std::array<float, 2> bounds, float exponent,
-               std::function<audio::AudioSpectrumSnapshot()> spectrum) {
-    if (mode == 0 || mode > 3) return {};
-
-    const int first = std::clamp(start, 0, 15);
-    const int last  = std::max(first, std::clamp(end, 0, 15));
-    return [mode, first, last, bounds, exponent, spectrum = std::move(spectrum)]() {
-        if (! spectrum || ! std::isfinite(bounds[0]) || ! std::isfinite(bounds[1]) ||
-            ! std::isfinite(exponent))
-            return 0.0f;
-        const auto snapshot = spectrum();
-        // Stock effects/pulse/shaders/effects/pulse.vert AUDIOPROCESSING options:
-        // 1=left, 2=right, 3=center (also authored by workshop 2562725207 emitters).
-        const auto& bands  = mode == 1   ? snapshot.left16
-                             : mode == 2 ? snapshot.right16
-                                         : snapshot.average16;
-        float       volume = 0.0f;
-        for (int band = first; band <= last; ++band) {
-            if (std::isfinite(bands[band])) volume = std::max(volume, bands[band]);
-        }
-        // Silence remains inactive even for exponent zero or negative bounds.
-        if (volume <= 0.0f) return 0.0f;
-        float response =
-            bounds[1] > bounds[0]
-                ? std::clamp((volume - bounds[0]) / (bounds[1] - bounds[0]), 0.0f, 1.0f)
-                : (volume > bounds[0] ? 1.0f : 0.0f);
-        if (response <= 0.0f) return 0.0f;
-        // Match the stock audio response shaders: smooth bounds, then exponent.
-        response = response * response * (3.0f - 2.0f * response);
-        return std::pow(response, std::max(0.0f, exponent));
-    };
-}
-
-std::function<float()>
-MakeEmitterAudioResponse(const wpscene::Emitter&                       emitter,
-                         std::function<audio::AudioSpectrumSnapshot()> spectrum) {
-    return MakeAudioLevel(emitter.audioprocessingmode,
-                          emitter.audioprocessingfrequencystart,
-                          emitter.audioprocessingfrequencyend,
-                          emitter.audioprocessingbounds,
-                          emitter.audioprocessingexponent,
-                          std::move(spectrum));
-}
-
-/// Wallpaper Engine keeps a control point index in 0..7: anything that is
-/// not below 7 (negative values included) names the last one.
-inline u32 ClampControlpointIndex(i32 value) {
-    return static_cast<u32>(value) < 7u ? static_cast<u32>(value) : 7u;
-}
-
-/// The scene object's speed override as the speed-driven operators read it: a
-/// file that ignores the override sees 1.
-inline double SpeedScale(const wpscene::ParticleInstanceoverride& over, bool applies) {
-    return applies ? static_cast<double>(over.speed) : 1.0;
-}
-
-/// The scene object's size override as the size records read it: a file that
-/// ignores the override sees 1.
-inline double SizeScale(const wpscene::ParticleInstanceoverride& over, bool applies) {
-    return applies ? static_cast<double>(over.size) : 1.0;
-}
-
-inline double UnitRandom() { return Random::get(0.0, 1.0); }
-
-/// `u` raised to the initializer's exponent, so values crowd toward the
-/// minimum for an exponent above one. An exponent of exactly one is a plain draw.
-inline double ExponentDraw(float exponent) {
-    const double u = UnitRandom();
-    return exponent == 1.0f ? u : std::pow(u, static_cast<double>(exponent));
-}
-
-// ---- colour -----------------------------------------------------------
-
-/// Hue in [0, 1) by sixths, saturation and value as the usual max/min
-/// definitions; hue and saturation are zero for a grey or black colour.
-inline Vector3f RgbToHsv(const Vector3f& c) {
-    const float mx    = c.maxCoeff();
-    const float mn    = c.minCoeff();
-    const float range = mx - mn;
-    if (range < 1.0e-5f || mx <= 0.0f) return { 0.0f, 0.0f, std::max(mx, 0.0f) };
-    float h;
-    if (c.x() < mx) {
-        h = c.y() < mx ? (c.x() - c.y()) / range + 4.0f : (c.z() - c.x()) / range + 2.0f;
-    } else {
-        h = (c.y() - c.z()) / range;
-    }
-    h /= 6.0f;
-    if (h < 0.0f) h += 1.0f;
-    return { h, range / mx, mx };
-}
 
 inline Vector3f HsvToRgb(float h, float s, float v) {
     h -= std::floor(h);
@@ -137,52 +46,6 @@ inline Vector3f HsvToRgb(float h, float s, float v) {
     }
 }
 
-inline float Clamp01(float x) { return std::clamp(x, 0.0f, 1.0f); }
-
-/// How far an instance's colour override moves the preset's own colour, in
-/// hue, saturation and value.
-struct ColorShift {
-    bool  active { false };
-    float dh { 0.0f };
-    float ds { 0.0f };
-    float dv { 0.0f };
-};
-
-inline ColorShift ComputeColorShift(const Vector3f& preset, const Vector3f& override_color) {
-    ColorShift shift;
-    if ((override_color - preset).cwiseAbs().maxCoeff() < 0.9f / 255.0f) return shift;
-    const Vector3f a = RgbToHsv(preset);
-    const Vector3f b = RgbToHsv(override_color);
-    shift.active     = true;
-    shift.dh         = b.x() - a.x();
-    shift.ds         = b.y() - a.y();
-    shift.dv         = b.z() - a.z();
-    return shift;
-}
-
-inline Vector3f RetintColor(const Vector3f& rgb, const ColorShift& shift) {
-    const Vector3f hsv = RgbToHsv(rgb);
-    return HsvToRgb(hsv.x() + shift.dh, Clamp01(hsv.y() + shift.ds), Clamp01(hsv.z() + shift.dv));
-}
-
-/// The colour the scene object overrides the preset with, 0-1, if it does.
-inline std::optional<Vector3f> OverrideColor(const wpscene::ParticleInstanceoverride* over) {
-    if (over == nullptr || ! over->enabled) return std::nullopt;
-    if (over->overColor)
-        return Vector3f(over->color[0] / 255.0f, over->color[1] / 255.0f, over->color[2] / 255.0f);
-    if (over->overColorn) return Vector3f(over->colorn[0], over->colorn[1], over->colorn[2]);
-    return std::nullopt;
-}
-
-/// The shift to apply at this moment, or an inactive one without an override.
-/// Read at spawn, so a colour bound to a user property takes effect on the
-/// next particle.
-inline ColorShift CurrentColorShift(const wpscene::ParticleInstanceoverride* over,
-                                    const ParticleColorDefinition&           def) {
-    const auto colour = OverrideColor(over);
-    return colour ? ComputeColorShift(def.defaultColor, *colour) : ColorShift {};
-}
-
 inline Vector3f ParseColorTriple(const nlohmann::json& j, const char* key,
                                  const Vector3f& fallback) {
     std::array<float, 3> value { fallback.x(), fallback.y(), fallback.z() };
@@ -190,135 +53,74 @@ inline Vector3f ParseColorTriple(const nlohmann::json& j, const char* key,
     return { value[0], value[1], value[2] };
 }
 
-// ---- blend window -----------------------------------------------------
-
-/// The fade a particle's own age puts on an operator: it ramps in over
-/// `[inStart, inEnd]` and out over `[outStart, outEnd]` of the lifetime.
-struct BlendWindow {
-    float inStart { 0.0f };
-    float inEnd { 0.0f };
-    float outStart { 1.0f };
-    float outEnd { 1.0f };
-    bool  enabled { false };
-
-    static BlendWindow FromJson(const nlohmann::json& j) {
-        BlendWindow w;
-        GET_JSON_NAME_VALUE_NOWARN(j, "blendinstart", w.inStart);
-        GET_JSON_NAME_VALUE_NOWARN(j, "blendinend", w.inEnd);
-        GET_JSON_NAME_VALUE_NOWARN(j, "blendoutstart", w.outStart);
-        GET_JSON_NAME_VALUE_NOWARN(j, "blendoutend", w.outEnd);
-        w.inStart = std::min(w.inStart, w.inEnd - 0.0001f);
-        w.outEnd  = std::max(w.outEnd, w.outStart + 0.0001f);
-        const float in_length  = w.inEnd - w.inStart;
-        const float out_length = w.outEnd - w.outStart;
-        w.enabled = (w.inEnd > 0.01f || w.outStart < 0.99f) &&
-                    (w.outStart - w.inEnd > 0.01f || in_length > 0.01f || out_length > 0.01f);
-        return w;
+/// Logs a record the engine does not decode, once for each distinct name.
+void LogInertOnce(const char* kind, const std::string& name) {
+    static std::mutex                     lock;
+    static std::unordered_set<std::string> seen;
+    const std::string                     key = std::string(kind) + ":" + name;
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        if (! seen.insert(key).second) return;
     }
-
-    /// 1 when the window is not in use.
-    float Factor(double life) const {
-        if (! enabled) return 1.0f;
-        const float t = static_cast<float>(life);
-        return Clamp01((t - inStart) / (inEnd - inStart)) *
-               Clamp01((outEnd - t) / (outEnd - outStart));
-    }
-};
-
-inline void ReadAudioBlock(const nlohmann::json& j, u32& mode, i32& start, i32& end,
-                           std::array<float, 2>& bounds, float& exponent) {
-    GET_JSON_NAME_VALUE_NOWARN(j, "audioprocessingmode", mode);
-    GET_JSON_NAME_VALUE_NOWARN(j, "audioprocessingfrequencystart", start);
-    GET_JSON_NAME_VALUE_NOWARN(j, "audioprocessingfrequencyend", end);
-    GET_JSON_NAME_VALUE_NOWARN(j, "audioprocessingbounds", bounds);
-    GET_JSON_NAME_VALUE_NOWARN(j, "audioprocessingexponent", exponent);
+    LOG_INFO("particle %s \"%s\" is not decoded and does nothing", kind, name.c_str());
 }
 
-/// The audio level of an operator or initializer record: always 1 without
-/// an `audioprocessingmode`; otherwise sampled once per call.
-inline std::function<float()> ReadAudioLevel(const nlohmann::json& j,
-                                             const ParticleParseContext& ctx) {
-    u32                  mode { 0 };
-    i32                  start { 0 };
-    i32                  end { 1 };
-    std::array<float, 2> bounds { 0.8f, 1.0f };
-    float                exponent { 2.0f };
-    ReadAudioBlock(j, mode, start, end, bounds, exponent);
-    if (mode == 0 || mode > 3) return {};
-    if (ctx.requires_audio) ctx.requires_audio();
-    return MakeAudioLevel(mode, start, end, bounds, exponent, ctx.spectrum);
-}
-
-inline void Color(Particle& p, const Vector3f& lo, const Vector3f& hi, double u) {
-    const Vector3f c = lo + static_cast<float>(u) * (hi - lo);
-    PM::MutiplyInitColor(p, c.x(), c.y(), c.z());
-}
-
-inline Vector3d GenRandomVec3(const std::array<float, 3>& min, const std::array<float, 3>& max,
-                              float exponent = 1.0f) {
-    Vector3d result;
-    for (int32_t i = 0; i < 3; i++) {
-        result[i] = algorism::lerp(ExponentDraw(exponent), min[i], max[i]);
+/// The response of an audio-driven emitter, operator or initializer: the
+/// loudest of the selected bands, mapped through the bounds, smoothed, and
+/// raised to the exponent. Zero for anything that is silent or not a number.
+float AudioLevel(const audio::AudioSpectrumSnapshot& snapshot, u32 mode, i32 band_start,
+                 i32 band_end, float low, float high, float exponent) {
+    const std::array<float, 16>& bands =
+        mode == 1 ? snapshot.left16 : (mode == 2 ? snapshot.right16 : snapshot.average16);
+    const i32 first = std::clamp(band_start, 0, 15);
+    const i32 last  = std::clamp(std::max(band_end, first), first, 15);
+    float     volume = 0.0f;
+    for (i32 i = first; i <= last; ++i) {
+        const float band = bands[static_cast<std::size_t>(i)];
+        if (! std::isfinite(band)) return 0.0f;
+        volume = std::max(volume, band);
     }
-    return result;
+    if (! (volume > 0.0f) || ! std::isfinite(low) || ! std::isfinite(high) ||
+        ! std::isfinite(exponent))
+        return 0.0f;
+    float response = 0.0f;
+    if (high > low) {
+        response = std::clamp((volume - low) / (high - low), 0.0f, 1.0f);
+    } else {
+        response = volume > low ? 1.0f : 0.0f;
+    }
+    if (! (response > 0.0f)) return 0.0f;
+    response = response * response * (3.0f - 2.0f * response);
+    return std::pow(response, std::max(0.0f, exponent));
+}
+
+/// The level callable of an emitter record, or empty when it has no audio mode.
+std::function<float()>
+MakeAudioResponse(const wpscene::Emitter&                              wpe,
+                  const std::function<audio::AudioSpectrumSnapshot()>& spectrum) {
+    if (wpe.audioprocessingmode < 1 || wpe.audioprocessingmode > 3) return {};
+    return [spectrum, mode = wpe.audioprocessingmode, start = wpe.audioprocessingfrequencystart,
+            end = wpe.audioprocessingfrequencyend, low = wpe.audioprocessingbounds[0],
+            high = wpe.audioprocessingbounds[1], exponent = wpe.audioprocessingexponent]() {
+        if (! spectrum) return 0.0f;
+        return AudioLevel(spectrum(), mode, start, end, low, high, exponent);
+    };
+}
+
+ParticleEmitterTiming TimingOf(const wpscene::Emitter& wpe) {
+    ParticleEmitterTiming timing;
+    timing.delay               = wpe.delay;
+    timing.duration            = wpe.duration;
+    timing.periodic            = wpe.flags[wpscene::Emitter::FlagEnum::periodic];
+    timing.minPeriodicDuration = wpe.minperiodicduration;
+    timing.maxPeriodicDuration = wpe.maxperiodicduration;
+    timing.minPeriodicDelay    = wpe.minperiodicdelay;
+    timing.maxPeriodicDelay    = wpe.maxperiodicdelay;
+    timing.maxToEmitPerPeriod  = wpe.maxtoemitperperiod;
+    return timing;
 }
 
 } // namespace
-
-struct SingleRandom {
-    float       min { 0.0f };
-    float       max { 0.0f };
-    float       exponent { 1.0f };
-    static void ReadFromJson(const nlohmann::json& j, SingleRandom& r) {
-        GET_JSON_NAME_VALUE_NOWARN(j, "min", r.min);
-        GET_JSON_NAME_VALUE_NOWARN(j, "max", r.max);
-        GET_JSON_NAME_VALUE_NOWARN(j, "exponent", r.exponent);
-    };
-    double Draw() const { return algorism::lerp(ExponentDraw(exponent), min, max); }
-};
-struct VecRandom {
-    std::array<float, 3> min { 0.0f, 0.0f, 0.0f };
-    std::array<float, 3> max { 0.0f, 0.0f, 0.0f };
-    float                exponent { 1.0f };
-
-    static void ReadFromJson(const nlohmann::json& j, VecRandom& r) {
-        GET_JSON_NAME_VALUE_NOWARN(j, "min", r.min);
-        GET_JSON_NAME_VALUE_NOWARN(j, "max", r.max);
-        GET_JSON_NAME_VALUE_NOWARN(j, "exponent", r.exponent);
-    };
-};
-struct TurbulentRandom {
-    float  scale { 1.0f };
-    double timescale { 1.0f };
-    float  offset { 0.0f };
-    float  speedmin { 100.0f };
-    float  speedmax { 250.0f };
-    float  phasemin { 0.0f };
-    float  phasemax { 0.1f };
-
-    std::array<float, 3> forward { 0.0f, 1.0f, 0.0f }; // x y z
-    std::array<float, 3> right { 0.0f, 0.0f, 1.0f };
-    std::array<float, 3> up { 1.0f, 0.0f, 0.0f };
-
-    static void ReadFromJson(const nlohmann::json& j, TurbulentRandom& r) {
-        GET_JSON_NAME_VALUE_NOWARN(j, "scale", r.scale);
-        GET_JSON_NAME_VALUE_NOWARN(j, "timescale", r.timescale);
-        GET_JSON_NAME_VALUE_NOWARN(j, "offset", r.offset);
-        GET_JSON_NAME_VALUE_NOWARN(j, "speedmin", r.speedmin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "speedmax", r.speedmax);
-        GET_JSON_NAME_VALUE_NOWARN(j, "phasemin", r.phasemin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "phasemax", r.phasemax);
-        GET_JSON_NAME_VALUE_NOWARN(j, "forward", r.forward);
-        GET_JSON_NAME_VALUE_NOWARN(j, "right", r.right);
-        GET_JSON_NAME_VALUE_NOWARN(j, "up", r.up);
-    };
-};
-template<std::size_t N>
-std::array<float, N> mapVertex(const std::array<float, N>& v, float (*oper)(float)) {
-    std::array<float, N> result;
-    std::transform(v.begin(), v.end(), result.begin(), oper);
-    return result;
-};
 
 ParticleColorDefinition
 WPParticleParser::analyzeColorSources(const std::vector<nlohmann::json>& initializers,
@@ -382,747 +184,830 @@ WPParticleParser::analyzeColorSources(const std::vector<nlohmann::json>& initial
     return def;
 }
 
+
+// ---------------------------------------------------------------------------
+// Helpers shared by the initializer, override and operator generators.
+// ---------------------------------------------------------------------------
+namespace
+{
+
+using Vec3d = linalg::Vector3d;
+using Json  = nlohmann::json;
+
+/// A draw from [0, 1).
+double Draw01() { return Random::get(0.0, 1.0); }
+
+/// A draw shaped by the record's exponent: exactly 1 is a plain draw.
+double DrawShaped(double exponent) {
+    const double u = Draw01();
+    return exponent == 1.0 ? u : std::pow(u, exponent);
+}
+
+double Lerp(double a, double b, double t) { return a + (b - a) * t; }
+
+template<class T>
+T ReadKey(const Json& j, const char* key, T value) {
+    GET_JSON_NAME_VALUE_NOWARN(j, key, value);
+    return value;
+}
+
+Vec3d ReadVec3(const Json& j, const char* key, const Vec3d& fallback) {
+    std::array<float, 3> value { static_cast<float>(fallback.x()), static_cast<float>(fallback.y()),
+                                 static_cast<float>(fallback.z()) };
+    GET_JSON_NAME_VALUE_NOWARN(j, key, value);
+    return { value[0], value[1], value[2] };
+}
+
+/// Control point numbers: 0..6 name themselves, anything else names the last.
+std::size_t ClampPoint(int index) {
+    return (index >= 0 && index <= 6) ? static_cast<std::size_t>(index) : 7u;
+}
+
+const ParticleControlpoint* PointOf(std::span<const ParticleControlpoint> points, int index) {
+    const std::size_t i = ClampPoint(index);
+    return i < points.size() ? &points[i] : nullptr;
+}
+
+double FiniteOr(double value, double fallback) { return std::isfinite(value) ? value : fallback; }
+
+// --- reference gradient noise (spec 3.12) ---------------------------------------
+
+constexpr std::array<std::uint8_t, 256> kPermutation = {
+    151, 160, 137, 91,  90,  15,  131, 13,  201, 95,  96,  53,  194, 233, 7,   225, 140, 36,  103,
+    30,  69,  142, 8,   99,  37,  240, 21,  10,  23,  190, 6,   148, 247, 120, 234, 75,  0,   26,
+    197, 62,  94,  252, 219, 203, 117, 35,  11,  32,  57,  177, 33,  88,  237, 149, 56,  87,  174,
+    20,  125, 136, 171, 168, 68,  175, 74,  165, 71,  134, 139, 48,  27,  166, 77,  146, 158, 231,
+    83,  111, 229, 122, 60,  211, 133, 230, 220, 105, 92,  41,  55,  46,  245, 40,  244, 102, 143,
+    54,  65,  25,  63,  161, 1,   216, 80,  73,  209, 76,  132, 187, 208, 89,  18,  169, 200, 196,
+    135, 130, 116, 188, 159, 86,  164, 100, 109, 198, 173, 186, 3,   64,  52,  217, 226, 250, 124,
+    123, 5,   202, 38,  147, 118, 126, 255, 82,  85,  212, 207, 206, 59,  227, 47,  16,  58,  17,
+    182, 189, 28,  42,  223, 183, 170, 213, 119, 248, 152, 2,   44,  154, 163, 70,  221, 153, 101,
+    155, 167, 43,  172, 9,   129, 22,  39,  253, 19,  98,  108, 110, 79,  113, 224, 232, 178, 185,
+    112, 104, 218, 246, 97,  228, 251, 34,  242, 193, 238, 210, 144, 12,  191, 179, 162, 241, 81,
+    51,  145, 235, 249, 14,  239, 107, 49,  192, 214, 31,  181, 199, 106, 157, 184, 84,  204, 176,
+    115, 121, 50,  45,  127, 4,   150, 254, 138, 236, 205, 93,  222, 114, 67,  29,  24,  72,  243,
+    141, 128, 195, 78,  66,  215, 61,  156, 180
+};
+
+int Hash(int i) { return kPermutation[static_cast<std::size_t>(i & 255)]; }
+
+double Fade(double t) { return t * t * t * (t * (t * 6.0 - 15.0) + 10.0); }
+
+double Gradient(int hash, double x, double y, double z) {
+    const int    h = hash & 15;
+    const double u = h < 8 ? x : y;
+    const double v = h < 4 ? y : ((h == 12 || h == 14) ? x : z);
+    return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
+}
+
+/// Perlin's improved noise in three dimensions: zero at lattice points, within
+/// -1..1, period 256 on each axis.
+double Noise3(double x, double y, double z) {
+    const double fx = std::floor(x), fy = std::floor(y), fz = std::floor(z);
+    // Reduce in double first so a huge coordinate cannot overflow the int cast.
+    const int cx = static_cast<int>(std::fmod(fx, 256.0));
+    const int cy = static_cast<int>(std::fmod(fy, 256.0));
+    const int cz = static_cast<int>(std::fmod(fz, 256.0));
+    const int X = cx & 255, Y = cy & 255, Z = cz & 255;
+    x -= fx;
+    y -= fy;
+    z -= fz;
+    const double u = Fade(x), v = Fade(y), w = Fade(z);
+    const int    A = Hash(X) + Y, AA = Hash(A) + Z, AB = Hash(A + 1) + Z;
+    const int    B = Hash(X + 1) + Y, BA = Hash(B) + Z, BB = Hash(B + 1) + Z;
+    return Lerp(
+        Lerp(Lerp(Gradient(Hash(AA), x, y, z), Gradient(Hash(BA), x - 1, y, z), u),
+             Lerp(Gradient(Hash(AB), x, y - 1, z), Gradient(Hash(BB), x - 1, y - 1, z), u), v),
+        Lerp(Lerp(Gradient(Hash(AA + 1), x, y, z - 1), Gradient(Hash(BA + 1), x - 1, y, z - 1), u),
+             Lerp(Gradient(Hash(AB + 1), x, y - 1, z - 1),
+                  Gradient(Hash(BB + 1), x - 1, y - 1, z - 1), u),
+             v),
+        w);
+}
+
+/// `octaves` layers of noise, frequency doubling and weight halving, divided by
+/// the weight sum: within -1..1.
+double FractalNoise(double a, double b, int octaves) {
+    double sum = 0.0, weights = 0.0, weight = 1.0, frequency = 1.0;
+    for (int i = 0; i < octaves; ++i) {
+        sum += weight * Noise3(a * frequency, b * frequency, 0.0);
+        weights += weight;
+        weight *= 0.5;
+        frequency *= 2.0;
+    }
+    return weights > 0.0 ? sum / weights : 0.0;
+}
+
+// --- colour ----------------------------------------------------------------------
+
+/// Hue in turns, saturation and value, of an RGB colour.
+Vec3d RgbToHsv(const Vec3d& c) {
+    const double mx = std::max({ c.x(), c.y(), c.z() });
+    const double mn = std::min({ c.x(), c.y(), c.z() });
+    const double range = mx - mn;
+    if (! (mx > 0.0) || ! (range > 0.0)) return { 0.0, 0.0, std::max(mx, 0.0) };
+    double h;
+    if (c.x() >= mx) h = (c.y() - c.z()) / range;
+    else if (c.y() >= mx) h = (c.z() - c.x()) / range + 2.0;
+    else h = (c.x() - c.y()) / range + 4.0;
+    h /= 6.0;
+    h -= std::floor(h);
+    return { h, range / mx, mx };
+}
+
+Vec3d HsvToRgbD(const Vec3d& hsv) {
+    const Vector3f rgb = HsvToRgb(static_cast<float>(hsv.x()), static_cast<float>(hsv.y()),
+                                  static_cast<float>(hsv.z()));
+    return { rgb.x(), rgb.y(), rgb.z() };
+}
+
+double Frac(double v) { return v - std::floor(v); }
+
+/// The colour side of the scene object's instance override, resolved once per
+/// record: it remembers the file's own reference colour (and its HSV) and reads
+/// the override record live every time it is asked, so a property that moves
+/// the override shows in the next birth or step.
+class OverrideTint {
+public:
+    /// The override colour moved from the reference: where it points and the
+    /// HSV step (hue in turns, saturation, value) from the reference to it.
+    struct Offset {
+        Vec3d target;
+        Vec3d hsv_step;
+    };
+
+    OverrideTint() = default;
+    OverrideTint(std::shared_ptr<const wpscene::ParticleInstanceoverride> over,
+                 const ParticleColorDefinition&                           file_colour)
+        : m_over(std::move(over)),
+          m_file_has_source(file_colour.hasColor),
+          m_reference { file_colour.defaultColor.x(), file_colour.defaultColor.y(),
+                        file_colour.defaultColor.z() },
+          m_reference_hsv(RgbToHsv(m_reference)) {}
+
+    /// The override colour on a 0..1 scale; nothing when the record is missing,
+    /// disabled, or sets neither `color` nor `colorn`.
+    std::optional<Vec3d> Colour() const {
+        if (! m_over || ! m_over->enabled) return std::nullopt;
+        if (m_over->overColor) {
+            const auto& c = m_over->color;
+            return Vec3d { c[0] / 255.0, c[1] / 255.0, c[2] / 255.0 };
+        }
+        if (m_over->overColorn) {
+            const auto& c = m_over->colorn;
+            return Vec3d { c[0], c[1], c[2] };
+        }
+        return std::nullopt;
+    }
+
+    /// The flat tint of a file that has no colour source of its own.
+    std::optional<Vec3d> FlatTint() const {
+        return m_file_has_source ? std::nullopt : Colour();
+    }
+
+    /// The retint a colour-bearing file applies, if the override differs from
+    /// the reference by at least 0.9/255 in some channel.
+    std::optional<Offset> Shifted() const {
+        if (! m_file_has_source) return std::nullopt;
+        const auto colour = Colour();
+        if (! colour) return std::nullopt;
+        const Vec3d gap = *colour - m_reference;
+        constexpr double kSame = 0.9 / 255.0;
+        if (std::abs(gap.x()) < kSame && std::abs(gap.y()) < kSame && std::abs(gap.z()) < kSame)
+            return std::nullopt;
+        return Offset { *colour, RgbToHsv(*colour) - m_reference_hsv };
+    }
+
+    /// `rgb` moved in HSV by `step`: hue added modulo 1, saturation and value
+    /// added and held in 0..1.
+    static Vec3d Moved(const Vec3d& rgb, const Vec3d& step) {
+        const Vec3d hsv = RgbToHsv(rgb);
+        return HsvToRgbD({ Frac(hsv.x() + step.x()), std::clamp(hsv.y() + step.y(), 0.0, 1.0),
+                           std::clamp(hsv.z() + step.z(), 0.0, 1.0) });
+    }
+
+private:
+    std::shared_ptr<const wpscene::ParticleInstanceoverride> m_over;
+    bool  m_file_has_source { false };
+    Vec3d m_reference { 1.0, 1.0, 1.0 };
+    Vec3d m_reference_hsv { 0.0, 0.0, 1.0 };
+};
+
+/// A draw between `centre - noise` and `centre + noise`, the interval cut off
+/// at 0 and 1 before it is sampled.
+double NoisyUnit(double centre, double noise) {
+    const double lo = std::max(0.0, centre - noise);
+    const double hi = std::min(1.0, centre + noise);
+    return hi > lo ? Lerp(lo, hi, Draw01()) : lo;
+}
+
+/// The numbers of a `colors` value: a string, or the strings (or numbers) of an
+/// array, read three to an entry. Nothing usable is one white entry.
+std::vector<Vec3d> ColourEntries(const Json& record) {
+    std::vector<double> numbers;
+    const auto take_text = [&numbers](const std::string& text) {
+        std::istringstream stream(text);
+        double             value = 0.0;
+        while (stream >> value) numbers.push_back(value);
+    };
+    const auto found = record.find("colors");
+    if (found != record.end()) {
+        const Json& colors = (found->is_object() && found->contains("value")) ? found->at("value") : *found;
+        if (colors.is_string()) {
+            take_text(colors.get<std::string>());
+        } else if (colors.is_array()) {
+            for (const auto& item : colors) {
+                if (item.is_string()) take_text(item.get<std::string>());
+                else if (item.is_number()) numbers.push_back(item.get<double>());
+            }
+        }
+    }
+    std::vector<Vec3d> entries;
+    for (std::size_t i = 0; i + 2 < numbers.size(); i += 3)
+        entries.push_back({ numbers[i], numbers[i + 1], numbers[i + 2] });
+    if (entries.empty()) entries.push_back({ 1.0, 1.0, 1.0 });
+    return entries;
+}
+
+/// Keeps the last finite value of a quantity that a script or property drives.
+struct LastFinite {
+    double value { 1.0 };
+    double operator()(double v) {
+        if (std::isfinite(v)) value = v;
+        return value;
+    }
+};
+
+} // namespace
+
 ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json& wpj) {
     return genParticleInitOp(wpj, ParticleParseContext {});
 }
 
 ParticleInitOp WPParticleParser::genParticleInitOp(const nlohmann::json&        wpj,
                                                    const ParticleParseContext&  ctx) {
-    using namespace std::placeholders;
-    do {
-        if (! wpj.contains("name")) break;
-        std::string name;
-        GET_JSON_NAME_VALUE(wpj, "name", name);
+    const ParticleInitOp inert = [](Particle&, double) {};
+    if (! wpj.is_object() || ! wpj.contains("name") || ! wpj.at("name").is_string()) {
+        LogInertOnce("initializer", "");
+        return inert;
+    }
+    const std::string name = wpj.at("name").get<std::string>();
+    const bool        pixel = ctx.ortho;
+    const auto        spawn = ctx.spawn;
+    const double      exponent = ReadKey<double>(wpj, "exponent", 1.0);
 
-        if (name == "colorrandom") {
-            VecRandom r;
-            r.min = { 0.0f, 0.0f, 0.0f };
-            r.max = { 255.0f, 255.0f, 255.0f };
-            VecRandom::ReadFromJson(wpj, r);
-            const auto over = ctx.over;
-            const auto def  = ctx.color;
-
-            return [=](Particle& p, double) {
-                Vector3f lo = Vector3f(r.min[0], r.min[1], r.min[2]) / 255.0f;
-                Vector3f hi = Vector3f(r.max[0], r.max[1], r.max[2]) / 255.0f;
-                // An instance colour re-tints the preset's colours, keeping the
-                // spread between them, instead of replacing them.
-                const ColorShift shift = CurrentColorShift(over.get(), def);
-                if (shift.active) {
-                    lo = RetintColor(lo, shift);
-                    hi = RetintColor(hi, shift);
-                }
-                // One draw for the three channels.
-                Color(p, lo, hi, ExponentDraw(r.exponent));
-            };
-        } else if (name == "hsvcolorrandom") {
-            float huemin { 0.0f }, huemax { 1.0f }, satmin { 0.5f }, satmax { 1.0f };
-            float valmin { 0.5f }, valmax { 1.0f };
-            i32   huesteps { 6 };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "huemin", huemin);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "huemax", huemax);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "huesteps", huesteps);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "saturationmin", satmin);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "saturationmax", satmax);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "valuemin", valmin);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "valuemax", valmax);
-            huesteps = std::max(huesteps, 0);
-            // The loader spaces the hue steps over the hue range. A range that
-            // is a whole number of turns (the default 0..1) ends where it began,
-            // so the last step would repeat the first and the range is divided
-            // into `huesteps` pieces; any other range puts a step on both of its
-            // ends and is divided into `huesteps - 1`. A range of no width is
-            // taken as one whole turn, and one step or none leaves the hue alone.
-            const float hue_range_raw = huemax - huemin;
-            const float hue_range     = hue_range_raw != 0.0f ? hue_range_raw : 1.0f;
-            float       hue_step      = 0.0f;
-            if (huesteps > 1) {
-                float divisor = static_cast<float>(huesteps) - 1.0f;
-                if (std::fabs(std::fmod(hue_range, 1.0f)) < 1.0f / 360.0f) divisor += 1.0f;
-                hue_step = hue_range / divisor;
-            }
-            // Width the hue steps are centred over when an instance colour sets
-            // the hue: the range itself, none when the hue never changes.
-            const float hue_width = huesteps > 1 ? hue_range : 0.0f;
-            const auto  over      = ctx.over;
-            const auto  def       = ctx.color;
-            return [=](Particle& p, double) {
-                float hue_lo = huemin;
-                float sat_lo = satmin;
-                float sat_hi = satmax;
-                float val_lo = valmin;
-                float val_hi = valmax;
-                // An instance colour re-centres the ranges on its own hue,
-                // saturation and value instead of adding to the preset's.
-                if (const auto colour = OverrideColor(over.get());
-                    colour && ComputeColorShift(def.defaultColor, *colour).active) {
-                    const Vector3f hsv = RgbToHsv(*colour);
-                    hue_lo = hsv.x() - hue_width * 0.5f;
-                    const float sat_range = std::min(satmax - satmin, 1.0f);
-                    sat_lo = Clamp01(hsv.y() - sat_range * 0.5f);
-                    sat_hi = std::min(1.0f, sat_lo + sat_range);
-                    const float val_range = std::min(valmax - valmin, 1.0f);
-                    val_lo = Clamp01(hsv.z() - val_range * 0.5f);
-                    val_hi = std::min(1.0f, val_lo + val_range);
-                }
-                const int index = huesteps > 0
-                                      ? std::clamp(static_cast<int>(
-                                                       std::floor(UnitRandom() * (huesteps + 1))),
-                                                   0,
-                                                   huesteps)
-                                      : 0;
-                const float    hue = hue_lo + static_cast<float>(index) * hue_step;
-                const float    sat = static_cast<float>(algorism::lerp(UnitRandom(), sat_lo, sat_hi));
-                const float    val = static_cast<float>(algorism::lerp(UnitRandom(), val_lo, val_hi));
-                const Vector3f rgb = HsvToRgb(hue, sat, val);
-                PM::MutiplyInitColor(p, rgb.x(), rgb.y(), rgb.z());
-            };
-        } else if (name == "colorlist") {
-            std::vector<Vector3f> colors;
-            std::string           text;
-            if (wpj.contains("colors")) {
-                const auto& value = wpj.at("colors");
-                if (value.is_string()) {
-                    text = value.get<std::string>();
-                } else if (value.is_array()) {
-                    for (const auto& entry : value) {
-                        if (entry.is_string()) text += entry.get<std::string>() + " ";
-                        else if (entry.is_number()) text += std::to_string(entry.get<double>()) + " ";
-                    }
-                }
-            } else {
-                text = "1 1 1";
-            }
-            {
-                std::istringstream stream(text);
-                float              r, g, b;
-                while (stream >> r >> g >> b) colors.emplace_back(r, g, b);
-            }
-            if (colors.empty()) colors.emplace_back(1.0f, 1.0f, 1.0f);
-            float huenoise { 0.0f }, saturationnoise { 0.0f }, valuenoise { 0.0f };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "huenoise", huenoise);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "saturationnoise", saturationnoise);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "valuenoise", valuenoise);
-            const auto over = ctx.over;
-            const auto def  = ctx.color;
-            return [=](Particle& p, double) {
-                const std::size_t pick = std::min<std::size_t>(
-                    colors.size() - 1,
-                    static_cast<std::size_t>(UnitRandom() * static_cast<double>(colors.size())));
-                const Vector3f hsv = RgbToHsv(colors[pick]);
-                // The noise is a uniform draw over the entry's own value plus
-                // and minus the noise, with the two ends of that range kept
-                // inside 0..1 (so the draw is cut off there, not piled up on
-                // the edge).
-                const auto noisy = [](float centre, float noise) {
-                    const float lo = std::max(0.0f, centre - noise);
-                    const float hi = std::min(1.0f, centre + noise);
-                    return static_cast<float>(algorism::lerp(UnitRandom(), lo, hi));
-                };
-                float hue = noisy(hsv.x(), huenoise);
-                float sat = noisy(hsv.y(), saturationnoise);
-                float val = noisy(hsv.z(), valuenoise);
-                // An instance colour moves every entry by the distance between
-                // the override and the list's first entry, after the noise.
-                if (const auto colour = OverrideColor(over.get());
-                    colour && ComputeColorShift(def.defaultColor, *colour).active) {
-                    const Vector3f first = RgbToHsv(colors.front());
-                    const Vector3f ov    = RgbToHsv(*colour);
-                    hue += ov.x() - first.x();
-                    sat += ov.y() - first.y();
-                    val += ov.z() - first.z();
-                }
-                sat = Clamp01(sat);
-                val = Clamp01(val);
-                const Vector3f rgb = HsvToRgb(hue, sat, val);
-                PM::MutiplyInitColor(p, rgb.x(), rgb.y(), rgb.z());
-            };
-        } else if (name == "lifetimerandom") {
-            SingleRandom r = { 0.0f, 1.0f };
-            SingleRandom::ReadFromJson(wpj, r);
-            return [=](Particle& p, double) {
-                // Never shorter than a millisecond, so a particle always lives
-                // long enough to be seen and to be aged out.
-                PM::InitLifetime(p, std::max(static_cast<float>(r.Draw()), 0.001f));
-            };
-        } else if (name == "sizerandom") {
-            // Wallpaper Engine's defaults: 5..50 in a pixel scene, 0.001..1 otherwise.
-            SingleRandom r = ctx.ortho ? SingleRandom { 5.0f, 50.0f } : SingleRandom { 0.001f, 1.0f };
-            SingleRandom::ReadFromJson(wpj, r);
-            // Scales the size the particle has so far, as Wallpaper Engine's does:
-            // a second `sizerandom` narrows the first's draw instead of replacing it.
-            return [=](Particle& p, double) {
-                PM::MutiplyInitSize(p, r.Draw());
-            };
-        } else if (name == "alpharandom") {
-            SingleRandom r = { 0.05f, 1.0f };
-            SingleRandom::ReadFromJson(wpj, r);
-            // Scales the alpha so far, like the size and the colour initializers.
-            return [=](Particle& p, double) {
-                PM::MutiplyInitAlpha(p, r.Draw());
-            };
-        } else if (name == "velocityrandom") {
-            VecRandom r;
-            if (ctx.ortho) {
-                r.min[0] = r.min[1] = -32.0f;
-                r.max[0] = r.max[1] = 32.0f;
-            } else {
-                r.min = { -1.0f, -1.0f, -1.0f };
-                r.max = { 1.0f, 1.0f, 1.0f };
-            }
-            VecRandom::ReadFromJson(wpj, r);
-            const auto spawn = ctx.spawn;
-            return [=](Particle& p, double) {
-                Vector3d result = GenRandomVec3(r.min, r.max, r.exponent);
-                if (spawn && spawn->has_world_linear) result = spawn->world_linear * result;
-                PM::ChangeVelocity(p, result[0], result[1], result[2]);
-            };
-        } else if (name == "rotationrandom") {
-            VecRandom r;
-            r.max[2] = 2 * M_PI;
-            VecRandom::ReadFromJson(wpj, r);
-            return [=](Particle& p, double) {
-                auto result = GenRandomVec3(r.min, r.max, r.exponent);
-                PM::ChangeRotation(p, result[0], result[1], result[2]);
-            };
-        } else if (name == "angularvelocityrandom") {
-            VecRandom r;
-            r.min[2] = -5.0f;
-            r.max[2] = 5.0f;
-            VecRandom::ReadFromJson(wpj, r);
-            return [=](Particle& p, double) {
-                auto result = GenRandomVec3(r.min, r.max, r.exponent);
-                PM::ChangeAngularVelocity(p, result[0], result[1], result[2]);
-            };
-        } else if (name == "inheritcontrolpointvelocity") {
-            i32   controlpoint { 0 };
-            float lo { 0.1f }, hi { 0.2f };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "controlpoint", controlpoint);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "min", lo);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "max", hi);
-            const u32  index = ClampControlpointIndex(controlpoint);
-            const auto spawn = ctx.spawn;
-            if (! spawn) break;
-            return [=](Particle& p, double) {
-                if (index >= spawn->controlpoints.size() || spawn->frame_time <= 0.0) return;
-                const auto&    cp = spawn->controlpoints[index];
-                // How fast the control point itself is moving: the particle starts
-                // with a share of it.
-                const Vector3d v = (cp.offset - cp.prev_offset) / spawn->frame_time;
-                PM::ChangeVelocity(p, v * algorism::lerp(UnitRandom(), lo, hi));
-            };
-        } else if (name == "positionoffsetrandom") {
-            float distance { ctx.ortho ? 100.0f : 0.1f };
-            float scale { ctx.ortho ? 0.001f : 1.0f };
-            float timescale { 1.0f };
-            i32   octaves { 6 };
-            std::array<float, 3> directions { 1.0f, 1.0f, ctx.ortho ? 0.0f : 1.0f };
-            std::array<int, 3>   sign { 0, 0, 0 };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "distance", distance);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "scale", scale);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "timescale", timescale);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "octaves", octaves);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "directions", directions);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "sign", sign);
-            octaves         = std::clamp(octaves, 1, 16);
-            const auto spawn = ctx.spawn;
-            return [=](Particle& p, double) {
-                const double time = spawn ? spawn->system_time * timescale : 0.0;
-                // Noise summed over octaves at doubling frequency, halving in
-                // weight, then averaged back into -1..1.
-                auto fractal = [&](double a, double b, double bsign) {
-                    double sum = 0.0, weight = 0.0, amplitude = 1.0, frequency = 1.0;
-                    for (int k = 0; k < octaves; ++k) {
-                        sum += amplitude * algorism::PerlinNoise(frequency * a, frequency * bsign * b, 0.0);
-                        weight += amplitude;
-                        amplitude *= 0.5;
-                        frequency *= 2.0;
-                    }
-                    return sum / weight;
-                };
-                const double x = p.position.x() * scale;
-                const double y = p.position.y() * scale;
-                const double z = p.position.z() * scale;
-                Vector3d     offset {
-                    fractal(x, time, 1.0),
-                    fractal(time, y, 1.0),
-                    fractal(z, time, -1.0),
-                };
-                offset = offset.cwiseProduct(
-                    Vector3d(directions[0], directions[1], directions[2])) * distance;
-                for (int i = 0; i < 3; ++i) {
-                    if (sign[i] != 0) offset[i] = std::abs(offset[i]) * (sign[i] > 0 ? 1.0 : -1.0);
-                }
-                PM::Move(p, offset);
-            };
-        } else if (name == "mapsequencearoundcontrolpoint") {
-            i32                  count { 32 };
-            std::array<float, 2> bounds { 0.0f, 1.0f };
-            std::string          limit { "repeat" };
-            i32                  controlpoint { 0 };
-            std::array<float, 3> axis_in { 0.0f, 0.0f, 1.0f };
-            std::array<float, 3> speedmin { 0.0f, 0.0f, 0.0f };
-            std::array<float, 3> speedmax { 0.0f, 0.0f, 0.0f };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "count", count);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "bounds", bounds);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "limitbehavior", limit);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "controlpoint", controlpoint);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "axis", axis_in);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "speedmin", speedmin);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "speedmax", speedmax);
-            const u32  index  = ClampControlpointIndex(controlpoint);
-            const auto spawn  = ctx.spawn;
-            if (! spawn) break;
-            const bool mirror = limit == "mirror";
-            double     phase { 0.0 };
-            double     step { 1.0 / std::max(count, 1) };
-            return [=](Particle& p, double) mutable {
-                Vector3d centre = Vector3d::Zero();
-                Vector3d axis(axis_in[0], axis_in[1], axis_in[2]);
-                if (index < spawn->controlpoints.size()) {
-                    const auto& cp = spawn->controlpoints[index];
-                    centre         = cp.offset;
-                    if (cp.has_rotation) axis = cp.rotation * axis;
-                }
-                if (axis.squaredNorm() < 1.0e-12) axis = Vector3d::UnitZ();
-                axis.normalize();
-                // Two directions across the axis, built the way Wallpaper Engine does.
-                Vector3d u, v;
-                if (axis.x() == 0.0 && axis.y() == 0.0) {
-                    u = Vector3d::UnitX();
-                    v = Vector3d::UnitY();
-                } else {
-                    u = Vector3d(axis.y(), -axis.x(), 0.0).normalized();
-                    v = axis.cross(u).normalized();
-                }
-                const double theta = 2.0 * M_PI * (bounds[0] + phase * (bounds[1] - bounds[0]));
-                const double ct = std::cos(theta), st = std::sin(theta);
-                const Vector3d r      = p.position.cast<double>() - centre;
-                const double   along  = r.dot(axis);
-                const double   across = (r - along * axis).norm();
-                const Vector3d d1     = ct * u + st * v;
-                const Vector3d d2     = -st * u + ct * v;
-                PM::MoveTo(p, centre + along * axis + across * d1);
-                const Vector3d speed = d1 * (speedmin[1] + UnitRandom() * (speedmax[1] - speedmin[1])) +
-                                       d2 * (speedmin[0] + UnitRandom() * (speedmax[0] - speedmin[0])) +
-                                       axis * (speedmin[2] + UnitRandom() * (speedmax[2] - speedmin[2]));
-                PM::ChangeVelocity(p, speed);
-
-                phase += step;
-                if (phase > 1.0) {
-                    if (mirror) {
-                        step  = -step;
-                        phase = 2.0 - phase;
-                    } else {
-                        phase = std::fmod(phase, 1.0);
-                    }
-                }
-                if (phase < 0.0) {
-                    phase = -phase;
-                    step  = -step;
-                }
-            };
-        } else if (name == "mapsequencebetweencontrolpoints") {
-            i32                  count { 32 };
-            std::array<float, 2> bounds { 0.0f, 1.0f };
-            std::string          limit { "repeat" };
-            i32                  start { 0 }, end { 1 };
-            i32                  flags { 0 };
-            float                arcamount { 0.3f };
-            float                sizereduction { 0.9f };
-            std::array<float, 3> arcdirection { 0.0f, 1.0f, 0.0f };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "count", count);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "bounds", bounds);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "limitbehavior", limit);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "controlpointstart", start);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "controlpointend", end);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "flags", flags);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "arcamount", arcamount);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "arcdirection", arcdirection);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "sizereductionamount", sizereduction);
-            const u32  start_index = ClampControlpointIndex(start);
-            const u32  end_index   = ClampControlpointIndex(end);
-            const auto spawn       = ctx.spawn;
-            if (! spawn) break;
-            const bool mirror = limit == "mirror";
-            double     phase { 0.0 };
-            // A single-particle sequence has no spacing: every spawn starts over.
-            double step { count > 1 ? 1.0 / (count - 1) : 1.0e9 };
-            return [=](Particle& p, double) mutable {
-                if (start_index < spawn->controlpoints.size() &&
-                    end_index < spawn->controlpoints.size()) {
-                    const Vector3d a      = spawn->controlpoints[start_index].offset;
-                    const Vector3d b      = spawn->controlpoints[end_index].offset;
-                    const double   length = (b - a).norm();
-                    if (length > 1.0e-9) {
-                        const Vector3d dir  = (b - a) / length;
-                        const Vector3d pos  = p.position.cast<double>();
-                        const Vector3d perp = pos - pos.dot(dir) * dir;
-                        const double   t    = bounds[0] + phase * (bounds[1] - bounds[0]);
-                        // 1 in the middle of the sequence, 0 at both ends.
-                        const double g = 1.0 - std::pow(std::abs(2.0 * phase - 1.0), 2.0);
-                        Vector3d     moved = perp * (((flags & 1) != 0) ? g : 1.0) + t * length * dir + a;
-                        if ((flags & 8) != 0) {
-                            moved += Vector3d(arcdirection[0], arcdirection[1], arcdirection[2]) * g *
-                                     length * arcamount;
-                        }
-                        PM::MoveTo(p, moved);
-                        if ((flags & 2) != 0) p.velocity *= static_cast<float>(g);
-                        if ((flags & 4) != 0) {
-                            PM::MutiplyInitSize(p, (1.0 - sizereduction) + sizereduction * g);
-                        }
-                    }
-                }
-                phase += step;
-                if (phase > 1.0) {
-                    if (mirror) {
-                        step  = -step;
-                        phase = 2.0 - phase;
-                    } else {
-                        phase = 0.0;
-                    }
-                }
-                if (phase < 0.0) {
-                    phase = -phase;
-                    step  = -step;
-                }
-            };
-        } else if (name == "inheritinitialvaluefromevent") {
-            std::string input { "setcolor" };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "input", input);
-            const auto spawn = ctx.spawn;
-            if (! spawn) break;
-            return [=](Particle& p, double) {
-                const Particle* parent = spawn->parent;
-                if (parent == nullptr) return;
-                if (input == "setcolor") {
-                    PM::InitColor(p, parent->color.x(), parent->color.y(), parent->color.z());
-                } else if (input == "multiplycolor") {
-                    PM::MutiplyInitColor(p, parent->color.x(), parent->color.y(), parent->color.z());
-                } else if (input == "setopacity") {
-                    PM::InitAlpha(p, parent->alpha);
-                } else if (input == "multiplyopacity") {
-                    PM::MutiplyInitAlpha(p, parent->alpha);
-                } else if (input == "setcoloropacity") {
-                    PM::InitColor(p, parent->color.x(), parent->color.y(), parent->color.z());
-                    PM::InitAlpha(p, parent->alpha);
-                } else if (input == "multiplycoloropacity") {
-                    PM::MutiplyInitColor(p, parent->color.x(), parent->color.y(), parent->color.z());
-                    PM::MutiplyInitAlpha(p, parent->alpha);
-                } else if (input == "setvelocity") {
-                    p.velocity = parent->velocity;
-                } else if (input == "addvelocity") {
-                    PM::ChangeVelocity(p, parent->velocity.cast<double>());
-                } else if (input == "setsize") {
-                    PM::InitSize(p, parent->size);
-                } else if (input == "multiplysize") {
-                    // The engine multiplies its own size by the parent's own, each half of
-                    // the size held here; `setsize` copies the same unit, so it needs no
-                    // conversion.
-                    PM::MutiplyInitSize(p, parent->size / kParticleSizeOverEngine);
-                } else if (input == "setrotation") {
-                    p.rotation = parent->rotation;
-                } else if (input == "addrotation") {
-                    PM::ChangeRotation(p, parent->rotation.cast<double>());
-                } else if (input == "setangularvelocity") {
-                    p.angularVelocity = parent->angularVelocity;
-                } else if (input == "addangularvelocity") {
-                    PM::ChangeAngularVelocity(p, parent->angularVelocity.cast<double>());
-                }
-            };
-        } else if (name == "turbulentvelocityrandom") {
-            // to do
-            TurbulentRandom r;
-            TurbulentRandom::ReadFromJson(wpj, r);
-            Vector3f forward(r.forward.data());
-            Vector3f right(r.right.data());
-            Vector3f pos = GenRandomVec3({ 0, 0, 0 }, { 10.0f, 10.0f, 10.0f }).cast<float>();
-            const auto spawn = ctx.spawn;
-            return [=](Particle& p, double duration) mutable {
-                float speed = Random::get(r.speedmin, r.speedmax);
-                if (duration > 10.0f) {
-                    pos[0] += speed;
-                    duration = 0.0f;
-                }
-                Vector3f result;
-                do {
-                    result = algorism::CurlNoise(pos.cast<double>()).cast<float>().normalized();
-                    pos += result * 0.005f / r.timescale;
-                    duration -= 0.01f;
-                } while (duration > 0.01f);
-                // limit direction
-                {
-                    double c     = result.dot(forward) / (result.norm() * forward.norm());
-                    float  a     = std::acos(c) / M_PI;
-                    float  scale = r.scale / 2.0f;
-                    if (a > scale) {
-                        auto axis = result.cross(forward).normalized();
-                        result    = AngleAxisf((a - a * scale) * M_PI, axis) * result;
-                    }
-                }
-                // offset
-                result = AngleAxisf(r.offset, right) * result;
-                result *= speed;
-                if (spawn && spawn->has_world_linear) {
-                    result = (spawn->world_linear * result.cast<double>()).cast<float>();
-                }
-                PM::ChangeVelocity(p, result[0], result[1], result[2]);
-            };
-        }
-    } while (false);
-    return [](Particle&, double) {
+    // The layer matrix the spawning emitter's control point carries, if any.
+    const auto through_layer = [spawn](const Vec3d& v) -> Vec3d {
+        if (spawn && spawn->has_world_linear) return spawn->world_linear * v;
+        return v;
     };
+
+    if (name == "lifetimerandom") {
+        const double lo = ReadKey<double>(wpj, "min", 0.0), hi = ReadKey<double>(wpj, "max", 1.0);
+        return [=](Particle& p, double) {
+            const double life = std::max(Lerp(lo, hi, DrawShaped(exponent)), 0.001);
+            PM::InitLifetime(p, static_cast<float>(life));
+        };
+    }
+    if (name == "sizerandom") {
+        const double lo = ReadKey<double>(wpj, "min", pixel ? 5.0 : 0.001);
+        const double hi = ReadKey<double>(wpj, "max", pixel ? 50.0 : 1.0);
+        return [=](Particle& p, double) {
+            PM::MutiplyInitSize(p, Lerp(lo, hi, DrawShaped(exponent)));
+        };
+    }
+    if (name == "alpharandom") {
+        const double lo = ReadKey<double>(wpj, "min", 0.05), hi = ReadKey<double>(wpj, "max", 1.0);
+        return [=](Particle& p, double) {
+            PM::MutiplyInitAlpha(p, Lerp(lo, hi, DrawShaped(exponent)));
+        };
+    }
+    if (name == "velocityrandom") {
+        const Vec3d lo = ReadVec3(wpj, "min", pixel ? Vec3d { -32, -32, 0 } : Vec3d { -1, -1, -1 });
+        const Vec3d hi = ReadVec3(wpj, "max", pixel ? Vec3d { 32, 32, 0 } : Vec3d { 1, 1, 1 });
+        return [=](Particle& p, double) {
+            Vec3d v;
+            for (int i = 0; i < 3; ++i) v[i] = Lerp(lo[i], hi[i], DrawShaped(exponent));
+            PM::ChangeVelocity(p, through_layer(v));
+        };
+    }
+    if (name == "rotationrandom") {
+        const Vec3d lo = ReadVec3(wpj, "min", { 0, 0, 0 });
+        const Vec3d hi = ReadVec3(wpj, "max", { 0, 0, 2.0 * Pi });
+        return [=](Particle& p, double) {
+            Vec3d r;
+            for (int i = 0; i < 3; ++i) r[i] = Lerp(lo[i], hi[i], DrawShaped(exponent));
+            PM::Rotate(p, r);
+        };
+    }
+    if (name == "angularvelocityrandom") {
+        const Vec3d lo = ReadVec3(wpj, "min", { 0, 0, -5 });
+        const Vec3d hi = ReadVec3(wpj, "max", { 0, 0, 5 });
+        return [=](Particle& p, double) {
+            Vec3d w;
+            for (int i = 0; i < 3; ++i) w[i] = Lerp(lo[i], hi[i], DrawShaped(exponent));
+            PM::ChangeAngularVelocity(p, w);
+        };
+    }
+    if (name == "colorrandom") {
+        const Vec3d lo = ReadVec3(wpj, "min", { 0, 0, 0 }) / 255.0;
+        const Vec3d hi = ReadVec3(wpj, "max", { 255, 255, 255 }) / 255.0;
+        const OverrideTint tint(ctx.over, ctx.color);
+        return [=](Particle& p, double) {
+            Vec3d from = lo, to = hi;
+            if (const auto moved = tint.Shifted()) {
+                from = OverrideTint::Moved(from, moved->hsv_step);
+                to   = OverrideTint::Moved(to, moved->hsv_step);
+            }
+            const double u = DrawShaped(exponent);
+            PM::MutiplyInitColor(p, Lerp(from.x(), to.x(), u), Lerp(from.y(), to.y(), u),
+                                 Lerp(from.z(), to.z(), u));
+        };
+    }
+    if (name == "hsvcolorrandom") {
+        const double hue_lo = ReadKey<double>(wpj, "huemin", 0.0);
+        const double hue_hi = ReadKey<double>(wpj, "huemax", 1.0);
+        const int    steps  = ReadKey<int32_t>(wpj, "huesteps", 6);
+        const double sat_lo = ReadKey<double>(wpj, "saturationmin", 0.5);
+        const double sat_hi = ReadKey<double>(wpj, "saturationmax", 1.0);
+        const double val_lo = ReadKey<double>(wpj, "valuemin", 0.5);
+        const double val_hi = ReadKey<double>(wpj, "valuemax", 1.0);
+        const OverrideTint tint(ctx.over, ctx.color);
+        return [=](Particle& p, double) {
+            double hmin = hue_lo, hmax = hue_hi;
+            double smin = sat_lo, smax = sat_hi, vmin = val_lo, vmax = val_hi;
+            if (const auto moved = tint.Shifted()) {
+                // The ranges are recentred on the override colour.
+                const Vec3d o     = RgbToHsv(moved->target);
+                const double width = steps > 1 ? hue_hi - hue_lo : 0.0;
+                hmin = o.x() - width / 2.0;
+                hmax = hmin + (hue_hi - hue_lo);
+                const double sw = std::min(std::abs(sat_hi - sat_lo), 1.0);
+                const double vw = std::min(std::abs(val_hi - val_lo), 1.0);
+                smin = std::clamp(o.y() - sw / 2.0, 0.0, 1.0);
+                smax = std::clamp(o.y() + sw / 2.0, 0.0, 1.0);
+                vmin = std::clamp(o.z() - vw / 2.0, 0.0, 1.0);
+                vmax = std::clamp(o.z() + vw / 2.0, 0.0, 1.0);
+            }
+            double hue = hmin;
+            if (steps > 1) {
+                double range = hmax - hmin;
+                if (range == 0.0) range = 1.0;
+                const double turns = std::round(range);
+                const bool   whole = turns != 0.0 && std::abs(range - turns) <= 1.0 / 360.0;
+                const double step  = whole ? range / steps : range / (steps - 1);
+                hue                = hmin + step * Random::get<int>(0, steps);
+            }
+            const double s = Lerp(smin, smax, Draw01());
+            const double v = Lerp(vmin, vmax, Draw01());
+            const Vec3d  rgb = HsvToRgbD({ Frac(hue), s, v });
+            PM::MutiplyInitColor(p, rgb.x(), rgb.y(), rgb.z());
+        };
+    }
+    if (name == "colorlist") {
+        const std::vector<Vec3d> entries = ColourEntries(wpj);
+        const double hue_noise = ReadKey<double>(wpj, "huenoise", 0.0);
+        const double sat_noise = ReadKey<double>(wpj, "saturationnoise", 0.0);
+        const double val_noise = ReadKey<double>(wpj, "valuenoise", 0.0);
+        const OverrideTint tint(ctx.over, ctx.color);
+        return [=](Particle& p, double) {
+            const Vec3d& entry = entries[static_cast<std::size_t>(
+                Random::get<int>(0, static_cast<int>(entries.size()) - 1))];
+            const Vec3d hsv = RgbToHsv(entry);
+            Vec3d       rgb = HsvToRgbD({ NoisyUnit(hsv.x(), hue_noise), NoisyUnit(hsv.y(), sat_noise),
+                                          NoisyUnit(hsv.z(), val_noise) });
+            if (const auto moved = tint.Shifted())
+                rgb = OverrideTint::Moved(rgb, RgbToHsv(moved->target) - RgbToHsv(entries.front()));
+            PM::MutiplyInitColor(p, rgb.x(), rgb.y(), rgb.z());
+        };
+    }
+    if (name == "turbulentvelocityrandom") {
+        const double scale     = ReadKey<double>(wpj, "scale", 1.0);
+        const double timescale = std::max(ReadKey<double>(wpj, "timescale", 1.0), 1.0e-3);
+        const double offset    = ReadKey<double>(wpj, "offset", 0.0);
+        const double speed_lo  = ReadKey<double>(wpj, "speedmin", 100.0);
+        const double speed_hi  = ReadKey<double>(wpj, "speedmax", 250.0);
+        Vec3d forward = ReadVec3(wpj, "forward", { 0, 1, 0 });
+        Vec3d right   = ReadVec3(wpj, "right", { 0, 0, 1 });
+        forward = forward.norm() > 0.0 ? Vec3d(forward.normalized()) : Vec3d(0, 1, 0);
+        right   = right.norm() > 0.0 ? Vec3d(right.normalized()) : Vec3d(0, 0, 1);
+        const double half_angle = std::min(std::max(scale, 0.0) * 0.5 * Pi, Pi);
+
+        const auto turn_about = [](const Vec3d& v, const Vec3d& axis, double angle) -> Vec3d {
+            const double c = std::cos(angle), s = std::sin(angle);
+            return v * c + axis.cross(v) * s + axis * (axis.dot(v) * (1.0 - c));
+        };
+        const auto random_unit = []() -> Vec3d {
+            for (int tries = 0; tries < 8; ++tries) {
+                const Vec3d v { Random::get(-1.0, 1.0), Random::get(-1.0, 1.0), Random::get(-1.0, 1.0) };
+                if (v.norm() > 1.0e-6) return v.normalized();
+            }
+            return { 0, 1, 0 };
+        };
+        // The heading wanders a little from one spawn to the next, so spawns
+        // close in time head the same way; a larger timescale slows the walk.
+        struct Walk {
+            Vec3d heading { 0, 1, 0 };
+            bool  started { false };
+        } walk;
+        return [=](Particle& p, double duration) mutable {
+            if (! walk.started) {
+                walk.heading = random_unit();
+                walk.started = true;
+            }
+            const double gap   = duration > 0.0 ? duration : 1.0 / 60.0;
+            const double sigma = std::sqrt(gap / timescale);
+            Vec3d        next  = walk.heading + Vec3d { Random::get(-1.0, 1.0), Random::get(-1.0, 1.0),
+                                                 Random::get(-1.0, 1.0) } * (sigma * 1.7);
+            walk.heading = next.norm() > 1.0e-9 ? Vec3d(next.normalized()) : random_unit();
+
+            // Squeeze the sphere of headings into the cone around `forward`.
+            const double angle = std::acos(std::clamp(walk.heading.dot(forward), -1.0, 1.0));
+            Vec3d        axis  = forward.cross(walk.heading);
+            Vec3d        dir   = forward;
+            if (axis.norm() > 1.0e-9 && half_angle > 0.0) {
+                dir = turn_about(forward, axis.normalized(), angle * (half_angle / Pi));
+            }
+            dir = turn_about(dir, right, offset);
+            const double speed = Lerp(speed_lo, speed_hi, Draw01());
+            PM::ChangeVelocity(p, through_layer(dir * speed));
+        };
+    }
+    if (name == "inheritcontrolpointvelocity") {
+        const int    index = ReadKey<int32_t>(wpj, "controlpoint", 0);
+        const double lo = ReadKey<double>(wpj, "min", 0.1), hi = ReadKey<double>(wpj, "max", 0.2);
+        return [=](Particle& p, double) {
+            if (! spawn) return;
+            const auto* point = PointOf(spawn->controlpoints, index);
+            const double dt   = spawn->frame_time;
+            if (point == nullptr || ! (dt > 0.0)) return;
+            const Vec3d moved = point->offset - point->prev_offset;
+            if (moved.x() == 0.0 && moved.y() == 0.0 && moved.z() == 0.0) return;
+            PM::ChangeVelocity(p, moved / dt * Lerp(lo, hi, Draw01()));
+        };
+    }
+    if (name == "positionoffsetrandom") {
+        const double distance  = ReadKey<double>(wpj, "distance", pixel ? 100.0 : 0.1);
+        const double scale     = ReadKey<double>(wpj, "scale", pixel ? 0.001 : 1.0);
+        const double timescale = ReadKey<double>(wpj, "timescale", 1.0);
+        const int    octaves   = std::clamp(ReadKey<int32_t>(wpj, "octaves", 6), 1, 16);
+        const Vec3d  directions = ReadVec3(wpj, "directions", pixel ? Vec3d { 1, 1, 0 } : Vec3d { 1, 1, 1 });
+        const Vec3d  sign       = ReadVec3(wpj, "sign", { 0, 0, 0 });
+        return [=](Particle& p, double) {
+            const double time = (spawn ? spawn->system_time : 0.0) * timescale;
+            const Vec3d  pos  = PM::GetPos(p).cast<double>();
+            Vec3d        shift {
+                FractalNoise(pos.x() * scale, time, octaves),
+                FractalNoise(time, pos.y() * scale, octaves),
+                FractalNoise(pos.z() * scale, -time, octaves),
+            };
+            for (int i = 0; i < 3; ++i) {
+                shift[i] *= directions[i] * distance;
+                if (sign[i] != 0.0) shift[i] = std::abs(shift[i]) * (sign[i] > 0.0 ? 1.0 : -1.0);
+            }
+            PM::Move(p, shift);
+        };
+    }
+    if (name == "mapsequencearoundcontrolpoint") {
+        const double count = ReadKey<double>(wpj, "count", 32.0);
+        const Vec3d  bounds = ReadVec3(wpj, "bounds", { 0, 1, 0 });
+        const bool   mirror = ReadKey<std::string>(wpj, "limitbehavior", "repeat") == "mirror";
+        const int    index  = ReadKey<int32_t>(wpj, "controlpoint", 0);
+        const Vec3d  axis_in = ReadVec3(wpj, "axis", { 0, 0, 1 });
+        const Vec3d  speed_lo = ReadVec3(wpj, "speedmin", { 0, 0, 0 });
+        const Vec3d  speed_hi = ReadVec3(wpj, "speedmax", { 0, 0, 0 });
+        // The phase walks through [0, 1] a step at a time, per instance.
+        struct Sequence {
+            double phase { 0.0 };
+            double step { 0.0 };
+        } sequence;
+        sequence.step = 1.0 / std::max(count, 1.0);
+        const auto advance = [mirror](Sequence& s) {
+            s.phase += s.step;
+            if (s.phase > 1.0 + 1.0e-9) {
+                if (mirror) {
+                    s.phase = 2.0 - s.phase;
+                    s.step  = -s.step;
+                } else {
+                    s.phase = std::fmod(s.phase, 1.0);
+                }
+            } else if (s.phase < 0.0) {
+                s.phase = -s.phase;
+                s.step  = -s.step;
+            }
+        };
+        return [=](Particle& p, double) mutable {
+            const double phase = sequence.phase;
+            advance(sequence);
+            if (! spawn) return;
+            const auto* point  = PointOf(spawn->controlpoints, index);
+            const Vec3d centre = point ? point->offset : Vec3d::Zero();
+            Vec3d       axis   = axis_in;
+            if (point != nullptr && point->has_rotation) axis = point->rotation * axis;
+            axis = axis.norm() > 0.0 ? Vec3d(axis.normalized()) : Vec3d(0, 0, 1);
+            Vec3d u { 1, 0, 0 }, v { 0, 1, 0 };
+            if (! (axis.x() == 0.0 && axis.y() == 0.0 && axis.z() > 0.0)) {
+                u = Vec3d { axis.y(), -axis.x(), 0.0 };
+                u = u.norm() > 0.0 ? Vec3d(u.normalized()) : Vec3d(1, 0, 0);
+                v = axis.cross(u);
+                v = v.norm() > 0.0 ? Vec3d(v.normalized()) : Vec3d(0, 1, 0);
+            }
+            const double angle = 2.0 * Pi * (bounds.x() + phase * (bounds.y() - bounds.x()));
+            const Vec3d  d1 = u * std::cos(angle) + v * std::sin(angle);
+            const Vec3d  d2 = u * -std::sin(angle) + v * std::cos(angle);
+            const Vec3d  rel    = PM::GetPos(p).cast<double>() - centre;
+            const double along  = rel.dot(axis);
+            const double radial = (rel - axis * along).norm();
+            PM::MoveTo(p, centre + axis * along + d1 * radial);
+            const double out_speed   = Lerp(speed_lo.y(), speed_hi.y(), Draw01());
+            const double spin_speed  = Lerp(speed_lo.x(), speed_hi.x(), Draw01());
+            const double axis_speed  = Lerp(speed_lo.z(), speed_hi.z(), Draw01());
+            PM::ChangeVelocity(p, d1 * out_speed + d2 * spin_speed + axis * axis_speed);
+        };
+    }
+    if (name == "mapsequencebetweencontrolpoints") {
+        const double count  = ReadKey<double>(wpj, "count", 32.0);
+        const Vec3d  bounds = ReadVec3(wpj, "bounds", { 0, 1, 0 });
+        const bool   mirror = ReadKey<std::string>(wpj, "limitbehavior", "repeat") == "mirror";
+        const int    first  = ReadKey<int32_t>(wpj, "controlpointstart", 0);
+        const int    last   = ReadKey<int32_t>(wpj, "controlpointend", 1);
+        const int    flags  = ReadKey<int32_t>(wpj, "flags", 0);
+        const double arc_amount = ReadKey<double>(wpj, "arcamount", 0.3);
+        const Vec3d  arc_direction = ReadVec3(wpj, "arcdirection", { 0, 1, 0 });
+        const double size_reduction = ReadKey<double>(wpj, "sizereductionamount", 0.9);
+        struct Sequence {
+            double phase { 0.0 };
+            double step { 0.0 };
+        } sequence;
+        sequence.step = count > 1.0 ? 1.0 / (count - 1.0) : 0.0;
+        return [=](Particle& p, double) mutable {
+            const double phase = sequence.phase;
+            sequence.phase += sequence.step;
+            if (sequence.phase > 1.0 + 1.0e-9) {
+                if (mirror) {
+                    sequence.phase = 2.0 - sequence.phase;
+                    sequence.step  = -sequence.step;
+                } else {
+                    sequence.phase = 0.0;
+                }
+            } else if (sequence.phase < 0.0) {
+                sequence.phase = -sequence.phase;
+                sequence.step  = -sequence.step;
+            }
+            if (! spawn) return;
+            const auto* a_point = PointOf(spawn->controlpoints, first);
+            const auto* b_point = PointOf(spawn->controlpoints, last);
+            if (a_point == nullptr || b_point == nullptr) return;
+            const Vec3d a = a_point->offset, b = b_point->offset;
+            const double length = (b - a).norm();
+            if (! (length > 0.0)) return;
+            const Vec3d dir  = (b - a) / length;
+            const Vec3d pos  = PM::GetPos(p).cast<double>();
+            const Vec3d perp = pos - dir * pos.dot(dir);
+            const double t   = bounds.x() + phase * (bounds.y() - bounds.x());
+            const double g   = 1.0 - (2.0 * phase - 1.0) * (2.0 * phase - 1.0);
+            Vec3d place = a + dir * (t * length) + perp * ((flags & 1) ? g : 1.0);
+            if (flags & 8) place += arc_direction * (g * length * arc_amount);
+            PM::MoveTo(p, place);
+            if (flags & 2) PM::MutiplyVelocity(p, g);
+            if (flags & 4) PM::MutiplyInitSize(p, (1.0 - size_reduction) + size_reduction * g);
+        };
+    }
+    if (name == "inheritinitialvaluefromevent") {
+        // The selector is "<mode><quantity>"; any string outside the table
+        // does nothing.
+        enum class Quantity { Colour, Opacity, ColourOpacity, Velocity, Size, Rotation, AngularVelocity };
+        enum class Mode { Set, Multiply, Add };
+        static const std::map<std::string, std::pair<Quantity, Mode>> kSelectors = [] {
+            std::map<std::string, std::pair<Quantity, Mode>> table;
+            const std::pair<const char*, Quantity> quantities[] = {
+                { "color", Quantity::Colour },
+                { "opacity", Quantity::Opacity },
+                { "coloropacity", Quantity::ColourOpacity },
+                { "velocity", Quantity::Velocity },
+                { "size", Quantity::Size },
+                { "rotation", Quantity::Rotation },
+                { "angularvelocity", Quantity::AngularVelocity },
+            };
+            const std::pair<const char*, Mode> modes[] = { { "set", Mode::Set },
+                                                           { "multiply", Mode::Multiply },
+                                                           { "add", Mode::Add } };
+            for (const auto& [quantity_name, quantity] : quantities) {
+                for (const auto& [mode_name, mode] : modes) {
+                    // Colour and opacity combine by set or multiply, velocity,
+                    // rotation and angular velocity by set or add, size by set
+                    // or multiply.
+                    const bool scaling = mode == Mode::Multiply;
+                    const bool offset  = mode == Mode::Add;
+                    const bool scalable = quantity == Quantity::Colour || quantity == Quantity::Opacity ||
+                                          quantity == Quantity::ColourOpacity || quantity == Quantity::Size;
+                    if ((scaling && ! scalable) || (offset && scalable)) continue;
+                    table[std::string(mode_name) + quantity_name] = { quantity, mode };
+                }
+            }
+            return table;
+        }();
+
+        const auto chosen = kSelectors.find(ReadKey<std::string>(wpj, "input", "setcolor"));
+        if (chosen == kSelectors.end()) return inert;
+        const auto [quantity, mode] = chosen->second;
+        return [=](Particle& p, double) {
+            if (! spawn || spawn->parent == nullptr) return;
+            const Particle& parent = *spawn->parent;
+            const bool      assign = mode == Mode::Set;
+            const bool      scale  = mode == Mode::Multiply;
+            const auto take_colour = [&] {
+                const Vec3d c = parent.color.cast<double>();
+                if (assign) PM::InitColor(p, c.x(), c.y(), c.z());
+                else PM::MutiplyInitColor(p, c.x(), c.y(), c.z());
+            };
+            const auto take_opacity = [&] {
+                if (assign) PM::InitAlpha(p, parent.alpha);
+                else PM::MutiplyInitAlpha(p, parent.alpha);
+            };
+            switch (quantity) {
+            case Quantity::Colour: take_colour(); break;
+            case Quantity::Opacity: take_opacity(); break;
+            case Quantity::ColourOpacity:
+                take_colour();
+                take_opacity();
+                break;
+            case Quantity::Velocity:
+                if (assign) PM::InitVelocity(p, parent.velocity.cast<double>());
+                else PM::ChangeVelocity(p, parent.velocity.cast<double>());
+                break;
+            case Quantity::Size:
+                if (scale) PM::MutiplyInitSize(p, static_cast<double>(parent.size) / kParticleSizeOverEngine);
+                else PM::InitSize(p, parent.size);
+                break;
+            case Quantity::Rotation:
+                if (assign) p.rotation = parent.rotation;
+                else PM::Rotate(p, parent.rotation.cast<double>());
+                break;
+            case Quantity::AngularVelocity:
+                if (assign) p.angularVelocity = parent.angularVelocity;
+                else PM::ChangeAngularVelocity(p, parent.angularVelocity.cast<double>());
+                break;
+            }
+        };
+    }
+    LogInertOnce("initializer", name);
+    return inert;
 }
 
 ParticleInitOp WPParticleParser::genOverrideInitOp(
     std::shared_ptr<const wpscene::ParticleInstanceoverride> over, ParticleColorDefinition def,
     bool speed_override, bool size_override) {
-    return [over = std::move(over), def, speed_override, size_override](Particle& p, double) {
-        PM::MutiplyInitLifeTime(p, over->lifetime);
-        PM::MutiplyInitAlpha(p, over->alpha);
-        if (size_override) PM::MutiplyInitSize(p, over->size);
-        if (speed_override) PM::MutiplyVelocity(p, over->speed);
-        // A file without colours takes the override as its colour. A file with
-        // colours of its own has them re-tinted by its colour records and is
-        // tinted by the override on top, unless the override is the file's own
-        // colour: an orange override on a red `colorchange` end makes that end
-        // magenta, and the tint brings it back to red.
-        if (const auto colour = OverrideColor(over.get())) {
-            if (! def.hasColor) {
-                PM::InitColor(p, colour->x(), colour->y(), colour->z());
-            } else if (ComputeColorShift(def.defaultColor, *colour).active) {
-                PM::MutiplyInitColor(p, colour->x(), colour->y(), colour->z());
-            }
-        }
-        if (over->hdr && over->brightness != 1.0f) {
-            PM::MutiplyInitColor(p, over->brightness, over->brightness, over->brightness);
-        }
+    LastFinite lifetime, alpha, size, speed, brightness;
+    const OverrideTint tint(over, def);
+    return [over = std::move(over), tint, speed_override, size_override, lifetime, alpha, size, speed,
+            brightness](Particle& p, double) mutable {
+        if (! over || ! over->enabled) return;
+        // The record is read now, so a property that moved it shows in the next birth.
+        const double life = lifetime(over->lifetime);
+        p.lifetime        = static_cast<float>(p.lifetime * life);
+        p.init.lifetime   = static_cast<float>(p.init.lifetime * life);
+        PM::MutiplyInitAlpha(p, alpha(over->alpha));
+        if (size_override) PM::MutiplyInitSize(p, size(over->size));
+        if (speed_override) PM::MutiplyVelocity(p, speed(over->speed));
+        if (const auto flat = tint.FlatTint()) PM::InitColor(p, flat->x(), flat->y(), flat->z());
+        // A file with colours had them re-tinted by its initializers and operators;
+        // the newborn is then multiplied by the override itself, once. Nothing
+        // moved (override equal to the file's colour) means no multiply either.
+        else if (const auto moved = tint.Shifted())
+            PM::MutiplyInitColor(p, moved->target.x(), moved->target.y(), moved->target.z());
+        const double glow = brightness(over->brightness);
+        if (over->hdr && glow != 1.0) PM::MutiplyInitColor(p, glow, glow, glow);
     };
 }
-double FadeValueChange(float life, float start, float end, float startValue,
-                       float endValue) noexcept {
-    if (life <= start)
-        return startValue;
-    else if (life > end)
-        return endValue;
-    else {
-        double pass = (life - start) / (end - start);
-        return algorism::lerp(pass, startValue, endValue);
+
+// ---------------------------------------------------------------------------
+// Operator helpers.
+// ---------------------------------------------------------------------------
+namespace
+{
+
+/// The instance override as an operator reads it each step: speed and size
+/// factors, 1 when the record is absent, disabled, or the file ignores them.
+struct OverrideReader {
+    std::shared_ptr<const wpscene::ParticleInstanceoverride> over;
+    bool       speed_applies { true };
+    bool       size_applies { true };
+    LastFinite last_speed;
+    LastFinite last_size;
+
+    double Speed() {
+        return (speed_applies && over && over->enabled) ? last_speed(over->speed) : 1.0;
+    }
+    double Size() {
+        return (size_applies && over && over->enabled) ? last_size(over->size) : 1.0;
+    }
+};
+
+/// The share of a particle's life over which an operator is in force, as a
+/// fade-in edge and a fade-out edge on the life position 0..1. An envelope
+/// whose keys leave the whole life untouched weighs 1 everywhere.
+class LifeEnvelope {
+public:
+    explicit LifeEnvelope(const Json& record) {
+        const double in_from  = ReadKey<double>(record, "blendinstart", 0.0);
+        const double in_to    = ReadKey<double>(record, "blendinend", 0.0);
+        const double out_from = ReadKey<double>(record, "blendoutstart", 1.0);
+        const double out_to   = ReadKey<double>(record, "blendoutend", 1.0);
+        // Each edge keeps a width of at least 0.0001.
+        m_rise_from = std::min(in_from, in_to - 0.0001);
+        m_rise_to   = in_to;
+        m_fall_from = out_from;
+        m_fall_to   = std::max(out_to, out_from + 0.0001);
+
+        const double rise_width = m_rise_to - m_rise_from;
+        const double fall_width = m_fall_to - m_fall_from;
+        const double plateau    = m_fall_from - m_rise_to;
+        const bool   touches    = m_rise_to > 0.01 || m_fall_from < 0.99;
+        const bool   visible    = plateau > 0.01 || rise_width > 0.01 || fall_width > 0.01;
+        m_enabled               = touches && visible;
+    }
+
+    /// The factor at life position `t`.
+    double At(double t) const {
+        if (! m_enabled) return 1.0;
+        const double fade_in  = std::clamp((t - m_rise_from) / (m_rise_to - m_rise_from), 0.0, 1.0);
+        const double fade_out = std::clamp((m_fall_to - t) / (m_fall_to - m_fall_from), 0.0, 1.0);
+        return fade_in * fade_out;
+    }
+
+private:
+    bool   m_enabled { false };
+    double m_rise_from { 0.0 }, m_rise_to { 0.0 }, m_fall_from { 1.0 }, m_fall_to { 1.0 };
+};
+
+/// The `audioprocessing*` keys of an operator.
+struct AudioGate {
+    u32         mode { 0 };
+    i32         first { 0 }, last { 1 };
+    float       low { 0.8f }, high { 1.0f }, exponent { 2.0f };
+    std::function<audio::AudioSpectrumSnapshot()> spectrum;
+
+    static AudioGate Read(const Json& j, const ParticleParseContext& ctx) {
+        AudioGate g;
+        g.mode = ReadKey<uint32_t>(j, "audioprocessingmode", 0u);
+        const auto bounds = ReadKey<std::array<float, 2>>(j, "audioprocessingbounds", { 0.8f, 1.0f });
+        g.low      = bounds[0];
+        g.high     = bounds[1];
+        g.exponent = ReadKey<float>(j, "audioprocessingexponent", 2.0f);
+        g.first    = ReadKey<int32_t>(j, "audioprocessingfrequencystart", 0);
+        g.last     = ReadKey<int32_t>(j, "audioprocessingfrequencyend", 1);
+        g.spectrum = ctx.spectrum;
+        if (g.Enabled() && ctx.requires_audio) ctx.requires_audio();
+        return g;
+    }
+    bool Enabled() const { return mode >= 1 && mode <= 3; }
+    /// Sampled once per operator call.
+    double Level() const {
+        if (! Enabled()) return 1.0;
+        if (! spectrum) return 0.0;
+        return AudioLevel(spectrum(), mode, first, last, low, high, exponent);
+    }
+};
+
+double RampValue(double t, double t_start, double t_end, double from, double to) {
+    if (t <= t_start) return from;
+    if (t > t_end || ! (t_end > t_start)) return to;
+    return from + (to - from) * (t - t_start) / (t_end - t_start);
+}
+
+/// Smallest distance from `point` to the segment `a`..`b`.
+double DistanceToSegment(const Vec3d& point, const Vec3d& a, const Vec3d& b) {
+    const Vec3d  edge = b - a;
+    const double len2 = edge.squaredNorm();
+    const double t    = len2 > 0.0 ? std::clamp((point - a).dot(edge) / len2, 0.0, 1.0) : 0.0;
+    return (a + edge * t - point).norm();
+}
+
+/// A particle an operator removes expires in the next ageing step.
+void Remove(Particle& p) { p.lifetime = std::numeric_limits<float>::min(); }
+
+enum class Collision { Bounce, Slide, Stop, Delete };
+
+Collision CollisionOf(const std::string& name) {
+    if (name == "slide") return Collision::Slide;
+    if (name == "stop") return Collision::Stop;
+    if (name == "delete") return Collision::Delete;
+    return Collision::Bounce;
+}
+
+/// What a surface does to a particle it has put back outside.
+void Respond(Particle& p, Collision how, double bounce, const Vec3d& normal) {
+    const double along = PM::GetVelocity(p).cast<double>().dot(normal);
+    switch (how) {
+    case Collision::Bounce: PM::ChangeVelocity(p, normal * (-(1.0 + bounce) * along)); break;
+    case Collision::Slide: PM::ChangeVelocity(p, normal * -along); break;
+    case Collision::Stop: p.velocity = Vector3f::Zero(); break;
+    case Collision::Delete: Remove(p); break;
     }
 }
 
-struct ValueChange {
-    float starttime { 0 };
-    float endtime { 1.0f };
-    float startvalue { 1.0f };
-    float endvalue { 0.0f };
-
-    static auto ReadFromJson(const nlohmann::json& j) {
-        ValueChange v;
-        GET_JSON_NAME_VALUE_NOWARN(j, "starttime", v.starttime);
-        GET_JSON_NAME_VALUE_NOWARN(j, "endtime", v.endtime);
-        GET_JSON_NAME_VALUE_NOWARN(j, "startvalue", v.startvalue);
-        GET_JSON_NAME_VALUE_NOWARN(j, "endvalue", v.endvalue);
-        return v;
-    }
-};
-double FadeValueChange(float life, const ValueChange& v) noexcept {
-    return FadeValueChange(life, v.starttime, v.endtime, v.startvalue, v.endvalue);
-}
-
-struct VecChange {
-    float                starttime { 0 };
-    float                endtime { 1.0f };
-    // Wallpaper Engine's defaults: the colour starts untouched and ends black.
-    std::array<float, 3> startvalue { 1.0f, 1.0f, 1.0f };
-    std::array<float, 3> endvalue { 0.0f, 0.0f, 0.0f };
-
-    static auto ReadFromJson(const nlohmann::json& j) {
-        VecChange v;
-        GET_JSON_NAME_VALUE_NOWARN(j, "starttime", v.starttime);
-        GET_JSON_NAME_VALUE_NOWARN(j, "endtime", v.endtime);
-        GET_JSON_NAME_VALUE_NOWARN(j, "startvalue", v.startvalue);
-        GET_JSON_NAME_VALUE_NOWARN(j, "endvalue", v.endvalue);
-        return v;
-    }
-};
-
-/// Oscillators: every particle takes one random (its `seed`) that picks its
-/// frequency, phase and swing together.
-struct Oscillation {
-    std::array<float, 3> mask { 1.0f, 1.0f, 0.0f };
-
-    float frequencymin { 1.0f };
-    float frequencymax { 10.0f };
-    float scalemin { 0.0f };
-    float scalemax { 1.0f };
-    float phasemin { 0.0f };
-    float phasemax { static_cast<float>(2 * M_PI) };
-    BlendWindow blend;
-
-    static Oscillation ReadFromJson(const nlohmann::json& j, std::string_view name, bool ortho) {
-        Oscillation v;
-        if (name == "oscillatesize") {
-            v.scalemin = 0.8f;
-            v.scalemax = 1.2f;
-        } else if (name == "oscillateposition") {
-            v.frequencymax = 5.0f;
-            v.scalemax     = ortho ? 10.0f : 0.5f;
-        }
-        GET_JSON_NAME_VALUE_NOWARN(j, "frequencymin", v.frequencymin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "frequencymax", v.frequencymax);
-        GET_JSON_NAME_VALUE_NOWARN(j, "scalemin", v.scalemin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "scalemax", v.scalemax);
-        GET_JSON_NAME_VALUE_NOWARN(j, "phasemin", v.phasemin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "phasemax", v.phasemax);
-        GET_JSON_NAME_VALUE_NOWARN(j, "mask", v.mask);
-        v.blend = BlendWindow::FromJson(j);
-        return v;
-    };
-
-    double Frequency(const Particle& p) const {
-        return frequencymin + static_cast<double>(p.seed) * (frequencymax - frequencymin);
-    }
-    double Phase(const Particle& p) const {
-        return phasemin + static_cast<double>(p.seed) * (phasemax - phasemin);
-    }
-    /// The multiplier alpha or size takes, blended toward one by the window.
-    double Multiplier(const Particle& p) const {
-        const double arg = (Phase(p) + PM::LifetimePassed(p)) * Frequency(p);
-        const double osc =
-            scalemin + 0.5 * (std::sin(arg) + 1.0) * p.seed * (scalemax - scalemin);
-        return 1.0 - (1.0 - osc) * blend.Factor(PM::LifetimePos(p));
-    }
-};
-
-struct Turbulence {
-    // the minimum time offset of the noise field for a particle.
-    float phasemin { 0 };
-    // the maximum time offset of the noise field for a particle.
-    float phasemax { 0 };
-    // the minimum velocity applied to particles.
-    float speedmin { 500.0f };
-    // the maximum velocity applied to particles.
-    float speedmax { 1000.0f };
-    // how fast the noise field changes shape.
-    float timescale { 20.0f };
-
-    float scale { 0.01f };
-
-    std::array<float, 3> mask { 1.0f, 1.0f, 0.0f };
-    BlendWindow          blend;
-
-    static auto ReadFromJson(const nlohmann::json& j, bool ortho) {
-        Turbulence v;
-        if (! ortho) {
-            v.speedmin  = 1.0f;
-            v.speedmax  = 5.0f;
-            v.timescale = 1.0f;
-            v.scale     = 0.5f;
-            v.mask      = { 1.0f, 1.0f, 1.0f };
-        }
-        GET_JSON_NAME_VALUE_NOWARN(j, "phasemin", v.phasemin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "phasemax", v.phasemax);
-        GET_JSON_NAME_VALUE_NOWARN(j, "speedmin", v.speedmin);
-        GET_JSON_NAME_VALUE_NOWARN(j, "speedmax", v.speedmax);
-        GET_JSON_NAME_VALUE_NOWARN(j, "timescale", v.timescale);
-        GET_JSON_NAME_VALUE_NOWARN(j, "mask", v.mask);
-        GET_JSON_NAME_VALUE_NOWARN(j, "scale", v.scale);
-        v.blend = BlendWindow::FromJson(j);
-        return v;
-    };
-};
-
-struct Vortex {
-    enum class FlagEnum
-    {
-        infinit_axis = 0, // 1
-    };
-    using EFlags = BitFlags<FlagEnum>;
-
-    i32 controlpoint { 0 };
-
-    // anything below this distance receives force multiplied with speed inner.
-    float distanceinner { 500.0f };
-    // anything above this distance receives force multiplied with speed outer.
-    float distanceouter { 650.0f };
-    // amount of force applied to inner ring.
-    float speedinner { 2500.0f };
-    // amount of force applied to outer ring.
-    float speedouter { 0 };
-
-    EFlags flags { 0 };
-
-    // positional offset from the center of the control point.
-    std::array<float, 3> offset { 0.0f, 0.0f, 0.0f };
-
-    // the axis to rotate around.
-    std::array<float, 3> axis { 0.0f, 0.0f, 1.0f };
-    BlendWindow          blend;
-
-    static auto ReadFromJson(const nlohmann::json& j, bool ortho) {
-        Vortex v;
-        if (! ortho) {
-            v.distanceinner = 1.0f;
-            v.distanceouter = 2.0f;
-            v.speedinner    = 1.0f;
-        }
-        GET_JSON_NAME_VALUE_NOWARN(j, "controlpoint", v.controlpoint);
-        if (v.controlpoint >= 8) LOG_ERROR("wrong contropoint index %d", v.controlpoint);
-        v.controlpoint = static_cast<i32>(ClampControlpointIndex(v.controlpoint));
-
-        GET_JSON_NAME_VALUE_NOWARN(j, "distanceinner", v.distanceinner);
-        GET_JSON_NAME_VALUE_NOWARN(j, "distanceouter", v.distanceouter);
-        GET_JSON_NAME_VALUE_NOWARN(j, "speedinner", v.speedinner);
-        GET_JSON_NAME_VALUE_NOWARN(j, "speedouter", v.speedouter);
-
-        i32 _flags { 0 };
-        GET_JSON_NAME_VALUE_NOWARN(j, "flags", _flags);
-        v.flags = EFlags(_flags);
-
-        GET_JSON_NAME_VALUE_NOWARN(j, "offset", v.offset);
-        GET_JSON_NAME_VALUE_NOWARN(j, "axis", v.axis);
-        v.blend = BlendWindow::FromJson(j);
-
-        return v;
-    };
-};
-
-struct ControlPointForce {
-    i32 controlpoint { 0 };
-
-    // how strongly the control point attracts or repels.
-    float scale { 512.0f };
-    // the maximum distance between particle and control point where the force takes effect.
-    float threshold { 512.0f };
-    // particles that pass within this distance of the control point are removed
-    // (flag 1).
-    float deletethreshold { 15.0f };
-    // 1: remove particles that come within `deletethreshold`; 2: never pull a
-    // particle past the control point.
-    i32 flags { 0 };
-
-    static auto ReadFromJson(const nlohmann::json& j, bool ortho) {
-        ControlPointForce v;
-        if (! ortho) {
-            v.scale           = 20.0f;
-            v.threshold       = 5.0f;
-            v.deletethreshold = 0.5f;
-        }
-        GET_JSON_NAME_VALUE_NOWARN(j, "controlpoint", v.controlpoint);
-        v.controlpoint = static_cast<i32>(ClampControlpointIndex(v.controlpoint));
-
-        GET_JSON_NAME_VALUE_NOWARN(j, "scale", v.scale);
-        if (j.contains("threshold")) {
-            GET_JSON_NAME_VALUE_NOWARN(j, "threshold", v.threshold);
-        } else {
-            GET_JSON_NAME_VALUE_NOWARN(j, "threadhold", v.threshold);
-        }
-        GET_JSON_NAME_VALUE_NOWARN(j, "deletethreshold", v.deletethreshold);
-        GET_JSON_NAME_VALUE_NOWARN(j, "flags", v.flags);
-        return v;
-    };
-};
+} // namespace
 
 ParticleOperatorOp
 WPParticleParser::genParticleOperatorOp(
@@ -1135,426 +1020,331 @@ WPParticleParser::genParticleOperatorOp(
 
 ParticleOperatorOp WPParticleParser::genParticleOperatorOp(const nlohmann::json&       wpj,
                                                            const ParticleParseContext& ctx) {
-    const auto over  = ctx.over != nullptr ? ctx.over
-                                           : std::make_shared<const wpscene::ParticleInstanceoverride>();
-    const bool ortho = ctx.ortho;
-    const bool speed_applies = ctx.speed_override;
-    const bool size_applies  = ctx.size_override;
-    do {
-        if (! wpj.contains("name")) break;
-        std::string name;
-        GET_JSON_NAME_VALUE(wpj, "name", name);
-        if (name == "movement") {
-            float drag { 0.0f };
+    const ParticleOperatorOp inert = [](const ParticleInfo&) {};
+    if (! wpj.is_object() || ! wpj.contains("name") || ! wpj.at("name").is_string()) {
+        LogInertOnce("operator", "");
+        return inert;
+    }
+    const std::string name  = wpj.at("name").get<std::string>();
+    const bool        pixel = ctx.ortho;
+    OverrideReader    reader { ctx.over, ctx.speed_override, ctx.size_override, {}, {} };
 
-            std::array<float, 3> gravity { 0, 0, 0 };
-            i32                  flags { 0 };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "drag", drag);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "gravity", gravity);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "flags", flags);
-            const Vector3d vecG = Vector3f(gravity.data()).cast<double>();
-            return [drag, vecG, flags, over, speed_applies](const ParticleInfo& info) {
-                // The speed override scales the gravity, not the damping.
-                Vector3d g = vecG * SpeedScale(*over, speed_applies);
-                // Bit 1 keeps gravity aligned to the screen however the layer is turned.
-                if ((flags & 1) != 0) g = info.world_to_local * g;
-                const double dt = info.time_pass;
-                const double damp = 1.0 - std::min(static_cast<double>(drag) * dt, 0.9999999);
+    if (name == "movement") {
+        const double drag    = ReadKey<double>(wpj, "drag", 0.0);
+        const Vec3d  gravity = ReadVec3(wpj, "gravity", { 0, 0, 0 });
+        const int    flags   = ReadKey<int32_t>(wpj, "flags", 0);
+        return [=](const ParticleInfo& info) mutable {
+            const double dt = info.time_pass;
+            Vec3d        g  = gravity * reader.Speed();
+            if (flags & 1) g = info.world_to_local * g;
+            const double keep = 1.0 - std::min(drag * dt, 0.9999999);
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                if (info.track_previous_position) p.prev_position = p.position;
+                PM::Accelerate(p, g, dt);
+                PM::MoveByTime(p, dt);
+                if (drag != 0.0) PM::MutiplyVelocity(p, keep);
+            }
+        };
+    }
+    if (name == "angularmovement") {
+        const double drag  = ReadKey<double>(wpj, "drag", 0.0);
+        const Vec3d  force = ReadVec3(wpj, "force", { 0, 0, 0 });
+        return [=](const ParticleInfo& info) mutable {
+            const double dt   = info.time_pass;
+            const Vec3d  push = force * reader.Speed();
+            const double keep = 1.0 - std::min(drag * dt, 0.9999999);
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                PM::AngularAccelerate(p, push, dt);
+                PM::RotateByTime(p, dt);
+                if (drag != 0.0) p.angularVelocity = (p.angularVelocity.cast<double>() * keep).cast<float>();
+            }
+        };
+    }
+    if (name == "sizechange" || name == "alphachange") {
+        const double t0 = ReadKey<double>(wpj, "starttime", 0.0), t1 = ReadKey<double>(wpj, "endtime", 1.0);
+        const double from = ReadKey<double>(wpj, "startvalue", 1.0), to = ReadKey<double>(wpj, "endvalue", 0.0);
+        const bool   size = name == "sizechange";
+        // Ramps visit every slot, a particle that expired this step included.
+        return [=](const ParticleInfo& info) mutable {
+            const double factor = size ? reader.Size() : 1.0;
+            for (auto& p : info.particles) {
+                const double value = RampValue(PM::LifetimePos(p), t0, t1, from, to);
+                if (size) PM::MutiplySize(p, factor * value);
+                else PM::MutiplyAlpha(p, value);
+            }
+        };
+    }
+    if (name == "colorchange") {
+        const double t0 = ReadKey<double>(wpj, "starttime", 0.0), t1 = ReadKey<double>(wpj, "endtime", 1.0);
+        const Vec3d  from = ReadVec3(wpj, "startvalue", { 1, 1, 1 });
+        const Vec3d  to   = ReadVec3(wpj, "endvalue", { 0, 0, 0 });
+        const OverrideTint tint(ctx.over, ctx.color);
+        return [=](const ParticleInfo& info) mutable {
+            Vec3d a = from, b = to;
+            if (const auto moved = tint.Shifted()) {
+                a = OverrideTint::Moved(a, moved->hsv_step);
+                b = OverrideTint::Moved(b, moved->hsv_step);
+            }
+            for (auto& p : info.particles) {
+                const double t = PM::LifetimePos(p);
+                PM::MutiplyColor(p, RampValue(t, t0, t1, a.x(), b.x()), RampValue(t, t0, t1, a.y(), b.y()),
+                                 RampValue(t, t0, t1, a.z(), b.z()));
+            }
+        };
+    }
+    if (name == "alphafade") {
+        const double fade_in  = ReadKey<double>(wpj, "fadeintime", 0.5);
+        const double fade_out = ReadKey<double>(wpj, "fadeouttime", 0.5);
+        return [=](const ParticleInfo& info) {
+            for (auto& p : info.particles) {
+                const double t = PM::LifetimePos(p);
+                if (t <= fade_in) {
+                    if (fade_in > 0.0) PM::MutiplyAlpha(p, t / fade_in);
+                } else if (t > fade_out) {
+                    const double span = 1.0 - fade_out;
+                    PM::MutiplyAlpha(p, span > 0.0 ? 1.0 - (t - fade_out) / span : 0.0);
+                }
+            }
+        };
+    }
+    if (name == "oscillatealpha" || name == "oscillatesize" || name == "oscillateposition") {
+        const bool   position = name == "oscillateposition";
+        const bool   alpha    = name == "oscillatealpha";
+        const double f_lo = ReadKey<double>(wpj, "frequencymin", 1.0);
+        const double f_hi = ReadKey<double>(wpj, "frequencymax", position ? 5.0 : 10.0);
+        const double s_lo = ReadKey<double>(wpj, "scalemin", (position || alpha) ? 0.0 : 0.8);
+        const double s_hi = ReadKey<double>(wpj, "scalemax",
+                                            position ? (pixel ? 10.0 : 0.5) : (alpha ? 1.0 : 1.2));
+        const double ph_lo = ReadKey<double>(wpj, "phasemin", 0.0);
+        const double ph_hi = ReadKey<double>(wpj, "phasemax", 2.0 * Pi);
+        const Vec3d  mask  = ReadVec3(wpj, "mask", { 1, 1, 0 });
+        const LifeEnvelope blend(wpj);
+        return [=](const ParticleInfo& info) mutable {
+            const double dt    = info.time_pass;
+            const double speed = reader.Speed();
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                const double seed      = p.seed;
+                const double frequency = Lerp(f_lo, f_hi, seed);
+                const double phase     = Lerp(ph_lo, ph_hi, seed);
+                const double age       = PM::LifetimePassed(p);
+                const double window    = blend.At(PM::LifetimePos(p));
+                if (position) {
+                    const double amp = (s_lo + seed * (s_hi - s_lo)) * window;
+                    const double f   = frequency * speed;
+                    const double wx  = amp * (std::sin((phase + age) * f) - std::sin((phase + age - dt) * f));
+                    const double shifted = phase + 2.0 * Pi * seed;
+                    const double wy  = amp * (std::sin((shifted + age) * f) - std::sin((shifted + age - dt) * f));
+                    PM::Move(p, wx * mask.x(), wy * mask.y(), wx * mask.z());
+                } else {
+                    const double o = s_lo + 0.5 * (std::sin((phase + age) * frequency) + 1.0) * seed * (s_hi - s_lo);
+                    const double factor = 1.0 - (1.0 - o) * window;
+                    if (alpha) PM::MutiplyAlpha(p, factor);
+                    else PM::MutiplySize(p, factor);
+                }
+            }
+        };
+    }
+    if (name == "turbulence") {
+        const double s_lo = ReadKey<double>(wpj, "speedmin", pixel ? 500.0 : 1.0);
+        const double s_hi = ReadKey<double>(wpj, "speedmax", pixel ? 1000.0 : 5.0);
+        const double timescale = ReadKey<double>(wpj, "timescale", pixel ? 20.0 : 1.0);
+        const double scale     = ReadKey<double>(wpj, "scale", pixel ? 0.01 : 0.5);
+        const Vec3d  mask = ReadVec3(wpj, "mask", pixel ? Vec3d { 1, 1, 0 } : Vec3d { 1, 1, 1 });
+        const double ph_lo = ReadKey<double>(wpj, "phasemin", 0.0);
+        const double ph_hi = ReadKey<double>(wpj, "phasemax", 0.0);
+        const LifeEnvelope blend(wpj);
+        const AudioGate   gate  = AudioGate::Read(wpj, ctx);
+        return [=](const ParticleInfo& info) mutable {
+            const double dt    = info.time_pass;
+            const double level = gate.Level() * reader.Speed();
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                const double seed  = p.seed;
+                const double phase = seed * (ph_hi - ph_lo) + info.time * timescale;
+                const Vec3d  q = (PM::GetPos(p).cast<double>() + Vec3d::Constant(phase)) * scale;
+                const Vec3d  field { Noise3(q.x(), q.y(), q.z()), Noise3(q.z(), q.x(), q.y()),
+                                     Noise3(q.y(), q.z(), q.x()) };
+                const double speed = Lerp(s_lo, s_hi, seed) * level * blend.At(PM::LifetimePos(p));
+                PM::ChangeVelocity(p, field.cwiseProduct(mask) * (speed * dt));
+            }
+        };
+    }
+    if (name == "vortex") {
+        const int    index = ReadKey<int32_t>(wpj, "controlpoint", 0);
+        const double inner = ReadKey<double>(wpj, "distanceinner", pixel ? 500.0 : 1.0);
+        const double outer = ReadKey<double>(wpj, "distanceouter", pixel ? 650.0 : 2.0);
+        const double speed_in  = ReadKey<double>(wpj, "speedinner", pixel ? 2500.0 : 1.0);
+        const double speed_out = ReadKey<double>(wpj, "speedouter", 0.0);
+        const int    flags = ReadKey<int32_t>(wpj, "flags", 0);
+        const Vec3d  offset = ReadVec3(wpj, "offset", { 0, 0, 0 });
+        Vec3d        axis   = ReadVec3(wpj, "axis", { 0, 0, 1 });
+        if (axis.squaredNorm() >= 0.001) axis = axis.normalized();
+        const LifeEnvelope blend(wpj);
+        const AudioGate   gate  = AudioGate::Read(wpj, ctx);
+        return [=](const ParticleInfo& info) mutable {
+            const auto* point  = PointOf(info.controlpoints, index);
+            const Vec3d centre = (point ? point->offset : Vec3d::Zero()) + offset;
+            const double dt    = info.time_pass;
+            const double level = gate.Level() * reader.Speed();
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                Vec3d d = PM::GetPos(p).cast<double>() - centre;
+                if (flags & 1) d -= axis * d.dot(axis);
+                const double r = d.norm();
+                if (! (r > 1.0e-9)) continue;
+                const double t = outer > inner ? std::clamp((r - inner) / (outer - inner), 0.0, 1.0)
+                                               : (r >= outer ? 1.0 : 0.0);
+                const double speed = level * blend.At(PM::LifetimePos(p)) * Lerp(speed_in, speed_out, t);
+                PM::ChangeVelocity(p, d.cross(axis) / r * (speed * dt));
+            }
+        };
+    }
+    if (name == "controlpointattract") {
+        const int    index = ReadKey<int32_t>(wpj, "controlpoint", 0);
+        const double scale = ReadKey<double>(wpj, "scale", pixel ? 512.0 : 20.0);
+        double       threshold = pixel ? 512.0 : 5.0;
+        if (wpj.contains("threshold")) threshold = ReadKey<double>(wpj, "threshold", threshold);
+        else threshold = ReadKey<double>(wpj, "threadhold", threshold);
+        const double delete_at = ReadKey<double>(wpj, "deletethreshold", pixel ? 15.0 : 0.5);
+        const int    flags     = ReadKey<int32_t>(wpj, "flags", 0);
+        return [=](const ParticleInfo& info) mutable {
+            const auto* point  = PointOf(info.controlpoints, index);
+            const Vec3d centre = point ? point->offset : Vec3d::Zero();
+            const double dt    = info.time_pass;
+            const double power = scale * reader.Speed();
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                const Vec3d  pos = PM::GetPos(p).cast<double>();
+                const Vec3d  d   = pos - centre;
+                const double len = d.norm();
+                if (len > 0.0 && len < threshold) {
+                    double k = (1.0 - len / threshold) * power * dt;
+                    if ((flags & 2) && k > 0.0) k = std::min(k, len);
+                    PM::ChangeVelocity(p, d / len * -k);
+                }
+                if ((flags & 1) &&
+                    DistanceToSegment(centre, p.prev_position.cast<double>(), pos) < delete_at) {
+                    Remove(p);
+                }
+            }
+        };
+    }
+    if (name == "capvelocity") {
+        const double max_speed = ReadKey<double>(wpj, "maxspeed", pixel ? 100.0 : 1.0);
+        const LifeEnvelope blend(wpj);
+        return [=](const ParticleInfo& info) {
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                const double speed = PM::GetVelocity(p).cast<double>().norm();
+                if (speed > max_speed && speed > 0.0) {
+                    PM::MutiplyVelocity(p, 1.0 - blend.At(PM::LifetimePos(p)) * (1.0 - max_speed / speed));
+                }
+            }
+        };
+    }
+    if (name == "reducemovementnearcontrolpoint") {
+        const int    index = ReadKey<int32_t>(wpj, "controlpoint", 0);
+        const double inner = ReadKey<double>(wpj, "distanceinner", pixel ? 100.0 : 0.5);
+        const double outer = ReadKey<double>(wpj, "distanceouter", pixel ? 350.0 : 1.0);
+        const double r_in  = ReadKey<double>(wpj, "reductioninner", 100.0);
+        const double r_out = ReadKey<double>(wpj, "reductionouter", 0.0);
+        return [=](const ParticleInfo& info) {
+            const auto* point  = PointOf(info.controlpoints, index);
+            const Vec3d centre = point ? point->offset : Vec3d::Zero();
+            double      span   = r_out - r_in;
+            if (span == 0.0) span = 1.0;
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                const double dist = (PM::GetPos(p).cast<double>() - centre).norm();
+                const double s = outer > inner ? std::clamp((dist - inner) / (outer - inner), 0.0, 1.0)
+                                               : (dist > inner ? 1.0 : 0.0);
+                const double reduction = std::clamp((r_in + s * span) * info.time_pass, 0.0, 1.0);
+                PM::MutiplyVelocity(p, 1.0 - reduction);
+            }
+        };
+    }
+    if (name == "maintaindistancetocontrolpoint") {
+        const int    index    = ReadKey<int32_t>(wpj, "controlpoint", 0);
+        const double distance = ReadKey<double>(wpj, "distance", pixel ? 200.0 : 1.0);
+        const double variable = ReadKey<double>(wpj, "variablestrength", 0.0);
+        return [=](const ParticleInfo& info) {
+            const auto* point = PointOf(info.controlpoints, index);
+            if (point == nullptr) return;
+            const Vec3d ride   = point->offset - point->prev_offset;
+            const double amount = variable == 0.0 ? 1.0 : std::clamp(variable * info.time_pass, 0.0, 1.0);
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                PM::Move(p, ride);
+                const Vec3d  rel = PM::GetPos(p).cast<double>() - point->offset;
+                const double len = rel.norm();
+                if (len > 0.0) PM::Move(p, rel * ((distance / len - 1.0) * amount));
+            }
+        };
+    }
+    if (name == "maintaindistancebetweencontrolpoints") {
+        const int first = ReadKey<int32_t>(wpj, "controlpointstart", 0);
+        const int last  = ReadKey<int32_t>(wpj, "controlpointend", 1);
+        return [=](const ParticleInfo& info) {
+            const auto* a = PointOf(info.controlpoints, first);
+            const auto* b = PointOf(info.controlpoints, last);
+            if (a == nullptr || b == nullptr) return;
+            const Vec3d was = b->prev_offset - a->prev_offset;
+            const Vec3d now = b->offset - a->offset;
+            if (was.squaredNorm() < 1.4e-14 || now.squaredNorm() < 1.4e-14) return;
+            const Vec3d slide = a->offset - a->prev_offset;
+            for (auto& p : info.particles) {
+                if (! PM::LifetimeOk(p)) continue;
+                const double along = (PM::GetPos(p).cast<double>() - a->prev_offset).dot(was) / was.squaredNorm();
+                PM::Move(p, slide + now * std::clamp(along, 0.0, 1.0) - was * along);
+            }
+        };
+    }
+    if (name == "collisionplane" || name == "collisionsphere") {
+        const bool   sphere   = name == "collisionsphere";
+        const int    index    = ReadKey<int32_t>(wpj, "controlpoint", 0);
+        const int    flags    = ReadKey<int32_t>(wpj, "flags", 0);
+        const Vec3d  origin   = ReadVec3(wpj, "origin", pixel ? Vec3d { 0, -200, 0 } : Vec3d { 0, 0, 0 });
+        const double distance = ReadKey<double>(wpj, "distance", pixel ? -150.0 : 0.0);
+        const double radius   = ReadKey<double>(wpj, "radius", pixel ? 50.0 : 1.0);
+        const double bounce   = ReadKey<double>(wpj, "bouncefactor", 0.5);
+        const Collision how   = CollisionOf(ReadKey<std::string>(wpj, "collisionbehavior", "bounce"));
+        Vec3d        plane    = ReadVec3(wpj, "plane", { 0, 1, 0 });
+        plane = plane.norm() > 0.0 ? Vec3d(plane.normalized()) : Vec3d::Zero();
+        return [=](const ParticleInfo& info) {
+            const auto* point = (flags & 1) ? PointOf(info.controlpoints, index) : nullptr;
+            if (sphere) {
+                const Vec3d centre = point ? point->offset : origin;
                 for (auto& p : info.particles) {
                     if (! PM::LifetimeOk(p)) continue;
-                    if (info.track_previous_position) p.prev_position = p.position;
-                    // The position moves by the velocity after this step's
-                    // acceleration and before its damping.
-                    const Vector3d v1 = p.velocity.cast<double>() + g * dt;
-                    PM::Move(p, v1 * dt);
-                    p.velocity = (v1 * damp).cast<float>();
+                    const Vec3d  rel = PM::GetPos(p).cast<double>() - centre;
+                    const double len = rel.norm();
+                    if (! (len > 0.0) || len - radius >= 0.0) continue;
+                    const Vec3d normal = rel / len;
+                    PM::MoveTo(p, centre + normal * radius);
+                    Respond(p, how, bounce, normal);
                 }
-            };
-        } else if (name == "angularmovement") {
-            float                drag { 0.0f };
-            std::array<float, 3> force { 0, 0, 0 };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "drag", drag);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "force", force);
-            const Vector3d vecF = Vector3f(force.data()).cast<double>();
-            return [drag, vecF, over, speed_applies](const ParticleInfo& info) {
-                const Vector3d f    = vecF * SpeedScale(*over, speed_applies);
-                const double   dt   = info.time_pass;
-                const double   damp = 1.0 - std::min(static_cast<double>(drag) * dt, 0.9999999);
-                for (auto& p : info.particles) {
-                    if (! PM::LifetimeOk(p)) continue;
-                    const Vector3d w1 = p.angularVelocity.cast<double>() + f * dt;
-                    PM::Rotate(p, w1 * dt);
-                    p.angularVelocity = (w1 * damp).cast<float>();
-                }
-            };
-        } else if (name == "sizechange") {
-            auto vc        = ValueChange::ReadFromJson(wpj);
-            // Every ramp of the file takes the instance's `size` override too: the
-            // loader rescales each size record's start and change by it, so the
-            // ramp multiplies the running size by `override * ramp`, on top of the
-            // override the size draw already carries (override^(1 + ramps) in all).
-            // A file that ignores the override sees 1.
-            return [vc, over, size_applies](const ParticleInfo& info) {
-                const auto size_over = SizeScale(*over, size_applies);
-                for (auto& p : info.particles)
-                    PM::MutiplySize(p, size_over * FadeValueChange(PM::LifetimePos(p), vc));
-            };
-
-        } else if (name == "alphafade") {
-            float fadeintime { 0.5f }, fadeouttime { 0.5f };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "fadeintime", fadeintime);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "fadeouttime", fadeouttime);
-            return [fadeintime, fadeouttime](const ParticleInfo& info) {
-                for (auto& p : info.particles) {
-                    auto life = PM::LifetimePos(p);
-                    if (life <= fadeintime)
-                        PM::MutiplyAlpha(p, FadeValueChange(life, 0, fadeintime, 0, 1.0f));
-                    else if (life > fadeouttime)
-                        PM::MutiplyAlpha(p,
-                                         1.0f - FadeValueChange(life, fadeouttime, 1.0f, 0, 1.0f));
-                }
-            };
-        } else if (name == "alphachange") {
-            auto vc = ValueChange::ReadFromJson(wpj);
-            return [vc](const ParticleInfo& info) {
-                for (auto& p : info.particles) {
-                    PM::MutiplyAlpha(p, FadeValueChange(PM::LifetimePos(p), vc));
-                }
-            };
-        } else if (name == "colorchange") {
-            auto vc  = VecChange::ReadFromJson(wpj);
-            const auto def = ctx.color;
-            // The ramp's two ends, re-tinted by an instance colour. The tint is
-            // recomputed only when the override colour changes.
-            struct Tinted {
-                std::optional<Vector3f> key;
-                bool                    valid { false };
-                Vector3f                start { Vector3f::Ones() };
-                Vector3f                end { Vector3f::Zero() };
-            };
-            return [vc, over, def, tinted = Tinted {}](const ParticleInfo& info) mutable {
-                Vector3f start(vc.startvalue[0], vc.startvalue[1], vc.startvalue[2]);
-                Vector3f end(vc.endvalue[0], vc.endvalue[1], vc.endvalue[2]);
-                if (const auto colour = OverrideColor(over.get()); colour && def.hasColor) {
-                    if (! tinted.valid || ! tinted.key || ! tinted.key->isApprox(*colour, 0.0f)) {
-                        const ColorShift shift = ComputeColorShift(def.defaultColor, *colour);
-                        tinted.key             = *colour;
-                        tinted.start           = shift.active ? RetintColor(start, shift) : start;
-                        tinted.end             = shift.active ? RetintColor(end, shift) : end;
-                        tinted.valid           = true;
-                    }
-                    start = tinted.start;
-                    end   = tinted.end;
-                }
-                for (auto& p : info.particles) {
-                    auto     life = PM::LifetimePos(p);
-                    Vector3f result;
-                    for (uint i = 0; i < 3; i++)
-                        result[i] =
-                            FadeValueChange(life, vc.starttime, vc.endtime, start[i], end[i]);
-                    PM::MutiplyColor(p, result[0], result[1], result[2]);
-                }
-            };
-        } else if (name == "oscillatealpha") {
-            const Oscillation osc = Oscillation::ReadFromJson(wpj, name, ortho);
-            return [osc](const ParticleInfo& info) {
-                for (auto& p : info.particles) {
-                    if (! PM::LifetimeOk(p)) continue;
-                    PM::MutiplyAlpha(p, osc.Multiplier(p));
-                }
-            };
-        } else if (name == "oscillatesize") {
-            const Oscillation osc = Oscillation::ReadFromJson(wpj, name, ortho);
-            return [osc](const ParticleInfo& info) {
-                for (auto& p : info.particles) {
-                    if (! PM::LifetimeOk(p)) continue;
-                    PM::MutiplySize(p, osc.Multiplier(p));
-                }
-            };
-
-        } else if (name == "oscillateposition") {
-            const Oscillation osc = Oscillation::ReadFromJson(wpj, name, ortho);
-            return [osc, over, speed_applies](const ParticleInfo& info) {
-                const double dt = info.time_pass;
-                // The speed override scales the swing's frequency (alpha and size
-                // oscillators do not read it).
-                const double speed = SpeedScale(*over, speed_applies);
-                for (auto& p : info.particles) {
-                    if (! PM::LifetimeOk(p)) continue;
-                    const double seed = p.seed;
-                    const double f    = osc.Frequency(p) * speed;
-                    const double ph   = osc.Phase(p);
-                    const double t    = PM::LifetimePassed(p);
-                    const double amp =
-                        (osc.scalemin + seed * (osc.scalemax - osc.scalemin)) *
-                        osc.blend.Factor(PM::LifetimePos(p));
-                    // The offset is the difference of two evaluations, so a
-                    // particle's displacement stays bounded by the swing.
-                    const double wx =
-                        amp * (std::sin((ph + t) * f) - std::sin((ph + t - dt) * f));
-                    const double wy = amp * (std::sin((ph + 2.0 * M_PI * seed + t) * f) -
-                                             std::sin((ph + 2.0 * M_PI * seed + t - dt) * f));
-                    // z shares x's wave.
-                    PM::Move(p, wx * osc.mask[0], wy * osc.mask[1], wx * osc.mask[2]);
-                }
-            };
-        } else if (name == "turbulence") {
-            Turbulence tur = Turbulence::ReadFromJson(wpj, ortho);
-            const auto level = ReadAudioLevel(wpj, ctx);
-            return [=](const ParticleInfo& info) {
-                const double dt = info.time_pass;
-                // Sampled once per step: the whole field swells and fades with the
-                // sound; the speed override scales the particle speed range.
-                const double audio =
-                    (level ? static_cast<double>(level()) : 1.0) * SpeedScale(*over, speed_applies);
-                for (auto& p : info.particles) {
-                    if (! PM::LifetimeOk(p)) continue;
-                    const double seed  = p.seed;
-                    const double phase = seed * (tur.phasemax - tur.phasemin) + info.time * tur.timescale;
-                    const double speed =
-                        (tur.speedmin + seed * (tur.speedmax - tur.speedmin)) * audio *
-                        static_cast<double>(tur.blend.Factor(PM::LifetimePos(p)));
-                    const Vector3d q = ((p.position.cast<double>().array() + phase) * tur.scale).matrix();
-                    const double nx = algorism::PerlinNoise(q.x(), q.y(), q.z());
-                    const double ny = algorism::PerlinNoise(q.z(), q.x(), q.y());
-                    const double nz = algorism::PerlinNoise(q.y(), q.z(), q.x());
-                    PM::ChangeVelocity(p,
-                                       nx * tur.mask[0] * dt * speed,
-                                       ny * tur.mask[1] * dt * speed,
-                                       nz * tur.mask[2] * dt * speed);
-                }
-            };
-        } else if (name == "vortex") {
-            Vortex v = Vortex::ReadFromJson(wpj, ortho);
-            const auto level = ReadAudioLevel(wpj, ctx);
-            return [=](const ParticleInfo& info) {
-                const Vector3d centre = info.controlpoints[v.controlpoint].offset +
-                                  (Vector3f { v.offset.data() }).cast<double>();
-                Vector3d axis = (Vector3f { v.axis.data() }).cast<double>();
-                if (axis.squaredNorm() >= 0.001) axis.normalize();
-                const bool   infinite = v.flags[Vortex::FlagEnum::infinit_axis];
-                const double span     = static_cast<double>(v.distanceouter) - v.distanceinner;
-                const double speed_scale =
-                    SpeedScale(*over, speed_applies) * (level ? static_cast<double>(level()) : 1.0);
-
-                for (auto& p : info.particles) {
-                    if (! PM::LifetimeOk(p)) continue;
-                    Vector3d d = p.position.cast<double>() - centre;
-                    if (infinite) d -= d.dot(axis) * axis;
-                    const double distance = d.norm();
-                    if (distance < 1.0e-9) continue;
-                    const double t = span > 1.0e-9
-                                         ? std::clamp((distance - v.distanceinner) / span, 0.0, 1.0)
-                                         : (distance >= v.distanceouter ? 1.0 : 0.0);
-                    const double speed =
-                        speed_scale * static_cast<double>(v.blend.Factor(PM::LifetimePos(p))) *
-                        (v.speedinner + t * (static_cast<double>(v.speedouter) - v.speedinner));
-                    // (pos - centre) x axis, over the distance to the axis.
-                    const Vector3d tangent = d.cross(axis) / distance;
-                    PM::Accelerate(p, tangent * speed, info.time_pass);
-                }
-            };
-        } else if (name == "controlpointattract") {
-            ControlPointForce c = ControlPointForce::ReadFromJson(wpj, ortho);
-            const double delete_squared = static_cast<double>(c.deletethreshold) * c.deletethreshold;
-            return [=](const ParticleInfo& info) {
-                // Wallpaper Engine reads only the control point's position here.
-                const Vector3d centre = info.controlpoints[c.controlpoint].offset;
-                const double   dt     = info.time_pass;
-                // The speed override scales the pull.
-                const double scale = static_cast<double>(c.scale) * SpeedScale(*over, speed_applies);
-                for (auto& p : info.particles) {
-                    if (! PM::LifetimeOk(p)) continue;
-                    const Vector3d d    = p.position.cast<double>() - centre;
-                    const double   dist = d.norm();
-                    if (dist > std::numeric_limits<float>::min() && dist < c.threshold) {
-                        // The pull is strongest at the control point and falls
-                        // to nothing at the threshold.
-                        double k = (1.0 - dist / c.threshold) * scale * dt;
-                        // Never carry a particle past the control point.
-                        if ((c.flags & 2) != 0 && k > 0.0) k = std::min(k, dist);
-                        PM::ChangeVelocity(p, -(d / dist) * k);
-                    }
-                    if ((c.flags & 1) != 0) {
-                        // Remove a particle whose last step took it within the
-                        // delete threshold of the control point: the path from
-                        // where the movement operator found it to where it left it.
-                        const Vector3d a = p.prev_position.cast<double>() - centre;
-                        const Vector3d b = d;
-                        const Vector3d e = b - a;
-                        const double   l = e.squaredNorm();
-                        const double   s = l > 1.0e-18 ? std::clamp(-a.dot(e) / l, 0.0, 1.0) : 0.0;
-                        // Expires at the next age update, so an event child bound to
-                        // the particle still sees it end.
-                        if ((a + s * e).squaredNorm() <= delete_squared)
-                            p.lifetime = std::numeric_limits<float>::min();
-                    }
-                }
-            };
-        } else if (name == "capvelocity") {
-            float maxspeed { ortho ? 100.0f : 1.0f };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "maxspeed", maxspeed);
-            const BlendWindow blend = BlendWindow::FromJson(wpj);
-            return [maxspeed, blend](const ParticleInfo& info) {
-                for (auto& p : info.particles) {
-                    if (! PM::LifetimeOk(p)) continue;
-                    const double speed = p.velocity.norm();
-                    if (speed <= static_cast<double>(maxspeed) || speed <= 0.0) continue;
-                    const double cap = maxspeed / speed;
-                    const double b   = blend.Factor(PM::LifetimePos(p));
-                    PM::MutiplyVelocity(p, 1.0 - b * (1.0 - cap));
-                }
-            };
-        } else if (name == "reducemovementnearcontrolpoint") {
-            i32   controlpoint { 0 };
-            float inner { ortho ? 100.0f : 0.5f };
-            float outer { ortho ? 350.0f : 1.0f };
-            float reduction_inner { 100.0f };
-            float reduction_outer { 0.0f };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "controlpoint", controlpoint);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "distanceinner", inner);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "distanceouter", outer);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "reductioninner", reduction_inner);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "reductionouter", reduction_outer);
-            const u32 index = ClampControlpointIndex(controlpoint);
-            return [=](const ParticleInfo& info) {
-                const Vector3d centre = info.controlpoints[index].offset;
-                const double   dt     = info.time_pass;
-                const double   range  = static_cast<double>(outer) - inner;
-                double         span   = static_cast<double>(reduction_outer) - reduction_inner;
-                if (span == 0.0) span = 1.0;
-                for (auto& p : info.particles) {
-                    if (! PM::LifetimeOk(p)) continue;
-                    const double distance = (p.position.cast<double>() - centre).norm();
-                    const double s = range != 0.0 ? std::clamp((distance - inner) / range, 0.0, 1.0)
-                                                   : (distance >= inner ? 1.0 : 0.0);
-                    const double reduction =
-                        std::clamp((reduction_inner + s * span) * dt, 0.0, 1.0);
-                    PM::MutiplyVelocity(p, 1.0 - reduction);
-                }
-            };
-        } else if (name == "maintaindistancetocontrolpoint") {
-            i32   controlpoint { 0 };
-            float distance { ortho ? 200.0f : 1.0f };
-            float variablestrength { 0.0f };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "controlpoint", controlpoint);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "distance", distance);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "variablestrength", variablestrength);
-            const u32 index = ClampControlpointIndex(controlpoint);
-            return [=](const ParticleInfo& info) {
-                const auto&    cp      = info.controlpoints[index];
-                const Vector3d moved   = cp.offset - cp.prev_offset;
-                const double   amount =
-                    variablestrength == 0.0f
-                        ? 1.0
-                        : std::clamp(static_cast<double>(variablestrength) * info.time_pass, 0.0, 1.0);
-                for (auto& p : info.particles) {
-                    if (! PM::LifetimeOk(p)) continue;
-                    // Ride along with the control point, then settle onto the
-                    // shell at the wanted distance from it.
-                    PM::Move(p, moved);
-                    const Vector3d rel = p.position.cast<double>() - cp.offset;
-                    const double   len = rel.norm();
-                    if (len > 1.0e-9) PM::Move(p, (distance / len - 1.0) * amount * rel);
-                }
-            };
-        } else if (name == "maintaindistancebetweencontrolpoints") {
-            i32 start { 0 }, end { 1 };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "controlpointstart", start);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "controlpointend", end);
-            const u32 start_index = ClampControlpointIndex(start);
-            const u32 end_index   = ClampControlpointIndex(end);
-            return [=](const ParticleInfo& info) {
-                const auto&    s_cp = info.controlpoints[start_index];
-                const auto&    e_cp = info.controlpoints[end_index];
-                const Vector3d now  = e_cp.offset - s_cp.offset;
-                const Vector3d was  = e_cp.prev_offset - s_cp.prev_offset;
-                if (now.squaredNorm() <= 1.42e-14 || was.squaredNorm() <= 1.42e-14) return;
-                const Vector3d slide = s_cp.offset - s_cp.prev_offset;
-                for (auto& p : info.particles) {
-                    if (! PM::LifetimeOk(p)) continue;
-                    // The particle keeps its place along the segment, wherever
-                    // the two ends have moved to.
-                    const double along =
-                        (p.position.cast<double>() - s_cp.prev_offset).dot(was) / was.squaredNorm();
-                    PM::Move(p, slide + std::clamp(along, 0.0, 1.0) * now - along * was);
-                }
-            };
-        } else if (name == "collisionplane" || name == "collisionsphere") {
-            const bool           sphere = name == "collisionsphere";
-            std::array<float, 3> plane { 0.0f, 1.0f, 0.0f };
-            // A sphere's centre defaults to the scene's own idea of "below the
-            // middle": 200 under the origin in a pixel scene.
-            std::array<float, 3> origin { 0.0f, ortho ? -200.0f : 0.0f, 0.0f };
-            float                distance { ortho ? -150.0f : 0.0f };
-            float                radius { ortho ? 50.0f : 1.0f };
-            float                bounce { 0.5f };
-            std::string          behavior { "bounce" };
-            i32                  controlpoint { 0 };
-            i32                  flags { 0 };
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "plane", plane);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "origin", origin);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "distance", distance);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "radius", radius);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "bouncefactor", bounce);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "collisionbehavior", behavior);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "controlpoint", controlpoint);
-            GET_JSON_NAME_VALUE_NOWARN(wpj, "flags", flags);
-            const u32 index = ClampControlpointIndex(controlpoint);
-            enum class Behavior { Bounce, Slide, Stop, Delete };
-            Behavior mode = Behavior::Bounce;
-            if (behavior == "slide") mode = Behavior::Slide;
-            else if (behavior == "stop") mode = Behavior::Stop;
-            else if (behavior == "delete") mode = Behavior::Delete;
-            return [=](const ParticleInfo& info) {
-                Vector3d normal(plane[0], plane[1], plane[2]);
-                if (normal.squaredNorm() > 1.0e-12) normal.normalize();
-                Vector3d centre(origin[0], origin[1], origin[2]);
-                double   offset = static_cast<double>(distance);
-                if ((flags & 1) != 0) {
-                    // The shape is carried by the control point: a sphere is
-                    // centred on it and a plane passes through it, turned by its
-                    // orientation. The shape's own origin and distance are not read.
-                    const auto& cp = info.controlpoints[index];
-                    if (cp.has_rotation) normal = cp.rotation * normal;
-                    centre = cp.offset;
-                    offset = normal.dot(cp.offset);
+            } else {
+                Vec3d normal = plane;
+                double offset = distance;
+                if (point != nullptr) {
+                    if (point->has_rotation) normal = point->rotation * normal;
+                    offset = normal.dot(point->offset);
                 }
                 for (auto& p : info.particles) {
                     if (! PM::LifetimeOk(p)) continue;
-                    Vector3d n;
-                    double   depth;
-                    if (sphere) {
-                        const Vector3d d = p.position.cast<double>() - centre;
-                        const double   l = d.norm();
-                        if (l >= radius || l < 1.0e-9) continue;
-                        n     = d / l;
-                        depth = l - radius; // negative inside
-                    } else {
-                        depth = p.position.cast<double>().dot(normal) - offset;
-                        if (depth >= 0.0) continue;
-                        n = normal;
-                    }
-                    // Back onto the surface.
-                    PM::Move(p, -depth * n);
-                    // Every particle that was found inside takes the response,
-                    // whichever way it is moving: a bounce reflects its velocity
-                    // along the surface normal and a slide takes that part away.
-                    const double into = p.velocity.cast<double>().dot(n);
-                    switch (mode) {
-                    case Behavior::Bounce: PM::ChangeVelocity(p, -(1.0 + bounce) * into * n); break;
-                    case Behavior::Slide: PM::ChangeVelocity(p, -into * n); break;
-                    case Behavior::Stop: p.velocity = Vector3f::Zero(); break;
-                    case Behavior::Delete:
-                        p.lifetime = std::numeric_limits<float>::min();
-                        break;
-                    }
+                    const double depth = normal.dot(PM::GetPos(p).cast<double>()) - offset;
+                    if (! (depth < 0.0)) continue;
+                    PM::Move(p, normal * -depth);
+                    Respond(p, how, bounce, normal);
                 }
-            };
-        }
-    } while (false);
-    return [](const ParticleInfo&) {
-    };
+            }
+        };
+    }
+    LogInertOnce("operator", name);
+    return inert;
 }
 
 ParticleEmittOp WPParticleParser::genParticleEmittOp(
@@ -1562,62 +1352,51 @@ ParticleEmittOp WPParticleParser::genParticleEmittOp(
     std::shared_ptr<const wpscene::ParticleInstanceoverride> override,
     std::function<audio::AudioSpectrumSnapshot()>            audio_spectrum,
     std::shared_ptr<ParticleSpawnContext>                    spawn) {
-    std::shared_ptr<const float> count_multiplier;
-    if (override != nullptr && override->enabled) {
-        count_multiplier = std::shared_ptr<const float>(override, &override->count);
-    }
-    ParticleEmitterTiming timing;
-    timing.delay               = wpe.delay;
-    timing.duration            = wpe.duration;
-    timing.periodic            = wpe.flags[wpscene::Emitter::FlagEnum::periodic];
-    timing.minPeriodicDuration = wpe.minperiodicduration;
-    timing.maxPeriodicDuration = wpe.maxperiodicduration;
-    timing.minPeriodicDelay    = wpe.minperiodicdelay;
-    timing.maxPeriodicDelay    = wpe.maxperiodicdelay;
-    timing.maxToEmitPerPeriod  = wpe.maxtoemitperperiod;
+    std::shared_ptr<const float> count;
+    if (override) count = std::shared_ptr<const float>(override, &override->count);
+
     if (wpe.name == "boxrandom") {
-        ParticleBoxEmitterArgs box;
-        box.emitSpeed       = wpe.rate;
-        box.minDistance     = wpe.distancemin;
-        box.maxDistance     = wpe.distancemax;
-        box.directions      = wpe.directions;
-        box.orgin           = wpe.origin;
-        box.one_per_frame   = wpe.flags[wpscene::Emitter::FlagEnum::one_per_frame];
-        box.instantaneous   = wpe.instantaneous;
-        box.minSpeed        = wpe.speedmin;
-        box.maxSpeed        = wpe.speedmax;
-        box.controlpoint    = wpe.controlpoint;
-        box.sort            = sort;
-        box.countMultiplier = count_multiplier;
-        box.audioResponse   = MakeEmitterAudioResponse(wpe, std::move(audio_spectrum));
-        box.timing          = timing;
-        box.spawn           = std::move(spawn);
-        return ParticleBoxEmitterArgs::MakeEmittOp(box);
-    } else if (wpe.name == "sphererandom") {
-        ParticleSphereEmitterArgs sphere;
-        sphere.emitSpeed       = wpe.rate;
-        sphere.minDistance     = wpe.distancemin[0];
-        sphere.maxDistance     = wpe.distancemax[0];
-        sphere.directions      = wpe.directions;
-        sphere.orgin           = wpe.origin;
-        sphere.sign            = wpe.sign;
-        sphere.one_per_frame   = wpe.flags[wpscene::Emitter::FlagEnum::one_per_frame];
-        sphere.instantaneous   = wpe.instantaneous;
-        sphere.minSpeed        = wpe.speedmin;
-        sphere.maxSpeed        = wpe.speedmax;
-        sphere.controlpoint    = wpe.controlpoint;
-        sphere.sort            = sort;
-        sphere.countMultiplier = count_multiplier;
-        sphere.audioResponse   = MakeEmitterAudioResponse(wpe, std::move(audio_spectrum));
-        sphere.timing          = timing;
-        sphere.cone            = wpe.cone;
-        sphere.spawn           = std::move(spawn);
-        return ParticleSphereEmitterArgs::MakeEmittOp(sphere);
-    } else
-        return [](std::vector<Particle>&,
-                  std::vector<ParticleInitOp>&,
-                  uint32_t,
-                  double,
-                  std::span<const ParticleControlpoint>) {
-        };
+        ParticleBoxEmitterArgs a;
+        a.directions      = wpe.directions;
+        a.minDistance     = wpe.distancemin;
+        a.maxDistance     = wpe.distancemax;
+        a.emitSpeed       = wpe.rate;
+        a.orgin           = wpe.origin;
+        a.one_per_frame   = wpe.flags[wpscene::Emitter::FlagEnum::one_per_frame];
+        a.sort            = sort;
+        a.instantaneous   = wpe.instantaneous;
+        a.minSpeed        = wpe.speedmin;
+        a.maxSpeed        = wpe.speedmax;
+        a.controlpoint    = wpe.controlpoint;
+        a.countMultiplier = std::move(count);
+        a.audioResponse   = MakeAudioResponse(wpe, audio_spectrum);
+        a.timing          = TimingOf(wpe);
+        a.spawn           = std::move(spawn);
+        return ParticleBoxEmitterArgs::MakeEmittOp(std::move(a));
+    }
+    if (wpe.name == "sphererandom") {
+        ParticleSphereEmitterArgs a;
+        a.directions      = wpe.directions;
+        a.minDistance     = wpe.distancemin[0];
+        a.maxDistance     = wpe.distancemax[0];
+        a.emitSpeed       = wpe.rate;
+        a.orgin           = wpe.origin;
+        a.sign            = wpe.sign;
+        a.one_per_frame   = wpe.flags[wpscene::Emitter::FlagEnum::one_per_frame];
+        a.sort            = sort;
+        a.instantaneous   = wpe.instantaneous;
+        a.minSpeed        = wpe.speedmin;
+        a.maxSpeed        = wpe.speedmax;
+        a.controlpoint    = wpe.controlpoint;
+        a.countMultiplier = std::move(count);
+        a.audioResponse   = MakeAudioResponse(wpe, audio_spectrum);
+        a.timing          = TimingOf(wpe);
+        a.cone            = wpe.cone;
+        a.spawn           = std::move(spawn);
+        return ParticleSphereEmitterArgs::MakeEmittOp(std::move(a));
+    }
+    // Any other emitter (one stock file has `layerimage`) never emits.
+    LogInertOnce("emitter", wpe.name);
+    return [](std::vector<Particle>&, std::vector<ParticleInitOp>&, uint32_t, double,
+              std::span<const ParticleControlpoint>) {};
 }

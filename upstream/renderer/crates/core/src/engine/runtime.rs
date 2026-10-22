@@ -1,7 +1,6 @@
-use std::sync::Arc;
+// Clean-room implementation from the WallpaperMachine spec r1a-core-engine.md; written without access to the original source.
+use std::{sync::Arc, time::Instant};
 use kameo::actor::WeakActorRef;
-
-use serde_json::Value;
 
 use crate::{
     DisplayDesc, EngineError, WallpaperWindow,
@@ -14,6 +13,7 @@ use crate::{
         },
         surface_recovery::{RecoveryStep, SurfaceRecovery},
     },
+    log_context::LoadScope,
     media::audio::AudioVolume,
     owe::{
         backend::{
@@ -22,8 +22,9 @@ use crate::{
         },
         scene_demand::SurfaceHealth,
     },
-    project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle, SerdeValudeExt},
+    project::{ScalingMode, SceneDesc, SceneFraming, SceneHandle},
     render::RendererSurfaceCounters,
+    SceneRegistry,
     window::{LayerInstall, LayerSwap, MouseButtonEdges, NormalizedMousePosition},
 };
 
@@ -340,15 +341,12 @@ impl RenderScale {
     }
 }
 
+/// One live scene: its window, its renderer object with the relays that carry
+/// the renderer's reports, and the mutable state that outlives a renderer.
 pub struct SceneRuntime {
     last_media: Option<crate::media::MediaPollResult>,
-    /// Last descriptor used to configure the renderer scene.
     pub desc: SceneDesc,
-    /// Stable handle used when reporting renderer lifecycle events.
     handle: SceneHandle,
-    /// Engine-level callback invoked after OWE renders the first frame.
-    first_frame_callback: FirstFrameCallback,
-    /// Opaque Open Wallpaper Engine renderer object.
     renderer: OweScene,
     actor: WeakActorRef<EngineActor>,
     pointer_relay: PointerInputRelay,
@@ -365,32 +363,27 @@ pub struct SceneRuntime {
     /// has a new scene that has not said anything yet.
     requires_audio: bool,
     pointer_input: NativePointerInputState,
-    /// Runtime override applied after descriptor defaults.
-    scaling_mode: ScalingMode,
-    /// Runtime override applied after descriptor defaults.
-    scaling_factor: f64,
-    /// Runtime override applied after descriptor defaults.
     framing: SceneFraming,
-    /// Renderer-surface override. Changing this rebuilds the renderer object.
+    scaling_mode: ScalingMode,
+    scaling_factor: f64,
+    /// Explicit rasterization size, used by every in-place reconfigure instead
+    /// of the display's pixel size. Not part of the stored descriptor.
     render_resolution: Option<(u32, u32)>,
+    audio_response_enabled: bool,
+    audio_volume: AudioVolume,
+    audio_muted: bool,
+    /// The flattened property override in force, `None` when the authored
+    /// defaults apply.
+    property_override_json: Option<String>,
+    /// Handed to every renderer this scene opens, so a callback installed
+    /// later still reaches a scene that is already running.
+    first_frame_callback: FirstFrameCallback,
     /// Internal rasterization scale, handed again to every renderer this
     /// runtime opens, whoever asked for the rebuild.
     render_scale: RenderScale,
-    /// Runtime audio-response state, preserved across scene reconciliation.
-    audio_response_enabled: bool,
     /// Runtime media-integration state, preserved across scene reconciliation.
     media_integration_enabled: bool,
-    /// Runtime playback state, preserved across scene reconciliation.
     paused: bool,
-    /// Runtime scene-global audio volume, preserved across scene
-    /// reconciliation.
-    audio_volume: AudioVolume,
-    /// Runtime scene-global audio mute state, preserved across scene
-    /// reconciliation.
-    audio_muted: bool,
-    /// Flattened runtime property override, preserved across reconciliation.
-    property_override_json: Option<String>,
-    /// `AppKit` window that owns the `CAMetalLayer` passed to OWE.
     window: Option<WallpaperWindow>,
     /// Increments every time the renderer object is rebuilt. The renderer's
     /// counters live and die with that object, so two wallpapers that reused
@@ -400,7 +393,6 @@ pub struct SceneRuntime {
 
 #[derive(Clone)]
 pub struct SceneRuntimeState {
-    /// Mutable state that should survive replacing the scene descriptor.
     pub scaling_mode: ScalingMode,
     pub scaling_factor: f64,
     pub framing: SceneFraming,
@@ -411,19 +403,6 @@ pub struct SceneRuntimeState {
     pub audio_volume: AudioVolume,
     pub audio_muted: bool,
     pub property_override_json: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DescriptorInheritance {
-    PreserveRuntimeOverrides,
-    UseDescriptorDefaults,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum PropertyOverrideUpdate<'a> {
-    Unchanged,
-    Apply(&'a str),
-    Reset,
 }
 
 pub struct RuntimeRefreshJob {
@@ -445,26 +424,132 @@ pub enum RuntimeRefreshMode {
 }
 
 impl RuntimeRefreshMode {
-    /// Classifies the transition between two scene descriptors.
+    /// What has to happen to the scene that runs now (`current`, its stored
+    /// descriptor) for it to match `desired`. Only the wallpaper-defining
+    /// fields and the display decide; the pause seed never does.
     pub fn from_transition(current: Option<&SceneDesc>, desired: &SceneDesc) -> Self {
         let Some(current) = current else {
-            return RuntimeRefreshMode::OpenRuntime;
+            return Self::OpenRuntime;
         };
-        if current.same_wallpaper(desired) && current.display == desired.display {
-            return RuntimeRefreshMode::Unchanged;
+        if !current.same_wallpaper(desired) {
+            return Self::RebuildExistingRuntime;
         }
-        if current.same_wallpaper(desired) {
-            if current.display.has_same_render_surface(&desired.display) {
-                return RuntimeRefreshMode::UpdateWindowOnly;
-            }
-            return RuntimeRefreshMode::ReopenRuntime;
+        if current.display == desired.display {
+            Self::Unchanged
+        } else if current.display.has_same_render_surface(&desired.display) {
+            Self::UpdateWindowOnly
+        } else {
+            Self::ReopenRuntime
         }
-        RuntimeRefreshMode::RebuildExistingRuntime
     }
 
-    /// Returns true if the transition requires a runtime refresh.
     pub fn is_required(self) -> bool {
-        self != RuntimeRefreshMode::Unchanged
+        self != Self::Unchanged
+    }
+}
+
+/// The renderer object of a scene together with the four relays that carry its
+/// reports to the engine thread. Everything in it is released by dropping it,
+/// which is what undoes a half-finished open.
+struct OpenedRenderer {
+    renderer: OweScene,
+    pointer_relay: PointerInputRelay,
+    shortcut_relay: UserShortcutRelay,
+    audio_relay: AudioRequirementRelay,
+    failure_relay: RenderFailureRelay,
+}
+
+impl OpenedRenderer {
+    /// Opens a renderer on `layer` and brings it to the state the scene has:
+    /// the descriptor's values are applied by the open, then only what the
+    /// state does differently, then the render scale in force.
+    #[allow(clippy::too_many_arguments)]
+    fn open(
+        backend: OweBackend,
+        first_frame_callback: &FirstFrameCallback,
+        handle: SceneHandle,
+        desc: &SceneDesc,
+        state: &SceneRuntimeState,
+        render_scale: RenderScale,
+        layer: *mut std::ffi::c_void,
+        actor: &WeakActorRef<EngineActor>,
+    ) -> Result<Self, EngineError> {
+        let (pointer_relay, on_pointer_input) = PointerInputRelay::new(actor.clone(), handle)?;
+        let (shortcut_relay, on_user_shortcut) = UserShortcutRelay::new(actor.clone(), handle)?;
+        let (audio_relay, on_audio_requirement) =
+            AudioRequirementRelay::new(actor.clone(), handle)?;
+        let (failure_relay, on_render_failure) = RenderFailureRelay::new(actor.clone(), handle)?;
+        let on_first_frame: crate::owe::backend::FirstFrameCallback = {
+            let callback = Arc::clone(first_frame_callback);
+            Arc::new(move || callback(handle))
+        };
+        let mut renderer = backend.open_scene(
+            desc,
+            layer,
+            state.scaling_mode,
+            state.scaling_factor,
+            state.framing,
+            state.render_resolution,
+            Some(on_first_frame),
+            Some(on_pointer_input),
+            Some(on_user_shortcut),
+            Some(on_audio_requirement),
+            Some(on_render_failure),
+        )?;
+        {
+            let _scope = LoadScope::enter(renderer.load_id());
+            catch_up_with_state(&mut renderer, desc, state)?;
+            render_scale.restore(|scale| renderer.set_render_scale(scale))?;
+        }
+        Ok(Self { renderer, pointer_relay, shortcut_relay, audio_relay, failure_relay })
+    }
+}
+
+/// Calls `send` with the live value when it is not the one the renderer was
+/// opened with; equal values cost the renderer nothing.
+fn send_if_changed<T: PartialEq + Copy>(
+    live: T,
+    opened_with: T,
+    send: impl FnOnce(T) -> Result<(), EngineError>,
+) -> Result<(), EngineError> {
+    if live == opened_with { Ok(()) } else { send(live) }
+}
+
+/// What a renderer opened with `opened_with` as its override must be given so
+/// that it shows `live`: nothing when they agree, otherwise the live document
+/// (`Some(Some(..))`) or the removal of the opened one (`Some(None)`).
+fn override_correction<'a>(
+    live: Option<&'a str>,
+    opened_with: Option<&str>,
+) -> Option<Option<&'a str>> {
+    (live != opened_with).then_some(live)
+}
+
+/// Brings a freshly opened renderer from what its descriptor produced to the
+/// carried state. Scaling mode, factor and framing are not handled here: the
+/// open took them from the state already.
+fn catch_up_with_state(
+    renderer: &mut OweScene,
+    desc: &SceneDesc,
+    state: &SceneRuntimeState,
+) -> Result<(), EngineError> {
+    let base = SceneRuntimeState::try_from(desc)?;
+    send_if_changed(state.paused, base.paused, |v| renderer.set_paused(v))?;
+    send_if_changed(state.audio_response_enabled, base.audio_response_enabled, |v| {
+        renderer.set_audio_response_enabled(v)
+    })?;
+    send_if_changed(state.media_integration_enabled, base.media_integration_enabled, |v| {
+        renderer.set_media_integration_enabled(v)
+    })?;
+    send_if_changed(state.audio_volume, base.audio_volume, |v| renderer.set_audio_volume(v))?;
+    send_if_changed(state.audio_muted, base.audio_muted, |v| renderer.set_audio_muted(v))?;
+    match override_correction(
+        state.property_override_json.as_deref(),
+        base.property_override_json.as_deref(),
+    ) {
+        Some(Some(document)) => renderer.set_property_override(document),
+        Some(None) => renderer.reset_property_override(),
+        None => Ok(()),
     }
 }
 
@@ -483,6 +568,56 @@ fn restore_previous_layer(window: &mut WallpaperWindow, swap: LayerSwap, cause: 
     }
 }
 
+// All surface stages are statically dispatched; no trait object, stored hook,
+// allocation or per-frame work is introduced. Native release is destructive:
+// a failed later stage promises metadata preservation, NOT surface rollback.
+trait SurfaceReconfigure {
+    type Layer;
+    fn begin(&mut self) -> Result<(), EngineError>;
+    fn layer(&mut self, display: &DisplayDesc) -> Result<Self::Layer, EngineError>;
+    fn finish(&mut self, layer: Self::Layer, display: &DisplayDesc, render: (u32, u32)) -> Result<(), EngineError>;
+    fn pause(&mut self) -> Result<(), EngineError>;
+    fn commit(&mut self, display: DisplayDesc);
+}
+
+fn reconfigure_sequence(
+    surface: &mut impl SurfaceReconfigure,
+    display: DisplayDesc,
+    resolution: Option<(u32, u32)>,
+    paused: bool,
+) -> Result<(), EngineError> {
+    surface.begin()?;
+    let layer = surface.layer(&display)?;
+    surface.finish(layer, &display, resolution.unwrap_or((display.width, display.height)))?;
+    if paused { surface.pause()?; }
+    surface.commit(display);
+    Ok(())
+}
+
+struct NativeSurfaceReconfigure<'a> {
+    renderer: &'a mut OweScene,
+    window: &'a mut WallpaperWindow,
+    desc: &'a mut SceneDesc,
+    started: Instant,
+}
+
+impl SurfaceReconfigure for NativeSurfaceReconfigure<'_> {
+    type Layer = *mut std::ffi::c_void;
+    fn begin(&mut self) -> Result<(), EngineError> { self.renderer.begin_surface_reconfigure() }
+    fn layer(&mut self, display: &DisplayDesc) -> Result<Self::Layer, EngineError> {
+        self.window.update_layer(display.clone())
+    }
+    fn finish(&mut self, layer: Self::Layer, display: &DisplayDesc, render: (u32, u32)) -> Result<(), EngineError> {
+        self.renderer.finish_surface_reconfigure(layer, display.width, display.height, render.0, render.1, display.scale_factor)
+    }
+    fn pause(&mut self) -> Result<(), EngineError> { self.renderer.set_paused(true) }
+    fn commit(&mut self, display: DisplayDesc) {
+        self.renderer.update_runtime_display(display.display_id);
+        log::debug!("[wallpaper-core display] reconfigured surface in place in {:?}: before=[{}] after=[{}]", self.started.elapsed(), self.desc.display.desc_label(), display.desc_label());
+        self.desc.display = display;
+    }
+}
+
 impl SceneRuntime {
     pub fn open(
         backend: OweBackend,
@@ -492,69 +627,218 @@ impl SceneRuntime {
         state: SceneRuntimeState,
         actor: WeakActorRef<EngineActor>,
     ) -> Result<Self, EngineError> {
-        let mut stored_desc = desc.clone();
-        stored_desc.mark_shader_refresh_complete();
+        Self::open_in_registry_with(&SceneRegistry::shared(), || {
+            Self::prepare_open(backend, first_frame_callback, handle, desc, state, actor)
+        })
+    }
+
+    fn prepare_open(
+        backend: OweBackend,
+        first_frame_callback: FirstFrameCallback,
+        handle: SceneHandle,
+        desc: &SceneDesc,
+        state: SceneRuntimeState,
+        actor: WeakActorRef<EngineActor>,
+    ) -> Result<Self, EngineError> {
+        // The window comes first, then the relays and the renderer. Anything
+        // that fails afterwards drops what was built, which closes the window,
+        // stops the relays and shuts the half-built renderer down.
         let window = WallpaperWindow::builder(desc.display.clone()).open()?;
-        let (pointer_relay, pointer_callback) = PointerInputRelay::new(actor.clone(), handle)?;
-        let (shortcut_relay, shortcut_callback) = UserShortcutRelay::new(actor.clone(), handle)?;
-        let (audio_relay, audio_callback) = AudioRequirementRelay::new(actor.clone(), handle)?;
-        let (failure_relay, failure_callback) = RenderFailureRelay::new(actor.clone(), handle)?;
-        let renderer = backend.open_scene(
-            desc,
-            window.metal_layer_ptr(),
-            state.scaling_mode,
-            state.scaling_factor,
-            state.framing,
-            state.render_resolution,
-            Some(Arc::new({
-                let callback = first_frame_callback.clone();
-                move || callback(handle)
-            })),
-            Some(pointer_callback),
-            Some(shortcut_callback),
-            Some(audio_callback),
-            Some(failure_callback),
-        )?;
-        let descriptor_state = SceneRuntimeState::try_from(desc)?;
-        let mut runtime = Self {
-            last_media: None,
-            desc: desc.clone(),
+        let opened = OpenedRenderer::open(
+            backend,
+            &first_frame_callback,
             handle,
-            first_frame_callback,
+            desc,
+            &state,
+            RenderScale(RenderScale::NATIVE),
+            window.metal_layer_ptr(),
+            &actor,
+        )?;
+        Ok(Self::assemble(Some(window), opened, handle, desc, &state, first_frame_callback, actor, 1))
+    }
+
+    fn open_in_registry_with(
+        registry: &SceneRegistry,
+        prepare: impl FnOnce() -> Result<Self, EngineError>,
+    ) -> Result<Self, EngineError> {
+        let mut runtime = prepare()?;
+        runtime.renderer.publish_runtime_state(registry, runtime.handle.raw(), runtime.desc.display.display_id);
+        Ok(runtime)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_replacement(
+        backend: OweBackend,
+        first_frame_callback: FirstFrameCallback,
+        handle: SceneHandle,
+        desc: &SceneDesc,
+        state: SceneRuntimeState,
+        actor: WeakActorRef<EngineActor>,
+        previous: &mut Self,
+    ) -> Result<Self, EngineError> {
+        Self::open_replacement_with(previous,
+            || Self::prepare_open(backend, first_frame_callback, handle, desc, state, actor),
+            |renderer, scale| renderer.set_render_scale(scale))
+    }
+
+    fn open_replacement_with(
+        previous: &mut Self,
+        prepare: impl FnOnce() -> Result<Self, EngineError>,
+        restore_scale: impl FnOnce(&mut OweScene, f64) -> Result<(), EngineError>,
+    ) -> Result<Self, EngineError> {
+        // Readiness first. The candidate has no withdrawal ownership until
+        // continue_from transfers the old registration under the same handle.
+        // In particular, a failed scale restoration cannot touch the old row.
+        let mut candidate = prepare()?;
+        candidate.continue_from_with(previous, restore_scale)?;
+        Ok(candidate)
+    }
+
+    /// Puts a scene together from an opened renderer. The stored descriptor is
+    /// the one given, with the one-shot shader refresh used up.
+    #[allow(clippy::too_many_arguments)]
+    fn assemble(
+        window: Option<WallpaperWindow>,
+        opened: OpenedRenderer,
+        handle: SceneHandle,
+        desc: &SceneDesc,
+        state: &SceneRuntimeState,
+        first_frame_callback: FirstFrameCallback,
+        actor: WeakActorRef<EngineActor>,
+        generation: u64,
+    ) -> Self {
+        let OpenedRenderer { renderer, pointer_relay, shortcut_relay, audio_relay, failure_relay } =
+            opened;
+        let mut stored = desc.clone();
+        stored.mark_shader_refresh_complete();
+        let pointer_input = NativePointerInputState::new(pointer_relay.renderer_instance.clone());
+        Self {
+            last_media: None,
+            desc: stored,
+            handle,
             renderer,
-            pointer_input: NativePointerInputState::new(pointer_relay.renderer_instance.clone()),
+            actor,
             pointer_relay,
             shortcut_relay,
             audio_relay,
             failure_relay,
             surface_recovery: SurfaceRecovery::default(),
             requires_audio: false,
-            actor,
+            pointer_input,
+            framing: state.framing,
             scaling_mode: state.scaling_mode,
             scaling_factor: state.scaling_factor,
-            framing: state.framing,
             render_resolution: state.render_resolution,
-            render_scale: RenderScale(RenderScale::NATIVE),
             audio_response_enabled: state.audio_response_enabled,
-            media_integration_enabled: state.media_integration_enabled,
-            paused: state.paused,
             audio_volume: state.audio_volume,
             audio_muted: state.audio_muted,
-            property_override_json: state.property_override_json,
-            window: Some(window),
-            generation: 1,
+            property_override_json: state.property_override_json.clone(),
+            first_frame_callback,
+            render_scale: RenderScale(RenderScale::NATIVE),
+            media_integration_enabled: state.media_integration_enabled,
+            paused: state.paused,
+            window,
+            generation,
+        }
+    }
+
+    /// Takes over the values a scene keeps beyond its renderer.
+    fn apply_state(&mut self, state: SceneRuntimeState) {
+        self.scaling_mode = state.scaling_mode;
+        self.scaling_factor = state.scaling_factor;
+        self.framing = state.framing;
+        self.render_resolution = state.render_resolution;
+        self.audio_response_enabled = state.audio_response_enabled;
+        self.media_integration_enabled = state.media_integration_enabled;
+        self.paused = state.paused;
+        self.audio_volume = state.audio_volume;
+        self.audio_muted = state.audio_muted;
+        self.property_override_json = state.property_override_json;
+    }
+
+    /// For a scene opened in a new window to take the place of `previous`
+    /// after an in-place reconfigure failed: it keeps counting renderer
+    /// generations for the handle, is handed the render scale in force (which
+    /// only the old scene object knew) and takes over the registry entry, so
+    /// closing the old scene cannot withdraw it. Nothing is taken over when
+    /// the scale is refused.
+    #[allow(dead_code)]
+    pub fn continue_from(&mut self, previous: &mut SceneRuntime) -> Result<(), EngineError> {
+        self.continue_from_with(previous, |renderer, scale| renderer.set_render_scale(scale))
+    }
+
+    fn continue_from_with(
+        &mut self,
+        previous: &mut Self,
+        restore_scale: impl FnOnce(&mut OweScene, f64) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        previous.render_scale.restore(|scale| restore_scale(&mut self.renderer, scale))?;
+        self.render_scale = previous.render_scale;
+        self.generation = previous.generation.saturating_add(1);
+        self.renderer
+            .inherit_runtime_registration(&mut previous.renderer, self.desc.display.display_id);
+        Ok(())
+    }
+
+    /// Replaces the renderer by one opened for `desc`, in the same window.
+    ///
+    /// A fresh layer goes under the view first, because the renderer still
+    /// drawing on the old one would contend for its drawables. The carried
+    /// state is the one of R78 to R80, the render scale in force is handed to
+    /// the new renderer, and the old renderer is closed only once the new one
+    /// exists and has taken over the scene's registry entry. Any failure
+    /// leaves this scene exactly as it was, previous layer back in view.
+    fn rebuild_for_desc(
+        &mut self,
+        backend: OweBackend,
+        desc: &SceneDesc,
+        render_resolution: Option<(u32, u32)>,
+    ) -> Result<(), EngineError> {
+        let mut state = self.runtime_state();
+        state.inherit_descriptor_transition(&self.desc, desc)?;
+        state.render_resolution = render_resolution;
+        let Some(window) = self.window.as_mut() else {
+            return Err(EngineError::Platform("wallpaper window is already closed".to_string()));
         };
-        runtime.desc = stored_desc;
-        runtime.apply_runtime_properties(&descriptor_state)?;
-        // Published last, so a reader never sees a scene whose properties have
-        // not been applied yet. Withdrawal is the scene's own responsibility
-        // and happens on close and on drop.
-        runtime.renderer.publish_runtime_state(
-            &crate::SceneRegistry::shared(),
-            handle.raw(),
-            desc.display.display_id,
-        );
-        Ok(runtime)
+        let swap = window.begin_layer_swap(desc.display.clone(), LayerInstall::Replace)?;
+        let opened = match OpenedRenderer::open(
+            backend,
+            &self.first_frame_callback,
+            self.handle,
+            desc,
+            &state,
+            self.render_scale,
+            swap.layer_ptr(),
+            &self.actor,
+        ) {
+            Ok(opened) => opened,
+            Err(error) => {
+                restore_previous_layer(window, swap, &error);
+                return Err(error);
+            }
+        };
+
+        let OpenedRenderer { renderer, pointer_relay, shortcut_relay, audio_relay, failure_relay } =
+            opened;
+        let mut replaced = std::mem::replace(&mut self.renderer, renderer);
+        self.renderer.inherit_runtime_registration(&mut replaced, desc.display.display_id);
+        swap.finish();
+        self.pointer_input = NativePointerInputState::new(pointer_relay.renderer_instance.clone());
+        self.pointer_relay = pointer_relay;
+        self.shortcut_relay = shortcut_relay;
+        self.audio_relay = audio_relay;
+        self.failure_relay = failure_relay;
+        self.requires_audio = false;
+        self.last_media = None;
+        self.surface_recovery = SurfaceRecovery::default();
+        self.generation = self.generation.saturating_add(1);
+        self.apply_state(state);
+        self.desc = desc.clone();
+        self.desc.mark_shader_refresh_complete();
+        if let Err(error) = replaced.close() {
+            log::warn!("[wallpaper-core display] failed to close replaced display runtime: {error}");
+        }
+        Ok(())
     }
 
     /// Renderer work counters for this surface, with the identity needed to
@@ -570,6 +854,8 @@ impl SceneRuntime {
         })
     }
 
+    /// The mapping from the cursor to the scene changes with the scaling, so
+    /// pointer delivery restarts before the renderer is asked.
     pub fn set_scaling_mode(&mut self, mode: ScalingMode) -> Result<(), EngineError> {
         self.pointer_input.delivery.invalidate();
         self.renderer.set_scaling_mode(mode)?;
@@ -635,11 +921,14 @@ impl SceneRuntime {
         self.render_scale.set(scale, |scale| self.renderer.set_render_scale(scale))
     }
 
+    /// Tells the renderer even when the value is unchanged. Pointer delivery
+    /// restarts only when the pause actually changed, so a resumed scene is
+    /// sampled afresh.
     pub fn set_paused(&mut self, paused: bool) -> Result<(), EngineError> {
+        self.renderer.set_paused(paused)?;
         if self.paused != paused {
             self.pointer_input.delivery.invalidate();
         }
-        self.renderer.set_paused(paused)?;
         self.paused = paused;
         Ok(())
     }
@@ -697,123 +986,8 @@ impl SceneRuntime {
         width: u32,
         height: u32,
     ) -> Result<(), EngineError> {
-        self.rebuild_for_desc(backend, &self.desc.clone(), Some((width, height)))
-    }
-
-    fn rebuild_for_desc(
-        &mut self,
-        backend: OweBackend,
-        desc: &SceneDesc,
-        render_resolution: Option<(u32, u32)>,
-    ) -> Result<(), EngineError> {
-        self.pointer_input.delivery.invalidate();
-        let mut state = self.runtime_state();
-        let current_descriptor_state = SceneRuntimeState::try_from(&self.desc)?;
-        let descriptor_state = SceneRuntimeState::try_from(desc)?;
-        let mut stored_desc = desc.clone();
-        stored_desc.mark_shader_refresh_complete();
-        let inheritance = if self.desc.same_wallpaper(desc) {
-            DescriptorInheritance::PreserveRuntimeOverrides
-        } else {
-            DescriptorInheritance::UseDescriptorDefaults
-        };
-        state.inherit_descriptor_defaults(
-            &current_descriptor_state,
-            &descriptor_state,
-            inheritance,
-        );
-        let render_scale = self.render_scale;
-        let first_frame_callback = self.renderer_first_frame_callback();
-        let (pointer_relay, pointer_callback) = PointerInputRelay::new(self.actor.clone(), self.handle)?;
-        // Both open paths, or a wallpaper switch on this display would
-        // silently un-wire the buttons the user just used.
-        let (shortcut_relay, shortcut_callback) =
-            UserShortcutRelay::new(self.actor.clone(), self.handle)?;
-        let (audio_relay, audio_callback) = AudioRequirementRelay::new(self.actor.clone(), self.handle)?;
-        let (failure_relay, failure_callback) =
-            RenderFailureRelay::new(self.actor.clone(), self.handle)?;
-        let window = self.window.as_mut().ok_or_else(|| {
-            EngineError::Platform("wallpaper window is already closed".to_string())
-        })?;
-
-        // Swap the CAMetalLayer BEFORE creating the new OWE scene so that
-        // each SceneWallpaper's VkSurface references its own CAMetalLayer.
-        // If we reused the old layer via `update_display`, the new VkSurface
-        // would be created on the same CAMetalLayer that the old VkSurface
-        // still references (it's destroyed only in `old_renderer.close()`
-        // below), violating the VK_EXT_metal_surface invariant that only
-        // one VkSurfaceKHR can be associated with a CAMetalLayer at a time.
-        //
-        // The old CAMetalLayer remains alive via MoltenVK's retain through
-        // the old VkSurface, and is deallocated when `old_renderer.close()`
-        // destroys that surface.
-        //
-        // The swap is a transaction. The window keeps the old layer until the
-        // new renderer exists, because a replacement that fails leaves the old
-        // renderer in place, drawing on that layer: it has to be back under
-        // the view then, or the display stays on the empty new layer.
-        let swap = window.begin_layer_swap(desc.display.clone(), LayerInstall::Replace)?;
-
-        let mut renderer = match backend.open_scene(
-            desc,
-            swap.layer_ptr(),
-            state.scaling_mode,
-            state.scaling_factor,
-            state.framing,
-            render_resolution,
-            Some(first_frame_callback),
-            Some(pointer_callback),
-            Some(shortcut_callback),
-            Some(audio_callback),
-            Some(failure_callback),
-        ) {
-            Ok(renderer) => renderer,
-            Err(error) => {
-                restore_previous_layer(window, swap, &error);
-                return Err(error);
-            }
-        };
-        // A new renderer rasterizes at native size whichever wallpaper it
-        // opens, so the scale in force is handed over with the rest of the
-        // runtime state rather than left for the next quality change.
-        if let Err(error) = state
-            .apply_to(&mut renderer, &descriptor_state)
-            .and_then(|()| render_scale.restore(|scale| renderer.set_render_scale(scale)))
-        {
-            // Closed first, so nothing but the window holds the new layer
-            // when it is taken out of the view.
-            let _ = renderer.close();
-            restore_previous_layer(window, swap, &error);
-            return Err(error);
-        }
-        swap.finish();
-        let mut old_renderer = std::mem::replace(&mut self.renderer, renderer);
-        self.renderer.inherit_runtime_registration(&mut old_renderer, desc.display.display_id);
-        self.last_media = None;
-        self.generation = self.generation.saturating_add(1);
-        let old_relay = std::mem::replace(&mut self.pointer_relay, pointer_relay);
-        drop(std::mem::replace(&mut self.shortcut_relay, shortcut_relay));
-        // The new renderer's scene has not reported yet; the old one's
-        // requirement must not keep the system-audio tap open for it.
-        drop(std::mem::replace(&mut self.audio_relay, audio_relay));
-        // A report from the renderer being replaced must not be taken for the
-        // new one's, and the new one has failed nothing yet.
-        drop(std::mem::replace(&mut self.failure_relay, failure_relay));
-        self.surface_recovery = SurfaceRecovery::default();
-        self.requires_audio = false;
-        self.pointer_input = NativePointerInputState::new(self.pointer_relay.renderer_instance.clone());
-        old_relay.stop();
-        self.desc = stored_desc;
-        self.scaling_mode = state.scaling_mode;
-        self.scaling_factor = state.scaling_factor;
-        self.framing = state.framing;
-        self.render_resolution = render_resolution;
-        self.audio_response_enabled = state.audio_response_enabled;
-        self.media_integration_enabled = state.media_integration_enabled;
-        self.audio_volume = state.audio_volume;
-        self.audio_muted = state.audio_muted;
-        self.property_override_json = state.property_override_json;
-        old_renderer.close()
+        let desc = self.desc.clone();
+        self.rebuild_for_desc(backend, &desc, Some((width, height)))
     }
 
     pub fn replace_wallpaper(
@@ -824,91 +998,56 @@ impl SceneRuntime {
         self.rebuild_for_desc(backend, desc, self.render_resolution)
     }
 
-    pub fn resize_or_rebuild(
-        &mut self,
-        backend: OweBackend,
-        display: DisplayDesc,
-    ) -> Result<(), EngineError> {
-        if self.desc.display == display {
-            return Ok(());
-        }
-        // Note: the fast surface-reconfigure transaction lives in
-        // `run_runtime_refresh_job`'s `ReopenRuntime` branch, not here. This
-        // method is reached only from `RebuildExistingRuntime`, which by
-        // construction means wallpaper-defining fields have changed and a
-        // full scene rebuild is required.
-        let mut desc = self.desc.clone();
-        desc.display = display;
-        self.rebuild_for_desc(backend, &desc, self.render_resolution)
+    /// Moves or re-fits the window for a display whose render surface is the
+    /// same. The renderer, the layer and the drawable are left alone, so a
+    /// wake does not expose the placeholder before the renderer can present.
+    pub fn update_window_display(&mut self, display: DisplayDesc) -> Result<(), EngineError> {
+        self.update_window_display_with(display, |window, display| {
+            let Some(window) = window.as_mut() else {
+                return Err(EngineError::Platform(
+                    "scene runtime has no window during display update".to_string(),
+                ));
+            };
+            window.update_display(display.clone())
+        })
     }
 
-    pub fn update_window_display(&mut self, display: DisplayDesc) -> Result<(), EngineError> {
+    fn update_window_display_with(
+        &mut self,
+        display: DisplayDesc,
+        move_window: impl FnOnce(&mut Option<WallpaperWindow>, &DisplayDesc) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        move_window(&mut self.window, &display)?;
         self.pointer_input.delivery.invalidate();
-        let window = self.window.as_mut().ok_or_else(|| {
-            EngineError::Platform("scene runtime has no window during display update".to_string())
-        })?;
-        window.update_display(display.clone())?;
         self.renderer.update_runtime_display(display.display_id);
+        log::debug!(
+            "[wallpaper-core display] moved window in place: before=[{}] after=[{}]",
+            self.desc.display.desc_label(),
+            display.desc_label()
+        );
         self.desc.display = display;
         Ok(())
     }
 
-    /// Fast-path display reconfiguration. Preserves scene, shaders, render
-    /// graph, audio, and runtime state; only the Vulkan surface, swapchain,
-    /// and presentation passes are rebuilt.
-    ///
-    /// On any failure, returns `Err`; the caller should fall back to
-    /// `rebuild_for_desc`.
     pub fn reconfigure_for_display(
         &mut self,
         backend: OweBackend,
         display: DisplayDesc,
     ) -> Result<(), EngineError> {
+        let _ = backend;
+        let started = std::time::Instant::now();
+        let Some(window) = self.window.as_mut() else {
+            return Err(EngineError::Platform(
+                "scene runtime has no window during reconfigure".to_string(),
+            ));
+        };
         self.pointer_input.delivery.invalidate();
-        let _ = backend; // retained in signature for symmetry with rebuild_for_desc
-        let start = std::time::Instant::now();
-        let runtime_state = self.runtime_state();
-
-        // 1. Pause rendering and release the renderer-side surface.
-        self.renderer.begin_surface_reconfigure()?;
-
-        // 2. Swap the CAMetalLayer under the existing NSWindow.
-        let window = self.window.as_mut().ok_or_else(|| {
-            EngineError::Platform("scene runtime has no window during reconfigure".to_string())
-        })?;
-        let metal_layer = window.update_layer(display.clone())?;
-
-        // 3. Compute render resolution from the new display, or keep explicit override
-        //    if one was set.
-        let (render_width, render_height) = self
-            .render_resolution
-            .unwrap_or((display.width, display.height));
-
-        // 4. Rebuild the Vulkan surface + swapchain + presentation passes from the new
-        //    layer, and resume rendering.
-        self.renderer.finish_surface_reconfigure(
-            metal_layer,
-            display.width,
-            display.height,
-            render_width,
-            render_height,
-            display.scale_factor,
-        )?;
-
-        // 5. OWE resumes after finishing the surface transaction. Preserve an
-        //    already-paused runtime by restoring that state before returning.
-        if runtime_state.paused {
-            self.renderer.set_paused(true)?;
-        }
-
-        // 6. Commit the new descriptor.
-        self.renderer.update_runtime_display(display.display_id);
-        self.desc.display = display;
-        log::debug!(
-            "[wallpaper-core engine] display reconfigure completed in {:?}",
-            start.elapsed()
-        );
-        Ok(())
+        reconfigure_sequence(&mut NativeSurfaceReconfigure {
+            renderer: &mut self.renderer,
+            window,
+            desc: &mut self.desc,
+            started,
+        }, display, self.render_resolution, self.paused)
     }
 
     /// Brings a surface that stopped drawing back, by `step`. Returns the step
@@ -1037,10 +1176,12 @@ impl SceneRuntime {
         &mut self,
         flat_json: Option<String>,
     ) -> Result<(), EngineError> {
-        if let Some(json) = flat_json.as_deref() {
-            self.renderer.set_property_override(json)?;
-        } else {
-            self.renderer.reset_property_override()?;
+        // The renderer drops its record of a previewed document whatever comes
+        // of the rest, and loads the scene again with the document merged over
+        // the project's authored defaults (or with those alone).
+        match flat_json.as_deref() {
+            Some(json) => self.renderer.set_property_override(json)?,
+            None => self.renderer.reset_property_override()?,
         }
         self.property_override_json = flat_json;
         Ok(())
@@ -1067,34 +1208,53 @@ impl SceneRuntime {
         preview_on_scene_of(&self.desc.scene_path, &mut self.renderer, expected_scene_path, flat_json)
     }
 
+    /// Stops the relays, closes the renderer, then closes and releases the
+    /// window. The renderer's own error is returned after the window is gone.
+    /// Closing again is harmless.
     pub fn close(&mut self) -> Result<(), EngineError> {
         self.pointer_relay.stop();
         self.shortcut_relay.stop();
         self.audio_relay.stop();
         self.failure_relay.stop();
         self.requires_audio = false;
-        let backend_result = self.renderer.close();
+        let renderer = self.renderer.close();
         if let Some(mut window) = self.window.take() {
             window.close();
         }
-        backend_result
+        renderer
     }
 
+    /// The live state a successor scene on the same slot inherits.
+    #[must_use]
     pub fn runtime_state(&self) -> SceneRuntimeState {
+        let Self {
+            scaling_mode,
+            scaling_factor,
+            framing,
+            render_resolution,
+            audio_response_enabled,
+            media_integration_enabled,
+            paused,
+            audio_volume,
+            audio_muted,
+            property_override_json,
+            ..
+        } = self;
         SceneRuntimeState {
-            scaling_mode: self.scaling_mode,
-            scaling_factor: self.scaling_factor,
-            framing: self.framing,
-            render_resolution: self.render_resolution,
-            audio_response_enabled: self.audio_response_enabled,
-            media_integration_enabled: self.media_integration_enabled,
-            paused: self.paused,
-            audio_volume: self.audio_volume,
-            audio_muted: self.audio_muted,
-            property_override_json: self.property_override_json.clone(),
+            scaling_mode: *scaling_mode,
+            scaling_factor: *scaling_factor,
+            framing: *framing,
+            render_resolution: *render_resolution,
+            audio_response_enabled: *audio_response_enabled,
+            media_integration_enabled: *media_integration_enabled,
+            paused: *paused,
+            audio_volume: *audio_volume,
+            audio_muted: *audio_muted,
+            property_override_json: property_override_json.clone(),
         }
     }
 
+    /// The state a scene for `desc` takes over from this one.
     pub(crate) fn runtime_state_for_desc(
         &self,
         desc: &SceneDesc,
@@ -1102,22 +1262,6 @@ impl SceneRuntime {
         let mut state = self.runtime_state();
         state.inherit_descriptor_transition(&self.desc, desc)?;
         Ok(state)
-    }
-
-    fn apply_runtime_properties(
-        &mut self,
-        descriptor_state: &SceneRuntimeState,
-    ) -> Result<(), EngineError> {
-        let state = self.runtime_state();
-        state.apply_to(&mut self.renderer, descriptor_state)
-    }
-
-    fn renderer_first_frame_callback(&self) -> crate::owe::backend::FirstFrameCallback {
-        Arc::new({
-            let callback = self.first_frame_callback.clone();
-            let handle = self.handle;
-            move || callback(handle)
-        })
     }
 }
 
@@ -1148,104 +1292,76 @@ fn preview_on_scene_of(
     Ok(PropertyPreview::Shown)
 }
 
+#[cfg(test)]
+impl SceneRuntime {
+    /// A scene that owns no window and drives an uninitialized renderer, for
+    /// tests that need a live scene on a slot. Must be called inside a tokio
+    /// runtime, like every relay.
+    pub(crate) fn windowless_for_test(
+        handle: SceneHandle,
+        desc: &SceneDesc,
+        state: &SceneRuntimeState,
+        actor: WeakActorRef<EngineActor>,
+    ) -> Result<Self, EngineError> {
+        let (pointer_relay, _) = PointerInputRelay::new(actor.clone(), handle)?;
+        let (shortcut_relay, _) = UserShortcutRelay::new(actor.clone(), handle)?;
+        let (audio_relay, _) = AudioRequirementRelay::new(actor.clone(), handle)?;
+        let (failure_relay, _) = RenderFailureRelay::new(actor.clone(), handle)?;
+        let opened = OpenedRenderer {
+            renderer: OweScene::uninitialized_for_test(),
+            pointer_relay,
+            shortcut_relay,
+            audio_relay,
+            failure_relay,
+        };
+        Ok(Self::assemble(None, opened, handle, desc, state, Arc::new(|_| {}), actor, 1))
+    }
+}
+
 impl Drop for SceneRuntime {
     fn drop(&mut self) {
-        let _ = self.close();
+        // A scene that is dropped still closes, and a drop never panics.
+        let closed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = self.close();
+        }));
+        if closed.is_err() {
+            log::warn!("[wallpaper-core display] closing a dropped scene panicked");
+        }
     }
 }
 
 impl SceneRuntimeState {
+    /// Carries this state, which belongs to a scene running `current_desc`,
+    /// over to a scene for `next_desc`. The same wallpaper keeps every live
+    /// value; another one takes the descriptor's scaling, framing and audio
+    /// and media flags, while pause and the explicit render resolution stay.
+    /// The property override follows one rule for both.
     pub(crate) fn inherit_descriptor_transition(
         &mut self,
         current_desc: &SceneDesc,
         next_desc: &SceneDesc,
     ) -> Result<(), EngineError> {
-        let current_descriptor_state = Self::try_from(current_desc)?;
-        let next_descriptor_state = Self::try_from(next_desc)?;
-        let inheritance = if current_desc.same_wallpaper(next_desc) {
-            DescriptorInheritance::PreserveRuntimeOverrides
+        let before = Self::try_from(current_desc)?;
+        let after = Self::try_from(next_desc)?;
+        // An override nobody touched since the running descriptor made it
+        // moves on with the descriptors; an explicit one (a reset too) stays.
+        let live_override = self.property_override_json.take();
+        let override_json = if live_override == before.property_override_json {
+            after.property_override_json.clone()
         } else {
-            DescriptorInheritance::UseDescriptorDefaults
+            live_override
         };
-        self.inherit_descriptor_defaults(
-            &current_descriptor_state,
-            &next_descriptor_state,
-            inheritance,
-        );
-        Ok(())
-    }
-
-    fn apply_to(
-        &self,
-        renderer: &mut OweScene,
-        descriptor_state: &SceneRuntimeState,
-    ) -> Result<(), EngineError> {
-        if self.paused != descriptor_state.paused {
-            renderer.set_paused(self.paused)?;
-        }
-        if self.audio_response_enabled != descriptor_state.audio_response_enabled {
-            renderer.set_audio_response_enabled(self.audio_response_enabled)?;
-        }
-        if self.media_integration_enabled != descriptor_state.media_integration_enabled {
-            renderer.set_media_integration_enabled(self.media_integration_enabled)?;
-        }
-        if self.audio_volume != descriptor_state.audio_volume {
-            renderer.set_audio_volume(self.audio_volume)?;
-        }
-        if self.audio_muted != descriptor_state.audio_muted {
-            renderer.set_audio_muted(self.audio_muted)?;
-        }
-        match self.property_override_update(descriptor_state) {
-            PropertyOverrideUpdate::Unchanged => {}
-            PropertyOverrideUpdate::Apply(json) => renderer.set_property_override(json)?,
-            PropertyOverrideUpdate::Reset => renderer.reset_property_override()?,
+        if current_desc.same_wallpaper(next_desc) {
+            self.property_override_json = override_json;
+        } else {
+            *self = Self {
+                paused: self.paused,
+                render_resolution: self.render_resolution,
+                property_override_json: override_json,
+                ..after
+            };
         }
         Ok(())
-    }
-
-    fn property_override_update<'a>(
-        &'a self,
-        descriptor_state: &SceneRuntimeState,
-    ) -> PropertyOverrideUpdate<'a> {
-        match (
-            self.property_override_json.as_deref(),
-            descriptor_state.property_override_json.as_deref(),
-        ) {
-            (runtime, descriptor) if runtime == descriptor => PropertyOverrideUpdate::Unchanged,
-            (Some(json), _) => PropertyOverrideUpdate::Apply(json),
-            (None, Some(_)) => PropertyOverrideUpdate::Reset,
-            (None, None) => PropertyOverrideUpdate::Unchanged,
-        }
-    }
-
-    fn inherit_descriptor_property_override(
-        &mut self,
-        current_descriptor_state: &SceneRuntimeState,
-        next_descriptor_state: &SceneRuntimeState,
-    ) {
-        if self.property_override_json == current_descriptor_state.property_override_json {
-            self.property_override_json
-                .clone_from(&next_descriptor_state.property_override_json);
-        }
-    }
-
-    fn inherit_descriptor_defaults(
-        &mut self,
-        current_descriptor_state: &SceneRuntimeState,
-        next_descriptor_state: &SceneRuntimeState,
-        inheritance: DescriptorInheritance,
-    ) {
-        self.inherit_descriptor_property_override(current_descriptor_state, next_descriptor_state);
-
-        if inheritance == DescriptorInheritance::UseDescriptorDefaults {
-            self.scaling_mode = next_descriptor_state.scaling_mode;
-            self.scaling_factor = next_descriptor_state.scaling_factor;
-            self.framing = next_descriptor_state.framing;
-            self.audio_response_enabled = next_descriptor_state.audio_response_enabled;
-            self.media_integration_enabled = next_descriptor_state.media_integration_enabled;
-            self.audio_volume = next_descriptor_state.audio_volume;
-            self.audio_muted = next_descriptor_state.audio_muted;
-        }
     }
 }
 
@@ -1253,8 +1369,11 @@ impl TryFrom<&SceneDesc> for SceneRuntimeState {
     type Error = EngineError;
 
     fn try_from(desc: &SceneDesc) -> Result<Self, Self::Error> {
-        // Descriptor values seed runtime state only for first open. Later
-        // reconciliations keep explicit API changes such as property overrides.
+        let property_override_json = desc
+            .property_override_json
+            .as_deref()
+            .map(super::flat_property_document)
+            .transpose()?;
         Ok(Self {
             scaling_mode: desc.scaling_mode,
             scaling_factor: desc.scaling_factor,
@@ -1265,17 +1384,7 @@ impl TryFrom<&SceneDesc> for SceneRuntimeState {
             paused: desc.paused,
             audio_volume: desc.audio_volume,
             audio_muted: desc.audio_muted,
-            property_override_json: desc
-                .property_override_json
-                .as_deref()
-                .map(|json| {
-                    let flat_json = serde_json::from_str::<Value>(json)
-                        .map_err(|e| EngineError::InvalidInput(e.to_string()))?
-                        .flatten()?;
-                    serde_json::to_string(&flat_json)
-                        .map_err(|e| EngineError::InvalidInput(e.to_string()))
-                })
-                .transpose()?,
+            property_override_json,
         })
     }
 }
@@ -1284,6 +1393,7 @@ impl TryFrom<&SceneDesc> for SceneRuntimeState {
 mod tests {
     use super::*;
     use crate::window::MouseButtonTracker;
+    use kameo::actor::Spawn;
 
     #[derive(Debug, PartialEq, Eq)]
     enum ButtonDelivery {
@@ -1817,182 +1927,180 @@ mod tests {
 
     #[test]
     fn scene_runtime_state_initial_uses_descriptor_pause_state() {
-        let desc = crate::project::SceneDesc::builder(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/project.json",
-        )
-        .assets_path("/tmp/assets")
-        .paused(true)
-        .build()
-        .expect("scene should build");
-
-        let state = SceneRuntimeState::try_from(&desc).expect("state should build");
-
-        assert!(state.paused);
+        // CLEANROOM ET48: the seed is used only for a fresh state.
+        let mut desc = framed_scene("/virtual/orchid/scene.json", SceneFraming::CENTERED);
+        for paused in [true, false] {
+            desc.paused = paused;
+            assert_eq!(SceneRuntimeState::try_from(&desc).unwrap().paused, paused);
+        }
     }
 
     #[test]
-    fn property_override_delta_keeps_matching_empty_override_unchanged() {
-        let state = runtime_state(None);
-        let descriptor_state = runtime_state(None);
-
-        assert!(matches!(
-            state.property_override_update(&descriptor_state),
-            PropertyOverrideUpdate::Unchanged
-        ));
+    fn override_correction_says_nothing_when_both_have_no_override() {
+        assert_eq!(override_correction(None, None), None);
     }
 
     #[test]
-    fn property_override_delta_resets_only_when_descriptor_supplies_override() {
-        let state = runtime_state(None);
-        let descriptor_state = runtime_state(Some(r#"{"enabled":true}"#));
-
-        assert!(matches!(
-            state.property_override_update(&descriptor_state),
-            PropertyOverrideUpdate::Reset
-        ));
+    fn override_correction_says_nothing_when_the_documents_agree() {
+        assert_eq!(override_correction(Some(r#"{"a":1}"#), Some(r#"{"a":1}"#)), None);
     }
 
     #[test]
-    fn property_override_delta_applies_runtime_override_when_different() {
-        let state = runtime_state(Some(r#"{"enabled":false}"#));
-        let descriptor_state = runtime_state(Some(r#"{"enabled":true}"#));
+    fn override_correction_removes_only_an_override_the_descriptor_supplied() {
+        assert_eq!(override_correction(None, Some(r#"{"enabled":true}"#)), Some(None));
+    }
 
-        assert!(matches!(
-            state.property_override_update(&descriptor_state),
-            PropertyOverrideUpdate::Apply(r#"{"enabled":false}"#)
-        ));
+    #[test]
+    fn override_correction_applies_a_runtime_document_that_differs() {
+        assert_eq!(
+            override_correction(Some(r#"{"enabled":false}"#), Some(r#"{"enabled":true}"#)),
+            Some(Some(r#"{"enabled":false}"#))
+        );
+        assert_eq!(
+            override_correction(Some(r#"{"enabled":false}"#), None),
+            Some(Some(r#"{"enabled":false}"#))
+        );
+    }
+
+    #[test]
+    fn a_value_is_sent_to_the_renderer_only_when_it_differs_from_the_opened_one() {
+        let mut sent = Vec::new();
+        send_if_changed(3, 3, |v| {
+            sent.push(v);
+            Ok(())
+        })
+        .expect("nothing to send");
+        send_if_changed(4, 3, |v| {
+            sent.push(v);
+            Ok(())
+        })
+        .expect("sent");
+        assert_eq!(sent, vec![4]);
+
+        let failure = send_if_changed(true, false, |_| Err(EngineError::Platform("gone".into())));
+        assert!(failure.is_err(), "a renderer error reaches the open");
+    }
+
+    fn scene_with_override(path: &str, document: Option<&str>) -> SceneDesc {
+        let mut desc = framed_scene(path, SceneFraming::default());
+        desc.property_override_json = document.map(ToOwned::to_owned);
+        desc
     }
 
     #[test]
     fn descriptor_property_override_change_is_not_reset_when_runtime_matches_current_descriptor() {
-        let mut state = runtime_state(None);
-        let current_descriptor_state = runtime_state(None);
-        let next_descriptor_state = runtime_state(Some(r#"{"newproperty24":false}"#));
-
-        state.inherit_descriptor_property_override(
-            &current_descriptor_state,
-            &next_descriptor_state,
-        );
-
-        assert_eq!(
-            state.property_override_json.as_deref(),
-            Some(r#"{"newproperty24":false}"#)
-        );
-        assert!(matches!(
-            state.property_override_update(&next_descriptor_state),
-            PropertyOverrideUpdate::Unchanged
-        ));
+        // CLEANROOM ET49
+        let current = scene_with_override("/virtual/orchid/scene.json", Some(r#"{"tint":0.28}"#));
+        let next = scene_with_override("/virtual/orchid/scene.json", Some(r#"{"lighting":{"gain":0.72},"caption":null}"#));
+        let mut state = SceneRuntimeState::try_from(&current).unwrap();
+        state.inherit_descriptor_transition(&current, &next).unwrap();
+        let expected = super::super::flat_property_document(next.property_override_json.as_deref().unwrap()).unwrap();
+        assert_eq!(state.property_override_json.as_deref(), Some(expected.as_str()));
+        assert_eq!(override_correction(state.property_override_json.as_deref(), Some(&expected)), None);
     }
 
     #[test]
     fn explicit_runtime_property_reset_still_overrides_descriptor_refresh() {
-        let mut state = runtime_state(None);
-        let current_descriptor_state = runtime_state(Some(r#"{"newproperty24":true}"#));
-        let next_descriptor_state = runtime_state(Some(r#"{"newproperty24":false}"#));
+        // CLEANROOM ET50
+        let current = scene_with_override("/virtual/orchid/scene.json", Some(r#"{"tint":0.28}"#));
+        for path in [current.scene_path.as_str(), "/virtual/cobalt/scene.json"] {
+            let next = scene_with_override(path, Some(r#"{"tint":0.91}"#));
+            let mut state = SceneRuntimeState::try_from(&current).unwrap();
+            state.property_override_json = None;
+            state.inherit_descriptor_transition(&current, &next).unwrap();
+            assert_eq!(state.property_override_json, None);
+            let base = SceneRuntimeState::try_from(&next).unwrap();
+            assert_eq!(override_correction(state.property_override_json.as_deref(), base.property_override_json.as_deref()), Some(None));
+        }
+    }
 
-        state.inherit_descriptor_property_override(
-            &current_descriptor_state,
-            &next_descriptor_state,
-        );
+    #[test]
+    fn an_explicit_runtime_override_survives_a_wallpaper_change() {
+        let current_desc = scene_with_override("/tmp/a/project.json", None);
+        let next_desc = scene_with_override("/tmp/b/project.json", Some(r#"{"x":1}"#));
+        let mut state = SceneRuntimeState::try_from(&current_desc).expect("state");
+        state.property_override_json = Some(r#"{"x":9}"#.to_owned());
 
-        assert_eq!(state.property_override_json, None);
-        assert!(matches!(
-            state.property_override_update(&next_descriptor_state),
-            PropertyOverrideUpdate::Reset
-        ));
+        state.inherit_descriptor_transition(&current_desc, &next_desc).expect("transition");
+
+        assert_eq!(state.property_override_json.as_deref(), Some(r#"{"x":9}"#));
     }
 
     #[test]
     fn different_wallpaper_rebuild_uses_next_descriptor_render_defaults() {
-        let mut state = runtime_state(None);
-        state.scaling_mode = ScalingMode::Fill;
-        state.scaling_factor = 1.25;
-        state.audio_response_enabled = true;
-        let mut current_descriptor_state = runtime_state(None);
-        current_descriptor_state.scaling_mode = ScalingMode::Fill;
-        current_descriptor_state.scaling_factor = 1.25;
-        current_descriptor_state.audio_response_enabled = true;
-        let mut next_descriptor_state = runtime_state(None);
-        next_descriptor_state.scaling_mode = ScalingMode::Stretch;
-        next_descriptor_state.scaling_factor = 2.0;
-        next_descriptor_state.audio_response_enabled = false;
-
-        state.inherit_descriptor_defaults(
-            &current_descriptor_state,
-            &next_descriptor_state,
-            DescriptorInheritance::UseDescriptorDefaults,
-        );
-
-        assert_eq!(state.scaling_mode, ScalingMode::Stretch);
-        assert!(
-            (state.scaling_factor - 2.0).abs() <= f64::EPSILON,
-            "expected scaling factor {} to be within f64::EPSILON of 2.0",
-            state.scaling_factor
-        );
-        assert!(!state.audio_response_enabled);
+        // CLEANROOM ET51
+        let current = framed_scene("/virtual/orchid/scene.json", SceneFraming::CENTERED);
+        let mut next = framed_scene("/virtual/cobalt/scene.json", SceneFraming { pan_x: 0.82, pan_y: 0.19 });
+        next.scaling_mode = ScalingMode::Stretch;
+        next.scaling_factor = 0.85;
+        next.audio_response_enabled = true;
+        next.media_integration_enabled = true;
+        next.audio_volume = AudioVolume::try_from(0.43).unwrap();
+        next.audio_muted = true;
+        let mut state = SceneRuntimeState::try_from(&current).unwrap();
+        state.paused = true;
+        state.render_resolution = Some((824, 472));
+        state.inherit_descriptor_transition(&current, &next).unwrap();
+        assert_eq!(state.scaling_mode, next.scaling_mode);
+        assert_eq!(state.scaling_factor, next.scaling_factor);
+        assert_eq!(state.framing, next.framing);
+        assert_eq!(state.audio_response_enabled, next.audio_response_enabled);
+        assert_eq!(state.media_integration_enabled, next.media_integration_enabled);
+        assert_eq!(state.audio_volume, next.audio_volume);
+        assert_eq!(state.audio_muted, next.audio_muted);
+        assert!(state.paused);
+        assert_eq!(state.render_resolution, Some((824, 472)));
     }
 
     #[test]
     fn live_runtime_transition_state_for_new_wallpaper_uses_descriptor_scaling_defaults() {
-        let current_desc = SceneDesc::builder(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/current/project.json",
-        )
-        .assets_path("/tmp/assets")
-        .scaling_mode(ScalingMode::Fill)
-        .scaling_factor(1.25)
-        .build()
-        .expect("current scene should build");
-        let next_desc = SceneDesc::builder(
-            crate::DisplayDesc::new(1, 0, 0, 1920, 1080, 1.0),
-            "/tmp/next/project.json",
-        )
-        .assets_path("/tmp/assets")
-        .scaling_mode(ScalingMode::Fit)
-        .scaling_factor(1.0)
-        .build()
-        .expect("next scene should build");
-        let mut state =
-            SceneRuntimeState::try_from(&current_desc).expect("current state should build");
-
-        state
-            .inherit_descriptor_transition(&current_desc, &next_desc)
-            .expect("transition should build");
-
-        assert_eq!(state.scaling_mode, ScalingMode::Fit);
-        assert!(
-            (state.scaling_factor - 1.0).abs() <= f64::EPSILON,
-            "expected descriptor scaling factor 1.0, got {}",
-            state.scaling_factor
-        );
+        // CLEANROOM ET52: use the live-runtime route, not only seeding.
+        tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(async {
+            let current = framed_scene("/virtual/orchid/scene.json", SceneFraming::CENTERED);
+            let mut next = current.clone();
+            next.scene_path = "/virtual/cobalt/scene.json".into();
+            next.scaling_mode = ScalingMode::Fit;
+            next.scaling_factor = 0.85;
+            let mut state = SceneRuntimeState::try_from(&current).unwrap();
+            state.scaling_mode = ScalingMode::Fill;
+            state.scaling_factor = 1.7;
+            let prepared = EngineActor::prepare();
+            let live = SceneRuntime::windowless_for_test(SceneHandle::new(41), &current, &state, prepared.actor_ref().downgrade()).unwrap();
+            let selected = live.runtime_state_for_desc(&next).unwrap();
+            assert_eq!(selected.scaling_mode, ScalingMode::Fit);
+            assert_eq!(selected.scaling_factor, 0.85);
+        });
     }
 
     #[test]
     fn same_wallpaper_rebuild_preserves_explicit_runtime_render_overrides() {
-        let mut state = runtime_state(None);
-        state.scaling_mode = ScalingMode::Fill;
-        state.scaling_factor = 1.25;
-        state.audio_response_enabled = false;
-        let current_descriptor_state = runtime_state(None);
-        let mut next_descriptor_state = runtime_state(None);
-        next_descriptor_state.scaling_mode = ScalingMode::Stretch;
-        next_descriptor_state.scaling_factor = 2.0;
-        next_descriptor_state.audio_response_enabled = true;
-
-        state.inherit_descriptor_defaults(
-            &current_descriptor_state,
-            &next_descriptor_state,
-            DescriptorInheritance::PreserveRuntimeOverrides,
-        );
-
-        assert_eq!(state.scaling_mode, ScalingMode::Fill);
-        assert!(
-            (state.scaling_factor - 1.25).abs() <= f64::EPSILON,
-            "expected scaling factor {} to be within f64::EPSILON of 1.25",
-            state.scaling_factor
-        );
-        assert!(!state.audio_response_enabled);
+        // CLEANROOM ET53: every carried field differs from its descriptor.
+        let current = framed_scene("/virtual/orchid/scene.json", SceneFraming::CENTERED);
+        let mut state = SceneRuntimeState::try_from(&current).unwrap();
+        state.scaling_mode = ScalingMode::Stretch;
+        state.scaling_factor = 1.65;
+        state.framing = SceneFraming { pan_x: 0.37, pan_y: 0.64 };
+        state.render_resolution = Some((824, 472));
+        state.audio_response_enabled = !current.audio_response_enabled;
+        state.media_integration_enabled = !current.media_integration_enabled;
+        state.audio_volume = AudioVolume::try_from(0.43).unwrap();
+        state.audio_muted = !current.audio_muted;
+        state.paused = !current.paused;
+        state.property_override_json = Some(r#"{"caption":"live"}"#.into());
+        let saved = state.clone();
+        let mut next = current.clone();
+        next.display.width += 128;
+        state.inherit_descriptor_transition(&current, &next).unwrap();
+        assert_eq!(state.scaling_mode, saved.scaling_mode);
+        assert_eq!(state.scaling_factor, saved.scaling_factor);
+        assert_eq!(state.framing, saved.framing);
+        assert_eq!(state.render_resolution, saved.render_resolution);
+        assert_eq!(state.audio_response_enabled, saved.audio_response_enabled);
+        assert_eq!(state.media_integration_enabled, saved.media_integration_enabled);
+        assert_eq!(state.audio_volume, saved.audio_volume);
+        assert_eq!(state.audio_muted, saved.audio_muted);
+        assert_eq!(state.paused, saved.paused);
+        assert_eq!(state.property_override_json, saved.property_override_json);
     }
 
     fn framed_scene(path: &str, framing: SceneFraming) -> SceneDesc {
@@ -2005,69 +2113,39 @@ mod tests {
 
     #[test]
     fn same_wallpaper_transition_keeps_the_live_framing() {
-        let centred = SceneFraming::default();
-        let dragged = SceneFraming {
-            pan_x: 0.2,
-            pan_y: 0.8,
-        };
-        let current_desc = framed_scene("/tmp/current/project.json", centred);
-        let mut next_display = current_desc.clone();
-        next_display.display = crate::DisplayDesc::new(2, 1920, 0, 2560, 1440, 2.0);
-        next_display.paused = true;
-        let mut state =
-            SceneRuntimeState::try_from(&current_desc).expect("current state should build");
-        state.framing = dragged;
-
-        state
-            .inherit_descriptor_transition(&current_desc, &next_display)
-            .expect("transition should build");
-
-        assert_eq!(state.framing, dragged);
+        // CLEANROOM ET54
+        let current = framed_scene("/virtual/orchid/scene.json", SceneFraming::CENTERED);
+        let mut next = current.clone();
+        next.display.display_id = 203;
+        next.paused = !current.paused;
+        let mut state = SceneRuntimeState::try_from(&current).unwrap();
+        state.framing = SceneFraming { pan_x: 0.37, pan_y: 0.64 };
+        state.inherit_descriptor_transition(&current, &next).unwrap();
+        assert_eq!(state.framing, SceneFraming { pan_x: 0.37, pan_y: 0.64 });
+        assert_eq!(state.paused, current.paused);
     }
 
     #[test]
     fn different_wallpaper_transition_takes_the_next_descriptors_framing() {
-        let dragged = SceneFraming {
-            pan_x: 0.2,
-            pan_y: 0.8,
-        };
-        let next_framing = SceneFraming {
-            pan_x: 0.9,
-            pan_y: 0.1,
-        };
-        let current_desc = framed_scene("/tmp/current/project.json", SceneFraming::default());
-        let next_desc = framed_scene("/tmp/next/project.json", next_framing);
-        let mut state =
-            SceneRuntimeState::try_from(&current_desc).expect("current state should build");
-        state.framing = dragged;
-
-        state
-            .inherit_descriptor_transition(&current_desc, &next_desc)
-            .expect("transition should build");
-
-        assert_eq!(state.framing, next_framing);
+        // CLEANROOM ET55
+        let current = framed_scene("/virtual/orchid/scene.json", SceneFraming::CENTERED);
+        let next = framed_scene("/virtual/cobalt/scene.json", SceneFraming { pan_x: 0.82, pan_y: 0.19 });
+        let mut state = SceneRuntimeState::try_from(&current).unwrap();
+        state.framing = SceneFraming { pan_x: 0.37, pan_y: 0.64 };
+        state.inherit_descriptor_transition(&current, &next).unwrap();
+        assert_eq!(state.framing, next.framing);
     }
 
     #[test]
     fn a_different_wallpaper_with_an_equal_framing_drops_the_dragged_position() {
-        let framing = SceneFraming {
-            pan_x: 0.3,
-            pan_y: 0.3,
-        };
-        let current_desc = framed_scene("/tmp/current/project.json", framing);
-        let next_desc = framed_scene("/tmp/next/project.json", framing);
-        let mut state =
-            SceneRuntimeState::try_from(&current_desc).expect("current state should build");
-        state.framing = SceneFraming {
-            pan_x: 0.9,
-            pan_y: 0.9,
-        };
-
-        state
-            .inherit_descriptor_transition(&current_desc, &next_desc)
-            .expect("transition should build");
-
-        assert_eq!(state.framing, framing);
+        // CLEANROOM ET56
+        let requested = SceneFraming { pan_x: 0.46, pan_y: 0.58 };
+        let current = framed_scene("/virtual/orchid/scene.json", requested);
+        let next = framed_scene("/virtual/cobalt/scene.json", requested);
+        let mut state = SceneRuntimeState::try_from(&current).unwrap();
+        state.framing = SceneFraming { pan_x: 0.73, pan_y: 0.24 };
+        state.inherit_descriptor_transition(&current, &next).unwrap();
+        assert_eq!(state.framing, requested);
     }
 
     #[test]
@@ -2109,7 +2187,7 @@ mod tests {
 
     #[test]
     fn paused_runtime_requires_pause_restore_after_surface_reconfigure() {
-        let mut state = runtime_state(None);
+        let mut state = cleanroom_et57(None);
         state.paused = true;
 
         assert!(state.paused);
@@ -2117,7 +2195,7 @@ mod tests {
 
     #[test]
     fn running_runtime_does_not_require_pause_restore_after_surface_reconfigure() {
-        let state = runtime_state(None);
+        let state = cleanroom_et57(None);
 
         assert!(!state.paused);
     }
@@ -2190,18 +2268,242 @@ mod tests {
         assert!(result.is_err(), "the caller has to roll the rebuild back, not keep a wrong-sized renderer");
     }
 
-    fn runtime_state(property_override_json: Option<&str>) -> SceneRuntimeState {
-        SceneRuntimeState {
-            scaling_mode: ScalingMode::Fit,
-            scaling_factor: 1.0,
-            framing: SceneFraming::default(),
-            render_resolution: None,
-            audio_response_enabled: true,
-            media_integration_enabled: false,
-            paused: false,
-            audio_volume: AudioVolume::try_from(1.0).expect("volume should be valid"),
-            audio_muted: false,
-            property_override_json: property_override_json.map(ToOwned::to_owned),
+    fn cleanroom_et57(document: Option<&str>) -> SceneRuntimeState {
+        // CLEANROOM ET57: independent descriptor seed for the retained tests.
+        SceneRuntimeState::try_from(&scene_with_override("/virtual/orchid/scene.json", document)).unwrap()
+    }
+
+    fn candidate(display_id: u32, paused: bool) -> SceneRuntime {
+        let (prepared, _) = prepared_empty_actor();
+        let mut desc = framed_scene("/virtual/orchid/scene.json", SceneFraming::CENTERED);
+        desc.display.display_id = display_id;
+        desc.paused = paused;
+        SceneRuntime::windowless_for_test(SceneHandle::new(73), &desc, &SceneRuntimeState::try_from(&desc).unwrap(), prepared.actor_ref().downgrade()).unwrap()
+    }
+
+    fn rows(registry: &SceneRegistry) -> Vec<(u64, u32)> {
+        registry.reports().iter().map(|r| (r.handle, r.display_id)).collect()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn window_only_move_preserves_renderer_generation_and_first_frame_callback() {
+        let registry = SceneRegistry::new();
+        let mut scene = candidate(87, false);
+        scene.renderer.publish_runtime_state(&registry, 73, 87);
+        let original = scene.desc.clone();
+        let token = scene.renderer_instance();
+        let presentations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = presentations.clone();
+        scene.first_frame_callback = Arc::new(move |_| { seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed); });
+        let mut display = original.display.clone();
+        display.x = 101;
+        display.y = -209;
+        display.display_id = 203;
+        let mut attempted = Vec::new();
+        scene.update_window_display_with(display.clone(), |_, desired| {
+            attempted.push(desired.clone());
+            Ok(())
+        }).unwrap();
+        assert_eq!(attempted, vec![display.clone()]);
+        assert_eq!(scene.desc.display, display);
+        assert!(Arc::ptr_eq(&token, &scene.renderer_instance()));
+        assert_eq!(scene.generation, 1);
+        assert_eq!(presentations.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(rows(&registry), vec![(73, 203)]);
+        let before_failure = scene.desc.clone();
+        let error = scene.update_window_display_with(original.display, |_, _| Err(EngineError::Platform("move refused".into()))).unwrap_err();
+        assert!(matches!(error, EngineError::Platform(text) if text == "move refused"));
+        assert_eq!(scene.desc, before_failure);
+        assert!(Arc::ptr_eq(&token, &scene.renderer_instance()));
+        assert_eq!(rows(&registry), vec![(73, 203)]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn refused_fallback_scale_never_takes_or_withdraws_the_old_registration() {
+        let registry = SceneRegistry::new();
+        let mut old = candidate(87, true);
+        old.renderer.publish_runtime_state(&registry, old.handle.raw(), 87);
+        old.render_scale.set(0.43, |_| Ok(())).unwrap();
+        old.generation = 8;
+        let old_desc = old.desc.clone();
+        let mut observed_during_restore = Vec::new();
+        let result = SceneRuntime::open_replacement_with(&mut old, || Ok(candidate(203, true)), |_, scale| {
+            assert_eq!(scale, 0.43);
+            observed_during_restore = rows(&registry);
+            Err(EngineError::Render("refused fallback scale".into()))
+        });
+        assert!(matches!(result, Err(EngineError::Render(text)) if text == "refused fallback scale"));
+        assert_eq!(observed_during_restore, vec![(73, 87)], "candidate must remain unpublished through fallible restoration");
+        assert_eq!(rows(&registry), vec![(73, 87)], "failed candidate drop must not withdraw the old row");
+        assert_eq!(old.desc, old_desc);
+        assert_eq!(old.generation, 8);
+        assert_eq!(old.render_scale.0, 0.43);
+        old.close().unwrap();
+        assert!(rows(&registry).is_empty());
+        old.close().unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn ready_fallback_hands_off_same_handle_before_old_close_and_drop() {
+        let registry = SceneRegistry::new();
+        let mut old = candidate(87, true);
+        old.renderer.publish_runtime_state(&registry, 73, 87);
+        old.render_scale.set(0.43, |_| Ok(())).unwrap();
+        old.generation = 8;
+        let mut received = None;
+        let mut new = SceneRuntime::open_replacement_with(&mut old, || Ok(candidate(203, true)), |_, scale| {
+            received = Some(scale);
+            assert_eq!(rows(&registry), vec![(73, 87)]);
+            Ok(())
+        }).unwrap();
+        assert_eq!(received, Some(0.43));
+        assert_eq!(new.render_scale.0, 0.43);
+        assert_eq!(new.generation, 9);
+        assert!(new.paused);
+        assert_eq!(rows(&registry), vec![(73, 203)]);
+        old.close().unwrap();
+        drop(old);
+        assert_eq!(rows(&registry), vec![(73, 203)]);
+        new.close().unwrap();
+        assert!(rows(&registry).is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_carried_state_candidate_preparation_keeps_the_old_registry_row() {
+        let registry = SceneRegistry::new();
+        let mut old = candidate(87, false);
+        old.renderer.publish_runtime_state(&registry, 73, 87);
+        let result = SceneRuntime::open_replacement_with(&mut old, || {
+            let mut candidate = candidate(203, false);
+            let mut invalid = candidate.desc.clone();
+            invalid.property_override_json = Some(r#"{"not_a_leaf":[]}"#.into());
+            let state = candidate.runtime_state();
+            catch_up_with_state(&mut candidate.renderer, &invalid, &state)?;
+            Ok(candidate)
+        }, |_, _| panic!("preparation failed before scale"));
+        assert!(matches!(result, Err(EngineError::InvalidInput(_))));
+        assert_eq!(rows(&registry), vec![(73, 87)]);
+    }
+
+    struct RecordingSurface<'a> {
+        scene: &'a mut SceneRuntime,
+        fail: Option<&'static str>,
+        events: Vec<&'static str>,
+        finished: Option<(u32, u32, u32, u32, f64)>,
+    }
+
+    impl RecordingSurface<'_> {
+        fn stage(&mut self, name: &'static str) -> Result<(), EngineError> {
+            self.events.push(name);
+            if self.fail == Some(name) { Err(EngineError::Render(format!("refused {name}"))) } else { Ok(()) }
+        }
+    }
+
+    impl SurfaceReconfigure for RecordingSurface<'_> {
+        type Layer = ();
+        fn begin(&mut self) -> Result<(), EngineError> { self.stage("begin") }
+        fn layer(&mut self, _: &DisplayDesc) -> Result<(), EngineError> { self.stage("layer") }
+        fn finish(&mut self, _: (), display: &DisplayDesc, render: (u32, u32)) -> Result<(), EngineError> {
+            self.stage("finish")?;
+            self.finished = Some((display.width, display.height, render.0, render.1, display.scale_factor));
+            Ok(())
+        }
+        fn pause(&mut self) -> Result<(), EngineError> { self.stage("pause") }
+        fn commit(&mut self, display: DisplayDesc) {
+            self.events.push("commit");
+            self.scene.renderer.update_runtime_display(display.display_id);
+            self.scene.desc.display = display;
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn production_surface_sequence_orders_running_and_paused_commits_and_sizes() {
+        for paused in [false, true] {
+            for explicit in [None, Some((824, 472))] {
+                let registry = SceneRegistry::new();
+                let mut scene = candidate(87, paused);
+                scene.renderer.publish_runtime_state(&registry, 73, 87);
+                let display = DisplayDesc::new(203, -613, 137, 2624, 1472, 1.5);
+                let mut sequence = RecordingSurface { scene: &mut scene, fail: None, events: Vec::new(), finished: None };
+                reconfigure_sequence(&mut sequence, display.clone(), explicit, paused).unwrap();
+                assert_eq!(sequence.events, if paused { vec!["begin", "layer", "finish", "pause", "commit"] } else { vec!["begin", "layer", "finish", "commit"] });
+                let render = explicit.unwrap_or((2624, 1472));
+                assert_eq!(sequence.finished, Some((2624, 1472, render.0, render.1, 1.5)));
+                assert_eq!(scene.desc.display, display);
+                assert_eq!(scene.paused, paused);
+                assert_eq!(rows(&registry), vec![(73, 203)]);
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn every_failed_surface_stage_can_handoff_a_ready_fallback_with_carried_state() {
+        for paused in [false, true] {
+            for resolution in [None, Some((824, 472))] {
+                for failure in ["begin", "layer", "finish", "pause"] {
+                    if failure == "pause" && !paused { continue; }
+                    let registry = SceneRegistry::new();
+                    let mut old = candidate(87, paused);
+                    old.render_resolution = resolution;
+                    old.render_scale.set(0.43, |_| Ok(())).unwrap();
+                    old.generation = 8;
+                    old.renderer.publish_runtime_state(&registry, 73, 87);
+                    let mut next = old.desc.clone();
+                    next.display = DisplayDesc::new(203, 0, 0, 2624, 1472, 1.5);
+                    let carried = old.runtime_state_for_desc(&next).unwrap();
+                    let mut surface = RecordingSurface { scene: &mut old, fail: Some(failure), events: Vec::new(), finished: None };
+                    reconfigure_sequence(&mut surface, next.display.clone(), resolution, paused).unwrap_err();
+                    let actor = old.actor.clone();
+                    let mut new = SceneRuntime::open_replacement_with(&mut old,
+                        || SceneRuntime::windowless_for_test(SceneHandle::new(73), &next, &carried, actor),
+                        |_, scale| {
+                            assert_eq!(scale, 0.43);
+                            assert_eq!(rows(&registry), vec![(73, 87)]);
+                            Ok(())
+                        }).unwrap();
+                    assert_eq!(new.generation, 9);
+                    assert_eq!(new.render_resolution, resolution);
+                    assert_eq!(new.render_scale.0, 0.43);
+                    assert_eq!(new.paused, paused);
+                    assert_eq!(rows(&registry), vec![(73, 203)]);
+                    old.close().unwrap();
+                    drop(old);
+                    assert_eq!(rows(&registry), vec![(73, 203)]);
+                    new.close().unwrap();
+                    assert!(rows(&registry).is_empty());
+                }
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn production_surface_failures_stop_before_commit_and_failed_fallback_keeps_ownership() {
+        for paused in [false, true] {
+            for explicit in [None, Some((824, 472))] {
+                for failure in ["begin", "layer", "finish", "pause"] {
+                    if failure == "pause" && !paused { continue; }
+                    let registry = SceneRegistry::new();
+                    let mut scene = candidate(87, paused);
+                    scene.render_scale.set(0.43, |_| Ok(())).unwrap();
+                    scene.renderer.publish_runtime_state(&registry, 73, 87);
+                    let before = scene.desc.clone();
+                    let mut surface = RecordingSurface { scene: &mut scene, fail: Some(failure), events: Vec::new(), finished: None };
+                    let error = reconfigure_sequence(&mut surface, DisplayDesc::new(203, 0, 0, 2624, 1472, 1.5), explicit, paused).unwrap_err();
+                    assert!(matches!(error, EngineError::Render(text) if text == format!("refused {failure}")));
+                    let order = ["begin", "layer", "finish", "pause"];
+                    let failed_index = order.iter().position(|s| *s == failure).unwrap();
+                    assert_eq!(surface.events, order[..=failed_index]);
+                    assert_eq!(scene.desc, before);
+                    assert_eq!(rows(&registry), vec![(73, 87)]);
+                    // The R76 fallback is the production replacement factory.
+                    // This models refusal after a potentially destructive release;
+                    // preservation asserted here is metadata/ownership, NOT pixels.
+                    let result = SceneRuntime::open_replacement_with(&mut scene, || Ok(candidate(203, paused)), |_, _| Err(EngineError::Render("fallback scale refusal".into())));
+                    assert!(result.is_err());
+                    assert_eq!(scene.desc, before);
+                    assert_eq!(rows(&registry), vec![(73, 87)]);
+                }
+            }
         }
     }
 }

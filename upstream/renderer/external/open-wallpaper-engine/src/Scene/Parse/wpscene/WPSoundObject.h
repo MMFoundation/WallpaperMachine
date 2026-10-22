@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec p1-scene-structure.md; written without access to the original source.
 #pragma once
 #include <cstdint>
 #include <unordered_map>
@@ -17,7 +18,6 @@ namespace wpscene
 {
 
 struct WPSoundObject {
-    int32_t                  id { 0 };
     std::string              playbackmode { "loop" };
     float                    maxtime { 10.0f };
     float                    mintime { 0.0f };
@@ -33,34 +33,41 @@ struct WPSoundObject {
     nlohmann::json           field_bindings;
 
     bool FromJson(const nlohmann::json& json, fs::VFS&) {
-        // A slider-bound volume arrives as {"user": …, "value": …} rather than
-        // a number. Reading only the number kept the author's default and left
-        // the user's own slider doing nothing to this sound.
-        if (json.contains("volume") && json.at("volume").is_object()) {
-            GET_JSON_NAME_VALUE_NOWARN(json.at("volume"), "value", volume);
-            if (json.at("volume").contains("user") && json.at("volume").at("user").is_string()) {
-                volume_user = json.at("volume").at("user").get<std::string>();
+        if (! json.is_object()) return false;
+        // The file list is the object's reason to exist: without an array of
+        // names there is nothing to play.
+        const auto files = json.find("sound");
+        if (files == json.end() || ! files->is_array()) return false;
+        sound.clear();
+        for (const auto& entry : *files) {
+            if (entry.is_string() && ! entry.get_ref<const std::string&>().empty()) {
+                sound.push_back(entry.get<std::string>());
             }
-        } else {
-            GET_JSON_NAME_VALUE(json, "volume", volume);
         }
-        GET_JSON_NAME_VALUE_NOWARN(json, "muted", muted);
-        GET_JSON_NAME_VALUE_NOWARN(json, "startsilent", startsilent);
-        GET_JSON_NAME_VALUE(json, "playbackmode", playbackmode);
-        GET_JSON_NAME_VALUE_NOWARN(json, "mintime", mintime);
-        GET_JSON_NAME_VALUE_NOWARN(json, "maxtime", maxtime);
-        GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
-        GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
-        GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
+        if (json.contains("name")) ReadStringSetting(json.at("name"), name);
+        if (const auto mode = json.find("playbackmode"); mode != json.end()) {
+            ReadStringSetting(*mode, playbackmode);
+        }
+        if (json.contains("mintime")) ReadNumberSetting(json.at("mintime"), mintime);
+        if (json.contains("maxtime")) ReadNumberSetting(json.at("maxtime"), maxtime);
+        if (json.contains("muted")) ReadFlagSetting(json.at("muted"), muted);
+        if (json.contains("startsilent")) ReadFlagSetting(json.at("startsilent"), startsilent);
+        // A sound follows no visibility binding: only the authored value counts.
+        if (json.contains("visible")) ReadFlagSetting(json.at("visible"), visible);
+        if (const auto level = json.find("volume"); level != json.end()) {
+            ReadNumberSetting(*level, volume);
+            if (level->is_object()) {
+                if (const auto user = level->find("user"); user != level->end()) {
+                    if (user->is_string()) {
+                        volume_user = user->get<std::string>();
+                    } else if (user->is_object() && user->contains("name") &&
+                               user->at("name").is_string()) {
+                        volume_user = user->at("name").get<std::string>();
+                    }
+                }
+            }
+        }
         ParseDependencies(json, dependencies);
-        if (! json.contains("sound") || ! json.at("sound").is_array()) {
-            return false;
-        }
-        for (const auto& el : json.at("sound")) {
-            std::string name;
-            GET_JSON_VALUE(el, name);
-            if (! name.empty()) sound.push_back(name);
-        }
         AbsorbFieldBindings(json, field_bindings);
         return true;
     }

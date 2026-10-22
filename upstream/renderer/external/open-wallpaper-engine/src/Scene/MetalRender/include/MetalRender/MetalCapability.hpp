@@ -29,12 +29,13 @@ namespace metal
 /// wrong picture presented as a right one.
 [[nodiscard]] std::string SceneMetalStructuralRejection(const Scene& scene);
 
-/// Whole-scene capability gate. There is no per-layer mixing: a scene either
-/// runs entirely on Metal or entirely on the compatibility backend.
+/// Whole-scene capability gate. There is no per-layer mixing: a scene is drawn
+/// entirely by Metal or it is not drawn.
 ///
-/// Answers before anything is created, so the caller builds exactly one
-/// backend. Every rejection carries a short user-readable phrase, because the
-/// settings pane shows the string verbatim.
+/// Answers before anything is created. A scene Metal cannot draw comes back
+/// failed (`SceneFailureStage::Unsupported`) with a short user-readable phrase
+/// as the reason, because the settings pane shows the string verbatim; a scene
+/// it can draw comes back with no failure.
 [[nodiscard]] SceneBackendSelection EvaluateMetalSupport(const Scene& scene);
 
 /// Pass kinds the Metal backend recognises in a compiled render graph.

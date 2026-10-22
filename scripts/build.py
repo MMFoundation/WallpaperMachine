@@ -63,9 +63,7 @@ def repository_commit(root=ROOT):
 def build_environment():
     result = os.environ.copy()
     prefix = subprocess.check_output(["brew", "--prefix"], text=True).strip()
-    if not (Path(prefix) / "opt/mwe-ffmpeg/lib/pkgconfig/libavcodec.pc").is_file():
-        raise SystemExit("Missing LGPL FFmpeg: run python3 scripts/install_ffmpeg.py; Homebrew ffmpeg is not a compatible substitute.")
-    packages = ["quickjs-ng", "glslang", "mwe-ffmpeg", "freetype", "lz4", "vulkan-loader", "vulkan-headers", "molten-vk", "eigen", "nlohmann-json", "argparse", "shaderc", "spirv-tools", "glm"]
+    packages = ["quickjs-ng", "freetype", "lz4", "nlohmann-json", "argparse"]
     roots = [str(Path(prefix) / "opt" / name) for name in packages]
     result["PATH"] = f"{prefix}/bin:" + result.get("PATH", "")
     result["CMAKE_PREFIX_PATH"] = ";".join(roots + [prefix])

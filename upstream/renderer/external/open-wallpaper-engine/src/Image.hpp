@@ -30,8 +30,6 @@ struct ImageData {
 };
 
 struct ImageHeader {
-    // these two size is not for tex, just come from we
-    // using Slot's size for tex
     i32 width { 0 };
     i32 height { 0 };
     i32 mapWidth { 0 };
@@ -51,11 +49,9 @@ struct ImageHeader {
     TextureSample sample;
 
     SpriteAnimation spriteAnim;
-    // for specific property
     std::unordered_map<std::string, ImageExtra> extraHeader;
 };
 
-// slot is one singal image
 struct Image : NoCopy, NoMove {
     struct Slot {
         i32 width { 0 };
@@ -63,7 +59,9 @@ struct Image : NoCopy, NoMove {
 
         std::vector<ImageData> mipmaps;
 
-        operator bool() { return width * height * std::ssize(mipmaps) > 0; }
+        // A usable picture has a positive size (both sides, so two negatives never
+        // pass) and at least one level.
+        operator bool() const { return width > 0 && height > 0 && ! mipmaps.empty(); }
     };
     ImageHeader       header;
     std::vector<Slot> slots;

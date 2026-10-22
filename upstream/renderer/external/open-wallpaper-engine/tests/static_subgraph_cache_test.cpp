@@ -1,6 +1,6 @@
 #include "Scene/include/Scene/SceneUpdateDemand.hpp"
-#include "VulkanRender/CopyElision.hpp"
-#include "VulkanRender/StaticSubgraphCache.hpp"
+#include "RenderCommon/CopyElision.hpp"
+#include "RenderCommon/StaticSubgraphCache.hpp"
 
 #include <gtest/gtest.h>
 
@@ -9,14 +9,14 @@
 #include <unordered_map>
 #include <vector>
 
-using wallpaper::vulkan::CopyElision;
-using wallpaper::vulkan::DynamicReason;
-using wallpaper::vulkan::ElisionPassDesc;
-using wallpaper::vulkan::PlanCopyElision;
-using wallpaper::vulkan::ResolveCopyAliasKey;
-using wallpaper::vulkan::StaticPassDesc;
-using wallpaper::vulkan::StaticPassSample;
-using wallpaper::vulkan::StaticSubgraphCache;
+using wallpaper::render::CopyElision;
+using wallpaper::render::DynamicReason;
+using wallpaper::render::ElisionPassDesc;
+using wallpaper::render::PlanCopyElision;
+using wallpaper::render::ResolveCopyAliasKey;
+using wallpaper::render::StaticPassDesc;
+using wallpaper::render::StaticPassSample;
+using wallpaper::render::StaticSubgraphCache;
 
 namespace
 {

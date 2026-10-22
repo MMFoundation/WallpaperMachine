@@ -94,25 +94,43 @@ pub struct SequenceForTest {
 #[cfg(test)]
 pub struct FailNextRefreshDisplaysForTest;
 
+/// Asks the engine to read the attached displays again and bring its
+/// windows and scenes in line with what it finds.
+/// The bridge sends it on demand and after a display change.
 pub struct RefreshDisplays;
 
+/// Refreshes the engine's display model from descriptors the sender already
+/// has, instead of querying the system again.
+/// `primary` is the main display and `displays` lists every attached display.
 pub struct RefreshDisplayDescriptors {
     pub primary: DisplayDesc,
     pub displays: Vec<DisplayDesc>,
 }
 
+/// Makes the engine run exactly this set of scenes: it opens the ones that
+/// are new, rebuilds the ones whose descriptor changed, and closes the rest.
+/// The reply names the handle of every requested scene.
 pub struct ReconcileScenes {
     pub scenes: Vec<SceneDesc>,
 }
 
+/// Opens a window for the display the selector names. The reply is the
+/// window's scene handle, or nothing when no attached display matches.
+/// The assignment of the display decides what the window shows.
 pub struct CreateWindowForDisplay {
     pub selector: DisplaySelector,
 }
 
+/// Closes the display's window and its scene, but keeps the slot with its
+/// assignment, so the display comes back the same way when it is opened
+/// again.
 pub struct DestroyWindowForDisplay {
     pub selector: DisplaySelector,
 }
 
+/// Assigns a wallpaper to one display: either a scene of its own, or a
+/// mirror of another display. A mirror that would loop back on itself is
+/// refused and leaves the model untouched.
 pub struct SetWallpaperForDisplay {
     pub selector: DisplaySelector,
     pub wallpaper: WallpaperAssignment,

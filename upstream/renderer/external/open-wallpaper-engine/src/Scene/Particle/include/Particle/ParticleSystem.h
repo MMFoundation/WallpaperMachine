@@ -28,7 +28,7 @@ public:
         isize             particle_idx { -1 };
 
         bool            pre_lifetime_ok { true };
-        Eigen::Vector3f pos { 0.0f, 0.0f, 0.0f };
+        linalg::Vector3f pos { 0.0f, 0.0f, 0.0f };
     };
 
     void Refresh();
@@ -218,8 +218,8 @@ private:
     /// The rotation and scale, and the origin, of the matrix the owner layer
     /// draws a world-space system's particles by, as of the last step.
     struct WorldFrame {
-        Eigen::Matrix3d linear { Eigen::Matrix3d::Identity() };
-        Eigen::Vector3d origin { Eigen::Vector3d::Zero() };
+        linalg::Matrix3d linear { linalg::Matrix3d::Identity() };
+        linalg::Vector3d origin { linalg::Vector3d::Zero() };
     };
     std::optional<WorldFrame> OwnerWorldFrame() const;
 
@@ -229,10 +229,8 @@ private:
     /// Set when `Emitt` wrote this frame's geometry. A draw that finds it
     /// clear rebuilds before uploading, without running the simulation again.
     bool m_mesh_rebuilt { true };
-    //	std::vector<std::unique_ptr<ParticleEmitter>> m_emiters;
     std::vector<ParticleEmittOp> m_emiters;
 
-    // std::vector<Particle>           m_particles;
     std::vector<ParticleInitOp>     m_initializers;
     std::vector<ParticleOperatorOp> m_operators;
     /// Bumped whenever an emitter or initializer is added, so an instance that
@@ -246,7 +244,7 @@ private:
     bool                                   m_drawn { true };
     bool                                   m_world_space { false };
     bool                                   m_have_prev_model { false };
-    Eigen::Matrix4d                        m_prev_model { Eigen::Matrix4d::Identity() };
+    linalg::Matrix4d                        m_prev_model { linalg::Matrix4d::Identity() };
     bool                                   m_cp_primed { false };
 
     std::array<ParticleControlpoint, 8> m_controlpoints;

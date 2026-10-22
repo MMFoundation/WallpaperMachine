@@ -1,3 +1,4 @@
+// Clean-room implementation from the WallpaperMachine spec e6-platform-host-api.md; written without access to the original source.
 #pragma once
 
 #include "WPShaderParser.hpp"
@@ -9,17 +10,13 @@ namespace wallpaper::shader
 
 inline void ApplyTextureFormatCombo(Combos& combos, usize slot, TextureFormat format)
 {
-    std::string combo_name = "TEX" + std::to_string(slot) + "FORMAT";
+    const char* value = nullptr;
     switch (format) {
-    case TextureFormat::R8:
-        combos[combo_name] = "9";
-        break;
-    case TextureFormat::RG8:
-        combos[combo_name] = "8";
-        break;
-    default:
-        break;
+    case TextureFormat::R8: value = "9"; break;
+    case TextureFormat::RG8: value = "8"; break;
+    default: return;
     }
+    combos["TEX" + std::to_string(slot) + "FORMAT"] = value;
 }
 
 } // namespace wallpaper::shader

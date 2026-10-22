@@ -5,7 +5,7 @@
 #include <vector>
 #include <memory>
 #include <span>
-#include <Eigen/Dense>
+#include "Utils/Linalg.hpp"
 
 #include "Scene/SceneMesh.h"
 #include "WPPuppet.hpp"
@@ -30,23 +30,26 @@ struct WPMdl {
         uint32_t mdl_flag { 0 };
         uint32_t mesh_count { 1 };
     };
+
     struct Mesh {
-        std::string mat_json_file;
-        uint32_t    flag_a { 0 };
-        bool        has_flag_a2_one { false };
-        uint32_t    flag { 0 };
+        std::string mat_json_file; // material the mesh is drawn with
+        // Flag words as they are stored in the file.
+        uint32_t flag_a { 0 };
+        bool     has_flag_a2_one { false };
+        uint32_t flag { 0 };
+        // Bounding box, when the file carries one.
         std::array<float, 3> aabb_min {};
         std::array<float, 3> aabb_max {};
-        bool        has_aabb { false };
-
+        bool                 has_aabb { false };
+        // One entry per vertex; widths are fixed by the file layout.
         std::vector<std::array<float, 3>>    positions;
         std::vector<std::array<float, 3>>    normals;
-        std::vector<std::array<float, 4>>    tangents;
-        std::vector<std::array<uint8_t, 4>>  extra4;
-        std::vector<std::array<uint32_t, 4>> blend_indices;
+        std::vector<std::array<float, 4>>    tangents;       // xyz and handedness
+        std::vector<std::array<uint8_t, 4>>  extra4;         // four bytes a vertex
+        std::vector<std::array<uint32_t, 4>> blend_indices;  // bones, 32 bits each
         std::vector<std::array<float, 4>>    blend_weights;
         std::vector<std::array<float, 2>>    texcoords;
-        std::vector<std::array<float, 2>>    texcoord2;
+        std::vector<std::array<float, 2>>    texcoord2;      // second UV set
         // 32-bit once a mesh has more vertices than a uint16 index can name.
         // High-poly bodies are stored that way; reading them as uint16 triples
         // doubles the triangle count and the mesh is then rejected.
@@ -93,16 +96,8 @@ struct WPMdl {
     };
     std::vector<MorphSection> morph_sections;
 
-    // std::vector<Eigen::Matrix<float, 3, 4>> bones;
+    // std::vector<linalg::Matrix<float, 3, 4>> bones;
     std::shared_ptr<WPPuppet> puppet;
-    // combo
-    // SKINNING = 1
-    // BONECOUNT
-
-    // input
-    // uvec4 a_BlendIndices
-    // vec4 a_BlendWeights
-    // uniform mat4x3 g_Bones[BONECOUNT]
 };
 
 class WPMdlParser {
