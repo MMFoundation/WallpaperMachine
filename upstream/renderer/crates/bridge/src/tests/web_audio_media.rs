@@ -46,6 +46,7 @@ async fn scene_media_requires_consent_and_clears_on_disable() {
         .with_state(crate::actor::state::BridgeActorState::default()).build().unwrap();
     bridge.inject_scene_project_for_test("301", "Scene",
         r#"{"type":"scene","title":"Scene","file":"scene.json"}"#).await;
+    bridge.set_media_integration_enabled("301".into(), false).await.unwrap();
     bridge.set_display_config_enabled("301".into(), "7".into(), true).await.unwrap();
     bridge.apply_wallpaper_options("301".into(), true).await.unwrap();
     let snapshot = BridgeMediaSnapshot { title: "Track".into(), playback_state: 0, ..Default::default() };
@@ -419,8 +420,32 @@ async fn web_wallpapers_report_their_media_integration_consent() {
     let bridge = web_bridge(&engine).await;
 
     assert!(
+        bridge.web_wallpapers().await.unwrap()[0].media_integration_enabled,
+        "a wallpaper that never chose is reported as consenting: media integration is on by default"
+    );
+    assert!(
+        bridge
+            .wallpaper_options_snapshot("300".into())
+            .await
+            .unwrap()
+            .media_integration_enabled
+    );
+
+    bridge
+        .set_media_integration_enabled("300".into(), false)
+        .await
+        .unwrap();
+
+    assert!(
         !bridge.web_wallpapers().await.unwrap()[0].media_integration_enabled,
-        "media integration needs an API this application cannot rely on, so it is opt-in"
+        "an explicit opt-out is reported as such"
+    );
+    assert!(
+        !bridge
+            .wallpaper_options_snapshot("300".into())
+            .await
+            .unwrap()
+            .media_integration_enabled
     );
 
     bridge
@@ -537,6 +562,10 @@ async fn scene_media_events_fan_out_only_to_opted_in_handles() {
         .inject_scene_wallpaper_config_for_test("100", "Scene")
         .await;
     bridge
+        .set_media_integration_enabled("100".into(), false)
+        .await
+        .unwrap();
+    bridge
         .set_display_config_enabled("100".into(), "7".into(), true)
         .await
         .unwrap();
@@ -597,6 +626,48 @@ async fn scene_media_events_fan_out_only_to_opted_in_handles() {
 }
 
 #[tokio::test]
+async fn an_applied_scene_consents_to_media_by_default_and_events_reach_it() {
+    let engine = FakeEngineFacade::default();
+    engine.set_snapshot(vec![DisplaySnapshotEntry {
+        handle: Some(SceneHandle::new(11)),
+        accepts_pointer_input: true,
+        paused: false,
+        window_active: true,
+        assignment: Some(WallpaperAssignment::Direct(
+            SceneTemplate::builder("/workshop/content/431960/100/project.json")
+                .build()
+                .unwrap(),
+        )),
+        ..display_snapshot(7)
+    }]);
+    let bridge = BridgeBuilder::new(engine.clone())
+        .with_state(crate::actor::state::BridgeActorState::default())
+        .build()
+        .unwrap();
+    bridge
+        .inject_scene_wallpaper_config_for_test("100", "Scene")
+        .await;
+    bridge
+        .set_display_config_enabled("100".into(), "7".into(), true)
+        .await
+        .unwrap();
+    bridge.apply_wallpaper_options("100".into(), true).await.unwrap();
+
+    assert_eq!(
+        bridge.system_media_scene_handles().await.unwrap(),
+        vec![11],
+        "without any explicit choice the scene is a media consumer"
+    );
+    bridge
+        .submit_system_media_event(r#"{"type":"mediaPlaybackChanged","state":0}"#.into())
+        .await
+        .unwrap();
+    let events = engine.media_event_calls();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].0, SceneHandle::new(11));
+}
+
+#[tokio::test]
 async fn scene_media_handles_follow_consent_so_nothing_reads_the_player_without_it() {
     let engine = FakeEngineFacade::default();
     engine.set_snapshot(vec![DisplaySnapshotEntry {
@@ -618,6 +689,10 @@ async fn scene_media_handles_follow_consent_so_nothing_reads_the_player_without_
     bridge
         .inject_scene_wallpaper_config_for_test("100", "Scene")
         .await;
+    bridge
+        .set_media_integration_enabled("100".into(), false)
+        .await
+        .unwrap();
     bridge
         .set_display_config_enabled("100".into(), "7".into(), true)
         .await

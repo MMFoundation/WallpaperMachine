@@ -168,40 +168,54 @@ impl EngineState {
     }
 
     /// Replaces the slots by the ones of `model`, moving each live scene with
-    /// its physical display: a slot that should have a scene takes the
-    /// contents of the first earlier slot that held the same display, else of
-    /// the earlier slot with an equal key. Earlier slots nobody took are kept
-    /// unless their key is in the new list (then they are dropped, closing
-    /// whatever they still hold).
+    /// its physical display. Every slot that should have a scene first takes
+    /// the contents of the first earlier slot that held the same display; only
+    /// then does each slot left over take the earlier slot with an equal key.
+    /// In that order a scene whose slot changed (the old main display's leaving
+    /// the primary slot) keeps its runtime and handle instead of being closed
+    /// under the key it left. Earlier slots nobody took are kept unless their
+    /// key is in the new list (then they are dropped, closing whatever they
+    /// still hold).
     pub fn apply_display_model(&mut self, model: &DisplayStateModel) -> Result<(), EngineError> {
         let mut earlier: Vec<Option<DisplayRuntimeRecord>> =
             std::mem::take(&mut self.display_records).into_iter().map(Some).collect();
-        let mut next = Vec::with_capacity(model.records.len());
+        let mut taken: Vec<Option<DisplayRuntimeRecord>> =
+            std::iter::repeat_with(|| None).take(model.records.len()).collect();
 
-        for new_model in &model.records {
-            let by_display = new_model
+        for (slot, new_model) in taken.iter_mut().zip(&model.records) {
+            let Some(display) = new_model
                 .should_have_runtime()
                 .then_some(new_model.live_display.as_ref())
                 .flatten()
-                .and_then(|display| {
-                    earlier.iter().position(|slot| {
-                        slot.as_ref().is_some_and(|slot| {
-                            slot.holds_anything()
-                                && slot
-                                    .model
-                                    .live_display
-                                    .as_ref()
-                                    .is_some_and(|held| held.is_same_physical_display_as(display))
-                        })
-                    })
-                });
-            let source = by_display.or_else(|| {
-                earlier.iter().position(|slot| {
-                    slot.as_ref().is_some_and(|slot| slot.model.key == new_model.key)
+            else {
+                continue;
+            };
+            let by_display = earlier.iter().position(|old| {
+                old.as_ref().is_some_and(|old| {
+                    old.holds_anything()
+                        && old
+                            .model
+                            .live_display
+                            .as_ref()
+                            .is_some_and(|held| held.is_same_physical_display_as(display))
                 })
             });
+            *slot = by_display.and_then(|index| earlier[index].take());
+        }
+        for (slot, new_model) in taken.iter_mut().zip(&model.records) {
+            if slot.is_some() {
+                continue;
+            }
+            let by_key = earlier.iter().position(|old| {
+                old.as_ref().is_some_and(|old| old.model.key == new_model.key)
+            });
+            *slot = by_key.and_then(|index| earlier[index].take());
+        }
+
+        let mut next = Vec::with_capacity(model.records.len());
+        for (slot, new_model) in taken.into_iter().zip(&model.records) {
             let mut record = DisplayRuntimeRecord::empty(new_model.clone());
-            if let Some(taken) = source.and_then(|index| earlier[index].take()) {
+            if let Some(taken) = slot {
                 record.handle = taken.handle;
                 record.runtime = taken.runtime;
                 record.last_runtime_state = taken.last_runtime_state;
@@ -346,6 +360,7 @@ impl Default for EngineState {
                 window_active: true,
                 runtime_open: false,
                 primary_inheritance_consumed: false,
+                bound_to_display: false,
             }],
         })
     }
@@ -376,7 +391,7 @@ mod tests {
         let (mut state, a) = cleanroom_et59(&first, WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(&first)), &first);
         let prepared = crate::engine::actor::EngineActor::prepare();
         let key_b = DisplayKey::LiveDisplayId(126);
-        let model_b = DisplayRecord { key: key_b.clone(), live_display: Some(second.display.clone()), assignment: Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(&second))), window_active: true, runtime_open: true, primary_inheritance_consumed: true };
+        let model_b = DisplayRecord { key: key_b.clone(), live_display: Some(second.display.clone()), assignment: Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(&second))), window_active: true, runtime_open: true, primary_inheritance_consumed: true, bound_to_display: false };
         state.ensure_record(model_b.clone());
         let b = state.reserve_handle_for_key(key_b);
         let runtime = crate::engine::runtime::SceneRuntime::windowless_for_test(b, &second, &crate::engine::runtime::SceneRuntimeState::try_from(&second).unwrap(), prepared.actor_ref().downgrade()).unwrap();
@@ -418,6 +433,7 @@ mod tests {
             window_active: true,
             runtime_open: false,
             primary_inheritance_consumed: true,
+            bound_to_display: false,
         }] });
         let handle = state.reserve_handle_for_key(DisplayKey::Primary);
         let prepared = crate::engine::actor::EngineActor::prepare();
@@ -527,7 +543,7 @@ mod tests {
             let mut next = desc.clone();
             next.display.display_id = id;
             let key = DisplayKey::LiveDisplayId(id);
-            state.ensure_record(DisplayRecord { key: key.clone(), live_display: Some(next.display.clone()), assignment: Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(&next))), window_active: true, runtime_open: true, primary_inheritance_consumed: true });
+            state.ensure_record(DisplayRecord { key: key.clone(), live_display: Some(next.display.clone()), assignment: Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(&next))), window_active: true, runtime_open: true, primary_inheritance_consumed: true, bound_to_display: false });
             let handle = state.reserve_handle_for_key(key.clone());
             let index = state.record_index(&key).unwrap();
             state.display_records[index].handle = Some(handle);
@@ -617,6 +633,7 @@ mod tests {
             window_active: false,
             runtime_open: false,
             primary_inheritance_consumed: false,
+            bound_to_display: false,
         });
         state.display_records[1].handle = Some(kept);
 

@@ -372,9 +372,12 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         wallpaper_configs: BTreeMap<String, WallpaperConfig>,
         force_shader_refresh: bool,
     ) -> Result<Vec<SceneDesc>, BridgeError> {
-        self.capture_reconcile_work(app_config, wallpaper_configs, force_shader_refresh)
+        let scenes = self
+            .capture_reconcile_work(app_config, wallpaper_configs, force_shader_refresh)
             .run()
-            .await
+            .await?;
+        self.align_live_pause_with_policy().await;
+        Ok(scenes)
     }
 
     pub(super) async fn reconcile_configured_operation(&mut self) -> Result<(), BridgeError> {
@@ -400,6 +403,9 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
         if let Some(scenes) = self.unchanged_configured_scenes(&displays)? {
             self.publish_operation_scenes(&scenes);
+            // Nothing was rebuilt, but a scene's pause may still be one the
+            // policy no longer asks for.
+            self.align_live_pause_with_policy().await;
             return Ok(());
         }
         let result = self
@@ -543,6 +549,7 @@ impl<E: EngineFacade + Clone> Message<ApplyFinished> for BridgeActor<E> {
             return self.wallpaper_bundle(msg.id);
         }
         self.refresh_mouse_polling_policy();
+        self.align_live_pause_with_policy().await;
         self.operation_forget_property_preview(&msg.id);
         if let Err(error) = self.save_operation_apply(&msg.candidate) {
             *self.operation_app_slot() = msg.candidate.into_app_config();
@@ -576,6 +583,7 @@ impl<E: EngineFacade + Clone> Message<DisplayFinished> for BridgeActor<E> {
             return Ok(self.display_bundle());
         }
         self.refresh_mouse_polling_policy();
+        self.align_live_pause_with_policy().await;
         self.save_operation_app(&msg.candidate)?;
         *self.operation_app_slot() = msg.candidate;
         *self.operation_rows_slot() = msg.rows;
@@ -637,7 +645,10 @@ impl<E: EngineFacade + Clone> Message<RepairFinished> for BridgeActor<E> {
             return Ok(());
         }
         match msg.result {
-            Ok(scenes) => self.publish_operation_scenes(&scenes),
+            Ok(scenes) => {
+                self.publish_operation_scenes(&scenes);
+                self.align_live_pause_with_policy().await;
+            }
             Err(error) => self.operation_append_error(error.message().to_owned()),
         }
         self.finish_operation(msg.ticket);
@@ -982,6 +993,7 @@ fn core_scaling_mode(mode: BridgeScalingMode) -> ScalingMode {
         BridgeScalingMode::Stretch => ScalingMode::Stretch,
         BridgeScalingMode::Match => ScalingMode::Fit,
         BridgeScalingMode::Fill => ScalingMode::Fill,
+        BridgeScalingMode::MatchBlurred => ScalingMode::FitBlurred,
     }
 }
 

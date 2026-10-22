@@ -141,6 +141,12 @@ fn first_for_identity(selector: &SerializedSelector, seen: &mut Vec<DisplayIdent
 }
 
 impl MonitorCfg {
+    /// Whether the block shows a wallpaper of its own: it is switched on and
+    /// does not mirror another display.
+    fn shows_own_wallpaper(&self) -> bool {
+        self.enabled && !self.mode.eq_ignore_ascii_case("mirror")
+    }
+
     /// Configuration for a display seen for the first time. It starts enabled
     /// so plugging in a monitor needs no trip to Settings: a display the
     /// renderer already mirrors keeps that mirror, any other shows the primary

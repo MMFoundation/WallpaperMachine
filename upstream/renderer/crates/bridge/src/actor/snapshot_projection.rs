@@ -190,6 +190,7 @@ pub(super) fn project_monitors<'a>(
                     BridgeScalingMode::Stretch => "Stretch",
                     BridgeScalingMode::Match => "Match",
                     BridgeScalingMode::Fill => "Fill",
+                    BridgeScalingMode::MatchBlurred => "MatchBlurred",
                 }
                 .to_owned(),
                 target_fps: render

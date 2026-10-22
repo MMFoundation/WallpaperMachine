@@ -184,6 +184,7 @@ impl AppConfig {
     pub fn sync_known_monitors(&mut self, displays: &[DisplaySnapshotEntry]) -> bool {
         let previous_monitors = self.monitors.clone();
         let previous_settings = self.monitor_settings.clone();
+        let previous_record = self.primary_display.clone();
         self.merge_display_aliases(displays);
 
         let mut protected_primary = match self
@@ -201,6 +202,8 @@ impl AppConfig {
         protected_primary.mirror_target = None;
 
         if let Some(primary) = displays.first() {
+            let handed_over =
+                self.hand_over_primary_role(&mut protected_primary, primary, displays);
             self.monitors.retain_mut(|config| {
                 let primary_live_alias = match &config.selector {
                     SerializedSelector::LiveDisplayId { display_id } => {
@@ -209,22 +212,24 @@ impl AppConfig {
                     }
                     _ => false,
                 };
-                if primary_live_alias && protected_primary.wallpaper.is_none() {
+                if primary_live_alias && !handed_over && protected_primary.wallpaper.is_none() {
                     protected_primary.wallpaper = config.wallpaper.take();
                 }
                 !primary_live_alias
             });
-            if protected_primary.wallpaper.is_none() {
+            if !handed_over && protected_primary.wallpaper.is_none() {
                 if let Some(selector) = primary.stable_identity_selector() {
                     if let Some(config) = self
                         .monitors
                         .iter()
                         .find(|config| config.selector == selector)
+                        .filter(|config| config.shows_own_wallpaper())
                     {
                         protected_primary.wallpaper = config.wallpaper.clone();
                     }
                 }
             }
+            self.primary_display = primary.stable_identity_selector();
         }
         self.monitors.insert(0, protected_primary);
 
@@ -244,7 +249,81 @@ impl AppConfig {
                 MonitorCfg::for_connected_display(selector, display, self.primary_wallpaper());
             self.monitors.push(config);
         }
-        previous_monitors != self.monitors || previous_settings != self.monitor_settings
+        previous_monitors != self.monitors
+            || previous_settings != self.monitor_settings
+            || previous_record != self.primary_display
+    }
+
+    /// The `primary` block is a role: it describes whichever display is main.
+    /// When the recorded display (`primary_display`) is no longer the main one,
+    /// the wallpaper the role showed is written back to that display's own
+    /// block, created if it has none, so it keeps what it showed whether or not
+    /// it is still connected. The new main display's own block, if it has one,
+    /// then decides what the role shows: its wallpaper, or nothing while it is
+    /// switched off or mirroring. A main display without a block of its own
+    /// keeps the role's wallpaper. Returns whether the role changed hands.
+    fn hand_over_primary_role(
+        &mut self,
+        role: &mut MonitorCfg,
+        main: &DisplaySnapshotEntry,
+        displays: &[DisplaySnapshotEntry],
+    ) -> bool {
+        let Some(recorded) = self.primary_display.clone() else {
+            return false;
+        };
+        let DisplaySelector::Identity(previous) = recorded.to_selector() else {
+            return false;
+        };
+        if previous.has_stable_match(&main.identity) {
+            return false;
+        }
+        let names_previous = |selector: &SerializedSelector| {
+            matches!(
+                selector.to_selector(),
+                DisplaySelector::Identity(identity) if identity.has_stable_match(&previous)
+            )
+        };
+        let index = match self
+            .monitors
+            .iter()
+            .position(|config| names_previous(&config.selector))
+        {
+            Some(index) => index,
+            None => {
+                let selector = displays
+                    .iter()
+                    .find(|display| display.identity.has_stable_match(&previous))
+                    .map_or(recorded, DisplaySnapshotExt::connected_selector);
+                self.monitors.push(MonitorCfg {
+                    selector,
+                    ..MonitorCfg::default()
+                });
+                self.monitors.len() - 1
+            }
+        };
+        let written_back = &mut self.monitors[index];
+        written_back.wallpaper.clone_from(&role.wallpaper);
+        written_back.enabled = true;
+        written_back.mode = "independent".into();
+        written_back.mirror_target = None;
+
+        let names_main = |selector: &SerializedSelector| match selector.to_selector() {
+            DisplaySelector::Identity(identity) => identity.has_stable_match(&main.identity),
+            DisplaySelector::LiveDisplayId(display_id) => display_id == main.desc.display_id,
+            DisplaySelector::Primary => false,
+        };
+        let own = self
+            .monitors
+            .iter()
+            .filter(|config| names_main(&config.selector))
+            .min_by_key(|config| !matches!(config.selector, SerializedSelector::Identity { .. }));
+        if let Some(own) = own {
+            role.wallpaper = own
+                .shows_own_wallpaper()
+                .then(|| own.wallpaper.clone())
+                .flatten();
+        }
+        true
     }
 
     pub fn ensure_monitor(&mut self, selector: SerializedSelector) -> &mut MonitorCfg {

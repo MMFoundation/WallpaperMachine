@@ -648,7 +648,12 @@ makes another display the main one it writes the block's wallpaper back to the p
 display's own block and loads the new main display's own block into it, so a wallpaper stays
 on its display and a display switched off stays off. The renderer agrees: its `Primary` record
 follows the main display, but a scene reconciled for a concrete display (`bound_to_display`)
-stays with that display's record, so a main-display change costs no scene load or flash.
+stays with that display's record, so a main-display change costs no scene load or flash. A
+wallpaper set on the `Primary` record from the configuration or directly is unbound and keeps
+following the main display. When the engine takes the refreshed model, each record that needs
+a runtime first takes the one already running on its physical display, and only the records
+left over pair with the earlier record of the same key, so a scene that changed records keeps
+its handle and only its window moves.
 
 Display-change callbacks fan out through an immutable snapshot of live subscriber senders;
 only registration and removal take the subscriber-writer mutex. Each receiver clone carries

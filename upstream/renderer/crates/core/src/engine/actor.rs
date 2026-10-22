@@ -1714,6 +1714,9 @@ impl Message<messages::TakeRenderFailuresForTest> for EngineActor {
 }
 
 #[cfg(test)]
+mod main_display_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{DisplayDesc, engine::{runtime::SceneRuntimeState, state::StoredSceneRuntimeState}, display::state::DisplayRecord, project::{ScalingMode, SceneFraming, SceneTemplate}, window::MouseButtonTracker};
@@ -1728,6 +1731,7 @@ mod tests {
             key: if i == 0 { DisplayKey::Primary } else { DisplayKey::LiveDisplayId(scene.display.display_id) },
             live_display: Some(scene.display.clone()), assignment: Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(scene))),
             window_active: true, runtime_open: false, primary_inheritance_consumed: true,
+            bound_to_display: false,
         }).collect();
         let state = EngineState::with_display_model(DisplayStateModel { records });
         let snapshots = Arc::new(EngineSnapshotPublisher::new(state.snapshot(), Arc::new(Mutex::new(MouseButtonTracker::with_press_test(Box::new(|| true))))));

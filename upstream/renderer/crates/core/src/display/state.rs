@@ -34,6 +34,12 @@ pub struct DisplayRecord {
     pub window_active: bool,
     pub runtime_open: bool,
     pub primary_inheritance_consumed: bool,
+    /// Whether the assignment is the one a reconcile asked for this slot's
+    /// concrete display. A bound assignment stays with its physical display
+    /// when another display becomes the main one; an unbound one (configured,
+    /// set directly or inherited) stays with its key, so on the primary slot
+    /// it follows the main display.
+    pub bound_to_display: bool,
 }
 
 impl DisplayRecord {
@@ -72,6 +78,7 @@ impl DisplayRecord {
             window_active: false,
             runtime_open: false,
             primary_inheritance_consumed: false,
+            bound_to_display: false,
         }
     }
 
@@ -179,9 +186,12 @@ impl DisplayStateModel {
         let slots_before = self.records.len();
         let index = self.index_or_insert(key);
         let replaced = self.records[index].assignment.replace(assignment);
+        // Set another way than by a reconcile: the slot's key decides.
+        let was_bound = std::mem::take(&mut self.records[index].bound_to_display);
         if let Err(error) = self.check_mirror_cycles() {
             // Undo: a slot made for this call is the last one.
             self.records[index].assignment = replaced;
+            self.records[index].bound_to_display = was_bound;
             self.records.truncate(slots_before);
             return Err(error);
         }
@@ -280,6 +290,7 @@ impl DisplayStateModel {
             if record.live_display.is_some() && !keys.contains(&record.key) {
                 record.window_active = false;
                 record.runtime_open = false;
+                record.bound_to_display = false;
             }
         }
         for (scene, key) in scenes.iter().zip(keys) {
@@ -289,6 +300,8 @@ impl DisplayStateModel {
             record.assignment = Some(WallpaperAssignment::Direct(Template::from_scene_desc(
                 scene,
             )));
+            // Asked for this concrete display: it stays with the display.
+            record.bound_to_display = true;
         }
         *self = next;
         Ok(())
@@ -470,6 +483,7 @@ impl DisplayStateModel {
                     if eligible {
                         record.assignment.clone_from(&primary_assignment);
                         record.primary_inheritance_consumed = true;
+                        record.bound_to_display = false;
                     }
                 }
                 record
@@ -477,9 +491,86 @@ impl DisplayStateModel {
             .collect();
 
         let mut candidate = Self { records };
+        candidate.hand_over_bound_assignments(self, transitional);
         candidate.check_mirror_cycles()?;
         candidate.carry_scene_marks_from(self)?;
         Ok(candidate)
+    }
+
+    /// Moves each assignment bound to its display to the slot that holds that
+    /// display after a report (`self`, built from `earlier`), so a change of
+    /// main display does not swap wallpapers between displays.
+    ///
+    /// The old main display's wallpaper leaves the primary slot for that
+    /// display's own slot, also when the display is gone: the slot keeps it
+    /// until the display returns. A bound wallpaper whose display became the
+    /// main one moves into the primary slot, unless the primary slot holds a
+    /// configured (unbound) wallpaper, which keeps following the main display.
+    /// A display still connecting keeps the descriptor it ran with, as it does
+    /// on its own slot. A gone display whose own slot cannot be told (two slots
+    /// name it equally well) leaves its wallpaper where it is.
+    fn hand_over_bound_assignments(&mut self, earlier: &Self, transitional: &[DisplayDesc]) {
+        let mut moves: Vec<(&DisplayRecord, DisplayKey)> = Vec::new();
+        for old in &earlier.records {
+            let (true, Some(WallpaperAssignment::Direct(_)), Some(display)) =
+                (old.bound_to_display, &old.assignment, &old.live_display)
+            else {
+                continue;
+            };
+            let holder = self.records.iter().find(|record| {
+                record
+                    .live_display
+                    .as_ref()
+                    .is_some_and(|live| live.is_same_physical_display_as(display))
+            });
+            let destination = match holder {
+                Some(record) => record.key.clone(),
+                None => match self.slot_for_display(display) {
+                    Ok(key) => key,
+                    Err(_) => continue,
+                },
+            };
+            if destination != old.key {
+                moves.push((old, destination));
+            }
+        }
+        let leaving = |key: &DisplayKey| moves.iter().any(|(old, _)| &old.key == key);
+        let mut accepted: Vec<(&DisplayRecord, DisplayKey)> = Vec::new();
+        for (old, destination) in &moves {
+            // A slot keeps a bound wallpaper that stays, and the primary slot
+            // keeps a configured one; anything else gives way.
+            let keeps_own = earlier.slot(destination).is_some_and(|current| {
+                current.assignment.is_some()
+                    && if current.bound_to_display {
+                        !leaving(&current.key)
+                    } else {
+                        current.key == DisplayKey::Primary
+                    }
+            });
+            let taken = accepted.iter().any(|(_, to)| to == destination);
+            if !keeps_own && !taken {
+                accepted.push((old, destination.clone()));
+            }
+        }
+        for (old, _) in &accepted {
+            if let Some(source) = self.records.iter_mut().find(|record| record.key == old.key) {
+                source.assignment = None;
+                source.bound_to_display = false;
+            }
+        }
+        for (old, destination) in accepted {
+            let record = self.slot_or_insert(destination);
+            record.assignment.clone_from(&old.assignment);
+            record.bound_to_display = true;
+            record.window_active = old.window_active;
+            if record.live_display.is_none() {
+                record.live_display = old.live_display.clone().filter(|previous| {
+                    transitional
+                        .iter()
+                        .any(|display| previous.is_same_physical_display_as(display))
+                });
+            }
+        }
     }
 
     /// The slot every connected display of a report lands on, primary first.
@@ -673,6 +764,9 @@ impl DisplayStateModel {
 
 #[cfg(test)]
 mod model_contract;
+
+#[cfg(test)]
+mod main_display_tests;
 
 #[cfg(test)]
 mod tests {

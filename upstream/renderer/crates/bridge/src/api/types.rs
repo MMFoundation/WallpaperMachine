@@ -69,6 +69,9 @@ pub enum BridgeScalingMode {
     Stretch,
     Match,
     Fill,
+    /// `Match`'s picture, with the room around it filled by a blurred,
+    /// darkened copy of the same picture.
+    MatchBlurred,
 }
 
 /// Where a wallpaper sits on one display when that display leaves room around
@@ -146,9 +149,10 @@ pub struct BridgeWebWallpaper {
     pub volume: f32,
     pub muted: bool,
     pub audio_response_enabled: bool,
-    /// Whether this wallpaper opted in to system media integration. The host
-    /// still has to find a usable system media source; this is only the user's
-    /// consent to look.
+    /// Whether this wallpaper shares system media integration: on by default,
+    /// off once the user turns it off for this wallpaper. The host still has to
+    /// find a usable system media source; this is only the user's consent to
+    /// look.
     pub media_integration_enabled: bool,
     /// Wallpaper Engine `applyUserProperties` payload for every user-editable
     /// property, overrides applied over defaults. Each entry is
@@ -397,7 +401,8 @@ pub struct BridgeWallpaperOptionsSnapshot {
     pub display_configurations: Vec<BridgeDisplayConfigRow>,
     pub audio_response_enabled: bool,
     /// The user's consent to look for a system media source for this
-    /// wallpaper. Consent, not availability.
+    /// wallpaper, given by default until the user turns it off. Consent, not
+    /// availability.
     pub media_integration_enabled: bool,
     pub muted: bool,
     pub volume: f32,

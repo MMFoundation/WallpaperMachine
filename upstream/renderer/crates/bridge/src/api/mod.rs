@@ -2134,8 +2134,8 @@ impl WallpaperBridge {
 
     /// Turns system media integration on or off for one wallpaper.
     ///
-    /// Off by default. This is the user's consent to look for a system media
-    /// source, not a promise that one exists.
+    /// On by default; a saved choice is kept. Turning it on allows a search for
+    /// a system media source, not a promise that one exists.
     ///
     /// # Errors
     ///
@@ -2654,6 +2654,7 @@ impl From<BridgeScalingMode> for ScalingMode {
             BridgeScalingMode::Stretch => Self::Stretch,
             BridgeScalingMode::Match => Self::Fit,
             BridgeScalingMode::Fill => Self::Fill,
+            BridgeScalingMode::MatchBlurred => Self::FitBlurred,
         }
     }
 }
@@ -2665,6 +2666,7 @@ impl From<ScalingMode> for BridgeScalingMode {
             ScalingMode::Stretch => Self::Stretch,
             ScalingMode::Fit => Self::Match,
             ScalingMode::Fill => Self::Fill,
+            ScalingMode::FitBlurred => Self::MatchBlurred,
         }
     }
 }

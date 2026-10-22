@@ -98,7 +98,7 @@ fn assert_default_wallpaper(config: &WallpaperConfig, id: &str, kind: &str) {
     assert_eq!(config.audio.volume, 1.0);
     assert!(config.audio.response_enabled);
     assert!(!config.audio.muted);
-    assert!(!config.media_integration_enabled);
+    assert!(config.media_integration_enabled);
     assert!(config.monitors.is_empty());
     assert!(config.property_overrides.is_empty());
 }
@@ -147,6 +147,9 @@ fn missing_files_and_absent_sections_have_distinct_default_identities() {
     assert_default_wallpaper(&loaded, "", "");
     assert_eq!(fs::read(wallpaper_path(&store, "fresh-29")).unwrap(), b"{}");
     assert_default_wallpaper(&WallpaperConfig::new_for("new", "web"), "new", "web");
+    let opted_out: WallpaperConfig =
+        serde_json::from_value(json!({"media_integration_enabled": false})).unwrap();
+    assert!(!opted_out.media_integration_enabled);
     let nested: WallpaperConfig =
         serde_json::from_value(json!({"audio":{},"monitors":[{}]})).unwrap();
     assert_eq!(nested.audio.volume, 1.0);
@@ -224,6 +227,7 @@ fn all_app_fields_and_selector_variants_round_trip_without_normalizing_preferenc
             for optional in [false, true] {
                 let mut expected = AppConfig {
                     schema_version: 0,
+                    primary_display: None,
                     general: GeneralCfg {
                         last_selected_wallpaper: optional.then(|| "item-52".to_owned()),
                     },

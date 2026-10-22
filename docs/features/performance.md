@@ -359,6 +359,12 @@ again resumes without a click or refresh, while one still covered stays paused.
 Reapplying a wallpaper or changing the display arrangement also reconciles the live
 scene's pause with the current playback policy, so a pause retained by a rebuilt
 renderer cannot hold a visible display still. The user's own Pause remains in force.
+After each reconcile that succeeds, including one that found nothing to rebuild, the
+bridge compares every live scene's pause with the policy as it stands then and sends
+a pause or resume only to the displays that differ; a covered or suspended display
+stays paused while a visible one resumes. A reconcile that a newer change overtook
+leaves this to the reconcile that replaces it, so a Pause or Play pressed meanwhile
+wins. There is no timer and no per-frame check (bridge `tests::playback_reconciliation`).
 
 | Setting | Values | Default |
 | --- | --- | --- |

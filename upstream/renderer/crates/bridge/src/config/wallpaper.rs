@@ -9,6 +9,11 @@ use crate::project::PropertyValue;
 
 pub const SCHEMA_VERSION: u32 = 1;
 
+/// Whether a wallpaper shares the system's now-playing information when its
+/// configuration has no saved choice: a new configuration and an older file
+/// without the field alike. A saved choice always wins.
+pub const MEDIA_INTEGRATION_DEFAULT: bool = true;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WallpaperConfig {
@@ -28,7 +33,7 @@ impl Default for WallpaperConfig {
             workshop_id: String::new(),
             r#type: String::new(),
             audio: AudioCfg::default(),
-            media_integration_enabled: false,
+            media_integration_enabled: MEDIA_INTEGRATION_DEFAULT,
             monitors: Vec::new(),
             property_overrides: BTreeMap::new(),
         }

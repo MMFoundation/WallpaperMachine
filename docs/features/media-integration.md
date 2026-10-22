@@ -3,7 +3,10 @@
 **Media integration** is on by default for scene and web wallpapers, sharing
 the system's current song title, artist, album, artwork and available timeline.
 Turn it off in a wallpaper's inspector to stop sharing; saved on/off choices are
-preserved. Configurations without a saved choice use the enabled default.
+preserved. Configurations without a saved choice, new ones and older files alike,
+use the enabled default (`MEDIA_INTEGRATION_DEFAULT` in the bridge's `config`
+module). The renderer's own scene default stays off, and previews and the lock
+screen never take part.
 The wallpaper must contain its own music display; this setting does not add an
 overlay to arbitrary wallpapers.
 
@@ -184,7 +187,9 @@ contract is in [Web wallpapers](web-wallpapers.md#host-protocol).
 The provider, fallback, artwork and sink tests run against fake streams and injected
 script results (see *SystemMedia* in [coverage](../testing/coverage.md)); Rust bridge
 tests cover consent, disabling and clearing, invalid states, nonfinite times and
-artwork bounds; `scenescript_media_event_smoke` and `media_thumbnail_texture_smoke`
+artwork bounds, and `tests::media_integration_default` the default (a new
+configuration, an older file without the field, saved choices kept, web pages, a
+scene that receives events with no setup step, previews and the lock screen left out); `scenescript_media_event_smoke` and `media_thumbnail_texture_smoke`
 exercise script delivery and runtime textures without a real player. Live Spotify,
 Apple Music, browser and local-player integration requires an explicit desktop run:
 passing the simulated tests is not proof that a particular player or OS version

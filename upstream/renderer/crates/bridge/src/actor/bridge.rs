@@ -1058,7 +1058,9 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
                     .state
                     .wallpaper_configs
                     .get(&desc.wallpaper_id)
-                    .is_some_and(|config| config.media_integration_enabled);
+                    .map_or(crate::config::MEDIA_INTEGRATION_DEFAULT, |config| {
+                        config.media_integration_enabled
+                    });
                 Ok(BridgeWebWallpaper {
                     display_id: desc.display.display_id,
                     startup_revision: self.reserved_startup_revision(),
@@ -1409,6 +1411,36 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
         self.refresh_mouse_polling_policy();
         Ok(())
+    }
+
+    /// Puts every live scene whose pause differs from the playback policy in
+    /// force now back on it: paused while every display is (the user's Pause
+    /// included) or while its own display is suspended, playing otherwise.
+    ///
+    /// Runs on this actor after a successful reconcile. The engine keeps a
+    /// scene's pause across a rebuild, so a renderer can come back holding a
+    /// pause its display no longer has, or running where its display should
+    /// not. Only a scene that differs gets a command, one display at a time,
+    /// so a covered display cannot stop a visible one. A command that fails is
+    /// logged and leaves the reconcile's result standing.
+    async fn align_live_pause_with_policy(&self) {
+        let paused = self.playback_paused();
+        for entry in self.engine.display_snapshot() {
+            if entry.handle.is_none() {
+                continue;
+            }
+            let display_id = entry.desc.display_id;
+            let target = paused || self.state.suspended_displays.contains(&display_id);
+            if entry.paused == target {
+                continue;
+            }
+            if let Err(error) = self.engine.set_display_paused(display_id, target).await {
+                log::warn!(
+                    "display {display_id}: could not {} its scene after a reconcile: {error}",
+                    if target { "pause" } else { "resume" }
+                );
+            }
+        }
     }
 }
 

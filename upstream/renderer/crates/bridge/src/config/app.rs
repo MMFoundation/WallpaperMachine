@@ -17,6 +17,12 @@ pub struct AppConfig {
     pub ui: UiCfg,
     pub experimental: ExperimentalCfg,
     pub quality: QualityCfg,
+    /// The stable identity of the display the `primary` block last described,
+    /// so a change of main display can be told apart from a renamed one. Absent
+    /// in older configurations and while the main display has no stable
+    /// identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_display: Option<SerializedSelector>,
     pub monitors: Vec<MonitorCfg>,
     pub monitor_settings: Vec<MonitorSettingsCfg>,
     pub diagnostics: DiagnosticsCfg,
@@ -31,6 +37,7 @@ impl Default for AppConfig {
             ui: UiCfg::default(),
             experimental: ExperimentalCfg::default(),
             quality: QualityCfg::default(),
+            primary_display: None,
             monitors: Vec::new(),
             monitor_settings: Vec::new(),
             diagnostics: DiagnosticsCfg::default(),

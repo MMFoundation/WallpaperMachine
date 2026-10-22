@@ -9,7 +9,9 @@ pub use app::{
     WindowGeom, clamp_render_scale,
 };
 pub use store::{ConfigLoad, ConfigStore};
-pub use wallpaper::{AudioCfg, FramingCfg, MonitorRender, WallpaperConfig};
+pub use wallpaper::{
+    AudioCfg, FramingCfg, MEDIA_INTEGRATION_DEFAULT, MonitorRender, WallpaperConfig,
+};
 
 pub(crate) fn resolve_frame_rate(frame_rate: Option<u32>, refresh_hz: u32) -> u32 {
     let refresh = refresh_hz.max(1);
@@ -29,6 +31,8 @@ fn scaling_mode(raw: &str) -> wallpaper_core::project::ScalingMode {
         ScalingMode::Stretch
     } else if raw.eq_ignore_ascii_case("fit") {
         ScalingMode::Fit
+    } else if raw.eq_ignore_ascii_case("fit_blurred") {
+        ScalingMode::FitBlurred
     } else {
         ScalingMode::Fill
     }

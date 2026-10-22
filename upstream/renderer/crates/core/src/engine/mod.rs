@@ -1184,6 +1184,7 @@ mod tests {
             window_active: active,
             runtime_open: false,
             primary_inheritance_consumed: true,
+            bound_to_display: false,
         }
     }
 
@@ -1591,7 +1592,7 @@ mod tests {
     fn reconcile_keeps_disconnected_future_identity_records_untouched() {
         // CLEANROOM ET21
         let desc = fixture_desc();
-        let future = DisplayRecord { key: DisplayKey::Identity(DisplayIdentity { uuid: Some("future-amber-57".into()), ..Default::default() }), live_display: None, assignment: Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(&desc))), window_active: true, runtime_open: false, primary_inheritance_consumed: true };
+        let future = DisplayRecord { key: DisplayKey::Identity(DisplayIdentity { uuid: Some("future-amber-57".into()), ..Default::default() }), live_display: None, assignment: Some(WallpaperAssignment::Direct(SceneTemplate::from_scene_desc(&desc))), window_active: true, runtime_open: false, primary_inheritance_consumed: true, bound_to_display: false };
         let mut model = DisplayStateModel { records: vec![fixture_record(Some(&desc), true), future.clone()] };
         let mut next = desc;
         next.fps = 47;

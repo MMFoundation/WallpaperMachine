@@ -1102,8 +1102,8 @@ public protocol WallpaperBridgeProtocol : AnyObject {
     /**
      * Turns system media integration on or off for one wallpaper.
      *
-     * On by default; saved choices are preserved. Enabling it allows a search
-     * for a system media source, not a promise that one exists.
+     * On by default; a saved choice is kept. Turning it on allows a search for
+     * a system media source, not a promise that one exists.
      *
      * # Errors
      *
@@ -2764,8 +2764,8 @@ open func setLaunchAtLogin(enabled: Bool)async throws  -> BridgeDisplayMutationB
     /**
      * Turns system media integration on or off for one wallpaper.
      *
-     * On by default; saved choices are preserved. Enabling it allows a search
-     * for a system media source, not a promise that one exists.
+     * On by default; a saved choice is kept. Turning it on allows a search for
+     * a system media source, not a promise that one exists.
      *
      * # Errors
      *
@@ -7568,7 +7568,8 @@ public struct BridgeWallpaperOptionsSnapshot {
     public var audioResponseEnabled: Bool
     /**
      * The user's consent to look for a system media source for this
-     * wallpaper. Consent, not availability.
+     * wallpaper, given by default until the user turns it off. Consent, not
+     * availability.
      */
     public var mediaIntegrationEnabled: Bool
     public var muted: Bool
@@ -7579,7 +7580,8 @@ public struct BridgeWallpaperOptionsSnapshot {
     public init(wallpaperId: String, title: String, kind: BridgeWallpaperKind, supported: Bool, dirty: Bool, properties: [BridgePropertyDescriptor], displayConfigurations: [BridgeDisplayConfigRow], audioResponseEnabled: Bool, 
         /**
          * The user's consent to look for a system media source for this
-         * wallpaper. Consent, not availability.
+         * wallpaper, given by default until the user turns it off. Consent, not
+         * availability.
          */mediaIntegrationEnabled: Bool, muted: Bool, volume: Float) {
         self.wallpaperId = wallpaperId
         self.title = title
@@ -7883,9 +7885,10 @@ public struct BridgeWebWallpaper {
     public var muted: Bool
     public var audioResponseEnabled: Bool
     /**
-     * Whether this wallpaper opted in to system media integration. The host
-     * still has to find a usable system media source; this is only the user's
-     * consent to look.
+     * Whether this wallpaper shares system media integration: on by default,
+     * off once the user turns it off for this wallpaper. The host still has to
+     * find a usable system media source; this is only the user's consent to
+     * look.
      */
     public var mediaIntegrationEnabled: Bool
     /**
@@ -7919,9 +7922,10 @@ public struct BridgeWebWallpaper {
          * `window.devicePixelRatio`.
          */renderScale: Float, paused: Bool, volume: Float, muted: Bool, audioResponseEnabled: Bool, 
         /**
-         * Whether this wallpaper opted in to system media integration. The host
-         * still has to find a usable system media source; this is only the user's
-         * consent to look.
+         * Whether this wallpaper shares system media integration: on by default,
+         * off once the user turns it off for this wallpaper. The host still has to
+         * find a usable system media source; this is only the user's consent to
+         * look.
          */mediaIntegrationEnabled: Bool, 
         /**
          * Wallpaper Engine `applyUserProperties` payload for every user-editable
@@ -10147,7 +10151,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_launch_at_login() != 35969) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_media_integration_enabled() != 64646) {
+    if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_media_integration_enabled() != 29153) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_wallpaper_bridge_checksum_method_wallpaperbridge_set_mirror_muted() != 46663) {

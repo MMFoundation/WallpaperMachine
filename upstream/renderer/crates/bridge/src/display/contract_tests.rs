@@ -207,6 +207,7 @@ fn d02_distinct_panels_keep_assignments_and_settings_across_two_reconnects() {
     let normalized = config.normalized(&inventory);
     assert_eq!(config, before);
     let mut expected = before.clone();
+    expected.primary_display = Some(identity_selector(&primary.identity));
     expected.monitors[1].selector = identity_selector(&current_a);
     expected.monitors[2].selector = identity_selector(&current_b);
     expected.monitors[3].mirror_target = Some(identity_selector(&current_a));
@@ -259,9 +260,11 @@ fn d02_retained_aliases_keep_first_assignment_but_prefer_current_settings() {
         tuned_settings(identity_selector(&old), 17, 0.125),
         current_settings.clone(),
     ];
+    let recorded_primary = identity_selector(&primary.identity);
     let normalized = config.normalized(&[primary, panel]);
     first.selector = identity_selector(&current);
     let mut expected = config.clone();
+    expected.primary_display = Some(recorded_primary);
     expected.monitors = vec![
         saved(SerializedSelector::Primary, Some("seed-art")),
         first,
@@ -652,10 +655,12 @@ fn d06_normalized_is_a_preserving_clone_and_sync_is_idempotent() {
     malformed_primary.wallpaper = Some("main-slate-art".into());
     let config = configuration(vec![malformed_primary]);
     let before = config.clone();
+    let recorded_primary = identity_selector(&primary.identity);
     let inventory = [primary, independent.clone(), mirrored.clone()];
     let normalized = config.normalized(&inventory);
     assert_eq!(config, before);
     let mut expected = config.clone();
+    expected.primary_display = Some(recorded_primary);
     expected.monitors = vec![
         saved(SerializedSelector::Primary, Some("main-slate-art")),
         saved(
@@ -850,7 +855,13 @@ fn d06_existing_secondary_modes_are_literal_and_first_seen_mirror_is_not_primary
             saved(SerializedSelector::Primary, None),
             existing.clone(),
         ]);
-        let before = config.clone();
+        let mut before = config.clone();
+        before.primary_display = Some(identity_selector(&primary.identity));
+        assert!(
+            config.sync_known_monitors(&[primary.clone(), secondary.clone()]),
+            "the first sync records the main display"
+        );
+        assert_eq!(config, before);
         assert!(!config.sync_known_monitors(&[primary.clone(), secondary.clone()]));
         assert_eq!(config, before);
         assert_eq!(
@@ -1274,6 +1285,7 @@ fn d06_live_primary_aliases_remove_none_rows_and_carry_first_present_literal_wal
     ]);
     config.monitor_settings = vec![tuned_settings(live(2221), 37, 0.375)];
     let mut expected = config.clone();
+    expected.primary_display = Some(stable.clone());
     expected.monitors = vec![
         saved(SerializedSelector::Primary, Some("")),
         saved(stable, Some("stable-must-not-win")),
@@ -1302,6 +1314,10 @@ fn d02_serial_stable_without_uuid_renames_assignment_settings_and_references() {
     ]);
     config.monitor_settings = vec![tuned_settings(identity_selector(&previous), 41, 0.625)];
     let mut expected = config.clone();
+    expected.primary_display = Some(identity_selector(&named_identity(
+        Some("serial-primary"),
+        None,
+    )));
     expected.monitors[1].selector = identity_selector(&current);
     expected.monitors[2].mirror_target = Some(identity_selector(&current));
     expected.monitor_settings[0].selector = identity_selector(&current);

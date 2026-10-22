@@ -83,6 +83,7 @@ pub(super) fn running_layout() -> RunningLayout {
                 window_active: true,
                 runtime_open: true,
                 primary_inheritance_consumed: false,
+                bound_to_display: false,
             },
             DisplayRecord {
                 key: DisplayKey::Identity(secondary_display.identity.clone()),
@@ -91,6 +92,7 @@ pub(super) fn running_layout() -> RunningLayout {
                 window_active: false,
                 runtime_open: true,
                 primary_inheritance_consumed: true,
+                bound_to_display: false,
             },
         ],
     };
@@ -858,6 +860,7 @@ fn public_action_computation_rejects_an_arranged_cycle_without_mutation() {
                 window_active: true,
                 runtime_open: false,
                 primary_inheritance_consumed: false,
+                bound_to_display: false,
             },
             DisplayRecord {
                 key: DisplayKey::Identity(secondary.identity.clone()),
@@ -866,6 +869,7 @@ fn public_action_computation_rejects_an_arranged_cycle_without_mutation() {
                 window_active: true,
                 runtime_open: false,
                 primary_inheritance_consumed: true,
+                bound_to_display: false,
             },
         ],
     };

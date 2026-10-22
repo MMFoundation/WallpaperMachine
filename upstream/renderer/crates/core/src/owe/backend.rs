@@ -324,6 +324,18 @@ impl OweBackend {
     }
 }
 
+/// The value of the engine's scaling-mode property for `mode`, as the C ABI
+/// numbers them. An engine that does not know a value ignores it.
+pub(crate) fn scaling_mode_property_value(mode: ScalingMode) -> i32 {
+    match mode {
+        ScalingMode::None => 0,
+        ScalingMode::Stretch => 1,
+        ScalingMode::Fit => 2,
+        ScalingMode::Fill => 3,
+        ScalingMode::FitBlurred => 4,
+    }
+}
+
 pub struct OweScene {
     raw: Option<NonNull<sys::owe_scene_wallpaper>>,
     #[allow(dead_code)]
@@ -535,13 +547,7 @@ impl OweScene {
     /// fails, or OWE rejects the property update.
     pub fn set_scaling_mode(&mut self, mode: ScalingMode) -> Result<(), EngineError> {
         let name = Self::scaling_mode()?;
-        let value = match mode {
-            ScalingMode::None => 0,
-            ScalingMode::Stretch => 1,
-            ScalingMode::Fit => 2,
-            ScalingMode::Fill => 3,
-        };
-        self.set_property_int32(name, value)
+        self.set_property_int32(name, scaling_mode_property_value(mode))
     }
 
     /// # Errors
