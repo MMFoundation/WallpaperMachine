@@ -454,16 +454,17 @@ final class WallpaperPresentationPolicy {
             }
         }
 
+        // A wake or unlock may also reveal a display that was suspended on its own.
+        // Adopt both decisions in this evaluation: no later window event is guaranteed.
         if presentation != globalPresentation {
-            commitPlayback(presentation: presentation, audio: audio, quality: quality)
-            return
+            globalPresentation = presentation
+            AppLog.info("presentation \(presentation.logLabel)")
         }
-        let audioChanged = audio != isAudioSuppressed
-        if audioChanged {
+        if audio != isAudioSuppressed {
             isAudioSuppressed = audio
             AppLog.info("wallpaper audio \(audio ? "suppressed" : "restored")")
         }
-        let qualityChanged = adopt(quality: quality)
+        adopt(quality: quality)
         // Resume instantly; delay only occlusion-driven suspension so a Space
         // switch or a Mission Control pass does not freeze a visible wallpaper.
         let revealed = suspendedDisplayIDs.subtracting(hidden)
@@ -472,8 +473,6 @@ final class WallpaperPresentationPolicy {
             suspendedDisplayIDs.subtract(revealed)
             pendingDisplays.formUnion(revealed)
             AppLog.info("presentation resumed for displays \(revealed.sorted())")
-            deliverPending()
-            if newlyHidden.isEmpty { return }
         }
         guard !newlyHidden.isEmpty else {
             deliverPending()
@@ -490,7 +489,7 @@ final class WallpaperPresentationPolicy {
             let stillHidden = Set(self.currentSurfaces().filter { !$0.isVisible }.map(\.displayID))
             self.commitHidden(newlyHidden.intersection(stillHidden))
         }
-        if audioChanged || qualityChanged { deliverPending() }
+        deliverPending()
     }
 
     private func resolvedPresentation() -> GlobalPresentation {
@@ -519,19 +518,6 @@ final class WallpaperPresentationPolicy {
         if userMuted() { return true }
         if appRuleActions().contains(.mute) { return true }
         return otherAudioActive() && otherAudioAction() == .mute
-    }
-
-    private func commitPlayback(presentation: GlobalPresentation, audio: Bool, quality: Set<QualityReduction>) {
-        if presentation != globalPresentation {
-            globalPresentation = presentation
-            AppLog.info("presentation \(presentation.logLabel)")
-        }
-        if audio != isAudioSuppressed {
-            isAudioSuppressed = audio
-            AppLog.info("wallpaper audio \(audio ? "suppressed" : "restored")")
-        }
-        adopt(quality: quality)
-        deliverPending()
     }
 
     /// Takes the conditions' current request as the decision, and says whether it changed.

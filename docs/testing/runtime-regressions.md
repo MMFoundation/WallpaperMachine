@@ -47,6 +47,16 @@ device.
   whose layer draws no composite) neither draws nor clears, as on
   Compatibility, instead of refusing the scene. An image that has a name and
   does not load still sends the whole scene to Compatibility.
+- **Intentionally unbound samplers** — `MetalSceneDraw.UnboundTextureSlotsSampleZeroOnBothRenderers`:
+  omitted texture lists and explicit null slots sample zero in every RGBA channel,
+  following [Direct3D null-resource sampling](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/sample--sm4---asm-),
+  rather than dropping the draw. The shared material loader fills only active
+  unbound slots after annotation defaults and texture-presence combos settle;
+  authored textures still win and their presence switches remain unchanged.
+  `WPTexImageParser` supplies one immutable 1x1 RGBA image under `$nullTexture`,
+  reused by the ordinary image caches, with no new per-frame work or render pass.
+  Named missing assets and unresolved layer links are not null bindings and keep
+  the failure/skip behavior above.
 - **Face culling** — `MetalSceneDraw.ADepthTestedDrawCullsTheSameFacesAsCompatibility`:
   a card under a perspective camera, turned towards and away, with back, front
   and no culling and with and without a depth attachment, drawn by both
@@ -154,6 +164,17 @@ device.
   a second renderer on the same device must not hand an identical translated
   program to the Metal compiler again. The pipeline key identifies the program by
   content, never by the address of the object holding it.
+- **Imported pictures shared between displays** — `MetalSceneDraw.TwoDisplaysShowingOneSceneShareEachImportedPictureUntilBothUnload`:
+  two renderers compiling one scene at the same moment, each from its own parse,
+  bind one texture for its image (`MetalRender::ImportedTextureForTests`), the
+  process cache holds one display's bytes for both
+  (`SharedImportedImagesForTests`), both draw the same picture, and the texture is
+  kept while either display still shows it and gone once both have unloaded.
+  `.DisplaysKeepingAnotherMipRangeOrAChangedFileGetTheirOwnPicture`: a surface that
+  drops a leading mip gets its own texture, and a file rewritten with other pixels
+  under the same name and layout is loaded fresh while the old picture is still
+  shown. A texture is handed to a further display only after its pixels compare
+  equal to that display's parse; the name and layout alone are never trusted.
 - **Optional programs** — `.AVideoLayerSamplesTheDecoderPlanesThroughItsOwnShader`
   asserts the parse compiled nothing optional before asking for it, and
   `.AVideoLayerKeepsConvertingWhileTheSettingIsOff` asserts the program was never

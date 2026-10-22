@@ -238,6 +238,7 @@ final class DesktopWallpaperSync {
          scope: @escaping @MainActor (String) -> DesktopPosterScope = { _ in .all },
          retainedDisplays: @escaping @MainActor () -> Set<String> = { [] },
          beforeDesktopChange: @escaping @MainActor () -> Void = {},
+         systemDefaultPicture: URL = DesktopWallpaperLedger.systemDefaultPictureURL,
          encode: @escaping @Sendable (DesktopPosterFrame) async throws -> Data = { frame in
              try await Task.detached(priority: .userInitiated) {
                  try DesktopPosterEncoder.jpeg(pixels: frame.pixels, width: frame.width, height: frame.height, bgra: frame.bgra)
@@ -249,7 +250,8 @@ final class DesktopWallpaperSync {
          recaptureFloor: Duration = DesktopWallpaperSync.recaptureFloor,
          clock: @escaping @MainActor () -> ContinuousClock.Instant = { ContinuousClock.now }) throws {
         ledger = try DesktopWallpaperLedger(folder: folder, workspace: workspace,
-                                            confirmationWindow: confirmationDelay)
+                                            confirmationWindow: confirmationDelay,
+                                            systemDefaultPicture: systemDefaultPicture)
         self.confirmationDelay = confirmationDelay
         self.surfaces = surfaces
         self.frameCenter = frameCenter

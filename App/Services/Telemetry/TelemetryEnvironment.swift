@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Metal
 import Security
 
@@ -17,7 +18,7 @@ enum TelemetryEnvironment {
         return TelemetryReport.AppInfo(
             version: matching(version, #"^\d{1,4}(\.\d{1,4}){0,3}$"#) ?? "0",
             build: matching(build, #"^[0-9A-Za-z.]{1,16}$"#) ?? "0",
-            source: !hasTeamSignature())
+            source: isSource(signingInformation: signingInformation()))
     }
 
     @MainActor
@@ -67,16 +68,36 @@ enum TelemetryEnvironment {
         value.range(of: pattern, options: .regularExpression) == nil ? nil : value
     }
 
-    /// The signed release carries a Developer ID team; a build from source is signed ad hoc.
-    private static func hasTeamSignature() -> Bool {
+    /// SHA-256 of the DER-encoded project certificate `WallpaperMachine Code Signing`.
+    /// This telemetry fingerprint is separate from the code-signing requirement's SHA-1
+    /// (`docs/build.md#release-signing`); replacing the certificate changes both.
+    static let releaseCertificateSHA256 = "5628ff548673a0cc17cbfc2de3298461be3340e00737a50f5356f5fcc84d364c"
+
+    /// A copy is the release only when it is signed with the project certificate. That
+    /// certificate is self-signed and carries no team, so a team says nothing here; a build
+    /// from source is signed ad hoc, without certificates, or with its builder's own one.
+    static func isSource(signingInformation: [String: Any]?) -> Bool {
+        guard let signingInformation else { return true }
+        if let flags = signingInformation[kSecCodeInfoFlags as String] as? NSNumber,
+            SecCodeSignatureFlags(rawValue: flags.uint32Value).contains(.adhoc)
+        {
+            return true
+        }
+        guard let leaf = (signingInformation[kSecCodeInfoCertificates as String] as? [SecCertificate])?.first
+        else { return true }
+        let digest = SHA256.hash(data: SecCertificateCopyData(leaf) as Data)
+        return digest.map { String(format: "%02x", $0) }.joined() != releaseCertificateSHA256
+    }
+
+    private static func signingInformation() -> [String: Any]? {
         var code: SecCode?
-        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return false }
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
         var staticCode: SecStaticCode?
-        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return false }
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
         var information: CFDictionary?
         guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information)
-            == errSecSuccess, let information = information as? [String: Any]
-        else { return false }
-        return information[kSecCodeInfoTeamIdentifier as String] is String
+            == errSecSuccess
+        else { return nil }
+        return information as? [String: Any]
     }
 }

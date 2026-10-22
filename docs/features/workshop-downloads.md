@@ -109,6 +109,10 @@ before it as full. The fallback is logged once per run. The original failure sta
 and no empty list is shown, when the page names no id, when no id belongs to a
 Wallpaper Engine item, and when the query is there but Steam answered it with a
 failure (`eresult` other than 1: a sign-in or access problem is not a layout change).
+`eresult` 10 is Steam's search being overloaded ("Rejected CRE query, because there
+are already 501 jobs"): the page is requested twice more, after 1 s and 3 s, for
+browsing and collections alike, and only then fails with "Steam’s Workshop is busy.
+Try again in a moment." (`WorkshopBusy`) instead of the page-changed message.
 Collections, which are read by the same decoder, are not listed this way: their pages
 carry every collection's children, so the ids they name are not the page's items.
 
@@ -172,9 +176,12 @@ the first frame.
 The panel never reads animation pixels back: frames go from ImageIO to the screen,
 and the bright still is chosen once, in the cache. Scrolling a tile offscreen, hiding
 the window or leaving Discover releases its animation, and returning to a visible tile
-reuses the disk cache; flipping to another page drops pending animation requests. An
-installed copy shows the library's still and never animates. The inspector shows
-Steam's 512 px still for the selected item, with its animation played over it.
+reuses the disk cache; flipping to another page drops pending animation requests and
+releases the animations of tiles that left. An installed copy shows the library's
+still and never animates. The inspector shows Steam's 512 px still for the selected
+item, with its animation played over it while the window is on screen; hiding the
+window releases the animation's bytes and showing it again reloads them from the disk
+cache.
 
 ## Collections, authors and subscriptions
 
@@ -246,12 +253,26 @@ subscriptions** needs a Steam Community sign-in. This is a different sign-in fro
 SteamCMD's (see [Steam sign-in](#steam-sign-in)), and the app never sees the
 password: **Sign in to Steam…** opens Steam's own sign-in page in a window
 (`WebSignInWindowController` with its `.steam` site, the same one pixiv uses) and
-takes the `steamLoginSecure` cookie Steam sets. The cookie is kept in memory only
-(`WorkshopStore.steamWebSession`): it is never written to disk or the keychain,
-ends when the app quits or on **Sign out of Steam**, and is sent only to
-`steamcommunity.com` over HTTPS (a redirect anywhere else goes without it,
-`WorkshopService.redirected`), to read the subscriptions list (the author page
-with `browsefilter=mysubscriptions`).
+takes the `steamLoginSecure` cookie Steam sets, and with it the
+`steamRefresh_steam` renewal token Steam sets on `login.steampowered.com` when the page
+set one for the same account. The session (`WorkshopStore.steamWebSession`) is kept in
+the login keychain as one generic password (`KeychainSteamWebSessionStore`, service
+`app.wallpapermachine.steam-community`), read once at launch off the main thread, so
+the sign-in survives quitting; **Sign out of Steam**, or Steam ending the session,
+removes it. The cookie is sent only to `steamcommunity.com` over HTTPS (a redirect
+anywhere else goes without it, `WorkshopService.redirected`), to read the subscriptions
+list (the author page with `browsefilter=mysubscriptions`).
+
+The cookie's own token lasts about a day; the renewal token lasts months. Before a
+subscriptions read, a cookie whose token has run out (its JWT `exp`, read without
+checking the signature, within two minutes) is traded for a new one through
+`IAuthenticationService/GenerateAccessTokenForApp` on `api.steampowered.com`
+(`WorkshopService.renew`): the renewal token goes there alone, in a POST body, and the
+request follows no redirect. Concurrent readers wait for one renewal, and the new
+cookie is saved. Steam refusing the token (an empty `response`) ends the session like
+its sign-in page does. A session without a renewal token is used until Steam ends it.
+The SteamCMD sign-in cannot be reused here: SteamCMD keeps its own machine-bound
+client token, which the app does not read.
 
 That page lists rows rather than an author's tiles, so
 `WorkshopService.decodeProfileListing` reads an item's id from either layout: an
@@ -268,7 +289,10 @@ with **Download the ones not in your library** as the list's main action beside
 **Download the ones not in your library** reads every page of subscriptions (at
 most 1,000 pages of 30), drops what is installed, collections and Application
 items, and queues the rest as ordinary downloads, which need SteamCMD's own
-sign-in as any download does. Nothing is subscribed or unsubscribed on Steam.
+sign-in as any download does. Nothing is subscribed or unsubscribed on Steam. The
+welcome guide's **Import my subscriptions** and its one-time offer to existing users
+([first run](first-run.md#star-prompt-the-performance-data-question-and-the-subscriptions-offer))
+do the same, signing in first when needed.
 
 ## One decision per download
 
@@ -458,6 +482,24 @@ never self-updates mid-download. Reinstall through setup when a newer version is
 needed. The implementation is `App/Services/Steam/SteamCMDPackages.swift`,
 `SteamCMDRuntime.swift` and `SteamCMDSetupStore.swift`.
 
+### Proxies
+
+The app has no proxy setting of its own: every connection follows the macOS
+system proxy (System Settings → Network → Details → Proxies). Browsing, thumbnails,
+pixiv and updates use `URLSession`/WebKit defaults. SteamCMD reads the same settings
+itself: Valve's `steamclient.dylib` calls `SCDynamicStoreCopyProxies` and
+`CFNetworkCopyProxiesForURL`, so its HTTP requests and its WebSocket connection
+to Steam's servers both go through a configured HTTP/HTTPS system proxy. It
+ignores `http_proxy`/`https_proxy` environment variables, and its proxy lookup has
+no SOCKS case, so a SOCKS-only system proxy leaves it direct. Passing a proxy to it
+from the app is therefore not possible.
+
+A proxy client in rule mode still decides per host name. Its Steam
+(`steamserver.net`, `steamcontent.com`, `steamcommunity.com`, `steampowered.com`)
+rules decide whether SteamCMD's traffic is proxied; rule sets that send them `DIRECT`
+give the same result as no proxy. Route those domains through the proxy, or use
+global mode while downloading. A TUN ("enhanced") mode applies the same rules.
+
 ## The download queue
 
 Every download also appears in a compact popover opened from the toolbar's
@@ -594,8 +636,14 @@ Scene support is experimental; [web wallpapers](web-wallpapers.md) run in a
 built-in web view; Windows application wallpapers are labeled unsupported.
 
 **Download from Steam…** in **Settings → Library & Steam**, or **Get shared
-resources** in a scene's details, starts the installation; **Locate an
-installation…** (**Use an existing installation** in the dialog) instead points at
+resources** in a scene's details, starts the installation. While the resources
+are missing, a scene's details lead with that notice (above any failure, with
+**Show in downloads** in place of the button while they download) and offer no
+GitHub report, and **Apply**, **Reapply** or **Apply to all displays** on an
+installed scene opens this setup instead of asking the renderer for a failure
+(`PanelController.getsSceneResourcesInstead(of:)`); the scene is not applied by
+itself once the resources arrive. **Locate an installation…** (**Use an existing
+installation** in the dialog) instead points at
 an existing purchased installation. Installation reuses the private SteamCMD login
 and cancellation flow and requests the Windows application with `app_update
 431960 validate`. Only the validated `assets` tree is retained, at

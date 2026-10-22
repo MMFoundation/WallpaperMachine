@@ -24,7 +24,7 @@ folder in the library) is sent as `null` with `source: "local"`, and
 | Part | Contents | Where it comes from |
 |---|---|---|
 | `install` | A random UUID made when sending is turned on and forgotten when it is turned off | `TelemetryPreferences` |
-| `app` | Version, build, and whether the copy is the Developer ID signed release or a build from source | the bundle and its code signature |
+| `app` | Version, build, and `source`: `false` only when the copy is signed with the project certificate releases use ([release signing](../build.md#release-signing)); an ad-hoc signature or any other certificate, even one with the same name, is a build from source | the bundle and its code signature (`TelemetryEnvironment.isSource`) |
 | `mac` | `hw.model`, CPU brand, core count, memory in GB, macOS version, Metal GPU name, and each display's pixel size, scale, maximum refresh rate and whether it is the main one | `TelemetryEnvironment` |
 | `sessions` | For each earlier run: start day, version, how it ended (`clean`, `quitStalled`, `unexpected`, `systemRestart`, `exception`), whether macOS left a crash report, minutes, memory-pressure warnings and critical events, peak footprint in MB | the [session ledger](diagnostics.md#how-the-previous-session-ended), the crash report lookup and this run's record |
 | `activations` | Day, `activation`/`reload`/`reapply`, wallpaper, kind, origin, outcome and milliseconds | the facts each [activation line](diagnostics.md#wallpaper-activations) states, handed over by `BridgeStore` |
@@ -115,7 +115,9 @@ The Worker:
 - deletes rows older than 180 days.
 
 The data is kept in its own D1 database, `wallpapermachine-telemetry`, separate from
-accounts so it can never be joined to them. The IP is used only as a rate-limit key,
+accounts so it can never be joined to them. A maintainer (the website's `OWNER_EMAIL`)
+reads it as totals on the website's `/account/telemetry/` page; no install id leaves
+the database there. The IP is used only as a rate-limit key,
 and Cloudflare's request logs keep it for up to 7 days. The website's
 [privacy notice](https://www.wallpapermachine.app/privacy/) says all of this.
 

@@ -164,7 +164,8 @@ private struct InspectorPreview: View {
       }
       .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
       .accessibilityHidden(true)
-      .task(id: item.id) { await loadAnimation() }
+      // Hidden, the request becomes nil and the animation's bytes go; the still stays under it.
+      .task(id: isVisible ? item.id : nil) { await loadAnimation() }
   }
 
   private var still: PanelImageSource? {
@@ -177,7 +178,7 @@ private struct InspectorPreview: View {
   /// Steam's animation for the selected item alone: one at a time, held to the pipeline's budget.
   private func loadAnimation() async {
     animation = nil
-    guard !isInstalled, let source = item.thumbnail else { return }
+    guard isVisible, !isInstalled, let source = item.thumbnail else { return }
     guard let data = try? await controller.images.animation(for: source) else { return }
     guard !Task.isCancelled else { return }
     animation = (item.id, data)
@@ -446,6 +447,9 @@ private struct DownloadNotes: View {
       if isInstalled, let notice = controller.workshopUpdateNotice(for: item.id) {
         UpdateNotice(item: item, notice: notice)
       }
+      // What keeps a scene from playing comes before any failure: getting the resources is the
+      // way forward, where a failure's report link is not.
+      if sceneResourcesMissing { sceneResources }
       failure
       if isInstalled, download.hasFinishedDownload { showInLibrary }
       if download.showsInDownloads {
@@ -457,39 +461,61 @@ private struct DownloadNotes: View {
         Text(verbatim: compatibility).noteStyle(theme)
       }
       if isInstalled { installedLinks }
-      if item.kind == .scene && !controller.workshop.sceneAssetsReady {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-          Image(systemName: "exclamationmark.circle.fill")
-            .foregroundStyle(theme.surface.warning.color)
-            .accessibilityHidden(true)
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Shared scene resources are required before playback.")
-            Button("Get shared resources") { downloads.requestSceneAssets() }
-              .buttonStyle(.panelLink)
-          }
-          .font(.system(size: 12))
-        }
-        .padding(10)
-        .background(
-          theme.surface.warning.color.opacity(0.1),
-          in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-      }
       if isInstalled, !download.hasFinishedDownload { showInLibrary }
     }
+  }
+
+  // MARK: Shared scene resources
+
+  /// A scene cannot play until Wallpaper Engine's shared resources are installed.
+  private var sceneResourcesMissing: Bool {
+    item.kind == .scene && !controller.workshop.sceneAssetsReady
+  }
+
+  /// The one-time setup of the shared resources, as the notice's own button, or their download
+  /// while it is under way.
+  private var sceneResources: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 6) {
+      Image(systemName: "exclamationmark.circle.fill")
+        .foregroundStyle(theme.surface.warning.color)
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Shared scene resources are required before playback.")
+        if controller.sceneResourcesArePending {
+          Button("Show in downloads") { controller.downloads.showDownloads() }
+            .buttonStyle(.panelLink)
+        } else {
+          Button {
+            controller.downloads.requestSceneAssets()
+          } label: {
+            Label("Get shared resources", systemImage: "shippingbox")
+          }
+          .buttonStyle(.panelPrimary(size: .compact))
+          .disabled(controller.isBusy(PanelActionCoordinator.key("requestDownload", id: "")))
+        }
+      }
+      .font(.system(size: 12))
+    }
+    .padding(10)
+    .background(
+      theme.surface.warning.color.opacity(0.1),
+      in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    .accessibilityElement(children: .contain)
   }
 
   // MARK: Failure and reports
 
   /// What a failed download said, or what the last attempt to apply an installed copy said, with the
   /// report prefilled with it; without a failure an installed wallpaper that can run offers a plain
-  /// report link.
+  /// report link. A scene waiting for the shared resources offers no report for applying it: the
+  /// notice above is the way forward.
   @ViewBuilder
   private var failure: some View {
     let applyFailure = download.isInstalled ? controller.activationFailures[item.id] : nil
     if let message = download.failure ?? applyFailure {
       VStack(alignment: .leading, spacing: 6) {
         DownloadNotice(kind: .error, text: message)
-        if let url = reportURL(failure: message) {
+        if download.failure != nil || !sceneResourcesMissing, let url = reportURL(failure: message) {
           Button {
             ExternalLink.open(url)
           } label: {
@@ -512,7 +538,7 @@ private struct DownloadNotes: View {
   @ViewBuilder
   private var installedLinks: some View {
     let hasFailure = controller.activationFailures[item.id] != nil
-    if !hasFailure, item.canRunOnMac, let url = controller.issueReportURL(for: item.id) {
+    if !hasFailure, !sceneResourcesMissing, item.canRunOnMac, let url = controller.issueReportURL(for: item.id) {
       Button {
         ExternalLink.open(url)
       } label: {

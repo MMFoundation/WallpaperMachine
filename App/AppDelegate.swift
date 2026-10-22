@@ -159,6 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             playbackSnapshotCurrent = false
         }
         pixivStore.restoreSession()
+        workshopStore.restoreSteamWebSession()
         // A crash during a download leaves its staging behind, holding the whole downloaded item.
         let stagingRoot = ClientPaths.supportURL
         let pixivStagingRoot = PixivWallpaperPackager.stagingRoot(forLibrary: ClientPaths.libraryURL)
@@ -171,6 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         NSApp.setActivationPolicy(.accessory)
         AppLog.info("startup: activation policy set to accessory")
+        WebSignInWindowController.onClosed = { [weak self] in self?.leaveDockUnlessAWindowIsOpen() }
         installStatusItem()
         synchronizeStatusItem()
         installDisplayChangeObserver()
@@ -988,7 +990,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let wallpaperRestorer = desktopWallpaperSync
         controlPanelWindow?.orderOut(nil)
         whatsNewWindow?.orderOut(nil)
-        NSApp.setActivationPolicy(.accessory)
+        leaveDockUnlessAWindowIsOpen()
 
         Task {
             var supervisor = QuitSupervisor(mode: mode)
@@ -1324,7 +1326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if window === whatsNewWindow {
             whatsNewWindow = nil
             window.contentViewController = nil
-            if controlPanelWindow?.isVisible != true, previewWindow == nil { NSApp.setActivationPolicy(.accessory) }
+            leaveDockUnlessAWindowIsOpen()
             retryHeldUpdatePrompt()
             return
         }
@@ -1332,8 +1334,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         controlPanelWindow = nil
         window.contentViewController = nil
-        if whatsNewWindow == nil, previewWindow == nil { NSApp.setActivationPolicy(.accessory) }
+        leaveDockUnlessAWindowIsOpen()
         rebuildMenu()
+    }
+
+    /// Drops to `.accessory` once none of the app's ordinary windows is open
+    /// (`ActivationPolicyRule`). A window that is closing still reports itself visible, so
+    /// callers forget it first; whatever opens a window raises the policy itself.
+    private func leaveDockUnlessAWindowIsOpen() {
+        let windows = NSApp.windows.map { window in
+            ActivationPolicyRule.Window(
+                role: activationPolicyRole(of: window),
+                isVisible: window.isVisible, isMiniaturized: window.isMiniaturized)
+        }
+        guard !ActivationPolicyRule.keepsRegular(windows, quitting: shutdownInProgress) else { return }
+        NSApp.setActivationPolicy(.accessory)
+    }
+
+    private func activationPolicyRole(of window: NSWindow) -> ActivationPolicyRule.Window.Role? {
+        if window === controlPanelWindow { return .controlPanel }
+        if window === whatsNewWindow { return .whatsNew }
+        if window === previewWindow?.window { return .preview }
+        if WebSignInWindowController.isOpen(window) { return .signIn }
+        return nil
     }
 
     private func startDesktopWallpaperSync() throws {
@@ -1989,9 +2012,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 self.previewWindow = nil
                 self.wallpaperEnergy?.invalidate()
                 self.telemetry?.invalidateFrames()
-                if self.controlPanelWindow?.isVisible != true, self.whatsNewWindow == nil {
-                    NSApp.setActivationPolicy(.accessory)
-                }
+                self.leaveDockUnlessAWindowIsOpen()
             }
             previewWindow = controller
         }

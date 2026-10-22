@@ -545,6 +545,52 @@ final class DisplaysSettingsModel {
 
   // MARK: Sunrise and sunset
 
+  /// Where the sun rules take their times from.
+  var solarSource: WallpaperSolarSource { controller.solarSettings.source }
+  var solarSunriseMinute: Int { controller.solarSettings.fixedSunriseMinute }
+  var solarSunsetMinute: Int { controller.solarSettings.fixedSunsetMinute }
+
+  /// What the automatic source has to show: the position it keeps up to date, or that it
+  /// has none yet.
+  var solarAutomaticStatus: String {
+    let tracker = controller.solarLocationTracker
+    guard tracker.servicesEnabled else {
+      return L("Location Services is turned off on this Mac. Turn it on in System Settings → Privacy & Security → Location Services.")
+    }
+    if tracker.isDenied {
+      return L("Location access has not been granted yet. Allow it in System Settings → Privacy & Security → Location Services.")
+    }
+    if tracker.authorizationStatus == .notDetermined {
+      return L("Allow location access to calculate sunrise and sunset for this Mac.")
+    }
+    guard let location = controller.solarSettings.location else {
+      return L("Waiting for the current location…")
+    }
+    return String(
+      format: L("Using the current location: %.4f, %.4f"), locale: PanelLocale.shared.locale,
+      location.latitude, location.longitude)
+  }
+
+  /// True once the user has refused location access, where asking again would do nothing.
+  var solarLocationDenied: Bool { controller.solarLocationTracker.isDenied }
+
+  func setSolarSource(_ source: WallpaperSolarSource) async throws {
+    try await controller.setSolarSource(source)
+  }
+
+  /// Updates one of the two fixed times, keeping the other as it is.
+  func setSolarFixedTimes(sunrise: Int? = nil, sunset: Int? = nil) async throws {
+    let current = controller.solarSettings
+    try await controller.setSolarFixedTimes(
+      sunriseMinute: sunrise ?? current.fixedSunriseMinute,
+      sunsetMinute: sunset ?? current.fixedSunsetMinute)
+  }
+
+  /// Retries the permission request without changing the current source.
+  func startAutomaticLocation() async throws {
+    try await controller.requestSolarLocation()
+  }
+
   /// What was typed in the coordinate fields; nil follows the saved location.
   var latitudeText: String?
   var longitudeText: String?

@@ -155,14 +155,31 @@ final class InspectorPolicyTests: InspectorTestCase {
   /// failure takes the plain link's place with a report of its own.
   func testOnlyAWallpaperThatCanRunGetsThePlainReportAndAFailureCarriesItsOwn() {
     for kind in [LibraryRow.Kind.scene, .video, .web] {
-      XCTAssertEqual(InspectorPolicy.issueReport(for: row(kind: kind), failure: nil), .plain, "\(kind)")
+      XCTAssertEqual(
+        InspectorPolicy.issueReport(for: row(kind: kind), failure: nil, sceneResourcesMissing: false),
+        .plain, "\(kind)")
     }
     XCTAssertEqual(
-      InspectorPolicy.issueReport(for: row(kind: .unknown, supported: false), failure: nil), .none,
-      "an Application wallpaper cannot run, so there is nothing to report but its type")
+      InspectorPolicy.issueReport(
+        for: row(kind: .unknown, supported: false), failure: nil, sceneResourcesMissing: false),
+      .none, "an Application wallpaper cannot run, so there is nothing to report but its type")
     XCTAssertEqual(
-      InspectorPolicy.issueReport(for: row(kind: .scene), failure: "The scene file is damaged."),
+      InspectorPolicy.issueReport(
+        for: row(kind: .scene), failure: "The scene file is damaged.", sceneResourcesMissing: false),
       .failure("The scene file is damaged."))
+  }
+
+  /// A scene waiting for the shared resources is setup to finish, not a problem to
+  /// report, so no report sits beside the notice that offers them, failure or not.
+  func testASceneWaitingForTheSharedResourcesOffersNoReport() {
+    for failure in [nil, "Shared resources are not installed."] {
+      XCTAssertEqual(
+        InspectorPolicy.issueReport(for: row(kind: .scene), failure: failure, sceneResourcesMissing: true),
+        .none)
+    }
+    XCTAssertEqual(
+      InspectorPolicy.issueReport(for: row(kind: .video), failure: nil, sceneResourcesMissing: true),
+      .plain, "other types do not need them")
   }
 
   func testTheMenusReportCarriesTheFailureAndNoneIsOfferedForAWallpaperThatCannotRun() async throws {
@@ -181,6 +198,8 @@ final class InspectorPolicyTests: InspectorTestCase {
           URLComponents(url: XCTUnwrap(url), resolvingAgainstBaseURL: false))
         return try XCTUnwrap(components.queryItems?.first { $0.name == "body" }?.value)
       }
+      panel.sceneAssets.available = true
+      panel.workshop.refreshSceneAssetsReadiness()
       let ghost = try XCTUnwrap(controller.libraryRow(id: "ghost"))
       let tool = try XCTUnwrap(controller.libraryRow(id: "tool"))
 
@@ -192,8 +211,14 @@ final class InspectorPolicyTests: InspectorTestCase {
         try body(controller.inspectorIssueReportURL(for: ghost))
           .contains("**Error:** The scene file is damaged."), "the menu's report carries the failure")
       XCTAssertEqual(
-        InspectorPolicy.issueReport(for: ghost, failure: controller.activationFailures["ghost"]),
+        controller.inspectorIssueReport(for: ghost),
         .failure("The scene file is damaged."), "so the plain link under the type sentence steps aside")
+
+      panel.sceneAssets.available = false
+      panel.workshop.refreshSceneAssetsReadiness()
+      XCTAssertNil(
+        controller.inspectorIssueReportURL(for: ghost),
+        "a scene waiting for the shared resources gets their notice instead")
     }
   }
 
@@ -242,6 +267,37 @@ final class InspectorPolicyTests: InspectorTestCase {
     XCTAssertEqual(
       displays.map(InspectorPolicy.offersFrameRate(for:)), [false, true],
       "a clip plays at its own rate on the native player; another display of it keeps the row")
+  }
+
+  func testFitWithBlurredBackdropIsOfferedWhereAScalingModeMovesThePicture() {
+    let configurations = [
+      InspectorRenderFixture.config("primary", "Studio Display (1 - Primary)", mode: .fill, factor: 1, pan: (0.5, 0.5)),
+      InspectorRenderFixture.config("second", "LG UltraFine (2 - Secondary)", mode: .matchBlurred, factor: 1, pan: (0.5, 0.5)),
+    ]
+    for kind in [BridgeWallpaperKind.projectScene, .video] {
+      let options = InspectorOptions.make(
+        BridgeSnapshotFixtures.options(wallpaperId: "w", kind: kind, displayConfigurations: configurations))
+      XCTAssertEqual(
+        options.displays.map { InspectorPolicy.offersBlurredFit(options, display: $0) }, [true, true], "\(kind)")
+    }
+    // A web page fills its window whatever the mode; a display already set to it keeps it shown.
+    let web = InspectorOptions.make(
+      BridgeSnapshotFixtures.options(wallpaperId: "w", kind: .webpage, displayConfigurations: configurations))
+    XCTAssertEqual(web.displays.map { InspectorPolicy.offersBlurredFit(web, display: $0) }, [false, true])
+  }
+
+  func testOnlyANativelyPlayedVideoWithABlurredBackdropIsToldItsBarsStayBlack() {
+    let snapshot = BridgeSnapshotFixtures.options(
+      wallpaperId: "clip", kind: .video,
+      displayConfigurations: [
+        InspectorRenderFixture.config("primary", "Studio Display (1 - Primary)", mode: .matchBlurred, factor: 1, pan: (0.5, 0.5)),
+        InspectorRenderFixture.config("second", "LG UltraFine (2 - Secondary)", mode: .matchBlurred, factor: 1, pan: (0.5, 0.5)),
+        InspectorRenderFixture.config("third", "Built-in (3 - Secondary)", mode: .match, factor: 1, pan: (0.5, 0.5)),
+      ])
+    var inputs = InspectorOptions.Inputs()
+    inputs.nativePlayerDisplays = [1, 3]
+    let displays = InspectorOptions.make(snapshot, inputs: inputs).displays
+    XCTAssertEqual(displays.map(InspectorPolicy.blurredFitNote(for:)), [.nativePlayer, .none, .none])
   }
 
   func testAStillTheAppPackagedIsToldByItsIdAndTheArtworkIdIsRead() {

@@ -323,29 +323,94 @@ struct DisplaysSolarGroup: View {
       if let error = controller.automationLoadError {
         DisplaysMessageRow(text: error, isError: true)
       }
-      DisplaysItemNote(item: DisplaysSettingsSection.solarIntro)
-      DisplaysRow(item: DisplaysSettingsSection.solarIntro, note: "") {
-        coordinateField(latitude, busy: busy, canSave: canSave)
-      }
-      DisplaysRow(item: DisplaysSettingsSection.solarLongitude) {
-        coordinateField(longitude, busy: busy, canSave: canSave)
-      }
-      HStack(spacing: 8) {
-        Spacer(minLength: 0)
-        if saved != nil {
-          Button("Clear location") {
-            controller.launch(PanelActionCoordinator.key("automationClearLocation")) {
-              try await model.clearLocation()
-            }
-          }
-          .disabled(busy)
+      DisplaysRow(item: DisplaysSettingsSection.solarSource) {
+        Picker(
+          noLabel,
+          selection: Binding(
+            get: { model.solarSource },
+            set: { source in
+              controller.launch(PanelActionCoordinator.key("automationSolarSource")) {
+                try await model.setSolarSource(source)
+              }
+            })
+        ) {
+          Text("Coordinates").tag(WallpaperSolarSource.coordinates)
+          Text("Fixed times").tag(WallpaperSolarSource.fixed)
+          Text("Automatic").tag(WallpaperSolarSource.automatic)
         }
-        Button("Save location") { save() }
-          .buttonStyle(.panelPrimary(size: .small))
-          .disabled(busy || !canSave)
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .disabled(busy)
       }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 8)
+      switch model.solarSource {
+      case .coordinates:
+        DisplaysItemNote(item: DisplaysSettingsSection.solarIntro)
+        DisplaysRow(item: DisplaysSettingsSection.solarIntro, note: "") {
+          coordinateField(latitude, busy: busy, canSave: canSave)
+        }
+        DisplaysRow(item: DisplaysSettingsSection.solarLongitude) {
+          coordinateField(longitude, busy: busy, canSave: canSave)
+        }
+        HStack(spacing: 8) {
+          Spacer(minLength: 0)
+          if saved != nil {
+            Button("Clear location") {
+              controller.launch(PanelActionCoordinator.key("automationClearLocation")) {
+                try await model.clearLocation()
+              }
+            }
+            .disabled(busy)
+          }
+          Button("Save location") { save() }
+            .buttonStyle(.panelPrimary(size: .small))
+            .disabled(busy || !canSave)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+      case .fixed:
+        DisplaysRow(item: DisplaysSettingsSection.solarSunrise) {
+          DisplaysClockField(
+            binding: Binding(
+              get: { model.solarSunriseMinute },
+              set: { minute in
+                controller.launch(
+                  PanelActionCoordinator.key("automationSolarTimes"), policy: .latestWins
+                ) {
+                  try await model.setSolarFixedTimes(sunrise: minute, sunset: nil)
+                }
+              }))
+        }
+        DisplaysRow(item: DisplaysSettingsSection.solarSunset) {
+          DisplaysClockField(
+            binding: Binding(
+              get: { model.solarSunsetMinute },
+              set: { minute in
+                controller.launch(
+                  PanelActionCoordinator.key("automationSolarTimes"), policy: .latestWins
+                ) {
+                  try await model.setSolarFixedTimes(sunrise: nil, sunset: minute)
+                }
+              }))
+        }
+      case .automatic:
+        DisplaysRow(item: DisplaysSettingsSection.solarActions, note: model.solarAutomaticStatus) {
+          if model.solarLocationDenied {
+            Button("Open Location Settings") {
+              controller.launch(PanelActionCoordinator.key("automationSolarSettings")) {
+                try await controller.showSolarLocationSettings()
+              }
+            }
+            .disabled(busy)
+          } else {
+            Button("Use current location") {
+              controller.launch(PanelActionCoordinator.key("automationSolarLocate")) {
+                try await model.startAutomaticLocation()
+              }
+            }
+            .disabled(busy)
+          }
+        }
+      }
       DisplaysNote(text: L("Solar times are approximate. Near the poles, a day may have no sunrise or sunset."))
     }
   }

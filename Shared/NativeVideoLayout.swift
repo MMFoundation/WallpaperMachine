@@ -18,7 +18,8 @@ enum NativeVideoScalingMode: Int32, Equatable, Sendable {
 /// switches a clip between the two backends must see the same picture.
 ///
 /// - **Fit, Fill, Stretch** scale the picture to the display by the smaller
-///   ratio, the larger ratio, or each axis on its own.
+///   ratio, the larger ratio, or each axis on its own. **Fit with blurred backdrop** is Fit
+///   here: this player has no blurred fill, so its bars stay black.
 /// - **Original size** is one video pixel to one *point*, not one device
 ///   pixel: a 1920x1080 clip covers 1920x1080 points of a Retina display,
 ///   exactly as Compatibility draws it.
@@ -110,7 +111,7 @@ enum NativeVideoLayout {
         case .stretch:
             scaleX = ratioX
             scaleY = ratioY
-        case .match:
+        case .match, .matchBlurred:
             scaleX = min(ratioX, ratioY)
             scaleY = scaleX
         case .fill:
@@ -141,7 +142,8 @@ enum NativeVideoLayout {
         if normalizedFactor(factor) == 1, pan.normalized == .centered {
             switch mode {
             case .fill: return .gravity(.resizeAspectFill)
-            case .match: return .gravity(.resizeAspect)
+            // The native player has no blurred fill: its bars stay black.
+            case .match, .matchBlurred: return .gravity(.resizeAspect)
             case .stretch: return .gravity(.resize)
             case .none: break
             }

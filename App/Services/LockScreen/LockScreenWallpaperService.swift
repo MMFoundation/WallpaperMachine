@@ -340,19 +340,12 @@ final class LockScreenWallpaperService {
           AppLog.debug("Native wallpaper topology pending: display \(record.displayId) is not online")
           return
         }
-        let mode: Int32
-        switch record.scalingMode {
-        case .none: mode = 0
-        case .stretch: mode = 1
-        case .match: mode = 2
-        case .fill: mode = 3
-        }
         inputs.append(LockScreenPublishInput(
           displayID: record.displayId,
           displayUUID: uuid,
           wallpaperID: record.wallpaperId, title: record.title,
           projectPath: record.projectPath, assetsPath: record.assetsPath, fps: record.fps,
-          scalingMode: mode, scalingFactor: record.scalingFactor,
+          scalingMode: record.scalingMode.rendererValue, scalingFactor: record.scalingFactor,
           framing: LockScreenFraming(panX: record.framing.panX, panY: record.framing.panY),
           propertiesJSON: record.propertiesJson, paused: record.paused))
       }

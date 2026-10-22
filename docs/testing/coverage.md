@@ -71,7 +71,10 @@ unattached `CAMetalLayer`s and injected notification and encoding services:
 - Originals and quit: inherited (pathless) selections resolve through the public
   API before any poster write and are never replaced by an unresolved poster;
   independent per-Space originals survive; a user's own wallpaper change is not
-  overwritten on restore; quit waits for the native reload, every read-back and
+  overwritten on restore; an original whose file is gone gives way to another
+  display's original and then macOS's default picture (when its display stops playing,
+  at quit and in the launch repair), while one the app may not look at is still put
+  back; quit waits for the native reload, every read-back and
   in-flight writes, keeps the original when restoration fails persistently, and
   cannot be blocked forever by an unreachable reference; cancelling a restoration
   that is waiting (a logout's deadline) stops it and leaves the journal entry and the
@@ -915,7 +918,8 @@ need an authorized runtime check
   factor 1 stay AVFoundation's gravity while Original size and a factor wait for the
   picture's size, and a position (the room is divided as the renderer divides it, an unusable
   one is held to the edge or the middle, and any position but the middle needs an explicit
-  frame because gravity centres). The host suite checks the user's mode, factor and position reach
+  frame because gravity centres); Fit with blurred backdrop is laid out exactly as Fit,
+  black bars and all, since the player has no blurred fill. The host suite checks the user's mode, factor and position reach
   a running surface without reopening or re-probing it, each display keeping its own, and the
   desktop-picture poster is drawn with the same layout (Fit leaves black bars, Original size is
   not scaled to the display, a factor zooms, a position puts the picture in its corner); the
@@ -1049,8 +1053,11 @@ never to `.shared`.
   cannot be made falls back once to the downsampled preview, stills decoded to the view's size
   and cached, only https Steam previews and only pixiv's image host and the fixed property hosts
   read, a view that goes away stops waiting without cancelling the shared fetch, animations only
-  from sources that fit the budget), `PanelImageViewTests`, `AnimatedPreviewTests` (GIF, APNG and
-  WebP frames and delays, no timer until asked and never without a window),
+  from sources that fit the budget), `PanelImageViewTests` (offscreen hosting, drawn-size decoding,
+  stable layout, scrolling a lazy list releases both the decoded wrapper and its `CGImage` after
+  cache eviction, scrolling back reloads it, and a cache hit stays alive while visible but is
+  released on disappearance), `AnimatedPreviewTests` (GIF, APNG and WebP frames and delays,
+  no timer until asked and never without a window),
   `PropertyImageCacheTests` (bounded transfers, author images cannot become a network proxy) and
   `LivePreviewSchedulerTests`.
 - Installed and the library: `PanelLibraryActionsTests` (favorites, Show in Finder, selection
@@ -1090,7 +1097,9 @@ never to `.shared`.
   `PanelPresetsTests`, `PanelImagePlacementTests`, `PanelLetterboxTests` (the Black bars card for
   an installed video only, the suggestion following the target display without a second probe,
   staging the recomputed factor and refusing a stale card, file or selection),
-  `PanelCompatibilityTests`, `PanelWallpaperSettingsTests`, `PanelSceneRetryTests`,
+  `PanelCompatibilityTests`, `PanelWallpaperSettingsTests` (each setting a typed call; Fit with
+  blurred backdrop saved for the one display it was chosen for, offered for scenes and videos,
+  and noted only where the native video player draws it), `PanelSceneRetryTests`,
   `SceneReportsTests` and `WallpaperEditorStateTests` (locale scaling, invalid raw text,
   independent drafts, held drag steps).
 - Steam Workshop and downloads: `PanelWorkshopActionsTests`, `PanelWorkshopSubscriptionsTests`,
@@ -1295,9 +1304,11 @@ install and a no-login smoke run (see [README.md](README.md#opt-in-layers)).
 
 `SupportPromptStoreTests` — a downloaded wallpaper qualifies only after a
 successful activation, a pending prompt survives relaunch and further downloads,
-and a presented prompt never returns. Across the three prompts: one a day in
+and a presented prompt never returns. Across the four prompts: one a day in
 priority order, the performance data question only for someone who finished the
-guide without it, the star prompt after 14 days and 5 days of use (one day counts
+guide without it, the subscriptions offer only for someone signed in to Steam who
+finished the guide without meeting the import (spent by the guide's card or a Steam
+Community sign-in), the star prompt after 14 days and 5 days of use (one day counts
 once) and not after the star was chosen, and state saved by earlier builds still
 loads. `Support/` also holds the shared fixtures
 (`TemporaryDefaults`, `TestAppLanguage`, bridge snapshots).
@@ -1410,7 +1421,10 @@ faces (`WebWallpaperFontAliasTests`) and the screen-saver surface
   unfiltered pages, age-rating sampling of collections, every subscription page
   read with the session, a page whose entries cannot be read failing instead of
   passing for empty, the store's back history, sign-in, ended session and
-  sign-out, and a pasted link or id: one tile that no sidebar filter hides, no
+  sign-out, the session saved for the next launch and removed with it, an expired
+  cookie renewed with Steam's renewal token before a read (and a refused renewal
+  ending the session; `SteamWebSessionTests` covers which token is kept and when a
+  cookie needs renewing), and a pasted link or id: one tile that no sidebar filter hides, no
   browse page read, failures on the normal retry path, other sources ignoring the
   id, and a browse page whose markup changed: listed from its links or the ids in
   its renamed data, an id Steam does not serve left out, paging estimates, the

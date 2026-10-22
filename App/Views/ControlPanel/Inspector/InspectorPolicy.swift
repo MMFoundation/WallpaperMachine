@@ -82,7 +82,8 @@ enum InspectorPolicy {
   /// The problem report the inspector offers for an installed wallpaper.
   enum IssueReport: Equatable {
     /// None: nothing failed, and the wallpaper's type cannot run on macOS, which its own sentence
-    /// already says.
+    /// already says; or it is a scene waiting for the shared resources, whose notice offers the
+    /// fix instead.
     case none
     /// **Not working? Report on GitHub** under the type sentence, and the menu's report.
     case plain
@@ -92,8 +93,13 @@ enum InspectorPolicy {
   }
 
   /// The page's `failureReport` and `report`: a failure always comes with its report; otherwise
-  /// only a wallpaper that can run gets the plain one.
-  static func issueReport(for row: LibraryRow, failure: String?) -> IssueReport {
+  /// only a wallpaper that can run gets the plain one. A scene that cannot play because the shared
+  /// scene resources are missing gets none, whatever failed: that is setup for the user to do, not
+  /// a problem to report, and a report link beside it is read as the way out.
+  static func issueReport(
+    for row: LibraryRow, failure: String?, sceneResourcesMissing: Bool
+  ) -> IssueReport {
+    if sceneResourcesMissing, row.kind == .scene { return .none }
     if let failure { return .failure(failure) }
     return canRun(row.kind) ? .plain : .none
   }
@@ -140,6 +146,29 @@ enum InspectorPolicy {
   /// the scene engine's own drawing of a clip is.
   static func offersFrameRate(for display: InspectorOptions.DisplayRow) -> Bool {
     !display.isDrawnByNativePlayer
+  }
+
+  // MARK: Fit with blurred backdrop
+
+  /// Fit with blurred backdrop is offered where the scaling mode moves a picture: scene and video wallpapers. A
+  /// web page always fills its window. A display already set to it keeps it in the menu.
+  static func offersBlurredFit(_ options: InspectorOptions, display: InspectorOptions.DisplayRow)
+    -> Bool
+  {
+    options.offersPosition || display.scalingMode == .matchBlurred
+  }
+
+  /// What is said under Fit with blurred backdrop.
+  enum BlurredFitNote: Equatable {
+    /// The native video player draws this display and has no blurred fill: its bars stay black,
+    /// with **Open Performance** to choose Compatibility instead.
+    case nativePlayer
+    /// Nothing: the blurred fill is drawn, or the mode is another one.
+    case none
+  }
+
+  static func blurredFitNote(for display: InspectorOptions.DisplayRow) -> BlurredFitNote {
+    display.scalingMode == .matchBlurred && display.isDrawnByNativePlayer ? .nativePlayer : .none
   }
 
   // MARK: Sections

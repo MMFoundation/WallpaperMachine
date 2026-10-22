@@ -353,12 +353,8 @@ final class DownloadsModel {
   /// resources, and opens the dialog when a prerequisite is missing.
   @discardableResult
   func requestSceneAssets() -> Task<Void, Never> {
-    controller.launch(PanelActionCoordinator.key("requestDownload", id: "")) {
-      [weak self, controller] in
-      try await controller.requestSceneAssets()
-      if let target = controller.downloadDialogTarget(afterRequesting: nil) {
-        self?.openDialog(for: target)
-      }
+    controller.launch(PanelActionCoordinator.key("requestDownload", id: "")) { [controller] in
+      try await controller.getSceneResources()
     }
   }
 

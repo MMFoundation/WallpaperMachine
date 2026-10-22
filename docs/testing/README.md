@@ -46,7 +46,10 @@ Routine verification **must not**:
 - sign in to Steam, run a real SteamCMD login, or approve a Gatekeeper prompt,
 - replace or restart the installed `/Applications/WallpaperMachine.app`.
 
-Each of those requires an explicit user decision. `python3 scripts/test.py --ui`
+Each of those requires an explicit user decision, with one standing exception: a
+wallpaper fix may wake the Parallels Windows VM, capture Wallpaper Engine's frames
+in it with Wallpaper Engine muted, and suspend it again
+([wallpaper-engine-reference.md](wallpaper-engine-reference.md)). `python3 scripts/test.py --ui`
 and the manual smoke checklist take over the desktop and are neither part of
 routine verification nor a required release gate. See
 [../../AGENTS.md](../../AGENTS.md) for the agent-facing form of this rule and
@@ -222,10 +225,10 @@ path. A test that passes alone but fails in the gate is the symptom; reproduce
 it with `python3 scripts/test.py --serial` and fix the shared state rather than
 the scheduling. UI runs are always serial: they drive one desktop.
 
-CI's `test` job runs `--serial` too: on hosted macOS runners serial costs almost
-no wall clock (the step's comment in `.github/workflows/build.yml` has the
-timings), and the `test-logs-<tag>` artifact carries the run's crash and jetsam
-reports when a run fails there and not locally.
+The Test workflow's `native` job runs `--serial` too: on hosted macOS runners serial
+costs almost no wall clock (the step's comment in `.github/workflows/test.yml` has the
+timings), and the `test-logs-<run id>-native` artifact carries the run's crash and
+jetsam reports when a run fails there and not locally.
 
 The per-test `UserDefaults` suite is not only a parallelism concern: the unit
 bundle runs inside the real app as its test host, so `UserDefaults.standard`
@@ -306,6 +309,7 @@ the effort to the change:
 | New feature or cross-domain change | targeted runs as above | full gate once, log entry; Release build only if delivery was requested |
 | Rust crates | `cargo test` in the touched crate | full gate plus `scripts/check_rust.py` |
 | Renderer / bridge | `cargo test` or the touched CMake target | full gate plus `scripts/check_rust.py` and `scripts/check_renderer.py` |
+| How a wallpaper looks | as above for the layer touched | as above, plus a before/after comparison with Wallpaper Engine's frames ([wallpaper-engine-reference.md](wallpaper-engine-reference.md)) |
 | Docs only | link, path and command check | nothing else |
 
 `--only` skips the Python script tests and prints a warning: it is an
@@ -363,6 +367,15 @@ they do not establish.
    checkout runs green — see [wallpaper-corpus.md](wallpaper-corpus.md).
 5. **Use original synthetic fixtures** when you need content; do not check in
    Workshop packages or other copyrighted assets.
+6. **Expect the CI gate to run on macOS 26.** CI's runner is a macOS 26 VM
+   while developers may be on a later macOS. There SwiftUI builds no
+   accessibility tree for an unshown window until a client has contacted the app;
+   `PanelTestCase` does that once (`AccessibilityClient`), so panel tests read the
+   tree through it. Behaviour of an unshown window that only macOS 27 shows
+   (toolbar overflow, sidebar arrow keys) skips earlier with
+   `PanelTestSupport.skipBeforeMacOS27`, which leaves it unverified there.
+   `gh workflow run test.yml --ref <branch>` runs the gate on that runner
+   ([release.md](../release.md#test-testyml)).
 6. **Record the result** when the change calls for a log entry (a feature or
    cross-domain change, a changed documented behavior, or on request — see
    [Verification tiers](#verification-tiers)): the counts, the command, and what

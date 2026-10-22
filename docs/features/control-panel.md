@@ -15,7 +15,7 @@ the black-bar check](wallpaper-properties.md), [local backup and restore](backup
 ## Language
 
 The app ships in English, Simplified Chinese (简体中文), Traditional Chinese
-(繁體中文) and Japanese (日本語), including navigation, filters, wallpaper options,
+(繁體中文), Japanese (日本語) and Korean (한국어), including navigation, filters, wallpaper options,
 download and sign-in guidance, settings, accessibility labels, menus and dialogs.
 **Settings → General → Language** offers **System (Auto)** (default, follows the
 macOS language list) and every shipped language under its own name.
@@ -111,7 +111,8 @@ does not count). Sweeping across the grid, dragging a selection and a preview
 that is a single picture start nothing, and moving between one tile's own buttons
 keeps it playing. Leaving the tile, hiding the window, filtering the tile away or
 changing page releases the animation. The inspector's artwork is the preview file
-itself, so the selected wallpaper still animates there.
+itself, so the selected wallpaper still animates there while the window is on
+screen; hiding the window releases it, and showing the window reads the file again.
 
 The window never shrinks below a 760×560 content area (capped by the visible
 screen on small displays). `ControlPanelWindow.minimumContentSize` owns that
@@ -186,8 +187,16 @@ the rest opens in a popover from the ⓘ beside the title.
   filters and app rules keep to their own rows
   ([performance](performance.md#low-battery-low-power-mode-heat-and-focus)).
 - **General** starts with the [Language](#language) picker (Interface), then Startup
-  (**Launch at login** and **Hide window after applying a wallpaper**) and Help (the
-  [welcome guide](first-run.md), **Show again**).
+  (**Launch at login** and **Hide window after applying a wallpaper**), Help (the
+  [welcome guide](first-run.md), **Show again**) and Reset (**Reset all settings**,
+  **Reset…**). Reset asks first; once confirmed, every setting the Settings pages
+  offer returns to a fresh install's default: language, appearance, shortcuts, launch
+  at login, desktop and lock-screen switches, playback, power and app rules, the
+  engine's performance and scene choices, logging, web inspection, Steam update checks
+  and download count, and performance data. Content is kept: the library, favorites,
+  playlists, collections, presets, displays and their wallpapers, the storage location
+  and sign-ins, as is macOS's own "Click wallpaper to reveal desktop". A setting that
+  fails to reset does not stop the others; the first failure goes to the banner.
   **Launch at login** is disabled with its reason while the app is outside
   Applications. When the user has switched WallpaperMachine off in System Settings →
   General → Login Items, macOS keeps it off however often the app registers it
@@ -229,7 +238,7 @@ the rest opens in a popover from the ⓘ beside the title.
   Release; download and restart-install happen only after confirmation (see
   [updates](updates.md)). The application menu item **Check for Updates…** opens
   this section. **Spread the word** has **Share WallpaperMachine…** and **Star on
-  GitHub** ([one-time prompts](first-run.md#star-prompt-and-the-performance-data-question)).
+  GitHub** ([one-time prompts](first-run.md#star-prompt-the-performance-data-question-and-the-subscriptions-offer)).
 - **Storage** holds the wallpaper files chosen for properties, **Clear unused
   caches…** with the shader cache, logs and completed downloads,
   [Backup](backup-restore.md), and ends with **Troubleshooting**: Detailed logging, *Allow inspecting web wallpapers*
@@ -268,7 +277,9 @@ The panel opens on the Space you are on rather than switching you to the Space i
 last left on, and so do What's New, the wallpaper preview and the Steam and pixiv sign-in
 windows. A minimized panel comes back from the Dock when it is opened from the status
 menu, the Dock icon or Command-comma, or when the app is activated; the green button still
-offers full screen. The wallpaper itself keeps playing on every Space as before.
+offers full screen. The app keeps its Dock icon while any of these windows is open, on screen
+or minimized, and leaves the Dock when the last one closes. The wallpaper itself keeps playing
+on every Space as before.
 
 ### Reopening the panel
 
@@ -402,8 +413,11 @@ type, app version and, while it is on screen, the backend drawing it (with the
 renderer's fallback reason) pre-filled. When the panel saw this wallpaper fail
 (its download, or the last attempt to apply it), an error notice takes the link's
 place with **Report this problem on GitHub**, whose issue also carries the error;
-an apply failure stays until an apply succeeds. Nothing is submitted by the app:
-the user edits and sends the issue on GitHub. The same report is in the inspector's
+an apply failure stays until an apply succeeds. An installed scene waiting for the
+shared scene resources offers neither report: their notice, with **Get shared
+resources**, is the way forward (see
+[Shared scene resources](workshop-downloads.md#shared-scene-resources)). Nothing is
+submitted by the app: the user edits and sends the issue on GitHub. The same report is in the inspector's
 **More actions** menu.
 
 ### Sharing a wallpaper
@@ -524,12 +538,14 @@ and reinstalling the wallpaper brings the assignment back.
 ## Target display
 
 The toolbar's target-display menu chooses which display Apply acts on, and which display
-Now Playing shows. Disabled and mirrored displays are listed but not selectable, annotated
+Now Playing shows. In a wide window the button names the chosen display next to its icon; a
+narrow window shows the icon alone and the help names the display. Disabled and mirrored displays are listed but not selectable, annotated
 `(disabled)` or `(mirrored)`; the menu waits while a wallpaper command runs. A target that
 can no longer be chosen stays stored (the menu bar and automation read it) and the menu reads
 **Target display** until another is picked.
-Per-display enablement, independent/mirror mode, mirror source, scaling, scale
-factor, frame rate, mute and volume live in **Settings → Displays**, beside each
+Per-display enablement, independent/mirror mode, mirror source, scaling (No scaling,
+Stretch, Match, Match with blurred backdrop, Fill), scale factor, frame rate, mute and
+volume live in **Settings → Displays**, beside each
 independent display's **Playlist** (see [playlists](playlists.md)). When the frame-rate
 ceiling in force is below the saved frame rate, the field notes it and names what set
 it: `Limited to N fps by Performance settings` with a button to Settings → Performance
@@ -570,6 +586,14 @@ Settings. Turning **Enable wallpaper** off saves that choice under the display's
 identity, and it stays off when the display reconnects. A display switched to
 mirroring shows its source even if it kept an earlier wallpaper; applying that
 wallpaper again does not make it independent.
+
+The **Primary display** row belongs to whichever display macOS makes the main one,
+but a wallpaper belongs to its display. When another display becomes the main one
+(a wake, a lid, a new arrangement), the previous main display keeps the wallpaper
+it showed, and the new main display shows what was saved for it, nothing if its
+wallpaper was switched off. A main display the app has never configured shows the
+wallpaper the previous main display had. `config.toml` records the display the
+row last described as `primary_display`.
 
 The renderer titles displays by CoreGraphics vendor and model numbers
 (`Vendor 1552 - Model 41055 (1 - Primary)`). `DisplayTitleResolver`

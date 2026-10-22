@@ -1,16 +1,24 @@
 # Everything a macOS job needs before scripts/build.py can run: Xcode 26, the Homebrew
 # packages, and the two caches that keep a release from compiling the world. Shared by
-# Build's build and test jobs and by Warm caches, so all of them read and write the same
-# cache entries.
+# Build's build job, the Test workflow's jobs and Warm caches, so all of them read and
+# write the same cache entries.
 #
 # Caches (docs/release.md, "Build (build.yml)"), all scoped to main, which every ref can read:
 # - ccache: the C++ scene engine's objects, hashed by content, so the fresh mtimes of a
 #   checkout (which force CMake to recompile everything) cost cache lookups, not builds.
-#   Saved under a new key every run and restored by prefix.
+#   Saved under a new key every run and restored by prefix. Test's parallel jobs
+#   share a run's key, so only the one that compiles the most (`renderer`) saves it;
+#   the others pass `save-object-cache: "false"`.
 # - renderer: cargo's registry and target directory, keyed on the lock file, the
 #   vendored revision and the toolchain file.
 name: Prepare build
 description: Select Xcode 26, install the build dependencies and restore the build caches.
+
+inputs:
+  save-object-cache:
+    description: "Save the C++ object cache when the job ends."
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -52,7 +60,16 @@ runs:
         } >> "$GITHUB_ENV"
 
     - name: Restore the C++ object cache
+      if: inputs.save-object-cache == 'true'
       uses: actions/cache@v4
+      with:
+        path: ~/.ccache
+        key: ccache-${{ steps.brew.outputs.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: ccache-${{ steps.brew.outputs.os }}-
+
+    - name: Restore the C++ object cache without saving it
+      if: inputs.save-object-cache != 'true'
+      uses: actions/cache/restore@v4
       with:
         path: ~/.ccache
         key: ccache-${{ steps.brew.outputs.os }}-${{ github.run_id }}-${{ github.run_attempt }}

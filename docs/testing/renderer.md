@@ -44,7 +44,7 @@ It assembles the Homebrew environment from `scripts/build.py`, then:
 | `--project PATH` | Add a local scene `project.json`; repeatable |
 | `--assets PATH` | Shared assets directory for `--project` inputs (default `~/Library/Application Support/WallpaperMachine/SceneAssets`) |
 | `--allow-missing-gpu` | CI fallback only: compile a Metal-device probe; its exact exit 77 skips the GPU targets flagged in `REGRESSION_BINARIES` plus the image and reload probes. Compile errors, abnormal exits and timeouts still fail. Default local runs require GPU checks. |
-| `--allow-imprecise-timers` | CI fallback only: compile a timer probe that takes the median of 31 condition-variable waits of 10 ms; its exact exit 77 (median above 20 ms) filters the cadence tests named in `REALTIME_TESTS` out of their binaries. Compile errors, abnormal exits and timeouts still fail. Default local runs require every cadence test. |
+| `--allow-imprecise-timers` | CI fallback only: compile a timer probe that takes the median of 31 condition-variable waits of 10 ms; its exact exit 77 (median above 15 ms; a Mac measures about 12 ms, hosted VMs 18 ms and more) filters the cadence tests named in `REALTIME_TESTS` out of their binaries. Compile errors, abnormal exits and timeouts still fail. Default local runs require every cadence test. |
 
 Reports, SHA-256 hashes, logs, the generated synthetic fixtures and private GPU
 output go under a fresh `artifacts/renderer/adaptive-<timestamp>/` directory,
@@ -89,7 +89,8 @@ missing-device skip. A default local renderer run remains necessary evidence for
 the GPU checks CI skips.
 
 Hosted macOS arm64 runners are virtual machines that deliver a 10 ms wait
-50–100 ms late regardless of process policy, so the frame-clock,
+8 ms or more late (a Mac: about 2 ms) regardless of process policy, and how late
+varies from run to run, so the frame-clock,
 unchanged-present and audio-expiry tests that count ticks against short waits
 cannot pass there. With `--allow-imprecise-timers` only the probe's exit 77
 filters exactly the tests in `REALTIME_TESTS` out of their binaries with
@@ -99,6 +100,15 @@ median under `skips`, each with a CI warning. A cadence test that fails only on
 hosted runners belongs in `REALTIME_TESTS`; the harness tests check that every
 name still exists. A default local renderer run remains necessary evidence for
 them.
+
+The same virtual machines differ from a real Mac in ways a few tests check for
+themselves, each skipping with its reason rather than failing: their GPU is a
+paravirtual Metal device whose VideoToolbox reports AV1 hardware it cannot open,
+so the AV1 decoder test skips on it; they have not downloaded the PingFang font
+asset, so the PingFang fallback tests skip unless FreeType reads a
+`PingFangSC-Regular` face with Han from the matched file; and the particle-scale
+draw test lets through an all-black compatibility frame on a paravirtual GPU
+alone (seen on a runner, cause not established), running its other cases.
 
 Test binaries and probes run through macOS `taskpolicy` with application
 scheduling and latency/throughput tiers of zero. Before exec, the
@@ -161,6 +171,7 @@ Frames, time and surfaces:
 | `WE_TEST_COMPARE_SURFACE` | the same test | `<width>x<height>` of the layer drawn into; default `960x540` |
 | `WE_TEST_COMPARE_RESOLUTION` | the same test | `display` rasterizes a 2D scene at the size it is presented at on the layer; `canvas`, the default, at the size it was authored at. Perspective scenes and videos ignore it |
 | `WE_TEST_COMPARE_SCALE_FACTOR` | the same test | The layer's backing scale, `1`–`4` (default `1`); with `WE_TEST_COMPARE_SURFACE` it makes a laptop-panel-sized layer |
+| `WE_TEST_COMPARE_SCALING` | the same test | The scaling mode the host pushes: `fill` (the default), `fit`, `fit_blurred`, `stretch` or `none`; anything else fails the test |
 | `WE_TEST_COMPARE_REALTIME` | the same test | Set (any value) to pace the frames in real time, so a script that reads the wall clock (`Date.now()`) sees as much time pass as the scene does on a desktop; unset, the frames run as fast as they draw |
 | `WE_TEST_COMPARE_STOP_AFTER_REBUILD` | the same test | `<n>`: the run ends `n` draws after the first time the host would build the graph again (a script that shows a layer the graph left out does), `WE_TEST_METAL_FRAMES` bounding the wait, and prints the draw the rebuild came before, so a run without one can be drawn to the same scene time. A scene's own scripts cause rebuilds as it starts; `WE_TEST_COMPARE_REBUILD_FROM=<m>` leaves out those before draw `m` |
 | `WE_TEST_COMPARE_REBUILD_AT` | the same test | `<k>`: builds the graph again before draw `k` whether or not the scene asked, as the host does for any change of the graph, so what a rebuild leaves behind (a video's frame, the draw's length) is looked at on a scene that would not rebuild by itself at a draw of your choosing |
@@ -676,7 +687,34 @@ function: the default position reproduces an in-test copy of the old centring
 arithmetic bit for bit in every scaling mode, a position of 0 and 1 puts the picture
 against the leading and trailing edges for an overflowing and a letterboxed picture
 alike, non-finite values fall back to the centre and out-of-range ones clamp, and the
-pointer mapping follows the position.
+pointer mapping follows the position. For Fit with blurred backdrop it pins that the
+picture and the pointer mapping are Fit's for every factor and position, that the copy
+covers the display as a centred Fill whatever the position, that the copy's bands cover
+exactly the room around the picture and never the picture, that a one-pixel rounding
+gap and every other mode draw no copy, how the picture is reduced (taps at most four
+texels apart, two steps for a picture longer than 1024) and that a scaling-mode value
+past the last mode is refused.
+
+`metal_scene_draw_smoke`'s `ABlurredFitFillsItsBarsWithTheBlurredPictureOnBothRenderers`
+draws a canvas-filling gradient as Fit and as Fit with blurred backdrop on both
+renderers, with bars either side, mirrored, above and below, and for a picture long
+enough to take the two-step reduction: the picture is Fit's byte for byte, Fit's bars
+are black, the filled ones are not, neighbouring pixels differ by at most four steps, each
+side takes after the picture's nearer edge and is darker than it, and the two renderers'
+fills differ by less than 1.5 on average. `WE_TEST_OUTPUT` keeps the pictures.
+`ABlurredFitHoldsItsImagesOnlyWhileItHasRoomToFill` checks on the native backend that
+Fit and Fill hold the same render-target bytes, that the fill's images (with the 8-bit
+reduction for a large picture) appear in its mode and go with Fit or with a display of
+the picture's own shape, and prints what they hold. `playback_gpu_test`'s
+`PlainVideoPresentsThroughTheFinalViewportByteForByte` checks the Compatibility side for
+a plain video: without the composition's fill to borrow it takes the copy path, with it
+it presents directly, and both give the same picture and poster, Fit's picture inside
+the room, the fill in all of it; a mirrored picture takes the copy, and going back to
+Fit restores the plain bars and frees the images. `unchanged_present_test`'s
+`ABlurredBackdropStillLetsAPlainVideoSkipItsRepeats` runs a plain video in this mode on a
+surface wider than the clip and checks that ticks repeating a frame are still skipped and
+every new frame presented: the fill's rectangle is part of the presentation key, whose
+capacity (32 words) a key must stay within, or it never matches and nothing is skipped.
 
 `project_property_preview_test` (CPU only, in the check) pins what a property
 document means to a running scene: the project's declared defaults with exactly the
@@ -729,7 +767,9 @@ of `WE_TEST_ENERGY_WIDTH` x `WE_TEST_ENERGY_HEIGHT` (default 1920x1080), waits
 `WE_TEST_ENERGY_SECONDS` window (default 20). `WE_TEST_ENERGY_RESOLUTION`
 (`canvas`, the default, or `display`) picks the 2D scene resolution the run draws
 at and `WE_TEST_ENERGY_SCALE_FACTOR` (default 1) the surface's backing scale, so a
-3456 x 2234 surface at 2 is a laptop panel. It prints one `ENERGY {...}` line:
+3456 x 2234 surface at 2 is a laptop panel. `WE_TEST_ENERGY_SCALING` (`fill`, `fit`,
+`fit_blurred`, `stretch` or `none`) is pushed as the host's scaling mode; unset, none is
+pushed and the scene keeps the renderer's own (Fit), as before the variable existed. It prints one `ENERGY {...}` line:
 the backend actually used, this process's CPU seconds and CPU energy
 (`ri_energy_nj`), the GPU time of this process's own Metal command buffers and
 how many there were (`gpu_own_s`, `command_buffers`: the test wraps the device's
@@ -879,9 +919,10 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
   MSAA by default, from its `msaa` setting); a camera path's `camerafade` fade,
   the planar `_rt_Reflection` pass and `customsortorder` are not implemented
   (the model flags are under their own entry below); and
-  `general` fog keys bound to user properties keep the value the scene loaded
-  with. Wallpaper Engine's user-level post-processing quality (off, LDR, HDR,
-  display HDR) is fixed at its highest SDR level.
+  `general` distance-fog keys bound to user properties keep their authored values.
+  Height fog and ambient/skylight colours resolve property values at load; preview
+  edits are deferred to the existing apply/reload path. Wallpaper Engine's user-level
+  post-processing quality (off, LDR, HDR, display HDR) is fixed at its highest SDR level.
 - **Fog reaches an effect layer only where its own material takes fog.** The pass
   that fogs an effect layer where it sits (`effectpassthrough_4`, ending the chain)
   stands in for the fog the layer's own material (its `FOG` combo) would have taken,
@@ -917,26 +958,23 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
   `color` timeline holds the authored colour, and a timeline on a setting that also has
   a script or a user property is dropped (the script or property is its only writer),
   even when the script is only an event handler that calls `getAnimation().play()`: that
-  start-paused timeline is neither shown at its first frame nor played, because the
-  script's no-name `getAnimation()` resolves the layer's unnamed alpha clock, not the
-  setting's (it needs a `getAnimation` scoped to the property).
+  start-paused timeline is neither shown at its first frame nor played, and with no
+  timeline of its own the script's no-name `getAnimation()` finds the layer's first
+  unnamed clock. A shader constant keeps its timeline beside its script, and there the
+  no-name call is the constant's own timeline.
   That a start-paused timeline shows its first frame before anything plays follows the
   origin and shader-constant timelines here and the editor's start-paused flag being a
   play state beside the curves; no frame of Wallpaper Engine showing a paused scale or
   angles timeline has been compared.
-- **The `perspective` flag of an image or text layer is not applied.** `WPTextObject`
-  and `WPModelObject` read it, `WPImageObject` does not, and only models use it: image
-  and text layers always draw through the orthographic camera, so a layer at a depth
-  or turned about x or y is drawn flat. Wallpaper Engine draws such a layer through a
-  perspective camera that sits `(canvas height / 2) / tan(fov / 2)` from the canvas
-  plane, with the scene's `perspectiveoverridefov` (95 when absent); in the one local
-  scene that shows it (a layer 222 units out, field of view 90, canvas 2160 high)
-  that is 1.26 times larger than flat. The perspective camera a 2D scene has, which
-  models and particles with the flag draw through, sits at that distance
-  (`FitCanvasPerspective`, shared by `ParseCamera`, `Scene::FrameCanvas`,
-  `SceneRuntimeContext::ApplySceneZoom` and `ApplyCameraFillMode`), so applying the
-  flag to image and text layers is a matter of binding them to it, and needs a
-  picture comparison of the layers it moves.
+- **The `perspective` flag of a text layer is not applied.** `WPTextObject` reads it
+  but nothing uses it: a text layer always draws through the orthographic camera, so
+  one at a depth or turned about x or y is drawn flat. Image layers, models and
+  particle systems with the flag draw through the 2D scene's perspective camera
+  (`FitCanvasPerspective`, `(canvas height / 2) / tan(fov / 2)` from the canvas plane
+  with the scene's `perspectiveoverridefov`, 95 when absent); a text layer would be
+  bound to it the same way, but no local scene has one and its card and composites
+  have not been checked through that camera. A compose layer drawn with the flag
+  still copies the screen behind it as the orthographic view places its card.
 - **Object kinds not drawn or not modelled.** A `shape` object draws only an effect of
   a single pass: its last effect is drawn onto the scene as a mesh, so a multi-pass
   last effect, which would draw into buffers first, is left out (the editor's
@@ -1268,20 +1306,14 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
   many spawns with a long start time in one frame costs that many times as much;
   spreading the work over frames is not done, because it would change what the
   instance looks like when it first appears.
-- **A cover slot's fallback is a picture, not a render target.** A slot bound to the
-  now-playing cover (`$mediaThumbnail`, `$mediaPreviousThumbnail`) shows its authored
-  texture until a cover arrives, but only when that is a colour picture. Where the
-  author left another layer's composite in it (a default cover drawn by a layer of its
-  own and sampled by the cover layer), the slot stays the transparent texel until a
-  cover arrives, where Wallpaper Engine's frame shows that composite; substituting it
-  needs a pass binding that moves between a render target and a runtime image in both
-  renderers' pass setup. The layer colour of a layer that binds a cover stays white
-  (`WPImageObject`), so the art, or the engine's own white placeholder a layer leaves
-  in the slot, draws untinted while nothing plays; whether Wallpaper Engine tints it
-  with the layer's colour is not established, and no local scene sets a colour on such
-  a layer. A cover layer that Wallpaper Engine hides while nothing plays through a
-  `mediaPlaybackChanged` script stays visible here until the host delivers an idle
-  playback state, so it now draws its art or placeholder in that state.
+- **A cover layer while nothing plays.** The layer colour of a layer that binds a
+  cover stays white (`WPImageObject`), so the art, or the engine's own white
+  placeholder a layer leaves in the slot, draws untinted while nothing plays; whether
+  Wallpaper Engine tints it with the layer's colour is not established, and no local
+  scene sets a colour on such a layer. A cover layer that Wallpaper Engine hides while
+  nothing plays through a `mediaPlaybackChanged` script stays visible here until the
+  host delivers an idle playback state, so it now draws its art or placeholder in that
+  state.
 - **Layer calls a script can make that this renderer lacks.** `getTransformMatrix()` is
   there; `getChildren`, `setParent`, `rotateObjectSpace`, `lookAt`, `lookAtYaw` and
   `getAttachment*` (the layer binding Wallpaper Engine registers beside it) are not, so a

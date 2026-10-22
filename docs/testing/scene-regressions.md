@@ -91,7 +91,10 @@ Playback, backend, host and startup areas are in
   (every fill mode, `FrameCanvas`); in `metal_scene_draw_smoke`:
   `MetalSceneDraw.APerspectiveLayerIsSeenFromTheEyeDistanceOfTheScenesFieldOfView`
   (a card 500, 1100 and 1400 units out is the width the eye distance gives on both
-  renderers). The eye sat at 1000 units with a field of view derived from it, so a
+  renderers) and `.AnImageLayerWithThePerspectiveFlagIsSeenThroughThePerspectiveCamera`
+  (the card's own `perspective` flag, drawn as it is and through an effect, on both
+  renderers: it was drawn flat, 30 pixels where the camera gives 44.5, and a cover
+  laid on a model's face slid off it once a group turned them). The eye sat at 1000 units with a field of view derived from it, so a
   particle 500 units out was twice its size and one past 1000 units was cut; the
   distance is the scene's own, in one helper (`FitCanvasPerspective`) that the
   parser, `Scene::FrameCanvas`, the scene zoom and `ApplyCameraFillMode` share.
@@ -121,7 +124,8 @@ Playback, backend, host and startup areas are in
   `.ParallaxLayersAreReportedAsFollowingTheCursor` in `script_runtime_compat_test`;
   `ScriptRuntimeCompat.AComposeLayersFirstPassReadsTheScreenWhereParallaxDrawsItsCard`
   in `script_runtime_compat_test`;
-  `SceneSchema.ParserCopiesImageParallaxDepthToPuppetMaterialSlots` in
+  `SceneSchema.ParserCopiesImageParallaxDepthToPuppetMaterialSlots` and
+  `.AModelUnderAGroupRidesTheGroupsParallax` in
   `scene_schema_tests`; `TextObjectRuntime.CameraParallaxMovesAPlainTextLayerByItsDepth`
   and `.ATextLayerUnderAGroupRidesTheGroupsParallax` in `text_object_runtime_test`;
   `MetalSceneDraw.CameraParallaxMovesATextLayerAsItMovesAnImage` and
@@ -156,6 +160,12 @@ Playback, backend, host and startup areas are in
     from the centre and measures how far their ink moves against
     the same scene at depth 0, with the cursor centred and away from the centre, and
     for a text drawn through a copy effect (moved once, not twice).
+  - A model is a parallax layer too, and its value updater record holds its
+    `parallaxDepth`; under a group it rides the group's depth and anchor, as text
+    does. Without it the model stood still while the image layers laid on its
+    faces, under the same group, moved, so a cover slid off the box it sits on and
+    the box showed as a dark slab beside it. The unit test reads the model's
+    matrix with the cursor centred and at the edge, and its `kParallax` report.
   - A compose layer with effects holds the screen behind the place its card is
     drawn. Its first pass maps the card onto the screen through the layer's
     model-view-projection (`composelayer.vert`) and its last pass draws the card,
@@ -262,6 +272,16 @@ Playback, backend, host and startup areas are in
     cursor centred) requires a picture under group -> fullscreen layer (with and without
     an effect) and under a top-level fullscreen layer saved where the group is (children
     inheriting its depth 2) to equal the picture under the group alone.
+    `.AFullscreenLayerStaysOverTheScreenWhileParallaxMovesTheSceneOnBothRenderers`
+    (amount 0.5, cursor at the top-left and the bottom-right corner, a backdrop at depth 1)
+    requires a top-level fullscreen layer without an effect, with one, saved with depth 0,
+    saved off the middle with depth 0.5, and saved where the backdrop is with the backdrop
+    below it, to equal the backdrop alone. `ParseImageObj` gives a fullscreen layer depth
+    0: the file's is never read for one (`WPImageObject::FromJson`), and the default depth 1 moved the
+    last pass of its effects, drawn through the `fullscreen` camera, so the copy of the
+    screen was drawn a second time, shifted by the cursor, over the scene (3521337568's
+    film-grain post-processing layer). The layers below it keep their tree's depth
+    (`ResolveLayerParallax`).
     Established from the 2.8.42 decompile (the layer's own draw ignores its model matrix;
     children are drawn through its composite) and from two local scenes, not from a
     Wallpaper Engine frame of a scene that has the layer: 3804689861's author preview
@@ -270,6 +290,25 @@ Playback, backend, host and startup areas are in
     Not compared pixel for pixel: the previews are a close-up and an edited loop. 3743578252
     now draws its large dark foreground fish at scale 3.7 across the frame early in its
     timeline, which a Wallpaper Engine frame at the same time would settle.
+- **A pass-through layer in a group reads the screen where it is drawn** —
+  `MetalSceneDraw.APassThroughLayerInAGroupReadsTheScreenWhereItIsDrawnOnBothRenderers`
+  draws a four-quadrant backdrop through a pass-through layer with an identity effect,
+  alone, as a project layer with no origin in a group at the canvas centre, and under a
+  moved, 2x-scaled group, and requires each to equal the backdrop alone on both
+  renderers (the scaled one away from the 3-pixel band its half-sized card softens). The
+  card that copies the screen (`PassthroughCardVertices`, `PassthroughClipSpaceVertices`)
+  is laid out again from the layer's world matrix by `LayOutPassthroughCards` once every
+  layer is under its parent; from the local transform the parse had before that, issue
+  #53's CRT "Full Composition Layer" (a project layer under a centred group) copied the
+  screen half a canvas off and showed a half-sized copy of the scene in one quadrant.
+  `MetalSceneDraw.APassThroughLayerReadsTheScreenWhereItsGroupMovesItWhileTheSceneRunsOnBothRenderers`
+  moves the group once the scene has loaded, by a zoom slider bound to its scale and
+  changed in the running scene and by a script on its origin, requires the same of the
+  frames after, and requires the card to have been laid out exactly once more.
+  `SyncEffectFinalNode` lays the card (`PassthroughCard`, an `OnEvent` mesh) out again
+  from the matrix it places the final card with, only when that matrix differs from the
+  one the card was last laid out from; before, the card kept copying the screen from
+  where the layer had been until the scene was loaded again.
 - **One cursor mapping, owned by the presentation** —
   `SceneRuntimeContext::SetCursorInput` maps window-normalized input through the
   cursor viewport the renderer publishes (`origin + (x, 1 - y) * size`) and writes
@@ -379,6 +418,14 @@ Playback, backend, host and startup areas are in
 
 All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
 
+- **Local-axis rotation** — `ScriptRuntimeCompat.RotateObjectSpace*` checks radians
+  increments composed with an existing orientation, degree-valued angles readback,
+  repeated updates, transformed parents, mirrored scale and anchored pivots.
+- **Property-bound scene shading** — `MetalSceneDraw.OlderPackagesApplyPropertyBoundHeightFog`
+  draws a known squared-density gradient from a version-22 scene with property-selected
+  endpoints and colour; `.LightingColorsUseProjectPropertyValues` checks ambient and
+  skylight contributions independently in the resulting pixels.
+
 - **Callback-only property scripts** — `*CallbackOnly*` in both binaries.
   Callback-only scripts keep their no-writeback behavior.
 - **Script property load order** — `ScriptRuntimeCompat.ModuleCodeSeesDeclaredDefaultsAndInitSeesTheBoundValue`.
@@ -406,6 +453,19 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   hover easing, full authored enlargement and continuous reversal on cursor leave
   and re-entry. JavaScript input conversion serializes only the value payload,
   without copying the live property's listener/subscription ownership.
+- **A number returned for a vector property** — `ScriptRuntimeCompat.ANumberReturnedForAVectorPropertyFillsEveryAxisAndStaysAVector`,
+  `.ANumberReturnedForAShaderVectorFillsEveryComponent` and
+  `.ANumberWrittenToALayersColourOrParallaxDepthFillsEveryComponent`.
+  `FillDynamicValueFromJS` turned a number into a Float whatever the property's
+  type, so a `scale` script returning `value.x + (target - value.x) * speed` handed its next `update` a bare
+  number, `value.x` was undefined, and the layer's scale and position went NaN from
+  the second frame (a default-on clock never drew). A number for a vector type now
+  fills every component of that type (`UpdateVectorFromNumber`), so the property stays
+  a vector. The tests ease a node's `scale` toward 2 through a script property for 30
+  frames (finite, uniform, monotonic, no script error) and step a two-component shader
+  constant that returns `value.y + 1`. The same conversion serves the `thisLayer`
+  setters, so `color` and `parallaxDepth` now take a number on every component
+  (the third test writes `0.5` and `0.75` to them); both ignored it.
 - **Native writes survive `update()`** — `ScriptRuntimeCompat.UpdateSideEffectWritesSurviveWhenUpdateReturnsUndefined`.
   "Keep the current value when `update()` returns `undefined`" only works if the
   current value includes what the script wrote, so evaluation continues from the
@@ -431,7 +491,13 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   own material, every effect pass and a compose layer's passthrough from one
   value, keeping each `g_Color4` alpha. It is a listener, so it costs nothing per
   frame and runs only when the property changes. A layer whose placeholder a
-  runtime image replaces drops a bound colour as it drops an authored one.
+  runtime image replaces drops a bound colour as it drops an authored one, and so
+  does a solid placeholder whose slot a `scenetexture` property fills:
+  `PlaceholderPicture.*` in `project_property_preview_test`. `WPImageObject` cannot
+  read the properties, so `ParseImageObj` resolves the instance's slots against the
+  loaded values as the material will (`PropertyPictureReplacesPlaceholder`); a preset's
+  picture multiplied by its dark scheme colour drew the whole wallpaper black (issue
+  #53). Unset, or a file that cannot be opened, keeps the placeholder and its colour.
 - **Image layer brightness** — `SceneSchema.AnImageLayersBrightnessTintsItsMaterialsOnlyInAnHdrSceneAndFollowsItsBindings`,
   `MetalSceneDraw.AnImageLayersBrightnessTintsItOnlyWhereTheSceneRendersHdr`
   and `.AnImageLayersBoundBrightnessFollowsItsPropertyAndScript`.
@@ -486,6 +552,24 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   projected input (`WE_TEST_INPUT_JSON`, `WE_TEST_CLICK_*`), not by forcing
   overlay alpha. A closed author menu and an audio-driven wave with no audio are
   not evidence that a rendered frame has exercised either feature.
+- **Script start-up order and what `init` returns** —
+  `SceneSchema.EveryScriptRunsInitBeforeAnyIsToldTheUserProperties` (an options
+  layer calls from its first `applyUserProperties` a function a later layer's
+  `init` hands out, then sets the switch that keeps the widget shown) and
+  `SceneSchema.WhatInitReturnsIsThePropertysValue` (a handle that hides itself
+  from `init`, a typing text that starts empty there, and an `init` that returns
+  nothing keeping the scene file's value). Started one script at a time, the
+  call threw and the switch was never set, so a music widget faded itself out;
+  with `init`'s value dropped, its drag handle stayed on screen and its title typed
+  onto the placeholder.
+- **Layers scripts gather by name** —
+  `SceneSchema.LayersWithScriptsOfTheirOwnCarryTheirAuthoredNameUnderGeneratedKeys`
+  (twin images, an unnamed image and a twin text, each with a script of its own,
+  are found by name and moved by another layer's `init`) and
+  `SceneSchema.ScriptsListSoundLayersInTheScenesOrderAndPlayThem` (sound layers in
+  the scene's order, found by id and by name, two that share a name played
+  separately). A widget that moves its layers by name prefix left its cover behind,
+  and one that finds its tracks by `.mp3` found none and threw when told to play.
 - **User-switched effects** — `RenderGraph.parsedEffectVisibilityFollowsTheBoundUserProperty`
   (`rendergraph_smoke`, image layers) and
   `TextObjectRuntime.TextEffectVisibilityFollowsTheBoundUserProperty`. An
@@ -795,6 +879,18 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   to a choice without a condition is unchanged (it reads 0). A puppet animation
   layer's flag and the other bool consumers share the one `DynamicValue` path and
   are not exercised one by one.
+- **A script property bound to a choice with a condition is a flag** —
+  `ScriptRuntimeCompat.AScriptPropertyBoundToAComboChoiceReadsWhetherTheChoiceMatches`.
+  A conditioned binding set the flag to whether the choice matched but kept the
+  choice as the value's type and string, so `DynamicValueToJS` handed a script the
+  string `"2"` for every flag over that combo, true in JavaScript whatever the
+  condition; a clock offering MM/DD, DD/MM and YYYY/MM/DD as three flags over one
+  combo always showed the first. `DynamicValue::update` from a string, directly or
+  copied from the bound property, now makes a conditioned value a Boolean. The test
+  binds two script properties to one combo (conditions `0` and `2`), has the script
+  report which is truthy and its `typeof`, and moves the choice through `2`, `0` and
+  `1` with `ApplyProjectPropertyOverride`. Consumers that read `getBool()` (layer and
+  effect `visible`) see what they saw before.
 - **Sound layer volume follows its slider** — `project_property_preview_test`
   (`SoundLayerVolume.*`, CPU only, a fake sound stream and a null-backend sound
   manager, so no audio device is opened). `WPSoundParser::Parse` read a
@@ -955,6 +1051,14 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     layer's authored name; `addEndedCallback` listeners (one set per layer,
     however it was asked for) run once per finish of a single-shot layer, from
     the puppet state the renderer advances, and never for a looping one.
+  - *A property script's own object.* `SceneSchema.AnEffectsVisibilityScriptSwitchesTheEffectAndNotItsLayer`
+    and `SceneSchema.AKeyedConstantsScriptPlaysTheConstantsOwnTimeline`: a script
+    deciding an effect's visibility has the effect as `thisObject`, so writing
+    `thisObject.visible` from `init` or a media handler switches the effect and leaves
+    the layer shown (it hid the layer and left the effect on); a script on a keyed
+    shader constant gets the constant's own timeline from `getAnimation()` with no
+    name on a layer whose origin also has an unnamed timeline (it got the origin's,
+    and the constant stayed on its first key).
   - *Sprite sheets.* `.PausedSpriteSheetHoldsItsFrameAndPlayResumesIt`,
     `.StoppedSpriteSheetReturnsToItsFirstFrameAndSetFrameStillPins`,
     `.SpriteSheetRateScalesPlaybackAndTheSheetDescribesItself`,
@@ -1024,7 +1128,7 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
     not change what the host builds. Each call answers a matrix of its own.
   - Not covered here: `localStorage` persistence, effects, bones, particles,
     scene properties, the camera, `Intl`, and the other layer transform calls
-    (`getChildren`, `setParent`, `rotateObjectSpace`, `lookAt`, `lookAtYaw`,
+    (`getChildren`, `setParent`, `lookAt`, `lookAtYaw`,
     `getAttachment*`: a script that calls one still stops at `not a function`);
     host plumbing for `SetLanguage` (scripts are told `en-us` until the host calls
     it).
@@ -1113,6 +1217,16 @@ texture entrances are not decoded-image or native-rendering evidence.
   the source layer says `"clampuvs": false` and clamps when it is true or absent;
   otherwise a model whose UVs run far outside 0..1 smears the composite's edge
   texels into solid bands.
+- **A composite holds the chain's result as written** —
+  `MetalSceneDraw.ALayerWithNoAreaFillsTheCompositeAnotherLayerSamples` in
+  `metal_scene_draw_smoke`: a translucent solid layer 64 wide and 0 high, hidden at
+  zero scale or shown, whose effect writes a colour of alpha 0.25 through the
+  model-view-projection matrix; a second layer shows that composite's colour and
+  alpha, and the buffer itself draws nothing on screen. Before the change the card
+  that carries the chain into the composite was 0 high, so the composite stayed
+  empty (an audio widget's bars, which read their spectrum from such a buffer,
+  never moved), and once filled, the chain's last pass blended into it with the
+  layer's translucency, multiplying the colour by an alpha the buffer uses for data.
 - **Layer targets: point sampling and wrap** — `LayerTextureReference.LayerTargetsFollowNointerpolationClampuvsAndTheTextureHeader`
   and `.ACompositeFollowsItsLayersTextureHeaderWhateverIsParsedFirst` in
   `layer_texture_reference_test` and
@@ -1159,6 +1273,14 @@ texture entrances are not decoded-image or native-rendering evidence.
   `autosize` and `projectlayer` is as large as the scene's canvas, whatever size
   the scene saved. `solidlayer` is read and unused, and `autosize` alone still takes
   the saved size.
+- **A layer's saved size over its model's** —
+  `SceneSchema.ALayerIsDrawnAtTheSizeItsSceneSavedRatherThanItsModels`. A model can
+  state a `width` and `height` (the editor writes a frame's size for a sprite sheet);
+  the layer is still as large as the `size` the scene saved, and the model's size is
+  only for a layer that saved none. A CRT wallpaper whose screen is a sprite sheet
+  resized in the editor drew its screen at the frame's size, a dark rectangle inset
+  in the monitor with background showing round it, where Wallpaper Engine's frames
+  fill the bezel.
 - **Depth state of a layer drawn through effects** —
   `MetalSceneDraw.ALayerDrawnThroughEffectsKeepsItsOwnDepthTestAndWrite`.
   The last pass of an image layer's effects is drawn with the layer's authored
@@ -1368,6 +1490,7 @@ texture entrances are not decoded-image or native-rendering evidence.
   block-compressed art, a slot with nothing authored),
   `.ACoverIsSampledClampedWhateverItsAuthoredPictureAskedFor` and
   `.AnIdleCoverSlotUploadsItsPictureOnceAndACoverChangeCostsOneUploadPerFrameInFlight`
+  and `.ACoverOverAnotherLayersPictureShowsThatPictureUntilACoverArrivesOnBothRenderers`
   in `metal_scene_draw_smoke`; `CoverSlot.*` in `media_thumbnail_texture_smoke`. A
   `usertextures` cover slot (`$mediaThumbnail`, `$mediaPreviousThumbnail`) is the
   picture its author left in that position until a cover is published, and again
@@ -1378,9 +1501,16 @@ texture entrances are not decoded-image or native-rendering evidence.
   version check a cover already had: no graph rebuild, an idle layer uploads its art
   once per frame in flight and a cover change once per frame in flight again. The
   picture is decoded when a renderer first asks, once, so the texture budget set after
-  the parse applies to it. Not substituted: a video, a sprite sheet, a render target
-  or composite, a mask or normal map (one or two channels), a missing file. A cover
-  keeps its own clamped sampler whatever the art's flags say.
+  the parse applies to it. Not substituted: a video, a sprite sheet, a mask or normal
+  map (one or two channels), a missing file. A cover keeps its own clamped sampler
+  whatever the art's flags say. Art that is another layer's composite stays a render
+  target in the slot, with the cover beside it (`SceneMaterial::texture_covers`), and
+  each renderer binds the cover there while the image it uploaded is one; the new test
+  draws a hidden layer's composite under both cover names, idle, with a cover a few
+  frames in (after a still target could have been reused), cleared, and with one and
+  two tracks for the previous cover. Before, the slot was the transparent texel: the
+  idle, cleared and first-track cases drew nothing on either renderer, and without the
+  pass marked as reading a runtime image a cover published mid-run was never shown.
 - **JPEG/EXIF orientation** — `tex_schema_tests`: all eight EXIF display
   transforms on asymmetric RGBA pixels, both TIFF byte orders, truncated
   JPEG/EXIF data, invalid IFD offsets.
@@ -2494,6 +2624,17 @@ Rust regressions in `Renderer/Shader` (`src/*/tests/` for the preprocessor, the 
 converter, the legalizer and the pipeline, and `tests/`) cover these paths with synthetic
 shader sources; the corpus sweeps skip asset-dependent cases with a printed reason.
 
+- **Scalar component swizzles** — `legalize_type_coercion::scalar_swizzles_*`
+  compiles scalar splats through both backends and checks Naga IR component types,
+  widths, vector selection, lexical shadowing and downstream width conversions.
+  A scalar's repeated component zero broadcasts; a genuine vector swizzle keeps
+  its authored component mapping. Shader pipeline revision 18 invalidates older
+  cached programs.
+  `scalar_initializer_selects_first_component_of_nested_texture_arithmetic`
+  also covers scalar initialization from a sampled vector inside arithmetic and
+  component-wise builtins: narrowing selects the completed expression's first
+  component, not the sample before its consumers run.
+
 - **Built-in simulation uniforms** —
   `ShaderValueUpdaterCompat.SimulationEffectsSeeFrameTimeCursorTravelAndButtons`
   checks that a shader declaring `g_Frametime`, `g_PointerPositionLast`,
@@ -2687,6 +2828,35 @@ shader sources; the corpus sweeps skip asset-dependent cases with a printed reas
   other; before, it took that token for its type and every repair skipped it.
   Known and not handled: logical-not applied to a float (`!someFloat`), which
   still rejects Wallpaper Engine's own `clipping_mask` effect.
+- **An array suffix declares one name, and an integer `clamp` stays integer** —
+  `pipeline` tests `array_suffix_declares_only_its_own_declarator` and
+  `integer_clamp_keeps_integer_literals`, each compiled for SPIR-V and MSL; both
+  fail without the change. Naga's GLSL frontend applies an array suffix to the
+  type a declarator list shares, so in `float color[4], f;` the scalar `f` became
+  `float[4]` and the effect failed to load (a Workshop procedural noise effect).
+  The `array_declarators` strategy ends the statement after each declarator with
+  a suffix and restates the qualifiers and type for the rest
+  (`float color[4]; float f;`); `for` initializers and stage interface or uniform
+  lists are left alone. Integer literals in `clamp` become floats for float
+  operands, which legacy shaders rely on, but an `int` or `ivecN` operand selects
+  the integer overload, so `clamp(index, 0, BANDS - 1)` on an `int` keeps its
+  literals; with only `uint` or `uvecN` operands they gain a `u` suffix, as do
+  those of `min` and `max`. Before, the float literals made an integer index
+  float and an audio line effect failed to load. The coercion now reads a
+  binding's component kind (`int`, `uint`, `float`) as well as its width, and
+  sees an `int` that the step repair turns into a `float` as a float. No pipeline
+  revision bump: a failed compile is never stored, and a program that compiled
+  before keeps its meaning. A split list only restates a name it never used, and
+  an integer `clamp` whose result is used as a float (`clamp(i, 0, 5) * 0.5`),
+  which Naga had compiled as a float clamp of `float(i)`, now clamps as `int`,
+  the same value for integer bounds. Over the 15 local scenes the SPIR-V corpus
+  sweep went from 3 failures to none, and on native Metal no other scene's last
+  frame changed beyond its run-to-run variation; generated SPIR-V and MSL were
+  not compared.
+  Known and not handled: in `uniform float a[4], b;` the generated source still
+  declares no `b`, and a declarator list whose array takes a
+  brace initializer (`= {…}, b`) is not recognized as a declaration, so it is not
+  split.
 - **Legacy effect shader interfaces** — `pipeline` tests: array varyings reserve
   all element locations; unambiguous user function parameters narrow wider vector
   arguments; a whole vector variable assigned to a narrower one keeps its leading

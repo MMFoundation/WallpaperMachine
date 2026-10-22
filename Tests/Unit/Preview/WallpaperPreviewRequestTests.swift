@@ -24,10 +24,25 @@ final class WallpaperPreviewRequestTests: XCTestCase {
             .write(to: project.appendingPathComponent("project.json"))
     }
 
-    private func descriptor(kind: BridgeWallpaperKind = .webpage, entry: String = "index.html") -> BridgeWallpaperPreview {
+    private func descriptor(
+        kind: BridgeWallpaperKind = .webpage, entry: String = "index.html",
+        scalingMode: BridgeScalingMode = .fill
+    ) -> BridgeWallpaperPreview {
         .init(wallpaperId: "preview", title: "Preview", kind: kind, projectPath: project.path,
               entryFile: entry, assetsPath: root.appendingPathComponent("Assets").path,
-              propertiesJson: "{}", fps: 30, scalingMode: .fill, scalingFactor: 1, volume: 0.5)
+              propertiesJson: "{}", fps: 30, scalingMode: scalingMode, scalingFactor: 1, volume: 0.5)
+    }
+
+    /// The preview and the lock screen hand the renderer its own number for every mode, Fit with
+    /// blurred backdrop included.
+    func testEveryScalingModeReachesTheRendererAsItsOwnNumber() throws {
+        let expected: [(BridgeScalingMode, Int32)] = [
+            (.none, 0), (.stretch, 1), (.match, 2), (.fill, 3), (.matchBlurred, 4),
+        ]
+        for (mode, number) in expected {
+            XCTAssertEqual(mode.rendererValue, number, "\(mode)")
+            XCTAssertEqual(try WallpaperPreviewRequest(descriptor(scalingMode: mode)).scalingMode, number)
+        }
     }
 
     func testValidInstalledWebProjectPassesWithoutChangingItsFiles() async throws {

@@ -112,14 +112,27 @@ struct WorkshopLayoutChanged: LocalizedError, Sendable {
     var errorDescription: String? { Self.message }
 }
 
+/// Steam answered the browse query with `eresult` 10 (busy): its Workshop search had more
+/// queries queued than it takes. Not a layout change; `WorkshopService` asks again before
+/// showing it.
+struct WorkshopBusy: LocalizedError, Sendable {
+    static var message: String { String(localized: "Steam’s Workshop is busy. Try again in a moment.") }
+    var errorDescription: String? { Self.message }
+}
+
 actor WorkshopService {
     /// Steam's public browse page clamps `numperpage` to 30 and `total_pages` to 1000, so a single
     /// query can only ever expose the first 30,000 results; the panel explains that cap.
     static let pageSize = 30
     static let maxPages = 1000
     private let session: URLSession
+    /// The pauses before each new request for a browse page Steam answered busy.
+    private let busyRetryDelays: [Duration]
 
-    init(session: URLSession = .shared) { self.session = session }
+    init(session: URLSession = .shared, busyRetryDelays: [Duration] = [.seconds(1), .seconds(3)]) {
+        self.session = session
+        self.busyRetryDelays = busyRetryDelays
+    }
 
     static func browseURL(search: String, kind: WorkshopKind, sort: WorkshopSort, page: Int, tags: [String] = [],
                           excludedTags: [String] = [], section: String = "readytouseitems") -> URL {
@@ -157,12 +170,25 @@ actor WorkshopService {
 
     func browse(search: String, kind: WorkshopKind, sort: WorkshopSort, page: Int, tags: [String] = [],
                 excludedTags: [String] = []) async throws -> WorkshopPage {
-        let html = try await communityPage(Self.browseURL(search: search, kind: kind, sort: sort, page: page, tags: tags,
-                                                          excludedTags: excludedTags))
-        do {
-            return try Self.decodePage(html)
-        } catch let changed as WorkshopLayoutChanged {
-            return try await degradedPage(html: html, page: page, original: changed)
+        let url = Self.browseURL(search: search, kind: kind, sort: sort, page: page, tags: tags, excludedTags: excludedTags)
+        let (html, decoded) = try await browsePage(url) { html -> (String, WorkshopPage?) in
+            do { return (html, try Self.decodePage(html)) } catch is WorkshopLayoutChanged { return (html, nil) }
+        }
+        if let decoded { return decoded }
+        return try await degradedPage(html: html, page: page, original: WorkshopLayoutChanged())
+    }
+
+    /// A browse page, decoded. While Steam answers it busy the page is requested again after
+    /// each of `busyRetryDelays`; after the last, `WorkshopBusy` stands.
+    private func browsePage<T>(_ url: URL, decode: (String) throws -> T) async throws -> T {
+        var delays = busyRetryDelays[...]
+        while true {
+            let html = try await communityPage(url)
+            do {
+                return try decode(html)
+            } catch is WorkshopBusy where !delays.isEmpty {
+                try await Task.sleep(for: delays.removeFirst())
+            }
         }
     }
 
@@ -223,6 +249,41 @@ actor WorkshopService {
         var request = request
         if !mayCarrySession(request.url) { request.setValue(nil, forHTTPHeaderField: "Cookie") }
         return request
+    }
+
+    /// Where Steam trades a session's renewal token for a new `steamLoginSecure` token.
+    static let renewalURL = URL(string: "https://api.steampowered.com/IAuthenticationService/GenerateAccessTokenForApp/v1/")!
+
+    /// The session with a new cookie, from Steam's token service. The renewal token goes there
+    /// alone, in the body of a request that follows no redirect. Steam refusing it, or a session
+    /// without one, throws `SteamSignInRequired`; a connection failure throws its own error.
+    func renew(_ account: SteamWebSession) async throws -> SteamWebSession {
+        guard let refreshToken = account.refreshToken else { throw SteamSignInRequired() }
+        var request = URLRequest(url: Self.renewalURL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 35
+        request.httpShouldHandleCookies = false
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        var form = URLComponents()
+        form.queryItems = [
+            URLQueryItem(name: "refresh_token", value: refreshToken),
+            URLQueryItem(name: "steamid", value: account.steamID),
+        ]
+        request.httpBody = Data((form.percentEncodedQuery ?? "").utf8)
+        let (data, response) = try await session.data(for: request, delegate: SteamNoRedirects())
+        try Task.checkCancellation()
+        guard let http = response as? HTTPURLResponse else { throw SteamSignInRequired() }
+        if http.statusCode == 401 || http.statusCode == 403 { throw SteamSignInRequired() }
+        guard (200..<300).contains(http.statusCode) else {
+            throw WorkshopFailure(message: String(localized: "Steam could not load the Workshop. Check your connection or open Steam in your browser, then retry."))
+        }
+        // Steam answers a refused token with an empty response and the reason in a header.
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let body = root["response"] as? [String: Any],
+              let token = body["access_token"] as? String,
+              let renewed = account.renewed(accessToken: token)
+        else { throw SteamSignInRequired() }
+        return renewed
     }
 
     /// Steam's public details endpoint answers up to this many items per request without a key.
@@ -386,10 +447,9 @@ actor WorkshopService {
     func collections(
         search: String, sort: WorkshopSort, page: Int, tags: [String], excludedTags: [String]
     ) async throws -> WorkshopPage {
-        let html = try await communityPage(Self.browseURL(
+        var (listing, children) = try await browsePage(Self.browseURL(
             search: search, kind: .all, sort: sort, page: page, tags: tags, excludedTags: excludedTags,
-            section: "collections"))
-        var (listing, children) = try Self.decodeBrowse(html)
+            section: "collections"), decode: Self.decodeBrowse)
         guard Self.screensRatings(tags: tags, excludedTags: excludedTags) else { return listing }
         let excluded = Self.hiddenTags(tags: tags, excludedTags: excludedTags)
         var samples: [String: [String]] = [:]
@@ -762,5 +822,15 @@ private final class SteamCookieRedirectGuard: NSObject, URLSessionTaskDelegate, 
         newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
     ) {
         completionHandler(WorkshopService.redirected(request))
+    }
+}
+
+/// Follows no redirect: the renewal token is for Steam's token service and nowhere else.
+private final class SteamNoRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }

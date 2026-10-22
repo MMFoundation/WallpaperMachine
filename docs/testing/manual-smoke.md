@@ -466,6 +466,10 @@ describes what should happen and the log lines to read afterwards.
       wallpaper and Mission Control thumbnails remain unchanged.
 - [ ] Change a native wallpaper outside the app and verify that quitting does
       not overwrite it.
+- [ ] Set the desktop picture to an image you can delete, apply a live wallpaper,
+      delete the image, then quit. The quit finishes, every Desktop shows another
+      display's original or macOS's default picture, and the log names the missing
+      file and what was put back instead.
 - [ ] With a live wallpaper applied, log out, then restart and shut down (separate
       runs, authorized only). macOS must show no "cancelled" or "preventing logout"
       dialog. The log says `quit: reason=logout mode=powerOff` (or restart or
@@ -623,6 +627,14 @@ unit-tested; how the menu draws and reads on real screens is not.
 - [ ] Set a large **Scale factor** (the panel sets no upper limit; try 4, then 8) on the
       largest display: playback stays smooth. Record the factor, the display and any
       dropped frames; the cost of a large factor is unmeasured.
+- [ ] Set **Fit with blurred backdrop** for a 16:9 scene and a 16:9 clip on a display of
+      another shape (an ultrawide, a MacBook panel), on Native Metal and on Compatibility:
+      the picture sits where Fit puts it and the bars hold a soft, darker copy of it that
+      moves with it, with no seam, block or shimmer at the picture's edges; a position
+      slider moves the picture and not the copy; the lock screen, the screen saver and the
+      Mission Control picture show the same. A clip the native player draws keeps black
+      bars and the inspector says so. **Match with blurred backdrop** reads in full in the
+      Settings › Displays menu in every language. Not seen on a display yet.
 - [ ] Play a portrait clip recorded on a phone (stored rotated), and a mirrored one if
       there is one. It is upright on the desktop, and its Mission Control thumbnail and
       the picture on another Space are upright too and match the desktop, also with Fit

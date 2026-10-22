@@ -41,6 +41,12 @@ extension PanelController {
     return automations.location
   }
 
+  /// Where the sun rules take their times from, and the fixed times when that is the source.
+  var solarSettings: WallpaperSolarSettings {
+    _ = revisions.automationSettings
+    return automations.solar
+  }
+
   /// Why the saved automatic rules could not all be read, when they could not.
   var automationLoadError: String? {
     _ = revisions.automationSettings
@@ -155,6 +161,38 @@ extension PanelController {
   /// `automationClearLocation`.
   func clearSolarLocation() async throws {
     try await run(.immediate) { try automations.setLocation(nil) }
+  }
+
+  /// `automationSolarSource`: a deliberate source choice may ask for location access. Restoring
+  /// saved settings does not use this action and therefore never prompts.
+  func setSolarSource(_ source: WallpaperSolarSource) async throws {
+    var value = automations.solar
+    value.source = source
+    try await run(.immediate) {
+      try automations.setSolar(value)
+      if source == .automatic { solarLocationTracker.requestAuthorization() }
+    }
+  }
+
+  /// `automationSolarLocate`: retries an undecided location request from the automatic source.
+  func requestSolarLocation() async throws {
+    try await run(.immediate) { solarLocationTracker.requestAuthorization() }
+  }
+
+  /// `automationSolarSettings`: opens the system pane after the user denied access.
+  func showSolarLocationSettings() async throws {
+    try await run(.immediate) { solarLocationTracker.openSettings() }
+  }
+
+  /// `automationSolarFixedTimes`: the clock times the fixed source switches at.
+  func setSolarFixedTimes(sunriseMinute: Int, sunsetMinute: Int) async throws {
+    guard (0..<1440).contains(sunriseMinute), (0..<1440).contains(sunsetMinute) else {
+      throw InvalidControlValue()
+    }
+    var value = automations.solar
+    value.fixedSunriseMinute = sunriseMinute
+    value.fixedSunsetMinute = sunsetMinute
+    try await run(.immediate) { try automations.setSolar(value) }
   }
 
   /// `automationRetry`: tries again the change that failed.

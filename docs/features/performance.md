@@ -353,6 +353,13 @@ A wallpaper nobody can see — behind a full-screen app, on a hidden Space or un
 windows that leave no pixel of it — pauses automatically, per display. There is no
 control for that part.
 
+Each display follows its own visibility even when both use the same wallpaper.
+Waking or unlocking re-evaluates every display in the same pass: one that is visible
+again resumes without a click or refresh, while one still covered stays paused.
+Reapplying a wallpaper or changing the display arrangement also reconciles the live
+scene's pause with the current playback policy, so a pause retained by a rebuilt
+renderer cannot hold a visible display still. The user's own Pause remains in force.
+
 | Setting | Values | Default |
 | --- | --- | --- |
 | Mute all wallpapers | On, Off | Off |
@@ -737,7 +744,10 @@ field would do nothing there.
 
 Playback honours the wallpaper's scaling mode and scale factor by the renderer's own
 layout rule, so a clip sits where the scene engine used to put it: **Fill**,
-**Fit** and **Stretch** scale it to the display, **Original size** shows one video
+**Fit** and **Stretch** scale it to the display, **Fit with blurred backdrop** places
+it as Fit but keeps Fit's black bars, because the native player has no blurred fill
+(the inspector says so; a mirror of a natively played display gets the same bars and
+no note), **Original size** shows one video
 pixel per point (a 1920x1080 clip covers 1920x1080 points of a Retina display, not
 1920x1080 device pixels), and the scale factor multiplies whichever applies, with
 the picture centred and anything outside the display cropped. A factor that is not a
@@ -895,6 +905,20 @@ listed, are gone. Both only reached a plain video that the scene engine played,
 and the app's own players play every plain video now; a configuration file that
 still holds `content_pacing` or `shared_video_decode` loads, and the keys are not
 written back.
+
+Scene videos packed into `.tex` mip payloads participate too: when the switch is
+on, opening a source first resolves its bytes to the existing content-named
+temporary file, then uses the same file-based session registry as ordinary video
+files. Identical payloads can share even under different texture names; different
+payloads do not share just because their names or sizes match. Extraction and
+identity lookup happen when the source opens, not per frame.
+
+Consumers share one driving playback clock. Each surface still owns its pause
+and retained frame; an incompatible playback rate splits that consumer onto a
+private decoder, reopened from the same file even after the packed image is gone.
+With the switch off, each source keeps its own decoder as before. The switch stays
+off by default: reducing duplicate queues does not establish that one shared
+clock is suitable for every scene or independently timed display.
 
 ### Direct video plane sampling
 

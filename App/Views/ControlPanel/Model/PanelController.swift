@@ -33,6 +33,7 @@ final class PanelController {
   let playback: PlaybackPreferences
   let playlists: PlaylistStore
   let automations: WallpaperAutomationStore
+  let solarLocationTracker: SolarLocationTracker
   let displayLayouts: WallpaperDisplayLayoutStore
   let spaces: WallpaperSpaceMonitor
   /// The condition rules engaged now, as the app's `SystemConditionMonitor` publishes them.
@@ -71,7 +72,7 @@ final class PanelController {
   /// pixiv's sign-in page in `WebSignInWindowController`.
   @ObservationIgnored var signInToPixiv: (@MainActor () async -> String?)?
   /// The same for Steam Community, whose session lets Discover list subscriptions.
-  @ObservationIgnored var signInToSteamWeb: (@MainActor () async -> String?)?
+  @ObservationIgnored var signInToSteamWeb: (@MainActor () async -> WebSignInCookies?)?
   /// Support links open only on a deliberate choice; tests capture their destinations.
   @ObservationIgnored var openSupportURL: @MainActor (URL) -> Bool = { DesktopActions.current.open($0) }
   /// Shows System Settings › General › Login Items, where the user allows a launch at login they
@@ -254,6 +255,7 @@ final class PanelController {
     letterbox: VideoLetterboxStore? = nil,
     chooseApplication: (@MainActor () async -> URL?)? = nil,
     automations: WallpaperAutomationStore? = nil,
+    solarLocationTracker: SolarLocationTracker? = nil,
     displayLayouts: WallpaperDisplayLayoutStore? = nil,
     spaces: WallpaperSpaceMonitor? = nil,
     systemConditions: SystemConditionState? = nil
@@ -286,6 +288,7 @@ final class PanelController {
     self.playback = playback
     self.playlists = playlists
     self.automations = automations
+    self.solarLocationTracker = solarLocationTracker ?? SolarLocationTracker(store: automations)
     self.displayLayouts = displayLayouts
     self.spaces = spaces
     self.systemConditions = systemConditions

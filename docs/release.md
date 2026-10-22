@@ -63,18 +63,19 @@ omitted nothing is written, which makes it safe to inspect a planned bump.
 A version's notes are written once, when it is cut, into its
 [`CHANGELOG.md`](../CHANGELOG.md) section. The app bundles that file. The
 release page uses only the English notes from the current section; the app keeps
-both translations. [`scripts/release_notes.py`](../scripts/release_notes.py)
+all translations. [`scripts/release_notes.py`](../scripts/release_notes.py)
 does both halves; GitHub's auto-generated notes are not used. Once a version's
 tag exists, its section is not extended: the tag's build already bundled it, so
 a change that lands later belongs in the next release's notes.
 
-A bundled changelog section is both languages, in this order, and nothing else at
-`###`; each language may open with its banner line:
+From 1.5.7, a bundled changelog section has three languages, in this order, and
+nothing else at `###`; each language may open with its banner line. Earlier
+sections keep their original English and Simplified Chinese notes unchanged:
 
 ```markdown
 ### English
 
-![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.jpg)
+![WallpaperMachine 1.5.7](Resources/ReleaseBanners/1.5.7.jpg)
 
 One or two sentences on what the release means, omitted when the lists say it.
 
@@ -84,7 +85,7 @@ One or two sentences on what the release means, omitted when the lists say it.
 
 ### 简体中文
 
-![WallpaperMachine 0.2.0](Resources/ReleaseBanners/0.2.0.zh-Hans.jpg)
+![WallpaperMachine 1.5.7](Resources/ReleaseBanners/1.5.7.zh-Hans.jpg)
 
 同样的一两句。
 
@@ -92,33 +93,44 @@ One or two sentences on what the release means, omitted when the lists say it.
 
 - 同一变更的简体中文
 
-**Full changelog**: https://github.com/owner/repo/compare/v0.1.0...v0.2.0
+### 한국어
+
+![WallpaperMachine 1.5.7](Resources/ReleaseBanners/1.5.7.ko.jpg)
+
+같은 내용을 한두 문장으로 요약합니다.
+
+#### 새로운 기능
+
+- 같은 변경 사항을 한국어로 설명합니다
+
+**Full changelog**: https://github.com/owner/repo/compare/v1.5.6...v1.5.7
 ```
 
-Category headings inside a language are `####`. The compare link follows both
+Category headings inside a language are `####`. The compare link follows all
 blocks; the app ignores it. The headings are:
 
-| Section | `####` English | `####` 简体中文 |
-|---|---|---|
-| highlights | Highlights | 亮点 |
-| breaking | Breaking changes | 不兼容变更 |
-| new | New | 新增 |
-| improved | Improved | 改进 |
-| fixed | Fixed | 修复 |
+| Section | `####` English | `####` 简体中文 | `####` 한국어 |
+|---|---|---|---|
+| highlights | Highlights | 亮点 | 주요 변경 사항 |
+| breaking | Breaking changes | 不兼容变更 | 호환되지 않는 변경 사항 |
+| new | New | 新增 | 새로운 기능 |
+| improved | Improved | 改进 | 개선 사항 |
+| fixed | Fixed | 修复 | 수정됨 |
 
-Highlights appear only in feature releases (`x.y.0`): the three to five changes that
-define the release, which the other sections still list.
+Highlights appear only in feature releases: the three to five changes that define the
+release, which the other sections still list. A feature release is `x.y.0`, or a patch
+whose notes start below `x.y` because it replaces an `x.y.0` that was never published.
 
 ### Release banners
 
-A feature release can carry a banner in each language: a 3:1 picture (2400 × 800
-pixels, JPEG or PNG) committed as `Resources/ReleaseBanners/x.y.z.jpg` (English) and
-`x.y.z.zh-Hans.jpg` (Simplified Chinese), or `.png`, before the commit with the
-`release:` line. Each banner carries its own language's words; without a Chinese file
-the Chinese notes share the English banner. When the section is written, the script
-opens each language block with its image line:
+A release can carry a banner in each language: a 3:1 picture (2400 × 800
+pixels, JPEG or PNG) committed as `Resources/ReleaseBanners/x.y.z.jpg` (English),
+`x.y.z.zh-Hans.jpg` (Simplified Chinese) and `x.y.z.ko.jpg` (Korean), or `.png`,
+before the commit with the `release:` line. Each banner carries its own language's
+words; a missing localized file falls back to the English banner. When the section
+is written, the script opens each language block with its image line:
 
-- `CHANGELOG.md` on GitHub shows both from the repository path.
+- `CHANGELOG.md` on GitHub shows the images from their repository paths.
 - The release page shows the English one from the version's tag on
   `raw.githubusercontent.com`, at the top of the English notes.
 - The app bundles the folder; the What's New window shows the banner of the version
@@ -136,8 +148,8 @@ with, so a banner never goes back into an older release.
 
 With `--ai` the commits between two version tags go to a language model that
 writes them up for users — what they can do now, what works better, what no
-longer goes wrong — in English and in Simplified Chinese, the same changes in
-both, merging commits that describe one change and leaving internal work out.
+longer goes wrong — in English, Simplified Chinese and Korean, the same changes in
+all three, merging commits that describe one change and leaving internal work out.
 The release pipeline always passes `--ai`.
 
 | Environment | Default | Meaning |
@@ -162,28 +174,30 @@ The instructions also carry the project's rules on claims, because CI commits th
 notes without review: no energy, battery or power-saving claims, nothing called
 fully supported or fully compatible, and opt-in features (direct video plane sampling,
 on-demand scene idle, the animated lock screen) keep their optional, experimental
-or off-by-default qualifier in both languages; Native Metal is the default
+or off-by-default qualifier in every language; Native Metal is the default
 renderer and native video is the default video player, and neither is ever called
 optional. The model groups many commits about
 one area (text layers, particles, lighting) into one bullet that names what users
 see, keeping each section to about 15 bullets, and is told whether the version is a
 feature release, which decides whether it writes highlights. Places in
 the app are named the way the panel labels them, in English and in the zh-Hans
-catalog's words (`Settings` / `设置`); the prompt lists those names, so renaming a
-tab or a Settings section changes the list in `scripts/release_notes.py` in
-the same commit.
+and ko catalogs' words (`Settings` / `设置` / `설정`); the prompt lists those names,
+so renaming a tab or a Settings section changes the list in
+`scripts/release_notes.py` in the same commit.
 
-The model answers with JSON. `summary` is `{"english", "chinese"}`. Each of
-`highlights`, `breaking`, `new`, `improved` and `fixed` is a list of the same pair, one object
-per change, so the two languages cannot drift in length. The script renders that
-shape — `### English`, then `### 简体中文`, categories at `####`, then the compare
-link — and stops the run on a reply that is not that JSON, omits a language,
-carries other fields or an HTML comment (the boundary marker below), or was cut
-off at the output-token limit. A Chinese string must contain Chinese characters
-and must not copy the English; an English string must contain Latin text.
-Whitespace is collapsed and list or heading markers are stripped, so no entry can
-open a changelog section of its own. A range without commits is reported in both
-languages as having no user-visible changes, without a request. The request
+The model answers with JSON. `summary` is `{"english", "chinese", "korean"}`. Each of
+`highlights`, `breaking`, `new`, `improved` and `fixed` is a list of the same
+three-language object, one per change, so translations cannot drift in length.
+The script renders that shape — `### English`, then `### 简体中文`, then
+`### 한국어`, categories at `####`, then the compare link — and stops the run on
+a reply that is not that JSON, omits a language, carries other fields or an HTML
+comment (the boundary marker below), or was cut off at the output-token limit.
+A Chinese string must contain Chinese characters; a Korean string must contain
+Hangul; neither may copy the English or another translation. An English string
+must contain Latin text. Whitespace is collapsed and list or heading markers are
+stripped, so no entry can open a changelog section of its own. A range without
+commits is reported in all three languages as having no user-visible changes,
+without a request. The request
 streams and names its own `User-Agent`, because Cloudflare in front of the
 gateway refuses urllib's default one (error 1010). A connection that goes quiet
 for 120 seconds, or a reply still running after 600, stops the run: the Version
@@ -196,13 +210,17 @@ Without `--ai` the commits are listed in English, read through the
 `type(scope): subject` convention in [conventions.md](conventions.md). It is
 offline and free, and it is a developer preview for inspecting a range and for
 tests. It is not published: `--release-body` and `--changelog --apply` refuse
-notes that are not `### English` then `### 简体中文`.
+notes without the required ordered language blocks: `### English`, then
+`### 简体中文`, then `### 한국어` for versions 1.5.7 and later. Older bilingual
+sections remain valid.
 
 Publication validates the whole bundled history, not just the current release.
 Each `##` heading must be the `x.y.z` token `AppReleaseHistory` accepts
 (optional `v`/`V`, three 64-bit integer components, no leading zeros), and each
-section needs actual prose in both languages and matching bullet counts (headings
-and compare links do not count as translated content). `## Unreleased`, duplicate
+section needs actual prose in every required language and matching bullet counts
+(headings and compare links do not count as translated content). An explicitly
+present Korean block must be complete even in older sections. Unknown, repeated
+or misordered language headings also fail validation. `## Unreleased`, duplicate
 versions, an overflow, a prerelease suffix, a leading zero, or a non-version `##`
 line inside notes fails `--release-body`, `--changelog --apply` and
 `--rebuild-changelog --apply`: such headings are neither kept nor dropped,
@@ -228,9 +246,9 @@ word boundary; the linked commit still carries every word.
 
 ```sh
 python3 scripts/release_notes.py                               # English listing, not for publish
-python3 scripts/release_notes.py --ai --tag v0.6.0 --to HEAD   # bilingual notes, before the tag exists
-python3 scripts/release_notes.py --tag v0.6.0 --release-body --ai --output notes.md
-python3 scripts/release_notes.py --ai --changelog --apply      # write one bilingual section
+python3 scripts/release_notes.py --ai --tag v1.5.7 --to HEAD   # three languages, before the tag exists
+python3 scripts/release_notes.py --tag v1.5.7 --release-body --ai --output notes.md
+python3 scripts/release_notes.py --ai --changelog --apply      # write one translated section
 python3 scripts/release_notes.py --rebuild-changelog --apply   # a section for every tag, recorded ones kept
 ```
 
@@ -240,7 +258,7 @@ newest released version below the target that the range's end descends from, so 
 gap in the numbering resolves correctly.
 
 `--release-body` is the English-only GitHub release page. It reuses the version's
-bilingual `CHANGELOG.md` section without calling the model again, keeps only the
+translated `CHANGELOG.md` section without calling the model again, keeps only the
 English prose and the **Full changelog** link, then adds
 `<!-- release-notes-end -->` and the install, checksum and requirement footer
 (with a `Built from` line when `--built-from` is given). Raw commit messages are
@@ -301,9 +319,10 @@ workflow** with a `spec` input. On an `ubuntu-latest` runner it:
 
 1. checks out with full history;
 2. runs `python3 scripts/bump_version.py --ci --apply`;
-3. has the release-notes model write the new version's bilingual section into
+3. has the release-notes model write the new version's three-language section into
    `CHANGELOG.md` with `scripts/release_notes.py --to HEAD --ai --changelog
-   --apply` — `### English` then `### 简体中文`. The tag does not exist yet, so
+   --apply` — `### English`, then `### 简体中文`, then `### 한국어`. The tag does
+   not exist yet, so
    the range ends at `HEAD`. Without the secret, or when the model fails or omits
    a language, the job stops here: nothing is committed or tagged, and re-running
    the failed job retries the same bump;
@@ -331,12 +350,16 @@ protection must allow GitHub Actions.
 
 `workflow_call` only, with a required `tag` input. It is the single place a
 publishable artifact is produced, called by Version for CI-produced tags and by
-Release for hand-pushed ones. It runs four jobs. `app-icon` compiles the app icon
+Release for hand-pushed ones. It runs three jobs. `app-icon` compiles the app icon
 on a `macos-26` runner. `build` then runs on `macos-15` (the oldest runner that
-carries Xcode 26, whose Homebrew bottles set the published app's minimum macOS)
-while `test` runs on `macos-26`, 150-minute timeout each, so the test gate adds no
-time on top of the Release build. `publish` runs on `ubuntu-latest` only after
-both succeed, so a published binary has passed the same gate a change has to pass.
+carries Xcode 26, whose Homebrew bottles set the published app's minimum macOS),
+with a 150-minute timeout. `publish` runs on `ubuntu-latest` once it succeeds.
+
+The test gate is not part of a release. Every change passes `python3 scripts/test.py`
+before it is committed, and on hosted VMs the gate failed 1.5.0 through 1.5.4 only on
+timing and layout the VM got wrong, each failure leaving a tag that could not be
+published and a fix that had to ship under the next number. The
+[Test workflow](#test-testyml) runs the same gate by hand.
 
 The icon is compiled apart because Xcode 26's `actool` crashes on most `.icon`
 compiles on macOS 15 ([build.md](build.md#stages-and-outputs)). `app-icon` runs
@@ -349,10 +372,10 @@ artifact.
 1. checks out the tag with full history, which the notes need;
 2. writes the release body with `scripts/release_notes.py --release-body --ai
    --built-from "$(git rev-parse HEAD)"` before anything is built. The current
-   section must already be bilingual (`### English`, then `### 简体中文`) and is
-   reused without calling the model; a hand-pushed tag with no section gets one
-   written once into the working-tree `CHANGELOG.md`, so the app bundles both
-   languages. English-only or malformed source history fails here, in seconds,
+   section must already have every required language and is reused without
+   calling the model; a hand-pushed tag with no section gets one written once into
+   the working-tree `CHANGELOG.md`, so the app bundles all translations. Missing
+   translations or malformed source history fail here, in seconds,
    rather than after the macOS build;
 3. runs `prepare-build` (below) and downloads the `app-icon-<tag>` artifact;
 4. runs `python3 scripts/build.py --configuration Release --app-icon DIR`, which
@@ -386,23 +409,8 @@ Step 6 is the guard that the bump actually reached the build:
 `CFBundleShortVersionString`, so a mismatch means the published tag and the
 built version disagree and the job fails instead of publishing the wrong binary.
 
-**`test`** runs `prepare-build`, `python3 scripts/build.py --renderer-only` for the
-renderer and the generated bridge, `python3 scripts/check_rust.py`,
-`python3 scripts/check_renderer.py --allow-missing-gpu --allow-imprecise-timers`,
-and `python3 scripts/test.py --serial`, which builds the Debug app, icon included,
-and its tests itself. A failure in any of them prevents publication.
-`--serial` runs one test class at a time: see
-[Parallel execution](testing/README.md#parallel-execution) for why. The two
-renderer flags are CI fallbacks for hosted VMs: only the exact exit 77 of a
-compiled device or timer probe skips the named GPU or wall-clock cadence checks
-([renderer testing](testing/renderer.md#scriptscheck_rendererpy)); each skip is a
-CI warning, and all other probe and test failures remain failures. Excluded and
-asset-dependent checks stay listed in the JSON reports and logs; they do not count
-as verified asset or GPU coverage.
-
-When either macOS job fails it uploads its full tool logs from `artifacts/` (for
-`test`, also any WebKit, app or jetsam reports from the run) as `build-logs-<tag>`
-or `test-logs-<tag>`, kept 14 days: the job output is only the scripts' filtered
+When `build` fails it uploads its full tool logs from `artifacts/` as
+`build-logs-<tag>`, kept 14 days: the job output is only the scripts' filtered
 summary.
 
 **`publish`**
@@ -421,11 +429,11 @@ non-beta `/Applications/Xcode_26*.app`, `brew install --quiet`s the
 XcodeGen/CMake/renderer package set with `ccache`, and restores two
 `actions/cache` entries. Every key carries the runner's macOS (`<os>` below is
 `macos-15` or `macos-26`), because bottles and compiled objects
-differ between releases; `build` and `test` therefore keep separate entries.
+differ between releases; `build` and the Test workflow therefore keep separate entries.
 
 | Cache | Path | Key | What a hit saves |
 |---|---|---|---|
-| C++ objects | `~/.ccache` | `ccache-<os>-<run>`, restored by the `ccache-<os>-` prefix | recompiling the scene engine. A checkout gives every file a new mtime, so CMake rebuilds the whole engine even from a restored build tree; ccache hashes content and returns the previous objects |
+| C++ objects | `~/.ccache` | `ccache-<os>-<run>`, restored by the `ccache-<os>-` prefix | recompiling the scene engine. A checkout gives every file a new mtime, so CMake rebuilds the whole engine even from a restored build tree; ccache hashes content and returns the previous objects. Test's three jobs share a run's key, so only `renderer`, which compiles the engine and its C++ tests, saves it; `rust` and `native` pass `save-object-cache: "false"` and only restore it |
 | Renderer | `~/.cargo/registry`, `~/.cargo/git`, `upstream/renderer/target` | `renderer-ccache-<os>-<hash of Cargo.lock, rust-toolchain.toml, provenance.json>`, restored by prefix | crate downloads, and Rust compilation while the nightly toolchain is unchanged |
 
 The `CMAKE_<LANG>_COMPILER_LAUNCHER=ccache` variables only take effect on a build
@@ -470,13 +478,49 @@ unpublished. Manual invocations must be serialized with every other publisher to
 use the release workflow for the shared lock. The script's docstring and
 `scripts/tests/test_publish_release.py` cover both rules.
 
+### Test (`test.yml`)
+
+The test gate on hosted runners, run by hand from **Actions -> Test -> Run
+workflow** on the branch or tag chosen under "Use workflow from" (`--ref` below). It
+does not tag, build the Release app or publish, and no release waits for it
+([why](#build-buildyml)). It has no input naming another ref to test: its jobs save
+caches under the ref the run starts from, and a run started from `main` that built
+another ref's code would let that code write the caches every release restores. Its
+three jobs run in parallel on `macos-26` runners, each after `prepare-build` and
+`python3 scripts/build.py --renderer-only` for the renderer and the generated bridge,
+so a run takes about as long as the native tests (about 25 minutes for 1.5) rather
+than the sum (over 40):
+
+- `rust` runs `python3 scripts/check_rust.py`;
+- `renderer` runs `python3 scripts/check_renderer.py --allow-missing-gpu
+  --allow-imprecise-timers`. The two flags are fallbacks for hosted VMs: only the exact
+  exit 77 of a compiled device or timer probe skips the named GPU or wall-clock cadence
+  checks ([renderer testing](testing/renderer.md#scriptscheck_rendererpy)); each skip
+  is a CI warning, and all other probe and test failures remain failures. Excluded and
+  asset-dependent checks stay listed in the JSON reports and logs; they do not count as
+  verified asset or GPU coverage;
+- `native` runs `python3 scripts/test.py --serial`, which builds the Debug app, icon
+  included, and its tests itself. `--serial` runs one test class at a time: see
+  [Parallel execution](testing/README.md#parallel-execution) for why.
+
+```sh
+gh workflow run test.yml --ref main
+gh workflow run test.yml --ref <branch> -f skip_renderer=true -f only="SettingsWindowRenderTests WorkshopBrowserRenderTests"
+```
+
+`only` passes each space-separated name to `scripts/test.py --only`, and
+`skip_renderer` skips the `rust` and `renderer` jobs; both are for diagnosis, so only
+a run without them says the gate passes. A failed job keeps its logs, result bundles
+and any WebKit, app or jetsam reports included, as `test-logs-<run id>-<job>` for 14
+days.
+
 ### Warm caches (`warm-caches.yml`)
 
 GitHub evicts a cache entry nobody has read for seven days. Twice a week (and on
 demand from **Actions -> Warm caches -> Run workflow**) this runs `prepare-build`
 and `python3 scripts/build.py --renderer-only` on `main`, once on `macos-15` and
-once on `macos-26`, which reads every entry Build uses and saves a fresh C++ object
-cache for each, so a release after a quiet week still starts warm. Caches saved on
+once on `macos-26`, which reads every entry Build and Test use and saves a fresh C++
+object cache for each, so a release or a Test run after a quiet week still starts warm. Caches saved on
 `main` are readable from every ref, including the tags Release builds. It
 publishes nothing.
 
@@ -502,13 +546,20 @@ as they were.
 Code scanning on every push to `main`, every pull request into it, weekly, and on
 demand. It replaces GitHub's default setup, which can only autobuild Swift and
 fails at the extension's link because the renderer library and the Homebrew
-libraries do not exist yet. Actions, JavaScript/TypeScript, Python and Rust are
-analyzed without a build on Linux. Swift runs on `macos-26`: `prepare-build` and
+libraries do not exist yet. Actions, Python and Rust are analyzed without a build
+on Linux. Swift runs on `macos-26`: `prepare-build` and
 `python3 scripts/build.py --renderer-only` first, untraced, then CodeQL traces
 `scripts/build.py --swift-only` with the `--xcode-setting` overrides CodeQL's own
 Swift autobuild uses (no signing, no compilation cache, no integrated driver), so
 the extractor sees every Swift compile. C/C++ (only vendored third-party code is
-visible to it) is deliberately not analyzed, and the repository has no Ruby.
+visible to it), Ruby (the repository has none) and JavaScript/TypeScript (none since
+the SwiftUI control panel; CodeQL fails a language with no code) are deliberately not
+analyzed.
+Removing a language from the matrix does not remove its configuration: **Security ->
+Code scanning -> Tool status** keeps showing that language's last scan, failed or
+not, because nothing uploads to its category again. In the same change, delete it
+there (the configuration's **⋯ -> Delete configuration**) once no alert in it needs
+keeping.
 Default setup must stay off under **Settings -> Code security -> CodeQL
 analysis**; while it is on, GitHub rejects this workflow's results.
 
@@ -518,9 +569,9 @@ Triggered by pushing a `v*.*.*` tag by hand. It only calls Build with
 `github.ref_name`, sharing the `publish-<tag>` concurrency group with Version's
 publish job so one tag is never built twice at once. A hand-pushed tag has no
 `CHANGELOG.md` section unless one was committed before tagging; Build then asks
-the model once and writes that bilingual section into the working tree before the
-app is built. A section that is present but not bilingual fails the build; it is
-not rewritten.
+the model once and writes that translated section into the working tree before the
+app is built. A section that is present but missing a required translation fails
+the build; it is not rewritten.
 
 ## What the in-app updater expects
 
@@ -581,7 +632,7 @@ passed the publication gate, preserve that tag and fix the failed checks on
 `publish_release.py` refuses a live release, and a `CHANGELOG.md` section is not
 extended once its tag exists. Cut the next patch instead, with the optional
 workflow-dispatch `notes_from` input set to the last *published* tag, so its
-model-written bilingual notes include the still-unpublished changes:
+model-written translated notes include the still-unpublished changes:
 
 ```sh
 gh workflow run version.yml --ref main -f spec=patch -f notes_from=v1.2.6
@@ -589,7 +640,15 @@ gh workflow run version.yml --ref main -f spec=patch -f notes_from=v1.2.6
 
 `notes_from` only sets `release_notes.py --previous`; it does not change the version
 policy, skip tests or replace a live release. Ordinary releases leave it empty and
-use the preceding tag.
+use the preceding tag. When the unpublished tag was a feature release, its notes start
+below that minor version, so the patch gets highlights too; commit copies of its
+banners under the patch's number (`x.y.1.jpg`, `x.y.1.zh-Hans.jpg`,
+`x.y.1.ko.jpg`) before running the
+workflow, since a section names only its own version's banner. Once the patch is cut,
+remove the sections of the unpublished versions it replaces, and their banners, from
+`CHANGELOG.md`: its notes already cover them, and a section left there is shown again in
+What's New. The app it builds still carries them, so remove them before cutting it when
+possible.
 
 ## Checklist for a release
 
@@ -597,16 +656,16 @@ use the preceding tag.
    workflow with a spec.
 2. Confirm the Version run committed `chore: bump version to x.y.z` with the new
    `CHANGELOG.md` section and pushed `vx.y.z`. Read the section: it is `### English`
-   then `### 简体中文`, and the model wrote both. The app bundles both translations;
-   the GitHub release page shows only the English notes.
-3. Confirm the called Build run passed the test gate, verified the mounted
+   then `### 简体中文`, then `### 한국어`, and the model wrote all three. The app
+   bundles all translations; the GitHub release page shows only the English notes.
+3. Confirm the called Build run verified the mounted
    image, and published `WallpaperMachine-x.y.z-arm64.dmg` with its `.sha256`
    sidecar, `WallpaperMachine-update.json` and a provenance attestation. The
    manifest's `digest` must equal the sidecar's checksum:
    `curl -sL https://github.com/WallpaperMachine/WallpaperMachine/releases/latest/download/WallpaperMachine-update.json`.
 4. Read the release body on the page: it should contain only the English notes
    from the current `CHANGELOG.md` section, followed by the install footer,
-   without a Chinese section or raw commit list. The **Full changelog** link
+   without Chinese or Korean sections or a raw commit list. The **Full changelog** link
    opens the commit history; the `Built from` line must match
    `git rev-parse vx.y.z^{commit}`.
 5. Confirm Latest points at the highest published version. Re-running Build for a

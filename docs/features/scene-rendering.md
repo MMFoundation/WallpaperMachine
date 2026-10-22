@@ -71,8 +71,13 @@ plane). The camera is read as it stood when the cursor was sampled. Layers are s
 where the cursor ray meets their own plane, and a particle control point still follows
 the cursor in canvas units.
 
-In a 2D scene, a particle system or 3D model with the `perspective` flag is drawn
-through a perspective camera seated as Wallpaper Engine seats it. Its field of view is
+In a 2D scene, a particle system, 3D model or image layer with the `perspective` flag
+is drawn through a perspective camera seated as Wallpaper Engine seats it (an image
+layer's effects still run in its own card; the pass that puts the result onto the
+scene is the one seen through it, and a fullscreen layer ignores the flag), so a
+cover laid on a model's face stays on it however a group turns them. Camera parallax
+moves a model by its depth as it moves every other layer, a model under a group by the
+group's, so the cover stays on its face as the cursor moves too. Its field of view is
 the scene's `perspectiveoverridefov` (95 degrees when the file leaves it out, read from
 a file of any package version; `fov` belongs to scenes with a perspective projection,
 which read it and ignore `perspectiveoverridefov`), its eye is
@@ -93,11 +98,20 @@ Scripts list the scene's layers through `thisScene`. `getLayer(index)`,
 one order, the scene file's object order followed by the layers scripts made, and a
 sort moves a layer in it as well as in the draw order among its siblings.
 `layer.name` is the name the scene file gives the layer, empty for an unnamed one,
-whatever key the engine files it under. Only layers the parser built are counted:
-an object the scene file marks statically invisible, which nothing can show, is
-never built, so it has no index or id and the count differs from the object list
-by those. `destroyLayer` removes the layers a script made below the layer too.
-A scene script's `init` runs once the scene is built, so it sees all of that.
+whatever key the engine files it under, from the moment any script can reach the
+layer, its own script compiling with it included. A sound object is a layer in that
+order like any other, found by its id and played through the object
+`enumerateLayers()` hands out; a music widget finds its tracks there by name. Only
+layers the parser built are counted: an object the scene file marks statically
+invisible, which nothing can show, is never built, so it has no index or id and the
+count differs from the object list by those. `destroyLayer` removes the layers a
+script made below the layer too. A scene script's `init` runs once the scene is
+built, so it sees all of that. Property scripts start on the scene's first tick:
+every one runs `init`, in the scene's order, before any of them is told the user
+properties, and that before any `update`, because a widget's options layer may call
+from its first `applyUserProperties` what a later layer's `init` set up. What `init`
+returns is the property's value from then on, as what `update` returns is: a drag
+handle hides itself there, and a typing text starts empty.
 `applyGeneralSettings({ language })` is always told `en-us`: the host does not
 yet pass the interface language on. `parallaxDepth` set on a layer reaches the
 layer, its effect passes and the layers below it (a layer drawn through effects
@@ -129,7 +143,11 @@ animated setting, shader constants and light intensity included); `single` stops
 for frames, so a scene whose only motion it was can go idle. A timeline with
 `startpaused` shows its first frame from the first frame of the scene, not the
 authored value, until a script plays it, and `getAnimation(name)` finds it by its
-`name`. Settings the editor keyed together (`options.parent`: an origin and the angles
+`name`. The script of a setting that keeps its timeline beside it (a shader constant)
+gets that timeline from `thisObject.getAnimation()` with no name, as Wallpaper
+Engine's `IThisPropertyObject` does; it got the layer's first unnamed timeline, which
+on a layer that also slides is its origin's, so a cross-fade a new cover restarts
+restarted the slide and never faded. Settings the editor keyed together (`options.parent`: an origin and the angles
 that turn with it) are one animation on the first one's clock, so playing or holding
 it moves them all. A script or a property bound to the same setting is its only
 writer. A colour timeline tints the layer's own material and each of its effect passes
@@ -142,7 +160,7 @@ clock of its own), and the colour timeline of a text layer or a light
 A scene starts as a desktop with no player. On its first tick, after every script has
 started and before anything is drawn, its scripts are told `mediaPropertiesChanged`
 with no track and `mediaPlaybackChanged` with `PLAYBACK_STOPPED`, once, whether or not
-the user turned media integration on. Wallpaper Engine's media widgets are authored
+media integration is on. Wallpaper Engine's media widgets are authored
 visible (a group layer, a cover, a mascot parented to it) and hide themselves on
 `PLAYBACK_STOPPED`, so a scene that was never told would show them on every start for
 anyone not playing music. The state names no one's music, so it does not wait for the
@@ -178,6 +196,20 @@ A scripted colour costs one script call a frame, as a text layer's does, and
 no pass or memory. It is also a script like any other, so a scene whose only script is
 an image layer's colour no longer goes idle (it did, while the colour script was never
 created); a scene with other scripts did not idle before either.
+
+A number a script hands back for a vector property (a layer's `origin`, `scale` or
+`angles`, a colour, a two- to four-component shader constant) is that number on every
+component, as a single authored number is, and the property stays a vector, so the next
+`update(value)` can read `value.x` again. A hover zoom whose `update(value)` returns
+`value.x + (target - value.x) * speed` for `scale` therefore scales evenly; kept as a
+bare number, its next call read `.x` off that number and the layer's scale, and with it
+its position, went NaN from the second frame, so the layer was never drawn (a clock
+widget on by default). A number written to `thisLayer.color` or
+`thisLayer.parallaxDepth` now fills every component too, where it was ignored;
+`origin`, `scale` and `angles` already took one on every axis. Wallpaper Engine's own
+`Vec3` and `Vec2` fill every component from a single number; that its host converts a
+returned number the same way is inferred from a default-on widget written to rely on
+it, not compared against its frames.
 
 A script that writes `thisLayer.alpha` on a layer whose alpha no timeline, script or
 user property owns sets the layer's opacity as the editor's `alpha` does. The layer's
@@ -344,6 +376,13 @@ local fogged scene has no such layer. Compose, fullscreen and puppet layers, a l
 that blends onto the screen by colour blend mode, text layers, and a layer whose
 material takes no fog keep what they drew.
 
+Height fog is read whenever its JSON fields are present, including older package
+containers. Ambient/skylight colours and height-fog settings resolve user-property
+values at scene load; preview edits are deferred to the existing apply/reload path
+rather than adding per-frame uniform work. SceneScript `rotateObjectSpace(Vec3)` composes a
+radians Euler increment around the layer's local axes; the `angles` property
+continues to read and write degrees.
+
 Shadow maps, spot cookies and
 volumetric light shafts are not drawn: a light that casts a shadow lights as if
 nothing did, which is also what Wallpaper Engine shows when nothing in the scene
@@ -378,7 +417,8 @@ plain translucent layer that writes depth still hides farther layers drawn after
 in a scene that sorts
 ([known limitations](../testing/renderer.md#known-limitations)). A target the frame
 reads before it writes it keeps its own image from one frame to the next on both
-renderers, so the reader sees exactly the previous frame; a scene with such a loop
+renderers, so the reader sees exactly the previous frame, and transparent black on
+the first frame, since both renderers clear every new target; a scene with such a loop
 is never called still while it runs. An effect's own buffers are made the way
 Wallpaper Engine makes them: a float format (`r16f`, `rg1616f`) is a float target,
 so a fluid simulation's velocity and pressure keep their sign; an explicit 8-bit
@@ -824,12 +864,25 @@ authored texture, whatever the number of layers that share them). The native
 renderer uploads it as the file holds it, block-compressed and mipmapped, and both
 renderers sample it as the file says and a cover clamped, as before. Nothing is
 substituted, and the slot stays the transparent texel the cover starts as, when no
-texture is authored in it, or when the authored one is a video, a sprite sheet, a
-render target or another layer's composite, or a one- or two-channel picture (a mask
-or a normal map: the material's shader reads those through other channels than a
-cover's). The layer colour stays white on a layer that binds a cover, as it was, so
-the art is drawn untinted: whether Wallpaper Engine tints it with the layer's colour
-while nothing plays is not established.
+texture is authored in it, or when the authored one is a video, a sprite sheet, or a
+one- or two-channel picture (a mask or a normal map: the material's shader reads
+those through other channels than a cover's). The layer colour stays white on a layer
+that binds a cover, as it was, so the art is drawn untinted: whether Wallpaper Engine
+tints it with the layer's colour while nothing plays is not established.
+
+Where the texture authored in a cover slot is a render target, another layer's
+composite (a default cover a layer of its own draws, which a cover layer, a blurred
+background and a cross-fade all sample), the slot keeps sampling that target until a
+cover is published, again after the clear, and in the previous-cover slot until a
+track has a predecessor; the slot was the transparent texel instead, so a cross-fade
+that writes the previous cover's alpha drew nothing at all and a background built on
+it was the clear colour. A target is not a picture the image source can hold, so the
+material keeps the target in the slot, which keeps the graph drawing it first, and
+carries the cover's name beside it (`SceneMaterial::texture_covers`); each renderer
+binds the cover's image there instead while the image it uploaded for that frame is a
+cover and not the empty texel. Such a pass reads an image the runtime replaces, so it
+is never reused as a still target. The slot's size uniforms stay the target's, as a
+picture slot's stay its art's.
 
 An image layer's own render targets, the pair its effects run through and the
 composite another layer reads, are point-sampled when the layer says
@@ -838,13 +891,31 @@ file, not from what an earlier layer happened to load), wrapped when the layer s
 `clampuvs` is off, and clamped and linear otherwise. A texture file whose header asks
 for point sampling is also sampled with its mip level picked by point, as the
 reference's sampler for that flag does; a texture without the flag, and a render
-target, keep the blend of mip levels they always had. Whether the cursor reaches a layer follows Wallpaper
+target, keep the blend of mip levels they always had. What a layer drawn through
+effects leaves in that composite is its chain's result as the chain wrote it, the way
+every pass of a chain writes into its buffers: the chain's last pass also puts the
+layer onto the scene with the layer's own blending, but drawn into the composite it
+replaces, so a translucent result keeps its colour instead of coming out multiplied by
+its alpha, and a data buffer that keeps numbers in all four channels (an audio widget's
+spectrum, which other layers read as bars) keeps them. A layer whose saved size is 0 on
+one axis has a card with no area, which draws nothing on screen; its render targets are
+made at the size an invalid axis takes from the scene's canvas, and when it draws into
+targets of its own (through effects, or into the composite another layer reads) its card
+takes that size too and is drawn only there, so what its effects made reaches the layer
+that reads it. A layer only 1 or 2 units thin is not such a card and keeps its size.
+Whether the cursor reaches a layer follows Wallpaper
 Engine's walk: only image, text and model layers that are `solid` (the default) are
 tested, a plain group or a particle layer is not, and a visible layer under the cursor
 with `disablepropagation` hides every layer behind it, which hears no enter, leave or
-move meanwhile and keeps whatever hover state it had. A project layer
+move meanwhile and keeps whatever hover state it had. An image layer is as large as
+the size its scene saved; the `width` and `height` a model states (a sprite sheet's
+frame) size only a layer that saved none. A project layer
 (`models/util/projectlayer.json`) is as large as the scene's canvas, and the
-depth-testing composition layer composes like the plain one. Camera parallax moves
+depth-testing composition layer composes like the plain one. A pass-through layer
+drawn through effects, such as a project layer under a CRT effect, copies the part of
+the screen it is drawn over, under the groups it sits in, not at the origin it has
+within them, and follows them when a property, a script or a timeline moves them while
+the scene runs. Camera parallax moves
 what a composition layer holds along with its card, as Wallpaper Engine's draw loop gives
 every pass of a layer the same offset: the screen its first pass reads is the place its last
 pass draws it, so a layer that only copies what is behind it shows a continuous scene, not
@@ -852,8 +923,12 @@ the scene displaced by the layer's own offset. A fullscreen layer
 (`fullscreen` in its model) is laid over the whole screen whichever group it sits in:
 the group decides whether it shows, never where, how large or how turned, so its
 effects, its result and camera parallax all treat it as the outermost layer of its own
-tree. The layers saved below it are another matter: they are placed from the transform
-the scene saved for the fullscreen layer (none saved, none added, so a post-processing
+tree. Nor does camera parallax move the layer itself: its depth is zero whatever the file
+saves, so the screen it copies is drawn back over the whole screen wherever the cursor is.
+With the default depth, the result of its effects was a second, shifted copy of the whole
+scene over the first, with the scene underneath showing along two edges. The layers saved
+below it are another matter: they are placed from the transform the scene saved for the
+fullscreen layer (none saved, none added, so a post-processing
 layer with no origin holds its children at canvas coordinates), under the groups it sits
 in, and not from the screen centre it is drawn at; and a fullscreen layer with effects
 holds those children in its own picture and runs its effects over them and over the
@@ -876,7 +951,8 @@ drawable is therefore only ever rendered to, never read back.
 
 Where the picture sits is one layout, shared with the pointer mapping and
 the posters. The scaling mode and the scale factor decide how large the picture is;
-whatever room that leaves around it (bars for Fit, Original size or a factor below 1)
+whatever room that leaves around it (bars for Fit, Original size or a factor below 1,
+filled by a blurred copy [under Fit with blurred backdrop](#fit-with-blurred-backdrop))
 or whatever it overflows by (Fill, or a factor above 1) is split by a position, a
 fraction per axis: 0 puts the picture's left or top edge on the display's, 1 its right
 or bottom edge, and 0.5, the default, centres it as every wallpaper was before the
@@ -1021,6 +1097,76 @@ the last frame or the preview in place. The shader case uses a scene whose card 
 and whose one effect does not: it is held with the effect's shader named and no frame
 presented, and the same scene with a compiling effect draws.
 
+### Fit with blurred backdrop
+
+`FIT_BLURRED` (the C ABI's scaling mode 4, `fit_blurred` in a display's `monitors` entry,
+`MatchBlurred` across the bridge) lays the picture out exactly as Fit does, position,
+scale factor and pointer mapping included, and fills the room around it with a blurred,
+darker copy of the same live picture instead of the clear colour
+([user-facing behaviour](wallpaper-properties.md#fit-with-blurred-backdrop)). The layout
+(`ComputeWallpaperScalingLayout`) adds `backdrop_px`, the picture as Fill at a factor of 1
+places it, centred whatever the position, and `backdrop`, whether the picture leaves room:
+a gap of one pixel, the most rounding leaves when the shapes match, is none. The copy is
+drawn only into that room (`ComputeWallpaperBackdropBands`), so the picture's pixels are
+Fit's byte for byte. Both backends build the copy the same way
+(`Presentation/WallpaperBackdrop.hpp`, `MetalWallpaperBackdrop`, `WallpaperBackdropPass`):
+the scene's output is reduced to an image 128 texels on its longer side, a picture longer
+than 1024 texels first to an eighth of its size in an 8-bit image, with bilinear taps at
+most four texels apart; that image is blurred by a separable Gaussian of 3 texels, then
+stretched over the room through a cubic B-spline, darkened to 70% and dithered by one
+8-bit step. A quarter of the source texels is read: reading all of them cost about three
+times the GPU time on a 6880-wide raster (below), and the copy is blurred over about 160
+source texels, so by estimate a one-pixel line moving in and out of the taps changes it by less
+than one 8-bit step (not measured with a moving fixture). The posters draw it too, since
+they compose the same picture again. A scale factor or a position change moves the
+picture and not the copy.
+
+Nothing of it exists in any other mode: the pipelines are built when the mode is chosen,
+between frames (a pipeline built inside a frame would hold it on the shader compiler),
+and the images (two half-float ones and, for a large picture, the 8-bit one) exist only
+while a composition has room to fill and go on the first frame that has none. The present
+key carries the copy's rectangle, so switching between Fit and this mode presents again,
+and a frame that repeats the picture still repeats the copy and is skipped as before.
+On Compatibility, a plain video keeps presenting straight from its decoded frame
+(`CustomShaderPass::recordPresentation`): that frame is texel for texel the scene output
+the copy would otherwise be made from, so the copy is made from it and drawn first. A
+mirrored picture takes the copy path as before. The native video player has no copy and
+shows Fit's black bars. `SceneWallpaper` ignores a scaling-mode value it has no mode for,
+instead of casting it into an unscaled layout. An app that predates the mode reads
+`fit_blurred` as Fill.
+
+Cost, measured headlessly on an M3 Max (macOS 27.2) with
+`UnchangedPresent.LocalProjectEnergyIsMeasuredHeadlessly` and `WE_TEST_ENERGY_SCALING`
+([renderer testing](../testing/renderer.md)), three or four alternating 15-second rounds
+per case at 60 FPS, while another copy of the app was drawing the desktop and other apps
+used the GPU (medians of the GPU time of the process's own command buffers per 60 Hz
+tick, Fit against this mode):
+
+| Wallpaper, surface | Renderer | Fit | Fit with blurred backdrop |
+| --- | --- | --- | --- |
+| 3840x2160 scene, display resolution, 6880x2880 @2 | Native Metal | 5.96 ms | 6.50 ms |
+| the same, 4112x2658 @2 | Native Metal | 5.17 ms | 5.04 ms (within the noise) |
+| the same, 6880x2880 @2 | Compatibility | 5.81 ms | 6.11 ms |
+| the same, 4112x2658 @2 | Compatibility | 4.90 ms | 5.35 ms |
+| 3840x2160 30 FPS HEVC clip, 6880x2880 @2 | Compatibility | 0.25 ms | 0.54 ms |
+| the same, 4112x2658 @2 | Compatibility | 0.26 ms | 0.32 ms |
+
+The clip presents on every other tick, so a presented frame costs about twice its share
+here. Every run kept its frame rate. In the quietest rounds the GPU as a whole drew 0.1
+to 0.2 W more and the process's CPU about 8 mW more. These figures are coarse: one case
+measured up to twice as long from one run to the next, so differences under about half a
+millisecond are not resolved, and on Compatibility the time also counts waiting for a
+drawable. The images hold about 2.0 MB on the ultrawide's 6880x3870 display raster,
+1.2 MB on the panel's 4726x2658 one and 0.86 MB for a 4K clip, on either renderer. With
+Fit, the composition records exactly the commands it recorded before the mode existed,
+plus two words of presentation key; a Metal System Trace shows the same 37 render passes
+a frame for the Compatibility scene, before and after. The native time goes to the first
+reduction (about 0.3 ms on the 6880-wide raster), the second step and the two blurs (about
+0.15 ms together) and the bands (about 0.05 ms); on Compatibility each of the small passes
+costs 0.1 to 0.17 ms. Earlier versions show what the design avoids: one pass straight to
+the small image, reading every texel, took about 3.4 ms for the clip, and a first
+reduction reading every texel took about 0.95 ms on the 6880-wide raster against 0.3 ms.
+
 ### Live property edits
 
 The renderer can take a whole property document on a running scene instead of
@@ -1042,7 +1188,10 @@ property loads with the property's current value, saved choices included. A prev
 load-only property at the value the scene read, for every layer that uses it, and
 reports it as deferred; only loading the scene applies it. An effect whose
 `visible` a script decides is different: it is built with its layer and
-follows the script, as Wallpaper Engine's effect object does. A switch resolves
+follows the script, as Wallpaper Engine's effect object does. That script's
+`thisObject` is the effect: writing `thisObject.visible`, from an event handler
+as from `init` or `update`, switches the effect and leaves its layer as it is (it
+showed or hid the whole layer, over a property that had hidden it). A switch resolves
 the layer's effect chain again over the effects that run and rebuilds the render
 graph before the next frame, so nothing is paid per frame. While a script has
 every effect of a layer off, the chain ends in a passthrough: Wallpaper Engine
@@ -1069,7 +1218,13 @@ bound to a text input whose text is `1` or `true` is on. A string a script retur
 for a flag is read the same way on every tick it runs, by a comparison in place
 that makes no copy. A binding that names a condition compares the choice with it
 instead, so `{"user": {"name": "mode", "condition": "2"}}` is on exactly when the
-choice is `2` and never by the rule above. Wallpaper Engine draws a layer bound
+choice is `2` and never by the rule above. The bound value is then a flag, not the
+choice: a script property bound this way reads `true` or `false`. It used to read the
+choice itself, a string such as `"2"` that is true in JavaScript whatever it says, so
+a clock offering its date formats as three flags over one combo (conditions `0`, `1`,
+`2`) always took the first one it tested. A shader constant bound with a condition
+now reads 1 or 0 as well, where it read the choice as a number; no wallpaper is known
+to bind one so. Wallpaper Engine draws a layer bound
 this way at the combo's default `1`; what it does with another choice is not
 established, so those follow the rule. A number bound to a choice without a
 condition still reads 0, because nothing shows that Wallpaper Engine converts a
@@ -1463,6 +1618,18 @@ authored mips; a single-level image or an incomplete chain may remain above the
 limit, and loose images, videos, sprite atlases, multi-slot images and unknown
 encoded containers keep their original loading behavior. It is a texture-residency
 reduction, not a fixed ceiling on total process memory.
+
+When **Native Metal** draws one scene on several displays, each display reads and
+decodes the scene's pictures itself but uploads none that another display already
+holds: displays keeping the same mip levels of a picture (and the same sheet of a
+sprite atlas) on the same GPU bind one texture between them. A texture is handed to
+another display only when its pixels equal what that display just read, so a file
+that changed between two loads, or another wallpaper's picture of the same name,
+gets its own, and so does a display that keeps a different mip range (above). The
+cache holds the textures weakly: a picture is freed when the last display showing it
+unloads. Confirming a match reads the shared texture back once while the scene
+loads; nothing is added per frame. Render targets, pictures a script writes and
+video frames stay per display, and the Compatibility backend does not share.
 
 An authored `hdr` scene with its bloom on selects the HDR path on either scene
 backend, as in Wallpaper Engine: overbright color is preserved in half-float targets

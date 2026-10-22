@@ -273,6 +273,7 @@ enum InspectorWording {
     case .stretch: L("Stretch")
     case .match: L("Fit")
     case .fill: L("Fill")
+    case .matchBlurred: L("Fit with blurred backdrop")
     }
   }
 

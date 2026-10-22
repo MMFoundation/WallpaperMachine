@@ -148,6 +148,29 @@ final class NativeVideoLayoutTests: XCTestCase {
             .gravity(.resizeAspectFill))
     }
 
+    /// The native player has no blurred backdrop: Fit with blurred backdrop is plain Fit here, with
+    /// the picture exactly where Fit puts it and black bars.
+    func testFitWithBlurredBackdropIsLaidOutAsFit() {
+        let viewport = CGSize(width: 3440, height: 1440)
+        let video = CGSize(width: 3840, height: 2160)
+        for factor in [1.0, 0.8] {
+            XCTAssertEqual(
+                NativeVideoLayout.pictureRect(
+                    mode: .matchBlurred, factor: factor, videoSize: video, viewport: viewport,
+                    backingScale: 2),
+                NativeVideoLayout.pictureRect(
+                    mode: .match, factor: factor, videoSize: video, viewport: viewport,
+                    backingScale: 2))
+            XCTAssertEqual(
+                NativeVideoLayout.placement(
+                    mode: .matchBlurred, factor: factor, videoSize: video, viewport: viewport,
+                    backingScale: 2),
+                NativeVideoLayout.placement(
+                    mode: .match, factor: factor, videoSize: video, viewport: viewport,
+                    backingScale: 2))
+        }
+    }
+
     func testOriginalSizeAndScaleFactorsWaitForThePicturesSize() {
         let viewport = CGSize(width: 1512, height: 982)
         for (mode, factor) in [

@@ -49,8 +49,13 @@ menu and the screen-parameters observer, opens the control-panel window, and sta
 long-lived services (lock screen, desktop poster sync, presentation policy, playlist and
 automation schedulers, the web and native-video wallpaper hosts, system media).
 
-- **Activation policy.** `.accessory` while no control-panel, What's New or preview window is
-  open, `.regular` while one is.
+- **Activation policy.** `.regular` while one of the four ordinary windows (control panel,
+  What's New, wallpaper preview, web sign-in) is on screen or minimized to the Dock,
+  `.accessory` otherwise. Opening one raises the policy; every place that lowers it (a window
+  closing, the status-item re-assert at launch, a quit) asks `ActivationPolicyRule`
+  (`App/Services/Lifecycle/`) about `NSApp.windows`. Alerts, open and save panels and wallpaper
+  windows never count, sign-in windows are matched through `WebSignInWindowController`'s own
+  list, and the panel and What's New a quit puts away stop counting even when minimized.
 - **Spaces and minimizing.** The four ordinary windows (control panel, What's New, wallpaper
   preview, web sign-in) call `ControlPanelWindow.moveToActiveSpace`, which inserts
   `.moveToActiveSpace` into their collection behavior, so opening one shows it on the Space the
@@ -223,7 +228,10 @@ It has no web view, and renderer content is never drawn into it. Coding rules fo
   `PanelImagePipeline` reads through the app's caches (`WorkshopThumbnailCache` for Steam, pixiv
   and installed covers, `PropertyImageCache`), decodes with ImageIO off the main thread at the
   size the view draws, and keeps decoded stills in a 128 MiB memory cache. `PanelImage` loads in
-  a task tied to the view and never shows the previous source's picture. `AnimatedPreview` plays
+  a task tied to the view and never shows the previous source's picture. A disappearing lazy row
+  releases both its decoded still and rendered image; its reference-backed state prevents old
+  SwiftUI view snapshots from retaining pixels outside the cache budget. Returning rows reload
+  through the cache, and visible rows retain their image even if the cache evicts it. `AnimatedPreview` plays
   GIF, APNG and animated WebP one frame at a time at the drawn size, decoding the next frame off
   the main thread while the current one shows, only while asked and while
   its window is visible, and shows the first frame under Reduce Motion; nothing reads pixels back.
@@ -353,7 +361,9 @@ Swift keeps the *system* wallpaper consistent with that window. `DesktopWallpape
 renderer output into JPEG posters and installs them as the static desktop picture that Mission
 Control shows; `DesktopWallpaperLedger` journals the user's original per-Space wallpaper before the
 first write and restores it on quit, or at once when Settings turns poster writing off
-(`PlaybackPreferences.writesDesktopPicture`); `DesktopSpaceWallpaperAPI` reaches the
+(`PlaybackPreferences.writesDesktopPicture`). An original whose file has since been deleted
+gives way to another desktop's original or macOS's default picture, so it cannot block a quit;
+`DesktopSpaceWallpaperAPI` reaches the
 per-Space getter and setter through optional private CoreGraphics and HIServices symbols, falling back to the public
 `NSWorkspace` API. Timing, refusals, macOS 27 behavior and the quit wait are in
 [desktop-picture](features/desktop-picture.md). More behaviors sit above the windows:
@@ -400,8 +410,14 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   policy never lets it darken every display: while every display in use is hidden anyway (a
   full-screen app, a covered working area that pauses), it pauses none. The bridge keeps
   `suspended_displays` beside the global flag, resolves each scene's and web descriptor's paused
-  state from its own display, and re-applies the still-hidden displays after a global resume. System audio capture
-  follows visible consumers, not the global pause flag.
+  state from its own display, and re-applies the still-hidden displays after a global resume.
+  A global transition also evaluates per-display visibility in that same pass, so waking or
+  unlocking releases an old per-display pause without waiting for another window event.
+  The bridge also compares live scene pauses with its current policy after a successful
+  reconcile, including an unchanged configuration. Core preserves runtime pause through a
+  rebuild; the bridge corrects any retained pause that no longer applies, on its actor after
+  checking a delegated reconcile's generation. Matching displays receive no extra command.
+  System audio capture follows visible consumers, not the global pause flag.
 - **Display changes.** Screen-parameter changes refresh displays through
   `DisplayRefreshCoalescer`: one refresh runs at a time and a burst that arrives meanwhile gets
   one more. A change that leaves `DisplayConfiguration` (AppKit's in-process copy of what
@@ -440,7 +456,9 @@ per-Space getter and setter through optional private CoreGraphics and HIServices
   picked up on the next refresh, which the display reconfiguration watcher schedules when it
   settles: one that already runs a scene keeps its previous descriptor, so the scene is not
   closed and reloaded, and a new one gets no window yet. If the primary display reports no
-  pixels, the whole refresh waits.
+  pixels, the whole refresh waits. When another display becomes the main one, the renderer
+  keeps every scene the bridge reconciled on the display it was opened for (its window only
+  moves), so the refresh itself opens or reloads nothing before the bridge's reconcile.
 - **Switch hold.** `WallpaperSwitchHold` keeps the previous picture on a display while a
   switched wallpaper loads. `BridgeStore.performActivation` calls three optional hooks around
   the bridge apply (`willSwitchWallpaper`, then `didSettleWallpaperSwitch` or
@@ -624,7 +642,13 @@ an identity names a display. A UUID both sides carry decides on its own, then ve
 serial; the unit number is a last resort that never overrides a UUID or serial that disagrees.
 macOS renumbers displays and renames identical models ("Name (1)", "Name (2)") across reboots
 and reconnects, so display sync (`AppConfig::sync_known_monitors`) keeps one block per display,
-renamed to its current selector, and settings entries and mirror targets follow.
+renamed to its current selector, and settings entries and mirror targets follow. The `primary`
+block is a role: sync records the display it describes (`primary_display`), and when macOS
+makes another display the main one it writes the block's wallpaper back to the previous main
+display's own block and loads the new main display's own block into it, so a wallpaper stays
+on its display and a display switched off stays off. The renderer agrees: its `Primary` record
+follows the main display, but a scene reconciled for a concrete display (`bound_to_display`)
+stays with that display's record, so a main-display change costs no scene load or flash.
 
 Display-change callbacks fan out through an immutable snapshot of live subscriber senders;
 only registration and removal take the subscriber-writer mutex. Each receiver clone carries
