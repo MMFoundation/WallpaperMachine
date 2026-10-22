@@ -204,7 +204,9 @@ TEST(ScriptLayerRelease, TheClosuresOfADestroyedLayerAreCollected)
     runtime.RegisterPuppetLayer(runtime.ResolveLayerName("made"), OneShotLayer());
     runtime.RegisterPuppetLayer(runtime.ResolveLayerName("kid"), OneShotLayer());
     f.scene->Tick(1); // step 2
-    if (f.scene->Color("driver")[1] < 0.0f) GTEST_SKIP() << "the script engine has no weak references";
+    // The script host creates a full quickjs-ng context, which provides WeakRef; a build without
+    // it must fail here instead of passing without checking anything.
+    ASSERT_GE(f.scene->Color("driver")[1], 0.0f) << "the script engine must provide weak references";
     EXPECT_EQ(f.scene->Color("driver")[1], 22.0f) << "both closures and both wrappers are alive while registered";
     f.scene->Tick(2); // step 4 destroys; the weak references are read after it
     EXPECT_EQ(f.scene->Color("driver")[1], 0.0f)

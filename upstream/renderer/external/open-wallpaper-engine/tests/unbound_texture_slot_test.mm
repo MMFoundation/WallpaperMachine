@@ -56,6 +56,7 @@ protected:
     // the card replaces what is behind it, so the picture at its centre is the pass's output.
     static std::optional<Image> Draw(const char* fragment, const Json& textures, const Json& extra_files = Json::object())
     {
+        last_error.clear();
         ScenePackage package;
         for (const auto& [path, bytes] : extra_files.items()) package.Put(path, bytes.get<std::string>());
         const std::string effect = AddFragmentEffect(package, "probe", fragment, textures);
@@ -133,23 +134,23 @@ TEST_F(UnboundSlot, ASwitchDrivenByWhetherATextureIsBoundIsNotFlippedByTheZeroBi
 
 TEST_F(UnboundSlot, ATextureNamedByAPathThatDoesNotExistIsNotANullBinding)
 {
-    // A named missing asset keeps its own failure: the scene is not drawn as if the slot read zero.
+    // A named missing asset keeps its own failure: the render graph is refused and the error
+    // names the asset, so the scene is not drawn as if the slot read zero and an unrelated
+    // failure (a shader that does not compile, a harness error) does not pass for this one.
     const auto picture = Draw(kQuarterPlusSecond, Json::array({ nullptr, "no/such/texture" }));
-    if (picture.has_value()) {
-        EXPECT_FALSE(ExpectPixel(*picture, 128, 72, { 64, 64, 64, 255 }, 2))
-            << "the missing asset must not read as zero";
-    } else {
-        SUCCEED() << last_error;
-    }
+    EXPECT_FALSE(picture.has_value()) << "the missing asset must not read as zero";
+    EXPECT_NE(last_error.find("no/such/texture"), std::string::npos)
+        << "the failure must name the missing texture, got: " << last_error;
 }
 
 TEST_F(UnboundSlot, AReferenceToALayerThatDoesNotResolveIsNotANullBindingEither)
 {
+    // The scene still draws, but the effect that samples the missing layer produces nothing:
+    // its step is skipped, so the frame is the unwritten transparent black, neither the picture
+    // a zero read would make nor the clear colour.
     const auto picture = Draw(kQuarterPlusSecond, Json::array({ nullptr, "_rt_imageLayerComposite_99" }));
-    if (picture.has_value()) {
-        EXPECT_FALSE(ExpectPixel(*picture, 128, 72, { 64, 64, 64, 255 }, 2))
-            << "a layer that is not there must not read as zero";
-    } else {
-        SUCCEED() << last_error;
-    }
+    ASSERT_TRUE(picture.has_value()) << "the draw must succeed: " << last_error;
+    EXPECT_FALSE(ExpectPixel(*picture, 128, 72, { 64, 64, 64, 255 }, 2))
+        << "a layer that is not there must not read as zero";
+    EXPECT_TRUE(ExpectPixel(*picture, 128, 72, { 0, 0, 0, 0 }, 0)) << "the sampling step is skipped";
 }
