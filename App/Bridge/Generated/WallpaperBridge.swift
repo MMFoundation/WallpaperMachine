@@ -3871,6 +3871,11 @@ public func FfiConverterTypeBridgeAudioSpectrum_lower(_ value: BridgeAudioSpectr
 }
 
 
+/**
+ * One entry of a combo property: what the user reads and the value stored
+ * when it is picked.
+ * The value keeps the project's own type, so numeric combos stay numeric.
+ */
 public struct BridgeComboOption {
     public var label: String
     public var value: BridgePropertyValue
@@ -4091,6 +4096,9 @@ public func FfiConverterTypeBridgeDisplayConfigRow_lower(_ value: BridgeDisplayC
 }
 
 
+/**
+ * The reply to a display mutation.
+ */
 public struct BridgeDisplayMutationBundle {
     public var app: BridgeAppSnapshot
     public var library: BridgeLibrarySnapshot
@@ -4173,23 +4181,90 @@ public func FfiConverterTypeBridgeDisplayMutationBundle_lower(_ value: BridgeDis
 }
 
 
+/**
+ * One display's block on the settings page.
+ * It holds floats, so it derives `PartialEq` but not `Eq`.
+ * The id is what the display mutations take as their first argument.
+ */
 public struct BridgeDisplaySettingsRow {
+    /**
+     * The key of the display in the display mutations: "primary", a live
+     * display id, or an identity selector. The settings rows and the
+     * monitor-information rows use the same keys.
+     */
     public var displayId: String
     public var title: String
+    /**
+     * Whether wallpapers are shown on this display at all.
+     */
     public var enabled: Bool
+    /**
+     * Standalone shows a wallpaper of its own; Mirror repeats another display.
+     */
     public var mode: BridgeDisplayMode
+    /**
+     * The display ids this display may be set to mirror.
+     * They use the same keys as `display_id`.
+     * `selected_mirror_target` names the one in use, if any.
+     */
     public var mirrorTargets: [String]
     public var selectedMirrorTarget: String?
     public var scalingMode: BridgeScalingMode
+    /**
+     * Scale applied on top of the scaling mode; 1.0 is the neutral value.
+     * It must be finite and positive to be accepted.
+     * Changes wait for Apply, like the other scene edits.
+     */
     public var scalingFactor: Double
+    /**
+     * The frame rate in effect for this display.
+     * The monitor-information view shows it as text
+     * (`BridgeMonitorInfoRow::target_fps`).
+     */
     public var targetFps: UInt32
+    /**
+     * The highest frame rate offered for this display.
+     * It is the upper end of the range a host lets the user pick from.
+     * `target_fps` is chosen within it.
+     */
     public var maxFps: UInt32
     public var muted: Bool
     public var volume: Float
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(displayId: String, title: String, enabled: Bool, mode: BridgeDisplayMode, mirrorTargets: [String], selectedMirrorTarget: String?, scalingMode: BridgeScalingMode, scalingFactor: Double, targetFps: UInt32, maxFps: UInt32, muted: Bool, volume: Float) {
+    public init(
+        /**
+         * The key of the display in the display mutations: "primary", a live
+         * display id, or an identity selector. The settings rows and the
+         * monitor-information rows use the same keys.
+         */displayId: String, title: String, 
+        /**
+         * Whether wallpapers are shown on this display at all.
+         */enabled: Bool, 
+        /**
+         * Standalone shows a wallpaper of its own; Mirror repeats another display.
+         */mode: BridgeDisplayMode, 
+        /**
+         * The display ids this display may be set to mirror.
+         * They use the same keys as `display_id`.
+         * `selected_mirror_target` names the one in use, if any.
+         */mirrorTargets: [String], selectedMirrorTarget: String?, scalingMode: BridgeScalingMode, 
+        /**
+         * Scale applied on top of the scaling mode; 1.0 is the neutral value.
+         * It must be finite and positive to be accepted.
+         * Changes wait for Apply, like the other scene edits.
+         */scalingFactor: Double, 
+        /**
+         * The frame rate in effect for this display.
+         * The monitor-information view shows it as text
+         * (`BridgeMonitorInfoRow::target_fps`).
+         */targetFps: UInt32, 
+        /**
+         * The highest frame rate offered for this display.
+         * It is the upper end of the range a host lets the user pick from.
+         * `target_fps` is chosen within it.
+         */maxFps: UInt32, muted: Bool, volume: Float) {
         self.displayId = displayId
         self.title = title
         self.enabled = enabled
@@ -4728,6 +4803,11 @@ public func FfiConverterTypeBridgeLockScreenScene_lower(_ value: BridgeLockScree
 }
 
 
+/**
+ * Where the logs are kept and which file is being written.
+ * `active_session` names the current run of the app.
+ * The size is that of the active file at the time of the read.
+ */
 public struct BridgeLogStatus {
     public var logsRoot: String
     public var activeSession: String
@@ -4935,20 +5015,71 @@ public func FfiConverterTypeBridgeMediaSnapshot_lower(_ value: BridgeMediaSnapsh
 }
 
 
+/**
+ * One display's line in the monitor-information view.
+ * The text fields are ready to show, so the view does no lookups
+ * of its own.
+ */
 public struct BridgeMonitorInfoRow {
     public var displayId: String
     public var title: String
+    /**
+     * The wallpaper shown on this display.
+     * Its title follows in `wallpaper_title`.
+     * The two always describe the same wallpaper.
+     */
     public var wallpaperId: String
     public var wallpaperTitle: String
+    /**
+     * Set when this display mirrors another one.
+     * It names the source display by the id the settings rows use,
+     * and `mirror_target_title` carries that display's title.
+     */
     public var mirrorTargetDisplayId: String?
     public var mirrorTargetTitle: String?
+    /**
+     * The scaling mode, as text for display.
+     * The settings rows carry the same setting as a typed value
+     * (`BridgeDisplaySettingsRow::scaling_mode`).
+     */
     public var scalingMode: String
+    /**
+     * The frame rate in effect, as text for display.
+     * The settings rows carry it as a number
+     * (`BridgeDisplaySettingsRow::target_fps`).
+     */
     public var targetFps: String
+    /**
+     * Whether the wallpaper on this display reacts to system audio.
+     */
     public var audioResponse: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(displayId: String, title: String, wallpaperId: String, wallpaperTitle: String, mirrorTargetDisplayId: String?, mirrorTargetTitle: String?, scalingMode: String, targetFps: String, audioResponse: Bool) {
+    public init(displayId: String, title: String, 
+        /**
+         * The wallpaper shown on this display.
+         * Its title follows in `wallpaper_title`.
+         * The two always describe the same wallpaper.
+         */wallpaperId: String, wallpaperTitle: String, 
+        /**
+         * Set when this display mirrors another one.
+         * It names the source display by the id the settings rows use,
+         * and `mirror_target_title` carries that display's title.
+         */mirrorTargetDisplayId: String?, mirrorTargetTitle: String?, 
+        /**
+         * The scaling mode, as text for display.
+         * The settings rows carry the same setting as a typed value
+         * (`BridgeDisplaySettingsRow::scaling_mode`).
+         */scalingMode: String, 
+        /**
+         * The frame rate in effect, as text for display.
+         * The settings rows carry it as a number
+         * (`BridgeDisplaySettingsRow::target_fps`).
+         */targetFps: String, 
+        /**
+         * Whether the wallpaper on this display reacts to system audio.
+         */audioResponse: Bool) {
         self.displayId = displayId
         self.title = title
         self.wallpaperId = wallpaperId
@@ -5057,6 +5188,11 @@ public func FfiConverterTypeBridgeMonitorInfoRow_lower(_ value: BridgeMonitorInf
 }
 
 
+/**
+ * All rows of the monitor-information view.
+ * They follow the order of the settings page, so the two views
+ * list the displays the same way.
+ */
 public struct BridgeMonitorInformationSnapshot {
     public var rows: [BridgeMonitorInfoRow]
 
@@ -5316,77 +5452,147 @@ public func FfiConverterTypeBridgeNativeVideoWallpaper_lower(_ value: BridgeNati
 }
 
 
+/**
+ * One row of a wallpaper's property editor, with everything a host needs to
+ * draw and edit it without reading the project file itself.
+ */
 public struct BridgePropertyDescriptor {
+    /**
+     * The property's key in the project.
+     */
     public var id: String
+    /**
+     * Which control the property is edited with.
+     * Kinds this build does not know are reported as `Unknown`
+     * instead of being dropped from the list.
+     */
     public var kind: BridgePropertyKind
+    /**
+     * The label as authored; it may carry HTML markup.
+     */
     public var labelHtml: String
+    /**
+     * The current value of the property.
+     * It includes edits that have not been applied yet,
+     * which is why `dirty` exists next to it.
+     */
     public var value: BridgePropertyValue
+    /**
+     * The value the wallpaper's author shipped, as authored.
+     * Edits never change it; it is what the property is compared
+     * with and returned to.
+     */
     public var defaultValue: BridgePropertyValue
+    /**
+     * Present for sliders only.
+     */
     public var slider: BridgeSliderMetadata?
+    /**
+     * Empty unless the property is a combo.
+     */
     public var comboOptions: [BridgeComboOption]
     /**
-     * Present only on file and directory properties, and only when the
-     * project declared a file-type option.
+     * Present on file and directory properties, and only when the project
+     * declared a file-type option.
      */
     public var fileFilter: BridgeFileFilter?
     /**
-     * Present only on directory properties.
+     * Present on directory properties only.
      */
     public var directoryMode: BridgeDirectoryMode?
+    /**
+     * Edited but not applied yet.
+     */
     public var dirty: Bool
+    /**
+     * Reported for the restore-defaults control of the host's editor.
+     * The bridge decides it so that every host offers the action
+     * under the same conditions.
+     */
     public var canRestoreDefaults: Bool
     /**
      * False while an authored visibility rule hides the property. The row is
-     * still listed, with the value the renderer is using, so a host can show only
-     * the enabled rows and still reach the rest. A rule the bridge cannot read
-     * never disables a property.
+     * still listed, with the value the renderer uses; a rule that cannot be
+     * read never disables a property.
      */
     public var enabled: Bool
     /**
-     * File and directory properties only: the app holds its own copy of this
-     * property's assets in managed storage, so deleting or re-downloading the
-     * wallpaper does not lose them. Always false for every other kind.
+     * File and directory properties: the app keeps its own managed copy of
+     * the property's assets. False for every other kind.
      */
     public var assetManaged: Bool
     /**
-     * File and directory properties only: the property names something, and
-     * neither the user's own path nor a managed copy resolves any more. An
-     * unset property is not missing.
+     * File and directory properties: the property names something and neither
+     * the user's own path nor a managed copy resolves any more. A property
+     * that is not set is not missing.
      */
     public var assetMissing: Bool
     /**
-     * The user's own path, for display. `None` when the property is unset.
+     * The user's own path, for display; `None` when the property is not set.
      */
     public var assetSourcePath: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, kind: BridgePropertyKind, labelHtml: String, value: BridgePropertyValue, defaultValue: BridgePropertyValue, slider: BridgeSliderMetadata?, comboOptions: [BridgeComboOption], 
+    public init(
         /**
-         * Present only on file and directory properties, and only when the
-         * project declared a file-type option.
+         * The property's key in the project.
+         */id: String, 
+        /**
+         * Which control the property is edited with.
+         * Kinds this build does not know are reported as `Unknown`
+         * instead of being dropped from the list.
+         */kind: BridgePropertyKind, 
+        /**
+         * The label as authored; it may carry HTML markup.
+         */labelHtml: String, 
+        /**
+         * The current value of the property.
+         * It includes edits that have not been applied yet,
+         * which is why `dirty` exists next to it.
+         */value: BridgePropertyValue, 
+        /**
+         * The value the wallpaper's author shipped, as authored.
+         * Edits never change it; it is what the property is compared
+         * with and returned to.
+         */defaultValue: BridgePropertyValue, 
+        /**
+         * Present for sliders only.
+         */slider: BridgeSliderMetadata?, 
+        /**
+         * Empty unless the property is a combo.
+         */comboOptions: [BridgeComboOption], 
+        /**
+         * Present on file and directory properties, and only when the project
+         * declared a file-type option.
          */fileFilter: BridgeFileFilter?, 
         /**
-         * Present only on directory properties.
-         */directoryMode: BridgeDirectoryMode?, dirty: Bool, canRestoreDefaults: Bool, 
+         * Present on directory properties only.
+         */directoryMode: BridgeDirectoryMode?, 
+        /**
+         * Edited but not applied yet.
+         */dirty: Bool, 
+        /**
+         * Reported for the restore-defaults control of the host's editor.
+         * The bridge decides it so that every host offers the action
+         * under the same conditions.
+         */canRestoreDefaults: Bool, 
         /**
          * False while an authored visibility rule hides the property. The row is
-         * still listed, with the value the renderer is using, so a host can show only
-         * the enabled rows and still reach the rest. A rule the bridge cannot read
-         * never disables a property.
+         * still listed, with the value the renderer uses; a rule that cannot be
+         * read never disables a property.
          */enabled: Bool, 
         /**
-         * File and directory properties only: the app holds its own copy of this
-         * property's assets in managed storage, so deleting or re-downloading the
-         * wallpaper does not lose them. Always false for every other kind.
+         * File and directory properties: the app keeps its own managed copy of
+         * the property's assets. False for every other kind.
          */assetManaged: Bool, 
         /**
-         * File and directory properties only: the property names something, and
-         * neither the user's own path nor a managed copy resolves any more. An
-         * unset property is not missing.
+         * File and directory properties: the property names something and neither
+         * the user's own path nor a managed copy resolves any more. A property
+         * that is not set is not missing.
          */assetMissing: Bool, 
         /**
-         * The user's own path, for display. `None` when the property is unset.
+         * The user's own path, for display; `None` when the property is not set.
          */assetSourcePath: String?) {
         self.id = id
         self.kind = kind
@@ -6843,6 +7049,11 @@ public func FfiConverterTypeBridgeSettingsSnapshot_lower(_ value: BridgeSettings
 }
 
 
+/**
+ * Range and granularity of a slider property.
+ * A host draws the control from these numbers.
+ * `precision` is the number of decimals to show.
+ */
 public struct BridgeSliderMetadata {
     public var min: Double
     public var max: Double
@@ -6925,16 +7136,25 @@ public func FfiConverterTypeBridgeSliderMetadata_lower(_ value: BridgeSliderMeta
 }
 
 
+/**
+ * Everything the panel shows, in one answer.
+ */
 public struct BridgeSnapshotBundle {
     public var app: BridgeAppSnapshot
     public var library: BridgeLibrarySnapshot
+    /**
+     * `None` when no wallpaper is selected or its options cannot be built.
+     */
     public var wallpaperOptions: BridgeWallpaperOptionsSnapshot?
     public var monitorInformation: BridgeMonitorInformationSnapshot
     public var settings: BridgeSettingsSnapshot
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(app: BridgeAppSnapshot, library: BridgeLibrarySnapshot, wallpaperOptions: BridgeWallpaperOptionsSnapshot?, monitorInformation: BridgeMonitorInformationSnapshot, settings: BridgeSettingsSnapshot) {
+    public init(app: BridgeAppSnapshot, library: BridgeLibrarySnapshot, 
+        /**
+         * `None` when no wallpaper is selected or its options cannot be built.
+         */wallpaperOptions: BridgeWallpaperOptionsSnapshot?, monitorInformation: BridgeMonitorInformationSnapshot, settings: BridgeSettingsSnapshot) {
         self.app = app
         self.library = library
         self.wallpaperOptions = wallpaperOptions
@@ -7015,6 +7235,11 @@ public func FfiConverterTypeBridgeSnapshotBundle_lower(_ value: BridgeSnapshotBu
 }
 
 
+/**
+ * Disk use shown on the settings page.
+ * The shader cache is the compiled-shader directory.
+ * The log status describes the current log file.
+ */
 public struct BridgeStorageStatus {
     public var shaderCacheSizeBytes: UInt64
     public var logs: BridgeLogStatus
@@ -7467,6 +7692,10 @@ public func FfiConverterTypeBridgeWallpaperEntry_lower(_ value: BridgeWallpaperE
 }
 
 
+/**
+ * The reply to a wallpaper mutation, carrying the options of the affected
+ * wallpaper.
+ */
 public struct BridgeWallpaperMutationBundle {
     public var app: BridgeAppSnapshot
     public var library: BridgeLibrarySnapshot
@@ -7557,19 +7786,38 @@ public func FfiConverterTypeBridgeWallpaperMutationBundle_lower(_ value: BridgeW
 }
 
 
+/**
+ * The options page of one wallpaper: its properties, where it runs, and its
+ * audio switches, as the user sees them before pressing Apply.
+ */
 public struct BridgeWallpaperOptionsSnapshot {
     public var wallpaperId: String
     public var title: String
+    /**
+     * Scene, video or web page; decides which options exist at all.
+     * Only scenes take property edits.
+     * The rest of the page is the same for every kind.
+     */
     public var kind: BridgeWallpaperKind
+    /**
+     * Whether the bridge supports applying this wallpaper at all.
+     * A host should not offer Apply for one it does not support.
+     * The reason is not part of this record.
+     */
     public var supported: Bool
+    /**
+     * Edits exist on this page that have not been applied.
+     * They are kept by the bridge, so every host sees the same answer.
+     * Per-property flags are on the rows of `properties`.
+     */
     public var dirty: Bool
     public var properties: [BridgePropertyDescriptor]
     public var displayConfigurations: [BridgeDisplayConfigRow]
     public var audioResponseEnabled: Bool
     /**
      * The user's consent to look for a system media source for this
-     * wallpaper, given by default until the user turns it off. Consent, not
-     * availability.
+     * wallpaper; on until switched off. It says nothing about whether a
+     * source exists.
      */
     public var mediaIntegrationEnabled: Bool
     public var muted: Bool
@@ -7577,11 +7825,26 @@ public struct BridgeWallpaperOptionsSnapshot {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(wallpaperId: String, title: String, kind: BridgeWallpaperKind, supported: Bool, dirty: Bool, properties: [BridgePropertyDescriptor], displayConfigurations: [BridgeDisplayConfigRow], audioResponseEnabled: Bool, 
+    public init(wallpaperId: String, title: String, 
+        /**
+         * Scene, video or web page; decides which options exist at all.
+         * Only scenes take property edits.
+         * The rest of the page is the same for every kind.
+         */kind: BridgeWallpaperKind, 
+        /**
+         * Whether the bridge supports applying this wallpaper at all.
+         * A host should not offer Apply for one it does not support.
+         * The reason is not part of this record.
+         */supported: Bool, 
+        /**
+         * Edits exist on this page that have not been applied.
+         * They are kept by the bridge, so every host sees the same answer.
+         * Per-property flags are on the rows of `properties`.
+         */dirty: Bool, properties: [BridgePropertyDescriptor], displayConfigurations: [BridgeDisplayConfigRow], audioResponseEnabled: Bool, 
         /**
          * The user's consent to look for a system media source for this
-         * wallpaper, given by default until the user turns it off. Consent, not
-         * availability.
+         * wallpaper; on until switched off. It says nothing about whether a
+         * source exists.
          */mediaIntegrationEnabled: Bool, muted: Bool, volume: Float) {
         self.wallpaperId = wallpaperId
         self.title = title

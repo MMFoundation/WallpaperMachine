@@ -1080,7 +1080,29 @@ impl DisplayPlane {
     }
 }
 
-// R2-CE1: to be written from spec
+/// One sample of the system pointer: where it is and which buttons changed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct MousePollState {
+    point: NSPoint,
+    buttons: MouseButtonEdges,
+}
+
+/// What a single display's scene is told about the pointer after a sample.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct MouseDisplayUpdate {
+    entered: bool,
+    position: Option<NormalizedMousePosition>,
+    buttons: MouseButtonEdges,
+}
+
+impl<M> From<kameo::error::SendError<M, EngineError>> for EngineError {
+    fn from(error: kameo::error::SendError<M, EngineError>) -> Self {
+        match error {
+            kameo::error::SendError::HandlerError(inner) => inner,
+            other => EngineError::Platform(format!("engine actor mailbox failed: {other}")),
+        }
+    }
+}
 
 impl WallpaperEngine {
     /// The resampler if nobody else is using it; a lock a panic poisoned still

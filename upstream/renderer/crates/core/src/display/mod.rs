@@ -10,7 +10,35 @@ pub mod callback;
 pub mod state;
 pub mod watcher;
 
-// R2-CW1: to be written from spec
+/// Names a display independently of its numeric id, which the system may hand
+/// out again after a reconnect. A uuid, or vendor + model + serial, is stable.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct DisplayIdentity {
+    /// The persistent identifier the system assigns to the attached panel.
+    /// It survives reconnects and renumbering, so it is the best key when
+    /// the system reports one.
+    pub uuid: Option<String>,
+    /// Vendor code of the panel.
+    /// Together with the model and a serial or unit number this names a
+    /// display when no uuid is available.
+    pub vendor_id: Option<u32>,
+    /// Model code of the panel.
+    /// Identical models share it, so it never identifies a display alone.
+    /// It is compared together with the vendor.
+    pub model_id: Option<u32>,
+    /// Serial number the panel reports.
+    /// With the vendor and model it names one physical panel.
+    /// The unit number can stand in for it.
+    pub serial_number: Option<u32>,
+    /// Unit number the system reports for the panel.
+    /// With the vendor and model it can tell two identical monitors apart.
+    /// It is the alternative to the serial number.
+    pub unit_number: Option<u32>,
+    /// Human-readable name, for labels only.
+    /// It is not part of what identifies a display.
+    /// Two different displays may have the same name.
+    pub name: Option<String>,
+}
 
 impl DisplayIdentity {
     #[must_use]

@@ -130,7 +130,41 @@ pub trait EngineFacade: Send + Sync + 'static {
     /// Live-updates one scene's internal rasterization scale. Resizes render
     /// targets in place; it must not reparse the project or reopen video.
     fn set_render_scale(&self, handle: SceneHandle, scale: f32) -> EngineFuture<()>;
-    // R2-BF1: to be written from spec
+    /// Samples the system pointer once and hands the result to the scenes.
+    /// The bridge's mouse poller calls it repeatedly while
+    /// polling is enabled.
+    fn poll_mouse_position(&self) -> EngineFuture<()>;
+    /// Tells one scene where the pointer is.
+    /// The position is relative to the scene, not to the screen,
+    /// so a caller that reads a global point converts it first.
+    fn set_mouse_position(&self, handle: SceneHandle, x: f64, y: f64) -> EngineFuture<()>;
+    /// Delivers a button edge to one scene: `pressed` is true when the button
+    /// goes down and false when it is released.
+    /// `button` is the system's number for the button.
+    fn set_mouse_button(&self, handle: SceneHandle, button: u32, pressed: bool) -> EngineFuture<()>;
+    /// Reports that the pointer entered or left the scene's display.
+    /// It is separate from the position updates so that a scene is told when
+    /// the pointer has gone, not only where it was last seen.
+    fn set_mouse_entered(&self, handle: SceneHandle, entered: bool) -> EngineFuture<()>;
+    /// Opens a window on the display the selector names and returns its
+    /// scene handle, or `None` when no connected display matches.
+    /// What the window shows is decided by the assignment of its display.
+    fn create_window_for_display(
+        &self,
+        selector: DisplaySelector,
+    ) -> EngineFuture<Option<SceneHandle>>;
+    /// Gives a display its wallpaper: a template for a scene of its own, or
+    /// the choice to mirror another display. The handle is the display's
+    /// scene afterwards, or `None` when there is no scene to name.
+    fn set_wallpaper_for_display(
+        &self,
+        selector: DisplaySelector,
+        assignment: WallpaperAssignment,
+    ) -> EngineFuture<Option<SceneHandle>>;
+    /// Registers the callback that hears about first frames.
+    /// A later call replaces the earlier registration.
+    /// Unlike the members above, it returns at once and is not a future.
+    fn set_first_frame_callback(&self, callback: FirstFrameCallback);
     fn set_pointer_consumer_callback(
         &self,
         callback: Option<wallpaper_core::PointerConsumerCallback>,
@@ -521,7 +555,29 @@ impl EngineFacade for RealEngineFacade {
         async move { engine.renderer_counters().await }.boxed()
     }
 
-    // R2-BF2: to be written from spec
+    // Volume, mute and audio response are passed to the engine unchanged. None
+    // of them takes the audio-mutation lock or touches system capture, which
+    // `set_audio_capture_enabled` switches separately.
+    fn set_audio_volume(&self, handle: SceneHandle, volume: AudioVolume) -> EngineFuture<()> {
+        let engine = self.engine.clone();
+        async move { engine.set_audio_volume(handle, volume).await }.boxed()
+    }
+
+    // Mute is forwarded exactly like volume.
+    // The engine keeps the two apart; nothing here combines them.
+    // The bridge passes the already-combined mute when it needs one.
+    fn set_audio_muted(&self, handle: SceneHandle, muted: bool) -> EngineFuture<()> {
+        let engine = self.engine.clone();
+        async move { engine.set_audio_muted(handle, muted).await }.boxed()
+    }
+
+    // Whether the scene reacts to audio. Only the scene's own switch is
+    // changed here; capture registration is a separate request that the
+    // bridge issues next to this one.
+    fn set_audio_response_enabled(&self, handle: SceneHandle, enabled: bool) -> EngineFuture<()> {
+        let engine = self.engine.clone();
+        async move { engine.set_audio_response_enabled(handle, enabled).await }.boxed()
+    }
 
     fn set_media_integration_enabled(&self, handle: SceneHandle, enabled: bool) -> EngineFuture<()> {
         let engine = self.engine.clone();
@@ -620,7 +676,58 @@ impl EngineFacade for RealEngineFacade {
         async move { engine.set_mouse_position(handle, x, y).await }.boxed()
     }
 
-    // R2-BF3: to be written from spec
+    // Pointer buttons and hover reach the engine as they are; the engine
+    // decides which scene and display they belong to.
+    fn set_mouse_button(&self, handle: SceneHandle, button: u32, pressed: bool) -> EngineFuture<()> {
+        let engine = self.engine.clone();
+        async move { engine.set_mouse_button(handle, button, pressed).await }.boxed()
+    }
+
+    // Entering and leaving reach the engine the same way as buttons.
+    // Nothing is filtered or coalesced on the way.
+    // The engine owns what a scene does with them.
+    fn set_mouse_entered(&self, handle: SceneHandle, entered: bool) -> EngineFuture<()> {
+        let engine = self.engine.clone();
+        async move { engine.set_mouse_entered(handle, entered).await }.boxed()
+    }
+
+    // The window call is forwarded as it is and the engine's answer returned
+    // untouched. Only an assignment can close scenes, so only
+    // `set_wallpaper_for_display` prunes capture ownership.
+    fn create_window_for_display(
+        &self,
+        selector: DisplaySelector,
+    ) -> EngineFuture<Option<SceneHandle>> {
+        let engine = self.engine.clone();
+        async move {
+            let opened = engine.create_window_for_display(selector).await;
+            opened
+        }
+        .boxed()
+    }
+
+    // A new assignment can close scenes, so capture ownership is pruned under
+    // the same lock that serialised the change.
+    fn set_wallpaper_for_display(
+        &self,
+        selector: DisplaySelector,
+        assignment: WallpaperAssignment,
+    ) -> EngineFuture<Option<SceneHandle>> {
+        let (engine, capture, lock) = (
+            self.engine.clone(),
+            self.audio_capture.clone(),
+            self.audio_mutation.clone(),
+        );
+        async move {
+            mutate_scenes_and_prune(
+                &lock,
+                || engine.set_wallpaper_for_display(selector, assignment),
+                || capture.mailbox().prune_scenes(),
+            )
+            .await
+        }
+        .boxed()
+    }
 
     fn set_first_frame_callback(&self, callback: FirstFrameCallback) {
         register_first_frame_callback(&self.readiness, callback, |wrapped| {

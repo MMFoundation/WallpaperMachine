@@ -1,6 +1,25 @@
 use crate::{DisplayIdentity, project::SceneTemplate};
 
-// R2-CC1: to be written from spec
+/// The displays an engine is created with.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WallpaperEngineConfig {
+    pub displays: Vec<DisplayConfig>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DisplayConfig {
+    pub selector: DisplaySelector,
+    pub window_active: bool,
+    pub wallpaper: Option<WallpaperAssignment>,
+}
+
+/// How a configured display is found among the connected ones.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum DisplaySelector {
+    Primary,
+    Identity(DisplayIdentity),
+    LiveDisplayId(u32),
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum WallpaperAssignment {

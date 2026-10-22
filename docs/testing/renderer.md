@@ -338,12 +338,13 @@ shipped Wallpaper Engine shaders or assets skip with a printed reason.
 `python3 scripts/check_rust.py` is the release-CI entry point. It supplies the
 Homebrew Cargo environment, uses a temporary `WALLPAPER_MACHINE_HOME`, disables
 the desktop, media and network opt-ins, and runs, all with `--release --locked`:
-the `wallpaper-core` and `wallpaper-bridge` library tests, three device-free
+the `wallpaper-core` and `wallpaper-bridge` library tests, five device-free
 `wallpaper-core` integration targets (`core_audio_api`,
-`project_override_json`, `wallpaper_background`) and, from
+`project_override_json`, `wallpaper_background`, `audio_response_capture_lifecycle`,
+`scene_audio_volume_validation`) and, from
 `Renderer/` (the shader layer's own workspace), `wm-shader` with `ffi`: its unit,
-corpus, GPU-probe and C-ABI tests, warnings denied by the crate. It prints and records the nine explicit
-desktop/external-corpus exclusions (`CORE_EXCLUSIONS` in the script) and any
+corpus, GPU-probe and C-ABI tests, warnings denied by the crate. It prints and records the five explicit
+desktop exclusions (`CORE_EXCLUSIONS` in the script) and any
 emitted skip reasons. A nonzero command or missing tool fails the check. Full
 logs and the JSON verdict go under `artifacts/rust/` (`--output` redirects them);
 CI uploads them on failure. This does not certify skipped corpus inputs or

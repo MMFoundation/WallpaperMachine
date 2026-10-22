@@ -39,7 +39,35 @@ pub struct GetWallpaperPreview {
 
 pub struct GetWebWallpapers;
 
-// R2-BM1: to be written from spec
+/// Asks for the monitor-information view: one row per display with the
+/// wallpaper it shows, how it is scaled, its frame rate, and the display it
+/// mirrors, if any.
+pub struct GetMonitorInformationSnapshot;
+
+/// Asks for the settings page state: the display rows, launch at login,
+/// logging, storage use and the renderer's backend reports. Reading it also
+/// drops the cached shader-cache measurement, so the size is read afresh.
+pub struct GetSettingsSnapshot;
+
+/// Empties the shader cache directory and rebuilds the running scenes with a
+/// forced shader refresh. The reply is the settings state afterwards, with
+/// the cache size measured again.
+pub struct ClearShaderCache;
+
+/// Asks for the editable options of one wallpaper: its properties, the
+/// per-display switches and the audio switches, with edits not yet applied.
+pub struct GetWallpaperOptionsSnapshot {
+    pub wallpaper_id: String,
+}
+
+/// Test hook: adds a library entry of the given kind without scanning disk.
+/// Tests that need real project files put them under a temporary
+/// library root and scan it.
+pub struct InjectWallpaperForTest {
+    pub id: String,
+    pub title: String,
+    pub kind: BridgeWallpaperKind,
+}
 
 pub struct InjectSceneWallpaperConfigForTest {
     pub id: String,
@@ -383,7 +411,40 @@ pub struct CompleteAudioResponse {
     pub result: Result<(), BridgeError>,
 }
 
-// R2-BM2: to be written from spec
+// Replies that answer with the whole panel state. They are one type under
+// several names so a handler's signature says which request it serves, and a
+// change to what "everything" means is made in exactly one place.
+pub type AllSnapshotsReply = Result<BridgeSnapshotBundle, BridgeError>;
+pub type BootstrapReply = AllSnapshotsReply;
+pub type SelectWallpaperReply = AllSnapshotsReply;
+pub type RefreshLibraryReply = AllSnapshotsReply;
+pub type RefreshDisplaysReply = AllSnapshotsReply;
+
+// More replies of the same kind: requests that change shared state and hand
+// the refreshed panel back in the same answer.
+pub type ReleaseHeldWallpaperReply = AllSnapshotsReply;
+pub type SetFilterReply = AllSnapshotsReply;
+pub type SetGlobalPlaybackReply = AllSnapshotsReply;
+
+// Reads that return one slice of the state. Each is a separate message so the
+// panel can refresh only the part it shows without paying for the rest.
+pub type AppSnapshotReply = Result<BridgeAppSnapshot, BridgeError>;
+pub type LibrarySnapshotReply = Result<BridgeLibrarySnapshot, BridgeError>;
+pub type MonitorInformationSnapshotReply = Result<BridgeMonitorInformationSnapshot, BridgeError>;
+pub type SettingsSnapshotReply = Result<BridgeSettingsSnapshot, BridgeError>;
+pub type WallpaperOptionsSnapshotReply = Result<BridgeWallpaperOptionsSnapshot, BridgeError>;
+
+// Replies for the lock screen and web wallpapers, which are listed apart from
+// the library because their hosts consume them through other channels.
+pub type LockScreenScenesReply = Result<Vec<BridgeLockScreenScene>, BridgeError>;
+pub type WebWallpapersReply = Result<Vec<BridgeWebWallpaper>, BridgeError>;
+pub type ClearShaderCacheReply = Result<BridgeSettingsSnapshot, BridgeError>;
+
+// Replies that carry no data, only whether the request succeeded, plus the
+// display mutation bundle (no wallpaper options: a display change has none).
+pub type TestMutationReply = Result<(), BridgeError>;
+pub type PollMousePositionReply = Result<(), BridgeError>;
+pub type DisplayMutationReply = Result<BridgeDisplayMutationBundle, crate::api::BridgeError>;
 pub type SetBatteryModeReply = AllSnapshotsReply;
 pub type SetVerboseLoggingReply = AllSnapshotsReply;
 pub type SetPresentationSuspendedReply = Result<(), BridgeError>;

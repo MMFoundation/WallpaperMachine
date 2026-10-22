@@ -22,16 +22,19 @@ CHECKS = (
     ("bridge", ("-p", "wallpaper-bridge", "--lib"), RENDERER),
     ("core-integration", ("-p", "wallpaper-core", "--test", "core_audio_api",
                           "--test", "project_override_json",
-                          "--test", "wallpaper_background"), RENDERER),
+                          "--test", "wallpaper_background",
+                          "--test", "audio_response_capture_lifecycle",
+                          "--test", "scene_audio_volume_validation"), RENDERER),
     ("shader", ("-p", "wm-shader", "--features", "ffi"), OWN_RENDERER),
 )
 OPT_INS = ("WE_RUN_MACOS_WINDOW_TESTS", "WALLPAPER_MACHINE_MEDIA_TESTS", "WALLPAPER_MACHINE_NETWORK_TESTS")
+_DESKTOP_RUN = "requires an explicitly authorized desktop run"
 CORE_EXCLUSIONS = {
-    "tests::general::platform::case_wallpaper_window": "requires an explicitly authorized desktop run",
-    "tests::general::platform::case_wallpaper_window_update_display": "requires an explicitly authorized desktop run",
-    "tests::general::platform::case_wallpaper_window_layer_swap_revert": "requires an explicitly authorized desktop run",
-    "tests::general::platform::case_wallpaper_window_layer_swap_finish": "requires an explicitly authorized desktop run",
-    "tests::general::platform::case_wallpaper_window_announces_layers": "requires an explicitly authorized desktop run",
+    "tests::general::desktop_window::a_window_opens_with_a_layer_and_closes_without_one": _DESKTOP_RUN,
+    "tests::general::desktop_window::updating_the_display_reshapes_window_view_and_layer": _DESKTOP_RUN,
+    "tests::general::desktop_window::reverting_a_layer_swap_restores_the_layer_and_the_geometry": _DESKTOP_RUN,
+    "tests::general::desktop_window::finishing_a_layer_swap_keeps_the_new_layer": _DESKTOP_RUN,
+    "tests::general::desktop_window::every_installed_layer_is_announced_once_in_install_order": _DESKTOP_RUN,
 }
 
 

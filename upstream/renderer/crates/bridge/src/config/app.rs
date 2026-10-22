@@ -225,7 +225,23 @@ impl Default for FilterCfg {
 pub enum SerializedSelector {
     #[default]
     Primary,
-    // R2-BC1: to be written from spec
+    /// A display named by what it is, not by the number it got this boot.
+    /// Fields that are not known are left out of the file, and a file that
+    /// lacks a field reads it as unknown, so older and newer files interoperate.
+    Identity {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        uuid: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        vendor_id: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        model_id: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        serial_number: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        unit_number: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        name: Option<String>,
+    },
     LiveDisplayId {
         display_id: u32,
     },
@@ -254,7 +270,29 @@ impl SerializedSelector {
         }
     }
 
-    // R2-BC2: to be written from spec
+    pub fn from_selector(sel: &DisplaySelector) -> Self {
+        match sel {
+            DisplaySelector::Primary => Self::Primary,
+            DisplaySelector::LiveDisplayId(display_id) => Self::LiveDisplayId {
+                display_id: *display_id,
+            },
+            DisplaySelector::Identity(DisplayIdentity {
+                uuid,
+                vendor_id,
+                model_id,
+                serial_number,
+                unit_number,
+                name,
+            }) => Self::Identity {
+                uuid: uuid.clone(),
+                vendor_id: *vendor_id,
+                model_id: *model_id,
+                serial_number: *serial_number,
+                unit_number: *unit_number,
+                name: name.clone(),
+            },
+        }
+    }
 
     pub fn id(&self) -> String {
         match self {

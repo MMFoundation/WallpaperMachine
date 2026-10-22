@@ -813,7 +813,7 @@ engine to redo, and when.
   burst of queued bridge requests (Apply and Quit among them) behind service-manager
   round trips.
 - **A failed scene replacement keeps the previous layer in the view** —
-  `tests::general::platform::case_wallpaper_window_layer_swap_revert` and `::case_wallpaper_window_layer_swap_finish`
+  `tests::general::desktop_window::reverting_a_layer_swap_restores_the_layer_and_the_geometry` and `::finishing_a_layer_swap_keeps_the_new_layer`
   (`wallpaper-core`, window tests: `WE_RUN_MACOS_WINDOW_TESTS`, an authorized desktop run
   only, listed in `CORE_EXCLUSIONS` of `scripts/check_rust.py`). The window installs the new
   `CAMetalLayer` before the replacement renderer exists. When the replacement then fails, the
@@ -833,7 +833,7 @@ engine to redo, and when.
   `WallpaperSwitchHold`, is pinned by `WallpaperSwitchHoldTests`, which post the same spelling).
   One announcement per
   install, in order, the layer as the object, delivered on the posting thread and not on the
-  default center. `tests::general::platform::case_wallpaper_window_announces_layers` runs the
+  default center. `tests::general::desktop_window::every_installed_layer_is_announced_once_in_install_order` runs the
   real window paths (open, swap, update, reverted swap) under the same gate as the layer-swap
   cases above and has not been run.
 - **The lock screen ignores the covered desktop** — `apply_options::lock_screen_export_ignores_the_desktop_display_being_covered`:

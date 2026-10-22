@@ -535,7 +535,40 @@ impl SceneDesc {
         Ok(Some(decision.scene_cache_path().to_string_lossy().into_owned()))
     }
 
-    // R2-CS1: to be written from spec
+    /// Whether `other` asks for the same picture as this scene: everything but
+    /// the display it sits on and whether it is currently paused.
+    #[must_use]
+    pub fn same_wallpaper(&self, other: &SceneDesc) -> bool {
+        let factors_agree = (self.scaling_factor - other.scaling_factor).abs() <= f64::EPSILON;
+        let places = (&self.scene_path, &self.assets_path, &self.shader_cache_path);
+        let other_places = (&other.scene_path, &other.assets_path, &other.shader_cache_path);
+        let timing = (self.fps, self.scaling_mode, self.framing);
+        let other_timing = (other.fps, other.scaling_mode, other.framing);
+        let switches = [
+            self.audio_response_enabled,
+            self.media_integration_enabled,
+            self.audio_muted,
+            self.force_shader_refresh,
+        ];
+        let other_switches = [
+            other.audio_response_enabled,
+            other.media_integration_enabled,
+            other.audio_muted,
+            other.force_shader_refresh,
+        ];
+        factors_agree
+            && places == other_places
+            && timing == other_timing
+            && switches == other_switches
+            && self.audio_volume == other.audio_volume
+            && self.property_override_json == other.property_override_json
+    }
+
+    /// Called once the renderer has rebuilt its shader cache, so a later
+    /// reconcile does not force another rebuild.
+    pub fn mark_shader_refresh_complete(&mut self) {
+        self.force_shader_refresh = false;
+    }
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -580,9 +613,66 @@ impl SceneTemplate {
         }
     }
 
-    // R2-CS2: to be written from spec
+    /// The reusable part of `scene`: everything except the display it runs on.
+    #[must_use]
+    pub fn from_scene_desc(scene: &SceneDesc) -> Self {
+        let SceneDesc {
+            scene_path,
+            assets_path,
+            fps,
+            scaling_mode,
+            scaling_factor,
+            framing,
+            paused,
+            audio_response_enabled,
+            media_integration_enabled,
+            audio_volume,
+            audio_muted,
+            property_override_json,
+            shader_cache_path,
+            force_shader_refresh,
+            ..
+        } = scene;
+        Self {
+            scene_path: scene_path.clone(),
+            assets_path: assets_path.clone(),
+            fps: *fps,
+            scaling_mode: *scaling_mode,
+            scaling_factor: *scaling_factor,
+            framing: *framing,
+            paused: *paused,
+            audio_response_enabled: *audio_response_enabled,
+            media_integration_enabled: *media_integration_enabled,
+            audio_volume: *audio_volume,
+            audio_muted: *audio_muted,
+            property_override_json: property_override_json.clone(),
+            shader_cache_path: shader_cache_path.clone(),
+            force_shader_refresh: *force_shader_refresh,
+        }
+    }
 
-    // R2-CS3: to be written from spec
+    /// Places the template on `display`. Nothing is validated here.
+    #[must_use]
+    pub fn for_display(&self, display: DisplayDesc) -> SceneDesc {
+        let mut scene = SceneDesc::new(
+            display,
+            self.scene_path.clone(),
+            self.assets_path.clone(),
+            self.fps,
+            self.paused,
+        );
+        scene.scaling_mode = self.scaling_mode;
+        scene.scaling_factor = self.scaling_factor;
+        scene.framing = self.framing;
+        scene.audio_response_enabled = self.audio_response_enabled;
+        scene.media_integration_enabled = self.media_integration_enabled;
+        scene.audio_volume = self.audio_volume;
+        scene.audio_muted = self.audio_muted;
+        scene.property_override_json.clone_from(&self.property_override_json);
+        scene.shader_cache_path.clone_from(&self.shader_cache_path);
+        scene.force_shader_refresh = self.force_shader_refresh;
+        scene
+    }
 
     /// # Errors
     ///
@@ -697,7 +787,53 @@ impl SceneTemplateBuilder {
         self
     }
 
-    // R2-CS4: to be written from spec
+    /// # Errors
+    ///
+    /// Returns `InvalidInput` for the first problem found; a bad audio volume is
+    /// reported only when every other field is valid.
+    pub fn build(self) -> Result<SceneTemplate, EngineError> {
+        let Self {
+            scene_path,
+            assets_path,
+            fps,
+            scaling_mode,
+            scaling_factor,
+            framing,
+            paused,
+            audio_response_enabled,
+            media_integration_enabled,
+            audio_volume: requested_volume,
+            audio_muted,
+            property_override_json,
+            shader_cache_path,
+            force_shader_refresh,
+        } = self;
+        let (audio_volume, volume_rejected) = match AudioVolume::try_from(requested_volume) {
+            Ok(volume) => (volume, false),
+            Err(_) => (full_volume(), true),
+        };
+        let template = SceneTemplate {
+            scene_path,
+            assets_path,
+            fps,
+            scaling_mode,
+            scaling_factor,
+            framing,
+            paused,
+            audio_response_enabled,
+            media_integration_enabled,
+            audio_volume,
+            audio_muted,
+            property_override_json,
+            shader_cache_path,
+            force_shader_refresh,
+        };
+        template.validate()?;
+        if volume_rejected {
+            return Err(invalid(AUDIO_VOLUME_MESSAGE));
+        }
+        Ok(template)
+    }
 }
 
 pub trait SceneDescSliceExt {
@@ -851,7 +987,56 @@ impl SceneDescBuilder {
         self
     }
 
-    // R2-CS5: to be written from spec
+    /// # Errors
+    ///
+    /// Returns `InvalidInput` for the first problem found in the wallpaper
+    /// fields; a bad audio volume is reported last. The display is not
+    /// checked here (see `SceneDesc::validate`).
+    pub fn build(self) -> Result<SceneDesc, EngineError> {
+        let Self {
+            display,
+            scene_path,
+            assets_path,
+            fps,
+            scaling_mode,
+            scaling_factor,
+            framing,
+            paused,
+            audio_response_enabled,
+            media_integration_enabled,
+            audio_volume: requested_volume,
+            audio_muted,
+            property_override_json,
+            shader_cache_path,
+            force_shader_refresh,
+        } = self;
+        let (audio_volume, volume_rejected) = match AudioVolume::try_from(requested_volume) {
+            Ok(volume) => (volume, false),
+            Err(_) => (full_volume(), true),
+        };
+        check_wallpaper_fields(&scene_path, fps, scaling_factor, framing)?;
+        if volume_rejected {
+            return Err(invalid(AUDIO_VOLUME_MESSAGE));
+        }
+        Ok(SceneDesc {
+            display,
+            scene_path,
+            assets_path,
+            fps,
+            scaling_mode,
+            scaling_factor,
+            framing,
+            paused,
+            audio_response_enabled,
+            media_integration_enabled,
+            audio_volume,
+            audio_muted,
+            property_override_json,
+            shader_cache_path,
+            force_shader_refresh,
+            rejected_audio_volume: false,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

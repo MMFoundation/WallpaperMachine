@@ -1082,7 +1082,36 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
     }
 
-    // R2-BO1: to be written from spec
+    /// The live display id a saved selector stands for.
+    pub(super) fn operation_source_id(
+        &self,
+        selector: &SerializedSelector,
+        displays: &[DisplaySnapshotEntry],
+    ) -> Result<u32, BridgeError> {
+        match selector {
+            SerializedSelector::LiveDisplayId { display_id } => Ok(*display_id),
+            SerializedSelector::Identity { .. } => selector
+                .to_selector()
+                .resolve_display(displays)
+                .map(|display| display.desc.display_id)
+                .ok_or_else(|| BridgeError::invalid_input("unknown display identity")),
+            SerializedSelector::Primary => {
+                if let Some(first) = displays.first() {
+                    return Ok(first.desc.display_id);
+                }
+                // With no live list, the cached row for the primary names it:
+                // "<text> (<id> - Primary)<text>".
+                self.operation_rows()
+                    .get("primary")
+                    .and_then(|row| {
+                        let (before, _) = row.title.rsplit_once(" - Primary)")?;
+                        let (_, id) = before.rsplit_once('(')?;
+                        id.parse::<u32>().ok()
+                    })
+                    .ok_or_else(|| BridgeError::invalid_input("unknown display id primary"))
+            }
+        }
+    }
 
     fn operation_selector_matches_live_primary(
         &self,

@@ -8,6 +8,8 @@ use objc2_service_management::{SMAppService, SMAppServiceStatus};
 use crate::api::BridgeError;
 
 mod operations;
+#[cfg(test)]
+mod transition_tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LaunchAtLoginStatus {

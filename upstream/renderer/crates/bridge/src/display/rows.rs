@@ -172,6 +172,71 @@ impl MonitorCfg {
     }
 }
 
-// R2-BD1: to be written from spec
+/// Saved-selector helpers for a display the engine reports.
+pub trait DisplaySnapshotExt {
+    /// The selector to save for a display that is plugged in right now: its
+    /// identity when it has a stable one, else its live id for this session.
+    fn connected_selector(&self) -> SerializedSelector;
 
-// R2-BD2: to be written from spec
+    /// The selector the display's settings are filed under. The first display
+    /// of `displays` is always the primary one, whatever its identity.
+    fn config_selector(&self, displays: &[DisplaySnapshotEntry]) -> SerializedSelector;
+
+    /// The identity selector, or nothing when the display cannot be told
+    /// apart from another of the same model.
+    fn stable_identity_selector(&self) -> Option<SerializedSelector>;
+
+    /// Whether this entry and `primary` are one physical display, whatever
+    /// ids the system has handed out for each of them.
+    fn matches_primary(&self, primary: &Self) -> bool;
+}
+
+/// Questions about an identity that do not need a live display.
+pub trait DisplayIdentityExt {
+    /// Enough is known to recognise the display again later: a uuid, or a
+    /// vendor and model together with a serial or unit number.
+    fn has_stable_identity(&self) -> bool;
+
+    /// The two identities describe the same panel. Identities with nothing in
+    /// common to compare are never the same.
+    fn same_physical_identity(&self, other: &Self) -> bool;
+}
+
+impl DisplayIdentityExt for DisplayIdentity {
+    fn has_stable_identity(&self) -> bool {
+        replacement::stable_identity_available(self)
+    }
+
+    fn same_physical_identity(&self, other: &Self) -> bool {
+        self.match_score(other).is_some()
+    }
+}
+
+/// Comparison of two display descriptions by the physical display behind them.
+pub trait DisplayDescExt {
+    /// The same display, by id or by identity. An id can be reused by another
+    /// display after a reconnect, so the identity gets a say too.
+    fn same_physical_display(&self, other: &Self) -> bool;
+}
+
+/// Looking up the display a saved selector stands for.
+pub trait DisplaySelectorExt {
+    /// Whether the selector currently names the primary display.
+    /// `displays` is the whole list, for selectors that go through an id.
+    fn matches_primary(
+        &self,
+        primary: &DisplaySnapshotEntry,
+        displays: &[DisplaySnapshotEntry],
+    ) -> bool;
+
+    /// Whether the selector names this particular entry.
+    /// The primary selector names no entry in particular, so it never does.
+    fn matches_display(&self, display: &DisplaySnapshotEntry) -> bool;
+
+    /// The entry the selector stands for, if that display is connected.
+    /// The primary selector resolves to the first entry of the list.
+    fn resolve_display<'a>(
+        &self,
+        displays: &'a [DisplaySnapshotEntry],
+    ) -> Option<&'a DisplaySnapshotEntry>;
+}

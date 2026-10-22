@@ -62,7 +62,55 @@ pub struct BridgeActorState {
     /// Whether `library` came from a successful scan of the workshop root.
     /// Only then does a wallpaper missing from it mean the files are gone.
     pub library_scanned: bool,
-    // R2-BS1: to be written from spec
+    /// The saved application settings.
+    /// The display blocks, the power policy and the UI preferences
+    /// are all part of it.
+    pub app_config: AppConfig,
+    /// The saved settings of each wallpaper, keyed by workshop id.
+    /// Drafts start from these and write back to them.
+    /// A wallpaper without an entry has never been configured.
+    pub wallpaper_configs: BTreeMap<String, WallpaperConfig>,
+    /// The editor's working copy per wallpaper: the saved settings plus the
+    /// edits that wait for Apply. Each draft keeps both copies side by side
+    /// so a cancel can return to the saved one.
+    pub wallpaper_drafts: BTreeMap<String, WallpaperOptionsDraft>,
+    /// The parsed project of each library wallpaper, keyed by workshop id.
+    /// The property editor and the scene builder both read it.
+    /// It is filled when the library is scanned.
+    pub project_models: BTreeMap<String, ProjectModel>,
+    /// The display rows as last published, keyed by display id.
+    /// A display operation falls back to them when the engine lists no
+    /// displays at all, so a request can still be resolved then.
+    pub display_settings: BTreeMap<String, BridgeDisplaySettingsRow>,
+    /// Where the machine gets its power from, as last sampled.
+    pub power_source: crate::power::PowerSource,
+    /// Playback was paused by the battery policy, not by the user.
+    /// Only a pause the policy made is undone when it lets go.
+    /// A pause the user made stays.
+    pub auto_paused_for_battery: bool,
+    /// While set, the battery policy does not pause playback.
+    /// External power clears it, and so does leaving the pause mode.
+    /// The policy sets and reads it; the host does not.
+    pub battery_pause_suppressed: bool,
+    /// The first power sample has been applied.
+    /// Until it has, `power_source` is only its default.
+    /// See `apply_startup_power_source`.
+    pub startup_power_sample_received: bool,
+    /// A scene has presented its first frame.
+    /// The startup pause on battery waits for it.
+    /// It is reported by the host through the first-frame callback.
+    pub initial_frame_ready: bool,
+    /// Started on battery with the pause mode: the pause waits for the first
+    /// frame. It is set by `apply_startup_power_source`
+    /// and cleared when the frame arrives.
+    pub pending_battery_pause_after_initial_frame: bool,
+    /// The library filter: whether wallpapers of each kind are listed.
+    /// They are saved with the app settings, and `filter_enabled`
+    /// answers for a kind.
+    pub filter_scene: bool,
+    pub filter_video: bool,
+    pub filter_webpage: bool,
+    pub filter_unknown: bool,
     /// Web pages that have registered an audio listener, keyed by wallpaper id
     /// and then by the display their web view renders on.
     ///
@@ -90,7 +138,35 @@ impl Default for BridgeActorState {
             errors: Vec::new(),
             library: Vec::new(),
             library_scanned: false,
-            // R2-BS2: to be written from spec
+            // Nothing is saved or staged yet, and no project has been read:
+            // the maps fill in when the library is scanned and as the user
+            // opens wallpapers.
+            app_config: AppConfig::default(),
+            wallpaper_configs: BTreeMap::new(),
+            project_models: BTreeMap::new(),
+            // Drafts exist only while an editor holds a wallpaper, and the
+            // settings rows are filled by the first display refresh. Until
+            // then a display operation has no cached row to fall back on.
+            wallpaper_drafts: BTreeMap::new(),
+            display_settings: BTreeMap::new(),
+            // External power until the first sample says otherwise, so the
+            // battery policy has nothing to act on at startup.
+            // The startup sample sets the flag below when it arrives.
+            power_source: crate::power::PowerSource::External,
+            startup_power_sample_received: false,
+            // The policy has paused nothing yet, and the user has not
+            // overridden it. Both flags matter only while on battery
+            // and are cleared again on external power.
+            auto_paused_for_battery: false,
+            battery_pause_suppressed: false,
+            // No frame has been presented and no pause is waiting for one.
+            // Starting on battery with the pause mode sets the pending flag
+            // later, once the startup sample has said where the power comes from.
+            initial_frame_ready: false,
+            pending_battery_pause_after_initial_frame: false,
+            // Every kind of wallpaper is listed until the saved filter, which
+            // `from_app_config` applies, says otherwise.
+            // A fresh state therefore hides nothing.
             filter_scene: true,
             filter_video: true,
             filter_webpage: true,
@@ -116,7 +192,27 @@ impl BridgeActorState {
         }
     }
 
-    // R2-BS3: to be written from spec
+    /// Records the power source the first sample reported. On battery with the
+    /// pause mode and no frame up yet, the pause waits for the first frame.
+    pub fn apply_startup_power_source(&mut self, source: crate::power::PowerSource) {
+        use crate::{config::BatteryModeCfg, power::PowerSource};
+        let pause_policy = matches!(self.app_config.power.on_battery, BatteryModeCfg::Pause);
+        let on_battery = matches!(source, PowerSource::Battery);
+        self.power_source = source;
+        self.startup_power_sample_received = true;
+        self.pending_battery_pause_after_initial_frame =
+            on_battery && pause_policy && !self.initial_frame_ready;
+    }
+
+    pub fn filter_enabled(&self, kind: BridgeWallpaperKind) -> bool {
+        use BridgeWallpaperKind as Kind;
+        match kind {
+            Kind::ProjectScene => self.filter_scene,
+            Kind::Video => self.filter_video,
+            Kind::Webpage => self.filter_webpage,
+            Kind::Unknown => self.filter_unknown,
+        }
+    }
 
     pub fn ensure_wallpaper_exists(&self, wallpaper_id: &str) -> Result<(), BridgeError> {
         state_values::ensure_present(&self.library, wallpaper_id)

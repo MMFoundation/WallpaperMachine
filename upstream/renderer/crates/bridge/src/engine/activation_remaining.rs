@@ -192,7 +192,40 @@ pub(super) fn build_mirror_scene(
     Ok(scene)
 }
 
-// R2-BR1: to be written from spec
+/// Builds the mirror assignments the saved configuration asks for.
+///
+/// A mirror is an assignment of its own kind: the display shows whatever its
+/// source shows, so the engine needs to hear about it apart from the scenes.
+pub trait WallpaperAssignmentExt {
+    /// One pair per usable mirror monitor, in the order the config lists them.
+    /// The source need not be connected; the engine decides what to show then.
+    fn build_mirror_assignments(
+        config: &crate::config::AppConfig,
+        displays: &[DisplaySnapshotEntry],
+    ) -> Vec<MirrorPair>;
+}
+
+/// The display that mirrors, and what it was told to show.
+pub type MirrorPair = (DisplaySelector, WallpaperAssignment);
+
+impl WallpaperAssignmentExt for WallpaperAssignment {
+    fn build_mirror_assignments(
+        config: &crate::config::AppConfig,
+        displays: &[DisplaySnapshotEntry],
+    ) -> Vec<MirrorPair> {
+        config
+            .monitors
+            .iter()
+            .filter(|monitor| monitor.enabled && monitor.mode == "mirror")
+            .filter_map(|monitor| {
+                let own = monitor.selector.to_selector();
+                own.resolve_display(displays)?;
+                let target = monitor.mirror_target.as_ref()?.to_selector();
+                Some((own, WallpaperAssignment::Mirror(target)))
+            })
+            .collect()
+    }
+}
 
 #[cfg(test)]
 mod tests {

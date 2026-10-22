@@ -750,6 +750,12 @@ impl Drop for WallpaperBridge {
     }
 }
 
+/// What a forwarded engine call returns: the wrapped engine's own boxed
+/// future, the same type as `EngineFuture` of the facade trait.
+type ForwardedUnit = Pin<Box<dyn Future<Output = Result<(), wallpaper_core::EngineError>> + Send>>;
+type ForwardedHandle =
+    Pin<Box<dyn Future<Output = Result<Option<SceneHandle>, wallpaper_core::EngineError>> + Send>>;
+
 #[derive(Clone)]
 struct ArcEngineFacade(Arc<dyn EngineFacade>);
 
@@ -1028,7 +1034,23 @@ impl EngineFacade for ArcEngineFacade {
         self.0.set_mouse_button(handle, button, pressed)
     }
 
-    // R2-BX1: to be written from spec
+    // The next three calls pass straight through: the wrapped engine's future
+    // is returned as it is, with no extra await, mapping or logging.
+    fn set_mouse_entered(&self, handle: SceneHandle, entered: bool) -> ForwardedUnit {
+        self.0.set_mouse_entered(handle, entered)
+    }
+
+    fn create_window_for_display(&self, selector: DisplaySelector) -> ForwardedHandle {
+        self.0.create_window_for_display(selector)
+    }
+
+    fn set_wallpaper_for_display(
+        &self,
+        selector: DisplaySelector,
+        assignment: WallpaperAssignment,
+    ) -> ForwardedHandle {
+        self.0.set_wallpaper_for_display(selector, assignment)
+    }
 
     fn set_first_frame_callback(&self, callback: FirstFrameCallback) {
         self.0.set_first_frame_callback(callback);
@@ -2646,7 +2668,24 @@ impl From<ScalingMode> for BridgeScalingMode {
     }
 }
 
-// R2-BX2: to be written from spec
+impl From<&crate::project::PropertyKind> for BridgePropertyKind {
+    fn from(kind: &crate::project::PropertyKind) -> Self {
+        use crate::project::PropertyKind;
+        match kind {
+            PropertyKind::Slider => Self::Slider,
+            PropertyKind::Combo => Self::Combo,
+            PropertyKind::Bool => Self::Bool,
+            PropertyKind::Color => Self::Color,
+            PropertyKind::TextInput => Self::TextInput,
+            PropertyKind::Text => Self::Text,
+            PropertyKind::Group => Self::Group,
+            PropertyKind::File => Self::File,
+            PropertyKind::Directory => Self::Directory,
+            PropertyKind::Texture => Self::Texture,
+            PropertyKind::Unknown(_) => Self::Unknown,
+        }
+    }
+}
 
 impl From<crate::project::PropertyValue> for BridgePropertyValue {
     fn from(value: crate::project::PropertyValue) -> Self {
@@ -2664,7 +2703,24 @@ impl From<crate::project::PropertyValue> for BridgePropertyValue {
     }
 }
 
-// R2-BX3: to be written from spec
+/// The reverse of the widening conversion above. Colour channels narrow with a
+/// plain cast and are not clamped, so a value that came from an `f32` returns
+/// to it exactly.
+#[allow(clippy::cast_possible_truncation)]
+impl From<BridgePropertyValue> for crate::project::PropertyValue {
+    fn from(value: BridgePropertyValue) -> Self {
+        use BridgePropertyValue as Bridge;
+        match value {
+            Bridge::Empty => Self::Null,
+            Bridge::Number { value } => Self::Number(value),
+            Bridge::Bool { value } => Self::Bool(value),
+            Bridge::String { value } => Self::String(value),
+            Bridge::ColorRgb { red, green, blue } => {
+                Self::ColorRgb(red as f32, green as f32, blue as f32)
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod mouse_polling_tests {

@@ -18,7 +18,23 @@ use objc2_quartz_core::{CAMetalLayer, CATransaction};
 
 use crate::{DisplayDesc, EngineError};
 
-// R2-CW2: to be written from spec
+define_class!(
+    /// A borderless desktop-level window that keeps exactly the frame it was
+    /// given, even over the menu bar or a camera housing.
+    #[unsafe(super(NSWindow))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "MWEWallpaperDesktopWindow"]
+    struct WallpaperDesktopWindow;
+
+    impl WallpaperDesktopWindow {
+        // AppKit's default would shrink or move a window that overlaps the
+        // menu bar; a wallpaper must cover the whole display.
+        #[unsafe(method(constrainFrameRect:toScreen:))]
+        fn constrain_frame_rect(&self, frame: NSRect, _screen: Option<&NSScreen>) -> NSRect {
+            frame
+        }
+    }
+);
 
 /// Background exposed before the first frame or while a drawable is unavailable.
 /// Default to black so display wake and surface recreation cannot flash white.

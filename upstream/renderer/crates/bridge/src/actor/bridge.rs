@@ -290,6 +290,11 @@ async fn register_audio_capture<E: EngineFacade>(
     Ok(())
 }
 
+/// The error a failed engine call reaches the caller as.
+fn engine_failed(error: wallpaper_core::EngineError) -> BridgeError {
+    BridgeError::engine(error.to_string())
+}
+
 fn map_send_error<M>(error: SendError<M, BridgeError>) -> BridgeError {
     match error {
         SendError::HandlerError(error) => error,
@@ -454,7 +459,26 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
         }
     }
 
-    // R2-BA1: to be written from spec
+    /// Everything the panel shows, with the options of `wallpaper_id`. Unlike
+    /// `all_snapshots`, a wallpaper whose options cannot be built fails the call.
+    fn snapshots_with_options(
+        &self,
+        wallpaper_id: String,
+    ) -> Result<BridgeSnapshotBundle, BridgeError> {
+        // The engine and the login item are each read once for the whole bundle.
+        let displays = self.engine.display_snapshot();
+        let launch_at_login = self.launch_at_login.status();
+        let options = self.state.options(&displays, wallpaper_id, &self.paths)?;
+        let reports = self.engine.scene_runtime_reports();
+        let settings = self.state.settings(&displays, launch_at_login, &self.paths, &reports);
+        Ok(BridgeSnapshotBundle {
+            app: self.app_snapshot(),
+            library: self.library_snapshot(),
+            wallpaper_options: Some(options),
+            monitor_information: self.state.monitor_info(&displays),
+            settings,
+        })
+    }
 
     fn wallpaper_bundle(
         &self,
@@ -751,11 +775,76 @@ impl<E: EngineFacade + Clone> BridgeActor<E> {
             return Ok(());
         }
 
-        // R2-BA2: to be written from spec
+        use crate::power::PowerSource;
+        match self.state.power_source {
+            PowerSource::Unknown => return Ok(()),
+            PowerSource::External => {
+                self.state.battery_pause_suppressed = false;
+                self.state.pending_battery_pause_after_initial_frame = false;
+                if self.state.auto_paused_for_battery {
+                    log::info!("back on external power: resuming wallpaper playback");
+                    self.set_playback(BridgePlaybackState::Playing, PlaybackChangeOrigin::Power)
+                        .await?;
+                    self.state.auto_paused_for_battery = false;
+                }
+                return Ok(());
+            }
+            PowerSource::Battery => {}
+        }
+        let already_paused = self.state.playback_state != BridgePlaybackState::Playing;
+        if already_paused || self.state.battery_pause_suppressed {
+            return Ok(());
+        }
+        if self.state.pending_battery_pause_after_initial_frame {
+            // The pause waits for the first frame; the pending flag says so.
+            return Ok(());
+        }
+        log::info!("on battery power: pausing wallpaper playback");
+        self.set_playback(BridgePlaybackState::Paused, PlaybackChangeOrigin::Power)
+            .await?;
+        self.state.auto_paused_for_battery = true;
         Ok(())
     }
 
-    // R2-BA3: to be written from spec
+    /// The scene a saved independent monitor shows `wallpaper_id` on, if the
+    /// display is connected and has one.
+    fn display_handle(
+        &self,
+        wallpaper_id: &str,
+        selector: &SerializedSelector,
+    ) -> Option<SceneHandle> {
+        let displays = self.engine.display_snapshot();
+        let monitor = self.state.app_config.monitors.iter().find(|monitor| {
+            monitor.enabled
+                && !monitor.mode.eq_ignore_ascii_case(MIRROR_DISPLAY_MODE)
+                && monitor.wallpaper.as_deref() == Some(wallpaper_id)
+                && monitor.selector == *selector
+        })?;
+        monitor
+            .selector
+            .to_selector()
+            .resolve_display(&displays)
+            .and_then(|display| display.handle)
+    }
+
+    /// The scene of the mirror monitor saved for `selector`, looked up in
+    /// `displays`.
+    fn mirror_display_handle(
+        &self,
+        selector: &SerializedSelector,
+        displays: &[DisplaySnapshotEntry],
+    ) -> Option<SceneHandle> {
+        let monitor = self.state.app_config.monitors.iter().find(|monitor| {
+            monitor.enabled
+                && monitor.mode.eq_ignore_ascii_case(MIRROR_DISPLAY_MODE)
+                && monitor.selector == *selector
+        })?;
+        monitor
+            .selector
+            .to_selector()
+            .resolve_display(displays)
+            .and_then(|display| display.handle)
+    }
 
     fn save_wallpaper(
         &mut self,
@@ -2834,7 +2923,33 @@ impl<E: EngineFacade + Clone> Message<Shutdown> for BridgeActor<E> {
     }
 }
 
-// R2-BA4: to be written from spec
+impl<E: EngineFacade + Clone> Message<SetVolume> for BridgeActor<E> {
+    type Reply = messages::WallpaperMutationReply;
+
+    async fn handle(
+        &mut self,
+        msg: SetVolume,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let SetVolume { wallpaper_id, volume } = msg;
+        let level = AudioVolume::try_from(volume)
+            .map_err(|error| BridgeError::invalid_input(error.to_string()))?;
+        let saved = self
+            .state
+            .wallpaper_draft_mut(&wallpaper_id)?
+            .set_volume_immediate(volume)?;
+        self.save_wallpaper(wallpaper_id.clone(), saved)?;
+        // Mirrors follow their source, so only the scenes of their own are told.
+        for handle in self.wallpaper_handles(&wallpaper_id, false) {
+            self.engine
+                .set_audio_volume(handle, level)
+                .await
+                .map_err(engine_failed)?;
+        }
+        self.invalidate_operations();
+        self.wallpaper_bundle(wallpaper_id)
+    }
+}
 
 impl<E: EngineFacade + Clone> Message<SetMuted> for BridgeActor<E> {
     type Reply = messages::WallpaperMutationReply;
@@ -2962,11 +3077,97 @@ impl<E: EngineFacade + Clone> Message<CompleteAudioResponse> for BridgeActor<E> 
     }
 }
 
-// R2-BA5: to be written from spec
+impl<E: EngineFacade + Clone> Message<SetDisplayConfigEnabled> for BridgeActor<E> {
+    type Reply = messages::WallpaperMutationReply;
 
-// R2-BA6: to be written from spec
+    /// Edits the draft only; Apply is what saves it and tells the engine.
+    async fn handle(
+        &mut self,
+        msg: SetDisplayConfigEnabled,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let displays = self.engine.display_snapshot();
+        let selector = self.resolve_operation_selector(&msg.display_id, &displays)?;
+        // Read before the edit: the draft seeds its assignment from what is saved.
+        let enabled_displays = self.state.enabled_selectors(&msg.wallpaper_id);
+        // The same display can be saved under several selectors, so the switch
+        // has to reach every one a later primary change or reconnect may use.
+        let mut aliases = vec![selector.clone()];
+        if let Some(display) = selector.to_selector().resolve_display(&displays) {
+            if displays
+                .first()
+                .is_some_and(|primary| display.matches_primary(primary))
+            {
+                aliases.push(SerializedSelector::Primary);
+            }
+            if let Some(identity) = display.stable_identity_selector() {
+                aliases.push(identity);
+            }
+            aliases.dedup();
+        }
+        self.state
+            .wallpaper_draft_mut(&msg.wallpaper_id)?
+            .set_display_aliases_enabled(&aliases, msg.enabled, &enabled_displays);
+        self.invalidate_operations();
+        self.wallpaper_bundle(msg.wallpaper_id)
+    }
+}
 
-// R2-BA7: to be written from spec
+impl<E: EngineFacade + Clone> Message<SetScalingMode> for BridgeActor<E> {
+    type Reply = messages::WallpaperMutationReply;
+
+    /// The mode is committed at once, saved and pushed to a running scene.
+    async fn handle(
+        &mut self,
+        msg: SetScalingMode,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let SetScalingMode { wallpaper_id, display_id, mode } = msg;
+        let displays = self.engine.display_snapshot();
+        let selector = self.resolve_operation_selector(&display_id, &displays)?;
+        let mode = ScalingMode::from(mode);
+        let saved = self
+            .state
+            .wallpaper_draft_mut(&wallpaper_id)?
+            .set_scaling_mode_immediate(selector.clone(), mode);
+        self.save_wallpaper(wallpaper_id.clone(), saved)?;
+        if let Some(handle) = self.display_handle(&wallpaper_id, &selector) {
+            self.engine
+                .set_scaling_mode(handle, mode)
+                .await
+                .map_err(engine_failed)?;
+        }
+        self.invalidate_operations();
+        self.wallpaper_bundle(wallpaper_id)
+    }
+}
+
+impl<E: EngineFacade + Clone> Message<SetScalingFactor> for BridgeActor<E> {
+    type Reply = messages::WallpaperMutationReply;
+
+    /// A draft edit held behind Apply; a running scene previews it live.
+    async fn handle(
+        &mut self,
+        msg: SetScalingFactor,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let SetScalingFactor { wallpaper_id, display_id, factor } = msg;
+        let displays = self.engine.display_snapshot();
+        let selector = self.resolve_operation_selector(&display_id, &displays)?;
+        // Validation happens in the draft, before the engine hears anything.
+        self.state
+            .wallpaper_draft_mut(&wallpaper_id)?
+            .set_scaling_factor(selector.clone(), factor)?;
+        if let Some(handle) = self.display_handle(&wallpaper_id, &selector) {
+            self.engine
+                .set_scaling_factor(handle, factor)
+                .await
+                .map_err(engine_failed)?;
+        }
+        self.invalidate_operations();
+        self.wallpaper_bundle(wallpaper_id)
+    }
+}
 
 impl<E: EngineFacade + Clone> Message<SetDisplayPosition> for BridgeActor<E> {
     type Reply = messages::WallpaperMutationReply;

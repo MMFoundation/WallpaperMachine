@@ -147,7 +147,44 @@ impl MediaThumbnailRgba {
     }
 }
 
-// R2-CD1: to be written from spec
+/// An event for a scene's media script or web page. The JSON form is what
+/// those pages receive: the `type` tag and the key spellings are fixed.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "type")]
+pub enum MediaIntegrationEvent {
+    /// System-media integration was switched on or off for the scene.
+    /// A scene that is told it is off should stop showing now-playing data.
+    /// `enabled` is the new state.
+    #[serde(rename = "mediaStatusChanged")]
+    StatusChanged { enabled: bool },
+    /// The player started, paused or stopped.
+    /// `state` serialises as the number media scripts compare against
+    /// (see [`MediaPlaybackState`]).
+    #[serde(rename = "mediaPlaybackChanged")]
+    PlaybackChanged { state: MediaPlaybackState },
+    /// Title, artist and album changed. The fields appear next to the tag,
+    /// each a string or null when the player does not say.
+    /// Their key spellings are fixed by [`MediaProperties`].
+    #[serde(rename = "mediaPropertiesChanged")]
+    PropertiesChanged(MediaProperties),
+    /// Track length and playhead position, both in seconds.
+    /// The two numbers are sent together.
+    /// A page works out the rest from them.
+    #[serde(rename = "mediaTimelineChanged")]
+    TimelineChanged { duration: f64, position: f64 },
+    /// The cover art changed, or was removed. The two colour triples are
+    /// derived from the artwork for tinting, and they mean something
+    /// only while `has_thumbnail` is true.
+    #[serde(rename = "mediaThumbnailChanged")]
+    ThumbnailChanged {
+        #[serde(rename = "hasThumbnail")]
+        has_thumbnail: bool,
+        #[serde(rename = "primaryColor")]
+        primary_color: [f32; 3],
+        #[serde(rename = "textColor")]
+        text_color: [f32; 3],
+    },
+}
 
 impl MediaIntegrationEvent {
     /// # Errors
