@@ -47,7 +47,7 @@ device.
   whose layer draws no composite) neither draws nor clears, as on
   Compatibility, instead of refusing the scene. An image that has a name and
   does not load still sends the whole scene to Compatibility.
-- **Intentionally unbound samplers** — `MetalSceneDraw.UnboundTextureSlotsSampleZeroOnBothRenderers`:
+- **Intentionally unbound samplers** — `UnboundSlot.*` in `unbound_texture_slot_test`:
   omitted texture lists and explicit null slots sample zero in every RGBA channel,
   following [Direct3D null-resource sampling](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/sample--sm4---asm-),
   rather than dropping the draw. The shared material loader fills only active
@@ -57,7 +57,7 @@ device.
   reused by the ordinary image caches, with no new per-frame work or render pass.
   Named missing assets and unresolved layer links are not null bindings and keep
   the failure/skip behavior above.
-- **Face culling** — `MetalSceneDraw.ADepthTestedDrawCullsTheSameFacesAsCompatibility`:
+- **Face culling** — `MetalSceneDraw.ADepthTestedDrawCullsTheFacesItsMaterialAsksFor`:
   a card under a perspective camera, turned towards and away, with back, front
   and no culling and with and without a depth attachment, drawn by both
   renderers through `SceneRendererHandle`; the pictures must be byte-identical,
@@ -164,13 +164,15 @@ device.
   a second renderer on the same device must not hand an identical translated
   program to the Metal compiler again. The pipeline key identifies the program by
   content, never by the address of the object holding it.
-- **Imported pictures shared between displays** — `MetalSceneDraw.TwoDisplaysShowingOneSceneShareEachImportedPictureUntilBothUnload`:
+- **Imported pictures shared between displays** — `SharedPictures.TwoDisplaysLoadingTogetherBindOneTextureAndUploadItOnce`
+  and `.TheTextureLivesWhileEitherDisplayShowsItAndIsGoneWhenBothUnloaded` in `scene_shared_pictures_test`:
   two renderers compiling one scene at the same moment, each from its own parse,
-  bind one texture for its image (`MetalRender::ImportedTextureForTests`), the
-  process cache holds one display's bytes for both
-  (`SharedImportedImagesForTests`), both draw the same picture, and the texture is
+  bind one texture for its image and upload it once
+  (`MetalRender::ImageUploadsForTests`), the process cache holds one display's bytes
+  for both (`SharedImageBytesForTests`), both draw the same picture, and the texture is
   kept while either display still shows it and gone once both have unloaded.
-  `.DisplaysKeepingAnotherMipRangeOrAChangedFileGetTheirOwnPicture`: a surface that
+  `.ADisplayThatKeepsAnotherMipRangeGetsItsOwnTexture` and
+  `.AFileRewrittenWithOtherPixelsUnderTheSameNameIsLoadedFresh`: a surface that
   drops a leading mip gets its own texture, and a file rewritten with other pixels
   under the same name and layout is loaded fresh while the old picture is still
   shown. A texture is handed to a further display only after its pixels compare
@@ -635,9 +637,9 @@ device.
   stops being wanted, and that a failed start is not retried on every command. The
   CoreAudio listener registration is not
   covered; see [audio response](../features/audio-response.md#output-device-changes).
-- **Audio capture follows what the scene reads** — `SceneSchema.AudioRequirementComesOnlyFromContentThatReadsAudio`
-  and `.AudioRequirementIsReportedOncePerSceneAndResetByReplacement` in
-  `scene_schema_tests`, `Decoders/VideoSourceInput.PlainVideoProjectNeverReportsAnAudioRequirement/*`
+- **Audio capture follows what the scene reads** — `SceneAudioRequirement.OnlyContentThatReadsAudioRaisesIt`
+  and `SceneAudioReport.TheHostHearsTheRequirementOncePerSceneAndTheReplacementResetsIt` in
+  `scene_schema_part11_test`, `Decoders/VideoSourceInput.PlainVideoProjectNeverReportsAnAudioRequirement/*`
   in `video_source_input_test`, and the bridge tests
   `display_presentation::audio_response_alone_does_not_open_the_tap_for_a_scene_that_reads_no_audio`,
   `::replacing_an_audio_scene_with_one_that_reads_nothing_closes_the_tap` and
