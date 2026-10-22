@@ -54,17 +54,7 @@ constexpr std::string_view PROPERTY_FRAMING                   = "framing";
 /// Internal rasterization scale in (0,1]. Distinct from PROPERTY_SCALINGFACTOR,
 /// which scales the presented image on the output.
 constexpr std::string_view PROPERTY_RENDER_SCALE              = "render_scale";
-constexpr std::string_view PROPERTY_HORIZONTAL_FLIP            = "horizontal_flip";
-constexpr std::string_view PROPERTY_SPEED                     = "speed";
-constexpr std::string_view PROPERTY_GRAPHIVZ                  = "graphivz";
-constexpr std::string_view PROPERTY_VOLUME                    = "volume";
-constexpr std::string_view PROPERTY_MUTED                     = "muted";
-constexpr std::string_view PROPERTY_AUDIO_RESPONSE_ENABLED    = "audio_response_enabled";
-constexpr std::string_view PROPERTY_MEDIA_INTEGRATION_ENABLED = "media_integration_enabled";
-constexpr std::string_view PROPERTY_MEDIA_EVENT_JSON          = "media_event_json";
-constexpr std::string_view PROPERTY_PROJECT_PROPERTY_OVERRIDE_JSON =
-    "project_property_override_json";
-constexpr std::string_view PROPERTY_PROJECT_PROPERTY_RESET = "project_property_reset";
+// R1-S1: to be written from spec
 /// String property: a flat JSON object holding the whole property state to show
 /// on the scene that is running (the same shape as the override JSON above),
 /// without loading it again. Unlike the override it is never remembered: a
@@ -117,17 +107,7 @@ public:
 
     void play();
     void pause();
-    void setPaused(bool paused);
-    void setSceneSource(std::string source);
-    void setAssetsPath(std::string assets);
-    void setCachePath(std::string cache_path);
-    void setTargetFps(uint32_t fps);
-    void mouseInput(double x, double y);
-    void mouseButton(int button, bool pressed);
-    void mouseButtonBaseline(uint32_t down);
-    void mouseEnter(bool entered);
-    void applySystemMediaArtwork(uint32_t width, uint32_t height, const uint8_t* rgba,
-                                 std::size_t rgba_len);
+    // R1-S2: to be written from spec
 
     /// How this scene is currently being updated, and why.
     ///

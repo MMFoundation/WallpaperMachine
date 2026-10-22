@@ -60,17 +60,7 @@ public:
     [[nodiscard]] const linalg::Vector4f& getVec4() const;
     [[nodiscard]] const linalg::Vector3f& getVec3() const;
     [[nodiscard]] const linalg::Vector2f& getVec2() const;
-    [[nodiscard]] const float&           getFloat() const;
-    [[nodiscard]] const int&             getInt() const;
-    [[nodiscard]] const bool&            getBool() const;
-    [[nodiscard]] const std::string&     getString() const;
-    [[nodiscard]] UnderlyingType         getType() const;
-    [[nodiscard]] virtual std::string    toString() const;
-    uint64_t Generation() const noexcept { return m_generation; }
-
-    virtual void update(float new_value);
-    virtual void update(int new_value);
-    virtual void update(bool new_value);
+    // R1-R1: to be written from spec
     virtual void update(const linalg::Vector2f& new_value);
     virtual void update(const linalg::Vector3f& new_value);
     virtual void update(const linalg::Vector4f& new_value);

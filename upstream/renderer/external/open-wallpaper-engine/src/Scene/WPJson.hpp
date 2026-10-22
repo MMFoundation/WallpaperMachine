@@ -6,22 +6,7 @@
 
 #include "Utils/Logging.h"
 
-#define GET_JSON_VALUE(json, value) \
-    wallpaper::GetJsonValue(        \
-        __SHORT_FILE__, __FUNCTION__, __LINE__, (json), (value), false, "", true)
-#define GET_JSON_NAME_VALUE(json, name, value) \
-    wallpaper::GetJsonValue(                   \
-        __SHORT_FILE__, __FUNCTION__, __LINE__, (json), (value), true, (name), true)
-
-#define GET_JSON_VALUE_NOWARN(json, value) \
-    wallpaper::GetJsonValue(               \
-        __SHORT_FILE__, __FUNCTION__, __LINE__, (json), (value), false, "", false)
-#define GET_JSON_NAME_VALUE_NOWARN(json, name, value) \
-    wallpaper::GetJsonValue(                          \
-        __SHORT_FILE__, __FUNCTION__, __LINE__, (json), (value), true, (name), false)
-
-#define PARSE_JSON(source, result) \
-    wallpaper::ParseJson(__SHORT_FILE__, __FUNCTION__, __LINE__, (source), (result))
+// R1-S20: to be written from spec
 
 namespace wallpaper
 {

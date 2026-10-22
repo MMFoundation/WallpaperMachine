@@ -38,15 +38,7 @@ public:
         linalg::Vector3f reference_position { linalg::Vector3f::Zero() };
         linalg::Vector3f reference_scale { linalg::Vector3f::Ones() };
         linalg::Quaterniond reference_rotation { linalg::Quaterniond::Identity() };
-        uint32_t        parent { NO_PARENT };
-        uint32_t        bind_parent { NO_PARENT };
-        uint32_t        anim_parent { NO_PARENT };
-        uint32_t        file_parent { NO_PARENT };
-        std::string     simulation_json;
-
-        bool noParent() const { return parent == NO_PARENT; }
-        bool noBindParent() const { return bind_parent == NO_PARENT; }
-        bool noAnimParent() const { return anim_parent == NO_PARENT; }
+        // R1-S5a: to be written from spec
         linalg::Affine3f offset_trans { linalg::Affine3f::Identity() };
         linalg::Affine3f world_bind { linalg::Affine3f::Identity() };
         linalg::Affine3f inv_bind { linalg::Affine3f::Identity() };
@@ -99,15 +91,7 @@ public:
             std::string event_json;
         };
 
-        uint32_t unk_after_id { 0 };
-        std::optional<AnimTrans>    trans;
-        std::vector<BoneFrameCurve> blend_curves;
-        std::vector<AnimV4Event>    v4_events;
-        std::array<float, 3>        aabb_min {};
-        std::array<float, 3>        aabb_max {};
-        bool                        has_aabb { false };
-        std::vector<BoneFrameCurve> scalar_curves;
-        std::vector<AnimEvent>      events;
+        // R1-S5b: to be written from spec
 
         double max_time;
         double frame_time;

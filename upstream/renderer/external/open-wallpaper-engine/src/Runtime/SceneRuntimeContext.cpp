@@ -868,17 +868,7 @@ void SceneRuntimeContext::SetCursorButton(int button, bool pressed) {
     }
 }
 
-void SceneRuntimeContext::SetCursorButtons(uint32_t down, uint32_t pressed, uint32_t released) {
-    m_host_context->mouse_buttons_down     = down;
-    m_host_context->mouse_buttons_pressed  = pressed;
-    m_host_context->mouse_buttons_released = released;
-}
-
-void SceneRuntimeContext::BeginFrame() {
-    m_host_context->mouse_buttons_pressed  = 0;
-    m_host_context->mouse_buttons_released = 0;
-}
-
+// R1-R3: to be written from spec
 void SceneRuntimeContext::StopTextWorker() {
     {
         std::lock_guard lock(m_text_worker_mutex);

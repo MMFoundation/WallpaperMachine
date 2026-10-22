@@ -126,18 +126,5 @@ void ApplyRustShaderMetalStageJson(
     ShaderType kind,
     RustShaderMetalStage& stage);
 
-bool CompileRustShaderProgram(
-    const RustShaderRequest& request,
-    RustShaderOutput& output,
-    const RustShaderIncludeReader& include_reader = {});
-
-std::string LastRustShaderError();
-
-#ifdef WESCENE_BUILD_TESTS
-bool CompileRustShaderProgramWithBridgeJson(
-    const nlohmann::json& request_json,
-    RustShaderOutput& output,
-    const RustShaderIncludeReader& include_reader = {});
-#endif
-
+// R1-X2: to be written from spec
 } // namespace wallpaper::shader

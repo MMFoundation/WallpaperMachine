@@ -67,21 +67,7 @@ struct ScriptLimits {
     std::function<double()>  log_clock_seconds {};
 };
 
-struct ScriptStartupMetrics {
-    double   module_strip_ms { 0.0 };
-    double   bootstrap_build_ms { 0.0 };
-    double   wrapper_build_ms { 0.0 };
-    double   eval_ms { 0.0 };
-    double   callback_registration_ms { 0.0 };
-    uint64_t bootstrap_installs { 0 };
-    uint64_t script_compiles { 0 };
-};
-
-enum class PropertyScriptValueSemantic
-{
-    Generic,
-    AnglesDegrees,
-};
+// R1-R6a: to be written from spec
 
 enum class ScriptCursorEvent : uint8_t {
     Click = 1u << 0,
@@ -218,20 +204,7 @@ public:
     void                        SetLimits(const ScriptLimits& limits);
     ScriptLimits                Limits() const;
 
-    static void                 ResetStartupMetrics();
-    static ScriptStartupMetrics GetStartupMetrics();
-
-    DynamicValueUniquePtr                  Evaluate(const std::string&                          script_source,
-                                                    const std::map<std::string, DynamicValue*>& script_properties,
-                                                    const DynamicValue&                         current_value,
-                                                    const ScriptHostContext&                    host_context);
-    std::unique_ptr<PropertyScriptProgram> CreatePropertyScriptProgram(
-        SceneRuntimeContext* runtime, std::string script_source, std::string current_layer_name,
-        std::map<std::string, DynamicValue*> script_properties, DynamicValue initial_value,
-        ScriptHostContext           host_context,
-        PropertyScriptValueSemantic semantic = PropertyScriptValueSemantic::Generic,
-        int                         animation_layer_index = -1, std::string effect_reference = {},
-        std::string                 setting_animation_reference = {});
+    // R1-R6b: to be written from spec
     std::unique_ptr<SceneScriptProgram>
     CreateSceneScriptProgram(SceneRuntimeContext& runtime, std::string script_source,
                              std::string current_layer_name, ProjectProperties project_properties,

@@ -97,29 +97,7 @@ uint8_t ScriptedDynamicValue::CursorHandlerMask() const noexcept {
     return m_program != nullptr && m_program->Valid() ? m_program->Capabilities().cursor_handlers : 0;
 }
 
-void ScriptedDynamicValue::DispatchCursorClick(const ScriptHostContext& host_context) {
-    if (m_program != nullptr) m_program->DispatchCursorClick(host_context);
-}
-
-void ScriptedDynamicValue::DispatchCursorDown(const ScriptHostContext& host_context) {
-    if (m_program != nullptr) m_program->DispatchCursorDown(host_context);
-}
-
-void ScriptedDynamicValue::DispatchCursorEnter(const ScriptHostContext& host_context) {
-    if (m_program != nullptr) m_program->DispatchCursorEnter(host_context);
-}
-
-void ScriptedDynamicValue::DispatchCursorLeave(const ScriptHostContext& host_context) {
-    if (m_program != nullptr) m_program->DispatchCursorLeave(host_context);
-}
-
-void ScriptedDynamicValue::DispatchCursorMove(const ScriptHostContext& host_context) {
-    if (m_program != nullptr) m_program->DispatchCursorMove(host_context);
-}
-
-void ScriptedDynamicValue::DispatchCursorUp(const ScriptHostContext& host_context) {
-    if (m_program != nullptr) m_program->DispatchCursorUp(host_context);
-}
+// R1-R5: to be written from spec
 
 void ScriptedDynamicValue::DispatchAnimationEvent(const ScriptHostContext& host_context,
                                                   std::string_view event_name, double frame) {

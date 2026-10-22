@@ -223,23 +223,6 @@ public:
     // Wallpaper Engine's default for an object that leaves the key out.
     std::array<float, 2>     parallaxDepth { 1.0f, 1.0f };
     bool                     visible { true };
-    bool                     dynamic_origin { false };
-    bool                     dynamic_visible { false };
-    nlohmann::json           origin_setting;
-    nlohmann::json           scale_setting;
-    nlohmann::json           angles_setting;
-    nlohmann::json           visible_setting;
-    std::string              particle;
-    Particle                 particleObj;
-    ParticleInstanceoverride instanceoverride;
-    std::vector<int32_t>     dependencies;
-    nlohmann::json           field_bindings;
-};
-
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Initializer, name, max, min);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Emitter, name, distancemax, distancemin, rate, directions);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Particle, initializers, operators, emitters);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPParticleObject, name, origin, angles, scale, visible, particle,
-                                   particleObj);
+    // R1-S11: to be written from spec
 } // namespace wpscene
 } // namespace wallpaper

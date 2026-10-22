@@ -63,16 +63,7 @@ struct WPUniformInfo {
     bool has_VIEWFORWARD { false };
     bool has_VIEWUP { false };
     bool has_VIEWRIGHT { false };
-    bool has_AudioSpectrum16Left { false };
-    bool has_AudioSpectrum16Right { false };
-    bool has_AudioSpectrum32Left { false };
-    bool has_AudioSpectrum32Right { false };
-    bool has_AudioSpectrum64Left { false };
-    bool has_AudioSpectrum64Right { false };
-
-    struct Tex {
-        bool has_resolution { false };
-        bool has_mipmap { false };
+    // R1-S19: to be written from spec
         bool has_texel { false };
     };
     std::array<Tex, 13> texs;

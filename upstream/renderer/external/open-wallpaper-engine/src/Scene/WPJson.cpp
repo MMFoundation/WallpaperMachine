@@ -348,21 +348,7 @@ GetJsonValue(const char* file, const char* func, int line, const nlohmann::json&
                                                                   bool);
 
 T_IMPL_GET_JSON(bool);
-T_IMPL_GET_JSON(int32_t);
-T_IMPL_GET_JSON(uint32_t);
-T_IMPL_GET_JSON(float);
-T_IMPL_GET_JSON(double);
-T_IMPL_GET_JSON(std::string);
-T_IMPL_GET_JSON(std::vector<float>);
-
-template<std::size_t N>
-using iarray = std::array<int, N>;
-T_IMPL_GET_JSON(iarray<3>);
-
-template<std::size_t N>
-using farray = std::array<float, N>;
-T_IMPL_GET_JSON(farray<2>);
-T_IMPL_GET_JSON(farray<3>);
+// R1-S21: to be written from spec
 
 // template bool GetJsonValue();
 } // namespace wallpaper

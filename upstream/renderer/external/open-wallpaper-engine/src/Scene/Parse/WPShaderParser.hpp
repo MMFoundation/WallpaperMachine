@@ -86,17 +86,7 @@ struct SceneMetalVariantInputs {
     uint32_t                     nv12_plane_slot { 0 };
 };
 
-struct ShaderStartupMetrics {
-    uint64_t cache_hits { 0 };
-    uint64_t cache_misses { 0 };
-    double   include_expand_ms { 0.0 };
-    double   metadata_extract_ms { 0.0 };
-    double   preprocess_ms { 0.0 };
-    double   legalize_ms { 0.0 };
-    double   final_assembly_ms { 0.0 };
-    double   compile_ms { 0.0 };
-    double   cache_read_ms { 0.0 };
-    double   cache_write_ms { 0.0 };
+// R1-S7: to be written from spec
 };
 
 class WPShaderParser {

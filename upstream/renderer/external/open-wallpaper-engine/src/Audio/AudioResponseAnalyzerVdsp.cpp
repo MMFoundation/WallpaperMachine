@@ -98,11 +98,7 @@ ChannelLevels AnalyzeChannel(const float* pcm)
 
     vDSP_vmul(pcm, 1, resources.window.data(), 1, windowed.data(), 1,
               static_cast<vDSP_Length>(kWindowSize));
-    for (uint32_t index = 0; index < kWindowSize; ++index) {
-        if (! std::isfinite(windowed[index])) {
-            windowed[index] = 0.0f;
-        }
-    }
+    // R1-W1a: to be written from spec
 
     // Real FFT input is packed as even samples in realp and odd samples in imagp.
     for (size_t index = 0; index < realp.size(); ++index) {
@@ -193,20 +189,6 @@ void AnalyzeAudioResponseStereoBlock(
     snapshot->stereo = true;
 }
 
-void ClearAudioResponseSnapshot(AudioSpectrumSnapshot* snapshot)
-{
-    if (snapshot == nullptr) {
-        return;
-    }
-    snapshot->left64.fill(0.0f);
-    snapshot->right64.fill(0.0f);
-    snapshot->average64.fill(0.0f);
-    snapshot->left32.fill(0.0f);
-    snapshot->right32.fill(0.0f);
-    snapshot->average32.fill(0.0f);
-    snapshot->left16.fill(0.0f);
-    snapshot->right16.fill(0.0f);
-    snapshot->average16.fill(0.0f);
-}
+// R1-A1: to be written from spec
 
 } // namespace wallpaper::audio

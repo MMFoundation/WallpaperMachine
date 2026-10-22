@@ -20,21 +20,7 @@ enum class SceneSourceResolutionKind
     NotSceneProject,
 };
 
-struct SceneSourceResolution {
-    SceneSourceResolutionKind kind { SceneSourceResolutionKind::Scene };
-    ProjectManifest           manifest;
-    SceneSourcePaths          scene_source;
-};
-
-bool ResolveSceneSourcePaths(
-    const std::string&      source,
-    SceneSourceResolution*  resolved,
-    std::string*            error);
-
-bool ResolveSceneSourcePaths(
-    const std::string& source,
-    SceneSourcePaths* resolved,
-    std::string* error);
+// R1-X5: to be written from spec
 
 namespace fs
 {

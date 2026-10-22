@@ -196,33 +196,10 @@ bool AdoptPixelBufferAsVideoFrame(void* retained_pixel_buffer, VideoTextureFrame
         return false;
     }
     auto pixel_buffer = reinterpret_cast<CVPixelBufferRef>(retained_pixel_buffer);
-    IOSurfaceRef io_surface = CVPixelBufferGetIOSurface(pixel_buffer);
-    if (io_surface != nullptr) CFRetain(io_surface);
-    out->width = static_cast<uint32_t>(CVPixelBufferGetWidth(pixel_buffer));
-    out->height = static_cast<uint32_t>(CVPixelBufferGetHeight(pixel_buffer));
-    out->pixel_buffer = pixel_buffer;
-    out->io_surface = io_surface;
-    out->pixel_format = static_cast<uint32_t>(CVPixelBufferGetPixelFormatType(pixel_buffer));
-    out->plane_count = CVPixelBufferIsPlanar(pixel_buffer)
-        ? static_cast<uint32_t>(CVPixelBufferGetPlaneCount(pixel_buffer))
-        : 1u;
-    return true;
+    // R1-P4: to be written from spec
 }
 
-void ReleaseAppleVideoFrame(VideoTextureFrame* frame)
-{
-    if (frame == nullptr) return;
-    if (frame->io_surface != nullptr) {
-        CFRelease(reinterpret_cast<IOSurfaceRef>(frame->io_surface));
-        frame->io_surface = nullptr;
-    }
-    if (frame->pixel_buffer != nullptr) {
-        CFRelease(reinterpret_cast<CVPixelBufferRef>(frame->pixel_buffer));
-        frame->pixel_buffer = nullptr;
-    }
-    frame->pixel_format = 0;
-    frame->plane_count = 0;
-}
+// R1-P5: to be written from spec
 
 void RetainAppleVideoFrame(const VideoTextureFrame& frame, VideoTextureFrame* out)
 {

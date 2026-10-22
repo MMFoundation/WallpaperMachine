@@ -36,18 +36,6 @@ using ProjectProperties = std::unordered_map<std::string, RuntimeScalarValue>;
 // `true` in any case, or `1`. Every other string is false.
 bool StringIsTrue(std::string_view value);
 
-bool ParseProjectProperties(
-    const std::string& project_path,
-    ProjectProperties* properties,
-    std::string*       error);
-
-bool ParseFlatProjectPropertyOverrideJson(
-    std::string_view   json,
-    ProjectProperties* properties,
-    std::string*       error);
-
-ProjectProperties MergeProjectProperties(
-    const ProjectProperties& defaults,
-    const ProjectProperties& overrides);
+// R1-X4: to be written from spec
 
 } // namespace wallpaper

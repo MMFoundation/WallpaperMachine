@@ -27,25 +27,7 @@ public:
         usize                offset;
     };
 
-    SceneVertexArray(const std::vector<SceneVertexAttribute>& attrs, const std::size_t count);
-    ~SceneVertexArray();
-
-    SceneVertexArray(SceneVertexArray&&) noexcept;
-    SceneVertexArray& operator=(SceneVertexArray&&) noexcept;
-
-    bool AddVertex(const float*);
-    bool SetVertex(std::string_view name, std::span<const float> data) noexcept;
-    bool SetVertexs(std::size_t index, std::span<const float> data) noexcept;
-
-    bool GetOption(std::string_view) const;
-    void SetOption(std::string_view, bool);
-
-    const float* Data() const { return m_data.get(); }
-    usize        DataSize() const { return m_size; }
-    usize        DataSizeOf() const { return m_size * sizeof(float); }
-    usize        VertexCount() const { return m_stride == 0 ? 0 : m_size / m_stride; }
-    usize        CapacitySize() const { return m_capacity; }
-    usize        CapacitySizeOf() const { return m_capacity * sizeof(float); }
+    // R1-S17: to be written from spec
     usize        OneSize() const { return m_stride; }
     usize        OneSizeOf() const { return m_stride * sizeof(float); }
 

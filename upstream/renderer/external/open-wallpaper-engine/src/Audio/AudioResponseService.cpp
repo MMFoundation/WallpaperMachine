@@ -27,8 +27,7 @@ constexpr uint32_t kHopSize = kWindowSize;
 constexpr size_t kInterleavedChannels = 2u;
 constexpr size_t kMaxRetainedMonoFrames = static_cast<size_t>(kAnalysisSampleRate) * 2u;
 constexpr auto kSnapshotStaleAfter = std::chrono::milliseconds(250);
-constexpr float kSnapshotSignalFloor = 0.0001f;
-constexpr float kPcmSignalFloor = 0.00005f;
+// R1-W1b: to be written from spec
 
 struct AudioResponseState
 {

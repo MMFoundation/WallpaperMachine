@@ -110,17 +110,7 @@ public:
     void                            setWhat(uint32_t);
     status_t                        post();
 
-    bool setBool(std::string_view, bool);
-    bool setInt32(std::string_view, int32_t);
-    bool setFloat(std::string_view, float);
-    bool setString(std::string_view, std::string);
-
-    bool findBool(std::string_view, bool*) const;
-    bool findInt32(std::string_view, int32_t*) const;
-    bool findFloat(std::string_view, float*) const;
-    bool findString(std::string_view, std::string*) const;
-
-    bool setObject(std::string_view name, const std::shared_ptr<void>&);
+    // R1-C4: to be written from spec
 
     // The object stored under `name`, as a `T` pointer: `T` has to be the type the
     // pointer had when it was stored.

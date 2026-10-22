@@ -350,7 +350,7 @@ public:
         CMD_SET_SCALINGFACTOR,
         CMD_SET_FRAMING,
         CMD_SET_RENDER_SCALE,
-        CMD_SET_HORIZONTAL_FLIP,
+        // R1-W3a: to be written from spec
         CMD_SET_AUDIO_RESPONSE_ENABLED,
         CMD_SET_MEDIA_INTEGRATION_ENABLED,
         CMD_MEDIA_EVENT_JSON,
@@ -409,7 +409,7 @@ public:
                 CASE_CMD(SET_SCALINGMODE);
                 CASE_CMD(SET_SCALINGFACTOR);
                 CASE_CMD(SET_FRAMING);
-                CASE_CMD(SET_HORIZONTAL_FLIP);
+                // R1-W3b: to be written from spec
                 CASE_CMD(SET_AUDIO_RESPONSE_ENABLED);
                 CASE_CMD(SET_MEDIA_INTEGRATION_ENABLED);
                 CASE_CMD(MEDIA_EVENT_JSON);
@@ -684,7 +684,7 @@ public:
         m_render->SetCounters(&counters);
         m_render->SetWallpaperScalingMode(m_scaling_mode);
         m_render->SetWallpaperScalingFactor(m_scaling_factor);
-        m_render->SetWallpaperHorizontalFlip(m_mirror);
+        // R1-W3c: to be written from spec
         m_render->SetVideoPlaybackRate(m_speed);
         m_render->SetWallpaperFraming(m_framing);
         m_render->SetVideoPlaybackPaused(! frame_timer.Running() || m_render_blocked);
@@ -957,7 +957,7 @@ private:
         m_render->SetWallpaperScalingMode(m_scaling_mode);
         m_render->SetWallpaperScalingFactor(m_scaling_factor);
         m_render->SetWallpaperFraming(m_framing);
-        m_render->SetWallpaperHorizontalFlip(m_mirror);
+        // R1-W3d: to be written from spec
         if (m_fill_explicit) m_render->UpdateCameraFillMode(*m_scene, m_fill_mode);
         m_render->SetVideoPlaybackRate(m_speed);
         if (m_scene->runtime != nullptr) {
@@ -1005,7 +1005,7 @@ private:
         // stores or delivers the position.
         float px = 0.5f, py = 0.5f;
         UnpackPointer(m_pointer_bits.load(std::memory_order_relaxed), px, py);
-        if (m_mirror) px = 1.0f - px;
+        // R1-W3e: to be written from spec
         scene.pointerPosition = { px, py };
         const MouseButtonSnapshot buttons   = consumeMouseButtonSnapshot();
         const bool                in_window = m_cursor_in_window.load();
@@ -1221,12 +1221,7 @@ private:
             (void)rebuildRenderGraph();
         }
     }
-    MHANDLER_CMD(SET_HORIZONTAL_FLIP) {
-        bool value = false;
-        if (! msg->findBool("value", &value)) return;
-        m_mirror = value;
-        m_render->SetWallpaperHorizontalFlip(m_mirror);
-    }
+    // R1-W3f: to be written from spec
     MHANDLER_CMD(SET_AUDIO_RESPONSE_ENABLED) {
         bool value = false;
         if (! msg->findBool("value", &value)) return;
@@ -1824,29 +1819,7 @@ void SceneWallpaper::pause() { PostPause(m_main_handler, true); }
 
 void SceneWallpaper::setPaused(bool paused) { PostPause(m_main_handler, paused); }
 
-void SceneWallpaper::setSceneSource(std::string source) {
-    setPropertyString(PROPERTY_SOURCE, std::move(source));
-}
-
-void SceneWallpaper::setAssetsPath(std::string assets) {
-    setPropertyString(PROPERTY_ASSETS, std::move(assets));
-}
-
-void SceneWallpaper::setCachePath(std::string cache_path) {
-    setPropertyString(PROPERTY_CACHE_PATH, std::move(cache_path));
-}
-
-void SceneWallpaper::setTargetFps(uint32_t fps) {
-    setPropertyInt32(PROPERTY_FPS, static_cast<int32_t>(fps));
-}
-
-void SceneWallpaper::mouseInput(double x, double y) {
-    m_main_handler->renderHandler()->setMousePos(x, y);
-}
-
-void SceneWallpaper::mouseButton(int button, bool pressed) {
-    m_main_handler->renderHandler()->setMouseButton(button, pressed);
-}
+// R1-S3: to be written from spec
 
 void SceneWallpaper::mouseButtonBaseline(uint32_t down) {
     m_main_handler->renderHandler()->setMouseButtonBaseline(down);
@@ -2019,10 +1992,7 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
         if (! msg->findFloat("value", &real)) return;
         PostToRender(m_render_handler, CMD::CMD_SET_SPEED,
                      [&](looper::Message& out) { out.setFloat("value", real); });
-    } else if (name == PROPERTY_HORIZONTAL_FLIP) {
-        if (! msg->findBool("value", &flag)) return;
-        PostToRender(m_render_handler, CMD::CMD_SET_HORIZONTAL_FLIP,
-                     [&](looper::Message& out) { out.setBool("value", flag); });
+    // R1-W3g: to be written from spec
     } else if (name == PROPERTY_FRAMING) {
         std::shared_ptr<WallpaperFraming> framing;
         if (! msg->findObject("value", &framing) || framing == nullptr) return;

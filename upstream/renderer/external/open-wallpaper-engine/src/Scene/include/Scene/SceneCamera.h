@@ -30,16 +30,7 @@ public:
 
     void Update();
 
-    void AttatchNode(std::shared_ptr<SceneNode>);
-
-    bool   IsPerspective() const { return m_perspective; }
-    double Aspect() const { return m_aspect; }
-    double Width() const { return m_width; }
-    double Height() const { return m_height; }
-    double NearClip() const { return m_nearClip; }
-    double FarClip() const { return m_farClip; }
-    double Fov() const { return m_fov; }
-
+    // R1-S15: to be written from spec
     void SetWidth(double value) {
         m_width  = value;
         m_aspect = AspectOf(m_width, m_height);

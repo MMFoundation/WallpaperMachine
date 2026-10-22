@@ -42,17 +42,7 @@ public:
                                         const linalg::Vector3f& scale,
                                         const linalg::Vector3f& rotation);
 
-    const auto& Translate() const { return m_translate; }
-    const auto& Scale() const { return m_scale; }
-    const auto& Rotation() const { return m_rotation; }
-    const auto& Name() const { return m_name; }
-    void SetName(std::string name) { m_name = std::move(name); }
-    bool Visible() const { return m_visible; }
-    bool SkipRenderPass() const { return m_skipRenderPass; }
-    /// A frame a script pinned the sprite sheet to; the sheet holds it until
-    /// `ClearTextureFrame` (a script's `play()`) lets it run again.
-    const auto& TextureFrame() const { return m_textureFrame; }
-    void SetTextureFrame(double frame) { m_textureFrame = frame; }
+    // R1-S16: to be written from spec
     void ClearTextureFrame() { m_textureFrame.reset(); }
     /// What a script's `pause()`, `stop()`, `play()` and `rate` say about the
     /// sprite sheet the layer draws. The renderer advances the sheet by the

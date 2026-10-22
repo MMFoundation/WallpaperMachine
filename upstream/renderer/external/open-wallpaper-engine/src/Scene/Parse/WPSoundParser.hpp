@@ -85,16 +85,7 @@ private:
 
     Config                              m_config;
     Desc                                m_desc {};
-    std::size_t                         m_cur_index { 0 };
-    uint64_t                            m_delay_frames { 0 };
-    std::vector<StreamFactory>          m_stream_factories;
-    std::shared_ptr<audio::SoundStream> m_cur_active;
-    std::mt19937                        m_random { std::random_device {}() };
-    std::atomic<float>                  m_volume { 1.0f };
-    std::atomic<bool>                   m_muted { false };
-    std::atomic<bool>                   m_playing { true };
-    std::atomic<bool>                   m_rewind_requested { false };
-    std::atomic<bool>                   m_finished { false };
+    // R1-S8: to be written from spec
 };
 
 class WPSoundParser {

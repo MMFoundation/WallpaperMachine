@@ -446,22 +446,7 @@ public:
     /// thread and must not touch scene state -- asking for one frame is all it
     /// is for. Passing an empty function detaches it.
     void SetContentWakeHandler(std::function<void()> handler);
-    bool            HasNodeNamed(std::string_view name) const;
-    bool            HasSoundLayer(std::string_view name) const;
-    bool            PlaySoundLayer(std::string_view name);
-    bool            PauseSoundLayer(std::string_view name);
-    bool            StopSoundLayer(std::string_view name);
-    bool            SoundLayerPlaying(std::string_view name) const;
-    bool            SetSoundLayerVolume(std::string_view name, float volume);
-    float           SoundLayerVolume(std::string_view name) const;
-    bool            SetSoundLayerMuted(std::string_view name, bool muted);
-    bool            SoundLayerMuted(std::string_view name) const;
-    int             NodeSiblingIndex(std::string_view name) const;
-    // `script_workshop_id` is the `__workshopId` the calling script declares,
-    // if any; it locates that item's assets once the plain path finds nothing.
-    std::string     CreateLayerFromTemplate(std::string_view requested_template_path,
-                                            std::string_view current_layer_name,
-                                            std::string_view script_workshop_id = {});
+    // R1-R2a: to be written from spec
     // Removes a layer `CreateLayerFromTemplate` (or `CreateTextLayer`) made: it
     // leaves the scene graph and every registry at once, so whatever a script
     // still holds for it reaches nothing. So does every layer registered below it
@@ -619,31 +604,7 @@ public:
     double                        NodeTextureAnimationRate(std::string_view name) const;
     /// The frame the sheet is on: the one a script pinned, else the one last drawn.
     double                        NodeTextureAnimationFrame(std::string_view name) const;
-    bool                          NodeHasVideoTexture(std::string_view name) const;
-    bool                          NodeVideoTextureIsPlaying(std::string_view name) const;
-    bool                          PlayNodeVideoTexture(std::string_view name);
-    bool                          PauseNodeVideoTexture(std::string_view name);
-    bool   SetNodeVideoTextureCurrentTime(std::string_view name, double seconds);
-    double NodeVideoTextureCurrentTime(std::string_view name) const;
-    bool   SetNodeVideoTextureRate(std::string_view name, float rate);
-    float  NodeVideoTextureRate(std::string_view name) const;
-    double NodeVideoTextureDuration(std::string_view name) const;
-    void   SetVideoTextureDuration(std::string_view texture_key, double seconds);
-    video::VideoPlaybackState
-                                 ResolveVideoPlaybackState(std::string_view texture_key,
-                                                           double           fallback_scene_elapsed_seconds) const;
-    void                         DispatchCursorClick(int button = 0);
-    void                         DispatchCursorDown(int button = 0);
-    void                         DispatchCursorEnter();
-    void                         DispatchCursorLeave();
-    void                         DispatchCursorMove();
-    void                         DispatchCursorUp(int button = 0);
-    bool                         DispatchCursorFrameEvents(bool cursor_was_in_window);
-    void                         DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
-                                                               const linalg::Vector3f& text_color);
-    void                         SetMediaIntegrationEnabled(bool enabled);
-    bool                         MediaIntegrationEnabled() const;
-    void                         DispatchMediaEventJson(std::string_view event_json);
+    // R1-R2b: to be written from spec
     /// Records a wallpaper's request to run the action its user bound to a
     /// `usershortcut` property.
     ///

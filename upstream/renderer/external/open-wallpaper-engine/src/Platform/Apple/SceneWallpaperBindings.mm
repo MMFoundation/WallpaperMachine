@@ -1020,45 +1020,7 @@ extern "C" int owe_scene_wallpaper_apply_system_media_artwork(
     });
 }
 
-extern "C" const char* owe_property_scaling_mode(void)
-{
-    return property_name(wallpaper::PROPERTY_SCALINGMODE);
-}
-
-extern "C" const char* owe_property_scaling_factor(void)
-{
-    return property_name(wallpaper::PROPERTY_SCALINGFACTOR);
-}
-
-extern "C" const char* owe_property_horizontal_flip(void)
-{
-    return property_name(wallpaper::PROPERTY_HORIZONTAL_FLIP);
-}
-
-extern "C" const char* owe_property_audio_response_enabled(void)
-{
-    return property_name(wallpaper::PROPERTY_AUDIO_RESPONSE_ENABLED);
-}
-
-extern "C" const char* owe_property_media_integration_enabled(void)
-{
-    return property_name(wallpaper::PROPERTY_MEDIA_INTEGRATION_ENABLED);
-}
-
-extern "C" const char* owe_property_force_shader_refresh(void)
-{
-    return property_name(wallpaper::PROPERTY_FORCE_SHADER_REFRESH);
-}
-
-extern "C" const char* owe_property_project_property_override_json(void)
-{
-    return property_name(wallpaper::PROPERTY_PROJECT_PROPERTY_OVERRIDE_JSON);
-}
-
-extern "C" const char* owe_property_project_property_reset(void)
-{
-    return property_name(wallpaper::PROPERTY_PROJECT_PROPERTY_RESET);
-}
+// R1-P3: to be written from spec
 
 extern "C" const char* owe_property_project_property_preview_json(void)
 {
@@ -1263,25 +1225,7 @@ extern "C" int owe_audio_submit_frames(
     });
 }
 
-extern "C" int owe_audio_current_spectrum_128(
-    float* out_bins,
-    uintptr_t out_len,
-    uint64_t* out_generation)
-{
-    clear_last_error();
-    if (out_bins == nullptr) return fail("the spectrum buffer is NULL");
-    if (out_len < 128) return fail("the spectrum buffer must hold at least 128 values");
-    const auto snapshot = wallpaper::audio::CurrentAudioSpectrumSnapshot();
-    const auto clean    = [](float value) {
-        return std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.0f;
-    };
-    for (std::size_t i = 0; i < 64; ++i) {
-        out_bins[i]      = clean(snapshot.left64[i]);
-        out_bins[64 + i] = clean(snapshot.right64[i]);
-    }
-    if (out_generation != nullptr) *out_generation = snapshot.generation;
-    return 0;
-}
+// R1-W2: to be written from spec
 
 extern "C" int owe_renderer_counters_set_enabled(bool enabled)
 {

@@ -10,19 +10,7 @@ if(ENDIAN)
 endif()
 
 if(APPLE)
-  find_library(ACCELERATE_FRAMEWORK Accelerate REQUIRED)
-  find_library(AUDIO_TOOLBOX_FRAMEWORK AudioToolbox REQUIRED)
-  find_library(AUDIO_UNIT_FRAMEWORK AudioUnit REQUIRED)
-  find_library(CORE_AUDIO_FRAMEWORK CoreAudio REQUIRED)
-  find_library(CORE_TEXT_FRAMEWORK CoreText REQUIRED)
-  find_library(CORE_GRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
-  find_library(CORE_MEDIA_FRAMEWORK CoreMedia REQUIRED)
-  find_library(CORE_VIDEO_FRAMEWORK CoreVideo REQUIRED)
-  find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
-  find_library(IOSURFACE_FRAMEWORK IOSurface REQUIRED)
-  find_library(METAL_FRAMEWORK Metal REQUIRED)
-  find_library(QUARTZ_CORE_FRAMEWORK QuartzCore REQUIRED)
-  find_library(VIDEOTOOLBOX_FRAMEWORK VideoToolbox REQUIRED)
+  # R1-B2a: to be written from spec
 endif()
 
 set(warn_opts
@@ -62,33 +50,7 @@ add_library(
   Type.cpp
   Runtime/CameraPath.cpp
   Runtime/DynamicValue.cpp
-  Runtime/SceneRuntimeContext.cpp
-  Runtime/SceneSettingResolver.cpp
-  Runtime/ScriptedDynamicValue.cpp
-  Shader/RustShaderBridge.cpp
-  Shader/SceneMetalVariants.cpp
-  Text/SystemFontResolver.cpp
-  Text/TextLayer.cpp
-  Scripting/ScriptEngine.cpp
-  Scripting/ScriptModuleSyntax.cpp
-  Scene/Parse/wpscene/WPImageObject.cpp
-  Scene/Parse/wpscene/WPParticleObject.cpp
-  Scene/Parse/wpscene/WPMaterial.cpp
-  Scene/Parse/wpscene/WPScene.cpp
-  Scene/Parse/wpscene/WPLightObject.cpp
-  Scene/Parse/WPParticleParser.cpp
-  Scene/Parse/WPShaderParser.cpp
-  Scene/Parse/WPSceneParser.cpp
-  Scene/SceneLayerReference.cpp
-  Scene/WPShaderValueUpdater.cpp
-  Scene/Parse/WPTexImageParser.cpp
-  Scene/Parse/WPVideoCache.cpp
-  Scene/Parse/WPSoundParser.cpp
-  Scene/Parse/WPMdlParser.cpp
-  Scene/Parse/WPPuppet.cpp
-  Project/ProjectManifest.cpp
-  Project/ProjectProperties.cpp
-  Runtime/VirtualAssetRegistry.cpp
+  # R1-B2b: to be written from spec
   Video/ClockedVideoSource.cpp
   Video/VideoColorConversion.cpp
   Video/VideoContainerProbe.cpp
@@ -168,18 +130,4 @@ if(APPLE)
 endif()
 
 target_include_directories(${PROJECT_NAME} PUBLIC .)
-set_target_properties(${PROJECT_NAME} PROPERTIES
-  OBJCXX_STANDARD 20
-  OBJCXX_STANDARD_REQUIRED YES)
-target_compile_options(${PROJECT_NAME} PRIVATE
-  "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
-if(BUILD_TESTS)
-  target_compile_definitions(${PROJECT_NAME} PUBLIC WESCENE_BUILD_TESTS=1)
-endif()
-if(RUST_SHADER_FFI)
-  target_compile_definitions(${PROJECT_NAME} PUBLIC WESCENE_HAS_RUST_SHADER_FFI=1)
-endif()
-if(TARGET wescene_rust_shader)
-  target_link_libraries(${PROJECT_NAME} PUBLIC wescene_rust_shader)
-endif()
-set_property(TARGET ${PROJECT_NAME} PROPERTY POSITION_INDEPENDENT_CODE ON)
+# R1-B2c: to be written from spec

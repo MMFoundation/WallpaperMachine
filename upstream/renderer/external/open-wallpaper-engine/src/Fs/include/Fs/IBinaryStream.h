@@ -37,17 +37,7 @@ public:
         return value;
     }
 
-    i64 ReadInt64() { return _ReadInt<i64>(); }
-    u64 ReadUint64() { return _ReadInt<u64>(); }
-
-    i32 ReadInt32() { return _ReadInt<i32>(); }
-    u32 ReadUint32() { return _ReadInt<u32>(); }
-
-    i16 ReadInt16() { return _ReadInt<i16>(); }
-    u16 ReadUint16() { return _ReadInt<u16>(); }
-
-    i8 ReadInt8() { return _ReadInt<i8>(); }
-    u8 ReadUint8() { return _ReadInt<u8>(); }
+    // R1-C2a: to be written from spec
 
     // Bytes up to the next NUL, which is consumed but not returned; or whatever was
     // left when the stream ended first.
@@ -67,29 +57,7 @@ public:
         return text;
     }
 
-    bool Rewind() { return SeekSet(0); }
-
-    usize Usize() const noexcept { return static_cast<usize>(Size()); }
-
-public:
-    virtual usize Read(void* buffer, usize sizeInByte) = 0;
-    virtual char* Gets(char* buffer, usize sizeStr)    = 0;
-    virtual idx   Tell() const                         = 0;
-    virtual bool  SeekSet(idx offset)                  = 0;
-    virtual bool  SeekCur(idx offset)                  = 0;
-    virtual bool  SeekEnd(idx offset)                  = 0;
-
-    virtual isize Size() const = 0;
-
-protected:
-    virtual usize Write_impl(const void* buffer, usize sizeInByte) = 0;
-};
-
-class IBinaryStreamW : IBinaryStream {
-public:
-    virtual ~IBinaryStreamW() = default;
-    usize Write(const void* buffer, usize sizeInByte) { return Write_impl(buffer, sizeInByte); }
-};
+    // R1-C2b: to be written from spec
 
 } // namespace fs
 } // namespace wallpaper

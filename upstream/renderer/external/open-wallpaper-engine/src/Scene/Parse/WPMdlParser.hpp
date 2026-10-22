@@ -28,25 +28,7 @@ struct WPMdl {
     struct Header {
         i32      mdlv { 13 };
         uint32_t mdl_flag { 0 };
-        uint32_t mesh_count { 1 };
-    };
-    struct Mesh {
-        std::string mat_json_file;
-        uint32_t    flag_a { 0 };
-        bool        has_flag_a2_one { false };
-        uint32_t    flag { 0 };
-        std::array<float, 3> aabb_min {};
-        std::array<float, 3> aabb_max {};
-        bool        has_aabb { false };
-
-        std::vector<std::array<float, 3>>    positions;
-        std::vector<std::array<float, 3>>    normals;
-        std::vector<std::array<float, 4>>    tangents;
-        std::vector<std::array<uint8_t, 4>>  extra4;
-        std::vector<std::array<uint32_t, 4>> blend_indices;
-        std::vector<std::array<float, 4>>    blend_weights;
-        std::vector<std::array<float, 2>>    texcoords;
-        std::vector<std::array<float, 2>>    texcoord2;
+        // R1-S6: to be written from spec
         // 32-bit once a mesh has more vertices than a uint16 index can name.
         // High-poly bodies are stored that way; reading them as uint16 triples
         // doubles the triangle count and the mesh is then rejected.

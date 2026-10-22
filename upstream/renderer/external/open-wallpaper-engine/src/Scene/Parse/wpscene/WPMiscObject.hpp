@@ -94,19 +94,7 @@ struct WPMiscObjectBase {
     // Wallpaper Engine's default for an object that leaves the key out.
     std::array<float, 2> parallaxDepth { 1.0f, 1.0f };
     bool                 visible { true };
-    bool                 locktransforms { false };
-    bool                 muteineditor { false };
-    bool                 nointerpolation { false };
-    bool                 dynamic_origin { false };
-    bool                 dynamic_visible { false };
-    std::vector<int32_t> dependencies;
-    nlohmann::json       instance;
-    nlohmann::json       origin_setting;
-    nlohmann::json       scale_setting;
-    nlohmann::json       angles_setting;
-    nlohmann::json       visible_setting;
-    nlohmann::json       field_bindings;
-
+    // R1-S9: to be written from spec
     void FromCommonJson(const nlohmann::json& json) {
         if (! json.is_object()) return;
         if (json.contains("id")) ReadInt32(json.at("id"), id);

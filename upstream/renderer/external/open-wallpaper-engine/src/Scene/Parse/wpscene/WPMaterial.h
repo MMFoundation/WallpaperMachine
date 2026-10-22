@@ -55,27 +55,6 @@ public:
 
 class WPMaterial {
 public:
-    bool                                                FromJson(const nlohmann::json&);
-    void                                                MergePass(const WPMaterialPass&);
-    std::string                                         blending { "translucent" };
-    std::string                                         cullmode { "nocull" };
-    std::string                                         shader;
-    std::string                                         depthtest { "disabled" };
-    std::string                                         depthwrite { "disabled" };
-    std::vector<std::string>                            textures;
-    std::vector<WPUserTexture>                          usertextures;
-    std::unordered_map<std::string, int32_t>            combos;
-    std::unordered_map<std::string, WPConstantShaderValue> constantshadervalues;
-
-    bool use_puppet { false };
-};
-
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPMaterialPassBindItem, name, index);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPUserTexture, name, type);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPConstantShaderValue, value, user);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPMaterialPass, bind, target, textures, combos,
-                                   constantshadervalues);
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WPMaterial, blending, shader, textures, combos,
-                                   constantshadervalues);
+    // R1-S14: to be written from spec
 } // namespace wpscene
 } // namespace wallpaper

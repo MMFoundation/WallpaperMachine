@@ -67,21 +67,7 @@ public:
 
 class WPImageObject {
 public:
-    struct Config {
-        bool passthrough { false };
-    };
-    bool                       FromJson(const nlohmann::json&, fs::VFS&);
-    int32_t                    id { 0 };
-    int32_t                    parent_id { -1 };
-    std::string                name;
-    std::array<float, 3>       origin { 0.0f, 0.0f, 0.0f };
-    std::array<float, 3>       scale { 1.0f, 1.0f, 1.0f };
-    std::array<float, 3>       angles { 0.0f, 0.0f, 0.0f };
-    std::array<float, 2>       size { 2.0f, 2.0f };
-    // Wallpaper Engine's default for an object that leaves the key out.
-    std::array<float, 2>       parallaxDepth { 1.0f, 1.0f };
-    std::array<float, 2>       cropoffset { 0.0f, 0.0f };
-    std::array<float, 3>       color { 1.0f, 1.0f, 1.0f };
+    // R1-S13a: to be written from spec
     // A picture stands in for the plain colour this layer is made of, and is drawn as it is: the
     // colour (and whatever property or script drives it) no longer tints it.
     bool                       colorIgnored { false };
@@ -112,24 +98,7 @@ public:
     bool                       autosize { false };
     bool                       projectlayer { false };
     bool                       solidlayer { false };
-    bool                       dynamic_origin { false };
-    bool                       dynamic_visible { false };
-    bool                       dynamic_alpha { false };
-    std::string                image;
-    std::string                alignment { "center" };
-    nlohmann::json             origin_setting;
-    nlohmann::json             scale_setting;
-    nlohmann::json             angles_setting;
-    nlohmann::json             visible_setting;
-    nlohmann::json             alpha_setting;
-    WPMaterial                 material;
-    std::vector<WPImageEffect> effects;
-    Config                     config;
-    std::vector<int32_t>       dependencies;
-    nlohmann::json             field_bindings;
-
-    std::string                                puppet;
-    std::vector<WPPuppetLayer::AnimationLayer> puppet_layers;
+    // R1-S13b: to be written from spec
     // Raw "animationlayers" entries, parallel to puppet_layers, so the parser
     // can bind visible/rate/blend to user properties.
     std::vector<nlohmann::json>                puppet_layer_settings;

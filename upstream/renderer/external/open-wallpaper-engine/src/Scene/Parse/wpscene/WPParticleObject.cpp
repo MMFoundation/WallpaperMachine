@@ -231,24 +231,7 @@ bool ParticleRender::FromJson(const nlohmann::json& json) {
     return true;
 }
 
-bool Emitter::FromJson(const nlohmann::json& json) {
-    id = 0;
-    GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
-    GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
-    GET_JSON_NAME_VALUE_NOWARN(json, "rate", rate);
-    GET_JSON_NAME_VALUE_NOWARN(json, "instantaneous", instantaneous);
-    GET_JSON_NAME_VALUE_NOWARN(json, "speedmin", speedmin);
-    GET_JSON_NAME_VALUE_NOWARN(json, "speedmax", speedmax);
-    GET_JSON_NAME_VALUE_NOWARN(json, "directions", directions);
-    GET_JSON_NAME_VALUE_NOWARN(json, "origin", origin);
-    GET_JSON_NAME_VALUE_NOWARN(json, "distancemin", distancemin);
-    GET_JSON_NAME_VALUE_NOWARN(json, "distancemax", distancemax);
-    GET_JSON_NAME_VALUE_NOWARN(json, "cone", cone);
-
-    GET_JSON_NAME_VALUE_NOWARN(json, "sign", sign);
-    for (auto& axis : sign) axis = (axis > 0) - (axis < 0);
-
-    GET_JSON_NAME_VALUE_NOWARN(json, "controlpoint", controlpoint);
+// R1-S12: to be written from spec
     if (controlpoint >= 8) LOG_ERROR("emitter names control point %d; using 7", controlpoint);
     controlpoint = ClampControlpoint(controlpoint);
 

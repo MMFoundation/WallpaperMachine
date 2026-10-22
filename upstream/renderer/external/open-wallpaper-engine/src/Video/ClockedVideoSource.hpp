@@ -108,17 +108,7 @@ private:
     void decodeLoop();
 
     std::unique_ptr<VideoFrameBackend> m_backend;
-    std::string                      m_debug_label;
-    std::string                      m_initial_error;
-    mutable std::mutex               m_mutex;
-    std::condition_variable          m_condition;
-    VideoPlaybackState               m_playback_state {};
-    double                           m_scene_absolute_seconds { 0.0 };
-    std::chrono::steady_clock::time_point m_clock_base_time {};
-    double                           m_clock_base_seconds { 0.0 };
-    bool                             m_clock_initialized { false };
-    double                           m_duration_seconds { 0.0 };
-    double                           m_frame_duration_seconds { 1.0 / 60.0 };
+    // R1-X3: to be written from spec
     /// Process-unique, so two decoders opened from the same file are two
     /// identities. Never derived from the path or from content.
     const uint64_t                   m_instance_id;

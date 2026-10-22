@@ -1,25 +1,7 @@
 ﻿---
 AccessModifierOffset: -4
 
-AlignAfterOpenBracket: Align
-AlignConsecutiveMacros: true
-AlignConsecutiveAssignments: true
-AlignConsecutiveDeclarations: true
-AlignEscapedNewlines: Left
-AlignOperands: true
-AlignTrailingComments: true
-
-AllowAllParametersOfDeclarationOnNextLine: true
-AllowShortBlocksOnASingleLine: false
-AllowShortCaseLabelsOnASingleLine: true
-AllowShortIfStatementsOnASingleLine: true
-AllowShortLoopsOnASingleLine: true
-AllowShortLambdasOnASingleLine: false
-
-AlwaysBreakAfterReturnType: None
-AlwaysBreakTemplateDeclarations: true
-
-BreakBeforeBraces: Custom
+# R1-B3a: to be written from spec
 BraceWrapping:
   AfterEnum: true
   AfterNamespace: true
@@ -38,20 +20,7 @@ KeepEmptyLinesAtTheStartOfBlocks: false
 Language: Cpp
 PointerAlignment: Left
 SortIncludes: false
-SpaceAfterCStyleCast: false
-SpaceAfterLogicalNot: true
-SpaceAfterTemplateKeyword: false
-SpaceBeforeAssignmentOperators: true
-SpaceBeforeCpp11BracedList: true
-SpaceBeforeCtorInitializerColon: false
-SpaceBeforeInheritanceColon: true
-SpaceBeforeRangeBasedForLoopColon: true
-SpaceInEmptyParentheses: false
-SpacesInAngles: false
-SpacesInCStyleCastParentheses: false
-SpacesInContainerLiterals: false
-SpacesInParentheses: false
-SpacesInSquareBrackets: false
+# R1-B3b: to be written from spec
 Standard: Cpp11
 TabWidth: 4
 UseTab: Never
