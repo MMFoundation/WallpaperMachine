@@ -124,6 +124,7 @@ final class DesktopWallpaperLedger {
         self.folder = folder
         self.workspace = workspace
         self.confirmationWindow = confirmationWindow
+        self.systemDefaultPicture = systemDefaultPicture
         journal = folder.appendingPathComponent(Self.journalName)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         if FileManager.default.fileExists(atPath: journal.path) {

@@ -160,6 +160,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         pixivStore.restoreSession()
         workshopStore.restoreSteamWebSession()
+        // Follows the Mac for Automatic sunrise and sunset. It asks for nothing here: access is
+        // requested only from an explicit action in the panel.
+        SolarLocationTracker.shared.start()
+        AppLog.info("startup: solar location tracker started")
         // A crash during a download leaves its staging behind, holding the whole downloaded item.
         let stagingRoot = ClientPaths.supportURL
         let pixivStagingRoot = PixivWallpaperPackager.stagingRoot(forLibrary: ClientPaths.libraryURL)
@@ -1517,9 +1521,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, self.statusItem != nil else { return }
-                if self.controlPanelWindow == nil, self.whatsNewWindow == nil, self.previewWindow == nil {
-                    NSApp.setActivationPolicy(.accessory)
-                }
+                self.leaveDockUnlessAWindowIsOpen()
                 self.rebuildMenu()
             }
         }
