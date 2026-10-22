@@ -104,6 +104,17 @@ add_scene_schema_behavior_test(scene_schema_part01_test
     scene_schema_part01_objects_test.cpp
     scene_schema_part01_model_layers_test.cpp
     scene_schema_part01_cameras_test.cpp)
+add_scene_schema_behavior_test(scene_schema_part09_test
+    scene_schema_part09_nodes_test.cpp
+    scene_schema_part09_layers_test.cpp)
+add_scene_schema_behavior_test(scene_schema_part10_test
+    scene_schema_part10_colour_test.cpp
+    scene_schema_part10_settings_test.cpp
+    scene_schema_part10_camera_test.cpp
+    scene_schema_part10_vector_test.cpp)
+add_scene_schema_behavior_test(scene_schema_part11_test
+    scene_schema_part11_timelines_test.cpp
+    scene_schema_part11_audio_test.cpp)
 # ------------------------------------------------------------------------------------------
 
 add_executable(mdl_schema_tests mdl_schema_tests.cpp)
