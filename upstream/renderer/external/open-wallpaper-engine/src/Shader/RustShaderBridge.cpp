@@ -21,7 +21,27 @@ struct RsShaderOwnedBytes {
 
 struct RsShaderProgram;
 
-// R1-X1: to be written from spec
+// Called back while a compile runs, for every `#include`d path the shader names.
+using RsShaderIncludeCallback = RsShaderOwnedBytes (*)(const char* path, void* user_data);
+
+#ifdef WESCENE_HAS_RUST_SHADER_FFI
+extern "C" {
+int rs_shader_compile_program(const char* request_json, RsShaderIncludeCallback include_callback,
+                              void* include_user_data, RsShaderProgram** out_program);
+size_t      rs_shader_program_stage_count(const RsShaderProgram* program);
+int         rs_shader_program_stage_kind(const RsShaderProgram* program, size_t stage_index);
+int         rs_shader_program_stage_target(const RsShaderProgram* program, size_t stage_index);
+const char* rs_shader_program_stage_msl_source(const RsShaderProgram* program, size_t stage_index);
+const char* rs_shader_program_stage_metal_json(const RsShaderProgram* program, size_t stage_index);
+const char* rs_shader_program_metadata_json(const RsShaderProgram* program);
+const char* rs_shader_program_reflection_json(const RsShaderProgram* program);
+const char* rs_shader_program_diagnostics_json(const RsShaderProgram* program);
+const char* rs_shader_program_cache_key(const RsShaderProgram* program);
+void        rs_shader_program_free(RsShaderProgram* program);
+const char* rs_shader_last_error();
+const char* rs_shader_cache_identity();
+}
+#endif
 
 RustShaderMetalSlotKind FromMetalSlotKind(std::string_view slot_kind)
 {

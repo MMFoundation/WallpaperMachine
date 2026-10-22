@@ -97,7 +97,20 @@ uint8_t ScriptedDynamicValue::CursorHandlerMask() const noexcept {
     return m_program != nullptr && m_program->Valid() ? m_program->Capabilities().cursor_handlers : 0;
 }
 
-// R1-R5: to be written from spec
+// Cursor events go straight to the script program, when there is one.
+#define FORWARD_CURSOR_EVENT(event)                                              \
+    void ScriptedDynamicValue::DispatchCursor##event(const ScriptHostContext& ctx) { \
+        if (m_program != nullptr) m_program->DispatchCursor##event(ctx);         \
+    }
+
+FORWARD_CURSOR_EVENT(Click)
+FORWARD_CURSOR_EVENT(Down)
+FORWARD_CURSOR_EVENT(Enter)
+FORWARD_CURSOR_EVENT(Leave)
+FORWARD_CURSOR_EVENT(Move)
+FORWARD_CURSOR_EVENT(Up)
+
+#undef FORWARD_CURSOR_EVENT
 
 void ScriptedDynamicValue::DispatchAnimationEvent(const ScriptHostContext& host_context,
                                                   std::string_view event_name, double frame) {

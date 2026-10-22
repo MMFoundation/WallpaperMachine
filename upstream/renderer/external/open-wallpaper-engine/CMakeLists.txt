@@ -5,7 +5,25 @@ if(APPLE)
     enable_language(OBJCXX)
 endif()
 
-# R1-B1a: to be written from spec
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Only clang-family compilers are supported unless explicitly overridden.
+if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT WAYWALLEN_ALLOW_NONCLANG)
+    message(
+        FATAL_ERROR
+        "Unsupported compiler '${CMAKE_CXX_COMPILER_ID}': configure with clang "
+        "(-DCMAKE_CXX_COMPILER=clang++) or pass -DWAYWALLEN_ALLOW_NONCLANG=ON to accept the risk.")
+endif()
+
+find_package(PkgConfig REQUIRED)
+
+# True when this directory is the root project (not pulled in with add_subdirectory).
+set(_wescene_is_top_level OFF)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(_wescene_is_top_level ON)
+endif()
 
 # This project's own container readers (wmMedia). The sources live outside
 # upstream/, in the repository's top-level Renderer/Media, and are pure C++17 with
@@ -39,7 +57,34 @@ if(EXISTS "${WESCENE_SURFACE_DIR}/CMakeLists.txt")
     add_subdirectory("${WESCENE_SURFACE_DIR}" "${CMAKE_BINARY_DIR}/Renderer/Surface")
 endif()
 
-# R1-B1b: to be written from spec
+# Vendored headers are treated as system headers.
+include_directories(SYSTEM third_party)
+add_subdirectory(third_party)
+
+option(BUILD_TESTS "Build the wescene-renderer test suite" ${_wescene_is_top_level})
+
+# A prebuilt Rust shader static library switches the FFI on and is linked whole,
+# so every rs_shader_* symbol survives dead-stripping.
+set(_wescene_rust_shader_ffi_default OFF)
+if(DEFINED RUST_SHADER_STATICLIB AND NOT "${RUST_SHADER_STATICLIB}" STREQUAL "")
+    set(_wescene_rust_shader_ffi_default ON)
+    if(NOT TARGET wescene_rust_shader)
+        add_library(wescene_rust_shader INTERFACE IMPORTED GLOBAL)
+        set_property(TARGET wescene_rust_shader PROPERTY INTERFACE_LINK_DEPENDS
+                                                         "${RUST_SHADER_STATICLIB}")
+        if(APPLE)
+            target_link_options(
+                wescene_rust_shader INTERFACE "LINKER:-force_load,${RUST_SHADER_STATICLIB}")
+        else()
+            target_link_options(
+                wescene_rust_shader
+                INTERFACE
+                "LINKER:--whole-archive"
+                "${RUST_SHADER_STATICLIB}"
+                "LINKER:--no-whole-archive")
+        endif()
+    endif()
+endif()
 option(
     RUST_SHADER_FFI
     "Compile the Rust shader bridge against externally resolved rs_shader_* symbols"

@@ -28,7 +28,28 @@ struct WPMdl {
     struct Header {
         i32      mdlv { 13 };
         uint32_t mdl_flag { 0 };
-        // R1-S6: to be written from spec
+        uint32_t mesh_count { 1 };
+    };
+
+    struct Mesh {
+        std::string mat_json_file; // material the mesh is drawn with
+        // Flag words as they are stored in the file.
+        uint32_t flag_a { 0 };
+        bool     has_flag_a2_one { false };
+        uint32_t flag { 0 };
+        // Bounding box, when the file carries one.
+        std::array<float, 3> aabb_min {};
+        std::array<float, 3> aabb_max {};
+        bool                 has_aabb { false };
+        // One entry per vertex; widths are fixed by the file layout.
+        std::vector<std::array<float, 3>>    positions;
+        std::vector<std::array<float, 3>>    normals;
+        std::vector<std::array<float, 4>>    tangents;       // xyz and handedness
+        std::vector<std::array<uint8_t, 4>>  extra4;         // four bytes a vertex
+        std::vector<std::array<uint32_t, 4>> blend_indices;  // bones, 32 bits each
+        std::vector<std::array<float, 4>>    blend_weights;
+        std::vector<std::array<float, 2>>    texcoords;
+        std::vector<std::array<float, 2>>    texcoord2;      // second UV set
         // 32-bit once a mesh has more vertices than a uint16 index can name.
         // High-poly bodies are stored that way; reading them as uint16 triples
         // doubles the triangle count and the mesh is then rejected.

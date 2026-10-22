@@ -27,7 +27,28 @@ public:
         usize                offset;
     };
 
-    // R1-S17: to be written from spec
+    // `count` vertices of room, laid out as `attrs` says.
+    SceneVertexArray(const std::vector<SceneVertexAttribute>& attrs, const std::size_t count);
+    ~SceneVertexArray();
+    SceneVertexArray(SceneVertexArray&&) noexcept;
+    SceneVertexArray& operator=(SceneVertexArray&&) noexcept;
+
+    // Filling: append a whole vertex, or write one attribute / one vertex in place.
+    bool AddVertex(const float*);   // one vertex of `OneSize()` words, at the end
+    bool SetVertex(std::string_view name, std::span<const float> data) noexcept;
+    bool SetVertexs(std::size_t index, std::span<const float> data) noexcept;
+
+    // Per-array flags by name.
+    bool GetOption(std::string_view) const;
+    void SetOption(std::string_view, bool);
+
+    // Reading back. Sizes are counted in 4-byte words; the `...Of` forms are in bytes.
+    const float* Data() const { return m_data.get(); }
+    usize DataSize() const { return m_size; }                                 // words filled
+    usize DataSizeOf() const { return m_size * sizeof(float); }               // bytes filled
+    usize VertexCount() const { return m_stride == 0 ? 0 : m_size / m_stride; }  // no divide by 0
+    usize CapacitySize() const { return m_capacity; }                         // words allocated
+    usize CapacitySizeOf() const { return m_capacity * sizeof(float); }       // bytes allocated
     usize        OneSize() const { return m_stride; }
     usize        OneSizeOf() const { return m_stride * sizeof(float); }
 

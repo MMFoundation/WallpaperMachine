@@ -231,7 +231,30 @@ bool ParticleRender::FromJson(const nlohmann::json& json) {
     return true;
 }
 
-// R1-S12: to be written from spec
+bool Emitter::FromJson(const nlohmann::json& json) {
+    // A missing or mistyped key leaves the member as it is, without a warning.
+    const auto lenient = [&json](const char* key, auto& member) {
+        GET_JSON_NAME_VALUE_NOWARN(json, key, member);
+    };
+
+    id = 0;  // the member has no initialiser; an absent key must read 0
+    lenient("name", name);
+    lenient("id", id);
+    lenient("rate", rate);
+    lenient("instantaneous", instantaneous);
+    lenient("speedmin", speedmin);
+    lenient("speedmax", speedmax);
+    lenient("directions", directions);
+    lenient("origin", origin);
+    lenient("distancemin", distancemin);
+    lenient("distancemax", distancemax);
+    lenient("cone", cone);
+
+    // Only the direction of each axis matters, so the sign is reduced to -1, 0 or 1.
+    lenient("sign", sign);
+    for (int32_t& axis : sign) axis = (axis > 0) - (axis < 0);
+
+    lenient("controlpoint", controlpoint);
     if (controlpoint >= 8) LOG_ERROR("emitter names control point %d; using 7", controlpoint);
     controlpoint = ClampControlpoint(controlpoint);
 

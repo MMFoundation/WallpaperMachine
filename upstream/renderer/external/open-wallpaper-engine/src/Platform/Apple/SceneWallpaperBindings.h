@@ -43,7 +43,43 @@ void owe_set_log_callback(owe_log_callback callback);
 uint64_t owe_current_log_scope(void);
 int owe_scene_wallpaper_set_log_scope(owe_scene_wallpaper* scene, uint64_t scope);
 
-// R1-P1: to be written from spec
+/* Lifecycle of the host handle. Every function here returns 0 on success. */
+int owe_scene_wallpaper_new(owe_scene_wallpaper** out_scene);
+int owe_scene_wallpaper_delete(owe_scene_wallpaper* scene);
+int owe_scene_wallpaper_init(owe_scene_wallpaper* scene);
+int owe_scene_wallpaper_shutdown(owe_scene_wallpaper* scene);
+
+/* The drawing surface: the CAMetalLayer, its size in points and the size to render at. */
+int owe_scene_wallpaper_init_metal(
+    owe_scene_wallpaper* scene,
+    void* metal_layer,
+    uint32_t width,
+    uint32_t height,
+    uint32_t render_width,
+    uint32_t render_height,
+    double display_scale_factor);
+int owe_scene_wallpaper_begin_surface_reconfigure(owe_scene_wallpaper* scene);
+int owe_scene_wallpaper_finish_surface_reconfigure(
+    owe_scene_wallpaper* scene,
+    void* metal_layer,
+    uint32_t width,
+    uint32_t height,
+    uint32_t render_width,
+    uint32_t render_height,
+    double display_scale_factor);
+
+/* What to show and how fast. */
+int owe_scene_wallpaper_apply_config(
+    owe_scene_wallpaper* scene,
+    const char* source,
+    const char* assets,
+    const char* cache_path,
+    uint32_t fps,
+    bool paused,
+    bool force_shader_refresh,
+    const char* project_property_override_json);
+int owe_scene_wallpaper_set_target_fps(owe_scene_wallpaper* scene, uint32_t fps);
+int owe_scene_wallpaper_set_paused(owe_scene_wallpaper* scene, bool paused);
 
 int owe_scene_wallpaper_set_render_scale(owe_scene_wallpaper* scene, double scale);
 
@@ -119,7 +155,50 @@ int owe_scene_wallpaper_mouse_enter(owe_scene_wallpaper* scene, bool entered);
 /* Reconciles held levels without creating or clearing pending edges. Requires initialization. */
 int owe_scene_wallpaper_set_mouse_button_baseline(owe_scene_wallpaper* scene, uint32_t down);
 
-// R1-P2: to be written from spec
+/* Property setters: a property takes exactly one of these kinds (see its accessor below). */
+int owe_scene_wallpaper_set_property_bool(
+    owe_scene_wallpaper* scene,
+    const char* name,
+    bool value);
+int owe_scene_wallpaper_set_property_int32(
+    owe_scene_wallpaper* scene,
+    const char* name,
+    int32_t value);
+int owe_scene_wallpaper_set_property_float(
+    owe_scene_wallpaper* scene,
+    const char* name,
+    float value);
+int owe_scene_wallpaper_set_property_string(
+    owe_scene_wallpaper* scene,
+    const char* name,
+    const char* value);
+
+/* Sound and media. */
+int owe_scene_wallpaper_set_audio_volume(owe_scene_wallpaper* scene, float volume);
+int owe_scene_wallpaper_set_audio_muted(owe_scene_wallpaper* scene, bool muted);
+int owe_scene_wallpaper_submit_media_event_json(
+    owe_scene_wallpaper* scene,
+    const char* event_json);
+int owe_scene_wallpaper_apply_system_media_artwork(
+    owe_scene_wallpaper* scene,
+    uint32_t width,
+    uint32_t height,
+    const uint8_t* rgba,
+    uintptr_t rgba_len);
+
+/*
+ * The names the setters above are given. Each pointer is NUL-terminated, valid
+ * for the life of the process and never freed.
+ */
+const char* owe_property_scaling_mode(void);                    /* int32 */
+const char* owe_property_scaling_factor(void);                  /* float */
+const char* owe_property_horizontal_flip(void);                 /* bool */
+const char* owe_property_audio_response_enabled(void);          /* bool */
+const char* owe_property_media_integration_enabled(void);       /* bool */
+const char* owe_property_force_shader_refresh(void);            /* bool */
+const char* owe_property_project_property_override_json(void);  /* string */
+const char* owe_property_project_property_reset(void);          /* bool, true resets */
+
 /*
  * String property taking a flat JSON object: the whole property state to show on
  * the running scene without loading it again. It is never remembered, so any
@@ -130,7 +209,7 @@ const char* owe_property_project_property_preview_json(void);
 int owe_audio_submit_mono_frames(uint32_t sample_rate, uint32_t frame_count,
                                  const float* pcm_frames);
 int owe_audio_submit_frames(uint32_t sample_rate, uint32_t frame_count, const float* pcm_frames);
-// R1-W2h: to be written from spec
+int owe_audio_current_spectrum_128(float* out_bins, uintptr_t out_len, uint64_t* out_generation);
 /*
  * Whether the analysis behind `owe_audio_current_spectrum_128` genuinely
  * carried two channels. Returns 1 for stereo, 0 for a mono source whose

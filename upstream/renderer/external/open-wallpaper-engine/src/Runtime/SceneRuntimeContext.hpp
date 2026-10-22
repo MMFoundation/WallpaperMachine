@@ -446,7 +446,29 @@ public:
     /// thread and must not touch scene state -- asking for one frame is all it
     /// is for. Passing an empty function detaches it.
     void SetContentWakeHandler(std::function<void()> handler);
-    // R1-R2a: to be written from spec
+    /// Does a node, or a sound layer, answer to this name?
+    bool HasNodeNamed(std::string_view node_name) const;
+    bool HasSoundLayer(std::string_view layer_name) const;
+
+    /// Sound layers by name. Each returns false when no such layer exists.
+    bool  PlaySoundLayer(std::string_view layer_name);
+    bool  PauseSoundLayer(std::string_view layer_name);
+    bool  StopSoundLayer(std::string_view layer_name);
+    bool  SoundLayerPlaying(std::string_view layer_name) const;
+    bool  SetSoundLayerVolume(std::string_view layer_name, float volume);
+    float SoundLayerVolume(std::string_view layer_name) const;
+    bool  SetSoundLayerMuted(std::string_view layer_name, bool muted);
+    bool  SoundLayerMuted(std::string_view layer_name) const;
+
+    /// Position of the named node among its siblings.
+    int NodeSiblingIndex(std::string_view name) const;
+
+    /// Instantiates a layer from a template file and returns its runtime name. The calling
+    /// script's own `__workshopId`, when it declares one, goes in `script_workshop_id`: it
+    /// finds that item's assets when the plain path leads nowhere.
+    std::string CreateLayerFromTemplate(std::string_view requested_template_path,
+                                        std::string_view current_layer_name,
+                                        std::string_view script_workshop_id = {});
     // Removes a layer `CreateLayerFromTemplate` (or `CreateTextLayer`) made: it
     // leaves the scene graph and every registry at once, so whatever a script
     // still holds for it reaches nothing. So does every layer registered below it
@@ -604,7 +626,44 @@ public:
     double                        NodeTextureAnimationRate(std::string_view name) const;
     /// The frame the sheet is on: the one a script pinned, else the one last drawn.
     double                        NodeTextureAnimationFrame(std::string_view name) const;
-    // R1-R2b: to be written from spec
+    /// A node's video texture, looked up by the node's name.
+    bool NodeHasVideoTexture(std::string_view node_name) const;
+    // Transport.
+    bool PlayNodeVideoTexture(std::string_view node_name);
+    bool PauseNodeVideoTexture(std::string_view node_name);
+    bool NodeVideoTextureIsPlaying(std::string_view node_name) const;
+    // Position and speed, in seconds and as a multiple of normal.
+    bool   SetNodeVideoTextureCurrentTime(std::string_view node_name, double seconds);
+    double NodeVideoTextureCurrentTime(std::string_view node_name) const;
+    bool   SetNodeVideoTextureRate(std::string_view node_name, float rate);
+    float  NodeVideoTextureRate(std::string_view node_name) const;
+    double NodeVideoTextureDuration(std::string_view node_name) const;
+
+    /// The texture itself, by key: its length once known, and the playback state a frame
+    /// should show (falling back to the scene clock when nothing drives it).
+    void SetVideoTextureDuration(std::string_view texture_key, double seconds);
+    video::VideoPlaybackState
+    ResolveVideoPlaybackState(std::string_view texture_key,
+                              double fallback_scene_elapsed_seconds) const;
+
+    /// Cursor events for the scripts that listen. The button-carrying ones default to the
+    /// primary button.
+    void DispatchCursorClick(int which_button = 0);
+    void DispatchCursorDown(int which_button = 0);
+    void DispatchCursorUp(int which_button = 0);
+    // Pointer entered, left or moved over a layer.
+    void DispatchCursorEnter();
+    void DispatchCursorLeave();
+    void DispatchCursorMove();
+    /// One frame's worth of them; true when a listener took part.
+    bool DispatchCursorFrameEvents(bool cursor_was_in_window);
+
+    /// Media integration: the artwork colours, the consent switch and the raw event feed.
+    void DispatchMediaThumbnailChanged(const linalg::Vector3f& primary_color,
+                                       const linalg::Vector3f& text_color);
+    void SetMediaIntegrationEnabled(bool enabled);
+    bool MediaIntegrationEnabled() const;
+    void DispatchMediaEventJson(std::string_view event_json);
     /// Records a wallpaper's request to run the action its user bound to a
     /// `usershortcut` property.
     ///

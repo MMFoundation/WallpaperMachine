@@ -67,7 +67,24 @@ public:
 
 class WPImageObject {
 public:
-    // R1-S13a: to be written from spec
+    struct Config {
+        bool passthrough { false };
+    };
+
+    bool FromJson(const nlohmann::json&, fs::VFS&);
+
+    int32_t     id { 0 };
+    int32_t     parent_id { -1 };  // -1: a layer of the scene itself
+    std::string name;
+    // Placement.
+    std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3> scale { 1.0f, 1.0f, 1.0f };
+    std::array<float, 3> angles { 0.0f, 0.0f, 0.0f };
+    std::array<float, 2> size { 2.0f, 2.0f };
+    // What the key reads when the file leaves it out.
+    std::array<float, 2> parallaxDepth { 1.0f, 1.0f };
+    std::array<float, 2> cropoffset { 0.0f, 0.0f };
+    std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
     // A picture stands in for the plain colour this layer is made of, and is drawn as it is: the
     // colour (and whatever property or script drives it) no longer tints it.
     bool                       colorIgnored { false };
@@ -98,7 +115,29 @@ public:
     bool                       autosize { false };
     bool                       projectlayer { false };
     bool                       solidlayer { false };
-    // R1-S13b: to be written from spec
+    // Set when a script or user property drives the value, so it is bound rather than read once.
+    bool dynamic_origin { false };
+    bool dynamic_visible { false };
+    bool dynamic_alpha { false };
+
+    std::string image;                      // model file
+    std::string alignment { "center" };     // layout tests rely on this default
+
+    // The setting objects as authored, whole, for the ones a property or script may drive.
+    nlohmann::json origin_setting;
+    nlohmann::json scale_setting;
+    nlohmann::json angles_setting;
+    nlohmann::json visible_setting;
+    nlohmann::json alpha_setting;
+
+    WPMaterial                 material;        // the layer's own pass
+    std::vector<WPImageEffect> effects;         // run in order over the layer's picture
+    Config                     config;
+    std::vector<int32_t>       dependencies;    // ids of the layers this one depends on
+    nlohmann::json             field_bindings;
+
+    std::string                                puppet;
+    std::vector<WPPuppetLayer::AnimationLayer> puppet_layers;
     // Raw "animationlayers" entries, parallel to puppet_layers, so the parser
     // can bind visible/rate/blend to user properties.
     std::vector<nlohmann::json>                puppet_layer_settings;

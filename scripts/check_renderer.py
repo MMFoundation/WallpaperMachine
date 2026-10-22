@@ -49,7 +49,7 @@ REGRESSION_BINARIES = {
     "timer_tests": False, "metal_backend_test": False,
     "metal_scene_draw_smoke": True, "metal_poster_capture_test": True,
     "metal_video_texture_test": True, "unchanged_present_test": True, "scene_failure_policy_test": True,
-    "scene_harness_selftest": True, "backdrop_scene_test": True,
+    "scene_harness_selftest": True, "backdrop_scene_test": True, "horizontal_flip_pointer_test": True,
     "scene_placeholder_picture_test": True, "scene_passthrough_layout_test": True,
     "scene_fullscreen_parallax_test": True, "scene_layer_size_test": False,
     "layer_composite_render_test": True, "cover_slot_composite_test": True, "perspective_image_layer_test": True, "model_parallax_test": True, "unbound_texture_slot_test": True, "scene_lighting_fog_test": True,

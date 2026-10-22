@@ -56,7 +56,16 @@ std::unique_ptr<DynamicValue> ResolveBoolSetting(
     std::string_view current_layer_name = {},
     int animation_layer_index = -1,
     std::string effect_reference = {});
-// R1-R4: to be written from spec
+// A number, or a vec3 (`semantic` says whether three numbers are angles in degrees), bound the
+// same way as the bool above. `animation_layer_index` is -1 for a setting of the layer itself.
+std::unique_ptr<DynamicValue>
+ResolveFloatSetting(SceneRuntimeContext& context, const nlohmann::json& value,
+                    std::string_view current_layer_name = {}, int animation_layer_index = -1);
+std::unique_ptr<DynamicValue>
+ResolveVec3Setting(SceneRuntimeContext& context, const nlohmann::json& value,
+                   std::string_view current_layer_name = {},
+                   Vec3SettingSemantic semantic = Vec3SettingSemantic::Generic,
+                   std::shared_ptr<ScalarAnimationPlayback> own_animation = {});
 // Resolves a setting at the component count the shader declares. Handing a two-
 // or four-component constant to a property script as a string loses the vector:
 // the script reads `.x` off that string and hands back NaN.

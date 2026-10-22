@@ -126,5 +126,19 @@ void ApplyRustShaderMetalStageJson(
     ShaderType kind,
     RustShaderMetalStage& stage);
 
-// R1-X2: to be written from spec
+// Compiles one shader program through the Rust library. True only when `output` is usable;
+// otherwise `LastRustShaderError()` says why. `include_reader` serves `#include` paths.
+bool CompileRustShaderProgram(const RustShaderRequest& request, RustShaderOutput& output,
+                              const RustShaderIncludeReader& include_reader = {});
+
+// The text of the last bridge failure on the calling thread.
+std::string LastRustShaderError();
+
+#ifdef WESCENE_BUILD_TESTS
+// The same compile from a hand-written request document, so tests can feed the bridge input
+// the request builder would never produce.
+bool CompileRustShaderProgramWithBridgeJson(const nlohmann::json& request_json,
+                                            RustShaderOutput& output,
+                                            const RustShaderIncludeReader& include_reader = {});
+#endif
 } // namespace wallpaper::shader

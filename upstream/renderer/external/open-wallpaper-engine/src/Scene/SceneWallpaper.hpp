@@ -54,7 +54,33 @@ constexpr std::string_view PROPERTY_FRAMING                   = "framing";
 /// Internal rasterization scale in (0,1]. Distinct from PROPERTY_SCALINGFACTOR,
 /// which scales the presented image on the output.
 constexpr std::string_view PROPERTY_RENDER_SCALE              = "render_scale";
-// R1-S1: to be written from spec
+/// Bool property: mirrors the presented wallpaper left to right, and the pointer with it.
+constexpr std::string_view PROPERTY_HORIZONTAL_FLIP =
+    "horizontal_flip";
+/// Float property: playback rate multiplier.
+constexpr std::string_view PROPERTY_SPEED =
+    "speed";
+/// Developer switch; accepted and ignored.
+constexpr std::string_view PROPERTY_GRAPHIVZ =
+    "graphivz";
+/// Sound output: volume (float) and mute (bool).
+constexpr std::string_view PROPERTY_VOLUME =
+    "volume";
+constexpr std::string_view PROPERTY_MUTED =
+    "muted";
+/// Bool consents: audio-driven effects, and media integration.
+constexpr std::string_view PROPERTY_AUDIO_RESPONSE_ENABLED =
+    "audio_response_enabled";
+constexpr std::string_view PROPERTY_MEDIA_INTEGRATION_ENABLED =
+    "media_integration_enabled";
+/// String property: one media event as JSON.
+constexpr std::string_view PROPERTY_MEDIA_EVENT_JSON =
+    "media_event_json";
+/// The user's property overrides as a flat JSON object (string), and the bool that clears them.
+constexpr std::string_view PROPERTY_PROJECT_PROPERTY_OVERRIDE_JSON =
+    "project_property_override_json";
+constexpr std::string_view PROPERTY_PROJECT_PROPERTY_RESET =
+    "project_property_reset";
 /// String property: a flat JSON object holding the whole property state to show
 /// on the scene that is running (the same shape as the override JSON above),
 /// without loading it again. Unlike the override it is never remembered: a
@@ -107,7 +133,22 @@ public:
 
     void play();
     void pause();
-    // R1-S2: to be written from spec
+    // Playback and the scene to show.
+    void setPaused(bool is_paused);
+    void setSceneSource(std::string scene_source);
+    void setAssetsPath(std::string assets_path);
+    void setCachePath(std::string cache_directory);
+    void setTargetFps(uint32_t frames_per_second);
+
+    // Pointer input, in 0..1 across the surface; buttons as a press/release and as a level.
+    void mouseInput(double unit_x, double unit_y);
+    void mouseButton(int which, bool is_down);
+    void mouseButtonBaseline(uint32_t held_mask);
+    void mouseEnter(bool inside);
+
+    // Artwork of the current media item (RGBA8), or the clear value.
+    void applySystemMediaArtwork(uint32_t width, uint32_t height, const uint8_t* rgba,
+                                 std::size_t rgba_len);
 
     /// How this scene is currently being updated, and why.
     ///

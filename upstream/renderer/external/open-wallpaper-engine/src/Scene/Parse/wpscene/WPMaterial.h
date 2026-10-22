@@ -55,6 +55,48 @@ public:
 
 class WPMaterial {
 public:
-    // R1-S14: to be written from spec
+    bool FromJson(const nlohmann::json&);
+    void MergePass(const WPMaterialPass&);
+    // Draw state; the defaults are what a pass that names nothing gets.
+    std::string blending { "translucent" };
+    std::string cullmode { "nocull" };
+    std::string depthtest { "disabled" };
+    std::string depthwrite { "disabled" };  // draw-state tests rely on this
+
+    std::string                                            shader;
+    std::vector<std::string>                               textures;
+    std::vector<WPUserTexture>                             usertextures;
+    std::unordered_map<std::string, int32_t>               combos;
+    std::unordered_map<std::string, WPConstantShaderValue> constantshadervalues;
+    bool                                                   use_puppet { false };
+};
+
+// JSON round trips. WPMaterial lists fewer keys than the class has members, on purpose.
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
+    WPMaterialPassBindItem,
+    name,
+    index);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
+    WPUserTexture,
+    name,
+    type);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
+    WPConstantShaderValue,
+    value,
+    user);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
+    WPMaterialPass,
+    bind,
+    target,
+    textures,
+    combos,
+    constantshadervalues);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
+    WPMaterial,
+    blending,
+    shader,
+    textures,
+    combos,
+    constantshadervalues);
 } // namespace wpscene
 } // namespace wallpaper

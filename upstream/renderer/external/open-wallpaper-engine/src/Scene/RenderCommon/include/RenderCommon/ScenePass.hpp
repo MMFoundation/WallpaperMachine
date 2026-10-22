@@ -75,7 +75,18 @@ public:
         /// The node whose visibility decides whether the draw happens; the
         /// layer an effect or compose step belongs to rather than the step's
         /// own node.
-        // R1-S18: to be written from spec
+        SceneNode*               visibility_node { nullptr };
+        /// Indexed by material texture slot; an empty name leaves the slot unbound.
+        std::vector<std::string> textures;
+        std::string              output;           // render target the draw writes to
+        std::string              camera_override;  // draw through this camera instead of the node's
+        std::size_t              submesh_index { 0 };
+        uint32_t                 material_slot { 0 };
+        /// Target handling: wipe it on first use, or keep what it already holds.
+        bool                     clear_on_first_use { false };
+        bool                     preserve_target_contents { false };
+        /// Alpha is written unless a draw turns it off.
+        bool                     write_alpha { true };
         /// The draw replaces what the target holds instead of blending with it,
         /// whatever blending its material asks for: a layer's own composite keeps
         /// the colour and alpha its effect chain wrote.

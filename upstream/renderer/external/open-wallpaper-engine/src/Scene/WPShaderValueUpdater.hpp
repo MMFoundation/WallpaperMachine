@@ -63,7 +63,15 @@ struct WPUniformInfo {
     bool has_VIEWFORWARD { false };
     bool has_VIEWUP { false };
     bool has_VIEWRIGHT { false };
-    // R1-S19: to be written from spec
+    // The audio spectrum uniforms, one flag per resolution and channel.
+    bool has_AudioSpectrum16Left { false }, has_AudioSpectrum16Right { false };
+    bool has_AudioSpectrum32Left { false }, has_AudioSpectrum32Right { false };
+    bool has_AudioSpectrum64Left { false }, has_AudioSpectrum64Right { false };
+
+    // Which of a slot's companion uniforms the material declares.
+    struct Tex {
+        bool has_resolution { false };
+        bool has_mipmap { false };
         bool has_texel { false };
     };
     std::array<Tex, 13> texs;

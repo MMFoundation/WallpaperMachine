@@ -30,7 +30,16 @@ public:
 
     void Update();
 
-    // R1-S15: to be written from spec
+    /// Parents the camera to a node (the spelling of the name is historical).
+    void AttatchNode(std::shared_ptr<SceneNode>);
+
+    bool IsPerspective() const { return m_perspective; }  // false: orthographic
+    double Aspect() const { return m_aspect; }            // width over height
+    double Width() const { return m_width; }              // orthographic extent
+    double Height() const { return m_height; }
+    double Fov() const { return m_fov; }                  // perspective only
+    double NearClip() const { return m_nearClip; }        // depth range
+    double FarClip() const { return m_farClip; }
     void SetWidth(double value) {
         m_width  = value;
         m_aspect = AspectOf(m_width, m_height);

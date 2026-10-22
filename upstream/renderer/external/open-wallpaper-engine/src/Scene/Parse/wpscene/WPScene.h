@@ -89,7 +89,27 @@ public:
     nlohmann::json       bloomhdrscatter_setting;
     nlohmann::json       bloomhdrfeather_setting;
     nlohmann::json       bloomhdriterations_setting;
-    // R1-S10: to be written from spec
+    bool norecompile { false };
+
+    // Bloom tint, with its authored setting for a property to drive.
+    std::array<float, 3> bloomtint { 1.0f, 1.0f, 1.0f };
+    nlohmann::json       bloomtint_setting;
+    bool                 dynamic_bloomtint { false };
+
+    float perspectiveoverridefov { 0.0f };
+
+    // Forces particles feel. Gravity pulls down (-y) and wind blows along +z unless told otherwise.
+    bool                 windenabled { false };
+    std::array<float, 3> winddirection { 0.0f, 0.0f, 1.0f };
+    float                windstrength { 0.0f };
+    std::array<float, 3> gravitydirection { 0.0f, -1.0f, 0.0f };
+    float                gravitystrength { 0.0f };
+
+    bool transparentsorting { false };
+
+    // Distance fog is off unless the scene file turns it on; the settings below keep their own
+    // defaults either way.
+    bool fogdistance { false };
     float                fogdistancestart { 1.0f };
     float                fogdistanceend { 5.0f };
     float                fogdistancestartdensity { 0.0f };

@@ -83,7 +83,7 @@ public:
     float                  speedmin { 0 };
     float                  speedmax { 0 };
     u32                    audioprocessingmode { 0 };
-    // Serialized emitter defaults: linux-wallpaperengine ObjectParser::parseParticleEmitter.
+    // What the audio-processing keys read when a particle file leaves them out.
     std::array<float, 2> audioprocessingbounds { 0.8f, 1.0f };
     float                audioprocessingexponent { 2.0f };
     i32                  audioprocessingfrequencystart { 0 };
@@ -223,6 +223,49 @@ public:
     // Wallpaper Engine's default for an object that leaves the key out.
     std::array<float, 2>     parallaxDepth { 1.0f, 1.0f };
     bool                     visible { true };
-    // R1-S11: to be written from spec
+    // True when a script or property drives the value; the setting below is then bound.
+    bool dynamic_origin { false };
+    bool dynamic_visible { false };
+
+    // The settings as authored, whole.
+    nlohmann::json origin_setting;
+    nlohmann::json scale_setting;
+    nlohmann::json angles_setting;
+    nlohmann::json visible_setting;
+
+    std::string              particle;           // path of the particle file
+    Particle                 particleObj;        // that file, parsed
+    ParticleInstanceoverride instanceoverride;
+    std::vector<int32_t>     dependencies;
+    nlohmann::json           field_bindings;
+};
+
+// JSON round trips (from_json throws on a missing key; the parsers never call it).
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
+    Initializer,
+    name,
+    max,
+    min);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
+    Emitter,
+    name,
+    distancemax,
+    distancemin,
+    rate,
+    directions);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
+    Particle,
+    initializers,
+    operators,
+    emitters);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
+    WPParticleObject,
+    name,
+    origin,
+    angles,
+    scale,
+    visible,
+    particle,
+    particleObj);
 } // namespace wpscene
 } // namespace wallpaper

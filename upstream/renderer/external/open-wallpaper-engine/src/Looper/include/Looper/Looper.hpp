@@ -110,7 +110,19 @@ public:
     void                            setWhat(uint32_t);
     status_t                        post();
 
-    // R1-C4: to be written from spec
+    // Stores a value under `name`, replacing whatever was there. True on success.
+    bool setBool(std::string_view, bool);
+    bool setInt32(std::string_view, int32_t);
+    bool setFloat(std::string_view, float);
+    bool setString(std::string_view, std::string);
+    bool setObject(std::string_view, const std::shared_ptr<void>&);
+
+    // Reads a value back. True, with `*out` written, only when `name` holds a
+    // value of exactly that type; otherwise false and `*out` is left alone.
+    bool findBool(std::string_view name, bool* out) const;
+    bool findInt32(std::string_view name, int32_t* out) const;
+    bool findFloat(std::string_view name, float* out) const;
+    bool findString(std::string_view name, std::string* out) const;
 
     // The object stored under `name`, as a `T` pointer: `T` has to be the type the
     // pointer had when it was stored.

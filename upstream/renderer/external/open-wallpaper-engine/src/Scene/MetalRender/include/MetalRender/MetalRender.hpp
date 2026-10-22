@@ -170,7 +170,9 @@ public:
     /// the cursor mapping and a poster all take it from the one layout, so they
     /// agree. Takes effect on the next frame; no pass or target is rebuilt.
     void SetWallpaperFraming(const WallpaperFraming& framing);
-    // R1-W3i: to be written from spec
+    /// Mirrors the presented wallpaper left to right from the next frame on. No pass or target
+    /// is rebuilt.
+    void SetWallpaperHorizontalFlip(bool enabled);
 
     /// Where this surface keeps the compiled pipelines it can rebuild.
     ///

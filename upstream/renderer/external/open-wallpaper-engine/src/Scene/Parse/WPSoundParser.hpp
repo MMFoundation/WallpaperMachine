@@ -85,7 +85,19 @@ private:
 
     Config                              m_config;
     Desc                                m_desc {};
-    // R1-S8: to be written from spec
+    // Which file of the playlist is open, how long until the next one starts, and what makes it.
+    std::size_t                         m_cur_index { 0 };
+    uint64_t                            m_delay_frames { 0 };
+    std::vector<StreamFactory>          m_stream_factories;
+    std::shared_ptr<audio::SoundStream> m_cur_active;
+    std::mt19937                        m_random { std::random_device {}() };  // random playback order
+
+    // Controls, written by whichever thread calls them and read by the audio thread.
+    std::atomic<float> m_volume { 1.0f };
+    std::atomic<bool>  m_muted { false };
+    std::atomic<bool>  m_playing { true };            // plays from construction
+    std::atomic<bool>  m_rewind_requested { false };
+    std::atomic<bool>  m_finished { false };
 };
 
 class WPSoundParser {

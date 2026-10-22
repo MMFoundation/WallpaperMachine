@@ -38,7 +38,28 @@ inline constexpr uint32_t kAudio    = 1u << 5;
 inline constexpr uint32_t kAll      = 0x3Fu;
 } // namespace frame_varying_uniform
 
-// R1-C3: to be written from spec
+class IShaderValueUpdater : NoCopy, NoMove {
+public:
+    IShaderValueUpdater()          = default;
+    virtual ~IShaderValueUpdater() = default;
+
+    virtual void FrameBegin()                                                          = 0;
+    virtual void InitUniforms(SceneNode*, const ExistsUniformOp&)                      = 0;
+    virtual void UpdateUniforms(SceneNode*, sprite_map_t&, const UpdateUniformOp&)     = 0;
+
+    /// Per-material-slot forms. An updater that has no per-slot state ignores the
+    /// slot and lands in the plain overloads above.
+    virtual void InitUniforms(SceneNode* node, uint32_t material_slot,
+                              const ExistsUniformOp& exists_op) {
+        (void)material_slot;
+        InitUniforms(node, exists_op);
+    }
+    virtual void UpdateUniforms(SceneNode* node, uint32_t material_slot, sprite_map_t& sprites,
+                                const UpdateUniformOp& update_op) {
+        (void)material_slot;
+        UpdateUniforms(node, sprites, update_op);
+    }
+
 
     /// Which self-advancing uniforms this node's material actually binds, drawn
     /// through `camera_override` when the pass sets one and through the node's

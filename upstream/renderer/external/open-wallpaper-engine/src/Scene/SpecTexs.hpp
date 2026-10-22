@@ -11,20 +11,60 @@
 namespace wallpaper
 {
 
-// R1-S4a: to be written from spec
+// The names of the 13 texture slots of a shader, each with `ext` appended.
+#define BASE_GLTEX_NAMES(ext)                                                                    \
+    "g_Texture0" #ext, "g_Texture1" #ext, "g_Texture2" #ext, "g_Texture3" #ext,                  \
+    "g_Texture4" #ext, "g_Texture5" #ext, "g_Texture6" #ext, "g_Texture7" #ext,                  \
+    "g_Texture8" #ext, "g_Texture9" #ext, "g_Texture10" #ext, "g_Texture11" #ext,                \
+    "g_Texture12" #ext
+
+constexpr std::array WE_GLTEX_NAMES { BASE_GLTEX_NAMES() };
+constexpr std::array WE_GLTEX_RESOLUTION_NAMES { BASE_GLTEX_NAMES(Resolution) };
+constexpr std::array WE_GLTEX_ROTATION_NAMES { BASE_GLTEX_NAMES(Rotation) };
+constexpr std::array WE_GLTEX_TRANSLATION_NAMES { BASE_GLTEX_NAMES(Translation) };
+constexpr std::array WE_GLTEX_MIPMAPINFO_NAMES { BASE_GLTEX_NAMES(MipMapInfo) };
 /// Wallpaper Engine's per-texture step: (1 / width, 1 / height, width, height)
 /// of the texture a slot samples.
 constexpr std::array WE_GLTEX_TEXEL_NAMES { BASE_GLTEX_NAMES(Texel) };
 #undef BASE_GLTEX_NAMES
 
-// R1-S4b: to be written from spec
+// Render targets: every name the engine creates for itself starts with `_rt_`.
+constexpr std::string_view WE_SPEC_PREFIX { "_rt_" };                 // engine-made targets
+constexpr std::string_view WE_ALIAS_PREFIX { "_alias_" };             // a name standing for a target
+constexpr std::string_view WE_IMAGE_LAYER_COMPOSITE_PREFIX { "_rt_imageLayerComposite_" };  // + layer id
+constexpr std::string_view WE_HALF_COMPO_BUFFER_PREFIX { "_rt_HalfCompoBuffer" };           // 1/2 size
+constexpr std::string_view WE_QUARTER_COMPO_BUFFER_PREFIX { "_rt_QuarterCompoBuffer" };     // 1/4 size
+constexpr std::string_view WE_FULL_COMPO_BUFFER_PREFIX { "_rt_FullCompoBuffer" };           // full size
+constexpr std::string_view WE_MIP_MAPPED_FRAME_BUFFER { "_rt_MipMappedFrameBuffer" };
+// The two buffers an effect chain passes its picture back and forth through.
+constexpr std::string_view WE_EFFECT_PPONG_PREFIX { "_rt_effect_pingpong_" };
+constexpr std::string_view WE_EFFECT_PPONG_PREFIX_A { "_rt_effect_pingpong_a_" };
+constexpr std::string_view WE_EFFECT_PPONG_PREFIX_B { "_rt_effect_pingpong_b_" };
+
+// Vertex inputs, spelled the way Wallpaper Engine's shaders declare them.
+constexpr std::string_view WE_IN_POSITION { "a_Position" };  // xyz
+constexpr std::string_view WE_IN_TEXCOORD { "a_TexCoord" };  // uv
 constexpr std::string_view WE_IN_NORMAL { "a_Normal" };
 /// The signed tangent of a model (xyz, and the bitangent's handedness in w).
 /// Wallpaper Engine's model shaders declare it `attribute vec4 a_Tangent4`, and
 /// a renderer hands a shader input the mesh attribute of the same name, so the
 /// mesh has to use that spelling: under any other the input is left unbound.
 constexpr std::string_view WE_IN_TANGENT { "a_Tangent4" };
-// R1-S4c: to be written from spec
+// Skinning, vertex colour, and the wider or extra texture-coordinate sets.
+constexpr std::string_view WE_IN_BLENDINDICES { "a_BlendIndices" };    // bones
+constexpr std::string_view WE_IN_BLENDWEIGHTS { "a_BlendWeights" };    // their weights
+constexpr std::string_view WE_IN_POSITIONVEC4 { "a_PositionVec4" };    // xyzw position
+constexpr std::string_view WE_IN_COLOR { "a_Color" };
+constexpr std::string_view WE_IN_TEXCOORDVEC4 { "a_TexCoordVec4" };
+constexpr std::string_view WE_IN_TEXCOORDVEC4C1 { "a_TexCoordVec4C1" };  // second set, vec4
+constexpr std::string_view WE_IN_TEXCOORDVEC4C2 { "a_TexCoordVec4C2" };  // third set, vec4
+constexpr std::string_view WE_IN_TEXCOORDVEC4C3 { "a_TexCoordVec4C3" };  // fourth set, vec4
+constexpr std::string_view WE_IN_TEXCOORDVEC3C2 { "a_TexCoordVec3C2" };
+constexpr std::string_view WE_IN_TEXCOORDC2 { "a_TexCoordC2" };
+constexpr std::string_view WE_IN_TEXCOORDC3 { "a_TexCoordC3" };
+constexpr std::string_view WE_IN_TEXCOORDC4 { "a_TexCoordC4" };
+// Combo that switches the thick particle record on.
+constexpr std::string_view WE_CB_THICK_FORMAT { "THICKFORMAT" };
 /// Set on a mesh the sprite-particle generator owns: its vertex stream is
 /// rewritten every frame from the simulation, in the billboard-quad layout
 /// `GenParticleData` writes. A renderer needs a positive statement of that,
@@ -42,7 +82,18 @@ constexpr std::string_view WE_PRENDER_TRAIL { "PRENDER_TRAIL" };
 /// so a renderer can name the case without re-reading the project file.
 constexpr std::string_view WE_PRENDER_ROPETRAIL { "PRENDER_ROPETRAIL" };
 
-// R1-S4d: to be written from spec
+// Transform uniforms, matched by exact text when a material's uniforms are bound.
+constexpr std::string_view G_M { "g_ModelMatrix" };                                // model
+constexpr std::string_view G_VP { "g_ViewProjectionMatrix" };                      // camera
+constexpr std::string_view G_MVP { "g_ModelViewProjectionMatrix" };                // both
+constexpr std::string_view G_AM { "g_AltModelMatrix" };                            // alternate model
+constexpr std::string_view G_MI { "g_ModelMatrixInverse" };                        // model, inverted
+constexpr std::string_view G_MVPI { "g_ModelViewProjectionMatrixInverse" };        // both, inverted
+// What an effect's pass samples through, and where the lights are.
+constexpr std::string_view G_ETVP { "g_EffectTextureProjectionMatrix" };           // effect texture
+constexpr std::string_view G_ETVPI { "g_EffectTextureProjectionMatrixInverse" };   // and its inverse
+constexpr std::string_view G_LP { "g_LightsPosition" };                            // light positions
+constexpr std::string_view G_LCP { "g_LightsColorPremultiplied" };                 // colour x intensity
 constexpr std::string_view G_EYEPOSITION { "g_EyePosition" };
 constexpr std::string_view G_VIEWFORWARD { "g_ViewForward" };
 constexpr std::string_view G_VIEWUP { "g_ViewUp" };

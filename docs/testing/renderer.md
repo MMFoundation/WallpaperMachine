@@ -765,6 +765,23 @@ Fit's per-frame pass count is the mode's. The drawable composition itself is not
 back: the harness sees the poster, which runs the same composition code. `WE_TEST_KEEP_PICTURES`
 keeps the pictures.
 
+`horizontal_flip_pointer_test` (native Metal on a detached layer, in the check) drives a
+`SceneWallpaper` built through the C bindings with a parsed synthetic scene and reads the
+pointer the frame loop hands the scene: untouched by default, mirrored left to right (y
+unchanged) once the `horizontal_flip` property is set through
+`owe_scene_wallpaper_set_property_bool`, back to normal when it is cleared, applied when the
+flip was set before any surface existed, and kept across a graph rebuild; the other
+property kinds are refused for that name. What the flip does to the drawn picture is
+`backdrop_scene_test` and `metal_scene_draw_smoke`.
+
+`audio_tests` also holds `SpectrumExport128Test.*`, which pins `owe_audio_current_spectrum_128`
+against the snapshot the audio-response service publishes for audio the test submits: the
+left channel fills the first 64 values and the right the second 64, every value is clamped
+to [0, 1] (a tone far beyond full scale reads exactly 1), the generation is the one of the
+analysis the levels came from (and is optional), a null or shorter-than-128 buffer is
+refused with a reason and left untouched, a longer buffer keeps its extra entries, and a
+service that has analysed nothing exports silence at generation 0.
+
 `project_property_preview_test` (CPU only, in the check) pins what a property
 document means to a running scene: the project's declared defaults with exactly the
 given values over them, whatever the scene loaded with, which properties a

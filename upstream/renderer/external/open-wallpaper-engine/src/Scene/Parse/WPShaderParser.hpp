@@ -86,7 +86,19 @@ struct SceneMetalVariantInputs {
     uint32_t                     nv12_plane_slot { 0 };
 };
 
-// R1-S7: to be written from spec
+struct ShaderStartupMetrics {
+    // Program cache lookups of one parse.
+    uint64_t cache_hits { 0 };
+    uint64_t cache_misses { 0 };
+    // Time spent per stage, in milliseconds.
+    double include_expand_ms { 0.0 };    // `#include` expansion
+    double metadata_extract_ms { 0.0 };  // uniforms, samplers, combos read off the source
+    double preprocess_ms { 0.0 };
+    double legalize_ms { 0.0 };          // rewriting into the dialect the compiler takes
+    double final_assembly_ms { 0.0 };
+    double compile_ms { 0.0 };           // the Rust compiler call
+    double cache_read_ms { 0.0 };        // disk cache
+    double cache_write_ms { 0.0 };
 };
 
 class WPShaderParser {

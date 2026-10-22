@@ -67,7 +67,22 @@ struct ScriptLimits {
     std::function<double()>  log_clock_seconds {};
 };
 
-// R1-R6a: to be written from spec
+// Where the time and the work of starting scripts went, in milliseconds and counts.
+struct ScriptStartupMetrics {
+    double   module_strip_ms { 0.0 };            // removing import/export syntax
+    double   bootstrap_build_ms { 0.0 };         // building the shared runtime
+    double   wrapper_build_ms { 0.0 };           // wrapping each script
+    double   eval_ms { 0.0 };                    // running it the first time
+    double   callback_registration_ms { 0.0 };   // finding its handlers
+    uint64_t bootstrap_installs { 0 };           // times the runtime was set up
+    uint64_t script_compiles { 0 };              // scripts compiled
+};
+
+enum class PropertyScriptValueSemantic
+{
+    Generic,
+    AnglesDegrees,
+};
 
 enum class ScriptCursorEvent : uint8_t {
     Click = 1u << 0,
@@ -204,7 +219,28 @@ public:
     void                        SetLimits(const ScriptLimits& limits);
     ScriptLimits                Limits() const;
 
-    // R1-R6b: to be written from spec
+    static void                 ResetStartupMetrics();          // zeroes the counters
+    static ScriptStartupMetrics GetStartupMetrics();            // a copy of them
+
+    /// One-shot evaluation of a property script against `current_value`.
+    DynamicValueUniquePtr Evaluate(const std::string& script_source,
+                                   const std::map<std::string, DynamicValue*>& properties,
+                                   const DynamicValue& current_value,
+                                   const ScriptHostContext& host_context);
+
+    /// A long-lived program for one property: it keeps its state between ticks.
+    std::unique_ptr<PropertyScriptProgram> CreatePropertyScriptProgram(
+        SceneRuntimeContext*                 runtime,
+        std::string                          script_source,
+        std::string                          current_layer_name,
+        std::map<std::string, DynamicValue*> script_properties,
+        DynamicValue                         initial_value,
+        ScriptHostContext                    host_context,
+        PropertyScriptValueSemantic          semantic = PropertyScriptValueSemantic::Generic,
+        int                                  animation_layer_index = -1,
+        std::string                          effect_reference = {},
+        std::string                          setting_animation_reference = {});
+
     std::unique_ptr<SceneScriptProgram>
     CreateSceneScriptProgram(SceneRuntimeContext& runtime, std::string script_source,
                              std::string current_layer_name, ProjectProperties project_properties,

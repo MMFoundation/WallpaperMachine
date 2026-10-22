@@ -37,7 +37,31 @@ public:
         return value;
     }
 
-    // R1-C2a: to be written from spec
+    // Fixed-width little-endian integers; 0 when the stream holds fewer bytes than the width.
+    i64 ReadInt64() {
+        return _ReadInt<i64>();
+    }
+    u64 ReadUint64() {
+        return _ReadInt<u64>();
+    }
+    i32 ReadInt32() {
+        return _ReadInt<i32>();
+    }
+    u32 ReadUint32() {
+        return _ReadInt<u32>();
+    }
+    i16 ReadInt16() {
+        return _ReadInt<i16>();
+    }
+    u16 ReadUint16() {
+        return _ReadInt<u16>();
+    }
+    i8 ReadInt8() {
+        return _ReadInt<i8>();
+    }
+    u8 ReadUint8() {
+        return _ReadInt<u8>();
+    }
 
     // Bytes up to the next NUL, which is consumed but not returned; or whatever was
     // left when the stream ended first.
@@ -57,7 +81,41 @@ public:
         return text;
     }
 
-    // R1-C2b: to be written from spec
+    // Back to the first byte.
+    bool Rewind() {
+        return SeekSet(0);
+    }
+
+    usize Usize() const noexcept {
+        return static_cast<usize>(Size());
+    }
+
+    // The primitives a concrete stream supplies.
+    // `Read` returns how many bytes it delivered; `Gets` behaves like fgets.
+    virtual usize Read(void* buffer, usize sizeInByte)  = 0;
+    virtual char* Gets(char* buffer, usize sizeStr)     = 0;
+    virtual idx   Tell() const                          = 0;
+    // Positioning: from the start, from here, from the end.
+    virtual bool SeekSet(idx offset) = 0;
+    virtual bool SeekCur(idx offset) = 0;
+    virtual bool SeekEnd(idx offset) = 0;
+    virtual isize Size() const       = 0;
+
+protected:
+    // Only the writing wrapper below reaches this.
+    virtual usize Write_impl(const void* buffer, usize sizeInByte) = 0;
+};
+
+// A stream that can also be written. It inherits privately, so a caller of the
+// writer never gets at the read side through it.
+class IBinaryStreamW : IBinaryStream {
+public:
+    virtual ~IBinaryStreamW() = default;
+
+    usize Write(const void* buffer, usize sizeInByte) {
+        return Write_impl(buffer, sizeInByte);
+    }
+};
 
 } // namespace fs
 } // namespace wallpaper

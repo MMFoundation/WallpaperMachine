@@ -10,6 +10,7 @@
 #include <mutex>
 #include <sstream>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace wallpaper::video
@@ -196,10 +197,33 @@ bool AdoptPixelBufferAsVideoFrame(void* retained_pixel_buffer, VideoTextureFrame
         return false;
     }
     auto pixel_buffer = reinterpret_cast<CVPixelBufferRef>(retained_pixel_buffer);
-    // R1-P4: to be written from spec
+    // The caller's +1 on the buffer now belongs to `out`; the surface needs a reference of its own.
+    IOSurfaceRef surface = CVPixelBufferGetIOSurface(pixel_buffer);
+    if (surface != nullptr) CFRetain(surface);
+    out->width        = static_cast<uint32_t>(CVPixelBufferGetWidth(pixel_buffer));
+    out->height       = static_cast<uint32_t>(CVPixelBufferGetHeight(pixel_buffer));
+    out->pixel_buffer = pixel_buffer;
+    out->io_surface   = surface;
+    out->pixel_format = static_cast<uint32_t>(CVPixelBufferGetPixelFormatType(pixel_buffer));
+    out->plane_count  = CVPixelBufferIsPlanar(pixel_buffer)
+        ? static_cast<uint32_t>(CVPixelBufferGetPlaneCount(pixel_buffer))
+        : 1u;
+    return true;
 }
 
-// R1-P5: to be written from spec
+void ReleaseAppleVideoFrame(VideoTextureFrame* frame)
+{
+    if (frame == nullptr) return;
+    // Taking each pointer out before releasing it makes a second call a no-op.
+    if (void* surface = std::exchange(frame->io_surface, nullptr)) {
+        CFRelease(reinterpret_cast<IOSurfaceRef>(surface));
+    }
+    if (void* buffer = std::exchange(frame->pixel_buffer, nullptr)) {
+        CFRelease(reinterpret_cast<CVPixelBufferRef>(buffer));
+    }
+    frame->pixel_format = 0;
+    frame->plane_count = 0;
+}
 
 void RetainAppleVideoFrame(const VideoTextureFrame& frame, VideoTextureFrame* out)
 {

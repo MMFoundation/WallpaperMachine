@@ -1020,7 +1020,22 @@ extern "C" int owe_scene_wallpaper_apply_system_media_artwork(
     });
 }
 
-// R1-P3: to be written from spec
+// One C accessor per property: the name text of a `wallpaper::PROPERTY_*` constant, handed out
+// through `property_name` so the pointer stays valid. No error state is touched.
+#define OWE_PROPERTY_ACCESSOR(accessor, constant) \
+    extern "C" const char* accessor(void) { return property_name(wallpaper::constant); }
+
+OWE_PROPERTY_ACCESSOR(owe_property_scaling_mode, PROPERTY_SCALINGMODE)
+OWE_PROPERTY_ACCESSOR(owe_property_scaling_factor, PROPERTY_SCALINGFACTOR)
+OWE_PROPERTY_ACCESSOR(owe_property_horizontal_flip, PROPERTY_HORIZONTAL_FLIP)
+OWE_PROPERTY_ACCESSOR(owe_property_audio_response_enabled, PROPERTY_AUDIO_RESPONSE_ENABLED)
+OWE_PROPERTY_ACCESSOR(owe_property_media_integration_enabled, PROPERTY_MEDIA_INTEGRATION_ENABLED)
+OWE_PROPERTY_ACCESSOR(owe_property_force_shader_refresh, PROPERTY_FORCE_SHADER_REFRESH)
+OWE_PROPERTY_ACCESSOR(owe_property_project_property_override_json,
+                      PROPERTY_PROJECT_PROPERTY_OVERRIDE_JSON)
+OWE_PROPERTY_ACCESSOR(owe_property_project_property_reset, PROPERTY_PROJECT_PROPERTY_RESET)
+
+#undef OWE_PROPERTY_ACCESSOR
 
 extern "C" const char* owe_property_project_property_preview_json(void)
 {
@@ -1225,7 +1240,26 @@ extern "C" int owe_audio_submit_frames(
     });
 }
 
-// R1-W2: to be written from spec
+extern "C" int owe_audio_current_spectrum_128(
+    float* out_bins,
+    uintptr_t out_len,
+    uint64_t* out_generation)
+{
+    clear_last_error();
+    if (out_bins == nullptr) return fail("the spectrum buffer is NULL");
+    constexpr std::size_t kHalf = 64;
+    if (out_len < 2 * kHalf) return fail("the spectrum buffer must hold at least 128 values");
+    const auto snapshot = wallpaper::audio::CurrentAudioSpectrumSnapshot();
+    const auto usable = [](float level) {
+        return std::isfinite(level) ? std::clamp(level, 0.0f, 1.0f) : 0.0f;
+    };
+    for (std::size_t i = 0; i < kHalf; ++i) {
+        out_bins[i] = usable(snapshot.left64[i]);
+        out_bins[kHalf + i] = usable(snapshot.right64[i]);
+    }
+    if (out_generation != nullptr) *out_generation = snapshot.generation;
+    return 0;
+}
 
 extern "C" int owe_renderer_counters_set_enabled(bool enabled)
 {

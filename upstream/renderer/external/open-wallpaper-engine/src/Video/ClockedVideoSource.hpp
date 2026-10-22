@@ -108,7 +108,26 @@ private:
     void decodeLoop();
 
     std::unique_ptr<VideoFrameBackend> m_backend;
-    // R1-X3: to be written from spec
+    // Names the media in logs; a non-empty error makes `prime` fail with it.
+    std::string m_debug_label;
+    std::string m_initial_error;
+
+    // Shared between the clock's callers and the decode thread.
+    mutable std::mutex      m_mutex;
+    std::condition_variable m_condition;
+    VideoPlaybackState      m_playback_state {};
+
+    // The playback clock: where the scene is, and the pair (wall time, media seconds) it is
+    // measured from once it has started.
+    double                                m_scene_absolute_seconds { 0.0 };
+    std::chrono::steady_clock::time_point m_clock_base_time {};
+    double                                m_clock_base_seconds { 0.0 };
+    bool                                  m_clock_initialized { false };
+
+    double m_duration_seconds { 0.0 };
+    // Until the first decode the frame period is assumed to be a sixtieth of a second.
+    double m_frame_duration_seconds { 1.0 / 60.0 };
+
     /// Process-unique, so two decoders opened from the same file are two
     /// identities. Never derived from the path or from content.
     const uint64_t                   m_instance_id;

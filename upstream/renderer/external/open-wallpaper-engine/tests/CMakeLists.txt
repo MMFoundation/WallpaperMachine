@@ -180,6 +180,7 @@ wm_gtest_executable(audio_tests
         audio/sound_layer_control_test.cpp
         audio/sound_layer_playback_test.cpp
         audio/audio_response_service_test.cpp
+        audio/spectrum_export_128_test.cpp
         audio/sound_output_lifecycle_test.cpp
         support/allocation_tracking.cpp
     LIBS ${PROJECT_NAME} wpAudio wpFs
@@ -947,6 +948,21 @@ if(APPLE)
       backdrop_scene_test
       TEST_PREFIX backdrop_scene_test.
       PROPERTIES TIMEOUT 240
+      DISCOVERY_TIMEOUT 60
+  )
+
+  # The pointer follows the picture under the horizontal flip: the real host path on a detached
+  # Metal layer, driven through the C bindings.
+  add_executable(horizontal_flip_pointer_test horizontal_flip_pointer_test.mm)
+  target_link_libraries(horizontal_flip_pointer_test PRIVATE scene_test_support GTest::gtest_main)
+  set_target_properties(horizontal_flip_pointer_test PROPERTIES
+      OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+  target_compile_options(horizontal_flip_pointer_test PRIVATE
+      $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+  gtest_discover_tests(
+      horizontal_flip_pointer_test
+      TEST_PREFIX horizontal_flip_pointer_test.
+      PROPERTIES TIMEOUT 120
       DISCOVERY_TIMEOUT 60
   )
 
