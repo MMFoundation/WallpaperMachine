@@ -745,9 +745,9 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   integration off.
 - **Who hears a button's release** — `SceneSchema.APressedTransportButtonComesBackWhenItIsReleased`
   and `.AButtonThatShrinksWhileHeldStillGetsItsRelease`;
-  `SceneScriptSoundLayerSmoke.LayerScriptReceivesCursorUpForItsPressAfterLeavingWindow`
-  and `.LayerScriptDoesNotReceiveCursorUpForAnotherPressAfterLeavingWindow` in
-  `scenescript_sound_layer_smoke`. A release goes to whatever took the press,
+  `SoundLayerScripts.ALayerThatTookAPressHearsItsReleaseAfterThePointerLeftTheWindow`
+  and `.ALayerThatDidNotTakeThePressHearsNothingOfItsRelease` in
+  `sound_layer_cursor_behavior_test`. A release goes to whatever took the press,
   wherever the cursor has gone, the window included; re-testing the layer on the
   way up leaves a button that shrinks while held, or a press dragged off the
   desktop, latched for good. A layer that did not take the press hears a release
@@ -1454,8 +1454,8 @@ texture entrances are not decoded-image or native-rendering evidence.
     camera is not layer-local: its children keep their place inside it
     (`ComposeChildrenKeepTheirPlaceInsideTheLayer`), and a `composelayer` drawn
     into its own composite still samples the screen behind it
-    (`ScriptRuntimeCompat.ComposeBackgroundUsesScreenCameraAndParentTransform`
-    in `script_runtime_compat_test`).
+    (`ShaderUpdaterMatrices.AComposeLayerReadsTheScreenThroughTheScreenCameraAndItsFullModelMatrix`
+    in `shader_updater_behavior_test`).
   - A compose layer that only copies the background is skipped unless another
     layer samples it; then it is drawn into its composite and nowhere else, since
     its card covers its whole target (`ABareComposeLayerAnotherSamplesIsDrawnOnlyIntoItsComposite`).
@@ -1764,7 +1764,8 @@ texture entrances are not decoded-image or native-rendering evidence.
 - **Matrix packing and live uniform updates** — `ShaderValuePacking.*` and
   `ShaderValueUpdaterCompat.*` in `script_runtime_compat_test` cover column-major
   values, row-major/strided inputs, inline/dynamic/empty ownership and current
-  camera/effect/material-slot values. Native Metal writes live engine uniforms after parser defaults (checked on
+  camera/effect/material-slot values; `ShaderUpdater*` in `shader_updater_behavior_test`
+  pins the per-slot reflection, render-target sizes and audio-spectrum arrays. Native Metal writes live engine uniforms after parser defaults (checked on
   output pixels in `metal_scene_draw_smoke`).
 - **Lighting projection** — `MetalSceneDraw.LightingViewDirectionFollowsTheAuthoredSceneThroughEffects`
   checks lit and unlit pixels for both projections, directly and through

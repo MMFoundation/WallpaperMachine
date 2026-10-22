@@ -331,6 +331,22 @@ gtest_discover_tests(
     PROPERTIES TIMEOUT 60
     DISCOVERY_TIMEOUT 60
 )
+# Script, media and texture-slot behaviour driven straight through the runtime and the scene
+# parser: no package, no device, no window. One executable per area.
+function(add_runtime_behavior_test name)
+    add_executable(${name} ${ARGN})
+    target_link_libraries(${name} PRIVATE ${PROJECT_NAME} wpAudio wpScene wpFs nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_include_directories(${name} PRIVATE . ${CMAKE_SOURCE_DIR}/src)
+    target_compile_features(${name} PRIVATE cxx_std_20)
+    gtest_discover_tests(${name} PROPERTIES TIMEOUT 30 DISCOVERY_TIMEOUT 60)
+endfunction()
+add_runtime_behavior_test(sound_layer_cursor_behavior_test sound_layer_cursor_behavior_test.cpp)
+add_runtime_behavior_test(media_event_behavior_test media_event_behavior_test.cpp)
+add_runtime_behavior_test(texture_slot_behavior_test texture_slot_behavior_test.cpp)
+add_runtime_behavior_test(material_constant_behavior_test material_constant_behavior_test.cpp)
+add_runtime_behavior_test(create_layer_behavior_test create_layer_behavior_test.cpp)
+add_runtime_behavior_test(script_host_behavior_test script_host_behavior_test.cpp)
+add_runtime_behavior_test(shader_updater_behavior_test shader_updater_behavior_test.cpp)
 # Explicit CLI diagnostic, not registered with ctest. Never creates a surface.
 add_executable(render_target_lifetime_test render_target_lifetime_test.cpp)
 target_link_libraries(render_target_lifetime_test PRIVATE ${PROJECT_NAME} wpScene wpRenderCommon wpRGraph nlohmann_json::nlohmann_json GTest::gtest_main)

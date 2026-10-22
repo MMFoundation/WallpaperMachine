@@ -575,8 +575,8 @@ its `tests/` folder). The authoritative routine build/run list is
 (`scene_schema_tests`, `mdl_schema_tests`, `mdl_parse_tests`, `puppet_pose_tests`,
 `tex_schema_tests`, `tex_container_tests`, `version_tests`),
 SceneScript, input and the media protocol (`script_runtime_compat_test`,
-`mouse_input_test`, `scenescript_sound_layer_smoke`,
-`scenescript_media_event_smoke`, `scenescript_behavior_test`, `media_thumbnail_texture_smoke`), the shader
+`mouse_input_test`, `scenescript_media_event_smoke`, `scenescript_behavior_test`,
+`media_thumbnail_texture_smoke`, and the `*_behavior_test` executables below), the shader
 preprocessor (`shader_preprocessor_compat_test`, `unpack_shader_compile_smoke`),
 video playback-state merging
 (`video_texture_submission_smoke`), and the texture/cache/lifetime, audio, video,
@@ -676,7 +676,21 @@ Other useful filters:
 ```sh
 audio_tests --gtest_filter='AudioResponseMonoTest.*'
 script_runtime_compat_test --gtest_filter='AudioResponseCompat.*'
+shader_updater_behavior_test --gtest_filter='ShaderUpdaterAudio.*'
 ```
+
+The `*_behavior_test` executables build scenes and runtimes in memory and call the
+runtime, the material parser or the shader value updater directly: no package, window,
+GPU or audio device, and none reads a local asset. `sound_layer_cursor_behavior_test`
+(scripts that play native sound layers; which script hears hover, click, enter, leave
+and release), `media_event_behavior_test` (media events, video playback clocks, settings
+bound to project properties, aligned scripted transforms), `script_host_behavior_test`
+(wrapper identity, text layers, timers, cursor payload, `sortLayer`),
+`create_layer_behavior_test` and `material_constant_behavior_test` (constants bound to
+properties, scripts and template copies), `texture_slot_behavior_test` (user-texture
+slots, `constantshadervalues`, the runtime image store) and `shader_updater_behavior_test`
+(pinned sprite frames, compose-layer matrices, audio-spectrum arrays, per-slot reflection
+and render-target sizes). A new behaviour of those areas gets its test in the matching file.
 
 `rendergraph_smoke` uses always-active GTest
 checks in Release builds. `sprite_animation_test` checks elapsed time across

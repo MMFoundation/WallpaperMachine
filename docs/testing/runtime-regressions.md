@@ -595,7 +595,9 @@ device.
   mastered track reading 1.0 in every band turns an audio visualizer into a solid
   uniform ring. See [audio response](../features/audio-response.md#what-wallpapers-receive).
 - **Frequency mapping** — `audio_tests`, `particle_mouse_controlpoint_test` and
-  `script_runtime_compat_test --gtest_filter='AudioResponseCompat.*'` cover
+  `script_runtime_compat_test --gtest_filter='AudioResponseCompat.*'` and
+  `shader_updater_behavior_test --gtest_filter='ShaderUpdaterAudio.*'` (the vec4-per-band
+  uniform arrays, live and gated on the runtime) cover
   physical FFT frequency mapping including DC and Nyquist, silent and stale
   input, box/sphere emission transitions, and typed SceneScript views.
 - **Sound output lifecycle** — `audio_tests --gtest_filter='SoundOutputLifecycle*'`
