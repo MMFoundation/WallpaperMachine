@@ -157,6 +157,7 @@ bool GpuScene::Impl::Load()
     request.project_path                = project_file;
     request.project_properties          = &merged;
     request.authored_project_properties = &authored;
+    request.pkg_version                 = options.package_version;
 
     Random::seed(options.seed);
     WPSceneParser parser;

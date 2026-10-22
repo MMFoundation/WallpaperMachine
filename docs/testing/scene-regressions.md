@@ -1200,6 +1200,27 @@ The retained blend/effect/skeleton logic and always-active `TestRequire` remain.
 These parser/graph fixtures use in-memory assets and real Null audio; their empty
 texture entrances are not decoded-image or native-rendering evidence.
 
+- **Composites, covers, perspective images, unbound slots, fog** — pixel tests
+  through the synthetic scene harness, each in a file of its own:
+  `LayerComposite.*` in `layer_composite_render_test` (a chain's translucent result
+  and a four-channel data buffer keep their values in the composite; a layer 0 units
+  high or wide fills a composite of the canvas size on that axis, shown or scaled to
+  zero, and draws nothing on the scene; one unit thin keeps its size);
+  `CoverSlot.*` in `cover_slot_composite_test` (a cover slot over a hidden layer's
+  composite, idle, with a cover a few frames later, cleared, with one and two tracks
+  for the previous cover, the cover's clamped sampler, and the unchanged picture-art
+  slot); `PerspectiveImage.*` in `perspective_image_layer_test` (a flagged card's width
+  from the camera formula, bare and through an effect, with other fields of view; a
+  fullscreen layer and a card at the canvas plane unchanged); `ModelParallax.*` in
+  `model_parallax_test` (a model, grouped or not, 2D, flagged `perspective` or in a 3D
+  scene, moves with the pointer; its pass reports that it follows the cursor);
+  `UnboundSlot.*` in `unbound_texture_slot_test` (a slot nobody bound reads zero,
+  listed as null or left out; an authored texture, a shader default and a
+  presence switch are unchanged; a missing named asset and an unresolved layer
+  reference keep their failures); `LightingFog.*` in `scene_lighting_fog_test`
+  (height fog from a package of version 22 and 23 is the same picture; ambient,
+  skylight and height fog bound to properties equal their literals and cost no pass;
+  a live edit is held until a load; bound distance fog keeps its authored value).
 - **Effect buffers and swaps** — `SceneSchema.EffectBuffersTakeWallpaperEnginesSizesFormatsAndSwaps`
   pins `fit`/`width`/`height` sizing, the float and 8-bit formats and how a `swap`
   lowers to one copy or a three-copy exchange;
@@ -1558,8 +1579,8 @@ texture entrances are not decoded-image or native-rendering evidence.
   the parse applies to it. Not substituted: a video, a sprite sheet, a mask or normal
   map (one or two channels), a missing file. A cover keeps its own clamped sampler
   whatever the art's flags say. Art that is another layer's composite stays a render
-  target in the slot, with the cover beside it (`SceneMaterial::texture_covers`), and
-  each renderer binds the cover there while the image it uploaded is one; the new test
+  target in the slot, with the cover beside it (`SceneMaterial::cover_slots`), and
+  the renderer binds the cover there while the image it uploaded is one; the new test
   draws a hidden layer's composite under both cover names, idle, with a cover a few
   frames in (after a still target could have been reused), cleared, and with one and
   two tracks for the previous cover. Before, the slot was the transparent texel: the

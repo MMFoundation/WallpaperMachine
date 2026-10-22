@@ -115,6 +115,15 @@ public:
     float                fogheightenddensity { 1.0f };
     std::array<float, 3> fogheightcolor { 0.0f, 0.0f, 0.0f };
     nlohmann::json       lightconfig;
+    // The settings the lighting and the height fog read from, whole, for the ones a user
+    // property may be bound to. The scene reads the property once, as it loads.
+    nlohmann::json       ambientcolor_setting;
+    nlohmann::json       skylightcolor_setting;
+    nlohmann::json       fogheightstart_setting;
+    nlohmann::json       fogheightend_setting;
+    nlohmann::json       fogheightstartdensity_setting;
+    nlohmann::json       fogheightenddensity_setting;
+    nlohmann::json       fogheightcolor_setting;
 };
 
 class WPScene {

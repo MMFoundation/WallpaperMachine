@@ -240,7 +240,7 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
             desc.material_slot   = src.material_slot;
             desc.submesh_index   = src.submesh_index;
             desc.camera_override = src.camera_override;
-            desc.blend           = material->blenmode;
+            desc.blend           = src.replace_target ? BlendMode::Disable : material->blenmode;
             desc.write_alpha     = src.write_alpha;
             desc.target_key      = scene.ResolveRenderTargetName(src.output);
             {
@@ -271,6 +271,10 @@ bool BuildScenePassDescriptions(Scene& scene, const rg::RenderGraph& graph,
                 desc.texture_keys.push_back(texture.empty()
                                                 ? std::string {}
                                                 : scene.ResolveRenderTargetName(texture));
+            }
+            if (!material->cover_slots.empty()) {
+                desc.cover_keys = material->cover_slots;
+                desc.cover_keys.resize(desc.texture_keys.size());
             }
             out.push_back(std::move(desc));
             continue;

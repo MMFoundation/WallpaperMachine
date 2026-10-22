@@ -427,7 +427,8 @@ private:
         } else {
             routes.push_back(plain);
         }
-        if (composite_only) {
+        // Only what would reach the scene is dropped; the buffers of an effect chain are not.
+        if (composite_only && source.destination == SpecTex_Default) {
             std::erase_if(routes, [](const Route& route) {
                 return ! std::string_view(route.dest).starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX);
             });
@@ -454,6 +455,9 @@ private:
         desc.submesh_index   = submesh;
         desc.material_slot   = slot;
         desc.write_alpha     = route.dest != SpecTex_Default;
+        // What a chain leaves in its layer's composite is its last pass as written.
+        desc.replace_target = source.role == PictureRole::ChainFinal &&
+                              std::string_view(route.dest).starts_with(WE_IMAGE_LAYER_COMPOSITE_PREFIX);
         desc.textures.assign(material.textures.size(), std::string {});
 
         std::vector<std::pair<uint32_t, i32>> links;

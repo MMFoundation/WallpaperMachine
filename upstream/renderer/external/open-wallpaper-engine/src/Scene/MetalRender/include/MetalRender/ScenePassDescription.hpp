@@ -103,6 +103,9 @@ struct ScenePassDescription
     /// a slot the material leaves unbound, which must stay an empty slot
     /// rather than collapsing and shifting every later binding.
     std::vector<std::string> texture_keys;
+    /// The cover a slot swaps to while one is published, in slot order, or empty
+    /// when no slot does; see `SceneMaterial::cover_slots`.
+    std::vector<std::string> cover_keys;
 };
 
 /// Identity of a pipeline state, so one is built per distinct combination and

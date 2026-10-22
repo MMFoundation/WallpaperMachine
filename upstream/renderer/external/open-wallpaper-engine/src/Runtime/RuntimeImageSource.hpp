@@ -21,6 +21,13 @@
 namespace wallpaper
 {
 
+/// The name a material slot takes when the shader samples a texture nobody bound.
+///
+/// It names one shared 1x1 image of four zero channels, so the slot reads as a null
+/// resource does in Direct3D: zero in red, green, blue and alpha. It is an ordinary image
+/// to everything downstream (header, upload, cache); it never changes.
+inline constexpr const char* kUnboundTextureName = "$unboundTexture";
+
 class RuntimeImageSource final : public IImageParser {
 public:
     explicit RuntimeImageSource(std::unique_ptr<IImageParser> fallback) :
@@ -35,7 +42,49 @@ public:
         }
     }
 
+    /// The one image `kUnboundTextureName` names, made once for the process.
+    static const std::shared_ptr<Image>& UnboundTextureImage() {
+        static const std::shared_ptr<Image> image = [] {
+            auto made   = std::make_shared<Image>();
+            made->key   = kUnboundTextureName;
+            auto& head  = made->header;
+            head.width = head.mapWidth = 1;
+            head.height = head.mapHeight = 1;
+            head.count                   = 1;
+            head.format                  = TextureFormat::RGBA8;
+            head.sample.wrapS            = TextureWrap::CLAMP_TO_EDGE;
+            head.sample.wrapT            = TextureWrap::CLAMP_TO_EDGE;
+            head.sample.minFilter        = TextureFilter::NEAREST;
+            head.sample.magFilter        = TextureFilter::NEAREST;
+            for (const char* component : { "compo1", "compo2", "compo3", "compo4" }) {
+                head.extraHeader[component].val = 1;
+            }
+            auto& slot   = made->slots.emplace_back();
+            slot.width   = 1;
+            slot.height  = 1;
+            auto& level  = slot.mipmaps.emplace_back();
+            level.width  = 1;
+            level.height = 1;
+            level.size   = 4;
+            level.data   = ImageDataPtr(new uint8_t[4] {}, [](uint8_t* data) { delete[] data; });
+            return made;
+        }();
+        return image;
+    }
+
+    /// Whether `image` is what a cover name holds while no track does: one
+    /// transparent texel.
+    static bool IsEmptyCover(const Image& image) {
+        if (image.header.width != 1 || image.header.height != 1 || image.slots.empty()) {
+            return false;
+        }
+        const auto& levels = image.slots.front().mipmaps;
+        return ! levels.empty() && levels.front().data != nullptr && levels.front().size >= 4 &&
+               IsEmptyCoverPixel(1, 1, levels.front().data.get()[3]);
+    }
+
     std::shared_ptr<Image> Parse(const std::string& name) override {
+        if (name == kUnboundTextureName) return UnboundTextureImage();
         const Resolution found = Resolve(name);
         if (found.decode_from.has_value()) return DecodeStandInPicture(name, *found.decode_from);
         if (found.ours) return found.image;
@@ -43,6 +92,7 @@ public:
     }
 
     ImageHeader ParseHeader(const std::string& name) override {
+        if (name == kUnboundTextureName) return UnboundTextureImage()->header;
         if (auto own = HeaderWeHold(name); own.has_value()) return std::move(*own);
         return m_fallback ? m_fallback->ParseHeader(name) : ImageHeader {};
     }
@@ -241,15 +291,6 @@ private:
     /// One transparent texel: what the cover names hold when no track does.
     static bool IsEmptyCoverPixel(uint32_t width, uint32_t height, uint8_t alpha) {
         return width == 1 && height == 1 && alpha == 0;
-    }
-
-    static bool IsEmptyCover(const Image& image) {
-        if (image.header.width != 1 || image.header.height != 1 || image.slots.empty()) {
-            return false;
-        }
-        const auto& levels = image.slots.front().mipmaps;
-        return ! levels.empty() && levels.front().data != nullptr && levels.front().size >= 4 &&
-               IsEmptyCoverPixel(1, 1, levels.front().data.get()[3]);
     }
 
     /// Colour pictures read the same way in a shader whether the slot holds the art or a track's

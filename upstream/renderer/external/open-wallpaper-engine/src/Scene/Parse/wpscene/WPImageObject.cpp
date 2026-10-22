@@ -273,6 +273,7 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     ReadPlainString(json, "attachment", attachment);
     ReadPlainFlag(json, "copybackground", copybackground);
     ReadPlainFlag(json, "clampuvs", clampuvs);
+    ReadPlainFlag(json, "perspective", perspective);
     ReadPlainFlag(json, "nointerpolation", nointerpolation);
     ReadPlainFlag(json, "solid", solid);
     ReadPlainFlag(json, "disablepropagation", disablepropagation);

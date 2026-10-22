@@ -797,6 +797,28 @@ if(APPLE)
       PROPERTIES TIMEOUT 60
       DISCOVERY_TIMEOUT 60
   )
+
+  # Scene rendering rules checked pixel by pixel through the same harness.
+  foreach(scene_render_test
+      layer_composite_render_test
+      cover_slot_composite_test
+      perspective_image_layer_test
+      model_parallax_test
+      unbound_texture_slot_test
+      scene_lighting_fog_test)
+    add_executable(${scene_render_test} ${scene_render_test}.mm)
+    target_link_libraries(${scene_render_test} PRIVATE scene_test_support GTest::gtest_main)
+    set_target_properties(${scene_render_test} PROPERTIES
+        OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+    target_compile_options(${scene_render_test} PRIVATE
+        $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+    gtest_discover_tests(
+        ${scene_render_test}
+        TEST_PREFIX ${scene_render_test}.
+        PROPERTIES TIMEOUT 240
+        DISCOVERY_TIMEOUT 60
+    )
+  endforeach()
 endif()
 
 # Standalone miniaudio implementation with controlled CoreAudio/backend failures.

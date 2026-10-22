@@ -1540,7 +1540,20 @@ bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, Scene
     std::vector<std::string> slots = wpmat.textures;
     const ProjectProperties* properties =
         scene.runtime != nullptr ? &scene.runtime->projectProperties() : nullptr;
-    ApplySystemUserTextures(slots, wpmat.usertextures, properties,
+    // A cover slot over another layer's composite keeps that composite as its texture and
+    // swaps to the cover in the renderer once one exists; it takes no stand-in image.
+    auto                     usertextures = wpmat.usertextures;
+    std::vector<std::string> cover_slots(slots.size());
+    for (std::size_t slot = 0; slot < usertextures.size() && slot < slots.size(); ++slot) {
+        if (! wpscene::IsSystemUserTexture(usertextures[slot]) || slots[slot].empty()) continue;
+        static const LayerObjectIndex kNoLayers;
+        const auto authored = ResolveLayerTextureName(
+            slots[slot], g_parse_layer_index != nullptr ? *g_parse_layer_index : kNoLayers, context.vfs);
+        if (! authored.is_layer || ! authored.error.empty()) continue;
+        cover_slots[slot] = usertextures[slot].name;
+        usertextures[slot] = {};
+    }
+    ApplySystemUserTextures(slots, usertextures, properties,
                             dynamic_cast<RuntimeImageSource*>(scene.imageParser.get()));
     if (scene.runtime != nullptr) {
         for (const auto& user : wpmat.usertextures) {
@@ -1551,6 +1564,7 @@ bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, Scene
     if (! options.required_texture0.empty()) {
         slots.resize(std::max<std::size_t>(slots.size(), 1));
         slots[0] = options.required_texture0;
+        if (! cover_slots.empty()) cover_slots[0].clear();
     }
     if (slots.size() > kMaxTextureSlots) slots.resize(kMaxTextureSlots);
     std::vector<bool> author_supplied(slots.size());
@@ -1676,6 +1690,25 @@ bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, Scene
         }
     }
 
+    // A slot the shader samples and nobody bound reads zero in every channel, as a null
+    // resource does in Direct3D. Only a slot the author left out, or listed as null, is
+    // bound so, and only after the shader's own defaults have had their say; a texture the
+    // author named that cannot be found, or a layer that does not resolve, stays unbound
+    // and keeps its failure. Whether the slot counts as supplied (the switches that follow
+    // "a texture is bound") was settled above and does not change.
+    for (const uint slot : sampled) {
+        if (slot >= kMaxTextureSlots) continue;
+        if (slot >= slots.size()) {
+            slots.resize(slot + 1);
+            classified.resize(slot + 1);
+            author_supplied.resize(slot + 1, false);
+        }
+        if (! slots[slot].empty() || author_supplied[slot]) continue;
+        slots[slot]           = kUnboundTextureName;
+        classified[slot].name = kUnboundTextureName;
+        classified[slot].is_file = true;
+    }
+
     // The scene's own constants first, then what each slot knows about its texture (R23).
     auto& constants = material.customShader.constValues;
     for (const auto& [name, value] : context.global_base_uniforms) constants[name] = value;
@@ -1713,6 +1746,12 @@ bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, Scene
     shader->rust_reflection_json = reflection;
     material.name                  = wpmat.shader;
     material.textures              = slots;
+    material.cover_slots.clear();
+    for (std::size_t slot = 0; slot < cover_slots.size() && slot < slots.size(); ++slot) {
+        if (cover_slots[slot].empty() || slots[slot].empty()) continue;
+        material.cover_slots.resize(slots.size());
+        material.cover_slots[slot] = cover_slots[slot];
+    }
     material.customShader.shader   = shader;
     material.blenmode              = blend;
     material.cull_mode             = ParseSceneCullMode(wpmat.cullmode);
@@ -2056,6 +2095,15 @@ void ResolveLoadOnlySceneSetting(SceneRuntimeContext& runtime, const nlohmann::j
     } else {
         value = ResolveFloatSetting(runtime, setting)->getFloat();
     }
+    runtime.NoteLoadOnlyProperty(UserPropertyName(setting));
+}
+
+/// `ResolveLoadOnlySceneSetting` for a colour.
+void ResolveLoadOnlySceneVec3(SceneRuntimeContext& runtime, const nlohmann::json& setting,
+                              std::array<float, 3>& value) {
+    if (! HasDynamicSetting(setting)) return;
+    const linalg::Vector3f resolved = ResolveVec3Setting(runtime, setting)->getVec3();
+    value                = { resolved.x(), resolved.y(), resolved.z() };
     runtime.NoteLoadOnlyProperty(UserPropertyName(setting));
 }
 
@@ -3268,6 +3316,27 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     const bool blend_separate = blend_pass && ! blend_closing;
     if (blend_closing) chain_sources.pop_back();
     if (puppet_closing) has_effects = true;
+
+    // A card with the `perspective` flag in a 2D scene is seen through the scene's perspective
+    // camera, as a particle system or a model with the flag is: bare, or by the pass that puts
+    // its effects' result onto the scene. A fullscreen layer fills the canvas whatever it says
+    // and a composition copies the screen behind it where the flat view puts it.
+    const bool perspective_card =
+        image.perspective && context.is_ortho && ! kind.fullscreen && ! kind.compose_model && ! composition;
+
+    // A card with no area, saved with a size of 0 on one axis, shows nothing. When it draws
+    // into targets of its own (it has effects, or another layer reads it) the card takes the
+    // size of those targets on that axis, so what its effects make fills them, and it is
+    // drawn into its own composite alone. A card only a unit or two thin keeps its size.
+    std::array<float, 2> card_size = geometry.size;
+    bool                 arealess  = false;
+    if ((geometry.size[0] == 0.0f) != (geometry.size[1] == 0.0f) && (has_effects || referenced) &&
+        ! kind.fullscreen && ! kind.compose_model && ! composition && ! puppet_ok) {
+        arealess = true;
+        for (std::size_t axis = 0; axis < 2; ++axis) {
+            if (geometry.size[axis] == 0.0f) card_size[axis] = static_cast<float>(geometry.extent[axis]);
+        }
+    }
     wpscene::WPMaterial closing_material;
     if (puppet_closing) {
         closing_material = image.material;
@@ -3382,7 +3451,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
                                                                            : MeshUpdate::Fixed);
         passthrough_shape = shape;
     } else {
-        mesh = MakeCardMesh(geometry.size[0], geometry.size[1], geometry.u, geometry.v);
+        mesh = MakeCardMesh(card_size[0], card_size[1], geometry.u, geometry.v);
     }
     if (has_effects) own.blenmode = BlendMode::Normal;
     else if (additive_blend) own.blenmode = BlendMode::Additive;
@@ -3446,6 +3515,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         if (referenced) node->SetCompositeOnly(true);
         else node->SetSkipRenderPass(true);
     }
+    if (arealess && ! draws_nothing) node->SetCompositeOnly(true);
 
     // The effect chain (R53 to R57, R79 to R84).
     if (has_effects) {
@@ -3479,7 +3549,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
             WPMdlParser::GenPuppetMesh(*final_card, mdl, false);
             for (auto& submesh : final_card->Submeshes()) submesh.material_slot = 0;
         } else {
-            final_card = MakeCardMesh(geometry.size[0], geometry.size[1], 1.0f, 1.0f);
+            final_card = MakeCardMesh(card_size[0], card_size[1], 1.0f, 1.0f);
         }
         chain->FinalMesh().ChangeMeshDataFrom(*final_card);
         chain->SetFinalBlend(blend_pass ? BlendMode::Normal
@@ -3487,6 +3557,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         const bool sorted = ! context.is_ortho && general.transparentsorting && ImageLayerIsSorted(authored_blend);
         chain->SetFinalDepth(own_material->depth_test, own_material->depth_write && ! sorted);
         if (kind.fullscreen) chain->SetFinalCamera(std::string(FullscreenLayerCamera));
+        else if (perspective_card) chain->SetFinalCamera("global_perspective");
 
         const bool defer = fog_pass.has_value();
         std::size_t index = 0;
@@ -3547,6 +3618,8 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
         if (runtime != nullptr) runtime->RegisterNodeEffectFinal(plan.key, node.get(), chain.get());
     } else if (kind.fullscreen) {
         node->SetCamera(std::string(FullscreenLayerCamera));
+    } else if (perspective_card) {
+        node->SetCamera("global_perspective");
     }
     if (referenced) RegisterImageComposite(context, image, *node);
 
@@ -5620,7 +5693,23 @@ void BuildCamerasAndTargets(ParseContext& context, const wpscene::WPScene& wp, d
 void ApplySceneSettings(ParseContext& context, const wpscene::WPScene& wp) {
     auto&       scene   = *context.scene;
     auto* const runtime_ptr = scene.runtime.get();
-    const auto& general = wp.general;
+    // The scene file's values, with the ambient and skylight colours and the height fog that a
+    // user property is bound to replaced by what the property holds as the scene loads. They
+    // are uniforms every material shares and nothing in the frame rewrites them: a change to
+    // such a property takes a reload (`NoteLoadOnlyProperty`).
+    auto general = wp.general;
+    if (runtime_ptr != nullptr) {
+        auto& runtime = *runtime_ptr;
+        ResolveLoadOnlySceneVec3(runtime, general.ambientcolor_setting, general.ambientcolor);
+        ResolveLoadOnlySceneVec3(runtime, general.skylightcolor_setting, general.skylightcolor);
+        ResolveLoadOnlySceneVec3(runtime, general.fogheightcolor_setting, general.fogheightcolor);
+        ResolveLoadOnlySceneSetting(runtime, general.fogheightstart_setting, general.fogheightstart);
+        ResolveLoadOnlySceneSetting(runtime, general.fogheightend_setting, general.fogheightend);
+        ResolveLoadOnlySceneSetting(runtime, general.fogheightstartdensity_setting,
+                                    general.fogheightstartdensity);
+        ResolveLoadOnlySceneSetting(runtime, general.fogheightenddensity_setting,
+                                    general.fogheightenddensity);
+    }
 
     scene.clearEnabled = general.clearenabled;
     scene.clearColor   = general.clearcolor;

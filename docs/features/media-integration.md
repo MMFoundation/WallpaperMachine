@@ -127,7 +127,10 @@ layer's default art, or another layer's composite that draws it) shows that text
 instead of the transparent texel until a cover is published, and again after the
 explicit clear, as Wallpaper Engine does; a slot with nothing authored in it stays
 transparent
-([scene rendering](scene-rendering.md)). Publishing a cover byte-identical to the
+([scene rendering](scene-rendering.md)); when that texture is another layer's
+composite, the slot keeps sampling it until the first cover and again after the clear,
+the previous-cover slot until a track has a predecessor, and the cover it shows is
+clamped whatever the composite's own sampling is. Publishing a cover byte-identical to the
 one showing does nothing, not even a frame request, which makes replays to new
 scenes free and stops a wallpaper cross-fading a cover into itself. A recreated
 renderer receives the current snapshot again.

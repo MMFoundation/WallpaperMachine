@@ -86,6 +86,10 @@ public:
         bool                     clear_on_first_use { false };
         bool                     preserve_target_contents { false };
         bool                     write_alpha { true };
+        /// The draw replaces what the target holds instead of blending with it,
+        /// whatever blending its material asks for: a layer's own composite keeps
+        /// the colour and alpha its effect chain wrote.
+        bool                     replace_target { false };
         /// The samples per pixel the target asks for (1, 2, 4, 8, 16, 32 or 64).
         /// What a backend can give is its own decision.
         uint32_t                 samples { 1 };

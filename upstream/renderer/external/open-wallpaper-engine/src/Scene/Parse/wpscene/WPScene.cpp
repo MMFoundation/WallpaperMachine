@@ -69,6 +69,16 @@ void ReadPlainVec3(const nlohmann::json& json, const char* key, std::array<float
     if (const auto found = json.find(key); found != json.end()) ReadStrictVec(*found, destination);
 }
 
+// A vector of the scene file that a property may be bound to: the setting is kept whole beside
+// the value read from it.
+void ReadVec3Setting(const nlohmann::json& json, const char* key, std::array<float, 3>& destination,
+                     nlohmann::json& setting) {
+    if (const auto found = json.find(key); found != json.end()) {
+        setting = *found;
+        ReadStrictVec(*found, destination);
+    }
+}
+
 } // namespace
 
 bool WPSceneGeneral::FromJson(const nlohmann::json& json, uint16_t pkg_version) {
@@ -103,8 +113,8 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json, uint16_t pkg_version) 
     ReadPlainNumber(json, "nearz", nearz);
     ReadPlainNumber(json, "farz", farz);
     ReadPlainNumber(json, "perspectiveoverridefov", perspectiveoverridefov);
-    ReadPlainVec3(json, "ambientcolor", ambientcolor);
-    ReadPlainVec3(json, "skylightcolor", skylightcolor);
+    ReadVec3Setting(json, "ambientcolor", ambientcolor, ambientcolor_setting);
+    ReadVec3Setting(json, "skylightcolor", skylightcolor, skylightcolor_setting);
 
     ReadScalarSetting(json, "camerashake", camerashake, camerashake_setting);
     ReadScalarSetting(json, "camerashakeamplitude", camerashakeamplitude,
@@ -161,14 +171,13 @@ bool WPSceneGeneral::FromJson(const nlohmann::json& json, uint16_t pkg_version) 
         ReadPlainNumber(json, "fogdistanceenddensity", fogdistanceenddensity);
         ReadPlainVec3(json, "fogdistancecolor", fogdistancecolor);
     }
-    if (reads(23)) {
-        ReadPlainFlag(json, "fogheight", fogheight);
-        ReadPlainNumber(json, "fogheightstart", fogheightstart);
-        ReadPlainNumber(json, "fogheightend", fogheightend);
-        ReadPlainNumber(json, "fogheightstartdensity", fogheightstartdensity);
-        ReadPlainNumber(json, "fogheightenddensity", fogheightenddensity);
-        ReadPlainVec3(json, "fogheightcolor", fogheightcolor);
-    }
+    // Height fog is read whenever the file has it, whatever package version saved it.
+    ReadPlainFlag(json, "fogheight", fogheight);
+    ReadScalarSetting(json, "fogheightstart", fogheightstart, fogheightstart_setting);
+    ReadScalarSetting(json, "fogheightend", fogheightend, fogheightend_setting);
+    ReadScalarSetting(json, "fogheightstartdensity", fogheightstartdensity, fogheightstartdensity_setting);
+    ReadScalarSetting(json, "fogheightenddensity", fogheightenddensity, fogheightenddensity_setting);
+    ReadVec3Setting(json, "fogheightcolor", fogheightcolor, fogheightcolor_setting);
     return true;
 }
 

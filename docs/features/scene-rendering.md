@@ -452,6 +452,18 @@ translate. A step that samples an image nothing in the scene produces (a layer
 texture whose layer draws no composite) is skipped on Native Metal, instead of holding
 the scene; an image that exists and does not load still holds it.
 
+A texture slot that a pass's shader samples and nobody bound (the material lists no
+texture for it, or lists a null) reads zero in all four channels, as a null resource
+does in Direct3D, instead of dropping the pass. Only a slot the author left out is
+bound so, after the shader's own default textures and the switches that follow "a
+texture is bound" have settled, and the binding changes neither: an authored texture
+always wins and such a switch still reads the slot as unbound. The slot names one
+shared 1x1 image of zeros (`kUnboundTextureName`) that the ordinary image caches hold,
+so it costs no pass and no per-frame work. A texture the material names by a path that
+does not exist is not a null binding and keeps holding the scene as an image that does
+not load; a reference to a layer that does not resolve is not one either and the step
+is skipped as above.
+
 Image-card UVs and file-texture resolution constants use the authored first stored
 level's padding fact, not nominal texture area or the first mip kept by the display
 budget. A nominal 8×8, visible 6×4 texture stored as 6×4 therefore has resolution
@@ -887,9 +899,9 @@ track has a predecessor; the slot was the transparent texel instead, so a cross-
 that writes the previous cover's alpha drew nothing at all and a background built on
 it was the clear colour. A target is not a picture the image source can hold, so the
 material keeps the target in the slot, which keeps the graph drawing it first, and
-carries the cover's name beside it (`SceneMaterial::texture_covers`); each renderer
-binds the cover's image there instead while the image it uploaded for that frame is a
-cover and not the empty texel. Such a pass reads an image the runtime replaces, so it
+carries the cover's name beside it (`SceneMaterial::cover_slots`); the renderer binds
+the cover's image there, with the cover's own clamped sampler, instead of the target
+while the image it uploaded for that frame is a cover and not the empty texel. Such a pass reads an image the runtime replaces, so it
 is never reused as a still target. The slot's size uniforms stay the target's, as a
 picture slot's stay its art's.
 

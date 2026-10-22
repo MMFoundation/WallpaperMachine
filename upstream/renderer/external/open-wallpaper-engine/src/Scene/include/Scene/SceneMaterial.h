@@ -38,6 +38,14 @@ public:
 
     bool hasSprite { false };
 
+    /// Per texture slot, the cover the slot shows once one is published
+    /// (`$mediaThumbnail` or `$mediaPreviousThumbnail`), and empty for every other
+    /// slot; empty altogether when no slot is one. Only a slot whose authored
+    /// texture is another layer's composite is listed: the slot keeps sampling that
+    /// composite (its entry in `textures`) until a cover exists. A slot over a
+    /// picture is a runtime image of its own and needs no entry.
+    std::vector<std::string> cover_slots;
+
     SceneMaterialCustomShader customShader;
     /// Set on the materials that take a layer's `g_Color4`; the rest keep white.
     SceneMaterialTint         tint;

@@ -1477,6 +1477,10 @@ struct MetalRender::Impl
         uint32_t                    block_bytes { 0 };
         uint32_t                    levels { 1 };
         TextureSample               sample {};
+        /// The image uploaded last is a track's cover, not the transparent texel a
+        /// cover name holds while nothing plays. A slot that stands in for a layer's
+        /// composite shows the cover only while this is set.
+        bool                        shows_cover { false };
     };
     std::unordered_map<std::string, RuntimeImageRing> runtime_image_rings;
     /// How many times pixels have actually been written into one of those
@@ -1824,6 +1828,9 @@ struct MetalRender::Impl
     /// which is the ordinary case for a text layer standing still.
     void refreshRuntimeImages(Scene& scene);
     id<MTLSamplerState> samplerFor(const TextureSample& sample);
+    /// Whether slot `slot` of `desc` samples a published cover this frame instead of the
+    /// layer composite it names; see `SceneMaterial::cover_slots`.
+    bool coverShown(const ScenePassDescription& desc, std::size_t slot) const;
     /// The same wrap modes with linear filtering, for the chroma plane.
     id<MTLSamplerState> chromaSamplerFor(const TextureSample& sample);
     id<MTLRenderPipelineState> pipelineFor(const MetalPipelineKey& key,
@@ -2161,16 +2168,25 @@ void MetalRender::Impl::collectRuntimeImageKeys(Scene& scene)
         dynamic_cast<const RuntimeImageSource*>(scene.imageParser.get());
     if (runtime_images == nullptr) return;
 
-    for (const auto& desc : descriptions) {
-        for (const auto& key : desc.texture_keys) {
-            if (key.empty() || IsSpecTex(key)) continue;
-            if (! runtime_images->IsRuntimeImage(key)) continue;
-            if (std::find(runtime_image_keys.begin(), runtime_image_keys.end(), key) ==
-                runtime_image_keys.end()) {
-                runtime_image_keys.push_back(key);
-            }
+    const auto note = [&](const std::string& key) {
+        if (key.empty() || IsSpecTex(key)) return;
+        if (! runtime_images->IsRuntimeImage(key)) return;
+        if (std::find(runtime_image_keys.begin(), runtime_image_keys.end(), key) ==
+            runtime_image_keys.end()) {
+            runtime_image_keys.push_back(key);
         }
+    };
+    for (const auto& desc : descriptions) {
+        for (const auto& key : desc.texture_keys) note(key);
+        for (const auto& key : desc.cover_keys) note(key);
     }
+}
+
+bool MetalRender::Impl::coverShown(const ScenePassDescription& desc, std::size_t slot) const
+{
+    if (slot >= desc.cover_keys.size() || desc.cover_keys[slot].empty()) return false;
+    const auto ring = runtime_image_rings.find(desc.cover_keys[slot]);
+    return ring != runtime_image_rings.end() && ! ring->second.slots.empty() && ring->second.shows_cover;
 }
 
 void MetalRender::Impl::refreshRuntimeImages(Scene& scene)
@@ -2256,6 +2272,7 @@ void MetalRender::Impl::refreshRuntimeImages(Scene& scene)
         // buffer is still reading. A level the image does not hold stays as it was.
         if (! UploadImageLevels(ring.slots[slot], source, bytes_per_pixel, block_bytes)) continue;
         ring.slot_versions[slot] = version;
+        ring.shows_cover         = ! RuntimeImageSource::IsEmptyCover(*parsed);
         ++runtime_image_uploads;
     }
 }
@@ -3860,6 +3877,10 @@ void MetalRender::Impl::computeDemandReasons(Scene& scene, rg::RenderGraph& grap
                         break;
                     }
                 }
+                // A slot that may swap to a cover reads an image the runtime replaces.
+                for (const auto& cover : desc.cover_keys) {
+                    if (! cover.empty()) reasons |= render::DynamicReason::RuntimeImage;
+                }
             }
             // A sheet with more than one frame and a mesh the runtime rewrites
             // both change the picture without any uniform this reflection
@@ -4147,6 +4168,10 @@ void MetalRender::Impl::compileStaticCache(Scene& scene)
                 if (runtime_images != nullptr && runtime_images->IsRuntimeImage(key))
                     reasons |= render::DynamicReason::RuntimeImage;
             }
+            // A slot that may swap to a cover reads an image the runtime replaces.
+            for (const auto& cover : desc.cover_keys) {
+                if (! cover.empty()) reasons |= render::DynamicReason::RuntimeImage;
+            }
             // A mesh the runtime rewrites every frame -- a particle system --
             // is never reusable. Its geometry is uploaded per frame and the
             // upload happens only for a pass that executes, so a skipped one
@@ -4284,6 +4309,16 @@ render::StaticPassSample MetalRender::Impl::frameSample(Scene& scene, std::size_
             if (ring == runtime_image_rings.end()) continue;
             hash = render::StaticHashBytes(hash, key.data(), key.size());
             hash = render::StaticHashMix(hash, ring->second.version);
+        }
+        // A slot over a composite shows a cover from the moment one is published.
+        for (std::size_t slot = 0; slot < desc.cover_keys.size(); ++slot) {
+            const auto& key = desc.cover_keys[slot];
+            if (key.empty()) continue;
+            const auto ring = runtime_image_rings.find(key);
+            if (ring == runtime_image_rings.end()) continue;
+            hash = render::StaticHashBytes(hash, key.data(), key.size());
+            hash = render::StaticHashMix(hash, ring->second.version);
+            hash = render::StaticHashMix(hash, coverShown(desc, slot) ? 1u : 0u);
         }
     }
 
@@ -5382,6 +5417,14 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
                     // image is bound; its rectangle inside that image arrives
                     // through the rotation and translation uniforms written
                     // above.
+                    if (impl.coverShown(desc, t)) {
+                        const auto& ring = impl.runtime_image_rings.at(desc.cover_keys[t]);
+                        bind_texture(slot,
+                                     ring.slots[static_cast<std::size_t>(impl.frame_slot) %
+                                                kFramesInFlight],
+                                     impl.samplerFor(ring.sample));
+                        continue;
+                    }
                     int image_slot = -1;
                     if (const auto sprite = pass.sprites.find(t);
                         sprite != pass.sprites.end() && sprite->second.numFrames() > 0) {
