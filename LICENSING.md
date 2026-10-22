@@ -95,18 +95,19 @@ What the root `LICENSE` does and does not do:
   them, and offering them under GPL-3.0-only needs each one's permission:
   - **Morax** (163 commits; about 91,000 lines at HEAD across `App/`, `Tests/`, the Rust
     bridge and core crates, the scene engine including its Native Metal renderer
-    `Scene/MetalRender`, and `scripts/`). The maintainer reports a written permission; the
-    text is not yet filed here, and its scope must cover all of these contributions.
+    `Scene/MetalRender`, and `scripts/`). The maintainer holds Morax's permission to offer
+    all of these contributions under GPL-3.0-only (given to the maintainer personally; not
+    filed in this repository).
   - **Henry Yang** (3 commits; about 130 lines, mostly the bridge's
     `actor/snapshots.rs` and `actor/state.rs` and `tests/metal_scene_draw_smoke.mm`, a few in
-    `App/` and `Extension/`). The maintainer reports a written permission; the text is not
-    yet filed here.
+    `App/` and `Extension/`). No permission is filed.
   - **Hi-Jiajun** (3 commits, `50dd988f0`, `d53864e34`, `ca5b7b1bb`; about 370 lines of the
     solar automation: `SolarLocationTracker.swift`, the `WallpaperAutomation*` sources and
     tests, `DisplaysGroups.swift`). No permission is recorded.
-  Until each permission is filed with a scope that covers the contributions, or the
-  contributions are replaced, the GPL-3.0-only offer of those lines rests on it (see
-  [Remaining blockers](#remaining-blockers)).
+  On 2026-10-22 the maintainer decided to offer Henry Yang's and Hi-Jiajun's small
+  contributions under GPL-3.0-only without a filed permission, accepting that either may
+  object; should one ask, their lines are replaced. That is the maintainer's decision, not a
+  grant (see [Remaining blockers](#remaining-blockers)).
 
 The application shell, extension and Workshop browser are recorded in
 `upstream/provenance.json` under `applicationShell`, `lockScreenExtension` and
@@ -396,12 +397,11 @@ applies that policy: GPL-2.0-only and unknown licenses fail.
 
 Open before any distribution:
 
-1. **Contributor permissions on file.** Morax's and Henry Yang's written permissions
-   to use their contributions under GPL-3.0-only are reported by the maintainer and not
-   yet filed here; Hi-Jiajun's is not recorded at all, so their solar automation code
-   needs a permission or a replacement. Each filed text must name who gave it, which
-   contributions it covers and under which license; a text narrower than that scope
-   leaves the rest uncovered.
+1. **Contributor permissions.** The maintainer holds Morax's permission for all of
+   Morax's contributions; it is not filed here. Henry Yang's and Hi-Jiajun's small
+   contributions are offered without a permission by the maintainer's decision of
+   2026-10-22 (see [Source license](#source-license-gpl-30-only)). A counsel review would
+   weigh both.
 2. **A run of the closure check on the app to be distributed.**
    `python3 scripts/check_licenses.py --enforce` on that Release app, with the outcome
    recorded here.
