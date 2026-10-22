@@ -86,7 +86,12 @@ mapping's first frame is acknowledged (or deactivation rolls a real failure back
 disabled). If Core Graphics temporarily cannot resolve a display the bridge still
 names, during wake or a lid change, the committed manifest and native selection stay
 untouched and that gap is not an error: while no earlier error is pending, the
-status monitor retries the same scene set once the topology settles. A real earlier
+status monitor retries the same scene set once the topology settles. While the Mac
+is locked or no display is awake, a committed display the bridge no longer names keeps
+its lock screen too: Core Graphics lists no sleeping display as active, and an
+external display can drop off while it sleeps, so applying that departure would hand
+its lock screen back to macOS just before the user wakes it. The first check after
+the Mac is unlocked with a display awake applies a departure that is still there. A real earlier
 compatibility or restoration error is left in place and the monitor stays stopped
 until an explicit retry succeeds. Removing the last wallpaper, disabling both modes,
 and shared publication or renderer failure recovery clear the manifest. If macOS
@@ -425,6 +430,30 @@ content check even when project paths and options stayed identical. The publishe
 recalculates its asset fingerprints: changed bytes produce a new immutable
 publication, while identical scene records keep the current revision and do not
 reload the extension.
+
+A failure a later attempt can get past does not hand the wallpapers back when it
+hits modes that are already committed and still requested: WallpaperAgent rewriting
+its store between the app's read and write, WallpaperAgent between a restart and its
+relaunch, or no first frame within the readiness wait. The committed selection stays
+on the lock screen and the monitor publishes again after 2, 4, 8, 16 and 32 seconds,
+the status keeping its last progress text. A sixth failure in a row is reported and
+restored like any other, with **Retry**. A first activation, a switch change and every
+other failure report at once, as before. A write that lost the race to WallpaperAgent
+wrote nothing, so the selection's next attempt does not count the fields it was about
+to take as its own (it would read them as changed outside the app); the recovery
+journal keeps them on disk.
+
+macOS keeps a lock-screen renderer whose process ended (a crash, or a process ended
+from outside) as its wallpaper and never asks for it again: every update to it fails
+and the lock screen stays black. The extension names its process in each readiness
+file (`processID`), and the app watches the processes that acknowledged the committed
+lock screen with a process-exit source, never by polling. When one exits, the app
+publishes the same scenes as a new revision, which makes WallpaperAgent load the
+renderer again, and waits for its first frame. A process macOS started in its place
+that has already drawn the committed revision is watched instead. More than three
+exits within ten minutes restore the system wallpaper with "The lock-screen renderer
+stopped repeatedly" and **Retry**. An extension copy older than the field is not
+watched.
 
 Repeated checks do not rewrite an unchanged recovery journal. New Spaces, choices made
 in System Settings and wallpaper-service reloads all rewrite the system wallpaper

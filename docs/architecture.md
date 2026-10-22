@@ -675,7 +675,8 @@ contracts they must agree on:
   `~/Library/Application Support/WallpaperMachine/LockScreenExchange/`, then posts
   `LockScreenConfiguration.changedNotification`. The extension reloads and writes
   `LockScreenReadiness` back once a GPU-ready non-preview surface exists, or with the error when
-  acquiring or replacing that surface's renderer failed. A scene field added later is optional
+  acquiring or replacing that surface's renderer failed; it names the writing process, whose exit
+  the app watches ([Background checks](features/lock-screen.md#background-checks-and-recovery)). A scene field added later is optional
   (for example `framing`, the picture's position), so the version stays and an extension copy that
   predates it ignores the key; `LockScreenScene.sharesRenderer(with:)` names which differences
   make the extension replace a renderer rather than update it.

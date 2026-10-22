@@ -731,6 +731,37 @@ final class LockScreenWallpaperTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
   }
 
+  /// WallpaperAgent writes its store in bursts; an attempt that lost that race wrote nothing, so
+  /// the next one takes the displays over rather than reporting a change made outside the app.
+  @MainActor
+  func testRetryAfterConcurrentStoreChangeTakesOverInsteadOfReportingAnExternalChange() throws {
+    var external = fixture()
+    try write(external)
+    external["Unrelated"] = "concurrent external update"
+    var raced = false
+    var reloads = 0
+    let selection = LockScreenWallpaperSelection(
+      storeURL: store, journalURL: journal, reload: { reloads += 1 },
+      persistJournal: { url, data in
+        try LockScreenWallpaperSelection.persistJournalFile(url, data)
+        if !raced {
+          raced = true
+          try self.write(external)
+        }
+      })
+    XCTAssertThrowsError(try selection.synchronize(desktopDisplays: ["one"], screenSaverDisplays: ["one"])) {
+      XCTAssertEqual(($0 as? LockScreenWallpaperFailure)?.reason, .transient)
+    }
+    try selection.synchronize(desktopDisplays: ["one"], screenSaverDisplays: ["one"])
+    XCTAssertEqual(reloads, 1)
+    let taken = try readStore()
+    let display = try XCTUnwrap((taken["Displays"] as? [String: Any])?["one"] as? [String: Any])
+    XCTAssertEqual(provider(display, key: "Desktop"), LockScreenConfiguration.extensionIdentifier)
+    XCTAssertEqual(taken["Unrelated"] as? String, "concurrent external update")
+    try selection.synchronize(desktopDisplays: [], screenSaverDisplays: [])
+    XCTAssertEqual(try readStore() as NSDictionary, external as NSDictionary)
+  }
+
   @MainActor
   func testReloadRetryUsesPersistedUnionWithoutRewritingIt() throws {
     let original = fixture()
