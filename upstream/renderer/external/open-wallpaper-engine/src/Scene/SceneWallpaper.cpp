@@ -1178,8 +1178,11 @@ private:
     }
     MHANDLER_CMD(SET_SCALINGMODE) {
         int32_t value = 0;
-        if (! msg->findInt32("value", &value) || value < 0 || value > 3) return;
-        m_scaling_mode = static_cast<WallpaperScalingMode>(value);
+        if (! msg->findInt32("value", &value)) return;
+        // A value no mode has is ignored, not cast into a layout that draws nothing scaled.
+        const auto mode = WallpaperScalingModeFromValue(value);
+        if (! mode) return;
+        m_scaling_mode = *mode;
         m_render->SetWallpaperScalingMode(m_scaling_mode);
     }
     MHANDLER_CMD(SET_SCALINGFACTOR) {

@@ -3,6 +3,7 @@
 
 #include "Audio/AudioResponseService.h"
 #include "Core/RendererCounters.hpp"
+#include "Presentation/WallpaperScaling.hpp"
 #include "SceneWallpaper.hpp"
 #include "Runtime/MediaArtwork.hpp"
 #include "SceneWallpaperSurface.hpp"
@@ -925,8 +926,9 @@ extern "C" int owe_scene_wallpaper_set_property_int32(
     if (const int status = check_property_write(scene, name, PropertyKind::Int32); status != 0) {
         return status;
     }
-    if (std::string_view(name) == wallpaper::PROPERTY_SCALINGMODE && (value < 0 || value > 3)) {
-        return fail("the scaling mode must be between 0 and 3");
+    if (std::string_view(name) == wallpaper::PROPERTY_SCALINGMODE &&
+        ! wallpaper::WallpaperScalingModeFromValue(value)) {
+        return fail("the scaling mode must be between 0 and 4");
     }
     return guarded([&] {
         scene->scene.setPropertyInt32(name, value);

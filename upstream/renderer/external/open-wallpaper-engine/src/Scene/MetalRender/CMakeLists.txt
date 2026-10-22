@@ -16,6 +16,7 @@ set(METAL_RENDER_SOURCES
 if(APPLE)
   list(APPEND METAL_RENDER_SOURCES
     MetalRender.mm
+    MetalBackdrop.mm
     MetalPosterCapture.mm
     MetalVideoTextures.mm)
 endif()

@@ -7,6 +7,15 @@
 namespace wallpaper
 {
 
+std::optional<WallpaperScalingMode> WallpaperScalingModeFromValue(int64_t value)
+{
+    if (value < static_cast<int64_t>(WallpaperScalingMode::NONE) ||
+        value > static_cast<int64_t>(WallpaperScalingMode::FIT_BLURRED)) {
+        return std::nullopt;
+    }
+    return static_cast<WallpaperScalingMode>(value);
+}
+
 WallpaperScalingLayout ComputeWallpaperScalingLayout(
     WallpaperScalingMode mode,
     uint32_t scene_width,
@@ -37,7 +46,8 @@ WallpaperScalingLayout ComputeWallpaperScalingLayout(
         scale_x = ratio_x;
         scale_y = ratio_y;
         break;
-    case WallpaperScalingMode::FIT: scale_x = scale_y = std::min(ratio_x, ratio_y); break;
+    case WallpaperScalingMode::FIT:
+    case WallpaperScalingMode::FIT_BLURRED: scale_x = scale_y = std::min(ratio_x, ratio_y); break;
     case WallpaperScalingMode::FILL: scale_x = scale_y = std::max(ratio_x, ratio_y); break;
     case WallpaperScalingMode::NONE:
     default: break;
@@ -61,6 +71,19 @@ WallpaperScalingLayout ComputeWallpaperScalingLayout(
     layout.viewport_px = PixelRect { px(x * dpr), px(y * dpr), px(content_w * dpr),
                                      px(content_h * dpr) };
     layout.scissor_px  = PixelRect { 0, 0, px(display_w * dpr), px(display_h * dpr) };
+
+    if (mode == WallpaperScalingMode::FIT_BLURRED) {
+        // The copy covers the display the way Fill at a factor of 1 would and stays centred:
+        // neither the picture's position nor its factor moves it.
+        const double fill_scale = std::max(ratio_x, ratio_y);
+        const double fill_w     = scene_w * fill_scale;
+        const double fill_h     = scene_h * fill_scale;
+        layout.backdrop_px = PixelRect { px((display_w - fill_w) * 0.5 * dpr), px((display_h - fill_h) * 0.5 * dpr),
+                                         px(fill_w * dpr), px(fill_h * dpr) };
+        // One pixel of gap is what rounding leaves when the shapes match: no room.
+        layout.backdrop = layout.scissor_px.width - layout.viewport_px.width > 1 ||
+                          layout.scissor_px.height - layout.viewport_px.height > 1;
+    }
     return layout;
 }
 

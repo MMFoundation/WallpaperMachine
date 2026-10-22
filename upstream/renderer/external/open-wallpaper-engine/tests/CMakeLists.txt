@@ -315,6 +315,17 @@ gtest_discover_tests(
     PROPERTIES TIMEOUT 30
     DISCOVERY_TIMEOUT 60
 )
+# The arithmetic of Fit with blurred backdrop: the layout it reports, the rectangles the
+# backdrop is drawn into and the plan that reduces the picture for it. No GPU.
+add_executable(backdrop_geometry_test backdrop_geometry_test.cpp)
+target_link_libraries(backdrop_geometry_test PRIVATE ${PROJECT_NAME} wpScene wpRenderCommon GTest::gtest_main)
+target_include_directories(backdrop_geometry_test PRIVATE . ${CMAKE_SOURCE_DIR}/src)
+target_compile_features(backdrop_geometry_test PRIVATE cxx_std_20)
+gtest_discover_tests(
+    backdrop_geometry_test
+    PROPERTIES TIMEOUT 30
+    DISCOVERY_TIMEOUT 60
+)
 add_executable(particle_mouse_controlpoint_test particle_mouse_controlpoint_test.cpp)
 target_link_libraries(particle_mouse_controlpoint_test PRIVATE ${PROJECT_NAME} wpScene wpParticle wpAudio nlohmann_json::nlohmann_json GTest::gtest_main)
 target_include_directories(particle_mouse_controlpoint_test PRIVATE .)
@@ -719,6 +730,19 @@ if(APPLE)
       scene_harness_selftest
       TEST_PREFIX scene_harness_selftest.
       PROPERTIES TIMEOUT 120
+      DISCOVERY_TIMEOUT 60
+  )
+  # Fit with blurred backdrop drawn by the native renderer, through the harness above.
+  add_executable(backdrop_scene_test backdrop_scene_test.mm)
+  target_link_libraries(backdrop_scene_test PRIVATE scene_test_support GTest::gtest_main)
+  set_target_properties(backdrop_scene_test PROPERTIES
+      OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+  target_compile_options(backdrop_scene_test PRIVATE
+      $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+  gtest_discover_tests(
+      backdrop_scene_test
+      TEST_PREFIX backdrop_scene_test.
+      PROPERTIES TIMEOUT 240
       DISCOVERY_TIMEOUT 60
   )
 endif()

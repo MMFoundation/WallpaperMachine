@@ -5,6 +5,7 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 
+#include "MetalBackdrop.hpp"
 #include "MetalPosterCapture.hpp"
 #include "MetalVideoTextures.hpp"
 
@@ -1246,6 +1247,9 @@ struct MetalRender::Impl
 
     // ---- host services
     MetalPosterCapture poster;
+    /// The blurred copy "Fit with blurred backdrop" fills the bars with. Holds nothing in any
+    /// other mode.
+    MetalBackdrop      backdrop;
     MetalVideoTextures video;
     /// Whether the graph currently compiled has produced a frame. A poster
     /// composed before that would publish an empty image as the wallpaper.
@@ -1676,8 +1680,13 @@ struct MetalRender::Impl
     bool buildPresentation();
     id<MTLRenderPipelineState> presentPipelineFor(MTLPixelFormat format);
     bool ensurePresentPipeline(MTLPixelFormat format);
+    /// `frame` is true for the composition a drawn frame presents: the one whose layout decides
+    /// whether the blurred backdrop still has room to fill.
     bool encodeComposition(id<MTLCommandBuffer> command, id<MTLTexture> destination,
-                           const Scene& scene);
+                           const Scene& scene, bool frame = false);
+    /// Builds what the scaling mode needs for the blurred backdrop, or lets go of it when the
+    /// mode is any other. Between frames only.
+    void prepareBackdrop();
     bool encodeScaledCopy(id<MTLCommandBuffer> command, id<MTLTexture> source,
                           id<MTLTexture> destination);
     bool compile(Scene& scene, rg::RenderGraph& graph);
@@ -1901,6 +1910,19 @@ void MetalRender::Impl::releasePresentation()
     layer                    = nil;
 }
 
+void MetalRender::Impl::prepareBackdrop()
+{
+    if (scaling_mode != WallpaperScalingMode::FIT_BLURRED) {
+        backdrop.release();
+        return;
+    }
+    // Before the renderer has a device the pipelines wait for `buildPresentation`.
+    if (device == nil || present_library == nil) return;
+    if (! backdrop.buildPipelines(device, drawable_format)) {
+        LOG_ERROR("metal render: the blurred backdrop is off: %s", backdrop.error().c_str());
+    }
+}
+
 bool MetalRender::Impl::buildPresentation()
 {
     present_gate.Invalidate();
@@ -1935,6 +1957,7 @@ bool MetalRender::Impl::buildPresentation()
     sampler_descriptor.tAddressMode = MTLSamplerAddressModeClampToEdge;
     present_sampler = [device newSamplerStateWithDescriptor:sampler_descriptor];
     if (present_sampler == nil) return fail("presentation sampler could not be created");
+    prepareBackdrop();
     return true;
 }
 
@@ -2011,7 +2034,8 @@ bool MetalRender::Impl::encodeScaledCopy(id<MTLCommandBuffer> command, id<MTLTex
 /// wallpaper it claims to be a picture of. The layout is computed from the
 /// destination's own size, which is the only thing that differs between them.
 bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
-                                          id<MTLTexture> destination, const Scene& scene)
+                                          id<MTLTexture> destination, const Scene& scene,
+                                          bool frame)
 {
     if (command == nil || destination == nil) return false;
     const auto output = targets.find(scene.ResolveRenderTargetName(SpecTex_Default));
@@ -2021,6 +2045,19 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
 
     const auto layout =
         scalingLayout(scene, (uint32_t)destination.width, (uint32_t)destination.height);
+
+    // The copy for the bars is made first, so the composition below can read it. It exists
+    // while a composition has room to fill: the first frame that has none lets it go.
+    bool draw_backdrop = false;
+    if (scaling_mode == WallpaperScalingMode::FIT_BLURRED) {
+        if (layout.backdrop) {
+            draw_backdrop = backdrop.canDraw(destination.pixelFormat) &&
+                            backdrop.encodeMaking(command, output->second);
+        } else if (frame) {
+            backdrop.releaseImages();
+        }
+    }
+
     MTLRenderPassDescriptor* present = [MTLRenderPassDescriptor renderPassDescriptor];
     present.colorAttachments[0].texture     = destination;
     // Cleared, so the letterbox around a fitted image is black rather than
@@ -2031,6 +2068,23 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
 
     id<MTLRenderCommandEncoder> encoder = [command renderCommandEncoderWithDescriptor:present];
     if (encoder == nil) return false;
+    if (draw_backdrop) {
+        encoder.label = @"Wallpaper composition with blurred backdrop";
+        // Only the room around the picture: its own pixels are the ones Fit draws.
+        const PixelRect display { 0, 0, (int32_t)std::min<NSUInteger>(std::max(0, layout.scissor_px.width), destination.width),
+                                  (int32_t)std::min<NSUInteger>(std::max(0, layout.scissor_px.height), destination.height) };
+        const FlippedViewportBox copy_box {
+            .x      = (double)layout.backdrop_px.x,
+            .y      = (double)(layout.backdrop_px.y + std::max(1, layout.backdrop_px.height)),
+            .width  = (double)std::max(1, layout.backdrop_px.width),
+            .height = -(double)std::max(1, layout.backdrop_px.height),
+        };
+        const auto copy_viewport = ToMetalViewport(copy_box);
+        backdrop.encodeBands(encoder, ComputeSurroundBands(display, layout.viewport_px),
+                             (MTLViewport) { copy_viewport.origin_x, copy_viewport.origin_y,
+                                             copy_viewport.width, copy_viewport.height, 0.0, 1.0 },
+                             horizontal_flip);
+    }
     const FlippedViewportBox viewport {
         .x      = (double)layout.viewport_px.x,
         .y      = (double)(layout.viewport_px.y + std::max(1, layout.viewport_px.height)),
@@ -4604,6 +4658,7 @@ void MetalRender::destroy()
         pImpl->releaseGraph();
         pImpl->video.closeHeld();
         pImpl->releasePresentation();
+        pImpl->backdrop.release();
         pImpl->present_pipelines.clear();
         pImpl->queue  = nil;
         pImpl->device = nil;
@@ -4732,6 +4787,7 @@ void MetalRender::UpdateCameraFillMode(Scene& scene, FillMode fillmode)
 void MetalRender::SetWallpaperScalingMode(WallpaperScalingMode mode)
 {
     pImpl->scaling_mode = mode;
+    pImpl->prepareBackdrop();
     pImpl->present_gate.Invalidate();
 }
 
@@ -5407,6 +5463,13 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
         impl.present_key.Add(static_cast<uint64_t>(static_cast<uint32_t>(layout.scissor_px.width)));
         impl.present_key.Add(static_cast<uint64_t>(static_cast<uint32_t>(layout.scissor_px.height)));
         impl.present_key.Add(impl.horizontal_flip ? 1u : 0u);
+        // The copy's rectangle, which no other word of the key follows: it moves with the
+        // display and the mode, never with the picture.
+        impl.present_key.Add(layout.backdrop ? 1u : 0u);
+        impl.present_key.Add(layout.backdrop ? static_cast<uint64_t>(static_cast<uint32_t>(layout.backdrop_px.x)) : 0u);
+        impl.present_key.Add(layout.backdrop ? static_cast<uint64_t>(static_cast<uint32_t>(layout.backdrop_px.y)) : 0u);
+        impl.present_key.Add(layout.backdrop ? static_cast<uint64_t>(static_cast<uint32_t>(layout.backdrop_px.width)) : 0u);
+        impl.present_key.Add(layout.backdrop ? static_cast<uint64_t>(static_cast<uint32_t>(layout.backdrop_px.height)) : 0u);
 
         // Every pass reused or drawing nothing, no feedback trade and no video
         // to import: the scene output holds exactly the pixels the last
@@ -5445,7 +5508,7 @@ bool MetalRender::drawFrame(Scene& scene, bool* presented)
             impl.frame_drawn = true;
             return true;
         }
-        impl.encodeComposition(command, drawable.texture, scene);
+        impl.encodeComposition(command, drawable.texture, scene, true);
 
         // The poster draws the same composition into a texture this process
         // owns. It costs nothing unless a request is pending, and it never
@@ -5623,7 +5686,7 @@ uint64_t MetalRender::RenderTargetBytesForTests() const
             bytes += texture.allocatedSize;
         }
     }
-    return bytes;
+    return bytes + pImpl->backdrop.allocatedBytes();
 }
 
 uint64_t MetalRender::ProgramCompilesForTests() { return MetalProgramCache::shared().compileCount(); }

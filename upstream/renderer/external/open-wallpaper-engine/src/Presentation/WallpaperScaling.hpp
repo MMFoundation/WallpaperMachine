@@ -3,6 +3,7 @@
 #include "Presentation/WallpaperFraming.hpp"
 
 #include <cstdint>
+#include <optional>
 
 namespace wallpaper
 {
@@ -13,7 +14,12 @@ enum class WallpaperScalingMode : std::uint8_t
     STRETCH = 1,
     FIT = 2,
     FILL = 3,
+    /// Fit, with a blurred copy of the picture in the room the picture leaves.
+    FIT_BLURRED = 4,
 };
+
+/// The mode a host value names, or nothing when no mode has that value.
+std::optional<WallpaperScalingMode> WallpaperScalingModeFromValue(int64_t value);
 
 struct PixelRect {
     int32_t x { 0 };
@@ -31,6 +37,11 @@ struct WallpaperScalingLayout {
     double scale_y { 1.0 };
     PixelRect viewport_px {};
     PixelRect scissor_px {};
+    /// Where the backdrop's picture sits: what Fill at a factor of 1 gives the picture,
+    /// centred whatever the picture's position. Empty unless the mode has a backdrop.
+    PixelRect backdrop_px {};
+    /// Whether the picture leaves room (more than a pixel on an axis) for the backdrop.
+    bool      backdrop { false };
 };
 
 // `pan_x` and `pan_y` are `WallpaperFraming` fractions and are clamped the same

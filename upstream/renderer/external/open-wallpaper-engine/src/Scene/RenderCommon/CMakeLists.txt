@@ -16,6 +16,8 @@ SceneToRenderGraph.cpp
 StaticSubgraphCache.cpp
 # Presentation layout and cursor mapping: plain arithmetic.
 ../../Presentation/WallpaperScaling.cpp
+# Where the blurred backdrop goes and how the picture is reduced for it.
+../../Presentation/BackdropGeometry.cpp
 )
 
 target_link_libraries(${LIB_NAME}

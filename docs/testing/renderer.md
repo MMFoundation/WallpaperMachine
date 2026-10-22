@@ -687,34 +687,37 @@ function: the default position reproduces an in-test copy of the old centring
 arithmetic bit for bit in every scaling mode, a position of 0 and 1 puts the picture
 against the leading and trailing edges for an overflowing and a letterboxed picture
 alike, non-finite values fall back to the centre and out-of-range ones clamp, and the
-pointer mapping follows the position. For Fit with blurred backdrop it pins that the
-picture and the pointer mapping are Fit's for every factor and position, that the copy
-covers the display as a centred Fill whatever the position, that the copy's bands cover
-exactly the room around the picture and never the picture, that a one-pixel rounding
-gap and every other mode draw no copy, how the picture is reduced (taps at most four
-texels apart, two steps for a picture longer than 1024) and that a scaling-mode value
-past the last mode is refused.
+pointer mapping follows the position.
 
-`metal_scene_draw_smoke`'s `ABlurredFitFillsItsBarsWithTheBlurredPictureOnBothRenderers`
-draws a canvas-filling gradient as Fit and as Fit with blurred backdrop on both
-renderers, with bars either side, mirrored, above and below, and for a picture long
-enough to take the two-step reduction: the picture is Fit's byte for byte, Fit's bars
-are black, the filled ones are not, neighbouring pixels differ by at most four steps, each
-side takes after the picture's nearer edge and is darker than it, and the two renderers'
-fills differ by less than 1.5 on average. `WE_TEST_OUTPUT` keeps the pictures.
-`ABlurredFitHoldsItsImagesOnlyWhileItHasRoomToFill` checks on the native backend that
-Fit and Fill hold the same render-target bytes, that the fill's images (with the 8-bit
-reduction for a large picture) appear in its mode and go with Fit or with a display of
-the picture's own shape, and prints what they hold. `playback_gpu_test`'s
-`PlainVideoPresentsThroughTheFinalViewportByteForByte` checks the Compatibility side for
-a plain video: without the composition's fill to borrow it takes the copy path, with it
-it presents directly, and both give the same picture and poster, Fit's picture inside
-the room, the fill in all of it; a mirrored picture takes the copy, and going back to
-Fit restores the plain bars and frees the images. `unchanged_present_test`'s
-`ABlurredBackdropStillLetsAPlainVideoSkipItsRepeats` runs a plain video in this mode on a
-surface wider than the clip and checks that ticks repeating a frame are still skipped and
-every new frame presented: the fill's rectangle is part of the presentation key, whose
-capacity (32 words) a key must stay within, or it never matches and nothing is skipped.
+`backdrop_geometry_test` (CPU only, in the check) pins the arithmetic of Fit with blurred
+backdrop: for several shapes (16:9 on an ultrawide, on 16:10, on a portrait display, the
+same shape, a one-pixel rounding gap) the layout's rectangle is Fit's for every factor,
+position and display scale, `backdrop_px` is Fill at a factor of 1, centred, and `backdrop`
+is true exactly when the picture leaves more than a pixel of room; every other mode reports
+none and keeps its rectangle; a mode value past the last is refused. The bands cover the
+display minus the picture exactly (checked by area and by sampled points) without
+overlapping the picture or each other, including a picture moved past an edge, larger than
+the display or absent. The reduction plan takes two steps for a 3840x2160 picture (through
+an 8-bit 480x270 image) and one for 1000 texels, always ends 128 texels on the longer side
+and keeps its taps at most four texels apart.
+
+`backdrop_scene_test` (native Metal, headless, in the check) runs a canvas-filling gradient
+through the scene harness as Fit and as Fit with blurred backdrop, with bars left and
+right, above and below, mirrored, and for a picture longer than 1024 texels: the picture
+is Fit's byte for byte, Fit's bars are black, the copy's are not, neighbouring pixels of
+the copy differ by at most four steps, the copy equals the gradient Fill-sized at 70% of
+its brightness within five steps, and each side is darker than the strip of picture beside
+it. Further tests pin that hard edges in the picture come out soft in both blur
+directions, that the copy carries exactly one step of dither, that two runs give the same
+bytes, that moving or scaling the picture leaves the copy where it is, that a picture
+fitting the display exactly draws no copy and Fit's bytes, that Fit and Fill hold the
+same render-target bytes while this mode holds more (more again with the 8-bit image for a
+large picture) and goes back to Fit's number when there is no room or another mode is
+chosen, that switching between Fit and this mode presents again while a repeated frame is
+still skipped (which also fails if the presentation key outgrows its capacity), and that
+Fit's per-frame pass count is the mode's. The drawable composition itself is not read
+back: the harness sees the poster, which runs the same composition code. `WE_TEST_KEEP_PICTURES`
+keeps the pictures.
 
 `project_property_preview_test` (CPU only, in the check) pins what a property
 document means to a running scene: the project's declared defaults with exactly the

@@ -1820,6 +1820,15 @@ texture entrances are not decoded-image or native-rendering evidence.
   the animation never reaches the next frame. `sprite_animation_test` checks
   elapsed time across cadences and long loops.
 
+- **Fit with blurred backdrop** — `backdrop_geometry_test` and `backdrop_scene_test`. The
+  mode's picture, position, scale factor and pointer mapping are Fit's; the room around
+  it holds a darker, blurred copy of the same live picture, drawn only into the bands
+  the picture leaves, so the picture's bytes are Fit's. The copy exists only while a
+  composition has room for it (a one-pixel gap is none), costs no extra scene pass,
+  and moves neither with the picture's position nor with its scale factor. A frame that
+  repeats the picture repeats the copy and is skipped; the key that decides it must
+  keep its capacity.
+
 ## Alpha compositing
 
 - **Source-over coverage** — the `generated-alpha` case in `check_renderer.py`.

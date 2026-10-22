@@ -1100,72 +1100,64 @@ presented, and the same scene with a compiling effect draws.
 ### Fit with blurred backdrop
 
 `FIT_BLURRED` (the C ABI's scaling mode 4, `fit_blurred` in a display's `monitors` entry,
-`MatchBlurred` across the bridge) lays the picture out exactly as Fit does, position,
-scale factor and pointer mapping included, and fills the room around it with a blurred,
+`MatchBlurred` across the bridge) shows the whole picture exactly as Fit does, with its
+position, scale factor and pointer mapping, and fills the room around it with a soft,
 darker copy of the same live picture instead of the clear colour
-([user-facing behaviour](wallpaper-properties.md#fit-with-blurred-backdrop)). The layout
-(`ComputeWallpaperScalingLayout`) adds `backdrop_px`, the picture as Fill at a factor of 1
-places it, centred whatever the position, and `backdrop`, whether the picture leaves room:
-a gap of one pixel, the most rounding leaves when the shapes match, is none. The copy is
-drawn only into that room (`ComputeWallpaperBackdropBands`), so the picture's pixels are
-Fit's byte for byte. Both backends build the copy the same way
-(`Presentation/WallpaperBackdrop.hpp`, `MetalWallpaperBackdrop`, `WallpaperBackdropPass`):
-the scene's output is reduced to an image 128 texels on its longer side, a picture longer
-than 1024 texels first to an eighth of its size in an 8-bit image, with bilinear taps at
-most four texels apart; that image is blurred by a separable Gaussian of 3 texels, then
-stretched over the room through a cubic B-spline, darkened to 70% and dithered by one
-8-bit step. A quarter of the source texels is read: reading all of them cost about three
-times the GPU time on a 6880-wide raster (below), and the copy is blurred over about 160
-source texels, so by estimate a one-pixel line moving in and out of the taps changes it by less
-than one 8-bit step (not measured with a moving fixture). The posters draw it too, since
-they compose the same picture again. A scale factor or a position change moves the
-picture and not the copy.
+([user-facing behaviour](wallpaper-properties.md#fit-with-blurred-backdrop)). The copy is
+what Fill at a factor of 1 would show, centred; moving or scaling the picture moves the
+picture only. Nothing of it exists in any other mode.
 
-Nothing of it exists in any other mode: the pipelines are built when the mode is chosen,
-between frames (a pipeline built inside a frame would hold it on the shader compiler),
-and the images (two half-float ones and, for a large picture, the 8-bit one) exist only
-while a composition has room to fill and go on the first frame that has none. The present
-key carries the copy's rectangle, so switching between Fit and this mode presents again,
-and a frame that repeats the picture still repeats the copy and is skipped as before.
-On Compatibility, a plain video keeps presenting straight from its decoded frame
-(`CustomShaderPass::recordPresentation`): that frame is texel for texel the scene output
-the copy would otherwise be made from, so the copy is made from it and drawn first. A
-mirrored picture takes the copy path as before. The native video player has no copy and
-shows Fit's black bars. `SceneWallpaper` ignores a scaling-mode value it has no mode for,
-instead of casting it into an unscaled layout. An app that predates the mode reads
-`fit_blurred` as Fill.
+**Layout.** `ComputeWallpaperScalingLayout` gives this mode Fit's rectangle and adds
+`backdrop_px`, the rectangle the copy is stretched over (Fill at a factor of 1, centred,
+whatever the position), and `backdrop`, whether the picture leaves room. A gap of one
+pixel on an axis is the rounding a picture of the display's own shape leaves, so room
+means more than one. `ComputeSurroundBands` (`Presentation/BackdropGeometry.hpp`)
+returns the up to four rectangles of the display the picture does not cover, and the copy
+is drawn into those only: the picture's own pixels are Fit's byte for byte.
+`WallpaperScalingModeFromValue` turns a host value into a mode, or into nothing for a value
+past the last mode; `SceneWallpaper` and the C bindings ignore or refuse such a value
+rather than casting it into a layout that scales nothing.
 
-Cost, measured headlessly on an M3 Max (macOS 27.2) with
-`UnchangedPresent.LocalProjectEnergyIsMeasuredHeadlessly` and `WE_TEST_ENERGY_SCALING`
-([renderer testing](../testing/renderer.md)), three or four alternating 15-second rounds
-per case at 60 FPS, while another copy of the app was drawing the desktop and other apps
-used the GPU (medians of the GPU time of the process's own command buffers per 60 Hz
-tick, Fit against this mode):
+**Making the copy** (`MetalBackdrop`, every frame that is drawn, all on the GPU, from the
+scene's final output):
 
-| Wallpaper, surface | Renderer | Fit | Fit with blurred backdrop |
-| --- | --- | --- | --- |
-| 3840x2160 scene, display resolution, 6880x2880 @2 | Native Metal | 5.96 ms | 6.50 ms |
-| the same, 4112x2658 @2 | Native Metal | 5.17 ms | 5.04 ms (within the noise) |
-| the same, 6880x2880 @2 | Compatibility | 5.81 ms | 6.11 ms |
-| the same, 4112x2658 @2 | Compatibility | 4.90 ms | 5.35 ms |
-| 3840x2160 30 FPS HEVC clip, 6880x2880 @2 | Compatibility | 0.25 ms | 0.54 ms |
-| the same, 4112x2658 @2 | Compatibility | 0.26 ms | 0.32 ms |
+1. The output is reduced to an image 128 texels on its longer side. A picture longer than
+   1024 texels is first reduced to an eighth of its size into an 8-bit image. A reduction
+   is a grid of bilinear taps spread over each destination texel, never more than four
+   source texels apart (`PlanBackdropReduction`), so about a quarter of the source
+   texels is read rather than all of them.
+2. A separable Gaussian (sigma 3 texels, radius 9, one horizontal and one vertical pass)
+   blurs it in half-float images.
+3. The composition stretches it over the bands through a cubic B-spline filter (four
+   bilinear fetches), darkens it to 70% and adds a fixed 4x4 ordered dither of one 8-bit
+   step, so one frame always draws the same bytes.
 
-The clip presents on every other tick, so a presented frame costs about twice its share
-here. Every run kept its frame rate. In the quietest rounds the GPU as a whole drew 0.1
-to 0.2 W more and the process's CPU about 8 mW more. These figures are coarse: one case
-measured up to twice as long from one run to the next, so differences under about half a
-millisecond are not resolved, and on Compatibility the time also counts waiting for a
-drawable. The images hold about 2.0 MB on the ultrawide's 6880x3870 display raster,
-1.2 MB on the panel's 4726x2658 one and 0.86 MB for a 4K clip, on either renderer. With
-Fit, the composition records exactly the commands it recorded before the mode existed,
-plus two words of presentation key; a Metal System Trace shows the same 37 render passes
-a frame for the Compatibility scene, before and after. The native time goes to the first
-reduction (about 0.3 ms on the 6880-wide raster), the second step and the two blurs (about
-0.15 ms together) and the bands (about 0.05 ms); on Compatibility each of the small passes
-costs 0.1 to 0.17 ms. Earlier versions show what the design avoids: one pass straight to
-the small image, reading every texel, took about 3.4 ms for the clip, and a first
-reduction reading every texel took about 0.95 ms on the 6880-wide raster against 0.3 ms.
+**Lifetime.** The pipelines are built when the mode is chosen, between frames; nothing is
+compiled inside a frame. The images are made on the first composition that has room to
+fill and let go on the first frame that has none, or when another mode is chosen (which
+also lets go of the pipelines). Fit records exactly the commands it recorded before the
+mode existed. The copy's rectangle is part of the presentation key (which has room for it
+within its capacity), so switching between Fit and this mode presents again, and a frame
+that repeats the picture repeats the copy and is skipped as before. The images count in
+the render-target byte statistic. The posters (the desktop, preview and lock-screen
+pictures) compose the same picture again and draw the copy too. The composition's GPU work
+carries debug labels: the group "Fit with blurred backdrop" on the passes that make the
+copy, and the composition pass itself is named for the mode.
+
+**Cost**, measured headlessly with `backdrop_scene_test` (a throwaway probe, not kept: the
+GPU time of the frame's command buffer, 300 frames with static reuse off so each draws and
+presents, a 3840x2160 scene, Fit against this mode) on an Apple M5 Pro, macOS 27.0.1:
+
+| Display raster | Fit | Fit with blurred backdrop |
+| --- | --- | --- |
+| 6880x2880 | 1.16 to 1.34 ms | 1.84 to 1.99 ms |
+| 4112x2658 | 0.80 to 0.91 ms | 1.34 ms |
+
+That is 0.6 to 0.75 ms more on the 6880-wide display (about 0.45 ms for the reductions and
+blur, 0.1 ms of it the blur, and about 0.23 ms for the bands) and 0.45 to 0.5 ms on the
+4112-wide one, a little above the 0.3 to 0.5 ms the design aimed for; the figures
+move by about 0.1 ms from one run to the next. The images hold about 0.9 MB for a 4K
+scene.
 
 ### Live property edits
 
