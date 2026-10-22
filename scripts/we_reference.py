@@ -4,7 +4,8 @@
 capture  serves the wallpapers to a worker inside the VM, which opens each one in
          Wallpaper Engine (muted), hides the desktop icons, minimises every window,
          centres the cursor and uploads two screenshots at physical pixels, about 8 s
-         and 15 s after opening. Run the PowerShell line it prints in the VM.
+         and 15 s after opening. The VM's background poller starts the worker
+         (install it once with the line `capture` prints), or run the worker line.
 render   draws the same wallpapers with Native Metal at the screenshots' size, scene
          time and time of day (`metal_scene_draw_smoke`'s renderer comparison, Native Metal only).
 compare  writes side-by-side sheets (Wallpaper Engine | each render | difference to the
@@ -146,6 +147,43 @@ Log 'run finished'
 }
 """
 
+# Installs, once, a hidden PowerShell that starts with the Windows session and runs the
+# worker whenever a capture is serving, so a capture needs no keystrokes in the VM.
+INSTALL_POLLER = r"""
+& {
+$ErrorActionPreference = 'Stop'
+$root = Join-Path $env:LOCALAPPDATA 'we-reference'
+New-Item -ItemType Directory -Force -Path $root | Out-Null
+$poller = Join-Path $root 'poller.ps1'
+Set-Content -LiteralPath $poller -Encoding UTF8 -Value @'
+# Wallpaper Engine reference capture poller (scripts/we_reference.py on the Mac). Runs the
+# capture worker whenever the Mac serves one at __SERVER__; one poller per session.
+$srv = '__SERVER__'
+$single = New-Object System.Threading.Mutex($false, 'Local\WeReferencePoller')
+if (-not $single.WaitOne(0)) { return }
+while ($true) {
+    $worker = $null
+    try { $worker = Invoke-RestMethod -Uri "$srv/worker.ps1" -TimeoutSec 3 } catch {}
+    if ($worker) {
+        try { Invoke-Expression $worker } catch {}
+        # The finished run's server lingers briefly; do not start its worker again.
+        Start-Sleep -Seconds 30
+    }
+    Start-Sleep -Seconds 5
+}
+'@
+$ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$poller`""
+$link = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path ([Environment]::GetFolderPath('Startup')) 'we-reference-poller.lnk'))
+$link.TargetPath = $ps
+$link.Arguments = $arguments
+$link.WindowStyle = 7
+$link.Save()
+Start-Process $ps -ArgumentList $arguments -WindowStyle Hidden
+Write-Host "Installed $poller; it runs at sign-in and is running now."
+}
+"""
+
 
 def resolve(wallpaper: str) -> Path:
     """Folder of a wallpaper given as a Workshop id in the app's library or a path."""
@@ -284,6 +322,8 @@ def handler(run: CaptureRun, server: str, log: Path):
             parts, _ = self.route()
             if parts == ["worker.ps1"]:
                 return self.send(200, WORKER.replace("__SERVER__", server), "text/plain; charset=utf-8")
+            if parts == ["install-poller.ps1"]:
+                return self.send(200, INSTALL_POLLER.replace("__SERVER__", server), "text/plain; charset=utf-8")
             if parts == ["next"]:
                 return self.send(200, json.dumps(run.next_job()))
             if len(parts) >= 3 and parts[0] == "file":
@@ -324,8 +364,10 @@ def capture(args) -> int:
               "network exists, or pass --host")
         return 1
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    print(f"{MARK.step} serving {len(run.folders)} wallpaper(s) on {server}. In the VM, run in PowerShell:")
-    print(f"    iex (irm {server}/worker.ps1)")
+    print(f"{MARK.step} serving {len(run.folders)} wallpaper(s) on {server}. The VM's background poller starts "
+          "within seconds; without it, run in PowerShell in the VM:")
+    print(f"    iex (irm {server}/worker.ps1)      # this capture only")
+    print(f"    iex (irm {server}/install-poller.ps1)  # once: install the poller")
     finished = run.wait(args.timeout)
     if finished and not run.aborted:
         run.drained.wait(30)   # let the worker hear it is done before the server goes away

@@ -69,6 +69,12 @@ class CaptureServerTests(unittest.TestCase):
         self.assertEqual(json.loads(self.request("/next")[1]), {"done": True})
         self.assertTrue(self.run.drained.is_set())
 
+    def test_the_poller_installer_points_the_vm_at_this_server(self):
+        status, script = self.request("/install-poller.ps1")
+        self.assertEqual(status, 200)
+        self.assertIn(b"'http://vm-host'", script)
+        self.assertNotIn(b"__SERVER__", script)
+
     def test_only_files_inside_a_queued_wallpaper_are_served(self):
         self.assertEqual(self.request("/file/111/materials/a%20b.json"), (200, b"{}"))
         self.assertEqual(self.request("/file/111/..%2Fsecret.txt")[0], 404)
