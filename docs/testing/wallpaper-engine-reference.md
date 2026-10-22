@@ -72,8 +72,10 @@ end its `powershell.exe` to uninstall. For each wallpaper the worker:
   opening anything. It never unmutes;
 - opens the wallpaper on monitor 0 with `wallpaper64.exe -control openWallpaper`,
   hides the desktop icons, minimises every window and centres the cursor;
-- takes two screenshots of the whole primary display at physical pixels, about 8 s
-  and 15 s after opening, and records when it opened the wallpaper and when it took
+- takes two screenshots of the whole primary display at physical pixels, about 30 s
+  and 45 s after opening (`--delays FIRST SECOND` changes them: Wallpaper Engine in the VM
+  can take more than 15 s to show a heavy scene, and an earlier shot catches the previous
+  wallpaper or a black desktop), and records when it opened the wallpaper and when it took
   each shot. The real times are used for rendering: the first wallpaper after
   Wallpaper Engine starts has been shot 10 s and 30 s in;
 - pauses Wallpaper Engine until the next job and shows the icons again at the end.

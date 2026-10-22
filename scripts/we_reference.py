@@ -51,7 +51,9 @@ ASSETS = APP_HOME / "SceneAssets"
 BINARY = RENDERER_ARTIFACTS / "bin/tests/metal_scene_draw_smoke"
 # The Mac's address on the Parallels "Shared" network, the VM's default gateway.
 HOST, PORT = "10.211.55.2", 8765
-SHOT_DELAYS = (8, 7)            # seconds after opening, then after the first shot
+# Seconds after opening, then after the first shot. Wallpaper Engine in the VM can take more
+# than 15 s to show a heavy scene; shooting earlier catches the previous wallpaper or black.
+SHOT_DELAYS = (30, 15)
 DEFAULT_TIMES = (8.0, 15.0)     # scene time of each shot when a capture did not record it
 STEP = 1.0 / 30.0
 # The harness test that draws a local project as a poster, and its name in binaries built
@@ -474,7 +476,7 @@ def unpack(args) -> int:
 
 
 def capture(args) -> int:
-    run = CaptureRun([resolve(w) for w in args.wallpapers], args.shots)
+    run = CaptureRun([resolve(w) for w in args.wallpapers], args.shots, delays=args.delays)
     server = f"http://{args.host}:{args.port}"
     try:
         httpd = ThreadingHTTPServer((args.host, args.port), handler(run, server, args.shots / "capture.log"))
@@ -705,6 +707,8 @@ def main(argv=None) -> int:
     grab.add_argument("--host", default=HOST, help="address to listen on (default: %(default)s, the Parallels network)")
     grab.add_argument("--port", type=int, default=PORT)
     grab.add_argument("--timeout", type=float, default=1800, help="seconds to wait for the VM (default: %(default)s)")
+    grab.add_argument("--delays", type=float, nargs=2, metavar=("FIRST", "SECOND"), default=SHOT_DELAYS,
+                      help="seconds from opening to the first shot, then to the second (default: %(default)s)")
     draw = commands.add_parser("render", help="render the wallpapers as the screenshots show them")
     draw.add_argument("wallpapers", nargs="+")
     draw.add_argument("--label", default="ours", help="name of this set of renders, e.g. before/after (default: %(default)s)")
