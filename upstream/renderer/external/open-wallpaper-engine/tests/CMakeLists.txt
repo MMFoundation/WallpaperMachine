@@ -61,9 +61,9 @@ gtest_discover_tests(
 # linalg_tests.cpp does the same for Utils/Linalg.hpp (against linalg_golden.inc, and the
 # behaviour its call sites rely on).
 add_executable(scene_schema_tests scene_schema_tests.cpp utils_known_answer_tests.cpp
-                                  linalg_tests.cpp)
+                                  linalg_tests.cpp material_contract_synthetic_tests.cpp)
 target_link_libraries(scene_schema_tests PRIVATE ${PROJECT_NAME} wpAudio wpFs wpScene wpParticle nlohmann_json::nlohmann_json GTest::gtest_main)
-target_include_directories(scene_schema_tests PRIVATE .)
+target_include_directories(scene_schema_tests PRIVATE . ../src/Scene/RenderCommon/include)
 target_compile_features(scene_schema_tests PRIVATE cxx_std_20)
 gtest_discover_tests(
     scene_schema_tests

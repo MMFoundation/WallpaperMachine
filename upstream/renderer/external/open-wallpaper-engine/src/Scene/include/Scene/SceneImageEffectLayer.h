@@ -71,6 +71,7 @@ public:
     std::size_t EffectCount() const;
     std::shared_ptr<SceneImageEffect>& GetEffect(std::size_t index);
     const std::string& FirstTarget() const;
+    const std::string& SecondTarget() const;
     SceneMesh&  FinalMesh() const;
     SceneNode&  FinalNode() const;
     SceneNode*  ResolvedFinalRenderNode() const;

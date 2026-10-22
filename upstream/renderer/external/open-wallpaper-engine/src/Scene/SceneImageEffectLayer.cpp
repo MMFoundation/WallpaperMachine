@@ -83,6 +83,8 @@ std::shared_ptr<SceneImageEffect>& SceneImageEffectLayer::GetEffect(std::size_t 
 
 const std::string& SceneImageEffectLayer::FirstTarget() const { return m_pingpong_a; }
 
+const std::string& SceneImageEffectLayer::SecondTarget() const { return m_pingpong_b; }
+
 SceneMesh& SceneImageEffectLayer::FinalMesh() const { return *m_final_mesh; }
 
 SceneNode& SceneImageEffectLayer::FinalNode() const { return *m_final_node; }

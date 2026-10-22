@@ -159,9 +159,22 @@ material, every effect pass and a compose layer's passthrough, as a colour bound
 user property does (alpha stays with the alpha bindings). A script whose `update()`
 returns nothing leaves the colour as it is, and one that writes `thisLayer.color` sets
 it from then on: the next `update(value)` is given it, and a value `update()` returns
-replaces it, as for `visible` and `origin`. A write to the colour of a layer that has no
-property or script bound to it reaches only the layer's own material, not its effect
-passes. A scripted colour costs one script call a frame, as a text layer's does, and
+replaces it, as for `visible` and `origin`. A static layer colour is a load-time
+default, not a live writer: an effect's explicit shader constant (including a material
+alias for `g_Color`) overrides that default at load and stays intact through ticks.
+A static partial constant replaces only its supplied lanes: tint `0.25` over a static
+`(0.3,0.5,0.7)` owner yields `(0.25,0.5,0.7)`, not the shader-default tail.
+A material constant driven by a property, script or timeline instead retains whole-value
+ownership: its binding replaces a differing current value, including its lane count.
+It does not retain extra lanes from an earlier material value. For a shorter scalar/vector
+value, the remaining uniform lanes follow shader defaults and later live writes, not
+an implicit extension of the static-effect rule.
+Explicit colour writes still reach the layer's registered recipients, including a write
+of the value already held; a truly unbound, single-material layer writes only its own
+mesh. Static multi-material recipients reuse the existing value/listener storage without
+an initial replay or per-frame work. Half-built-layer rollback also restores colour
+recipients registered before their node, without requiring an anchor registration.
+A scripted colour costs one script call a frame, as a text layer's does, and
 no pass or memory. It is also a script like any other, so a scene whose only script is
 an image layer's colour no longer goes idle (it did, while the colour script was never
 created); a scene with other scripts did not idle before either.
@@ -390,13 +403,28 @@ translate. A step that samples an image nothing in the scene produces (a layer
 texture whose layer draws no composite) is skipped on Native Metal, instead of holding
 the scene; an image that exists and does not load still holds it.
 
+Image-card UVs and file-texture resolution constants use the authored first stored
+level's padding fact, not nominal texture area or the first mip kept by the display
+budget. A nominal 8×8, visible 6×4 texture stored as 6×4 therefore has resolution
+`(6,4,6,4)` and full-card UVs; an actually padded sheet retains allocated/visible
+pairs. `nopadding` changes only the card's UVs. Flat sheets entering puppet effects
+use the same rule; puppet meshes retain authored UVs and effect-final cards use full UVs.
+
 Puppets and rope geometry behave the same. A puppet is deformed
 by its author's own skinning shader, and its pose comes from the one animation
 system the scene already has (animation layers, their play, pause, stop, rate,
 blend and visibility, and any script or user property driving them); the renderer
-only uploads the resulting bone matrices. Rope and rope-trail geometry is generated
+only uploads the resulting bone matrices. Under effects, the closing puppet material's
+slot 0 must read the processed sheet even when its copied material or a user texture
+names the original picture. This also applies to boneless meshes and blend-only
+chains; other slots, playback, and the direct/additive routes are unchanged.
+Rope and rope-trail geometry is generated
 once by the shared particle simulation, with the rope renderers' *UV scale*, scrolling
-and smoothing. A particle's sprite, rope or trail is sized as authored and drawn
+and smoothing. Particle-sheet `g_RenderVar1` uses normalized frame width/height,
+frame count and texel-height/texel-width aspect. These facts follow the final
+compiled sheet program even if it never samples its slot 0 and that unused
+resource is pruned; retaining metadata does not upload the unused texture.
+A particle's sprite, rope or trail is sized as authored and drawn
 through its layer's model matrix, so a particle layer scaled up draws its
 particles larger by the same factor, in a 2D canvas as in 3D, as Wallpaper
 Engine's particle shader does. A `worldspace` file is the exception: Wallpaper
@@ -559,6 +587,14 @@ pieces between them; the renderers fill the keys a file omits with their own def
 clamping what they read. What a file omits in an operator or initializer takes the
 pixel-canvas defaults in a scene drawn with an orthogonal projection of a size (a scene
 that names none is drawn as the default canvas) and the scene-unit defaults otherwise.
+For `genericparticle` and `genericropeparticle`, a usable sheet writes `g_RenderVar1`
+as normalized horizontal/vertical cell fractions, frame count, and cell height divided
+by cell width in texels: two 4×4 cells in an 8×4 picture give `(0.5,1,2,1)`.
+Sheet/layout combos follow the final substituted/default texture slot. Whole-cell
+resolution rounding uses nominal power-of-two extents and skips subtexel cells;
+frame-blending policy is unchanged. An empty frame table is static, and other
+shaders receive no particle-sheet constants.
+
 The known differences, among them the operators
 (`vortex_v2`, `boids`, `remapvalue`) and the renderer `orientation`, `fadealpha` and
 `fadesize` keys that are not implemented, are listed under
@@ -661,6 +697,13 @@ the picture moves by that fraction of the card, as in Wallpaper Engine. A card p
 4096 texels on a side is drawn cut off to 4096. An effect's own buffers (`fbos`) that name no
 `width`, `height` or `fit` are the card's size whatever their `scale`; one that names its own
 size keeps that fixed size, as for an image layer, and is not resized with the card.
+Both live ping-pong working targets follow the measured card, including the second
+buffer after asynchronous growth or shrinkage. The existing resize event sizes both
+sibling roots and their authored extents directly, so each can be render-scaled
+independently without depending on bound-target traversal order. Target sharing
+stays enabled: no extra target, pass, per-frame loop, or additional resize request.
+Glyph rasters still ceil each axis while
+effect targets floor it; alignment-only changes retain the target extents.
 
 A text layer that draws through a
 visible effect is a composite, as in Wallpaper Engine: the card first holds the scene behind

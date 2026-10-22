@@ -1212,17 +1212,22 @@ void SceneRuntimeContext::RollbackNodeRegistration(
     // What stood under the key before comes back: its place, then each record it had.
     if (previous->node != nullptr) {
         m_nodes[key] = previous->node;
-        const std::size_t at = std::min(previous->rank.value_or(m_node_order.size()),
-                                        m_node_order.size());
+        const std::size_t at = std::min(previous->rank, m_node_order.size());
         m_node_order.insert(m_node_order.begin() + static_cast<std::ptrdiff_t>(at), key);
         m_node_rank_valid = false;
     }
     for (const auto& restore : previous->put_back) restore(*this);
+    if (previous->color != nullptr) m_node_color.insert_or_assign(key, previous->color);
     RefreshNodeTransformBindings(key);
 }
 
 std::shared_ptr<SceneRuntimeContext::LayerRegistrationMemo>
 SceneRuntimeContext::CaptureNodeRegistration(std::string_view name) const {
+    static_assert(sizeof(std::size_t) + sizeof(DynamicValue*) == sizeof(std::optional<std::size_t>));
+    // The generic anchor closure replaces its colour-pointer capture with a
+    // table-member pointer of the same size/alignment; no new closure is stored.
+    static_assert(sizeof(DynamicValue*) == sizeof(decltype(&SceneRuntimeContext::m_node_alignment)));
+    static_assert(alignof(DynamicValue*) == alignof(decltype(&SceneRuntimeContext::m_node_alignment)));
     auto              memo = std::make_shared<LayerRegistrationMemo>();
     const std::string key(name);
 
@@ -1231,6 +1236,11 @@ SceneRuntimeContext::CaptureNodeRegistration(std::string_view name) const {
         if (const auto at = std::ranges::find(m_node_order, key); at != m_node_order.end()) {
             memo->rank = static_cast<std::size_t>(at - m_node_order.begin());
         }
+    }
+
+    // Public colour binding may precede RegisterNode (and therefore any anchor).
+    if (const auto color = m_node_color.find(key); color != m_node_color.end()) {
+        memo->color = color->second;
     }
 
     // One closure per per-layer table that holds a record for the key; running it writes that
@@ -1896,10 +1906,12 @@ void SceneRuntimeContext::RegisterSceneClearColor(std::unique_ptr<DynamicValue> 
 
 void SceneRuntimeContext::RegisterDynamicValueListener(
     std::unique_ptr<DynamicValue> value,
-    std::function<void(const DynamicValue&)> callback) {
+    std::function<void(const DynamicValue&)> callback,
+    bool replay_current) {
     if (value == nullptr || ! callback) return;
-    // The first call is the value as it is now; every assignment after it is another.
-    callback(*value);
+    // Drivers start with the held value. Static mutation recipients subscribe
+    // without replay; later explicit assignments still notify the same listener.
+    if (replay_current) callback(*value);
     DynamicValue* raw = value.get();
     m_owned_values.push_back(std::move(value));
     m_listener_ends.push_back(raw->listen(callback));
@@ -1941,7 +1953,8 @@ void SceneRuntimeContext::BindMaterialAlpha(std::shared_ptr<SceneMaterial> mater
 
 void SceneRuntimeContext::BindMaterialColor(std::string layer_name,
                                             std::vector<std::shared_ptr<SceneMaterial>> materials,
-                                            std::unique_ptr<DynamicValue> value) {
+                                            std::unique_ptr<DynamicValue> value,
+                                            bool replay_current) {
     if (materials.empty() || value == nullptr) return;
     if (! layer_name.empty()) m_node_color[std::move(layer_name)] = value.get();
     RegisterDynamicValueListener(
@@ -1950,7 +1963,7 @@ void SceneRuntimeContext::BindMaterialColor(std::string layer_name,
             for (const auto& material : materials) {
                 if (material != nullptr) ApplyMaterialColor(*material, color);
             }
-        });
+        }, replay_current);
 }
 
 void SceneRuntimeContext::BindMaterialBrightness(
@@ -2970,8 +2983,13 @@ void SceneRuntimeContext::ResizeEffectChain(EffectCardLink& link, SceneNode* nod
             target.height = target.authored_height = side(effect_frame.size.y());
         };
         const std::string& first = link.layer->FirstTarget();
-        if (const auto root = m_scene->renderTargets.find(first); root != m_scene->renderTargets.end()) {
-            fit(root->second, 1.0);
+        const std::string& second = link.layer->SecondTarget();
+        // These are sibling roots: each is scaled independently by the backend,
+        // without introducing a bound-target traversal-order dependency.
+        for (const std::string* name : { &first, &second }) {
+            if (const auto root = m_scene->renderTargets.find(*name); root != m_scene->renderTargets.end()) {
+                fit(root->second, 1.0);
+            }
         }
         for (auto& [target_name, target] : m_scene->renderTargets) {
             const bool follows_first = target.bind.enable && ! target.bind.screen &&

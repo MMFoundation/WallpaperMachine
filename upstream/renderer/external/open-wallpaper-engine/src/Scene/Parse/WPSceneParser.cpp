@@ -1099,16 +1099,25 @@ std::vector<ResolvedConstant> ResolveConstantUniforms(const wpscene::WPMaterial&
     return resolved;
 }
 
-/// Writes the authored lanes of every constant that has a uniform.
+enum class MaterialConstantWrite { Replace, Overlay };
+
+/// Writes the authored lanes of every constant that has a uniform. Effect
+/// restoration overlays the chosen layer defaults without replacing their tails.
 void LoadStaticMaterialConstants(SceneMaterial& material, const wpscene::WPMaterial& wpmat,
-                                 const WPShaderInfo& info) {
+                                 const WPShaderInfo& info, bool report_unmatched = true,
+                                 MaterialConstantWrite write = MaterialConstantWrite::Replace) {
     std::vector<std::string> unmatched;
-    const auto               resolved = ResolveConstantUniforms(wpmat, info, &unmatched);
+    const auto resolved = ResolveConstantUniforms(wpmat, info, report_unmatched ? &unmatched : nullptr);
     for (const auto& key : unmatched) LOG_ERROR("ShaderValue: %s not found in glsl", key.c_str());
     for (const auto& entry : resolved) {
         if (entry.constant->value.empty()) continue;
-        material.customShader.constValues[entry.uniform] =
-            ShaderValue(entry.constant->value.data(), entry.constant->value.size());
+        auto& value = material.customShader.constValues[entry.uniform];
+        const auto& authored = entry.constant->value;
+        if (write == MaterialConstantWrite::Overlay && authored.size() < value.size()) {
+            for (std::size_t lane = 0; lane < authored.size(); ++lane) value[lane] = authored[lane];
+        } else {
+            value = ShaderValue(authored.data(), authored.size());
+        }
     }
 }
 
@@ -1248,6 +1257,47 @@ const ImageHeader& TextureHeaderOf(ParseContext& context, const std::string& nam
     return context.texture_headers.emplace(name, std::move(header)).first->second;
 }
 
+/// Load-time geometry facts of a file texture. The authored first stored level,
+/// not the nominal extent or the budget's first kept mip, establishes padding.
+/// Cards and shader resolution constants must make the same decision.
+struct FileTextureGeometry {
+    std::array<float, 4> resolution;
+    float u { 1.0f };
+    float v { 1.0f };
+};
+
+FileTextureGeometry TextureGeometryOf(const ImageHeader& header) {
+    const float iw = static_cast<float>(header.mapWidth);
+    const float ih = static_cast<float>(header.mapHeight);
+    FileTextureGeometry geometry { .resolution = { iw, ih, iw, ih } };
+    if (header.mipmap_larger) {
+        geometry.resolution[0] = static_cast<float>(header.width);
+        geometry.resolution[1] = static_cast<float>(header.height);
+        if (header.width > 0 && header.height > 0 && header.mapWidth > 0 && header.mapHeight > 0) {
+            geometry.u = iw / geometry.resolution[0];
+            geometry.v = ih / geometry.resolution[1];
+        }
+    }
+    return geometry;
+}
+
+/// A primary file slot with usable sheet frames, after the caller's texture
+/// substitutions/defaults. Header caching keeps this a load-time-only query.
+const ImageHeader* SpriteHeaderOf(ParseContext& context, const std::vector<std::string>& slots) {
+    if (slots.empty() || slots[0].empty() || IsSpecTex(slots[0])) return nullptr;
+    const auto& header = TextureHeaderOf(context, slots[0]);
+    return header.isSprite && header.spriteAnim.numFrames() > 0 ? &header : nullptr;
+}
+
+bool IsParticleSheetShader(std::string_view shader) {
+    return shader == "genericparticle" || shader == "genericropeparticle";
+}
+
+bool ParticleSheetUsesWholeCells(const ImageHeader& header) {
+    const auto power_of_two = [](int32_t size) { return size > 0 && (size & (size - 1)) == 0; };
+    return power_of_two(header.width) && power_of_two(header.height);
+}
+
 /// Records a file texture the scene draws with: its sampling, whether it is a
 /// video or a sprite sheet. One entry exists per distinct name.
 void RegisterFileTexture(ParseContext& context, const std::string& name, const ImageHeader& header) {
@@ -1257,7 +1307,10 @@ void RegisterFileTexture(ParseContext& context, const std::string& name, const I
     texture.url         = name;
     texture.sample      = header.sample;
     texture.isVideo     = header.isVideo;
-    texture.isSprite    = header.isSprite;
+    texture.isSprite    = header.isSprite && header.spriteAnim.numFrames() > 0;
+    if (header.isSprite && ! texture.isSprite) {
+        LOG_ERROR("texture '%s' has no sprite frames; using it as a static texture", name.c_str());
+    }
     texture.spriteAnim  = header.spriteAnim;
     textures[name]      = std::move(texture);
 }
@@ -1351,6 +1404,13 @@ struct MaterialLoadOptions {
     /// layer composited through effects): fog stays out of it and `fog_deferred`
     /// of the shader info says the pass would have taken it.
     bool defer_fog { false };
+    /// A synthesized puppet close must consume the processed sheet even if the
+    /// copied material or its user texture supplies slot 0. Applied before any
+    /// classification/compilation. Empty leaves ordinary pass routing alone.
+    std::string_view required_texture0;
+    /// Settle particle sheet/layout combos from the same final slot list as the
+    /// compiler (including user replacements and sampler-default textures).
+    bool particle_material { false };
     /// The two stages of a program made in code; with both empty the shader's
     /// files are read from the asset namespace.
     std::string vertex_source;
@@ -1401,6 +1461,10 @@ bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, Scene
             if (! property.empty()) scene.runtime->NoteLoadOnlyProperty(property);
         }
     }
+    if (! options.required_texture0.empty()) {
+        slots.resize(std::max<std::size_t>(slots.size(), 1));
+        slots[0] = options.required_texture0;
+    }
     if (slots.size() > kMaxTextureSlots) slots.resize(kMaxTextureSlots);
     std::vector<bool> author_supplied(slots.size());
     for (std::size_t slot = 0; slot < slots.size(); ++slot) author_supplied[slot] = ! slots[slot].empty();
@@ -1431,8 +1495,20 @@ bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, Scene
     classify_all();
 
     const auto texture_keys_of = [&]() { return slots; };
+    // A cached header pointer, valid only during this load. The selected program's
+    // sheet facts survive resource pruning without retaining an unused GPU texture.
+    const ImageHeader* compiled_sheet = nullptr;
     const auto compile = [&](WPShaderInfo& info, Combos combos, std::string* reflection,
                              const std::shared_ptr<SceneShader>& shader) {
+        if (options.particle_material) {
+            const auto* sheet = SpriteHeaderOf(context, slots);
+            const bool sheet_material = sheet != nullptr && IsParticleSheetShader(wpmat.shader);
+            compiled_sheet = sheet_material ? sheet : nullptr;
+            combos["SPRITESHEET"] = sheet_material ? "1" : "0";
+            if (sheet != nullptr) combos["THICKFORMAT"] = "1";
+            combos["SPRITESHEETBLENDNPOT"] =
+                sheet_material && ParticleSheetUsesWholeCells(*sheet) ? "1" : "0";
+        }
         info.combos = std::move(combos);
         for (std::size_t slot = 0; slot < slots.size(); ++slot) {
             if (slots[slot].empty() || IsSpecTex(slots[slot])) continue;
@@ -1534,15 +1610,9 @@ bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, Scene
             loaded.render_targets.emplace_back(slot, scene.ResolveRenderTargetName(name));
         } else {
             const auto& header = TextureHeaderOf(context, name);
-            const float iw     = static_cast<float>(header.mapWidth);
-            const float ih     = static_cast<float>(header.mapHeight);
-            const bool  padded = static_cast<int64_t>(header.width) * header.height >
-                                static_cast<int64_t>(header.mapWidth) * header.mapHeight;
-            resolution = padded ? std::array<float, 4> { static_cast<float>(header.width),
-                                                         static_cast<float>(header.height), iw, ih }
-                                : std::array<float, 4> { iw, ih, iw, ih };
+            resolution = TextureGeometryOf(header).resolution;
             RegisterFileTexture(context, name, header);
-            if (header.isSprite) material.hasSprite = true;
+            if (header.isSprite && header.spriteAnim.numFrames() > 0) material.hasSprite = true;
         }
         constants[std::string(WE_GLTEX_RESOLUTION_NAMES[slot])] = ShaderValue(resolution.data(), 4);
         if (resolution[2] != 0.0f && resolution[3] != 0.0f) {
@@ -1570,6 +1640,26 @@ bool LoadMaterial(ParseContext& context, const wpscene::WPMaterial& wpmat, Scene
         MarkSceneRequiresAudioResponse(&scene);
     }
     LoadStaticMaterialConstants(material, wpmat, info);
+    // Intrinsic particle facts finalize after authored constants, just as they did
+    // in particle preparation. They describe the compiled program, not its pruned slots.
+    if (compiled_sheet != nullptr) {
+        const auto& frame = compiled_sheet->spriteAnim.FrameAt(0);
+        constants["g_RenderVar1"] = ShaderValue(std::array<float, 4> {
+            frame.xAxis[0], frame.yAxis[1],
+            static_cast<float>(compiled_sheet->spriteAnim.numFrames()), frame.rate });
+        // Whole-cell rounding uses texels; subtexel/non-finite cells cannot divide.
+        const float cell_w = std::trunc(frame.width);
+        const float cell_h = std::trunc(frame.height);
+        const auto resolution = constants.find("g_Texture0Resolution");
+        if (ParticleSheetUsesWholeCells(*compiled_sheet) && std::isfinite(cell_w) &&
+            std::isfinite(cell_h) && cell_w >= 1.0f && cell_h >= 1.0f &&
+            resolution != constants.end() && resolution->second.size() >= 4) {
+            const auto& value = resolution->second;
+            constants["g_Texture0Resolution"] = ShaderValue(std::array<float, 4> {
+                value[0], value[1], value[2] - std::fmod(value[2], cell_w),
+                value[3] - std::fmod(value[3], cell_h) });
+        }
+    }
     loaded.info = std::move(info);
     return true;
 }
@@ -1981,13 +2071,15 @@ void RegisterLayerTint(ParseContext& context, const std::string& key, const nloh
                    animation != nullptr) {
             runtime->RegisterMaterialColorAnimation(tinted, animation);
         } else if (color->contains("script") || tinted.size() > 1) {
-            // A script that only listens still writes `thisLayer.color`, to every material.
+            // Event-only scripts and multi-material static layers retain their
+            // existing mutation recipients, but a static value is not a driver:
+            // registration must not replay it over an authored effect constant.
             runtime->BindMaterialColor(
-                key, tinted, std::make_unique<DynamicValue>(Vector3f(authored.data())));
+                key, tinted, std::make_unique<DynamicValue>(Vector3f(authored.data())), false);
         }
     } else if (tinted.size() > 1) {
         runtime->BindMaterialColor(key, tinted,
-                                   std::make_unique<DynamicValue>(Vector3f(authored.data())));
+                                   std::make_unique<DynamicValue>(Vector3f(authored.data())), false);
     }
     if (const auto brightness = entry.find("brightness");
         brightness != entry.end() && HasDynamicSetting(*brightness)) {
@@ -2128,7 +2220,8 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
                  std::vector<std::shared_ptr<SceneMaterial>>& tinted,
                  std::vector<std::shared_ptr<SceneMaterial>>& all_materials,
                  std::shared_ptr<SceneImageEffect>*           built_out,
-                 const WPPuppetLayer*                         puppet = nullptr) {
+                 const WPPuppetLayer*                         puppet = nullptr,
+                 bool mandatory_previous_slot0 = false) {
     auto&      scene = *context.scene;
     const auto previous_name = PingPongName(WE_EFFECT_PPONG_PREFIX_A, camera_name);
     const auto output_name   = PingPongName(WE_EFFECT_PPONG_PREFIX_B, camera_name);
@@ -2159,12 +2252,17 @@ bool BuildEffect(ParseContext& context, const wpscene::WPImageObject& image,
         LoadedMaterial loaded;
         MaterialLoadOptions options;
         options.defer_fog = defer_fog;
+        if (mandatory_previous_slot0) options.required_texture0 = previous_name;
         if (! LoadMaterial(context, material, scene_material, loaded, options)) return false;
         // The closing pass of a puppet is the layer's own material, with the layer's alpha
         // as its own; every other pass keeps an alpha of its own.
         scene_material.own_user_alpha = puppet == nullptr;
         const bool white = white_tint || is_closing_pass;
         SetLayerTint(context, scene_material, image, white);
+        // Layer values are load-time defaults. Authored aliases override them;
+        // unmatched keys were already reported by LoadMaterial, only once.
+        LoadStaticMaterialConstants(scene_material, material, loaded.info, false,
+                                    MaterialConstantWrite::Overlay);
         scene_material.blenmode = BlendMode::Normal;
         Built entry;
         entry.node     = MakeEffectPassNode(std::move(scene_material));
@@ -3084,13 +3182,9 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
     // The mesh of the own pass: a card, with the padding of the picture left out (R21, R22).
     if (! own.textures.empty() && ! own.textures[0].empty() && ! IsSpecTex(own.textures[0]) &&
         ! image.nopadding) {
-        const auto& header = TextureHeaderOf(context, own.textures[0]);
-        if (header.width > 0 && header.height > 0 &&
-            static_cast<int64_t>(header.width) * header.height >
-                static_cast<int64_t>(header.mapWidth) * header.mapHeight) {
-            geometry.u = static_cast<float>(header.mapWidth) / static_cast<float>(header.width);
-            geometry.v = static_cast<float>(header.mapHeight) / static_cast<float>(header.height);
-        }
+        const auto texture_geometry = TextureGeometryOf(TextureHeaderOf(context, own.textures[0]));
+        geometry.u = texture_geometry.u;
+        geometry.v = texture_geometry.v;
     }
 
     auto& layer = AddLayer(context, at, entry, plan, true, false);
@@ -3303,7 +3397,7 @@ bool LoadImageEntry(ParseContext& context, std::size_t at, const nlohmann::json&
             closing.materials.push_back(closing_material);
             if (BuildEffect(context, image, closing, index++, node, *chain, geometry.extent, false, false,
                             false, false, plan.key, camera_name, tinted, all_materials, nullptr,
-                            mdl.puppet != nullptr ? &puppet_layer : nullptr)) {
+                            mdl.puppet != nullptr ? &puppet_layer : nullptr, true)) {
                 any_fixed = true;
             }
         }
@@ -4273,22 +4367,19 @@ bool PrepareParticleSystem(ParseContext& context, const wpscene::Particle& file,
             item.authored.shader = "genericropeparticle";
             build.has_plain_rope = build.has_plain_rope || item.kind == ParticleRendererKind::Rope;
         }
-        bool sheet = false;
-        if (! item.authored.textures.empty() && ! item.authored.textures[0].empty() &&
-            ! IsSpecTex(item.authored.textures[0])) {
-            sheet = TextureHeaderOf(context, item.authored.textures[0]).isSprite;
-        }
         const bool trail = item.kind == ParticleRendererKind::SpriteTrail ||
                            item.kind == ParticleRendererKind::RopeTrail;
-        const bool thick = sheet || trail || IsRopeKind(item.kind);
-        item.authored.combos["SPRITESHEET"]      = sheet ? 1 : 0;
-        item.authored.combos["THICKFORMAT"]      = thick ? 1 : 0;
+        item.authored.combos["THICKFORMAT"]      = trail || IsRopeKind(item.kind) ? 1 : 0;
         item.authored.combos["SPRITESHEETBLEND"] = file.BlendsSpriteFrames() ? 1 : 0;
         item.authored.combos["TRAILRENDERER"]    = trail ? 1 : 0;
-        if (! LoadMaterial(context, item.authored, item.material, item.loaded)) {
+        MaterialLoadOptions options;
+        options.particle_material = true;
+        if (! LoadMaterial(context, item.authored, item.material, item.loaded, options)) {
             LOG_ERROR("particle material '%s' cannot be loaded", item.authored.shader.c_str());
             return false;
         }
+        const auto thick_combo = item.loaded.info.combos.find("THICKFORMAT");
+        const bool thick = thick_combo != item.loaded.info.combos.end() && thick_combo->second != "0";
         auto& constants = item.material.customShader.constValues;
         if (context.is_ortho) {
             // A 2D scene's eye: the centre of the canvas view, 2000 units in front of it, and
@@ -4300,18 +4391,6 @@ bool PrepareParticleSystem(ParseContext& context, const wpscene::Particle& file,
             constants["g_OrientationForward"] = ShaderValue(std::array<float, 3> { 0.0f, 0.0f, 1.0f });
             constants["g_ViewUp"]             = ShaderValue(std::array<float, 3> { 0.0f, 1.0f, 0.0f });
             constants["g_ViewRight"]          = ShaderValue(std::array<float, 3> { 1.0f, 0.0f, 0.0f });
-        }
-        if (sheet) {
-            const auto& texture = context.scene->textures[item.material.textures[0]];
-            const auto& header  = TextureHeaderOf(context, item.material.textures[0]);
-            if (texture.spriteAnim.numFrames() > 0) {
-                const auto& frame = texture.spriteAnim.FrameAt(0);
-                const float w     = static_cast<float>(std::max(1, header.mapWidth)) * frame.width;
-                const float h     = static_cast<float>(std::max(1, header.mapHeight)) * frame.height;
-                constants["g_RenderVar1"] = ShaderValue(std::array<float, 4> {
-                    frame.width, frame.height, static_cast<float>(texture.spriteAnim.numFrames()),
-                    h > 0.0f ? w / h : 1.0f });
-            }
         }
         // How many straight pieces join two particles (rope), or two recorded points (trail).
         const uint32_t added = static_cast<uint32_t>(std::clamp(render.subdivision, 0.0f, 32.0f));

@@ -337,8 +337,11 @@ public:
                             CameraShotTimeline timeline, bool origin_bound);
     void RegisterPerspectiveCameraShot(std::shared_ptr<SceneNode> node, SceneCamera* camera,
                                        double fov, CameraPathPlayback path);
+    // `replay_current` false registers only future assignments (including an
+    // assignment of the held value), without making a static value a driver.
     void RegisterDynamicValueListener(std::unique_ptr<DynamicValue> value,
-                                      std::function<void(const DynamicValue&)> callback);
+                                      std::function<void(const DynamicValue&)> callback,
+                                      bool replay_current = true);
     void RegisterNodeEffectFinal(std::string name, SceneNode* node, SceneImageEffectLayer* layer,
                                  TextLayerRenderFrame target_frame = {});
     void RegisterMaterialAlphaAnimation(std::shared_ptr<SceneMaterial> material,
@@ -351,9 +354,13 @@ public:
     // draws with: its own and each effect pass. One value feeds them all, and
     // the alpha in `g_Color4` is left to the alpha bindings. What a script
     // writes to `thisLayer.color` becomes that value (see `SetNodeColor`).
+    // Static multi-material recipients use replay_current=false: explicit writes
+    // still reach the existing recipient set, but registration changes no tint.
+    // Both forms reuse the same live value, listener and m_node_color entry.
     void BindMaterialColor(std::string layer_name,
                            std::vector<std::shared_ptr<SceneMaterial>> materials,
-                           std::unique_ptr<DynamicValue> value);
+                           std::unique_ptr<DynamicValue> value,
+                           bool replay_current = true);
     // A user-bound or scripted image `brightness` multiplies the colour of every
     // material the layer tints with, and only in an HDR scene: with no material
     // given the value is kept for its script alone.
@@ -770,7 +777,10 @@ public:
     /// the loader.
     struct LayerRegistrationMemo {
         SceneNode*                 node { nullptr };
-        std::optional<std::size_t> rank;
+        // SIZE_MAX cannot be an index in the layer-order vector. Replacing the
+        // optional rank leaves room for the pre-node colour pointer at no cost.
+        std::size_t                rank { std::numeric_limits<std::size_t>::max() };
+        DynamicValue*              color { nullptr };
         std::vector<std::function<void(SceneRuntimeContext&)>> put_back;
         std::array<std::size_t, static_cast<std::size_t>(RuntimeList::Count)> lengths {};
     };
