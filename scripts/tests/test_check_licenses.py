@@ -403,6 +403,15 @@ class InventoryTests(unittest.TestCase):
                           ("static", "stb_vorbis"), ("dylib", "c++"), ("dylib", "lz4"),
                           ("dylib", "freetype"), ("framework", "Metal"), ("framework", "AppKit")])
 
+    def test_link_lists_also_come_from_named_arrays_and_a_kind_table(self):
+        self.build_rs.write_text(
+            'const STATIC_ARCHIVES: [&str; 2] = [\n    "wpAudio",\n    // "wpRetired",\n    "stb_vorbis",\n];\n'
+            'const SHARED_LIBRARIES: [&str; 1] = ["lz4"];\nconst FRAMEWORKS: [&str; 1] = ["Metal"];\n'
+            'fn main() {\n    let kinds = [("static", &STATIC_ARCHIVES), ("dylib", &SHARED_LIBRARIES), ("framework", &FRAMEWORKS)];\n'
+            '    for (kind, names) in kinds { for name in names { println!("cargo:rustc-link-lib={kind}={name}"); } }\n}\n')
+        self.assertEqual(check_licenses.link_lists(self.build_rs),
+                         [("static", "wpAudio"), ("static", "stb_vorbis"), ("dylib", "lz4"), ("framework", "Metal")])
+
     def test_first_party_archives_pass_and_third_party_ones_carry_their_license(self):
         components = self.components()
         # wp* are the scene engine's archives, wm* the project's own (Renderer/).

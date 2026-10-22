@@ -456,17 +456,25 @@ def dylib_components(walk, prefix, app, run):
 # 2. Compiled-in and statically linked code, from the sources
 # ---------------------------------------------------------------------------
 LINK_LIST = re.compile(r'for\s+(\w+)\s+in\s+\[(.*?)\]\s*\{\s*println!\(\s*"cargo:rustc-link-lib=(static|dylib|framework)=\{\1\}"', re.DOTALL)
+# The other form: named `const NAME: [&str; N] = [...]` arrays, linked through a table of
+# `("static" | "dylib" | "framework", &NAME)` pairs that one `cargo:rustc-link-lib={kind}={name}` loop prints.
+NAMED_LIST = re.compile(r"\bconst\s+(\w+)\s*:\s*\[\s*&(?:'static\s+)?str\s*;\s*\d+\s*\]\s*=\s*\[(.*?)\]\s*;", re.DOTALL)
+KIND_TABLE = re.compile(r'\(\s*"(static|dylib|framework)"\s*,\s*&(\w+)\s*\)')
 FIND_PACKAGE = re.compile(r"\bfind_package\(\s*([A-Za-z0-9_+.-]+)", re.IGNORECASE)
 PKG_CHECK = re.compile(r"\bpkg_check_modules\(\s*[A-Za-z0-9_]+((?:\s+(?:REQUIRED|QUIET|IMPORTED_TARGET|GLOBAL))*)\s+([A-Za-z0-9_.+-]+)", re.IGNORECASE)
 
 
 def link_lists(build_script):
-    """[(kind, name)] from the link-lib loops of build.rs; an empty result is an error, never silence."""
+    """[(kind, name)] from the link-lib lists of build.rs; an empty result is an error, never silence."""
     text = build_script.read_text(errors="replace")
     found = []
     for _, body, kind in LINK_LIST.findall(text):
         body = re.sub(r"//[^\n]*", "", body)
         found += [(kind, name) for name in re.findall(r'"([^"]+)"', body)]
+    if "cargo:rustc-link-lib={kind}={name}" in text:
+        lists = {name: re.sub(r"//[^\n]*", "", body) for name, body in NAMED_LIST.findall(text)}
+        for kind, name in KIND_TABLE.findall(text):
+            found += [(kind, entry) for entry in re.findall(r'"([^"]+)"', lists.get(name, ""))]
     if not found:
         raise ToolError(f"No cargo:rustc-link-lib lists recognised in {build_script}")
     return found
