@@ -10,8 +10,13 @@ render   draws the same wallpapers with Native Metal at the screenshots' size, s
          time and time of day (`metal_scene_draw_smoke`'s renderer comparison, Native Metal only).
 compare  writes side-by-side sheets (Wallpaper Engine | each render | difference to the
          last render) cropped to the Windows work area, and coarse metrics.
+fetch    downloads Workshop items into a task folder with the app's SteamCMD and saved
+         Steam sign-in (never a new sign-in), for wallpapers not in the app's library.
+unpack   extracts a wallpaper's scene.pkg into a task folder, to read its scene.json,
+         presets and shaders.
 
-A wallpaper is a Workshop id in the app's library or a folder holding project.json.
+A wallpaper is a Workshop id in the app's library or a folder holding project.json,
+such as the one fetch writes.
 Screenshots are shared by every worktree in the main checkout's
 artifacts/we-reference/shots/; renders and sheets go to this tree's
 artifacts/we-reference/. See docs/testing/wallpaper-engine-reference.md.
@@ -50,6 +55,9 @@ SHOT_DELAYS = (8, 7)            # seconds after opening, then after the first sh
 DEFAULT_TIMES = (8.0, 15.0)     # scene time of each shot when a capture did not record it
 STEP = 1.0 / 30.0
 SHEET_WIDTH, METRIC_WIDTH = 640, 256
+WALLPAPER_ENGINE_APP = "431960"
+# SteamCMD output that means the saved sign-in is no longer accepted; fetch never answers it.
+SIGN_IN_NEEDED = ("password:", "steam guard", "two-factor", "login failure", "invalid password", "expired")
 
 WORKER = r"""
 & {
@@ -354,6 +362,114 @@ def handler(run: CaptureRun, server: str, log: Path):
     return Handler
 
 
+def fetch_item(item: str, into: Path, app_home: Path = APP_HOME, timeout: float = 900) -> Path:
+    """Download one Workshop item to `into/<item>` with the app's SteamCMD and saved sign-in.
+
+    Runs a scratch copy of both, so the app's own copies stay untouched, never types a
+    password or starts a new sign-in, and deletes the copy (it holds the session) at the end.
+    """
+    if not item.isdigit():
+        raise SystemExit(f"{MARK.missing} {item}: not a Workshop id")
+    dest = into / item
+    if (dest / "project.json").is_file():
+        return dest
+    runtime, session = app_home / "SteamCMD/MacOS", app_home / "SteamSession/Library"
+    account = app_home / "SteamSession/account"
+    if not ((runtime / "steamcmd").is_file() and session.is_dir() and account.is_file()):
+        raise SystemExit(f"{MARK.missing} no SteamCMD or saved Steam sign-in in {app_home}: sign in once in the "
+                         "app (Settings > Library & Steam); fetch never signs in")
+    into.mkdir(parents=True, exist_ok=True)
+    scratch = Path(tempfile.mkdtemp(prefix=".steamcmd-", dir=into))
+    try:
+        shutil.copytree(runtime, scratch, symlinks=True, dirs_exist_ok=True)
+        shutil.copytree(session, scratch / "Library", symlinks=True)
+        # A quarantined copy is killed at launch; the app's own copy was approved in place.
+        subprocess.run(["xattr", "-dr", "com.apple.quarantine", str(scratch)], capture_output=True)
+        (scratch / "tmp").mkdir()
+        env = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": str(scratch), "TMPDIR": str(scratch / "tmp"),
+               "TERM": "dumb", "LANG": "en_US.UTF-8", "DYLD_LIBRARY_PATH": str(scratch),
+               "DYLD_FRAMEWORK_PATH": str(scratch / "Frameworks")}
+        command = [str(scratch / "steamcmd"), "-inhibitbootstrap", "+@ShutdownOnFailedCommand", "1",
+                   "+force_install_dir", str(scratch / "out"), "+login", account.read_text().strip(),
+                   "+workshop_download_item", WALLPAPER_ENGINE_APP, item, "+quit"]
+        try:
+            result = subprocess.run(command, cwd=scratch, env=env, stdin=subprocess.DEVNULL, capture_output=True,
+                                    text=True, errors="replace", timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"SteamCMD did not finish within {timeout:.0f} s") from None
+        output = (result.stdout + result.stderr).replace("\r", "\n")
+        content = scratch / "out/steamapps/workshop/content" / WALLPAPER_ENGINE_APP / item
+        if result.returncode != 0 or not (content / "project.json").is_file():
+            if any(sign in output.lower() for sign in SIGN_IN_NEEDED):
+                raise RuntimeError("the saved Steam sign-in is no longer accepted; the user signs in again in "
+                                   "the app (fetch never signs in)")
+            lines = [line.strip() for line in output.splitlines() if line.strip() and "password" not in line.lower()]
+            raise RuntimeError("; ".join(lines[-3:]) or f"SteamCMD exited with {result.returncode}")
+        shutil.rmtree(dest, ignore_errors=True)
+        shutil.move(str(content), dest)
+        return dest
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def fetch(args) -> int:
+    status = 0
+    for item in args.items:
+        if not args.download and (LIBRARY / item / "project.json").is_file():
+            print(f"{MARK.ok} {item}: in the app's library; pass the id as it is")
+            continue
+        print(f"{MARK.step} {item}: downloading with SteamCMD")
+        try:
+            print(f"{MARK.ok} {item}: {fetch_item(item, args.into, timeout=args.timeout)}")
+        except RuntimeError as error:
+            print(f"{MARK.missing} {item}: {error}")
+            status = 1
+    return status
+
+
+def unpack_pkg(pkg: Path, dest: Path) -> list[str]:
+    """Extract a Wallpaper Engine package (PKGV) into dest; returns the entry names."""
+    data = pkg.read_bytes()
+    pos = 0
+
+    def text() -> str:
+        nonlocal pos
+        (size,) = struct.unpack_from("<I", data, pos)
+        pos += 4 + size
+        return data[pos - size:pos].decode("utf-8")
+
+    if not text().startswith("PKGV"):
+        raise SystemExit(f"{MARK.missing} {pkg}: not a Wallpaper Engine package")
+    (count,) = struct.unpack_from("<I", data, pos)
+    pos += 4
+    entries = []
+    for _ in range(count):
+        name = text()
+        offset, size = struct.unpack_from("<II", data, pos)
+        pos += 8
+        entries.append((name, offset, size))
+    root = dest.resolve()
+    for name, offset, size in entries:
+        out = (root / name).resolve()
+        if not out.is_relative_to(root):
+            raise SystemExit(f"{MARK.missing} {pkg}: entry {name!r} points outside {dest}")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(data[pos + offset:pos + offset + size])
+    return [name for name, _, _ in entries]
+
+
+def unpack(args) -> int:
+    for wallpaper in args.wallpapers:
+        folder = resolve(wallpaper)
+        if not (folder / "scene.pkg").is_file():
+            print(f"{MARK.ok} {wallpaper}: no scene.pkg; its files are loose in {folder}")
+            continue
+        dest = args.into / folder.name
+        names = unpack_pkg(folder / "scene.pkg", dest)
+        print(f"{MARK.ok} {wallpaper}: {len(names)} files in {dest}")
+    return 0
+
+
 def capture(args) -> int:
     run = CaptureRun([resolve(w) for w in args.wallpapers], args.shots)
     server = f"http://{args.host}:{args.port}"
@@ -594,9 +710,18 @@ def main(argv=None) -> int:
     sheet = commands.add_parser("compare", help="side-by-side sheets and metrics")
     sheet.add_argument("wallpapers", nargs="+")
     sheet.add_argument("--labels", default="ours", help="comma-separated render sets, left to right (default: %(default)s)")
+    get = commands.add_parser("fetch", help="download Workshop items with the app's saved Steam sign-in")
+    get.add_argument("items", nargs="+", help="Workshop ids")
+    get.add_argument("--into", type=Path, required=True, help="the task's folder, e.g. artifacts/issue-67")
+    get.add_argument("--download", action="store_true", help="download even if the app's library has the item")
+    get.add_argument("--timeout", type=float, default=900, help="seconds per item (default: %(default)s)")
+    open_ = commands.add_parser("unpack", help="extract the wallpapers' scene.pkg")
+    open_.add_argument("wallpapers", nargs="+")
+    open_.add_argument("--into", type=Path, required=True, help="the task's folder; one subfolder per wallpaper")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(line_buffering=True)   # progress shows up while the VM works
-    return {"capture": capture, "render": render, "compare": compare}[args.command](args)
+    return {"capture": capture, "render": render, "compare": compare, "fetch": fetch,
+            "unpack": unpack}[args.command](args)
 
 
 if __name__ == "__main__":

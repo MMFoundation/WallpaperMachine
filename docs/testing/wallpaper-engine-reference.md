@@ -5,7 +5,8 @@ An author's preview image, a screenshot attached to an issue, and our own earlie
 render are not targets: previews are often edited or out of date, and an earlier
 render carries our own bugs. `scripts/we_reference.py` captures Wallpaper Engine's
 frames in a Parallels Windows VM, renders the same wallpaper with Native Metal at the
-same size and moment, and puts the two side by side.
+same size and moment, and puts the two side by side. The order of work for a whole
+fix is in [wallpaper-fixes.md](wallpaper-fixes.md).
 
 ## When to use it
 
@@ -33,6 +34,11 @@ picture.
   not resume them or run commands in them, so the VM is woken by opening it
   (`open -a "Parallels Desktop"` resumes it) and the worker is started by the
   background poller installed in it (see [Capturing](#capturing)).
+- A wallpaper missing from the app's library is downloaded with
+  `python3 scripts/we_reference.py fetch <id> --into artifacts/<task>`. It runs a
+  scratch copy of the app's SteamCMD with the app's saved Steam sign-in, never signs
+  in, deletes the copy (it holds the session) and leaves `artifacts/<task>/<id>/`.
+  `unpack <wallpaper> --into <dir>` extracts a wallpaper's `scene.pkg` for reading.
 - `metal_scene_draw_smoke` built in this tree: `python3 scripts/check_renderer.py`
   builds it into `artifacts/renderer/bin/tests/`. A binary built before the change
   you are judging renders that change's "before"; pass it with `--binary`.

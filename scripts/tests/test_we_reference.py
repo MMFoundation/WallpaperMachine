@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for the capture queue, scene clock and image handling in scripts/we_reference.py."""
+"""Unit tests for the capture queue, Workshop fetch and unpack, scene clock and image handling in scripts/we_reference.py."""
 from __future__ import annotations
 
 from http.server import ThreadingHTTPServer
@@ -99,6 +99,88 @@ class CaptureServerTests(unittest.TestCase):
         self.request("/abort", b"wallpaper64.exe not found", "POST")
         self.assertTrue(self.run.wait(0))
         self.assertEqual(self.run.aborted, "wallpaper64.exe not found")
+
+
+FAKE_STEAMCMD = """#!/bin/sh
+echo "$@" > "$HOME/../args"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    +force_install_dir) dir="$2";;
+    +workshop_download_item) item="$3";;
+  esac
+  shift
+done
+%s
+"""
+
+
+class FetchTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        root = Path(self.temp.name)
+        self.home, self.into = root / "home", root / "artifacts/issue-1"
+        (self.home / "SteamCMD/MacOS").mkdir(parents=True)
+        (self.home / "SteamSession/Library/Application Support/Steam").mkdir(parents=True)
+        (self.home / "SteamSession/account").write_text("someone\n")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def steamcmd(self, body):
+        tool = self.home / "SteamCMD/MacOS/steamcmd"
+        tool.write_text(FAKE_STEAMCMD % body)
+        tool.chmod(0o755)
+
+    def test_an_item_is_downloaded_with_the_saved_sign_in_and_no_copy_of_it_is_left(self):
+        self.steamcmd('mkdir -p "$dir/steamapps/workshop/content/431960/$item" && '
+                      'echo {} > "$dir/steamapps/workshop/content/431960/$item/project.json"')
+        folder = we_reference.fetch_item("111", self.into, app_home=self.home)
+        self.assertEqual(folder, self.into / "111")
+        self.assertTrue((folder / "project.json").is_file())
+        self.assertEqual(sorted(p.name for p in self.into.iterdir()), ["111", "args"])
+        self.assertIn("+login someone +workshop_download_item 431960 111", (self.into / "args").read_text())
+
+    def test_an_expired_sign_in_is_reported_and_never_answered(self):
+        self.steamcmd('printf "Cached credentials not found.\\npassword: "; exit 5')
+        with self.assertRaisesRegex(RuntimeError, "signs in again"):
+            we_reference.fetch_item("111", self.into, app_home=self.home)
+        self.assertEqual([p.name for p in self.into.iterdir()], ["args"])
+
+    def test_without_a_saved_sign_in_nothing_runs(self):
+        (self.home / "SteamSession/account").unlink()
+        with self.assertRaises(SystemExit):
+            we_reference.fetch_item("111", self.into, app_home=self.home)
+        self.assertFalse(self.into.exists())
+
+
+def package(entries: list[tuple[str, bytes]]) -> bytes:
+    def text(value: str) -> bytes:
+        raw = value.encode()
+        return len(raw).to_bytes(4, "little") + raw
+    header, body = text("PKGV0019") + len(entries).to_bytes(4, "little"), b""
+    for name, content in entries:
+        header += text(name) + len(body).to_bytes(4, "little") + len(content).to_bytes(4, "little")
+        body += content
+    return header + body
+
+
+class UnpackTests(unittest.TestCase):
+    def test_a_package_is_extracted_entry_by_entry(self):
+        with tempfile.TemporaryDirectory() as temp:
+            pkg = Path(temp) / "scene.pkg"
+            pkg.write_bytes(package([("scene.json", b'{"objects": []}'), ("particles/fire.json", b"{}")]))
+            names = we_reference.unpack_pkg(pkg, Path(temp) / "out")
+            self.assertEqual(names, ["scene.json", "particles/fire.json"])
+            self.assertEqual((Path(temp) / "out/scene.json").read_bytes(), b'{"objects": []}')
+            self.assertEqual((Path(temp) / "out/particles/fire.json").read_bytes(), b"{}")
+
+    def test_an_entry_outside_the_folder_is_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            pkg = Path(temp) / "scene.pkg"
+            pkg.write_bytes(package([("../escaped.json", b"{}")]))
+            with self.assertRaises(SystemExit):
+                we_reference.unpack_pkg(pkg, Path(temp) / "out")
+            self.assertFalse((Path(temp) / "escaped.json").exists())
 
 
 class MainCheckoutTests(unittest.TestCase):
