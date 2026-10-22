@@ -266,6 +266,7 @@ add_executable(scenescript_behavior_test
     scenescript_objects_test.cpp
     scenescript_startup_test.cpp
     scenescript_rotation_test.cpp
+    scenescript_layer_release_test.cpp
     support/pixels.cpp
     support/scene_package.cpp
     support/script_scene.cpp)
@@ -544,6 +545,27 @@ if(APPLE)
     )
 endif()
 
+# A scene's video reaches the decoder without whole-file copies: where a loose clip lies, the
+# cache file a packaged one is streamed to, and a clip packed into a texture.
+if(APPLE)
+    pkg_check_modules(TEST_LZ4_SCENE_VIDEO REQUIRED IMPORTED_TARGET liblz4)
+    add_executable(scene_video_input_test scene_video_input_test.mm)
+    target_link_libraries(scene_video_input_test PRIVATE ${PROJECT_NAME} wpFs wpScene wmMedia
+        wescene_testing_media PkgConfig::TEST_LZ4_SCENE_VIDEO ${CORE_VIDEO_FRAMEWORK} GTest::gtest_main)
+    target_include_directories(scene_video_input_test PRIVATE
+        . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene ${CMAKE_SOURCE_DIR}/src/Scene/include
+        ${CMAKE_SOURCE_DIR}/src/Scene/Parse)
+    target_compile_features(scene_video_input_test PRIVATE cxx_std_20)
+    set_target_properties(scene_video_input_test PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+    target_compile_options(scene_video_input_test PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+    gtest_discover_tests(
+        scene_video_input_test
+        TEST_PREFIX scene_video_input_test.
+        PROPERTIES TIMEOUT 300
+        DISCOVERY_TIMEOUT 60
+    )
+endif()
+
 add_executable(video_source_input_test video_source_input_test.cpp)
 target_link_libraries(video_source_input_test PRIVATE ${PROJECT_NAME}
     wmMedia wescene_testing_media GTest::gtest_main)
@@ -788,6 +810,23 @@ if(APPLE)
         DISCOVERY_TIMEOUT 60
     )
   endforeach()
+
+  # What a running wallpaper holds in memory: the pipeline-archive stores and the pictures
+  # displays share. Private textures and archive files in the temp directory only.
+  add_executable(metal_memory_test
+      metal_archive_store_test.mm
+      scene_shared_pictures_test.mm)
+  target_link_libraries(metal_memory_test PRIVATE scene_test_support GTest::gtest_main)
+  set_target_properties(metal_memory_test PROPERTIES
+      OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+  target_compile_options(metal_memory_test PRIVATE
+      $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+  gtest_discover_tests(
+      metal_memory_test
+      TEST_PREFIX metal_memory_test.
+      PROPERTIES TIMEOUT 240
+      DISCOVERY_TIMEOUT 60
+  )
 
   add_executable(scene_layer_size_test scene_layer_size_test.cpp)
   target_link_libraries(scene_layer_size_test PRIVATE scene_test_support GTest::gtest_main)

@@ -27,6 +27,15 @@ public:
 		(void)to;
 		return false;
 	}
+	/// Where the file `path` names lies on the host disk, when this file space is a
+	/// folder of real files. A reader that can open a path itself (a video decoder)
+	/// uses it to play the file in place instead of reading it through the mount. A
+	/// file space that has no such path says so by answering false.
+	virtual bool PhysicalPath(std::string_view path, std::string* out) const {
+		(void)path;
+		(void)out;
+		return false;
+	}
 public:
 	Fs() = default;
 	virtual ~Fs() = default;

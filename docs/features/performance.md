@@ -919,6 +919,14 @@ files. Identical payloads can share even under different texture names; differen
 payloads do not share just because their names or sizes match. Extraction and
 identity lookup happen when the source opens, not per frame.
 
+Memory a running wallpaper holds is kept to what it shows. Displays showing one scene
+share the pictures they have in common instead of each holding a copy, a destroyed
+layer's script state and a let-go pipeline-archive store are released, and a scene's
+video is opened from its file (or a content-named cache file) instead of being read
+whole into memory; the details are in [renderer
+memory](scene-rendering.md#renderer-memory). None of it adds per-frame work, a render
+pass or render-target memory, and the pictures are unchanged.
+
 Consumers share one driving playback clock. Each surface still owns its pause
 and retained frame; an incompatible playback rate splits that consumer onto a
 private decoder, reopened from the same file even after the packed image is gone.

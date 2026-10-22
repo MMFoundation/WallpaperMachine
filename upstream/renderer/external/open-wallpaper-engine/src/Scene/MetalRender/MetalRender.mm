@@ -7,6 +7,7 @@
 
 #include "MetalBackdrop.hpp"
 #include "MetalPosterCapture.hpp"
+#include "MetalSharedImages.hpp"
 #include "MetalVideoTextures.hpp"
 
 #include "MetalRender/MetalBlend.hpp"
@@ -569,6 +570,66 @@ public:
 
     /// Lets every write already scheduled run, keeping the open archives.
     void finishArchiveWrites() { waitForArchiveWrites(); }
+
+    [[nodiscard]] MetalRender::ArchiveResidency archiveResidency() const
+    {
+        const std::lock_guard lock { m_mutex };
+        MetalRender::ArchiveResidency residency;
+        residency.stores              = m_archives.size();
+        residency.generation_records  = m_archive_write_generations.size();
+        return residency;
+    }
+
+    [[nodiscard]] MetalRender::ArchiveStoreState archiveStore(std::string_view root) const
+    {
+        MetalRender::ArchiveStoreState state;
+        const std::lock_guard lock { m_mutex };
+        for (const auto& [archive_id, entry] : m_archives) {
+            if (archive_id.second != root || ! entry.attempted) continue;
+            state.open        = true;
+            state.descriptors = entry.descriptors.size();
+            state.identity    = entry.identity;
+            state.writes      = entry.writes;
+            state.collector   = (__bridge const void*)entry.collector;
+        }
+        return state;
+    }
+
+    /// While suspended nothing queued on the archive queue runs.
+    void suspendArchiveQueue(bool suspended)
+    {
+        if (suspended == m_archive_queue_suspended) return;
+        m_archive_queue_suspended = suspended;
+        if (suspended) {
+            dispatch_suspend(m_archive_queue);
+        } else {
+            dispatch_resume(m_archive_queue);
+        }
+    }
+
+    bool buildArchivedPipeline(std::string_view archive_root, uint32_t variant)
+    {
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+        if (device == nil) return false;
+        static const char kSource[] =
+            "#include <metal_stdlib>\nusing namespace metal;\n"
+            "vertex float4 archive_vertex(uint i [[vertex_id]]) {\n"
+            "  float2 p[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };\n"
+            "  return float4(p[i], 0.0, 1.0);\n}\n"
+            "fragment half4 archive_fragment() { return half4(1.0h); }\n";
+        std::vector<SceneMetalStage> stages(2);
+        stages[0].kind        = SceneMetalStageKind::Vertex;
+        stages[0].source      = kSource;
+        stages[0].entry_point = "archive_vertex";
+        stages[1].kind        = SceneMetalStageKind::Fragment;
+        stages[1].source      = kSource;
+        stages[1].entry_point = "archive_fragment";
+        MetalPipelineKey key;
+        key.program_id   = 0xA4C41FEull + variant;
+        key.color_format = MetalPixelFormat::BGRA8Unorm;
+        std::string error;
+        return pipelineFor(device, key, stages, nil, archive_root, &error) != nil;
+    }
 #endif
 
     [[nodiscard]] MetalPipelineArchiveStatus archiveStatus() const
@@ -829,6 +890,14 @@ private:
         NSURL*                                 url { nil };
         id<MTLDevice>                          device { nil };
         bool                                   attempted { false };
+        /// Names this opening of the store. A store that is let go and opened again under
+        /// the same path is a different store with a different collector, and work captured
+        /// for the first must not reach the second. Zero while the store is not open.
+        uint64_t                               identity { 0 };
+#ifdef WESCENE_BUILD_TESTS
+        /// Writes started for this opening of the store.
+        uint64_t                               writes { 0 };
+#endif
         std::unordered_set<MetalPipelineKey, MetalPipelineKeyHash> keys;
         std::vector<MTLRenderPipelineDescriptor*>                  descriptors;
     };
@@ -844,6 +913,8 @@ private:
     /// wallpaper one recompile on a later launch and nothing else.
     void rememberStoreLocked(const ArchiveId& archive_id)
     {
+        // A store opened again after being forgotten is in the order once, at the end.
+        std::erase(m_archive_order, archive_id);
         m_archive_order.push_back(archive_id);
         while (m_archive_order.size() > kMaxArchiveStores) {
             const auto oldest = m_archive_order.front();
@@ -863,6 +934,7 @@ private:
             entry.loaded    = nil;
             entry.collector = nil;
             entry.attempted = false;
+            entry.identity  = 0;
             entry.keys.clear();
         }
     }
@@ -956,6 +1028,7 @@ private:
         // dispatched against it is not lost when this one is discarded.
         if (entry.attempted) return entry.loaded;
         entry.attempted = true;
+        entry.identity  = ++m_archive_identities;
         rememberStoreLocked(archive_id);
         entry.device    = device;
         entry.url       = url;
@@ -978,13 +1051,18 @@ private:
         if (device == nil || archive_root.empty()) return;
         const ArchiveId      archive_id { device.registryID, std::string(archive_root) };
         id<MTLBinaryArchive> collector = nil;
+        uint64_t             identity  = 0;
         {
             const std::lock_guard lock { m_mutex };
-            auto& entry = m_archives[archive_id];
+            // Looked up, not made: a store that is not open stays closed.
+            const auto found = m_archives.find(archive_id);
+            if (found == m_archives.end()) return;
+            auto& entry = found->second;
             if (entry.collector == nil) return;
             if (entry.keys.size() >= kMaxArchivedPipelines) return;
             if (! entry.keys.insert(key).second) return;
             collector = entry.collector;
+            identity  = entry.identity;
         }
 
         // Copied, and without the archives it was created against: what is
@@ -1004,14 +1082,19 @@ private:
             }
             {
                 const std::lock_guard lock { m_mutex };
-                auto& entry = m_archives[archive_id];
+                // This completion belongs to the store it was captured for. If that
+                // store was let go meanwhile (and perhaps opened again under the same
+                // path) there is nothing left to tell.
+                const auto found = m_archives.find(archive_id);
+                if (found == m_archives.end() || found->second.identity != identity) return;
+                auto& entry = found->second;
                 // Bounded on its own account: `keys` is emptied when the store
                 // is reopened, and this must not grow with every reopen.
                 if (entry.descriptors.size() < kMaxArchivedPipelines) {
                     entry.descriptors.push_back(stored);
                 }
             }
-            scheduleArchiveWrite(archive_id);
+            scheduleArchiveWrite(archive_id, identity);
         });
     }
 
@@ -1021,7 +1104,10 @@ private:
     /// The generation is per store, not global: a Mac with two GPUs, or two
     /// wallpapers with their own caches, must not have one store's pending
     /// write cancelled by an addition to another.
-    void scheduleArchiveWrite(const ArchiveId& requested)
+    ///
+    /// `identity` is the opening of the store the addition was made to. A record
+    /// is kept, and a write scheduled, only while that same opening is open.
+    void scheduleArchiveWrite(const ArchiveId& requested, uint64_t identity)
     {
         // Copied into a local before the block is built. A block that names a
         // reference parameter captures the reference, not the referent, and
@@ -1030,6 +1116,8 @@ private:
         uint64_t        generation = 0;
         {
             const std::lock_guard lock { m_mutex };
+            const auto found = m_archives.find(archive_id);
+            if (found == m_archives.end() || found->second.identity != identity) return;
             generation = ++m_archive_write_generations[archive_id];
         }
         m_archive_writes_pending.fetch_add(1, std::memory_order_relaxed);
@@ -1039,22 +1127,30 @@ private:
                            bool current = false;
                            {
                                const std::lock_guard lock { m_mutex };
-                               current = m_archive_write_generations[archive_id] == generation;
+                               const auto found      = m_archives.find(archive_id);
+                               const auto generation_record = m_archive_write_generations.find(archive_id);
+                               current = found != m_archives.end() && found->second.identity == identity &&
+                                         generation_record != m_archive_write_generations.end() &&
+                                         generation_record->second == generation;
                            }
-                           if (current) writeArchive(archive_id);
+                           if (current) writeArchive(archive_id, identity);
                            m_archive_writes_pending.fetch_sub(1, std::memory_order_relaxed);
                        });
     }
 
     /// Runs only on `m_archive_queue`.
-    void writeArchive(const ArchiveId& archive_id)
+    void writeArchive(const ArchiveId& archive_id, uint64_t identity)
     {
         id<MTLBinaryArchive> collector = nil;
         NSURL*               url       = nil;
         {
             const std::lock_guard lock { m_mutex };
             auto found = m_archives.find(archive_id);
-            if (found == m_archives.end()) return;
+            // Only the store this write was scheduled for is published by it.
+            if (found == m_archives.end() || found->second.identity != identity) return;
+#ifdef WESCENE_BUILD_TESTS
+            ++found->second.writes;
+#endif
             collector = found->second.collector;
             url       = found->second.url;
         }
@@ -1151,11 +1247,16 @@ private:
     std::unordered_map<ArchiveId, ArchiveEntry, ArchiveIdHash> m_archives;
     std::unordered_map<ArchiveId, uint64_t, ArchiveIdHash>     m_archive_write_generations;
     std::deque<ArchiveId>                                      m_archive_order;
+    /// Hands out `ArchiveEntry::identity`. Guarded by `m_mutex`.
+    uint64_t                                                   m_archive_identities { 0 };
     std::atomic<uint64_t>                     m_compiles { 0 };
     dispatch_queue_t                          m_archive_queue { nullptr };
     std::atomic<uint64_t>                     m_archive_collected { 0 };
     std::atomic<uint64_t>                     m_archive_published { 0 };
     std::atomic<uint64_t>                     m_archive_writes_pending { 0 };
+#ifdef WESCENE_BUILD_TESTS
+    bool                                      m_archive_queue_suspended { false };
+#endif
     /// Names each write's scratch file. Touched only on `m_archive_queue`.
     uint64_t                                  m_archive_scratch_serial { 0 };
 };
@@ -2358,23 +2459,38 @@ id<MTLTexture> MetalRender::Impl::resolveTexture(Scene& scene, const std::string
     const std::size_t wanted = is_sprite ? parsed->slots.size() : 1;
     std::vector<id<MTLTexture>> slot_textures;
     slot_textures.reserve(wanted);
-    for (const auto& slot : std::span(parsed->slots).first(wanted)) {
+    for (std::size_t slot_index = 0; slot_index < wanted; ++slot_index) {
+        const auto& slot = parsed->slots[slot_index];
         if (slot.mipmaps.empty() || slot.width <= 0 || slot.height <= 0) break;
-        MTLTextureDescriptor* descriptor =
-            [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
-                                                               width:(NSUInteger)slot.width
-                                                              height:(NSUInteger)slot.height
-                                                           mipmapped:slot.mipmaps.size() > 1];
-        descriptor.mipmapLevelCount = slot.mipmaps.size();
-        descriptor.usage            = MTLTextureUsageShaderRead;
-        // Shared storage, so the pixels are written straight into the texture.
-        // A staging buffer plus a blit would need the frame to wait on an
-        // upload, which is exactly what the per-frame path must never do.
-        descriptor.storageMode = MTLStorageModeShared;
+        // The same picture on the same GPU is one texture, whichever display asked: a texture
+        // another display holds is bound as it is, once its pixels are confirmed equal to the
+        // ones parsed here.
+        SharedImageRequest request;
+        request.device          = device;
+        request.name            = key;
+        request.slot_index      = slot_index;
+        request.format          = format;
+        request.slot            = &slot;
+        request.bytes_per_pixel = bytes_per_pixel;
+        request.block_bytes     = block_bytes;
+        id<MTLTexture> texture = SharedImageCache::shared().import(request, [&]() -> id<MTLTexture> {
+            MTLTextureDescriptor* descriptor =
+                [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
+                                                                   width:(NSUInteger)slot.width
+                                                                  height:(NSUInteger)slot.height
+                                                               mipmapped:slot.mipmaps.size() > 1];
+            descriptor.mipmapLevelCount = slot.mipmaps.size();
+            descriptor.usage            = MTLTextureUsageShaderRead;
+            // Shared storage, so the pixels are written straight into the texture.
+            // A staging buffer plus a blit would need the frame to wait on an
+            // upload, which is exactly what the per-frame path must never do.
+            descriptor.storageMode = MTLStorageModeShared;
 
-        id<MTLTexture> texture = [device newTextureWithDescriptor:descriptor];
+            id<MTLTexture> made = [device newTextureWithDescriptor:descriptor];
+            if (made == nil) return nil;
+            return UploadImageLevels(made, slot, bytes_per_pixel, block_bytes) ? made : nil;
+        });
         if (texture == nil) break;
-        if (! UploadImageLevels(texture, slot, bytes_per_pixel, block_bytes)) break;
         slot_textures.push_back(texture);
     }
     if (slot_textures.empty()) return nil;
@@ -5734,6 +5850,17 @@ uint64_t MetalRender::RenderTargetBytesForTests() const
 
 uint64_t MetalRender::ProgramCompilesForTests() { return MetalProgramCache::shared().compileCount(); }
 
+const void* MetalRender::ImportedImageForTests(const std::string& key, std::size_t slot) const
+{
+    const auto found = pImpl->images.find(key);
+    if (found == pImpl->images.end() || slot >= found->second.size()) return nullptr;
+    return (__bridge const void*)found->second[slot];
+}
+
+uint64_t MetalRender::SharedImageBytesForTests() { return SharedImageCache::shared().liveBytes(); }
+std::size_t MetalRender::SharedImageEntriesForTests() { return SharedImageCache::shared().entries(); }
+uint64_t MetalRender::ImageUploadsForTests() { return SharedImageCache::shared().uploads(); }
+
 bool MetalRender::PipelineArchiveServesEverySeenPipelineForTests()
 {
     return MetalProgramCache::shared().archiveServesEverySeenPipeline();
@@ -5742,6 +5869,26 @@ bool MetalRender::PipelineArchiveServesEverySeenPipelineForTests()
 void MetalRender::WaitForPipelineArchiveWritesForTests()
 {
     MetalProgramCache::shared().finishArchiveWrites();
+}
+
+MetalRender::ArchiveResidency MetalRender::PipelineArchiveResidencyForTests()
+{
+    return MetalProgramCache::shared().archiveResidency();
+}
+
+MetalRender::ArchiveStoreState MetalRender::PipelineArchiveStoreForTests(std::string_view archive_root)
+{
+    return MetalProgramCache::shared().archiveStore(archive_root);
+}
+
+void MetalRender::SuspendPipelineArchiveQueueForTests(bool suspended)
+{
+    MetalProgramCache::shared().suspendArchiveQueue(suspended);
+}
+
+bool MetalRender::BuildArchivedPipelineForTests(std::string_view archive_root, uint32_t variant)
+{
+    return MetalProgramCache::shared().buildArchivedPipeline(archive_root, variant);
 }
 #endif
 

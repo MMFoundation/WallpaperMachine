@@ -18,6 +18,7 @@ if(APPLE)
     MetalRender.mm
     MetalBackdrop.mm
     MetalPosterCapture.mm
+    MetalSharedImages.mm
     MetalVideoTextures.mm)
 endif()
 

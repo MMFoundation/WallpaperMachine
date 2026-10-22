@@ -82,6 +82,7 @@ add_library(
   Scene/SceneLayerReference.cpp
   Scene/WPShaderValueUpdater.cpp
   Scene/Parse/WPTexImageParser.cpp
+  Scene/Parse/WPVideoCache.cpp
   Scene/Parse/WPSoundParser.cpp
   Scene/Parse/WPMdlParser.cpp
   Scene/Parse/WPPuppet.cpp

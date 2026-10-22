@@ -4,30 +4,63 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <limits>
 
 // The digest names caches and keys them; it is not a security boundary. The
 // SDK does not mark CC_SHA1 deprecated, so no warning needs silencing here.
-std::string utils::genSha1(std::span<const char> in) {
-    CC_SHA1_CTX context;
-    CC_SHA1_Init(&context);
-    // CC_LONG is 32 bits wide, so a payload past 4 GiB goes in several updates.
-    constexpr std::size_t kMaxChunk = std::numeric_limits<CC_LONG>::max();
-    const char*           data      = in.data();
-    for (std::size_t left = in.size(); left > 0;) {
-        const std::size_t chunk = std::min(left, kMaxChunk);
-        CC_SHA1_Update(&context, data, static_cast<CC_LONG>(chunk));
-        data += chunk;
-        left -= chunk;
-    }
-    std::uint8_t digest[CC_SHA1_DIGEST_LENGTH];
-    CC_SHA1_Final(digest, &context);
+namespace
+{
+// The most that is handed to the digest at a time.
+constexpr std::size_t kPiece = 64 * 1024;
 
+std::string Hex(const std::uint8_t (&digest)[CC_SHA1_DIGEST_LENGTH])
+{
     static constexpr char kHex[] = "0123456789abcdef";
-    std::string           hex(SHA1_LEN, '0');
+    std::string           hex(utils::SHA1_LEN, '0');
     for (std::size_t i = 0; i < CC_SHA1_DIGEST_LENGTH; ++i) {
         hex[2 * i]     = kHex[digest[i] >> 4];
         hex[2 * i + 1] = kHex[digest[i] & 0x0f];
     }
     return hex;
+}
+
+void Feed(CC_SHA1_CTX& context, std::span<const char> bytes)
+{
+    const char* data = bytes.data();
+    for (std::size_t left = bytes.size(); left > 0;) {
+        const std::size_t piece = std::min(left, kPiece);
+        CC_SHA1_Update(&context, data, static_cast<CC_LONG>(piece));
+        data += piece;
+        left -= piece;
+    }
+}
+} // namespace
+
+struct utils::Sha1Stream::State {
+    CC_SHA1_CTX context;
+};
+
+utils::Sha1Stream::Sha1Stream() : m_state(new State)
+{
+    CC_SHA1_Init(&m_state->context);
+}
+
+utils::Sha1Stream::~Sha1Stream() { delete m_state; }
+
+void utils::Sha1Stream::Update(std::span<const char> bytes) { Feed(m_state->context, bytes); }
+
+std::string utils::Sha1Stream::Finish()
+{
+    std::uint8_t digest[CC_SHA1_DIGEST_LENGTH];
+    CC_SHA1_Final(digest, &m_state->context);
+    return Hex(digest);
+}
+
+std::string utils::genSha1(std::span<const char> in)
+{
+    CC_SHA1_CTX context;
+    CC_SHA1_Init(&context);
+    Feed(context, in);
+    std::uint8_t digest[CC_SHA1_DIGEST_LENGTH];
+    CC_SHA1_Final(digest, &context);
+    return Hex(digest);
 }

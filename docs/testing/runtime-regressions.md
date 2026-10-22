@@ -189,6 +189,25 @@ device.
   pipelines are offered to the archive, published, reopened from disk and
   satisfied strictly, and a scene with no archive path still draws. A written
   archive that is never attached to a production descriptor proves nothing.
+- **Archive stores that were let go stay let go** — `MetalArchiveStores.*` in `metal_memory_test`
+  (test-only hooks hold the archive's queue, so "later" is a point in the test, and read the
+  open store, record and descriptor counts). A pipeline is built, nine stores are opened
+  while the queue is held and the first is let go, and the queue is released: no store is
+  brought back, stores stay at eight or fewer and records never outnumber stores
+  (`AnEvictedStoreIsNotRevivedByItsLateCompletion`, `ManyEvictionsKeepTheBookkeepingWithinTheBound`).
+  A store let go and opened again under the same folder keeps only its own pipelines and its own
+  collector when the older work runs, and an older scheduled write publishes nothing of it
+  (`AnOldCompletionDoesNotFeedAStoreOpenedAgainUnderTheSamePath`,
+  `AnOldScheduledWriteDoesNotPublishAStoreOpenedAgain`).
+- **Displays share the pictures of one scene** — `SharedPictures.*` in `metal_memory_test`:
+  two renderers loading one scene at the same moment bind one texture, the cache holds one
+  display's bytes for both and the second display uploaded nothing, both draw the same
+  picture, and the texture is gone once both have unloaded (a dead key is dropped by the next
+  import). A display that keeps another mip range gets its own texture; a file rewritten with
+  other pixels under the same name and layout while the old picture is still shown, a change
+  to the very last texel included (the readback is in bands, so it is the last band that must
+  be compared), and another wallpaper's file of the same name, are loaded fresh and neither
+  display's picture changes. A text layer's runtime image never enters the cache.
 - **A store folder deleted mid-write** — `MetalSceneDraw.AStoreFolderDeletedWhileItsArchiveIsWrittenCostsOnlyThatWrite`:
   eight scenes, each with its own store, write while every store folder is deleted
   and made again in a loop; the process survives and no scratch file is left in
@@ -215,6 +234,20 @@ device.
 
 ## Video decode, color and import
 
+- **A scene's video reaches the decoder without whole-file copies** — `VideoInput.*` and
+  `Sha1Stream.*` in `scene_video_input_test`, against clips the project's synthetic encoder
+  writes, with the temp directory pointed at a private folder and a counting file-space hook.
+  For a loose clip on the host disk and one on a physical mount, the image carries the file's
+  own path and no slots, the mount is asked for nothing and no cache file appears. A clip in a
+  package is read through the mount in pieces of at most 1 MiB into exactly one file named by
+  the content's SHA-1; a second open reuses it (same inode and modification time), and six
+  openers at once never show a watcher a file of the wrong size at that name and leave no
+  staging file. A clip packed into a `.tex`, plain and lz4, keeps its bytes in the first level
+  and its header is probed from the byte range. Each shape's size, length and first picture
+  equal what decoding the file itself gives, and a truncated, garbage or empty clip fails in
+  every shape and leaves no cache entry. `Sha1Stream` gives the one-shot digest however the
+  input is cut (known answers included). `DISABLED_PeakResidentGrowthOfOpeningAHundredMegabyteClipFromAPackage`
+  measures the open in a child process: a 154 MiB clip grew the peak resident size by 1.1 MiB.
 - **Decode state machine** — `video_decode_pump_test` pins the send/receive
   contract and includes reproductions of the two orders to avoid:
   feeding input before draining output loses a packet the decoder rejected with
@@ -387,6 +420,14 @@ device.
   uniforms borrow an owning packing buffer synchronously and read a fresh spectrum
   on every call; particle mouse inverses are skipped only when all current
   controlpoint link flags are off.
+- **A destroyed layer's script state** — `ScriptLayerRelease.*` in `scenescript_behavior_test`
+  (no device). A script makes a layer and one below it, registers an animation-ended callback
+  on each and keeps a weak reference to each callback and each layer object; the test gives the
+  layers a one-shot animation and plays it out by hand. While the layers exist both callbacks
+  run and both closures and both wrappers are alive; after `destroyLayer` no callback runs, even
+  for an animation that ends later, and a tick later every closure and wrapper is collected. The
+  behaviour was already there when the test was written; breaking the library's cleanup fails
+  the last two cases.
 - **Core and bridge tests** additionally cover bounded capability relay delivery,
   renderer-instance replacement, serialized observer replay/publication, retained
   held-button levels and discarded inactive taps, level-only native

@@ -39,6 +39,12 @@ public:
         }
         return CreateCBinaryStreamW(full.string());
     }
+    bool PhysicalPath(std::string_view path, std::string* out) const override {
+        std::filesystem::path full;
+        if (out == nullptr || ! Contains(path) || ! Resolve(path, &full)) return false;
+        *out = full.string();
+        return true;
+    }
     bool Rename(std::string_view from, std::string_view to) override {
         std::filesystem::path from_full, to_full;
         if (! Resolve(from, &from_full) || ! Resolve(to, &to_full)) return false;

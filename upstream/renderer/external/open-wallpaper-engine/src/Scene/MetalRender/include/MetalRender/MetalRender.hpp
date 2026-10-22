@@ -10,6 +10,7 @@
 #include <functional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace wallpaper
@@ -268,6 +269,19 @@ public:
     /// not compile a program that is already compiled.
     [[nodiscard]] static uint64_t ProgramCompilesForTests();
 
+    /// The texture this renderer binds for picture slot `slot` of the scene texture
+    /// `key`, as an opaque handle (null when it has none). Two renderers that answer the
+    /// same handle show one texture.
+    [[nodiscard]] const void* ImportedImageForTests(const std::string& key, std::size_t slot = 0) const;
+    /// Source bytes of the imported pictures alive in this process, each counted once
+    /// however many renderers bind it.
+    [[nodiscard]] static uint64_t SharedImageBytesForTests();
+    /// Entries the process-wide picture cache holds, dead ones included until the next
+    /// import prunes them.
+    [[nodiscard]] static std::size_t SharedImageEntriesForTests();
+    /// Picture slots uploaded to a GPU by any renderer since the process started.
+    [[nodiscard]] static uint64_t ImageUploadsForTests();
+
     /// Whether the pipeline archive can supply every pipeline this process has
     /// created so far, asked strictly.
     ///
@@ -279,6 +293,43 @@ public:
     [[nodiscard]] static bool PipelineArchiveServesEverySeenPipelineForTests();
     /// Returns once every pipeline-archive write already scheduled has run.
     static void WaitForPipelineArchiveWritesForTests();
+
+    /// What the process-wide pipeline-archive bookkeeping holds right now.
+    struct ArchiveResidency
+    {
+        /// Stores kept open at once (never more than eight).
+        std::size_t stores { 0 };
+        /// Stores that carry a write-generation record. A record exists only for an
+        /// open store and goes with it, so this never exceeds `stores`.
+        std::size_t generation_records { 0 };
+    };
+    [[nodiscard]] static ArchiveResidency PipelineArchiveResidencyForTests();
+
+    /// One open store, by the directory it lives in, on the default device.
+    struct ArchiveStoreState
+    {
+        bool        open { false };
+        /// Pipeline descriptors the store has accepted from completed compiles.
+        std::size_t descriptors { 0 };
+        /// Names the store this answer is about: it changes whenever a store is opened
+        /// again after having been let go.
+        uint64_t    identity { 0 };
+        /// Writes of the file this store has started.
+        uint64_t    writes { 0 };
+        /// The object additions are made on and that a write publishes.
+        const void* collector { nullptr };
+    };
+    [[nodiscard]] static ArchiveStoreState PipelineArchiveStoreForTests(std::string_view archive_root);
+
+    /// Holds back (or lets run) the queue the archive's additions and writes
+    /// complete on. While held, nothing completes; everything queued runs on release.
+    static void SuspendPipelineArchiveQueueForTests(bool suspended);
+
+    /// Builds one small pipeline, distinct for every `variant`, for the default
+    /// device as a scene would: it opens the store of `archive_root` if that is
+    /// not open and hands the pipeline to it. False if the machine has no device
+    /// or Metal refuses the pipeline.
+    static bool BuildArchivedPipelineForTests(std::string_view archive_root, uint32_t variant);
 #endif
 
 private:

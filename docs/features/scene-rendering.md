@@ -105,7 +105,9 @@ order like any other, found by its id and played through the object
 layers the parser built are counted: an object the scene file marks statically
 invisible, which nothing can show, is never built, so it has no index or id and the
 count differs from the object list by those. `destroyLayer` removes the layers a
-script made below the layer too. A scene script's `init` runs once the scene is
+script made below the layer too, and with each of them the script's wrapper object
+and the animation-ended callbacks registered on it, so their closures are released
+and a destroyed layer never fires a stale listener. A scene script's `init` runs once the scene is
 built, so it sees all of that. Property scripts start on the scene's first tick:
 every one runs `init`, in the scene's order, before any of them is told the user
 properties, and that before any `update`, because a widget's options layer may call
@@ -1040,6 +1042,14 @@ there. The archive is written in the app's temporary folder and moved into the c
 only once it is complete, so clearing the cache while a write is due costs that
 write and nothing else.
 
+A session keeps at most eight of these stores open at once; the oldest is let go and
+opened again the next time one of its pipelines is built. Work that finishes later on
+the archive's own queue (adding a pipeline to a store, publishing its file) never
+brings a store back: it finds the store it was started for or does nothing, and a
+store that was let go and then opened again under the same folder is a different
+store, which that older work does not touch. The records kept for a store go with
+it, so they stay within the same bound.
+
 The Compatibility renderer, retired, kept no compiled Metal code of its own. Its MoltenVK
 pipeline cache (`vk-pipeline-cache.bin`, beside the same scene's shaders) stored the Metal
 source MoltenVK generated, which saved translating it again but not compiling it; the
@@ -1669,6 +1679,21 @@ increasing FPS alone cannot substitute for it: the High preset controls only fra
 rate and render scale ([Quality](performance.md#quality)). The HDR bloom's levels,
 sampling and weights are Wallpaper Engine's ([scene
 regressions](../testing/scene-regressions.md)).
+
+A scene's video is never read whole into memory merely to be opened. A loose clip
+next to the scene on the host disk, or in a folder the project is mounted from, is
+probed and played where it lies: nothing is read through the file space and no copy
+is made. A loose clip inside a `.pkg` is streamed in 1 MiB pieces into one file of the
+temp directory named by the SHA-1 of its content (hashed first, as it is read), once:
+the file is written under a staging name and published in one step, so another
+display opening the same clip never sees half of it, and an entry already there is
+reused, not replaced. A clip packed into a `.tex` keeps its bytes in the texture's
+first level, in the allocation the file was read or expanded into, and the header of
+an uncompressed one is read by probing that byte range in the file. All of these give
+the metadata, length and first picture that decoding the media file itself gives, and
+a truncated, garbage or empty clip fails the same way in each. Opening a 154 MiB clip
+from a package grew the process's peak resident size by 1.1 MiB; reading it whole
+(as loose clips were read before) grew it by 154 MiB.
 
 A layer hidden by its authored visibility or by one of the
 wallpaper's own properties, itself or through a parent, is left out of the render

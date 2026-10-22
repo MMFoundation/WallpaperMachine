@@ -15,6 +15,7 @@
 #include "Utils/BitFlags.hpp"
 #include "Fs/CBinaryStream.h"
 #include "Media/ByteSource.hpp"
+#include "WPVideoCache.hpp"
 
 #if (defined(__aarch64__) || defined(__arm64__)) && !defined(STBI_NO_SIMD)
 #define STBI_NEON
@@ -524,6 +525,9 @@ void ReadFrameTable(fs::IBinaryStream& file, const PictureDims& pictures, Sprite
 
 // A window of a stream as the container readers' byte source. Reads are
 // serialised, since the stream has one position.
+// The most that is asked of a stream in one read when a window of it is probed.
+constexpr std::size_t kStreamReadPiece = std::size_t { 1 } << 20;
+
 class StreamByteSource final : public media::ByteSource {
 public:
     StreamByteSource(std::shared_ptr<fs::IBinaryStream> stream, u64 start, u64 size)
@@ -538,7 +542,16 @@ public:
             m_failed = true;
             return 0;
         }
-        return m_stream->Read(destination, length);
+        // However much a reader asks for at once, the stream is read in bounded pieces.
+        auto*       out  = static_cast<uint8_t*>(destination);
+        std::size_t done = 0;
+        while (done < length) {
+            const std::size_t piece = std::min(length - done, kStreamReadPiece);
+            const std::size_t got   = m_stream->Read(out + done, piece);
+            done += got;
+            if (got < piece) break;
+        }
+        return done;
     }
     bool ioFailed() const override { return m_failed; }
 
@@ -887,6 +900,67 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
     return ParseLooseAssetHeader(name);
 }
 
+namespace
+{
+ImageHeader VideoHeader(const video::VideoMetadata& meta)
+{
+    ImageHeader h = LooseHeader(static_cast<i32>(meta.width), static_cast<i32>(meta.height), ImageType::UNKNOWN);
+    h.isVideo         = true;
+    h.durationSeconds = meta.duration_seconds;
+    return h;
+}
+
+// Where the clip is a file on the host disk: a path the user gave, or a file of a folder mount.
+std::string HostPathOf(fs::VFS* vfs, const LooseFile& file)
+{
+    if (file.host) return file.path;
+    std::string path;
+    if (vfs != nullptr && vfs->PhysicalPath(file.path, &path)) return path;
+    return {};
+}
+
+// The clip on the host disk, measured where it lies.
+std::optional<video::VideoMetadata> ProbeHostFile(const std::string& path)
+{
+    media::Error error;
+    auto         source = media::OpenFileByteSource(path, &error);
+    if (! source || source->size() == 0) return std::nullopt;
+    return video::ProbeVideoMetadataFromSource(source);
+}
+
+// A clip is played from a file. One that lies on the host disk (a path the user picked, or a
+// file of a folder mount) is probed and opened there, and nothing is read through the file
+// space. One inside a package is measured through its stream, then streamed in bounded pieces
+// to a cache file named by its content.
+std::shared_ptr<Image> ParseLooseVideo(fs::VFS* vfs, const std::string& name, const LooseFile& file)
+{
+    const auto fail = [&name]() -> std::shared_ptr<Image> {
+        LOG_ERROR("texture \"%s\": the clip cannot be read", name.c_str());
+        return nullptr;
+    };
+    auto image = std::make_shared<Image>();
+    image->key = name;
+
+    if (const std::string host = HostPathOf(vfs, file); ! host.empty()) {
+        const auto meta = ProbeHostFile(host);
+        if (! meta) return fail();
+        image->header        = VideoHeader(*meta);
+        image->videoFilePath = host;
+        return image;
+    }
+
+    auto stream = OpenLoose(vfs, file);
+    if (! stream || stream->Size() <= 0) return nullptr;
+    const auto meta = ProbeStreamWindow(stream, 0, static_cast<u64>(stream->Size()));
+    if (! meta) return fail();
+    std::string cached = CacheVideoByContent(*stream, ExtensionOfName(file.path));
+    if (cached.empty()) return fail();
+    image->header        = VideoHeader(*meta);
+    image->videoFilePath = std::move(cached);
+    return image;
+}
+} // namespace
+
 std::shared_ptr<Image> WPTexImageParser::ParseLooseAsset(const std::string& name)
 {
     const auto found = ResolveLooseFile(m_vfs, name);
@@ -894,40 +968,25 @@ std::shared_ptr<Image> WPTexImageParser::ParseLooseAsset(const std::string& name
         LOG_ERROR("texture \"%s\" not found", name.c_str());
         return nullptr;
     }
+    // A clip is never read whole: it is played where it lies, or from a cache file.
+    if (found->video) return ParseLooseVideo(m_vfs, name, *found);
+
     auto stream = OpenLoose(m_vfs, *found);
     if (! stream || stream->Size() <= 0 || ! stream->SeekSet(0)) return nullptr;
 
-    ImageHeader header;
-    auto        slot = Image::Slot {};
-    ImageData   level;
-    if (found->video) {
-        const auto meta = ProbeStreamWindow(stream, 0, static_cast<u64>(stream->Size()));
-        if (! meta) {
-            LOG_ERROR("texture \"%s\": the clip cannot be read", name.c_str());
-            return nullptr;
-        }
-        const i64 size = stream->Size();
-        Bytes     bytes = MakeBytes(static_cast<u64>(size));
-        if (! bytes || ! stream->SeekSet(0) || stream->Read(bytes.get(), static_cast<usize>(size)) != static_cast<usize>(size))
-            return nullptr;
-        header = LooseHeader(static_cast<i32>(meta->width), static_cast<i32>(meta->height), ImageType::UNKNOWN);
-        header.isVideo         = true;
-        header.durationSeconds = meta->duration_seconds;
-        level.width            = header.width;
-        level.height           = header.height;
-        level.size             = static_cast<isize>(size);
-        level.data             = OwnArray(std::move(bytes));
-    } else {
-        const i64 size = stream->Size();
-        if (size > INT_MAX) return nullptr;
-        Bytes bytes = MakeBytes(static_cast<u64>(size));
-        if (! bytes || stream->Read(bytes.get(), static_cast<usize>(size)) != static_cast<usize>(size)) return nullptr;
-        if (! DecodePicture(std::move(bytes), size, level)) {
-            LOG_ERROR("texture \"%s\": the picture does not decode", name.c_str());
-            return nullptr;
-        }
-        header = LooseHeader(level.width, level.height, TypeOfExtension(ExtensionOfName(found->path)));
+    // The picture is read straight into the buffer it is decoded from.
+    const i64 size = stream->Size();
+    if (size > INT_MAX) return nullptr;
+    Bytes bytes = MakeBytes(static_cast<u64>(size));
+    if (! bytes || stream->Read(bytes.get(), static_cast<usize>(size)) != static_cast<usize>(size)) return nullptr;
+    ImageData level;
+    if (! DecodePicture(std::move(bytes), size, level)) {
+        LOG_ERROR("texture \"%s\": the picture does not decode", name.c_str());
+        return nullptr;
     }
+    ImageHeader header = LooseHeader(level.width, level.height, TypeOfExtension(ExtensionOfName(found->path)));
+
+    Image::Slot slot;
     slot.width  = level.width;
     slot.height = level.height;
     slot.mipmaps.push_back(std::move(level));
@@ -943,16 +1002,18 @@ ImageHeader WPTexImageParser::ParseLooseAssetHeader(const std::string& name)
 {
     const auto found = ResolveLooseFile(m_vfs, name);
     if (! found) return {};
+    if (found->video) {
+        if (const std::string host = HostPathOf(m_vfs, *found); ! host.empty()) {
+            const auto meta = ProbeHostFile(host);
+            return meta ? VideoHeader(*meta) : ImageHeader {};
+        }
+        auto stream = OpenLoose(m_vfs, *found);
+        if (! stream) return {};
+        const auto meta = ProbeStreamWindow(stream, 0, static_cast<u64>(stream->Size()));
+        return meta ? VideoHeader(*meta) : ImageHeader {};
+    }
     auto stream = OpenLoose(m_vfs, *found);
     if (! stream) return {};
-    if (found->video) {
-        const auto meta = ProbeStreamWindow(stream, 0, static_cast<u64>(stream->Size()));
-        if (! meta) return {};
-        ImageHeader h = LooseHeader(static_cast<i32>(meta->width), static_cast<i32>(meta->height), ImageType::UNKNOWN);
-        h.isVideo         = true;
-        h.durationSeconds = meta->duration_seconds;
-        return h;
-    }
     i32 width = 0, height = 0;
     if (! LoosePictureSize(*stream, width, height)) return {};
     return LooseHeader(width, height, TypeOfExtension(ExtensionOfName(found->path)));

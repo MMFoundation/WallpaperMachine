@@ -119,6 +119,13 @@ public:
 		std::string      inside;
 		return Locate(path, &owner, &inside);
 	}
+	/// The host path of the file `path` names, when the mount that holds it is a folder of
+	/// real files (see `Fs::PhysicalPath`). Nothing is opened or read.
+	bool PhysicalPath(std::string_view path, std::string* out) const {
+		const MountedFs* owner = nullptr;
+		std::string      inside;
+		return Locate(path, &owner, &inside) && owner->fs->PhysicalPath(inside, out);
+	}
 private:
 	// The topmost mount that covers `path` and holds the file, with the path as
 	// that mount's file system knows it.
