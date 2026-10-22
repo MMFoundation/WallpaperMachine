@@ -2,7 +2,6 @@
 """scripts/notices.py: which license a notice carries, where its text comes from, and the exit codes."""
 import contextlib
 import io
-import os
 import subprocess
 import sys
 import tempfile
