@@ -832,18 +832,53 @@ TEST(ColourOverride, APresetWithNoColourSourceTakesTheOverrideAsAPlainTint) {
     EXPECT_FLOAT_EQ(p.color.z(), 0.6f);
 }
 
-TEST(ColourOverride, ARetintedFileIsNotFlattenedByTheOverrideInitializer) {
+TEST(ColourOverride, ARetintedFileIsTintedByTheOverrideToo) {
+    // Wallpaper Engine 2.8 draws a green colorrandom under an orange override
+    // as orange times orange, not as orange.
     const json initializers = json::array({ { { "name", "colorrandom" },
-                                               { "min", "255 0 0" },
-                                               { "max", "255 128 0" } } });
-    auto ctx = ColourContext(initializers, json::array(), { 0.0f, 0.0f, 1.0f });
+                                               { "min", "0 255 0" },
+                                               { "max", "0 255 0" } } });
+    auto ctx = ColourContext(initializers, json::array(), { 1.0f, 0.5f, 0.0f });
     auto op  = WPParticleParser::genOverrideInitOp(ctx.over, ctx.color);
-    Particle p;
-    p.color      = { 0.3f, 0.2f, 0.9f };
-    p.init.color = p.color;
+    Particle p = RunInitializer(initializers[0], 1, ctx).front();
     op(p, 0.0);
-    EXPECT_FLOAT_EQ(p.color.x(), 0.3f);
-    EXPECT_FLOAT_EQ(p.color.z(), 0.9f);
+    EXPECT_NEAR(p.color.x(), 1.0f, 1.0e-5f);
+    EXPECT_NEAR(p.color.y(), 0.25f, 1.0e-5f);
+    EXPECT_NEAR(p.color.z(), 0.0f, 1.0e-5f);
+    EXPECT_EQ(p.init.color, p.color) << "the colour operators start from the tinted colour";
+}
+
+TEST(ColourOverride, AnOverrideEqualToTheFilesColourDoesNotTint) {
+    const json operators = json::array({ { { "name", "colorchange" },
+                                            { "startvalue", "1 0.74902 0" },
+                                            { "endvalue", "1 0 0" } } });
+    auto ctx = ColourContext(json::array(), operators, { 1.0f, 0.74902f, 0.0f });
+    Particle p;
+    WPParticleParser::genOverrideInitOp(ctx.over, ctx.color)(p, 0.0);
+    EXPECT_EQ(p.color, Eigen::Vector3f::Ones());
+}
+
+TEST(ColourOverride, AColourchangeEndRetintedPastRedIsTintedBackToRed) {
+    // A fire fading from orange to red under a redder orange override: the hue
+    // shift moves the red end to magenta, and the tint by the override takes
+    // the blue out again, as Wallpaper Engine 2.8 draws it.
+    const json operators = json::array({ { { "name", "colorchange" },
+                                            { "startvalue", "1 0.74902 0" },
+                                            { "endvalue", "1 0 0" },
+                                            { "endtime", 0.5 } } });
+    const auto ctx = ColourContext(json::array(), operators, { 1.0f, 0.13725f, 0.0f });
+    const auto tint = WPParticleParser::genOverrideInitOp(ctx.over, ctx.color);
+    const auto op   = WPParticleParser::genParticleOperatorOp(operators[0], ctx);
+    std::array<Particle, 2> particles { LivingParticle(), LivingParticle() };
+    for (auto& p : particles) tint(p, 0.0);
+    particles[1].lifetime = 1.0f;   // past the end of the ramp
+    RunOperator(op, particles, 0.0);
+    EXPECT_NEAR(particles[0].color.x(), 1.0f, 1.0e-4f);
+    EXPECT_NEAR(particles[0].color.y(), 0.13725f * 0.13725f, 1.0e-3f);
+    EXPECT_NEAR(particles[0].color.z(), 0.0f, 1.0e-4f);
+    EXPECT_NEAR(particles[1].color.x(), 1.0f, 1.0e-4f);
+    EXPECT_NEAR(particles[1].color.y(), 0.0f, 1.0e-4f);
+    EXPECT_NEAR(particles[1].color.z(), 0.0f, 1.0e-4f) << "not magenta";
 }
 
 TEST(ColourOverride, ColourchangeIsRetintedToo) {

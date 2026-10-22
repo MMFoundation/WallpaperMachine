@@ -1607,7 +1607,9 @@ All in `script_runtime_compat_test` and `scene_schema_tests` unless noted.
   the scene parser and a real spawn), the colour override
   re-tinting colours (spread kept, identity for the preset's own colour, white
   desaturating, plain tint without colours, HSV and list initializers, `colorchange`
-  default and re-tint, brightness only in HDR). `SequenceInitializers.*`:
+  default and re-tint, the override's tint on top of a re-tint and not for an override
+  equal to the preset's colour, a `colorchange` end re-tinted past red tinted back to red
+  (issue #67), brightness only in HDR). `SequenceInitializers.*`:
   `mapsequencearound`/`between`, `inheritcontrolpointvelocity`, `positionoffsetrandom`,
   `inheritinitialvaluefromevent` (an inherited `multiplysize` scales by half of the
   parent's size, in the engine's unit, `setsize` copies it). `Movement.*`, `AngularMovement.*`,

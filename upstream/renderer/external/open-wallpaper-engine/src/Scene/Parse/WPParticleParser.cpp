@@ -882,11 +882,16 @@ ParticleInitOp WPParticleParser::genOverrideInitOp(
         PM::MutiplyInitAlpha(p, over->alpha);
         if (size_override) PM::MutiplyInitSize(p, over->size);
         if (speed_override) PM::MutiplyVelocity(p, over->speed);
-        // A file with colours of its own has them re-tinted by the colour
-        // initializers; only a file without any takes the colour as a tint.
-        if (! def.hasColor) {
-            if (const auto colour = OverrideColor(over.get())) {
+        // A file without colours takes the override as its colour. A file with
+        // colours of its own has them re-tinted by its colour records and is
+        // tinted by the override on top, unless the override is the file's own
+        // colour: an orange override on a red `colorchange` end makes that end
+        // magenta, and the tint brings it back to red.
+        if (const auto colour = OverrideColor(over.get())) {
+            if (! def.hasColor) {
                 PM::InitColor(p, colour->x(), colour->y(), colour->z());
+            } else if (ComputeColorShift(def.defaultColor, *colour).active) {
+                PM::MutiplyInitColor(p, colour->x(), colour->y(), colour->z());
             }
         }
         if (over->hdr && over->brightness != 1.0f) {
