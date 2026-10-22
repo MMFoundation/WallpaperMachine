@@ -685,6 +685,44 @@ if(APPLE)
   endforeach()
 endif()
 
+# The synthetic scene harness: a scratch wallpaper project, the engine's texture container,
+# and a headless Metal run of it that returns the final picture and the named render targets.
+# Test support only (see tests/support). Draws into private textures and a detached layer:
+# no window, no drawable shown.
+if(APPLE)
+  add_library(scene_test_support STATIC
+      support/pixels.cpp
+      support/scene_package.cpp
+      support/gpu_scene.mm)
+  target_link_libraries(scene_test_support PUBLIC
+      ${PROJECT_NAME} wpMetalRender wpScene wpRGraph wpRenderCommon
+      wpParticle wpAudio wpFs nlohmann_json::nlohmann_json GTest::gtest)
+  target_include_directories(scene_test_support PUBLIC
+      . ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/Scene/MetalRender/include
+      ${CMAKE_SOURCE_DIR}/src/Scene/include ${CMAKE_SOURCE_DIR}/src/Scene/RenderCommon/include)
+  target_compile_features(scene_test_support PUBLIC cxx_std_20)
+  set_target_properties(scene_test_support PROPERTIES
+      OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+  target_compile_options(scene_test_support PRIVATE
+      $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+  if(TARGET wescene_rust_shader)
+    target_link_libraries(scene_test_support PUBLIC wescene_rust_shader)
+  endif()
+
+  add_executable(scene_harness_selftest scene_harness_selftest.mm)
+  target_link_libraries(scene_harness_selftest PRIVATE scene_test_support GTest::gtest_main)
+  set_target_properties(scene_harness_selftest PROPERTIES
+      OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED YES)
+  target_compile_options(scene_harness_selftest PRIVATE
+      $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+  gtest_discover_tests(
+      scene_harness_selftest
+      TEST_PREFIX scene_harness_selftest.
+      PROPERTIES TIMEOUT 120
+      DISCOVERY_TIMEOUT 60
+  )
+endif()
+
 # Standalone miniaudio implementation with controlled CoreAudio/backend failures.
 # This target never opens a real audio context or links the renderer's audio unit.
 if(APPLE)

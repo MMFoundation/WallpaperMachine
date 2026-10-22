@@ -37,6 +37,7 @@ REGRESSION_BINARIES = {
     "timer_tests": False, "metal_backend_test": False,
     "metal_scene_draw_smoke": True, "metal_poster_capture_test": True,
     "metal_video_texture_test": True, "unchanged_present_test": True, "scene_failure_policy_test": True,
+    "scene_harness_selftest": True,
     "audio_tests": False, "miniaudio_failure_paths_test": False, "sprite_animation_test": False,
     "rendergraph_smoke": False,
     "rust_shader_bridge_test": False, "stb_image_regression_test": False,

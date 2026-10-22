@@ -805,6 +805,66 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
 
 `scene_failure_policy_test` (registered, GPU-gated like `unchanged_present_test`) drives the whole scene wallpaper on a `CAMetalLayer` no window owns and forces the failures a real GPU almost never produces through `SceneBackendFaults` (compiled into tests only): the admission gate, creating the native renderer, compiling its graph, a frame after the scene runs and a replacement surface. Each must leave the failure logged exactly once (read through `SetWallpaperLogCallback`), the frame loop stopped without presenting again, the host's first frame settled once, and either the last frame (a layer that drew carries no sublayer) or the project's preview picture (one sublayer) in place; a retry creates the native renderer and draws, a rebuilt surface heals a failed frame and re-arms the report, and a surface with no Metal layer is a prepare failure. A scene whose effect has a fragment shader that does not compile (a card that compiles under it) is held as `unsupported` with that shader's name in the reason, presents no frame, shows the preview and says so once, where parsing used to drop the effect and draw the rest; the same scene with a compiling effect is not held (`AnEffectWhoseShaderCannotBeCompiledHoldsTheWholeScene`, `ASceneWhoseShadersAllCompileIsNotHeld`). A scene refused on a reload while another scene was drawing releases the outgoing renderer: a following resize leaves the refused scene failed, presenting nothing, with the last frame held. There is no other renderer to hand a scene to, so there is nothing else to count; the test that armed the same faults under the old preferred mode and expected the Compatibility backend, and the counters of Vulkan renderers created, are retired with it. `surface_path_tests` (pure C++: which file is a project's preview and that none outside the project folder, through a symbolic link, absolute, with `..`, empty or over 32 MB is read) and `surface_still_tests` (the `preview` key lookup, decoding, one replaceable sublayer, a replaced layer, an unreadable file) cover `Renderer/Surface` on a plain `CALayer`. `tests.test_check_renderer` reads `Renderer/Surface/tests/CMakeLists.txt` (`wm_surface_test()`), so an unregistered surface test binary fails it.
 
+### Synthetic scene harness
+
+Tests that need to see what a scene draws (the pixels of the final picture, the contents of a
+named intermediate target, how many passes a frame opened) use the shared support under
+`upstream/renderer/external/open-wallpaper-engine/tests/support/` instead of building their
+own loader. It is test support only and changes no production behaviour. The CMake target
+`scene_test_support` (a static library) carries it; a test executable links it and includes
+`support/gpu_scene.hpp`, `support/scene_package.hpp` and `support/pixels.hpp`. The harness
+checks itself in `scene_harness_selftest`, which is registered and GPU-gated; read it first
+for working examples.
+
+- **Fixtures** (`scene_package.hpp`, no GPU). A `ScenePackage` is a scratch loose project
+  folder in the system temp directory, removed when it goes out of scope. `Put` and
+  `PutJson` write any file; `AddImageModel`, `AddTexture`, `AddPngTexture` and
+  `AddTintEffect` write the common ones against a small set of harness shaders
+  (`shaders/harness_image`, `harness_tint`, plus the white `util/white` texture);
+  `AddShader` installs a test's own pair. `MakeTex` encodes an `Image` as the engine's
+  texture container (uncompressed RGBA8, nearest and clamped by default, optional box
+  filtered mip levels, or explicit levels with `MakeTexWithLevels`), `MakePng` as a loose
+  PNG. `SceneJson`, `ImageLayerJson`, `GroupJson`, `EffectUse`, `PropertyBinding`,
+  `ScriptedValue` and the property declarations (`ColorProperty`, `SliderProperty`,
+  `BoolProperty`) build the JSON; `SceneGeneral` sets the canvas, the clear colour and the
+  parallax. A canvas-sized layer on the default 256x144 canvas needs no geometry.
+  `MakeSolidScene(colour)` is the shortest scene.
+- **Running** (`gpu_scene.hpp`). `GpuScene scene(package, options)` loads the package as the
+  host does (project properties, saved values over them, a scratch shader cache and an
+  empty shared-assets folder, the scene parser), asks the backend gate, starts the native
+  renderer on a `CAMetalLayer` no window owns and compiles the graph. Check `ok()` and
+  print `error()`. `Step(n)` advances n frames in the order the host's frame handler runs
+  them, with a fixed time step (1/60 s by default) and the random source seeded from the
+  options; `Picture()` composes the last frame into the renderer's own poster texture and
+  reads it back as RGBA8, so nothing is read from a drawable or the desktop. `Run(n)` is
+  both. `SetPointer` moves the cursor and the parallax, `SetProperty` changes a user
+  property the way the live property preview does (it shows on the next `Step`),
+  `TickRuntime` runs scripts without drawing, `Rebuild` compiles the graph again the way
+  the host does after a scene-graph change, and `Release` (also the destructor) hands the
+  renderer back. The surface is 256x144 at backing scale 1 unless the options say otherwise.
+- **Looking inside.** `FirstFramePasses`, `LastFramePasses` and `FramePasses` report the
+  render and blit passes a frame opened. Static reuse is on by default, so a frame that
+  changes nothing opens none; set `scene_optimization = false` in the options (restored
+  when the scene is destroyed) to count every pass of every frame. `RenderTargetNames`,
+  `RenderTargetsOfLayer(id)` and `ReadRenderTarget` or `RenderTarget(name)` read a target
+  after the last frame; `scene()`, `runtime()` and `renderer()` reach the engine objects for
+  anything else.
+- **Pixels** (`pixels.hpp`). `Image` is RGBA8, row 0 on top. `ExpectPixel`,
+  `ExpectRegionAverage` and `ExpectSamePicture` return a `::testing::AssertionResult`
+  (use them as `EXPECT_TRUE(ExpectPixel(...))`) whose message names the first differing
+  pixel and the counts; `MaxChannelDifference`, `CountDifferingPixels` and `RegionAverage`
+  are the plain functions. No picture is written to disk unless `WE_TEST_KEEP_PICTURES`
+  names a directory, in which case `KeepPicture(name, image)` writes `<name>.png` there.
+- **Skipping.** Begin a fixture's `SetUp` or a test with `WE_SKIP_WITHOUT_METAL()`. With
+  `WE_TEST_SIMULATE_NO_METAL=1` the harness behaves as on a machine without a device:
+  `GpuScene` reports `ok() == false` and nothing runs.
+
+The surface is a detached layer and the renderer's own drawable path still acquires and
+presents a drawable to it, as it does in the app; nothing is shown, because no window owns
+the layer. Shaders written for a test use the engine's dialect (`mul`, `texSample2D`, the
+`g_ModelViewProjectionMatrix` and `g_Color4` uniforms the image layers set); see
+`ScenePackage::InstallStandardAssets` for the working pair.
+
 ## Known limitations
 
 - Local scenes can emit MDLA, Rust `light_map` compile and shader-value alias
