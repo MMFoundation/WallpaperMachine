@@ -59,6 +59,10 @@ tokio = { version = "1", features = ["macros", "rt"] }
 name = "wallpaper_background"
 harness = false
 
+[[test]]
+name = "first_frame_scaling"
+harness = false
+
 [build-dependencies]
 cmake = "0.1.58"
 bindgen = "0.72.1"
