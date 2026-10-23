@@ -17,6 +17,8 @@ struct DesktopPictureTarget: Hashable, Codable {
 /// https://gist.github.com/RhetTbull/86394ac9c2cc1096e510775dee14ae08
 /// These optional HIServices/CoreGraphics APIs target an inactive Space directly.
 /// Do not replace them with Space switching, plist edits, or process restarts.
+/// Only a full restoration edits the store, for choices these APIs cannot write
+/// back (`DesktopWallpaperStoreRestoration`).
 @MainActor
 final class DesktopSpaceWallpaperAPI {
     private typealias Connection = @convention(c) () -> Int32
@@ -170,6 +172,20 @@ final class SystemDesktopPictureWorkspace: DesktopPictureWorkspace {
     init(storeURL: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
         "Library/Application Support/com.apple.wallpaper/Store/Index.plist")) {
         self.storeURL = storeURL
+    }
+
+    func storeContents() throws -> Data? {
+        guard FileManager.default.fileExists(atPath: storeURL.path) else { return nil }
+        return try Data(contentsOf: storeURL)
+    }
+
+    /// WallpaperAgent reads the store only as it starts, so it is restarted to
+    /// show the replaced selections.
+    func replaceStore(_ data: Data, expected: Data) throws {
+        // A choice made in System Settings since the store was read is never overwritten.
+        guard try Data(contentsOf: storeURL) == expected else { throw DesktopPictureUnconfirmed() }
+        try data.write(to: storeURL, options: .atomic)
+        try LockScreenWallpaperSelection.reloadWallpaperAgent()
     }
 
     func referencedPictureURLs(targets: [DesktopPictureTarget]) throws -> Set<URL> {
