@@ -1,7 +1,8 @@
 import Foundation
 
-/// GitHub's new-issue form, pre-filled with a wallpaper, the app version and what the panel knows
+/// GitHub's bug report form, pre-filled with a wallpaper, the app version and what the panel knows
 /// about it: the failure the user just saw and the backend drawing it, fallback reason included.
+/// What went wrong is left for the user, whom the form asks for it.
 /// Nothing is sent from here: the browser opens the draft and the user decides whether to submit it.
 enum LibraryIssueReport {
   /// - Parameters:
@@ -15,15 +16,12 @@ enum LibraryIssueReport {
       as? String
   ) -> URL? {
     let workshop = ExternalLink.workshopItem(id: row.id)?.absoluteString ?? row.id
-    var facts = [
-      "**Wallpaper:** \(row.title)", "**Workshop item:** \(workshop)", "**Type:** \(row.kind.rawValue)",
-      "**App version:** \(version ?? "unknown")",
-    ]
+    var facts = ["**Wallpaper:** \(row.title)", "**Type:** \(row.kind.rawValue)"]
     if !renderers.isEmpty { facts.append("**Renderer:** \(renderers.joined(separator: "; "))") }
     if let failure { facts.append("**Error:** \(failure)") }
     return ExternalLink.newIssue(
-      title: "[\(row.kind.rawValue)] \(row.title)",
-      body: (facts + ["", "**What went wrong?**", "", ""]).joined(separator: "\n"))
+      title: "[\(row.kind.rawValue)] \(row.title)", wallpaper: workshop, version: version ?? "unknown",
+      details: facts.joined(separator: "\n"))
   }
 
   /// The backends the engine reports for `wallpaperID`, each once, in the order the scene reports

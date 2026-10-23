@@ -68,15 +68,20 @@ enum ExternalLink {
     return URL(string: "https://www.pixiv.net/artworks/\(id)")
   }
 
-  /// GitHub's new-issue form pre-filled with `title` and `body`. Nothing is sent from here:
-  /// the browser opens the draft and the user decides whether to submit it.
-  static func newIssue(title: String, body: String) -> URL? {
+  /// GitHub's bug report form (`.github/ISSUE_TEMPLATE/bug_report.yml`) with `title` and what the
+  /// app knows filled in. What the user did, saw and expected stay empty: the form requires the user
+  /// to write them before it can be sent. Nothing is sent from here: the browser opens the draft and
+  /// the user decides whether to submit it.
+  static func newIssue(title: String, wallpaper: String, version: String, details: String) -> URL? {
     guard
       var components = URLComponents(
         url: repository.appendingPathComponent("issues/new"), resolvingAgainstBaseURL: false)
     else { return nil }
+    // After `template` and `title`, each name is a field `id` in bug_report.yml: rename them together.
     components.queryItems = [
-      URLQueryItem(name: "title", value: title), URLQueryItem(name: "body", value: body),
+      URLQueryItem(name: "template", value: "bug_report.yml"), URLQueryItem(name: "title", value: title),
+      URLQueryItem(name: "wallpaper", value: wallpaper), URLQueryItem(name: "version", value: version),
+      URLQueryItem(name: "app-details", value: details),
     ]
     return components.url
   }

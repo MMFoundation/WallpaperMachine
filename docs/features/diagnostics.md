@@ -369,9 +369,9 @@ Older macOS releases wrote them to the user folder, so the export looks in both.
   processes that were running, which a bug report should not carry.
 
 Bug reports on GitHub use the issue form in
-`.github/ISSUE_TEMPLATE/bug_report.yml`. It asks for the Workshop ID and the
-exported report, and points to Detailed logging for problems that are hard to
-reproduce.
+`.github/ISSUE_TEMPLATE/bug_report.yml`. It asks for the Workshop ID and requires
+what the reporter did, what went wrong, what they expected and the exported
+report. It points to Detailed logging for problems that are hard to reproduce.
 
 ### Wallpaper window state
 

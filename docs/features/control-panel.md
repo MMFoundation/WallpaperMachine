@@ -408,9 +408,11 @@ stay visible in a footer while editing. Its texts can be selected and copied.
 
 Below the compatibility note, an installed wallpaper that can run (not
 Application) shows **Not working? Report on GitHub**. It opens the repository's
-new-issue form in the browser with the wallpaper's title, Workshop link or id,
+bug report form in the browser with the wallpaper's title, Workshop link or id,
 type, app version and, while it is on screen, the backend drawing it (with the
-renderer's fallback reason) pre-filled. When the panel saw this wallpaper fail
+renderer's fallback reason) pre-filled. The fields the form requires (what the
+user did, what went wrong, what they expected and the diagnostics report) are
+left for the user to fill in. When the panel saw this wallpaper fail
 (its download, or the last attempt to apply it), an error notice takes the link's
 place with **Report this problem on GitHub**, whose issue also carries the error;
 an apply failure stays until an apply succeeds. An installed scene waiting for the
