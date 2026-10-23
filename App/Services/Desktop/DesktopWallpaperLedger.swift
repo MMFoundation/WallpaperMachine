@@ -117,7 +117,7 @@ final class DesktopWallpaperLedger {
     /// aerial or extension choice; see `DesktopWallpaperStoreRestoration`.
     private struct StoreSnapshot: Codable {
         var store: Data
-        var written: [URL] = []
+        var written: [DesktopWallpaperStoreRestoration.Write] = []
         /// The store was put back but WallpaperAgent has not loaded it yet.
         var reloadPending: Bool? = nil
     }
@@ -166,9 +166,14 @@ final class DesktopWallpaperLedger {
     }
 
     /// Whether the journal in `folder` still names a poster whose original has not been put back,
-    /// so a crash, a relaunch or a switched-off preference may have left one on a desktop. False
-    /// for a missing, unreadable or empty journal. Reads the file only; nothing is created.
+    /// so a crash, a relaunch or a switched-off preference may have left one on a desktop, or the
+    /// store copy is still there: its selections, or WallpaperAgent's reload of them, may not be
+    /// back yet. False for a missing, unreadable or empty journal and no store copy. Reads the
+    /// files only; nothing is created.
     static func hasRecordedOriginals(in folder: URL) -> Bool {
+        if FileManager.default.fileExists(atPath: folder.appendingPathComponent(storeSnapshotName).path) {
+            return true
+        }
         guard let data = try? Data(contentsOf: folder.appendingPathComponent(journalName)),
               let entries = try? JSONDecoder().decode([String: Entry].self, from: data) else { return false }
         return !entries.isEmpty
@@ -259,7 +264,7 @@ final class DesktopWallpaperLedger {
     private func restoreStore() throws {
         guard var snapshot = storeSnapshot, let current = try workspace.storeContents() else { return }
         if let restored = try DesktopWallpaperStoreRestoration.restored(
-            current: current, original: snapshot.store, written: Set(snapshot.written), posters: folder) {
+            current: current, original: snapshot.store, written: snapshot.written, posters: folder) {
             snapshot.reloadPending = true
             try save(snapshot)
             try workspace.replaceStore(restored, expected: current)
@@ -568,11 +573,17 @@ final class DesktopWallpaperLedger {
         storeSnapshot = snapshot
     }
 
-    /// A picture written back is told apart from one chosen in System Settings
-    /// only by being on this list, journaled before the write.
+    /// A picture written back is told apart from the same picture chosen in
+    /// System Settings by this record of the write and its time, journaled
+    /// before the write. A write of the same file moments after the last one
+    /// is covered by that record.
     private func recordWritten(_ url: URL) throws {
-        guard var snapshot = storeSnapshot, !snapshot.written.contains(url) else { return }
-        snapshot.written.append(url)
+        guard var snapshot = storeSnapshot else { return }
+        let now = Date()
+        if snapshot.written.contains(where: {
+            $0.url == url && now.timeIntervalSince($0.at) < DesktopWallpaperStoreRestoration.writeTolerance.before
+        }) { return }
+        snapshot.written.append(.init(url: url, at: now))
         try save(snapshot)
     }
 }

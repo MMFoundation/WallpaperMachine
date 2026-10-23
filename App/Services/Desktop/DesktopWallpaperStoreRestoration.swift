@@ -13,20 +13,42 @@ import Foundation
 enum DesktopWallpaperStoreRestoration {
     private static let imageProvider = "com.apple.wallpaper.choice.image"
 
+    /// A picture written back through the per-Space API, and when.
+    struct Write: Codable, Equatable {
+        var url: URL
+        var at: Date
+    }
+
+    /// How far a selection's `LastSet` may sit from a write for the write to
+    /// be what set it: WallpaperAgent applies a write about 0.3 s later, and
+    /// copies it into the display-wide and system-wide selections then too.
+    static let writeTolerance: (before: TimeInterval, after: TimeInterval) = (2, 10)
+
     /// The store with every selection this app wrote put back as `original` had
     /// it, or nil when nothing needs to change. `written` are the image files
-    /// the app wrote back through the per-Space API; `posters` is the folder of
+    /// the app wrote back through the per-Space API; a selection of the same
+    /// file is the app's only when it was set at one of those writes, so the
+    /// same picture chosen in System Settings stays. `posters` is the folder of
     /// its posters. A selection that was itself a poster in `original` is never
     /// put back.
-    static func restored(current: Data, original: Data, written: Set<URL>, posters: URL) throws -> Data? {
+    static func restored(current: Data, original: Data, written: [Write], posters: URL) throws -> Data? {
         guard var root = try PropertyListSerialization.propertyList(from: current, format: nil) as? [String: Any],
               let before = try PropertyListSerialization.propertyList(from: original, format: nil) as? [String: Any]
         else { throw CocoaError(.fileReadCorruptFile) }
-        let written = Set(written.map(\.standardizedFileURL))
+        let writes = Dictionary(grouping: written, by: \.url.standardizedFileURL).mapValues { $0.map(\.at) }
         let posters = posters.standardizedFileURL.path
         func isOurs(_ selection: [String: Any]) -> Bool {
             guard let urls = imageURLs(selection), !urls.isEmpty else { return false }
-            return urls.allSatisfy { written.contains($0) || $0.deletingLastPathComponent().path == posters }
+            let set = selection["LastSet"] as? Date
+            return urls.allSatisfy { url in
+                if url.deletingLastPathComponent().path == posters { return true }
+                guard let times = writes[url] else { return false }
+                // Without a time, the file is the only provenance there is.
+                guard let set else { return true }
+                return times.contains {
+                    set >= $0 - writeTolerance.before && set <= $0 + writeTolerance.after
+                }
+            }
         }
         func namesPoster(_ selection: [String: Any]) -> Bool {
             imageURLs(selection)?.contains { $0.deletingLastPathComponent().path == posters } == true

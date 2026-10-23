@@ -880,12 +880,16 @@ final class DesktopWallpaperTests: XCTestCase {
         }
         let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
         try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        // A crash before quitting leaves the store copy for the launch repair.
+        XCTAssertTrue(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
         try ledger.restoreAll()
         XCTAssertEqual(try storeRoot(workspace.store) as NSDictionary, try storeRoot(saved) as NSDictionary)
+        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
     }
 
     /// Only selections the app wrote are put back: a choice made in System Settings while the
-    /// app ran stays, and a snapshot that already named a poster is never written back.
+    /// app ran stays, even of the picture the app wrote back, and a snapshot that already named
+    /// a poster is never written back.
     @MainActor
     func testStoreRestorationKeepsTheUsersChoicesAndNeverPutsBackAPoster() throws {
         let posters = root.appendingPathComponent("posters")
@@ -899,19 +903,27 @@ final class DesktopWallpaperTests: XCTestCase {
             "SystemDefault": ["Type": "individual", "Desktop": poster, "Idle": idle],
             "Displays": [String: Any](), "Spaces": ["kept": ["Displays": [String: Any]()]]])
         let user = try storeImage(self.original("user-choice").url)
-        let ours: [String: Any] = ["Type": "individual", "Desktop": try storeImage(written), "Idle": idle]
+        let wroteAt = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        var ourImage = try storeImage(written)
+        ourImage["LastSet"] = wroteAt.addingTimeInterval(0.3)
+        let ours: [String: Any] = ["Type": "individual", "Desktop": ourImage, "Idle": idle]
+        // The user picked the same picture for this display long after the app wrote it.
+        var sameFile = try storeImage(written)
+        sameFile["LastSet"] = wroteAt.addingTimeInterval(600)
+        let usersSameFile: [String: Any] = ["Type": "individual", "Desktop": sameFile, "Idle": idle]
         let current = try storeData([
             "AllSpacesAndDisplays": ["Type": "individual", "Desktop": aerial, "Idle": idle],
             "SystemDefault": ours,
-            "Displays": ["d": ours],
+            "Displays": ["d": ours, "e": usersSameFile],
             "Spaces": ["kept": ["Displays": [String: Any]()],
                        "user": ["Default": ["Type": "individual", "Desktop": user, "Idle": idle],
                                 "Displays": ["d": ours]]]])
+        let writes = [DesktopWallpaperStoreRestoration.Write(url: written, at: wroteAt)]
         let restored = try storeRoot(DesktopWallpaperStoreRestoration.restored(
-            current: current, original: original, written: [written], posters: posters))
+            current: current, original: original, written: writes, posters: posters))
         XCTAssertEqual(restored["SystemDefault"] as? NSDictionary, ours as NSDictionary,
                        "a poster in the snapshot is not an original")
-        XCTAssertEqual((restored["Displays"] as? [String: Any])?.isEmpty, true)
+        XCTAssertEqual(restored["Displays"] as? NSDictionary, ["e": usersSameFile] as NSDictionary)
         let spaces = try XCTUnwrap(restored["Spaces"] as? [String: Any])
         XCTAssertNotNil(spaces["kept"])
         let space = try XCTUnwrap(spaces["user"] as? [String: Any])
@@ -919,7 +931,7 @@ final class DesktopWallpaperTests: XCTestCase {
         XCTAssertEqual((space["Displays"] as? [String: Any])?.isEmpty, true)
 
         XCTAssertNil(try DesktopWallpaperStoreRestoration.restored(
-            current: original, original: original, written: [written], posters: posters))
+            current: original, original: original, written: writes, posters: posters))
     }
 
     @MainActor
