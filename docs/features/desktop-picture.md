@@ -228,7 +228,8 @@ and journals each picture it writes back there. A full restoration (quit, the sw
 turned off, the launch repair), once every desktop reads back without a poster, puts back
 `DesktopWallpaperStoreRestoration`'s result: every store desktop selection that names
 only posters or pictures the app wrote back gets its pre-poster value, a node the writes
-created goes, and WallpaperAgent is restarted to load it. A selection chosen in System
+created goes, and WallpaperAgent is restarted to load it; a restart that fails is
+retried by the next pass or launch even though the store has nothing left to change. A selection chosen in System
 Settings meanwhile is kept, a snapshot entry that already named a poster is never put
 back, and the store is written only if it is still the version just read. The copy is
 deleted once restoration succeeds.

@@ -179,12 +179,15 @@ final class SystemDesktopPictureWorkspace: DesktopPictureWorkspace {
         return try Data(contentsOf: storeURL)
     }
 
-    /// WallpaperAgent reads the store only as it starts, so it is restarted to
-    /// show the replaced selections.
     func replaceStore(_ data: Data, expected: Data) throws {
         // A choice made in System Settings since the store was read is never overwritten.
         guard try Data(contentsOf: storeURL) == expected else { throw DesktopPictureUnconfirmed() }
         try data.write(to: storeURL, options: .atomic)
+    }
+
+    /// WallpaperAgent reads the store only as it starts, so it is restarted to
+    /// show the replaced selections.
+    func reloadStore() throws {
         try LockScreenWallpaperSelection.reloadWallpaperAgent()
     }
 

@@ -43,13 +43,16 @@ protocol DesktopPictureWorkspace {
     func referencedPictureURLs(targets: [DesktopPictureTarget]) throws -> Set<URL>
     /// The macOS wallpaper store, or nil where there is none to put back.
     func storeContents() throws -> Data?
-    /// Replaces the store if it still holds `expected`, then has WallpaperAgent load it.
+    /// Replaces the store if it still holds `expected`.
     func replaceStore(_ data: Data, expected: Data) throws
+    /// Has WallpaperAgent load the store, which it reads only as it starts.
+    func reloadStore() throws
 }
 
 extension DesktopPictureWorkspace {
     func storeContents() throws -> Data? { nil }
     func replaceStore(_ data: Data, expected: Data) throws {}
+    func reloadStore() throws {}
 }
 
 @MainActor
@@ -115,6 +118,8 @@ final class DesktopWallpaperLedger {
     private struct StoreSnapshot: Codable {
         var store: Data
         var written: [URL] = []
+        /// The store was put back but WallpaperAgent has not loaded it yet.
+        var reloadPending: Bool? = nil
     }
     private var storeSnapshot: StoreSnapshot?
     private let storeSnapshotURL: URL
@@ -249,12 +254,20 @@ final class DesktopWallpaperLedger {
     /// Once every desktop reads back without a poster, puts back the store
     /// selections the app replaced, including the aerial or extension choice
     /// the per-Space API could only write back as a still picture.
+    /// A store written back but not yet loaded stays pending, so a retry or the
+    /// next launch reloads it once rather than finding nothing left to change.
     private func restoreStore() throws {
-        guard let snapshot = storeSnapshot, let current = try workspace.storeContents(),
-              let restored = try DesktopWallpaperStoreRestoration.restored(
-                current: current, original: snapshot.store, written: Set(snapshot.written), posters: folder)
-        else { return }
-        try workspace.replaceStore(restored, expected: current)
+        guard var snapshot = storeSnapshot, let current = try workspace.storeContents() else { return }
+        if let restored = try DesktopWallpaperStoreRestoration.restored(
+            current: current, original: snapshot.store, written: Set(snapshot.written), posters: folder) {
+            snapshot.reloadPending = true
+            try save(snapshot)
+            try workspace.replaceStore(restored, expected: current)
+        }
+        guard snapshot.reloadPending == true else { return }
+        try workspace.reloadStore()
+        snapshot.reloadPending = nil
+        try save(snapshot)
     }
 
     func apply(image: Data, target: DesktopPictureTarget) throws {

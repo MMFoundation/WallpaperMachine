@@ -22,7 +22,7 @@ private final class MemoryDesktopWorkspace: DesktopPictureWorkspace {
     /// applies them asynchronously.
     var lagging: Set<DesktopPictureTarget> = []
     private var inFlight: [DesktopPictureTarget: DesktopPicture] = [:]
-    var didWrite: (() -> Void)?
+    var didWrite: (() throws -> Void)?
     var didEnumerate: (() -> Void)?
 
     func targets() -> [DesktopPictureTarget] {
@@ -46,11 +46,11 @@ private final class MemoryDesktopWorkspace: DesktopPictureWorkspace {
         writes.append(target)
         if lagging.contains(target) {
             inFlight[target] = picture
-            didWrite?()
+            try didWrite?()
             throw DesktopPictureUnconfirmed()
         }
         pictures[target] = picture
-        didWrite?()
+        try didWrite?()
     }
     func land() {
         pictures.merge(inFlight) { $1 }
@@ -61,11 +61,21 @@ private final class MemoryDesktopWorkspace: DesktopPictureWorkspace {
     /// macOS's wallpaper store, which a per-Space write changes along with the picture.
     var store: Data?
     var storeReplacements = 0
+    var storeReloads = 0
+    /// Reloads that fail before one succeeds, as when WallpaperAgent is between a restart and its relaunch.
+    var failingReloads = 0
     func storeContents() -> Data? { store }
     func replaceStore(_ data: Data, expected: Data) throws {
         guard store == expected else { throw DesktopPictureUnconfirmed() }
         store = data
         storeReplacements += 1
+    }
+    func reloadStore() throws {
+        if failingReloads > 0 {
+            failingReloads -= 1
+            throw CocoaError(.fileWriteUnknown)
+        }
+        storeReloads += 1
     }
 }
 
@@ -804,17 +814,17 @@ final class DesktopWallpaperTests: XCTestCase {
         // WallpaperAgent records each per-Space write in its own nodes and copies it into the
         // system default.
         workspace.didWrite = {
-            var root = try! self.storeRoot(workspace.store)
+            var root = try self.storeRoot(workspace.store)
             var spaces = root["Spaces"] as? [String: Any] ?? [:]
             for target in [self.one, self.two] {
                 guard let url = workspace.pictures[target]?.url, url.isFileURL else { continue }
-                let node: [String: Any] = ["Type": "individual", "Desktop": try! self.storeImage(url), "Idle": idle]
+                let node: [String: Any] = ["Type": "individual", "Desktop": try self.storeImage(url), "Idle": idle]
                 spaces[target.space!] = ["Default": node, "Displays": ["display-uuid": node]]
                 root["SystemDefault"] = node
                 root["Displays"] = ["display-uuid": node]
             }
             root["Spaces"] = spaces
-            workspace.store = try! self.storeData(root)
+            workspace.store = try self.storeData(root)
         }
         let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
         try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
@@ -823,6 +833,8 @@ final class DesktopWallpaperTests: XCTestCase {
         // A relaunch after a crash still has the store as it was before the first poster.
         let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
                                             surfaces: { [] }, frameCenter: NotificationCenter())
+        // The retry after a failed reload finds nothing left to change and still reloads.
+        workspace.failingReloads = 1
         try await sync.restoreForTermination { }
         let after = try storeRoot(workspace.store)
         XCTAssertEqual(after["AllSpacesAndDisplays"] as? NSDictionary, global as NSDictionary)
@@ -830,13 +842,15 @@ final class DesktopWallpaperTests: XCTestCase {
         XCTAssertEqual((after["Spaces"] as? [String: Any])?.isEmpty, true)
         XCTAssertEqual((after["Displays"] as? [String: Any])?.isEmpty, true)
         XCTAssertEqual(workspace.storeReplacements, 1)
+        XCTAssertEqual(workspace.storeReloads, 1)
 
-        // Nothing is left to put back on the next quit.
+        // Nothing is left to put back or reload on the next quit.
         workspace.pictures = [one: inherited, two: inherited]
         workspace.didWrite = nil
         let next = try DesktopWallpaperLedger(folder: root, workspace: workspace)
         try next.restoreAll()
         XCTAssertEqual(workspace.storeReplacements, 1)
+        XCTAssertEqual(workspace.storeReloads, 1)
     }
 
     /// A poster whose file and journal entry survive from an earlier run is written again
@@ -860,8 +874,8 @@ final class DesktopWallpaperTests: XCTestCase {
         let saved = workspace.store
         workspace.didWrite = {
             guard let url = workspace.pictures[self.one]?.url else { return }
-            let node: [String: Any] = ["Type": "desktop", "Desktop": try! self.storeImage(url)]
-            workspace.store = try! self.storeData(["AllSpacesAndDisplays": node, "SystemDefault": node,
+            let node: [String: Any] = ["Type": "desktop", "Desktop": try self.storeImage(url)]
+            workspace.store = try self.storeData(["AllSpacesAndDisplays": node, "SystemDefault": node,
                                                    "Displays": [String: Any](), "Spaces": [String: Any]()])
         }
         let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
