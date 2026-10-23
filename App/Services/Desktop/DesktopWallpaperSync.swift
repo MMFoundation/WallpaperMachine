@@ -211,6 +211,11 @@ final class DesktopWallpaperSync {
     /// the moment before a wallpaper loads keep the saved look; the owner asks for a refresh when
     /// the surface draws the saved look again. A frame already on its way is dropped on arrival.
     var showsUnsavedLook: @MainActor (DesktopPosterSurface) -> Bool = { _ in false }
+    /// The last poster of each desktop's wallpaper on a display whose posters are scoped to one
+    /// desktop, keyed by Space id. The current desktop takes it only until a fresh one is taken.
+    var desktopPosters: @MainActor (String) -> [String: Data] = { _ in [:] }
+    /// A poster was taken from a surface on a display, for the scope it was taken in.
+    var onPosterAccepted: (@MainActor (String, DesktopPosterScope, Data) -> Void)?
     /// Takes the poster again every `periodicRefreshInterval` while on.
     var refreshesPeriodically = false {
         didSet { if refreshesPeriodically != oldValue { schedulePeriodicCaptures() } }
@@ -506,6 +511,7 @@ final class DesktopWallpaperSync {
                 // only after a fresh response validates the new context, then publish there.
                 self.posterScopes[key] = receivedScope
                 self.arrivals[key] = arrival
+                if let poster = self.posters[key] { self.onPosterAccepted?(surface.display, receivedScope, poster) }
                 self.synchronizeAllSpaces()
                 return
             }
@@ -517,6 +523,7 @@ final class DesktopWallpaperSync {
                 self.posterScopes[key] = receivedScope
                 self.frameDigests[key] = digest
                 self.arrivals[key] = arrival
+                self.onPosterAccepted?(surface.display, receivedScope, image)
                 self.synchronizeAllSpaces()
             } catch {
                 // No poster came of this frame, so the next trigger takes another.
@@ -544,15 +551,18 @@ final class DesktopWallpaperSync {
         var byDisplay: [String: Data] = [:]
         var newest: [String: UInt64] = [:]
         var targetSpaces: [String: Set<String>] = [:]
+        var spacePosters: [String: [String: Data]] = [:]
         let retained = retainedDisplays()
         knownDisplays.formUnion(surfaces.map(\.display))
         knownDisplays.formUnion(retained)
         for display in knownDisplays {
             switch scope(display) {
-            case .all: break
+            case .all: continue
             case .desktop(let id, _): targetSpaces[display] = [id]
             case .hold: targetSpaces[display] = []
             }
+            let saved = desktopPosters(display)
+            if !saved.isEmpty { spacePosters[display] = saved }
         }
         for surface in surfaces {
             let currentScope = scope(surface.display)
@@ -567,7 +577,8 @@ final class DesktopWallpaperSync {
         retry?.cancel()
         defer { scheduleConfirmation() }
         do {
-            try ledger.synchronize(posters: byDisplay, liveDisplays: Set(surfaces.map(\.display)).union(retained), targetSpaces: targetSpaces)
+            try ledger.synchronize(posters: byDisplay, liveDisplays: Set(surfaces.map(\.display)).union(retained),
+                                   targetSpaces: targetSpaces, spacePosters: spacePosters)
         } catch {
             report(error)
             // Retry native asynchronous acknowledgement/Space creation races,

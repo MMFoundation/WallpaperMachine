@@ -575,12 +575,15 @@ validated before changes. These operations preserve existing playback rules and
 use the normal command queue. See [Multi-display wallpaper layouts](display-layouts.md)
 for recovery, history, saved settings and the per-Space boundary.
 
-**Automatic wallpaper selection → Follow desktop Space** adds an experimental
-wallpaper/playlist picker for each regular desktop on the display. The current
-desktop is marked, reordered desktops keep their UUID-based choice, and
-unavailable desktops can be forgotten. Fullscreen app Spaces keep the previous
-selection. See [Space-based wallpaper choices](spaces.md) for transition, pause and
-lock-screen ownership limits; this mode does not create or switch Spaces.
+**Different wallpaper for each desktop**, under **Wallpaper** on each display's card
+and in the Library's target-display menu, gives each regular desktop of the display
+its own wallpaper or saved playlist. While it is on, the card shows a tile per desktop
+with its cover, the current one outlined; a tile opens a chooser with a search field
+and the installed wallpapers as covers, and Apply sets the current desktop's wallpaper,
+which the toolbar button names. Reordered desktops keep their UUID-based choice,
+unavailable desktops can be forgotten, and **Automatic wallpaper selection** shows the
+same mode by name. See [a wallpaper for each desktop](spaces.md) for transitions, pause
+and lock-screen ownership limits; this mode does not create or switch Spaces.
 
 A display the app has never configured starts enabled with the primary display's
 wallpaper, so a newly connected monitor shows a wallpaper without a trip to

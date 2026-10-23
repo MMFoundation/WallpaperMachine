@@ -56,6 +56,7 @@ final class WallpaperWindowAuditorTests: XCTestCase {
         var windows: [DesktopWindowObservation]
         var canExpectVisible = true
         var desktopSpace = true
+        var concealed = Set<UInt32>()
         var displays = DisplayConfiguration(displays: [])
         var clock = ContinuousClock.now
         var holdSleeps = false
@@ -82,6 +83,7 @@ final class WallpaperWindowAuditorTests: XCTestCase {
                 },
                 canExpectVisible: { [unowned self] in self.canExpectVisible },
                 isDesktopSpace: { [unowned self] _ in self.desktopSpace },
+                isConcealed: { [unowned self] in $0.map(self.concealed.contains) ?? false },
                 repair: { [unowned self] window, step in
                     self.repairs.append((window, step))
                     self.onRepair?()
@@ -258,6 +260,21 @@ final class WallpaperWindowAuditorTests: XCTestCase {
 
         XCTAssertTrue(h.reports.isEmpty, "desktop windows are legitimately off screen above a full-screen app")
         XCTAssertTrue(h.repairs.isEmpty)
+    }
+
+    func testAWindowHiddenWhileItsDesktopsWallpaperLoadsIsNotAFault() async throws {
+        var hidden = healthy()
+        hidden.alpha = 0
+        var other = healthy(number: 5678, display: 2)
+        other.alpha = 0
+        let h = try harness([hidden, other])
+        h.concealed = [1]
+
+        h.spaceChanged()
+        await h.settle()
+
+        XCTAssertEqual(Set(h.reports.compactMap(\.window?.windowNumber)), [5678],
+                       "only the display that follows Spaces hides its window on purpose")
     }
 
     func testAFaultTheSpaceDoesNotExplainIsStillRecordedInAFullscreenSpace() async throws {

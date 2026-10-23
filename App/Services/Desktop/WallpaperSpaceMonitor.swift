@@ -10,11 +10,16 @@ struct WallpaperDisplaySpaces: Equatable, Sendable {
     var displayUUID: String
     var spaces: [WallpaperDesktopSpace]
     var current: String?
+    /// The window server's number for the current desktop, which a window is moved to; nil on a
+    /// full-screen app's Space or when the topology does not give one.
+    var currentManagedID: UInt64? = nil
 }
 
 struct WallpaperSpaceVisit: Equatable, Sendable {
     var spaceID: String
     var token: String
+    /// The display's Desktop 1, whose choice a desktop without one follows.
+    var firstSpaceID: String? = nil
 }
 
 /// Read-only Space topology and persistent visit identities for automatic selection.
@@ -116,7 +121,7 @@ final class WallpaperSpaceMonitor {
     func visit(for physicalDisplay: String) -> WallpaperSpaceVisit? {
         guard available, let display = displays[physicalDisplay], let current = display.current,
               let visit = visits[display.displayUUID], visit.space == current else { return nil }
-        return .init(spaceID: current, token: visit.token)
+        return .init(spaceID: current, token: visit.token, firstSpaceID: display.spaces.first?.id)
     }
 
     func physicalDisplay(_ id: String, title: String) -> String? {
@@ -165,7 +170,9 @@ final class WallpaperSpaceMonitor {
             let desktops = decoded.filter { $0.type == 0 }.enumerated().map { WallpaperDesktopSpace(id: $0.element.id!, number: $0.offset + 1) }
             for (display, uuid) in matching {
                 guard result[display] == nil else { return nil }
-                result[display] = .init(displayUUID: uuid, spaces: desktops, current: active[0].type == 0 ? active[0].id : nil)
+                let desktop = active[0].type == 0
+                result[display] = .init(displayUUID: uuid, spaces: desktops, current: desktop ? active[0].id : nil,
+                                        currentManagedID: desktop ? currentNumber ?? active[0].number : nil)
             }
         }
         return result.isEmpty ? nil : result

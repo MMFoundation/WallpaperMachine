@@ -479,6 +479,8 @@ final class DisplaysSettingsModel {
     case editRule(display: String, id: String)
     case firstDay
     case modePicker(display: String)
+    /// The Different wallpaper for each desktop switch.
+    case desktopsToggle(display: String)
     case forget(display: String, desktop: String)
     /// The editor's first control, When, as the editor opens.
     case ruleEvent(display: String)
@@ -534,13 +536,13 @@ final class DisplaysSettingsModel {
   }
 
   /// Forgets the choice saved for a desktop that is gone. Focus goes to the next Forget button of
-  /// the display, else to its mode menu.
+  /// the display, else to its Different wallpaper for each desktop switch.
   func forgetDesktop(_ desktop: String, display: String) async throws {
     let missing = controller.automationState(for: display).missingDesktops.map(\.id)
     try await controller.setAutomationDesktop(desktop, to: nil, display: display)
     let next = missing.drop { $0 != desktop }.dropFirst().first
     automationFocus =
-      next.map { .forget(display: display, desktop: $0) } ?? .modePicker(display: display)
+      next.map { .forget(display: display, desktop: $0) } ?? .desktopsToggle(display: display)
   }
 
   // MARK: Sunrise and sunset

@@ -3277,12 +3277,6 @@
     "The video changed since it was checked. Look for black bars again." : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "검사 후 동영상이 변경되었습니다. 검은 여백을 다시 확인하세요."}}, "en" : {"stringUnit" : {"state" : "translated", "value" : "The video changed since it was checked. Look for black bars again."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "確認したあとでビデオが変更されました。もう一度黒帯を確認してください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "视频在检查之后发生了变化。请重新检查黑边。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "影片在檢查之後發生了變化。請再次檢查黑邊。"}}}
     },
-    "Follow desktop Space" : {
-      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "데스크탑 Space에 맞추기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "デスクトップスペースに連動"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "跟随桌面空间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "跟隨桌面空間"}}}
-    },
-    "Experimental. Switching desktops reloads their chosen wallpaper or playlist and may briefly show the previous wallpaper. Full-screen app Spaces keep the last choice." : {
-      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "실험적 기능입니다. 데스크탑을 전환하면 해당 데스크탑에서 선택한 배경화면이나 재생목록을 다시 불러오며, 이전 배경화면이 잠깐 보일 수 있습니다. 전체 화면 앱의 Spaces에서는 마지막 선택을 유지합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "試験的な機能です。デスクトップを切り替えると選択した壁紙やプレイリストを読み直し、一時的に前の壁紙が見える場合があります。フルスクリーンのスペースでは直前の選択を維持します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "实验功能。切换桌面会重新载入该桌面的壁纸或播放列表，期间可能短暂显示上一张壁纸。全屏应用空间会保留上一次选择。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "實驗功能。切換桌面會重新載入該桌面的桌布或播放列表，期間可能短暫顯示上一張桌布。全螢幕 App 空間會保留上一次選擇。"}}}
-    },
     "Turn off animated lock-screen wallpaper to use desktop Space choices." : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "데스크탑 공간별 선택을 사용하려면 움직이는 잠금 화면 배경화면을 끄세요."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "デスクトップスペースごとの選択を使うには、動くロック画面の壁紙をオフにしてください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "请先关闭动态锁屏壁纸，再使用按桌面空间切换。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "請先關閉動態鎖定畫面桌布，再使用依桌面空間切換。"}}}
     },
@@ -3301,8 +3295,50 @@
     "Forget choice for %@" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "%@에 대한 선택 지우기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "%@の割り当てを解除"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "移除 %@ 的关联"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "移除 %@ 的關聯"}}}
     },
-    "Desktop numbers follow their order on this display; choices follow the desktop when you reorder it. An empty choice keeps the current wallpaper." : {
-      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "데스크탑 번호는 이 디스플레이의 순서를 따릅니다. 순서를 바꿔도 선택한 배경화면은 해당 데스크탑에 유지됩니다. 선택을 비워 두면 현재 배경화면을 유지합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "番号はこのディスプレイ上の順序です。並べ替えても壁紙の選択は同じデスクトップに保持されます。未選択の場合は現在の壁紙を維持します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "编号按此显示器上的桌面顺序排列；调整顺序后，壁纸选择仍与原桌面关联。留空会保留当前壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "編號依此顯示器上的桌面順序排列；調整順序後，桌布選擇仍與原桌面關聯。留空會保留目前的桌布。"}}}
+    "Different wallpaper for each desktop" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "데스크탑마다 다른 배경화면"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "デスクトップごとに別の壁紙"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "每个桌面使用不同壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "每個桌面使用不同桌布"}}}
+    },
+    "Each desktop keeps the wallpaper you apply while you are on it. Only the desktop you are on plays; the others show a still picture of theirs." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "각 데스크탑은 그 데스크탑에 있을 때 적용한 배경화면을 유지합니다. 현재 데스크탑만 재생되고, 다른 데스크탑에는 각자의 정지 이미지가 표시됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "各デスクトップは、そのデスクトップにいるときに適用した壁紙を保持します。再生されるのは表示中のデスクトップだけで、ほかのデスクトップにはそれぞれの静止画が表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "每个桌面会保留你在该桌面上应用的壁纸。只有当前桌面会播放，其他桌面显示各自壁纸的静态画面。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "每個桌面會保留你在該桌面上套用的桌布。只有目前的桌面會播放，其他桌面顯示各自桌布的靜態畫面。"}}}
+    },
+    "Keeps the current wallpaper" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "현재 배경화면 유지"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "現在の壁紙のまま"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "保持当前壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "保持目前的桌布"}}}
+    },
+    "Keep the current wallpaper" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "현재 배경화면 그대로 두기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "現在の壁紙を使う"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "沿用当前壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "沿用目前的桌布"}}}
+    },
+    "Same as Desktop 1" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "데스크탑 1과 같음"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "デスクトップ1と同じ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "与桌面 1 相同"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "與桌面 1 相同"}}}
+    },
+    "This desktop shows Desktop 1’s wallpaper, like every desktop you add." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "이 데스크탑은 새로 추가하는 모든 데스크탑처럼 데스크탑 1의 배경화면을 표시합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このデスクトップには、追加するすべてのデスクトップと同じく、デスクトップ1の壁紙が表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "此桌面和你添加的每个桌面一样，显示桌面 1 的壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "此桌面和你加入的每個桌面一樣，顯示桌面 1 的桌布。"}}}
+    },
+    "Spaces" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "스페이스"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "スペース"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "空间"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "空間"}}}
+    },
+    "Turning it on replaces this display’s automatic wallpaper selection." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "켜면 이 디스플레이의 배경화면 자동 선택을 대체합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "オンにすると、このディスプレイの壁紙の自動選択の代わりに使われます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "开启后会取代此显示器的“自动选择壁纸”。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "開啟後會取代此顯示器的「自動選擇桌布」。"}}}
+    },
+    "Each desktop’s wallpaper is chosen above, under Different wallpaper for each desktop." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "각 데스크탑의 배경화면은 위의 ‘데스크탑마다 다른 배경화면’에서 선택합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "各デスクトップの壁紙は、上の「デスクトップごとに別の壁紙」で選びます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "每个桌面的壁纸请在上方的“每个桌面使用不同壁纸”中选择。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "每個桌面的桌布請在上方的「每個桌面使用不同桌布」中選擇。"}}}
+    },
+    "Desktops of %@" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "%@의 데스크탑"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "%@のデスクトップ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "%@ 的桌面"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "%@ 的桌面"}}}
+    },
+    "Choose the wallpaper for %@" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "%@의 배경화면 선택"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "%@の壁紙を選択"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "为%@选择壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "為%@選擇桌布"}}}
+    },
+    "Wallpaper for %@" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "%@의 배경화면"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "%@の壁紙"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "%@的壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "%@的桌布"}}}
+    },
+    "No wallpapers match." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "일치하는 배경화면이 없습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "一致する壁紙はありません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "没有匹配的壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "沒有符合的桌布。"}}}
+    },
+    "This desktop shows whatever the display plays when you switch to it." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "이 데스크탑으로 전환하면 디스플레이에서 재생 중인 배경화면을 그대로 표시합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このデスクトップに切り替えると、ディスプレイで再生中の壁紙がそのまま表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "切换到此桌面时，会显示该显示器正在播放的壁纸。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "切換到此桌面時，會顯示該顯示器正在播放的桌布。"}}}
+    },
+    "Wallpapers you apply go to %@ of this display" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "배경화면을 적용하면 이 디스플레이의 %@에 표시됩니다"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "適用した壁紙はこのディスプレイの%@に表示されます"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "应用的壁纸会显示在这台显示器的%@上"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "套用的桌布會顯示在這台顯示器的%@上"}}}
     },
     "Refresh Spaces" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "Spaces 새로고침"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "スペースを更新"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "刷新空间列表"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "重新整理空間列表"}}}

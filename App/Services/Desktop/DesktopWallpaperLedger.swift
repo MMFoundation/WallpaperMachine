@@ -147,7 +147,12 @@ final class DesktopWallpaperLedger {
 
     /// Submit a fresh frame to EVERY desktop on its display, without a Space
     /// change event. A loading renderer keeps the previous poster until ready.
-    func synchronize(posters: [String: Data], liveDisplays: Set<String>, targetSpaces: [String: Set<String>] = [:]) throws {
+    ///
+    /// `spacePosters` gives a display's desktops a picture of their own: a display that follows
+    /// desktop Spaces sends the last poster of each desktop's wallpaper. A desktop outside
+    /// `targetSpaces` takes only that; one inside it takes the fresh poster when there is one.
+    func synchronize(posters: [String: Data], liveDisplays: Set<String>, targetSpaces: [String: Set<String>] = [:],
+                     spacePosters: [String: [String: Data]] = [:]) throws {
         let targets = try workspace.targets()
         var firstError: Error?
         // Cache only within this pass: external edits/missing files must still
@@ -161,11 +166,17 @@ final class DesktopWallpaperLedger {
         for target in targets {
             // A key with an empty set holds every Space on that display. The public
             // fallback has no identity and cannot safely accept a Space-specific poster.
-            if let allowed = targetSpaces[target.display], target.space.map(allowed.contains) != true { continue }
+            let otherDesktop = targetSpaces[target.display].map { allowed in target.space.map(allowed.contains) != true } ?? false
+            // Only a display whose posters are scoped to its desktops takes saved ones.
+            let ownPoster = targetSpaces[target.display] == nil ? nil
+                : target.space.flatMap { spacePosters[target.display]?[$0] }
+            if otherDesktop, ownPoster == nil { continue }
+            let fresh = otherDesktop ? nil : posters[target.display]
             do {
-                if let image = posters[target.display], liveDisplays.contains(target.display) {
+                if let image = fresh ?? ownPoster, liveDisplays.contains(target.display) {
                     applied.insert(target)
-                    try apply(image: image, digest: digests[target.display]!, target: target,
+                    let digest = fresh != nil ? digests[target.display]! : Data(SHA256.hash(data: image))
+                    try apply(image: image, digest: digest, target: target,
                               comparisons: &comparisons, fallbacks: fallbacks)
                 } else if !liveDisplays.contains(target.display) {
                     try restore(target: target) {

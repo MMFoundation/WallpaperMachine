@@ -637,9 +637,10 @@ decision itself is `LowBatteryGate`, fed by one `BatteryReading` of the internal
 battery. Web mute uses the same availability boundary as above.
 Wallpaper and playlist selections instead reach `WallpaperAutomationScheduler`;
 they never become pause/mute/stop actions or change the user's own Play/Pause. The
-experimental [desktop Space mode](spaces.md) uses the same eligibility gate,
-retains manual overrides for the current visit, and defers Focus exit while the
-current desktop cannot be identified. Animated lock-screen ownership
+[different wallpaper for each desktop](spaces.md) mode uses the same eligibility gate,
+keeps a wallpaper chosen by hand as the current desktop's own, and defers Focus exit
+while the current desktop cannot be identified. It runs one renderer per display, like
+any other mode: desktops that are not on screen show a still picture. Animated lock-screen ownership
 conflicts with that mode; screen-saver-only ownership does not.
 
 ### App rules
