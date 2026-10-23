@@ -70,7 +70,7 @@ archive's exported symbols).
 
 ## Dependencies
 
-- `naga` 29.0.3 by path (`../upstream/naga` from `Renderer/`), features
+- `naga` 29.0.3 by path (`../ThirdParty/naga` from `Renderer/`), features
   `glsl-in` and `msl-out` only (MIT OR Apache-2.0). It is the compiler the backend calls (front end,
   validator, Metal writer). `identity::NAGA_VERSION` is checked against the vendored manifest by a test.
 - Nothing else. The request reader and the response writer use the crate's own

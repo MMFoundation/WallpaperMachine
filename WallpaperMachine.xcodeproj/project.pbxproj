@@ -2348,7 +2348,7 @@
 				4B62C45FA668966458B0E2F3 /* LICENSE */,
 			);
 			name = "mediaremote-adapter";
-			path = "upstream/mediaremote-adapter";
+			path = "ThirdParty/mediaremote-adapter";
 			sourceTree = "<group>";
 		};
 		4840ECC654727F58B816B6B8 /* Support */ = {
@@ -2702,7 +2702,7 @@
 				4CF75497C2C65AB51E3C19DC /* mediaremote-adapter.pl */,
 			);
 			name = bin;
-			path = "upstream/mediaremote-adapter/bin";
+			path = "ThirdParty/mediaremote-adapter/bin";
 			sourceTree = "<group>";
 		};
 		7E11E0D9186CFEE3ED0562FC /* Support */ = {
@@ -3266,7 +3266,7 @@
 				58E9D7C70020523A5DA42B9E /* utility */,
 			);
 			name = src;
-			path = "upstream/mediaremote-adapter/src";
+			path = "ThirdParty/mediaremote-adapter/src";
 			sourceTree = "<group>";
 		};
 		BF283B4F4373183833855AEC /* StarterWallpaper */ = {
@@ -3462,7 +3462,7 @@
 				F4AD9E79BA6BF063B8C95DB8 /* MediaRemoteAdapter.h */,
 			);
 			name = include;
-			path = "upstream/mediaremote-adapter/include";
+			path = "ThirdParty/mediaremote-adapter/include";
 			sourceTree = "<group>";
 		};
 		F03042DF5A7A6A431631B95A /* Steam */ = {
@@ -4846,7 +4846,7 @@
 				CURRENT_PROJECT_VERSION = 44;
 				ENABLE_APP_SANDBOX = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/upstream/renderer/external/open-wallpaper-engine/src/Platform/Apple";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Renderer/Engine/src/Platform/Apple";
 				INFOPLIST_FILE = Extension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "WallpaperMachine Wallpapers";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -4856,7 +4856,7 @@
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
 				LIBRARY_SEARCH_PATHS = (
-					"$(SRCROOT)/upstream/renderer/target/release",
+					"$(SRCROOT)/Renderer/target/release",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
@@ -4909,8 +4909,8 @@
 				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
-					"$(SRCROOT)/upstream/mediaremote-adapter/include",
-					"$(SRCROOT)/upstream/mediaremote-adapter/src",
+					"$(SRCROOT)/ThirdParty/mediaremote-adapter/include",
+					"$(SRCROOT)/ThirdParty/mediaremote-adapter/src",
 				);
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -4932,7 +4932,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(SRCROOT)/App/Bridge/Generated",
-					"$(SRCROOT)/upstream/renderer/external/open-wallpaper-engine/src/Platform/Apple",
+					"$(SRCROOT)/Renderer/Engine/src/Platform/Apple",
 				);
 				INFOPLIST_KEY_NSPrincipalClass = WallpaperMachineTestBundle;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -4962,8 +4962,8 @@
 				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
-					"$(SRCROOT)/upstream/mediaremote-adapter/include",
-					"$(SRCROOT)/upstream/mediaremote-adapter/src",
+					"$(SRCROOT)/ThirdParty/mediaremote-adapter/include",
+					"$(SRCROOT)/ThirdParty/mediaremote-adapter/src",
 				);
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -5003,7 +5003,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = (
 					"$(SRCROOT)/App/Bridge/Generated",
-					"$(SRCROOT)/upstream/renderer/external/open-wallpaper-engine/src/Platform/Apple",
+					"$(SRCROOT)/Renderer/Engine/src/Platform/Apple",
 				);
 				INFOPLIST_FILE = App/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -5012,7 +5012,7 @@
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
 				LIBRARY_SEARCH_PATHS = (
-					"$(SRCROOT)/upstream/renderer/target/release",
+					"$(SRCROOT)/Renderer/target/release",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
@@ -5060,7 +5060,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = (
 					"$(SRCROOT)/App/Bridge/Generated",
-					"$(SRCROOT)/upstream/renderer/external/open-wallpaper-engine/src/Platform/Apple",
+					"$(SRCROOT)/Renderer/Engine/src/Platform/Apple",
 				);
 				INFOPLIST_FILE = App/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -5069,7 +5069,7 @@
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
 				LIBRARY_SEARCH_PATHS = (
-					"$(SRCROOT)/upstream/renderer/target/release",
+					"$(SRCROOT)/Renderer/target/release",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
@@ -5117,7 +5117,7 @@
 				CURRENT_PROJECT_VERSION = 44;
 				ENABLE_APP_SANDBOX = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/upstream/renderer/external/open-wallpaper-engine/src/Platform/Apple";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/Renderer/Engine/src/Platform/Apple";
 				INFOPLIST_FILE = Extension/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "WallpaperMachine Wallpapers";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -5127,7 +5127,7 @@
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
 				LIBRARY_SEARCH_PATHS = (
-					"$(SRCROOT)/upstream/renderer/target/release",
+					"$(SRCROOT)/Renderer/target/release",
 					/opt/homebrew/lib,
 					"/opt/homebrew/opt/quickjs-ng/lib",
 				);
@@ -5174,7 +5174,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
 					"$(SRCROOT)/App/Bridge/Generated",
-					"$(SRCROOT)/upstream/renderer/external/open-wallpaper-engine/src/Platform/Apple",
+					"$(SRCROOT)/Renderer/Engine/src/Platform/Apple",
 				);
 				INFOPLIST_KEY_NSPrincipalClass = WallpaperMachineTestBundle;
 				LD_RUNPATH_SEARCH_PATHS = (

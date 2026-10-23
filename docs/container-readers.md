@@ -42,7 +42,7 @@ readers sit in the build and the tree is in
 
 ## Build and tests
 
-The engine's CMake (`upstream/renderer/external/open-wallpaper-engine/CMakeLists.txt`)
+The engine's CMake (`Renderer/Engine/CMakeLists.txt`)
 includes `Renderer/Media` for the library and `Renderer/Media/tests` for the
 executables, which land in `<build>/tests` beside the engine's own and are
 registered in `scripts/check_renderer.py` (`REGRESSION_BINARIES`);

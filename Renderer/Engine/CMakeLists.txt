@@ -25,12 +25,11 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(_wescene_is_top_level ON)
 endif()
 
-# This project's own container readers (wmMedia). The sources live outside
-# upstream/, in the repository's top-level Renderer/Media, and are pure C++17 with
-# no dependency on anything else here. The engine links it, so it has to be
+# The container readers (wmMedia), in Renderer/Media beside the engine: pure C++17
+# with no dependency on anything else here. The engine links it, so it has to be
 # configured from a full checkout.
 get_filename_component(
-    WESCENE_MEDIA_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../Renderer/Media" ABSOLUTE)
+    WESCENE_MEDIA_DIR "${CMAKE_CURRENT_LIST_DIR}/../Media" ABSOLUTE)
 if(EXISTS "${WESCENE_MEDIA_DIR}/CMakeLists.txt")
     add_subdirectory("${WESCENE_MEDIA_DIR}" "${CMAKE_BINARY_DIR}/Renderer/Media")
     # Its Apple platform layer (ObjC++ over VideoToolbox) is a library of its own.
@@ -39,27 +38,31 @@ if(EXISTS "${WESCENE_MEDIA_DIR}/CMakeLists.txt")
     endif()
 endif()
 
-# This project's own sound path (wmSound): remixing, resampling, looping and the
-# decoders behind scene sounds, in the repository's top-level Renderer/Sound. It
+# The sound path (wmSound): remixing, resampling, looping and the decoders behind
+# scene sounds, in Renderer/Sound. It
 # needs wmMedia's ByteSource, so it is only built where wmMedia is.
 get_filename_component(
-    WESCENE_SOUND_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../Renderer/Sound" ABSOLUTE)
+    WESCENE_SOUND_DIR "${CMAKE_CURRENT_LIST_DIR}/../Sound" ABSOLUTE)
 if(TARGET wmMedia AND EXISTS "${WESCENE_SOUND_DIR}/CMakeLists.txt")
     add_subdirectory("${WESCENE_SOUND_DIR}" "${CMAKE_BINARY_DIR}/Renderer/Sound")
 endif()
 
-# This project's own surface pieces (wmSurface): the still preview a wallpaper
-# that cannot be drawn shows instead of an empty layer, in the repository's
-# top-level Renderer/Surface. Self-contained: ImageIO and Core Animation only.
+# The surface pieces (wmSurface): the still preview a wallpaper that cannot be
+# drawn shows instead of an empty layer, in Renderer/Surface. Self-contained:
+# ImageIO and Core Animation only.
 get_filename_component(
-    WESCENE_SURFACE_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../Renderer/Surface" ABSOLUTE)
+    WESCENE_SURFACE_DIR "${CMAKE_CURRENT_LIST_DIR}/../Surface" ABSOLUTE)
 if(EXISTS "${WESCENE_SURFACE_DIR}/CMakeLists.txt")
     add_subdirectory("${WESCENE_SURFACE_DIR}" "${CMAKE_BINARY_DIR}/Renderer/Surface")
 endif()
 
-# Vendored headers are treated as system headers.
-include_directories(SYSTEM third_party)
-add_subdirectory(third_party)
+# The vendored C libraries live in the repository's top-level ThirdParty/ (see
+# ThirdParty/provenance.json); their headers are treated as system headers.
+# Dependencies/ defines their targets and finds the Homebrew packages.
+get_filename_component(
+    WESCENE_THIRD_PARTY_DIR "${CMAKE_CURRENT_LIST_DIR}/../../ThirdParty" ABSOLUTE)
+include_directories(SYSTEM "${WESCENE_THIRD_PARTY_DIR}" "${WESCENE_THIRD_PARTY_DIR}/stb_image")
+add_subdirectory(Dependencies)
 
 option(BUILD_TESTS "Build the wescene-renderer test suite" ${_wescene_is_top_level})
 
@@ -108,4 +111,4 @@ if(BUILD_TESTS)
 endif()
 
 # The waywallen host, QML helper and standalone viewer were removed from this
-# vendored copy (macOS app embeds the library directly); see upstream/provenance.json.
+# engine (macOS app embeds the library directly); see ThirdParty/provenance.json.

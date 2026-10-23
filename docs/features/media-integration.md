@@ -30,7 +30,7 @@ call for scenes that are paused or suspended, and its deliveries are chained so 
 slow cover is never overtaken by the one that replaced it.
 
 **Providers.** The primary provider is `AdapterSystemMediaProvider`. It runs the
-pinned BSD-3-Clause `upstream/mediaremote-adapter` stream through `/usr/bin/perl`;
+pinned BSD-3-Clause `ThirdParty/mediaremote-adapter` stream through `/usr/bin/perl`;
 Xcode builds and embeds `MediaRemoteAdapter.framework` without linking it into
 the application, and the Perl entry point loads it in its own process. This
 accommodates the private MediaRemote interface's restrictions on direct application

@@ -1,6 +1,6 @@
 # Renderer verification
 
-Non-desktop verification of the vendored renderer in `upstream/renderer`: the
+Non-desktop verification of the renderer in `Renderer/`: the
 Rust crates, the C++ scene engine and its GPU probes. Nothing here creates a
 window, swapchain, audio device, or screenshot, and nothing here inspects or
 changes the desktop. What "verified" means and which checks a change needs are
@@ -16,11 +16,11 @@ python3 scripts/check_renderer.py
 It assembles the Homebrew environment from `scripts/build.py`, then:
 
 1. builds `cargo build -p wm-shader --features ffi --release --locked` **from
-   `Renderer/`** (the shader layer's own workspace), because rustup resolves that
+   `Renderer/`** (the Rust workspace), because rustup resolves that
    tree's `rust-toolchain.toml` (nightly) from the working directory, not from
    `--manifest-path`; running it from the repository root picks the default
    stable toolchain instead,
-2. configures CMake over `upstream/renderer/external/open-wallpaper-engine` with
+2. configures CMake over `Renderer/Engine` with
    `CMAKE_BUILD_TYPE=Release`, `BUILD_TESTS=ON`, `RUST_SHADER_FFI=ON`, and
    `RUST_SHADER_STATICLIB` pointing at `Renderer/target/release/libwm_shader.a`,
 3. builds `offscreen_scene_probe`, `scene_reload_cycle_probe`, the separately
@@ -341,8 +341,7 @@ the desktop, media and network opt-ins, and runs, all with `--release --locked`:
 the `wallpaper-core` and `wallpaper-bridge` library tests, five device-free
 `wallpaper-core` integration targets (`core_audio_api`,
 `project_override_json`, `wallpaper_background`, `audio_response_capture_lifecycle`,
-`scene_audio_volume_validation`) and, from
-`Renderer/` (the shader layer's own workspace), `wm-shader` with `ffi`: its unit,
+`scene_audio_volume_validation`) and `wm-shader` with `ffi`: its unit,
 corpus, GPU-probe and C-ABI tests, warnings denied by the crate. It prints and records the five explicit
 desktop exclusions (`CORE_EXCLUSIONS` in the script) and any
 emitted skip reasons. A nonzero command or missing tool fails the check. Full
@@ -371,7 +370,7 @@ an unrelated test with `Resource temporarily unavailable (os error 35)` from `ka
 or a tokio worker is that cap, not the change under test; it also turns up when other
 builds on the same Mac hold the per-user process limit.
 
-Run individual commands from `upstream/renderer` with the Homebrew environment
+Run individual commands from `Renderer/` with the Homebrew environment
 from `scripts/build.py`. The first `cargo test` after that environment changes
 fails in its CMake configure step and succeeds on an unchanged retry, so a single
 configure failure is not a result:
@@ -383,9 +382,8 @@ cargo test --release -p wallpaper-bridge --lib
 cargo test --release -p wallpaper-core --lib audio
 ```
 
-The shader layer (`wm-shader`) is its own workspace and runs from `Renderer/`, not from
-`upstream/renderer`, because rustup reads that tree's `rust-toolchain.toml` from the
-working directory: `cargo test --release --locked -p wm-shader --features ffi`, with
+The shader layer (`wm-shader`) runs from `Renderer/` too, because rustup reads the
+workspace's `rust-toolchain.toml` from the working directory: `cargo test --release --locked -p wm-shader --features ffi`, with
 `--test corpus -- --nocapture` appended for the shipped-shader sweep (a case that finds
 no assets prints `skipped: …` and is not a pass).
 
@@ -675,7 +673,7 @@ artifacts/renderer/bin/tests/scene_schema_part10_test --gtest_filter='*SceneZoom
 
 The video suites (`video_source_input_test`, `unchanged_present_test`, `metal_scene_draw_smoke`) decode H.264 clips written by `Renderer/Testing/synthetic_video.mm`, which is this project's own code and uses Apple frameworks only: a `VTCompressionSession` encodes one group of pictures per binary (640x360, 30 fps, no B-frames, a 200 Mbit/s noise group and a 600-frame single-keyframe bar clip), and an `AVAssetWriter` passthrough input re-times the compressed samples for as many repeats as a test needs, with the salt as iTunes comment metadata and the display matrix as the input transform. The clips carry no colour tags, so the decoders infer the matrix from the picture size and the absolute colours the tests expect depend on that. `EncoderAvailable()` is the guard (a machine with no VideoToolbox H.264 encoder reports it instead of failing on a missing file). `synthetic_video_test` (CPU only, no decoder under test) reads the files back with AVFoundation: frame times, one keyframe per repeat, the eight orientations, no colour extensions and the luma the encoder was given. The same file also writes 10-bit clips (`WriteTenBitVideo`, guarded by `TenBitEncoderAvailable()`): `kTenBitFrames` flat 640x360 frames of HEVC Main10 from `VTCompressionSession`, one keyframe, no B-frames, tagged PQ, HLG or BT.709 in both the bitstream and the container (and optionally a content light level). `synthetic_video_test` checks them with AVFoundation alone (the `hvcC` record says Main 10 and 10 bits, each tag, frame times, the decoded codes), and `vt_frame_decoder_test` requires that the project's reader plus VideoToolbox decode them to `x420` IOSurface frames carrying the curve, primaries and matrix as attachments, which is where the scene import reads them. `Renderer/Testing/hdr_reference.hpp` is the header-only, double-precision CPU reference for the 10-bit kernel (BT.2100, ST 2084, BT.2390, primaries derived from chromaticities), shared by `metal_video_texture_test` and `metal_scene_draw_smoke`. `video_source_input_test` drives the one decoder, the native backend: the input and clock cases (`VideoSourceInput`, `VideoSourceClock`), and the cases about how an embedded payload reaches it (`NativePayloads`: memory or an anonymous file, never a visible one, a stream that breaks part way, a fragmented MP4 and an AVI refused with their reason and nothing staged, a VP9 WebM and an H.264 Matroska with B-frames, the VP8 refusal). `Renderer/Testing` also writes a 60-frame clip with B-frames (`WriteReorderedVideo`) and embeds small clips made once offline (`embedded_clips.hpp`: VP9 128x96 in WebM, since VideoToolbox's VP9 decoder refuses 64x48, H.264 64x48 with B-frames in Matroska, and full-range H.264 and HEVC 64x48 ramps in MP4 with no colr box). The tests that used to count open .mp4 descriptors count `OpenVideoDecoderCount()`.
 
-`scene_schema_tests` also compiles `tests/utils_known_answer_tests.cpp`, which pins the `Random` draws that `WE_TEST_RANDOM_SEED` replays and the `genSha1` digests that key the shader and script caches, so replacing either implementation cannot change them silently. It also compiles `tests/linalg_tests.cpp`, which pins `Utils/Linalg.hpp`, the engine's own linear algebra, bit for bit against `tests/linalg_golden.inc` (results captured once from the library it replaced; the cases that call libm trigonometry are checked only where the host's libm still rounds like the capture host's, and are reported skipped otherwise) and checks the behaviour the engine's call sites rely on. The 4 x 4 inverse and determinant are held to a tolerance there, and a singular matrix with rounding noise may invert differently from the replaced library (see `sceneEngine.linalgChanges` in `upstream/provenance.json`). The rest of the engine's tests use `Utils/Linalg.hpp` types directly, so every other test binary also exercises the library through the engine.
+`scene_schema_tests` also compiles `tests/utils_known_answer_tests.cpp`, which pins the `Random` draws that `WE_TEST_RANDOM_SEED` replays and the `genSha1` digests that key the shader and script caches, so replacing either implementation cannot change them silently. It also compiles `tests/linalg_tests.cpp`, which pins `Utils/Linalg.hpp`, the engine's own linear algebra, bit for bit against `tests/linalg_golden.inc` (results captured once from the library it replaced; the cases that call libm trigonometry are checked only where the host's libm still rounds like the capture host's, and are reported skipped otherwise) and checks the behaviour the engine's call sites rely on. The 4 x 4 inverse and determinant are held to a tolerance there, and a singular matrix with rounding noise may invert differently from the replaced library (see `sceneEngine.linalgChanges` in `ThirdParty/provenance.json`). The rest of the engine's tests use `Utils/Linalg.hpp` types directly, so every other test binary also exercises the library through the engine.
 
 The scene-schema behaviour tests (what `scene_schema_tests.cpp` used to hold beyond its independent remainder) are written in parts, each part in its own executable `scene_schema_partNN_test` built from its own `tests/scene_schema_partNN_*.cpp` files and linked against one shared static library, `scene_schema_support` (`tests/support/schema_fixtures.{hpp,cpp}`). The library is plain headless test data and a thin driver: a read-only `fs::Fs` over a map of path to bytes (mounted at `/assets`), a little-endian byte writer, the binary model and video-texture files, the asset sets (basic image/particle objects, a skinned puppet in its variants, a leaf model layer, the LDR/HDR bloom stand-ins), the scene-file skeletons (quiet canvas, perspective, canvas with a camera object, camera-path clips), `ParseRig`, which parses a scene document through `WPSceneParser` with a null-output sound manager, and a few helpers for reading the parsed tree. `scene_schema_fixtures_selftest` checks the library against the production readers, so a part can rely on it. A new part adds one `add_scene_schema_behavior_test(scene_schema_partNN_test ...)` line to the marked list in `tests/CMakeLists.txt` and one name to `REGRESSION_BINARIES`; it never edits another part's sources or the library (what it needs beyond the library it writes in its own files). Test names say what behaviour they pin, and a part states the behaviour (not a count) in its comments.
 
@@ -878,7 +876,7 @@ The project's own container readers in `Renderer/Media` ([container-readers.md](
 
 Tests that need to see what a scene draws (the pixels of the final picture, the contents of a
 named intermediate target, how many passes a frame opened) use the shared support under
-`upstream/renderer/external/open-wallpaper-engine/tests/support/` instead of building their
+`Renderer/Engine/tests/support/` instead of building their
 own loader. It is test support only and changes no production behaviour. The CMake target
 `scene_test_support` (a static library) carries it; a test executable links it and includes
 `support/gpu_scene.hpp`, `support/scene_package.hpp` and `support/pixels.hpp`. The harness
@@ -1121,7 +1119,7 @@ the layer. Shaders written for a test use the engine's dialect (`mul`, `texSampl
   Engine's. Choosing each layer's level from its projected extent at graph compile
   would fix that and keep the full-size chain for those layers only, at the price of
   more texture memory for them than the display rule; the figures from the mip
-  headers of one machine's library are in `upstream/provenance.json`
+  headers of one machine's library are in `ThirdParty/provenance.json`
   (`textureMipBudgetChanges`).
 - **A scene with `transparentsorting` is drawn in scene order.** Wallpaper Engine
   draws such a perspective scene's objects in two sets: the unmarked ones first, in

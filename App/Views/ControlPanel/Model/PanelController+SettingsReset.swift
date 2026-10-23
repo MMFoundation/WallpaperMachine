@@ -9,7 +9,7 @@ import Foundation
 /// Desktop switch only mirrors, is the system's and stays too.
 extension PanelController {
   /// The engine's defaults for the settings it owns, as `AppConfig::default()` in
-  /// `upstream/renderer/crates/bridge/src/config/app.rs` writes them.
+  /// `Renderer/Bridge/src/config/app.rs` writes them.
   enum EngineSettingDefaults {
     static let batteryMode = BridgeBatteryMode.keepRunning
     static let renderScale: Float = 1

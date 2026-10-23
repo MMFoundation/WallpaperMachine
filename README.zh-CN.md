@@ -108,8 +108,8 @@
 | 层 | 作用 |
 | --- | --- |
 | **Swift 外壳** | AppKit 应用。控制面板是原生 SwiftUI 界面（[`App/Views/ControlPanel`](App/Views/ControlPanel)），[网页壁纸](docs/features/web-wallpapers.md)在各自的 web view 中运行。 |
-| **Rust 核心** | 内置的渲染器（[`upstream/renderer`](upstream/renderer)）：负责显示器、壁纸窗口、视频解码和音频捕获，通过 uniffi 桥接到 Swift。 |
-| **C++ 场景引擎** | Open Wallpaper Engine，静态链接进 Rust 核心，负责绘制场景壁纸。 |
+| **Rust 核心** | 渲染器（[`Renderer/`](Renderer)）：负责显示器、壁纸窗口、视频解码和音频捕获，通过 uniffi 桥接到 Swift。 |
+| **C++ 场景引擎** | 本项目的场景引擎（[`Renderer/Engine`](Renderer/Engine)），静态链接进 Rust 核心，负责绘制场景壁纸。 |
 | **Metal** | 场景直接用原生 Metal 渲染，原生渲染器无法绘制的场景不会被绘制：它保留最后一帧画面，原因显示在[设置 → 性能](docs/features/performance.md)中。视频壁纸由应用自带的播放器播放（AVFoundation，WebM 和 Matroska 文件使用自带的 WebM 播放器）。 |
 | **锁定屏幕** | 一个沙盒化的 ExtensionKit 扩展（[`Extension/`](Extension)）。 |
 
@@ -191,7 +191,7 @@ WallpaperMachine 支持场景、视频和网页渲染。兼容性因壁纸而异
 
 ## 开源与自行构建
 
-完整源代码就在这里。构建需要搭载 Apple 芯片的 Mac、Xcode 26（macOS 15.6 或更高版本）、用 `xcode-select` 选定的完整 Xcode，以及[先决条件](docs/build.md#prerequisites)中列出的 Homebrew 软件包；渲染器和场景引擎内置在[`upstream/`](upstream) 中，而不是以子模块引入。
+完整源代码就在这里。构建需要搭载 Apple 芯片的 Mac、Xcode 26（macOS 15.6 或更高版本）、用 `xcode-select` 选定的完整 Xcode，以及[先决条件](docs/build.md#prerequisites)中列出的 Homebrew 软件包；渲染器和场景引擎位于 [`Renderer/`](Renderer)，第三方代码内置在 [`ThirdParty/`](ThirdParty) 中，而不是以子模块引入。
 
 ```sh
 python3 scripts/build.py --configuration Release   # 渲染器、绑定、Xcode 项目和应用
@@ -234,7 +234,7 @@ python3 scripts/build.py --configuration Release   # 渲染器、绑定、Xcode 
 
 本节为译文，如有出入，以英文 [README](README.md#license) 和 [LICENSE](LICENSE) 为准。
 
-源代码以 GNU 通用公共许可证第 3 版（仅限该版本）提供（[LICENSE](LICENSE)）。上游代码保留其各自的版权和许可声明，记录在 [upstream/provenance.json](upstream/provenance.json) 中。无论是否为支持者，每位接收者都享有 GPL 授予的全部权利。
+源代码以 GNU 通用公共许可证第 3 版（仅限该版本）提供（[LICENSE](LICENSE)）。内置的第三方代码保留其各自的版权和许可声明，记录在 [ThirdParty/provenance.json](ThirdParty/provenance.json) 中。无论是否为支持者，每位接收者都享有 GPL 授予的全部权利。
 
 [LICENSING.md](LICENSING.md) 说明了代码的来源、每个第三方组件的许可证、支持者模式，以及在任何分发之前仍待完成的事项；本 README 不声称任何二进制文件已获准分发或已通过法律审查。构建过去所链接的 Apache-2.0 与 GPL-3.0 组件（MoltenVK、Vulkan loader、SPIRV-Tools、glslang、内置的 spirv_reflect，以及 spirv Rust crate）已于 2026-10-17 在早先的 GPL-2.0-only 政策下移除，这些组件与 GPLv3 兼容。创意工坊壁纸归其创作者所有，场景资源来自你所拥有的 Wallpaper Engine；应用两者都不附带。
 

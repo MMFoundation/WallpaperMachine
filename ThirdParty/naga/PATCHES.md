@@ -7,7 +7,7 @@ project under the MIT license. `LICENSE.MIT` and `LICENSE.APACHE` are the crate'
 vendored. `Cargo.toml.orig` and `.cargo_vcs_info.json` are kept as published and describe the
 unpatched crate; cargo reads only `Cargo.toml`.
 
-`upstream/renderer/Cargo.toml` points the workspace at this copy with `[patch.crates-io]`.
+`Renderer/Cargo.toml` points the workspace at this copy as a path dependency (`[workspace.dependencies]`).
 
 ## Why
 
@@ -54,5 +54,5 @@ shader crate formats the information itself: `WithSpan::spans`, `WithSpan::as_in
    renderer's `glsl-in,spv-out,msl-out`; and that
    `cargo tree -e normal,no-proc-macro --target aarch64-apple-darwin` for the workspace lists no
    `codespan-reporting`.
-4. Update `upstream/provenance.json` and `LICENSING.md`. Drop this patch if upstream makes the
+4. Update `ThirdParty/provenance.json` and `LICENSING.md`. Drop this patch if upstream makes the
    dependency optional.

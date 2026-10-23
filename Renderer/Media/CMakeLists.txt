@@ -2,8 +2,8 @@
 #
 # Pure C++17 with no Apple, FFmpeg or other third-party dependency, so the same
 # sources can be compiled into the app, the sandboxed lock-screen extension and
-# the test binaries. The engine build (upstream/renderer/external/
-# open-wallpaper-engine/CMakeLists.txt) includes this directory for the library
+# the test binaries. The engine build (Renderer/Engine/CMakeLists.txt) includes
+# this directory for the library
 # and Media/tests for the test executables; configuring this directory on its
 # own (`cmake -S Renderer/Media`) builds both with a fetched googletest, which is
 # how the sanitizer build in docs/testing/renderer.md is made.

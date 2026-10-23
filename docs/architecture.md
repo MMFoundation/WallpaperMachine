@@ -22,7 +22,7 @@ flowchart TD
   Generated --> BridgeLib["libwallpaper_bridge.a"]
   BridgeLib --> Core["wallpaper-core (windows, media, display)"]
   Core --> Shader["wm-shader (Renderer/Shader, naga)"]
-  Core --> OWE["Open Wallpaper Engine (C++ wescene-renderer)"]
+  Core --> OWE["Scene engine (C++ wescene-renderer, Renderer/Engine)"]
   Core --> Brew["Homebrew: quickjs-ng, freetype, lz4"]
   Services -->|"LockScreenExchange/configuration.json + Darwin notification"| Ext["WallpaperMachineExtension (sandboxed)"]
   Ext --> BridgeLib
@@ -309,7 +309,7 @@ Rust side resolves the same paths.
 
 ### Desktop wallpaper windows and private-API handling
 
-Three owners create live desktop windows. Scene wallpapers are drawn by the Rust core: `upstream/renderer/crates/core/src/window.rs` defines the
+Three owners create live desktop windows. Scene wallpapers are drawn by the Rust core: `Renderer/Core/src/window.rs` defines the
 `NSWindow` subclass `MWEWallpaperDesktopWindow` (a stable Objective-C name, deliberately
 depended on by Swift) hosting a `CAMetalLayer` at a wallpaper window level. Web projects
 (`MWEWebWallpaperDesktopWindow`, `App/Services/WebWallpaper/`) and every plain video
@@ -558,13 +558,13 @@ rendering](features/scene-rendering.md#live-property-edits).
 
 ### Rust crates and the C++ scene engine
 
-`upstream/renderer` is a Cargo workspace (`resolver = "2"`, edition 2024, GPL-3.0-only) with
-two members:
+`Renderer/` is a Cargo workspace (`resolver = "2"`, edition 2024, GPL-3.0-only) with
+three members:
 
 | Crate | Output | Role |
 |---|---|---|
-| `crates/bridge` (`wallpaper-bridge`, lib name `wallpaper_bridge`) | `staticlib` + `rlib`, plus the `uniffi-bindgen` binary | uniffi API surface (`api/`), kameo actor (`actor/`), engine facade (`engine/`), config store (`config/`), library scanner (`library/`), display rows (`display/`), user assets, logging, login item, power |
-| `crates/core` (`wallpaper-core`) | `rlib` | Runtime state machine (`engine/`): scene reconciliation, display discovery and watching, wallpaper windows, media decode (`media/video`, `media/audio` capture for audio response), render cache, and the `owe` FFI wrappers |
+| `Bridge` (`wallpaper-bridge`, lib name `wallpaper_bridge`) | `staticlib` + `rlib`, plus the `uniffi-bindgen` binary | uniffi API surface (`api/`), kameo actor (`actor/`), engine facade (`engine/`), config store (`config/`), library scanner (`library/`), display rows (`display/`), user assets, logging, login item, power |
+| `Core` (`wallpaper-core`) | `rlib` | Runtime state machine (`engine/`): scene reconciliation, display discovery and watching, wallpaper windows, media decode (`media/video`, `media/audio` capture for audio response), render cache, and the `owe` FFI wrappers |
 
 Within the bridge, `engine/activation.rs` owns the scene/web/native-video/export
 consumers; `engine/activation_remaining.rs` supplies selection and scene construction,
@@ -572,7 +572,7 @@ and `engine/render_settings.rs` resolves render overrides. Display traits and re
 remain in `display/{label,rows}.rs`; their private `replacement` children provide the
 independently authored bodies. `display/rows.rs` retains reconnect alias reconciliation
 and connected-display inheritance. Public exports and host routing are unchanged;
-the scoped authorship records in `upstream/provenance.json` do not clear the whole
+the scoped authorship records in `ThirdParty/provenance.json` do not clear the whole
 workspace's licensing or native behavior.
 
 `actor/transport.rs` owns request delivery and the shared actor-runtime lifetime.
@@ -615,25 +615,26 @@ caps all use that proposal; power, throttle, library and shared cache observatio
 remain actor-owned. Ordinary settings use the same implementation with committed
 configuration, and empty-inventory operation handling still bypasses service reads.
 
-The shader layer is not a member: it is `wm-shader`, this project's own crate in the separate
-workspace `Renderer/` (`Renderer/Shader`, `rlib` + `staticlib`; `Renderer/Cargo.toml` pins naga to the
-patched copy in `upstream/naga`). It turns Wallpaper Engine shader text into Metal Shading Language
+The third member is the shader layer, `wm-shader` (`Renderer/Shader`, `rlib` + `staticlib`;
+`Renderer/Cargo.toml` pins naga to the patched copy in `ThirdParty/naga`). It turns Wallpaper Engine shader text into Metal Shading Language
 through `naga` and exposes thirteen `rs_shader_*` functions to the C++ scene engine through the
 `ffi` feature (header `Renderer/Shader/include/rs_shader.h`; the engine declares them itself in
 `Shader/RustShaderBridge.cpp`). `wallpaper-core` depends on it by path with `ffi`, so the exports end
 up in `libwallpaper_bridge.a`; `OweBackend::initialize` calls `wm_shader::ffi::keep_exports_alive()`,
 which names one of them so the linker keeps the object that holds all thirteen. The layer's design
 choices are in `Renderer/Shader/NOTES.md`. `scripts/check_rust.py` runs its tests from `Renderer/`
-(its own `rust-toolchain.toml`), and `scripts/check_renderer.py` builds `libwm_shader.a` there for
+(the workspace's `rust-toolchain.toml`), and `scripts/check_renderer.py` builds `libwm_shader.a` there for
 the CMake test binaries.
 
-`crates/core/build.rs` drives the C++ layer: it runs `bindgen` over
-`upstream/renderer/external/open-wallpaper-engine/src/Platform/Apple/SceneWallpaperBindings.h`,
-then CMake-builds the `wescene-renderer` target of Open Wallpaper Engine with `BUILD_TESTING`
-and `BUILD_TESTS` off and `RUST_SHADER_FFI` on, and emits the static link flags. Open Wallpaper
-Engine is only the statically linked renderer backend behind bindgen-generated
-`extern "C-unwind"` calls; `core/src/owe/` is deliberately not a runtime layer, and runtime
-state lives in `WallpaperEngine` (`core/src/engine/`).
+`Renderer/Core/build.rs` drives the C++ layer: it runs `bindgen` over
+`Renderer/Engine/src/Platform/Apple/SceneWallpaperBindings.h`,
+then CMake-builds the `wescene-renderer` target of the scene engine (`Renderer/Engine`) with
+`BUILD_TESTING` and `BUILD_TESTS` off and `RUST_SHADER_FFI` on, and emits the static link flags.
+The scene engine is only the statically linked renderer backend behind bindgen-generated
+`extern "C-unwind"` calls; `Core/src/owe/` is deliberately not a runtime layer, and runtime
+state lives in `WallpaperEngine` (`Core/src/engine/`). The engine's vendored C libraries
+(miniaudio, stb_image, stb_vorbis) are in `ThirdParty/`; `Renderer/Engine/Dependencies` defines
+their targets and finds the Homebrew packages.
 
 Per-display configuration (`[[monitors]]` and `[[monitor_settings]]` in `config.toml`) is keyed
 by a selector: the primary display, a live display id, or an identity (UUID, vendor, model,
@@ -834,7 +835,7 @@ User-facing behaviour: [features/lock-screen.md](features/lock-screen.md).
 ## Build and linking
 
 `scripts/build.py` runs the whole chain: `cargo build --workspace --release` in
-`upstream/renderer` (which also bindgen-generates the Open Wallpaper Engine bindings and
+`Renderer/` (which also bindgen-generates the scene engine bindings and
 CMake-builds `wescene-renderer`), `uniffi-bindgen generate` into `App/Bridge/Generated`,
 `xcodegen generate`, then `xcodebuild`. The environment, modes (`--swift-only`,
 `--renderer-only`), outputs and packaging are owned by [build.md](build.md).
@@ -843,7 +844,7 @@ Both the app and the extension link the same renderer flag set (`project.yml` an
 `rendererLibraryPaths` and `rendererLinkerFlags`): `-lwallpaper_bridge`, the C++ runtime,
 `-llz4`, `-lfreetype`, `-lqjs` (quickjs-ng), `-liconv` and the system
 frameworks. Library search paths point at
-`upstream/renderer/target/release` and the Homebrew prefixes. No FFmpeg library is linked:
+`Renderer/target/release` and the Homebrew prefixes. No FFmpeg library is linked:
 video and sound decode with the system frameworks and the project's own readers. What still keeps the bundle from being
 distributable is recorded in [../LICENSING.md](../LICENSING.md#remaining-blockers). A freshly built
 app still depends on Homebrew until `scripts/package.py` bundles its libraries
@@ -854,15 +855,19 @@ app still depends on Homebrew until `scripts/package.py` bundles its libraries
 | Path | Origin |
 |---|---|
 | `App/`, `Extension/`, `Shared/`, `Tests/`, `scripts/`, `project.yml` | This project, GPL-3.0-only (root `LICENSE`); `App/` is a derived work of the renderer's former `app/WallpaperEngine` |
-| `Renderer/` | This project's own renderer code, GPL-3.0-only, outside `upstream/`; C++17 with no third-party dependency, and no Apple dependency except `Renderer/Media/Apple`, the decoder in `Renderer/Sound/Apple` and `Renderer/Surface`. `Renderer/Media` (`wmMedia`) holds the MP4 and Matroska/WebM container readers and `Renderer/Media/Apple` (`wmMediaApple`, ObjC++ with C++ headers) their VideoToolbox layer (codec format descriptions, a decoder session that delivers frames in display order); both are static libraries the scene engine links, and the engine's native video backend plays video textures with them ([container-readers.md](container-readers.md)); `WebMReader` (`Renderer/Media/Apple`, the `WallpaperMedia` module) is the Objective-C face of the Matroska reader that the app's and the lock-screen extension's WebM player use. `Renderer/Sound` (`wmSound`) is the scene-sound path: channel remix, a windowed-sinc resampler, the loop pipeline and an AudioToolbox decoder and an Ogg Vorbis decoder over the vendored stb_vorbis, `Renderer/Sound/Matroska` (the audio of a WebM or Matroska file for the WebM player: Opus, AAC and MP3 through an `AudioConverter`, Vorbis re-framed as an in-memory Ogg stream for stb_vorbis), all reading through `wmMedia`'s `ByteSource`; its pure parts need no Apple framework ([sound-decoding.md](sound-decoding.md)). `Renderer/Surface` (`wmSurface`, ObjC++ over ImageIO and Core Animation with a C++ header) holds the still preview a scene that cannot be drawn shows on a layer that has drawn nothing, and the rule that keeps that picture inside the project's own folder; the engine's failure policy under the Native Metal only renderer preference uses it ([scene rendering](features/scene-rendering.md#when-native-metal-cannot-draw-a-scene)) |
-| `App/Bridge/Generated/` | Build output of the vendored bridge crate |
-| `upstream/renderer/` | Fork of `bigsaltyfishes/wallpaper-engine-for-macos`, modified; its license and origin are recorded in `LICENSING.md` and `upstream/provenance.json` |
-| `upstream/renderer/external/open-wallpaper-engine/` | Fork of `bigsaltyfishes/open-wallpaper-engine`, modified; vendors public-domain/MIT-0 `miniaudio` and public-domain/MIT `stb_vorbis` under `third_party/` |
-| `upstream/mediaremote-adapter/` | `ungive/mediaremote-adapter`, BSD-3-Clause, modified (see `upstream/provenance.json`) |
-| `upstream/naga/` | The published `naga` 29.0.3 crate (MIT OR Apache-2.0, used under MIT), patched so `codespan-reporting` is an optional dependency (`upstream/naga/PATCHES.md`); `upstream/renderer/Cargo.toml` points the workspace at it with `[patch.crates-io]` |
+| `Renderer/` | This project's renderer, GPL-3.0-only: the Rust workspace (`Shader`, `Core`, `Bridge`) and the C++ areas. `Renderer/Engine` is the scene engine (rewritten clean-room from the scene engine the project imported; see below). The other C++ areas are C++17 with no third-party dependency, and no Apple dependency except `Renderer/Media/Apple`, the decoder in `Renderer/Sound/Apple` and `Renderer/Surface`. `Renderer/Media` (`wmMedia`) holds the MP4 and Matroska/WebM container readers and `Renderer/Media/Apple` (`wmMediaApple`, ObjC++ with C++ headers) their VideoToolbox layer (codec format descriptions, a decoder session that delivers frames in display order); both are static libraries the scene engine links, and the engine's native video backend plays video textures with them ([container-readers.md](container-readers.md)); `WebMReader` (`Renderer/Media/Apple`, the `WallpaperMedia` module) is the Objective-C face of the Matroska reader that the app's and the lock-screen extension's WebM player use. `Renderer/Sound` (`wmSound`) is the scene-sound path: channel remix, a windowed-sinc resampler, the loop pipeline and an AudioToolbox decoder and an Ogg Vorbis decoder over the vendored stb_vorbis, `Renderer/Sound/Matroska` (the audio of a WebM or Matroska file for the WebM player: Opus, AAC and MP3 through an `AudioConverter`, Vorbis re-framed as an in-memory Ogg stream for stb_vorbis), all reading through `wmMedia`'s `ByteSource`; its pure parts need no Apple framework ([sound-decoding.md](sound-decoding.md)). `Renderer/Surface` (`wmSurface`, ObjC++ over ImageIO and Core Animation with a C++ header) holds the still preview a scene that cannot be drawn shows on a layer that has drawn nothing, and the rule that keeps that picture inside the project's own folder; the engine's failure policy under the Native Metal only renderer preference uses it ([scene rendering](features/scene-rendering.md#when-native-metal-cannot-draw-a-scene)) |
+| `App/Bridge/Generated/` | Build output of the bridge crate |
+| `ThirdParty/miniaudio/`, `ThirdParty/stb_image/`, `ThirdParty/stb_vorbis/` | The scene engine's vendored C libraries: miniaudio (public domain or MIT-0), stb_image and stb_vorbis (public domain or MIT) |
+| `ThirdParty/received-licenses/` | The GPLv2 texts the imported renderer and scene engine arrived under; a record, not the license of any code in the tree |
+| `ThirdParty/mediaremote-adapter/` | `ungive/mediaremote-adapter`, BSD-3-Clause, modified (see `ThirdParty/provenance.json`) |
+| `ThirdParty/naga/` | The published `naga` 29.0.3 crate (MIT OR Apache-2.0, used under MIT), patched so `codespan-reporting` is an optional dependency (`ThirdParty/naga/PATCHES.md`); `Renderer/Cargo.toml` points the workspace at it as a path dependency |
 
-`upstream/provenance.json` records the repositories, pinned revisions, modification status and
-the current `distributionStatus`. The Workshop browser is recorded there and in
+The renderer, the scene engine and the app shell were imported on 2026-09-14 from
+`bigsaltyfishes/wallpaper-engine-for-macos` and its fork of `open-wallpaper-engine`, and rewritten
+clean-room by 2026-10-22; `Renderer/` holds the rewrite, and the imported code is only in Git
+history ([../LICENSING.md](../LICENSING.md#source-license-gpl-30-only)).
+`ThirdParty/provenance.json` records that history and, for vendored code, the repositories, pinned
+revisions and modification status, with the current `distributionStatus`. The Workshop browser is recorded there and in
 [../LICENSING.md](../LICENSING.md) as independently implemented. Licence policy, the Supporter
 model and the open distribution blockers live in `LICENSING.md`; which notices `scripts/package.py`
 bundles is in [build.md](build.md#packaging-and-installing).
@@ -872,7 +877,7 @@ bundles is in [build.md](build.md#packaging-and-installing).
 | Target | Type | Sources | Notes |
 |---|---|---|---|
 | `WallpaperMachine` | application | `App/`, `Shared/`, `Resources/StarterWallpaper`, `Resources/ReleaseBanners` and `CHANGELOG.md` as resources, the MediaRemote adapter's Perl script and license | Embeds the extension and `MediaRemoteAdapter.framework`; uses `App/Resources/Info.plist` verbatim, including permission-purpose text |
-| `MediaRemoteAdapter` | framework | `upstream/mediaremote-adapter/src` and `include` | Embedded in the app but not linked; the app runs its Perl entry point only while a wallpaper has media integration on |
+| `MediaRemoteAdapter` | framework | `ThirdParty/mediaremote-adapter/src` and `include` | Embedded in the app but not linked; the app runs its Perl entry point only while a wallpaper has media integration on |
 | `WallpaperMachineExtension` | extensionkit-extension | `Extension/`, `Shared/`, the starter preview image | Sandboxed, `APPLICATION_EXTENSION_API_ONLY`, Objective-C bridging header |
 | `WallpaperMachineTests` | bundle.unit-test | `Tests/Unit/` | Hosted in the app binary (`TEST_HOST`/`BUNDLE_LOADER`) |
 | `WallpaperMachineUITests` | bundle.ui-testing | `Tests/UI/` | Separate runner, `TEST_TARGET_NAME: WallpaperMachine` |

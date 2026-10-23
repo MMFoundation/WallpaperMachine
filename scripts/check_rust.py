@@ -10,13 +10,12 @@ import tempfile
 
 from build import cargo_environment
 from lib.glyphs import markers
-from lib.paths import ARTIFACTS, OWN_RENDERER, RENDERER
+from lib.paths import ARTIFACTS, RENDERER
 from lib.xcode import run_quiet, skipped_test_lines
 
 MARK = markers()
 # (name, cargo arguments, workspace directory). Cargo runs inside the workspace it tests:
-# rustup resolves rust-toolchain.toml from the working directory. The shader layer is this
-# project's own workspace (Renderer/), apart from the vendored renderer's (upstream/renderer).
+# rustup resolves rust-toolchain.toml from the working directory.
 CHECKS = (
     ("core", ("-p", "wallpaper-core", "--lib"), RENDERER),
     ("bridge", ("-p", "wallpaper-bridge", "--lib"), RENDERER),
@@ -25,7 +24,7 @@ CHECKS = (
                           "--test", "wallpaper_background",
                           "--test", "audio_response_capture_lifecycle",
                           "--test", "scene_audio_volume_validation"), RENDERER),
-    ("shader", ("-p", "wm-shader", "--features", "ffi"), OWN_RENDERER),
+    ("shader", ("-p", "wm-shader", "--features", "ffi"), RENDERER),
 )
 OPT_INS = ("WE_RUN_MACOS_WINDOW_TESTS", "WALLPAPER_MACHINE_MEDIA_TESTS", "WALLPAPER_MACHINE_NETWORK_TESTS")
 _DESKTOP_RUN = "requires an explicitly authorized desktop run"
@@ -47,7 +46,7 @@ def run_checks(output, environment, runner=run_quiet, *, observer_uniform_layout
         print(f"{MARK.warn} Excluded {test}: {reason}")
     checks = CHECKS
     if observer_uniform_layout:
-        checks += (("shader-observer", ("-p", "wm-shader", "--features", "ffi,observer-uniform-layout"), OWN_RENDERER),)
+        checks += (("shader-observer", ("-p", "wm-shader", "--features", "ffi,observer-uniform-layout"), RENDERER),)
     with tempfile.TemporaryDirectory(prefix="wallpaper-rust-tests-") as home:
         env = dict(environment)
         for variable in OPT_INS:

@@ -73,7 +73,7 @@ The rules contributors trip over; [AGENTS.md](AGENTS.md) and
 - **Never hand-edit generated files.** `WallpaperMachine.xcodeproj` comes from
   `project.yml`; `App/Bridge/Generated` comes from `uniffi-bindgen`. Change the
   source, regenerate, commit both.
-- **Never change `upstream/` without updating `upstream/provenance.json`.** That
+- **Never change `ThirdParty/` without updating `ThirdParty/provenance.json`.** That
   file is the record of which third-party revision is vendored.
 - **Never commit `artifacts/` or `build/`.** Both are Git-ignored and disposable.
   Screenshots, traces, wallpaper payloads, Steam session data and personal paths

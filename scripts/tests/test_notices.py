@@ -120,7 +120,7 @@ class NoticeTests(unittest.TestCase):
         self.cargo = self.root / "cargo"
         self.registry = self.cargo / "registry/src/index.crates.io-test"
         self.environment = {"CARGO_HOME": str(self.cargo)}
-        patches = [mock.patch.object(notices, "UPSTREAM", self.root / "upstream"),
+        patches = [mock.patch.object(notices, "THIRD_PARTY", self.root / "ThirdParty"),
                    mock.patch.object(notices, "SUPPLEMENTS", self.root / "supplements")]
         for patch in patches:
             patch.start()
@@ -140,11 +140,11 @@ class NoticeTests(unittest.TestCase):
         self.assertEqual([label for label, _ in notice.texts], ["LICENSE-MIT"])
         self.assertEqual(notice.chosen, ("MIT",))
 
-    def test_a_vendored_crate_reads_its_copy_under_upstream(self):
-        write(self.root / "upstream/naga", {"Cargo.toml": "[package]\n", "LICENSE.MIT": MIT, "LICENSE.APACHE": APACHE})
+    def test_a_vendored_crate_reads_its_copy_under_third_party(self):
+        write(self.root / "ThirdParty/naga", {"Cargo.toml": "[package]\n", "LICENSE.MIT": MIT, "LICENSE.APACHE": APACHE})
         notice = self.find(self.build([crate("naga", "29.0.3", "MIT OR Apache-2.0")]), "naga")
         self.assertTrue(notice.found)
-        self.assertEqual([text for _, text in notice.texts], [notices.read(self.root / "upstream/naga/LICENSE.MIT")])
+        self.assertEqual([text for _, text in notice.texts], [notices.read(self.root / "ThirdParty/naga/LICENSE.MIT")])
 
     def test_a_crate_without_a_license_text_is_not_found_and_says_why(self):
         write(self.registry / "objc2-0.6.4", {"README.md": "x"})
@@ -193,8 +193,8 @@ class NoticeTests(unittest.TestCase):
         self.assertEqual([notice.name for notice in self.build([component]).missing], ["lz4"])
 
     def test_vendored_code_reads_its_repository_files(self):
-        write(self.root / "third_party/miniaudio", {"LICENSE": MIT})
-        with mock.patch.dict(notices.VENDORED_FILES, {"miniaudio": [self.root / "third_party/miniaudio/LICENSE"]}):
+        write(self.root / "ThirdParty/miniaudio", {"LICENSE": MIT})
+        with mock.patch.dict(notices.VENDORED_FILES, {"miniaudio": [self.root / "ThirdParty/miniaudio/LICENSE"]}):
             component = check_licenses.Component("miniaudio", "vendored", "inventory", "", "Unlicense OR MIT-0", "map")
             notice = self.find(self.build([component]), "miniaudio")
         self.assertTrue(notice.found)

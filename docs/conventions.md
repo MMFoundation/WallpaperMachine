@@ -14,12 +14,13 @@ raise the conflict rather than reformatting someone else's code in passing.
   (`Shell/`, `Library/`, `Inspector/`, `Discover/`, `Downloads/`, `Pixiv/`,
   `Settings/`, `Welcome/`) beside the shared `Model/`, `Components/`, `Theme/`,
   `Localization/` and `Images/`.
-- Third-party sources stay under `upstream/` (the renderer in `upstream/renderer/`,
-  the patched `naga` crate in `upstream/naga/`). Do not add first-party app code
+- Third-party sources stay under `ThirdParty/` (the patched `naga` crate, the
+  MediaRemote adapter, the scene engine's C libraries). Do not add first-party code
   there, and do not change vendored sources without recording the revision in
-  `upstream/provenance.json`.
-- Renderer code this project writes itself goes in `Renderer/<Area>/`, never
-  under `upstream/`: pure C++17 until a layer needs a platform API, written from
+  `ThirdParty/provenance.json`.
+- Renderer code goes in `Renderer/`: the Rust crates (`Shader/`, `Core/`, `Bridge/`),
+  the scene engine (`Engine/`) and the other C++ areas (`Renderer/<Area>/`, never
+  under `ThirdParty/`): pure C++17 until a layer needs a platform API, written from
   public specifications rather than copied from another implementation, with its
   tests in `Renderer/<Area>/tests/` registered in `scripts/check_renderer.py`
   (today `Renderer/Media/`, `Renderer/Sound/` and `Renderer/Surface/`, see
@@ -94,7 +95,7 @@ Adding a new target, source directory, resource or build setting means editing
   the real library.
 - **`App/Bridge/Generated/` is build output.** It is written by `uniffi-bindgen`
   during [the build](build.md); hand edits are lost on the next build. Change the
-  bridge crate under `upstream/renderer/` and regenerate.
+  bridge crate in `Renderer/Bridge/` and regenerate.
 - Comments explain a decision that is not visible from the code (why a staging
   directory is a sibling of the library, why an rpath is deleted). `///` doc
   comments state a type's responsibility in one line. No commentary that restates
@@ -297,7 +298,7 @@ The rules that bind every change:
   - a behavior change and the documentation that describes that behavior;
   - a new user-facing string and every shipped catalog;
   - `README.md` and `README.zh-CN.md`;
-  - a vendored `upstream/` update and `upstream/provenance.json`.
+  - a vendored `ThirdParty/` update and `ThirdParty/provenance.json`.
 - History stays linear: catch up with `origin/main` by rebasing unpushed commits
   (`git pull --rebase`), not with a `Merge remote-tracking branch` commit. CI commits
   to `main` on its own (version bumps, the Supporter list), so a local `main`

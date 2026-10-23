@@ -37,7 +37,7 @@ import sys
 import time
 
 from lib.glyphs import markers
-from lib.paths import ARTIFACTS, ROOT
+from lib.paths import ARTIFACTS, PROVENANCE, ROOT, THIRD_PARTY
 
 MARK = markers()
 POWER_ARTIFACTS = ARTIFACTS / "power"
@@ -283,7 +283,7 @@ def renderer_libraries():
 
 def provenance():
     """Pinned revision of every vendored component that ships in the build."""
-    path = ROOT / "upstream/provenance.json"
+    path = PROVENANCE
     if not path.is_file():
         return {}
     try:
@@ -292,11 +292,14 @@ def provenance():
         return {}
     if not isinstance(data, dict):
         return {}
-    # Entries without a revision describe first-party directories recorded for
-    # licensing, not pinned third-party code, so they identify nothing here.
+    # Entries outside ThirdParty/ describe first-party directories recorded for
+    # licensing (the rewritten renderer keeps the revision it was imported at), not
+    # pinned third-party code, so they identify nothing here.
+    vendored = f"{THIRD_PARTY.name}/"
     return {entry["directory"]: entry["revision"]
             for entry in data.values()
-            if isinstance(entry, dict) and "directory" in entry and entry.get("revision")}
+            if isinstance(entry, dict) and str(entry.get("directory", "")).startswith(vendored)
+            and entry.get("revision")}
 
 
 def manifest(args):

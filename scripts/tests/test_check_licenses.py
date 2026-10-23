@@ -50,7 +50,7 @@ cfg-if v1.0.4|MIT OR Apache-2.0 (*)
 mystery v1.0.0|
 legacy-crate v0.9.0|EPL-1.0
 
-wallpaper-core v0.2.0 (/work/upstream/renderer/crates/core)|GPL-3.0-only
+wallpaper-core v0.2.0 (/work/Renderer/Core)|GPL-3.0-only
 cfg-if v1.0.4|MIT OR Apache-2.0 (*)
 """
 CLEAN_TREE_OUTPUT = "wallpaper-core v0.2.0 (/work/crates/core)|GPL-3.0-only\ncfg-if v1.0.4|MIT OR Apache-2.0\n"
@@ -203,9 +203,9 @@ class CargoTreeTests(unittest.TestCase):
 
     def test_a_vendored_path_crate_is_third_party_with_the_license_its_manifest_declares(self):
         text = (
-            "wallpaper-core v0.2.0 (/work/upstream/renderer/crates/core)|GPL-3.0-only\n"
-            "naga v29.0.3 (/work/upstream/naga)|MIT OR Apache-2.0\n"
-            "naga v29.0.3 (/work/upstream/naga)|MIT OR Apache-2.0 (*)\n"
+            "wallpaper-core v0.2.0 (/work/Renderer/Core)|GPL-3.0-only\n"
+            "naga v29.0.3 (/work/ThirdParty/naga)|MIT OR Apache-2.0\n"
+            "naga v29.0.3 (/work/ThirdParty/naga)|MIT OR Apache-2.0 (*)\n"
             "cfg-if v1.0.4|MIT OR Apache-2.0\n"
         )
         components = {c.name: c for c in check_licenses.parse_cargo_tree(text)}
@@ -218,19 +218,20 @@ class CargoTreeTests(unittest.TestCase):
     def test_vendored_crates_are_told_apart_by_directory_under_the_repository_root(self):
         root = check_licenses.ROOT
         for path, vendored in (
-            (root / "upstream/naga", True),
-            (root / "upstream/naga/crate", True),
+            (root / "ThirdParty/naga", True),
+            (root / "ThirdParty/naga/crate", True),
             (root / "Renderer/Shader", False),
             (root / "tools/helper", False),
-            (Path("/elsewhere/upstream/naga"), True),
-            (Path("/elsewhere/upstream/renderer/crates/core"), False),
+            (Path("/elsewhere/ThirdParty/naga"), True),
+            (Path("/elsewhere/Renderer/Core"), False),
+            (root / "ThirdParty", False),
             (Path("/work/crates/core"), False),
         ):
             with self.subTest(path=str(path)):
                 self.assertEqual(check_licenses.is_vendored_crate(str(path)), vendored)
 
     def test_a_vendored_crate_with_a_rejected_license_is_flagged(self):
-        text = "naga v29.0.3 (/work/upstream/naga)|GPL-2.0-only\n"
+        text = "naga v29.0.3 (/work/ThirdParty/naga)|GPL-2.0-only\n"
         (naga,) = check_licenses.parse_cargo_tree(text)
         self.assertEqual(naga.kind, "crate")
         self.assertEqual(check_licenses.assess(naga)[0], "gpl2")
@@ -381,12 +382,12 @@ class InventoryTests(unittest.TestCase):
         self.build_rs = self.tmp / "build.rs"
         self.build_rs.write_text(BUILD_RS)
         (self.engine / "src/Audio").mkdir(parents=True)
-        (self.engine / "third_party").mkdir(parents=True)
-        (self.engine / "third_party/glad").mkdir()
-        (self.engine / "third_party/miniaudio").mkdir()
-        (self.engine / "third_party/mystery_lib").mkdir()
-        (self.engine / "third_party/stb_image.h").write_text("")
-        (self.engine / "third_party/CMakeLists.txt").write_text(
+        self.third_party = self.tmp / "ThirdParty"
+        for name in ("glad", "miniaudio", "mystery_lib", "naga", "mediaremote-adapter", "received-licenses"):
+            (self.third_party / name).mkdir(parents=True)
+        (self.third_party / "stb_image.h").write_text("")
+        (self.engine / "Dependencies").mkdir()
+        (self.engine / "Dependencies/CMakeLists.txt").write_text(
             "find_package(PkgConfig REQUIRED)\nfind_package(nlohmann_json CONFIG REQUIRED)\n# find_package(Commented REQUIRED)\n")
         (self.engine / "src/CMakeLists.txt").write_text(
             "find_package(Threads REQUIRED)\npkg_check_modules(LZ4 REQUIRED IMPORTED_TARGET liblz4)\n"
@@ -394,7 +395,7 @@ class InventoryTests(unittest.TestCase):
         (self.engine / "src/Audio/CMakeLists.txt").write_text("find_package(Brand_New_Package REQUIRED)\n")
 
     def components(self):
-        return {c.name: c for c in check_licenses.inventory_components(self.engine, self.build_rs)}
+        return {c.name: c for c in check_licenses.inventory_components(self.engine, self.build_rs, self.third_party)}
 
     def test_link_lists_come_from_the_build_script_comments_ignored(self):
         self.assertEqual(check_licenses.link_lists(self.build_rs),
@@ -430,6 +431,12 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(check_licenses.assess(components[name])[0], "unknown", name)
             self.assertIsNone(components[name].license)
 
+    def test_third_party_entries_other_sections_check_are_not_engine_inventory(self):
+        components = self.components()
+        for name in ("naga", "mediaremote-adapter", "received-licenses"):
+            self.assertNotIn(name, components)
+        self.assertEqual(components["miniaudio"].reached_from, ("ThirdParty/miniaudio",))
+
     def test_unlinked_system_and_tool_entries_do_not_count_against_the_policy(self):
         components = self.components()
         self.assertEqual(check_licenses.assess(components["glad"])[0], "not-linked")
@@ -448,7 +455,7 @@ class InventoryTests(unittest.TestCase):
     def test_an_unrecognised_build_script_is_an_error_not_an_empty_list(self):
         self.build_rs.write_text("fn main() {}\n")
         with self.assertRaises(check_licenses.ToolError):
-            check_licenses.inventory_components(self.engine, self.build_rs)
+            check_licenses.inventory_components(self.engine, self.build_rs, self.third_party)
 
 
 class ReportTests(unittest.TestCase):
@@ -457,8 +464,10 @@ class ReportTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.tmp = Path(directory.name).resolve()
         self.engine = self.tmp / "engine"
-        (self.engine / "third_party/miniaudio").mkdir(parents=True)
-        (self.engine / "third_party/CMakeLists.txt").write_text("find_package(argparse CONFIG REQUIRED)\n")
+        self.third_party = self.tmp / "ThirdParty"
+        (self.third_party / "miniaudio").mkdir(parents=True)
+        (self.engine / "Dependencies").mkdir(parents=True)
+        (self.engine / "Dependencies/CMakeLists.txt").write_text("find_package(argparse CONFIG REQUIRED)\n")
         self.build_rs = self.tmp / "build.rs"
         self.build_rs.write_text('for lib in ["lz4"] { println!("cargo:rustc-link-lib=dylib={lib}"); }\n')
         self.app = self.tmp / "Test.app"
@@ -475,6 +484,7 @@ class ReportTests(unittest.TestCase):
         stdout = io.StringIO()
         with contextlib.ExitStack() as stack:
             stack.enter_context(mock.patch.object(check_licenses, "ENGINE", self.engine))
+            stack.enter_context(mock.patch.object(check_licenses, "THIRD_PARTY", self.third_party))
             stack.enter_context(mock.patch.object(check_licenses, "CORE_BUILD_SCRIPT", self.build_rs))
             stack.enter_context(contextlib.redirect_stdout(stdout))
             code = check_licenses.main(argv, runner=tools, environment={}, licensing_text=licensing)
@@ -509,7 +519,7 @@ class ReportTests(unittest.TestCase):
 
     def test_a_clean_closure_passes_even_when_enforced(self):
         tools = FakeTools(otool={"Main": []}, tree=CLEAN_TREE_OUTPUT)
-        (self.engine / "third_party/miniaudio").mkdir(exist_ok=True)
+        (self.third_party / "miniaudio").mkdir(exist_ok=True)
         code, output, _ = self.check("--enforce", tools=tools)
         self.assertEqual(code, 0, output)
         self.assertEqual(self.report()["counts"]["failing"], 0)

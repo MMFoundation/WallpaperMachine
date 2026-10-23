@@ -17,7 +17,7 @@ writes that configuration to `artifacts/power/manifest-<timestamp>.json`:
 workspace commit and whether the tree was dirty, requested build configuration,
 chip and memory, macOS build, every online display's pixel geometry and refresh
 rate, charging and low-power state, recorded thermal warnings, current host
-Homebrew versions, and the workspace's pinned `upstream/` revisions. These
+Homebrew versions, and the pinned revisions of the vendored code in `ThirdParty/`. These
 workspace and host fields do not identify the application already running.
 
 Schema version 2 separates `workspace`, `host_renderer_libraries` and

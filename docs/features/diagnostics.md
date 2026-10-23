@@ -8,7 +8,7 @@ see [power-benchmark.md](../testing/power-benchmark.md#runtime-counters).
 
 One log for the whole process. Swift (`App/Logging/AppLog.swift`), the Rust bridge
 and core, and the C++ renderer all write into the bridge's `ApplicationLogger`
-(`upstream/renderer/crates/bridge/src/logging.rs`). Files live under
+(`Renderer/Bridge/src/logging.rs`). Files live under
 `<app support>/Logs/<session>/<N>.log`. Each launch is one session, named by its
 start time (`20260927-150211`, `-1`, `-2`… for same-second launches).
 
@@ -517,11 +517,11 @@ Advanced), then pick the page from the **Develop** menu's submenu for this Mac.
 ## Verification
 
 - Rust:
-  - `tests::wake_revalidation` (`upstream/renderer/crates/bridge/src/tests/`): which scenes
+  - `tests::wake_revalidation` (`Renderer/Bridge/src/tests/`): which scenes
     the wake check probes and repairs, against scripted frame counters.
-  - `logging::tests` (`upstream/renderer/crates/bridge/src/logging.rs`): line format, load tag, session and
+  - `logging::tests` (`Renderer/Bridge/src/logging.rs`): line format, load tag, session and
     file retention.
-  - `log_context::tests` (`upstream/renderer/crates/core/src/log_context.rs`): scope nesting, project summary.
+  - `log_context::tests` (`Renderer/Core/src/log_context.rs`): scope nesting, project summary.
   - `settings_intents::verbose_logging_persists_across_relaunch_and_can_be_turned_off`.
 - Swift: `AppLogRouterTests`, `DiagnosticsRedactorTests`, `DiagnosticsBundleTests`,
   `SessionLedgerTests`, `CrashReportIndexTests`, `UncaughtExceptionLogTests`,

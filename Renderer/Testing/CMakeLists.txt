@@ -1,9 +1,8 @@
 # Synthetic video for the renderer's tests: a VideoToolbox H.264 encoder and an
 # AVAssetWriter passthrough writer, behind a header that is plain C++.
 #
-# Project-owned code, deliberately outside upstream/. It depends on Apple
-# frameworks only, so the files it writes are not produced by the libraries
-# the decoders under test are built from.
+# It depends on Apple frameworks only, so the files it writes are not produced
+# by the libraries the decoders under test are built from.
 find_library(AVFOUNDATION_FRAMEWORK AVFoundation REQUIRED)
 find_library(CORE_GRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
 find_library(CORE_MEDIA_FRAMEWORK CoreMedia REQUIRED)

@@ -57,7 +57,7 @@ command produces the same build from a terminal, an editor, or CI.
 | `CC` / `CXX` | `/usr/bin/clang`, `/usr/bin/clang++` | Apple Clang, not a Homebrew LLVM that happens to be first on `PATH`. |
 | `MACOSX_DEPLOYMENT_TARGET` | `15.0` | Set for `xcodegen` and `xcodebuild`. Deliberately **not** in cargo's environment: cargo builds proc-macro crates for the host and dlopens them in the running compiler, and a pinned host dylib is rejected at load with `mis-aligned LINKEDIT`, which the compiler reports as `can't find crate for <macro>`. |
 | `OWE_MACOSX_DEPLOYMENT_TARGET` | `15.0` | The same value under a name cargo ignores. The renderer crate's build script passes it as `CMAKE_OSX_DEPLOYMENT_TARGET`, so the C++ engine keeps the minimum the app links against. |
-| `GIT_SHORT_COMMIT` | `git rev-parse --short HEAD` in the repository root | Stamps the build with the revision it was built from; Settings shows it as `Git revision`. The renderer build runs with `upstream/renderer` as its working directory, so HEAD is resolved against the repository root explicitly. |
+| `GIT_SHORT_COMMIT` | `git rev-parse --short HEAD` in the repository root | Stamps the build with the revision it was built from; Settings shows it as `Git revision`. The renderer build runs with `Renderer/` as its working directory, so HEAD is resolved against the repository root explicitly. |
 
 ## Stages and outputs
 
@@ -82,12 +82,12 @@ Xcode 26's `actool` crashes on most `.icon` compiles: CI compiles the icon on
 macOS 26 ([release.md](release.md#build-buildyml)), and a local build on macOS 15
 can do the same (see Troubleshooting). A build on macOS 26 never needs them.
 
-1. **Renderer** — `cargo build --workspace --release` in `upstream/renderer`.
+1. **Renderer** — `cargo build --workspace --release` in `Renderer/`.
    The Rust crates and the C++ scene engine are always built in release mode,
    independently of `--configuration`. Output lands in
-   `upstream/renderer/target/release`, including the static library
+   `Renderer/target/release`, including the static library
    `libwallpaper_bridge.a` the app links as `-lwallpaper_bridge`.
-2. **Swift bindings** — `upstream/renderer/target/release/uniffi-bindgen generate
+2. **Swift bindings** — `Renderer/target/release/uniffi-bindgen generate
    --library …/libwallpaper_bridge.a --language swift --no-format --out-dir
    App/Bridge/Generated`. This writes `WallpaperBridge.swift` plus the FFI header
    and module map. `App/Bridge/Generated` is build output: never edit it, and
@@ -99,7 +99,7 @@ can do the same (see Troubleshooting). A build on macOS 26 never needs them.
    WallpaperMachine -configuration <cfg> -derivedDataPath build build`. The app
    target embeds the `WallpaperMachineExtension` ExtensionKit extension.
    It also builds and embeds the unlinked `MediaRemoteAdapter.framework` from
-   the pinned BSD-3-Clause sources under `upstream/mediaremote-adapter`, and
+   the pinned BSD-3-Clause sources under `ThirdParty/mediaremote-adapter`, and
    includes its Perl entry point and license as app resources. Building or
    testing does not launch that helper.
 
@@ -109,7 +109,7 @@ Products:
 |---|---|
 | `build/Build/Products/Debug/WallpaperMachine.app` | Debug app, used by `scripts/test.py` |
 | `build/Build/Products/Release/WallpaperMachine.app` | Release app; this is the bundle the user runs, who quits and reopens it to load a new build |
-| `upstream/renderer/target/release/` | Renderer static library (`libwallpaper_bridge.a`, which contains the shader layer) and `uniffi-bindgen` |
+| `Renderer/target/release/` | Renderer static library (`libwallpaper_bridge.a`, which contains the shader layer) and `uniffi-bindgen` |
 | `Renderer/target/release/` | The shader layer on its own (`libwm_shader.a`), built only by `scripts/check_renderer.py` and `scripts/check_rust.py` for the C++ and Rust tests |
 | `App/Bridge/Generated/` | Generated uniffi Swift bindings |
 
@@ -127,7 +127,7 @@ to see the raw stream as well, or open the log named in the failure line.
 | Mode | Use when | Requires |
 |---|---|---|
 | Full (no flag) | Renderer, bridge crate, or first build of a clean checkout. | All prerequisites. |
-| `--swift-only` | Only Swift, resources, or `project.yml` changed. | `upstream/renderer/target/release/libwallpaper_bridge.a` and `App/Bridge/Generated` must already exist from an earlier full build. |
+| `--swift-only` | Only Swift, resources, or `project.yml` changed. | `Renderer/target/release/libwallpaper_bridge.a` and `App/Bridge/Generated` must already exist from an earlier full build. |
 | `--renderer-only` | Iterating on Rust/C++ or the uniffi interface without needing an app bundle. | Nothing further; it stops after regenerating bindings. |
 
 ## Packaging and installing
@@ -161,7 +161,7 @@ bundle is absent.
      app.** Preview with `--dry-run`, keep a copy of any app you still need,
      and only then clean and rebuild; nothing cleans automatically.
    - The notice payload must exist: repository `LICENSE`, `LICENSING.md`,
-     `upstream/renderer/LICENSE.upstream-GPL-2.0`, `upstream/provenance.json`, the
+     `ThirdParty/received-licenses/wallpaper-engine-for-macos.GPL-2.0.txt`, `ThirdParty/provenance.json`, the
      Xcode-bundled `Resources/LICENSE` (mediaremote-adapter, BSD-3-Clause) and
      the extension's `Phosphene-LICENSE.txt`, and a `LICENSE*`/`COPYING*`/
      `COPYRIGHT*`/`NOTICE*` file in every Homebrew keg the link closure
@@ -201,8 +201,8 @@ bundle is absent.
    and Rust-crate inventories; see [testing](testing/README.md).
 2. **License payload.** The root `LICENSE` is copied in as
    `WallpaperMachine-LICENSE.txt`, `LICENSING.md` as `LICENSING.md`,
-   `upstream/renderer/LICENSE.upstream-GPL-2.0` (the terms the imported renderer arrived under, not the license of the code now) as `Imported-Renderer-GPL-2.0-LICENSE.txt`,
-   `upstream/provenance.json` as `provenance.json`, each bundled keg's notices
+   `ThirdParty/received-licenses/wallpaper-engine-for-macos.GPL-2.0.txt` (the terms the imported renderer arrived under, not the license of the code now) as `Imported-Renderer-GPL-2.0-LICENSE.txt`,
+   `ThirdParty/provenance.json` as `provenance.json`, each bundled keg's notices
    under `Licenses/<formula>-<version>/`, the notices of the third-party
    code statically linked into the renderer under
    `Licenses/renderer-third-party/`, and the generated
@@ -336,7 +336,7 @@ whole tree, which is how tests stay isolated from your real library.
 | `cargo`/CMake stops with a missing header, library or `.pc` file | One of the Homebrew packages above is not installed, so its `opt/<package>` root contributed nothing to `CMAKE_PREFIX_PATH`/`PKG_CONFIG_PATH` | Install the package list, then rebuild. |
 | `cargo`/CMake configure fails once, immediately after the environment changed, and an unmodified retry succeeds | The renderer's CMake configure step is not robust to a changed `CMAKE_PREFIX_PATH`/`PKG_CONFIG_PATH` on its first run in a directory | Retry the same command once before investigating. Running `cargo` with a bare shell environment fails outright for the same reason |
 | `brew: command not found` or `xcode-select` failure during startup | `build_environment()` shells out to `brew --prefix`, `xcode-select -p` and `xcrun` before any stage runs | Install Homebrew; select a full Xcode with `sudo xcode-select -s /Applications/Xcode.app`. |
-| Linker reports `library 'wallpaper_bridge' not found`, or Swift cannot find the generated bridge module | `--swift-only` was used without an earlier full build, so `upstream/renderer/target/release` and `App/Bridge/Generated` are empty | Run `python3 scripts/build.py` once without `--swift-only`. |
+| Linker reports `library 'wallpaper_bridge' not found`, or Swift cannot find the generated bridge module | `--swift-only` was used without an earlier full build, so `Renderer/target/release` and `App/Bridge/Generated` are empty | Run `python3 scripts/build.py` once without `--swift-only`. |
 | `xcodegen: command not found` | XcodeGen missing; both `scripts/build.py` and `scripts/test.py` regenerate the project | `brew install xcodegen`. |
 | Renderer changes have no effect on the app | The run used `--swift-only` | Rebuild without the flag. |
 | `Unbundled dependency:` or `Missing bundled dependency:` during packaging | A new native dependency is reachable from a binary but was not copied into `Contents/Frameworks` — usually loaded through an `@rpath` name with no Homebrew `lib/<name>` counterpart | Add the library to the Homebrew package list so the relocation walk can find it, then repackage. Never ship the bundle with the audit bypassed. |

@@ -246,7 +246,7 @@ gtest_discover_tests(
 # How a scene becomes shader compile jobs (always run) and the opt-in whole-corpus
 # compile sweep (DISABLED_ParsesCorpus). The unpack root default is compiled in; the
 # environment overrides it at run time.
-get_filename_component(_wescene_default_unpack_root "${CMAKE_CURRENT_SOURCE_DIR}/../../../unpack" ABSOLUTE)
+get_filename_component(_wescene_default_unpack_root "${CMAKE_CURRENT_SOURCE_DIR}/../../unpack" ABSOLUTE)
 add_executable(shader_corpus_test shader_corpus_unit_test.cpp shader_corpus_sweep_test.cpp)
 target_link_libraries(shader_corpus_test PRIVATE ${PROJECT_NAME} wpFs wpScene nlohmann_json::nlohmann_json GTest::gtest_main)
 if(DEFINED RUST_SHADER_STATICLIB AND NOT "${RUST_SHADER_STATICLIB}" STREQUAL "")
@@ -595,12 +595,12 @@ gtest_discover_tests(
     DISCOVERY_TIMEOUT 60
 )
 
-# The synthetic media the video tests decode. It is this project's own code and
-# lives outside upstream/: a VideoToolbox encoder and an AVAssetWriter, so the
+# The synthetic media the video tests decode, in Renderer/Testing: a VideoToolbox
+# encoder and an AVAssetWriter, so the
 # files a decoder under test is shown were not produced by that decoder's
 # library. `synthetic_video_test` checks the fixture itself, with AVFoundation.
 get_filename_component(WESCENE_RENDERER_TESTING_DIR
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Renderer/Testing" ABSOLUTE)
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../Testing" ABSOLUTE)
 if(APPLE)
     add_subdirectory(${WESCENE_RENDERER_TESTING_DIR} ${CMAKE_CURRENT_BINARY_DIR}/synthetic_video)
     add_executable(synthetic_video_test
@@ -620,11 +620,11 @@ if(APPLE)
 endif()
 
 # The Apple adapter of the container readers (Renderer/Media/Apple), on real
-# VideoToolbox decoding of the synthetic clips. Project-owned test, outside
-# upstream/, registered here because the fixture library is built here.
+# VideoToolbox decoding of the synthetic clips, registered here because the
+# fixture library is built here.
 if(APPLE)
     get_filename_component(WESCENE_MEDIA_APPLE_TESTS_DIR
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Renderer/Media/Apple/tests" ABSOLUTE)
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../Media/Apple/tests" ABSOLUTE)
     add_executable(vt_frame_decoder_test
         ${WESCENE_MEDIA_APPLE_TESTS_DIR}/vt_frame_decoder_test.mm)
     target_link_libraries(vt_frame_decoder_test PRIVATE
@@ -1039,7 +1039,7 @@ endif()
 # This target never opens a real audio context or links the renderer's audio unit.
 if(APPLE)
   add_executable(miniaudio_failure_paths_test miniaudio_failure_paths_test.cpp)
-  target_include_directories(miniaudio_failure_paths_test PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
+  target_include_directories(miniaudio_failure_paths_test PRIVATE ${WESCENE_THIRD_PARTY_DIR})
   target_link_libraries(miniaudio_failure_paths_test PRIVATE GTest::gtest_main)
   target_compile_features(miniaudio_failure_paths_test PRIVATE cxx_std_20)
   gtest_discover_tests(miniaudio_failure_paths_test

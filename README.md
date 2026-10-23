@@ -144,8 +144,8 @@ without opening the window.
 | Layer | What it does |
 | --- | --- |
 | **Swift shell** | The AppKit app. Its control panel is native SwiftUI ([`App/Views/ControlPanel`](App/Views/ControlPanel)), and [web wallpapers](docs/features/web-wallpapers.md) run in web views of their own. |
-| **Rust core** | The vendored renderer ([`upstream/renderer`](upstream/renderer)): displays, wallpaper windows, video decode and audio capture, bridged to Swift with uniffi. |
-| **C++ scene engine** | Open Wallpaper Engine, statically linked into the Rust core, draws scene wallpapers. |
+| **Rust core** | The renderer ([`Renderer/`](Renderer)): displays, wallpaper windows, video decode and audio capture, bridged to Swift with uniffi. |
+| **C++ scene engine** | The project's scene engine ([`Renderer/Engine`](Renderer/Engine)), statically linked into the Rust core, draws scene wallpapers. |
 | **Metal** | Scenes render natively on Metal, and a scene the native renderer cannot draw is not drawn: it keeps its last picture and says why in [Settings → Performance](docs/features/performance.md). Video wallpapers play with the app's own players (AVFoundation, and a WebM player for WebM and Matroska files). |
 | **Lock screen** | A sandboxed ExtensionKit extension ([`Extension/`](Extension)). |
 
@@ -262,8 +262,9 @@ details. Security problems are reported privately: see [SECURITY.md](SECURITY.md
 
 The complete source is here. It builds on a Mac with Apple silicon, Xcode 26 (macOS 15.6 or later), a
 full Xcode selected with `xcode-select` and the Homebrew packages listed under
-[Prerequisites](docs/build.md#prerequisites); the renderer and scene engine are
-vendored under [`upstream/`](upstream), not pulled in as submodules.
+[Prerequisites](docs/build.md#prerequisites); the renderer and scene engine are in
+[`Renderer/`](Renderer), and third-party code is vendored under
+[`ThirdParty/`](ThirdParty), not pulled in as submodules.
 
 ```sh
 python3 scripts/build.py --configuration Release   # renderer, bindings, Xcode project, app
@@ -312,8 +313,8 @@ desktop, [become a Supporter](SPONSORS.md).
 ## License
 
 The source is offered under the GNU General Public License, version 3 only
-([LICENSE](LICENSE)). Upstream code keeps its own copyright and license notices,
-recorded in [upstream/provenance.json](upstream/provenance.json). Every recipient
+([LICENSE](LICENSE)). Vendored third-party code keeps its own copyright and license notices,
+recorded in [ThirdParty/provenance.json](ThirdParty/provenance.json). Every recipient
 keeps every right the GPL grants, whether or not they are a Supporter.
 
 [LICENSING.md](LICENSING.md) is the account of where the code comes from, the license of

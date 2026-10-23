@@ -8,7 +8,7 @@ sandboxed ExtensionKit lock screen. `CLAUDE.md` must stay a relative symlink to 
 Read only task-relevant sections; keep this file to durable rules and routing.
 For any doc over ~300 lines, list its headings with `rg -n '^#' <file>` and read
 with offset/limit; never read the whole file. `.ignore` keeps `rg` out of
-`docs/archive/`, `docs/testing/archive/`, `App/Bridge/Generated/` and `upstream/`;
+`docs/archive/`, `docs/testing/archive/`, `App/Bridge/Generated/` and `ThirdParty/`;
 use `rg -u` only when those are the target.
 
 - Placement / runtime: [layout](docs/repository-layout.md), [architecture](docs/architecture.md).
@@ -40,8 +40,10 @@ use `rg -u` only when those are the target.
   the next version ([recovery](docs/release.md#recovering-a-failed-release)).
   Regenerate `App/Bridge/Generated/` via `scripts/build.py` after bridge changes;
   never patch generated bindings.
-- `upstream/` is vendored renderer code, not app code. Every change requires updating
-  `upstream/provenance.json`; preserve notices and [licensing constraints](LICENSING.md).
+- `Renderer/` is the project's renderer: the Rust workspace (`Shader/`, `Core/`, `Bridge/`)
+  and the C++ scene engine (`Engine/`) with its libraries. `ThirdParty/` is vendored
+  third-party code only; every change there requires updating `ThirdParty/provenance.json`;
+  preserve notices and [licensing constraints](LICENSING.md).
 - Wallpaper/renderer fixes repair the general mechanism (format, shader, scene,
   script, playback): never detect or special-case a wallpaper by workshop ID,
   title, path, hash or a fingerprint of its quirks. Reproduce the failure as a
