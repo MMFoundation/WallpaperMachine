@@ -882,6 +882,13 @@ final class DesktopWallpaperTests: XCTestCase {
         try ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
         // A crash before quitting leaves the store copy for the launch repair.
         XCTAssertTrue(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        // A store that cannot be read keeps the copy for a later restoration.
+        let written = workspace.store
+        workspace.store = nil
+        workspace.didWrite = nil
+        try ledger.restoreAll()
+        XCTAssertTrue(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        workspace.store = written
         try ledger.restoreAll()
         XCTAssertEqual(try storeRoot(workspace.store) as NSDictionary, try storeRoot(saved) as NSDictionary)
         XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))

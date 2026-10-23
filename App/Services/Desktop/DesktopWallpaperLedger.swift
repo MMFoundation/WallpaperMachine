@@ -244,13 +244,14 @@ final class DesktopWallpaperLedger {
         // in flight can also land after its desktop was restored; the next pass
         // restores it, and the window ends well within quit's wait.
         guard unconfirmedRestorations.isEmpty, inFlight.isEmpty else { throw Failure.restorationUnconfirmed }
-        try restoreStore()
+        let storeRestored = try restoreStore()
         let targets = try workspace.targets()
         guard try !workspace.referencedPictureURLs(targets: targets)
             .contains(where: { Self.isPoster($0, folder: folder) }) else {
             throw Failure.restorationPending
         }
-        if storeSnapshot != nil {
+        // A store that could not be read keeps its copy for the next restoration.
+        if storeRestored, storeSnapshot != nil {
             try FileManager.default.removeItem(at: storeSnapshotURL)
             storeSnapshot = nil
         }
@@ -261,18 +262,21 @@ final class DesktopWallpaperLedger {
     /// the per-Space API could only write back as a still picture.
     /// A store written back but not yet loaded stays pending, so a retry or the
     /// next launch reloads it once rather than finding nothing left to change.
-    private func restoreStore() throws {
-        guard var snapshot = storeSnapshot, let current = try workspace.storeContents() else { return }
+    /// False when there is a copy to put back but no store to read.
+    private func restoreStore() throws -> Bool {
+        guard var snapshot = storeSnapshot else { return true }
+        guard let current = try workspace.storeContents() else { return false }
         if let restored = try DesktopWallpaperStoreRestoration.restored(
             current: current, original: snapshot.store, written: snapshot.written, posters: folder) {
             snapshot.reloadPending = true
             try save(snapshot)
             try workspace.replaceStore(restored, expected: current)
         }
-        guard snapshot.reloadPending == true else { return }
+        guard snapshot.reloadPending == true else { return true }
         try workspace.reloadStore()
         snapshot.reloadPending = nil
         try save(snapshot)
+        return true
     }
 
     func apply(image: Data, target: DesktopPictureTarget) throws {
