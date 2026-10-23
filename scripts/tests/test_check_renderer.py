@@ -515,5 +515,28 @@ class GateExitStatusTests(unittest.TestCase):
                 self.assertNotIn(check_renderer.OFFSCREEN_PROBE, report["skips"])
 
 
+class ForeignBuildTreeTests(unittest.TestCase):
+    def tree(self, home):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        source, build = root / "Engine", root / "bin"
+        source.mkdir()
+        build.mkdir()
+        (build / "CMakeCache.txt").write_text(f"CMAKE_BUILD_TYPE:STRING=Release\nCMAKE_HOME_DIRECTORY:INTERNAL={home(root)}\n")
+        return source, build
+
+    def test_a_tree_from_another_source_directory_is_removed(self):
+        source, build = self.tree(lambda root: root / "upstream/open-wallpaper-engine")
+        self.assertTrue(check_renderer.discard_foreign_build_tree(build, source))
+        self.assertFalse(build.exists())
+
+    def test_a_tree_from_the_same_source_or_no_tree_is_kept(self):
+        source, build = self.tree(lambda root: root / "Engine")
+        self.assertFalse(check_renderer.discard_foreign_build_tree(build, source))
+        self.assertTrue((build / "CMakeCache.txt").is_file())
+        self.assertFalse(check_renderer.discard_foreign_build_tree(source / "missing", source))
+
+
 if __name__ == "__main__":
     unittest.main()

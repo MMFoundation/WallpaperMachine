@@ -2,9 +2,8 @@
 # decoders that feed it). The pure parts (PcmPipeline, Resampler, ChannelRemix)
 # are C++17 with no dependency but wmMedia's ByteSource; the decoders behind
 # Sound/Apple and Sound/Vorbis use AudioToolbox and a vendored public-domain
-# stb_vorbis. The engine build (upstream/renderer/external/open-wallpaper-engine/
-# CMakeLists.txt) includes this directory for the library and Sound/tests for the
-# test executables.
+# stb_vorbis. The engine build (Renderer/Engine/CMakeLists.txt) includes this
+# directory for the library and Sound/tests for the test executables.
 set(WM_SOUND_SOURCES
     ChannelRemix.cpp
     PcmPipeline.cpp
@@ -24,8 +23,8 @@ set_target_properties(wmSound PROPERTIES
 # Includes are written as "Sound/<Header>.hpp", relative to Renderer/.
 target_include_directories(wmSound PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(wmSound PUBLIC wmMedia)
-# The Ogg Vorbis decoder: stb_vorbis, vendored unchanged under the scene engine's
-# third_party/ and defined there, so wmSound is only built with the engine.
+# The Ogg Vorbis decoder: stb_vorbis, vendored unchanged in ThirdParty/stb_vorbis
+# and defined by the engine's Dependencies/, so wmSound is only built with the engine.
 target_link_libraries(wmSound PRIVATE stb_vorbis)
 if(APPLE)
     target_link_libraries(wmSound PUBLIC "-framework AudioToolbox" "-framework CoreFoundation")

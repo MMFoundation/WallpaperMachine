@@ -49,7 +49,7 @@ study session that read the old code wrote a behavior and contract specification
 without its expression, deleted the old code, and a separate session that never read
 it, its history or the study notes wrote the replacement and its tests from that
 specification; every replacement test was shown to fail when the behavior it covers is
-broken. `upstream/provenance.json` records each replacement, its specification and its
+broken. `ThirdParty/provenance.json` records each replacement, its specification and its
 verification under `renderer.*Replacement` and `sceneEngine.*Replacement` and the later
 entries of 2026-10-22. The measure used to find upstream expression is runs of 8 or
 more consecutive lines (gaps of at most 2) that also occur in the import snapshot. On
@@ -57,7 +57,9 @@ more consecutive lines (gaps of at most 2) that also occur in the import snapsho
 
 - the generated Swift bindings in `App/Bridge/Generated/`, which `uniffi-bindgen`
   produces from the exported API's names and types;
-- the license texts themselves (see below) and nothing else under `upstream/renderer`;
+- the license texts themselves (see below) and nothing else in the rewritten renderer (then
+  under `upstream/renderer`; since 2026-10-23 in `Renderer/Core`, `Renderer/Bridge` and
+  `Renderer/Engine`, see [Implementation record](#implementation-record));
 - 30 lines in `App/`: Apple's standard `Info.plist` keys with Xcode build variables, and
   property assignments and a five-field struct in `App/ViewModels/BridgeStore.swift`
   whose names are dictated by the exported API.
@@ -78,17 +80,17 @@ AppKit's `applicationShouldHandleReopen`.
 What the root `LICENSE` does and does not do:
 
 - It states the terms under which this project's code (`App/`, `Extension/`,
-  `Shared/`, `Renderer/`, `Tests/`, `scripts/`, `project.yml` and the rewritten code
-  under `upstream/renderer`) is offered.
+  `Shared/`, `Renderer/` (the rewritten renderer and scene engine among it), `Tests/`,
+  `scripts/` and `project.yml`) is offered.
 - It does not transfer or relicense anyone else's copyright. The mediaremote-adapter
-  authors, Phosphene, naga and every other holder named in `upstream/provenance.json`
-  and in the notices under `upstream/` keep their copyright and their own license terms.
+  authors, Phosphene, naga and every other holder named in `ThirdParty/provenance.json`
+  and in the notices under `ThirdParty/` keep their copyright and their own license terms.
   Third-party notices are retained where they were found and are bundled by
   `scripts/package.py` (see [Notice payload](#notice-payload)).
 - The upstream projects' GPLv2 texts are kept, renamed, as
-  `upstream/renderer/LICENSE.upstream-GPL-2.0` and
-  `upstream/renderer/external/open-wallpaper-engine/LICENSE.upstream-GPL-2.0`: they record
-  under which terms the imported code was received, not the terms of the code there now.
+  `ThirdParty/received-licenses/wallpaper-engine-for-macos.GPL-2.0.txt` and
+  `ThirdParty/received-licenses/open-wallpaper-engine.GPL-2.0.txt`: they record
+  under which terms the imported code was received, not the terms of any code in the tree.
   The imported code itself remains in this repository's Git history under those terms.
 - Three people besides the maintainer contributed to the project's own code after the
   import, while it was GPL-2.0-only. Their contributions are under the terms they gave
@@ -110,7 +112,7 @@ What the root `LICENSE` does and does not do:
   grant (see [Remaining blockers](#remaining-blockers)).
 
 The application shell, extension and Workshop browser are recorded in
-`upstream/provenance.json` under `applicationShell`, `lockScreenExtension` and
+`ThirdParty/provenance.json` under `applicationShell`, `lockScreenExtension` and
 `workshopBrowser`. The browser is independently implemented; no code from the
 Unayung/wallpaper-engine-mac project
 (https://github.com/Unayung/wallpaper-engine-mac/blob/main/LICENSE) was copied,
@@ -259,23 +261,23 @@ see [Rust crates](#rust-crates) for how.
 
 | Component | Where | License | Combination with GPL-3.0-only |
 |---|---|---|---|
-| Renderer (`wallpaper-core`, `wallpaper-bridge`) | `upstream/renderer` (rewritten; origin in `provenance.json`) | GPL-3.0-only (this project) | Same license |
-| Shader layer (`wm-shader`: Wallpaper Engine shader text to Metal Shading Language, reflection, the C ABI the scene engine calls) | `Renderer/Shader` (a Rust workspace of its own, `Renderer/Cargo.toml`), linked into `libwallpaper_bridge.a` | GPL-3.0-only (this project; clean-room, see the [implementation record](#implementation-record)) | Same license |
-| Scene engine (open-wallpaper-engine) | `upstream/renderer/external/open-wallpaper-engine` (rewritten; origin in `provenance.json`) | GPL-3.0-only (this project) | Same license |
+| Renderer (`wallpaper-core`, `wallpaper-bridge`) | `Renderer/Core`, `Renderer/Bridge` (rewritten; origin in `provenance.json`) | GPL-3.0-only (this project) | Same license |
+| Shader layer (`wm-shader`: Wallpaper Engine shader text to Metal Shading Language, reflection, the C ABI the scene engine calls) | `Renderer/Shader` (a member of the `Renderer/Cargo.toml` workspace), linked into `libwallpaper_bridge.a` | GPL-3.0-only (this project; clean-room, see the [implementation record](#implementation-record)) | Same license |
+| Scene engine (rewritten from the imported open-wallpaper-engine fork) | `Renderer/Engine` (rewritten; origin in `provenance.json`) | GPL-3.0-only (this project) | Same license |
 | Application shell, extension, Workshop browser, control panel, scripts, new renderer code | `App/`, `Extension/`, `Shared/`, `Renderer/`, `scripts/` | GPL-3.0-only (this project) | Same license |
 | Phosphene ABI reference | notice in `Extension/Phosphene-LICENSE.txt` | MIT | Compatible |
-| ungive/mediaremote-adapter | `upstream/mediaremote-adapter` | BSD-3-Clause | Compatible; embedded as an unlinked framework |
-| miniaudio | `upstream/renderer/external/open-wallpaper-engine/third_party/miniaudio` | Public domain or MIT-0 (choice) | Compatible |
-| stb_image | `upstream/renderer/external/open-wallpaper-engine/third_party/stb_image.h`, v2.26 | Public domain or MIT, licensee's choice (end of the header) | Compatible |
-| stb_vorbis | `upstream/renderer/external/open-wallpaper-engine/third_party/stb_vorbis`, v1.22 (nothings/stb commit `1ee679ca`), unchanged, linked statically (`stb_vorbis`) | Public domain (Unlicense) or MIT, licensee's choice (`LICENSE` there and the end of `stb_vorbis.c`) | Compatible |
+| ungive/mediaremote-adapter | `ThirdParty/mediaremote-adapter` | BSD-3-Clause | Compatible; embedded as an unlinked framework |
+| miniaudio | `ThirdParty/miniaudio` | Public domain or MIT-0 (choice) | Compatible |
+| stb_image | `ThirdParty/stb_image/stb_image.h`, v2.26 | Public domain or MIT, licensee's choice (end of the header) | Compatible |
+| stb_vorbis | `ThirdParty/stb_vorbis`, v1.22 (nothings/stb commit `1ee679ca`), unchanged, linked statically (`stb_vorbis`) | Public domain (Unlicense) or MIT, licensee's choice (`LICENSE` there and the end of `stb_vorbis.c`) | Compatible |
 | nlohmann-json, argparse | Homebrew, header-only | MIT | Compatible |
 | quickjs-ng | Homebrew `quickjs-ng` 0.16.2, `libqjs` in the verified Debug dependency closure | MIT | Compatible |
 | lz4 | Homebrew `lz4` 1.10.0 | BSD-2-Clause | Compatible |
 | FreeType | Homebrew `freetype` 2.14.3 | FTL or GPL-2.0-or-later, licensee's choice (`LICENSE.TXT` in the keg) | Compatible under the GPL-2.0-or-later option, used under GPLv3 |
 | libpng | Homebrew `libpng` 1.6.58 (FreeType dependency) | libpng-2.0 | Compatible |
-| naga 29.0.3 | Rust crate, a patched copy vendored in `upstream/naga` (`upstream/naga/PATCHES.md`): the shader translator and validator the `wm-shader` crate (`Renderer/Shader`) uses for every shader; built with `glsl-in` and `msl-out` only | MIT OR Apache-2.0, used under MIT | Compatible under the MIT terms; the patch makes Apache-2.0 `codespan-reporting` an optional dependency `wm-shader` does not enable, so it is no longer linked, and dropping `spv-out` removed the Apache-2.0 `spirv` crate |
+| naga 29.0.3 | Rust crate, a patched copy vendored in `ThirdParty/naga` (`ThirdParty/naga/PATCHES.md`): the shader translator and validator the `wm-shader` crate (`Renderer/Shader`) uses for every shader; built with `glsl-in` and `msl-out` only | MIT OR Apache-2.0, used under MIT | Compatible under the MIT terms; the patch makes Apache-2.0 `codespan-reporting` an optional dependency `wm-shader` does not enable, so it is no longer linked, and dropping `spv-out` removed the Apache-2.0 `spirv` crate |
 | uniffi 0.28.3 (`uniffi`, `uniffi_core`, `uniffi_bindgen`, `uniffi_meta`, `uniffi_udl`, `uniffi_testing`), option-ext 0.2.0 | Rust crates: the Swift bridge, and `dirs` | MPL-2.0 | Compatible through MPL-2.0 section 3.3, whose Secondary Licenses include GPL-2.0 "or any later version", so GPLv3; none of their source files carries the "Incompatible With Secondary Licenses" notice |
-| The other 140 linked Rust crates | `upstream/renderer/Cargo.lock` | 136 offer MIT, alone or as a choice; the rest are Zlib (foldhash), BSD-3-Clause (pp-rs) or BSD-3-Clause OR Apache-2.0 (moxcms, pxfm) | Compatible under the MIT, Zlib or BSD-3-Clause terms |
+| The other 140 linked Rust crates | `Renderer/Cargo.lock` | 136 offer MIT, alone or as a choice; the rest are Zlib (foldhash), BSD-3-Clause (pp-rs) or BSD-3-Clause OR Apache-2.0 (moxcms, pxfm) | Compatible under the MIT, Zlib or BSD-3-Clause terms |
 | Valve SteamCMD | installed at runtime into the app's support directory, never bundled | Valve's terms | Outside the GPL entirely; see [Rights outside software licenses](#rights-outside-software-licenses) |
 
 "Compatible" in this table means compatible with GPLv3 according to the FSF's
@@ -283,7 +285,7 @@ license list (https://www.gnu.org/licenses/license-list.html) or the license's
 own text; it is not an audit of every file.
 
 Removed on 2026-10-17, each from the source tree, the build and the link closure (the
-commits are in this repository's history, and `upstream/provenance.json` records them).
+commits are in this repository's history, and `ThirdParty/provenance.json` records them).
 They were removed under the earlier GPL-2.0-only policy, which Apache-2.0 and the GPL-3.0
 family could not join; every one of them is GPLv3-compatible, so bringing one back is a
 product decision, not a license question:
@@ -306,12 +308,12 @@ product decision, not a license question:
 
 ### Rust crates
 
-Checked 2026-10-17 (and again after the FFmpeg crates left, `d2c891aa`) against `upstream/renderer/Cargo.lock` with `cargo tree
+Checked 2026-10-17 (and again after the FFmpeg crates left, `d2c891aa`) against `Renderer/Cargo.lock` with `cargo tree
 --offline --workspace -e normal,no-proc-macro --target aarch64-apple-darwin`.
 That resolves features the way `scripts/build.py`'s `cargo build --workspace
 --release` does. Each crate's license is the one its manifest declares; no
 crate was reviewed file by file. The result is 148 third-party crates (naga counted among them, as the
-vendored copy in `upstream/naga`), all compiled into `libwallpaper_bridge.a`,
+vendored copy in `ThirdParty/naga`), all compiled into `libwallpaper_bridge.a`,
 which the app links (`-lwallpaper_bridge` in `project.yml`).
 
 Native Metal is the only scene renderer ([docs/features/scene-rendering.md](docs/features/scene-rendering.md#scene-renderer)).
@@ -481,11 +483,11 @@ As implemented by `scripts/package.py` and `.github/workflows/build.yml`
 - `python3 scripts/check_licenses.py` lists the license of every Mach-O
   dependency of the built app (`otool -L`, walked recursively from the main
   executable, the extension and `Contents/Frameworks`), of the third-party code compiled or statically linked into the
-  renderer (a source inventory: `crates/core/build.rs`, the scene engine's CMake
-  `find_package` targets and `third_party/`, against a hand-kept license table
+  renderer (a source inventory: `Renderer/Core/build.rs`, the scene engine's CMake
+  `find_package` targets and the C libraries in `ThirdParty/`, against a hand-kept license table
   in the script) and of every linked Rust crate (`cargo tree`, the same set as
-  [Rust crates](#rust-crates); a vendored path crate under `upstream/` outside
-  the renderer workspace, naga, counts as third party with the license its
+  [Rust crates](#rust-crates); a vendored path crate under `ThirdParty/`, naga,
+  counts as third party with the license its
   `Cargo.toml` declares). It classifies SPDX expressions against one
   policy table (today GPL-3.0-only: GPL-2.0-only, GPLv3-incompatible and unknown licenses fail) and prints any failing component, and any component
   this file does not name. It is report-only by default; `--enforce` exits 1.
@@ -493,7 +495,7 @@ As implemented by `scripts/package.py` and `.github/workflows/build.yml`
 - `python3 scripts/notices.py` reuses that closure and writes `THIRD-PARTY-NOTICES.txt`:
   for every third-party component its name, version, SPDX license and the license text
   taken from the component itself (a crate's `LICENSE*` files in the cargo registry or
-  under `upstream/`, the Homebrew keg's license files, a vendored library's file or the
+  under `ThirdParty/`, the Homebrew keg's license files, a vendored library's file or the
   notice at the end of its header). Of a dual `MIT OR Apache-2.0` crate the MIT text is
   written, the option this project uses; files are matched to the license by what they
   say, not by name. A component with no text found is marked `LICENSE TEXT NOT FOUND`;
@@ -512,9 +514,9 @@ package that returns is reported as unknown.
 - `Contents/Resources/WallpaperMachine-LICENSE.txt`: the root `LICENSE`;
 - `Contents/Resources/LICENSING.md`: this file;
 - `Contents/Resources/Imported-Renderer-GPL-2.0-LICENSE.txt`:
-  `upstream/renderer/LICENSE.upstream-GPL-2.0`, the terms under which the imported renderer
+  `ThirdParty/received-licenses/wallpaper-engine-for-macos.GPL-2.0.txt`, the terms under which the imported renderer
   was received, not the license of the code now;
-- `Contents/Resources/provenance.json`: `upstream/provenance.json`;
+- `Contents/Resources/provenance.json`: `ThirdParty/provenance.json`;
 - `Contents/Resources/Licenses/<formula>-<version>/`: every `LICENSE*`,
   `COPYING*`, `COPYRIGHT*` and `NOTICE*` file of each Homebrew keg in the link
   closure;
@@ -547,9 +549,13 @@ not pass it yet.
 The native application is named **WallpaperMachine**; its bundle identifier
 prefix is `app.wallpapermachine`.
 
-- Renderer source is in `upstream/renderer`. It was imported from revision
+- Renderer source is in `Renderer/`. It was imported into `upstream/renderer` from revision
   `8c19c002ff37930c68117dd591dfe3f44792e25e` and has since been rewritten as
-  recorded in `upstream/provenance.json` (see [Source license](#source-license-gpl-30-only)).
+  recorded in `ThirdParty/provenance.json` (see [Source license](#source-license-gpl-30-only)).
+  On 2026-10-23 the rewritten crates and scene engine moved out of `upstream/` into
+  `Renderer/Core`, `Renderer/Bridge` and `Renderer/Engine`, and the vendored third-party code
+  into `ThirdParty/` (`renderer.firstPartyRelocation2026_10_23`); files moved only, and the
+  engine's module layout and file names still follow the imported engine's.
 - The application shell in `App/` began as that renderer revision's
   `app/WallpaperEngine` sources, relocated out of `upstream/renderer`; its
   remaining matching lines are listed under [Source license](#source-license-gpl-30-only).
@@ -584,13 +590,13 @@ prefix is `app.wallpapermachine`.
   from those specifications, naga's public documentation and Apple's Metal documentation; a
   verification session compared the two as black boxes; only the swap session, which deleted the
   retired crate, read both. The specification files and their SHA-256 are in
-  `upstream/provenance.json` (`renderer.shaderCrateReplacement`). The retired crate's source is
+  `ThirdParty/provenance.json` (`renderer.shaderCrateReplacement`). The retired crate's source is
   gone from the tree (`upstream/renderer/crates/shader`); it remains in Git history, under
   GPL-2.0-only, as does all other replaced code. The only third-party dependency of the new crate is the vendored naga; the crates
   the retired one used for tokens, string storage and static registration (`logos`, `smol_str`,
   `linkme`) are no longer linked.
 - The Rust bridge's configuration and project-data domains
-  (`upstream/renderer/crates/bridge/src/config` and `src/project`) and their local
+  (`Renderer/Bridge/src/config` and `src/project`) and their local
   contract tests were independently reimplemented from physically separated
   behavior/declaration inputs. Separate reviews examined the source, the test
   obligations and the implementation agents' actual tool records; no original
@@ -600,7 +606,7 @@ prefix is `app.wallpapermachine`.
   bridge, renderer, application interfaces or retained tests, and does not supply
   contributor grants or legal clearance. Its contract identities and verification
   scope are recorded under `renderer.bridgeConfigurationReplacement` and
-  `renderer.bridgeProjectReplacement` in `upstream/provenance.json`.
+  `renderer.bridgeProjectReplacement` in `ThirdParty/provenance.json`.
 - The bridge path-value module, render-settings lookup and mesh contract tests
   now use independently authored replacements from separate behavior/declaration
   inputs. The lookup's three activation callers migrated together; the old
@@ -609,7 +615,7 @@ prefix is `app.wallpapermachine`.
   transitions rather than environment-query counts. Scope and procedural
   qualifications are recorded under `renderer.bridgePathsReplacement`,
   `renderer.renderSettingsLookupReplacement` and
-  `renderer.sceneMeshContractTestsReplacement` in `upstream/provenance.json`.
+  `renderer.sceneMeshContractTestsReplacement` in `ThirdParty/provenance.json`.
   These were bounded source replacements; the completion of the rewrite is the
   entry below.
 - Bounded independent replacements also cover the core descriptor/model/pointer
@@ -619,7 +625,7 @@ prefix is `app.wallpapermachine`.
   coverage remain. The separate source-only writer and integration scopes are
   recorded under `renderer.coreDisplayContractTestsReplacement`,
   `renderer.bridgeLoggingLifecycleReplacement`, `renderer.bridgeLoginOperationsReplacement`
-  and `renderer.bridgePowerBoundaryReplacement` in `upstream/provenance.json`.
+  and `renderer.bridgePowerBoundaryReplacement` in `ThirdParty/provenance.json`.
   Existing interface/ordinary-expression treatment is described under
   [Source license](#source-license-gpl-30-only).
 - The library scanner/filter/thumbnail unit and inherited options-draft operations
@@ -629,26 +635,26 @@ prefix is `app.wallpapermachine`.
   returned bytes, not private wallpapers or the transform as its own oracle.
   Scope, retained-code integration and filesystem/reference limitations are under
   `renderer.bridgeLibraryReplacement` and `renderer.bridgeOptionsDraftReplacement`
-  in `upstream/provenance.json`.
+  in `ThirdParty/provenance.json`.
 - The rewrite was completed between 2026-10-19 and 2026-10-22: the scene engine's remaining
   declarations, build files, Apple bindings and runtime headers, every inherited C++ test file
   (the scene schema, model and texture, text object, script, shader, particle, cursor input,
   dump-tool, corpus and audio tests), and the Rust crates' remaining scene, bridge actor, API,
   facade, configuration and display code and their tests. Each part followed the protocol
-  under [Source license](#source-license-gpl-30-only); `upstream/provenance.json` records it
+  under [Source license](#source-license-gpl-30-only); `ThirdParty/provenance.json` records it
   under `renderer.cleanRoomCompletion2026_10_22`. Main's renderer fixes made after the import
   were carried over as behavior, each by a separate implementer from a behavior specification
   with a regression test, and compared with Wallpaper Engine's own frames: on nine scenes the
   rewritten renderer is within noise of main's, better on one shot and slightly worse on one.
 - System now-playing metadata uses [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)
   at revision `73f14ab1568371e6e3c44063f21c34c5e2712c4d`, BSD-3-Clause, vendored
-  under `upstream/mediaremote-adapter` with the `src/adapter/stream.m` changes
-  recorded in `upstream/provenance.json`, and built as an embedded, unlinked
+  under `ThirdParty/mediaremote-adapter` with the `src/adapter/stream.m` changes
+  recorded in `ThirdParty/provenance.json`, and built as an embedded, unlinked
   framework.
 - The shader translator [naga](https://github.com/gfx-rs/wgpu) 29.0.3 is vendored
-  under `upstream/naga` (its `LICENSE.MIT` and `LICENSE.APACHE` ship with it; this
+  under `ThirdParty/naga` (its `LICENSE.MIT` and `LICENSE.APACHE` ship with it; this
   project uses it under the MIT option) with the patch listed in
-  `upstream/naga/PATCHES.md`, recorded in `upstream/provenance.json`.
+  `ThirdParty/naga/PATCHES.md`, recorded in `ThirdParty/provenance.json`.
 - The control panel's icons are SF Symbols, drawn by macOS at run time; no
   icon artwork is copied into the app or the repository, so no icon notice
   ships.

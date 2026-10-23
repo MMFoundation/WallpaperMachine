@@ -257,7 +257,7 @@ removed when the page stops.
 
 ## Runtime shape
 
-- Rust (`upstream/renderer/crates/bridge`): `WallpaperProjectType::Web` entries are
+- Rust (`Renderer/Bridge`): `WallpaperProjectType::Web` entries are
   `supported`. `ActivationInputs::build()` routes web projects away from the scene
   engine and `build_web()` yields one `WebWallpaperDesc` per assigned display
   (mirrors included). The uniffi call `web_wallpapers()` exposes them as
@@ -592,7 +592,7 @@ of every surface given the script), and `WebWallpaperFontAliasTests`: SimHei and
 and not Songti, Segoe UI's digits are PT Sans's at 98.7 percent and the four Latin fonts have the
 real fonts' digit advance, a page's own `@font-face` of the same name wins, the style comes first in the
 document, subframes get it, an https document does not, and every surface's user scripts hold it) and the bridge contract in
-`upstream/renderer/crates/bridge/src/tests/` (`apply_options.rs`,
+`Renderer/Bridge/src/tests/` (`apply_options.rs`,
 `quality_settings.rs`, `web_audio_media.rs`); file and directory properties are
 covered under [user files](user-files.md#verification), and the domain inventory is in
 [coverage](../testing/coverage.md). The held picture over a replacement page is covered

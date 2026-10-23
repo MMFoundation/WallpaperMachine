@@ -14,7 +14,7 @@ name = "uniffi-bindgen"
 path = "src/uniffi.rs"
 
 [dependencies]
-wallpaper-core = { path = "../core" }
+wallpaper-core = { path = "../Core" }
 anyhow = { workspace = true }
 arc-swap = "1.9.1"
 async-channel = "2"
@@ -72,4 +72,4 @@ uniffi = { version = "0.28", features = ["build"] }
 pretty_assertions = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["test-util"] }
-wallpaper-core = { path = "../core", features = ["bridge-contract-tests"] }
+wallpaper-core = { path = "../Core", features = ["bridge-contract-tests"] }

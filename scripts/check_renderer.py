@@ -10,10 +10,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 
 from build import build_environment, cargo_environment
-from lib.paths import OWN_RENDERER, RENDERER, RENDERER_ARTIFACTS, ROOT
+from lib.paths import ENGINE, RENDERER, RENDERER_ARTIFACTS, ROOT
 from lib.xcode import skipped_test_lines
 
 GENERATED_CASE_COUNT = 12
@@ -566,6 +567,25 @@ def check_generated_pixels(data, index):
     return pixel(180, 136) != background
 
 
+def discard_foreign_build_tree(build, source):
+    """Delete a CMake build tree configured from a source directory other than `source`.
+
+    CMake refuses to reconfigure such a tree, which happens to every tree made before
+    the engine moved (it was under upstream/renderer/external/open-wallpaper-engine).
+    """
+    cache = build / "CMakeCache.txt"
+    if not cache.is_file():
+        return False
+    for line in cache.read_text(errors="replace").splitlines():
+        if line.startswith("CMAKE_HOME_DIRECTORY:"):
+            configured = Path(line.split("=", 1)[1])
+            if configured.resolve() == Path(source).resolve():
+                return False
+            break
+    shutil.rmtree(build)
+    return True
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--assets", type=Path, default=Path.home() / "Library/Application Support/WallpaperMachine/SceneAssets")
@@ -583,11 +603,13 @@ def main(argv=None):
     env = build_environment()
     build = RENDERER_ARTIFACTS / "bin"
     if not args.skip_build:
+        if discard_foreign_build_tree(build, ENGINE):
+            print(f"Removed {build}: it was configured from another engine source directory")
         # Cargo must run inside the workspace it builds (Renderer/ for the shader layer):
         # rustup resolves rust-toolchain.toml from the working directory, not --manifest-path.
         steps = [
-            (["cargo", "build", "-p", "wm-shader", "--features", "ffi", "--release", "--locked"], "shader-build", OWN_RENDERER),
-            (["cmake", "-S", RENDERER / "external/open-wallpaper-engine", "-B", build, "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_TESTS=ON", "-DRUST_SHADER_FFI=ON", "-DRUST_SHADER_STATICLIB=" + str(OWN_RENDERER / "target/release/libwm_shader.a")], "configure", ROOT),
+            (["cargo", "build", "-p", "wm-shader", "--features", "ffi", "--release", "--locked"], "shader-build", RENDERER),
+            (["cmake", "-S", ENGINE, "-B", build, "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_TESTS=ON", "-DRUST_SHADER_FFI=ON", "-DRUST_SHADER_STATICLIB=" + str(RENDERER / "target/release/libwm_shader.a")], "configure", ROOT),
             (["cmake", "--build", build, "--target", OFFSCREEN_PROBE, RELOAD_PROBE, TIMER_DELIVERY_BENCHMARK, *REGRESSION_BINARIES, "-j", "6"], "build", ROOT),
         ]
         for command, name, cwd in steps:

@@ -925,7 +925,7 @@ need an authorized runtime check
   not scaled to the display, a factor zooms, a position puts the picture in its corner); the
   player suite places the live layer for a position (flush to each edge, gravity back at the
   middle, a position that is not a position held to the edge or the middle). To regenerate or extend the expected rectangles, compile
-  `upstream/renderer/external/open-wallpaper-engine/src/Presentation/WallpaperScaling.cpp`
+  `Renderer/Engine/src/Presentation/WallpaperScaling.cpp`
   directly (it needs no GPU header), hand `ComputeWallpaperScalingLayout` the display as
   `lround(devicePixels / scale)` logical points (as `MetalRender::Impl::scalingLayout`
   does), and print `viewport_px`.

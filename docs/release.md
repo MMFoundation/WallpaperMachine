@@ -434,14 +434,14 @@ differ between releases; `build` and the Test workflow therefore keep separate e
 | Cache | Path | Key | What a hit saves |
 |---|---|---|---|
 | C++ objects | `~/.ccache` | `ccache-<os>-<run>`, restored by the `ccache-<os>-` prefix | recompiling the scene engine. A checkout gives every file a new mtime, so CMake rebuilds the whole engine even from a restored build tree; ccache hashes content and returns the previous objects. Test's three jobs share a run's key, so only `renderer`, which compiles the engine and its C++ tests, saves it; `rust` and `native` pass `save-object-cache: "false"` and only restore it |
-| Renderer | `~/.cargo/registry`, `~/.cargo/git`, `upstream/renderer/target` | `renderer-ccache-<os>-<hash of Cargo.lock, rust-toolchain.toml, provenance.json>`, restored by prefix | crate downloads, and Rust compilation while the nightly toolchain is unchanged |
+| Renderer | `~/.cargo/registry`, `~/.cargo/git`, `Renderer/target` | `renderer-ccache-<os>-<hash of Cargo.lock, rust-toolchain.toml, provenance.json>`, restored by prefix | crate downloads, and Rust compilation while the nightly toolchain is unchanged |
 
 The `CMAKE_<LANG>_COMPILER_LAUNCHER=ccache` variables only take effect on a build
 tree's first CMake configure, so change the renderer key's prefix whenever the
 launcher setup changes: no tree configured the old way may be restored. Each
 macOS job prints `ccache --show-stats` at the end; hits against misses there is
 the evidence the cache worked. The toolchain is an unpinned `nightly`
-(`upstream/renderer/rust-toolchain.toml`), and a new nightly invalidates every
+(`Renderer/rust-toolchain.toml`), and a new nightly invalidates every
 compiled crate, so the Rust half of the renderer build is only reused between
 builds on the same nightly.
 

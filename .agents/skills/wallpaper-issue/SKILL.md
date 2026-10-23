@@ -29,8 +29,8 @@ Steps, each detailed in the guide:
 2. Localize: `we_reference.py unpack`, read `scene.json`, find the parser code for the
    keys involved. When Wallpaper Engine's rule is unclear, capture a generated probe
    scene and read the pixels instead of guessing.
-3. Fix the general mechanism with a failing test first; no per-frame cost; an
-   `upstream/` change updates `upstream/provenance.json` and the owning docs.
+3. Fix the general mechanism with a failing test first; no per-frame cost; a
+   `ThirdParty/` change updates `ThirdParty/provenance.json` and the owning docs.
 4. Verify: render `after`, compare `before,after`, run the gates once, suspend the VM.
 5. Deliver: commit with `Fixes #<n>` in the body (push only when asked), Release build
    only per AGENTS.md or local opt-in, delete this task's `artifacts/` output, keep the

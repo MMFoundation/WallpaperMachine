@@ -7,11 +7,11 @@ dependencies of the built app, the compiled-in inventory, every linked Rust crat
 component this script finds the license text in the component itself, never from memory:
 
 * Rust crates: the `LICENSE*`/`COPYING*` files of the crate in the local cargo registry, or
-  of the vendored copy under `upstream/` (naga). For a choice (`MIT OR Apache-2.0`) the text
+  of the vendored copy under `ThirdParty/` (naga). For a choice (`MIT OR Apache-2.0`) the text
   of the option the project uses is written: the first allowed option in `CHOICE_ORDER`.
   Files are matched to a license by what they say, not by what they are called;
 * Homebrew libraries and header-only packages: the license files of the keg;
-* vendored code: its license file under `upstream/`, or the notice at the end of the header.
+* vendored code: its license file under `ThirdParty/`, or the notice at the end of the header.
 
 A component whose text cannot be found is listed with a `LICENSE TEXT NOT FOUND` marker.
 Report-only by default; `--enforce` exits 1 when any text is missing. Tool errors (no cargo,
@@ -27,16 +27,14 @@ import re
 from types import SimpleNamespace
 
 import check_licenses
-from check_licenses import ENGINE, PASSING, ToolError, evaluate, merge, parse_expression
+from check_licenses import PASSING, ToolError, evaluate, merge, parse_expression
 from lib.glyphs import markers
 from lib.homebrew import KEG_LICENSE_FILE
-from lib.paths import ARTIFACTS, ROOT, app_bundle
+from lib.paths import ARTIFACTS, ENGINE, ROOT, THIRD_PARTY, app_bundle
 
 MARK = markers()
 DEFAULT_OUTPUT = ARTIFACTS / "licenses/THIRD-PARTY-NOTICES.txt"
 NOT_FOUND = "LICENSE TEXT NOT FOUND"
-THIRD_PARTY = ENGINE / "third_party"
-UPSTREAM = ROOT / "upstream"
 # License files this repository supplies for a component whose own distribution carries none
 # (`<name>/LICENSE*`, copied from the upstream project's repository, recorded in the commit).
 SUPPLEMENTS = ROOT / "Packaging/notices"
@@ -73,22 +71,22 @@ CRATE_LICENSE_FILE = re.compile(r"^(LICEN[CS]E|COPYING|UNLICENSE|COPYRIGHT)([-_.
 VENDORED_FILES = {
     "miniaudio": [THIRD_PARTY / "miniaudio/LICENSE"],
     "stb_vorbis": [THIRD_PARTY / "stb_vorbis/LICENSE"],
-    "mediaremote-adapter": [UPSTREAM / "mediaremote-adapter/LICENSE"],
+    "mediaremote-adapter": [THIRD_PARTY / "mediaremote-adapter/LICENSE"],
     "phosphene abi reference": [ROOT / "Extension/Phosphene-LICENSE.txt"],
 }
 VENDORED_HEADERS = {
-    "stb_image": (THIRD_PARTY / "stb_image.h", "This software is available under 2 licenses"),
+    "stb_image": (THIRD_PARTY / "stb_image/stb_image.h", "This software is available under 2 licenses"),
 }
 # Shipped in the bundle but outside the closure: not code the walks can see.
 EXTRAS = (
-    ("mediaremote-adapter", "BSD-3-Clause", "upstream/mediaremote-adapter, embedded framework"),
+    ("mediaremote-adapter", "BSD-3-Clause", "ThirdParty/mediaremote-adapter, embedded framework"),
     ("Phosphene ABI reference", "MIT", "notice for the lock screen extension (Extension/Phosphene-LICENSE.txt)"),
 )
 SOURCE_NOTE = {
     "crate": "https://crates.io/crates/{name}/{version}",
 }
 MPL_NOTE = ("Source form of this component: its crate source at the URL above, and the exact version in "
-            "upstream/renderer/Cargo.lock of the WallpaperMachine source tree (MPL-2.0 section 3.2).")
+            "Renderer/Cargo.lock of the WallpaperMachine source tree (MPL-2.0 section 3.2).")
 
 
 @dataclass(frozen=True)
@@ -218,8 +216,8 @@ def license_files(directory, pattern=CRATE_LICENSE_FILE):
 
 
 def crate_directory(name, version, environment):
-    """The source directory of a crate: the vendored copy under `upstream/`, else the cargo registry."""
-    vendored = UPSTREAM / name
+    """The source directory of a crate: the vendored copy under `ThirdParty/`, else the cargo registry."""
+    vendored = THIRD_PARTY / name
     if (vendored / "Cargo.toml").is_file():
         return vendored
     home = Path((environment or os.environ).get("CARGO_HOME") or Path.home() / ".cargo")
@@ -321,7 +319,7 @@ notice below carries (for a choice, the option this project uses), and the licen
 text taken from the component itself.
 
 The complete source code of this application, including the exact versions of every
-Rust crate in upstream/renderer/Cargo.lock, is available from the project repository
+Rust crate in Renderer/Cargo.lock, is available from the project repository
 at the tag of the release.
 """
 
@@ -371,7 +369,7 @@ def summary(noticeset):
 def options_for(app=None, skip_app=False):
     """The options `collect_components` reads, for callers that are not the command line."""
     return SimpleNamespace(app=app or app_bundle("Release"), app_given=app is not None, skip_app=skip_app,
-                           engine=ENGINE, build_script=check_licenses.CORE_BUILD_SCRIPT)
+                           engine=ENGINE, build_script=check_licenses.CORE_BUILD_SCRIPT, third_party=THIRD_PARTY)
 
 
 def main(argv=None, runner=check_licenses.run_command, environment=None):

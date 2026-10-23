@@ -63,8 +63,8 @@ The verdict:
   `origin`), then its material, effects, particle preset, `instanceoverride` and any
   user property bound to it. Those files say which feature is involved; the wallpaper
   never names the fix.
-- Find the code that reads those keys: `rg -u '<key>'
-  upstream/renderer/external/open-wallpaper-engine/src` (scene parsing is in
+- Find the code that reads those keys: `rg '<key>'
+  Renderer/Engine/src` (scene parsing is in
   `src/Scene/Parse/`), and the regression page for the area
   ([scene](scene-regressions.md) or [runtime](runtime-regressions.md)) for the tests
   that already guard it.
@@ -100,9 +100,9 @@ override rule, 13 cells matched before the fix and all 22 to the 8-bit level aft
    and `artifacts/renderer/bin/tests/<test> --gtest_filter='<Suite>.*'`.
 3. Prefer work at load or spawn time to work per frame; no extra passes or caches to
    cover a bug (see AGENTS.md).
-4. A change under `upstream/` adds an entry to `upstream/provenance.json`: date, issue,
-   the evidence and the regression tests. Update the owning feature doc and the
-   regression page in the same change.
+4. Update the owning feature doc and the regression page in the same change. A change
+   under `ThirdParty/` also adds an entry to `ThirdParty/provenance.json`: date, issue,
+   the evidence and the regression tests.
 
 ## 4. Verify
 

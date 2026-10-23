@@ -9,9 +9,9 @@ Three inventories, each with its license and where it comes from:
    already packaged app (`@rpath` into `Contents/Frameworks`) is walked the same way.
    Apple system libraries pass as system;
 2. third-party code compiled or statically linked into the renderer, from a source-level
-   inventory: the `cargo:rustc-link-lib` lists of `crates/core/build.rs`, the
+   inventory: the `cargo:rustc-link-lib` lists of `Renderer/Core/build.rs`, the
    `find_package`/`pkg_check_modules` targets of the scene engine's CMake files, and
-   its `third_party/` directory. Their licenses come from the hand-kept `COMPONENTS`
+   the vendored C libraries in `ThirdParty/`. Their licenses come from the hand-kept `COMPONENTS`
    table below, which must cover every entry or the entry is reported as unknown;
 3. every linked Rust crate, from `cargo tree` for the target the app is built for (not
    `cargo metadata`, which also lists crates the build never compiles).
@@ -38,12 +38,11 @@ import subprocess
 from build import cargo_environment
 from lib.glyphs import markers
 from lib.homebrew import keg_of
-from lib.paths import ARTIFACTS, RENDERER, ROOT, app_bundle
+from lib.paths import ARTIFACTS, ENGINE, RENDERER, ROOT, THIRD_PARTY, app_bundle
 
 MARK = markers()
 LICENSE_ARTIFACTS = ARTIFACTS / "licenses"
-ENGINE = RENDERER / "external/open-wallpaper-engine"
-CORE_BUILD_SCRIPT = RENDERER / "crates/core/build.rs"
+CORE_BUILD_SCRIPT = RENDERER / "Core/build.rs"
 CARGO_MANIFEST = RENDERER / "Cargo.toml"
 LICENSING = ROOT / "LICENSING.md"
 CARGO_TREE = ("cargo", "tree", "--offline", "--manifest-path", str(CARGO_MANIFEST), "--workspace",
@@ -240,7 +239,7 @@ COMPONENTS = {
     "lz4": Entry("BSD-2-Clause", "Homebrew dylib"),
     "freetype": Entry("FTL OR GPL-2.0-or-later", "Homebrew dylib; the keg's LICENSE.TXT offers either"),
     "libpng": Entry("libpng-2.0", "Homebrew dylib, a FreeType dependency"),
-    "mediaremote-adapter": Entry("BSD-3-Clause", "upstream/mediaremote-adapter, embedded framework"),
+    "mediaremote-adapter": Entry("BSD-3-Clause", "ThirdParty/mediaremote-adapter, embedded framework"),
     "(apple system)": Entry(None, "Apple system library or framework", "system"),
     "(build tool)": Entry(None, "build-time tool, not part of the product", "tool"),
 }
@@ -259,12 +258,12 @@ ALIASES = {
     "nlohmann_json": "nlohmann-json", "argparse": "argparse",
     "opengl": "(apple system)", "threads": "(apple system)", "pkgconfig": "(build tool)",
     "liblz4": "lz4",
-    # third_party/
+    # ThirdParty/
     "effolkronium": "effolkronium-random", "glad": "glad", "miniaudio": "miniaudio",
     "vog": "vog-sha1", "stb_image": "stb_image",
 }
-# The scene engine's own archives (src/ of open-wallpaper-engine, `wp*`) and this project's own
-# renderer libraries (top-level Renderer/, `wm*`: wmMedia, wmSound) are first party.
+# The scene engine's archives (Renderer/Engine/src, `wp*`) and the other renderer libraries
+# (Renderer/, `wm*`: wmMedia, wmSound) are first party.
 FIRST_PARTY_ARCHIVE = re.compile(r"^((wp|wm)[A-Z]\w*|wescene-renderer)$")
 # A library file's stem -> its component, for libraries whose Homebrew keg cannot be found
 # (an already packaged app, or a machine without Homebrew).
@@ -483,7 +482,7 @@ def link_lists(build_script):
 def cmake_packages(engine):
     """[(name, file)] for the packages the scene engine's own CMake files look up (not its tests)."""
     files = [engine / "CMakeLists.txt", *sorted((engine / "src").rglob("CMakeLists.txt")),
-             *sorted((engine / "third_party").glob("CMakeLists.txt"))]
+             *sorted((engine / "Dependencies").glob("CMakeLists.txt"))]
     found = []
     for file in files:
         if not file.is_file():
@@ -496,24 +495,32 @@ def cmake_packages(engine):
     return found
 
 
-def vendored(engine):
-    """[(name, path)] of third_party/: every directory, and every loose header."""
-    directory = engine / "third_party"
-    if not directory.is_dir():
-        raise ToolError(f"No third_party directory in {engine}")
-    items = [(entry.name, f"third_party/{entry.name}") for entry in sorted(directory.iterdir()) if entry.is_dir()]
-    items += [(entry.stem, f"third_party/{entry.name}") for entry in sorted(directory.iterdir())
+# ThirdParty/ entries another section checks, or that hold no code.
+NOT_ENGINE_VENDORED = {
+    "naga": "a Rust crate, checked with the crates",
+    "mediaremote-adapter": "an embedded framework, checked with the app's libraries",
+    "received-licenses": "license texts of imported code, not code",
+}
+
+
+def vendored(third_party):
+    """[(name, path)] of ThirdParty/ the engine may compile: every directory, and every loose header."""
+    if not third_party.is_dir():
+        raise ToolError(f"No vendored-code directory at {third_party}")
+    entries = [entry for entry in sorted(third_party.iterdir()) if entry.name not in NOT_ENGINE_VENDORED]
+    items = [(entry.name, f"ThirdParty/{entry.name}") for entry in entries if entry.is_dir()]
+    items += [(entry.stem, f"ThirdParty/{entry.name}") for entry in entries
               if entry.is_file() and entry.suffix in (".h", ".hpp")]
     return items
 
 
-def inventory_components(engine, build_script):
+def inventory_components(engine, build_script, third_party):
     """One component per library the sources name, however many lists and CMake files name it."""
     lists = link_lists(build_script)
     raw = [(name, f"build.rs {kind}", {"static": "static", "dylib": "link-dylib"}[kind])
            for kind, name in lists if kind != "framework"]
     raw += [(name, f"CMake {file}", "cmake-package") for name, file in cmake_packages(engine)]
-    raw += [(name, path, "vendored") for name, path in vendored(engine)]
+    raw += [(name, path, "vendored") for name, path in vendored(third_party)]
     grouped = {}  # component -> (first raw name, kinds, origins)
     for name, origin, kind in raw:
         first_party = kind == "static" and FIRST_PARTY_ARCHIVE.match(name)
@@ -554,7 +561,7 @@ CRATE_LINE = re.compile(r"^(?P<name>\S+) v(?P<version>\S+)(?: \((?P<where>[^)]*)
 
 
 def is_vendored_crate(where):
-    """True for a path crate vendored under `upstream/` outside the renderer workspace (naga).
+    """True for a path crate vendored under `ThirdParty/` (naga).
 
     `cargo tree` prints every path crate with its directory, so a vendored third-party copy looks
     like a workspace member; it is the directory that tells them apart.
@@ -564,10 +571,9 @@ def is_vendored_crate(where):
         parts = path.relative_to(ROOT).parts
     except ValueError:
         parts = path.parts
-    if "upstream" not in parts:
+    if THIRD_PARTY.name not in parts:
         return False
-    inside = parts[parts.index("upstream") + 1:]
-    return bool(inside) and inside[0] != RENDERER.name
+    return len(parts) > parts.index(THIRD_PARTY.name) + 1
 
 
 def parse_cargo_tree(text):
@@ -732,7 +738,7 @@ def collect_components(options, runner=run_command, environment=None, output=Non
         for dependency, referrer in walk.unresolved:
             say(f"{MARK.warn} Dependency not found: {dependency} (from {referrer})")
 
-    inventory = inventory_components(options.engine, options.build_script)
+    inventory = inventory_components(options.engine, options.build_script, options.third_party)
     components += inventory
     sections["inventory"] = {"status": "checked", "entries": len(inventory), "build_script": display_path(options.build_script)}
     say(f"{MARK.step} Compiled-in and statically linked: {len(inventory)} inventory entries")
@@ -796,6 +802,7 @@ def main(argv=None, runner=run_command, environment=None, licensing_text=None):
     args.app_given = args.app is not None
     args.app = args.app or app_bundle("Release")
     args.engine = ENGINE
+    args.third_party = THIRD_PARTY
     args.build_script = CORE_BUILD_SCRIPT
     output = args.output or LICENSE_ARTIFACTS / datetime.now().strftime("closure-%Y%m%d-%H%M%S-%f")
     try:

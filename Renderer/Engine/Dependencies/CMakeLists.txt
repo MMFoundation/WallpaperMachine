@@ -1,3 +1,5 @@
+# The engine's external libraries: the Homebrew packages it finds and the vendored C
+# libraries under ThirdParty/ (WESCENE_THIRD_PARTY_DIR, set by the engine).
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 
 find_package(PkgConfig REQUIRED)
@@ -60,15 +62,15 @@ elseif(TARGET qjs::qjs AND NOT TARGET quickjs::quickjs)
 endif()
 
 add_library(miniaudio INTERFACE)
-target_include_directories(miniaudio SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/miniaudio)
+target_include_directories(miniaudio SYSTEM INTERFACE ${WESCENE_THIRD_PARTY_DIR}/miniaudio)
 
 # stb_vorbis 1.22 (public domain or MIT, unchanged): the Ogg Vorbis decoder behind
 # scene sounds (Renderer/Sound/Vorbis). It decodes from memory with the pull API
 # only, so the stdio and push-data parts are compiled out; the same definitions
 # reach every user of the header-only declarations.
-add_library(stb_vorbis STATIC stb_vorbis/stb_vorbis.c)
+add_library(stb_vorbis STATIC ${WESCENE_THIRD_PARTY_DIR}/stb_vorbis/stb_vorbis.c)
 target_compile_definitions(stb_vorbis PUBLIC STB_VORBIS_NO_STDIO STB_VORBIS_NO_PUSHDATA_API)
-target_include_directories(stb_vorbis SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/stb_vorbis)
+target_include_directories(stb_vorbis SYSTEM PUBLIC ${WESCENE_THIRD_PARTY_DIR}/stb_vorbis)
 # Vendored code is built as shipped: its warnings are not ours to fix.
 target_compile_options(stb_vorbis PRIVATE -w)
 set_property(TARGET stb_vorbis PROPERTY POSITION_INDEPENDENT_CODE ON)

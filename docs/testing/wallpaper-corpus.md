@@ -33,9 +33,9 @@ any machine. Never hardcode a home directory in a test.
 | Variable | Default | Used by |
 | --- | --- | --- |
 | `WALLPAPER_MACHINE_ASSETS_ROOT` | `~/Library/Application Support/Steam/steamapps/common/wallpaper_engine/assets` | Wallpaper Engine's shipped `assets/shaders` (`Renderer/Shader/tests/corpus.rs` and the sweeps under `Renderer/Shader/src/*/tests/`, `shader_corpus_test`, and the bridge at runtime) |
-| `WALLPAPER_MACHINE_UNPACK_ROOT` | `upstream/renderer/unpack` | shaders unpacked from workshop packages, one `<id>/` folder each (the on-request corpus sweep in `shader_corpus_test`; the `Renderer/Shader` tests read workshop shaders unpacked under `artifacts/p5/workshop-shaders/<id>/shaders/` instead) |
+| `WALLPAPER_MACHINE_UNPACK_ROOT` | `Renderer/unpack` | shaders unpacked from workshop packages, one `<id>/` folder each (the on-request corpus sweep in `shader_corpus_test`; the `Renderer/Shader` tests read workshop shaders unpacked under `artifacts/p5/workshop-shaders/<id>/shaders/` instead) |
 | `WALLPAPER_MACHINE_VIDEO_ROOT` | `~/Library/Application Support/WallpaperMachine/Library` | video files (`.mp4`/`.m4v`/`.mov`, `.webm`/`.mkv`) the container readers' A/B checks compare with `ffprobe` (`media_isobmff_tests`, `media_matroska_tests`; `WALLPAPER_MACHINE_FFPROBE` overrides the `ffprobe` path); `video_probe_test` reads the `.tex` files under the same root, probes every embedded video payload in memory with the project's own readers and opens each one with the native backend, printing the payloads that are declined or not played with their reason |
-| `WALLPAPER_MACHINE_WORKSHOP_ROOT` | `upstream/renderer/external/open-wallpaper-engine/workshop` | packed workshop items, one `<id>/scene.pkg` each, such as the app's `Library` folder (`workshop_corpus_stamps_test`) |
+| `WALLPAPER_MACHINE_WORKSHOP_ROOT` | `Renderer/Engine/workshop` | packed workshop items, one `<id>/scene.pkg` each, such as the app's `Library` folder (`workshop_corpus_stamps_test`) |
 
 A skipped case is **not** a passing case. From `Renderer/`, run
 `cargo test --release --locked -p wm-shader --features ffi --test corpus -- --nocapture`

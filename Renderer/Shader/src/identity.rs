@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn the_recorded_compiler_version_matches_the_vendored_manifest() {
-        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../upstream/naga/Cargo.toml");
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ThirdParty/naga/Cargo.toml");
         let text = std::fs::read_to_string(&manifest).expect("the vendored naga manifest is in the checkout");
         let version = text
             .lines()

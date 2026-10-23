@@ -37,12 +37,12 @@ import check_licenses
 from lib import bundle_contract, dmg
 from lib.homebrew import KEG_LICENSE_FILE, keg_of
 from lib.glyphs import markers
-from lib.paths import RENDERER, ROOT, app_bundle
+from lib.paths import PROVENANCE, ROOT, THIRD_PARTY, app_bundle
 import notices
 
 MARK = markers()
-# Statically linked into the renderer; their notices travel with the app binary.
-RENDERER_THIRD_PARTY = RENDERER / "external/open-wallpaper-engine/third_party"
+# The GPLv2 text the imported renderer was received under; see LICENSING.md.
+IMPORTED_RENDERER_LICENSE = THIRD_PARTY / "received-licenses/wallpaper-engine-for-macos.GPL-2.0.txt"
 # Packaging is one-way: it rewrites load commands and fills Contents/Frameworks, and
 # does not record where those dylibs came from. Repackaging therefore needs fresh
 # build output rather than an incremental rebuild, which leaves Frameworks as it was.
@@ -164,7 +164,7 @@ def preflight(notice_files, libraries):
     repository file it must match.
     """
     licenses = keg_licenses(libraries)
-    sources = [ROOT / "LICENSE", ROOT / "LICENSING.md", RENDERER / "LICENSE.upstream-GPL-2.0", ROOT / "upstream/provenance.json", *notice_files.values()]
+    sources = [ROOT / "LICENSE", ROOT / "LICENSING.md", IMPORTED_RENDERER_LICENSE, PROVENANCE, *notice_files.values()]
     missing = [f"{file} is missing from the repository" for file in sources if not file.is_file()]
     missing += [f"{file} is missing from the build or differs from {original}" for file, original in notice_files.items() if original.is_file() and (not file.is_file() or file.read_bytes() != original.read_bytes())]
     if missing:
@@ -204,14 +204,18 @@ def write_licenses(resources, licenses, third_party):
         target.mkdir(parents=True)
         for file in files:
             shutil.copy2(file, target / file.name)
-    for file in sorted(RENDERER_THIRD_PARTY.glob("*/LICENSE*")):
+    # The vendored C libraries statically linked into the renderer; their notices travel
+    # with the app binary.
+    for file in sorted(THIRD_PARTY.glob("*/LICENSE*")):
+        if file.parent.name in check_licenses.NOT_ENGINE_VENDORED:
+            continue
         target = directory / "renderer-third-party" / file.parent.name
         target.mkdir(parents=True, exist_ok=True)
         shutil.copy2(file, target / file.name)
     shutil.copy2(ROOT / "LICENSE", resources / "WallpaperMachine-LICENSE.txt")
     shutil.copy2(ROOT / "LICENSING.md", resources / "LICENSING.md")
-    shutil.copy2(RENDERER / "LICENSE.upstream-GPL-2.0", resources / "Imported-Renderer-GPL-2.0-LICENSE.txt")
-    shutil.copy2(ROOT / "upstream/provenance.json", resources / "provenance.json")
+    shutil.copy2(IMPORTED_RENDERER_LICENSE, resources / "Imported-Renderer-GPL-2.0-LICENSE.txt")
+    shutil.copy2(PROVENANCE, resources / "provenance.json")
     (resources / "THIRD-PARTY-NOTICES.txt").write_text(third_party)
 
 
@@ -247,7 +251,7 @@ def package(args):
         raise PackagingError(f"{FRESH_BUILD}; Contents/Frameworks already holds: {', '.join(file.name for file in bundled)}")
     libraries = resolve_libraries([binary, *extension_binaries], [], prefix)
     # Notices Xcode already bundles from project.yml; packaging never rewrites them.
-    notice_files = {resources / "LICENSE": ROOT / "upstream/mediaremote-adapter/LICENSE"}
+    notice_files = {resources / "LICENSE": THIRD_PARTY / "mediaremote-adapter/LICENSE"}
     for extension in extensions:
         notice_files[extension / "Contents/Resources/Phosphene-LICENSE.txt"] = ROOT / "Extension/Phosphene-LICENSE.txt"
     licenses = preflight(notice_files, libraries)

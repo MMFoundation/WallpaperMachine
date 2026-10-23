@@ -22,10 +22,10 @@ targets:
     type: framework
     platform: macOS
     sources:
-      - path: upstream/mediaremote-adapter/src
+      - path: ThirdParty/mediaremote-adapter/src
         excludes:
           - test
-      - path: upstream/mediaremote-adapter/include
+      - path: ThirdParty/mediaremote-adapter/include
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.wallpapermachine.MediaRemoteAdapter
@@ -36,8 +36,8 @@ targets:
         CLANG_ENABLE_OBJC_ARC: YES
         GCC_SYMBOLS_PRIVATE_EXTERN: NO
         HEADER_SEARCH_PATHS:
-          - "$(SRCROOT)/upstream/mediaremote-adapter/include"
-          - "$(SRCROOT)/upstream/mediaremote-adapter/src"
+          - "$(SRCROOT)/ThirdParty/mediaremote-adapter/include"
+          - "$(SRCROOT)/ThirdParty/mediaremote-adapter/src"
     dependencies:
       - sdk: Foundation.framework
       - sdk: AppKit.framework
@@ -64,9 +64,9 @@ targets:
       - path: Resources/ReleaseBanners
         type: folder
         buildPhase: resources
-      - path: upstream/mediaremote-adapter/bin/mediaremote-adapter.pl
+      - path: ThirdParty/mediaremote-adapter/bin/mediaremote-adapter.pl
         buildPhase: resources
-      - path: upstream/mediaremote-adapter/LICENSE
+      - path: ThirdParty/mediaremote-adapter/LICENSE
         buildPhase: resources
     dependencies:
       - target: MediaRemoteAdapter
@@ -87,9 +87,9 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: App/Bridge/WallpaperPreviewBridge.h
         HEADER_SEARCH_PATHS:
           - "$(SRCROOT)/App/Bridge/Generated"
-          - "$(SRCROOT)/upstream/renderer/external/open-wallpaper-engine/src/Platform/Apple"
+          - "$(SRCROOT)/Renderer/Engine/src/Platform/Apple"
         LIBRARY_SEARCH_PATHS: &rendererLibraryPaths
-          - "$(SRCROOT)/upstream/renderer/target/release"
+          - "$(SRCROOT)/Renderer/target/release"
           - /opt/homebrew/lib
           - /opt/homebrew/opt/quickjs-ng/lib
         OTHER_SWIFT_FLAGS: "-Xcc -fmodule-map-file=$(SRCROOT)/App/Bridge/Generated/WallpaperBridgeFFI.modulemap -Xcc -fmodule-map-file=$(SRCROOT)/Renderer/Media/Apple/WallpaperMedia.modulemap"
@@ -148,7 +148,7 @@ targets:
         APPLICATION_EXTENSION_API_ONLY: YES
         SWIFT_OBJC_BRIDGING_HEADER: Extension/WallpaperExtensionBridge.h
         OTHER_SWIFT_FLAGS: "-Xcc -fmodule-map-file=$(SRCROOT)/Renderer/Media/Apple/WallpaperMedia.modulemap"
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/upstream/renderer/external/open-wallpaper-engine/src/Platform/Apple"
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/Renderer/Engine/src/Platform/Apple"
         LIBRARY_SEARCH_PATHS: *rendererLibraryPaths
         OTHER_LDFLAGS: *rendererLinkerFlags
         LD_RUNPATH_SEARCH_PATHS:
@@ -175,7 +175,7 @@ targets:
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/App/Bridge/Generated"
         HEADER_SEARCH_PATHS:
           - "$(SRCROOT)/App/Bridge/Generated"
-          - "$(SRCROOT)/upstream/renderer/external/open-wallpaper-engine/src/Platform/Apple"
+          - "$(SRCROOT)/Renderer/Engine/src/Platform/Apple"
         OTHER_SWIFT_FLAGS: "-Xcc -fmodule-map-file=$(SRCROOT)/App/Bridge/Generated/WallpaperBridgeFFI.modulemap -Xcc -fmodule-map-file=$(SRCROOT)/Renderer/Media/Apple/WallpaperMedia.modulemap"
   WallpaperMachineUITests:
     type: bundle.ui-testing

@@ -77,13 +77,13 @@ fn the_retired_scene_descriptor_layer_does_not_come_back() {
         "owe_scene_result",
     ];
     let manifest = manifest_dir();
-    let workspace = manifest.join("../..");
+    let workspace = manifest.join("..");
     let mut files = Vec::new();
     for root in [
         manifest.join("build.rs"),
         manifest.join("src/engine.rs"),
         manifest.join("src/owe"),
-        workspace.join("external/open-wallpaper-engine/src/Platform/Apple"),
+        workspace.join("Engine/src/Platform/Apple"),
     ] {
         source_files(&root, &mut files);
     }

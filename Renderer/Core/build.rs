@@ -64,7 +64,7 @@ const ARCHIVE_FOLDERS: [&str; 15] = [
     "src/Scene/Timer",
     "src/Scene/MetalRender",
     "src/Utils",
-    "third_party",
+    "Dependencies",
     "Renderer/Sound",
     "Renderer/Media",
     "Renderer/Media/Apple",
@@ -74,7 +74,9 @@ const ARCHIVE_FOLDERS: [&str; 15] = [
 /// Where everything this script reads or writes lives.
 struct Layout {
     engine_dir: PathBuf,
-    project_renderer_dir: PathBuf,
+    /// The other source folders the engine's CMake build compiles: the project's
+    /// C++ areas beside the engine and the vendored C libraries.
+    engine_inputs: [PathBuf; 4],
     wrapper_header: PathBuf,
     wrapper_impl: PathBuf,
     out_dir: PathBuf,
@@ -86,22 +88,26 @@ impl Layout {
             env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
         );
         let workspace = crate_dir
-            .ancestors()
-            .nth(2)
-            .expect("the core crate sits two levels below the workspace root");
-        let engine_dir = workspace.join("external/open-wallpaper-engine");
+            .parent()
+            .expect("the core crate sits one level below the workspace root");
+        let engine_dir = workspace.join("Engine");
         let apple = engine_dir.join("src/Platform/Apple");
         Self {
             wrapper_header: apple.join("SceneWallpaperBindings.h"),
             wrapper_impl: apple.join("SceneWallpaperBindings.mm"),
-            project_renderer_dir: workspace.join("../../Renderer"),
+            engine_inputs: [
+                workspace.join("Media"),
+                workspace.join("Sound"),
+                workspace.join("Surface"),
+                workspace.join("../ThirdParty"),
+            ],
             out_dir: PathBuf::from(env::var_os("OUT_DIR").expect("cargo sets OUT_DIR")),
             engine_dir,
         }
     }
 
     fn cmake_prefix(&self) -> PathBuf {
-        self.out_dir.join("open_wallpaper_engine")
+        self.out_dir.join("engine")
     }
 }
 
@@ -121,12 +127,9 @@ fn announce_rerun_triggers(layout: &Layout) {
     for variable in WATCHED_VARIABLES {
         println!("cargo:rerun-if-env-changed={variable}");
     }
-    let watched_paths = [
-        &layout.engine_dir,
-        &layout.project_renderer_dir,
-        &layout.wrapper_header,
-        &layout.wrapper_impl,
-    ];
+    let watched_paths = [&layout.engine_dir, &layout.wrapper_header, &layout.wrapper_impl]
+        .into_iter()
+        .chain(&layout.engine_inputs);
     for path in watched_paths {
         println!("cargo:rerun-if-changed={}", path.display());
     }
