@@ -156,6 +156,20 @@ final class StorageMoveServiceTests: XCTestCase {
         XCTAssertNil(service.pending)
     }
 
+    func testNoMoveWhileAnInterruptedRestoreIsStillToBePutRight() throws {
+        let service = StorageMoveService(support: support, volumes: FakeVolumes(drive: drive))
+        try service.prepare(try service.plan(moveTo: drive))
+        // The backup restore staged afterwards stopped part-way before this launch.
+        let transaction = support.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
+        try FileManager.default.createDirectory(at: transaction, withIntermediateDirectories: true)
+
+        XCTAssertThrowsError(try XCTUnwrap(StorageMoveService.applyPending(support: support)).get())
+        XCTAssertEqual(StorageLocation.resolve(support: support), .support)
+        XCTAssertEqual(try read("Library/101/project.json"), "project-101")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path), "the copy is removed")
+        XCTAssertThrowsError(try service.plan(moveTo: drive))
+    }
+
     func testOnlyOneMoveWaitsAtATime() throws {
         let service = StorageMoveService(support: support, volumes: FakeVolumes(drive: drive))
         let plan = try service.plan(moveTo: drive)

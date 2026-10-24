@@ -126,7 +126,11 @@ private struct StorageLocationRows: View {
 
   var body: some View {
     let location = controller.libraryLocation
-    let canMove = !location.isCopying && location.pending == nil
+    // Also while either move has its folder picker or confirmation open.
+    let canMove =
+      !location.isCopying && location.pending == nil
+      && !controller.isBusy(PanelActionCoordinator.key("moveLibrary"))
+      && !controller.isBusy(PanelActionCoordinator.key("moveLibraryToThisMac"))
     DisplaysRow(
       item: StorageSettingsSection.libraryLocation, details: [location.current.path], labelsControl: false
     ) {

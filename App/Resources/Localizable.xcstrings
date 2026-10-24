@@ -1,6 +1,12 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "A backup restore that did not finish is put right the next time you open WallpaperMachine. Move the library after that." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "완료되지 않은 백업 복원은 다음에 WallpaperMachine을 열 때 바로잡힙니다. 그 후에 보관함을 이동하세요."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "完了しなかったバックアップの復元は、次回WallpaperMachineを開いたときに修復されます。ライブラリの移動はその後に行ってください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "未完成的备份恢复会在下次打开 WallpaperMachine 时修复。请在那之后再移动壁纸库。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "未完成的備份回復會在下次開啟 WallpaperMachine 時修復。請在那之後再搬移桌布庫。"}}}
+    },
+    "Restore recovery needs the drive that holds the wallpaper library. Connect it and open WallpaperMachine again; nothing has been deleted." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "복원을 바로잡으려면 배경화면 보관함이 있는 드라이브가 필요합니다. 드라이브를 연결하고 WallpaperMachine을 다시 여세요. 아무것도 삭제되지 않았습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "復元の修復には壁紙ライブラリがあるドライブが必要です。ドライブを接続して、もう一度WallpaperMachineを開いてください。何も削除されていません。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "修复恢复需要存放壁纸库的磁盘。请连接它，然后重新打开 WallpaperMachine；没有任何内容被删除。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "修復回復需要存放桌布庫的磁碟。請連接它，然後重新開啟 WallpaperMachine；沒有任何內容被刪除。"}}}
+    },
     "WallpaperMachine could not read where your wallpaper library is kept." : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine이 배경화면 보관함이 저장된 위치를 읽지 못했습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachineは壁紙ライブラリの保存場所を読み取れませんでした。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 无法读取壁纸库的存放位置。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "WallpaperMachine 無法讀取桌布庫的存放位置。"}}}
     },

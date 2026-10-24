@@ -321,9 +321,9 @@ pass `--sign-identity "WallpaperMachine Code Signing"`.
 
 ## Runtime data locations
 
-The app never writes into the repository. Managed wallpapers live at
-`~/Library/Application Support/WallpaperMachine/Library`; imports copy files
-there and leave the originals untouched. Sibling directories under
+The app never writes into the repository. Managed wallpapers live by default at
+`~/Library/Application Support/WallpaperMachine/Library`; imports copy files into
+the library wherever it is kept and leave the originals untouched. Sibling directories under
 `~/Library/Application Support/WallpaperMachine/` hold scene assets
 (`SceneAssets`), the private SteamCMD runtime (`SteamCMD`) and the optional saved
 Steam sign-in (`SteamSession`). Settings → Storage can move `Library` and the

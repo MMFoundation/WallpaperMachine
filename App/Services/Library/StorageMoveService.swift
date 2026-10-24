@@ -85,6 +85,7 @@ struct StorageMoveService: Sendable {
         guard pending == nil else {
             throw StorageMoveError(String(localized: "A move is already waiting for the next launch. Cancel it before choosing another folder."))
         }
+        try requireNoInterruptedRestore()
         let targetRoot: URL
         let target: StorageLocation?
         if let parent {
@@ -148,6 +149,15 @@ struct StorageMoveService: Sendable {
     }
 
     private static func headroom(for bytes: Int64) -> Int64 { max(512 * 1024 * 1024, bytes / 20) }
+
+    /// A backup restore that stopped part-way is put right at the next launch from a journal that
+    /// names where the library was; moving the library first would take it away from there.
+    private func requireNoInterruptedRestore() throws {
+        let transaction = support.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
+        guard !FileManager.default.fileExists(atPath: transaction.path) else {
+            throw StorageMoveError(String(localized: "A backup restore that did not finish is put right the next time you open WallpaperMachine. Move the library after that."))
+        }
+    }
 
     // MARK: Preparing
 
@@ -249,6 +259,12 @@ struct StorageMoveService: Sendable {
         }
         if let target = pending.target, StorageLocation.marker(at: root) != target.id {
             throw StorageMoveError(String(localized: "The wallpaper library was not moved: “\(target.path)” was not available. Connect the drive and choose the folder again."))
+        }
+        do {
+            try requireNoInterruptedRestore()
+        } catch {
+            Self.discardTarget(root: root, target: pending.target, removeRoot: true)
+            throw error
         }
         let staging = root.appendingPathComponent(Self.stagingName, isDirectory: true)
         var moves: [(from: URL, to: URL)] = []

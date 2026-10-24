@@ -84,7 +84,12 @@ it fails as if the files were deleted. Reconnect the drive and reopen the app.
 ## Backups
 
 A backup reads `Library/` from the storage root and a restore writes it there
-(`WallpaperBackupService.storageRoot`). The storage root is recorded as one of the
+(`WallpaperBackupService.storageRoot`). A restore keeps the `old/` and `ready/`
+copies of library units in a `.BackupRestoreTransaction` folder beside the library,
+so putting them in place and putting them back stay renames on that disk; its
+journal names that folder (`libraryRoot`), and a restore that stopped part-way is
+put right from there, or waits for the drive. A library move is refused, at
+**Move…** and again at launch, while such a restore is still to be put right. The storage root is recorded as one of the
 package's source roots, so a property that names a file inside a wallpaper's own
 folder is remapped to the library's place on the Mac it is restored to.
 

@@ -386,6 +386,38 @@ final class WallpaperBackupTests: XCTestCase {
         XCTAssertEqual(targetDefaults.string(forKey: "WallpaperMachine.otherAudioAction"), "mute")
     }
 
+    func testRestoreIntoAMovedLibraryKeepsItsOldCopyBesideTheLibraryAndPutsItBack() async throws {
+        let original = try fixture()
+        let targetDefaults = try defaults()
+        let destinationDrive = root.appendingPathComponent("destination-drive")
+        try put(#"{"title":"Local","type":"scene","file":"scene.json"}"#, "Library/101/project.json", in: destinationDrive)
+        try WallpaperBackupService(supportRoot: source).export(to: package, includeLibrary: true, preferences: .init(defaults: original, domainName: domainName(for: original)))
+        let importer = WallpaperBackupService(supportRoot: destination, storageRoot: destinationDrive)
+        let preview = try importer.preview(package: package, preferences: .init(defaults: targetDefaults, domainName: domainName(for: targetDefaults)))
+        try importer.stageRestore(package: package, preview: preview, policy: .replace)
+        let libraryTransaction = destinationDrive.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
+        let supportTransaction = destination.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
+        var oldCopyBesideTheLibrary = false
+        var oldCopyInSupport = true
+        XCTAssertThrowsError(try importer.applyPendingRestore(defaults: targetDefaults, domainName: domainName(for: targetDefaults), beforePublish: { path in
+            guard path == "Preferences" else { return }
+            // Every move of a library unit was a rename on the library's own disk.
+            oldCopyBesideTheLibrary = FileManager.default.fileExists(atPath: libraryTransaction.appendingPathComponent("old/Library/101/project.json").path)
+            oldCopyInSupport = FileManager.default.fileExists(atPath: supportTransaction.appendingPathComponent("old/Library").path)
+            throw CocoaError(.fileWriteOutOfSpace)
+        }))
+        XCTAssertTrue(oldCopyBesideTheLibrary)
+        XCTAssertFalse(oldCopyInSupport)
+        XCTAssertEqual(try json("Library/101/project.json", in: destinationDrive)["title"] as? String, "Local", "recovery puts the old copy back")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: libraryTransaction.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: supportTransaction.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathComponent("Library").path))
+
+        _ = try importer.applyPendingRestore(defaults: targetDefaults, domainName: domainName(for: targetDefaults))
+        XCTAssertEqual(try json("Library/101/project.json", in: destinationDrive)["title"] as? String, "Original")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: libraryTransaction.path))
+    }
+
     func testInterruptedUncommittedJournalRestoresOriginalBeforeStoresReadPreferences() async throws {
         let targetDefaults = try defaults()
         let transaction = destination.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)

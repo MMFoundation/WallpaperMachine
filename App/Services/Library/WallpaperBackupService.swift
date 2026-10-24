@@ -33,6 +33,21 @@ struct WallpaperBackupService: Sendable {
 
     private func live(_ logical: String) -> URL { liveRoot(logical).appendingPathComponent(logical) }
 
+    private static func isLibrary(_ logical: String) -> Bool { logical == "Library" || logical.hasPrefix("Library/") }
+
+    /// Where a restore keeps a unit's `old/` and `ready/`: on the volume of the unit's live copy, so
+    /// publishing it and putting it back are renames. A library on another disk has its own
+    /// transaction folder there, which the journal names (`libraryRoot`).
+    private func unitTransaction(_ logical: String, transaction: URL, libraryRoot: URL) -> URL {
+        Self.isLibrary(logical) && libraryRoot.path != supportRoot.path
+            ? libraryRoot.appendingPathComponent(Self.transactionDirectoryName, isDirectory: true) : transaction
+    }
+
+    /// The library's transaction folder, when it is not the support root's.
+    private func libraryTransaction(libraryRoot: URL, transaction: URL) -> URL? {
+        libraryRoot.path == supportRoot.path ? nil : unitTransaction("Library", transaction: transaction, libraryRoot: libraryRoot)
+    }
+
     var pendingRestore: Bool {
         manager.fileExists(atPath: supportRoot.appendingPathComponent(Self.pendingDirectoryName).path)
     }
@@ -184,6 +199,12 @@ struct WallpaperBackupService: Sendable {
             try recover(transaction: transaction, defaults: defaults)
             recovered = true
         }
+        let libraryTransaction = libraryTransaction(libraryRoot: storageRoot, transaction: transaction)
+        // Without the support root's transaction, one beside the library holds only prepared
+        // copies or what a committed restore replaced: it is cleared after the journal's own.
+        if let libraryTransaction, manager.fileExists(atPath: libraryTransaction.path) {
+            try manager.removeItem(at: libraryTransaction)
+        }
         let pending = supportRoot.appendingPathComponent(Self.pendingDirectoryName)
         guard pendingRestore, lastStartupError == nil else {
             return recovered ? .init(restoredPaths: [], warnings: [], recoveredInterruptedRestore: true) : nil
@@ -213,11 +234,15 @@ struct WallpaperBackupService: Sendable {
         let warnings = try diagnose(manifest: manifest, package: pending)
         let prepared = transaction.appendingPathComponent("ready")
         try manager.createDirectory(at: prepared, withIntermediateDirectories: true)
+        func ready(_ path: String) -> URL {
+            unitTransaction(path, transaction: transaction, libraryRoot: storageRoot).appendingPathComponent("ready/" + path)
+        }
         // A failure before the journal is published has not touched live data.
         do {
             for path in selected {
                 let source = pending.appendingPathComponent("data/" + path)
-                let target = prepared.appendingPathComponent(path)
+                let target = ready(path)
+                try manager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
                 let (kind, size) = try files.kind(at: source, rejectHardLinks: true)
                 if kind == .directory {
                     try files.copyTree(from: source, to: target, rejectingHardLinks: true)
@@ -247,20 +272,22 @@ struct WallpaperBackupService: Sendable {
             var journal = WallpaperBackupJournal(units: selected.map {
                 .init(path: $0, existed: manager.fileExists(atPath: live($0).path))
             }, originalPreferences: previousValues.filter { changedKeys.contains($0.key) },
-                absentPreferences: changedKeys.filter { previousValues[$0] == nil })
+                absentPreferences: changedKeys.filter { previousValues[$0] == nil },
+                libraryRoot: libraryTransaction == nil ? nil : storageRoot.path)
             try writeJSON(journal, to: transaction.appendingPathComponent("journal.json"))
             do {
                 for unit in journal.units {
                     try beforePublish?(unit.path)
                     let live = live(unit.path)
-                    let old = transaction.appendingPathComponent("old/" + unit.path)
+                    let old = unitTransaction(unit.path, transaction: transaction, libraryRoot: storageRoot)
+                        .appendingPathComponent("old/" + unit.path)
                     try ensureSafeParents(of: unit.path, root: liveRoot(unit.path))
                     if unit.existed {
                         try manager.createDirectory(at: old.deletingLastPathComponent(), withIntermediateDirectories: true)
                         try manager.moveItem(at: live, to: old)
                     }
                     try manager.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    try manager.moveItem(at: prepared.appendingPathComponent(unit.path), to: live)
+                    try manager.moveItem(at: ready(unit.path), to: live)
                 }
                 // Preferences are last, after every referenced file is safely in place.
                 try beforePublish?("Preferences")
@@ -276,10 +303,11 @@ struct WallpaperBackupService: Sendable {
                 throw error
             }
             // A committed journal is a durable completion marker; recovery only cleans it.
-            try finishCommitted(transaction: transaction)
+            try finishCommitted(transaction: transaction, libraryTransaction: libraryTransaction)
             return .init(restoredPaths: selected, warnings: warnings, recoveredInterruptedRestore: recovered)
         } catch {
             if !manager.fileExists(atPath: transaction.appendingPathComponent("journal.json").path) {
+                if let libraryTransaction { try? manager.removeItem(at: libraryTransaction) }
                 try? manager.removeItem(at: transaction)
             }
             throw error
@@ -508,11 +536,24 @@ struct WallpaperBackupService: Sendable {
         // not hydrate. Recovery must not reject those originals under a newer schema.
         guard Set(journal.originalPreferences.keys).isSubset(of: recoveryKeys) else { throw files.unsafe("journal.json") }
         for data in journal.originalPreferences.values { try validateValue(WallpaperBackupPreferences.decode(data), depth: 0) }
+        // The library where this restore found it, which may not be where it is now.
+        let libraryRoot: URL
+        if let recorded = journal.libraryRoot {
+            libraryRoot = URL(fileURLWithPath: recorded, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath()
+            guard recorded.hasPrefix("/"), manager.fileExists(atPath: libraryRoot.path) else {
+                throw WallpaperBackupFailure(message: String(localized: "Restore recovery needs the drive that holds the wallpaper library. Connect it and open WallpaperMachine again; nothing has been deleted."))
+            }
+        } else {
+            libraryRoot = supportRoot
+        }
+        let libraryTransaction = libraryTransaction(libraryRoot: libraryRoot, transaction: transaction)
+        func staged(_ unit: String) -> URL { unitTransaction(unit, transaction: transaction, libraryRoot: libraryRoot) }
+        func liveRoot(_ unit: String) -> URL { Self.isLibrary(unit) ? libraryRoot : supportRoot }
         var paths = Set<String>()
         for unit in journal.units {
             try files.validateRelative(unit.path)
-            try ensureSafeParents(of: "old/" + unit.path, root: transaction)
-            try ensureSafeParents(of: "ready/" + unit.path, root: transaction)
+            try ensureSafeParents(of: "old/" + unit.path, root: staged(unit.path))
+            try ensureSafeParents(of: "ready/" + unit.path, root: staged(unit.path))
             let parts = unit.path.split(separator: "/")
             guard paths.insert(unit.path).inserted,
                   unit.path == "config.toml" || (parts.count == 2 && ["wallpapers", "Library", "UserAssets"].contains(String(parts[0])) && unit.path != "UserAssets/PresetAssets")
@@ -521,14 +562,14 @@ struct WallpaperBackupService: Sendable {
             }
         }
         if journal.preferencesCommitted {
-            try finishCommitted(transaction: transaction)
+            try finishCommitted(transaction: transaction, libraryTransaction: libraryTransaction)
             return
         }
         for unit in journal.units.reversed() {
             try ensureSafeParents(of: unit.path, root: liveRoot(unit.path))
-            let live = live(unit.path)
-            let old = transaction.appendingPathComponent("old/" + unit.path)
-            let ready = transaction.appendingPathComponent("ready/" + unit.path)
+            let live = liveRoot(unit.path).appendingPathComponent(unit.path)
+            let old = staged(unit.path).appendingPathComponent("old/" + unit.path)
+            let ready = staged(unit.path).appendingPathComponent("ready/" + unit.path)
             if manager.fileExists(atPath: old.path) {
                 _ = try files.kind(at: old)
                 if manager.fileExists(atPath: live.path) { try manager.removeItem(at: live) }
@@ -543,12 +584,15 @@ struct WallpaperBackupService: Sendable {
         guard defaults.synchronize() else {
             throw WallpaperBackupFailure(message: String(localized: "The previous preferences could not be saved. Restore recovery will retry at the next launch."))
         }
+        // The library's folder first: the journal beside the support root is what names it.
+        if let libraryTransaction, manager.fileExists(atPath: libraryTransaction.path) { try manager.removeItem(at: libraryTransaction) }
         try manager.removeItem(at: transaction)
     }
 
-    private func finishCommitted(transaction: URL) throws {
+    private func finishCommitted(transaction: URL, libraryTransaction: URL?) throws {
         // Delete pending first: a crash cannot leave a completed restore to repeat.
         try cancelPendingRestore()
+        if let libraryTransaction, manager.fileExists(atPath: libraryTransaction.path) { try manager.removeItem(at: libraryTransaction) }
         try manager.removeItem(at: transaction)
     }
 
