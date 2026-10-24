@@ -17,8 +17,8 @@ enum UpdateWindow {
   }
 
   /// - Parameter language: The notes translation the window opens with, the app's effective
-  ///   language's by default; the title bar's switch changes it for this window only, never the
-  ///   app's language.
+  ///   language's by default; the switch above the notes changes it for this window only, never
+  ///   the app's language.
   static func make(
     store: AppUpdateStore, actions: Actions, language: AppReleaseHistory.Language? = nil
   ) -> NSWindow {
@@ -37,7 +37,6 @@ enum UpdateWindow {
         .panelTheme(theme: AppThemeStore.shared, locale: PanelLocale.shared))
     hosting.sizingOptions = []
     window.contentViewController = hosting
-    window.addTitlebarAccessoryViewController(UpdateLanguageAccessory(notesLanguage))
     window.contentMinSize = minimumContentSize
     // Installing a controller can resize the window to its content view's fitting size.
     window.setContentSize(defaultContentSize)
@@ -64,47 +63,6 @@ final class UpdateNotesLanguage {
   }
 }
 
-/// **English / 简体中文 / 한국어** at the right end of the title bar, level with the window
-/// buttons. A titlebar accessory, so the title bar's own dragging never swallows its clicks.
-@MainActor
-final class UpdateLanguageAccessory: NSTitlebarAccessoryViewController {
-  private let notesLanguage: UpdateNotesLanguage
-  private(set) var control: NSSegmentedControl!
-
-  init(_ notesLanguage: UpdateNotesLanguage) {
-    self.notesLanguage = notesLanguage
-    super.init(nibName: nil, bundle: nil)
-    layoutAttribute = .trailing
-  }
-
-  required init?(coder: NSCoder) { nil }
-
-  override func loadView() {
-    control = NSSegmentedControl(
-      labels: AppReleaseHistory.Language.allCases.map(\.name), trackingMode: .selectOne,
-      target: self, action: #selector(changeLanguage))
-    control.controlSize = .small
-    control.selectedSegment = notesLanguage.selection.rawValue
-    control.setAccessibilityLabel(String(localized: "Release notes language"))
-    control.translatesAutoresizingMaskIntoConstraints = false
-    let container = NSView()
-    container.addSubview(control)
-    NSLayoutConstraint.activate([
-      control.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-      control.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-      control.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-    ])
-    container.frame = NSRect(
-      x: 0, y: 0, width: control.fittingSize.width + 12, height: 28)
-    view = container
-  }
-
-  @objc private func changeLanguage() {
-    notesLanguage.selection =
-      AppReleaseHistory.Language(rawValue: control.selectedSegment) ?? .english
-  }
-}
-
 struct UpdateWindowView: View {
   let store: AppUpdateStore
   let actions: UpdateWindow.Actions
@@ -116,18 +74,41 @@ struct UpdateWindowView: View {
     let state = store.state
     VStack(alignment: .leading, spacing: 16) {
       header(state)
-      UpdateNotesBox(releases: store.pendingReleases, language: notesLanguage.selection)
+      VStack(alignment: .leading, spacing: 8) {
+        notesBar
+        UpdateNotesBox(releases: store.pendingReleases, language: notesLanguage.selection)
+      }
       footer(state, automatic: $store.automaticallyInstallsUpdates)
     }
     .padding(.horizontal, 24)
-    // From the window's top edge: just clear of the window buttons and the language switch.
-    .padding(.top, 36)
+    // From the window's top edge: the title bar holds only the window buttons, then a gap.
+    .padding(.top, 46)
     .padding(.bottom, 20)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(theme.surface.background.color)
     .ignoresSafeArea(.container, edges: .top)
     // Release notes link issues and commits on GitHub; nothing else opens from here.
     .environment(\.openURL, OpenURLAction { url in ExternalLink.open(url) ? .handled : .discarded })
+  }
+
+  /// **English / 简体中文 / 한국어** above the notes: the translation this window shows.
+  private var notesBar: some View {
+    @Bindable var notesLanguage = notesLanguage
+    return HStack(spacing: 12) {
+      Text("Release notes")
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(theme.surface.muted.color)
+      Spacer(minLength: 0)
+      Picker("Release notes language", selection: $notesLanguage.selection) {
+        ForEach(AppReleaseHistory.Language.allCases, id: \.self) { language in
+          Text(verbatim: language.name).tag(language)
+        }
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+      .controlSize(.small)
+      .fixedSize()
+    }
   }
 
   private func header(_ state: AppUpdateState) -> some View {

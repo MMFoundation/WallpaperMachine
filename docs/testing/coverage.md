@@ -464,8 +464,8 @@ running app.
 
 `AppReleaseHistoryTests` — the manifest's changelog: linked headings, translations
 and their fallbacks, reference links kept for the window and dropped for About, and
-which releases the update window shows. `UpdateWindowTests` — the title bar's
-notes-language switch and the translation the window opens on. Not covered: a live release
+which releases the update window shows. `UpdateWindowTests` — the notes-language
+switch above the notes and the translation the window opens on. Not covered: a live release
 check, the published disk image and replacing the app in Applications; these are
 on [manual-smoke.md](manual-smoke.md).
 

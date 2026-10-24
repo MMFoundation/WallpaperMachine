@@ -193,9 +193,9 @@ then its sections (**Highlights**, **Breaking Changes**, **Features**,
 **Improvements**, **Bug Fixes**) and bullets, with each bullet's issue and commit
 references as links. Links open only through `ExternalLink`, so only GitHub's.
 
-The notes come from the manifest's `changelog`. **English / 简体中文 / 한국어** at
-the right end of the title bar, level with the window buttons, picks the translation
-for this window only and returns the notes to the top; it never changes the app's
+The notes come from the manifest's `changelog`. **English / 简体中文 / 한국어** on the
+right of the **Release notes** row above the box picks the translation for this window
+only and returns the notes to the top (the title bar holds only the window buttons); it never changes the app's
 language. The window opens on the app's effective language (Settings → General →
 Language): Simplified or Traditional Chinese opens on the Chinese notes, Korean on the
 Korean ones (English for releases before 1.5.7), and English or Japanese on the English
