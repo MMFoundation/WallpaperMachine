@@ -440,9 +440,11 @@ describes what should happen and the log lines to read afterwards.
       moved on; with it off they keep the last settled frame.
 - [ ] With an animated wallpaper that has played for over a minute, swipe
       quickly between several Desktops and open Mission Control: every
-      thumbnail shows the wallpaper as it looked within the last two minutes, and
-      a Desktop created in the middle of the swipes has a picture at once. After
-      two more minutes, swipe once more and check the thumbnails moved on.
+      thumbnail shows the wallpaper as it looked once it settled, and a Desktop
+      created in the middle of the swipes has a picture at once. With verbose
+      logging on, keep swiping, waking the Mac and pausing and resuming playback
+      for a few minutes: the log says `kept the settled poster` and no new
+      `poster-*.jpg` appears in `DesktopPosters`.
 - [ ] Turn off **Use the wallpaper as the macOS desktop picture** with a wallpaper
       playing: within a few seconds every Desktop shows the user's own picture in
       Mission Control and the Spaces bar, the five-minute row is disabled, and

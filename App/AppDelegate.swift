@@ -62,6 +62,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var desktopSpaces: WallpaperSpaceMonitor?
     private var powerSourceResampler: PowerSourceResampler?
     private var posterRefreshTask: Task<Void, Never>?
+    /// What decided the desktop posters at the last snapshot (`desktopPosterLayout`).
+    private var lastDesktopPosterLayout: [String]?
     /// Putting the user's own desktop picture back after the Settings switch went off, or after
     /// a poster was found left behind.
     private var restoringDesktopPicture: Task<Void, Never>?
@@ -326,11 +328,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 if let lockScreen, lockScreen.canRefreshAutomatically {
                     lockScreen.refresh()
                 }
+                // A snapshot that leaves every display showing what it showed (playback, audio,
+                // quality, the panel's selection) keeps the posters that have settled.
+                let posterLayout = self.desktopPosterLayout()
+                let capture: DesktopWallpaperSync.CaptureRequest =
+                    posterLayout == self.lastDesktopPosterLayout ? .unsettled : .all
+                self.lastDesktopPosterLayout = posterLayout
                 // Posters keep the desktop unless the native provider has it or an animated lock
                 // screen is on its way to taking it; a screen saver chosen on its own leaves it here.
                 if lockScreen?.claimsDesktopPicture != true {
                     // A suspended poster sync must never outlive the native provider.
-                    do { try self.startDesktopWallpaperSync() } catch {
+                    do { try self.startDesktopWallpaperSync(capture: capture) } catch {
                         self.lastError = error
                         AppLog.error("Desktop poster sync could not be restarted: \(error.localizedDescription)")
                     }
@@ -1363,7 +1371,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         return nil
     }
 
-    private func startDesktopWallpaperSync() throws {
+    /// `capture` is what a running sync asks the wallpapers for; a sync that starts takes every poster.
+    private func startDesktopWallpaperSync(capture: DesktopWallpaperSync.CaptureRequest = .all) throws {
         guard !shutdownInProgress else { return }
         // Every start comes through here, so with the switch off no poster can be written.
         guard PlaybackPreferences.shared.writesDesktopPicture else { return }
@@ -1372,7 +1381,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         // The restore re-runs this through `applyDesktopPicturePreference` when it ends.
         guard restoringDesktopPicture == nil else { return }
         if let sync = desktopWallpaperSync, !sync.isSuspended {
-            sync.refresh()
+            sync.refresh(capture: capture)
             return
         }
         let sync = try DesktopWallpaperSync(folder: ClientPaths.supportURL.appendingPathComponent("DesktopPosters"),
@@ -1467,6 +1476,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
               let visit = desktopSpaces?.visit(for: physicalDisplay) else { return .hold }
         let wallpaper = store.monitorInformationSnapshot.rows.first(where: { $0.displayId == row.displayId })?.wallpaperId ?? ""
         return .desktop(id: visit.spaceID, context: "\(visit.token):\(wallpaper):\(store.wallpaperContentRevision)")
+    }
+
+    /// What a snapshot must change for every desktop poster to be taken again: each display's
+    /// wallpaper and how it is placed, the wallpapers' files and the screens' sizes. A wallpaper
+    /// switch, a property apply and a move ask for posters themselves. Every other snapshot keeps
+    /// the posters that have settled: an animated wallpaper makes each capture a new image file,
+    /// and macOS keeps a full-size copy of every one (docs/features/desktop-picture.md).
+    private func desktopPosterLayout() -> [String] {
+        guard let store else { return [] }
+        return store.monitorInformationSnapshot.rows.map {
+            [$0.displayId, $0.wallpaperId, $0.mirrorTargetDisplayId ?? "", $0.scalingMode].joined(separator: "|")
+        } + store.settingsSnapshot.displays.map {
+            "\($0.displayId)|\($0.enabled)|\($0.mode)|\($0.selectedMirrorTarget ?? "")|\($0.scalingMode)|\($0.scalingFactor)"
+        } + NSScreen.screens.map { "\($0.frame)|\($0.backingScaleFactor)" }
+            + [String(store.wallpaperContentRevision)]
     }
 
     private func retainedSpacePosterDisplays() -> Set<String> {

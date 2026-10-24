@@ -31,7 +31,9 @@ retakes the poster every five minutes while the wallpaper plays, for wallpapers 
 change over time; the wait may run up to 30 seconds longer so the system can share the
 wakeup with other timers. Without it the poster is taken only at the moments listed
 [below](#when-a-poster-is-taken), so it shows the wallpaper as it looked once it
-settled. The setting applies to the running sync at once and has no effect while the
+settled. With it, every retake of an animated wallpaper is a new file that macOS keeps
+a full-size copy of for good ([below](#a-new-file-for-every-new-frame)), so the setting
+costs disk space for as long as it is on. The setting applies to the running sync at once and has no effect while the
 lock screen is animated, because poster sync is then suspended
 ([below](#the-native-lock-screen-provider-and-space-selection)), or while posters are
 [switched off](#leaving-macoss-own-wallpaper-alone), where its row is disabled.
@@ -101,7 +103,7 @@ Neither path resumes a paused video.
   `DesktopWallpaperSync.settleCaptureDelays` (3 s and 15 s), because intros, fades and
   settings that fade in are missed by the first frame. A wallpaper that resumes after
   a pause, a cover or display sleep settles the same way (`presentationResumed`),
-  unless its poster is still fresh (below).
+  unless its poster has settled (below).
 - **A wallpaper is moved on a display.** The inspector's Position sliders and **Center**
   change what the final pixels show, so a committed move requests the same capture as a
   new wallpaper (`BridgeStore.onDisplayFramingChanged`); moves that arrive close together
@@ -124,22 +126,34 @@ Neither path resumes a paused video.
   edit ends, so its poster is older, never unsaved.
 - **A Space change or wake.** The existing poster is applied at once, so a new Space
   has one immediately. A fresh frame is requested only for a surface whose poster has
-  aged (see the next item). Desktops that kept refusing posters are tried again, and
-  the Space monitor re-reads the topology first.
-- **A poster that is still fresh is kept.** A Space change, a wake and a resume
-  (`presentationResumed`) retake a surface only when its poster is older than
-  `DesktopWallpaperSync.recaptureFloor` (120 s) or was taken before the wallpaper
-  settled, that is, before the last of the settle captures could have landed. Each
-  display is judged on its own. Mission Control shows sampled stills, and a file name
-  hashes the pixels, so an animated wallpaper turns every extra capture into one more
-  poster file for WallpaperAgent to decode, as well as a full-resolution readback, a
-  hash and an encode here. A wallpaper that starts or changes, the periodic setting
-  and a poster scoped to a Space ([spaces.md](spaces.md#poster-ownership-and-late-frames),
-  which must confirm its context) are not affected. The resume's settle captures
-  cover only the surfaces that were retaken, and nothing is scheduled when none were.
-  A frame that a paused or covered surface answers with is the one it kept, so it does
-  not make its poster fresh: a Space change or wake that asks such a surface while its
-  display is paused leaves the resume to retake it. The debug log notes each poster kept.
+  not settled (see the next item). Desktops that kept refusing posters are tried
+  again, and the Space monitor re-reads the topology first.
+- **A settled poster is kept until the wallpaper changes.** A Space change, a wake, a
+  resume (`presentationResumed`) and an engine snapshot that leaves every display as it
+  was retake only a surface whose poster has not settled: one taken before the last of
+  the settle captures could have landed, one a paused display answered with, or none
+  at all. A surface that a settle capture is still to ask is left to it. Each display
+  is judged on its own, and a settled poster stays however long ago it was taken,
+  because every new frame of an animated wallpaper is a new file macOS keeps
+  ([below](#a-new-file-for-every-new-frame)). A snapshot changes the displays when it
+  changes a display's wallpaper, mode, mirror target or scaling, the wallpapers' files
+  or a screen's size (`AppDelegate.desktopPosterLayout`); playback, audio, quality and
+  the panel's selection do not. A wallpaper that starts or changes, a move, an apply,
+  the end of shown edits, the periodic setting and a poster scoped to a Space
+  ([spaces.md](spaces.md#poster-ownership-and-late-frames), which must confirm its
+  context) are not affected. The resume's settle captures cover only the surfaces that
+  were retaken, and nothing is scheduled when none were. A frame that a paused or
+  covered surface answers with is the one it kept, so it does not settle its poster: a
+  Space change or wake that asks such a surface while its display is paused leaves the
+  resume to retake it. The debug log notes the displays whose poster was kept.
+- **A frame nobody asked for.** A renderer sends its first frame unasked. On a surface
+  whose poster has settled, and which no settle capture is still to ask, it is
+  dropped: a renderer started again in the same window draws the same wallpaper, and
+  that first frame is often the start of an intro (a new wallpaper, a move or a new
+  screen size asks for posters itself). On a surface without a settled poster, such as
+  a window that just opened (a wallpaper unloaded while the displays slept gets a new
+  one), it becomes the poster without settling it, and the surface settles as a new
+  wallpaper does.
 - **Periodically**, every `periodicRefreshInterval` (300 s), while the setting is on.
 - Settling and periodic captures ask only displays whose wallpaper is presenting
   (`canCapture`: the presentation policy has not suspended playback globally or for
@@ -164,6 +178,20 @@ are kept without scaling the content a second time. A failed synchronization is
 retried up to three times, 100 ms longer each time, for the system's asynchronous
 acknowledgement and Space-creation races; the initial update is never delayed for
 them.
+
+### A new file for every new frame
+
+Because the file name hashes the pixels, an animated wallpaper turns every capture
+that is not identical into a new poster file. On macOS 26 and later, WallpaperAgent
+keeps an uncompressed, full-size bitmap of every image file a desktop has shown in
+`~/Library/Containers/com.apple.wallpaper.agent/Data/Library/Caches/com.apple.wallpaper.caches/extension-com.apple.wallpaper.extension.image/`
+and does not delete it, even after the poster file itself is gone: 17.8 MB per poster
+on a 14-inch MacBook Pro (3024 × 1964 at 24 bits). When every engine snapshot retook
+every poster three times, and a Space change, a wake or a resume retook any poster
+older than two minutes, that cache grew to about 100 GB. That is why a settled poster
+is kept until the wallpaper changes and why the periodic setting is off by default. The
+app does not clear the cache: it belongs to WallpaperAgent, lives in another app's
+container, and changing it behind the system's back is unsupported.
 
 ## Reaching the per-Space picture
 
