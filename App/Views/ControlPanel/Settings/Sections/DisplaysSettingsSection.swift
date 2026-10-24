@@ -35,7 +35,7 @@ struct DisplaysSettingsSection: View {
   static let desktops = SettingsItem(
     id: "displays.desktops", section: .displays, group: card, title: "Different wallpaper for each desktop",
     note:
-      "Each desktop keeps the wallpaper you apply while you are on it. Only the desktop you are on plays; the others show a still picture of theirs.",
+      "Each desktop keeps the wallpaper you apply while you are on it. Only the desktop you are on plays; the others wait paused where you left them, or show a still picture until you first visit them.",
     keywords: [
       "Desktop \(1)", "Keeps the current wallpaper", "Keep the current wallpaper", "Unavailable desktop",
       "Spaces", "Refresh Spaces",

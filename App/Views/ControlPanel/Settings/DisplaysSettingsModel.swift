@@ -490,6 +490,10 @@ final class DisplaysSettingsModel {
 
   func consumeAutomationFocus() { automationFocus = nil }
 
+  /// Takes keyboard focus to a display's Different wallpaper for each desktop switch, for a way in
+  /// from another page.
+  func revealDesktops(display: String) { automationFocus = .desktopsToggle(display: display) }
+
   /// Opens the editor for a new rule, or for `rule` when one is given.
   func beginRule(display: String, editing rule: WallpaperAutomationRule? = nil) {
     ruleEditorDisplay = display

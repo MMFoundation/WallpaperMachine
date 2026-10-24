@@ -171,8 +171,11 @@ the rest opens in a popover from the ⓘ beside the title.
 - **Quick Settings** collects Control Center-style tiles that switch the same
   preferences as their full rows and stay in sync with them: **Open at Login**,
   **Mute All**, **Lock Screen** and **Screen Saver** (both experimental),
-  **Desktop Picture**, **Active Display Only** (shown with two or more enabled
-  displays, or while on), **Hide After Applying** and **Live Edits**. A tile that
+  **Desktop Picture**, **Wallpaper per Desktop** (the display the Library applies
+  wallpapers to, named in its state line when there are several; **Unavailable** without
+  desktop information or for a mirrored or disabled display), **Active Display Only**
+  (shown with two or more enabled displays, or while on), **Hide After Applying** and
+  **Live Edits**. A tile that
   cannot be switched is disabled with its reason (Desktop Picture leaves the reason to
   its row). Below the tiles are modules with
   segmented controls: the **Quality** preset (Low, Medium, High; Custom shows when
@@ -210,7 +213,10 @@ the rest opens in a popover from the ⓘ beside the title.
   the same note.
 - **Appearance** holds the window's look: appearance, accent color, surface tone,
   app icon and **Reset appearance** ([appearance](appearance.md)).
-- **Desktop & Lock Screen** holds the Desktop group (the switch for using the
+- **Desktop & Lock Screen** holds the Desktop group (**Different wallpaper for each
+  desktop** for the display the Library applies wallpapers to, named when there are several,
+  with **Choose…** opening that display's card in Displays to pick each desktop's wallpaper;
+  see [a different wallpaper for each desktop](spaces.md); the switch for using the
   wallpaper as the macOS desktop picture and the optional five-minute Mission Control
   picture update; see [desktop picture](desktop-picture.md#leaving-macoss-own-wallpaper-alone);
   keeping windows in place when clicking the wallpaper; and the off-by-default switch

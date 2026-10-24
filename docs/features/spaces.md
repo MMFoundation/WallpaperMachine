@@ -2,8 +2,10 @@
 
 **Different wallpaper for each desktop** gives every desktop (Space) of a display a wallpaper
 or saved playlist of its own. It is off by default and is turned on for one display at a time:
-on that display's card in **Settings → Displays**, where it sits under **Wallpaper**, or in the
-toolbar's target-display menu in the Library. It is the `spaces` mode of the display's
+on that display's card in **Settings → Displays**, where it sits under **Wallpaper**; with the
+**Wallpaper per Desktop** tile in **Settings → Quick Settings** or the first row of **Settings →
+Desktop & Lock Screen**, both for the display the Library applies wallpapers to (the row's
+**Choose…** opens that display's card); or in the toolbar's target-display menu in the Library. It is the `spaces` mode of the display's
 [automatic selection](automation.md), so turning it on takes the place of a time schedule or
 an appearance rule on that display, and turning it off leaves the display on the wallpaper it
 shows. Only enabled independent displays offer it.

@@ -3298,8 +3298,8 @@
     "Different wallpaper for each desktop" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "데스크탑마다 다른 배경화면"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "デスクトップごとに別の壁紙"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "每个桌面使用不同壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "每個桌面使用不同桌布"}}}
     },
-    "Each desktop keeps the wallpaper you apply while you are on it. Only the desktop you are on plays; the others show a still picture of theirs." : {
-      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "각 데스크탑은 그 데스크탑에 있을 때 적용한 배경화면을 유지합니다. 현재 데스크탑만 재생되고, 다른 데스크탑에는 각자의 정지 이미지가 표시됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "各デスクトップは、そのデスクトップにいるときに適用した壁紙を保持します。再生されるのは表示中のデスクトップだけで、ほかのデスクトップにはそれぞれの静止画が表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "每个桌面会保留你在该桌面上应用的壁纸。只有当前桌面会播放，其他桌面显示各自壁纸的静态画面。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "每個桌面會保留你在該桌面上套用的桌布。只有目前的桌面會播放，其他桌面顯示各自桌布的靜態畫面。"}}}
+    "Each desktop keeps the wallpaper you apply while you are on it. Only the desktop you are on plays; the others wait paused where you left them, or show a still picture until you first visit them." : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "각 데스크탑은 그 데스크탑에 있을 때 적용한 배경화면을 유지합니다. 현재 데스크탑만 재생되고, 다른 데스크탑은 떠날 때의 화면에서 일시 정지되며, 아직 방문하지 않은 데스크탑에는 배경화면의 정지 이미지가 표시됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "各デスクトップは、そのデスクトップにいるときに適用した壁紙を保持します。再生されるのは今いるデスクトップだけで、ほかのデスクトップは離れたときの場面で一時停止し、まだ訪れていないデスクトップには壁紙の静止画が表示されます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "每个桌面会保留你在该桌面上应用的壁纸。只有当前桌面会播放；其他桌面会暂停在你离开时的画面，尚未访问过的桌面则显示其壁纸的静态画面。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "每個桌面會保留你在該桌面上套用的桌布。只有目前的桌面會播放；其他桌面會暫停在你離開時的畫面，尚未造訪過的桌面則顯示其桌布的靜態畫面。"}}}
     },
     "Keeps the current wallpaper" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "현재 배경화면 유지"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "現在の壁紙のまま"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "保持当前壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "保持目前的桌布"}}}
@@ -7152,6 +7152,9 @@
     },
     "Desktop Picture" : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "데스크탑 사진"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "デスクトップピクチャ"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "桌面图片"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "桌面圖片"}}}
+    },
+    "Wallpaper per Desktop" : {
+      "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "데스크탑별 배경화면"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "デスクトップごとの壁紙"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "每个桌面独立壁纸"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "每個桌面獨立桌布"}}}
     },
     "Disk space, backups and troubleshooting." : {
       "localizations" : {"ko" : {"stringUnit" : {"state" : "translated", "value" : "디스크 공간, 백업 및 문제 해결."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ディスク容量、バックアップ、トラブルシューティング。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "磁盘空间、备份与故障排除。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "磁碟空間、備份與疑難排解。"}}}
