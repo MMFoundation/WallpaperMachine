@@ -88,6 +88,9 @@ struct WallpaperBackupJournal: Codable, Sendable {
     /// The folder holding the live `Library` units and their own `old/` and `ready/`, when the
     /// library is not in the support root (`StorageLocation`); nil for the support root.
     var libraryRoot: String?
+    /// That folder's `StorageLocation` marker, so recovery never takes an empty mount point left
+    /// by a disconnected drive for it.
+    var libraryMarker: String?
 }
 
 /// Deliberately enumerated. Cookies, login/session state, SteamCMD paths, update history,

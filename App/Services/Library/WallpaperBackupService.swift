@@ -273,7 +273,8 @@ struct WallpaperBackupService: Sendable {
                 .init(path: $0, existed: manager.fileExists(atPath: live($0).path))
             }, originalPreferences: previousValues.filter { changedKeys.contains($0.key) },
                 absentPreferences: changedKeys.filter { previousValues[$0] == nil },
-                libraryRoot: libraryTransaction == nil ? nil : storageRoot.path)
+                libraryRoot: libraryTransaction == nil ? nil : storageRoot.path,
+                libraryMarker: libraryTransaction == nil ? nil : StorageLocation.marker(at: storageRoot))
             try writeJSON(journal, to: transaction.appendingPathComponent("journal.json"))
             do {
                 for unit in journal.units {
@@ -538,15 +539,20 @@ struct WallpaperBackupService: Sendable {
         for data in journal.originalPreferences.values { try validateValue(WallpaperBackupPreferences.decode(data), depth: 0) }
         // The library where this restore found it, which may not be where it is now.
         let libraryRoot: URL
+        let drive = WallpaperBackupFailure(message: String(localized: "Restore recovery needs the drive that holds the wallpaper library. Connect it and open WallpaperMachine again; nothing has been deleted."))
         if let recorded = journal.libraryRoot {
             libraryRoot = URL(fileURLWithPath: recorded, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath()
-            guard recorded.hasPrefix("/"), manager.fileExists(atPath: libraryRoot.path) else {
-                throw WallpaperBackupFailure(message: String(localized: "Restore recovery needs the drive that holds the wallpaper library. Connect it and open WallpaperMachine again; nothing has been deleted."))
-            }
+            // A folder that is merely there is not enough: a disconnected drive can leave its
+            // empty mount point behind.
+            guard recorded.hasPrefix("/"), manager.fileExists(atPath: libraryRoot.path),
+                  journal.libraryMarker == nil || StorageLocation.marker(at: libraryRoot) == journal.libraryMarker else { throw drive }
         } else {
             libraryRoot = supportRoot
         }
         let libraryTransaction = libraryTransaction(libraryRoot: libraryRoot, transaction: transaction)
+        // Every library unit was prepared there before the journal was written.
+        if let libraryTransaction, journal.units.contains(where: { Self.isLibrary($0.path) }),
+           !manager.fileExists(atPath: libraryTransaction.path) { throw drive }
         func staged(_ unit: String) -> URL { unitTransaction(unit, transaction: transaction, libraryRoot: libraryRoot) }
         func liveRoot(_ unit: String) -> URL { Self.isLibrary(unit) ? libraryRoot : supportRoot }
         var paths = Set<String>()
@@ -564,6 +570,16 @@ struct WallpaperBackupService: Sendable {
         if journal.preferencesCommitted {
             try finishCommitted(transaction: transaction, libraryTransaction: libraryTransaction)
             return
+        }
+        // A unit that was here is moved aside before its replacement is published, so one of the
+        // two copies is always there. Neither means the copies are not where the journal says:
+        // nothing is rolled back and the journal is kept.
+        for unit in journal.units where unit.existed {
+            let staging = staged(unit.path)
+            guard manager.fileExists(atPath: staging.appendingPathComponent("old/" + unit.path).path)
+                    || manager.fileExists(atPath: staging.appendingPathComponent("ready/" + unit.path).path) else {
+                throw WallpaperBackupFailure(message: String(localized: "Restore recovery could not find the copies it set aside. The restore folder has been kept and nothing has been deleted."))
+            }
         }
         for unit in journal.units.reversed() {
             try ensureSafeParents(of: unit.path, root: liveRoot(unit.path))

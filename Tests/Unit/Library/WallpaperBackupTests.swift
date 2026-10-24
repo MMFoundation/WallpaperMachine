@@ -418,6 +418,36 @@ final class WallpaperBackupTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: libraryTransaction.path))
     }
 
+    func testRecoveryWaitsForTheLibraryDriveInsteadOfAnEmptyMountPoint() async throws {
+        let original = try fixture()
+        let targetDefaults = try defaults()
+        let drive = root.appendingPathComponent("drive")
+        let unplugged = root.appendingPathComponent("unplugged")
+        try put(#"{"title":"Local","type":"scene","file":"scene.json"}"#, "Library/101/project.json", in: drive)
+        try StorageLocation.writeMarker("drive-id", at: drive)
+        try WallpaperBackupService(supportRoot: source).export(to: package, includeLibrary: true, preferences: .init(defaults: original, domainName: domainName(for: original)))
+        let importer = WallpaperBackupService(supportRoot: destination, storageRoot: drive)
+        let preview = try importer.preview(package: package, preferences: .init(defaults: targetDefaults, domainName: domainName(for: targetDefaults)))
+        try importer.stageRestore(package: package, preview: preview, policy: .replace)
+        // The drive goes away part-way and leaves its empty mount point behind.
+        XCTAssertThrowsError(try importer.applyPendingRestore(defaults: targetDefaults, domainName: domainName(for: targetDefaults), beforePublish: { path in
+            guard path == "Preferences" else { return }
+            try FileManager.default.moveItem(at: drive, to: unplugged)
+            try FileManager.default.createDirectory(at: drive, withIntermediateDirectories: true)
+            throw CocoaError(.fileWriteOutOfSpace)
+        }))
+        let transaction = destination.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: transaction.appendingPathComponent("journal.json").path), "the journal waits for the drive")
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: drive.path).isEmpty, "nothing is written to the mount point")
+
+        // The drive is back: the next launch puts the wallpaper it replaced back first.
+        try FileManager.default.removeItem(at: drive)
+        try FileManager.default.moveItem(at: unplugged, to: drive)
+        _ = try importer.applyPendingRestore(defaults: targetDefaults, domainName: domainName(for: targetDefaults))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: transaction.path))
+        XCTAssertEqual(try json("Library/101/project.json", in: drive)["title"] as? String, "Original")
+    }
+
     func testInterruptedUncommittedJournalRestoresOriginalBeforeStoresReadPreferences() async throws {
         let targetDefaults = try defaults()
         let transaction = destination.appendingPathComponent(WallpaperBackupService.transactionDirectoryName)
