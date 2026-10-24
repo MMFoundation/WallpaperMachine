@@ -239,7 +239,10 @@ the rest opens in a popover from the ⓘ beside the title.
   [updates](updates.md)). The application menu item **Check for Updates…** opens
   this section. **Spread the word** has **Share WallpaperMachine…** and **Star on
   GitHub** ([one-time prompts](first-run.md#star-prompt-the-performance-data-question-and-the-subscriptions-offer)).
-- **Storage** holds the wallpaper files chosen for properties, **Clear unused
+- **Storage** opens with **Wallpaper library location**: where the installed
+  wallpapers and downloads are kept, **Show in Finder**, **Move…** to another folder
+  or an external drive and **Move to This Mac…** ([library location](library-location.md)).
+  It holds the wallpaper files chosen for properties, **Clear unused
   caches…** with the shader cache, logs and completed downloads,
   [Backup](backup-restore.md), and ends with **Troubleshooting**: Detailed logging, *Allow inspecting web wallpapers*
   (Safari's Web Inspector on the running pages), the diagnostics report

@@ -303,7 +303,9 @@ Services are grouped by domain under `App/Services/`; each domain has a matching
 
 `ClientPaths` fixes the on-disk contract: everything lives under
 `~/Library/Application Support/WallpaperMachine` (overridable with `WALLPAPER_MACHINE_HOME`),
-with `Library/`, `SceneAssets/`, `SteamCMD/`, `UserAssets/` and `Cache/` beneath it. It exports
+with `Library/`, `SceneAssets/`, `SteamCMD/`, `UserAssets/` and `Cache/` beneath it, except
+that `Library/` and the partial downloads live in `storageURL`, a folder the user may have
+moved them to ([library location](features/library-location.md)). It exports
 `WALLPAPER_MACHINE_SUPPORT_ROOT`, `_LIBRARY_ROOT`, `_ASSETS_ROOT` and `_USER_ASSETS_ROOT` so the
 Rust side resolves the same paths.
 
