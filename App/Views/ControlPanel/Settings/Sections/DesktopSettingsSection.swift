@@ -10,7 +10,7 @@ struct DesktopSettingsSection: View {
   static let desktopWallpapers = SettingsItem(
     id: "desktop.desktop-wallpapers", section: .desktop, group: desktop,
     title: "Different wallpaper for each desktop",
-    note: "Each desktop keeps the wallpaper you apply while you are on it. Only the desktop you are on plays; the others wait paused where you left them, or show a still picture until you first visit them.",
+    note: "Each desktop keeps the wallpaper you apply while you are on it, and only the desktop you are on plays, so Mission Control shows the other desktops as still pictures. A desktop you have visited waits paused where you left it; one you have not visited yet shows a still picture until its first visit. Kept wallpapers use memory and are let go when the Mac runs short of it.",
     keywords: ["Spaces", "Choose…"])
   static let writeDesktopPicture = SettingsItem(
     id: "desktop.write-desktop-picture", section: .desktop, group: desktop,

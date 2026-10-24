@@ -35,7 +35,7 @@ struct DisplaysSettingsSection: View {
   static let desktops = SettingsItem(
     id: "displays.desktops", section: .displays, group: card, title: "Different wallpaper for each desktop",
     note:
-      "Each desktop keeps the wallpaper you apply while you are on it. Only the desktop you are on plays; the others wait paused where you left them, or show a still picture until you first visit them.",
+      "Each desktop keeps the wallpaper you apply while you are on it, and only the desktop you are on plays, so Mission Control shows the other desktops as still pictures. A desktop you have visited waits paused where you left it; one you have not visited yet shows a still picture until its first visit. Kept wallpapers use memory and are let go when the Mac runs short of it.",
     keywords: [
       "Desktop \(1)", "Keeps the current wallpaper", "Keep the current wallpaper", "Unavailable desktop",
       "Spaces", "Refresh Spaces",

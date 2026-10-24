@@ -151,6 +151,16 @@ current desktop has it until a fresh poster is taken. Only wallpapers some deskt
 the rest are deleted from memory and disk when the choices change. A desktop set to a playlist, or to a
 wallpaper that has not played on that display yet, keeps the picture it had.
 
+In Mission Control and the Spaces bar the other desktops are therefore still: a visited desktop shows
+the frame its kept wallpaper paused on, the others their poster. Only a desktop that shows the same
+wallpaper as the current one moves, because that window is on the current desktop too. The switch's
+explanation in Settings says so in its first sentence, which stays under the title. This is a
+deliberate trade-off: a probe on macOS 27.0.1 opened Mission Control, with the Spaces bar collapsed and
+held open with its previews, and a window on another desktop got no occlusion change and was never
+listed as on screen, while one on the current desktop got both. macOS shows other desktops from
+snapshots and tells their windows nothing, so animating them would mean running every kept wallpaper
+all the time or polling for Mission Control.
+
 ## Focus, mirroring and native lock-screen ownership
 
 Focus wallpaper/playlist choices keep their existing priority. Leaving Focus uses the rule for the
