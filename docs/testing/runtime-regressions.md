@@ -786,6 +786,14 @@ engine to redo, and when.
   reading it as absent would close the scene and reload it after the glitch. All
   descriptors are synthetic; a real display that reports 0x0 while connecting was
   not reproduced.
+- **A scene moved to a display of another shape fills it** —
+  `UnchangedPresent.ASceneResizedOntoADisplayOfAnotherShapeFillsItLikeAFreshOne`:
+  a scene running on a 16:9 surface at 1x and rebuilt in place on a 16:10 surface at
+  2x (the surface reconfigure the host runs when a display changes) is laid out with
+  Fill for the new surface, with no rows left unfilled at the top or bottom, exactly
+  as a scene opened there. The canvas is about 1.69:1, between the two shapes, so a
+  layout that kept the old shape or fell back to Fit would show bars. The host's own
+  hot-plug sequence needs real displays and is not covered.
 - **A wake repairs only a scene that stopped drawing** — `wake_revalidation::*` in the bridge
   (`a_scene_whose_frames_advanced_is_left_alone`,
   `::a_continuous_scene_with_flat_frames_is_recovered_once`,
