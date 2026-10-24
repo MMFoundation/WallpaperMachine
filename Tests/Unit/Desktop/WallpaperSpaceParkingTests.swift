@@ -26,9 +26,21 @@ final class WallpaperSpaceParkingTests: XCTestCase {
                 center: center)
         }
 
-        /// Lets the sends in flight finish.
+        /// Lets the sends in flight finish, for an assertion that nothing more is sent.
         func settle() async {
             for _ in 0..<50 { await Task.yield() }
+        }
+
+        /// Waits, two seconds at most, until `count` lists have been sent in all.
+        func sends(_ count: Int, file: StaticString = #filePath, line: UInt = #line) async {
+            let deadline = ContinuousClock.now + .seconds(2)
+            while sent.count < count {
+                guard ContinuousClock.now < deadline else {
+                    XCTFail("\(sent.count) of \(count) lists sent", file: file, line: line)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(5))
+            }
         }
 
         var sentLists: [String] { sent.map { "\($0.0): \($0.1.joined(separator: ","))" } }
@@ -38,14 +50,14 @@ final class WallpaperSpaceParkingTests: XCTestCase {
         let rig = Rig()
         rig.plan = [1: ["aurora", "basalt"], 2: ["cobalt"], 3: []]
         rig.parking.start()
-        await rig.settle()
+        await rig.sends(2)
 
         XCTAssertEqual(rig.sentLists, ["1: aurora,basalt", "2: cobalt"], "a display with nothing to keep is not told")
         XCTAssertEqual(rig.hostPlans.last, [1: ["aurora", "basalt"], 2: ["cobalt"]])
 
         rig.plan = [1: ["aurora"], 2: ["cobalt"]]
         rig.parking.update()
-        await rig.settle()
+        await rig.sends(3)
         XCTAssertEqual(rig.sentLists.last, "1: aurora", "only what changed is sent")
         XCTAssertEqual(rig.sent.count, 3)
 
@@ -58,10 +70,10 @@ final class WallpaperSpaceParkingTests: XCTestCase {
         let rig = Rig()
         rig.plan = [1: ["aurora", "basalt"]]
         rig.parking.start()
-        await rig.settle()
+        await rig.sends(1)
 
         rig.parking.setUnderPressure(true)
-        await rig.settle()
+        await rig.sends(2)
         XCTAssertEqual(rig.sentLists.last, "1: ", "an empty list frees what the display keeps")
         XCTAssertEqual(rig.hostPlans.last, [:])
 
@@ -70,7 +82,7 @@ final class WallpaperSpaceParkingTests: XCTestCase {
         XCTAssertEqual(rig.sentLists.last, "1: ", "the choices do not bring them back while it lasts")
 
         rig.parking.setUnderPressure(false)
-        await rig.settle()
+        await rig.sends(3)
         XCTAssertEqual(rig.sentLists.last, "1: aurora,basalt")
     }
 
@@ -78,15 +90,15 @@ final class WallpaperSpaceParkingTests: XCTestCase {
         let rig = Rig()
         rig.plan = [1: ["aurora"]]
         rig.parking.start()
-        await rig.settle()
+        await rig.sends(1)
 
         rig.parking.setUnloaded(true)
-        await rig.settle()
+        await rig.sends(2)
         XCTAssertEqual(rig.sentLists.last, "1: ")
         XCTAssertEqual(rig.hostPlans.last, [:])
 
         rig.parking.setUnloaded(false)
-        await rig.settle()
+        await rig.sends(3)
         XCTAssertEqual(rig.sentLists.last, "1: aurora")
     }
 
@@ -95,11 +107,11 @@ final class WallpaperSpaceParkingTests: XCTestCase {
         rig.parking.start()
         rig.plan = [1: ["aurora"]]
         rig.center.post(name: WallpaperSpaceMonitor.didChangeNotification, object: nil)
-        await rig.settle()
+        await rig.sends(1)
         XCTAssertEqual(rig.sentLists, ["1: aurora"])
 
         rig.parking.stop()
-        await rig.settle()
+        await rig.sends(2)
         XCTAssertEqual(rig.sentLists.last, "1: ")
         XCTAssertEqual(rig.hostPlans.last, [:])
     }
@@ -114,7 +126,7 @@ final class WallpaperSpaceParkingTests: XCTestCase {
 
         rig.failing = false
         rig.parking.update()
-        await rig.settle()
+        await rig.sends(1)
         XCTAssertEqual(rig.sentLists, ["1: aurora"])
     }
 }
