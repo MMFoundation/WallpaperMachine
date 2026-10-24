@@ -352,6 +352,95 @@ TEST(LayerTextureReference, FileNameIsNotALayerEvenWhenNamesMatch) {
     EXPECT_EQ(resolved.resolved, "solid");
 }
 
+// Render targets are the names that start with `_rt_` (or `_alias_`); any other
+// texture name is a file, whatever it starts with. Layers exported from an image
+// editor are often named like `_0022_Eyes`, and their textures with them: read as
+// a render target nobody registered, the slot was left unbound and the layer never
+// drew.
+TEST(LayerTextureReference, ATextureNamedWithALeadingUnderscoreIsItsFile) {
+    const auto material = [](std::string_view texture) {
+        return std::string(R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":[")") +
+               std::string(texture) + R"("]}]})";
+    };
+    fs::VFS vfs;
+    auto    parsed = ParseScene(vfs, R"([
+        {"id":1,"name":"_eyes","image":"eyes.json"},
+        {"id":2,"name":"lids","image":"lids.json"}
+      ])",
+      {{ "/eyes.json", R"({"width":64,"height":32,"material":"eyes_mat.json"})" },
+       { "/eyes_mat.json", material("_eyes") },
+       { "/materials/_eyes.tex", "" },
+       { "/lids.json", R"({"width":64,"height":32,"material":"lids_mat.json"})" },
+       { "/lids_mat.json", material("__drawn_by__lids") },
+       { "/materials/__drawn_by__lids.tex", "" }});
+    ASSERT_NE(parsed, nullptr);
+
+    for (const auto& [layer, texture] : { std::pair { "_eyes", "_eyes" }, std::pair { "lids", "__drawn_by__lids" } }) {
+        SCOPED_TRACE(layer);
+        SceneNode* node = nullptr;
+        for (auto& child : parsed->sceneGraph->GetChildren()) {
+            if (child->Name() == layer) node = child.get();
+        }
+        ASSERT_NE(node, nullptr);
+        ASSERT_NE(node->Mesh(), nullptr);
+        const auto* drawn = node->Mesh()->MaterialForSlot(0);
+        ASSERT_NE(drawn, nullptr);
+        ASSERT_FALSE(drawn->textures.empty());
+        EXPECT_EQ(drawn->textures[0], texture);
+        EXPECT_FALSE(IsSpecTex(drawn->textures[0]));
+        EXPECT_EQ(parsed->FindRenderTarget(texture), nullptr);
+    }
+}
+
+// An effect's own buffers are render targets whatever the effect calls them: a
+// bokeh blur declares `_coc` and `_full1`, and a buffer may have no underscore at
+// all. Each pass that binds one reads what the pass before it drew there.
+TEST(LayerTextureReference, AnEffectsOwnBuffersAreTargetsWhateverTheyAreCalled) {
+    fs::VFS vfs;
+    auto    parsed = ParseScene(vfs, R"([
+        {"id":5,"name":"blurred","image":"image.json",
+         "effects":[{"file":"effects/buffers/effect.json","id":6,"visible":true}]}
+      ])",
+      {{ "/effects/buffers/effect.json",
+         R"({"name":"buffers","fbos":[{"name":"_half","scale":2},{"name":"plain","scale":1}],"passes":[)"
+         R"({"material":"materials/copy.json","target":"_half","bind":[{"name":"previous","index":0}]},)"
+         R"({"material":"materials/copy.json","target":"plain","bind":[{"name":"_half","index":0}]},)"
+         R"({"material":"materials/copy.json","bind":[{"name":"plain","index":0}]}]})" },
+       { "/materials/copy.json",
+         R"({"passes":[{"blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled","shader":"genericimage","textures":[null]}]} )" }});
+    ASSERT_NE(parsed, nullptr);
+    AddScreenTarget(*parsed);
+    if (parsed->cameras.find("effect") == parsed->cameras.end()) {
+        parsed->cameras["effect"] = std::make_shared<SceneCamera>(64, 32, 0.01f, 100.0f);
+    }
+    parsed->activeCamera = nullptr;
+    const auto graph = sceneToRenderGraph(*parsed);
+    ASSERT_NE(graph, nullptr);
+
+    std::vector<std::pair<rg::NodeID, const rg::DrawPass*>> passes;
+    for (const auto id : graph->topologicalOrder()) {
+        if (auto* pass = dynamic_cast<const rg::DrawPass*>(graph->getPass(id))) passes.emplace_back(id, pass);
+    }
+    for (const auto* buffer : { "_half", "plain" }) {
+        SCOPED_TRACE(buffer);
+        std::string key;
+        for (const auto& [name, target] : parsed->renderTargets) {
+            if (name.find(buffer) != std::string::npos) key = name;
+        }
+        ASSERT_FALSE(key.empty()) << "the effect's buffer was never registered";
+        EXPECT_TRUE(IsSpecTex(key)) << key << " would be loaded as a texture file";
+        const auto writer = std::find_if(passes.begin(), passes.end(),
+                                         [&key](const auto& pass) { return pass.second->desc().output == key; });
+        const auto reader = std::find_if(passes.begin(), passes.end(), [&key](const auto& pass) {
+            const auto& textures = pass.second->desc().textures;
+            return ! textures.empty() && textures[0] == key;
+        });
+        ASSERT_NE(writer, passes.end());
+        ASSERT_NE(reader, passes.end());
+        EXPECT_TRUE(graph->mustPrecede(writer->first, reader->first));
+    }
+}
+
 TEST(LayerTextureReference, ParserKeepsInvisibleCompositeSource) {
     fs::VFS vfs;
     auto    parsed = ParseScene(vfs, R"([

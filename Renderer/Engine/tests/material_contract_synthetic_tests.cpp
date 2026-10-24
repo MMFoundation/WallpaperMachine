@@ -877,7 +877,7 @@ TEST_F(MaterialContracts, TextRelayoutKeepsFixedTargetsAndRelativeScaleAndNoSize
     std::map<std::string,std::array<int32_t,2>> fixed;
     for (const char* base : {"fixed","fitted","explicitScaled"}) {
         for (int i : {0,1}) {
-            const auto key = std::string(base)+"_1_"+std::to_string(i);
+            const auto key = "_rt_"+std::string(base)+"_1_"+std::to_string(i);
             const auto* target = scene->FindRenderTarget(key); ASSERT_NE(target,nullptr);
             fixed[key] = {target->width,target->height};
         }
@@ -897,7 +897,7 @@ TEST_F(MaterialContracts, TextRelayoutKeepsFixedTargetsAndRelativeScaleAndNoSize
     TargetExtent(*scene,"synthetic-half",{std::max(4,static_cast<int>(std::llround(extent[0]*0.5))),
         std::max(4,static_cast<int>(std::llround(extent[1]*0.5)))});
     for (const auto& [key,shape] : fixed) TargetExtent(*scene,key,shape);
-    for (int i : {0,1}) TargetExtent(*scene,"relative_1_"+std::to_string(i),extent);
+    for (int i : {0,1}) TargetExtent(*scene,"_rt_relative_1_"+std::to_string(i),extent);
     EXPECT_TRUE(runtime.ConsumeRenderTargetResizeFlag()); runtime.ConsumeSceneGraphMutationFlag();
 
     // A font-size layout follows the same existing resize-event path.
