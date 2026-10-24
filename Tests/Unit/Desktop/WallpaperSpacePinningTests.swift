@@ -326,6 +326,25 @@ final class WallpaperSpacePinningTests: XCTestCase {
         XCTAssertEqual(arriving.space, 6)
     }
 
+    func testAKeptWallpaperThatRunsOnIsNeverHiddenWhileTheSwitchFinishes() {
+        let rig = PinRig()
+        let left = rig.window(10, space: 5, wallpaper: "aurora")
+        let kept = rig.window(11, space: 6, wallpaper: "basalt")
+        let desktops: [String: Set<UInt64>] = ["aurora": [5], "basalt": [6]]
+        rig.pins = [1: .init(space: 5, content: .ready, desktops: desktops)]
+        rig.pinning.start()
+        defer { rig.pinning.stop() }
+        rig.log.events.removeAll()
+
+        // The renderer already runs the kept wallpaper; the app still counts the switch as loading.
+        rig.pins = [1: .init(space: 6, content: .loading, desktops: desktops, incoming: "basalt")]
+        rig.pinning.update()
+        XCTAssertFalse(kept.hidden, "the desktop picture never flashes through")
+        XCTAssertFalse(left.hidden)
+        XCTAssertFalse(rig.pinning.isConcealed(1))
+        XCTAssertTrue(rig.log.events.isEmpty, "nothing is hidden, shown or moved: \(rig.log.events)")
+    }
+
     func testAWallpaperNoDesktopIsChosenForStaysWhereItIsWhileAnotherIsOnItsWay() {
         let rig = PinRig()
         let playing = rig.window(10, space: 5, wallpaper: "from-a-playlist")

@@ -186,8 +186,8 @@ final class WallpaperSpacePinning {
     func update() {
         let pins = mover == nil || observer == nil ? [:] : self.pins()
         lastPins = pins
-        let concealed = displaysToConceal(pins)
         let windows = windows()
+        let concealed = displaysToConceal(pins, windows: windows)
         awayWindows.removeAll()
         for window in windows {
             let number = window.number
@@ -262,13 +262,24 @@ final class WallpaperSpacePinning {
         }
     }
 
-    private func displaysToConceal(_ pins: [UInt32: WallpaperSpacePin]) -> Set<UInt32> {
+    private func displaysToConceal(_ pins: [UInt32: WallpaperSpacePin],
+                                   windows: [any WallpaperPinnableWindow]) -> Set<UInt32> {
         let instant = now()
         var result = Set<UInt32>()
         for (display, pin) in pins {
             let wasConcealed = concealedSince[display] != nil
             let held = wasConcealed && holding(display)
-            guard pin.content != .ready || held else {
+            // The incoming wallpaper may already be on screen there, shown: the one the display
+            // kept paused for this desktop, which the renderer runs on before the app hears
+            // that the switch is done. Hiding it would flash the desktop picture.
+            let alreadyShowing = !wasConcealed && pin.incoming.map { incoming in
+                windows.contains { window in
+                    window.displayID == display && window.wallpaperID == incoming
+                        && !concealedWindows.contains(window.number)
+                        && Self.placement(of: incoming, in: pin).onCurrentDesktop
+                }
+            } == true
+            guard pin.content != .ready || held, !alreadyShowing else {
                 gaveUp.remove(display)
                 continue
             }
