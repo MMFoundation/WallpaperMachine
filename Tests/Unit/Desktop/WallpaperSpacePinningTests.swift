@@ -8,6 +8,7 @@ private final class FakeWindow: WallpaperPinnableWindow {
     let number: Int
     var displayID: UInt32?
     var wallpaperID: String?
+    var isOrderedIn = true
     var allSpaces = true
     var hidden = false
     var lastFade: TimeInterval?
@@ -75,6 +76,8 @@ private final class PinRig {
     var pins: [UInt32: WallpaperSpacePin] = [:]
     var holding = Set<UInt32>()
     var reduceMotion = false
+    /// Every wait the pinning asked for, in order.
+    private(set) var sleeps: [Duration] = []
     private(set) var clock = ContinuousClock.now
     private(set) var pinning: WallpaperSpacePinning!
     let center = NotificationCenter()
@@ -90,7 +93,10 @@ private final class PinRig {
             mover: available ? mover : nil,
             reduceMotion: { [unowned self] in self.reduceMotion },
             now: { [unowned self] in self.clock },
-            sleep: { _ in try await Task.sleep(for: .seconds(3_600)) },
+            sleep: { [unowned self] duration in
+                await MainActor.run { self.sleeps.append(duration) }
+                try await Task.sleep(for: .seconds(3_600))
+            },
             center: center,
             windowCenter: center,
             openedWindow: { [unowned self] _ in self.opening })
@@ -230,6 +236,31 @@ final class WallpaperSpacePinningTests: XCTestCase {
         XCTAssertTrue(window.hidden, "paused playback keeps the desktop's own still on screen")
     }
 
+    func testADisplayWaitingForPlaybackPastTheCeilingArmsNoZeroWait() async {
+        let rig = PinRig()
+        let window = rig.window(10)
+        rig.pins = [1: .init(space: 9, content: .waiting)]
+        rig.pinning.start()
+        defer { rig.pinning.stop() }
+        rig.advance(WallpaperSpacePinning.Configuration().loadingCeiling * 2)
+        rig.pinning.update()
+        rig.pinning.update()
+        for _ in 0..<20 { await Task.yield() }
+
+        XCTAssertTrue(window.hidden, "paused playback keeps the desktop's own still on screen")
+        XCTAssertTrue(rig.sleeps.isEmpty, "nothing can end a wait for playback, so no ceiling is armed: \(rig.sleeps)")
+    }
+
+    func testADisplayThatLoadsArmsItsCeilingOnce() async {
+        let rig = PinRig()
+        rig.window(10)
+        rig.pins = [1: .init(space: 9, content: .loading)]
+        rig.pinning.start()
+        defer { rig.pinning.stop() }
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(rig.sleeps, [WallpaperSpacePinning.Configuration().loadingCeiling])
+    }
+
     func testAFullScreenSpaceLeavesTheWindowWhereItIs() {
         let rig = PinRig()
         let window = rig.window(10, space: 5)
@@ -343,6 +374,23 @@ final class WallpaperSpacePinningTests: XCTestCase {
         XCTAssertFalse(left.hidden)
         XCTAssertFalse(rig.pinning.isConcealed(1))
         XCTAssertTrue(rig.log.events.isEmpty, "nothing is hidden, shown or moved: \(rig.log.events)")
+    }
+
+    func testAWindowNotOrderedInYetIsNotTakenForTheWallpaperAlreadyShowing() {
+        let rig = PinRig()
+        rig.window(10, space: 5, wallpaper: "aurora")
+        let desktops: [String: Set<UInt64>] = ["aurora": [5], "basalt": [6]]
+        rig.pins = [1: .init(space: 5, content: .ready, desktops: desktops)]
+        rig.pinning.start()
+        defer { rig.pinning.stop() }
+
+        // A host has listed the new page's window, which is still loading and not ordered in.
+        let staged = rig.window(11, space: 6, wallpaper: "basalt")
+        staged.isOrderedIn = false
+        rig.pins = [1: .init(space: 6, content: .loading, desktops: desktops, incoming: "basalt")]
+        rig.pinning.update()
+        XCTAssertTrue(rig.pinning.isConcealed(1), "the desktop waits for its wallpaper to be ready")
+        XCTAssertTrue(staged.hidden, "so the window cannot flash in before its first frame")
     }
 
     func testAWallpaperNoDesktopIsChosenForStaysWhereItIsWhileAnotherIsOnItsWay() {

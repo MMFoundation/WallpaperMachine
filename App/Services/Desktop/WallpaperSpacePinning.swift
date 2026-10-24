@@ -34,6 +34,9 @@ protocol WallpaperPinnableWindow {
     /// The wallpaper the window shows; nil while that is not known yet, as for a window that has
     /// just opened.
     var wallpaperID: String? { get }
+    /// Whether the window is ordered in: a host's new window is listed, with its wallpaper, before
+    /// its page or clip is ready and the window is presented.
+    var isOrderedIn: Bool { get }
     var joinsAllSpaces: Bool { get nonmutating set }
     /// Hides the window at once, on screen before it returns, or shows it again over `fade`
     /// seconds.
@@ -271,12 +274,13 @@ final class WallpaperSpacePinning {
             let held = wasConcealed && holding(display)
             // The incoming wallpaper may already be on screen there, shown: the one the display
             // kept paused for this desktop, which the renderer runs on before the app hears
-            // that the switch is done. Hiding it would flash the desktop picture.
+            // that the switch is done. Hiding it would flash the desktop picture. A window that
+            // is not ordered in yet, or not on this desktop as the window server says, is not.
             let alreadyShowing = !wasConcealed && pin.incoming.map { incoming in
                 windows.contains { window in
-                    window.displayID == display && window.wallpaperID == incoming
+                    window.displayID == display && window.wallpaperID == incoming && window.isOrderedIn
                         && !concealedWindows.contains(window.number)
-                        && Self.placement(of: incoming, in: pin).onCurrentDesktop
+                        && pin.space.map { mover?.spaces(ofWindow: window.number)?.contains($0) == true } == true
                 }
             } == true
             guard pin.content != .ready || held, !alreadyShowing else {
@@ -300,15 +304,18 @@ final class WallpaperSpacePinning {
             let seconds = Double(since.duration(to: instant).wholeMilliseconds) / 1_000
             AppLog.info("space pinning: display \(display) shown after \(String(format: "%.1f", seconds)) s")
         }
-        armCeiling()
+        armCeiling(pins)
         return result
     }
 
-    /// Wakes the pinning when the oldest hidden display reaches the ceiling.
-    private func armCeiling() {
+    /// Wakes the pinning when the oldest hidden display that can reach the ceiling does. A display
+    /// waiting for playback stays hidden however long it waits, so it never arms it: counting it
+    /// would re-arm a ceiling already passed with no wait, over and over.
+    private func armCeiling(_ pins: [UInt32: WallpaperSpacePin]) {
         ceiling?.cancel()
         ceiling = nil
-        guard let oldest = concealedSince.values.min() else { return }
+        let loading = concealedSince.filter { display, _ in pins[display].map { $0.content != .waiting } ?? false }
+        guard let oldest = loading.values.min() else { return }
         let wait = max(.zero, now().duration(to: oldest + configuration.loadingCeiling))
         let sleep = self.sleep
         ceiling = Task { [weak self] in
@@ -340,6 +347,8 @@ struct SystemPinnableWindow: WallpaperPinnableWindow {
     }
 
     var number: Int { window.windowNumber }
+
+    var isOrderedIn: Bool { window.isVisible }
 
     var displayID: UInt32? {
         let screen = window.screen ?? NSScreen.screens.first { $0.frame.intersects(window.frame) }
