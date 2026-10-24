@@ -123,12 +123,14 @@ without opening the window.
   ```sh
   gh attestation verify WallpaperMachine-*-arm64.dmg --repo WallpaperMachine/WallpaperMachine
   ```
-- **No tracking.** The app goes online only for what you ask of it: Steam for the
+- **No tracking.** The app goes online for what you ask of it: Steam for the
   Workshop, pixiv when you open it, GitHub for update checks, and, only if you turn
   on [Send performance data](docs/features/telemetry.md), one small report a day
   with load times, frame rates and your Mac's model. That report has no names, files
-  or account details, and turning it off deletes what was sent. Sign-ins and
-  passwords stay on your Mac.
+  or account details, and turning it off deletes what was sent. Apart from that,
+  the app sends a [daily count](docs/features/telemetry.md#daily-active-count) that
+  it ran that day, with its version and no install ID, so we know how many Macs use
+  it. Sign-ins and passwords stay on your Mac.
 - **Updates it can check.** The built-in updater installs only a disk image whose
   SHA-256 matches the release; one it can't verify is
   [refused, never installed unchecked](docs/features/updates.md#downloading).

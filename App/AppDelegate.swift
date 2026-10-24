@@ -79,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var playbackPreferencesObserver: NSObjectProtocol?
     private var wallpaperEnergy: WallpaperEnergyRecorder?
     private var telemetry: TelemetryService?
+    private var activeCount: TelemetryActiveCount?
     /// Last presentation the bridge accepted, so leaving unloaded clears that flag first.
     private var appliedGlobalPresentation: GlobalPresentation = .running
     private var store: BridgeStore?
@@ -633,6 +634,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             Task { await WallpaperFocusFilter.refreshState() }
             startWallpaperEnergyRecorder(store: store)
             startTelemetry(store: store)
+            startActiveCount()
             do {
                 try lockScreen?.start()
                 if lockScreen?.isRequested != true { try startDesktopWallpaperSync() }
@@ -839,6 +841,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         service.start()
     }
 
+    /// See `TelemetryActiveCount`: once a day, for everyone, with no install id. A run with
+    /// its own app-support folder or preferences sends nothing.
+    private func startActiveCount() {
+        guard TelemetryActiveCount.countsRun(environment: ProcessInfo.processInfo.environment) else { return }
+        let count = TelemetryActiveCount(sender: TelemetryClient())
+        activeCount = count
+        count.start()
+    }
+
     /// The scenes a frame window credits, by display. Nil while nothing plays; a display
     /// suspended on its own is left out, so its paused surface is not counted.
     private func telemetryFrameContext() -> TelemetryFrameContext? {
@@ -964,6 +975,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         wallpaperEnergy = nil
         telemetry?.stop()
         telemetry = nil
+        activeCount?.stop()
+        activeCount = nil
         presentationPolicy?.stop()
         presentationPolicy = nil
         windowAuditor?.stop()
@@ -1151,6 +1164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 wallpaperEnergy = nil
                 telemetry?.stop()
                 telemetry = nil
+                activeCount?.stop()
+                activeCount = nil
                 presentationPolicy?.stop()
                 presentationPolicy = nil
                 windowAuditor?.stop()
