@@ -10,6 +10,28 @@ for older releases without Korean notes. The GitHub Release body repeats only th
 English notes. See
 [docs/release.md](docs/release.md) for how a version is cut.
 
+## 1.6.2 — 2026-10-24
+
+### English
+
+#### Fixed
+
+- Long names on narrow Quick Settings tiles now shrink slightly to fit instead of being cut off with an ellipsis
+
+### 简体中文
+
+#### 修复
+
+- 快捷设置磁贴较窄时，较长的名称现在会略微缩小以完整显示，不再被省略号截断
+
+### 한국어
+
+#### 수정됨
+
+- 빠른 설정 타일이 좁을 때 긴 이름이 말줄임표로 잘리지 않고 살짝 작아져 전체가 표시됩니다
+
+**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.1...v1.6.2
+
 ## 1.6.1 — 2026-10-24
 
 ### English
