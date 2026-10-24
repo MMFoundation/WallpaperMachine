@@ -124,14 +124,11 @@ constexpr std::string_view SpecTex_Link { "_rt_link_" };
 inline bool StartsWithText(const std::string_view text, const std::string_view prefix) {
     return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
 }
-/// A name that starts with an underscore and names no file: no directory separator and no
-/// extension dot.
-inline bool IsImplicitSpecTex(const std::string_view name) {
-    return ! name.empty() && name.front() == '_' && name.find_first_of("/.") == std::string_view::npos;
-}
+/// A render target or an alias of one. Any other name is a texture file, even one that
+/// starts with an underscore (`_0022_Eyes` is `materials/_0022_Eyes.tex`); the buffers an
+/// effect declares are registered under a `_rt_` name whatever the effect calls them.
 inline bool IsSpecTex(const std::string_view name) {
-    return StartsWithText(name, WE_SPEC_PREFIX) || StartsWithText(name, WE_ALIAS_PREFIX) ||
-           IsImplicitSpecTex(name);
+    return StartsWithText(name, WE_SPEC_PREFIX) || StartsWithText(name, WE_ALIAS_PREFIX);
 }
 inline std::string EnsureSpecTexName(const std::string_view name) {
     if (name.empty() || IsSpecTex(name)) return std::string(name);
