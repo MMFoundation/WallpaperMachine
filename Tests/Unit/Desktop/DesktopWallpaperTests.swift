@@ -13,6 +13,8 @@ private final class MemoryDesktopWorkspace: DesktopPictureWorkspace {
     /// A reload can lag behind the persisted native selection.
     var persistedPictures: Set<URL> = []
     var writes: [DesktopPictureTarget] = []
+    /// The picture of each write, in order.
+    var written: [URL] = []
     var failures: Set<DesktopPictureTarget> = []
     /// Writes to a desktop in `failures`, each one refused.
     var refused: [DesktopPictureTarget] = []
@@ -44,6 +46,7 @@ private final class MemoryDesktopWorkspace: DesktopPictureWorkspace {
             throw CocoaError(.fileWriteNoPermission)
         }
         writes.append(target)
+        written.append(picture.url)
         if lagging.contains(target) {
             inFlight[target] = picture
             try didWrite?()
@@ -104,12 +107,11 @@ private actor FailingPosterEncoder {
     }
 }
 
-/// The sync's notion of how old a poster is, moved by the test and not by waiting.
+/// The sync's notion of when a frame arrived, moved by the test and not by waiting.
 @MainActor
 private final class ManualClock {
     private(set) var now = ContinuousClock.now
     func advance(_ duration: Duration) { now = now.advanced(by: duration) }
-    func rewind(_ duration: Duration) { now = now.advanced(by: .zero - duration) }
 }
 
 final class DesktopWallpaperTests: XCTestCase {
@@ -1189,11 +1191,10 @@ final class DesktopWallpaperTests: XCTestCase {
         workspace.pictures = [one: original("one")]
         let frames = NotificationCenter(), spaces = NotificationCenter()
         let layer = CAMetalLayer()
-        // The poster is only retaken once it has aged; this is the aged case.
         let sync = try DesktopWallpaperSync(folder: root, workspace: workspace,
                                             surfaces: { [DesktopPosterSurface(layer: layer, display: "1")] },
                                             frameCenter: frames, workspaceCenter: spaces,
-                                            encode: { $0.pixels }, settleDelays: [], recaptureFloor: .zero)
+                                            encode: { $0.pixels }, settleDelays: [])
         var requests = 0
         let observer = frames.addObserver(forName: Notification.Name("WallpaperMachine.requestDesktopPoster"),
                                           object: layer, queue: nil) { _ in requests += 1 }
@@ -1206,7 +1207,7 @@ final class DesktopWallpaperTests: XCTestCase {
 
         // A Space the poster is not on yet becomes current. It gets the poster
         // that exists without waiting for pixels, and a fresh frame is asked
-        // for because an animated wallpaper has moved on since.
+        // for because the frame came unasked, so the poster has not settled.
         workspace.pictures[two] = original("two")
         let added = expectation(description: "New Space updated")
         workspace.didWrite = { added.fulfill() }
@@ -1217,10 +1218,11 @@ final class DesktopWallpaperTests: XCTestCase {
         XCTAssertEqual(requests, 1)
     }
 
-    /// A rig for the freshness floor: one or two displays, a clock the test moves, and
-    /// counters for the frames the sync asks for.
+    /// A rig for the frames the sync asks for: one or two displays, a clock the test moves,
+    /// and counters for the requests. With `answers`, each surface answers every request a
+    /// moment later with pixels it has not drawn before, as an animated wallpaper does.
     @MainActor
-    private final class FloorRig {
+    private final class PosterRig {
         let workspace = MemoryDesktopWorkspace()
         let frames = NotificationCenter(), spaces = NotificationCenter()
         let clock = ManualClock()
@@ -1228,10 +1230,13 @@ final class DesktopWallpaperTests: XCTestCase {
         let sync: DesktopWallpaperSync
         private(set) var requests: [Int] = []
         private var observers: [NSObjectProtocol] = []
+        private var drawn: UInt8 = 0
 
         var total: Int { requests.reduce(0, +) }
+        /// Every poster file a desktop was given.
+        var posterFiles: Set<URL> { Set(workspace.written.filter { $0.lastPathComponent.hasPrefix("poster-") }) }
 
-        init(root: URL, displays: Int = 1, floor: Duration = .seconds(60), settleDelays: [Duration] = [],
+        init(root: URL, displays: Int = 1, settleDelays: [Duration] = [], answers: Bool = false,
              scope: @escaping @MainActor (String) -> DesktopPosterScope = { _ in .all },
              periodicInterval: Duration = .seconds(300),
              encode: @escaping @Sendable (DesktopPosterFrame) async throws -> Data = { $0.pixels }) throws {
@@ -1243,15 +1248,28 @@ final class DesktopWallpaperTests: XCTestCase {
                 folder: root, workspace: workspace,
                 surfaces: { layers.enumerated().map { DesktopPosterSurface(layer: $1, display: String($0 + 1)) } },
                 frameCenter: frames, workspaceCenter: spaces, scope: scope, encode: encode,
-                settleDelays: settleDelays, periodicInterval: periodicInterval,
-                recaptureFloor: floor, clock: { clock.now })
+                settleDelays: settleDelays, periodicInterval: periodicInterval, clock: { clock.now })
             for (index, layer) in layers.enumerated() {
                 observers.append(frames.addObserver(forName: DesktopPosterNotification.request,
                                                     object: layer, queue: nil) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.requests[index] += 1 }
+                    MainActor.assumeIsolated {
+                        self?.requests[index] += 1
+                        guard answers else { return }
+                        Task { @MainActor [weak self] in
+                            self?.clock.advance(.seconds(1))
+                            self?.draw(on: index)
+                        }
+                    }
                 })
             }
             sync.start()
+        }
+
+        /// The surface draws a frame it has not drawn before, whether asked or not.
+        func draw(on display: Int = 0) {
+            drawn &+= 1
+            frames.post(name: DesktopPosterNotification.ready, object: layers[display],
+                        userInfo: ["pixels": Data([drawn]), "width": 1, "height": 1, "bgra": false, "context": ""])
         }
 
         func finish() {
@@ -1260,41 +1278,72 @@ final class DesktopWallpaperTests: XCTestCase {
         }
 
         func spaceChanged() { spaces.post(name: NSWorkspace.activeSpaceDidChangeNotification, object: nil) }
+        func woke() { spaces.post(name: NSWorkspace.didWakeNotification, object: nil) }
     }
 
     @MainActor
-    private func postFrame(_ pixels: Data, on rig: FloorRig, display: Int = 0, context: String = "") async throws {
+    private func postFrame(_ pixels: Data, on rig: PosterRig, display: Int = 0, context: String = "") async throws {
         let written = rig.workspace.writes.count
         post(pixels, layer: rig.layers[display], center: rig.frames, context: context)
         try await waitUntil { rig.workspace.writes.count > written }
     }
 
     @MainActor
-    func testSpaceChangeWithinTheFloorReusesThePosterAndAfterItCapturesAgain() async throws {
-        let rig = try FloorRig(root: root, floor: .seconds(60))
+    func testAnAnimatedWallpaperGetsNewPosterFilesOnlyWhenItsLookChanges() async throws {
+        // Each frame of an animated wallpaper is a new image file, and macOS keeps a full-size
+        // copy of every file a desktop has shown. Hours of Space changes, wakes, resumes,
+        // snapshots that change no display and renderers starting again add no file.
+        let rig = try PosterRig(root: root, settleDelays: [.milliseconds(20), .milliseconds(50)], answers: true)
         defer { rig.finish() }
         rig.workspace.pictures = [one: original("one")]
+        rig.sync.refresh()
+        try await waitUntil { rig.total == 3 && rig.posterFiles.count == 3 }
+        let settled = rig.posterFiles
+
+        for _ in 0..<5 {
+            rig.clock.advance(.seconds(3600))
+            rig.spaceChanged()
+            rig.woke()
+            rig.sync.presentationResumed()
+            rig.sync.refresh(capture: .unsettled)
+            rig.draw()
+            try await Task.sleep(for: .milliseconds(120))
+        }
+        // The last coalesced refresh runs within the 500 ms refresh interval.
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(rig.total, 3, "nothing was asked for")
+        XCTAssertEqual(rig.posterFiles, settled, "no desktop was given a new file")
+
+        // A new or changed wallpaper is taken again as it settles.
+        rig.sync.refresh()
+        try await waitUntil { rig.total == 6 && rig.posterFiles.count == settled.count + 3 }
+    }
+
+    @MainActor
+    func testASettledPosterStaysThroughSpaceChangesAndWakesHoweverOld() async throws {
+        let rig = try PosterRig(root: root)
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        rig.sync.refresh()
+        XCTAssertEqual(rig.total, 1)
         try await postFrame(Data([1]), on: rig)
 
-        // A new Space gets the poster that exists; a poster this young is not taken again.
-        rig.clock.advance(.seconds(10))
+        // A new Space gets the poster that exists, and an hour on it is not taken again.
+        rig.clock.advance(.seconds(3600))
         rig.workspace.pictures[two] = original("two")
         let written = rig.workspace.writes.count
         rig.spaceChanged()
         try await waitUntil { rig.workspace.writes.count > written }
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[two]?.url)), Data([1]))
-        XCTAssertEqual(rig.total, 0, "a poster ten seconds old is as good as a new one")
-
-        rig.clock.advance(.seconds(51))
-        rig.spaceChanged()
-        try await waitUntil { rig.total == 1 }
-        try await Task.sleep(for: .milliseconds(100))
-        XCTAssertEqual(rig.total, 1, "once, not once per settle delay")
+        rig.clock.advance(.seconds(3600))
+        rig.woke()
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(rig.total, 1, "a settled poster shows the wallpaper as well as a new one")
     }
 
     @MainActor
-    func testResumeWithinTheFloorOfASettledPosterTakesNothing() async throws {
-        let rig = try FloorRig(root: root, floor: .seconds(60), settleDelays: [.milliseconds(20), .milliseconds(50)])
+    func testResumeOfASettledPosterTakesNothingHoweverOld() async throws {
+        let rig = try PosterRig(root: root, settleDelays: [.milliseconds(20), .milliseconds(50)])
         defer { rig.finish() }
         rig.workspace.pictures = [one: original("one")]
         rig.sync.refresh()
@@ -1307,43 +1356,42 @@ final class DesktopWallpaperTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(200))
         XCTAssertEqual(rig.total, 3, "the wallpaper settled a moment ago")
 
-        rig.clock.advance(.seconds(60))
+        rig.clock.advance(.seconds(3600))
         rig.sync.presentationResumed()
-        try await waitUntil { rig.total == 5 }
-        try await Task.sleep(for: .milliseconds(150))
-        XCTAssertEqual(rig.total, 5, "an aged poster settles again, with both captures")
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(rig.total, 3, "an hour later it still shows the same wallpaper")
     }
 
     @MainActor
-    func testAFrameAPausedSurfaceAnswersWithDoesNotMakeThePosterFreshForTheResume() async throws {
-        let rig = try FloorRig(root: root, floor: .seconds(120), settleDelays: [.milliseconds(20), .milliseconds(50)])
+    func testAFrameAPausedSurfaceAnswersWithDoesNotSettleThePosterForTheResume() async throws {
+        let rig = try PosterRig(root: root, settleDelays: [.milliseconds(20), .milliseconds(50)])
         defer { rig.finish() }
         rig.workspace.pictures = [one: original("one"), two: original("two")]
         var presenting = false
         rig.sync.canCapture = { _ in presenting }
 
-        // A Space change asks every surface whose poster has aged, paused or not, and a paused
-        // one answers with the frame it kept.
+        // A Space change asks every surface without a settled poster, paused or not, and a
+        // paused one answers with the frame it kept.
         rig.spaceChanged()
         try await waitUntil { rig.total == 1 }
         try await postFrame(Data([1]), on: rig)
 
-        // The display plays again within the floor: that frame was no reading of the wallpaper
-        // running, so the resume still takes the poster as the wallpaper settles.
+        // The display plays again: that frame was no reading of the wallpaper running, so the
+        // resume still takes the poster as the wallpaper settles.
         presenting = true
         rig.sync.presentationResumed()
         try await waitUntil { rig.total == 3 }
 
-        // A frame taken while it presents does make the poster fresh.
+        // A frame taken while it presents does settle the poster.
         try await postFrame(Data([2]), on: rig)
         rig.sync.presentationResumed()
         try await Task.sleep(for: .milliseconds(200))
-        XCTAssertEqual(rig.total, 3, "a presenting surface's frame is fresh")
+        XCTAssertEqual(rig.total, 3, "a presenting surface's frame settles the poster")
     }
 
     @MainActor
     func testResumeRetakesAPosterThatWasTakenBeforeSettling() async throws {
-        let rig = try FloorRig(root: root, floor: .seconds(60), settleDelays: [.milliseconds(20), .milliseconds(50)])
+        let rig = try PosterRig(root: root, settleDelays: [.milliseconds(20), .milliseconds(50)])
         defer { rig.finish() }
         rig.workspace.pictures = [one: original("one")]
         rig.sync.refresh()
@@ -1357,9 +1405,25 @@ final class DesktopWallpaperTests: XCTestCase {
     }
 
     @MainActor
-    func testSpaceScopedPostersAreNeverSkippedByTheFloor() async throws {
-        let rig = try FloorRig(root: root, floor: .seconds(60),
-                               scope: { _ in .desktop(id: "one", context: "visit-a") })
+    func testSpaceChangesDuringSettlingLeaveTheCapturesToTheSettleSequence() async throws {
+        let rig = try PosterRig(root: root, settleDelays: [.milliseconds(150), .milliseconds(300)])
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        rig.sync.refresh()
+        try await postFrame(Data([1]), on: rig)
+
+        // The frame came before the wallpaper settled, but the settle captures still to come
+        // take it again, so neither a Space change nor a snapshot asks for another.
+        rig.spaceChanged()
+        rig.sync.refresh(capture: .unsettled)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(rig.total, 1)
+        try await waitUntil { rig.total == 3 }
+    }
+
+    @MainActor
+    func testSpaceScopedPostersAreNeverKept() async throws {
+        let rig = try PosterRig(root: root, scope: { _ in .desktop(id: "one", context: "visit-a") })
         defer { rig.finish() }
         rig.workspace.pictures = [one: original("one"), two: original("two")]
         try await postFrame(Data([1]), on: rig, context: "visit-a")
@@ -1369,10 +1433,11 @@ final class DesktopWallpaperTests: XCTestCase {
     }
 
     @MainActor
-    func testPeriodicCapturesIgnoreTheFloor() async throws {
-        let rig = try FloorRig(root: root, floor: .seconds(600), periodicInterval: .milliseconds(30))
+    func testPeriodicCapturesRetakeASettledPoster() async throws {
+        let rig = try PosterRig(root: root, periodicInterval: .milliseconds(30))
         defer { rig.finish() }
         rig.workspace.pictures = [one: original("one")]
+        rig.sync.refresh()
         try await postFrame(Data([1]), on: rig)
         let before = rig.total
         rig.sync.refreshesPeriodically = true
@@ -1381,42 +1446,154 @@ final class DesktopWallpaperTests: XCTestCase {
 
     @MainActor
     func testDisplaysAreJudgedOnTheirOwn() async throws {
-        let rig = try FloorRig(root: root, displays: 2, floor: .seconds(120))
+        let rig = try PosterRig(root: root, displays: 2, settleDelays: [.milliseconds(20)])
         defer { rig.finish() }
         rig.workspace.pictures = [one: original("one"), external: original("external")]
+        rig.sync.refresh()
+        try await waitUntil { rig.total == 4 }
+        // Display 1 answers in the instant its wallpaper started, display 2 once it settled.
         try await postFrame(Data([1]), on: rig, display: 0)
-        rig.clock.advance(.seconds(100))
+        rig.clock.advance(.seconds(1))
         try await postFrame(Data([2]), on: rig, display: 1)
 
-        // Display 1 is now 130 s old, display 2 only 30 s.
-        rig.clock.advance(.seconds(30))
         rig.spaceChanged()
-        try await waitUntil { rig.total == 1 }
+        try await waitUntil { rig.total == 5 }
         try await Task.sleep(for: .milliseconds(100))
-        XCTAssertEqual(rig.requests, [1, 0])
+        XCTAssertEqual(rig.requests, [3, 2])
     }
 
     @MainActor
-    func testADisplayWithoutAFrameYetAndAClockThatWentBackwardsAreStale() async throws {
-        let rig = try FloorRig(root: root, displays: 2, floor: .seconds(60))
+    func testADisplayWithoutAFrameYetIsAskedAndTheOtherKeepsItsPoster() async throws {
+        let rig = try PosterRig(root: root, displays: 2)
         defer { rig.finish() }
         rig.workspace.pictures = [one: original("one"), external: original("external")]
+        rig.sync.refresh()
+        XCTAssertEqual(rig.requests, [1, 1])
         try await postFrame(Data([1]), on: rig, display: 0)
 
         rig.spaceChanged()
-        try await waitUntil { rig.total == 1 }
-        XCTAssertEqual(rig.requests, [0, 1], "the display that never answered is asked, the other keeps its poster")
+        try await waitUntil { rig.total == 3 }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(rig.requests, [1, 2], "the display that never answered is asked, the other keeps its poster")
+    }
 
-        rig.clock.rewind(.seconds(5))
-        rig.spaceChanged()
-        try await waitUntil { rig.requests[0] == 1 }
+    @MainActor
+    func testAFrameNobodyAskedForNeverReplacesASettledPoster() async throws {
+        let rig = try PosterRig(root: root, settleDelays: [.milliseconds(20)])
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        rig.sync.refresh()
+        try await waitUntil { rig.total == 2 }
+        rig.clock.advance(.seconds(1))
+        try await postFrame(Data([1]), on: rig)
+
+        // The renderer starts again on the same wallpaper, as after display sleep, and sends
+        // its first frame, the start of an intro, unasked.
+        let written = rig.workspace.writes.count
+        post(Data([0]), layer: rig.layers[0], center: rig.frames)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(rig.workspace.writes.count, written)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[one]?.url)), Data([1]))
+        XCTAssertEqual(rig.total, 2, "and nothing is asked again")
+    }
+
+    @MainActor
+    func testAFrameNobodyAskedForOnANewSurfaceSettlesLikeANewWallpaper() async throws {
+        let rig = try PosterRig(root: root, settleDelays: [.milliseconds(20), .milliseconds(50)])
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        // A window that just opened draws its first frame before anything asks for one.
+        try await postFrame(Data([1]), on: rig)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[one]?.url)), Data([1]))
+        try await waitUntil { rig.total == 2 }
+    }
+
+    @MainActor
+    func testAFrameDroppedForItsContextStillAnswersTheRequest() async throws {
+        let rig = try PosterRig(root: root, periodicInterval: .milliseconds(30))
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        rig.sync.refresh()
+        rig.clock.advance(.seconds(1))
+        try await postFrame(Data([1]), on: rig)
+
+        // A periodic capture asks again, and the renderer answers the piled-up requests with
+        // one frame that carries a switch hold's context: it is dropped, but it answered.
+        rig.sync.refreshesPeriodically = true
+        try await waitUntil { rig.total >= 2 }
+        rig.sync.refreshesPeriodically = false
+        post(Data([2]), layer: rig.layers[0], center: rig.frames, context: "switch-hold:A")
+
+        // So the intro frame a restarted renderer sends next is still one nobody asked for.
+        let written = rig.workspace.writes.count
+        post(Data([0]), layer: rig.layers[0], center: rig.frames)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(rig.workspace.writes.count, written)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rig.workspace.pictures[one]?.url)), Data([1]))
+    }
+
+    @MainActor
+    func testASnapshotRetakesEveryPosterOnlyWhenItChangesTheLayout() async throws {
+        let rig = try PosterRig(root: root)
+        defer { rig.finish() }
+        rig.workspace.pictures = [one: original("one")]
+        // The first snapshot a sync sees takes every poster.
+        rig.sync.snapshotApplied(posterLayout(wallpaper: "a"))
+        XCTAssertEqual(rig.total, 1)
+        try await postFrame(Data([1]), on: rig)
+
+        // Playback, audio or quality changed: the settled poster stays.
+        rig.sync.snapshotApplied(posterLayout(wallpaper: "a", fps: 60))
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(rig.total, 1)
+
+        // The display shows another wallpaper.
+        rig.sync.snapshotApplied(posterLayout(wallpaper: "b"))
+        try await waitUntil { rig.total == 2 }
+    }
+
+    func testThePosterLayoutFollowsWhatTheDisplaysShowAndNothingElse() {
+        let base = posterLayout(wallpaper: "a")
+        XCTAssertEqual(posterLayout(wallpaper: "a", fps: 60, volume: 0.2, muted: true, title: "Another title"), base,
+                       "frame rates, volume, mute and titles change no picture")
+        let changed: [(String, DesktopPosterLayout)] = [
+            ("wallpaper", posterLayout(wallpaper: "b")),
+            ("mirror target", posterLayout(wallpaper: "a", mirrorTarget: "2")),
+            ("scaling", posterLayout(wallpaper: "a", scaling: .match)),
+            ("scaling factor", posterLayout(wallpaper: "a", scalingFactor: 1.5)),
+            ("enabled", posterLayout(wallpaper: "a", enabled: false)),
+            ("mode", posterLayout(wallpaper: "a", mode: .mirror)),
+            ("screen size", posterLayout(wallpaper: "a", screen: CGRect(x: 0, y: 0, width: 2560, height: 1440))),
+            ("screen scale", posterLayout(wallpaper: "a", scale: 1)),
+            ("files", posterLayout(wallpaper: "a", contentRevision: 1)),
+        ]
+        for (name, layout) in changed { XCTAssertNotEqual(layout, base, name) }
+    }
+
+    private func posterLayout(wallpaper: String, mirrorTarget: String? = nil, scaling: BridgeScalingMode = .fill,
+                              scalingFactor: Double = 1, enabled: Bool = true, mode: BridgeDisplayMode = .standalone,
+                              fps: UInt32 = 30, volume: Float = 1, muted: Bool = false, title: String = "Built-in",
+                              screen: CGRect = CGRect(x: 0, y: 0, width: 1512, height: 982), scale: CGFloat = 2,
+                              contentRevision: UInt64 = 0) -> DesktopPosterLayout {
+        DesktopPosterLayout(
+            monitors: [BridgeMonitorInfoRow(
+                displayId: "1", title: title, wallpaperId: wallpaper, wallpaperTitle: wallpaper.uppercased(),
+                mirrorTargetDisplayId: mirrorTarget, mirrorTargetTitle: nil,
+                scalingMode: scaling == .fill ? "fill" : "match", targetFps: String(fps), audioResponse: false)],
+            displays: [BridgeDisplaySettingsRow(
+                displayId: "1", title: title, enabled: enabled, mode: mode, mirrorTargets: [],
+                selectedMirrorTarget: mirrorTarget, scalingMode: scaling, scalingFactor: scalingFactor,
+                targetFps: fps, maxFps: 120, muted: muted, volume: volume)],
+            screens: [.init(frame: screen, scale: scale)], contentRevision: contentRevision)
     }
 
     @MainActor
     func testADisplayDrawingAnUnsavedLookKeepsItsPosterUntilItDrawsTheSavedLookAgain() async throws {
-        let rig = try FloorRig(root: root, displays: 2, floor: .seconds(60), settleDelays: [.milliseconds(20)])
+        let rig = try PosterRig(root: root, displays: 2, settleDelays: [.milliseconds(20)])
         defer { rig.finish() }
         rig.workspace.pictures = [one: original("one"), external: original("external")]
+        rig.sync.refresh()
+        try await waitUntil { rig.total == 4 }
         try await postFrame(Data([1]), on: rig, display: 0)
         try await postFrame(Data([2]), on: rig, display: 1)
         let asked = rig.requests
@@ -1427,7 +1604,6 @@ final class DesktopWallpaperTests: XCTestCase {
         rig.sync.showsUnsavedLook = { unsaved && $0.display == "1" }
         rig.sync.refresh()
         try await waitUntil { rig.requests[1] == asked[1] + 2 }
-        rig.clock.advance(.seconds(100))
         rig.spaceChanged()
         try await waitUntil { rig.requests[1] == asked[1] + 3 }
         XCTAssertEqual(rig.requests[0], asked[0], "no capture reads an edit nobody saved")
@@ -1448,10 +1624,11 @@ final class DesktopWallpaperTests: XCTestCase {
     }
 
     @MainActor
-    func testFrameThatCouldNotBeEncodedDoesNotMakeThePosterFresh() async throws {
+    func testFrameThatCouldNotBeEncodedDoesNotSettleThePoster() async throws {
         let encoder = FailingPosterEncoder()
-        let rig = try FloorRig(root: root, floor: .seconds(60), encode: { try await encoder.encode($0) })
+        let rig = try PosterRig(root: root, encode: { try await encoder.encode($0) })
         defer { rig.finish() }
+        rig.sync.refresh()
         post(Data([1]), layer: rig.layers[0], center: rig.frames)
         for _ in 0..<300 {
             if await encoder.count > 0 { break }
@@ -1462,7 +1639,7 @@ final class DesktopWallpaperTests: XCTestCase {
         for _ in 0..<50 { await Task.yield() }
 
         rig.spaceChanged()
-        try await waitUntil { rig.total == 1 }
+        try await waitUntil { rig.total == 2 }
     }
 
     @MainActor
@@ -1584,7 +1761,7 @@ final class DesktopWallpaperTests: XCTestCase {
         post(Data([7]), layer: layer, center: center, context: "visit-a")
         try await waitUntil { workspace.writes == [self.one] }
         scope = .desktop(id: "two", context: "visit-b")
-        sync.refresh(capture: false)
+        sync.refresh(capture: .none)
         XCTAssertEqual(workspace.pictures[two], original("two"), "cached pixels need a response for the new visit")
         post(Data([7]), layer: layer, center: center, context: "visit-b")
         try await waitUntil { workspace.writes.contains(self.two) }
@@ -1970,7 +2147,7 @@ final class DesktopWallpaperTests: XCTestCase {
         try await waitUntil { workspace.writes == [self.one] }
         let first = try XCTUnwrap(workspace.pictures[one])
         scope = .hold; surfaces = []; workspace.writes.removeAll()
-        sync.refresh(capture: false)
+        sync.refresh(capture: .none)
         XCTAssertTrue(workspace.writes.isEmpty)
         XCTAssertEqual(workspace.pictures[one], first)
         surfaces = [.init(layer: layer, display: "1")]
@@ -1979,7 +2156,7 @@ final class DesktopWallpaperTests: XCTestCase {
         try await waitUntil { workspace.writes == [self.two] }
         XCTAssertEqual(try Data(contentsOf: first.url), Data([1]))
         surfaces = []; retained = []
-        sync.refresh(capture: false)
+        sync.refresh(capture: .none)
         try await waitUntil { workspace.pictures[self.two] == self.original("two") }
         XCTAssertEqual(workspace.pictures[one], first)
     }

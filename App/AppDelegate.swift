@@ -330,7 +330,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 // screen is on its way to taking it; a screen saver chosen on its own leaves it here.
                 if lockScreen?.claimsDesktopPicture != true {
                     // A suspended poster sync must never outlive the native provider.
-                    do { try self.startDesktopWallpaperSync() } catch {
+                    do { try self.startDesktopWallpaperSync(afterSnapshot: true) } catch {
                         self.lastError = error
                         AppLog.error("Desktop poster sync could not be restarted: \(error.localizedDescription)")
                     }
@@ -1363,7 +1363,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         return nil
     }
 
-    private func startDesktopWallpaperSync() throws {
+    /// A sync that starts takes every poster. A running one takes every poster again, or after an
+    /// engine snapshot (`afterSnapshot`) only when it changed what the displays show.
+    private func startDesktopWallpaperSync(afterSnapshot: Bool = false) throws {
         guard !shutdownInProgress else { return }
         // Every start comes through here, so with the switch off no poster can be written.
         guard PlaybackPreferences.shared.writesDesktopPicture else { return }
@@ -1372,7 +1374,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         // The restore re-runs this through `applyDesktopPicturePreference` when it ends.
         guard restoringDesktopPicture == nil else { return }
         if let sync = desktopWallpaperSync, !sync.isSuspended {
-            sync.refresh()
+            if afterSnapshot { sync.snapshotApplied(desktopPosterLayout()) } else { sync.refresh() }
             return
         }
         let sync = try DesktopWallpaperSync(folder: ClientPaths.supportURL.appendingPathComponent("DesktopPosters"),
@@ -1391,7 +1393,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         sync.refreshesPeriodically = PlaybackPreferences.shared.refreshesDesktopPicturePeriodically
         sync.start()
-        sync.refresh()
+        sync.snapshotApplied(desktopPosterLayout())
     }
 
     /// Makes the desktop picture follow Settings › General › Use the wallpaper as the macOS desktop
@@ -1467,6 +1469,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
               let visit = desktopSpaces?.visit(for: physicalDisplay) else { return .hold }
         let wallpaper = store.monitorInformationSnapshot.rows.first(where: { $0.displayId == row.displayId })?.wallpaperId ?? ""
         return .desktop(id: visit.spaceID, context: "\(visit.token):\(wallpaper):\(store.wallpaperContentRevision)")
+    }
+
+    /// What the current snapshot shows on the displays, as far as desktop posters are concerned.
+    /// An animated wallpaper makes each poster a new image file, and macOS keeps a full-size copy
+    /// of every one (docs/features/desktop-picture.md), so only a change here retakes them all.
+    private func desktopPosterLayout() -> DesktopPosterLayout {
+        DesktopPosterLayout(
+            monitors: store?.monitorInformationSnapshot.rows ?? [], displays: store?.settingsSnapshot.displays ?? [],
+            screens: NSScreen.screens.map { .init(frame: $0.frame, scale: $0.backingScaleFactor) },
+            contentRevision: store?.wallpaperContentRevision ?? 0)
     }
 
     private func retainedSpacePosterDisplays() -> Set<String> {
