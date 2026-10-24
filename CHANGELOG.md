@@ -10,6 +10,94 @@ for older releases without Korean notes. The GitHub Release body repeats only th
 English notes. See
 [docs/release.md](docs/release.md) for how a version is cut.
 
+## 1.6.1 — 2026-10-24
+
+### English
+
+Each desktop can now have its own wallpaper and the library can live on an external drive, and Mission Control pictures no longer fill the disk on macOS 26 and later
+
+#### Breaking changes
+
+- The app now sends one daily count that it ran, with its version but no install ID, even when Send performance data is off
+
+#### New
+
+- Each desktop (Space) can now play a wallpaper or playlist of its own and resumes where you left it, off by default and turned on in Quick Settings
+- The wallpaper library and downloads can now live on an external drive, moved from Storage in Settings, with new downloads going straight there
+
+#### Improved
+
+- Report on GitHub now opens a bug report form with the wallpaper, app version and any error filled in, and asks what happened and what you expected
+
+#### Fixed
+
+- Mission Control pictures no longer fill the disk on macOS 26 and later, since the app now retakes them only when a display's wallpaper changes
+- Aerial, dynamic and other moving macOS wallpapers come back as you left them when you quit, instead of a still picture on every desktop
+- Muted scene wallpapers stay silent while they load, instead of playing a moment of music when a playlist switches to them
+- Video wallpapers with a sound track loop smoothly instead of freezing for about a quarter of a second at each seam
+- Scene layers that drew nothing now appear, such as the eyes and hair in Pastel Bloom and the alternate backgrounds some wallpapers offer
+- Recoloured particles in scenes saved with newer Wallpaper Engine editors are no longer tinted twice, so the snow in The Winter Nothingness [4K] shows again
+- A scene's first frame now shows with its own scaling instead of appearing fitted for a moment and then jumping to Fill
+- After an update, What's New and the control panel open in front of other apps instead of hiding behind them
+
+### 简体中文
+
+现在每个桌面都能拥有自己的壁纸，壁纸库也可以存放在外置磁盘上，同时修复了 macOS 26 及更高版本上调度中心图片占满磁盘的问题
+
+#### 不兼容变更
+
+- 即使关闭了“发送性能数据”，应用现在也会每天发送一次运行计数，包含版本信息但不含安装标识
+
+#### 新增
+
+- 每个桌面（空间）现在可以播放各自的壁纸或播放列表，切回时从离开处继续，此功能默认关闭，可在快速设置中开启
+- 壁纸库和下载内容现在可以存放在外置磁盘上，在设置的存储中即可移动，之后的新下载会直接保存到该磁盘
+
+#### 改进
+
+- “在 GitHub 上报告”现在会打开问题报告表单，自动填入壁纸、应用版本和错误信息，并请你描述发生了什么以及预期结果
+
+#### 修复
+
+- 在 macOS 26 及更高版本上，调度中心的桌面图片不再反复生成副本占满磁盘，现在仅在显示器的壁纸变化时才会更新
+- 退出应用后，航拍、动态等会动的 macOS 壁纸会恢复原样，不再在每个桌面上留下一张静态图片
+- 已静音的场景壁纸在加载时保持静音，播放列表切换时不再先播放片刻音乐
+- 带音轨的视频壁纸现在可以平滑循环，不再在每次循环时停顿约四分之一秒
+- 之前不显示的场景图层现在可以正常绘制，例如 Pastel Bloom 中人物的眼睛和头发，以及部分壁纸提供的备选背景
+- 使用较新 Wallpaper Engine 编辑器保存的场景中，重新着色的粒子不再被重复着色，The Winter Nothingness [4K] 的落雪重新可见
+- 场景壁纸的第一帧现在直接按其缩放方式显示，不再先短暂适应屏幕再跳到填充
+- 更新后，“新功能”窗口和控制面板会显示在其他应用前面，不再被遮挡在后方
+
+### 한국어
+
+이제 데스크탑마다 자체 배경화면을 둘 수 있고 보관함을 외장 드라이브에 보관할 수 있으며, macOS 26 이상에서 Mission Control 사진이 디스크를 채우던 문제가 해결되었습니다
+
+#### 호환되지 않는 변경 사항
+
+- 이제 성능 데이터 보내기가 꺼져 있어도 앱이 실행되었다는 사실을 하루에 한 번 보내며, 앱 버전은 포함하지만 설치 ID는 포함하지 않습니다
+
+#### 새로운 기능
+
+- 이제 데스크탑(Space)마다 각자의 배경화면이나 재생목록을 재생하고 돌아오면 멈춘 곳부터 이어지며, 기본적으로 꺼짐 상태로 빠른 설정에서 켤 수 있습니다
+- 이제 설정의 저장 공간에서 보관함과 다운로드를 외장 드라이브로 옮길 수 있으며, 이후 새 다운로드도 그 드라이브에 바로 저장됩니다
+
+#### 개선 사항
+
+- GitHub에 보고하기가 이제 배경화면, 앱 버전, 오류가 미리 채워진 버그 보고 양식을 열고 무슨 일이 있었는지와 기대한 결과를 묻습니다
+
+#### 수정됨
+
+- macOS 26 이상에서 Mission Control용 데스크탑 사진의 사본이 디스크를 채우지 않으며, 이제 디스플레이의 배경화면이 바뀔 때만 다시 찍습니다
+- 앱을 종료하면 항공 영상, 다이내믹 등 움직이는 macOS 배경화면이 원래대로 돌아오며, 더 이상 모든 데스크탑에 정지 사진이 남지 않습니다
+- 음소거된 씬 배경화면이 불러오는 동안에도 조용히 유지되며, 재생목록이 전환될 때 음악이 잠깐 재생되지 않습니다
+- 사운드 트랙이 있는 동영상 배경화면이 반복될 때마다 약 0.25초씩 멈추지 않고 매끄럽게 반복됩니다
+- Pastel Bloom의 눈과 머리카락, 일부 배경화면이 제공하는 대체 배경처럼 보이지 않던 씬 레이어가 이제 제대로 나타납니다
+- 최신 Wallpaper Engine 편집기로 저장한 씬에서 색을 바꾼 파티클이 두 번 칠해지지 않아 The Winter Nothingness [4K]의 눈이 다시 보입니다
+- 씬의 첫 프레임이 잠깐 화면에 맞춤으로 보였다가 채우기로 바뀌지 않고 처음부터 자체 크기 조정으로 표시됩니다
+- 업데이트 후 새로운 기능 창과 제어판이 다른 앱 뒤에 숨지 않고 앞에 열립니다
+
+**Full changelog**: https://github.com/WallpaperMachine/WallpaperMachine/compare/v1.6.0...v1.6.1
+
 ## 1.6.0 — 2026-10-23
 
 ### English
